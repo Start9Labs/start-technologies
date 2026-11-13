@@ -125,15 +125,13 @@ export const ENGLISH: Record<string, number> = {
   'View Config': 112,
   'WAN IP': 113,
   'WAN IPv4': 114,
-  // Referenced via maps / ternaries / provider values (invisible to the
-  // literal-only check-i18n scanner) — registered so they can be translated
   'This field is required': 115,
   'Password must be at least 8 characters': 116,
   'Password cannot exceed 64 characters': 117,
   'Passwords do not match': 118,
   'IPv4': 119,
   'IPv4 + IPv6': 120,
-  'Only supported for SSL/TLS services — the gateway routes by the TLS SNI, so several hostnames can share one external port. IPv4 only. Leave blank for a plain published port.': 121,
+  'Routes TLS over TCP or QUIC over UDP by hostname. TCP/UDP shares one mapping; separate TCP and UDP mappings may use different servers. IPv4 only. Leave blank to publish both transports without hostname routing.': 121,
   'Publish this many consecutive ports, counting up from the external and internal ports above. Leave at 1 for a single port. SNI hostnames are not supported for ranges.': 122,
   'Hostname (optional, ipv4 only)': 123,
   'Hostname (optional)': 124,
@@ -142,6 +140,8 @@ export const ENGLISH: Record<string, number> = {
   'WireGuard endpoint': 127,
   'Defaults to this page’s host. Use an IP address or DNS name reachable by the device; the WireGuard port is unchanged.': 128,
   'Generate config': 129,
+  'TCP': 130,
+  'UDP': 131,
 }
 
 export default ENGLISH

@@ -1220,6 +1220,7 @@ struct WanPortCollision {
 #[derive(Serialize)]
 struct SniPortUse {
     ports: String,
+    protocol: TransportProtocol, // "tcp" or "udp"
     /// The routed hostnames on the port, deduped and sorted.
     hostnames: Vec<String>,
     /// Display names (or MACs) of the devices the routes deliver to.
@@ -1252,9 +1253,9 @@ under `hostname_route_ports` instead of `router_service_ports`, with the routed
 hostnames and owning devices filled in from the live demux — the real holder is a device's
 hostname routes, and the dialog names them rather than blaming the router.
 The split is informational only: the override works identically and removes
-the displaced hostname routes when the manual rule is saved.
-Detection is transport-aware (Remote Access is TCP, WireGuard is UDP — a
-UDP-only forward on 443 collides with nothing) and skipped in configs-only
+the displaced hostname routes on the selected transport when the manual rule is saved.
+Detection is transport-aware (Remote Access is TCP, WireGuard is UDP; a UDP-only
+forward on 443 can collide with QUIC hostname routes, but not Remote Access) and skipped in configs-only
 mode (the CLI editor confirms implicitly).
 The automatic (PCP/UPnP) path refuses the same collision outright — a
 protocol client can't be asked.
@@ -1302,26 +1303,32 @@ _except_ that a manual rule claiming an auto-held external port wins: `set`
 removes the overlapping auto forward.
 
 Besides plain forwards, the list includes **SNI hostname routes** (label
-`"SNI"`, `hostname` set): TLS routes on a shared external port, demultiplexed
-by ClientHello SNI so several devices/hostnames share one port. These live in
+`"SNI"`, `hostname` set): TLS-over-TCP and QUIC-over-UDP routes on a shared
+external port, demultiplexed by ClientHello SNI so several devices/hostnames
+share one transport and port. PCP and UPnP HOSTNAME mappings identify the
+transport explicitly. Ownership, renewal, deletion, expiry and manual displacement
+are independent across TCP and UDP, including the same hostname and external
+address/port held by different clients. Existing TCP mappings remain TCP. These live in
 daemon memory (not UCI), always carry a lease (≤1h, device-renewed), and do
 not survive a daemon restart — the device re-asserts them. A demuxed port
-reads as router-reserved to manual and plain-auto forwards. Ports the router
-answers on itself refuse hostname routes — except 443, where Remote Access
+reads as router-reserved to manual and plain-auto forwards on that transport. Ports the router
+answers on itself refuse hostname routes — except TCP 443, where Remote Access
 coexists with the demux: while routes share the port, connections naming no
 routed hostname (e.g. browsing the router by IP, which sends no SNI) are piped
 to the router's own UI, admitted from exactly the sources the Remote Access
 mode allows (any in "always"; RFC1918 in "default" behind NAT; none in
 "never"). A route is granted only once its listener is actually bound
 (`NO_RESOURCES` / UPnP fault 501 otherwise), so a granted route can never
-leave the port open with nothing serving it.
+leave the port open with nothing serving it. HTTP-to-HTTPS redirection and
+the router UI fallback are scoped to TCP. Transparent reply diversion admits
+both TCP and UDP sockets.
 
 ```rust
 // Request: {}
 
 #[derive(Serialize)]
 struct AutomaticPortUse {
-    /// Stable per automatic port use.
+    /// Stable per automatic port use; SNI IDs include transport and external address/port/hostname.
     id: String,
     /// "PCP", "UPnP", or "SNI" for a hostname route.
     kind: String,
@@ -1334,6 +1341,7 @@ struct AutomaticPortUse {
     ports: String,
     /// External (WAN) port or range.
     public_ports: String,
+    protocol: Protocol, // "tcp", "udp", or "tcp+udp"; SNI rows carry one transport.
     /// Seconds until the lease expires if the device stops renewing it. None
     /// right after a daemon restart, before the first grace lease is granted.
     expires_secs: Option<u64>,

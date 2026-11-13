@@ -168,6 +168,7 @@ function automaticPortUseFromApiToDisplay(
     deviceName: portUse.device_name ?? undefined,
     ports: portUse.ports,
     publicPorts: portUse.public_ports,
+    protocol: portUse.protocol,
     expiresSecs: portUse.expires_secs ?? undefined,
     hostname: portUse.hostname ?? undefined,
   }

@@ -4,16 +4,31 @@
 .SH NAME
 start\-tunnel\-port\-forward\-set\-enabled \- Enable or disable a port forward
 .SH SYNOPSIS
-\fBstart\-tunnel port\-forward set\-enabled\fR [\fB\-\-enabled\fR] [\fB\-\-hostname\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR>
+\fBstart\-tunnel port\-forward set\-enabled\fR [\fB\-\-protocol\fR] [\fB\-\-enabled\fR] [\fB\-\-hostname\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR>
 .SH DESCRIPTION
 Enable or disable a port forward
 .SH OPTIONS
+.TP
+\fB\-\-protocol\fR \fI<PROTOCOL>\fR
+Logical protocol selection; omitted selects the mapping that owns TCP
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+tcp
+.IP \(bu 2
+udp
+.IP \(bu 2
+tcp+udp
+.RE
 .TP
 \fB\-\-enabled\fR
 
 .TP
 \fB\-\-hostname\fR \fI<HOSTNAME>\fR
-Toggle a single SNI route on `source`; omit for a DNAT forward
+Omitted toggles the selected fallback or a plain forward
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

@@ -5,6 +5,7 @@ use imbl_value::Value;
 use ipnet::IpNet;
 use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
+use startos::net::port_map::TransportProtocol;
 use uciedit::openwrt::{
     DhcpHost, FirewallForwarding, FirewallRedirect, FirewallRule, FirewallTarget, FirewallZone,
     InterfaceProto, NetworkInterface,
@@ -81,17 +82,7 @@ pub(crate) fn may_affect_v6_rules(mac: &str) -> bool {
     }
 }
 
-// ── Types ──────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitVariants)]
-#[serde(rename_all = "lowercase")]
-pub enum Protocol {
-    Tcp,
-    Udp,
-    #[serde(rename = "tcp+udp")]
-    TcpUdp,
-}
-rpc_toolkit::reflect_ts!(Protocol);
+pub use startos::net::port_map::Protocol;
 
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "lowercase")]
@@ -165,6 +156,7 @@ rpc_toolkit::reflect_ts!(WanPortCollision);
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct SniPortUse {
     pub ports: String,
+    pub protocol: TransportProtocol,
     pub hostnames: Vec<String>,
     pub devices: Vec<String>,
 }
@@ -319,15 +311,12 @@ fn port_profile<'a>(
         .or_else(|| zones.get(port.dest_zone.as_deref()?).map(String::as_str))
 }
 
-// ── Helpers ──────────────────────────────────────────────
-
-/// Convert our Protocol enum to UCI proto string
 fn protocol_to_uci(proto: &Protocol) -> Vec<String> {
-    match proto {
-        Protocol::Tcp => vec!["tcp".into()],
-        Protocol::Udp => vec!["udp".into()],
-        Protocol::TcpUdp => vec!["tcp".into(), "udp".into()],
-    }
+    proto
+        .transports()
+        .iter()
+        .map(|transport| transport.as_str().into())
+        .collect()
 }
 
 /// Check whether an IPv6 address is a Global Unicast Address (2000::/3 —
@@ -931,8 +920,12 @@ pub async fn set<C: CtrlContext>(
                 for collision in &mut pending {
                     for sni in &mut collision.hostname_route_ports {
                         if let Some(want) = crate::port_control::parse_port_range(&sni.ports) {
-                            (sni.hostnames, sni.devices) =
-                                crate::port_control::sni_route_holders(&cfgs["dhcp"], want).await;
+                            (sni.hostnames, sni.devices) = crate::port_control::sni_route_holders(
+                                &cfgs["dhcp"],
+                                want,
+                                sni.protocol,
+                            )
+                            .await;
                         }
                     }
                 }
@@ -1361,14 +1354,21 @@ fn active_ipv4_ranges(ports: &[PublishedPortInput]) -> Vec<(u16, u16)> {
         .collect()
 }
 
-fn active_sni_conflicting_ranges(ports: &[PublishedPortInput]) -> Vec<(u16, u16)> {
+fn active_sni_conflicting_ranges(
+    ports: &[PublishedPortInput],
+) -> Vec<(TransportProtocol, (u16, u16))> {
     ports
         .iter()
-        .filter(|port| port.enabled && port.ipv4 && !matches!(port.protocol, Protocol::Udp))
-        .filter_map(|port| {
-            crate::port_control::parse_port_range(
+        .filter(|port| port.enabled && port.ipv4)
+        .flat_map(|port| {
+            let range = crate::port_control::parse_port_range(
                 port.ipv4_public_port.as_deref().unwrap_or(&port.ports),
-            )
+            );
+            port.protocol
+                .transports()
+                .iter()
+                .copied()
+                .filter_map(move |protocol| range.map(|range| (protocol, range)))
         })
         .collect()
 }
@@ -1385,12 +1385,12 @@ fn wan_port_collisions(
             let range = crate::port_control::parse_port_range(
                 p.ipv4_public_port.as_deref().unwrap_or(&p.ports),
             )?;
-            let (tcp, udp) = match p.protocol {
-                Protocol::Tcp => (true, false),
-                Protocol::Udp => (false, true),
-                Protocol::TcpUdp => (true, true),
-            };
-            let overlaps = crate::port_control::wan_reserved_overlaps(firewall, range, tcp, udp);
+            let overlaps = crate::port_control::wan_reserved_overlaps(
+                firewall,
+                range,
+                p.protocol.contains(TransportProtocol::Tcp),
+                p.protocol.contains(TransportProtocol::Udp),
+            );
             (!overlaps.is_empty()).then(|| {
                 let (hostname_routes, router_services): (Vec<_>, Vec<_>) = overlaps
                     .into_iter()
@@ -1398,14 +1398,20 @@ fn wan_port_collisions(
                 WanPortCollision {
                     id: p.id.clone(),
                     label: p.label.clone(),
-                    router_service_ports: router_services
-                        .into_iter()
-                        .map(|overlap| overlap.ports)
-                        .collect(),
+                    router_service_ports: router_services.into_iter().fold(
+                        Vec::new(),
+                        |mut ports, overlap| {
+                            if !ports.contains(&overlap.ports) {
+                                ports.push(overlap.ports);
+                            }
+                            ports
+                        },
+                    ),
                     hostname_route_ports: hostname_routes
                         .into_iter()
                         .map(|overlap| SniPortUse {
                             ports: overlap.ports,
+                            protocol: overlap.protocol,
                             hostnames: Vec::new(),
                             devices: Vec::new(),
                         })
@@ -4730,7 +4736,7 @@ config rule 'apf_sni_8444'
     }
 
     #[test]
-    fn sni_displacement_requires_tcp() {
+    fn sni_displacement_tracks_each_selected_transport() {
         let tcp = make_input(|port| {
             port.ports = "443".into();
             port.protocol = Protocol::Tcp;
@@ -4739,7 +4745,50 @@ config rule 'apf_sni_8444'
             port.ports = "8443".into();
             port.protocol = Protocol::Udp;
         });
-        assert_eq!(active_sni_conflicting_ranges(&[tcp, udp]), vec![(443, 443)]);
+        let both = make_input(|port| {
+            port.ports = "9443".into();
+            port.protocol = Protocol::TcpUdp;
+        });
+        assert_eq!(
+            active_sni_conflicting_ranges(&[tcp, udp, both]),
+            vec![
+                (TransportProtocol::Tcp, (443, 443)),
+                (TransportProtocol::Udp, (8443, 8443)),
+                (TransportProtocol::Tcp, (9443, 9443)),
+                (TransportProtocol::Udp, (9443, 9443)),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn hostname_collisions_report_only_the_selected_transport() {
+        let dir = tempfile::tempdir().unwrap();
+        let udp = "config rule 'apf_sni_udp_8444'\n\toption name 'SNI demux (hostname routes)'\n\toption src 'wan'\n\toption dest_port '8444'\n\tlist proto 'udp'\n\toption target 'ACCEPT'\n\toption _apf_label 'SNI'\n";
+        setup_firewall(dir.path(), &format!("{ROUTER_SERVICE_RULES}\n{udp}"));
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
+        for (protocol, expected) in [
+            (Protocol::Tcp, vec![TransportProtocol::Tcp]),
+            (Protocol::Udp, vec![TransportProtocol::Udp]),
+            (
+                Protocol::TcpUdp,
+                vec![TransportProtocol::Tcp, TransportProtocol::Udp],
+            ),
+        ] {
+            let ports = vec![make_input(|p| {
+                p.ports = "8444".into();
+                p.protocol = protocol;
+            })];
+            let hits = wan_port_collisions(&cfgs["firewall"], &ports);
+            assert_eq!(hits.len(), 1);
+            assert!(hits[0].router_service_ports.is_empty());
+            let transports: Vec<_> = hits[0]
+                .hostname_route_ports
+                .iter()
+                .map(|sni| sni.protocol)
+                .collect();
+            assert_eq!(transports, expected);
+        }
     }
 
     #[tokio::test]

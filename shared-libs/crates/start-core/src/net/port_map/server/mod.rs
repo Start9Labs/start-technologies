@@ -10,6 +10,7 @@ use std::future::Future;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
 use std::sync::Arc;
 
+use crate::net::port_map::TransportProtocol;
 use crate::net::port_map::pcp::capability::encode_start9_capability_option;
 use crate::net::port_map::pcp::hostname::{
     RESULT_UNSUPP_HOSTNAME, encode_hostname_option, parse_hostname_options,
@@ -39,8 +40,6 @@ const MALFORMED_OPTION: u8 = 6;
 use crate::net::port_map::pcp::RESULT_NO_RESOURCES as NO_RESOURCES;
 const CANNOT_PROVIDE_EXTERNAL: u8 = 11;
 
-/// PCP protocol field value for TCP (the only transport the SNI demux handles).
-const PROTO_TCP: u8 = 6;
 /// Largest PORT_SET range we will grant in one MAP (RFC 7753 lets us grant
 /// fewer than requested; the client skips the range if it can't get them all).
 const MAX_PORT_SET: u16 = 1024;
@@ -173,6 +172,7 @@ pub trait GatewayBackend: Send + Sync {
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
+        protocol: TransportProtocol,
         lifetime: Option<u32>,
     ) -> impl Future<Output = Result<(), u8>> + Send {
         async move {
@@ -180,7 +180,14 @@ pub trait GatewayBackend: Send + Sync {
                 return Err(RESULT_UNSUPP_HOSTNAME);
             };
             sni.prepare().await?;
-            sni.register(*source.ip(), source.port(), hostnames, target, lifetime)
+            sni.register_transport(
+                protocol,
+                *source.ip(),
+                source.port(),
+                hostnames,
+                target,
+                lifetime,
+            )
         }
     }
 
@@ -190,10 +197,11 @@ pub trait GatewayBackend: Send + Sync {
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
+        protocol: TransportProtocol,
     ) -> impl Future<Output = ()> + Send {
         async move {
             if let Some(sni) = self.sni() {
-                sni.unregister(*source.ip(), source.port(), hostnames, target);
+                sni.unregister_transport(protocol, *source.ip(), source.port(), hostnames, target);
             }
         }
     }
@@ -471,7 +479,7 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
                 epoch,
             ));
         }
-        if req[36] != PROTO_TCP {
+        let Some(protocol) = TransportProtocol::from_ip_number(req[36]) else {
             return Some(map_response(
                 RESULT_UNSUPP_HOSTNAME,
                 req,
@@ -481,7 +489,7 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
                 0,
                 epoch,
             ));
-        }
+        };
         // Force the route target to the requesting peer's own address.
         let target = SocketAddrV4::new(peer, internal_port);
         if lifetime == 0 {
@@ -490,6 +498,7 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
                     SocketAddrV4::new(external_ip, external_port),
                     target,
                     &hostnames,
+                    protocol,
                 )
                 .await;
             return Some(map_response_with_hostnames(
@@ -509,6 +518,7 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
                 SocketAddrV4::new(external_ip, external_port),
                 target,
                 &hostnames,
+                protocol,
                 Some(granted),
             )
             .await
@@ -1098,8 +1108,61 @@ mod tests {
         );
     }
 
-    // A lifetime-0 MAP is a delete: it removes rather than adds, so the backend
-    // forward — and thus any lease — is never stamped.
+    #[tokio::test]
+    async fn hostname_mappings_have_independent_transport_owners_and_deletion() {
+        let stub = RecordingStub {
+            sni: SniDemux::new(),
+            forward_lifetime: std::sync::Mutex::new(None),
+        };
+        let probe = std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let tcp_peer = Ipv4Addr::new(10, 59, 0, 2);
+        let udp_peer = Ipv4Addr::new(10, 59, 0, 3);
+        for (protocol, peer) in [
+            (TransportProtocol::Tcp, tcp_peer),
+            (TransportProtocol::Udp, udp_peer),
+        ] {
+            let mut request = map_request([7; 12], 3600, 8443, port);
+            request[36] = protocol.ip_number();
+            encode_hostname_option(&mut request, "quic.example.com");
+            let response = handle(&stub, peer, &request, 1).await.unwrap();
+            assert_eq!(response[3], SUCCESS);
+            assert_eq!(response[36], protocol.ip_number());
+            assert_eq!(
+                parse_hostname_options(&response[MAP_RESPONSE_LEN..]).unwrap(),
+                vec!["quic.example.com"]
+            );
+        }
+        assert_eq!(stub.sni.snapshot().len(), 2);
+        let mut delete = map_request([7; 12], 0, 8443, port);
+        delete[36] = TransportProtocol::Udp.ip_number();
+        encode_hostname_option(&mut delete, "quic.example.com");
+        assert_eq!(
+            handle(&stub, tcp_peer, &delete, 1).await.unwrap()[3],
+            SUCCESS
+        );
+        assert_eq!(
+            stub.sni.snapshot().len(),
+            2,
+            "wrong UDP owner cannot delete"
+        );
+        assert_eq!(
+            handle(&stub, udp_peer, &delete, 1).await.unwrap()[3],
+            SUCCESS
+        );
+        let remaining = stub.sni.snapshot();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].protocol, TransportProtocol::Tcp);
+        assert_eq!(*remaining[0].target.ip(), tcp_peer);
+        delete[36] = 132;
+        assert_eq!(
+            handle(&stub, udp_peer, &delete, 1).await.unwrap()[3],
+            RESULT_UNSUPP_HOSTNAME
+        );
+        assert_eq!(stub.sni.snapshot().len(), 1);
+    }
+
     #[tokio::test]
     async fn map_lifetime_zero_does_not_add() {
         let stub = RecordingStub {
@@ -1275,6 +1338,7 @@ mod tests {
             _: SocketAddrV4,
             _: SocketAddrV4,
             _: &[String],
+            _: TransportProtocol,
             _: Option<u32>,
         ) -> impl Future<Output = Result<(), u8>> + Send {
             async { panic!("add_sni_forward reached on a backend without an SNI dataplane") }

@@ -71,11 +71,7 @@ fn retry_delay(failures: u32) -> Duration {
     (RETRY_INTERVAL * 2u32.pow(failures.saturating_sub(1).min(6))).min(BACKOFF_MAX)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum TransportProtocol {
-    Tcp,
-    Udp,
-}
+use super::TransportProtocol;
 
 impl TransportProtocol {
     fn internet(self) -> InternetProtocol {
@@ -266,6 +262,26 @@ impl PortMapController {
         gateways: Vec<(IpAddr, Option<u32>)>,
         hostname: String,
     ) {
+        self.ensure_hostname_transport(
+            local_ip,
+            external_port,
+            internal_port,
+            gateways,
+            hostname,
+            TransportProtocol::Tcp,
+        );
+    }
+
+    /// Binds a hostname on one transport without changing its other mapping.
+    pub fn ensure_hostname_transport(
+        &self,
+        local_ip: IpAddr,
+        external_port: u16,
+        internal_port: u16,
+        gateways: Vec<(IpAddr, Option<u32>)>,
+        hostname: String,
+        protocol: TransportProtocol,
+    ) {
         self.send_ensure(
             local_ip,
             external_port,
@@ -273,7 +289,7 @@ impl PortMapController {
             gateways,
             Some(hostname),
             1,
-            TransportProtocol::Tcp,
+            protocol,
         );
     }
 
@@ -336,14 +352,20 @@ impl PortMapController {
     /// Remove the SNI HOSTNAME mapping for `hostname` on
     /// `(local_ip, external_port)`, leaving any other hostnames on that port.
     pub fn remove_hostname(&self, local_ip: IpAddr, external_port: u16, hostname: String) {
+        self.remove_hostname_transport(local_ip, external_port, hostname, TransportProtocol::Tcp);
+    }
+
+    /// Withdraws one transport's hostname mapping.
+    pub fn remove_hostname_transport(
+        &self,
+        local_ip: IpAddr,
+        external_port: u16,
+        hostname: String,
+        protocol: TransportProtocol,
+    ) {
         self.shard(local_ip)
             .send(Command::Remove {
-                key: (
-                    local_ip,
-                    external_port,
-                    Some(hostname),
-                    TransportProtocol::Tcp,
-                ),
+                key: (local_ip, external_port, Some(hostname), protocol),
             })
             .ok();
     }
@@ -645,6 +667,7 @@ impl State {
                                     external_port,
                                     internal_port,
                                     host,
+                                    protocol,
                                 )
                                 .await
                                 .log_err();
@@ -827,6 +850,7 @@ impl State {
                                 local_v4,
                                 spec.internal_port,
                                 hostname,
+                                protocol,
                             )
                             .await
                             {

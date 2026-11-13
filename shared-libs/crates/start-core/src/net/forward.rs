@@ -191,30 +191,61 @@ struct ForwardMapping {
     /// becomes one nft rule for the range (port-preserving when the bases match,
     /// else an offset verdict map).
     count: u16,
+    /// Bounds hairpin SNAT to the target subnet.
     target_prefix: u8,
     src_filter: Option<IpNet>,
     rc: Weak<()>,
 }
 
+impl ForwardMapping {
+    fn matches(
+        &self,
+        target: SocketAddrV4,
+        count: u16,
+        target_prefix: u8,
+        src_filter: Option<&IpNet>,
+    ) -> bool {
+        self.target == target
+            && self.count == count
+            && self.target_prefix == target_prefix
+            && self.src_filter.as_ref() == src_filter
+    }
+}
+
 #[derive(Default)]
 struct PortForwardState {
-    mappings: BTreeMap<SocketAddrV4, ForwardMapping>, // source -> target
+    mappings: BTreeMap<SocketAddrV4, ForwardMapping>,
 }
 
 impl PortForwardState {
+    /// Unknown subnets preserve installed scope for the same target IP; new targets use /32.
+    fn target_prefix(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        observed: Option<u8>,
+    ) -> u8 {
+        observed
+            .or_else(|| {
+                self.mappings
+                    .get(&source)
+                    .filter(|mapping| mapping.target.ip() == target.ip())
+                    .map(|mapping| mapping.target_prefix)
+            })
+            .unwrap_or(32)
+    }
+
     async fn add_forward(
         &mut self,
         source: SocketAddrV4,
         target: SocketAddrV4,
         count: u16,
-        target_prefix: u8,
+        target_prefix: Option<u8>,
         src_filter: Option<IpNet>,
     ) -> Result<Arc<()>, Error> {
+        let target_prefix = self.target_prefix(source, target, target_prefix);
         if let Some(existing) = self.mappings.get_mut(&source) {
-            if existing.target == target
-                && existing.count == count
-                && existing.src_filter == src_filter
-            {
+            if existing.matches(target, count, target_prefix, src_filter.as_ref()) {
                 if let Some(existing_rc) = existing.rc.upgrade() {
                     return Ok(existing_rc);
                 } else {
@@ -311,7 +342,7 @@ enum PortForwardCommand {
         source: SocketAddrV4,
         target: SocketAddrV4,
         count: u16,
-        target_prefix: u8,
+        target_prefix: Option<u8>,
         src_filter: Option<IpNet>,
         respond: oneshot::Sender<Result<Arc<()>, Error>>,
     },
@@ -637,22 +668,21 @@ impl PortForwardController {
         &self,
         source: SocketAddrV4,
         target: SocketAddrV4,
-        target_prefix: u8,
+        target_prefix: impl Into<Option<u8>>,
         src_filter: Option<IpNet>,
     ) -> Result<Arc<()>, Error> {
         self.add_forward_range(source, target, 1, target_prefix, src_filter)
             .await
     }
 
-    /// Like [`add_forward`] but covers `count` contiguous ports per protocol
-    /// (TCP + UDP) from `source.port()` / `target.port()`, mapped by offset
-    /// (the two bases may differ).
+    /// Forwards contiguous ports on TCP and UDP, mapped by offset.
+    /// An unknown target prefix retains an existing mapping's subnet for the same target IP.
     pub async fn add_forward_range(
         &self,
         source: SocketAddrV4,
         target: SocketAddrV4,
         count: u16,
-        target_prefix: u8,
+        target_prefix: impl Into<Option<u8>>,
         src_filter: Option<IpNet>,
     ) -> Result<Arc<()>, Error> {
         let (send, recv) = oneshot::channel();
@@ -661,7 +691,7 @@ impl PortForwardController {
                 source,
                 target,
                 count,
-                target_prefix,
+                target_prefix: target_prefix.into(),
                 src_filter,
                 respond: send,
             })
@@ -1249,6 +1279,63 @@ pub(crate) async fn unforward6(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forward_reuse_requires_the_current_target_subnet() {
+        let target = "10.59.0.2:443".parse().unwrap();
+        let mapping = ForwardMapping {
+            source: "203.0.113.1:443".parse().unwrap(),
+            target,
+            count: 1,
+            target_prefix: 24,
+            src_filter: None,
+            rc: Weak::new(),
+        };
+        assert!(mapping.matches(target, 1, 24, None));
+        assert!(!mapping.matches(target, 1, 32, None));
+        assert!(!mapping.matches("10.59.0.3:443".parse().unwrap(), 1, 24, None));
+        assert!(!mapping.matches(target, 2, 24, None));
+        assert!(!mapping.matches(target, 1, 24, Some(&"192.0.2.0/24".parse().unwrap())));
+    }
+
+    #[tokio::test]
+    async fn unknown_subnet_renews_without_replacing_installed_forward() {
+        let source = "203.0.113.1:443".parse().unwrap();
+        let target = "10.59.0.2:443".parse().unwrap();
+        let rc = Arc::new(());
+        let mut state = PortForwardState {
+            mappings: BTreeMap::from([(
+                source,
+                ForwardMapping {
+                    source,
+                    target,
+                    count: 1,
+                    target_prefix: 24,
+                    src_filter: None,
+                    rc: Arc::downgrade(&rc),
+                },
+            )]),
+        };
+        let renewed = state
+            .add_forward(source, target, 1, None, None)
+            .await
+            .unwrap();
+        assert!(Arc::ptr_eq(&rc, &renewed));
+        assert_eq!(state.mappings[&source].target_prefix, 24);
+        assert_eq!(state.target_prefix(source, target, Some(28)), 28);
+        assert_eq!(
+            state.target_prefix(source, "10.59.0.2:8443".parse().unwrap(), None),
+            24
+        );
+        assert_eq!(
+            state.target_prefix(source, "10.59.0.3:443".parse().unwrap(), None),
+            32
+        );
+        assert_eq!(
+            state.target_prefix("203.0.113.2:443".parse().unwrap(), target, None),
+            32
+        );
+    }
 
     #[test]
     fn try_alloc_range_basic() {

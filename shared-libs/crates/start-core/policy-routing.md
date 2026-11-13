@@ -33,7 +33,7 @@ Each name is the label the model prints when that invariant breaks.
 
 ### Delivery
 
-- **`divert`** — A backend's reply to a source-preserving proxy socket is delivered to that socket, whatever its destination address. The destination is the client's address, which may be on-link, so this outranks every rule that routes by destination. (#3306, #3558)
+- **`divert`** — A backend's TCP or UDP reply to a source-preserving proxy socket is delivered to that socket, whatever its destination address. The destination is the client's address, which may be on-link, so this outranks every rule that routes by destination. (#3306, #3558)
 - **`specific`** — A destination with a specific route in `main` uses it, whatever the packet's mark, source, or outbound selection. LAN hosts, containers, and VPN peers stay reachable under any selection, including an engaged kill switch, and inbound packets forwarded to a container reach `lxcbr0` even though they carry their gateway's mark. `suppress_prefixlength 0` is what limits this to specific routes. `main` must therefore hold no `throw` route and no reject-type default. (#3911, replacing the route mirror of #3117)
 
 ### Connection affinity

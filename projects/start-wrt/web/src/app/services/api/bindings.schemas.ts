@@ -65,108 +65,6 @@ export const ApChannel: z.ZodObject<{
 }).meta({
   id: 'ApChannel',
 })
-
-/**
- * One automatic port use for the published-ports UI.
- */
-export const AutomaticPortUse: z.ZodObject<{
-  /**
-   * UCI section name (`apf_<mac>_<extport>`).
-   */
-  id: z.ZodString
-  /**
-   * Which mechanism created it ("PCP", "UPnP", or "SNI").
-   */
-  kind: z.ZodString
-  device_mac: z.ZodString
-  device_name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * Forward target address on the LAN.
-   */
-  internal_ip: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * Internal port (or range).
-   */
-  ports: z.ZodString
-  /**
-   * External port (or range) on the WAN.
-   */
-  public_ports: z.ZodString
-  /**
-   * Seconds until the lease expires if not renewed (None when the daemon
-   * isn't tracking it yet, e.g. right after boot).
-   */
-  expires_secs: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-  /**
-   * Hostname for an SNI route; absent for plain forwards.
-   */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  /**
-   * UCI section name (`apf_<mac>_<extport>`).
-   */
-  id: z.string().meta({
-    description: 'UCI section name (`apf_<mac>_<extport>`).',
-  }),
-  /**
-   * Which mechanism created it ("PCP", "UPnP", or "SNI").
-   */
-  kind: z.string().meta({
-    description: 'Which mechanism created it ("PCP", "UPnP", or "SNI").',
-  }),
-  device_mac: z.string(),
-  device_name: wire(z.string().nullable().optional(), z.string().nullable()),
-  /**
-   * Forward target address on the LAN.
-   */
-  internal_ip: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description: 'Forward target address on the LAN.',
-  }),
-  /**
-   * Internal port (or range).
-   */
-  ports: z.string().meta({
-    description: 'Internal port (or range).',
-  }),
-  /**
-   * External port (or range) on the WAN.
-   */
-  public_ports: z.string().meta({
-    description: 'External port (or range) on the WAN.',
-  }),
-  /**
-   * Seconds until the lease expires if not renewed (None when the daemon
-   * isn't tracking it yet, e.g. right after boot).
-   */
-  expires_secs: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      "Seconds until the lease expires if not renewed (None when the daemon\nisn't tracking it yet, e.g. right after boot).",
-  }),
-  /**
-   * Hostname for an SNI route; absent for plain forwards.
-   */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'Hostname for an SNI route; absent for plain forwards.',
-  }),
-}).meta({
-  id: 'AutomaticPortUse',
-  description: 'One automatic port use for the published-ports UI.',
-})
 export const BackupCreateParams: z.ZodObject<{ password: z.ZodString }> =
   /* @__PURE__ */ object({ password: z.string() }).meta({
     id: 'BackupCreateParams',
@@ -1106,12 +1004,17 @@ export const ProfileIdOpt: z.ZodObject<{
 }).meta({
   id: 'ProfileIdOpt',
 })
+
+/**
+ * Transports owned together by one port mapping.
+ */
 export const Protocol: z.ZodEnum<{
   tcp: 'tcp'
   udp: 'udp'
   'tcp+udp': 'tcp+udp'
 }> = /* @__PURE__ */ z.enum(['tcp', 'udp', 'tcp+udp']).meta({
   id: 'Protocol',
+  description: 'Transports owned together by one port mapping.',
 })
 export const PublishedPortStatus: z.ZodEnum<{
   active: 'active'
@@ -1296,17 +1199,6 @@ export const SetTimezoneParams: z.ZodObject<{
 }).meta({
   id: 'SetTimezoneParams',
 })
-export const SniPortUse: z.ZodObject<{
-  ports: z.ZodString
-  hostnames: z.ZodArray<z.ZodString>
-  devices: z.ZodArray<z.ZodString>
-}> = /* @__PURE__ */ object({
-  ports: z.string(),
-  hostnames: z.array(z.string()),
-  devices: z.array(z.string()),
-}).meta({
-  id: 'SniPortUse',
-})
 export const SpeedData: z.ZodObject<{
   up: z.ZodCodec<z.ZodNumber, z.ZodNullable<z.ZodNumber>>
   down: z.ZodCodec<z.ZodNumber, z.ZodNullable<z.ZodNumber>>
@@ -1354,6 +1246,15 @@ export const SystemInfoResponse: z.ZodObject<{
 }).meta({
   id: 'SystemInfoResponse',
 })
+
+/**
+ * Transport of a gateway request or dataplane listener.
+ */
+export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
+  /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
+    id: 'TransportProtocol',
+    description: 'Transport of a gateway request or dataplane listener.',
+  })
 export const UpdateSystemParams: z.ZodObject<{
   registry: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1639,6 +1540,110 @@ export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
     id: 'AuthKeys',
     description: 'Enrolled sign-ins indexed by canonical DER64 SPKI.',
   })
+
+/**
+ * One automatic port use for the published-ports UI.
+ */
+export const AutomaticPortUse: z.ZodObject<{
+  /**
+   * Stable identifier within the automatic-port snapshot.
+   */
+  id: z.ZodString
+  /**
+   * Which mechanism created it ("PCP", "UPnP", or "SNI").
+   */
+  kind: z.ZodString
+  device_mac: z.ZodString
+  device_name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Forward target address on the LAN.
+   */
+  internal_ip: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Internal port (or range).
+   */
+  ports: z.ZodString
+  /**
+   * External port (or range) on the WAN.
+   */
+  public_ports: z.ZodString
+  protocol: typeof Protocol
+  /**
+   * Seconds until the lease expires if not renewed (None when the daemon
+   * isn't tracking it yet, e.g. right after boot).
+   */
+  expires_secs: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  /**
+   * Hostname for an SNI route; absent for plain forwards.
+   */
+  hostname: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Stable identifier within the automatic-port snapshot.
+   */
+  id: z.string().meta({
+    description: 'Stable identifier within the automatic-port snapshot.',
+  }),
+  /**
+   * Which mechanism created it ("PCP", "UPnP", or "SNI").
+   */
+  kind: z.string().meta({
+    description: 'Which mechanism created it ("PCP", "UPnP", or "SNI").',
+  }),
+  device_mac: z.string(),
+  device_name: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * Forward target address on the LAN.
+   */
+  internal_ip: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description: 'Forward target address on the LAN.',
+  }),
+  /**
+   * Internal port (or range).
+   */
+  ports: z.string().meta({
+    description: 'Internal port (or range).',
+  }),
+  /**
+   * External port (or range) on the WAN.
+   */
+  public_ports: z.string().meta({
+    description: 'External port (or range) on the WAN.',
+  }),
+  protocol: Protocol,
+  /**
+   * Seconds until the lease expires if not renewed (None when the daemon
+   * isn't tracking it yet, e.g. right after boot).
+   */
+  expires_secs: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description:
+      "Seconds until the lease expires if not renewed (None when the daemon\nisn't tracking it yet, e.g. right after boot).",
+  }),
+  /**
+   * Hostname for an SNI route; absent for plain forwards.
+   */
+  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: 'Hostname for an SNI route; absent for plain forwards.',
+  }),
+}).meta({
+  id: 'AutomaticPortUse',
+  description: 'One automatic port use for the published-ports UI.',
+})
 export const BackupCreateRes: z.ZodObject<{
   guid: typeof Guid
   filename: z.ZodString
@@ -2565,6 +2570,19 @@ export const SetupStatusRes: z.ZodObject<{
 }> = /* @__PURE__ */ object({ setupMode: z.boolean(), disk: DiskState }).meta({
   id: 'SetupStatusRes',
 })
+export const SniPortUse: z.ZodObject<{
+  ports: z.ZodString
+  protocol: typeof TransportProtocol
+  hostnames: z.ZodArray<z.ZodString>
+  devices: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  ports: z.string(),
+  protocol: TransportProtocol,
+  hostnames: z.array(z.string()),
+  devices: z.array(z.string()),
+}).meta({
+  id: 'SniPortUse',
+})
 export const UciFile: z.ZodObject<{
   sections: z.ZodArray<typeof Section>
   modified: z.ZodCodec<
@@ -2999,25 +3017,6 @@ export const WanMacSetRequest: z.ZodObject<{
 })
 
 /**
- * An enabled IPv4 forward overlapping a router- or SNI-owned WAN port.
- */
-export const WanPortCollision: z.ZodObject<{
-  id: z.ZodString
-  label: z.ZodString
-  router_service_ports: z.ZodArray<z.ZodString>
-  hostname_route_ports: z.ZodArray<typeof SniPortUse>
-}> = /* @__PURE__ */ object({
-  id: z.string(),
-  label: z.string(),
-  router_service_ports: z.array(z.string()),
-  hostname_route_ports: z.array(SniPortUse),
-}).meta({
-  id: 'WanPortCollision',
-  description:
-    'An enabled IPv4 forward overlapping a router- or SNI-owned WAN port.',
-})
-
-/**
  * `wifi.set` request: the desired WiFi config. With `preview`, nothing is
  * applied and the result lists the Wi-Fi devices that keep settings for a
  * profile losing its last password.
@@ -3136,20 +3135,6 @@ export const PublishedPortsSetRequest: z.ZodObject<{
 })
 
 /**
- * [`set`] response. A non-empty collision list means nothing was applied —
- * the caller confirms and re-saves; empty means the request was applied.
- */
-export const PublishedPortsSetResult: z.ZodObject<{
-  pending_wan_port_collisions: z.ZodArray<typeof WanPortCollision>
-}> = /* @__PURE__ */ object({
-  pending_wan_port_collisions: z.array(WanPortCollision),
-}).meta({
-  id: 'PublishedPortsSetResult',
-  description:
-    '[`set`] response. A non-empty collision list means nothing was applied —\nthe caller confirms and re-saves; empty means the request was applied.',
-})
-
-/**
  * The server's sessions, by credential type.
  */
 export const Sessions: z.ZodObject<{
@@ -3171,6 +3156,25 @@ export const VpnServers: z.ZodObject<{
 }> = /* @__PURE__ */ object({ servers: z.array(VpnServer) }).meta({
   id: 'VpnServers',
   description: 'Response containing all VPN servers',
+})
+
+/**
+ * An enabled IPv4 forward overlapping a router- or SNI-owned WAN port.
+ */
+export const WanPortCollision: z.ZodObject<{
+  id: z.ZodString
+  label: z.ZodString
+  router_service_ports: z.ZodArray<z.ZodString>
+  hostname_route_ports: z.ZodArray<typeof SniPortUse>
+}> = /* @__PURE__ */ object({
+  id: z.string(),
+  label: z.string(),
+  router_service_ports: z.array(z.string()),
+  hostname_route_ports: z.array(SniPortUse),
+}).meta({
+  id: 'WanPortCollision',
+  description:
+    'An enabled IPv4 forward overlapping a router- or SNI-owned WAN port.',
 })
 export const WifiRegulatory: z.ZodObject<{
   /**
@@ -3197,6 +3201,20 @@ export const WifiRegulatory: z.ZodObject<{
   }),
 }).meta({
   id: 'WifiRegulatory',
+})
+
+/**
+ * [`set`] response. A non-empty collision list means nothing was applied —
+ * the caller confirms and re-saves; empty means the request was applied.
+ */
+export const PublishedPortsSetResult: z.ZodObject<{
+  pending_wan_port_collisions: z.ZodArray<typeof WanPortCollision>
+}> = /* @__PURE__ */ object({
+  pending_wan_port_collisions: z.array(WanPortCollision),
+}).meta({
+  id: 'PublishedPortsSetResult',
+  description:
+    '[`set`] response. A non-empty collision list means nothing was applied —\nthe caller confirms and re-saves; empty means the request was applied.',
 })
 export const SessionList: z.ZodObject<{
   current: z.ZodCodec<

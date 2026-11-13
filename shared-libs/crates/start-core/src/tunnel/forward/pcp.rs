@@ -14,6 +14,7 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::net::UdpSocket;
 
 use crate::net::port_map::server::{GatewayBackend, MappingEntry, PCP_PORT, handle, handle6};
+use crate::net::port_map::{Protocol as MappingProtocol, TransportProtocol};
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::{PortForward, PortForwards};
@@ -176,7 +177,8 @@ impl GatewayBackend for TunnelContext {
         count: u16,
         lifetime: Option<u32>,
     ) -> Result<(), u16> {
-        crate::tunnel::forward::pinhole::add_pinhole(
+        let _guard = self.forward_write_lock.lock().await;
+        let pinhole = crate::tunnel::forward::pinhole::add_pinhole_locked(
             self,
             gua,
             external_port,
@@ -190,18 +192,22 @@ impl GatewayBackend for TunnelContext {
             tracing::warn!("PCP v6 pinhole {gua}:{external_port} failed: {e}");
             0u16
         })?;
-        if let Some(lt) = lifetime {
-            lease::stamp(
-                self,
-                LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
-                lt,
-            );
+        if pinhole.auto {
+            if let Some(lt) = lifetime {
+                lease::stamp(
+                    self,
+                    LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
+                    lt,
+                );
+            }
         }
         Ok(())
     }
 
     async fn remove_pinhole(&self, gua: Ipv6Addr, external_port: u16) {
-        crate::tunnel::forward::pinhole::remove_pinhole(self, gua, external_port, true).await;
+        let _guard = self.forward_write_lock.lock().await;
+        crate::tunnel::forward::pinhole::remove_pinhole_locked(self, gua, external_port, true)
+            .await;
         lease::forget(
             self,
             &LeaseKey::Pinhole(SocketAddrV6::new(gua, external_port, 0, 0)),
@@ -227,9 +233,10 @@ impl GatewayBackend for TunnelContext {
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
+        protocol: TransportProtocol,
         lifetime: Option<u32>,
     ) -> Result<(), u8> {
-        self.persist_sni_forward(source, target, hostnames, lifetime, true, None)
+        self.persist_sni_forward(source, target, hostnames, protocol, lifetime, true, None)
             .await
     }
 
@@ -238,8 +245,9 @@ impl GatewayBackend for TunnelContext {
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
+        protocol: TransportProtocol,
     ) {
-        self.remove_sni_routes(source, target, hostnames, true)
+        self.remove_sni_routes(source, target, hostnames, protocol, true)
             .await;
     }
 }
@@ -272,14 +280,20 @@ impl TunnelContext {
                 lease::forget(self, &LeaseKey::Dnat(source));
                 true
             }
-            // Plain mappings on SNI ports own only the fallback.
-            Some(PortForward::Sni {
-                fallback: Some(fallback),
-                ..
-            }) if *fallback.target.ip() == peer && (!auto_only || fallback.auto) => {
-                self.remove_sni_fallback_locked(source, fallback.target)
-                    .await;
-                true
+            Some(entry @ PortForward::Sni { .. }) => {
+                let mut removed = false;
+                for (protocol, bindings) in entry.sni_bindings() {
+                    if let Some(fallback) = bindings
+                        .fallback
+                        .as_ref()
+                        .filter(|f| *f.target.ip() == peer && (!auto_only || f.auto))
+                    {
+                        self.remove_sni_fallback_locked(source, fallback.target, protocol)
+                            .await;
+                        removed = true;
+                    }
+                }
+                removed
             }
             _ => false,
         }
@@ -290,32 +304,29 @@ impl TunnelContext {
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
+        protocol: impl Into<MappingProtocol>,
         auto_only: bool,
     ) {
         let _guard = self.forward_write_lock.lock().await;
-        let hostnames = hostnames.to_vec();
+        self.remove_sni_routes_locked(source, target, hostnames, protocol.into(), auto_only)
+            .await;
+    }
+
+    pub(in crate::tunnel) async fn remove_sni_routes_locked(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        hostnames: &[String],
+        protocol: MappingProtocol,
+        auto_only: bool,
+    ) {
         let Some(removed) = self
             .db
             .mutate(|db| {
                 db.as_port_forwards_mut().mutate(|pf| {
-                    let mut removed = Vec::new();
-                    let mut now_empty = false;
-                    if let Some(PortForward::Sni { routes, fallback }) = pf.0.get_mut(&source) {
-                        routes.retain(|hostname, route| {
-                            let remove = route.target == target
-                                && hostnames.contains(hostname)
-                                && (!auto_only || route.auto);
-                            if remove {
-                                removed.push(hostname.clone());
-                            }
-                            !remove
-                        });
-                        now_empty = routes.is_empty() && fallback.is_none();
-                    }
-                    if now_empty {
-                        pf.0.remove(&source);
-                    }
-                    Ok(removed)
+                    Ok(remove_owned_sni_routes(
+                        pf, source, target, hostnames, protocol, auto_only,
+                    ))
                 })
             })
             .await
@@ -325,22 +336,32 @@ impl TunnelContext {
             return;
         };
         self.sni
-            .unregister(*source.ip(), source.port(), &removed, target);
+            .unregister_protocol(protocol, *source.ip(), source.port(), &removed, target);
         for hostname in removed {
-            lease::forget(self, &LeaseKey::Sni { source, hostname });
+            lease::forget(
+                self,
+                &LeaseKey::Sni {
+                    source,
+                    hostname,
+                    protocol,
+                },
+            );
         }
     }
 
-    /// Persists and registers SNI-demuxed hostname routes.
+    /// Persists one owner for the complete protocol selection; overlapping selections conflict.
+    /// Automatic single-transport requests reuse matching manual combined intent without changes or leases.
     pub async fn persist_sni_forward(
         &self,
         source: SocketAddrV4,
         target: SocketAddrV4,
         hostnames: &[String],
+        protocol: impl Into<MappingProtocol>,
         lifetime: Option<u32>,
         auto: bool,
         label: Option<String>,
     ) -> Result<(), u8> {
+        let protocol = protocol.into();
         let _guard = self.forward_write_lock.lock().await;
         self.sni.prepare().await?;
         let default_label = if auto {
@@ -348,13 +369,11 @@ impl TunnelContext {
         } else {
             label
         };
-        // Reject conflicts before displacing a working DNAT.
-        let hostnames_owned = hostnames.to_vec();
+        let hostnames: Vec<_> = hostnames.iter().map(|h| h.to_ascii_lowercase()).collect();
         let persisted = self
             .db
             .mutate(|db| {
                 db.as_port_forwards_mut().mutate(|pf| {
-                    use crate::tunnel::db::{PortForward, SniRoute};
                     let previous = pf.0.get(&source).cloned();
                     if let Some(conflict) = pf.overlapping(source, 1) {
                         return Err(Error::new(
@@ -362,103 +381,55 @@ impl TunnelContext {
                             ErrorKind::InvalidRequest,
                         ));
                     }
-                    let mut converted = None;
-                    if plan_dnat_conversion(pf.0.get(&source), source, target)? {
-                        if let Some(dnat @ PortForward::Dnat { .. }) = pf.0.remove(&source) {
-                            let PortForward::Dnat {
-                                target,
-                                label,
-                                enabled,
-                                auto,
-                                ..
-                            } = &dnat
-                            else {
-                                unreachable!()
-                            };
-                            pf.0.insert(
-                                source,
-                                PortForward::Sni {
-                                    routes: std::collections::BTreeMap::new(),
-                                    fallback: Some(SniRoute {
-                                        target: *target,
-                                        label: label.clone(),
-                                        enabled: *enabled,
-                                        auto: *auto,
-                                    }),
-                                },
-                            );
-                            converted = Some(dnat);
-                        }
+                    let converted = plan_dnat_conversion(previous.as_ref(), source, target)?;
+                    if converted {
+                        let entry = pf.0.get_mut(&source).unwrap();
+                        entry.convert_to_sni();
                     }
-                    let entry = pf.0.entry(source).or_insert_with(|| PortForward::Sni {
-                        routes: std::collections::BTreeMap::new(),
-                        fallback: None,
-                    });
-                    match entry {
-                        PortForward::Sni { routes, .. } => {
-                            for h in &hostnames_owned {
-                                if routes
-                                    .get(h)
-                                    .is_some_and(|r| route_conflicts(r, target, auto))
-                                {
-                                    return Err(Error::new(
-                                        eyre!(
-                                            "SNI hostname {h} on {source} is held by another client"
-                                        ),
-                                        ErrorKind::InvalidRequest,
-                                    ));
-                                }
-                            }
-                            let mut enabled_hostnames = Vec::new();
-                            for h in &hostnames_owned {
-                                let (label, enabled, auto) =
-                                    sni_route_fields(routes.get(h), auto, &default_label);
-                                if enabled {
-                                    enabled_hostnames.push(h.clone());
-                                }
-                                routes.insert(
-                                    h.clone(),
-                                    SniRoute {
-                                        target,
-                                        label,
-                                        enabled,
-                                        auto,
-                                    },
-                                );
-                            }
-                            Ok((converted, previous, enabled_hostnames))
-                        }
-                        PortForward::Dnat { .. } => Err(Error::new(
-                            eyre!("{source} is already a DNAT forward"),
-                            ErrorKind::InvalidRequest,
-                        )),
-                    }
+                    let entry = pf.0.entry(source).or_insert_with(PortForward::empty_sni);
+                    let claims = claim_sni_routes(
+                        entry,
+                        protocol,
+                        &hostnames,
+                        target,
+                        auto,
+                        &default_label,
+                    )?;
+                    Ok((previous, converted, claims))
                 })
             })
             .await
             .result;
-        let (converted, previous, enabled_hostnames) = match persisted {
-            Ok(c) => c,
-            Err(_) => return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN),
+        let (
+            previous,
+            converted,
+            SniClaims {
+                enabled_hostnames,
+                leased_hostnames,
+            },
+        ) = persisted.map_err(|_| crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN)?;
+        let fallback_target = match &previous {
+            Some(PortForward::Dnat {
+                target,
+                enabled: true,
+                ..
+            }) => Some(*target),
+            _ => None,
         };
-        let converted_dnat = converted.as_ref().and_then(|forward| match forward {
-            PortForward::Dnat {
-                target, enabled, ..
-            } => Some((*target, *enabled)),
-            PortForward::Sni { .. } => None,
-        });
-        if let Some((dnat_target, dnat_enabled)) = converted_dnat {
-            let dnat = converted.unwrap();
+        if converted {
+            let restore = previous.clone();
             register_converted_sni(
                 &self.sni,
                 source,
                 target,
                 &enabled_hostnames,
-                dnat_enabled.then_some(dnat_target),
-                || self.restore_persisted_forward(source, Some(dnat)),
+                protocol,
+                fallback_target,
+                || self.restore_persisted_forward(source, restore),
             )
             .await?;
-        } else if let Err(code) = self.sni.register(
+        } else if let Err(code) = self.sni.register_protocol(
+            protocol,
             *source.ip(),
             source.port(),
             &enabled_hostnames,
@@ -468,25 +439,22 @@ impl TunnelContext {
             self.restore_persisted_forward(source, previous).await;
             return Err(code);
         }
-        if converted_dnat.is_some() {
+        if converted {
             if let Some(rc) = self.active_forwards.mutate(|m| m.remove(&source)) {
                 drop(rc);
                 self.forward.gc().await.log_err();
             }
-            let carried = self.leases.mutate(|l| l.remove(&LeaseKey::Dnat(source)));
-            if let Some(exp) = carried {
-                self.leases.mutate(|l| {
-                    l.insert(LeaseKey::SniFallback(source), exp);
-                });
-            }
+            self.leases
+                .mutate(|leases| lease::convert_dnat_to_sni(leases, source));
         }
         if let Some(lt) = lifetime {
-            for h in hostnames {
+            for hostname in leased_hostnames {
                 lease::stamp(
                     self,
                     LeaseKey::Sni {
                         source,
-                        hostname: h.clone(),
+                        hostname,
+                        protocol,
                     },
                     lt,
                 );
@@ -495,7 +463,11 @@ impl TunnelContext {
         Ok(())
     }
 
-    async fn restore_persisted_forward(&self, source: SocketAddrV4, previous: Option<PortForward>) {
+    pub(in crate::tunnel) async fn restore_persisted_forward(
+        &self,
+        source: SocketAddrV4,
+        previous: Option<PortForward>,
+    ) {
         self.db
             .mutate(|db| {
                 db.as_port_forwards_mut().mutate(|forwards| {
@@ -513,8 +485,6 @@ impl TunnelContext {
             .log_err();
     }
 
-    /// Persists a hostname-less fallback on an existing SNI port.
-    /// The same target reclaims it; a different target is rejected.
     pub async fn persist_fallback_forward(
         &self,
         source: SocketAddrV4,
@@ -528,7 +498,8 @@ impl TunnelContext {
             .await
     }
 
-    pub(super) async fn persist_fallback_forward_locked(
+    /// Plain forwards own one combined fallback, preserving DNAT's shared state.
+    pub(in crate::tunnel) async fn persist_fallback_forward_locked(
         &self,
         source: SocketAddrV4,
         target: SocketAddrV4,
@@ -542,94 +513,77 @@ impl TunnelContext {
         } else {
             label
         };
-        let persisted = self
+        let (previous, (owner, mapping)) = self
             .db
             .mutate(|db| {
                 db.as_port_forwards_mut().mutate(|pf| {
-                    use crate::tunnel::db::{PortForward, SniRoute};
-                    match pf.0.get_mut(&source) {
-                        Some(PortForward::Sni { fallback, .. }) => {
-                            if fallback
-                                .as_ref()
-                                .is_some_and(|f| route_conflicts(f, target, auto))
-                            {
-                                return Err(Error::new(
-                                    eyre!("fallback on {source} is held by another client"),
-                                    ErrorKind::InvalidRequest,
-                                ));
-                            }
-                            let (label, enabled, auto) =
-                                sni_route_fields(fallback.as_ref(), auto, &default_label);
-                            *fallback = Some(SniRoute {
-                                target,
-                                label,
-                                enabled,
-                                auto,
-                            });
-                            Ok(enabled)
-                        }
-                        _ => Err(Error::new(
-                            eyre!("{source} is not an SNI-demuxed port"),
-                            ErrorKind::InvalidRequest,
-                        )),
-                    }
-                })
-            })
-            .await
-            .result;
-        let Ok(enabled) = persisted else {
-            return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN);
-        };
-        if enabled
-            && self
-                .sni
-                .register_fallback(*source.ip(), source.port(), target)
-                .is_err()
-        {
-            self.remove_sni_fallback_locked(source, target).await;
-            return Err(crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN);
-        }
-        if let Some(lt) = lifetime {
-            lease::stamp(self, LeaseKey::SniFallback(source), lt);
-        }
-        Ok(())
-    }
-
-    /// Remove the hostname-less fallback on `source`, only if held by `target`.
-    /// Drops the shared port entirely if no SNI routes remain either.
-    pub async fn remove_sni_fallback(&self, source: SocketAddrV4, target: SocketAddrV4) {
-        let _guard = self.forward_write_lock.lock().await;
-        self.remove_sni_fallback_locked(source, target).await;
-    }
-
-    pub(super) async fn remove_sni_fallback_locked(
-        &self,
-        source: SocketAddrV4,
-        target: SocketAddrV4,
-    ) {
-        self.sni
-            .unregister_fallback(*source.ip(), source.port(), target);
-        lease::forget(self, &LeaseKey::SniFallback(source));
-        self.db
-            .mutate(|db| {
-                db.as_port_forwards_mut().mutate(|pf| {
-                    use crate::tunnel::db::PortForward;
-                    let mut now_empty = false;
-                    if let Some(PortForward::Sni { routes, fallback }) = pf.0.get_mut(&source) {
-                        if fallback.as_ref().is_some_and(|f| f.target == target) {
-                            *fallback = None;
-                        }
-                        now_empty = routes.is_empty() && fallback.is_none();
-                    }
-                    if now_empty {
-                        pf.0.remove(&source);
-                    }
-                    Ok(())
+                    let entry = pf.0.get_mut(&source).ok_or_else(|| {
+                        Error::new(eyre!(t!("tunnel.api.route-not-found")), ErrorKind::NotFound)
+                    })?;
+                    let previous = entry.clone();
+                    let mapping = claim_sni_fallback(entry, target, auto, &default_label)?;
+                    Ok((previous, mapping))
                 })
             })
             .await
             .result
-            .log_err();
+            .map_err(|_| crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN)?;
+        if mapping.enabled {
+            if let Err(code) =
+                self.sni
+                    .register_fallback_protocol(owner, *source.ip(), source.port(), target)
+            {
+                self.restore_persisted_forward(source, Some(previous)).await;
+                return Err(code);
+            }
+        }
+        if mapping.auto {
+            if let Some(lt) = lifetime {
+                lease::stamp(
+                    self,
+                    LeaseKey::SniFallback {
+                        source,
+                        protocol: owner,
+                    },
+                    lt,
+                );
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn remove_sni_fallback(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        protocol: impl Into<MappingProtocol>,
+    ) {
+        let _guard = self.forward_write_lock.lock().await;
+        self.remove_sni_fallback_locked(source, target, protocol.into())
+            .await;
+    }
+
+    pub(in crate::tunnel) async fn remove_sni_fallback_locked(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        protocol: MappingProtocol,
+    ) {
+        let removed = self
+            .db
+            .mutate(|db| {
+                db.as_port_forwards_mut()
+                    .mutate(|pf| Ok(remove_owned_sni_fallback(pf, source, target, protocol)))
+            })
+            .await
+            .result
+            .log_err()
+            .unwrap_or(false);
+        if removed {
+            self.sni
+                .unregister_fallback_protocol(protocol, *source.ip(), source.port(), target);
+            lease::forget(self, &LeaseKey::SniFallback { source, protocol });
+        }
     }
 }
 
@@ -638,6 +592,7 @@ async fn register_converted_sni<F, Fut>(
     source: SocketAddrV4,
     target: SocketAddrV4,
     hostnames: &[String],
+    protocol: impl Into<MappingProtocol>,
     fallback_target: Option<SocketAddrV4>,
     restore: F,
 ) -> Result<(), u8>
@@ -645,20 +600,191 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    if let Some(fallback_target) = fallback_target {
-        if let Err(code) = sni.register_fallback(*source.ip(), source.port(), fallback_target) {
-            restore().await;
-            return Err(code);
+    let protocol = protocol.into();
+    let mut fallback_registered = false;
+    let result = (|| {
+        if let Some(fallback) = fallback_target {
+            sni.register_fallback_protocol(
+                MappingProtocol::TcpUdp,
+                *source.ip(),
+                source.port(),
+                fallback,
+            )?;
+            fallback_registered = true;
         }
-    }
-    if let Err(code) = sni.register(*source.ip(), source.port(), hostnames, target, None) {
-        if let Some(fallback_target) = fallback_target {
-            sni.unregister_fallback(*source.ip(), source.port(), fallback_target);
+        sni.register_protocol(
+            protocol,
+            *source.ip(),
+            source.port(),
+            hostnames,
+            target,
+            None,
+        )
+    })();
+    if let Err(code) = result {
+        if fallback_registered {
+            sni.unregister_fallback_protocol(
+                MappingProtocol::TcpUdp,
+                *source.ip(),
+                source.port(),
+                fallback_target.unwrap(),
+            );
         }
         restore().await;
         return Err(code);
     }
     Ok(())
+}
+
+fn remove_owned_sni_routes(
+    pf: &mut PortForwards,
+    source: SocketAddrV4,
+    target: SocketAddrV4,
+    hostnames: &[String],
+    protocol: impl Into<MappingProtocol>,
+    auto_only: bool,
+) -> Vec<String> {
+    let mut removed = Vec::new();
+    if let Some(entry) = pf.0.get_mut(&source) {
+        if let Some(bindings) = entry.bindings_mut(protocol) {
+            bindings.routes.retain(|hostname, route| {
+                let remove = route.target == target
+                    && hostnames.contains(hostname)
+                    && (!auto_only || route.auto);
+                if remove {
+                    removed.push(hostname.clone());
+                }
+                !remove
+            });
+        }
+        if entry.sni_is_empty() {
+            pf.0.remove(&source);
+        }
+    }
+
+    removed
+}
+
+fn remove_owned_sni_fallback(
+    pf: &mut PortForwards,
+    source: SocketAddrV4,
+    target: SocketAddrV4,
+    protocol: impl Into<MappingProtocol>,
+) -> bool {
+    let mut removed = false;
+    if let Some(entry) = pf.0.get_mut(&source) {
+        if let Some(bindings) = entry.bindings_mut(protocol) {
+            if bindings
+                .fallback
+                .as_ref()
+                .is_some_and(|f| f.target == target)
+            {
+                bindings.fallback = None;
+                removed = true;
+            }
+        }
+        if entry.sni_is_empty() {
+            pf.0.remove(&source);
+        }
+    }
+
+    removed
+}
+
+struct SniClaims {
+    enabled_hostnames: Vec<String>,
+    leased_hostnames: Vec<String>,
+}
+
+fn claim_sni_routes(
+    entry: &mut PortForward,
+    protocol: impl Into<MappingProtocol>,
+    hostnames: &[String],
+    target: SocketAddrV4,
+    auto: bool,
+    default_label: &Option<String>,
+) -> Result<SniClaims, Error> {
+    let protocol = protocol.into();
+    let mut claimed = Vec::new();
+    for h in hostnames {
+        if let Some((owner, route)) = entry.overlapping_route(protocol, Some(h)) {
+            if auto && owner == MappingProtocol::TcpUdp && manual_route_matches(route, target) {
+                continue;
+            }
+            if owner != protocol {
+                return Err(Error::new(
+                    eyre!(t!(
+                        "tunnel.forward.hostname-protocol-conflict",
+                        hostname = h
+                    )),
+                    ErrorKind::InvalidRequest,
+                ));
+            }
+            if route_conflicts(route, target, auto) {
+                return Err(Error::new(
+                    eyre!(t!("tunnel.forward.hostname-held", hostname = h)),
+                    ErrorKind::InvalidRequest,
+                ));
+            }
+        }
+        claimed.push(h);
+    }
+    let routes = &mut entry.bindings_mut(protocol).unwrap().routes;
+    let mut claims = SniClaims {
+        enabled_hostnames: Vec::new(),
+        leased_hostnames: Vec::new(),
+    };
+    for h in claimed {
+        let (label, enabled, auto) = sni_route_fields(routes.get(h), auto, default_label);
+        if enabled {
+            claims.enabled_hostnames.push(h.clone());
+        }
+        if auto {
+            claims.leased_hostnames.push(h.clone());
+        }
+        routes.insert(
+            h.clone(),
+            crate::tunnel::db::SniRoute {
+                target,
+                label,
+                enabled,
+                auto,
+            },
+        );
+    }
+    Ok(claims)
+}
+
+/// Existing catch-alls retain their transport scope on renewal or same-device repointing.
+fn claim_sni_fallback(
+    entry: &mut PortForward,
+    target: SocketAddrV4,
+    auto: bool,
+    default_label: &Option<String>,
+) -> Result<(MappingProtocol, crate::tunnel::db::SniRoute), Error> {
+    let mut owner = MappingProtocol::TcpUdp;
+    if let Some((protocol, route)) = entry.overlapping_route(MappingProtocol::TcpUdp, None) {
+        if route_conflicts(route, target, auto) {
+            return Err(Error::new(
+                eyre!(t!("tunnel.forward.fallback-conflict")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        if auto && manual_route_matches(route, target) {
+            return Ok((protocol, route.clone()));
+        }
+        owner = protocol;
+    }
+    let fallback = &mut entry.bindings_mut(owner).unwrap().fallback;
+    let (label, enabled, auto) = sni_route_fields(fallback.as_ref(), auto, default_label);
+    let mapping = crate::tunnel::db::SniRoute {
+        target,
+        label,
+        enabled,
+        auto,
+    };
+    *fallback = Some(mapping.clone());
+    Ok((owner, mapping))
 }
 
 fn restore_forward_entry(forwards: &mut PortForwards, source: SocketAddrV4, forward: PortForward) {
@@ -690,12 +816,16 @@ fn plan_dnat_conversion(
     }
 }
 
+fn manual_route_matches(route: &crate::tunnel::db::SniRoute, target: SocketAddrV4) -> bool {
+    !route.auto && route.target == target
+}
+
 /// A route's owner repoints it within its own device. Any other change conflicts.
 fn route_conflicts(route: &crate::tunnel::db::SniRoute, target: SocketAddrV4, auto: bool) -> bool {
     route.target != target && (route.auto != auto || route.target.ip() != target.ip())
 }
 
-/// Preserves an existing SNI route's owner, enabled state, and label.
+/// Retains ownership and disabled intent; an unset label inherits the default.
 fn sni_route_fields(
     existing: Option<&crate::tunnel::db::SniRoute>,
     auto: bool,
@@ -717,9 +847,11 @@ fn peer_forward_matches(entry: &PortForward, target: &SocketAddrV4) -> bool {
         PortForward::Dnat {
             target: t, auto, ..
         } => *auto && t == target,
-        PortForward::Sni { fallback, .. } => fallback
-            .as_ref()
-            .is_some_and(|f| f.auto && &f.target == target),
+        PortForward::Sni { .. } => entry.sni_bindings().any(|(_, b)| {
+            b.fallback
+                .as_ref()
+                .is_some_and(|f| f.auto && &f.target == target)
+        }),
     }
 }
 
@@ -751,7 +883,18 @@ async fn remove_peer_forward(ctx: &TunnelContext, peer: Ipv4Addr, internal_port:
         return;
     };
     if is_sni {
-        ctx.remove_sni_fallback_locked(source, target).await;
+        if let Some(entry) = current_forward(ctx, source).await {
+            for (protocol, bindings) in entry.sni_bindings() {
+                if bindings
+                    .fallback
+                    .as_ref()
+                    .is_some_and(|f| f.auto && f.target == target)
+                {
+                    ctx.remove_sni_fallback_locked(source, target, protocol)
+                        .await;
+                }
+            }
+        }
         return;
     }
     ctx.db
@@ -825,9 +968,12 @@ mod tests {
     use std::net::SocketAddrV4;
 
     use super::{
-        mapping_entries, peer_forward_matches, peer_forward_source, plan_dnat_conversion,
-        register_converted_sni, restore_forward_entry, route_conflicts, sni_route_fields,
+        claim_sni_fallback, claim_sni_routes, mapping_entries, peer_forward_matches,
+        peer_forward_source, plan_dnat_conversion, register_converted_sni,
+        remove_owned_sni_fallback, remove_owned_sni_routes, restore_forward_entry, route_conflicts,
+        sni_route_fields,
     };
+    use crate::net::port_map::{Protocol as MappingProtocol, TransportProtocol};
     use crate::tunnel::db::{PortForward, PortForwards, SniRoute};
 
     fn route(label: Option<&str>, enabled: bool, auto: bool) -> SniRoute {
@@ -856,13 +1002,17 @@ mod tests {
     fn peer_delete_matches_dnat_and_own_fallback() {
         let mine: SocketAddrV4 = "10.59.217.2:5349".parse().unwrap();
         let sni = |target: SocketAddrV4, auto| PortForward::Sni {
-            routes: Default::default(),
-            fallback: Some(SniRoute {
-                target,
-                label: None,
-                enabled: true,
-                auto,
-            }),
+            both: Default::default(),
+            tcp: crate::tunnel::db::SniBindings {
+                routes: Default::default(),
+                fallback: Some(SniRoute {
+                    target,
+                    label: None,
+                    enabled: true,
+                    auto,
+                }),
+            },
+            udp: Default::default(),
         };
         assert!(peer_forward_matches(&sni(mine, true), &mine));
         assert!(!peer_forward_matches(&sni(mine, false), &mine));
@@ -873,8 +1023,12 @@ mod tests {
         assert!(
             !peer_forward_matches(
                 &PortForward::Sni {
-                    routes: Default::default(),
-                    fallback: None,
+                    both: Default::default(),
+                    tcp: crate::tunnel::db::SniBindings {
+                        routes: Default::default(),
+                        fallback: None,
+                    },
+                    udp: Default::default()
                 },
                 &mine
             ),
@@ -926,8 +1080,12 @@ mod tests {
         // Nothing to convert on an empty port or one already SNI.
         assert!(!plan_dnat_conversion(None, src, mine).unwrap());
         let sni = PortForward::Sni {
-            routes: std::collections::BTreeMap::new(),
-            fallback: None,
+            both: Default::default(),
+            tcp: crate::tunnel::db::SniBindings {
+                routes: std::collections::BTreeMap::new(),
+                fallback: None,
+            },
+            udp: Default::default(),
         };
         assert!(!plan_dnat_conversion(Some(&sni), src, theirs).unwrap());
     }
@@ -942,18 +1100,9 @@ mod tests {
         let target: SocketAddrV4 = "10.59.0.2:443".parse().unwrap();
         let dnat = dnat("10.59.0.2:443", 1);
         let mut forwards = PortForwards(Default::default());
-        forwards.0.insert(
-            source,
-            PortForward::Sni {
-                routes: Default::default(),
-                fallback: Some(SniRoute {
-                    target,
-                    label: None,
-                    enabled: true,
-                    auto: true,
-                }),
-            },
-        );
+        let mut converted = dnat.clone();
+        converted.convert_to_sni();
+        forwards.0.insert(source, converted);
         let forwards = std::sync::Arc::new(std::sync::Mutex::new(forwards));
         let restore_forwards = forwards.clone();
         let sni = crate::tunnel::forward::sni::SniDemux::new();
@@ -963,6 +1112,7 @@ mod tests {
             source,
             target,
             &["blocked.example.com".to_string()],
+            TransportProtocol::Tcp,
             Some(target),
             move || async move {
                 restore_forward_entry(&mut restore_forwards.lock().unwrap(), source, dnat);
@@ -1104,5 +1254,438 @@ mod tests {
             .map(|e| (e.external_port, e.internal.port()))
             .collect();
         assert_eq!(tcp, vec![(5000, 6000), (5001, 6001), (5002, 6002)]);
+    }
+    #[test]
+    fn same_hostname_has_independent_transport_owners_and_state() {
+        let mut entry = PortForward::empty_sni();
+        let hostname = vec!["service.example.com".to_owned()];
+        let tcp = "10.59.0.2:443".parse().unwrap();
+        let udp = "10.59.0.3:8443".parse().unwrap();
+        claim_sni_routes(
+            &mut entry,
+            TransportProtocol::Tcp,
+            &hostname,
+            tcp,
+            false,
+            &Some("TLS".into()),
+        )
+        .unwrap();
+        entry
+            .bindings_mut(TransportProtocol::Tcp)
+            .unwrap()
+            .routes
+            .get_mut(&hostname[0])
+            .unwrap()
+            .enabled = false;
+        claim_sni_routes(
+            &mut entry,
+            TransportProtocol::Udp,
+            &hostname,
+            udp,
+            true,
+            &Some("QUIC".into()),
+        )
+        .unwrap();
+        assert!(
+            claim_sni_routes(
+                &mut entry,
+                TransportProtocol::Udp,
+                &hostname,
+                tcp,
+                true,
+                &None
+            )
+            .is_err()
+        );
+        let tcp_route = entry
+            .bindings(TransportProtocol::Tcp)
+            .unwrap()
+            .route(Some(&hostname[0]))
+            .unwrap();
+        assert_eq!(tcp_route.target, tcp);
+        assert_eq!(tcp_route.label.as_deref(), Some("TLS"));
+        assert!(!tcp_route.enabled);
+        assert!(!tcp_route.auto);
+        let udp_route = entry
+            .bindings(TransportProtocol::Udp)
+            .unwrap()
+            .route(Some(&hostname[0]))
+            .unwrap();
+        assert_eq!(udp_route.target, udp);
+        assert_eq!(udp_route.label.as_deref(), Some("QUIC"));
+        assert!(udp_route.enabled);
+        assert!(udp_route.auto);
+    }
+
+    #[test]
+    fn combined_claim_has_one_record_and_preserves_shared_manual_state() {
+        let source = "203.0.113.1:443".parse().unwrap();
+        let target = "10.59.0.2:443".parse().unwrap();
+        let repointed = "10.59.0.2:8443".parse().unwrap();
+        let hosts = vec!["service.example.com".to_owned()];
+        let mut entry = PortForward::empty_sni();
+        let claims = claim_sni_routes(
+            &mut entry,
+            MappingProtocol::TcpUdp,
+            &hosts,
+            target,
+            false,
+            &Some("HTTPS".into()),
+        )
+        .unwrap();
+        assert_eq!(claims.enabled_hostnames, hosts);
+        assert!(claims.leased_hostnames.is_empty());
+        assert_eq!(entry.sni_routes().count(), 1);
+        assert!(entry.bindings(MappingProtocol::Tcp).unwrap().is_empty());
+        assert!(entry.bindings(MappingProtocol::Udp).unwrap().is_empty());
+        entry
+            .bindings_mut(MappingProtocol::TcpUdp)
+            .unwrap()
+            .route_mut(Some(&hosts[0]))
+            .unwrap()
+            .enabled = false;
+        let claims = claim_sni_routes(
+            &mut entry,
+            MappingProtocol::TcpUdp,
+            &hosts,
+            repointed,
+            false,
+            &Some("replacement".into()),
+        )
+        .unwrap();
+        assert!(claims.enabled_hostnames.is_empty());
+        assert!(claims.leased_hostnames.is_empty());
+        let encoded = serde_json::to_value(&entry).unwrap();
+        assert_eq!(
+            encoded["both"]["routes"][&hosts[0]]["target"],
+            "10.59.0.2:8443"
+        );
+        assert_eq!(encoded["both"]["routes"][&hosts[0]]["label"], "HTTPS");
+        assert_eq!(encoded["both"]["routes"][&hosts[0]]["enabled"], false);
+        let mut forwards = PortForwards(std::collections::BTreeMap::from([(source, entry)]));
+        assert!(
+            remove_owned_sni_routes(
+                &mut forwards,
+                source,
+                repointed,
+                &hosts,
+                MappingProtocol::Tcp,
+                false
+            )
+            .is_empty()
+        );
+        assert!(
+            remove_owned_sni_routes(
+                &mut forwards,
+                source,
+                repointed,
+                &hosts,
+                MappingProtocol::TcpUdp,
+                true
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            remove_owned_sni_routes(
+                &mut forwards,
+                source,
+                repointed,
+                &hosts,
+                MappingProtocol::TcpUdp,
+                false
+            ),
+            hosts
+        );
+        assert!(!forwards.0.contains_key(&source));
+    }
+
+    #[test]
+    fn overlapping_logical_claims_fail_before_mutating_any_hostname() {
+        let target = "10.59.0.2:443".parse().unwrap();
+        for (owner, requested) in [
+            (MappingProtocol::TcpUdp, MappingProtocol::Tcp),
+            (MappingProtocol::TcpUdp, MappingProtocol::Udp),
+            (MappingProtocol::Tcp, MappingProtocol::TcpUdp),
+            (MappingProtocol::Udp, MappingProtocol::TcpUdp),
+        ] {
+            for enabled in [false, true] {
+                for auto in [false, true] {
+                    let mut entry = PortForward::empty_sni();
+                    entry.bindings_mut(owner).unwrap().routes.insert(
+                        "held.example.com".into(),
+                        SniRoute {
+                            target,
+                            label: Some("owner".into()),
+                            enabled,
+                            auto,
+                        },
+                    );
+                    let previous = serde_json::to_value(&entry).unwrap();
+                    assert!(
+                        claim_sni_routes(
+                            &mut entry,
+                            requested,
+                            &["new.example.com".into(), "held.example.com".into()],
+                            target,
+                            false,
+                            &None
+                        )
+                        .is_err()
+                    );
+                    assert_eq!(serde_json::to_value(&entry).unwrap(), previous);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn automatic_claims_reuse_manual_combined_intent_without_grants() {
+        let target = "10.59.0.2:443".parse().unwrap();
+        let hosts = vec!["service.example.com".to_owned()];
+        for enabled in [false, true] {
+            for transport in MappingProtocol::ALL {
+                let mut entry = PortForward::empty_sni();
+                claim_sni_routes(
+                    &mut entry,
+                    MappingProtocol::TcpUdp,
+                    &hosts,
+                    target,
+                    false,
+                    &None,
+                )
+                .unwrap();
+                entry
+                    .bindings_mut(MappingProtocol::TcpUdp)
+                    .unwrap()
+                    .route_mut(Some(&hosts[0]))
+                    .unwrap()
+                    .enabled = enabled;
+                let previous = serde_json::to_value(&entry).unwrap();
+                let claims = claim_sni_routes(
+                    &mut entry,
+                    transport,
+                    &hosts,
+                    target,
+                    true,
+                    &Some("automatic".into()),
+                )
+                .unwrap();
+                assert!(claims.enabled_hostnames.is_empty());
+                assert!(claims.leased_hostnames.is_empty());
+                assert_eq!(serde_json::to_value(&entry).unwrap(), previous);
+                assert!(
+                    claim_sni_routes(
+                        &mut entry,
+                        transport,
+                        &hosts,
+                        "10.59.0.2:8443".parse().unwrap(),
+                        true,
+                        &None
+                    )
+                    .is_err()
+                );
+                assert_eq!(serde_json::to_value(&entry).unwrap(), previous);
+            }
+        }
+    }
+
+    #[test]
+    fn combined_fallback_is_one_owned_record_and_rejects_other_devices() {
+        let target = "10.59.0.2:443".parse().unwrap();
+        let mut entry = PortForward::empty_sni();
+        let (owner, mapping) = claim_sni_fallback(&mut entry, target, false, &None).unwrap();
+        assert_eq!(owner, MappingProtocol::TcpUdp);
+        assert!(!mapping.auto);
+        assert_eq!(entry.sni_routes().count(), 1);
+        entry
+            .bindings_mut(MappingProtocol::TcpUdp)
+            .unwrap()
+            .fallback
+            .as_mut()
+            .unwrap()
+            .enabled = false;
+        let (_, mapping) =
+            claim_sni_fallback(&mut entry, target, true, &Some("automatic".into())).unwrap();
+        assert!(mapping.label.is_none());
+        assert!(!mapping.enabled);
+        assert!(!mapping.auto);
+        for transport in TransportProtocol::ALL {
+            let mut entry = PortForward::empty_sni();
+            entry.bindings_mut(transport).unwrap().fallback = Some(mapping.clone());
+            let previous = serde_json::to_value(&entry).unwrap();
+            let other_device = "10.59.0.3:443".parse().unwrap();
+            assert!(claim_sni_fallback(&mut entry, other_device, false, &None).is_err());
+            assert_eq!(serde_json::to_value(&entry).unwrap(), previous);
+        }
+    }
+
+    #[test]
+    fn migrated_tcp_fallback_renews_and_repoints_without_adding_udp_or_changing_ownership() {
+        let target = "10.59.0.2:443".parse().unwrap();
+        for auto in [false, true] {
+            for enabled in [false, true] {
+                let mut entry = PortForward::empty_sni();
+                entry.bindings_mut(MappingProtocol::Tcp).unwrap().fallback =
+                    Some(crate::tunnel::db::SniRoute {
+                        target,
+                        label: None,
+                        enabled,
+                        auto,
+                    });
+                let previous = serde_json::to_value(&entry).unwrap();
+                let default_label = if auto { None } else { Some("Automatic".into()) };
+                let (owner, mapping) =
+                    claim_sni_fallback(&mut entry, target, true, &default_label).unwrap();
+                assert_eq!(owner, MappingProtocol::Tcp);
+                assert_eq!(mapping.auto, auto);
+                assert_eq!(mapping.enabled, enabled);
+                assert_eq!(serde_json::to_value(&entry).unwrap(), previous);
+                assert_eq!(entry.sni_routes().count(), 1);
+                for protocol in [MappingProtocol::Udp, MappingProtocol::TcpUdp] {
+                    assert!(entry.bindings(protocol).unwrap().is_empty());
+                }
+                let repointed = "10.59.0.2:8443".parse().unwrap();
+                let (owner, mapping) =
+                    claim_sni_fallback(&mut entry, repointed, auto, &None).unwrap();
+                assert_eq!(owner, MappingProtocol::Tcp);
+                assert_eq!(mapping.target, repointed);
+                assert_eq!(mapping.auto, auto);
+                assert_eq!(mapping.enabled, enabled);
+                assert_eq!(entry.sni_routes().count(), 1);
+                let other_device = "10.59.0.3:443".parse().unwrap();
+                let previous = serde_json::to_value(&entry).unwrap();
+                assert!(claim_sni_fallback(&mut entry, other_device, auto, &None).is_err());
+                assert_eq!(serde_json::to_value(&entry).unwrap(), previous);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn blocked_udp_conversion_restores_dnat_and_releases_tcp_fallback() {
+        let blocked = std::net::UdpSocket::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let source = match blocked.local_addr().unwrap() {
+            std::net::SocketAddr::V4(source) => source,
+            _ => unreachable!(),
+        };
+        let target = "10.59.0.2:443".parse().unwrap();
+        let previous = dnat("10.59.0.2:443", 1);
+        let mut converted = previous.clone();
+        converted.convert_to_sni();
+        let forwards = std::sync::Arc::new(std::sync::Mutex::new(PortForwards(
+            std::collections::BTreeMap::from([(source, converted)]),
+        )));
+        let restored = forwards.clone();
+        let sni = crate::tunnel::forward::sni::SniDemux::new();
+        let code = register_converted_sni(
+            &sni,
+            source,
+            target,
+            &["quic.example.com".into()],
+            TransportProtocol::Udp,
+            Some(target),
+            move || async move {
+                restore_forward_entry(&mut restored.lock().unwrap(), source, previous);
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(code, crate::net::port_map::pcp::RESULT_NO_RESOURCES);
+        assert!(
+            matches!(forwards.lock().unwrap().0.get(&source), Some(PortForward::Dnat { target: t, .. }) if *t == target)
+        );
+        assert!(sni.snapshot().is_empty());
+        tokio::task::yield_now().await;
+        std::net::TcpListener::bind(source).expect("cancelled TCP listener releases its socket");
+    }
+
+    #[test]
+    fn deleting_one_transport_preserves_the_other_routes_fallback_and_manual_owner() {
+        let source = "203.0.113.1:443".parse().unwrap();
+        let tcp = "10.59.0.2:443".parse().unwrap();
+        let udp = "10.59.0.3:443".parse().unwrap();
+        let hosts = vec!["service.example.com".to_owned()];
+        let mut entry = PortForward::empty_sni();
+        for (protocol, target, auto) in [
+            (TransportProtocol::Tcp, tcp, false),
+            (TransportProtocol::Udp, udp, true),
+        ] {
+            claim_sni_routes(&mut entry, protocol, &hosts, target, auto, &None).unwrap();
+            entry.bindings_mut(protocol).unwrap().fallback = Some(SniRoute {
+                target,
+                label: None,
+                enabled: true,
+                auto,
+            });
+        }
+        let mut forwards = PortForwards(std::collections::BTreeMap::from([(source, entry)]));
+        assert!(
+            remove_owned_sni_routes(
+                &mut forwards,
+                source,
+                udp,
+                &hosts,
+                TransportProtocol::Tcp,
+                false
+            )
+            .is_empty()
+        );
+        assert!(
+            remove_owned_sni_routes(
+                &mut forwards,
+                source,
+                tcp,
+                &hosts,
+                TransportProtocol::Tcp,
+                true
+            )
+            .is_empty()
+        );
+        assert!(!remove_owned_sni_fallback(
+            &mut forwards,
+            source,
+            udp,
+            TransportProtocol::Tcp
+        ));
+        assert_eq!(
+            remove_owned_sni_routes(
+                &mut forwards,
+                source,
+                udp,
+                &hosts,
+                TransportProtocol::Udp,
+                true
+            ),
+            hosts
+        );
+        assert!(remove_owned_sni_fallback(
+            &mut forwards,
+            source,
+            udp,
+            TransportProtocol::Udp
+        ));
+        let entry = &forwards.0[&source];
+        assert!(entry.bindings(TransportProtocol::Udp).unwrap().is_empty());
+        assert_eq!(
+            entry.bindings(TransportProtocol::Tcp).unwrap().routes[&hosts[0]].target,
+            tcp
+        );
+        assert!(
+            entry
+                .bindings(TransportProtocol::Tcp)
+                .unwrap()
+                .fallback
+                .is_some()
+        );
+        remove_owned_sni_routes(
+            &mut forwards,
+            source,
+            tcp,
+            &hosts,
+            TransportProtocol::Tcp,
+            false,
+        );
+        assert!(forwards.0.contains_key(&source));
+        remove_owned_sni_fallback(&mut forwards, source, tcp, TransportProtocol::Tcp);
+        assert!(!forwards.0.contains_key(&source));
     }
 }

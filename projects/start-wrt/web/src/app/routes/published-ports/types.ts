@@ -1,6 +1,15 @@
-import type { AutomaticPortUseKind } from 'src/app/services/api/api.service'
+import type {
+  AutomaticPortUseFromApi,
+  AutomaticPortUseKind,
+} from 'src/app/services/api/api.service'
 
-export type Protocol = 'tcp' | 'udp' | 'tcp+udp'
+export type Protocol = AutomaticPortUseFromApi['protocol']
+
+export const PROTOCOL_LABELS = {
+  tcp: 'TCP',
+  udp: 'UDP',
+  'tcp+udp': 'TCP + UDP',
+} as const
 
 export function isGua(ip: string): boolean {
   const firstHextet = parseInt(ip.split(':')[0], 16)
@@ -55,6 +64,7 @@ export interface AutomaticPortUseDisplay {
   deviceName?: string
   ports: string
   publicPorts: string
+  protocol: AutomaticPortUseFromApi['protocol']
   expiresSecs?: number
   hostname?: string
 }

@@ -129,7 +129,7 @@ Puertos que un servidor publica por sí mismo automáticamente (PCP/UPnP). Son d
 
 ### Columnas
 
-Etiqueta, el **servidor** de destino, un **nombre de host** TLS opcional (SNI), los puertos externo e interno, el protocolo (siempre TCP/UDP) y la **IP** pública en la que es accesible.
+Etiqueta, el **servidor** de destino, un **nombre de host** TLS opcional (SNI), los puertos externo e interno, el protocolo (TCP, UDP o TCP/UDP para rutas por nombre de host; TCP/UDP para puertos simples) y la **IP** pública en la que es accesible.
 
 <a href="https://docs.start9.com/start-tunnel/published-ports.html" target="_blank" rel="noreferrer">Más información →</a>`,
 
@@ -163,7 +163,7 @@ Accede al servicio por IPv4, IPv6 o ambos. IPv6 requiere que la subred del servi
 
 ### Nombre de host (opcional)
 
-Un dominio TLS/SSL (SNI) para que varios nombres de host compartan un mismo puerto externo. Solo IPv4, y no disponible para rangos.
+Un dominio (SNI) para TLS por TCP o QUIC por UDP, para que varios nombres de host compartan un mismo puerto externo. Selecciona TCP, UDP o TCP/UDP debajo del nombre. TCP está seleccionado inicialmente. TCP/UDP crea una ruta con destino, etiqueta y estado compartidos. Las rutas TCP y UDP separadas pueden usar servidores distintos con el mismo nombre y puerto. Solo IPv4, y no disponible para rangos.
 
 <a href="https://docs.start9.com/start-tunnel/published-ports.html#add-a-port-manually" target="_blank" rel="noreferrer">Más información →</a>`,
 

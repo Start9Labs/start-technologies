@@ -1,5 +1,10 @@
 import { Signal } from '@angular/core'
 import { T } from '@start9labs/start-core'
+import {
+  FORWARD_PROTOCOLS,
+  ForwardProtocol,
+  sniBindings,
+} from 'src/app/utils/port-forwards'
 
 export interface MappedDevice {
   readonly ip: string
@@ -9,12 +14,17 @@ export interface MappedDevice {
 }
 
 export type IpVersion = 'ipv4' | 'ipv6'
+export const FORWARD_PROTOCOL_LABELS = {
+  tcp: 'TCP',
+  udp: 'UDP',
+  'tcp+udp': 'TCP/UDP',
+} as const satisfies Record<ForwardProtocol, string>
 
 export interface MappedForward {
+  readonly protocol: ForwardProtocol | null
   // For a v4 forward this is the WAN IP; for a v6 pinhole it's the client's GUA.
   readonly externalip: string
-  // Start port of the forward; `externalport`/`internalport` stay the raw start
-  // (they rebuild the operation source key), while `count` gives the span.
+  // Stores start ports for range operations, not formatted spans.
   readonly externalport: string
   readonly device: MappedDevice
   readonly internalport: string
@@ -24,7 +34,6 @@ export interface MappedForward {
   readonly auto: T.Tunnel.SniRoute['auto']
   readonly sni: string | null
   readonly hostname: string | null
-  // v4 (DNAT/SNI on the WAN IP) vs v6 (a firewall pinhole on the client's GUA).
   readonly ipVersion: IpVersion
 }
 
@@ -39,34 +48,37 @@ export function mapForwards(
 ): MappedForward[] {
   return Object.entries(portForwards).flatMap(([source, forward]) =>
     forward.kind === 'sni'
-      ? [
-          ...Object.entries(forward.routes).map(([hostname, route]) =>
-            toRow(
-              source,
-              route.target,
-              route.label,
-              route.enabled,
-              route.auto,
-              hostname,
-              1,
+      ? FORWARD_PROTOCOLS.flatMap(protocol => {
+          const bindings = sniBindings(forward, protocol)
+          return [
+            ...Object.entries(bindings.routes).map(([hostname, route]) =>
+              toRow(
+                source,
+                route.target,
+                route.label,
+                route.enabled,
+                route.auto,
+                hostname,
+                1,
+                protocol,
+              ),
             ),
-          ),
-          // The hostname-less fallback: a catch-all row on the shared port,
-          // reachable by a bare IP or any SNI that matches no named route.
-          ...(forward.fallback
-            ? [
-                toRow(
-                  source,
-                  forward.fallback.target,
-                  forward.fallback.label,
-                  forward.fallback.enabled,
-                  forward.fallback.auto,
-                  null,
-                  1,
-                ),
-              ]
-            : []),
-        ]
+            ...(bindings.fallback
+              ? [
+                  toRow(
+                    source,
+                    bindings.fallback.target,
+                    bindings.fallback.label,
+                    bindings.fallback.enabled,
+                    bindings.fallback.auto,
+                    null,
+                    1,
+                    protocol,
+                  ),
+                ]
+              : []),
+          ]
+        })
       : [
           toRow(
             source,
@@ -88,16 +100,15 @@ export function mapForwards(
     auto: boolean,
     hostname: string | null,
     count: number,
+    protocol: ForwardProtocol | null = null,
   ): MappedForward {
     const [externalip, externalport] = source.split(':')
     const [targetip, internalport] = target.split(':')
 
     return {
+      protocol,
       externalip: externalip!,
       externalport: externalport!,
-      // Fall back to the raw target IP when it isn't a named device (e.g. a
-      // manual SNI route to a non-client) so the row still renders rather than
-      // crashing the whole table on an undefined device.
       device: devices.find(d => d.ip === targetip) ?? {
         ip: targetip!,
         name: targetip!,
@@ -115,8 +126,6 @@ export function mapForwards(
   }
 }
 
-// v6 GUA pinholes keyed by `[gua]:port`. A pure pinhole has `internalPort` null
-// (internal == external); a remap (e.g. 80→443) carries a distinct internal.
 export function mapPinholes(
   pinholes: T.Tunnel.Pinholes6,
   devices: readonly MappedDevice[],
@@ -129,6 +138,7 @@ export function mapPinholes(
       ph.internalPort != null ? String(ph.internalPort) : externalport
 
     return {
+      protocol: null,
       externalip: gua,
       externalport,
       device: devices.find(d => d.ipv6 === gua) ?? {

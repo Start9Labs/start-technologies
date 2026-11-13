@@ -23,6 +23,9 @@ author:
     email: me@drbonez.dev
 normative:
   RFC6066:
+  RFC9000:
+  RFC9001:
+  RFC9369:
   UDA2:
     title: UPnP Device Architecture 2.0
     date: 2020-04-17
@@ -42,9 +45,9 @@ informative:
 abstract
 
 This document defines two vendor-defined actions for the UPnP
-WANIPConnection:1 service. The actions create and delete finite-lived TCP port
-mappings selected by the hostname in the TLS Server Name Indication (SNI)
-extension. Multiple internal hosts can thereby share an external address and
+WANIPConnection:1 service. The actions create and delete finite-lived TCP and,
+optionally, QUIC/UDP port mappings selected by the hostname in the TLS Server
+Name Indication (SNI) extension. Multiple internal hosts can thereby share an external address and
 port while retaining end-to-end TLS. The actions are discoverable through the
 existing WANIPConnection service description and do not change the behavior of
 standard WANIPConnection actions.
@@ -80,8 +83,8 @@ Control point:
 : the UPnP client invoking a WANIPConnection action.
 
 Hostname mapping:
-: a finite-lived association from an external IPv4 address, TCP port, and
-hostname to an internal IPv4 address and TCP port.
+: a finite-lived association from an external IPv4 address, transport, port,
+and hostname to an internal IPv4 address and port on that transport.
 
 Mapping owner:
 : the control point authorized to create, renew, and delete a hostname mapping.
@@ -90,8 +93,8 @@ in addition to the externally visible mapping tuple.
 
 SNI demultiplexer:
 : the gateway function that reads the TLS ClientHello, selects a hostname
-mapping using the SNI `HostName`, and forwards the TCP stream without
-terminating TLS.
+mapping using the SNI `HostName`, and forwards the TCP stream or QUIC datagrams
+without terminating TLS.
 
 # Protocol Overview {#overview}
 
@@ -109,7 +112,8 @@ extension as unsupported unless both actions are advertised.
 The control point invokes the actions using the WANIPConnection control URL and
 SOAP rules already used for standard actions. A successful add creates or
 renews a finite lease. A successful delete removes the mapping owned by the
-requesting control point. Both actions apply only to TCP mappings.
+requesting control point. Both actions support TCP and MAY additionally support
+QUIC/UDP mappings.
 
 The extension adds declarations to an existing SCPD but does not alter standard
 action declarations or semantics. Control points that do not recognize these
@@ -121,9 +125,10 @@ support.
 
 ## Transport and Lease Requirements {#transport-lease}
 
-Both actions defined by this document operate exclusively on TCP hostname
-mappings. A control point invoking either action MUST set `NewProtocol` to
-`TCP`. A gateway MUST reject any other value with error 402, `Invalid Args`.
+A control point invoking either action MUST set `NewProtocol` to `TCP` or
+`UDP`. A gateway MUST reject any other value with error 402, `Invalid Args`.
+A gateway without the QUIC demultiplexing support in {{quic}} MUST reject
+`UDP` with error 801, `HostnameNotSupported`.
 
 Mappings managed by either action MUST be finite-lived. A gateway MUST NOT use
 these actions to create, identify, renew, or delete a permanent mapping. The
@@ -149,8 +154,9 @@ reject an invalid `NewHostname` with error 402, `Invalid Args`.
 ## Mapping Identity and Ownership {#ownership}
 
 For conflict detection, a hostname mapping is selected by the external IPv4
-address, external TCP port, and normalized hostname. Only one internal target
-can hold that selection at a time.
+address, transport, external port, and normalized hostname. Only one internal
+target can hold that selection at a time. TCP and UDP mappings have independent
+ownership, renewal, and deletion, even for the same address, port, and hostname.
 
 The gateway determines the external IPv4 address associated with the control
 point. The gateway MUST use the control point's source IPv4 address as the
@@ -172,9 +178,9 @@ The action has the following required input arguments, in this order:
 | Argument                    | UPnP data type | Semantics                                                                                   |
 | --------------------------- | -------------- | ------------------------------------------------------------------------------------------- |
 | `NewRemoteHost`             | string         | MUST be empty; non-empty source filters are not supported by this extension.                |
-| `NewExternalPort`           | `ui2`          | External TCP port. Zero is invalid.                                                         |
-| `NewProtocol`               | string         | MUST be `TCP`.                                                                              |
-| `NewInternalPort`           | `ui2`          | Internal TCP port. Zero is invalid.                                                         |
+| `NewExternalPort`           | `ui2`          | External port. Zero is invalid.                                                             |
+| `NewProtocol`               | string         | `TCP`, or `UDP` when QUIC demultiplexing is supported.                                      |
+| `NewInternalPort`           | `ui2`          | Internal port on the selected transport. Zero is invalid.                                   |
 | `NewInternalClient`         | string         | Address asserted by the control point; the gateway uses the request source address instead. |
 | `NewEnabled`                | boolean        | MUST indicate enabled.                                                                      |
 | `NewPortMappingDescription` | string         | Control-point-provided description.                                                         |
@@ -202,19 +208,19 @@ action.
 The action has no output argument for the granted lifetime. A control point
 therefore MUST assume that the mapping expires no later than 3600 seconds after
 a successful response and SHOULD renew it sufficiently before that time. A
-renewal uses the same external port, internal port, hostname, and owner.
+renewal uses the same transport, external port, internal port, hostname, and owner.
 
 ## Server Behavior {#add-behavior}
 
 After validating and authorizing the request, the gateway determines its
 external IPv4 address and creates a mapping from that address,
-`NewExternalPort`, and `NewHostname` to the request source address and
-`NewInternalPort`.
+`NewProtocol`, `NewExternalPort`, and `NewHostname` to the request source address
+and `NewInternalPort`.
 
 If the same owner and target already hold the mapping, the gateway MUST treat
 the request as a renewal and replace its remaining lifetime according to
 {{add-lease}}. If another target holds the hostname on the same external
-address and port, the gateway MUST leave the existing mapping unchanged and
+address, transport, and port, the gateway MUST leave the existing mapping unchanged and
 return error 800, `HostnameTaken`.
 
 On success, the gateway returns an
@@ -226,29 +232,30 @@ On success, the gateway returns an
 
 The action has the following required input arguments, in this order:
 
-| Argument          | UPnP data type | Semantics                                          |
-| ----------------- | -------------- | -------------------------------------------------- |
-| `NewRemoteHost`   | string         | MUST be empty.                                     |
-| `NewExternalPort` | `ui2`          | External TCP port.                                 |
-| `NewProtocol`     | string         | MUST be `TCP`.                                     |
-| `NewInternalPort` | `ui2`          | Internal TCP port and part of the ownership check. |
-| `NewHostname`     | string         | Hostname key, as specified in {{hostname}}.        |
+| Argument          | UPnP data type | Semantics                                              |
+| ----------------- | -------------- | ------------------------------------------------------ |
+| `NewRemoteHost`   | string         | MUST be empty.                                         |
+| `NewExternalPort` | `ui2`          | External port.                                         |
+| `NewProtocol`     | string         | `TCP`, or `UDP` when QUIC demultiplexing is supported. |
+| `NewInternalPort` | `ui2`          | Internal port and part of the ownership check.         |
+| `NewHostname`     | string         | Hostname key, as specified in {{hostname}}.            |
 
 All arguments MUST appear even when their value is empty. A gateway MUST reject
 a missing or malformed required argument with error 402, `Invalid Args`.
 
 Unlike `DeletePortMapping`, this action carries `NewInternalPort`. A hostname
 mapping's target and ownership include the requesting control point and its
-internal port, while multiple targets can share one external TCP port under
+internal port, while multiple targets can share one external port under
 different hostnames.
 
 ## Server Behavior {#delete-behavior}
 
 The gateway reconstructs the target from the request source address and
-`NewInternalPort`, then removes the matching finite-lived TCP hostname mapping.
+`NewInternalPort`, then removes the matching finite-lived hostname mapping on
+`NewProtocol`.
 The action MUST NOT remove a conventional port mapping, a permanent
 operator-created hostname mapping, another hostname on the same port, or a
-mapping owned by another control point.
+mapping owned by another control point or using the other transport.
 
 Deletion SHOULD be idempotent. To avoid exposing another control point's
 mapping state, a gateway MAY return success when no owner-matching mapping
@@ -259,13 +266,13 @@ exists. On success, the gateway returns an
 
 Errors use the SOAP fault format defined by {{UDA2}}. The following codes apply:
 
-| Code | Description             | Condition                                                                                     |
-| ---- | ----------------------- | --------------------------------------------------------------------------------------------- |
-| 402  | `Invalid Args`          | A required argument is absent or malformed, a port is invalid, or `NewProtocol` is not `TCP`. |
-| 501  | `Action Failed`         | The gateway cannot complete the action for an otherwise valid request.                        |
-| 606  | `Action not authorized` | The control point is not authorized to manage hostname mappings.                              |
-| 800  | `HostnameTaken`         | Another target holds the hostname on the selected external address and port.                  |
-| 801  | `HostnameNotSupported`  | The gateway lacks SNI demultiplexing or an optional requested behavior.                       |
+| Code | Description             | Condition                                                                                                   |
+| ---- | ----------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 402  | `Invalid Args`          | A required argument is absent or malformed, a port is invalid, or `NewProtocol` is neither `TCP` nor `UDP`. |
+| 501  | `Action Failed`         | The gateway cannot complete the action for an otherwise valid request.                                      |
+| 606  | `Action not authorized` | The control point is not authorized to manage hostname mappings.                                            |
+| 800  | `HostnameTaken`         | Another target holds the hostname on the selected external address and port.                                |
+| 801  | `HostnameNotSupported`  | The gateway lacks SNI demultiplexing or an optional requested behavior.                                     |
 
 Codes 800 and 801 are vendor-defined UPnP errors from the 800--899 range. A
 malformed hostname is reported as 402 rather than 800 or 801.
@@ -313,9 +320,26 @@ address and port when forwarding to the internal endpoint. If it does not,
 operators and internal endpoints need to account for the gateway address as the
 apparent peer.
 
-This specification does not define hostname demultiplexing for UDP or QUIC.
-Both actions reject `UDP` even if the gateway independently supports QUIC
-demultiplexing through another protocol.
+## QUIC Demultiplexing (OPTIONAL) {#quic}
+
+A gateway MAY support hostname mappings for QUIC {{RFC9000}} over UDP. It
+derives Initial secrets and decrypts supported-version Initial packets as
+specified by {{RFC9001}} and, for QUIC version 2, {{RFC9369}}. It reassembles
+the CRYPTO stream across Initial packets to obtain the ClientHello and selects
+a UDP hostname mapping using the same exact-name, wildcard, and fallback rules.
+It MUST bound buffered datagrams, CRYPTO bytes, collection time, and concurrent
+state. Supporting gateways SHOULD recognize both QUIC versions 1 and 2.
+
+The gateway forwards buffered datagrams verbatim and pins subsequent traffic to
+the selected endpoint by the external connection's four-tuple. It MUST remove
+flow state after an idle timeout. It never obtains handshake or application
+traffic keys. Unknown versions and other UDP payloads use the UDP fallback, if
+configured, and are otherwise dropped.
+
+Connection migration and NAT rebinding produce an unknown four-tuple and can
+strand a connection. Internal QUIC endpoints SHOULD advertise
+`disable_active_migration`; this does not prevent NAT rebinding. TCP and UDP
+fallbacks are independent.
 
 # Security Considerations {#security}
 

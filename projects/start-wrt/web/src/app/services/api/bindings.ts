@@ -84,11 +84,6 @@ export type ActivityEntry = z.output<typeof schemas.ActivityEntry>
 export type ActivityListParamsInput = z.input<typeof schemas.ActivityListParams>
 export type AnyVerifyingKeyInput = z.input<typeof schemas.AnyVerifyingKey>
 export type ApChannel = z.output<typeof schemas.ApChannel>
-
-/**
- * One automatic port use for the published-ports UI.
- */
-export type AutomaticPortUse = z.output<typeof schemas.AutomaticPortUse>
 export type BackupCreateParamsInput = z.input<typeof schemas.BackupCreateParams>
 export type BackupRestoreParamsInput = z.input<
   typeof schemas.BackupRestoreParams
@@ -199,7 +194,15 @@ export type PeerSetDnsInjectionArgsInput = z.input<
 >
 export type ProfileId = z.output<typeof schemas.ProfileId>
 export type ProfileIdOptInput = z.input<typeof schemas.ProfileIdOpt>
+
+/**
+ * Transports owned together by one port mapping.
+ */
 export type Protocol = z.output<typeof schemas.Protocol>
+
+/**
+ * Transports owned together by one port mapping.
+ */
 export type ProtocolInput = z.input<typeof schemas.Protocol>
 export type PublishedPortStatus = z.output<typeof schemas.PublishedPortStatus>
 export type RemoveUsbPortRequestInput = z.input<
@@ -224,12 +227,16 @@ export type SetRouterAdvertisementsReqInput = z.input<
   typeof schemas.SetRouterAdvertisementsReq
 >
 export type SetTimezoneParamsInput = z.input<typeof schemas.SetTimezoneParams>
-export type SniPortUse = z.output<typeof schemas.SniPortUse>
 export type SpeedData = z.output<typeof schemas.SpeedData>
 export type SshKeyAddParamsInput = z.input<typeof schemas.SshKeyAddParams>
 export type SshKeyDeleteParamsInput = z.input<typeof schemas.SshKeyDeleteParams>
 export type SshKeyResponse = z.output<typeof schemas.SshKeyResponse>
 export type SystemInfoResponse = z.output<typeof schemas.SystemInfoResponse>
+
+/**
+ * Transport of a gateway request or dataplane listener.
+ */
+export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type UpdateSystemRes = z.output<typeof schemas.UpdateSystemRes>
 export type UsbPortStatus = z.output<typeof schemas.UsbPortStatus>
@@ -266,6 +273,11 @@ export type ActivityListResponse = z.output<typeof schemas.ActivityListResponse>
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
+
+/**
+ * One automatic port use for the published-ports UI.
+ */
+export type AutomaticPortUse = z.output<typeof schemas.AutomaticPortUse>
 export type BackupCreateRes = z.output<typeof schemas.BackupCreateRes>
 export type BackupRestoreRes = z.output<typeof schemas.BackupRestoreRes>
 export type BandChannels = z.output<typeof schemas.BandChannels>
@@ -312,6 +324,7 @@ export type SetInitialPasswordParamsInput = z.input<
   typeof schemas.SetInitialPasswordParams
 >
 export type SetupStatusRes = z.output<typeof schemas.SetupStatusRes>
+export type SniPortUse = z.output<typeof schemas.SniPortUse>
 export type UciFile = z.output<typeof schemas.UciFile>
 export type UciFileInput = z.input<typeof schemas.UciFile>
 
@@ -329,11 +342,6 @@ export type WanIpv6Response = z.output<typeof schemas.WanIpv6Response>
 export type WanIpv6SetRequestInput = z.input<typeof schemas.WanIpv6SetRequest>
 export type WanMacResponse = z.output<typeof schemas.WanMacResponse>
 export type WanMacSetRequestInput = z.input<typeof schemas.WanMacSetRequest>
-
-/**
- * An enabled IPv4 forward overlapping a router- or SNI-owned WAN port.
- */
-export type WanPortCollision = z.output<typeof schemas.WanPortCollision>
 
 /**
  * `wifi.set` request: the desired WiFi config. With `preview`, nothing is
@@ -357,14 +365,6 @@ export type PublishedPortsSetRequestInput = z.input<
 >
 
 /**
- * [`set`] response. A non-empty collision list means nothing was applied —
- * the caller confirms and re-saves; empty means the request was applied.
- */
-export type PublishedPortsSetResult = z.output<
-  typeof schemas.PublishedPortsSetResult
->
-
-/**
  * The server's sessions, by credential type.
  */
 export type Sessions = z.output<typeof schemas.Sessions>
@@ -373,6 +373,19 @@ export type Sessions = z.output<typeof schemas.Sessions>
  * Response containing all VPN servers
  */
 export type VpnServers = z.output<typeof schemas.VpnServers>
+
+/**
+ * An enabled IPv4 forward overlapping a router- or SNI-owned WAN port.
+ */
+export type WanPortCollision = z.output<typeof schemas.WanPortCollision>
 export type WifiRegulatory = z.output<typeof schemas.WifiRegulatory>
+
+/**
+ * [`set`] response. A non-empty collision list means nothing was applied —
+ * the caller confirms and re-saves; empty means the request was applied.
+ */
+export type PublishedPortsSetResult = z.output<
+  typeof schemas.PublishedPortsSetResult
+>
 export type SessionList = z.output<typeof schemas.SessionList>
 export type Api = RpcSchemaTree<typeof schemas.Api>

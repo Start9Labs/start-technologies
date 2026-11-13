@@ -4,13 +4,31 @@
 .SH NAME
 start\-cli\-tunnel\-port\-forward\-remove \- Remove port forward
 .SH SYNOPSIS
-\fBstart\-cli tunnel port\-forward remove\fR [\fB\-\-hostname\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR>
+\fBstart\-cli tunnel port\-forward remove\fR [\fB\-\-protocol\fR] [\fB\-\-fallback\fR] [\fB\-\-hostname\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISOURCE\fR>
 .SH DESCRIPTION
 Remove port forward
 .SH OPTIONS
 .TP
+\fB\-\-protocol\fR \fI<PROTOCOL>\fR
+Limit removal to tcp, udp, or tcp+udp. Omit to remove the whole forward; hostname or fallback selection follows the mapping that owns TCP
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+tcp
+.IP \(bu 2
+udp
+.IP \(bu 2
+tcp+udp
+.RE
+.TP
+\fB\-\-fallback\fR
+Remove only the selected transport\*(Aqs hostname\-less fallback
+.TP
 \fB\-\-hostname\fR \fI<HOSTNAME>\fR
-Remove a single SNI route on `source`; omit to remove the whole forward
+Selects a hostname; omitted removes the selected routes and fallback
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

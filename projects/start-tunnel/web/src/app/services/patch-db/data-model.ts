@@ -27,6 +27,15 @@ export const mockTunnelData: TunnelData = {
             allowAutoPortForward: true,
             wanIp: null,
           },
+          '10.59.0.6': {
+            name: 'Server Two',
+            key: '',
+            psk: '',
+            kind: 'server',
+            allowDnsInjection: true,
+            allowAutoPortForward: true,
+            wanIp: null,
+          },
           '10.59.0.3': {
             name: 'Phone',
             key: '',
@@ -90,33 +99,55 @@ export const mockTunnelData: TunnelData = {
   portForwards: {
     '203.0.113.42:443': {
       kind: 'sni',
-      routes: {
-        'cloud.example.com': {
-          target: '10.59.0.2:443',
-          label: 'Nextcloud',
-          enabled: true,
-          auto: true,
+      both: {
+        routes: {
+          'dashboard.example.com': {
+            target: '10.59.0.2:443',
+            label: 'HTTPS dashboard',
+            enabled: true,
+            auto: false,
+          },
         },
-        'photos.example.com': {
-          target: '10.59.0.2:443',
-          label: 'Immich',
-          enabled: true,
-          auto: true,
+        fallback: null,
+      },
+      udp: {
+        routes: {
+          'blog.example.com': {
+            target: '10.59.0.2:8443',
+            label: 'QUIC blog',
+            enabled: true,
+            auto: false,
+          },
         },
-        'blog.example.com': {
-          target: '10.59.0.4:443',
-          label: 'Blog',
+        fallback: null,
+      },
+      tcp: {
+        routes: {
+          'cloud.example.com': {
+            target: '10.59.0.2:443',
+            label: 'Nextcloud',
+            enabled: true,
+            auto: true,
+          },
+          'photos.example.com': {
+            target: '10.59.0.2:443',
+            label: 'Immich',
+            enabled: true,
+            auto: true,
+          },
+          'blog.example.com': {
+            target: '10.59.0.4:443',
+            label: 'Blog',
+            enabled: true,
+            auto: false,
+          },
+        },
+        fallback: {
+          target: '10.59.0.2:443',
+          label: 'Server One (fallback)',
           enabled: true,
           auto: false,
         },
-      },
-      // Hostname-less fallback: catches bare-IP / non-matching-SNI traffic on
-      // this shared port.
-      fallback: {
-        target: '10.59.0.2:443',
-        label: 'Server One (fallback)',
-        enabled: true,
-        auto: false,
       },
     },
     '203.0.113.42:8333': {

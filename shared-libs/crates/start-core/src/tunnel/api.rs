@@ -13,6 +13,7 @@ use crate::db::model::public::NetworkInterfaceType;
 use crate::net::dns_update::rfc2136::InjectedRecord;
 use crate::net::forward::nft_rule;
 use crate::net::port_map::server::GatewayBackend;
+use crate::net::port_map::{Protocol, TransportProtocol};
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::{DnsRecordEntry, PortForward, TunnelDatabase};
@@ -1268,6 +1269,15 @@ fn render_device_config(
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct AddPortForwardParams {
+    #[arg(
+        long,
+        value_enum,
+        default_value = "tcp",
+        help = "help.arg.tunnel-forward-protocol"
+    )]
+    #[serde(default)]
+    protocol: Protocol,
+
     /// External (WAN) port to forward. The external IP is fixed to the target's
     /// WAN so return traffic stays symmetric.
     external_port: u16,
@@ -1297,6 +1307,7 @@ pub async fn add_forward(
         label,
         sni,
         count,
+        protocol,
     }: AddPortForwardParams,
 ) -> Result<(), Error> {
     let count = count.unwrap_or(1);
@@ -1317,7 +1328,7 @@ pub async fn add_forward(
 
     let covers_80 =
         external_port <= 80 && 80 <= external_port.saturating_add(count.saturating_sub(1));
-    if covers_80 {
+    if covers_80 && (sni.is_empty() || protocol.contains(TransportProtocol::Tcp)) {
         let peek = ctx.db.peek().await;
         let disabled = peek.as_http_redirects().de()?.disabled;
         let public = crate::tunnel::redirect::public_ipv4s(&peek.as_gateways().de()?);
@@ -1338,7 +1349,7 @@ pub async fn add_forward(
                 ErrorKind::InvalidRequest,
             ));
         }
-        ctx.persist_sni_forward(source, target, &sni, None, false, label)
+        ctx.persist_sni_forward(source, target, &sni, protocol, None, false, label)
             .await
             .map_err(|code| {
                 Error::new(
@@ -1349,6 +1360,12 @@ pub async fn add_forward(
         return Ok(());
     }
 
+    if protocol == Protocol::Udp {
+        return Err(Error::new(
+            eyre!(t!("tunnel.api.protocol-requires-hostname")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
     if external_port.checked_add(count - 1).is_none()
         || target.port().checked_add(count - 1).is_none()
     {
@@ -1361,6 +1378,27 @@ pub async fn add_forward(
         ));
     }
 
+    let _guard = ctx.forward_write_lock.lock().await;
+    let peek = ctx.db.peek().await;
+    peek.as_webserver()
+        .de()?
+        .check_plain_forward(source, count)?;
+    if matches!(
+        peek.as_port_forwards().de()?.0.get(&source),
+        Some(PortForward::Sni { .. })
+    ) && count == 1
+    {
+        return ctx
+            .persist_fallback_forward_locked(source, target, None, false, label)
+            .await
+            .map_err(|code| {
+                Error::new(
+                    eyre!("SNI registration failed (code {code})"),
+                    ErrorKind::InvalidRequest,
+                )
+            });
+    }
+    drop(peek);
     ctx.db
         .mutate(|db| {
             db.as_webserver().de()?.check_plain_forward(source, count)?;
@@ -1432,8 +1470,16 @@ pub async fn add_forward(
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct RemovePortForwardParams {
+    /// Omitted removes the whole forward, or selects the TCP-owning hostname/fallback mapping.
+    #[arg(long, value_enum, help = "help.arg.tunnel-forward-remove-protocol")]
+    #[serde(default)]
+    protocol: Option<Protocol>,
+    #[arg(long, help = "help.arg.tunnel-forward-fallback")]
+    #[serde(default)]
+    fallback: bool,
+
     source: SocketAddrV4,
-    /// Remove a single SNI route on `source`; omit to remove the whole forward.
+    /// Selects a hostname; omitted removes the selected routes and fallback.
     #[arg(long)]
     #[serde(default)]
     hostname: Option<String>,
@@ -1442,10 +1488,24 @@ pub struct RemovePortForwardParams {
 rpc_toolkit::reflect_ts!(RemovePortForwardParams);
 rpc_toolkit::ts_export!(RemovePortForwardParams, namespaces = ["tunnel"]);
 
+impl RemovePortForwardParams {
+    fn protocols(&self, entry: &PortForward) -> Vec<Protocol> {
+        if self.protocol.is_none() && self.hostname.is_none() && !self.fallback {
+            Protocol::ALL.to_vec()
+        } else {
+            let hostname = self.hostname.as_deref().filter(|_| !self.fallback);
+            vec![entry.resolve_sni_protocol(self.protocol, hostname)]
+        }
+    }
+}
+
 pub async fn remove_forward(
     ctx: TunnelContext,
-    RemovePortForwardParams { source, hostname }: RemovePortForwardParams,
+    params: RemovePortForwardParams,
 ) -> Result<(), Error> {
+    let source = params.source;
+    let hostname = params.hostname.as_deref().map(str::to_ascii_lowercase);
+    let _guard = ctx.forward_write_lock.lock().await;
     let entry = ctx
         .db
         .peek()
@@ -1456,22 +1516,26 @@ pub async fn remove_forward(
         .get(&source)
         .cloned();
     match entry {
-        Some(PortForward::Sni { routes, fallback }) => {
-            let to_remove: Vec<(String, SocketAddrV4)> = match &hostname {
-                Some(h) => routes
-                    .get(h)
-                    .map(|r| vec![(h.clone(), r.target)])
-                    .unwrap_or_default(),
-                None => routes.iter().map(|(h, r)| (h.clone(), r.target)).collect(),
-            };
-            for (h, route_target) in to_remove {
-                ctx.remove_sni_routes(source, route_target, &[h], false)
-                    .await;
-            }
-            // Removing the whole forward (no hostname) also drops its fallback.
-            if hostname.is_none() {
-                if let Some(f) = fallback {
-                    ctx.remove_sni_fallback(source, f.target).await;
+        Some(entry @ PortForward::Sni { .. }) => {
+            for protocol in params.protocols(&entry) {
+                let bindings = entry.bindings(protocol).unwrap();
+                if !params.fallback {
+                    let to_remove: Vec<_> = bindings
+                        .routes
+                        .iter()
+                        .filter(|(h, _)| hostname.as_ref().is_none_or(|name| *h == name))
+                        .map(|(h, r)| (h.clone(), r.target))
+                        .collect();
+                    for (h, target) in to_remove {
+                        ctx.remove_sni_routes_locked(source, target, &[h], protocol, false)
+                            .await;
+                    }
+                }
+                if params.fallback || hostname.is_none() {
+                    if let Some(f) = &bindings.fallback {
+                        ctx.remove_sni_fallback_locked(source, f.target, protocol)
+                            .await;
+                    }
                 }
             }
             Ok(())
@@ -1485,6 +1549,10 @@ pub async fn remove_forward(
                 drop(rc);
                 ctx.forward.gc().await?;
             }
+            crate::tunnel::forward::lease::forget(
+                &ctx,
+                &crate::tunnel::forward::lease::LeaseKey::Dnat(source),
+            );
             Ok(())
         }
         None => Ok(()),
@@ -1495,9 +1563,14 @@ pub async fn remove_forward(
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePortForwardLabelParams {
+    /// Omitted selects the logical mapping that owns TCP.
+    #[arg(long, value_enum, help = "help.arg.tunnel-forward-management-protocol")]
+    #[serde(default)]
+    protocol: Option<Protocol>,
+
     source: SocketAddrV4,
     label: Option<String>,
-    /// Label a single SNI route on `source`; omit to label the DNAT forward.
+    /// Omitted labels the selected fallback or a plain forward.
     #[arg(long)]
     #[serde(default)]
     hostname: Option<String>,
@@ -1506,47 +1579,51 @@ pub struct UpdatePortForwardLabelParams {
 rpc_toolkit::reflect_ts!(UpdatePortForwardLabelParams);
 rpc_toolkit::ts_export!(UpdatePortForwardLabelParams, namespaces = ["tunnel"]);
 
-pub async fn update_forward_label(
-    ctx: TunnelContext,
+fn update_forward_label_in_db(
+    db: &mut Model<TunnelDatabase>,
     UpdatePortForwardLabelParams {
         source,
         label,
         hostname,
+        protocol,
     }: UpdatePortForwardLabelParams,
 ) -> Result<(), Error> {
+    db.as_port_forwards_mut().mutate(|pf| {
+        let entry = pf.0.get_mut(&source).ok_or_else(|| {
+            Error::new(
+                eyre!("Port forward from {source} not found"),
+                ErrorKind::NotFound,
+            )
+        })?;
+        match entry {
+            PortForward::Dnat { label: l, .. } => {
+                *l = label;
+                Ok(())
+            }
+            PortForward::Sni { .. } => {
+                let hostname = hostname.as_deref().map(str::to_ascii_lowercase);
+                let protocol = entry.resolve_sni_protocol(protocol, hostname.as_deref());
+                let route = entry
+                    .bindings_mut(protocol)
+                    .unwrap()
+                    .route_mut(hostname.as_deref())
+                    .ok_or_else(|| {
+                        Error::new(eyre!(t!("tunnel.api.route-not-found")), ErrorKind::NotFound)
+                    })?;
+                route.label = label;
+                Ok(())
+            }
+        }
+    })
+}
+
+pub async fn update_forward_label(
+    ctx: TunnelContext,
+    params: UpdatePortForwardLabelParams,
+) -> Result<(), Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
     ctx.db
-        .mutate(|db| {
-            db.as_port_forwards_mut().mutate(|pf| {
-                let entry = pf.0.get_mut(&source).ok_or_else(|| {
-                    Error::new(
-                        eyre!("Port forward from {source} not found"),
-                        ErrorKind::NotFound,
-                    )
-                })?;
-                match entry {
-                    PortForward::Dnat { label: l, .. } => {
-                        *l = label;
-                        Ok(())
-                    }
-                    PortForward::Sni { routes, .. } => {
-                        let hostname = hostname.ok_or_else(|| {
-                            Error::new(
-                                eyre!("--hostname is required to label an SNI route"),
-                                ErrorKind::InvalidRequest,
-                            )
-                        })?;
-                        let route = routes.get_mut(&hostname).ok_or_else(|| {
-                            Error::new(
-                                eyre!("No SNI route for {hostname} on {source}"),
-                                ErrorKind::NotFound,
-                            )
-                        })?;
-                        route.label = label;
-                        Ok(())
-                    }
-                }
-            })
-        })
+        .mutate(|db| update_forward_label_in_db(db, params))
         .await
         .result
 }
@@ -1555,10 +1632,15 @@ pub async fn update_forward_label(
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetPortForwardEnabledParams {
+    /// Omitted selects the logical mapping that owns TCP.
+    #[arg(long, value_enum, help = "help.arg.tunnel-forward-management-protocol")]
+    #[serde(default)]
+    protocol: Option<Protocol>,
+
     source: SocketAddrV4,
     #[arg(long)]
     enabled: bool,
-    /// Toggle a single SNI route on `source`; omit for a DNAT forward.
+    /// Omitted toggles the selected fallback or a plain forward.
     #[arg(long)]
     #[serde(default)]
     hostname: Option<String>,
@@ -1573,8 +1655,9 @@ enum ForwardToggle {
         count: u16,
     },
     Sni {
-        hostname: String,
+        hostname: Option<String>,
         target: SocketAddrV4,
+        protocol: Protocol,
     },
 }
 
@@ -1583,6 +1666,7 @@ fn update_forward_enabled(
     source: SocketAddrV4,
     enabled: bool,
     hostname: Option<&str>,
+    protocol: Option<Protocol>,
 ) -> Result<ForwardToggle, Error> {
     let web = db.as_webserver().de()?;
     db.as_port_forwards_mut().mutate(|pf| {
@@ -1608,23 +1692,24 @@ fn update_forward_enabled(
                     count: *count,
                 })
             }
-            PortForward::Sni { routes, .. } => {
-                let hostname = hostname.ok_or_else(|| {
-                    Error::new(
-                        eyre!("--hostname is required to toggle an SNI route"),
-                        ErrorKind::InvalidRequest,
-                    )
-                })?;
-                let route = routes.get_mut(hostname).ok_or_else(|| {
-                    Error::new(
-                        eyre!("No SNI route for {hostname} on {source}"),
-                        ErrorKind::NotFound,
-                    )
-                })?;
+            PortForward::Sni { .. } => {
+                let hostname = hostname.map(str::to_ascii_lowercase);
+                let protocol = entry.resolve_sni_protocol(protocol, hostname.as_deref());
+                if enabled && hostname.is_none() && protocol.contains(TransportProtocol::Tcp) {
+                    web.check_plain_forward(source, 1)?;
+                }
+                let route = entry
+                    .bindings_mut(protocol)
+                    .unwrap()
+                    .route_mut(hostname.as_deref())
+                    .ok_or_else(|| {
+                        Error::new(eyre!(t!("tunnel.api.route-not-found")), ErrorKind::NotFound)
+                    })?;
                 route.enabled = enabled;
                 Ok(ForwardToggle::Sni {
-                    hostname: hostname.to_owned(),
+                    hostname,
                     target: route.target,
+                    protocol,
                 })
             }
         }
@@ -1637,55 +1722,103 @@ pub async fn set_forward_enabled(
         source,
         enabled,
         hostname,
+        protocol,
     }: SetPortForwardEnabledParams,
 ) -> Result<(), Error> {
     let _guard = ctx.forward_write_lock.lock().await;
+    let previous = ctx
+        .db
+        .peek()
+        .await
+        .as_port_forwards()
+        .de()?
+        .0
+        .get(&source)
+        .cloned();
     let toggle = ctx
         .db
-        .mutate(|db| update_forward_enabled(db, source, enabled, hostname.as_deref()))
+        .mutate(|db| update_forward_enabled(db, source, enabled, hostname.as_deref(), protocol))
         .await
         .result?;
 
-    match toggle {
-        ForwardToggle::Dnat { target, count } => {
-            if enabled {
-                let prefix = crate::tunnel::forward::igd::prefix_for(&ctx, target.ip()).await;
-                let rc = ctx
-                    .forward
-                    .add_forward_range(source, target, count, prefix, None)
-                    .await?;
-                ctx.active_forwards.mutate(|m| {
-                    m.insert(source, rc);
-                });
-            } else if let Some(rc) = ctx.active_forwards.mutate(|m| m.remove(&source)) {
-                drop(rc);
-                ctx.forward.gc().await?;
+    let applied = async {
+        match toggle {
+            ForwardToggle::Dnat { target, count } => {
+                if enabled {
+                    let prefix = crate::tunnel::forward::igd::prefix_for(&ctx, target.ip()).await;
+                    let rc = ctx
+                        .forward
+                        .add_forward_range(source, target, count, prefix, None)
+                        .await?;
+                    ctx.active_forwards.mutate(|m| {
+                        m.insert(source, rc);
+                    });
+                } else if let Some(rc) = ctx.active_forwards.mutate(|m| m.remove(&source)) {
+                    drop(rc);
+                    ctx.forward.gc().await?;
+                }
             }
-        }
-        ForwardToggle::Sni { hostname, target } => {
-            if enabled {
-                ctx.sni.prepare().await.map_err(|code| {
-                    Error::new(
-                        eyre!("SNI diversion setup failed (code {code})"),
-                        ErrorKind::Network,
-                    )
-                })?;
-                ctx.sni
-                    .register(*source.ip(), source.port(), &[hostname], target, None)
-                    .map_err(|code| {
+            ForwardToggle::Sni {
+                hostname,
+                target,
+                protocol,
+            } => {
+                if enabled {
+                    ctx.sni.prepare().await.map_err(|code| {
+                        Error::new(
+                            eyre!("SNI diversion setup failed (code {code})"),
+                            ErrorKind::Network,
+                        )
+                    })?;
+                    let result = match hostname {
+                        Some(hostname) => ctx.sni.register_protocol(
+                            protocol,
+                            *source.ip(),
+                            source.port(),
+                            &[hostname],
+                            target,
+                            None,
+                        ),
+                        None => ctx.sni.register_fallback_protocol(
+                            protocol,
+                            *source.ip(),
+                            source.port(),
+                            target,
+                        ),
+                    };
+                    result.map_err(|code| {
                         Error::new(
                             eyre!("SNI registration failed (code {code})"),
                             ErrorKind::InvalidRequest,
                         )
                     })?;
-            } else {
-                ctx.sni
-                    .unregister(*source.ip(), source.port(), &[hostname], target);
+                } else {
+                    match hostname {
+                        Some(hostname) => ctx.sni.unregister_protocol(
+                            protocol,
+                            *source.ip(),
+                            source.port(),
+                            &[hostname],
+                            target,
+                        ),
+                        None => ctx.sni.unregister_fallback_protocol(
+                            protocol,
+                            *source.ip(),
+                            source.port(),
+                            target,
+                        ),
+                    }
+                }
             }
         }
-    }
 
-    Ok(())
+        Ok::<_, Error>(())
+    }
+    .await;
+    if applied.is_err() {
+        ctx.restore_persisted_forward(source, previous).await;
+    }
+    applied
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
@@ -2153,7 +2286,7 @@ mod tests {
                 },
             )])))
             .unwrap();
-        let error = update_forward_enabled(&mut db, source, true, None)
+        let error = update_forward_enabled(&mut db, source, true, None, Some(Protocol::Tcp))
             .err()
             .unwrap();
         assert_eq!(error.kind, ErrorKind::InvalidRequest);
@@ -2161,9 +2294,10 @@ mod tests {
             db.as_port_forwards().de().unwrap().0[&source],
             PortForward::Dnat { enabled: false, .. }
         ));
-        update_forward_enabled(&mut db, source, false, None).unwrap();
+        update_forward_enabled(&mut db, source, false, None, Some(Protocol::Tcp)).unwrap();
         db.as_webserver_mut().as_enabled_mut().ser(&false).unwrap();
-        let toggle = update_forward_enabled(&mut db, source, true, None).unwrap();
+        let toggle =
+            update_forward_enabled(&mut db, source, true, None, Some(Protocol::Tcp)).unwrap();
         assert!(matches!(toggle, ForwardToggle::Dnat { target: t, count: 3 } if t == target));
         assert!(matches!(
             db.as_port_forwards().de().unwrap().0[&source],
@@ -2196,21 +2330,25 @@ mod tests {
             .ser(&PortForwards(BTreeMap::from([(
                 source,
                 PortForward::Sni {
-                    routes: BTreeMap::from([(
-                        "service.example.com".to_owned(),
-                        SniRoute {
-                            target,
-                            label: None,
-                            enabled: false,
-                            auto: false,
-                        },
-                    )]),
-                    fallback: None,
+                    tcp: crate::tunnel::db::SniBindings {
+                        routes: BTreeMap::from([(
+                            "service.example.com".to_owned(),
+                            SniRoute {
+                                target,
+                                label: None,
+                                enabled: false,
+                                auto: false,
+                            },
+                        )]),
+                        fallback: None,
+                    },
+                    udp: Default::default(),
+                    both: Default::default(),
                 },
             )])))
             .unwrap();
         assert!(matches!(
-            update_forward_enabled(&mut db, source, true, Some("service.example.com")).unwrap(),
+            update_forward_enabled(&mut db, source, true, Some("service.example.com"), Some(Protocol::Tcp)).unwrap(),
             ForwardToggle::Sni { target: t, .. } if t == target
         ));
     }
@@ -2244,5 +2382,330 @@ mod tests {
         assert!(parse_dns_server("not-an-ip").is_err());
         assert!(parse_dns_server("1.1.1.1:99999").is_err());
         assert!(parse_dns_server("").is_err());
+    }
+    #[test]
+    fn legacy_whole_forward_removal_selects_all_logical_mappings() {
+        let legacy: RemovePortForwardParams =
+            serde_json::from_value(serde_json::json!({"source": "203.0.113.1:443"})).unwrap();
+        assert_eq!(legacy.protocols(&PortForward::empty_sni()), Protocol::ALL);
+        let cli = RemovePortForwardParams::try_parse_from(["remove", "203.0.113.1:443"]).unwrap();
+        assert_eq!(cli.protocols(&PortForward::empty_sni()), Protocol::ALL);
+        for (extra, expected) in [
+            (serde_json::json!({"protocol": "udp"}), &[Protocol::Udp][..]),
+            (serde_json::json!({"protocol": "tcp"}), &[Protocol::Tcp][..]),
+            (
+                serde_json::json!({"protocol": "tcp+udp"}),
+                &[Protocol::TcpUdp][..],
+            ),
+            (
+                serde_json::json!({"hostname": "Cloud.Example.com"}),
+                &[Protocol::Tcp][..],
+            ),
+            (serde_json::json!({"fallback": true}), &[Protocol::Tcp][..]),
+        ] {
+            let mut request = serde_json::json!({"source": "203.0.113.1:443"});
+            request
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let params: RemovePortForwardParams = serde_json::from_value(request).unwrap();
+            assert_eq!(params.protocols(&PortForward::empty_sni()), expected);
+        }
+    }
+
+    #[test]
+    fn omitted_management_protocol_follows_tcp_owner_without_selecting_udp_only_routes() {
+        use std::collections::BTreeMap;
+
+        use crate::tunnel::db::{PortForwards, SniRoute};
+        let source = "203.0.113.1:443".parse().unwrap();
+        for owner in Protocol::ALL {
+            for hostname in [None, Some("SERVICE.EXAMPLE.COM")] {
+                let mut entry = PortForward::empty_sni();
+                let bindings = entry.bindings_mut(owner).unwrap();
+                let route = SniRoute {
+                    target: "10.59.0.2:443".parse().unwrap(),
+                    label: None,
+                    enabled: false,
+                    auto: false,
+                };
+                bindings
+                    .routes
+                    .insert("service.example.com".into(), route.clone());
+                bindings.fallback = Some(route);
+                let request = serde_json::json!({
+                    "source": source, "hostname": hostname, "fallback": hostname.is_none(),
+                });
+                let removal: RemovePortForwardParams = serde_json::from_value(request).unwrap();
+                let expected = if owner == Protocol::Udp {
+                    Protocol::Tcp
+                } else {
+                    owner
+                };
+                assert_eq!(removal.protocols(&entry), [expected]);
+                let explicit: RemovePortForwardParams = serde_json::from_value(serde_json::json!({
+                    "source": source, "hostname": hostname, "fallback": hostname.is_none(),
+                    "protocol": "tcp",
+                }))
+                .unwrap();
+                assert_eq!(explicit.protocols(&entry), [Protocol::Tcp]);
+
+                let mut db = Model::new(&TunnelDatabase::default()).unwrap();
+                db.as_webserver_mut().as_enabled_mut().ser(&false).unwrap();
+                db.as_port_forwards_mut()
+                    .ser(&PortForwards(BTreeMap::from([(source, entry)])))
+                    .unwrap();
+                let label: UpdatePortForwardLabelParams =
+                    serde_json::from_value(serde_json::json!({
+                        "source": source, "hostname": hostname, "label": "renamed",
+                    }))
+                    .unwrap();
+                assert!(label.protocol.is_none());
+                let label_result = update_forward_label_in_db(&mut db, label);
+                let toggle_result = update_forward_enabled(&mut db, source, true, hostname, None);
+                if owner == Protocol::Udp {
+                    assert_eq!(label_result.unwrap_err().kind, ErrorKind::NotFound);
+                    assert_eq!(toggle_result.err().unwrap().kind, ErrorKind::NotFound);
+                } else {
+                    label_result.unwrap();
+                    assert!(
+                        matches!(toggle_result.unwrap(), ForwardToggle::Sni { protocol, .. } if protocol == owner)
+                    );
+                }
+                let forwards = db.as_port_forwards().de().unwrap();
+                let stored = forwards.0[&source].bindings(owner).unwrap();
+                let route = stored
+                    .route(hostname.map(|_| "service.example.com"))
+                    .unwrap();
+                assert_eq!(route.enabled, owner != Protocol::Udp);
+                assert_eq!(
+                    route.label.as_deref(),
+                    (owner != Protocol::Udp).then_some("renamed")
+                );
+            }
+        }
+        let cli_label = UpdatePortForwardLabelParams::try_parse_from([
+            "update-label",
+            "203.0.113.1:443",
+            "name",
+        ])
+        .unwrap();
+        assert!(cli_label.protocol.is_none());
+        let cli_toggle = SetPortForwardEnabledParams::try_parse_from([
+            "set-enabled",
+            "203.0.113.1:443",
+            "--enabled",
+        ])
+        .unwrap();
+        assert!(cli_toggle.protocol.is_none());
+    }
+
+    #[test]
+    fn fallback_removal_resolves_the_catch_all_even_if_a_hostname_is_supplied() {
+        let mut entry = PortForward::empty_sni();
+        let route = crate::tunnel::db::SniRoute {
+            target: "10.59.0.2:443".parse().unwrap(),
+            label: None,
+            enabled: true,
+            auto: false,
+        };
+        entry
+            .bindings_mut(Protocol::Tcp)
+            .unwrap()
+            .routes
+            .insert("service.example.com".into(), route.clone());
+        entry.bindings_mut(Protocol::TcpUdp).unwrap().fallback = Some(route);
+        let params: RemovePortForwardParams = serde_json::from_value(serde_json::json!({
+            "source": "203.0.113.1:443", "hostname": "service.example.com", "fallback": true,
+        }))
+        .unwrap();
+        assert_eq!(params.protocols(&entry), [Protocol::TcpUdp]);
+    }
+
+    #[test]
+    fn manual_hostname_api_defaults_to_tcp() {
+        let params: AddPortForwardParams = serde_json::from_value(serde_json::json!({
+            "externalPort": 443, "target": "10.59.0.2:443", "sni": ["service.example.com"]
+        }))
+        .unwrap();
+        assert_eq!(params.protocol, Protocol::Tcp);
+        let udp = AddPortForwardParams::try_parse_from([
+            "add",
+            "443",
+            "10.59.0.3:8443",
+            "--sni",
+            "service.example.com",
+            "--protocol",
+            "udp",
+        ])
+        .unwrap();
+        assert_eq!(udp.protocol, Protocol::Udp);
+        let both = AddPortForwardParams::try_parse_from([
+            "add",
+            "443",
+            "10.59.0.2:443",
+            "--sni",
+            "service.example.com",
+            "--protocol",
+            "tcp+udp",
+        ])
+        .unwrap();
+        assert_eq!(both.protocol, Protocol::TcpUdp);
+    }
+
+    #[test]
+    fn combined_toggle_uses_one_record_and_preserves_tcp_ui_reservations() {
+        use crate::tunnel::db::{PortForwards, SniRoute};
+        let source = "203.0.113.1:443".parse().unwrap();
+        let target = "10.59.0.2:443".parse().unwrap();
+        let mut entry = PortForward::empty_sni();
+        let bindings = entry.bindings_mut(Protocol::TcpUdp).unwrap();
+        let route = SniRoute {
+            target,
+            label: Some("shared".into()),
+            enabled: false,
+            auto: false,
+        };
+        bindings
+            .routes
+            .insert("service.example.com".into(), route.clone());
+        bindings.fallback = Some(route);
+        let mut db = Model::new(&TunnelDatabase::default()).unwrap();
+        db.as_port_forwards_mut()
+            .ser(&PortForwards(std::collections::BTreeMap::from([(
+                source, entry,
+            )])))
+            .unwrap();
+        db.as_webserver_mut().as_enabled_mut().ser(&true).unwrap();
+        db.as_webserver_mut()
+            .as_listen_mut()
+            .ser(&Some("0.0.0.0:443".parse::<SocketAddr>().unwrap()))
+            .unwrap();
+        update_forward_enabled(
+            &mut db,
+            source,
+            true,
+            Some("SERVICE.EXAMPLE.COM"),
+            Some(Protocol::TcpUdp),
+        )
+        .unwrap();
+        for protocol in [Protocol::Tcp, Protocol::Udp] {
+            let error = update_forward_enabled(
+                &mut db,
+                source,
+                true,
+                Some("service.example.com"),
+                Some(protocol),
+            )
+            .err()
+            .unwrap();
+            assert_eq!(error.kind, ErrorKind::NotFound);
+        }
+        assert!(
+            update_forward_enabled(&mut db, source, true, None, Some(Protocol::TcpUdp)).is_err()
+        );
+        let forwards = db.as_port_forwards().de().unwrap();
+        let entry = &forwards.0[&source];
+        assert_eq!(entry.sni_routes().count(), 2);
+        assert!(entry.bindings(Protocol::TcpUdp).unwrap().routes["service.example.com"].enabled);
+        assert_eq!(
+            entry.bindings(Protocol::TcpUdp).unwrap().routes["service.example.com"]
+                .label
+                .as_deref(),
+            Some("shared")
+        );
+        assert!(
+            !entry
+                .bindings(Protocol::TcpUdp)
+                .unwrap()
+                .fallback
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
+        db.as_webserver_mut().as_enabled_mut().ser(&false).unwrap();
+        update_forward_enabled(&mut db, source, true, None, Some(Protocol::TcpUdp)).unwrap();
+        update_forward_enabled(
+            &mut db,
+            source,
+            false,
+            Some("service.example.com"),
+            Some(Protocol::TcpUdp),
+        )
+        .unwrap();
+        let forwards = db.as_port_forwards().de().unwrap();
+        let bindings = forwards.0[&source].bindings(Protocol::TcpUdp).unwrap();
+        assert!(!bindings.routes["service.example.com"].enabled);
+        assert!(bindings.fallback.as_ref().unwrap().enabled);
+    }
+
+    #[test]
+    fn toggle_scopes_hostname_and_fallback_to_the_selected_transport() {
+        use crate::tunnel::db::{PortForwards, SniRoute};
+        let source = "203.0.113.1:443".parse().unwrap();
+        let mut entry = PortForward::empty_sni();
+        for (protocol, target) in [
+            (TransportProtocol::Tcp, "10.59.0.2:443"),
+            (TransportProtocol::Udp, "10.59.0.3:8443"),
+        ] {
+            let bindings = entry.bindings_mut(protocol).unwrap();
+            let route = SniRoute {
+                target: target.parse().unwrap(),
+                label: None,
+                enabled: false,
+                auto: false,
+            };
+            bindings
+                .routes
+                .insert("service.example.com".into(), route.clone());
+            bindings.fallback = Some(route);
+        }
+        let mut db = Model::new(&TunnelDatabase::default()).unwrap();
+        db.as_port_forwards_mut()
+            .ser(&PortForwards(std::collections::BTreeMap::from([(
+                source, entry,
+            )])))
+            .unwrap();
+        db.as_webserver_mut().as_enabled_mut().ser(&true).unwrap();
+        db.as_webserver_mut()
+            .as_listen_mut()
+            .ser(&Some("0.0.0.0:443".parse::<SocketAddr>().unwrap()))
+            .unwrap();
+        update_forward_enabled(
+            &mut db,
+            source,
+            true,
+            Some("SERVICE.EXAMPLE.COM"),
+            Some(Protocol::Udp),
+        )
+        .unwrap();
+        update_forward_enabled(&mut db, source, true, None, Some(Protocol::Udp)).unwrap();
+        assert!(update_forward_enabled(&mut db, source, true, None, Some(Protocol::Tcp)).is_err());
+        let forwards = db.as_port_forwards().de().unwrap();
+        let entry = &forwards.0[&source];
+        assert!(
+            entry.bindings(TransportProtocol::Udp).unwrap().routes["service.example.com"].enabled
+        );
+        assert!(
+            entry
+                .bindings(TransportProtocol::Udp)
+                .unwrap()
+                .fallback
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
+        assert!(
+            !entry.bindings(TransportProtocol::Tcp).unwrap().routes["service.example.com"].enabled
+        );
+        assert!(
+            !entry
+                .bindings(TransportProtocol::Tcp)
+                .unwrap()
+                .fallback
+                .as_ref()
+                .unwrap()
+                .enabled
+        );
     }
 }

@@ -33,14 +33,17 @@ import { ModalHelp } from 'src/app/help/modal-help'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { i18nKey } from 'src/app/i18n/i18n.providers'
 import { ApiService } from 'src/app/services/api/api.service'
+import { FORWARD_PROTOCOLS, ForwardProtocol } from 'src/app/utils/port-forwards'
 
-import { MappedDevice, PublishedPortsData } from './utils'
+import {
+  FORWARD_PROTOCOL_LABELS,
+  MappedDevice,
+  PublishedPortsData,
+} from './utils'
 
-// A range counts up from both the external and internal port, so neither side
-// may run past the u16 port space. Mirrors the server-side guard in add_forward.
 function portRangeOverflow(group: AbstractControl): ValidationErrors | null {
-  const ext = group.get('externalport')?.value
-  const int = group.get('internalport')?.value
+  const ext = group.get('externalPort')?.value
+  const int = group.get('internalPort')?.value
   const count = group.get('count')?.value ?? 1
   if (count <= 1) return null
   const last = count - 1
@@ -50,12 +53,16 @@ function portRangeOverflow(group: AbstractControl): ValidationErrors | null {
     : null
 }
 
-// IPv6 needs the selected server to have a GUA (its subnet needs a v6 prefix).
 function ipVersionRequiresGua(group: AbstractControl): ValidationErrors | null {
   const ipVersion = group.get('ipVersion')?.value
   const device = group.get('device')?.value as MappedDevice | null
   const needsV6 = ipVersion === 'ipv6' || ipVersion === 'both'
   return needsV6 && device && !device.ipv6 ? { noGua: true } : null
+}
+
+function forwardHostname(group: AbstractControl): string {
+  const { sni, count, ipVersion } = group.getRawValue()
+  return count > 1 || ipVersion === 'ipv6' ? '' : sni.trim()
 }
 
 const IP_VERSION: Record<string, i18nKey> = {
@@ -66,7 +73,7 @@ const IP_VERSION: Record<string, i18nKey> = {
 
 @Component({
   template: `
-    <form tuiForm="m" [formGroup]="form">
+    <form tuiForm="m" [formGroup]="form" (submit.prevent)="onSave()">
       <tui-textfield>
         <label tuiLabel>{{ 'Label' | i18n }}</label>
         <input tuiInput formControlName="label" />
@@ -76,13 +83,13 @@ const IP_VERSION: Record<string, i18nKey> = {
         <label tuiLabel>{{ 'External Port' | i18n }}</label>
         <input
           tuiInputNumber
-          formControlName="externalport"
+          formControlName="externalPort"
           [min]="0"
           [max]="65535"
           [tuiNumberFormat]="{ thousandSeparator: '' }"
         />
       </tui-textfield>
-      <tui-error formControlName="externalport" />
+      <tui-error formControlName="externalPort" />
       <tui-textfield
         tuiChevron
         [stringify]="stringify"
@@ -111,13 +118,13 @@ const IP_VERSION: Record<string, i18nKey> = {
         <label tuiLabel>{{ 'Internal Port' | i18n }}</label>
         <input
           tuiInputNumber
-          formControlName="internalport"
+          formControlName="internalPort"
           [min]="0"
           [max]="65535"
           [tuiNumberFormat]="{ thousandSeparator: '' }"
         />
       </tui-textfield>
-      <tui-error formControlName="internalport" />
+      <tui-error formControlName="internalPort" />
       <tui-textfield [tuiTextfieldCleaner]="false">
         <label tuiLabel>{{ 'Number of Ports' | i18n }}</label>
         <input
@@ -172,8 +179,19 @@ const IP_VERSION: Record<string, i18nKey> = {
           <tui-icon [tuiTooltip]="hostnameHint | i18n" />
         </tui-textfield>
       }
+      @if (hostname) {
+        <fieldset>
+          <legend>{{ 'Protocol' | i18n }}</legend>
+          <tui-radio-list
+            size="s"
+            formControlName="protocol"
+            [items]="protocols"
+            [itemContent]="protocolLabel"
+          />
+        </fieldset>
+      }
       <footer>
-        <button tuiButton [disabled]="form.invalid" (click)="onSave()">
+        <button tuiButton type="submit">
           {{ 'Save' | i18n }}
         </button>
       </footer>
@@ -209,7 +227,7 @@ export class PublishedPortsAdd {
   private readonly i18n = inject(i18nPipe)
 
   protected readonly hostnameHint =
-    'Only supported for SSL/TLS services — the gateway routes by the TLS SNI, so several hostnames can share one external port. IPv4 only. Leave blank for a plain published port.'
+    'Routes TLS over TCP or QUIC over UDP by hostname. TCP/UDP shares one mapping; separate TCP and UDP mappings may use different servers. IPv4 only. Leave blank to publish both transports without hostname routing.'
 
   protected readonly countHint =
     'Publish this many consecutive ports, counting up from the external and internal ports above. Leave at 1 for a single port. SNI hostnames are not supported for ranges.'
@@ -218,6 +236,10 @@ export class PublishedPortsAdd {
   protected readonly context =
     injectContext<TuiDialogContext<void, PublishedPortsData>>()
 
+  protected readonly protocols = FORWARD_PROTOCOLS
+  protected readonly protocolLabel = (ctx: TuiContext<ForwardProtocol>) =>
+    this.i18n.transform(FORWARD_PROTOCOL_LABELS[ctx.$implicit])
+
   protected readonly ipVersionValues = ['ipv4', 'ipv6', 'both'] as const
   protected readonly ipVersionLabel = (ctx: TuiContext<string>) =>
     this.i18n.transform(IP_VERSION[ctx.$implicit])
@@ -225,17 +247,20 @@ export class PublishedPortsAdd {
   protected readonly form = inject(NonNullableFormBuilder).group(
     {
       label: ['', Validators.required],
-      externalport: [null as number | null, Validators.required],
+      externalPort: [null as number | null, Validators.required],
       device: [null as MappedDevice | null, Validators.required],
-      internalport: [null as number | null, Validators.required],
+      internalPort: [null as number | null, Validators.required],
       ipVersion: ['ipv4' as 'ipv4' | 'ipv6' | 'both'],
       sni: [''],
+      protocol: ['tcp' as ForwardProtocol],
       count: [
         1,
         [Validators.required, Validators.min(1), Validators.max(65535)],
       ],
     },
-    { validators: [portRangeOverflow, ipVersionRequiresGua] },
+    {
+      validators: [portRangeOverflow, ipVersionRequiresGua],
+    },
   )
 
   private readonly selectedDevice = toSignal(
@@ -247,12 +272,15 @@ export class PublishedPortsAdd {
     { initialValue: 'ipv4' as const },
   )
 
-  // The v6-requires-GUA error, shown proactively (mirrors the form validator).
   protected readonly guaError = computed(() => {
     const v = this.selectedVersion()
     const device = this.selectedDevice()
     return (v === 'ipv6' || v === 'both') && !!device && !device.ipv6
   })
+
+  protected get hostname(): string {
+    return forwardHostname(this.form)
+  }
 
   protected get isRange(): boolean {
     return this.form.controls.count.value > 1
@@ -268,34 +296,37 @@ export class PublishedPortsAdd {
       return
     }
 
-    const { label, externalport, device, internalport, sni, count, ipVersion } =
-      this.form.getRawValue()
+    const {
+      label,
+      externalPort,
+      device,
+      internalPort,
+      count,
+      ipVersion,
+      protocol,
+    } = this.form.getRawValue()
 
-    const isRange = count > 1
-    // SNI demux is IPv4-only and per-port; it applies to the v4 side even in
-    // "both" mode (the v6 side is always a plain pinhole). Ignored for v6-only
-    // and for ranges.
-    const hostname = isRange || ipVersion === 'ipv6' ? '' : sni.trim()
+    const hostname = this.hostname
     const v4 = ipVersion === 'ipv4' || ipVersion === 'both'
     const v6 = ipVersion === 'ipv6' || ipVersion === 'both'
 
     this.tasks.run(async () => {
       if (v4) {
-        // The external IP is fixed server-side to the target device's WAN.
         await this.api.rpc.portForward.add({
-          externalPort: externalport!,
-          target: `${device!.ip}:${internalport}`,
+          externalPort: externalPort!,
+          target: `${device!.ip}:${internalPort}`,
           label,
           sni: hostname ? [hostname] : [],
+          protocol: hostname ? protocol : 'tcp',
           count,
         })
       }
       if (v6 && device!.ipv6) {
         await this.api.rpc.pinhole.add({
           gua: device!.ipv6,
-          externalPort: externalport!,
+          externalPort: externalPort!,
           internalPort:
-            internalport !== externalport ? internalport! : undefined,
+            internalPort !== externalPort ? internalPort! : undefined,
           label,
           count,
         })

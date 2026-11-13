@@ -9,7 +9,7 @@ import {
   LANGUAGES,
   TaskService,
 } from '@start9labs/shared'
-import { T, utils } from '@start9labs/start-core'
+import { utils } from '@start9labs/start-core'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import {
   TuiButton,
@@ -35,6 +35,7 @@ import { ApiService } from 'src/app/services/api/api.service'
 import { AuthService } from 'src/app/services/auth.service'
 import { TunnelData } from 'src/app/services/patch-db/data-model'
 import { UpdateService } from 'src/app/services/update.service'
+import { portEightyForwarded } from 'src/app/utils/port-forwards'
 import { CHANGE_PASSWORD } from './change-password'
 
 @Component({
@@ -336,19 +337,4 @@ export default class Settings {
       this.auth.deauthenticate()
     })
   }
-}
-
-// Whether any forward on `ip` covers port 80 (a DNAT range or an SNI/single
-// entry) — the redirect and a port-80 forward are mutually exclusive.
-function portEightyForwarded(
-  forwards: Record<string, T.Tunnel.PortForward>,
-  ip: string,
-): boolean {
-  return Object.entries(forwards).some(([source, pf]) => {
-    const idx = source.lastIndexOf(':')
-    if (idx < 0 || source.slice(0, idx) !== ip) return false
-    const start = Number(source.slice(idx + 1))
-    const span = pf.kind === 'dnat' ? (pf.count ?? 1) : 1
-    return start <= 80 && 80 <= start + span - 1
-  })
 }

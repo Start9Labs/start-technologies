@@ -1,7 +1,7 @@
 # StartTunnel Architecture
 
 StartTunnel is a WireGuard-based virtual private router with kernel-level
-clearnet port forwarding. This document covers how the code is laid out across
+clearnet port forwarding and TCP TLS / UDP QUIC hostname routing. This document covers how the code is laid out across
 the monorepo and how a request flows through the system. For the product-level
 "what it is and how it compares" writeup, see
 [`docs/src/architecture.md`](docs/src/architecture.md).
@@ -49,7 +49,7 @@ All paths below are under `shared-libs/crates/start-core/src/tunnel/`.
 - **`dns.rs`** — DNS helpers for the tunnel network.
 - **`forward/`** — the port-forwarding engine:
   - `mod.rs` — forward-entry orchestration (iptables/nftables DNAT rules).
-  - `sni.rs` — SNI-based routing for forwarded TLS traffic.
+  - `sni.rs` — Independent hostname routing for TLS over TCP and QUIC over UDP.
   - `igd.rs` — IGD/UPnP upstream port mapping.
   - `pcp.rs` — PCP (Port Control Protocol) upstream port mapping.
 - **`update.rs`** — self-update support for the daemon.
@@ -87,7 +87,7 @@ The `start-tunnel` CLI builds an `rpc-toolkit` `CliApp` against the same
 4. Optionally requests an upstream mapping from the network gateway via
    IGD (`igd.rs`) or PCP (`pcp.rs`).
 5. Inbound packets are NAT-forwarded at Layer 3/4 — TLS is not terminated by the tunnel. Hostname forwards inspect ClientHello
-   SNI to choose a destination, then relay the connection; TLS terminates at the destination service, not the tunnel.
+   SNI to choose a destination for TCP TLS or UDP QUIC, then relay encrypted traffic; TLS terminates at the destination service, not the tunnel.
 
 ## Frontend
 

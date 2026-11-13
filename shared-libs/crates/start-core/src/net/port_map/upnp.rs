@@ -10,6 +10,7 @@ use igd_next::aio::Gateway;
 use igd_next::aio::tokio::{Tokio, search_gateway};
 use igd_next::{PortMappingProtocol, SearchOptions};
 
+use crate::net::port_map::TransportProtocol;
 use crate::net::port_map::pcp::hostname::validate_hostname;
 use crate::net::port_map::server::igd::{
     ADD_HOSTNAME_ACTION, DELETE_HOSTNAME_ACTION, WANIP_SERVICE,
@@ -103,6 +104,7 @@ pub(crate) fn add_hostname_body(
     local_ip: Ipv4Addr,
     internal_port: u16,
     hostname: &str,
+    protocol: TransportProtocol,
 ) -> String {
     format!(
         r#"<?xml version="1.0"?>
@@ -111,7 +113,7 @@ pub(crate) fn add_hostname_body(
 <u:{ADD_HOSTNAME_ACTION} xmlns:u="{service}">
 <NewRemoteHost></NewRemoteHost>
 <NewExternalPort>{external_port}</NewExternalPort>
-<NewProtocol>TCP</NewProtocol>
+<NewProtocol>{protocol}</NewProtocol>
 <NewInternalPort>{internal_port}</NewInternalPort>
 <NewInternalClient>{local_ip}</NewInternalClient>
 <NewEnabled>1</NewEnabled>
@@ -122,6 +124,7 @@ pub(crate) fn add_hostname_body(
 </s:Body>
 </s:Envelope>"#,
         service = WANIP_SERVICE,
+        protocol = protocol.igd(),
     )
 }
 
@@ -130,6 +133,7 @@ pub(crate) fn delete_hostname_body(
     external_port: u16,
     internal_port: u16,
     hostname: &str,
+    protocol: TransportProtocol,
 ) -> String {
     format!(
         r#"<?xml version="1.0"?>
@@ -138,13 +142,14 @@ pub(crate) fn delete_hostname_body(
 <u:{DELETE_HOSTNAME_ACTION} xmlns:u="{service}">
 <NewRemoteHost></NewRemoteHost>
 <NewExternalPort>{external_port}</NewExternalPort>
-<NewProtocol>TCP</NewProtocol>
+<NewProtocol>{protocol}</NewProtocol>
 <NewInternalPort>{internal_port}</NewInternalPort>
 <NewHostname>{hostname}</NewHostname>
 </u:{DELETE_HOSTNAME_ACTION}>
 </s:Body>
 </s:Envelope>"#,
         service = WANIP_SERVICE,
+        protocol = protocol.igd(),
     )
 }
 
@@ -203,6 +208,7 @@ pub async fn add_hostname_mapping(
     local_ip: Ipv4Addr,
     internal_port: u16,
     hostname: &str,
+    protocol: TransportProtocol,
 ) -> Result<(), Error> {
     // Hostnames are interpolated without XML escaping.
     if !validate_hostname(hostname) {
@@ -214,7 +220,7 @@ pub async fn add_hostname_mapping(
     vendor_control_call(
         gateway,
         ADD_HOSTNAME_ACTION,
-        add_hostname_body(external_port, local_ip, internal_port, hostname),
+        add_hostname_body(external_port, local_ip, internal_port, hostname, protocol),
     )
     .await
 }
@@ -225,6 +231,7 @@ pub async fn remove_hostname_mapping(
     external_port: u16,
     internal_port: u16,
     hostname: &str,
+    protocol: TransportProtocol,
 ) -> Result<(), Error> {
     if !validate_hostname(hostname) {
         return Err(Error::new(
@@ -235,7 +242,7 @@ pub async fn remove_hostname_mapping(
     vendor_control_call(
         gateway,
         DELETE_HOSTNAME_ACTION,
-        delete_hostname_body(external_port, internal_port, hostname),
+        delete_hostname_body(external_port, internal_port, hostname, protocol),
     )
     .await
 }

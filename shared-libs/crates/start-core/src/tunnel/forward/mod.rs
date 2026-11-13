@@ -11,6 +11,7 @@ pub mod sni;
 use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
+use crate::net::port_map::Protocol;
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::PortForward;
@@ -34,11 +35,12 @@ pub async fn clear_for_peer(
     for source in dnat_sources {
         ctx.remove_peer_forward_by_source(source, peer, false).await;
     }
-    for (source, target, host) in sni_routes {
-        ctx.remove_sni_routes(source, target, &[host], false).await;
+    for (source, target, host, protocol) in sni_routes {
+        ctx.remove_sni_routes(source, target, &[host], protocol, false)
+            .await;
     }
-    for (source, target) in sni_fallbacks {
-        ctx.remove_sni_fallback(source, target).await;
+    for (source, target, protocol) in sni_fallbacks {
+        ctx.remove_sni_fallback(source, target, protocol).await;
     }
 
     // v6 pinholes are keyed by the device's own GUA, derivable from each subnet's
@@ -84,8 +86,8 @@ fn select_peer_forwards(
     auto_only: bool,
 ) -> (
     Vec<SocketAddrV4>,
-    Vec<(SocketAddrV4, SocketAddrV4, String)>,
-    Vec<(SocketAddrV4, SocketAddrV4)>,
+    Vec<(SocketAddrV4, SocketAddrV4, String, Protocol)>,
+    Vec<(SocketAddrV4, SocketAddrV4, Protocol)>,
 ) {
     let mut dnat_sources = Vec::new();
     let mut sni_routes = Vec::new();
@@ -97,15 +99,15 @@ fn select_peer_forwards(
             {
                 dnat_sources.push(*source);
             }
-            PortForward::Sni { routes, fallback } => {
-                for (host, route) in routes {
+            PortForward::Sni { .. } => {
+                for (protocol, hostname, route) in entry.sni_routes() {
                     if route.target.ip() == &peer && (!auto_only || route.auto) {
-                        sni_routes.push((*source, route.target, host.clone()));
-                    }
-                }
-                if let Some(f) = fallback {
-                    if f.target.ip() == &peer && (!auto_only || f.auto) {
-                        sni_fallbacks.push((*source, f.target));
+                        match hostname {
+                            Some(host) => {
+                                sni_routes.push((*source, route.target, host.to_owned(), protocol))
+                            }
+                            None => sni_fallbacks.push((*source, route.target, protocol)),
+                        }
                     }
                 }
             }
@@ -170,13 +172,17 @@ mod tests {
         fwds.insert(
             "5.6.7.8:443".parse().unwrap(),
             PortForward::Sni {
-                routes,
-                fallback: Some(SniRoute {
-                    target: "10.59.0.2:443".parse().unwrap(),
-                    label: None,
-                    enabled: true,
-                    auto: true,
-                }),
+                both: Default::default(),
+                tcp: crate::tunnel::db::SniBindings {
+                    routes,
+                    fallback: Some(SniRoute {
+                        target: "10.59.0.2:443".parse().unwrap(),
+                        label: None,
+                        enabled: true,
+                        auto: true,
+                    }),
+                },
+                udp: Default::default(),
             },
         );
 
@@ -189,7 +195,8 @@ mod tests {
             auto_fb,
             vec![(
                 "5.6.7.8:443".parse().unwrap(),
-                "10.59.0.2:443".parse().unwrap()
+                "10.59.0.2:443".parse().unwrap(),
+                Protocol::Tcp
             )]
         );
 
@@ -202,5 +209,81 @@ mod tests {
         let (other_dnat, _, other_fb) = select_peer_forwards(&fwds, other, false);
         assert_eq!(other_dnat, vec!["1.2.3.4:9000".parse().unwrap()]);
         assert!(other_fb.is_empty());
+    }
+    #[test]
+    fn device_cleanup_selects_a_combined_mapping_once_with_its_shared_owner() {
+        let source = "203.0.113.1:443".parse().unwrap();
+        let peer = "10.59.0.2".parse().unwrap();
+        for (auto, auto_only, count) in [
+            (false, false, 1),
+            (false, true, 0),
+            (true, false, 1),
+            (true, true, 1),
+        ] {
+            let mut entry = PortForward::empty_sni();
+            let bindings = entry.bindings_mut(Protocol::TcpUdp).unwrap();
+            let route = SniRoute {
+                target: "10.59.0.2:443".parse().unwrap(),
+                label: None,
+                enabled: false,
+                auto,
+            };
+            bindings
+                .routes
+                .insert("service.example.com".into(), route.clone());
+            bindings.fallback = Some(route);
+            let forwards = BTreeMap::from([(source, entry)]);
+            let (dnat, routes, fallbacks) = select_peer_forwards(&forwards, peer, auto_only);
+            assert!(dnat.is_empty());
+            assert_eq!(routes.len(), count);
+            assert_eq!(fallbacks.len(), count);
+            if count == 1 {
+                assert_eq!(routes[0].3, Protocol::TcpUdp);
+                assert_eq!(fallbacks[0].2, Protocol::TcpUdp);
+            }
+            let (_, routes, fallbacks) =
+                select_peer_forwards(&forwards, "10.59.0.3".parse().unwrap(), false);
+            assert!(routes.is_empty());
+            assert!(fallbacks.is_empty());
+        }
+    }
+
+    #[test]
+    fn device_cleanup_scopes_shared_hostname_and_fallback_by_transport_owner() {
+        let source = "203.0.113.1:443".parse().unwrap();
+        let peer = "10.59.0.2".parse().unwrap();
+        let mut entry = PortForward::empty_sni();
+        for (protocol, target) in [
+            (Protocol::Tcp, "10.59.0.3:443"),
+            (Protocol::Udp, "10.59.0.2:8443"),
+        ] {
+            let route = SniRoute {
+                target: target.parse().unwrap(),
+                label: None,
+                enabled: true,
+                auto: true,
+            };
+            let bindings = entry.bindings_mut(protocol).unwrap();
+            bindings
+                .routes
+                .insert("service.example.com".into(), route.clone());
+            bindings.fallback = Some(route);
+        }
+        let forwards = BTreeMap::from([(source, entry)]);
+        let (dnat, routes, fallbacks) = select_peer_forwards(&forwards, peer, true);
+        assert!(dnat.is_empty());
+        assert_eq!(
+            routes,
+            vec![(
+                source,
+                "10.59.0.2:8443".parse().unwrap(),
+                "service.example.com".into(),
+                Protocol::Udp
+            )]
+        );
+        assert_eq!(
+            fallbacks,
+            vec![(source, "10.59.0.2:8443".parse().unwrap(), Protocol::Udp)]
+        );
     }
 }

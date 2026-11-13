@@ -1834,28 +1834,29 @@ export class MockApiService extends ApiService {
 
     const sniMac = '00:1A:2B:3C:4D:5E'
     const pending = params.ports
-      .filter(
-        p =>
-          p.enabled && p.ipv4 && !p.override_wan_ports && p.protocol !== 'udp',
-      )
+      .filter(p => p.enabled && p.ipv4 && !p.override_wan_ports)
       .map(p => {
         const spec = p.ipv4_public_port || p.ports
         const [lo, hi = lo] = spec.split('-').map(Number)
         const router_service_ports =
-          this.mockSystemInfo.remoteAccess !== 'never'
+          p.protocol !== 'udp' && this.mockSystemInfo.remoteAccess !== 'never'
             ? ['80', '443', '22'].filter(
                 rp => Number(rp) >= lo && Number(rp) <= hi,
               )
             : []
         const hostname_route_ports =
           this.autoForwardAllowed.has(sniMac) && lo <= 443 && 443 <= hi
-            ? [
-                {
+            ? (['tcp', 'udp'] as const)
+                .filter(
+                  protocol =>
+                    p.protocol === 'tcp+udp' || p.protocol === protocol,
+                )
+                .map(protocol => ({
                   ports: '443',
+                  protocol,
                   hostnames: ['nextcloud.example.com'],
                   devices: [this.lookupDeviceByMac(sniMac).name || sniMac],
-                },
-              ]
+                }))
             : []
         return {
           id: p.id,
@@ -1928,6 +1929,7 @@ export class MockApiService extends ApiService {
         public_ports: '5443',
         expires_secs: 3542,
         hostname: null,
+        protocol: 'tcp+udp',
       },
       {
         id: 'apf_001a2b3c4d5e_80',
@@ -1939,10 +1941,12 @@ export class MockApiService extends ApiService {
         public_ports: '80',
         expires_secs: 3211,
         hostname: null,
+        protocol: 'tcp+udp',
       },
       {
-        id: 'sni_443_nextcloud.example.com',
+        id: 'sni_tcp_203.0.113.1_443_nextcloud.example.com',
         kind: 'SNI',
+        protocol: 'tcp',
         device_mac: mac,
         device_name: device.name,
         internal_ip: device.ipv4,
@@ -1952,8 +1956,9 @@ export class MockApiService extends ApiService {
         hostname: 'nextcloud.example.com',
       },
       {
-        id: 'sni_443_photos.example.com',
+        id: 'sni_tcp_203.0.113.1_443_photos.example.com',
         kind: 'SNI',
+        protocol: 'tcp',
         device_mac: mac,
         device_name: device.name,
         internal_ip: device.ipv4,
@@ -1961,6 +1966,18 @@ export class MockApiService extends ApiService {
         public_ports: '443',
         expires_secs: 2871,
         hostname: 'photos.example.com',
+      },
+      {
+        id: 'sni_udp_203.0.113.1_443_nextcloud.example.com',
+        kind: 'SNI',
+        protocol: 'udp',
+        device_mac: mac,
+        device_name: device.name,
+        internal_ip: device.ipv4,
+        ports: '443',
+        public_ports: '443',
+        expires_secs: 2954,
+        hostname: 'nextcloud.example.com',
       },
     ]
   }

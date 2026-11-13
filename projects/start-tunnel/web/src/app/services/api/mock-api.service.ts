@@ -1,7 +1,5 @@
 import { inject, Injectable } from '@angular/core'
-import { shareReplay, Subject, tap } from 'rxjs'
-import { WebSocketSubject } from 'rxjs/webSocket'
-import { Api, ApiClient, ApiService } from './api.service'
+import { toObservable } from '@angular/core/rxjs-interop'
 import { pauseFor } from '@start9labs/shared'
 import {
   createRpcClient,
@@ -9,7 +7,6 @@ import {
   T,
   tableTransport,
 } from '@start9labs/start-core'
-import { AuthService } from '../auth.service'
 import {
   AddOperation,
   Operation,
@@ -18,8 +15,18 @@ import {
   ReplaceOperation,
   Revision,
 } from 'patch-db-client'
-import { toObservable } from '@angular/core/rxjs-interop'
+import { shareReplay, Subject, tap } from 'rxjs'
+import { WebSocketSubject } from 'rxjs/webSocket'
+import {
+  FORWARD_PROTOCOLS,
+  resolveSniProtocol,
+  sniBindings,
+  sniRoute,
+} from 'src/app/utils/port-forwards'
+
+import { AuthService } from '../auth.service'
 import { mockTunnelData } from '../patch-db/data-model'
+import { Api, ApiClient, ApiService } from './api.service'
 
 @Injectable({
   providedIn: 'root',
@@ -223,22 +230,57 @@ export class MockApiService extends ApiService {
       const existing = forwards[source]
 
       if (params.sni?.length) {
-        const routes: { [hostname: string]: T.Tunnel.SniRoute } =
-          existing?.kind === 'sni' ? { ...existing.routes } : {}
-
-        for (const hostname of params.sni ?? []) {
-          routes[hostname] = {
+        if (
+          existing?.kind === 'dnat' &&
+          (existing.count !== 1 ||
+            existing.target.split(':')[0] !== params.target.split(':')[0])
+        )
+          throw new Error('Port already mapped')
+        const fallback =
+          existing?.kind === 'dnat'
+            ? {
+                target: existing.target,
+                label: existing.label,
+                enabled: existing.enabled,
+                auto: existing.auto,
+              }
+            : null
+        const value: Extract<T.Tunnel.PortForward, { kind: 'sni' }> =
+          existing?.kind === 'sni'
+            ? structuredClone(existing)
+            : {
+                kind: 'sni',
+                tcp: { routes: {}, fallback: null },
+                udp: { routes: {}, fallback: null },
+                both: { routes: {}, fallback },
+              }
+        const protocol = params.protocol ?? 'tcp'
+        const bindings = sniBindings(value, protocol)
+        for (const hostname of params.sni) {
+          const name = hostname.toLowerCase()
+          if (
+            FORWARD_PROTOCOLS.some(
+              other =>
+                other !== protocol &&
+                (other === 'tcp+udp' || protocol === 'tcp+udp') &&
+                sniBindings(value, other).routes[name],
+            )
+          )
+            throw new Error('Hostname already mapped')
+          const old = bindings.routes[name]
+          if (
+            old &&
+            old.target !== params.target &&
+            (old.auto ||
+              old.target.split(':')[0] !== params.target.split(':')[0])
+          )
+            throw new Error('Hostname already mapped')
+          bindings.routes[name] = {
             target: params.target,
-            label: params.label || null,
-            enabled: true,
-            auto: false,
+            label: old?.label ?? params.label ?? null,
+            enabled: old?.enabled ?? true,
+            auto: old?.auto ?? false,
           }
-        }
-
-        const value: T.Tunnel.PortForward = {
-          kind: 'sni',
-          routes,
-          fallback: null,
         }
         forwards[source] = value
         this.mockRevision([
@@ -248,7 +290,35 @@ export class MockApiService extends ApiService {
             value,
           },
         ])
+      } else if (existing?.kind === 'sni' && (params.count ?? 1) === 1) {
+        const owner =
+          FORWARD_PROTOCOLS.find(protocol =>
+            sniRoute(existing, protocol, null),
+          ) ?? 'tcp+udp'
+        const bindings = sniBindings(existing, owner)
+        if (
+          bindings.fallback &&
+          bindings.fallback.target !== params.target &&
+          (bindings.fallback.auto ||
+            bindings.fallback.target.split(':')[0] !==
+              params.target.split(':')[0])
+        )
+          throw new Error('Port already mapped')
+        bindings.fallback = {
+          target: params.target,
+          label: bindings.fallback?.label ?? params.label ?? null,
+          enabled: bindings.fallback?.enabled ?? true,
+          auto: bindings.fallback?.auto ?? false,
+        }
+        this.mockRevision([
+          {
+            op: PatchOp.REPLACE,
+            path: '/portForwards/' + source,
+            value: existing,
+          },
+        ])
       } else {
+        if (existing) throw new Error('Port already mapped')
         const value: T.Tunnel.PortForward = {
           kind: 'dnat',
           target: params.target,
@@ -275,14 +345,19 @@ export class MockApiService extends ApiService {
       const entry = mockTunnelData.portForwards[params.source]
       if (!entry) return null
 
-      if (params.hostname && entry.kind === 'sni') {
-        const route = entry.routes[params.hostname]
-        if (route) route.label = params.label ?? null
+      if (entry.kind === 'sni') {
+        const route = sniRoute(
+          entry,
+          resolveSniProtocol(entry, params.protocol, params.hostname),
+          params.hostname,
+        )
+        if (!route) throw new Error('Port forward route not found')
+        route.label = params.label ?? null
         this.mockRevision([
           {
             op: PatchOp.REPLACE,
-            path: `/portForwards/${params.source}/routes/${params.hostname}/label`,
-            value: params.label,
+            path: '/portForwards/' + params.source,
+            value: entry,
           },
         ])
       } else if (entry.kind === 'dnat') {
@@ -304,14 +379,19 @@ export class MockApiService extends ApiService {
       const entry = mockTunnelData.portForwards[params.source]
       if (!entry) return null
 
-      if (params.hostname && entry.kind === 'sni') {
-        const route = entry.routes[params.hostname]
-        if (route) route.enabled = params.enabled
+      if (entry.kind === 'sni') {
+        const route = sniRoute(
+          entry,
+          resolveSniProtocol(entry, params.protocol, params.hostname),
+          params.hostname,
+        )
+        if (!route) throw new Error('Port forward route not found')
+        route.enabled = params.enabled
         this.mockRevision([
           {
             op: PatchOp.REPLACE,
-            path: `/portForwards/${params.source}/routes/${params.hostname}/enabled`,
-            value: params.enabled,
+            path: '/portForwards/' + params.source,
+            value: entry,
           },
         ])
       } else if (entry.kind === 'dnat') {
@@ -333,28 +413,48 @@ export class MockApiService extends ApiService {
       const entry = mockTunnelData.portForwards[params.source]
       if (!entry) return null
 
-      if (params.hostname && entry.kind === 'sni') {
-        delete entry.routes[params.hostname]
-
-        if (Object.keys(entry.routes).length) {
+      if (entry.kind === 'sni') {
+        const protocols = params.protocol
+          ? [params.protocol]
+          : params.hostname == null && !params.fallback
+            ? FORWARD_PROTOCOLS
+            : [
+                resolveSniProtocol(
+                  entry,
+                  params.protocol,
+                  params.fallback ? null : params.hostname,
+                ),
+              ]
+        for (const protocol of protocols) {
+          const bindings = sniBindings(entry, protocol)
+          if (params.fallback) bindings.fallback = null
+          else if (params.hostname != null)
+            delete bindings.routes[params.hostname.toLowerCase()]
+          else {
+            bindings.routes = {}
+            bindings.fallback = null
+          }
+        }
+        if (
+          FORWARD_PROTOCOLS.some(protocol => {
+            const bindings = sniBindings(entry, protocol)
+            return Object.keys(bindings.routes).length || bindings.fallback
+          })
+        ) {
           this.mockRevision([
             {
-              op: PatchOp.REMOVE,
-              path: `/portForwards/${params.source}/routes/${params.hostname}`,
+              op: PatchOp.REPLACE,
+              path: '/portForwards/' + params.source,
+              value: entry,
             },
           ])
-        } else {
-          delete mockTunnelData.portForwards[params.source]
-          this.mockRevision([
-            { op: PatchOp.REMOVE, path: `/portForwards/${params.source}` },
-          ])
+          return null
         }
-      } else {
-        delete mockTunnelData.portForwards[params.source]
-        this.mockRevision([
-          { op: PatchOp.REMOVE, path: `/portForwards/${params.source}` },
-        ])
       }
+      delete mockTunnelData.portForwards[params.source]
+      this.mockRevision([
+        { op: PatchOp.REMOVE, path: '/portForwards/' + params.source },
+      ])
 
       return null
     },

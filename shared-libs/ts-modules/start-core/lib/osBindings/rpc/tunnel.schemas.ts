@@ -84,63 +84,6 @@ export const AddPinholeParams: z.ZodObject<{
 }).meta({
   id: 'AddPinholeParams',
 })
-export const AddPortForwardParams: z.ZodObject<{
-  /**
-   * External (WAN) port to forward. The external IP is fixed to the target's
-   * WAN so return traffic stays symmetric.
-   */
-  externalPort: z.ZodInt
-  target: z.ZodString
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * Hostnames to SNI-demux on the shared external port. Empty = normal DNAT.
-   */
-  sni: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
-  /**
-   * Number of contiguous ports to forward (a PCP PORT_SET range), counting up
-   * from both `external_port` and the target port. Defaults to 1. Not valid
-   * together with SNI demux.
-   */
-  count: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-}> = /* @__PURE__ */ object({
-  /**
-   * External (WAN) port to forward. The external IP is fixed to the target's
-   * WAN so return traffic stays symmetric.
-   */
-  externalPort: z.int().meta({
-    description:
-      "External (WAN) port to forward. The external IP is fixed to the target's\nWAN so return traffic stays symmetric.",
-  }),
-  target: z.string(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
-  /**
-   * Hostnames to SNI-demux on the shared external port. Empty = normal DNAT.
-   */
-  sni: wire(z.array(z.string()).optional(), z.array(z.string())).meta({
-    description:
-      'Hostnames to SNI-demux on the shared external port. Empty = normal DNAT.',
-  }),
-  /**
-   * Number of contiguous ports to forward (a PCP PORT_SET range), counting up
-   * from both `external_port` and the target port. Defaults to 1. Not valid
-   * together with SNI demux.
-   */
-  count: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Number of contiguous ports to forward (a PCP PORT_SET range), counting up\nfrom both `external_port` and the target port. Defaults to 1. Not valid\ntogether with SNI demux.',
-  }),
-}).meta({
-  id: 'AddPortForwardParams',
-})
 export const AddSubnetParams: z.ZodObject<{ name: z.ZodString }> =
   /* @__PURE__ */ object({ name: z.string() }).meta({
     id: 'AddSubnetParams',
@@ -361,6 +304,18 @@ export const ListParams: typeof empty = /* @__PURE__ */ empty.meta({
 export const LogoutParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'LogoutParams',
 })
+
+/**
+ * Transports owned together by one port mapping.
+ */
+export const Protocol: z.ZodEnum<{
+  tcp: 'tcp'
+  udp: 'udp'
+  'tcp+udp': 'tcp+udp'
+}> = /* @__PURE__ */ z.enum(['tcp', 'udp', 'tcp+udp']).meta({
+  id: 'Protocol',
+  description: 'Transports owned together by one port mapping.',
+})
 export const RemoveDeviceParams: z.ZodObject<{
   subnet: z.ZodString
   ip: z.ZodString
@@ -384,27 +339,6 @@ export const RemovePinholeParams: z.ZodObject<{
   externalPort: z.ZodInt
 }> = /* @__PURE__ */ object({ gua: z.string(), externalPort: z.int() }).meta({
   id: 'RemovePinholeParams',
-})
-export const RemovePortForwardParams: z.ZodObject<{
-  source: z.ZodString
-  /**
-   * Remove a single SNI route on `source`; omit to remove the whole forward.
-   */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  source: z.string(),
-  /**
-   * Remove a single SNI route on `source`; omit to remove the whole forward.
-   */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Remove a single SNI route on `source`; omit to remove the whole forward.',
-  }),
-}).meta({
-  id: 'RemovePortForwardParams',
 })
 export const Session: z.ZodObject<{
   /**
@@ -508,29 +442,6 @@ export const SetPinholeEnabledParams: z.ZodObject<{
   enabled: z.boolean(),
 }).meta({
   id: 'SetPinholeEnabledParams',
-})
-export const SetPortForwardEnabledParams: z.ZodObject<{
-  source: z.ZodString
-  enabled: z.ZodBoolean
-  /**
-   * Toggle a single SNI route on `source`; omit for a DNAT forward.
-   */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  source: z.string(),
-  enabled: z.boolean(),
-  /**
-   * Toggle a single SNI route on `source`; omit for a DNAT forward.
-   */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Toggle a single SNI route on `source`; omit for a DNAT forward.',
-  }),
-}).meta({
-  id: 'SetPortForwardEnabledParams',
 })
 export const SetSubnetIpv6Params: z.ZodObject<{
   /**
@@ -661,32 +572,6 @@ export const UpdatePinholeLabelParams: z.ZodObject<{
 }).meta({
   id: 'UpdatePinholeLabelParams',
 })
-export const UpdatePortForwardLabelParams: z.ZodObject<{
-  source: z.ZodString
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * Label a single SNI route on `source`; omit to label the DNAT forward.
-   */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  source: z.string(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
-  /**
-   * Label a single SNI route on `source`; omit to label the DNAT forward.
-   */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Label a single SNI route on `source`; omit to label the DNAT forward.',
-  }),
-}).meta({
-  id: 'UpdatePortForwardLabelParams',
-})
 
 /**
  * A WireGuard client's role. A `Server` is a StartOS box that may configure the
@@ -730,6 +615,65 @@ export const AddKeyParams: z.ZodObject<{
   key: typeof AnyVerifyingKey
 }> = /* @__PURE__ */ object({ name: z.string(), key: AnyVerifyingKey }).meta({
   id: 'AddKeyParams',
+})
+export const AddPortForwardParams: z.ZodObject<{
+  protocol: z.ZodCodec<z.ZodOptional<typeof Protocol>, typeof Protocol>
+  /**
+   * External (WAN) port to forward. The external IP is fixed to the target's
+   * WAN so return traffic stays symmetric.
+   */
+  externalPort: z.ZodInt
+  target: z.ZodString
+  label: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Hostnames to SNI-demux on the shared external port. Empty = normal DNAT.
+   */
+  sni: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
+  /**
+   * Number of contiguous ports to forward (a PCP PORT_SET range), counting up
+   * from both `external_port` and the target port. Defaults to 1. Not valid
+   * together with SNI demux.
+   */
+  count: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+}> = /* @__PURE__ */ object({
+  protocol: wire(Protocol.optional(), Protocol),
+  /**
+   * External (WAN) port to forward. The external IP is fixed to the target's
+   * WAN so return traffic stays symmetric.
+   */
+  externalPort: z.int().meta({
+    description:
+      "External (WAN) port to forward. The external IP is fixed to the target's\nWAN so return traffic stays symmetric.",
+  }),
+  target: z.string(),
+  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * Hostnames to SNI-demux on the shared external port. Empty = normal DNAT.
+   */
+  sni: wire(z.array(z.string()).optional(), z.array(z.string())).meta({
+    description:
+      'Hostnames to SNI-demux on the shared external port. Empty = normal DNAT.',
+  }),
+  /**
+   * Number of contiguous ports to forward (a PCP PORT_SET range), counting up
+   * from both `external_port` and the target port. Defaults to 1. Not valid
+   * together with SNI demux.
+   */
+  count: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description:
+      'Number of contiguous ports to forward (a PCP PORT_SET range), counting up\nfrom both `external_port` and the target port. Defaults to 1. Not valid\ntogether with SNI demux.',
+  }),
+}).meta({
+  id: 'AddPortForwardParams',
 })
 export const ApplyWithPathParams: z.ZodIntersection<
   z.ZodObject<{
@@ -812,6 +756,43 @@ export const RemoveKeyParams: z.ZodObject<{ key: typeof AnyVerifyingKey }> =
   /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
     id: 'RemoveKeyParams',
   })
+export const RemovePortForwardParams: z.ZodObject<{
+  /**
+   * Omitted removes the whole forward, or selects the TCP-owning hostname/fallback mapping.
+   */
+  protocol: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Protocol>>,
+    z.ZodNullable<typeof Protocol>
+  >
+  fallback: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  source: z.ZodString
+  /**
+   * Selects a hostname; omitted removes the selected routes and fallback.
+   */
+  hostname: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Omitted removes the whole forward, or selects the TCP-owning hostname/fallback mapping.
+   */
+  protocol: wire(Protocol.nullable().optional(), Protocol.nullable()).meta({
+    description:
+      'Omitted removes the whole forward, or selects the TCP-owning hostname/fallback mapping.',
+  }),
+  fallback: wire(z.boolean().optional(), z.boolean()),
+  source: z.string(),
+  /**
+   * Selects a hostname; omitted removes the selected routes and fallback.
+   */
+  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'Selects a hostname; omitted removes the selected routes and fallback.',
+  }),
+}).meta({
+  id: 'RemovePortForwardParams',
+})
 export const SetDeviceKindParams: z.ZodObject<{
   subnet: z.ZodString
   ip: z.ZodString
@@ -822,6 +803,41 @@ export const SetDeviceKindParams: z.ZodObject<{
   kind: WgClientKind,
 }).meta({
   id: 'SetDeviceKindParams',
+})
+export const SetPortForwardEnabledParams: z.ZodObject<{
+  /**
+   * Omitted selects the logical mapping that owns TCP.
+   */
+  protocol: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Protocol>>,
+    z.ZodNullable<typeof Protocol>
+  >
+  source: z.ZodString
+  enabled: z.ZodBoolean
+  /**
+   * Omitted toggles the selected fallback or a plain forward.
+   */
+  hostname: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Omitted selects the logical mapping that owns TCP.
+   */
+  protocol: wire(Protocol.nullable().optional(), Protocol.nullable()).meta({
+    description: 'Omitted selects the logical mapping that owns TCP.',
+  }),
+  source: z.string(),
+  enabled: z.boolean(),
+  /**
+   * Omitted toggles the selected fallback or a plain forward.
+   */
+  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: 'Omitted toggles the selected fallback or a plain forward.',
+  }),
+}).meta({
+  id: 'SetPortForwardEnabledParams',
 })
 export const SetSubnetDnsParams: z.ZodObject<{
   mode: typeof DnsMode
@@ -860,6 +876,44 @@ export const SubscribeRes: z.ZodObject<{
   guid: typeof Guid
 }> = /* @__PURE__ */ object({ dump: Dump, guid: Guid }).meta({
   id: 'SubscribeRes',
+})
+export const UpdatePortForwardLabelParams: z.ZodObject<{
+  /**
+   * Omitted selects the logical mapping that owns TCP.
+   */
+  protocol: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Protocol>>,
+    z.ZodNullable<typeof Protocol>
+  >
+  source: z.ZodString
+  label: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Omitted labels the selected fallback or a plain forward.
+   */
+  hostname: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Omitted selects the logical mapping that owns TCP.
+   */
+  protocol: wire(Protocol.nullable().optional(), Protocol.nullable()).meta({
+    description: 'Omitted selects the logical mapping that owns TCP.',
+  }),
+  source: z.string(),
+  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * Omitted labels the selected fallback or a plain forward.
+   */
+  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: 'Omitted labels the selected fallback or a plain forward.',
+  }),
+}).meta({
+  id: 'UpdatePortForwardLabelParams',
 })
 export const WgConfig: z.ZodObject<{
   name: z.ZodString

@@ -79,9 +79,6 @@ export type RpcSchemaTree<Schema> = {
 }
 export type AddDnsRecordParamsInput = z.input<typeof schemas.AddDnsRecordParams>
 export type AddPinholeParamsInput = z.input<typeof schemas.AddPinholeParams>
-export type AddPortForwardParamsInput = z.input<
-  typeof schemas.AddPortForwardParams
->
 export type AddSubnetParamsInput = z.input<typeof schemas.AddSubnetParams>
 export type AnyVerifyingKeyInput = z.input<typeof schemas.AnyVerifyingKey>
 export type ApplyParamsInput = z.input<typeof schemas.ApplyParams>
@@ -121,15 +118,17 @@ export type IoFormatInput = z.input<typeof schemas.IoFormat>
 export type ListDevicesParamsInput = z.input<typeof schemas.ListDevicesParams>
 export type ListParamsInput = z.input<typeof schemas.ListParams>
 export type LogoutParamsInput = z.input<typeof schemas.LogoutParams>
+
+/**
+ * Transports owned together by one port mapping.
+ */
+export type ProtocolInput = z.input<typeof schemas.Protocol>
 export type RemoveDeviceParamsInput = z.input<typeof schemas.RemoveDeviceParams>
 export type RemoveDnsRecordParamsInput = z.input<
   typeof schemas.RemoveDnsRecordParams
 >
 export type RemovePinholeParamsInput = z.input<
   typeof schemas.RemovePinholeParams
->
-export type RemovePortForwardParamsInput = z.input<
-  typeof schemas.RemovePortForwardParams
 >
 export type Session = z.output<typeof schemas.Session>
 export type SetAutoPortForwardParamsInput = z.input<
@@ -147,9 +146,6 @@ export type SetPasswordParamsInput = z.input<typeof schemas.SetPasswordParams>
 export type SetPinholeEnabledParamsInput = z.input<
   typeof schemas.SetPinholeEnabledParams
 >
-export type SetPortForwardEnabledParamsInput = z.input<
-  typeof schemas.SetPortForwardEnabledParams
->
 export type SetSubnetIpv6ParamsInput = z.input<
   typeof schemas.SetSubnetIpv6Params
 >
@@ -161,9 +157,6 @@ export type TunnelCertDataInput = z.input<typeof schemas.TunnelCertData>
 export type TunnelUpdateResult = z.output<typeof schemas.TunnelUpdateResult>
 export type UpdatePinholeLabelParamsInput = z.input<
   typeof schemas.UpdatePinholeLabelParams
->
-export type UpdatePortForwardLabelParamsInput = z.input<
-  typeof schemas.UpdatePortForwardLabelParams
 >
 
 /**
@@ -183,6 +176,9 @@ export type WgClientKind = z.output<typeof schemas.WgClientKind>
 export type WgClientKindInput = z.input<typeof schemas.WgClientKind>
 export type AddDeviceParamsInput = z.input<typeof schemas.AddDeviceParams>
 export type AddKeyParamsInput = z.input<typeof schemas.AddKeyParams>
+export type AddPortForwardParamsInput = z.input<
+  typeof schemas.AddPortForwardParams
+>
 export type ApplyWithPathParamsInput = z.input<
   typeof schemas.ApplyWithPathParams
 >
@@ -194,11 +190,20 @@ export type AuthKeys = z.output<typeof schemas.AuthKeys>
 export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
+export type RemovePortForwardParamsInput = z.input<
+  typeof schemas.RemovePortForwardParams
+>
 export type SetDeviceKindParamsInput = z.input<
   typeof schemas.SetDeviceKindParams
 >
+export type SetPortForwardEnabledParamsInput = z.input<
+  typeof schemas.SetPortForwardEnabledParams
+>
 export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
+export type UpdatePortForwardLabelParamsInput = z.input<
+  typeof schemas.UpdatePortForwardLabelParams
+>
 export type WgConfig = z.output<typeof schemas.WgConfig>
 
 /**

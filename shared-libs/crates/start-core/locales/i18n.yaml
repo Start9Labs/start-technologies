@@ -3975,6 +3975,41 @@ tunnel.api.invalid-endpoint:
   fr_FR: 'Saisissez une adresse IPv4, IPv6 ou un nom DNS sans schéma, port ni chemin'
   pl_PL: 'Wprowadź adres IPv4, IPv6 lub nazwę DNS bez schematu, portu ani ścieżki'
 
+tunnel.api.protocol-requires-hostname:
+  en_US: "UDP transport selection requires a hostname. Plain forwards publish both TCP and UDP."
+  de_DE: "Die Auswahl von UDP erfordert einen Hostnamen. Einfache Weiterleitungen veröffentlichen TCP und UDP."
+  es_ES: "Seleccionar UDP requiere un nombre de host. Los reenvíos simples publican tanto TCP como UDP."
+  fr_FR: "La sélection d’UDP nécessite un nom d’hôte. Les redirections simples publient TCP et UDP."
+  pl_PL: "Wybór UDP wymaga nazwy hosta. Zwykłe przekierowania udostępniają zarówno TCP, jak i UDP."
+
+tunnel.api.route-not-found:
+  en_US: "Hostname route or fallback not found"
+  de_DE: "Hostnamen-Route oder Fallback nicht gefunden"
+  es_ES: "No se encontró la ruta por nombre de host ni el destino predeterminado"
+  fr_FR: "Route par nom d’hôte ou destination de repli introuvable"
+  pl_PL: "Nie znaleziono trasy według nazwy hosta ani celu domyślnego"
+
+tunnel.forward.fallback-conflict:
+  en_US: "Fallback overlaps an existing mapping"
+  de_DE: "Das Fallback überschneidet sich mit einer vorhandenen Zuordnung"
+  es_ES: "El destino predeterminado se superpone con una asignación existente"
+  fr_FR: "La destination de repli chevauche une correspondance existante"
+  pl_PL: "Cel domyślny nakłada się na istniejące mapowanie"
+
+tunnel.forward.hostname-held:
+  en_US: "Hostname %{hostname} is held by another client"
+  de_DE: "Der Hostname %{hostname} ist einem anderen Client zugeordnet"
+  es_ES: "El nombre de host %{hostname} pertenece a otro cliente"
+  fr_FR: "Le nom d’hôte %{hostname} est attribué à un autre client"
+  pl_PL: "Nazwa hosta %{hostname} jest przypisana do innego klienta"
+
+tunnel.forward.hostname-protocol-conflict:
+  en_US: "Hostname %{hostname} overlaps an existing protocol selection"
+  de_DE: "Der Hostname %{hostname} überschneidet sich mit einer vorhandenen Protokollauswahl"
+  es_ES: "El nombre de host %{hostname} se superpone con una selección de protocolo existente"
+  fr_FR: "Le nom d’hôte %{hostname} chevauche une sélection de protocole existante"
+  pl_PL: "Nazwa hosta %{hostname} nakłada się na istniejący wybór protokołu"
+
 util.crypto.invalid-backup-key:
   en_US: "The wrapped backup key is invalid or could not be authenticated."
   de_DE: "Der verschlüsselte Sicherungsschlüssel ist ungültig oder konnte nicht authentifiziert werden."
@@ -5130,6 +5165,34 @@ help.arg.tunnel-address:
   es_ES: "Dirección del servidor de túnel"
   fr_FR: "Adresse du serveur tunnel"
   pl_PL: "Adres serwera tunelu"
+
+help.arg.tunnel-forward-fallback:
+  en_US: "Remove only the selected transport's hostname-less fallback"
+  de_DE: "Nur den namenslosen Fallback des ausgewählten Transportprotokolls entfernen"
+  es_ES: "Eliminar solo el destino predeterminado sin nombre del protocolo seleccionado"
+  fr_FR: "Supprimer uniquement la destination de repli sans nom du protocole sélectionné"
+  pl_PL: "Usuń tylko domyślny cel bez nazwy hosta dla wybranego protokołu"
+
+help.arg.tunnel-forward-management-protocol:
+  en_US: "Logical protocol selection; omitted selects the mapping that owns TCP"
+  de_DE: "Logische Protokollauswahl; ohne Angabe wird die Zuordnung ausgewählt, die TCP belegt"
+  es_ES: "Selección lógica de protocolo; si se omite, selecciona la asignación que ocupa TCP"
+  fr_FR: "Sélection logique du protocole ; sans indication, sélectionne la correspondance qui détient TCP"
+  pl_PL: "Logiczny wybór protokołu; pominięcie wybiera mapowanie zajmujące TCP"
+
+help.arg.tunnel-forward-protocol:
+  en_US: "Logical protocol selection; tcp+udp shares one mapping. Plain DNAT forwards use both transports."
+  de_DE: "Logische Protokollauswahl; tcp+udp verwendet eine gemeinsame Zuordnung. Einfache DNAT-Weiterleitungen verwenden beide Protokolle."
+  es_ES: "Selección lógica de protocolo; tcp+udp comparte una asignación. Los reenvíos DNAT simples usan ambos protocolos."
+  fr_FR: "Sélection logique du protocole ; tcp+udp partage une correspondance. Les redirections DNAT simples utilisent les deux protocoles."
+  pl_PL: "Logiczny wybór protokołu; tcp+udp współdzieli jedno mapowanie. Zwykłe przekierowania DNAT używają obu protokołów."
+
+help.arg.tunnel-forward-remove-protocol:
+  en_US: "Limit removal to tcp, udp, or tcp+udp. Omit to remove the whole forward; hostname or fallback selection follows the mapping that owns TCP"
+  de_DE: "Entfernen auf tcp, udp oder tcp+udp begrenzen. Ohne Angabe die gesamte Weiterleitung entfernen; bei Hostnamen oder Fallbacks wird die Zuordnung ausgewählt, die TCP belegt"
+  es_ES: "Limitar la eliminación a tcp, udp o tcp+udp. Omitir para eliminar todo el reenvío; al seleccionar un nombre o destino predeterminado se usa la asignación que ocupa TCP"
+  fr_FR: "Limiter la suppression à tcp, udp ou tcp+udp. Omettre pour supprimer toute la redirection ; un nom ou un repli sélectionne la correspondance qui détient TCP"
+  pl_PL: "Ogranicz usuwanie do tcp, udp lub tcp+udp. Pomiń, aby usunąć całe przekierowanie; wybór nazwy hosta lub celu domyślnego wskazuje mapowanie zajmujące TCP"
 
 help.arg.tunnel-listen-address:
   en_US: "Address for tunnel to listen on"

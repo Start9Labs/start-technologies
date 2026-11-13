@@ -323,6 +323,7 @@ pub(super) async fn apply_peer_forward_range(
             target: existing,
             count: existing_count,
             enabled,
+            auto,
             ..
         }) => {
             if existing != target || existing_count != count {
@@ -355,8 +356,10 @@ pub(super) async fn apply_peer_forward_range(
                     m.insert(source, rc);
                 });
             }
-            if let Some(lt) = lifetime {
-                lease::stamp(ctx, LeaseKey::Dnat(source), lt);
+            if auto {
+                if let Some(lt) = lifetime {
+                    lease::stamp(ctx, LeaseKey::Dnat(source), lt);
+                }
             }
             return Ok(());
         }
@@ -499,19 +502,17 @@ async fn assigned_wan_for(ctx: &TunnelContext, peer: Ipv4Addr) -> Option<Ipv4Add
     })
 }
 
-pub(in crate::tunnel) async fn prefix_for(ctx: &TunnelContext, target_ip: &Ipv4Addr) -> u8 {
-    ctx.net_iface
-        .peek(|ifaces| {
-            ifaces.iter().find_map(|(_, info)| {
-                info.ip_info.as_ref().and_then(|i| {
-                    i.subnets
-                        .iter()
-                        .find(|s| s.contains(&IpAddr::V4(*target_ip)))
-                        .map(|s| s.prefix_len())
-                })
+pub(in crate::tunnel) async fn prefix_for(ctx: &TunnelContext, target_ip: &Ipv4Addr) -> Option<u8> {
+    ctx.net_iface.peek(|ifaces| {
+        ifaces.iter().find_map(|(_, info)| {
+            info.ip_info.as_ref().and_then(|i| {
+                i.subnets
+                    .iter()
+                    .find(|s| s.contains(&IpAddr::V4(*target_ip)))
+                    .map(|s| s.prefix_len())
             })
         })
-        .unwrap_or(32)
+    })
 }
 
 #[cfg(test)]
