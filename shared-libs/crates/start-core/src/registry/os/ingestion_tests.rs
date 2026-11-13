@@ -404,12 +404,49 @@ async fn os_version_edits_preserve_omitted_metadata_assets_and_signers() {
         ..Default::default()
     })
     .unwrap();
-    let request = imbl_value::json!({ "version": "0.4.0.5", "releaseNotes": "RPC edit" });
+    let mut replicas = Vec::new();
+    for os_version in ["0.4.3", "0.4.0.4"] {
+        let wire = crate::registry::device_info::WireCompatibility::for_startos(
+            &os_version.parse().unwrap(),
+        )
+        .unwrap();
+        let mirror = crate::registry::mirror::index_mirror(
+            &ctx.index_mirrors,
+            &ctx.db,
+            None,
+            wire,
+            &ctx.datadir,
+        )
+        .await
+        .unwrap();
+        let (dump, revisions) = mirror
+            .db
+            .dump_and_sub("/index/os/versions".parse().unwrap())
+            .await;
+        replicas.push((mirror, dump.value, revisions));
+    }
+    let revised_notes = imbl_value::json!({ "en_US": "RPC edit", "pl_PL": "Zmiana RPC" });
+    let request =
+        imbl_value::json!({ "version": "0.4.0.5", "releaseNotes": revised_notes.clone() });
     call_registry(&cli, url.clone(), "os.version.edit", request.clone())
         .await
         .unwrap();
-    expected["index"]["os"]["versions"]["0.4.0.5"]["releaseNotes"] = "RPC edit".into();
+    expected["index"]["os"]["versions"]["0.4.0.5"]["releaseNotes"] = revised_notes.clone();
     assert_eq!(snapshot(&ctx).await, expected);
+    for (index, (_mirror, mut view, mut revisions)) in replicas.into_iter().enumerate() {
+        let revision = tokio::time::timeout(std::time::Duration::from_secs(5), revisions.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        patch_db::json_patch::patch(&mut view, &revision.patch).unwrap();
+        if index == 0 {
+            assert_eq!(view["0.4.0.5"]["releaseNotes"], revised_notes);
+            assert!(view["0.4.0.5"].get("headline").is_none());
+        } else {
+            assert_eq!(view["0.4.0.5"]["releaseNotes"].as_str(), Some("RPC edit"));
+            assert_eq!(view["0.4.0.5"]["headline"].as_str(), Some("v0.4.0.5"));
+        }
+    }
 
     ctx.db
         .mutate(|db| db.as_admins_mut().ser(&BTreeSet::<Guid>::new()))
