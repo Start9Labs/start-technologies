@@ -241,12 +241,34 @@ impl<'a> Until<'a> {
 }
 
 /// Caller cancellation abandons the result, not the owned operation.
+/// Propagates the original panic payload.
 pub(crate) async fn complete_owned_operation<T: Send + 'static>(
     operation: impl Future<Output = Result<T, Error>> + Send + 'static,
 ) -> Result<T, Error> {
-    tokio::spawn(operation)
-        .await
-        .with_kind(ErrorKind::Filesystem)?
+    match tokio::spawn(operation).await {
+        Ok(result) => result,
+        Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+        Err(error) => Err(Error::new(error, ErrorKind::Filesystem)),
+    }
+}
+
+#[tokio::test]
+async fn complete_owned_operation_propagates_original_panic() {
+    use std::panic::{AssertUnwindSafe, panic_any};
+    use std::sync::Arc;
+
+    let payload = Arc::new(42);
+    let expected = payload.clone();
+    let error = AssertUnwindSafe(complete_owned_operation::<()>(
+        async move { panic_any(payload) },
+    ))
+    .catch_unwind()
+    .await
+    .unwrap_err();
+    assert!(Arc::ptr_eq(
+        error.downcast_ref::<Arc<i32>>().unwrap(),
+        &expected
+    ));
 }
 
 pub async fn make_send<F, Fut, T>(f: F) -> Result<T, Error>

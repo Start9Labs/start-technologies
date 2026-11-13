@@ -125,7 +125,8 @@ impl Descriptor {
                 &generation.manifest.rootfs_sha256,
                 &generation.manifest.overlay_sha256,
             )?;
-            let Ok(mut policies) = tokio::fs::read_dir(generation.path.join(POLICIES_DIR)).await
+            let Ok(mut policies) =
+                os_overlay::read_generation_directory(&generation.path.join(POLICIES_DIR)).await
             else {
                 continue;
             };

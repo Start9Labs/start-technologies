@@ -7,6 +7,8 @@
 //! untouched lower root-deletion markers survive unrelated edits. The public
 //! rootfs is excluded from configuration snapshots.
 //!
+//! Metadata files and leaf directories reject symlinks and special files before opening.
+//! Callers keep source paths stable throughout passive admission and verification.
 //! Selection authenticates full file contents. Callers must keep verified contents
 //! stable through use, using the signed dm-verity roots or a RAM copy; a returned
 //! path is not protection against subsequent writes. Timestamps select among valid generations
@@ -451,6 +453,9 @@ impl Manifest {
 }
 
 async fn regular_file(path: &Path) -> Result<tokio::fs::File, Error> {
+    if !tokio::fs::symlink_metadata(path).await?.is_file() {
+        return Err(invalid_signature());
+    }
     let file = tokio::fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
@@ -461,6 +466,15 @@ async fn regular_file(path: &Path) -> Result<tokio::fs::File, Error> {
         return Err(invalid_signature());
     }
     Ok(file)
+}
+
+pub(crate) async fn read_generation_directory(path: &Path) -> Result<tokio::fs::ReadDir, Error> {
+    if !tokio::fs::symlink_metadata(path).await?.is_dir() {
+        return Err(invalid_signature());
+    }
+    tokio::fs::read_dir(path)
+        .await
+        .with_kind(ErrorKind::Filesystem)
 }
 
 async fn digest_file(path: &Path) -> Result<[u8; 32], Error> {
@@ -664,7 +678,7 @@ impl PreparedGeneration {
 
 fn sync_tree(path: &Path) -> impl Future<Output = Result<(), Error>> + Send {
     async move {
-        let mut entries = tokio::fs::read_dir(path).await?;
+        let mut entries = read_generation_directory(path).await?;
         while let Some(entry) = entries.next_entry().await? {
             let kind = entry.file_type().await?;
             if kind.is_dir() {
@@ -741,7 +755,7 @@ pub async fn verified_generations(
 ) -> Result<Vec<VerifiedGeneration>, Error> {
     require_p256(key)?;
     let rootfs_sha256 = digest_file(rootfs).await?;
-    let mut entries = tokio::fs::read_dir(store).await?;
+    let mut entries = read_generation_directory(store).await?;
     let mut verified = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
         if !is_generation(&entry.file_name()) || !entry.file_type().await?.is_dir() {
@@ -770,7 +784,7 @@ pub async fn verified_generations(
 /// are left alone, including active preparations. Serialize pruning with writers
 /// and readers that still need paths.
 pub async fn prune(store: &Path, retain: &[PathBuf]) -> Result<(), Error> {
-    let mut entries = tokio::fs::read_dir(store).await?;
+    let mut entries = read_generation_directory(store).await?;
     while let Some(entry) = entries.next_entry().await? {
         if is_generation(&entry.file_name())
             && entry.file_type().await?.is_dir()
@@ -798,6 +812,76 @@ mod tests {
 
     fn public_key(key: &PKeyRef<Private>) -> PKey<Public> {
         PKey::public_key_from_pem(&key.public_key_to_pem().unwrap()).unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn passive_generation_file_admission_rejects_fifo_without_opening() {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        use inotify::{EventMask, Inotify, WatchMask};
+        use nix::sys::stat::Mode;
+
+        let root = tempfile::tempdir().unwrap();
+        let fifo = root.path().join("manifest.bin");
+        nix::unistd::mkfifo(&fifo, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+        let mut watch = Inotify::init().unwrap();
+        watch.watches().add(&fifo, WatchMask::OPEN).unwrap();
+        assert!(read_generation_file(&fifo, MANIFEST_LEN).await.is_err());
+        let mut events = [0; 4096];
+        assert!(matches!(
+            watch.read_events(&mut events),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+        ));
+        let _opened = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&fifo)
+            .unwrap();
+        assert!(
+            watch
+                .read_events(&mut events)
+                .unwrap()
+                .any(|event| event.mask.contains(EventMask::OPEN))
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn passive_generation_directory_admission_rejects_symlink_without_listing() {
+        use inotify::{EventMask, Inotify, WatchMask};
+
+        let root = tempfile::tempdir().unwrap();
+        let policies = root.path().join("policies");
+        fs::create_dir(&policies).unwrap();
+        fs::write(policies.join("profile.json"), b"profile data").unwrap();
+        let alias = root.path().join("policy-link");
+        symlink(&policies, &alias).unwrap();
+        let mut watch = Inotify::init().unwrap();
+        watch.watches().add(&policies, WatchMask::OPEN).unwrap();
+        assert!(read_generation_directory(&alias).await.is_err());
+        let mut events = [0; 4096];
+        assert!(matches!(
+            watch.read_events(&mut events),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+        ));
+        let mut directory = read_generation_directory(&policies).await.unwrap();
+        assert_eq!(
+            directory.next_entry().await.unwrap().unwrap().file_name(),
+            "profile.json"
+        );
+        assert!(
+            watch
+                .read_events(&mut events)
+                .unwrap()
+                .any(|event| event.mask.contains(EventMask::OPEN))
+        );
+        assert_eq!(
+            read_generation_file(&policies.join("profile.json"), 20)
+                .await
+                .unwrap(),
+            b"profile data"
+        );
     }
 
     #[test]
