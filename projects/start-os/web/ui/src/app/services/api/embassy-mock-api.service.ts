@@ -167,6 +167,31 @@ export class MockApiService extends ApiService {
   >()
   sequence = 1
   private readonly handlers: RpcHandlers<Api> = {
+    'server.set-nut': params => this.setNut(params),
+    'server.nut-status': params => this.getNutStatus(params),
+    'server.nut-list-ups': async () => {
+      await pauseFor(1000)
+      return [{ name: 'ups', description: 'Synology UPS' }]
+    },
+    'server.nut-scan': async () => {
+      await pauseFor(2000)
+      return [
+        {
+          driver: 'usbhid-ups',
+          port: 'auto',
+          vendorId: '051D',
+          productId: '0002',
+          serial: '4B1234P56789',
+          bus: '001',
+          busPort: '002',
+          vendor: 'American Power Conversion',
+          product: 'Back-UPS ES 600M1',
+        },
+      ]
+    },
+    'server.clear-nut': () =>
+      this.setNut({ config: { enabled: false, settings: null } }),
+
     'git-info': async () => this.gitHash,
     state: async () => {
       await pauseFor(1000)
@@ -1303,28 +1328,6 @@ export class MockApiService extends ApiService {
               },
             },
           ])
-
-        await this.notify({
-          packageId: null,
-          code: 1,
-          level: Object.values(report.sharedVolumes).some(item => item.error)
-            ? 'warning'
-            : 'success',
-          title: 'Backup complete',
-          message: 'Backup complete',
-          data: report,
-        })
-        if (this.backupTarget(params.targetId)?.legacyBackup) {
-          await this.notify({
-            packageId: null,
-            code: 0,
-            level: 'warning',
-            title: 'Old Backup Still Present',
-            message:
-              'This backup target still contains an old-format (V1) backup that is no longer needed. To free up space on the drive, open this target on the Backups page and delete it.',
-            data: null,
-          })
-        }
       }, 500)
 
       const originalPatch: ReplaceOperation<
@@ -2863,24 +2866,6 @@ export class MockApiService extends ApiService {
     }
   }
 
-  private async notify(
-    notification: Omit<T.NotificationWithId, 'id' | 'createdAt' | 'seen'>,
-  ) {
-    Mock.Notifications.unshift({
-      ...notification,
-      id: Math.max(0, ...Mock.Notifications.map(item => item.id)) + 1,
-      createdAt: new Date().toISOString(),
-      seen: false,
-    })
-    await this.mockRevision([
-      {
-        op: PatchOp.REPLACE,
-        path: '/serverInfo/unreadNotificationCount',
-        value: this.mockData('/serverInfo/unreadNotificationCount') + 1,
-      },
-    ])
-  }
-
   private offeredKeys(url: string): string[] {
     return Object.entries(mockPatchData.serverInfo.registryKeys)
       .filter(([saved]) => sameUrl(saved, url))
@@ -3239,5 +3224,93 @@ export class MockApiService extends ApiService {
   private async getRegistryPackages(params: GetRegistryPackagesReq) {
     await pauseFor(2000)
     return Mock.RegistryPackages
+  }
+
+  private async setNut(params: Params<'server.set-nut'>): Promise<null> {
+    await pauseFor(2000)
+    const settings = params.config.settings ?? null
+    const config: T.NutConfig = {
+      enabled: params.config.enabled ?? false,
+      settings: !settings
+        ? null
+        : settings.mode === 'client'
+          ? { ...settings, port: settings.port ?? 3493 }
+          : {
+              ...settings,
+              device: {
+                ...settings.device,
+                vendorId: settings.device.vendorId ?? null,
+                productId: settings.device.productId ?? null,
+                serial: settings.device.serial ?? null,
+                bus: settings.device.bus ?? null,
+                busPort: settings.device.busPort ?? null,
+                vendor: settings.device.vendor ?? null,
+                product: settings.device.product ?? null,
+              },
+              listenAll: settings.listenAll ?? false,
+              remoteUsername: settings.remoteUsername ?? null,
+              remotePassword: settings.remotePassword ?? null,
+            },
+    }
+    mockPatchData.serverInfo.nut = config
+    this.mockRevision([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/nut',
+        value: config,
+      },
+    ])
+    return null
+  }
+
+  private async getNutStatus(params: {}): Promise<T.NutStatus> {
+    await pauseFor(1000)
+    const settings: T.NutSettings | null = this.mockData(
+      '/serverInfo/nut/settings',
+    )
+    const host = settings?.mode === 'client' ? settings.host : 'localhost'
+    const port = settings?.mode === 'client' ? settings.port : 3493
+    return {
+      target: `${settings?.mode === 'client' ? settings.upsName : 'startos'}@${host.includes(':') && !host.startsWith('[') ? `[${host}]` : host}:${port}`,
+      monitoringError: null,
+      variables: {
+        'battery.charge': '96',
+        'battery.charge.low': '10',
+        'battery.charge.warning': '20',
+        'battery.mfr.date': '2023/04/11',
+        'battery.runtime': '4280',
+        'battery.runtime.low': '300',
+        'battery.type': 'PbAc',
+        'battery.voltage': '13.5',
+        'battery.voltage.nominal': '12',
+        'device.mfr': 'Start9 Mock UPS',
+        'device.model': 'NUT Simulator',
+        'device.serial': 'MOCK-UPS-001',
+        'device.type': 'ups',
+        'driver.name': 'usbhid-ups',
+        'driver.parameter.pollinterval': '15',
+        'driver.parameter.port': 'auto',
+        'driver.version': '2.8.1',
+        'driver.version.data': 'CyberPower HID 0.8',
+        'input.transfer.high': '139',
+        'input.transfer.low': '88',
+        'input.voltage': '120.1',
+        'input.voltage.nominal': '120',
+        'output.voltage': '120.0',
+        'ups.beeper.status': 'enabled',
+        'ups.delay.shutdown': '20',
+        'ups.load': '18',
+        'ups.mfr': 'Start9 Mock UPS',
+        'ups.model': 'NUT Simulator',
+        'ups.productid': '0501',
+        'ups.realpower.nominal': '900',
+        'ups.serial': 'MOCK-UPS-001',
+        'ups.status': 'OL CHRG',
+        'ups.test.result': 'No test initiated',
+        'ups.timer.shutdown': '-1',
+        'ups.timer.start': '-1',
+        'ups.vendorid': '0764',
+      },
+    }
   }
 }
