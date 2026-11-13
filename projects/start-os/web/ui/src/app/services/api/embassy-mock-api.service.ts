@@ -1303,28 +1303,6 @@ export class MockApiService extends ApiService {
               },
             },
           ])
-
-        await this.notify({
-          packageId: null,
-          code: 1,
-          level: Object.values(report.sharedVolumes).some(item => item.error)
-            ? 'warning'
-            : 'success',
-          title: 'Backup complete',
-          message: 'Backup complete',
-          data: report,
-        })
-        if (this.backupTarget(params.targetId)?.legacyBackup) {
-          await this.notify({
-            packageId: null,
-            code: 0,
-            level: 'warning',
-            title: 'Old Backup Still Present',
-            message:
-              'This backup target still contains an old-format (V1) backup that is no longer needed. To free up space on the drive, open this target on the Backups page and delete it.',
-            data: null,
-          })
-        }
       }, 500)
 
       const originalPatch: ReplaceOperation<
