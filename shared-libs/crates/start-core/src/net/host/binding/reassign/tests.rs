@@ -298,6 +298,7 @@ fn moving_a_shared_listener_refreshes_sibling_domains_without_enabling_them() {
             .unwrap();
         assert_eq!(row.port, Some(8443));
         assert!(!addresses.enabled().contains(row));
+        assert!(!addresses.effective.contains(row));
     }
     assert!(
         !host
@@ -352,6 +353,7 @@ fn assigning_a_shared_preferred_port_does_not_move_a_siblings_ip_overrides() {
         .unwrap();
     assert_eq!(domain.port, Some(8444));
     assert!(!addresses.enabled().contains(domain));
+    assert!(!addresses.effective.contains(domain));
 }
 
 #[test]

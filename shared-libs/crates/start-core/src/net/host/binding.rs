@@ -134,6 +134,7 @@ impl Model<DerivedAddressInfo> {
 }
 
 impl DerivedAddressInfo {
+    /// Override mutations must refresh selections before publication.
     pub(super) fn refresh_effective(&mut self) {
         self.effective = self.enabled().into_iter().cloned().collect();
     }
