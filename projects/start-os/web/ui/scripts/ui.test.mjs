@@ -2866,6 +2866,13 @@ test('production mocks support inspection, independent failed backups and new-lo
     timestamp: '2026-01-01T00:00:00Z',
     generation: 'previous',
   }
+  await api.mockRevision([
+    {
+      op: 'replace',
+      path: `/backupTargets/${targetId}/legacyBackup`,
+      value: true,
+    },
+  ])
   await api.rpc.backup.create({
     targetId,
     packageIds: [],
@@ -2888,14 +2895,15 @@ test('production mocks support inspection, independent failed backups and new-lo
     Mock.BackupInfo.sharedVolumeBackups[remote].generation,
     'previous',
   )
-  const report = Mock.Notifications[0].data
-  assert.equal(report.sharedVolumes[local].error, null)
-  assert.ok(report.sharedVolumes[remote].error)
-  assert.deepEqual(report.packages, {})
   const history = await api.rpc.backup.history.list({ offset: 0, limit: 1 })
   assert.equal(history.runs[0].targetId, targetId)
   assert.equal(history.runs[0].targetName, 'Archive')
-  assert.deepEqual(history.runs[0].report, report)
+  const report = history.runs[0].report
+  assert.equal(report.sharedVolumes[local].error, null)
+  assert.ok(report.sharedVolumes[remote].error)
+  assert.deepEqual(report.packages, {})
+  assert.equal(cache.value.value.serverInfo.statusInfo.backupProgress, null)
+  assert.deepEqual(Mock.Notifications, originalNotifications)
   assert.equal(cache.value.value.backupTargets[targetId].name, 'Later name')
   const restored = await api.rpc.backup.volume.restore({
     targetId,

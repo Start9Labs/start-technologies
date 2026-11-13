@@ -1129,6 +1129,17 @@ export const QueryDnsRes: z.ZodObject<{
 export const ReaderParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'ReaderParams',
 })
+export const ReassignPortParams: z.ZodObject<{
+  internalPort: z.ZodInt
+  externalPort: z.ZodInt
+  ssl: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  internalPort: z.int(),
+  externalPort: z.int(),
+  ssl: wire(z.boolean().optional(), z.boolean()),
+}).meta({
+  id: 'ReassignPortParams',
+})
 
 /**
  * A registry asset with a caller-selected commitment representation.
@@ -6025,7 +6036,18 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
             list: {
-              _PARAMS: /* @__PURE__ */ HistoryParams,
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                HistoryParams,
+              ),
               _RETURN: /* @__PURE__ */ BackupHistory,
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
@@ -6902,6 +6924,15 @@ export const Api = {
                     ),
                   ),
                   _RETURN: /* @__PURE__ */ Bindings,
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
+                },
+                'reassign-port': {
+                  _PARAMS: /* @__PURE__ */ z.intersection(
+                    z.intersection(RequiresPackageId, RequiresHostId),
+                    ReassignPortParams,
+                  ),
+                  _RETURN: /* @__PURE__ */ z.null(),
                   _ITEM: /* @__PURE__ */ z.never(),
                   _FINAL: /* @__PURE__ */ z.null(),
                 },
@@ -8084,6 +8115,12 @@ export const Api = {
                     empty,
                   ),
                   _RETURN: /* @__PURE__ */ Bindings,
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
+                },
+                'reassign-port': {
+                  _PARAMS: /* @__PURE__ */ ReassignPortParams,
+                  _RETURN: /* @__PURE__ */ z.null(),
                   _ITEM: /* @__PURE__ */ z.never(),
                   _FINAL: /* @__PURE__ */ z.null(),
                 },

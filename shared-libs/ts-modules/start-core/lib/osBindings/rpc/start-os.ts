@@ -307,6 +307,7 @@ export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
  */
 export type QueryDnsRes = z.output<typeof schemas.QueryDnsRes>
 export type ReaderParamsInput = z.input<typeof schemas.ReaderParams>
+export type ReassignPortParamsInput = z.input<typeof schemas.ReassignPortParams>
 
 /**
  * A registry asset with a caller-selected commitment representation.

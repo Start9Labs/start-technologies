@@ -1831,61 +1831,12 @@ init.initializing:
   pl_PL: "Inicjalizowanie..."
 
 # backup/backup_bulk.rs
-backup.bulk.complete-title:
-  en_US: "Backup Complete"
-  de_DE: "Sicherung abgeschlossen"
-  es_ES: "Copia de seguridad completada"
-  fr_FR: "Sauvegarde terminée"
-  pl_PL: "Kopia zapasowa zakończona"
-
-backup.bulk.complete-message:
-  en_US: "Your backup has completed"
-  de_DE: "Ihre Sicherung wurde abgeschlossen"
-  es_ES: "Su copia de seguridad se ha completado"
-  fr_FR: "Votre sauvegarde est terminée"
-  pl_PL: "Twoja kopia zapasowa została zakończona"
-
-backup.bulk.complete-with-failures:
-  en_US: "Your backup has completed, but some package(s) failed to backup"
-  de_DE: "Ihre Sicherung wurde abgeschlossen, aber einige Pakete konnten nicht gesichert werden"
-  es_ES: "Su copia de seguridad se completó, pero algunos paquetes fallaron"
-  fr_FR: "Votre sauvegarde est terminée, mais certains paquets n'ont pas pu être sauvegardés"
-  pl_PL: "Twoja kopia zapasowa została zakończona, ale niektóre pakiety nie zostały zapisane"
-
-backup.bulk.legacy-present-title:
-  en_US: "Old Backup Still Present"
-  de_DE: "Alte Sicherung noch vorhanden"
-  es_ES: "Copia de seguridad antigua aún presente"
-  fr_FR: "Ancienne sauvegarde toujours présente"
-  pl_PL: "Stara kopia zapasowa nadal obecna"
-
-backup.bulk.legacy-present-message:
-  en_US: "This backup target still contains an old-format (V1) backup that is no longer needed. To free up space on the drive, open this target on the Backups page and delete it."
-  de_DE: "Dieses Sicherungsziel enthält noch eine Sicherung im alten Format (V1), die nicht mehr benötigt wird. Um Speicherplatz auf dem Laufwerk freizugeben, öffnen Sie dieses Ziel auf der Seite Backups und löschen Sie sie."
-  es_ES: "Este destino de copia de seguridad todavía contiene una copia en formato antiguo (V1) que ya no es necesaria. Para liberar espacio en la unidad, abra este destino en la página Copias de seguridad y elimínela."
-  fr_FR: "Cette cible de sauvegarde contient encore une sauvegarde à l'ancien format (V1) qui n'est plus nécessaire. Pour libérer de l'espace sur le disque, ouvrez cette cible sur la page Sauvegardes et supprimez-la."
-  pl_PL: "Ten cel kopii zapasowej nadal zawiera kopię w starym formacie (V1), która nie jest już potrzebna. Aby zwolnić miejsce na dysku, otwórz to miejsce docelowe na stronie Kopie zapasowe i usuń ją."
-
 backup.bulk.failed-error:
   en_US: "Backup Failed: %{error}"
   de_DE: "Sicherung fehlgeschlagen: %{error}"
   es_ES: "Copia de seguridad fallida: %{error}"
   fr_FR: "Échec de la sauvegarde : %{error}"
   pl_PL: "Kopia zapasowa nie powiodła się: %{error}"
-
-backup.bulk.failed-title:
-  en_US: "Backup Failed"
-  de_DE: "Sicherung fehlgeschlagen"
-  es_ES: "Copia de seguridad fallida"
-  fr_FR: "Échec de la sauvegarde"
-  pl_PL: "Kopia zapasowa nie powiodła się"
-
-backup.bulk.failed-message:
-  en_US: "Your backup failed to complete."
-  de_DE: "Ihre Sicherung konnte nicht abgeschlossen werden."
-  es_ES: "Su copia de seguridad no se pudo completar."
-  fr_FR: "Votre sauvegarde n'a pas pu être terminée."
-  pl_PL: "Twoja kopia zapasowa nie została ukończona."
 
 backup.bulk.password-mismatch:
   en_US: "The existing backup on this target was encrypted with a different password. Provide the password that was used to create it."
@@ -2225,6 +2176,27 @@ net.host.binding.address-ssl:
   es_ES: "SSL"
   fr_FR: "SSL"
   pl_PL: "SSL"
+
+net.host.binding.reassign.no-assigned-port:
+  en_US: "The binding has no assigned port of the selected type"
+  de_DE: "Die Bindung hat keinen zugewiesenen Port des ausgewählten Typs"
+  es_ES: "La vinculación no tiene un puerto asignado del tipo seleccionado"
+  fr_FR: "La liaison n'a aucun port attribué du type sélectionné"
+  pl_PL: "Powiązanie nie ma przypisanego portu wybranego typu"
+
+net.host.binding.reassign.port-unavailable:
+  en_US: "Port %{port} is reserved or already allocated"
+  de_DE: "Port %{port} ist reserviert oder bereits zugewiesen"
+  es_ES: "El puerto %{port} está reservado o ya está asignado"
+  fr_FR: "Le port %{port} est réservé ou déjà attribué"
+  pl_PL: "Port %{port} jest zarezerwowany lub już przypisany"
+
+net.host.binding.reassign.server-ui-port:
+  en_US: "The server UI's SSL port must remain %{port}"
+  de_DE: "Der SSL-Port der Serveroberfläche muss %{port} bleiben"
+  es_ES: "El puerto SSL de la interfaz del servidor debe seguir siendo %{port}"
+  fr_FR: "Le port SSL de l'interface du serveur doit rester %{port}"
+  pl_PL: "Port SSL interfejsu serwera musi pozostać ustawiony na %{port}"
 
 # net/ssl.rs
 net.ssl.unreachable:
@@ -4320,6 +4292,13 @@ help.arg.binding-enabled:
   fr_FR: "Activer ou désactiver cette liaison"
   pl_PL: "Włącz lub wyłącz to powiązanie"
 
+help.arg.binding-ssl-port:
+  en_US: "Reassign the SSL port instead of the non-SSL port"
+  de_DE: "Den SSL-Port statt des Nicht-SSL-Ports neu zuweisen"
+  es_ES: "Reasignar el puerto SSL en lugar del puerto no SSL"
+  fr_FR: "Réattribuer le port SSL au lieu du port non SSL"
+  pl_PL: "Przypisz ponownie port SSL zamiast portu bez SSL"
+
 help.arg.ca-certificate:
   en_US: "PEM-encoded CA certificate"
   de_DE: "PEM-codiertes CA-Zertifikat"
@@ -5350,6 +5329,20 @@ help.arg.asset-url:
   fr_FR: "URL de la ressource"
   pl_PL: "URL zasobu"
 
+help.arg.backup-history-limit:
+  en_US: "Maximum number of backups to return"
+  de_DE: "Maximale Anzahl zurückzugebender Sicherungen"
+  es_ES: "Número máximo de copias de seguridad a devolver"
+  fr_FR: "Nombre maximum de sauvegardes à retourner"
+  pl_PL: "Maksymalna liczba kopii zapasowych do zwrócenia"
+
+help.arg.backup-history-offset:
+  en_US: "Number of most recent backups to skip"
+  de_DE: "Anzahl der neuesten Sicherungen, die übersprungen werden"
+  es_ES: "Número de copias de seguridad más recientes que se omiten"
+  fr_FR: "Nombre de sauvegardes les plus récentes à ignorer"
+  pl_PL: "Liczba najnowszych kopii zapasowych do pominięcia"
+
 help.arg.backup-password:
   en_US: "Password for backup encryption"
   de_DE: "Passwort für Backup-Verschlüsselung"
@@ -6263,6 +6256,13 @@ about.commands-backup:
   fr_FR: "Commandes liées à la création de sauvegardes et aux cibles de sauvegarde"
   pl_PL: "Polecenia związane z tworzeniem kopii zapasowych i celami kopii zapasowych"
 
+about.commands-backup-history:
+  en_US: "Commands related to backup history"
+  de_DE: "Befehle zum Sicherungsverlauf"
+  es_ES: "Comandos relacionados con el historial de copias de seguridad"
+  fr_FR: "Commandes liées à l'historique des sauvegardes"
+  pl_PL: "Polecenia związane z historią kopii zapasowych"
+
 about.commands-backup-target:
   en_US: "Commands related to a backup target"
   de_DE: "Befehle zu einem Backup-Ziel"
@@ -7090,6 +7090,13 @@ about.list-available-wifi-networks:
   fr_FR: "Lister les réseaux wifi disponibles"
   pl_PL: "Wyświetl dostępne sieci wifi"
 
+about.list-backup-history:
+  en_US: "List past backups and their reports, newest first"
+  de_DE: "Vergangene Sicherungen und ihre Berichte auflisten, neueste zuerst"
+  es_ES: "Listar las copias de seguridad anteriores y sus informes, de la más reciente a la más antigua"
+  fr_FR: "Lister les sauvegardes passées et leurs rapports, les plus récentes en premier"
+  pl_PL: "Wyświetl poprzednie kopie zapasowe i ich raporty, od najnowszych"
+
 about.list-bindings-for-host:
   en_US: "List bindings for a host"
   de_DE: "Bindungen für einen Host auflisten"
@@ -7404,6 +7411,13 @@ about.select-s9pk-for-device:
   es_ES: "Seleccionar el s9pk más compatible para un dispositivo destino"
   fr_FR: "Sélectionner le meilleur s9pk compatible pour un appareil cible"
   pl_PL: "Wybierz najlepiej kompatybilny s9pk dla urządzenia docelowego"
+
+about.reassign-binding-port:
+  en_US: "Change a binding's assigned external port"
+  de_DE: "Den zugewiesenen externen Port einer Bindung ändern"
+  es_ES: "Cambiar el puerto externo asignado de una vinculación"
+  fr_FR: "Modifier le port externe attribué à une liaison"
+  pl_PL: "Zmień przypisany port zewnętrzny powiązania"
 
 about.rebuild-service-container:
   en_US: "Rebuild service container"
