@@ -149,10 +149,12 @@ source version without a device header. Headerless queries without a source vers
 retain the full map. Projection covers OS version queries, the OS index and the full
 index; stored notes remain unchanged.
 
-`WireCompatibility` preserves update discovery for StartOS through 0.4.2.1
+`WireCompatibility` preserves update discovery for StartOS through 0.4.3
 and StartWRT by synthesizing `headline: "v<version>"` in ordinary OS responses
-and versioned subscription snapshots/revisions. Ordinary calls select compatibility
-from the device header or explicit update source version; subscriptions use `osVersion`.
+and versioned subscription snapshots/revisions. The StartOS bound includes the
+0.4.3 alpha builds published before the field's removal, which still require it.
+Ordinary calls select compatibility from the device header or explicit update
+source version; subscriptions use `osVersion`.
 Canonical projections omit persisted headlines without rewriting the database.
 
 ## Persistence

@@ -75,7 +75,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.3"),
+        wire("0.4.3.1"),
         fixture.dir.path(),
     )
     .await
@@ -95,7 +95,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.2.1"),
+        wire("0.4.3"),
         fixture.dir.path(),
     )
     .await

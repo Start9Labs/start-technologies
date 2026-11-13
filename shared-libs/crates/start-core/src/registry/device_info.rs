@@ -334,9 +334,9 @@ fn predates_0_4_0_5(version: &Version) -> Result<bool, Error> {
     Ok(version < &"0.4.0.5".parse::<Version>()?)
 }
 
-/// StartOS through 0.4.2.1 requires `headline` to discover updates.
+/// Some StartOS builds through 0.4.3 require `headline` to discover updates.
 fn requires_os_headline(version: &Version) -> Result<bool, Error> {
-    Ok(version <= &"0.4.2.1".parse::<Version>()?)
+    Ok(version <= &"0.4.3".parse::<Version>()?)
 }
 
 fn os_version_infos<'a>(
@@ -713,7 +713,8 @@ mod tests {
         for (header, source, startwrt, legacy) in [
             (None, None, false, false),
             (None, Some("0.4.2.1"), false, true),
-            (None, Some("0.4.2.2"), false, false),
+            (None, Some("0.4.3"), false, true),
+            (None, Some("0.4.3.1"), false, false),
             (
                 Some("os.version=0.4.0.4&os.compat=*&os.platform=x86_64"),
                 None,
@@ -721,7 +722,7 @@ mod tests {
                 true,
             ),
             (
-                Some("os.version=0.4.3&os.compat=*&os.platform=x86_64"),
+                Some("os.version=0.4.3.1&os.compat=*&os.platform=x86_64"),
                 Some("0.4.0.4"),
                 false,
                 false,

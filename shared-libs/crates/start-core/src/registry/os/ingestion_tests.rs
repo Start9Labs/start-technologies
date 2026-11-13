@@ -405,7 +405,7 @@ async fn os_version_edits_preserve_omitted_metadata_assets_and_signers() {
     })
     .unwrap();
     let mut replicas = Vec::new();
-    for os_version in ["0.4.3", "0.4.0.4"] {
+    for os_version in ["0.4.3.1", "0.4.0.4"] {
         let wire = crate::registry::device_info::WireCompatibility::for_startos(
             &os_version.parse().unwrap(),
         )
@@ -507,16 +507,16 @@ async fn legacy_devices_can_discover_headline_free_releases() {
         for method in ["os.version.get", "os.index", "index"] {
             for (header, source, projected) in [
                 (
-                    Some("os.version=0.4.2.1&os.compat=*&os.platform=x86_64"),
+                    Some("os.version=0.4.3&os.compat=*&os.platform=x86_64"),
                     None,
                     true,
                 ),
                 (
-                    Some("os.version=0.4.2.2&os.compat=*&os.platform=x86_64"),
-                    Some("0.4.2.1"),
+                    Some("os.version=0.4.3.1&os.compat=*&os.platform=x86_64"),
+                    Some("0.4.3"),
                     startwrt,
                 ),
-                (None, Some("0.4.2.1"), method == "os.version.get"),
+                (None, Some("0.4.3"), method == "os.version.get"),
                 (None, None, false),
             ] {
                 let mut headers = http::HeaderMap::new();
