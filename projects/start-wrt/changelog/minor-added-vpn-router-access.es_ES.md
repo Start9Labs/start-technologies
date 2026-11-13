@@ -1,0 +1,1 @@
+- **Administre el router a través de una VPN saliente.** Una VPN saliente hacia un servidor que usted controle, como StartTunnel, puede permitir que los dispositivos detrás de ese servidor accedan a la interfaz web del router, a SSH o a ambos, de modo que un router detrás de CGNAT se pueda administrar desde cualquier lugar.

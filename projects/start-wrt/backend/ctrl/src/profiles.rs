@@ -2752,6 +2752,9 @@ const DNAT_RETURN_PRIORITY: u32 = 100;
 /// Explicit priority for source-based VPN ip rules, ensuring they don't
 /// collide with DNAT_RETURN_PRIORITY through netifd auto-assignment.
 pub(crate) const VPN_ROUTING_PRIORITY: u32 = 200;
+/// Source rule returning traffic from an outbound VPN's own addresses through
+/// its tunnel. Behind DNAT_RETURN_PRIORITY.
+pub(crate) const VPN_ADMIN_REPLY_PRIORITY: u32 = 120;
 /// IPv6 cross-VLAN escape rule: must fire before VPN_ROUTING_PRIORITY so
 /// specific (sibling-LAN /64) destinations escape to the main table before
 /// the per-VLAN default route captures them.
@@ -3024,12 +3027,15 @@ pub(crate) fn strip_unreferenced_wan_zone_vpns(cfgs: &mut Configs) -> Result<boo
 }
 
 /// After routing changes, remove `vpn_<X>` zones (and any forwardings or rules
-/// that reference them) when no profile uses `wg_X` as outbound.
+/// that reference them) when no profile uses `wg_X` as outbound and its server
+/// may not manage the router.
 pub(crate) fn cleanup_orphaned_vpn_zones(cfgs: &mut Configs) {
     let referenced_vpns = profile_vpn_outbounds(cfgs);
     let referenced_zone_names: std::collections::HashSet<String> = referenced_vpns
         .iter()
-        .map(|wg| resolve_outbound_zone(wg))
+        .cloned()
+        .chain(crate::vpn_client::admin_vpns(cfgs))
+        .map(|wg| resolve_outbound_zone(&wg))
         .collect();
 
     // 1. Collect orphaned vpn_<X> zone names.

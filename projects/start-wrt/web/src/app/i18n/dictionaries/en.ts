@@ -594,4 +594,8 @@ export const ENGLISH: Record<string, number> = {
   'Your traffic': 640,
   "To delete this VPN, first change {vpns} to connect via something else.": 641,
   "To disable this VPN, first change {vpns} to connect via something else.": 642,
+  'Router access': 643,
+  'Allow access to the web interface': 644,
+  'Allow SSH access': 645,
+  "Anyone this VPN's server lets through can reach these, including the server's operator. Allow them only on a VPN server you control, such as StartTunnel.": 646,
 }

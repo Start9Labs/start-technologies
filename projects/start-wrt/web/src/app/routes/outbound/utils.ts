@@ -120,6 +120,8 @@ export function getOutboundVpnForm(
       Validators.max(1500),
     ]),
     dns: builder.control('', [dnsListValidator]),
+    admin_web: false,
+    admin_ssh: false,
   })
 }
 
@@ -135,6 +137,8 @@ export function getAddOutboundVpnForm(
     }),
     target: builder.control('Internet', [Validators.required]),
     dns: builder.control('', [dnsListValidator]),
+    admin_web: false,
+    admin_ssh: false,
   })
 }
 

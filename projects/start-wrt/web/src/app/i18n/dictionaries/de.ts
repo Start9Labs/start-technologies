@@ -589,4 +589,8 @@ export default {
   640: 'Ihr Datenverkehr',
   641: 'Um dieses VPN zu löschen, stellen Sie zuerst {vpns} so um, dass sie sich über etwas anderes verbinden.',
   642: 'Um dieses VPN zu deaktivieren, stellen Sie zuerst {vpns} so um, dass sie sich über etwas anderes verbinden.',
+  643: 'Routerzugriff',
+  644: 'Zugriff auf die Weboberfläche erlauben',
+  645: 'SSH-Zugriff erlauben',
+  646: 'Jeder, den der Server dieses VPNs durchlässt, kann diese erreichen, auch der Betreiber des Servers. Erlauben Sie sie nur auf einem VPN-Server, den Sie selbst kontrollieren, etwa StartTunnel.',
 } satisfies i18n

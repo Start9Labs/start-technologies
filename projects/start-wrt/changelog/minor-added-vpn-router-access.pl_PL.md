@@ -1,0 +1,1 @@
+- **Zarządzaj routerem przez wychodzącą sieć VPN.** Wychodząca sieć VPN do serwera, który kontrolujesz, takiego jak StartTunnel, może dać urządzeniom za tym serwerem dostęp do interfejsu WWW routera, SSH lub obu, dzięki czemu routerem za CGNAT można zarządzać z dowolnego miejsca.

@@ -35,6 +35,8 @@ CGNAT does **not** affect:
 
 [StartTunnel](/start-tunnel/) is a virtual private router (VPR) — a minimal, self-hosted router that runs on a VPS with a public IP address. Your devices connect _outbound_ to the VPS, and the VPS accepts inbound connections on their behalf. Because the VPS has a real public IP, CGNAT is completely bypassed.
 
+To manage your router from away, add your StartTunnel connection to the router as an [Outbound VPN](outbound-vpn.md), turn on its [Router Access](outbound-vpn.md#router-access), and connect your laptop or phone to the same StartTunnel. A WireGuard server you run yourself on a VPS or dedicated server works the same way.
+
 ## How to Check
 
 Compare your router's WAN IP with your actual public IP:

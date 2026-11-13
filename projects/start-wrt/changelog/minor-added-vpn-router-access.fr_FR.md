@@ -1,0 +1,1 @@
+- **Gérez le routeur via un VPN sortant.** Un VPN sortant vers un serveur que vous contrôlez, comme StartTunnel, peut permettre aux appareils situés derrière ce serveur d’accéder à l’interface web du routeur, à SSH, ou aux deux, de sorte qu’un routeur derrière un CGNAT peut être géré de n’importe où.

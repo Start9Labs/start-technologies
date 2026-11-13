@@ -3,6 +3,9 @@ use std::net::IpAddr;
 use clap::Parser;
 use rpc_toolkit::{from_fn_async_local, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
+use uciedit::openwrt::{
+    FirewallRule, FirewallTarget, NetworkRoute, NetworkRoute6, NetworkRule, NetworkRule6,
+};
 use uciedit::{
     dump_all, parse_all, Arena, Configs, Line, LineComment, Section, Token, TypedSection,
 };
@@ -24,6 +27,10 @@ struct UciVpnClient {
     pub label: String,
     /// "Internet" or another VPN's label (for chaining)
     pub target: String,
+    #[uci(default)]
+    pub admin_web: Option<bool>,
+    #[uci(default)]
+    pub admin_ssh: Option<bool>,
 }
 
 // === Public API Types ===
@@ -51,6 +58,10 @@ pub struct OutboundVpn {
     /// Seconds since the tunnel's latest handshake, measured on the router.
     /// `None` when it has never completed one.
     pub last_handshake_secs: Option<u64>,
+    /// Private addresses behind the tunnel may reach the router's web interface.
+    pub admin_web: bool,
+    /// Private addresses behind the tunnel may reach the router's SSH server.
+    pub admin_ssh: bool,
 }
 rpc_toolkit::reflect_ts!(OutboundVpn);
 
@@ -76,6 +87,10 @@ pub struct OutboundVpnCreateRequest {
     /// Replaces the config's `DNS =` servers. Absent keeps them.
     #[serde(default)]
     pub dns: Option<Vec<IpAddr>>,
+    #[serde(default)]
+    pub admin_web: bool,
+    #[serde(default)]
+    pub admin_ssh: bool,
 }
 rpc_toolkit::reflect_ts!(OutboundVpnCreateRequest);
 
@@ -97,6 +112,12 @@ pub struct OutboundVpnUpdateRequest {
     /// Replaces the resolvers reached through the tunnel. Absent keeps them.
     #[serde(default)]
     pub dns: Option<Vec<IpAddr>>,
+    /// Absent keeps it.
+    #[serde(default)]
+    pub admin_web: Option<bool>,
+    /// Absent keeps it.
+    #[serde(default)]
+    pub admin_ssh: Option<bool>,
 }
 rpc_toolkit::reflect_ts!(OutboundVpnUpdateRequest);
 
@@ -799,6 +820,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<OutboundVpn>, Error> {
                 dns,
                 status: OutboundVpnStatus::Disabled,
                 last_handshake_secs: None,
+                admin_web: meta.admin_web == Some(true),
+                admin_ssh: meta.admin_ssh == Some(true),
             })
         })
         .collect();
@@ -929,7 +952,8 @@ pub async fn create(
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all("/etc/config", &arena, &["network", "startwrt"]).await?;
+        let mut cfgs =
+            parse_all("/etc/config", &arena, &["network", "startwrt", "firewall"]).await?;
 
         // Check for interface name conflict
         let name_conflict = cfgs["network"]
@@ -970,6 +994,8 @@ pub async fn create(
             interface: interface_name.clone(),
             label: req.label.clone(),
             target: req.target.clone(),
+            admin_web: req.admin_web.then_some(true),
+            admin_ssh: req.admin_ssh.then_some(true),
         };
         cfgs["startwrt"].append(&meta, Some(&interface_name))?;
 
@@ -981,6 +1007,7 @@ pub async fn create(
         }
 
         rewrite_vpn_chain_routes(&mut cfgs)?;
+        rewrite_vpn_admin_access(&mut cfgs)?;
 
         match dump_all("/etc/config", cfgs).await {
             Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
@@ -1035,6 +1062,7 @@ pub async fn update(
         .await?;
 
         let old_target = update_client_metadata(&mut cfgs, &req.id, &req.label, &req.target)?;
+        set_admin_access(&mut cfgs, &req.id, req.admin_web, req.admin_ssh)?;
         // Only on an actual retarget, mirroring guard_subnet_collision: a
         // no-op edit (label, MTU) must not be blocked by a broken chain that
         // already exists in the stored config — otherwise a router that
@@ -1056,6 +1084,7 @@ pub async fn update(
         }
 
         rewrite_vpn_chain_routes(&mut cfgs)?;
+        rewrite_vpn_admin_access(&mut cfgs)?;
 
         match dump_all("/etc/config", cfgs).await {
             Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
@@ -1245,6 +1274,7 @@ pub async fn delete(ctx: ServerContext, args: OutboundVpnDeleteRequest) -> Resul
         // tables left by removed/reset profiles don't retain stale vxr_ entries.
         crate::vpn_server::sync_vpn_peer_cross_routes(&mut cfgs)?;
 
+        rewrite_vpn_admin_access(&mut cfgs)?;
         // Remove any orphaned VPN interfaces from the WAN firewall zone.
         // This is more robust than removing just the deleted VPN — it also
         // cleans up any previously orphaned entries.
@@ -1476,6 +1506,166 @@ pub async fn set_enabled(
             }
         }
     }
+}
+
+// === Router Access Through a VPN ===
+
+/// Name prefix of the input rules admitting a VPN to the router's own services.
+const ADMIN_RULE_PREFIX: &str = "startwrt_vpn_admin_";
+/// Name prefix of the routes and rules returning replies through the tunnel.
+const ADMIN_ROUTE_PREFIX: &str = "vpn_admin_";
+/// Above every VLAN-tag table and the shared divert table.
+const ADMIN_TABLE_BASE: u32 = startos::net::transparent::DIVERT_TABLE + 1;
+const PRIVATE_V4: &[&str] = &["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
+const PRIVATE_V6: &str = "fc00::/7";
+const WEB_PORTS: &[&str] = &["443", "80"];
+const SSH_PORTS: &[&str] = &["22"];
+
+/// VPN interfaces whose servers may reach the router's own services.
+pub(crate) fn admin_vpns(cfgs: &Configs) -> std::collections::BTreeSet<String> {
+    cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+        .filter(|meta| meta.admin_web == Some(true) || meta.admin_ssh == Some(true))
+        .map(|meta| meta.interface)
+        .collect()
+}
+
+fn set_admin_access(
+    cfgs: &mut Configs,
+    id: &str,
+    web: Option<bool>,
+    ssh: Option<bool>,
+) -> Result<(), Error> {
+    if web.is_none() && ssh.is_none() {
+        return Ok(());
+    }
+    for section in &mut cfgs["startwrt"].sections {
+        let Ok(mut meta) = section.get::<UciVpnClient>() else {
+            continue;
+        };
+        if meta.interface != id {
+            continue;
+        }
+        if let Some(web) = web {
+            meta.admin_web = web.then_some(true);
+        }
+        if let Some(ssh) = ssh {
+            meta.admin_ssh = ssh.then_some(true);
+        }
+        section.set(&meta)?;
+    }
+    Ok(())
+}
+
+/// Admits private sources on each VPN allowed to manage the router, and
+/// returns traffic from the tunnel's own addresses through the tunnel.
+pub(crate) fn rewrite_vpn_admin_access(cfgs: &mut Configs) -> Result<(), Error> {
+    cfgs["firewall"]
+        .sections
+        .retain(|s| !s.name().is_some_and(|n| n.starts_with(ADMIN_RULE_PREFIX)));
+    cfgs["network"]
+        .sections
+        .retain(|s| !s.name().is_some_and(|n| n.starts_with(ADMIN_ROUTE_PREFIX)));
+
+    let mut clients: Vec<UciVpnClient> = cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+        .filter(|meta| meta.admin_web == Some(true) || meta.admin_ssh == Some(true))
+        .collect();
+    clients.sort_by(|a, b| a.interface.cmp(&b.interface));
+
+    for (table, client) in (ADMIN_TABLE_BASE..).zip(&clients) {
+        let wg = &client.interface;
+        let Some(iface) = wg_interface(cfgs, wg) else {
+            continue;
+        };
+        let zone = crate::profiles::ensure_vpn_outbound_zone(cfgs, wg)?;
+
+        let ports = [
+            (client.admin_web == Some(true), WEB_PORTS),
+            (client.admin_ssh == Some(true), SSH_PORTS),
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .flat_map(|(_, ports)| ports.iter().copied());
+        for port in ports {
+            let sources = PRIVATE_V4
+                .iter()
+                .map(|block| ("ipv4", *block))
+                .chain([("ipv6", PRIVATE_V6)]);
+            for (index, (family, block)) in sources.enumerate() {
+                let name = format!("{ADMIN_RULE_PREFIX}{wg}_{port}_{index}");
+                cfgs["firewall"].append(
+                    &FirewallRule {
+                        name: name.clone(),
+                        src: zone.clone(),
+                        src_ip: Some(block.to_string()),
+                        dest_port: Some(port.to_string()),
+                        proto: vec!["tcp".to_string()],
+                        target: FirewallTarget::ACCEPT,
+                        family: Some(family.to_string()),
+                        ..Default::default()
+                    },
+                    Some(&name),
+                )?;
+            }
+        }
+
+        let addrs: Vec<IpAddr> = iface
+            .addresses
+            .iter()
+            .filter_map(|a| a.split('/').next()?.parse().ok())
+            .collect();
+        for (index, addr) in addrs.iter().enumerate() {
+            let name = format!("{ADMIN_ROUTE_PREFIX}{wg}_rule_{index}");
+            match addr {
+                IpAddr::V4(addr) => cfgs["network"].append(
+                    &NetworkRule {
+                        src: Some(format!("{addr}/32")),
+                        lookup: table,
+                        priority: Some(crate::profiles::VPN_ADMIN_REPLY_PRIORITY),
+                        ..Default::default()
+                    },
+                    Some(&name),
+                )?,
+                IpAddr::V6(addr) => cfgs["network"].append(
+                    &NetworkRule6 {
+                        src: Some(format!("{addr}/128")),
+                        lookup: table,
+                        priority: Some(crate::profiles::VPN_ADMIN_REPLY_PRIORITY),
+                        ..Default::default()
+                    },
+                    Some(&name),
+                )?,
+            }
+        }
+        if addrs.iter().any(IpAddr::is_ipv4) {
+            cfgs["network"].append(
+                &NetworkRoute {
+                    interface: wg.clone(),
+                    target: "0.0.0.0/0".to_string(),
+                    table: Some(table),
+                    ..Default::default()
+                },
+                Some(&format!("{ADMIN_ROUTE_PREFIX}{wg}_route")),
+            )?;
+        }
+        if addrs.iter().any(IpAddr::is_ipv6) {
+            cfgs["network"].append(
+                &NetworkRoute6 {
+                    interface: wg.clone(),
+                    target: "::/0".to_string(),
+                    table: Some(table),
+                    ..Default::default()
+                },
+                Some(&format!("{ADMIN_ROUTE_PREFIX}{wg}_route6")),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 // === VPN Chain Routing ===
@@ -1722,8 +1912,6 @@ fn set_interface_mtu<'a>(
 /// endpoint host route would copy the fallback as a unicast route over it.
 /// IPv4 endpoints produce `route` /32s; IPv6 endpoints `route6` /128s.
 pub(crate) fn rewrite_vpn_chain_routes(cfgs: &mut Configs) -> Result<(), Error> {
-    use uciedit::openwrt::{NetworkRoute, NetworkRoute6};
-
     // 1. Remove all existing chain route / route6 sections
     cfgs["network"].sections.retain(|s| {
         !s.name()
@@ -2290,6 +2478,7 @@ mod tests {
 
     use rpc_toolkit::Context;
     use tokio::runtime::Runtime;
+    use uciedit::openwrt::FirewallZone;
 
     use super::*;
     use crate::wg::{Base64, WgKey, WgPeerStats};
@@ -2484,6 +2673,124 @@ mod tests {
 
     /// Write base configs: two profiles (Admin/lan/vlan99, Guest/guest/vlan101)
     /// with network interfaces. No VPN client or server.
+    #[tokio::test]
+    async fn admin_access_admits_private_sources_and_routes_replies_back() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_base_configs(dir.path());
+        let mut startwrt = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
+        startwrt.push_str(
+            "\nconfig vpn_client 'wg_st'\n\toption interface 'wg_st'\n\toption label 'Tunnel'\n\toption target 'Internet'\n\toption admin_web '1'\n",
+        );
+        std::fs::write(dir.path().join("startwrt"), startwrt).unwrap();
+        let mut network = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        network.push_str(&format!(
+            "\nconfig interface 'wg_st'\n\toption proto 'wireguard'\n\toption private_key '{}'\n\tlist addresses '10.59.246.2/24'\n\tlist addresses 'fd59::2/64'\n",
+            gen_key()
+        ));
+        std::fs::write(dir.path().join("network"), network).unwrap();
+        std::fs::write(dir.path().join("firewall"), "").unwrap();
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt", "firewall"])
+            .await
+            .unwrap();
+        rewrite_vpn_admin_access(&mut cfgs).unwrap();
+        crate::profiles::cleanup_orphaned_vpn_zones(&mut cfgs);
+
+        let zone = cfgs["firewall"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get::<FirewallZone>().ok())
+            .find(|z| z.name == "vpn_wg_st")
+            .expect("zone kept while the VPN manages the router");
+        assert_eq!(zone.input, FirewallTarget::REJECT);
+        let rules: Vec<FirewallRule> = cfgs["firewall"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get::<FirewallRule>().ok())
+            .filter(|r| r.name.starts_with(ADMIN_RULE_PREFIX))
+            .collect();
+        assert_eq!(rules.len(), 8);
+        assert!(rules
+            .iter()
+            .all(|r| r.src == "vpn_wg_st" && r.target == FirewallTarget::ACCEPT));
+        let mut ports: Vec<_> = rules.iter().filter_map(|r| r.dest_port.clone()).collect();
+        ports.dedup();
+        assert_eq!(ports, ["443", "80"]);
+        let mut sources: Vec<_> = rules.iter().filter_map(|r| r.src_ip.clone()).collect();
+        sources.sort();
+        sources.dedup();
+        assert_eq!(
+            sources,
+            ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"]
+        );
+
+        let rule = cfgs["network"]
+            .sections
+            .iter()
+            .find_map(|s| {
+                s.get::<NetworkRule>()
+                    .ok()
+                    .filter(|r| r.lookup == ADMIN_TABLE_BASE)
+            })
+            .unwrap();
+        assert_eq!(rule.src.as_deref(), Some("10.59.246.2/32"));
+        assert_eq!(
+            rule.priority,
+            Some(crate::profiles::VPN_ADMIN_REPLY_PRIORITY)
+        );
+        let rule6 = cfgs["network"]
+            .sections
+            .iter()
+            .find_map(|s| {
+                s.get::<NetworkRule6>()
+                    .ok()
+                    .filter(|r| r.lookup == ADMIN_TABLE_BASE)
+            })
+            .unwrap();
+        assert_eq!(rule6.src.as_deref(), Some("fd59::2/128"));
+        let route = cfgs["network"]
+            .sections
+            .iter()
+            .find_map(|s| {
+                s.get::<NetworkRoute>()
+                    .ok()
+                    .filter(|r| r.table == Some(ADMIN_TABLE_BASE))
+            })
+            .unwrap();
+        assert_eq!(
+            (route.interface.as_str(), route.target.as_str()),
+            ("wg_st", "0.0.0.0/0")
+        );
+        assert!(cfgs["network"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get::<NetworkRoute6>().ok())
+            .any(|r| r.table == Some(ADMIN_TABLE_BASE) && r.target == "::/0"));
+
+        set_admin_access(&mut cfgs, "wg_st", None, Some(true)).unwrap();
+        rewrite_vpn_admin_access(&mut cfgs).unwrap();
+        let ports: Vec<_> = cfgs["firewall"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get::<FirewallRule>().ok())
+            .filter(|r| r.name.starts_with(ADMIN_RULE_PREFIX))
+            .filter_map(|r| r.dest_port)
+            .collect();
+        assert_eq!(ports.len(), 12);
+        assert!(ports.iter().any(|p| p == "22"));
+
+        set_admin_access(&mut cfgs, "wg_st", Some(false), Some(false)).unwrap();
+        rewrite_vpn_admin_access(&mut cfgs).unwrap();
+        crate::profiles::cleanup_orphaned_vpn_zones(&mut cfgs);
+        assert!(cfgs["firewall"].sections.is_empty());
+        assert!(!cfgs["network"]
+            .sections
+            .iter()
+            .any(|s| s.name().is_some_and(|n| n.starts_with(ADMIN_ROUTE_PREFIX))));
+        assert!(admin_vpns(&cfgs).is_empty());
+    }
+
     fn setup_base_configs(dir: &Path) {
         std::fs::write(
             dir.join("startwrt"),
@@ -3510,6 +3817,8 @@ MIID...snip...
             interface: interface_name.clone(),
             label: "Proton".into(),
             target: "Internet".into(),
+            admin_web: None,
+            admin_ssh: None,
         };
         cfgs["startwrt"]
             .append(&meta, Some(&interface_name))
@@ -4828,6 +5137,8 @@ config wireguard_wg_inner 'in_peer0'
                     dns: vec![],
                     status: OutboundVpnStatus::Disabled,
                     last_handshake_secs: None,
+                    admin_web: meta.admin_web == Some(true),
+                    admin_ssh: meta.admin_ssh == Some(true),
                 })
             })
             .collect();

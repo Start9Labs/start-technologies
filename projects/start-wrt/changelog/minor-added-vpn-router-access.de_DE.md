@@ -1,0 +1,1 @@
+- **Den Router über ein ausgehendes VPN verwalten.** Ein ausgehendes VPN zu einem Server, den Sie selbst kontrollieren, etwa StartTunnel, kann den Geräten hinter diesem Server Zugriff auf die Weboberfläche des Routers, auf SSH oder auf beides geben, sodass sich auch ein Router hinter CGNAT von überall verwalten lässt.

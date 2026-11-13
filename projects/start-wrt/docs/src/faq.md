@@ -32,7 +32,7 @@ Yes. StartWRT is built on OpenWrt, and the full CLI is accessible over [SSH](ssh
 
 ## How do I manage my router when I'm away from home?
 
-Connect to one of its [Inbound VPNs](inbound-vpn.md). VPN clients join your network as local devices, with the access their [Security Profile](security-profiles.md) grants, so once connected you browse to the web interface exactly as you would at home. If your router sits behind another router, forward the VPN's WireGuard port on that upstream router. If your ISP uses [CGNAT](cgnat.md), inbound connections cannot reach your router at all.
+Connect to one of its [Inbound VPNs](inbound-vpn.md). VPN clients join your network as local devices, with the access their [Security Profile](security-profiles.md) grants, so once connected you browse to the web interface exactly as you would at home. If your router sits behind another router, forward the VPN's WireGuard port on that upstream router. If your ISP uses [CGNAT](cgnat.md), inbound connections cannot reach your router at all. Have the router connect out instead, to [StartTunnel](/start-tunnel/) or a WireGuard server on a VPS or dedicated server, and turn on [Router Access](outbound-vpn.md#router-access) for that connection.
 
 ## What happens if I forget my admin password?
 

@@ -19,7 +19,14 @@ export class OutboundService extends FormService<OutboundVpn[]> {
 
   update(
     id: string,
-    data: { label: string; target: string; mtu: number | null; dns: string },
+    data: {
+      label: string
+      target: string
+      mtu: number | null
+      dns: string
+      admin_web: boolean
+      admin_ssh: boolean
+    },
   ) {
     return this.actions.run(
       async () => {
@@ -38,7 +45,14 @@ export class OutboundService extends FormService<OutboundVpn[]> {
     )
   }
 
-  create(data: { label: string; target: string; config: File; dns: string }) {
+  create(data: {
+    label: string
+    target: string
+    config: File
+    dns: string
+    admin_web: boolean
+    admin_ssh: boolean
+  }) {
     return this.actions.run(
       async () => {
         const configText = await data.config.text()
@@ -47,6 +61,8 @@ export class OutboundService extends FormService<OutboundVpn[]> {
           target: data.target,
           config: configText,
           dns: data.dns ? parseDnsList(data.dns) : null,
+          admin_web: data.admin_web,
+          admin_ssh: data.admin_ssh,
         })
         this.refresh()
       },

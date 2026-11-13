@@ -589,4 +589,8 @@ export default {
   640: 'Twój ruch',
   641: 'Aby usunąć ten VPN, najpierw zmień {vpns} tak, aby łączyły się przez coś innego.',
   642: 'Aby wyłączyć ten VPN, najpierw zmień {vpns} tak, aby łączyły się przez coś innego.',
+  643: 'Dostęp do routera',
+  644: 'Zezwól na dostęp do interfejsu WWW',
+  645: 'Zezwól na dostęp SSH',
+  646: 'Każdy, kogo serwer tej sieci VPN przepuści, może z nich skorzystać, w tym operator serwera. Zezwalaj na nie tylko na serwerze VPN, który kontrolujesz, takim jak StartTunnel.',
 } satisfies i18n

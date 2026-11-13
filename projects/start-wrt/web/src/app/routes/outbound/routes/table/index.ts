@@ -172,8 +172,8 @@ export default class OutboundTable {
         label: this.i18n.transform('Add Outbound VPN'),
         data,
       })
-      .subscribe(async ({ label, target, config, dns }) => {
-        await this.service.create({ label, target, config, dns })
+      .subscribe(async form => {
+        await this.service.create(form)
       })
   }
 }
