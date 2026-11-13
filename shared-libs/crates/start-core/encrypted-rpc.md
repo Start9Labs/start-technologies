@@ -13,7 +13,9 @@ before admission starts; concurrent initializers retain the committed winner. Ma
 stored keys fail startup without rotation. Identity persistence uses no separate file;
 PatchDB files use mode `0600`. WRT preserves its authentication database during sysupgrade. Registry public index feeds
 and WRT session APIs exclude this field. Tunnel's existing authenticated full-database
-feed includes it alongside its WireGuard and TLS secrets. StartOS signs with its existing
+feed includes it alongside its WireGuard and TLS secrets. Registry and Tunnel admin root
+`db.dump` results also include it. Copies can bypass advisory fingerprint-change detection;
+revoking a session does not revoke a copied server key. StartOS signs with its existing
 account `server_identity_key`; its persisted `developerKey` field and historical backup
 formats retain their names. Startup contexts retain temporary identities. Server identity is
 separate from enrollment, authcookies, package/OS trust and TLS keys.

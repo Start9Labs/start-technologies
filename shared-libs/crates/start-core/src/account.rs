@@ -27,7 +27,7 @@ pub struct AccountInfo {
     pub root_ca_key: PKey<Private>,
     pub root_ca_cert: X509,
     pub ssh_key: ssh_key::PrivateKey,
-    /// Identifies this server, independently of package publisher identities.
+    /// Identifies this server.
     pub server_identity_key: ed25519_dalek::SigningKey,
 }
 impl AccountInfo {
