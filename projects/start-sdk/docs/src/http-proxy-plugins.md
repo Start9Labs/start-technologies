@@ -60,7 +60,7 @@ For each attachment:
 
 Use the supplied paths verbatim. Socket paths are runtime values, not persisted configuration. `next` routes to the next selected stage, or to the protected application's original binding, including its upstream TLS validation. Preserve the incoming request's authority and trusted forwarded headers when forwarding. StartOS applies the binding's authentication and forwarded-header policy before the first stage.
 
-If a provider stops, a selected profile disappears, or a socket cannot be reached, the chain fails closed with HTTP 503. StartOS retains the user's selection. It neither skips a stage nor replays the request against the application. Policy changes disconnect existing connections on the binding, including its other gateways and upgraded WebSocket connections.
+If a provider stops, a selected profile disappears, or a socket cannot be reached, the chain fails closed with HTTP 503. StartOS retains the user's selection during unavailability. Completing an uninstall instead removes every stage owned by that package from all service and OS bindings, preserving other stages, their order, and gateway preferences. An emptied chain routes directly to the application. StartOS neither skips unavailable stages nor replays their requests against the application. Policy changes disconnect existing connections on the binding, including its other gateways and upgraded WebSocket connections.
 
 ## Anubis adapter settings
 
@@ -85,4 +85,4 @@ Network policies default to `publicOnly: false`. With **Public only** enabled, c
 URL-plugin policies select traffic from the actual originating service container and require `publicOnly: false`. They are not inferred from URL spelling or forwarded headers. Traffic from a URL plugin without a configured chain does not fall back to the physical network gateway's policy. Direct service-to-service connections to container ports follow the package's own access policy and do not enter these gateway chains.
 
 > [!WARNING]
-> A selected provider can read and modify traffic, including credentials and cookies. Configure authentication and policy for every route the binding serves. Stopping or uninstalling a provider blocks traffic selected for its chains until the user repairs or removes the selection.
+> A selected provider can read and modify traffic, including credentials and cookies. Configure authentication and policy for every route the binding serves. Stopping a provider blocks traffic selected for its chains until the user repairs or removes the selection. Uninstalling it removes its protection from every chain.

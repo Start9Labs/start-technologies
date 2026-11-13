@@ -34,10 +34,10 @@ On a network gateway, **Public only** defaults off. When enabled, clients StartO
 
 URL-plugin gateways, such as Tor, have their own chains and no **Public only** switch. StartOS identifies that gateway from the service container delivering the connection, not an onion hostname or forwarded header. Traffic from a URL plugin with no chain does not fall back to a network gateway's chain. Direct connections to an application's container port bypass these gateway chains.
 
-Unavailable stages remain visible and return HTTP 503 for traffic to which the chain applies. Saved gateway settings remain available even if the gateway or URL plugin disappears. If no HTTP proxy plugin remains installed, the buttons are hidden; install one to edit retained selections. Start or configure the provider, restore the missing profile, or remove its stage to restore access. Applying changed settings disconnects existing clients on the binding, including clients on its other gateways and upgraded WebSockets. A selected profile's supported HTTP versions can also limit which clients can connect.
+Unavailable stages remain visible and return HTTP 503 for traffic to which the chain applies. Saved gateway settings remain available even if the gateway or URL plugin disappears. Completing a proxy plugin uninstall automatically removes all its profiles from every chain, preserving other stages and gateway settings. If no stages remain, traffic goes directly to the application. Stopping a provider or withdrawing profiles does not remove its stages. Start or configure the provider, restore the missing profile, or remove its stage to restore access. Applying changed settings disconnects existing clients on the binding, including clients on its other gateways and upgraded WebSockets. A selected profile's supported HTTP versions can also limit which clients can connect.
 
 > [!WARNING]
-> Proxy services can read and modify requests and responses, including credentials and cookies. Select providers you trust. Stopping or uninstalling one blocks traffic selected for its chain until you repair or remove the selection.
+> Proxy services can read and modify requests and responses, including credentials and cookies. Select providers you trust. Stopping one blocks traffic selected for its chain until you repair or remove the selection. Uninstalling it removes its protection from every chain.
 
 ### Gateway Tables
 

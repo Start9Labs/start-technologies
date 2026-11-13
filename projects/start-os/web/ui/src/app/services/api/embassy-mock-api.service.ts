@@ -1423,12 +1423,53 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
 
       setTimeout(async () => {
-        const patch2: RemoveOperation[] = [
+        const patch2: Operation<T.HttpProxyChain[] | T.HostnameInfo[]>[] = [
           {
             op: PatchOp.REMOVE,
             path: `/packageData/${params.id}`,
           },
         ]
+        const hosts: Array<[string, T.Host]> = [
+          [
+            '/serverInfo/network/host',
+            this.cache.value.value.serverInfo.network.host,
+          ],
+          ...Object.entries(this.cache.value.value.packageData)
+            .filter(([id]) => id !== params.id)
+            .flatMap(([id, pkg]) =>
+              Object.entries(pkg.hosts).map(
+                ([hostId, host]): [string, T.Host] => [
+                  this.mockHostPath(id, hostId),
+                  host,
+                ],
+              ),
+            ),
+        ]
+        for (const [path, host] of hosts) {
+          for (const [port, binding] of Object.entries(host.bindings)) {
+            patch2.push(
+              {
+                op: PatchOp.REPLACE,
+                path: `${path}/bindings/${port}/proxyChains`,
+                value: binding.proxyChains.map(policy => ({
+                  ...policy,
+                  chain: policy.chain.filter(
+                    stage => stage.packageId !== params.id,
+                  ),
+                })),
+              },
+              {
+                op: PatchOp.REPLACE,
+                path: `${path}/bindings/${port}/addresses/available`,
+                value: binding.addresses.available.filter(
+                  address =>
+                    address.metadata.kind !== 'plugin' ||
+                    address.metadata.packageId !== params.id,
+                ),
+              },
+            )
+          }
+        }
         this.mockRevision(patch2)
       }, this.revertTime)
 

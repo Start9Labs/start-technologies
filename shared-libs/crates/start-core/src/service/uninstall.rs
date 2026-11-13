@@ -2,55 +2,75 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::context::RpcContext;
-use crate::db::model::package::{InstalledState, InstallingInfo, InstallingState, PackageState};
+use crate::db::model::DatabaseModel;
+use crate::db::model::package::{
+    InstalledState, InstallingInfo, InstallingState, PackageDataEntry, PackageState,
+};
 use crate::net::host::all_hosts;
+use crate::net::http_proxy::HttpProxyChain;
 use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
 use crate::prelude::*;
 use crate::volume::PKG_VOLUME_DIR;
 use crate::{DATA_DIR, PackageId};
 
+/// Package removal deletes its stages; stopping or withdrawing profiles retains them.
+fn remove_package_data(
+    db: &mut DatabaseModel,
+    id: &PackageId,
+) -> Result<Option<PackageDataEntry>, Error> {
+    let Some(pde) = db
+        .as_public_mut()
+        .as_package_data_mut()
+        .remove(id)?
+        .map(|entry| entry.de())
+        .transpose()?
+    else {
+        return Ok(None);
+    };
+    db.as_private_mut()
+        .as_available_ports_mut()
+        .mutate(|ports| {
+            for host in pde.hosts.0.values() {
+                host.release(ports);
+            }
+            Ok(())
+        })?;
+    db.as_private_mut().as_package_stores_mut().remove(id)?;
+    for host in all_hosts(db) {
+        let host = host?;
+        for (_, bind) in host.as_bindings_mut().as_entries_mut()? {
+            bind.as_addresses_mut().as_available_mut().mutate(
+                |available: &mut BTreeSet<HostnameInfo>| {
+                    available.retain(|h| {
+                        !matches!(
+                            &h.metadata,
+                            HostnameMetadata::Plugin { package_id, .. } if package_id == id
+                        )
+                    });
+                    Ok(())
+                },
+            )?;
+            bind.as_proxy_chains_mut()
+                .mutate(|policies: &mut Vec<HttpProxyChain>| {
+                    for policy in policies {
+                        policy.chain.retain(|stage| &stage.package_id != id);
+                    }
+                    Ok(())
+                })?;
+        }
+    }
+    Ok(Some(pde))
+}
+
+#[cfg(test)]
+#[path = "uninstall_tests.rs"]
+mod tests;
+
 pub async fn cleanup(ctx: &RpcContext, id: &PackageId, soft: bool) -> Result<(), Error> {
     Ok(
         if let Some(pde) = ctx
             .db
-            .mutate(|d| {
-                if let Some(pde) = d
-                    .as_public_mut()
-                    .as_package_data_mut()
-                    .remove(&id)?
-                    .map(|d| d.de())
-                    .transpose()?
-                {
-                    d.as_private_mut().as_available_ports_mut().mutate(|p| {
-                        for host in pde.hosts.0.values() {
-                            host.release(p);
-                        }
-                        Ok(())
-                    })?;
-                    d.as_private_mut().as_package_stores_mut().remove(&id)?;
-                    // Remove plugin URLs exported by this package from all hosts
-                    for host in all_hosts(d) {
-                        let host = host?;
-                        for (_, bind) in host.as_bindings_mut().as_entries_mut()? {
-                            bind.as_addresses_mut().as_available_mut().mutate(
-                                |available: &mut BTreeSet<HostnameInfo>| {
-                                    available.retain(|h| {
-                                        !matches!(
-                                            &h.metadata,
-                                            HostnameMetadata::Plugin { package_id, .. }
-                                            if package_id == id
-                                        )
-                                    });
-                                    Ok(())
-                                },
-                            )?;
-                        }
-                    }
-                    Ok(Some(pde))
-                } else {
-                    Ok(None)
-                }
-            })
+            .mutate(|db| remove_package_data(db, id))
             .await
             .result?
         {
