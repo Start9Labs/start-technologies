@@ -741,7 +741,7 @@ pub fn plan_host_exposure(
                     let src_filter = if a.public && secure_exposure {
                         None
                     } else {
-                        // Insecure protocols require an operator-marked secure LAN gateway.
+                        // Insecure protocols require a `NetworkInterfaceInfo::secure` gateway.
                         if !secure_exposure
                             && !a
                                 .metadata
@@ -770,7 +770,7 @@ pub fn plan_host_exposure(
         }
     }
 
-    // Ranges have no Security option; `secure: true` bypasses the single-port protocol-security gate.
+    // Ranges have no Security option; `secure: true` passes `ForwardRequirements::allows_gateway`.
     // Outbound-only gateways never receive synthesized range addresses.
     for (&internal_start, range) in host.binding_ranges.iter() {
         if !range.enabled {
