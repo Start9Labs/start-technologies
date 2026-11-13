@@ -53,6 +53,11 @@ export const SYSTEM_MENU = [
       item: 'WiFi',
       link: 'wifi',
     },
+    {
+      icon: '@tui.battery-charging',
+      item: 'UPS Monitor',
+      link: 'ups',
+    },
   ],
   [
     {
