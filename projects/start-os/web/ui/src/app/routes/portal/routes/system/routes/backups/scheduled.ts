@@ -339,7 +339,7 @@ class JobEditor
         <backup-schedule-browser
           [jobs]="jobs()"
           [packageIds]="packageIds()"
-          [targets]="backupService.targets()"
+          [targets]="backupService.scheduleTargets()"
           (enabledChange)="setJobEnabled($event.job, $event.enabled)"
           (runRequested)="runNow($event)"
           (editRequested)="edit($event)"
@@ -458,7 +458,10 @@ class JobEditor
               <label tuiLabel>{{ 'Backup location' | i18n }}</label>
               <input tuiSelect formControlName="targetId" />
               <tui-data-list *tuiDropdown>
-                @for (target of backupService.targets(); track target.id) {
+                @for (
+                  target of backupService.scheduleTargets();
+                  track target.id
+                ) {
                   <button tuiOption [value]="target.id">
                     {{ target.name }}
                   </button>
@@ -791,7 +794,10 @@ class JobEditor
               <label tuiLabel>{{ 'New backup location' | i18n }}</label>
               <input tuiSelect formControlName="targetId" />
               <tui-data-list *tuiDropdown>
-                @for (target of backupService.targets(); track target.id) {
+                @for (
+                  target of backupService.scheduleTargets();
+                  track target.id
+                ) {
                   <button tuiOption [value]="target.id">
                     {{ target.name }}
                   </button>
@@ -1425,7 +1431,7 @@ export class ScheduledBackups {
     this.loading.set(true)
     try {
       const [histories, reviews] = await Promise.all([
-        this.api.rpc.backup.history.list({}),
+        this.api.rpc.backup.checkpoint.list({}),
         this.api.rpc.backup.review.list({}),
       ])
       this.histories.set(histories)
@@ -1464,7 +1470,7 @@ export class ScheduledBackups {
       this.formBuilder,
       {
         name: '',
-        targetId: this.backupService.targets()[0]?.id || '',
+        targetId: this.backupService.scheduleTargets()[0]?.id || '',
         packageIds: review
           ? [SYSTEM_PACKAGE_ID, review.packageId]
           : this.packages().map(pkg => pkg.id),
@@ -1864,7 +1870,7 @@ export class ScheduledBackups {
 
   private async waitForRunProgress(
     jobId: string,
-    run: Promise<T.BackupRun>,
+    run: Promise<T.ScheduledBackupRun>,
   ): Promise<void> {
     const outcome = await firstValueFrom(
       race(
@@ -1949,7 +1955,8 @@ export class ScheduledBackups {
     this.reassigning.set(job)
     this.reassignForm.reset({
       targetId:
-        this.backupService.targets().find(t => t.id !== job.targetId)?.id || '',
+        this.backupService.scheduleTargets().find(t => t.id !== job.targetId)
+          ?.id || '',
       password: '',
       waitForSchedule: false,
     })

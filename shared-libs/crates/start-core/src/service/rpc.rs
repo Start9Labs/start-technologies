@@ -16,6 +16,16 @@ use crate::service::ProcedureName;
 use crate::service::persistent_container::PersistentContainer;
 use crate::util::{FromStrParser, Never};
 
+macro_rules! serialize_rpc_method {
+    ($method:ty) => {
+        impl serde::Serialize for $method {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.serialize_str(self.as_str())
+            }
+        }
+    };
+}
+
 #[derive(Clone, serde::Deserialize, serde::Serialize, VisitVariants)]
 #[serde(rename_all = "kebab-case")]
 pub enum InitKind {
@@ -44,14 +54,27 @@ impl RpcMethod for Init {
         "init"
     }
 }
-impl serde::Serialize for Init {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
+serialize_rpc_method!(Init);
+
+#[derive(Clone, serde::Deserialize, serde::Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupInitParams {
+    pub id: Guid,
+}
+
+rpc_toolkit::reflect_ts!(BackupInitParams);
+rpc_toolkit::ts_export!(BackupInitParams, namespaces = [""]);
+
+#[derive(Clone)]
+pub struct InitBackup;
+impl RpcMethod for InitBackup {
+    type Params = BackupInitParams;
+    type Response = ();
+    fn as_str<'a>(&'a self) -> &'a str {
+        "init-backup"
     }
 }
+serialize_rpc_method!(InitBackup);
 
 #[derive(Clone)]
 pub struct Start;
@@ -62,14 +85,7 @@ impl RpcMethod for Start {
         "start"
     }
 }
-impl serde::Serialize for Start {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
+serialize_rpc_method!(Start);
 
 #[derive(Clone)]
 pub struct Stop;
@@ -80,14 +96,7 @@ impl RpcMethod for Stop {
         "stop"
     }
 }
-impl serde::Serialize for Stop {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
+serialize_rpc_method!(Stop);
 
 #[derive(Clone, serde::Deserialize, serde::Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -137,14 +146,7 @@ impl RpcMethod for Exit {
         "exit"
     }
 }
-impl serde::Serialize for Exit {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
+serialize_rpc_method!(Exit);
 
 #[derive(Clone, serde::Deserialize, serde::Serialize, VisitFields)]
 pub struct ExecuteParams {
@@ -180,14 +182,7 @@ impl RpcMethod for Execute {
         "execute"
     }
 }
-impl serde::Serialize for Execute {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
+serialize_rpc_method!(Execute);
 
 #[derive(Clone)]
 pub struct Sandbox;
@@ -198,14 +193,7 @@ impl RpcMethod for Sandbox {
         "sandbox"
     }
 }
-impl serde::Serialize for Sandbox {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
+serialize_rpc_method!(Sandbox);
 
 #[derive(
     Clone,
@@ -294,11 +282,27 @@ impl RpcMethod for Callback {
         "callback"
     }
 }
-impl serde::Serialize for Callback {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
+serialize_rpc_method!(Callback);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn method_serialization_preserves_the_container_protocol_names() {
+        fn name(method: impl RpcMethod + serde::Serialize, expected: &str) {
+            assert_eq!(
+                serde_json::to_value(method).unwrap(),
+                serde_json::json!(expected)
+            );
+        }
+        name(Init, "init");
+        name(InitBackup, "init-backup");
+        name(Start, "start");
+        name(Stop, "stop");
+        name(Exit, "exit");
+        name(Execute, "execute");
+        name(Sandbox, "sandbox");
+        name(Callback, "callback");
     }
 }

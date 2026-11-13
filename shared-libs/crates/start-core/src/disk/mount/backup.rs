@@ -12,7 +12,6 @@ use super::util::sync_directory;
 use crate::PackageId;
 use crate::auth::check_password;
 use crate::backup::target::BackupInfo;
-use crate::disk::BACKUP_DIR_NAME;
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::backupfs::BackupFS;
 use crate::disk::mount::guard::SubPath;
@@ -25,6 +24,8 @@ use crate::util::crypto::{unwrap_backup_key, wrap_backup_key};
 use crate::util::io::AtomicFile;
 use crate::util::serde::{IoFormat, read_json_file_bounded};
 
+const ENCRYPTED_DATA_DIR: &str = "crypt";
+
 pub(crate) fn backup_directory(root: &Path, server_id: &str) -> Result<PathBuf, Error> {
     let mut components = Path::new(server_id).components();
     if !matches!(components.next(), Some(Component::Normal(name)) if name == Path::new(server_id).as_os_str())
@@ -35,7 +36,10 @@ pub(crate) fn backup_directory(root: &Path, server_id: &str) -> Result<PathBuf, 
             crate::ErrorKind::InvalidRequest,
         ));
     }
-    Ok(root.join(BACKUP_DIR_NAME).join(server_id))
+    Ok(BackupUnencryptedMetadata::path(root, server_id)
+        .parent()
+        .unwrap()
+        .to_owned())
 }
 
 fn existing_key(
@@ -72,8 +76,9 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
         let backup_dir = backup_directory(backup_disk_path, server_id)?;
         let _key_initialization =
             crate::util::FileLock::new(backup_dir.join(".key.lock"), true).await?;
-        let unencrypted_metadata_path = backup_dir.join("unencrypted-metadata.json");
-        let crypt_path = backup_dir.join("crypt");
+        let unencrypted_metadata_path =
+            BackupUnencryptedMetadata::path(backup_disk_path, server_id);
+        let crypt_path = backup_dir.join(ENCRYPTED_DATA_DIR);
         let mut unencrypted_metadata: BackupUnencryptedMetadata =
             match tokio::fs::metadata(&unencrypted_metadata_path).await {
                 Ok(_) => {
@@ -141,6 +146,7 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
         server_id: &str,
         password: &str,
     ) -> Result<(), Error> {
+        backup_directory(backup_disk_path, server_id)?;
         let unencrypted_metadata_path =
             backup_directory(backup_disk_path, server_id)?.join("unencrypted-metadata.json");
         match tokio::fs::metadata(&unencrypted_metadata_path).await {
@@ -173,7 +179,7 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
         password: &str,
     ) -> Result<(PathBuf, Zeroizing<String>), Error> {
         let directory = backup_directory(backup_disk_path, server_id)?;
-        let data = directory.join("crypt");
+        let data = directory.join(ENCRYPTED_DATA_DIR);
         if !tokio::fs::try_exists(&data).await? {
             return Err(Error::new(
                 eyre!("{}", t!("backup.conversion.no-store")),
@@ -181,7 +187,7 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
             ));
         }
         let _key_lock = crate::util::FileLock::new(directory.join(".key.lock"), true).await?;
-        let path = directory.join("unencrypted-metadata.json");
+        let path = BackupUnencryptedMetadata::path(backup_disk_path, server_id);
         let mut metadata: BackupUnencryptedMetadata =
             IoFormat::Json.from_slice(&tokio::fs::read(&path).await?)?;
         let (key, needs_wrap) = existing_key(&metadata, password)?;
@@ -206,8 +212,9 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
                 .await?;
         let enc_key = Zeroizing::new(enc_key);
         let backup_dir = backup_directory(backup_disk_path, server_id)?;
-        let unencrypted_metadata_path = backup_dir.join("unencrypted-metadata.json");
-        let crypt_path = backup_dir.join("crypt");
+        let unencrypted_metadata_path =
+            BackupUnencryptedMetadata::path(backup_disk_path, server_id);
+        let crypt_path = backup_dir.join(ENCRYPTED_DATA_DIR);
 
         if tokio::fs::metadata(&crypt_path).await.is_err() {
             tokio::fs::create_dir_all(&crypt_path).await.with_ctx(|_| {
@@ -249,6 +256,15 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
             .path()
     }
 
+    pub fn encrypted_relative_path(&self) -> PathBuf {
+        self.unencrypted_metadata_path
+            .parent()
+            .unwrap()
+            .strip_prefix(self.backup_disk_path())
+            .unwrap()
+            .join(ENCRYPTED_DATA_DIR)
+    }
+
     pub fn change_password(&mut self, new_password: &str) -> Result<(), Error> {
         let wrapped_key = wrap_backup_key(&self.enc_key, new_password)?;
         let password_hash = argon2::hash_encoded(
@@ -280,6 +296,13 @@ impl<G: GenericMountGuard> BackupMountGuard<G> {
                 })?;
         }
         Ok(package_guard)
+    }
+
+    pub fn shared_volume_data(&self, id: &crate::shared_volumes::SharedVolumeId) -> PathBuf {
+        self.path()
+            .join(".shared-volumes")
+            .join(id.as_ref())
+            .join("data")
     }
 
     #[instrument(skip_all)]
@@ -356,6 +379,7 @@ impl<G: GenericMountGuard> std::fmt::Debug for BackupMountGuard<G> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::disk::BACKUP_DIR_NAME;
     use crate::util::Never;
     use crate::util::crypto::backup_key_tests::{KEY, LEGACY_PASSWORD, legacy_fixture};
 

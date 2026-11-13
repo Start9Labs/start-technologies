@@ -46,5 +46,6 @@ export function getMenu() {
     icon: SYSTEM_UTILITIES[key]?.icon || '',
     routerLink: key,
     badge: toSignal(badge.getCount(key), { initialValue: 0 }),
+    warning: toSignal(badge.getWarning(key), { initialValue: false }),
   }))
 }

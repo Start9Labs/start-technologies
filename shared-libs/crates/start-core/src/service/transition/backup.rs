@@ -21,9 +21,9 @@ use crate::util::actor::background::BackgroundJobQueue;
 use crate::util::actor::{ConflictBuilder, Handler};
 
 /// Maximum wall-clock time a service backup procedure may run.
-const PACKAGE_BACKUP_TIMEOUT: Duration = Duration::from_secs(6 * 60 * 60);
+pub(in crate::service) const PACKAGE_BACKUP_TIMEOUT: Duration = Duration::from_secs(6 * 60 * 60);
 
-async fn run_backup_procedure<T, Stop, StopFuture>(
+pub(in crate::service) async fn run_backup_procedure<T, Stop, StopFuture>(
     execute: impl Future<Output = Result<T, Error>>,
     mut stop_runtime: Stop,
     unmount: impl Future<Output = Result<(), Error>>,
@@ -146,6 +146,9 @@ impl Handler<Backup> for ServiceActor {
         let (remote, handle) = async move {
             let runtime_stopped = AtomicBool::new(false);
             let res = async {
+                if seed.persistent_container.s9pk.as_manifest().shared_volumes {
+                    return crate::service::Service::isolated_backup(&seed, id, path).await;
+                }
                 let backup_guard = seed
                     .persistent_container
                     .mount_backup(path, ReadWrite)

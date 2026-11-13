@@ -180,7 +180,7 @@ export class DeleteScheduleService {
   async delete(job: T.BackupJob): Promise<boolean> {
     let histories: T.ServiceTargetHistory[] = []
     const loaded = await this.tasks.run(async () => {
-      histories = await this.api.rpc.backup.history.list({})
+      histories = await this.api.rpc.backup.checkpoint.list({})
     }, 'Loading')
     if (!loaded) return false
 

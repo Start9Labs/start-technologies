@@ -1,42 +1,28 @@
 import { T } from '@start9labs/start-core'
 import { TuiDialogContext } from '@taiga-ui/core'
-import {
-  CifsBackupTarget,
-  DiskBackupTarget,
-} from 'src/app/services/api/api.types'
-import { MappedBackupTarget } from './backup.service'
+import { Result } from 'src/app/services/api/api.types'
 
-export type BackupContext = TuiDialogContext<
-  void,
-  MappedBackupTarget<CifsBackupTarget | DiskBackupTarget>
->
+export type BackupContext = TuiDialogContext<void, { id: string }>
+export type BackupRun = T.BackupRun
+export type BackupHistory = Result<'backup.history.list'>
+export const EMPTY_HISTORY: BackupHistory = { runs: [], total: 0 }
 
-export interface RecoverCheckpoint {
-  key: string
-  source: 'manual' | 'scheduled'
-  version: string
-  timestamp: string
-  jobName?: string
-  snapshotId?: string
-  runId?: string
-  archived?: boolean
-}
-
-export interface RecoverOption {
-  id: string
-  title: string
-  checked: boolean
-  installed: boolean
-  newerOs: boolean
-  selectedKey: string
-  checkpoints: RecoverCheckpoint[]
-}
+export type RecoverOption =
+  | (T.PackageBackupInfo & {
+      kind: 'package'
+      id: string
+      installed: boolean
+      newerOs: boolean
+    })
+  | (Pick<T.SharedVolumeBackupInfo, 'timestamp'> & {
+      kind: 'volume'
+      id: string
+      title: string
+    })
 
 export interface RecoverData {
   targetId: string
   serverId: string
   backupInfo: T.BackupInfo
-  scheduledHistories: T.ServiceTargetHistory[]
   password: string
-  unavailableSources?: string[]
 }

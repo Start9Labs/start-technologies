@@ -73,7 +73,7 @@ LND will then sync and reconnect to your peers with the migrated channel state.
 
 ### 6. Back Up
 
-Take a [StartOS backup](/start-os/backup-create.html), and set up [continuous backups](continuous-backups.md). Your channel funds are recoverable only from LND's static channel backup, and a StartOS backup holds it only as of the moment it was taken — a continuous backup keeps a copy current on storage you choose.
+Take a [StartOS backup](/start-os/backups.html), and set up [continuous backups](continuous-backups.md). Your channel funds are recoverable only from LND's static channel backup, and a StartOS backup holds it only as of the moment it was taken — a continuous backup keeps a copy current on storage you choose.
 
 ## Other Platforms
 

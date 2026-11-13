@@ -14,7 +14,7 @@ use super::scheduled::{
     BackupActivityKind, BackupRunState, ScheduledBackupMountGuard, ServiceSnapshotId,
     complete_activity, history_key, insert_activity, mount_scheduled_target, running_activity,
 };
-use super::target::BackupTargetId;
+use super::target::{BackupTargetId, TargetMount};
 use crate::backup::os::OsBackup;
 use crate::context::rpc::InitRpcContextPhases;
 use crate::context::setup::SetupResult;
@@ -191,7 +191,7 @@ mod cli_tests {
         ])
         .unwrap();
 
-        assert_eq!(params.target_id, BackupTargetId::Cifs { id: 7 });
+        assert_eq!(params.target_id, "cifs-7".parse().unwrap());
         assert_eq!(params.manual_ids.len(), 2);
         assert_eq!(
             params.checkpoints,
@@ -313,7 +313,7 @@ pub async fn restore_selection_rpc(
             })?;
             let target = target_id.clone().load(&db)?;
             ScheduledBackupMountGuard::discover_with_password(
-                TmpMountGuard::mount(&target, ReadWrite).await?,
+                target.mount(ReadWrite).await?,
                 &server_id,
                 password,
             )
@@ -332,12 +332,8 @@ pub async fn restore_selection_rpc(
             )
         })?;
         let target = target_id.clone().load(&db)?;
-        let guard = BackupMountGuard::mount(
-            TmpMountGuard::mount(&target, ReadWrite).await?,
-            &server_id,
-            password,
-        )
-        .await?;
+        let guard =
+            BackupMountGuard::mount(target.mount(ReadWrite).await?, &server_id, password).await?;
         manual_guard = Some(guard);
     }
     drop(db);
@@ -413,9 +409,9 @@ pub async fn restore_scheduled_packages_rpc(
     .await
 }
 
-fn restore_scheduled_packages(
+fn restore_scheduled_packages<G: GenericMountGuard>(
     ctx: &RpcContext,
-    guard: ScheduledBackupMountGuard<TmpMountGuard>,
+    guard: ScheduledBackupMountGuard<G>,
     snapshots: BTreeMap<PackageId, ServiceSnapshotId>,
 ) -> BTreeMap<PackageId, DownloadInstallFuture> {
     let guard = Arc::new(guard);
@@ -451,7 +447,7 @@ fn defer_restore_preparation(
 }
 
 async fn validate_scheduled_snapshots(
-    guard: &ScheduledBackupMountGuard<TmpMountGuard>,
+    guard: &ScheduledBackupMountGuard<TargetMount>,
     snapshots: &BTreeMap<PackageId, ServiceSnapshotId>,
 ) -> Result<(), Error> {
     validate_snapshot_selection(&guard.metadata, snapshots)?;
@@ -590,6 +586,15 @@ pub async fn recover_full_server(
         rpc_ctx_phases,
     )
     .await?;
+    for id in backup_guard.metadata.shared_volume_backups.keys() {
+        if let Err(error) = super::volume::restore_volume(&rpc_ctx, &backup_guard, id).await {
+            tracing::error!(
+                "{}",
+                t!("backup.volume.restore-error", id = id, error = error)
+            );
+            tracing::debug!(?error);
+        }
+    }
     let tasks = restore_packages(&rpc_ctx, backup_guard, ids);
     restore_setup_services(tasks, restore_phase).await;
     Ok((result, rpc_ctx))
@@ -892,9 +897,9 @@ async fn restore_setup_services(
 }
 
 #[instrument(skip(ctx, backup_guard))]
-fn restore_packages(
+fn restore_packages<G: GenericMountGuard>(
     ctx: &RpcContext,
-    backup_guard: BackupMountGuard<TmpMountGuard>,
+    backup_guard: BackupMountGuard<G>,
     ids: Vec<PackageId>,
 ) -> BTreeMap<PackageId, DownloadInstallFuture> {
     let backup_guard = Arc::new(backup_guard);

@@ -75,9 +75,12 @@ is wired and built.
   `RpcContext`'s router replaces `name` and `short_name` with the server's
   hostname. Keep it out of `ngsw-config.json`: an asset group makes the service
   worker hash-check it against a body it never receives and drop out of service.
-- **The `beta` feature swaps the UI seed** (`patchdb-ui-seed.beta.json`) and
-  forwards to `start-core`'s `beta` feature — keep both seeds in sync when you
-  change seed shape.
+- **The `beta` feature forwards to `start-core`'s `beta` feature**, which
+  selects the beta registries a new server connects to and takes StartOS
+  updates from.
+- **`web/patchdb-ui-seed.json` seeds only UI-owned state.** The backend never
+  reads or writes `public.ui` outside migrations; state the backend needs
+  belongs in a typed `serverInfo` field.
 
 ## Contributor workflow
 
@@ -221,13 +224,15 @@ sudo bash projects/start-os/build/tests/subcontainer-exec-test.sh /path/to/start
 
 It exercises concurrent execs, rootfs isolation, read-only roots, user/workdir/environment settings,
 nested user namespaces, and command exit codes. It requires root and a statically linked BusyBox.
-The launch teardown regression uses the same fixtures in a private mount namespace:
+The launch teardown regression uses the same fixtures in a private mount namespace.
+Install the tested binary at `/usr/bin/start-container` in the disposable VM; the launcher executes that path:
 
 ```sh
-sudo unshare --mount --propagation private bash projects/start-os/build/tests/subcontainer-launch-test.sh /path/to/start-container /path/to/static-busybox
+sudo unshare --mount --propagation private bash projects/start-os/build/tests/subcontainer-launch-test.sh /usr/bin/start-container /path/to/static-busybox
 ```
 
 It checks that killing the launch parent kills the image init and its descendants, as root and a numeric user.
+Commandless init cases cover early and ready launcher death, graceful shutdown, and both pipe and PTY launches.
 The end-to-end attach suite runs on a StartOS VM with an installed package whose selected
 subcontainer is running and provides `sh`:
 

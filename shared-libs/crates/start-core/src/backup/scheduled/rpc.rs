@@ -7,18 +7,18 @@ use serde::{Deserialize, Serialize};
 
 use super::retention::CAPACITY_MARGIN_PERCENT;
 use super::{
-    BackupJob, BackupJobId, BackupJobPause, BackupJobStatus, BackupRun, BackupRunTrigger,
-    BackupServiceScope, CapacityEstimate, RetentionPolicy, RetentionPolicyChangePreview,
-    RetentionTier, Schedule, ScheduledBackupCredential, ScheduledBackupMountGuard,
-    ServiceSnapshotId, ServiceTargetHistory, associate_histories, associated_service_ids,
-    disassociate_histories, history_key, refresh_archive_state, run_job,
+    BackupJob, BackupJobId, BackupJobPause, BackupJobStatus, BackupRunTrigger, BackupServiceScope,
+    CapacityEstimate, RetentionPolicy, RetentionPolicyChangePreview, RetentionTier, Schedule,
+    ScheduledBackupCredential, ScheduledBackupMountGuard, ScheduledBackupRun, ServiceSnapshotId,
+    ServiceTargetHistory, associate_histories, associated_service_ids, disassociate_histories,
+    history_key, refresh_archive_state, run_job,
 };
 use crate::auth::{LoginContext, PasswordType};
-use crate::backup::target::BackupTargetId;
+use crate::backup::target::{BackupTargetId, TargetMount};
 use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
 use crate::disk::mount::filesystem::ReadWrite;
-use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
+use crate::disk::mount::guard::GenericMountGuard;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::serde::HandlerExtSerde;
@@ -477,7 +477,7 @@ async fn refresh_histories(
     let server_id = db.as_public().as_server_info().as_id().de()?;
     let target = target_id.clone().load(&db)?;
     let mut guard = ScheduledBackupMountGuard::mount_with_key(
-        TmpMountGuard::mount(&target, ReadWrite).await?,
+        target.mount(ReadWrite).await?,
         &server_id,
         &credential.target_instance_id,
         &encryption_key,
@@ -595,7 +595,7 @@ pub async fn discover_histories(
     let target = target_id.clone().load(&db)?;
     drop(db);
     let (mut guard, encryption_key) = ScheduledBackupMountGuard::discover_with_password(
-        TmpMountGuard::mount(&target, ReadWrite).await?,
+        target.mount(ReadWrite).await?,
         &server_id,
         &password,
     )
@@ -974,7 +974,7 @@ pub async fn delete_archived_snapshots_bulk(
 
 async fn finish_history_change(
     ctx: &RpcContext,
-    mut guard: ScheduledBackupMountGuard<TmpMountGuard>,
+    mut guard: ScheduledBackupMountGuard<TargetMount>,
     mut histories: Vec<ServiceTargetHistory>,
     credential: Option<(&BackupTargetId, &ScheduledBackupCredential)>,
     change: Result<(), Error>,
@@ -1034,7 +1034,7 @@ pub(crate) async fn mount_scheduled_target(
     password: Option<&str>,
 ) -> Result<
     (
-        ScheduledBackupMountGuard<TmpMountGuard>,
+        ScheduledBackupMountGuard<TargetMount>,
         ScheduledBackupCredential,
     ),
     Error,
@@ -1053,7 +1053,7 @@ pub(crate) async fn mount_scheduled_target(
         if credential.target_instance_id == expected_target_instance_id {
             if let Ok(encryption_key) = credential.open(&device_key) {
                 let mut guard = ScheduledBackupMountGuard::mount_with_key(
-                    TmpMountGuard::mount(&target, ReadWrite).await?,
+                    target.mount(ReadWrite).await?,
                     server_id,
                     expected_target_instance_id,
                     &encryption_key,
@@ -1072,7 +1072,7 @@ pub(crate) async fn mount_scheduled_target(
         )
     })?;
     let (mut guard, encryption_key) = ScheduledBackupMountGuard::mount_with_password(
-        TmpMountGuard::mount(&target, ReadWrite).await?,
+        target.mount(ReadWrite).await?,
         server_id,
         expected_target_instance_id,
         password,
@@ -1333,7 +1333,7 @@ pub async fn reassign_target(
     let package_ids = selected_installed_services(&db, &job.services)?;
     let server_id = db.as_public().as_server_info().as_id().de()?;
     let hostname = ctx.account.peek(|account| account.hostname.clone());
-    let target_guard = TmpMountGuard::mount(&target_id.clone().load(&db)?, ReadWrite).await?;
+    let target_guard = target_id.load(&db)?.mount(ReadWrite).await?;
     let available = crate::disk::util::get_available(target_guard.path()).await?;
     super::runner::preflight_new_target_capacity(&ctx, &package_ids, available).await?;
     let (mut guard, encryption_key) = ScheduledBackupMountGuard::initialize(
@@ -1587,7 +1587,7 @@ pub async fn update_policy(
         credential.open(&db.as_private().as_scheduled_backup_device_key().de()?)?;
     let server_id = db.as_public().as_server_info().as_id().de()?;
     let mut guard = ScheduledBackupMountGuard::mount_with_key(
-        TmpMountGuard::mount(&target_id.clone().load(&db)?, ReadWrite).await?,
+        target_id.load(&db)?.mount(ReadWrite).await?,
         &server_id,
         &credential.target_instance_id,
         &encryption_key,
@@ -2209,7 +2209,7 @@ pub async fn create(
     let package_ids = selected_installed_services(&db, &services)?;
     let server_id = db.as_public().as_server_info().as_id().de()?;
     let hostname = ctx.account.peek(|account| account.hostname.clone());
-    let target_guard = TmpMountGuard::mount(&target_id.clone().load(&db)?, ReadWrite).await?;
+    let target_guard = target_id.load(&db)?.mount(ReadWrite).await?;
     let (mut scheduled_guard, encryption_key) = ScheduledBackupMountGuard::initialize(
         target_guard,
         &server_id,
@@ -2616,7 +2616,7 @@ pub async fn disable_cli(
 pub async fn run_now(
     ctx: RpcContext,
     RunBackupJobNowParams { id }: RunBackupJobNowParams,
-) -> Result<BackupRun, Error> {
+) -> Result<ScheduledBackupRun, Error> {
     run_job(ctx, id, BackupRunTrigger::RunNow).await
 }
 
@@ -2742,7 +2742,7 @@ pub(crate) async fn sync_archive_states(
         credential.open(&db.as_private().as_scheduled_backup_device_key().de()?)?;
     let server_id = db.as_public().as_server_info().as_id().de()?;
     let mut guard = ScheduledBackupMountGuard::mount_with_key(
-        TmpMountGuard::mount(&target_id.clone().load(&db)?, ReadWrite).await?,
+        target_id.load(&db)?.mount(ReadWrite).await?,
         &server_id,
         &credential.target_instance_id,
         &encryption_key,
@@ -2755,7 +2755,7 @@ pub(crate) async fn sync_archive_states(
 pub(super) fn reconcile_target_histories(
     db: &DatabaseModel,
     target_id: &BackupTargetId,
-    guard: &mut ScheduledBackupMountGuard<TmpMountGuard>,
+    guard: &mut ScheduledBackupMountGuard<TargetMount>,
 ) -> Result<(), Error> {
     let histories = db
         .as_public()
@@ -3081,7 +3081,7 @@ mod cli_tests {
 
         update_reassigned_job(
             &mut job,
-            "disk-/dev/sda1".parse().unwrap(),
+            "cifs-2".parse().unwrap(),
             "new-instance".to_owned(),
             false,
             now,
@@ -3089,7 +3089,7 @@ mod cli_tests {
         .unwrap();
 
         assert!(!job.enabled);
-        assert_eq!(job.target_id, "disk-/dev/sda1".parse().unwrap());
+        assert_eq!(job.target_id, "cifs-2".parse().unwrap());
         assert_eq!(job.target_instance_id, "new-instance");
         assert_eq!(job.updated_at, now);
         assert!(job.status.next_run_at.is_none());
@@ -3204,7 +3204,7 @@ mod cli_tests {
         let wrong_target = backup_job(
             BackupJobId::new(),
             "Wrong target",
-            "disk-/dev/sda1",
+            "cifs-2",
             "instance",
             "hello-world",
         );

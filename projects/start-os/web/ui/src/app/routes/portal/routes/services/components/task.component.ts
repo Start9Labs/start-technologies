@@ -319,7 +319,7 @@ export class ServiceTaskComponent {
             })
           })
         } else if (decision === 'create') {
-          await this.router.navigate(['/system/backups'], {
+          await this.router.navigate(['/system/backups/automatic'], {
             queryParams: {
               addService: task.packageId,
               createSchedule: true,
@@ -328,7 +328,7 @@ export class ServiceTaskComponent {
         }
         return
       }
-      await this.router.navigate(['/system/backups'], {
+      await this.router.navigate(['/system/backups/automatic'], {
         queryParams: { addService: task.packageId },
       })
       return

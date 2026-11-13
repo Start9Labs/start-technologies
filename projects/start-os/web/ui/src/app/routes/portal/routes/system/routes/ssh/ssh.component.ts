@@ -57,7 +57,7 @@ import { SSHTableComponent } from './table.component'
             appearance="primary-destructive"
             (click)="remove(keys || [])"
           >
-            {{ 'Delete' | i18n }}
+            {{ 'Remove' | i18n }}
           </button>
         } @else {
           <button
@@ -158,7 +158,7 @@ export default class SystemSSHComponent {
             all.filter(s => !fingerprints.includes(s.fingerprint)),
           )
           this.tableKeys()?.selected.set([])
-        }, 'Deleting')
+        }, 'Removing')
       })
   }
 }

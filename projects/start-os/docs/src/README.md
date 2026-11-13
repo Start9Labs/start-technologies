@@ -2,6 +2,8 @@
 
 StartOS is a sovereign computing platform that makes it easy to run a personal server. It handles service installation, networking, backups, and system administration — all from a simple browser-based interface.
 
+The [Overview](overview.md) introduces the main StartOS concepts.
+
 ## Getting Started
 
 - [Installing StartOS](installing-startos.md)
@@ -50,15 +52,6 @@ StartOS is a sovereign computing platform that makes it easy to run a personal s
 - [DNS](dns.md)
 - [CGNAT](cgnat.md)
 
-## Backups
-
-Use automatic backups for ongoing protection, create a one-time manual backup,
-or restore a service from an earlier checkpoint.
-
-- [Creating Backups](backup-create.md)
-- [Automatic Backups](backup-automatic.md)
-- [Restoring Backups](backup-restore.md)
-
 ## System
 
 - [Notifications](notifications.md)
@@ -67,6 +60,9 @@ or restore a service from an earlier checkpoint.
 - [SSH](ssh.md)
 - [Kernel Arguments](kernel-arguments.md)
 - [SMTP](smtp.md)
+- [Shared Volumes](shared-volumes.md)
+- [Backups](backups.md)
+- [Automatic Backups](backup-automatic.md)
 - [WiFi](wifi.md)
 - [Internationalization](internationalization.md)
 - [Kiosk Mode](kiosk-mode.md)

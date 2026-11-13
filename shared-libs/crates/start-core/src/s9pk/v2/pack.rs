@@ -643,14 +643,20 @@ impl ImageSource {
 
                     if *CONTAINER_TOOL == "docker" {
                         command.arg("--output=type=oci,dest=-");
-                        image_from_command(&mut command, &docker_platform).await?
+                        // Build logs use stderr; stdout carries the OCI archive.
+                        image_from_command(&mut command, &docker_platform, true).await?
                     } else {
                         let tag = format!("start9/package-build:{}", Guid::new().as_ref());
                         command.arg("--format=oci").arg("--tag").arg(&tag);
-                        command.invoke(ErrorKind::Docker).await?;
+                        command
+                            .capture(false)
+                            .forward_stderr(true)
+                            .invoke(ErrorKind::Docker)
+                            .await?;
                         let image = image_from_command(
                             &mut image_save_command("podman", &tag, &docker_platform),
                             &docker_platform,
+                            false,
                         )
                         .await;
                         let removed = Command::new("podman")
@@ -726,7 +732,13 @@ async fn image_from_tag(
     image: &str,
     platform: &str,
 ) -> Result<(Squashfs<DynFileSource>, DockerImageConfig), Error> {
-    match image_from_command(&mut image_save_command(tool, image, platform), platform).await {
+    match image_from_command(
+        &mut image_save_command(tool, image, platform),
+        platform,
+        false,
+    )
+    .await
+    {
         Err(error)
             if error.kind == ErrorKind::Docker
                 || error.source.is::<super::image::MissingImagePlatform>() => {}
@@ -739,17 +751,24 @@ async fn image_from_tag(
         .arg(image)
         .invoke(ErrorKind::Docker)
         .await?;
-    image_from_command(&mut image_save_command(tool, image, platform), platform).await
+    image_from_command(
+        &mut image_save_command(tool, image, platform),
+        platform,
+        false,
+    )
+    .await
 }
 
 async fn image_from_command(
     command: &mut Command,
     platform: &str,
+    forward_stderr: bool,
 ) -> Result<(Squashfs<DynFileSource>, DockerImageConfig), Error> {
     let (mut output, input) = tokio::io::duplex(crate::CAP_1_MiB);
     let producer = async {
         let result = command
             .output_to(&mut output)
+            .forward_stderr(forward_stderr)
             .invoke(ErrorKind::Docker)
             .await;
         drop(output);

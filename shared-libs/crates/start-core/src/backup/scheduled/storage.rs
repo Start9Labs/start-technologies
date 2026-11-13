@@ -6,7 +6,9 @@ use chrono::{DateTime, Utc};
 use color_eyre::eyre::eyre;
 use serde::{Deserialize, Serialize};
 
-use super::{BackupRun, RetentionPolicy, ServiceSnapshot, ServiceSnapshotId, ServiceTargetHistory};
+use super::{
+    RetentionPolicy, ScheduledBackupRun, ServiceSnapshot, ServiceSnapshotId, ServiceTargetHistory,
+};
 use crate::auth::check_password;
 #[cfg(test)]
 use crate::disk::BACKUP_DIR_NAME;
@@ -551,7 +553,7 @@ impl<G: GenericMountGuard> ScheduledBackupMountGuard<G> {
         Ok(())
     }
 
-    pub async fn save_run(&self, run: &BackupRun) -> Result<(), Error> {
+    pub async fn save_run(&self, run: &ScheduledBackupRun) -> Result<(), Error> {
         write_json(
             &self.path().join("runs").join(format!("{}.json", run.id)),
             run,

@@ -36,6 +36,16 @@ describe('createRpcClient', () => {
     ])
   })
 
+  test('inspection methods remain callable and preserve HTTP options', async () => {
+    const { calls, transport } = recording()
+    const api = createRpcClient<StartOS>(transport)
+    const params = { id: '7cb12a88-783d-4909-9923-d5eb47c7e01f' }
+    const options = { timeout: 0, headers: { 'ngsw-bypass': 'true' } }
+    await api.volumes.inspect(params, options)
+    expect(calls).toEqual([['volumes.inspect', params, options]])
+    expect(api.volumes.inspect).toBe(api.volumes.inspect)
+  })
+
   test('a callable parent is a function with its children attached', async () => {
     const { calls, transport } = recording()
     const api = createRpcClient<StartOS>(transport)

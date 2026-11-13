@@ -498,6 +498,7 @@ export const Api = {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
         activity: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        checkpoint: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         history: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         job: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         policy: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
@@ -508,6 +509,7 @@ export const Api = {
             cifs: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
           },
         },
+        volume: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
       },
     },
     db: {
@@ -765,8 +767,8 @@ export const Api = {
           ),
           _CHILDREN: {},
         },
+        registries: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         'trusted-keys': { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
-        'update-signers': { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
       },
     },
     setup: {
@@ -782,6 +784,7 @@ export const Api = {
       _RETURN: /* @__PURE__ */ ApiState,
     },
     util: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+    volumes: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
     wifi: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {

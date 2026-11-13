@@ -184,7 +184,7 @@ rpc_toolkit::ts_export!(BackupRunState, namespaces = [""]);
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-pub struct BackupRun {
+pub struct ScheduledBackupRun {
     pub id: BackupRunId,
     pub job_id: BackupJobId,
     pub job_name: String,
@@ -200,8 +200,8 @@ pub struct BackupRun {
     pub error: Option<String>,
 }
 
-rpc_toolkit::reflect_ts!(BackupRun);
-rpc_toolkit::ts_export!(BackupRun, namespaces = [""]);
+rpc_toolkit::reflect_ts!(ScheduledBackupRun);
+rpc_toolkit::ts_export!(ScheduledBackupRun, namespaces = [""]);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
@@ -295,7 +295,7 @@ rpc_toolkit::ts_export!(ServiceTargetRetentionPolicy, namespaces = [""]);
 pub struct ScheduledBackupState {
     pub jobs: BTreeMap<BackupJobId, BackupJob>,
     pub histories: BTreeMap<String, ServiceTargetHistory>,
-    pub runs: BTreeMap<BackupRunId, BackupRun>,
+    pub runs: BTreeMap<BackupRunId, ScheduledBackupRun>,
     #[serde(default)]
     pub activities: BTreeMap<BackupActivityId, BackupActivity>,
     pub target_failures: BTreeMap<String, BackupTargetFailureState>,
@@ -332,7 +332,7 @@ pub(crate) fn completed_activity_overflow<'a>(
 }
 
 pub(crate) fn completed_run_overflow<'a>(
-    runs: impl IntoIterator<Item = &'a BackupRun>,
+    runs: impl IntoIterator<Item = &'a ScheduledBackupRun>,
 ) -> Vec<BackupRunId> {
     completed_history_overflow(runs.into_iter().filter_map(|run| {
         (run.state != BackupRunState::Running).then_some((run.started_at, run.id.clone()))
@@ -458,13 +458,13 @@ mod tests {
     #[test]
     fn completed_history_is_bounded_without_removing_running_entries() {
         let mut state = ScheduledBackupState::default();
-        let target_id = BackupTargetId::Cifs { id: 1 };
+        let target_id: BackupTargetId = "cifs-1".parse().unwrap();
         let job_id = BackupJobId::new();
         let mut oldest_completed_ids = Vec::new();
 
         for offset in 0..(MAX_COMPLETED_HISTORY_ITEMS + 2) {
             let started_at = DateTime::from_timestamp(offset as i64, 0).unwrap();
-            let run = BackupRun {
+            let run = ScheduledBackupRun {
                 id: BackupRunId::new(),
                 job_id: job_id.clone(),
                 job_name: "Nightly".to_owned(),
@@ -501,7 +501,7 @@ mod tests {
             state.runs.insert(run.id.clone(), run);
         }
 
-        let running = BackupRun {
+        let running = ScheduledBackupRun {
             id: BackupRunId::new(),
             job_id,
             job_name: "Nightly".to_owned(),

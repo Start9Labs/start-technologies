@@ -73,11 +73,13 @@ pub mod notifications;
 pub mod os_install;
 pub mod prelude;
 pub mod progress;
+pub mod registries;
 pub mod registry;
 pub mod rpc_continuations;
 pub mod s9pk;
 pub mod service;
 pub mod setup;
+pub mod shared_volumes;
 pub mod shutdown;
 pub mod sign;
 pub mod sound;
@@ -216,6 +218,12 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
                     auth::token::<C, RpcContext>().with_about("about.commands-auth-tokens"),
                 )
                 .with_about("about.commands-authentication"),
+        )
+        .subcommand(
+            "volumes",
+            shared_volumes::handler::<C>()
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
         )
         .subcommand("db", db::db::<C>().with_about("about.commands-db"))
         .subcommand("ssh", ssh::ssh::<C>().with_about("about.commands-ssh-keys"))
@@ -425,10 +433,13 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_about("about.check-update-startos"),
         )
         .subcommand(
-            "update-signers",
-            update::signers::api::<C>().with_about("about.commands-os-update-signers"),
+            "registries",
+            registries::api::<C>().with_about("about.commands-registries"),
         )
-        .subcommand("trusted-keys", trusted_keys::api::<C>().no_cli())
+        .subcommand(
+            "trusted-keys",
+            trusted_keys::api::<C>().with_about("about.commands-trusted-keys"),
+        )
         .subcommand(
             "update-firmware",
             from_fn_async(|_: RpcContext| async {

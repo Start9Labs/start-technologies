@@ -131,7 +131,7 @@ start-cli backup job list
 start-cli backup job run-now <JOB_ID>
 ```
 
-Use `start-cli backup history list` to obtain checkpoint IDs and
+Use `start-cli backup checkpoint list` to obtain checkpoint IDs and
 `start-cli package backup restore-checkpoint` to restore them. Retention-policy
 updates intentionally use a two-step `backup policy preview-change` then
 `backup policy apply` flow; the apply command accepts the exact checkpoint IDs

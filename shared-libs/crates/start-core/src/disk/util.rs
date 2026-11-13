@@ -24,6 +24,9 @@ use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::serde::read_json_file_bounded;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
 pub enum PartitionTable {
@@ -48,6 +51,7 @@ pub struct DiskInfo {
 }
 
 rpc_toolkit::reflect_ts!(DiskInfo);
+rpc_toolkit::ts_export!(DiskInfo, namespaces = [""]);
 
 #[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -92,6 +96,14 @@ pub struct BackupUnencryptedMetadata {
     pub password_hash: Option<String>,
     pub wrapped_key: Option<String>,
 }
+impl BackupUnencryptedMetadata {
+    pub fn path(root: &Path, server_id: &str) -> PathBuf {
+        root.join(super::BACKUP_DIR_NAME)
+            .join(server_id)
+            .join("unencrypted-metadata.json")
+    }
+}
+
 impl From<BackupUnencryptedMetadata> for StartOsRecoveryInfo {
     fn from(meta: BackupUnencryptedMetadata) -> Self {
         Self {
@@ -359,6 +371,7 @@ pub async fn pvscan() -> Result<BTreeMap<PathBuf, Option<InternedString>>, Error
     Ok(parse_pvscan_output(pvscan_out_str))
 }
 
+/// Reads `StartOSBackupsV2` directly beneath the supplied root.
 pub async fn recovery_info(
     mountpoint: impl AsRef<Path>,
 ) -> Result<BTreeMap<String, StartOsRecoveryInfo>, Error> {
@@ -412,9 +425,8 @@ async fn recovery_info_with_limit(
                 }
                 continue;
             }
-            let backup_unencrypted_metadata_path = backup_root
-                .join(&server_id)
-                .join("unencrypted-metadata.json");
+            let backup_unencrypted_metadata_path =
+                BackupUnencryptedMetadata::path(mountpoint.as_ref(), &server_id);
             if tokio::fs::metadata(&backup_unencrypted_metadata_path)
                 .await
                 .is_ok()

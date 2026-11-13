@@ -4,8 +4,8 @@ use chrono::Utc;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 
 use super::{
-    BackupActivity, BackupActivityId, BackupActivityKind, BackupJob, BackupRun, BackupRunState,
-    BackupRunTrigger, completed_activity_overflow, completed_run_overflow,
+    BackupActivity, BackupActivityId, BackupActivityKind, BackupJob, BackupRunState,
+    BackupRunTrigger, ScheduledBackupRun, completed_activity_overflow, completed_run_overflow,
 };
 use crate::PackageId;
 use crate::backup::PackageBackupReport;
@@ -67,7 +67,7 @@ pub(crate) fn running(
     }
 }
 
-pub(crate) fn from_run(run: &BackupRun) -> BackupActivity {
+pub(crate) fn from_run(run: &ScheduledBackupRun) -> BackupActivity {
     BackupActivity {
         id: run.id.clone(),
         kind: BackupActivityKind::Automatic,
@@ -106,7 +106,7 @@ pub(crate) fn prune_completed_history(db: &mut DatabaseModel) -> Result<usize, E
         .as_entries()?
         .into_iter()
         .map(|(_, run)| run.de())
-        .collect::<Result<Vec<BackupRun>, Error>>()?;
+        .collect::<Result<Vec<ScheduledBackupRun>, Error>>()?;
     let activity_ids = completed_activity_overflow(&activities);
     let run_ids = completed_run_overflow(&runs);
     let removed = activity_ids.len() + run_ids.len();

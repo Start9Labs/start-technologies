@@ -1,5 +1,4 @@
 import { Routes } from '@angular/router'
-
 import { SYSTEM_UTILITIES } from 'src/app/utils/system-utilities'
 import { titleResolver } from 'src/app/utils/title-resolver'
 import { toRouterLink } from 'src/app/utils/to-router-link'
@@ -10,6 +9,12 @@ const ROUTES: Routes = [
     path: '',
     component: PortalComponent,
     children: [
+      { path: 'backups/automatic', redirectTo: 'system/backups/automatic' },
+      { path: 'backups/history', redirectTo: 'system/backups/automatic' },
+      { path: 'backups/locations', redirectTo: 'system/backup-targets' },
+      { path: 'backups/manual', redirectTo: 'system/backups' },
+      { path: 'backups/restore', redirectTo: 'system/backups' },
+      { path: 'backups', redirectTo: 'system/backups' },
       {
         redirectTo: 'services',
         pathMatch: 'full',
@@ -20,16 +25,6 @@ const ROUTES: Routes = [
         data: { title: 'Services' },
         title: titleResolver,
         loadChildren: () => import('./routes/services/services.routes'),
-      },
-      {
-        path: 'backups',
-        redirectTo: '/system/backups',
-        pathMatch: 'full',
-      },
-      {
-        path: 'backups/:section',
-        redirectTo: '/system/backups/:section',
-        pathMatch: 'full',
       },
       {
         title: titleResolver,

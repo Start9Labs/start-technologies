@@ -801,6 +801,9 @@ mod test {
             "public": {
                 "ui": {},
                 "scheduledBackups": imbl_value::to_value(&crate::backup::scheduled::ScheduledBackupState::default()).unwrap(),
+                "disks": [],
+                "sharedVolumes": {},
+                "backupTargets": {},
                 "serverInfo": {
                     "hostname": "server",
                     "network": {

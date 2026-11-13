@@ -10,17 +10,17 @@ use tokio::sync::OwnedMutexGuard;
 
 use super::retention::{CAPACITY_MARGIN_PERCENT, with_margin};
 use super::{
-    BackupJob, BackupJobId, BackupJobPause, BackupRun, BackupRunState, BackupRunTrigger,
-    BackupServiceScope, BackupTargetFailureState, ScheduledBackupCredential,
-    ScheduledBackupMountGuard, ServiceSnapshot, ServiceSnapshotId, activity_from_run,
-    insert_activity, prune_completed_history,
+    BackupJob, BackupJobId, BackupJobPause, BackupRunState, BackupRunTrigger, BackupServiceScope,
+    BackupTargetFailureState, ScheduledBackupCredential, ScheduledBackupMountGuard,
+    ScheduledBackupRun, ServiceSnapshot, ServiceSnapshotId, activity_from_run, insert_activity,
+    prune_completed_history,
 };
 use crate::backup::PackageBackupReport;
 use crate::backup::scheduled::history_key;
-use crate::backup::target::{BackupTargetFS, BackupTargetId};
+use crate::backup::target::{BackupTargetId, BackupTargetSource, TargetMount};
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::ReadWrite;
-use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
+use crate::disk::mount::guard::GenericMountGuard;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker};
@@ -51,12 +51,8 @@ where
     result
 }
 
-async fn mount_target(target: &BackupTargetFS) -> Result<TmpMountGuard, Error> {
-    retry_mount(
-        || TmpMountGuard::mount(target, ReadWrite),
-        &TARGET_MOUNT_RETRY_DELAYS,
-    )
-    .await
+async fn mount_target(target: &BackupTargetSource) -> Result<TargetMount, Error> {
+    retry_mount(|| target.mount(ReadWrite), &TARGET_MOUNT_RETRY_DELAYS).await
 }
 
 /// Runs one automatic backup job while holding the global backup coordinator.
@@ -64,7 +60,7 @@ pub async fn run_job(
     ctx: RpcContext,
     job_id: BackupJobId,
     trigger: BackupRunTrigger,
-) -> Result<BackupRun, Error> {
+) -> Result<ScheduledBackupRun, Error> {
     let coordinator = crate::backup::try_backup_coordinator(ctx.backup_coordinator.clone())?;
     // Client disconnects must not release active backup ownership.
     tokio::spawn(run_job_with_coordinator(ctx, job_id, trigger, coordinator))
@@ -78,7 +74,7 @@ pub(super) async fn run_job_with_coordinator(
     job_id: BackupJobId,
     trigger: BackupRunTrigger,
     _coordinator: OwnedMutexGuard<()>,
-) -> Result<BackupRun, Error> {
+) -> Result<ScheduledBackupRun, Error> {
     super::reconcile_interrupted_backup_state(&ctx).await?;
     let result = run_job_inner(&ctx, &job_id, trigger).await;
     ctx.db
@@ -98,7 +94,7 @@ async fn run_job_inner(
     ctx: &RpcContext,
     job_id: &BackupJobId,
     trigger: BackupRunTrigger,
-) -> Result<BackupRun, Error> {
+) -> Result<ScheduledBackupRun, Error> {
     let db = ctx.db.peek().await;
     let job: BackupJob = db
         .as_public()
@@ -274,7 +270,7 @@ async fn run_job_inner(
     let mut scheduled_guard = Arc::new(scheduled_guard);
 
     let now = Utc::now();
-    let mut run = BackupRun {
+    let mut run = ScheduledBackupRun {
         id: Guid::new(),
         job_id: job.id.clone(),
         job_name: job.name.clone(),
@@ -614,10 +610,10 @@ fn backup_item_name(package_id: &PackageId) -> String {
 }
 
 async fn promote_staging(
-    scheduled_guard: Arc<ScheduledBackupMountGuard<TmpMountGuard>>,
+    scheduled_guard: Arc<ScheduledBackupMountGuard<TargetMount>>,
     db: &crate::db::model::DatabaseModel,
     job: &BackupJob,
-    run: &BackupRun,
+    run: &ScheduledBackupRun,
     package_id: &PackageId,
     package_version: String,
     physical_size: Option<u64>,
@@ -625,7 +621,7 @@ async fn promote_staging(
     started: Instant,
 ) -> Result<
     (
-        Arc<ScheduledBackupMountGuard<TmpMountGuard>>,
+        Arc<ScheduledBackupMountGuard<TargetMount>>,
         PackageBackupReport,
     ),
     Error,
@@ -908,9 +904,9 @@ async fn record_failed_run(
     package_ids: &BTreeSet<PackageId>,
     trigger: BackupRunTrigger,
     error: String,
-) -> Result<BackupRun, Error> {
+) -> Result<ScheduledBackupRun, Error> {
     let now = Utc::now();
-    let run = BackupRun {
+    let run = ScheduledBackupRun {
         id: Guid::new(),
         job_id: job.id.clone(),
         job_name: job.name.clone(),
@@ -965,7 +961,7 @@ async fn record_failed_run_and_notify(
     package_ids: &BTreeSet<PackageId>,
     trigger: BackupRunTrigger,
     error: String,
-) -> Result<BackupRun, Error> {
+) -> Result<ScheduledBackupRun, Error> {
     let run = record_failed_run(ctx, job, package_ids, trigger, error).await?;
     ctx.db
         .mutate(|db| notify_run_failure(db, &job.name, &job.target_id, package_ids))

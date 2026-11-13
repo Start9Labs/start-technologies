@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { setImmediate } from 'node:timers/promises'
 import '@angular/compiler'
 import { createEnvironmentInjector, runInInjectionContext } from '@angular/core'
-import { TuiNotificationService } from '@taiga-ui/core'
 import { BehaviorSubject, EMPTY, of } from 'rxjs'
+import { TuiNotificationService } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
 import { loadTypeScript } from './typescript-loader.mjs'
 
@@ -18,8 +17,6 @@ loadTypeScript(
     export class TaskService {}
     export class i18nPipe {}
     export class RpcError extends Error {}
-    export const convertBytes = value => String(value);
-    export const getErrorMessage = error => error.message;
   `,
     ],
     ['src/app/services/api/embassy-api.service', 'export class ApiService {}'],
@@ -40,12 +37,12 @@ const backup = formatStatus => ({
   formatStatus,
 })
 const target = formatStatus => ({
-  type: 'cifs',
-  hostname: 'host',
-  path: '/backups',
-  username: '',
-  mountable: true,
+  name: 'Target',
+  source: { kind: 'cifs', hostname: 'host', path: '/backups' },
+  availability: 'available',
   available: 100,
+  error: null,
+  checkedAt: null,
   startOs: { own: backup(formatStatus) },
   legacyBackup: false,
 })
@@ -57,9 +54,8 @@ const job = state => ({
 
 function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
   const observations = new BehaviorSubject({})
-  const requests = [],
-    submissions = [],
-    errors = [],
+  const targets = new BehaviorSubject({})
+  const submissions = [],
     prompts = [],
     confirmations = [],
     tasks = []
@@ -67,10 +63,6 @@ function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
     rpc: {
       backup: {
         target: {
-          list: () =>
-            new Promise((resolve, reject) =>
-              requests.push({ resolve, reject }),
-            ),
           convert: async params => {
             submissions.push(params)
             return null
@@ -86,12 +78,13 @@ function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
     {
       provide: PatchDB,
       useValue: {
-        watch$: (...path) => (path.at(-1) === 'id' ? of('own') : observations),
+        watch$: (...path) =>
+          path.at(-1) === 'id'
+            ? of('own')
+            : path[0] === 'backupTargets'
+              ? targets
+              : observations,
       },
-    },
-    {
-      provide: ErrorService,
-      useValue: { handleError: error => errors.push(error) },
     },
     {
       provide: DialogService,
@@ -106,6 +99,7 @@ function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
         },
       },
     },
+    { provide: ErrorService, useValue: { handleError: () => {} } },
     {
       provide: TaskService,
       useValue: {
@@ -120,11 +114,11 @@ function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
   const service = runInInjectionContext(injector, () => new BackupService())
   t.after(() => injector.destroy())
   return {
+    api,
     service,
     observations,
-    requests,
+    targets,
     submissions,
-    errors,
     prompts,
     confirmations,
     tasks,
@@ -180,108 +174,13 @@ test('conversion indicators and dialog entries never include another server', ()
   assert.deepEqual(serverBackups(backups, 'absent'), {})
 })
 
-test('legacy discovery preserves backup/restore eligibility and never starts conversion', async t => {
+test('targets come from the database and keep backup/restore eligibility without starting conversion', t => {
   const f = fixture(t)
-  f.service.getBackupTargets()
-  f.requests[0].resolve({ legacy: target('legacy') })
-  await setImmediate()
-  assert.equal(f.service.cifs()[0].hasAnyBackup, true)
-  assert.equal(f.service.cifs()[0].hasCurrentBackup, true)
+  f.targets.next({ legacy: target('legacy') })
+  const entry = f.service.targets().legacy
+  assert.equal(f.service.hasAnyBackup(entry), true)
+  assert.equal(f.service.hasCurrentBackup(entry), true)
   assert.deepEqual(f.submissions, [])
-  assert.equal(f.service.loading(), false)
-})
-
-test('awaiting discovery makes targets available for automatic setup', async t => {
-  const f = fixture(t)
-  const loading = f.service.getBackupTargets()
-  let settled = false
-  Promise.resolve(loading).then(() => (settled = true))
-  await setImmediate()
-  assert.equal(settled, false)
-  f.requests[0].resolve({ destination: target('current') })
-  await loading
-  assert.equal(f.service.locations()[0].id, 'destination')
-  assert.equal(f.service.targets()[0].id, 'destination')
-})
-
-test('overlapping discovery callers wait for the latest target view', async t => {
-  const f = fixture(t)
-  let settled = false
-  const first = f.service.getBackupTargets().then(() => (settled = true))
-  const latest = f.service.getBackupTargets()
-  f.requests[0].resolve({ stale: target('legacy') })
-  await setImmediate()
-  assert.equal(settled, false)
-  f.requests[1].resolve({ latest: target('current') })
-  await Promise.all([first, latest])
-  assert.equal(f.service.locations()[0].id, 'latest')
-})
-
-test('a late discovery response cannot replace a newer target view; failures retain the view', async t => {
-  const f = fixture(t)
-  f.service.getBackupTargets()
-  f.service.getBackupTargets()
-  f.requests[1].resolve({ latest: target('current') })
-  await setImmediate()
-  f.requests[0].resolve({ stale: target('legacy') })
-  await setImmediate()
-  assert.equal(f.service.cifs()[0].id, 'latest')
-  f.service.getBackupTargets()
-  f.requests[2].reject(new Error('offline'))
-  await setImmediate()
-  assert.equal(f.service.cifs()[0].id, 'latest')
-  assert.deepEqual(f.errors, ['offline'])
-  assert.equal(f.service.loading(), false)
-})
-
-test('completion refreshes discovery once, not on every progress observation', async t => {
-  const f = fixture(t)
-  f.observations.next({ target: { own: job('running') } })
-  f.observations.next({ target: { own: job('running') } })
-  assert.equal(f.requests.length, 0)
-  f.observations.next({ target: { own: job('complete') } })
-  assert.equal(f.requests.length, 1)
-  f.observations.next({ target: { own: job('complete') } })
-  assert.equal(f.requests.length, 1)
-  f.requests[0].resolve({ target: target('current') })
-  await setImmediate()
-  assert.equal(f.service.cifs()[0].entry.startOs.own.formatStatus, 'current')
-})
-
-test('failure refreshes discovery once and exposes the interrupted format', async t => {
-  const f = fixture(t)
-  f.service.getBackupTargets()
-  f.requests[0].resolve({ target: target('legacy') })
-  await setImmediate()
-  f.observations.next({ target: { own: job('running') } })
-  f.observations.next({ target: { own: job('failed') } })
-  assert.equal(f.requests.length, 2)
-  f.observations.next({ target: { own: job('failed') } })
-  assert.equal(f.requests.length, 2)
-  f.requests[1].resolve({ target: target('interrupted') })
-  await setImmediate()
-  const refreshed = f.service.cifs()[0]
-  assert.equal(refreshed.entry.startOs.own.formatStatus, 'interrupted')
-  assert.equal(
-    conversionLabel(
-      refreshed.entry.startOs,
-      f.service.conversions().target,
-      'own',
-    ),
-    'Resume conversion',
-  )
-})
-
-test('coalesced terminal observations refresh without requiring a visible running state', async t => {
-  for (const state of ['complete', 'failed']) {
-    const f = fixture(t)
-    f.observations.next({ target: { own: job(state) } })
-    assert.equal(f.requests.length, 1)
-    f.requests[0].resolve({
-      target: target(state === 'complete' ? 'current' : 'interrupted'),
-    })
-    await setImmediate()
-  }
 })
 
 test('backup creation offers an update and skip; skipping starts no conversion', async t => {
@@ -347,7 +246,7 @@ test('other-server backups do not prompt; interrupted or running own backups ope
   assert.deepEqual(f.submissions, [])
 })
 
-test('conversion requires explicit confirmation and a password, scoped to one server', async t => {
+test('conversion asks only for the password, scoped to one server', async t => {
   const f = fixture(t)
   await f.service.convert('disk-target', 'archived-server')
   assert.deepEqual(f.submissions, [
@@ -358,20 +257,40 @@ test('conversion requires explicit confirmation and a password, scoped to one se
     },
   ])
   assert.equal(f.prompts.length, 1)
+  assert.deepEqual(f.confirmations, [])
   assert.deepEqual(f.tasks, ['Starting backup conversion'])
-})
-
-test('declined or dismissed confirmation never prompts for a credential', async t => {
-  for (const confirm of [of(false), EMPTY]) {
-    const f = fixture(t, { confirm })
-    await f.service.convert('target', 'own')
-    assert.deepEqual(f.prompts, [])
-    assert.deepEqual(f.submissions, [])
-  }
 })
 
 test('dismissing the password prompt starts no background job', async t => {
   const f = fixture(t, { password: EMPTY })
   await f.service.convert('target', 'own')
   assert.deepEqual(f.submissions, [])
+})
+
+test('schedule setup awaits target inspection and sees the pushed catalog', async t => {
+  const f = fixture(t)
+  let finish
+  const inspected = new Promise(resolve => {
+    finish = resolve
+  })
+  f.api.rpc.backup.target.inspect = () => inspected
+  f.targets.next({ destination: target('current') })
+  let settled = false
+  const refresh = f.service.getBackupTargets().then(() => {
+    settled = true
+  })
+  await Promise.resolve()
+  assert.equal(settled, false)
+  f.targets.next({
+    destination: {
+      ...target('current'),
+      name: 'Updated destination',
+      checkedAt: new Date().toISOString(),
+    },
+  })
+  finish()
+  await refresh
+  assert.deepEqual(f.service.scheduleTargets(), [
+    { id: 'destination', name: 'Updated destination' },
+  ])
 })

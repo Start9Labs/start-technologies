@@ -1,3 +1,4 @@
+import type AutomaticBackups from './routes/backups/automatic-page'
 import { TUI_BREAKPOINT } from '@taiga-ui/core'
 import { inject } from '@angular/core'
 import {
@@ -6,7 +7,6 @@ import {
   RouterStateSnapshot,
   Routes,
 } from '@angular/router'
-
 import { titleResolver } from 'src/app/utils/title-resolver'
 import { SystemComponent } from './system.component'
 import { TRUSTED_KEYS_MENU_ITEM } from './system.const'
@@ -34,20 +34,31 @@ export default [
         loadComponent: () => import('./routes/smtp/smtp.component'),
       },
       {
+        path: 'volumes',
+        title: titleResolver,
+        data: { title: 'Shared Volumes' },
+        loadComponent: () => import('./routes/volumes'),
+      },
+      {
+        path: 'backup-targets',
+        title: titleResolver,
+        data: { title: 'Backup Targets' },
+        loadComponent: () => import('./routes/backups/targets'),
+      },
+      {
+        path: 'backups/automatic',
+        title: titleResolver,
+        data: { title: 'Automatic backups' },
+        canDeactivate: [
+          (component: AutomaticBackups) => component.canDeactivate(),
+        ],
+        loadComponent: () => import('./routes/backups/automatic-page'),
+      },
+      {
         path: 'backups',
         title: titleResolver,
-        loadChildren: () => import('../backups/backups.routes'),
         data: { title: 'Backups' },
-      },
-      {
-        path: 'backup',
-        redirectTo: 'backups/manual',
-        pathMatch: 'full',
-      },
-      {
-        path: 'restore',
-        redirectTo: 'backups/restore',
-        pathMatch: 'full',
+        loadComponent: () => import('./routes/backups'),
       },
       {
         path: 'interfaces',

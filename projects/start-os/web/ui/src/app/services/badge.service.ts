@@ -1,7 +1,7 @@
 import { inject, Injectable } from '@angular/core'
 import { PatchDB } from 'patch-db-client'
-import { combineLatest, EMPTY, map, Observable, shareReplay } from 'rxjs'
-
+import { combineLatest, EMPTY, map, Observable, of, shareReplay } from 'rxjs'
+import { conversionLabel } from 'src/app/routes/portal/routes/system/routes/backups/conversion-state'
 import { HiddenUpdatesService } from 'src/app/services/hidden-updates.service'
 import { LocalPackagesService } from 'src/app/services/local-packages.service'
 import { NotificationService } from 'src/app/services/notification.service'
@@ -22,7 +22,7 @@ export class BadgeService {
   private readonly metrics$ = this.patch
     .watch$('serverInfo', 'ntpSynced')
     .pipe(map(synced => Number(!synced)))
-  private readonly backups$ = this.patch
+  private readonly backupActivities$ = this.patch
     .watch$('scheduledBackups', 'activities')
     .pipe(
       map(
@@ -60,6 +60,27 @@ export class BadgeService {
     shareReplay(1),
   )
 
+  private readonly backups$ = combineLatest([
+    this.patch.watch$('backupTargets'),
+    this.patch.watch$('serverInfo', 'id'),
+    this.patch.watch$('serverInfo', 'statusInfo', 'backupConversions'),
+  ]).pipe(
+    map(([targets, serverId, jobs]) =>
+      Object.entries(targets).some(
+        ([id, target]) =>
+          target.legacyBackup ||
+          !!conversionLabel(target.startOs, jobs[id], serverId),
+      ),
+    ),
+    shareReplay(1),
+  )
+
+  getWarning(id: string): Observable<boolean> {
+    return id === 'system' || id === 'backup-targets'
+      ? this.backups$
+      : of(false)
+  }
+
   getCount(id: string): Observable<number> {
     switch (id) {
       case 'updates':
@@ -71,7 +92,7 @@ export class BadgeService {
       case 'metrics':
         return this.metrics$
       case 'backups':
-        return this.backups$
+        return this.backupActivities$
       case 'notifications':
         return this.notifications.unreadCount$
       default:

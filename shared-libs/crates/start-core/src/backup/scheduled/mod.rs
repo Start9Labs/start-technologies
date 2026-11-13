@@ -3,6 +3,7 @@
 mod activity;
 mod association;
 mod credential;
+mod migration;
 mod model;
 mod retention;
 mod review;
@@ -22,6 +23,7 @@ pub(crate) use association::{
     associate_histories, associated_service_ids, disassociate_histories, refresh_archive_state,
 };
 pub use credential::*;
+pub(crate) use migration::register_legacy_disk_targets;
 pub use model::*;
 pub use retention::*;
 pub use review::*;

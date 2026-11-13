@@ -8,7 +8,9 @@ use super::{VersionT, v0_4_1_1};
 use crate::prelude::*;
 use crate::sign::AnyVerifyingKey;
 use crate::trusted_keys::legacy::{decode_keys, grouped_keys};
-use crate::trusted_keys::{TrustedKeys, initial_signer_certificates, protect_registry_keys};
+use crate::trusted_keys::{
+    TrustedKeys, initial_signer_certificates, protect_registry_keys, ui_registries,
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;
@@ -60,16 +62,16 @@ fn migrate(db: &mut Value, now: DateTime<Utc>) -> Result<(), Error> {
         .map(from_value)
         .transpose()?
         .unwrap_or_default();
-    let ui = db
+    let registries = db
         .get("public")
         .and_then(|public| public.get("ui"))
-        .cloned()
+        .map(ui_registries)
         .unwrap_or_default();
     let stored = stored_keys(db)?;
     let mut keys = decode_keys(stored.clone(), now)?;
     replace_stored_drbonez_certificates(&mut keys);
     remove_seeded_alpha_keys(&mut keys);
-    protect_registry_keys(&mut keys, &snapshots, &ui);
+    protect_registry_keys(&mut keys, &snapshots, &registries);
     *stored = to_value(&keys)?;
     Ok(())
 }

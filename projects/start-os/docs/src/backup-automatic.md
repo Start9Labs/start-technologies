@@ -35,8 +35,9 @@ differs from the current password.
 
 ## Schedules
 
-During setup, **Continue** validates each step. Select a completed step to return
-to its settings.
+In **System → Backups**, select **Manage schedules**. Add a schedule, choose a registered backup target, select its services and version-history rules, then save. Manage targets in **System → Backup Targets**.
+
+Service checkpoints contain service-owned volumes. Back up shared volumes separately from the **Backups** page.
 
 Schedules can run hourly, daily, weekly, or monthly at a chosen local time and
 timezone. StartOS stores the selected timezone with the schedule so
@@ -115,12 +116,12 @@ Changing a schedule's location does not copy its existing checkpoints. They
 remain archived on the old location, and the next run begins a history on the
 new one. A replacement drive or network folder needs a separate location entry
 while the original entry has schedules or checkpoints.
-For a replacement network folder, add a new location entry. If a replacement
-drive reuses the original device name, find its partition under
-`/dev/disk/by-id/` over SSH and reassign the schedule with the CLI:
+Add the replacement as a new target under **System → Backup Targets**. Use
+`start-cli backup target list` to find its registered target ID, then reassign
+the schedule with the CLI:
 
 ```sh
-start-cli backup job reassign-target <JOB_ID> disk-/dev/disk/by-id/<REPLACEMENT_PARTITION> <PASSWORD> --wait-for-schedule
+start-cli backup job reassign-target <JOB_ID> <REPLACEMENT_TARGET_ID> <PASSWORD> --wait-for-schedule
 ```
 
 Deleting a schedule can either leave its automatic checkpoints archived
@@ -150,7 +151,7 @@ to any backup or restore still in progress. Successful checkpoints remain
 available when another service in the same run fails. During restore, StartOS
 selects the newest available checkpoint for each service by default, but any
 retained or archived manual or automatic checkpoint can be chosen instead. See
-[Restoring Backups](./backup-restore.md).
+[Restoring Backups](backups.md#restoring-backups).
 
 StartOS sends a notification whenever an automatic run fails. It pauses affected
 schedules after three consecutive failures to connect to a backup location. It
