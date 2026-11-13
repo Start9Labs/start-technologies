@@ -19,9 +19,7 @@ export default {
   16: 'Tema',
   17: 'Zona horaria',
   18: 'Acceso remoto',
-  19: 'nunca',
   20: 'siempre',
-  21: 'Cuando está detrás de NAT (predeterminado)',
   22: 'Seguridad',
   23: 'Descarga tu CA raíz para confiar en las conexiones HTTPS desde dispositivos adicionales.',
   24: 'Descargar CA raíz',
@@ -594,4 +592,6 @@ export default {
   640: 'Tu tráfico',
   641: 'Para eliminar esta VPN, primero cambia {vpns} para que se conecten a través de otra cosa.',
   642: 'Para desactivar esta VPN, primero cambia {vpns} para que se conecten a través de otra cosa.',
+  643: 'Nunca (predeterminado)',
+  644: 'Cuando está detrás de NAT',
 } satisfies i18n
