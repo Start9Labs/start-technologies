@@ -27,9 +27,9 @@ case "${0##*/}" in
         fi
         ;;
     lxc-stop)
-        [ "$#" = 2 ] && [ "$1" = --name ] || exit 2
-        printf 'stop %s\n' "$2" >> "$STARTOS_LXC_GC_TEST_DIR/events"
-        if [ "$2" = "$GC_FAILED" ] && [ -e "$STARTOS_LXC_GC_TEST_DIR/fail-stop" ]; then
+        [ "$#" = 3 ] && [ "$1" = --kill ] && [ "$2" = --name ] || exit 2
+        printf 'stop %s\n' "$3" >> "$STARTOS_LXC_GC_TEST_DIR/events"
+        if [ "$3" = "$GC_FAILED" ] && [ -e "$STARTOS_LXC_GC_TEST_DIR/fail-stop" ]; then
             printf 'injected stop failure\n' >&2
             exit 1
         fi

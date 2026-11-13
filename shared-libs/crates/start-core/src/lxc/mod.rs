@@ -155,7 +155,7 @@ impl LxcManager {
         Ok(container)
     }
 
-    /// Stops and destroys untracked LXC containers.
+    /// Kills and destroys untracked LXC containers.
     ///
     /// Fails when an untracked container may still be running; destroy failures are only logged.
     /// Startup requires success before volume maintenance or service initialization.
@@ -175,6 +175,7 @@ impl LxcManager {
             async move {
                 if running {
                     Command::new("lxc-stop")
+                        .arg("--kill")
                         .arg("--name")
                         .arg(&**container)
                         .invoke(ErrorKind::Lxc)
