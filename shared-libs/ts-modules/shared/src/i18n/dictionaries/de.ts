@@ -1020,7 +1020,7 @@ export default {
   1219: 'Erstellen',
   1220: 'Wiederherstellen',
   1221: 'Zu den Backup-Zielen',
-  1222: 'Derzeit läuft eine Sicherung. Eine Unterbrechung kann jetzt die Sicherung des gerade geschriebenen Dienstes beschädigen.',
+  1222: 'Derzeit läuft eine Sicherung. Eine Unterbrechung kann die gerade geschriebene Sicherung beschädigen.',
   1223: 'Auf Abschluss der Sicherung warten',
   1224: 'Jetzt herunterfahren',
   1225: 'Eine Sicherung läuft. Ihr Server wird nach deren Abschluss neu gestartet.',

@@ -1020,7 +1020,7 @@ export default {
   1219: 'Utwórz',
   1220: 'Przywróć',
   1221: 'Przejdź do miejsc docelowych kopii zapasowych',
-  1222: 'Trwa tworzenie kopii zapasowej. Przerwanie jej teraz może uszkodzić kopię zapasową aktualnie zapisywanej usługi.',
+  1222: 'Trwa tworzenie kopii zapasowej. Przerwanie tego procesu może uszkodzić zapisywaną kopię zapasową.',
   1223: 'Poczekaj na zakończenie kopii zapasowej',
   1224: 'Wyłącz teraz',
   1225: 'Trwa tworzenie kopii zapasowej. Serwer zostanie ponownie uruchomiony po jej zakończeniu.',

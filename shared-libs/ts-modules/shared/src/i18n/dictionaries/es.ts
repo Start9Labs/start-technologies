@@ -1020,7 +1020,7 @@ export default {
   1219: 'Crear',
   1220: 'Restaurar',
   1221: 'Ir a destinos de copia de seguridad',
-  1222: 'Hay una copia de seguridad en curso. Interrumpirla ahora puede dañar la copia de seguridad del servicio que se está escribiendo.',
+  1222: 'Hay una copia de seguridad en curso. Interrumpirla ahora puede dañar la copia que se está escribiendo.',
   1223: 'Esperar a que termine la copia de seguridad',
   1224: 'Apagar ahora',
   1225: 'Hay una copia de seguridad en curso. Su servidor se reiniciará cuando termine.',

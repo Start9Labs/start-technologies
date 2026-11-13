@@ -2625,7 +2625,7 @@ test('grant capability reads the installed manifest throughout updates without c
   assert.equal(getCurrentManifest(pkg), installed)
 })
 
-test('production mocks support inspection, independent failed backups and new-local restore without a public password', async t => {
+test('production mocks finish volume-only backup reports before deferred power and restore without a public password', async t => {
   const { MockApiService } =
     await import('src/app/services/api/embassy-mock-api.service')
   const { Mock } = await import('src/app/services/api/api.fixures')
@@ -2802,6 +2802,23 @@ test('production mocks support inspection, independent failed backups and new-lo
     password: 'password',
     oldPassword: null,
   })
+  let committed
+  const subscription = cache.subscribe(({ value }) => {
+    if (value.serverInfo.statusInfo.restarting && !committed)
+      committed = structuredClone({
+        progress: value.serverInfo.statusInfo.backupProgress,
+        backup: value.backupTargets[targetId].startOs[Mock.ServerId],
+        report: Mock.Notifications[0]?.data,
+      })
+  })
+  t.after(() => subscription.unsubscribe())
+  assert.ok(cache.value.value.serverInfo.statusInfo.backupProgress)
+  await api.rpc.server.restart({ force: false })
+  assert.equal(
+    cache.value.value.serverInfo.statusInfo.deferredPowerAction,
+    'restart',
+  )
+  assert.equal(cache.value.value.serverInfo.statusInfo.restarting, false)
   await api.rpc.backup.target.rename({ id: targetId, name: 'Later name' })
   t.mock.timers.tick(500)
   await tick()
@@ -2818,6 +2835,13 @@ test('production mocks support inspection, independent failed backups and new-lo
     'previous',
   )
   const report = Mock.Notifications[0].data
+  assert.equal(committed.progress, null)
+  assert.ok(committed.backup.timestamp)
+  assert.deepEqual(committed.report, report)
+  assert.equal(
+    cache.value.value.serverInfo.statusInfo.deferredPowerAction,
+    null,
+  )
   assert.equal(report.sharedVolumes[local].error, null)
   assert.ok(report.sharedVolumes[remote].error)
   assert.deepEqual(report.packages, {})

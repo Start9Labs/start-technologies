@@ -1020,7 +1020,7 @@ export default {
   1219: 'Créer',
   1220: 'Restaurer',
   1221: 'Aller aux cibles de sauvegarde',
-  1222: 'Une sauvegarde est en cours. L’interrompre maintenant peut corrompre la sauvegarde du service en cours d’écriture.',
+  1222: 'Une sauvegarde est en cours. L’interrompre maintenant peut corrompre la sauvegarde en cours d’écriture.',
   1223: 'Attendre la fin de la sauvegarde',
   1224: 'Éteindre maintenant',
   1225: 'Une sauvegarde est en cours. Votre serveur redémarrera une fois celle-ci terminée.',

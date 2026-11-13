@@ -7,7 +7,7 @@ import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
   template: `
     <p>
       {{
-        'A backup is currently running. Interrupting it now can corrupt the backup of the service being written.'
+        'A backup is currently running. Interrupting it now can corrupt the backup being written.'
           | i18n
       }}
     </p>

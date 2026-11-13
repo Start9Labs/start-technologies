@@ -172,6 +172,7 @@ fn notify_legacy_present(db: &mut DatabaseModel) -> Result<(), Error> {
     )
 }
 
+/// Power deferral covers service and shared-volume backups through status cleanup.
 #[instrument(skip(ctx, old_password, password))]
 pub async fn backup_all(
     ctx: RpcContext,

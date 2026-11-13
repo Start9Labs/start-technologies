@@ -1295,22 +1295,6 @@ export class MockApiService extends ApiService {
           report,
         })
 
-        const lastPatch: ReplaceOperation<T.ServerStatus['backupProgress']>[] =
-          [
-            {
-              op: PatchOp.REPLACE,
-              path: serverPath,
-              value: null,
-            },
-          ]
-        this.mockRevision(lastPatch)
-        this.backingUp = false
-        if (this.deferredPowerAction) {
-          const action = this.deferredPowerAction
-          await this.handlers[
-            action === 'restart' ? 'server.restart' : 'server.shutdown'
-          ]!({})
-        }
         if (utils.deepEqual(this.backupTarget(params.targetId)?.source, source))
           await this.mockRevision<unknown>([
             {
@@ -1345,6 +1329,16 @@ export class MockApiService extends ApiService {
               'This backup target still contains an old-format (V1) backup that is no longer needed. To free up space on the drive, open this target on the Backups page and delete it.',
             data: null,
           })
+        }
+        await this.mockRevision([
+          { op: PatchOp.REPLACE, path: serverPath, value: null },
+        ])
+        this.backingUp = false
+        if (this.deferredPowerAction) {
+          const action = this.deferredPowerAction
+          await this.handlers[
+            action === 'restart' ? 'server.restart' : 'server.shutdown'
+          ]!({})
         }
       }, 500)
 
