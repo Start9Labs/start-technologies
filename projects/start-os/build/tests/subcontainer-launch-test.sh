@@ -5,6 +5,10 @@ set -euo pipefail
 START_CONTAINER=$(realpath -s "${1:?path to start-container}")
 BUSYBOX=$(realpath "${2:?path to static busybox}")
 [ "$EUID" -eq 0 ] || { echo 'Run in a private mount namespace as root.' >&2; exit 1; }
+cmp -s "$START_CONTAINER" /usr/bin/start-container || {
+    echo 'Install the tested binary at /usr/bin/start-container for launcher tests.' >&2
+    exit 1
+}
 TMP=$(mktemp -d)
 ROOT="$TMP/root"
 wrapper_pid=
@@ -81,3 +85,48 @@ for user in root 1234:2345; do
     umount "$ROOT/proc"
 done
 printf 'PASS: SIGKILL of the launch wrapper kills init and descendants, as root and numeric user\n'
+
+for tty in pipe pty; do
+    tty_args=()
+    if [ "$tty" = pty ]; then
+        tty_args=(--force-tty --force-stderr-tty)
+    fi
+    for phase in early ready graceful; do
+        init_pid=
+        "$START_CONTAINER" subcontainer launch "${tty_args[@]}" "$ROOT" >"$TMP/stdout" 2>"$TMP/stderr" &
+        wrapper_pid=$!
+        for _ in {1..200}; do
+            read -r init_pid _ <"/proc/$wrapper_pid/task/$wrapper_pid/children" || true
+            if [ -n "$init_pid" ]; then break; fi
+            sleep 0.01
+        done
+        [ -n "$init_pid" ] || { cat "$TMP/stderr" >&2; exit 1; }
+        if [ "$phase" != early ]; then
+            ready=false
+            for _ in {1..200}; do
+                caught=$(awk '/^SigCgt:/ {print $2}' "/proc/$init_pid/status")
+                if (( (16#$caught & (1 << 14)) != 0 )); then
+                    ready=true
+                    break
+                fi
+                sleep 0.01
+            done
+            "$ready" || { cat "$TMP/stderr" >&2; exit 1; }
+        fi
+        if [ "$phase" = graceful ]; then
+            kill -TERM "$wrapper_pid"
+            wait_dead "$wrapper_pid"
+            wait "$wrapper_pid"
+        else
+            kill -KILL "$wrapper_pid"
+            wait "$wrapper_pid" 2>/dev/null || [ "$?" -eq 137 ]
+        fi
+        wrapper_pid=
+        wait_dead "$init_pid"
+        init_pid=
+        if mountpoint -q "$ROOT/proc"; then
+            umount "$ROOT/proc"
+        fi
+        printf 'PASS: commandless init teardown (%s, %s)\n' "$tty" "$phase"
+    done
+done

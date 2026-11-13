@@ -55,7 +55,7 @@ packaging
 })
 
 const NEXT = `start-os=0.4.3.x
-start-os=0.4.2.x@start-os/v0.4.2
+start-os=0.4.2.x@start-os/v0.4.2.1
 start-os=0.4.1.x@start-os/v0.4.1.2
 start-os=0.4.0.x@start-os/v0.4.0.4
 start-tunnel=1.6.x
