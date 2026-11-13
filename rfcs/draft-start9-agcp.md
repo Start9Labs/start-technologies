@@ -15,7 +15,7 @@ keyword:
   - firewall
   - JSON-RPC
   - PCP
-date: 2026-09-24
+date: 2026-11-13
 author:
   - ins: A. McClelland
     name: Aiden McClelland
@@ -24,16 +24,24 @@ author:
 normative:
   RFC2136:
   RFC4632:
-  RFC4648:
-  RFC5280:
+  RFC6455:
   RFC6762:
   RFC6763:
   RFC5890:
   RFC6887:
   RFC8259:
-  RFC8410:
   RFC8446:
   RFC9110:
+  START-RPC-SESSION:
+    title: Signed RPC session protocol, version 1
+    author:
+      - org: Start9
+    target: https://github.com/Start9Labs/start-technologies/blob/9a76317ccf701020f222bea4eadb11f2f1b2458e/shared-libs/crates/start-core/signed-session.md
+  START-RPC-INTEGRATION:
+    title: Encrypted RPC integration
+    author:
+      - org: Start9
+    target: https://github.com/Start9Labs/start-technologies/blob/9a76317ccf701020f222bea4eadb11f2f1b2458e/shared-libs/crates/start-core/encrypted-rpc.md
   JSONRPC:
     title: JSON-RPC 2.0 Specification
     date: 2013-01-04
@@ -54,7 +62,6 @@ informative:
   RFC4033:
   RFC6335:
   RFC6970:
-  RFC7250:
   RFC7652:
   RFC8040:
   RFC8512:
@@ -89,10 +96,11 @@ reachability and filtering for the host's own addresses: port mappings,
 SNI routes on shared ports, IPv6 firewall pinholes, source-address
 filters, and names in the gateway's DNS resolver that point at those
 addresses. Hosts enroll with the gateway under a public-key
-identity carried in mutually authenticated TLS, and every grant a host holds
-is confined to addresses the gateway attributes to that host. Commands are
-JSON-RPC 2.0 over HTTPS. AGCP carries the self-provisioning model of the
-Port Control Protocol (PCP) to an authenticated transport, and a gateway
+identity verified by the shared signed RPC session protocol, and every
+grant a host holds is confined to addresses the gateway attributes to that
+host. Commands are JSON-RPC 2.0 over encrypted WebSocket sessions. AGCP
+carries the self-provisioning model of the Port Control Protocol (PCP) to
+an authenticated transport, and a gateway
 that implements AGCP alongside PCP, UPnP IGD, or DNS UPDATE refuses those
 protocols from any host that has enrolled with AGCP.
 
@@ -133,7 +141,8 @@ saves.
 
 AGCP keeps the self-provisioning model (a host provisions only what
 targets itself) and replaces address-based identity with an enrolled
-public key, verified on every connection by mutually authenticated TLS.
+public key, verified on every connection by the shared signed RPC session
+protocol {{START-RPC-SESSION}}.
 
 ## Design Goals {#goals}
 
@@ -144,9 +153,9 @@ public key, verified on every connection by mutually authenticated TLS.
    bound what one host can claim ({{policy}}).
 2. Cryptographic identity. A host's authority follows its key, not its
    address; forging a host's address grants nothing.
-3. Implementability. Every mechanism is available in common libraries:
-   TLS 1.3 with client certificates, HTTP, JSON, JSON-RPC 2.0. No
-   AAA infrastructure is needed.
+3. Implementability. Reuse the shared signed RPC session protocol and its
+   WebSocket transport, identity proofs, encryption, and replay checks.
+   No AAA infrastructure or client certificates are needed.
 4. PCP compatibility. The mapping model is a superset of PCP MAP's, so a
    gateway can serve both protocols from one set of mapping state, and a
    host can fall back to PCP on gateways that do not implement AGCP.
@@ -175,10 +184,10 @@ the gateway ({{bindings}}): a link-layer address on a directly attached
 segment, or a tunnel peer.
 
 Identity:
-: the public key a host presents in its TLS client certificate.
+: the verified signing public key in a peer's signed-session proof.
 
 Fingerprint:
-: the SHA-256 digest of an identity's DER-encoded SubjectPublicKeyInfo
+: the shared SHA-256 representation of an identity's public key
 ({{fingerprints}}).
 
 Enrollment:
@@ -205,8 +214,9 @@ state.
 This section is informative.
 
 1. The host discovers the gateway's AGCP endpoint ({{discovery}}) and
-   connects with TLS 1.3, presenting a self-signed certificate for its
-   identity. The gateway presents its own self-signed certificate.
+   opens its `/rpc/v2` WebSocket endpoint. The host and gateway complete
+   signed-session admission, proving their signing identities and deriving
+   fresh directional encryption keys ({{transport}}).
 2. The gateway determines the connection's binding from its own view of
    the network ({{bindings}}): the neighbor-table entry for the source
    address on a link, or the tunnel peer that carried it.
@@ -224,53 +234,79 @@ This section is informative.
 
 # Transport {#transport}
 
-## HTTPS {#https}
+## WebSocket Endpoint {#websocket}
 
-AGCP messages are carried in HTTP {{RFC9110}} over TLS. The client sends
-each JSON-RPC request ({{jsonrpc}}) as the body of a POST request to the
-path `/agcp/v1`, with media type `application/json`. The server returns the
-JSON-RPC response as the body of a 200 (OK) response with the same media
-type, including when the response is a JSON-RPC error. Requests with any
-other method or path receive an HTTP error response and no JSON-RPC
-processing.
+AGCP uses the shared encrypted RPC endpoint `/rpc/v2`, with any configured
+deployment prefix, over WebSocket {{RFC6455}}. The client performs an
+HTTP/1.1 upgrade {{RFC9110}} and completes signed-session admission before
+sending any JSON-RPC request. AGCP version 1 is an application protocol on
+this endpoint; it does not change the shared transport's version or proof
+domain. The endpoint MAY also serve the gateway's other RPC methods,
+subject to their own authorization rules.
 
-Clients and servers MUST support HTTP/1.1 and MAY support HTTP/2. HTTP
-authentication schemes and cookies are not used; identity comes from TLS
-alone ({{identity}}).
+Clients MUST support `ws://` and `wss://`; gateways advertise the scheme
+and port they serve ({{discovery}}). Signed-session encryption is mandatory
+with either scheme. When TLS is used, it provides an additional layer
+with the deployment's normal server-certificate validation; TLS 1.3
+{{RFC8446}} is RECOMMENDED. AGCP does not require TLS client certificates.
+Clients MUST NOT follow upgrade redirects or retry a failed `wss://`
+connection over `ws://`.
 
-## TLS {#tls}
+## Signed-Session Admission {#admission}
 
-Clients and servers MUST use TLS 1.3 {{RFC8446}} and MUST NOT negotiate an
-earlier version. The server MUST request a client certificate and MUST
-abort the handshake if the client presents none. Each side presents an
-X.509 certificate {{RFC5280}}, normally self-signed, whose only role is to
-carry the sender's identity key:
+Clients and servers MUST implement version 1 of {{START-RPC-SESSION}},
+including its proof encoding, signing context, replay checks, key
+derivation, encrypted framing, limits, and failure behavior. That document
+is the authoritative wire contract; AGCP defines no separate handshake or
+cryptographic encoding. {{START-RPC-INTEGRATION}} describes its integration
+with the shared RPC transport and identity owners.
 
-- Each side MUST verify that its peer possesses the private key for the
-  certificate (TLS CertificateVerify), and MUST NOT otherwise validate the
-  certificate: its issuer, subject, names, extensions, and validity period
-  are ignored. A peer's identity is its SubjectPublicKeyInfo.
-- Implementations MUST support Ed25519 keys {{RFC8410}} and SHOULD support
-  ECDSA with P-256.
+The client uses its selected gateway hostname as the signing context,
+preserving that logical name when dialing a resolved IP address. The
+gateway verifies it against its permitted ingress names. AGCP uses the
+ordinary RPC target `"rpc"`, not a continuation target or an AGCP-specific
+target. Each physical connection uses fresh ephemeral keys and a fresh
+signed commitment and nonce. The server's signed response binds the
+complete client hello; both peers verify the exchange before accepting
+encrypted application data. Implementations MUST support the shared
+protocol's Ed25519 signing identity. Ephemeral X25519 keys are not
+enrollment identities. The gateway reuses the persistent signing identity
+of its shared RPC endpoint. A host retains its signing key for the
+lifetime of the enrollment.
 
-The server authenticates the client against its enrollments
-({{enrollment}}). The client authenticates the server against the identity
-it pinned at enrollment ({{client-pinning}}); before enrollment, the
-client accepts any server identity for the purpose of calling
+A valid proof from an unknown key completes admission without granting
+AGCP authority. The gateway authorizes the verified client identity
+against the connection's binding and its live enrollment ({{enrollment}}),
+not an identity supplied in RPC parameters, HTTP headers, or cookies.
+The client checks the verified server signing identity against its gateway
+record before sending any RPC ({{client-pinning}}). Without a gateway
+record, the client accepts the verified server identity only for
 `gateway.info`, `enrollment.enroll`, and `enrollment.status`.
+
+Admission, proof, pin, or record-authentication failure MUST terminate the
+connection without sending further RPCs or selecting a plaintext RPC
+transport. A lost connection leaves the result of an unanswered call
+unknown; clients MUST NOT automatically replay it. They can reconnect with
+fresh admission and reconcile grants through `grant.list` and their
+client-chosen identifiers ({{grant-ids}}). An `event.wait` can resume from
+its last cursor. A WebSocket Close or EOF does not establish RPC success.
 
 ## JSON-RPC {#jsonrpc}
 
 Commands are JSON-RPC 2.0 {{JSONRPC}} requests encoded as JSON {{RFC8259}}.
-Every request MUST carry an `id`; clients MUST NOT send notifications.
+Every AGCP request MUST carry an `id`; clients MUST NOT send AGCP
+notifications. Shared RPC transport controls retain their own semantics.
 Parameters are passed by name. Member names use lowerCamelCase; enumerated
 string values use lowercase with hyphens.
 
-A request body MAY be a JSON-RPC batch. The server MAY process the calls of
-a batch in any order and concurrently; a client needing ordering issues
-the calls in separate requests. Each call in a batch succeeds or fails
-independently. Servers MUST accept batches of at least 100 calls and
-report their limit in `gateway.info` ({{gateway-info}}).
+Each request or response is a logical text message inside the shared
+encrypted framing, not a plaintext WebSocket text frame. A message MAY
+carry a JSON-RPC batch. The server MAY process the calls of a batch in any
+order and concurrently; a client needing ordering MUST await one call's
+response before sending the next. Each call in a batch succeeds or fails
+independently. Servers MUST accept batches of at least 100 calls within
+the shared transport's message-size limit and report their call-count
+limit in `gateway.info` ({{gateway-info}}).
 
 Errors are reported as JSON-RPC error objects. The error codes JSON-RPC
 defines apply to malformed requests, unknown methods, and invalid
@@ -280,16 +316,17 @@ parameters; AGCP errors use the codes in {{errors}}.
 
 ## Fingerprints {#fingerprints}
 
-An identity's fingerprint is the SHA-256 digest of its DER-encoded
-SubjectPublicKeyInfo. In protocol messages a fingerprint is the unpadded
-base64url encoding ({{Section 5 of RFC4648}}) of the 32-octet digest.
+Fingerprints MUST use the shared identity format of
+{{START-RPC-INTEGRATION}}: for Ed25519, SHA-256 of the raw 32-octet public
+key, rendered as `SHA256:` followed by 64 lowercase hexadecimal characters.
+Protocol fields, discovery hints, and user-facing displays use this same
+full fingerprint. The shared identity owner defines fingerprints for any
+additional signing scheme.
 
-For display to users, implementations MUST render a fingerprint as the
-base32 encoding ({{Section 6 of RFC4648}}) of the digest's first 20
-octets, as 32 uppercase characters in eight groups of four separated by
-spaces (for example `MZXW 6YTB OI3G 4ZLB MFRG 64TB OVSW 45DP`). Gateways
-and hosts that display fingerprints MUST use this form, so that a user can
-compare a fingerprint shown on one device against the other.
+Enrollment and gateway records store the verified signing public key;
+a fingerprint is for comparison, not a client-supplied identity or a
+substitute for verification of the signed-session proof. A gateway's
+`fingerprint` result MUST match its verified session identity.
 
 ## Bindings {#bindings}
 
@@ -306,7 +343,7 @@ Tunnel binding:
 : for a connection carried by a tunnel whose encapsulation authenticates
 its peers (e.g. WireGuard), the peer that carried it.
 
-Every call on a connection with neither binding (for example, one routed
+Every AGCP call on a connection with neither binding (for example, one routed
 to the gateway from beyond its directly attached networks) MUST fail with
 NOT_AUTHORIZED ({{errors}}).
 
@@ -343,6 +380,12 @@ state the binding holds through the protocols of {{coexistence}}, and MUST
 begin refusing those protocols for the binding. Enrollment MUST be stored
 durably.
 
+The gateway MUST check the current enrollment and policy for each AGCP
+call, including each member of a batch. Admission MUST NOT cache an enrollment or
+its permissions for the connection's lifetime. Enrollment, approval,
+replacement, and revocation affect subsequent calls on an already-open
+connection.
+
 An enrollment ends only when the operator removes it, the operator approves
 a different identity for the binding, or the enrolled host calls
 `enrollment.leave` ({{m-leave}}). When an enrollment ends, the
@@ -362,11 +405,12 @@ the server's identity and the gateway's attachment identifier, which is
 the link-layer address of the gateway on the link the client reached it
 through, or the tunnel peer identity of the gateway.
 
-Thereafter the client MUST verify the server's identity against the
-record on every connection. A mismatch MUST be treated as a failure and
-surfaced to the user; the client MUST NOT re-enroll with, or fall back to
-another protocol toward, a gateway whose attachment identifier matches a
-record but whose identity does not.
+Thereafter the client MUST verify the signed-session server identity
+against the record on every connection, before sending an RPC. This is a
+hard pin, not the shared clients' advisory identity-change history. A
+mismatch MUST be treated as a failure and surfaced to the user; the client
+MUST NOT re-enroll with, or fall back to another protocol toward, a gateway
+whose attachment identifier matches a record but whose identity does not.
 
 A client MAY remove a gateway record on user action, after
 `enrollment.leave`, or on receiving NOT_ENROLLED ({{errors}}) from a server
@@ -830,7 +874,7 @@ below, and MAY carry further detail.
 | 1009 | NOT_PERMITTED           | The operator's policy forbids the request within the enrollment's capabilities. |
 | 1010 | QUOTA_EXCEEDED          | The request exceeds a limit reported in `gateway.info`.                         |
 
-Every method other than `gateway.info`, `enrollment.enroll`, and
+Every AGCP method other than `gateway.info`, `enrollment.enroll`, and
 `enrollment.status` fails with NOT_ENROLLED or ENROLLMENT_PENDING for a
 caller that is not enrolled.
 
@@ -839,9 +883,16 @@ caller that is not enrolled.
 Gateways advertise AGCP by DNS-Based Service Discovery {{RFC6763}}, with
 service type `_agcp._tcp`, over Multicast DNS {{RFC6762}} on their
 attached links and MAY also answer it through their unicast DNS service.
-The SRV record gives the port. The TXT record carries `v=1` and MAY carry
-`fp=` with the gateway's fingerprint; a client MUST NOT treat the TXT
-fingerprint as authentication.
+The SRV record gives the target hostname and port. The TXT record MUST
+carry `v=1` and `tls=0` for `ws://` or `tls=1` for `wss://`, and MAY carry
+`fp=` with the gateway's fingerprint. The endpoint path is `/rpc/v2`;
+configured endpoints MAY include a deployment prefix. The selected target
+hostname is the signed-session signing context, and the gateway MUST
+accept that name under its ingress policy.
+
+Discovery hints are unauthenticated. A client MUST NOT treat the TXT
+fingerprint as authentication or let discovery override a gateway record
+or a configured endpoint's scheme.
 
 A client selects the gateway that is its default router on the link, or
 the tunnel peer that routes its traffic. Gateways MAY additionally provide
@@ -888,25 +939,38 @@ MAY use those protocols.
 First contact:
 : Enrollment by trust on first use accepts the first identity to enroll
 for a permitted binding. An attacker must hold the binding's address
-long enough to complete a TLS handshake, which on a shared link means
-actively diverting the host's traffic by ARP or Neighbor Discovery
-spoofing, and must do so before the genuine host first enrolls. The
-genuine host's later enrollment then appears to the operator as a pending
-identity for an already enrolled binding. The permission of
+long enough to complete signed-session admission and enroll its own key,
+which on a shared link means actively diverting traffic by ARP or Neighbor
+Discovery spoofing, and must do so before the genuine host first enrolls.
+The genuine host's later enrollment then appears to the operator as a
+pending identity for an already enrolled binding. The client's first
+gateway pin is also trust on first use; an active interceptor can
+substitute a gateway identity before that pin exists. The permission of
 {{permission}} limits the exposure to hosts the operator chose to trust,
 and gateways MAY require operator approval of every enrollment.
 
 After enrollment:
 : A forged address gains nothing: AGCP requires the enrolled key, and the
 gateway refuses the other provisioning protocols for the binding
-({{coexistence}}). Traffic diversion on the link yields an attacker only
-TLS it cannot complete.
+({{coexistence}}). Gateway pinning prevents a diverted connection from
+accepting a substituted server identity. A transparent relay cannot read
+or alter encrypted RPCs or acquire the host's enrollment authority.
 
 Downgrade:
 : An attacker able to block AGCP cannot induce an enrolled client to use
 PCP, UPnP, or DNS UPDATE ({{coexistence-client}}), and cannot use them itself for the
 binding ({{coexistence-gateway}}). A client that has never enrolled with a
 gateway has no such protection.
+
+Replay and clocks:
+: Admission inherits the shared signed-request timestamp and nonce policy
+({{START-RPC-SESSION}}, {{START-RPC-INTEGRATION}}). With a synchronized
+verifier clock, proof timestamps more than 30 seconds from its current
+time fail; signing delays and clock skew can prevent admission. Unsynchronized
+verifiers use the shared bounded nonce cache, not an AGCP-specific clock
+exception. Fresh ephemeral keys, transcript binding, and record counters
+prevent a captured hello from executing an RPC without its ephemeral
+secret. Implementations MUST NOT retain prepared hellos for reconnection.
 
 Blast radius:
 : Pinholes and filters affect only the reachability of the host that holds
@@ -931,7 +995,9 @@ enrollment and ownership; it never substitutes for the enrolled identity.
 Resource exhaustion:
 : Gateways bound per-enrollment state through the quotas of {{policy}},
 and SHOULD bound concurrent connections, pending enrollments, and
-concurrent `event.wait` calls per binding. The resource considerations
+concurrent `event.wait` calls per binding. Shared admission and record
+limits apply before AGCP authorization; per-enrollment quotas do not bound
+unauthenticated proof-verification work. The resource considerations
 of {{PCP-HOSTNAME}} apply to SNI routes.
 
 Server names:
@@ -943,7 +1009,10 @@ handled as {{PCP-HOSTNAME}} requires.
 An identity is a stable identifier. A host that used one key with every
 gateway would let gateways, or anyone who observes enrollments, correlate
 the host across networks. Clients SHOULD use a distinct key per gateway
-record.
+record. The first signed-session message exposes the client's public
+identity on `ws://`, including to passive observers before enrollment.
+`wss://` protects that message and its HTTP upgrade metadata; application
+encryption alone does not hide them.
 
 A gateway's fingerprint in its DNS-SD TXT record identifies the gateway to
 every host on the link; gateways MAY omit it.
@@ -1014,23 +1083,27 @@ shared secret per host, and DNS UPDATE has no notion of a record's owner:
 an authorized updater may add any name with any data and delete records
 others added.
 
-TLS with raw public keys {{RFC7250}} would carry AGCP's identities more
-directly than self-signed certificates; AGCP uses certificates because
-client-certificate support is universal among TLS libraries.
+The signed RPC session protocol {{START-RPC-SESSION}} supplies the
+transport's identity proofs, key exchange, encryption, and framing. AGCP
+adds binding-scoped enrollment, ownership, and grant semantics over that
+transport. Its hard gateway pins ({{client-pinning}}) are stricter than the
+advisory identity observations described in {{START-RPC-INTEGRATION}}.
 
 # Example {#example}
 
 This section is informative. A host enrolls, maps TCP port 8333, adds an SNI
 route for a hostname on the shared port 443, and denies a prefix, as a host without
-the `filter-deny` capability. Each block shows a request body followed by
-its response body.
+the `filter-deny` capability. Signed-session admission has completed and
+the client has verified the gateway identity. Each block shows decrypted
+logical request and response messages; these JSON bytes travel only inside
+the shared encrypted record framing.
 
 ```json
 {"jsonrpc": "2.0", "id": 1, "method": "enrollment.enroll", "params": {}}
 
 {"jsonrpc": "2.0", "id": 1,
  "result": {"status": "enrolled",
-            "fingerprint": "q0W9JQf0c9mYq6o5nqj1kIhZcT0Hc0v8b2yF2d9x2cA"}}
+            "fingerprint": "SHA256:d7e1e084be213b01e506852af8198b9980b43e03749c67d82dcd0903f4001c77"}}
 ```
 
 ```json
@@ -1063,4 +1136,7 @@ No implementation exists yet. Implementations are planned in StartOS
 (client) and in its StartTunnel and StartWRT gateways, which already serve
 PCP, UPnP IGD, and {{PCP-HOSTNAME}} from shared mapping state, and in
 StartTunnel's DNS UPDATE record injection; AGCP is planned as a further
-front end to that state.
+front end to that state. Its transport dependency is the shared signed
+RPC session implementation specified by {{START-RPC-SESSION}} and
+{{START-RPC-INTEGRATION}}; that transport alone does not implement AGCP
+enrollment or grants.
