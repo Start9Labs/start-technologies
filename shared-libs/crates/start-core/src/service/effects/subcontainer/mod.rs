@@ -41,9 +41,16 @@ pub async fn destroy_subcontainer_fs(
     DestroySubcontainerFsParams { guid }: DestroySubcontainerFsParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
+    let mut shared_volumes = context
+        .seed
+        .persistent_container
+        .shared_volumes
+        .lock()
+        .await;
     let mut subcontainers = context.seed.persistent_container.subcontainers.lock().await;
     if let Some(overlay) = subcontainers.get(&guid) {
         kill_subcontainer(&context.seed.persistent_container, overlay).await?;
+        shared_volumes.remove_subcontainer(&guid);
         subcontainers
             .remove(&guid)
             .unwrap()
@@ -148,7 +155,6 @@ pub async fn create_subcontainer_fs(
         );
         tracing::info!("Mounting overlay {guid} for {image_id}");
 
-        // Determine which nvidia overlay to use based on distro detection
         let nvidia_overlay: &[&str] = if context
             .seed
             .persistent_container
@@ -158,7 +164,6 @@ pub async fn create_subcontainer_fs(
             .get(&image_id)
             .map_or(false, |i| i.nvidia_container)
         {
-            // Check if image is debian-based by looking for /etc/debian_version
             let is_debian = tokio::fs::metadata(image.path().join("etc/debian_version"))
                 .await
                 .is_ok();
@@ -181,7 +186,7 @@ pub async fn create_subcontainer_fs(
         };
 
         Command::new("chown")
-            .arg("100000:100000")
+            .arg(format!("{0}:{0}", crate::lxc::BASE_IDMAP.to_id))
             .arg(&mountpoint)
             .invoke(ErrorKind::Filesystem)
             .await?;
@@ -189,7 +194,7 @@ pub async fn create_subcontainer_fs(
         match tokio::fs::create_dir(&etc).await {
             Ok(()) => {
                 Command::new("chown")
-                    .arg("100000:100000")
+                    .arg(format!("{0}:{0}", crate::lxc::BASE_IDMAP.to_id))
                     .arg(&etc)
                     .invoke(ErrorKind::Filesystem)
                     .await?;
@@ -202,15 +207,15 @@ pub async fn create_subcontainer_fs(
         write_file_owned_atomic(
             mountpoint.join("etc/hostname"),
             format!("{container_guid}\n"),
-            100000,
-            100000,
+            crate::lxc::BASE_IDMAP.to_id,
+            crate::lxc::BASE_IDMAP.to_id,
         )
         .await?;
         write_file_owned_atomic(
             mountpoint.join("etc/hosts"),
             format!("127.0.0.1\tlocalhost\n127.0.1.1\t{container_guid}\n::1\tlocalhost ip6-localhost ip6-loopback\n"),
-            100000,
-            100000,
+            crate::lxc::BASE_IDMAP.to_id,
+            crate::lxc::BASE_IDMAP.to_id,
         )
         .await?;
         tracing::info!("Mounted overlay {guid} for {image_id}");

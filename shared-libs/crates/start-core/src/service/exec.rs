@@ -436,7 +436,7 @@ mod test {
         })
     }
 
-    /// `SIGKILL` lands asynchronously, and output reaches EOF before the process stops running.
+    /// Output EOF can precede process exit after `SIGKILL`.
     async fn stops_running_soon(pid: i32) -> bool {
         for _ in 0..200 {
             if !is_running(pid) {
@@ -457,10 +457,10 @@ mod test {
         .await
         .unwrap();
         let command = res.stdout.trim().parse().unwrap();
-        let running = is_running(command);
+        let stopped = stops_running_soon(command).await;
         nix::sys::signal::kill(Pid::from_raw(command), Signal::SIGKILL).ok();
         assert!(res.timed_out);
-        assert!(!running, "the command survives the timeout");
+        assert!(stopped, "the command survives the timeout");
     }
 
     #[tokio::test]

@@ -1,5 +1,6 @@
 import { GetPackagesRes } from '@start9labs/marketplace'
 import { ISB, IST, T } from '@start9labs/start-core'
+import type { BackupRun } from 'src/app/routes/portal/routes/system/routes/backups/backup.types'
 import {
   InstalledState,
   PackageDataEntry,
@@ -26,6 +27,52 @@ const mockDescription = {
 }
 
 export namespace Mock {
+  export function driveLink(logicalname: string) {
+    if (logicalname.startsWith('/dev/disk/by-uuid/')) return logicalname
+    const hex = [0, 1, 2, 3]
+      .map(seed =>
+        [...logicalname]
+          .reduce(
+            (hash, c) => Math.imul(hash ^ c.charCodeAt(0), 16777619),
+            2166136261 + seed,
+          )
+          .toString(16)
+          .replace('-', '')
+          .padStart(8, '0')
+          .slice(-8),
+      )
+      .join('')
+    return `/dev/disk/by-uuid/${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+
+  export function diskSource(
+    logicalname: string,
+    path = '',
+  ): T.SharedVolumeSource & { kind: 'disk' } {
+    const entry = Disks.flatMap(disk =>
+      disk.partitions.map(partition => ({ disk, partition })),
+    ).find(({ partition }) =>
+      [
+        partition.logicalname,
+        partition.stablePath,
+        driveLink(partition.logicalname),
+      ].includes(logicalname),
+    )
+    return {
+      kind: 'disk',
+      logicalname: driveLink(entry?.partition.logicalname ?? logicalname),
+      path: path.replace(/^\/+/, ''),
+      drive: entry
+        ? {
+            vendor: entry.disk.vendor,
+            model: entry.disk.model,
+            label: entry.partition.label,
+            capacity: entry.disk.capacity,
+          }
+        : null,
+    }
+  }
+
   export const ServerId = '1234-5678-9876-5432'
 
   export const ServerUpdated: T.ServerStatus = {
@@ -318,6 +365,7 @@ export namespace Mock {
       },
     },
     volumes: ['main'],
+    sharedVolumes: false,
     hardwareRequirements: {
       device: [],
       arch: null,
@@ -374,6 +422,7 @@ export namespace Mock {
       },
     },
     volumes: ['main'],
+    sharedVolumes: false,
     hardwareRequirements: {
       device: [],
       arch: null,
@@ -416,6 +465,7 @@ export namespace Mock {
       },
     },
     volumes: ['main'],
+    sharedVolumes: false,
     hardwareRequirements: {
       device: [],
       arch: null,
@@ -465,6 +515,7 @@ export namespace Mock {
       },
     },
     volumes: ['main'],
+    sharedVolumes: true,
     hardwareRequirements: {
       device: [],
       arch: null,
@@ -1155,13 +1206,15 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       title: 'Backup Complete',
       message: 'StartOS and services have been successfully backed up.',
       data: {
+        sharedVolumes: {},
         server: {
           attempted: false,
           error: null,
         },
         packages: {
           bitcoind: {
-            error: 'An error ocurred while backing up',
+            error: 'An error occurred while backing up',
+            duration_ms: 1000,
           },
         },
       },
@@ -1441,7 +1494,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     ],
   }
 
-  export const Disks: Result<'disk.list'> = [
+  export const Disks: T.Public['disks'] = [
     {
       logicalname: '/dev/sdb',
       stablePath: '/dev/disk/by-path/pci-0000:00:14.0-usb-0:2:1.0-scsi-0:0:0:0',
@@ -1464,7 +1517,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           logicalname: '/dev/sdc1',
           stablePath:
             '/dev/disk/by-path/pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0-part1',
-          label: 'Old Backups',
+          label: 'T7',
           capacity: 1000000000000,
           used: 100000000000,
           available: 900000000000,
@@ -1480,218 +1533,147 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           guid: null,
           filesystem: null,
         },
+        ...['Media', 'Archive', null].map((label, index) => ({
+          logicalname: `/dev/sdc${index + 2}`,
+          stablePath: `/dev/disk/by-path/pci-0000:00:14.0-usb-0:3:1.0-scsi-0:0:0:0-part${index + 2}`,
+          label,
+          capacity: 100000000000,
+          used: 0,
+          available: 100000000000,
+          startOs: {},
+          legacyBackup: false,
+          guid: null,
+          filesystem: 'btrfs',
+        })),
       ],
-      capacity: 1000000000000,
+      capacity: 2000000000000,
+      guid: null,
+      filesystem: null,
+    },
+    {
+      logicalname: '/dev/sdd',
+      stablePath: '/dev/disk/by-path/pci-0000:00:17.0-ata-2',
+      partitionTable: 'gpt',
+      vendor: 'SSK',
+      model: null,
+      partitions: [
+        {
+          logicalname: '/dev/sdd1',
+          stablePath: '/dev/disk/by-path/pci-0000:00:17.0-ata-2-part1',
+          label: null,
+          capacity: 2000000000000,
+          used: 100000000000,
+          available: 1000000000,
+          startOs: {},
+          legacyBackup: false,
+          guid: null,
+          filesystem: null,
+        },
+      ],
+      capacity: 2000000000000,
+      guid: null,
+      filesystem: null,
+    },
+    {
+      logicalname: '/dev/sde',
+      stablePath: '/dev/disk/by-path/pci-0000:00:14.0-usb-0:4:1.0-scsi-0:0:0:0',
+      partitionTable: 'gpt',
+      vendor: 'WD',
+      model: 'My Passport 2626',
+      partitions: [
+        {
+          logicalname: '/dev/sde1',
+          stablePath:
+            '/dev/disk/by-path/pci-0000:00:14.0-usb-0:4:1.0-scsi-0:0:0:0-part1',
+          label: 'My Passport',
+          capacity: 2000000000000,
+          used: 1938800000000,
+          available: 61200000000,
+          startOs: {},
+          legacyBackup: false,
+          guid: null,
+          filesystem: null,
+        },
+      ],
+      capacity: 2000000000000,
       guid: null,
       filesystem: null,
     },
   ]
 
-  export const BackupTargets: { [id: string]: T.BackupTarget } = {
-    hsbdjhasbasda: {
-      type: 'cifs',
-      hostname: 'smb://192.169.10.0',
-      path: '/Desktop/startos-backups',
-      username: 'TestUser',
-      mountable: false,
-      available: null,
-      startOs: {
-        [ServerId]: {
-          hostname: 'server-name',
-          timestamp: new Date().toISOString(),
-          version: '0.4.0',
-          formatStatus: 'unknown',
+  export const BackupHistory: BackupRun[] = [
+    {
+      id: 'MOCKRUNNAS3',
+      targetId: 'MOCKBACKUPNAS234567ABCDEFGHIJKLM',
+      targetName: 'office-nas.local',
+      startedAt: new Date(Date.now() - 86400000 * 3 - 754000).toISOString(),
+      completedAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+      report: {
+        server: { attempted: true, error: null },
+        packages: {
+          bitcoind: { error: null, duration_ms: 512000 },
+          lnd: { error: null, duration_ms: 64000 },
+        },
+        sharedVolumes: {
+          MOCKLOCALVOLUME234567ABCDEFGHIJK: {
+            name: 'Shared files',
+            error: null,
+            duration_ms: 171000,
+          },
         },
       },
-      legacyBackup: false,
     },
-    // 'ftcvewdnkemfksdm': {
-    //   type: 'disk',
-    //   logicalname: 'sdba1',
-    //   label: 'Matt Stuff',
-    //   capacity: 1000000000000,
-    //   used: 0,
-    //   model: 'Evo SATA 2.5',
-    //   vendor: 'Samsung',
-    //   startOs: {},
-    // },
-    csgashbdjkasnd: {
-      type: 'cifs',
-      hostname: 'smb://192.169.10.0',
-      path: '/Desktop/startos-backups-2',
-      username: 'TestUser',
-      mountable: true,
-      available: 50000000000,
-      startOs: {
-        [ServerId]: {
-          hostname: 'server-name',
-          timestamp: new Date().toISOString(),
-          version: '0.4.0',
-          formatStatus: 'legacy',
+    {
+      id: 'MOCKRUNNAS10',
+      targetId: 'MOCKBACKUPNAS234567ABCDEFGHIJKLM',
+      targetName: 'office-nas.local',
+      startedAt: new Date(Date.now() - 86400000 * 10 - 803000).toISOString(),
+      completedAt: new Date(Date.now() - 86400000 * 10).toISOString(),
+      report: {
+        server: { attempted: true, error: null },
+        packages: {
+          bitcoind: { error: null, duration_ms: 530000 },
+          lnd: {
+            error: 'Service is not responding to backup requests',
+            duration_ms: 12000,
+          },
         },
-        'archive-server': {
-          hostname: 'archive-server',
-          timestamp: new Date().toISOString(),
-          version: '0.4.0',
-          formatStatus: 'legacy',
-        },
+        sharedVolumes: {},
       },
-      legacyBackup: false,
     },
-    powjefhjbnwhdva: {
-      type: 'disk',
-      logicalname: 'sdba1',
-      stablePath: '/dev/disk/by-path/pci-0000:00:17.0-ata-2-part1',
-      label: 'Another Drive',
-      capacity: 2000000000000,
-      used: 100000000000,
-      model: null,
-      vendor: 'SSK',
-      guid: null,
-      filesystem: null,
-      available: 1000000000,
-      startOs: {
-        [ServerId]: {
-          hostname: 'server-name',
-          timestamp: new Date().toISOString(),
-          version: '0.4.0',
-          formatStatus: 'interrupted',
+    {
+      id: 'MOCKRUNDESKTOP',
+      targetId: 'MOCKBACKUPDESKTOP234567ABCDEFGHI',
+      targetName: 'desktop.invalid',
+      startedAt: new Date(Date.now() - 86400000 * 31 - 9000).toISOString(),
+      completedAt: new Date(Date.now() - 86400000 * 31).toISOString(),
+      report: {
+        server: {
+          attempted: true,
+          error: 'mount error(113): could not connect to desktop.invalid',
         },
+        packages: {},
+        sharedVolumes: {},
       },
-      legacyBackup: true,
     },
-  }
-
-  // @TODO 041
-
-  // export const BackupTargets: RR.GetBackupTargetsRes = {
-  //   unknownDisks: [
-  //     {
-  //       logicalname: 'sbc4',
-  //       label: 'My Backup Drive',
-  //       capacity: 2000000000000,
-  //       used: 100000000000,
-  //       model: 'T7',
-  //       vendor: 'Samsung',
-  //       startOs: {},
-  //     },
-  //   ],
-  //   saved: {
-  //     hsbdjhasbasda: {
-  //       type: 'cifs',
-  //       name: 'Embassy Backups',
-  //       hostname: 'smb://192.169.10.0',
-  //       path: '/Desktop/embassy-backups',
-  //       username: 'TestUser',
-  //       mountable: true,
-  //       startOs: {
-  //         abcdefgh: {
-  //           hostname: 'server-name.local',
-  //           version: '0.4.0',
-  //           timestamp: new Date().toISOString(),
-  //           passwordHash:
-  //             '$argon2d$v=19$m=1024,t=1,p=1$YXNkZmFzZGZhc2RmYXNkZg$Ceev1I901G6UwU+hY0sHrFZ56D+o+LNJ',
-  //           wrappedKey: '',
-  //         },
-  //       },
-  //     },
-  //     ftcvewdnkemfksdm: {
-  //       type: 'cloud',
-  //       name: 'Dropbox 1',
-  //       provider: 'dropbox',
-  //       path: '/Home/backups',
-  //       mountable: false,
-  //       startOs: {},
-  //     },
-  //     csgashbdjkasnd: {
-  //       type: 'cifs',
-  //       name: 'Network Folder 2',
-  //       hostname: 'smb://192.169.10.0',
-  //       path: '/Desktop/embassy-backups-2',
-  //       username: 'TestUser',
-  //       mountable: true,
-  //       startOs: {},
-  //     },
-  //     powjefhjbnwhdva: {
-  //       type: 'disk',
-  //       name: 'Physical Drive 1',
-  //       logicalname: 'sdba1',
-  //       label: 'Another Drive',
-  //       capacity: 2000000000000,
-  //       used: 100000000000,
-  //       model: null,
-  //       vendor: 'SSK',
-  //       mountable: true,
-  //       path: '/HomeFolder/Documents',
-  //       startOs: {
-  //         'different-server': {
-  //           hostname: 'different-server.local',
-  //           version: '0.4.0',
-  //           timestamp: new Date().toISOString(),
-  //           passwordHash:
-  //             '$argon2d$v=19$m=1024,t=1,p=1$YXNkZmFzZGZhc2RmYXNkZg$Ceev1I901G6UwU+hY0sHrFZ56D+o+LNJ',
-  //           wrappedKey: '',
-  //         },
-  //       },
-  //     },
-  //   },
-  // }
-
-  // export const BackupJobs: RR.GetBackupJobsRes = [
-  //   {
-  //     id: 'lalalalalala-babababababa',
-  //     name: 'My Backup Job',
-  //     targetId: Object.keys(BackupTargets.saved)[0],
-  //     cron: '0 3 * * *',
-  //     packageIds: ['bitcoind', 'lnd'],
-  //   },
-  //   {
-  //     id: 'hahahahaha-mwmwmwmwmwmw',
-  //     name: 'Another Backup Job',
-  //     targetId: Object.keys(BackupTargets.saved)[1],
-  //     cron: '0 * * * *',
-  //     packageIds: ['lnd'],
-  //   },
-  // ]
-
-  // export const BackupRuns: RR.GetBackupRunsRes = [
-  //   {
-  //     id: 'kladhbfweubdsk',
-  //     startedAt: new Date().toISOString(),
-  //     completedAt: new Date(new Date().valueOf() + 10000).toISOString(),
-  //     packageIds: ['bitcoind', 'lnd'],
-  //     job: BackupJobs[0],
-  //     report: {
-  //       server: {
-  //         attempted: true,
-  //         error: null,
-  //       },
-  //       packages: {
-  //         bitcoind: { error: null },
-  //         lnd: { error: null },
-  //       },
-  //     },
-  //   },
-  //   {
-  //     id: 'kladhbfwhrfeubdsk',
-  //     startedAt: new Date().toISOString(),
-  //     completedAt: new Date(new Date().valueOf() + 10000).toISOString(),
-  //     packageIds: ['bitcoind', 'lnd'],
-  //     job: BackupJobs[0],
-  //     report: {
-  //       server: {
-  //         attempted: true,
-  //         error: null,
-  //       },
-  //       packages: {
-  //         bitcoind: { error: null },
-  //         lnd: { error: null },
-  //       },
-  //     },
-  //   },
-  // ]
+    ...Array.from({ length: 20 }, (_, i) => ({
+      id: `MOCKRUNWEEKLY${i}`,
+      targetId: 'MOCKBACKUPDRIVE234567ABCDEFGHIJK',
+      targetName: 'Samsung T7',
+      startedAt: new Date(
+        Date.now() - 86400000 * (38 + 7 * i) - 690000,
+      ).toISOString(),
+      completedAt: new Date(Date.now() - 86400000 * (38 + 7 * i)).toISOString(),
+      report: {
+        server: { attempted: true, error: null },
+        packages: { bitcoind: { error: null, duration_ms: 498000 } },
+        sharedVolumes: {},
+      },
+    })),
+  ]
 
   export const BackupInfo: T.BackupInfo = {
+    sharedVolumeBackups: {},
     version: '0.4.0',
     timestamp: new Date().toISOString(),
     packageBackups: {
@@ -2613,7 +2595,7 @@ PersistentKeepalive = 25`
       state: 'installed',
       manifest: MockManifestBitcoind,
     },
-    s9pk: '/media/startos/data/package-data/archive/installed/asdfasdf.s9pk',
+    s9pk: '/media/startos/data/package-data/archive/installed/bitcoind.s9pk',
     lastBackup: null,
     statusInfo: {
       forceStopAt: null,
@@ -2893,7 +2875,7 @@ PersistentKeepalive = 25`
       state: 'installed',
       manifest: MockManifestBitcoinProxy,
     },
-    s9pk: '/media/startos/data/package-data/archive/installed/asdfasdf.s9pk',
+    s9pk: '/media/startos/data/package-data/archive/installed/btc-rpc-proxy.s9pk',
     lastBackup: null,
     statusInfo: {
       forceStopAt: null,
@@ -2926,7 +2908,7 @@ PersistentKeepalive = 25`
       state: 'installed',
       manifest: MockManifestLnd,
     },
-    s9pk: '/media/startos/data/package-data/archive/installed/asdfasdf.s9pk',
+    s9pk: '/media/startos/data/package-data/archive/installed/lnd.s9pk',
     lastBackup: null,
     statusInfo: {
       forceStopAt: null,

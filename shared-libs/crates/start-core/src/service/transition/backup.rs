@@ -93,14 +93,18 @@ impl Handler<Backup> for ServiceActor {
         // doesn't resolve until the service has left the backing-up state.
         let (remote, handle) = async move {
             let res = async {
-                let backup_guard = seed
-                    .persistent_container
-                    .mount_backup(path, ReadWrite)
-                    .await?;
-                seed.persistent_container
-                    .execute::<NoOutput>(id, ProcedureName::CreateBackup, Value::Null, None)
-                    .await?;
-                backup_guard.unmount(true).await?;
+                if seed.persistent_container.s9pk.as_manifest().shared_volumes {
+                    crate::service::Service::isolated_backup(&seed, id, path).await?;
+                } else {
+                    let backup_guard = seed
+                        .persistent_container
+                        .mount_backup(path, ReadWrite)
+                        .await?;
+                    seed.persistent_container
+                        .execute::<NoOutput>(id, ProcedureName::CreateBackup, Value::Null, None)
+                        .await?;
+                    backup_guard.unmount(true).await?;
+                }
 
                 Ok::<_, Error>(())
             }

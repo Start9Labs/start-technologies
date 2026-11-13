@@ -95,6 +95,10 @@ pub trait FileSystem: Send + Sync {
     fn source(&self) -> impl Future<Output = Result<Option<impl AsRef<Path>>, Error>> + Send {
         async { Ok(None::<&Path>) }
     }
+    /// The block-device path available for mount retirement.
+    fn device(&self) -> impl Future<Output = Result<Option<std::path::PathBuf>, Error>> + Send {
+        async { Ok(None) }
+    }
     fn pre_mount(
         &self,
         mountpoint: &Path,
@@ -112,5 +116,19 @@ pub trait FileSystem: Send + Sync {
     ) -> impl Future<Output = Result<(), Error>> + Send {
         default_mount_impl(self, mountpoint, mount_type)
     }
+    /// Rejects known unavailability without retiring an existing mount.
+    fn check_mount(
+        &self,
+        #[allow(unused_variables)] mountpoint: &Path,
+    ) -> impl Future<Output = Result<(), Error>> + Send {
+        async { Ok(()) }
+    }
     fn source_hash(&self) -> impl Future<Output = Result<digest::Output<Sha256>, Error>> + Send;
+    /// Temporary-mount identity, including immutable mount policy.
+    fn mount_hash(
+        &self,
+        #[allow(unused_variables)] mount_type: MountType,
+    ) -> impl Future<Output = Result<digest::Output<Sha256>, Error>> + Send {
+        self.source_hash()
+    }
 }

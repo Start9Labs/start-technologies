@@ -82,6 +82,11 @@ import { ServiceUptimeComponent } from '../components/uptime.component'
       service-uptime {
         display: none;
       }
+
+      service-tasks,
+      &::after {
+        order: 1;
+      }
     }
   `,
   host: { class: 'g-subpage' },
