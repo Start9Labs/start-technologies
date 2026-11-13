@@ -26,17 +26,6 @@ pub struct BackupReport {
     shared_volumes: BTreeMap<crate::shared_volumes::SharedVolumeId, VolumeBackupReport>,
 }
 
-impl BackupReport {
-    fn has_failures(&self) -> bool {
-        self.server.error.is_some()
-            || self.packages.values().any(|item| item.error.is_some())
-            || self
-                .shared_volumes
-                .values()
-                .any(|item| item.result.error.is_some())
-    }
-}
-
 #[derive(Debug, Deserialize, Serialize, VisitFields)]
 pub struct VolumeBackupReport {
     pub name: String,
@@ -82,7 +71,10 @@ fn read_password() -> Result<String, Error> {
 
 pub fn backup<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("history", history::handler::<C>().no_cli())
+        .subcommand(
+            "history",
+            history::handler::<C>().with_about("about.commands-backup-history"),
+        )
         .subcommand(
             "create",
             from_fn_async(backup_bulk::backup_all)
@@ -141,13 +133,12 @@ mod tests {
         }))
         .unwrap();
         assert!(report.shared_volumes.is_empty());
-        assert!(!report.has_failures());
     }
 
     #[test]
-    fn volume_errors_make_the_bulk_report_unsuccessful() {
+    fn volume_errors_round_trip_in_bulk_reports() {
         let id = crate::shared_volumes::SharedVolumeId::new();
-        let mut report = BackupReport {
+        let report = BackupReport {
             server: ServerBackupReport {
                 attempted: true,
                 error: None,
@@ -164,16 +155,13 @@ mod tests {
                 },
             )]),
         };
-        assert!(report.has_failures());
         let wire = serde_json::to_value(&report).unwrap();
         assert_eq!(wire["sharedVolumes"][id.as_ref()]["error"], "offline");
         assert_eq!(wire["sharedVolumes"][id.as_ref()]["duration_ms"], 12);
-        assert!(
-            serde_json::from_value::<BackupReport>(wire)
-                .unwrap()
-                .has_failures()
+        let decoded = serde_json::from_value::<BackupReport>(wire).unwrap();
+        assert_eq!(
+            decoded.shared_volumes[&id].result.error.as_deref(),
+            Some("offline")
         );
-        report.shared_volumes.get_mut(&id).unwrap().result.error = None;
-        assert!(!report.has_failures());
     }
 }
