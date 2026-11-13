@@ -2197,6 +2197,47 @@ export const EditSignerParams: z.ZodObject<{
 }).meta({
   id: 'EditSignerParams',
 })
+
+/**
+ * Edits an existing release; omitted fields, assets and authorized signers remain unchanged.
+ */
+export const EditVersionParams: z.ZodObject<{
+  version: z.ZodString
+  releaseNotes: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
+    z.ZodNullable<typeof LocaleString>
+  >
+  sourceVersion: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  expectedGitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  security: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+    z.ZodNullable<z.ZodBoolean>
+  >
+}> = /* @__PURE__ */ object({
+  version: z.string(),
+  releaseNotes: wire(
+    LocaleString.nullable().optional(),
+    LocaleString.nullable(),
+  ),
+  sourceVersion: wire(z.string().nullable().optional(), z.string().nullable()),
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  expectedGitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  security: wire(z.boolean().nullable().optional(), z.boolean().nullable()),
+}).meta({
+  id: 'EditVersionParams',
+  description:
+    'Edits an existing release; omitted fields, assets and authorized signers remain unchanged.',
+})
 export const EppInfo: z.ZodObject<{
   current: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof Epp>>,
@@ -6368,6 +6409,13 @@ export const Api = {
                   _PARAMS: /* @__PURE__ */ z.intersection(
                     z.intersection(empty, RegistryUrlParams),
                     AddVersionParams,
+                  ),
+                  _RETURN: /* @__PURE__ */ z.null(),
+                },
+                edit: {
+                  _PARAMS: /* @__PURE__ */ z.intersection(
+                    z.intersection(empty, RegistryUrlParams),
+                    EditVersionParams,
                   ),
                   _RETURN: /* @__PURE__ */ z.null(),
                 },

@@ -34,6 +34,14 @@ pub fn version_api<C: Context>() -> ParentHandler<C> {
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
+            "edit",
+            from_fn_async(edit_version)
+                .with_metadata("admin", Value::Bool(true))
+                .no_display()
+                .with_about("about.edit-os-version")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
             "remove",
             from_fn_async(remove_version)
                 .with_metadata("admin", Value::Bool(true))
@@ -131,6 +139,74 @@ pub async fn add_version(
                     i.git_hash = git_hash;
                     i.security = security;
                     i.authorized.extend(signer);
+                    Ok(())
+                })
+        })
+        .await
+        .result
+}
+
+/// Edits an existing release; omitted fields, assets and authorized signers remain unchanged.
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
+#[command(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
+pub struct EditVersionParams {
+    #[arg(help = "help.arg.os-version")]
+    pub version: Version,
+    #[arg(
+        long,
+        help = "help.arg.release-notes",
+        value_name = "RELEASE_NOTES_OR_JSON"
+    )]
+    pub release_notes: Option<LocaleString>,
+    #[arg(long, help = "help.arg.source-version-range")]
+    pub source_version: Option<VersionRange>,
+    #[arg(long, help = "help.arg.os-git-hash")]
+    pub git_hash: Option<GitHash>,
+    #[arg(long, help = "help.arg.expected-os-git-hash")]
+    pub expected_git_hash: Option<GitHash>,
+    #[arg(long, help = "help.arg.os-security", action = clap::ArgAction::Set)]
+    pub security: Option<bool>,
+}
+
+rpc_toolkit::reflect_ts!(EditVersionParams);
+rpc_toolkit::ts_export!(EditVersionParams, namespaces = [""]);
+
+pub async fn edit_version(
+    ctx: RegistryContext,
+    EditVersionParams {
+        version,
+        release_notes,
+        source_version,
+        git_hash,
+        expected_git_hash,
+        security,
+    }: EditVersionParams,
+) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| {
+            db.as_index_mut()
+                .as_os_mut()
+                .as_versions_mut()
+                .as_idx_mut(&version)
+                .or_not_found(&version)?
+                .mutate(|info| {
+                    if let Some(expected) = expected_git_hash {
+                        info.require_git_hash(&expected)?;
+                    }
+                    if let Some(release_notes) = release_notes {
+                        info.release_notes = release_notes;
+                    }
+                    if let Some(source_version) = source_version {
+                        info.source_version = source_version;
+                    }
+                    if let Some(git_hash) = git_hash {
+                        info.git_hash = Some(git_hash);
+                    }
+                    if let Some(security) = security {
+                        info.security = security;
+                    }
                     Ok(())
                 })
         })
@@ -343,6 +419,44 @@ mod tests {
             plain.release_notes,
             LocaleString::Translated("English notes".into())
         );
+    }
+
+    #[test]
+    fn edits_accept_partial_metadata_from_cli_and_rpc() {
+        let cli = EditVersionParams::try_parse_from(["edit", "0.4.0.5"]).unwrap();
+        let rpc: EditVersionParams = from_value(json!({ "version": "0.4.0.5" })).unwrap();
+        assert_eq!(to_value(&cli).unwrap(), to_value(&rpc).unwrap());
+        assert!(cli.security.is_none());
+
+        for security in ["true", "false"] {
+            let notes = r#"{"en_US":"Notes","pl_PL":"Informacje"}"#;
+            let cli = EditVersionParams::try_parse_from([
+                "edit",
+                "0.4.0.5",
+                "--release-notes",
+                notes,
+                "--source-version",
+                ">=0.4.0.1",
+                "--git-hash",
+                "new-build",
+                "--expected-git-hash",
+                "old-build",
+                "--security",
+                security,
+            ])
+            .unwrap();
+            let rpc: EditVersionParams = from_value(json!({
+                "version": "0.4.0.5",
+                "releaseNotes": { "en_US": "Notes", "pl_PL": "Informacje" },
+                "sourceVersion": ">=0.4.0.1",
+                "gitHash": "new-build",
+                "expectedGitHash": "old-build",
+                "security": security == "true",
+            }))
+            .unwrap();
+            assert_eq!(to_value(&cli).unwrap(), to_value(&rpc).unwrap());
+            assert_eq!(cli.security, Some(security == "true"));
+        }
     }
 
     #[test]
