@@ -78,7 +78,7 @@ package and OS metadata through PatchDB. Subscriptions reconnect with jittered b
 dump. Cached metadata remains available offline, with connection availability reported separately
 from registry configuration. Malformed saved source URLs are skipped independently without
 rewriting configured intent. Streaming requires signed-DH admission, `rpcstream` and a configured
-hostname covering the client's selected URL host. An upgrade HTTP 404/405/501 selects signed HTTP
+hostname covering the client's selected URL host. A legacy HTTP 200 without upgrading, or upgrade HTTP 404/405/501, selects signed HTTP
 polling every 15 minutes, using full/all-revision `package.get`, `info` and the selected `os.index`.
 Each cycle rechecks upgrade support. Successful polling marks observed availability; failed polls
 retain caches without granting trust. Redirects, authorization errors and failed encrypted admission

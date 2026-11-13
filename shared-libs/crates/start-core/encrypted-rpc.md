@@ -125,7 +125,7 @@ streaming, output, cancellation and keepalive ownership. WRT log/update commands
 GUIDs rather than adding native stream consumers; its HTTP RPC path remains `/rpc/v1`.
 
 Backend registry discovery, cache misses and grouped subscriptions share the existing
-reloadable SOCKS client. Upgrade HTTP 404/405/501 selects signed HTTP compatibility for
+reloadable SOCKS client. A legacy HTTP 200 without upgrading, or upgrade HTTP 404/405/501, selects signed HTTP compatibility for
 discovery and cache misses; the same registry task polls full/all-revision `package.get`,
 `info` and the selected `os.index` immediately and every 15 minutes, retrying upgrade
 support each cycle. Projection, selection and disabled-key discovery keep their owners;

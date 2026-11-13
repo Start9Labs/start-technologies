@@ -5113,10 +5113,21 @@ export const OsUpdateCache: z.ZodObject<{
     z.ZodOptional<typeof RegistryStatus>,
     typeof RegistryStatus
   >
+  /**
+   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   */
+  error: z.ZodOptional<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   registry: z.string(),
   versions: z.record(z.string(), OsVersionInfo),
   status: wire(RegistryStatus.optional(), RegistryStatus),
+  /**
+   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   */
+  error: z.string().nullable().optional().meta({
+    description:
+      'Failure of the latest synchronization attempt; absent while connecting or connected.',
+  }),
 }).meta({
   id: 'OsUpdateCache',
   description: 'Compatible releases from the selected StartOS update source.',
@@ -6544,10 +6555,21 @@ export const RegistryCache: z.ZodObject<{
     z.ZodOptional<typeof RegistryStatus>,
     typeof RegistryStatus
   >
+  /**
+   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   */
+  error: z.ZodOptional<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   info: RegistryInfo,
   packages: z.record(z.string(), GetPackageResponse),
   status: wire(RegistryStatus.optional(), RegistryStatus),
+  /**
+   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   */
+  error: z.string().nullable().optional().meta({
+    description:
+      'Failure of the latest synchronization attempt; absent while connecting or connected.',
+  }),
 }).meta({
   id: 'RegistryCache',
   description:
