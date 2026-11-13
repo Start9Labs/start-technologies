@@ -37,6 +37,27 @@ function fakeSubcontainer() {
   }
 }
 
+async function runRestore(backups: Backups<any>) {
+  const fake = fakeSubcontainer()
+  jest.spyOn(SubContainer, 'withTemp').mockImplementationOnce((async (
+    ...args: unknown[]
+  ) => {
+    const fn = args[4] as (sub: typeof fake) => Promise<void>
+    await fn(fake)
+  }) as typeof SubContainer.withTemp)
+
+  const restore = (backups as unknown as { postRestore: BackupHook })
+    .postRestore
+  await restore({} as never, {} as never)
+  return fake
+}
+
+function grantSql(fake: ReturnType<typeof fakeSubcontainer>) {
+  const calls = fake.execFail.mock.calls as unknown as [string[]][]
+  const command = calls.map(([c]) => c).find(c => c.includes('-e'))
+  return command?.[command.indexOf('-e') + 1] ?? ''
+}
+
 async function expectLeadingHyphenImport(
   backups: Backups<any>,
   client: 'mysql' | 'mariadb',
@@ -124,6 +145,41 @@ describe('MySQL and MariaDB dump restore', () => {
         password: 'secret',
       }),
       'mariadb',
+    )
+  })
+
+  test.each([
+    [
+      'MySQL',
+      Backups.withMysqlDump<any>({
+        imageId: 'database',
+        dbVolume: 'database',
+        datadir: '/var/lib/mysql',
+        database: 'app',
+        user: 'app',
+        password: 'secret',
+        engine: 'mysql',
+      }),
+    ],
+    [
+      'MariaDB',
+      Backups.withMariadbDump<any>({
+        imageId: 'database',
+        dbVolume: 'database',
+        datadir: '/var/lib/mysql',
+        database: 'app',
+        user: 'app',
+        password: 'secret',
+      }),
+    ],
+  ])('%s restore creates TCP-reachable accounts', async (_, backups) => {
+    const sql = grantSql(await runRestore(backups))
+    for (const account of ["'app'@'localhost'", "'app'@'%'", "'root'@'%'"]) {
+      expect(sql).toContain(`CREATE USER IF NOT EXISTS ${account}`)
+    }
+    expect(sql).toContain("GRANT ALL ON `app`.* TO 'app'@'%';")
+    expect(sql).toContain(
+      "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;",
     )
   })
 })

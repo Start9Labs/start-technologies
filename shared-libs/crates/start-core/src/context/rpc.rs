@@ -592,6 +592,7 @@ impl RpcContext {
 
         // Conversion requires unmounted, quiescent roots before observers and services start.
         optimize_storage.start();
+        self.lxc_manager.gc().await?;
         let peek = self.db.peek().await;
         let mut installed = BTreeSet::new();
         let mut all = BTreeSet::new();

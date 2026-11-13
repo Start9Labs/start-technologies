@@ -5336,12 +5336,6 @@ export const SessionList: z.ZodObject<{
 }).meta({
   id: 'SessionList',
 })
-export const BackupHistory: z.ZodObject<{
-  runs: z.ZodArray<typeof BackupRun>
-  total: z.ZodInt
-}> = /* @__PURE__ */ object({ runs: z.array(BackupRun), total: z.int() }).meta({
-  id: 'BackupHistory',
-})
 
 /**
  * Parameters for replacing the stored NUT configuration.
@@ -5351,6 +5345,12 @@ export const SetNutParams: z.ZodObject<{ config: typeof NutConfig }> =
     id: 'SetNutParams',
     description: 'Parameters for replacing the stored NUT configuration.',
   })
+export const BackupHistory: z.ZodObject<{
+  runs: z.ZodArray<typeof BackupRun>
+  total: z.ZodInt
+}> = /* @__PURE__ */ object({ runs: z.array(BackupRun), total: z.int() }).meta({
+  id: 'BackupHistory',
+})
 
 /**
  * Active DNS authority and its bootstrap gateway.
