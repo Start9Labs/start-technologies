@@ -1092,4 +1092,5 @@ export default {
   1291: 'Huella anterior',
   1292: 'Huella actual',
   1293: 'Los detalles del error no están disponibles',
+  1294: 'Inaccesible',
 } satisfies i18n

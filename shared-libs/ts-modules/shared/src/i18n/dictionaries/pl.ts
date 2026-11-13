@@ -1092,4 +1092,5 @@ export default {
   1291: 'Poprzedni odcisk',
   1292: 'Obecny odcisk',
   1293: 'Szczegóły błędu nie są dostępne',
+  1294: 'Nieosiągalny',
 } satisfies i18n

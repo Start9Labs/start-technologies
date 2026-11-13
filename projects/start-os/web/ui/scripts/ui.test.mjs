@@ -77,7 +77,7 @@ boundary(
     'TuiLink',
     'TuiExpand',
   ],
-  'export const TUI_BREAKPOINT = Symbol("breakpoint"); export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => []; export const tuiIconStart = value => value;',
+  'export const TUI_ICON_START = Symbol("iconStart"); export const tuiButtonOptionsProvider = () => []; export const TUI_BREAKPOINT = Symbol("breakpoint"); export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => []; export const tuiIconStart = value => value;',
 )
 boundary(
   '@taiga-ui/kit',
@@ -4154,6 +4154,8 @@ const { PackageIconService: ProductionPackageIconService } =
   await import('../src/app/services/package-icon.service.ts')
 const { default: MarketplacePage } =
   await import('../src/app/routes/portal/routes/marketplace/marketplace.component.ts')
+const { RegistryRetry } =
+  await import('../src/app/routes/portal/components/registry-retry.ts')
 
 const registryEntry = (version = '1.0.0:0', status = 'connected') => ({
   status,
@@ -4279,6 +4281,11 @@ function marketplaceFixture(t, entries = {}) {
     routeParams,
     makePage: () =>
       runInInjectionContext(injector, () => new MarketplacePage()),
+    makeRetry(url) {
+      const retry = runInInjectionContext(injector, () => new RegistryRetry())
+      retry.registryRetry = () => url
+      return retry
+    },
     watch(observable) {
       const values = []
       subscriptions.push(observable.subscribe(value => values.push(value)))
@@ -4408,7 +4415,8 @@ test('the visible refresh action retries failed icons when the refreshed cache a
   const icon = 'blake3/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png'
   entry.packages.example.best['1.0.0:0'].icon = icon
   const f = marketplaceFixture(t, { 'https://registry.test/': entry })
-  const page = f.makePage()
+  f.makePage()
+  const retry = f.makeRetry('https://registry.test/')
   const visible = f.watch(
     f.service.currentRegistry$.pipe(
       switchMap(store =>
@@ -4420,7 +4428,7 @@ test('the visible refresh action retries failed icons when the refreshed cache a
   f.iconResponses[0].reject(new Error('Icon temporarily unavailable'))
   await tick()
   assert.equal(visible.at(-1), 'fallback.png')
-  await page.refreshRegistry()
+  await retry.retry()
   assert.deepEqual(f.refreshes, [{ url: 'https://registry.test/' }])
   assert.deepEqual(f.connections, [])
   assert.equal(f.iconRequests.length, 1)

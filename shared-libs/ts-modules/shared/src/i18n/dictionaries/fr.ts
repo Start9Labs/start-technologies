@@ -1092,4 +1092,5 @@ export default {
   1291: 'Empreinte précédente',
   1292: 'Empreinte actuelle',
   1293: 'Les détails de l’erreur ne sont pas disponibles',
+  1294: 'Injoignable',
 } satisfies i18n

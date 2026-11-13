@@ -1092,4 +1092,5 @@ export default {
   1291: 'Vorheriger Fingerabdruck',
   1292: 'Aktueller Fingerabdruck',
   1293: 'Fehlerdetails sind nicht verfügbar',
+  1294: 'Nicht erreichbar',
 } satisfies i18n

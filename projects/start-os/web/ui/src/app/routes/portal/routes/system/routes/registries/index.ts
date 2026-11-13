@@ -23,6 +23,7 @@ import { defaultIfEmpty, firstValueFrom } from 'rxjs'
 import { TRUSTED_KEYS_NOTICE } from 'src/app/components/trusted-keys/notice'
 import { BackDirective } from 'src/app/routes/portal/components/back'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
+import { RegistryRetry } from 'src/app/routes/portal/components/registry-retry'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { OSService } from 'src/app/services/os.service'
@@ -65,7 +66,7 @@ interface Row extends Pick<T.RegistryCache, 'status' | 'error'> {
         </button>
       </header>
       @if (rows(); as rows) {
-        <table [appTable]="[null, 'Name', 'URL', null]">
+        <table [appTable]="[null, 'Name', 'URL', 'Status', null]">
           @for (row of rows; track row.url) {
             <tr>
               <td [style.width.rem]="3">
@@ -73,11 +74,6 @@ interface Row extends Pick<T.RegistryCache, 'status' | 'error'> {
               </td>
               <td class="name">
                 <span>{{ row.name }}</span>
-                <marketplace-registry-status
-                  [status]="row.status"
-                  [url]="row.url"
-                  [error]="row.error"
-                />
                 @if (row.os) {
                   <span tuiBadge appearance="primary">
                     {{ 'StartOS updates' | i18n }}
@@ -85,6 +81,16 @@ interface Row extends Pick<T.RegistryCache, 'status' | 'error'> {
                 }
               </td>
               <td class="url">{{ row.url }}</td>
+              <td class="status">
+                <marketplace-registry-status
+                  [status]="row.status"
+                  [url]="row.url"
+                  [error]="row.error"
+                />
+                @if (row.status === 'error') {
+                  <button [registryRetry]="row.url" size="xs"></button>
+                }
+              </td>
               <td>
                 <button
                   tuiIconButton
@@ -121,7 +127,7 @@ interface Row extends Pick<T.RegistryCache, 'status' | 'error'> {
             </tr>
           } @empty {
             <tr>
-              <td colspan="4">{{ 'No registries connected' | i18n }}</td>
+              <td colspan="5">{{ 'No registries connected' | i18n }}</td>
             </tr>
           }
         </table>
@@ -150,11 +156,20 @@ interface Row extends Pick<T.RegistryCache, 'status' | 'error'> {
       }
 
       td:first-child {
-        grid-area: 1 / 1 / 3;
+        grid-area: 1 / 1 / 4;
         align-content: center;
       }
 
+      .url {
+        grid-area: 2 / 2;
+      }
+
+      .status {
+        grid-area: 3 / 2;
+      }
+
       .name {
+        grid-area: 1 / 2;
         display: flex;
         flex-wrap: wrap;
         align-items: center;
@@ -169,13 +184,14 @@ interface Row extends Pick<T.RegistryCache, 'status' | 'error'> {
       }
 
       td:last-child {
-        grid-area: 1 / 3 / 3;
+        grid-area: 1 / 3 / 4;
         align-content: center;
       }
     }
   `,
   imports: [
     RegistryConnectionStatus,
+    RegistryRetry,
     BackDirective,
     DocsLinkDirective,
     StoreIconDirective,
