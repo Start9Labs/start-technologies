@@ -9,7 +9,11 @@ import type {
   RpcStreamFinalType,
 } from './osBindings/rpc/start-os'
 
-export type RpcCallOptions = { timeout?: number }
+export type RpcCallOptions = {
+  timeout?: number
+  /** HTTP transport headers; non-HTTP transports may ignore them. */
+  headers?: Record<string, string>
+}
 
 /** Aborting cancels initialization and iteration, including items queued after a terminal. */
 export type RpcStreamOptions = RpcCallOptions & { signal?: AbortSignal }
@@ -99,7 +103,6 @@ const reserved = new Set([
   ...Object.getOwnPropertyNames(Object.prototype),
   'then',
   'toJSON',
-  'inspect',
 ])
 
 type Invoke<Options> = (

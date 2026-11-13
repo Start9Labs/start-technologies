@@ -46,8 +46,6 @@ export type GetRegistryPackageReq = GetPackageReq &
 export type GetRegistryPackagesReq = GetPackagesReq &
   Pick<Params<'registry.package.get'>, 'registry'>
 export type CheckDnsRes = Result<'net.gateway.check-dns'>
-export type DiskBackupTarget = Extract<T.BackupTarget, { type: 'disk' }>
-export type CifsBackupTarget = Extract<T.BackupTarget, { type: 'cifs' }>
 export type RecoverySource = DiskRecoverySource | CifsRecoverySource
 export interface DiskRecoverySource {
   type: 'disk'

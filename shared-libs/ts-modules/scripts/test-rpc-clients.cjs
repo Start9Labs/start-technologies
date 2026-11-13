@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict')
+const { webcrypto } = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const test = require('node:test')
@@ -50,6 +51,8 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       'StaleUiService',
       'PATCH_CACHE',
       'RELATIVE_URL',
+      'WA_CRYPTO',
+      'WA_SESSION_STORAGE',
     ].map(name => [name, Symbol(name)]),
   )
   tokens.HttpClient = HttpClient
@@ -126,6 +129,11 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       if (moduleOverrides.has(request)) return moduleOverrides.get(request)
       if (request === '@angular/core') return angular
       if (request === '@angular/common/http') return httpAngular
+      if (request === '@ng-web-apis/common')
+        return {
+          WA_CRYPTO: tokens.WA_CRYPTO,
+          WA_SESSION_STORAGE: tokens.WA_SESSION_STORAGE,
+        }
       if (request === '@start9labs/shared') return shared()
       if (request === '@start9labs/marketplace')
         return load('shared-libs/ts-modules/marketplace/src/types.ts')
@@ -182,6 +190,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
     defaultView: { location: { host: 'server.test', protocol: 'https:' } },
   })
   dependencies.set(tokens.RELATIVE_URL, '/rpc/v1')
+  dependencies.set(tokens.WA_CRYPTO, webcrypto)
   return { dependencies, tokens, load }
 }
 
@@ -1284,7 +1293,6 @@ test('Brochure serves each registry root through its own client', async () => {
 })
 
 test('StartOS mock registry calls reach list and single-package fixtures', async () => {
-  const storage = Symbol('session storage')
   const pkg = { categories: [], best: {}, otherVersions: {} }
   const version = { ...pkg, best: { '1.0.0': {} } }
   const fixtures = {
@@ -1293,14 +1301,13 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
   }
   const { dependencies, tokens, load } = harness(
     new Map([
-      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: fixtures }],
       ['./mock-patch', mockPatchFixture({})],
       ['./md-sample.md', ''],
     ]),
   )
-  dependencies.set(storage, null)
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: {} }))
   const client = new (load(
@@ -1332,7 +1339,6 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
 })
 
 test('StartOS trust mock rejects whole batches and imports the requested trust atomically', async () => {
-  const storage = Symbol('session storage')
   const ids = [
     'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=',
     'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
@@ -1365,14 +1371,13 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
   }
   const { dependencies, tokens, load } = harness(
     new Map([
-      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: {} }],
       ['./mock-patch', mockPatchFixture(data)],
       ['./md-sample.md', ''],
     ]),
   )
-  dependencies.set(storage, null)
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
   const client = new (load(
@@ -1415,10 +1420,8 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
 })
 
 test('StartOS DNS mock updates the selected gateway using live gateway state', async () => {
-  const storage = Symbol('session storage')
   const { dependencies, tokens, load } = harness(
     new Map([
-      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: {} }],
       [
@@ -1440,7 +1443,7 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
   const cache = new BehaviorSubject({
     value: { serverInfo: { network: { gateways: { wg0: gateway } } } },
   })
-  dependencies.set(storage, null)
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, cache)
   const client = new (load(

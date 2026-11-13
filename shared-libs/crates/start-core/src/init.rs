@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
+use patch_db::ModelExt;
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
@@ -469,8 +470,13 @@ pub async fn init(
 
     validate_db.start();
     db.mutate(|d| {
-        let model = d.de()?;
-        d.ser(&model)
+        let mut model = d.de()?;
+        crate::shared_volumes::recover_pending_deletions(
+            &mut model.public.shared_volumes,
+            d.as_private().as_value(),
+        )?;
+        d.ser(&model)?;
+        crate::backup::target::catalog::initialize(d)
     })
     .await
     .result?;

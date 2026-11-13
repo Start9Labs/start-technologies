@@ -16,7 +16,7 @@ license = "MIT"
 name = "start-core"
 readme = "README.md"
 repository = "https://github.com/Start9Labs/start-technologies"
-version = "0.4.2" # VERSION_BUMP
+version = "0.4.3" # VERSION_BUMP
 
 [lib]
 name = "start_core"
@@ -164,6 +164,7 @@ nix = { version = "0.30.1", features = [
   "process",
   "sched",
   "signal",
+  "uio",
   "user",
 ] }
 nom = "8.0.0"

@@ -47,6 +47,14 @@ pub struct Public {
     pub registry_cache: BTreeMap<Url, crate::registry::sync::RegistryCache>,
     #[serde(default)]
     pub os_update_cache: Option<crate::registry::sync::OsUpdateCache>,
+    #[serde(default)]
+    pub disks: Vec<crate::disk::util::DiskInfo>,
+    #[serde(default)]
+    pub shared_volumes:
+        BTreeMap<crate::shared_volumes::SharedVolumeId, crate::shared_volumes::SharedVolume>,
+    #[serde(default)]
+    pub backup_targets:
+        BTreeMap<crate::backup::target::BackupTargetId, crate::backup::target::BackupTarget>,
     /// UI-owned state; backend domain logic accesses its contents only during migrations.
     pub ui: Value,
 }
@@ -163,6 +171,9 @@ impl Public {
             package_data: AllPackageData::default(),
             registry_cache: BTreeMap::new(),
             os_update_cache: None,
+            disks: Vec::new(),
+            shared_volumes: BTreeMap::new(),
+            backup_targets: BTreeMap::new(),
             ui: serde_json::from_str(*DB_UI_SEED_CELL.get().unwrap_or(&"null"))
                 .with_kind(ErrorKind::Deserialization)?,
         })
