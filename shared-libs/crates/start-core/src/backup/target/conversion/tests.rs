@@ -9,7 +9,7 @@ use super::*;
 use crate::util::Invoke;
 
 fn target(id: u32) -> BackupTargetId {
-    BackupTargetId::Cifs { id }
+    format!("cifs-{id}").parse().unwrap()
 }
 
 #[test]
@@ -168,6 +168,7 @@ async fn worker_publishes_result_after_cleanup_for_success_and_failures() {
                 db.clone(),
                 backupfs::ConversionProgressSink::new(),
                 receiver,
+                watch::Sender::new(()),
             )
             .await
             .unwrap();
@@ -250,6 +251,7 @@ async fn worker_streams_progress_and_cancels_on_shutdown() {
         db.clone(),
         backupfs::ConversionProgressSink::new(),
         receiver,
+        watch::Sender::new(()),
     ));
     live_progress(&db).await;
     let pid = helper_pid(&temp);
@@ -287,6 +289,7 @@ async fn worker_progress_and_completion_are_scoped_to_one_backup() {
         db.clone(),
         backupfs::ConversionProgressSink::new(),
         receiver,
+        watch::Sender::new(()),
     ));
     live_progress(&db).await;
     nix::sys::signal::kill(helper_pid(&temp), nix::sys::signal::Signal::SIGUSR2).unwrap();
@@ -331,6 +334,7 @@ async fn real_helper_converts_the_frozen_backup_through_the_background_worker() 
             db.clone(),
             backupfs::ConversionProgressSink::new(),
             receiver,
+            watch::Sender::new(()),
         )
         .await
         .unwrap();

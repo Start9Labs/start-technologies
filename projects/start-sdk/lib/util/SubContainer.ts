@@ -157,6 +157,14 @@ export interface SubContainer<
   mount(mounts: Mounts<Manifest>): Promise<this>
 
   /**
+   * Try an optional shared-volume mount; start the affected workload only when mounted.
+   * Requires manifest opt-in and a user grant. Authorization and invalid-path failures reject.
+   */
+  tryMountSharedVolume(
+    options: SharedVolumeMountOptions,
+  ): Promise<T.SharedVolumeMountResult>
+
+  /**
    * Take a use-hold on this subcontainer. The returned function releases
    * the hold; the SubContainer is destroyed when {@link destroy} has been
    * called *and* the last hold is released, in either order.
@@ -432,6 +440,7 @@ export class SubContainerEager<
   private teardown: Promise<void> | null = null
   private readonly fileMounts = new FileMounts()
   private sharedMounts = false
+  private sharedVolumeDependency = false
 
   private leader: cp.ChildProcess
   private leaderExited: boolean = false
@@ -623,6 +632,18 @@ export class SubContainerEager<
         const from = `/media/startos/assets/${subpath}`
 
         await bind(from, path, options.filetype, options.idmap, true)
+      } else if (options.type === 'shared') {
+        const result = await this.tryMountSharedVolume({
+          id: options.id,
+          mountpoint,
+          subpath: options.subpath,
+          readonly: options.readonly,
+        })
+        if (result.kind === 'unavailable') {
+          throw new Error(
+            `Essential shared volume ${options.id} unavailable (${result.reason}) at ${mountpoint}`,
+          )
+        }
       } else if (options.type === 'pointer') {
         await prepBind(null, path, 'directory')
         // The host-side mount effect applies the SDK idmap in startd, which
@@ -637,6 +658,31 @@ export class SubContainerEager<
       }
     }
     return this
+  }
+
+  /** @internal Includes unsuccessful optional shared-volume mount attempts. */
+  get dependsOnSharedVolumes(): boolean {
+    return this.sharedVolumeDependency
+  }
+
+  /**
+   * Try an optional shared-volume mount. Only source unavailability returns an outcome;
+   * authorization, invalid paths, and internal failures reject.
+   */
+  async tryMountSharedVolume(
+    options: SharedVolumeMountOptions,
+  ): Promise<T.SharedVolumeMountResult> {
+    if (options.mountpoint.split('/').includes('..')) {
+      throw new Error(
+        'Shared-volume mountpoint must stay within the subcontainer',
+      )
+    }
+    this.sharedVolumeDependency = true
+    await prepBind(null, this.subpath(options.mountpoint), 'directory')
+    return this.effects.mountSharedVolume({
+      ...options,
+      subcontainer: this.guid,
+    })
   }
 
   /**
@@ -951,6 +997,14 @@ export class SubContainerLazy<
   /** The mounts declared at construction. Read by `Daemons.dynamic`'s configHash. */
   readonly mounts: Mounts<Manifest> | null
 
+  /** @internal Declared or attempted shared-volume dependencies of this container. */
+  get dependsOnSharedVolumes(): boolean {
+    return (
+      !!this.mounts?.sharedVolumes.length ||
+      !!this.created?.dependsOnSharedVolumes
+    )
+  }
+
   private materialized: Promise<SubContainerEager<Manifest, Effects>> | null =
     null
   private created: SubContainerEager<Manifest, Effects> | null = null
@@ -1042,6 +1096,13 @@ export class SubContainerLazy<
   async mount(mounts: Mounts<Manifest>): Promise<this> {
     await (await this.eager()).mount(mounts)
     return this
+  }
+
+  /** Try an optional shared-volume mount, materializing this subcontainer on first use. */
+  async tryMountSharedVolume(
+    options: SharedVolumeMountOptions,
+  ): Promise<T.SharedVolumeMountResult> {
+    return (await this.eager()).tryMountSharedVolume(options)
   }
 
   /**
@@ -1201,6 +1262,21 @@ export type MountOptions =
   | MountOptionsVolume
   | MountOptionsAssets
   | MountOptionsPointer
+  | MountOptionsShared
+
+/** A shared-volume directory mount. Names are editable; select by the granted ID. */
+export type SharedVolumeMountOptions = Omit<
+  Parameters<T.Effects['mountSharedVolume']>[0],
+  'subcontainer'
+>
+
+/** An essential shared-volume mount declared by `Mounts`. */
+export type MountOptionsShared = Omit<
+  SharedVolumeMountOptions,
+  'mountpoint'
+> & {
+  type: 'shared'
+}
 
 /** Mount options for binding a service volume into a subcontainer */
 export type MountOptionsVolume = {
