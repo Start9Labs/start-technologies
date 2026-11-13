@@ -119,11 +119,13 @@ export class HttpProxyChainButton {
         {{
           'Applies to every address and interface on this gateway and binding.'
             | i18n
-        }}&ngsp;
+        }}
+        <br />
         {{
           'Proxy services can read and modify traffic, including credentials.'
             | i18n
-        }}&ngsp;
+        }}
+        <br />
         {{
           'Unavailable proxies block traffic. Applying changes disconnects existing clients.'
             | i18n
