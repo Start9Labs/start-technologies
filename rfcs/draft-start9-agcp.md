@@ -303,10 +303,17 @@ Each request or response is a logical text message inside the shared
 encrypted framing, not a plaintext WebSocket text frame. A message MAY
 carry a JSON-RPC batch. The server MAY process the calls of a batch in any
 order and concurrently; a client needing ordering MUST await one call's
-response before sending the next. Each call in a batch succeeds or fails
-independently. Servers MUST accept batches of at least 100 calls within
-the shared transport's message-size limit and report their call-count
-limit in `gateway.info` ({{gateway-info}}).
+response before sending the next. Each call the transport admits succeeds
+or fails independently.
+
+The shared transport bounds the calls a connection may have pending,
+including outstanding `event.wait` calls, and the size of each logical
+message. A message carrying more calls than the pending-call limit closes
+the connection. A message that fits the limit alone, but exceeds it
+together with calls already pending, is refused in full: every call in it
+fails with the transport's limit error and none is executed. Servers
+report the pending-call limit as `maxBatch` in `gateway.info`
+({{gateway-info}}), and clients MUST keep their pending calls within it.
 
 Errors are reported as JSON-RPC error objects. The error codes JSON-RPC
 defines apply to malformed requests, unknown methods, and invalid
@@ -522,7 +529,8 @@ caller.
 caller.
 
 `limits`:
-: an object with `maxLifetime` (seconds), `maxBatch`, the per-kind quotas
+: an object with `maxLifetime` (seconds), `maxBatch` (the connection's
+pending-call limit, {{jsonrpc}}), the per-kind quotas
 `maxMappings`, `maxSniRoutes`, `maxPinholes`, `maxFilters`, and
 `maxDnsRecords`, and `dnsDomains`, the domains the operator grants the
 enrollment for DNS records ({{dns-records}}).
