@@ -34,6 +34,7 @@ async fn fixture() -> Fixture {
         } }]]);
     }
     state["index"]["os"]["versions"] = json!({ "0.4.0.6": {
+        "headline": "Stored unused headline",
         "releaseNotes": { "en_US": "English", "pl_PL": "Polski" },
     } });
     let main = TypedPatchDb::<RegistryDatabase>::load_unchecked(PatchDb::in_memory());
@@ -74,7 +75,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.1.3"),
+        wire("0.4.3"),
         fixture.dir.path(),
     )
     .await
@@ -90,6 +91,26 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
     .unwrap();
     assert!(Arc::ptr_eq(&current, &unversioned));
     assert!(!Arc::ptr_eq(&old, &current));
+    let headline = index_mirror(
+        &mirrors,
+        &fixture.main,
+        None,
+        wire("0.4.2.1"),
+        fixture.dir.path(),
+    )
+    .await
+    .unwrap();
+    assert!(!Arc::ptr_eq(&headline, &current));
+    let same_headline = index_mirror(
+        &mirrors,
+        &fixture.main,
+        None,
+        wire("0.4.1.3"),
+        fixture.dir.path(),
+    )
+    .await
+    .unwrap();
+    assert!(Arc::ptr_eq(&headline, &same_headline));
     let own = index_mirror(
         &mirrors,
         &fixture.main,
@@ -111,7 +132,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
     .unwrap();
     assert!(!Arc::ptr_eq(&old, &middle));
     assert!(!Arc::ptr_eq(&current, &middle));
-    assert_eq!(mirrors.lock().await.len(), 4);
+    assert_eq!(mirrors.lock().await.len(), 5);
 
     let pointer: JsonPointer = "/index".parse().unwrap();
     let (old_dump, mut old_sub) = old.db.dump_and_sub(pointer.clone()).await;
@@ -121,6 +142,21 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
     let mut new_view = new_dump.value;
     let mut own_view = own_dump.value;
     let middle_view = middle.db.dump(&pointer).await.value;
+    let headline_view = headline.db.dump(&pointer).await.value;
+    assert_eq!(
+        headline_view["os"]["versions"]["0.4.0.6"]["headline"],
+        json!("v0.4.0.6")
+    );
+    assert!(headline_view["os"]["versions"]["0.4.0.6"]["releaseNotes"].is_object());
+    assert_eq!(
+        old_view["os"]["versions"]["0.4.0.6"]["headline"],
+        json!("v0.4.0.6")
+    );
+    assert!(
+        new_view["os"]["versions"]["0.4.0.6"]
+            .get("headline")
+            .is_none()
+    );
     assert_eq!(
         old_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
         json!("English")
@@ -196,6 +232,19 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
     assert_eq!(
         new_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
         json!({ "en_US": "Updated", "pl_PL": "Nowe" })
+    );
+    assert_eq!(
+        old_view["os"]["versions"]["0.4.0.6"]["headline"],
+        json!("v0.4.0.6")
+    );
+    assert!(
+        new_view["os"]["versions"]["0.4.0.6"]
+            .get("headline")
+            .is_none()
+    );
+    assert_eq!(
+        fixture.main.peek().await.into_value()["index"]["os"]["versions"]["0.4.0.6"]["headline"],
+        json!("Stored unused headline")
     );
 }
 

@@ -263,9 +263,7 @@ impl WireCompatibility {
         if self.legacy_os_notes {
             project_legacy_os_notes(method, res)?;
         }
-        if self.legacy_os_headlines {
-            project_legacy_os_headlines(method, res);
-        }
+        project_os_headlines(method, res, self.legacy_os_headlines);
         if self.legacy_signatures {
             crate::sign::compat::downgrade_signatures(res);
         }
@@ -357,9 +355,13 @@ fn os_version_infos<'a>(
         .flat_map(|o| o.iter_mut())
 }
 
-fn project_legacy_os_headlines(method: &str, res: &mut Value) {
+fn project_os_headlines(method: &str, res: &mut Value, legacy: bool) {
     for (version, info) in os_version_infos(method, res) {
-        info["headline"] = Value::String(format!("v{version}").into());
+        if legacy {
+            info["headline"] = Value::String(format!("v{version}").into());
+        } else if let Some(info) = info.as_object_mut() {
+            info.remove("headline");
+        }
     }
 }
 
@@ -761,17 +763,24 @@ mod tests {
                 "os.index" => json!({ "versions": stored }),
                 _ => json!({ "os": { "versions": stored }, "package": {} }),
             };
-            project_legacy_os_headlines(method, &mut response);
+            project_os_headlines(method, &mut response, true);
             let versions = match method {
                 "os.version.get" => &response,
                 "os.index" => &response["versions"],
                 _ => &response["os"]["versions"],
             };
             assert_eq!(versions["0.4.0.5"]["headline"].as_str(), Some("v0.4.0.5"));
+            project_os_headlines(method, &mut response, false);
+            let versions = match method {
+                "os.version.get" => &response,
+                "os.index" => &response["versions"],
+                _ => &response["os"]["versions"],
+            };
+            assert_eq!(versions, &stored);
         }
         assert!(stored["0.4.0.5"].get("headline").is_none());
         let mut unrelated = stored.clone();
-        project_legacy_os_headlines("package.index", &mut unrelated);
+        project_os_headlines("package.index", &mut unrelated, true);
         assert_eq!(unrelated, stored);
     }
 
