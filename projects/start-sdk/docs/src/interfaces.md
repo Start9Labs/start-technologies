@@ -225,7 +225,7 @@ The handler then re-runs when the new value lands, updating the interface in pla
 | `proxy.auth`                    | `ProxyAuth` \| `null`                                                      | Auth gate on both the original and TLS-wrapper legs. Defaults to `null`. See [Authenticating at the Proxy](#authenticating-at-the-proxy).                                           |
 | `secure`                        | `{ ssl: boolean }` \| `null`                                               | For `protocol: null`, whether the original port is safe to expose on untrusted networks and whether it speaks TLS itself. See [Choosing `secure`](#choosing-secure).                |
 
-A `protocol: null` or `'dns'` binding forwards UDP as well as TCP on its original port, so one `bindPort` serves a protocol that speaks both, such as DNS. You don't need a [port range](#port-ranges) just to get UDP. The `addSsl` port carries TCP only.
+A non-TLS binding without HTTP proxying forwards UDP as well as TCP on its original port. Use `protocol: 'dns'`, or `protocol: null` with `secure: { ssl: false }` and `proxy: null`, for a protocol that speaks both, such as DNS. You don't need a [port range](#port-ranges) just to get UDP. HTTP-proxied ports and TLS ports (`addSsl` or `secure: { ssl: true }`) carry TCP only.
 
 Omitting `proxy` inherits the protocol's default: enabled for `http`, `https`, `ws`, and `wss`, otherwise `null`. Set `proxy: null` to forward traffic without HTTP handling. An explicit object enables HTTP proxying for any protocol and merges partial settings with the defaults. The service must speak HTTP on that binding; proxying does not translate other application protocols. Setting `proxy: { addXForwardedHeaders: false, auth: null }` retains HTTP parsing.
 
