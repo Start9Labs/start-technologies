@@ -26,8 +26,8 @@ import {
 
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreIconDirective } from './store-icon.directive'
-import { RegistryStatus } from './registry-status'
 
+// Connection status belongs in the catalog header and registry management.
 @Component({
   selector: 'marketplace-registry-select',
   template: `
@@ -83,9 +83,6 @@ import { RegistryStatus } from './registry-status'
                 {{ registry.name }}
                 <span tuiSubtitle>{{ registry.url }}</span>
               </span>
-              @if (registry.status; as status) {
-                <span [marketplaceRegistryStatus]="status"></span>
-              }
               @if (registry.selected) {
                 <tui-icon icon="@tui.check" />
               }
@@ -120,9 +117,6 @@ import { RegistryStatus } from './registry-status'
                 {{ registry.name }}
                 <span tuiSubtitle>{{ registry.url }}</span>
               </span>
-              @if (registry.status; as status) {
-                <span [marketplaceRegistryStatus]="status"></span>
-              }
               <tui-icon icon="@tui.trash" (click.stop)="delete(registry.url)" />
               @if (registry.selected) {
                 <tui-icon icon="@tui.check" />
@@ -161,7 +155,6 @@ import { RegistryStatus } from './registry-status'
     }
   `,
   imports: [
-    RegistryStatus,
     StoreIconDirective,
     RouterLink,
     TuiButton,
