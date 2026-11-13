@@ -64,10 +64,7 @@ impl std::fmt::Display for ForwardRequirements {
         write!(
             f,
             "ForwardRequirements {{ public: {:?}, private: {:?}, secure: {}, transport: {} }}",
-            self.public_gateways,
-            self.private_ips,
-            self.secure,
-            self.transport
+            self.public_gateways, self.private_ips, self.secure, self.transport
         )
     }
 }
@@ -479,6 +476,7 @@ async fn remove_stale_forward_rules() -> Result<(), Error> {
 /// every prior copy of this comment and adds the desired rule. No-op when the
 /// chain already holds exactly that rule. `prepend` inserts at the chain top
 /// (needed for the mark-restore rule, which must precede the set-mark rules).
+/// Callers must use nft's printed form for no-op detection.
 ///
 /// Lock-free: the only failure is a stale handle — a concurrent reconcile of
 /// the *same* comment replaced the rule between our list and delete. Benign (nft
@@ -521,7 +519,6 @@ async fn nft_rule_family(
     for attempt in 1..=MAX_ATTEMPTS {
         let existing = nft_rules_with_comment(family, chain, comment).await;
 
-        // Already converged: nothing to undo, or exactly the desired rule present.
         if undo {
             if existing.is_empty() {
                 return Ok(());

@@ -45,11 +45,7 @@ pub async fn apply_pinhole(
     transport: Transport,
 ) -> Result<(), Error> {
     let comment = tag(gua, external_port, transport.clone());
-    let protocols = if transport.protocols().len() > 1 {
-        format!("{{ {} }}", transport)
-    } else {
-        transport.to_string()
-    };
+    let protocols = l4proto(&transport);
     let ext = port_span(external_port, count);
     let int = port_span(internal_port, count);
     if internal_port == external_port {
@@ -68,6 +64,15 @@ pub async fn apply_pinhole(
         nft_rule_v6("forward", &comment, false, false, &accept).await?;
     }
     Ok(())
+}
+
+/// Matches nft's printed form for `nft_rule_v6` no-op detection.
+fn l4proto(transport: &Transport) -> String {
+    let protocols: Vec<_> = transport.protocols().iter().map(|p| p.as_str()).collect();
+    match protocols.as_slice() {
+        [protocol] => protocol.to_string(),
+        _ => format!("{{ {} }}", protocols.join(", ")),
+    }
 }
 
 /// Remove every nft rule for the pinhole at `[gua]:external_port` (undo is by
@@ -330,6 +335,13 @@ pub async fn seed_pinholes(ctx: &TunnelContext) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn l4proto_matches_the_nft_listing() {
+        assert_eq!(l4proto(&Transport::tcp()), "tcp");
+        assert_eq!(l4proto(&Transport::udp()), "udp");
+        assert_eq!(l4proto(&Transport::default()), "{ tcp, udp }");
+    }
 
     #[test]
     fn protocol_pinhole_updates_preserve_the_other_transport() {
