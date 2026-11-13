@@ -198,12 +198,15 @@ export class MarketplaceService extends AbstractMarketplaceService {
     url: string,
     provides: string,
     range: string,
+    providerId: string | null = null,
   ): Observable<MarketplacePkg[]> {
     // Registries before 1.6.0 ignore `provides`.
     return this.fetchPackages$(url, provides, range).pipe(
       map(packages =>
-        packages.filter(pkg =>
-          satisfiesWithAliases(this.exver, pkg, range, provides),
+        packages.filter(
+          pkg =>
+            (!providerId || pkg.id === providerId) &&
+            satisfiesWithAliases(this.exver, pkg, range, provides),
         ),
       ),
     )

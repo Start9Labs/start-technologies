@@ -1,4 +1,5 @@
 import type { PackageDataEntry } from '../services/patch-db/data-model'
+import { isInstalled, isUpdating } from './get-package-data'
 
 /** Dependency targets follow owner bindings; self and administration remain physical. */
 export function dependencyProvider(
@@ -13,4 +14,19 @@ export function dependencyProvider(
     return owner.dependencyBindings?.[target]?.providerId ?? null
   }
   return target
+}
+
+export function dependencyCandidates(
+  owner: PackageDataEntry,
+  services: Record<string, PackageDataEntry>,
+  dependencyId: string,
+): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(
+      owner.dependencyBindings?.[dependencyId]?.candidates || {},
+    ).filter(([id]) => {
+      const provider = services[id]
+      return provider && (isInstalled(provider) || isUpdating(provider))
+    }),
+  )
 }

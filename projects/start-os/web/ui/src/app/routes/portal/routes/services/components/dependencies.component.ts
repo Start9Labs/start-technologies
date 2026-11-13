@@ -1,23 +1,24 @@
 import { KeyValuePipe } from '@angular/common'
 import { Component, inject, input, signal } from '@angular/core'
-import { FormsModule, NgModel } from '@angular/forms'
 import { RouterLink } from '@angular/router'
-import { i18nKey, i18nPipe, TaskService } from '@start9labs/shared'
 import {
-  TuiCell,
-  TuiDataList,
-  TuiIcon,
-  TuiTextfield,
-  TuiTitle,
-} from '@taiga-ui/core'
-import { TuiAvatar, TuiChevron, TuiSelect, TuiSkeleton } from '@taiga-ui/kit'
+  DialogService,
+  i18nKey,
+  i18nPipe,
+  LocalizePipe,
+  TaskService,
+} from '@start9labs/shared'
+import { TuiButton, TuiCell, TuiTitle } from '@taiga-ui/core'
+import { TuiAvatar, TuiButtonLoading, TuiSkeleton } from '@taiga-ui/kit'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { PkgDependencyErrors } from 'src/app/services/dep-error.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
+import { dependencyCandidates } from 'src/app/utils/dependency-provider'
 import { getManifest } from 'src/app/utils/get-package-data'
 import { ToManifestPipe } from '../../../pipes/to-manifest'
+import { PROVIDER_SELECTION, ProviderSelectionData } from './provider-selection'
 
 @Component({
   selector: 'service-dependencies',
@@ -26,31 +27,13 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
     @let services = this.services();
     @for (d of pkg().currentDependencies | keyvalue; track d.key) {
       @let binding = pkg().dependencyBindings?.[d.key];
-      @let providerId = binding?.providerId;
+      @let selection = pkg().dependencySelections?.[d.key];
+      @let pinned = selection?.pin;
+      @let providerId = pinned ? selection?.providerId : binding?.providerId;
       @let provider = providerId ? services[providerId] : undefined;
       @let manifest = provider ? (provider | toManifest) : null;
       @let needsSelection = errors()[d.key]?.type === 'selectionRequired';
-      <a
-        tuiCell
-        [routerLink]="
-          needsSelection
-            ? null
-            : providerId
-              ? ['..', providerId]
-              : ['/marketplace']
-        "
-        [attr.aria-disabled]="needsSelection || null"
-        [queryParams]="
-          providerId || needsSelection
-            ? {}
-            : {
-                provides: d.key,
-                requirePkg: d.key,
-                requireRange: d.value.versionRange,
-              }
-        "
-        [class.error]="getError(d.key)"
-      >
+      <div tuiCell [class.error]="getError(d.key)">
         <span
           tuiAvatar
           appearance="action-grayscale"
@@ -59,18 +42,36 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
         >
           <img
             #icon="pkgIcon"
-            [pkgIcon]="provider || pkg()"
-            [dependency]="provider ? undefined : d.key"
+            [pkgIcon]="provider || pinned || pkg()"
+            [dependency]="provider || pinned ? undefined : d.key"
           />
         </span>
-        <span tuiTitle>
-          {{ d.value.title || d.key }}
-          <span tuiSubtitle>{{ d.key }} · {{ d.value.versionRange }}</span>
-          @if (manifest) {
+        <a
+          tuiTitle
+          [routerLink]="
+            binding?.providerId
+              ? ['..', binding!.providerId]
+              : needsSelection
+                ? null
+                : ['/marketplace']
+          "
+          [attr.aria-disabled]="needsSelection || null"
+          [queryParams]="
+            binding?.providerId
+              ? {}
+              : {
+                  provides: d.key,
+                  requirePkg: d.key,
+                  requireRange: d.value.versionRange,
+                  providerId: pinned ? providerId : null,
+                }
+          "
+        >
+          {{ d.value.title || d.key | localize }}
+          <span tuiSubtitle>{{ d.value.versionRange }}</span>
+          @if (manifest || pinned) {
             <span tuiSubtitle>
-              {{ 'Provided by' | i18n }}: {{ manifest.title }} ({{
-                providerId
-              }}) · {{ manifest.version }}
+              {{ 'Provided by' | i18n }}: {{ manifest?.title || pinned?.title }}
             </span>
           }
           @if (getError(d.key); as error) {
@@ -80,52 +81,37 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
                 : {{ name }}
               }
             </span>
-          } @else if (providerId) {
+          } @else if (binding?.providerId) {
             <span tuiSubtitle class="g-positive">{{ 'Satisfied' | i18n }}</span>
           } @else {
             <span tuiSubtitle>{{ 'Loading' | i18n }}</span>
           }
-        </span>
-        @if (!needsSelection) {
-          <tui-icon icon="@tui.arrow-right" />
+        </a>
+        @if (providerId) {
+          <button
+            tuiIconButton
+            size="s"
+            appearance="flat-grayscale"
+            [iconStart]="pinned ? '@tui.lock' : '@tui.lock-open'"
+            [attr.aria-pressed]="!!pinned"
+            [loading]="saving()"
+            (click)="setProvider(d.key, providerId, !pinned)"
+          >
+            {{ (pinned ? 'Unlock provider' : 'Lock provider') | i18n }}
+          </button>
         }
-      </a>
-      @if (binding) {
-        <tui-textfield
-          tuiChevron
-          [tuiTextfieldCleaner]="false"
-          [stringify]="stringify"
-        >
-          <label tuiLabel>
-            {{ 'Provider' | i18n }}: {{ d.value.title || d.key }}
-          </label>
-          <input
-            #selection="ngModel"
-            tuiSelect
-            [ngModel]="pkg().dependencySelections?.[d.key] || ''"
+        @if (canSwitch(d.key)) {
+          <button
+            tuiButton
+            size="s"
+            appearance="flat-grayscale"
             [disabled]="saving()"
-            (ngModelChange)="select(d.key, $event, selection)"
-          />
-          <tui-data-list *tuiDropdown>
-            <button tuiOption [value]="''">{{ 'Automatic' | i18n }}</button>
-            @for (
-              candidate of binding.candidates | keyvalue;
-              track candidate.key
-            ) {
-              <button tuiOption [value]="candidate.key">
-                {{ stringify(candidate.key) }} ·
-                {{ candidate.value.join(', ') }}
-              </button>
-            }
-            @let preferred = pkg().dependencySelections?.[d.key];
-            @if (preferred && !binding.candidates[preferred]) {
-              <button tuiOption [value]="preferred" [disabled]="true">
-                {{ stringify(preferred) }} ({{ 'Unavailable' | i18n }})
-              </button>
-            }
-          </tui-data-list>
-        </tui-textfield>
-      }
+            (click)="switchProvider(d.key)"
+          >
+            {{ 'Switch' | i18n }}
+          </button>
+        }
+      </div>
     } @empty {
       <app-placeholder icon="@tui.boxes">
         {{ 'No dependencies' | i18n }}
@@ -144,19 +130,16 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
   host: { class: 'g-card' },
   imports: [
     KeyValuePipe,
-    FormsModule,
     RouterLink,
+    TuiButton,
+    TuiButtonLoading,
     TuiCell,
     TuiAvatar,
     TuiSkeleton,
     TuiTitle,
-    TuiIcon,
-    TuiTextfield,
-    TuiChevron,
-    TuiSelect,
-    TuiDataList,
     PlaceholderComponent,
     i18nPipe,
+    LocalizePipe,
     ToManifestPipe,
     PkgIconDirective,
   ],
@@ -164,34 +147,51 @@ import { ToManifestPipe } from '../../../pipes/to-manifest'
 export class ServiceDependenciesComponent {
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
-  private readonly i18n = inject(i18nPipe)
+  private readonly dialogs = inject(DialogService)
   protected readonly saving = signal(false)
-  protected readonly stringify = (id: string) => {
-    if (!id) return this.i18n.transform('Automatic')
-    const provider = this.services()[id]
-    return provider ? `${getManifest(provider).title} (${id})` : id
-  }
 
   public readonly pkg = input.required<PackageDataEntry>()
   public readonly services = input.required<Record<string, PackageDataEntry>>()
   public readonly errors = input.required<PkgDependencyErrors>()
 
-  protected async select(
+  protected canSwitch(id: string) {
+    return (
+      Object.keys(dependencyCandidates(this.pkg(), this.services(), id))
+        .length > 1 ||
+      (!!this.pkg().dependencySelections?.[id]?.pin &&
+        !this.pkg().dependencyBindings?.[id]?.providerId)
+    )
+  }
+
+  protected switchProvider(id: string) {
+    const selection = this.pkg().dependencySelections?.[id]
+    const data: ProviderSelectionData = {
+      providerId: selection?.pin
+        ? selection.providerId
+        : (this.pkg().dependencyBindings?.[id]?.providerId ?? null),
+      candidates: dependencyCandidates(this.pkg(), this.services(), id),
+      services: this.services(),
+    }
+    this.dialogs
+      .openComponent<string>(PROVIDER_SELECTION, { data })
+      .subscribe(providerId => void this.setProvider(id, providerId, false))
+  }
+
+  protected async setProvider(
     dependencyId: string,
     providerId: string,
-    selection: NgModel,
+    locked: boolean,
   ) {
     this.saving.set(true)
     try {
-      const saved = await this.tasks.runInline(() =>
+      await this.tasks.runInline(() =>
         this.api.rpc.package.selectDependencyProvider({
           id: getManifest(this.pkg()).id,
           dependencyId,
-          providerId: providerId || null,
+          providerId,
+          locked,
         }),
       )
-      if (!saved)
-        selection.reset(this.pkg().dependencySelections?.[dependencyId] || '')
     } finally {
       this.saving.set(false)
     }

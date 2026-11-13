@@ -13,9 +13,11 @@ StartOS lists required dependencies from the package as soon as it initializes t
 
 ## Choosing a Provider
 
-A different package can fulfill a dependency when its developer declares the required compatibility. StartOS uses the sole compatible installed provider automatically. If several providers are available, choose one under **Dependencies** on the dependent service's page. Each service has its own choice.
+A different package can fulfill a dependency when its developer declares the required compatibility. StartOS uses the sole compatible installed provider automatically. If several providers are available, use **Switch** under **Dependencies** on the dependent service's page to open the selection dialog. Each service has its own choice.
 
-The selected provider stays in use while compatible. If it becomes unavailable or incompatible, StartOS falls back to the sole compatible alternative; if several alternatives remain, choose one. An explicit choice remains preferred and returns when compatible again. Switching providers rebuilds the dependent service before its connections, mounts, and tasks use the replacement.
+Choices are unlocked by default. The selected provider stays in use while compatible. If it becomes unavailable or incompatible, StartOS falls back to the sole compatible alternative; if several alternatives remain, choose one. An unlocked explicit choice remains preferred and returns when compatible again. Switching providers rebuilds the dependent service before its connections, mounts, and tasks use the replacement.
+
+The lock button pins the exact provider. A missing or incompatible locked provider leaves the dependency unsatisfied instead of falling back. Its cached title and icon remain visible after uninstall, and its Marketplace link shows only that package. **Switch** remains available for a missing pin even when only one compatible alternative is installed. Unlocking restores automatic fallback; choosing another provider starts unlocked.
 
 ## Configuring Dependencies
 

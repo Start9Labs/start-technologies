@@ -560,6 +560,7 @@ fn check_dependency_results(
         .as_idx(owner)
         .or_not_found(owner)?;
     let current_dependencies = pde.as_current_dependencies().de()?;
+    let selections = pde.as_dependency_selections().de()?;
     let tasks = pde.as_tasks().de()?;
     let package_dependency_info: Vec<_> = package_ids
         .unwrap_or_else(|| current_dependencies.0.keys().cloned().collect())
@@ -579,7 +580,11 @@ fn check_dependency_results(
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         let provider_id = find_package(db, owner, &package_id)?;
+        let pinned = selections
+            .get(&package_id)
+            .filter(|selection| selection.pin.is_some());
         let incompatible = provider_id.is_none()
+            && pinned.is_none()
             && pde
                 .as_dependency_bindings()
                 .as_idx(&package_id)
@@ -588,6 +593,7 @@ fn check_dependency_results(
                 .map_or(true, |candidates| candidates.is_empty());
         let package = provider_id
             .as_ref()
+            .or(pinned.map(|selection| &selection.provider_id))
             .or(incompatible.then_some(&package_id))
             .and_then(|id| db.as_public().as_package_data().as_idx(id));
         let Some(package) = package else {
@@ -604,14 +610,25 @@ fn check_dependency_results(
             continue;
         };
         let manifest = package.as_state_info().as_manifest(ManifestPreference::Old);
-        let (installed_version, satisfies) = match &provider_id {
-            Some(provider) if provider != &package_id => {
+        let (installed_version, satisfies) = match (&provider_id, pinned) {
+            (Some(provider), _) if provider != &package_id => {
                 let binding = pde
                     .as_dependency_bindings()
                     .as_idx(&package_id)
                     .or_not_found(&package_id)?
                     .de()?;
                 dependency_release_versions(binding.versions)
+            }
+            (None, Some(selection)) if selection.provider_id != package_id => {
+                dependency_release_versions(
+                    manifest
+                        .as_metadata()
+                        .as_satisfies_packages()
+                        .as_idx(&package_id)
+                        .map(|claims| claims.de())
+                        .transpose()?
+                        .unwrap_or_default(),
+                )
             }
             _ => (
                 Some(manifest.as_version().de()?.into_version().into()),
@@ -710,7 +727,7 @@ mod test {
         let owner = "consumer".parse().unwrap();
         let target = "target".parse().unwrap();
         let mut db = DatabaseModel::from(imbl_value::json!({"public":{"packageData":{
-            "consumer":{"currentDependencies":{"target":{"kind":"exists","versionRange":">=2.0.0:0"}},"tasks":{},
+            "consumer":{"currentDependencies":{"target":{"kind":"exists","versionRange":">=2.0.0:0"}},"tasks":{},"dependencySelections":{},
                 "dependencyBindings":{"target":{"providerId":null,"versions":[],"candidates":{}}}},
             "target":{"stateInfo":{"state":"installed","manifest":{"id":"target","version":"1.0.0:0","satisfies":[]}},"statusInfo":{"started":null,"health":{}}},
             "alternate":{"stateInfo":{"state":"installed","manifest":{"id":"alternate","version":"99.0.0:0","satisfies":[],"satisfiesPackages":{"target":["2.0.0:0"]}}},"statusInfo":{"started":null,"health":{}}},
@@ -773,6 +790,51 @@ mod test {
             .unwrap()
             .ser(&DependencyBinding::default())
             .unwrap();
+        let mut dependencies = db
+            .as_public()
+            .as_package_data()
+            .as_idx(&owner)
+            .unwrap()
+            .as_current_dependencies()
+            .de()
+            .unwrap();
+        dependencies.0.get_mut(&target).unwrap().version_range = ">=3.0.0:0".parse().unwrap();
+        db.as_public_mut()
+            .as_package_data_mut()
+            .as_idx_mut(&owner)
+            .unwrap()
+            .as_current_dependencies_mut()
+            .ser(&dependencies)
+            .unwrap();
+        db.as_public_mut()
+            .as_package_data_mut()
+            .as_idx_mut(&owner)
+            .unwrap()
+            .as_dependency_selections_mut()
+            .insert(
+                &target,
+                &crate::dependencies::providers::DependencySelection {
+                    provider_id: "alternate".parse().unwrap(),
+                    pin: Some(crate::dependencies::providers::ProviderPin {
+                        title: "Pinned".into(),
+                        icon: crate::util::data_url::DataUrl::from_vec("image/png", vec![1, 2, 3]),
+                    }),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            check_dependency_results(&db, &owner, None).unwrap()[0].installed_version,
+            Some("2.0.0:0".parse().unwrap())
+        );
+        db.as_public_mut()
+            .as_package_data_mut()
+            .remove(&"alternate".parse().unwrap())
+            .unwrap();
+        assert!(
+            check_dependency_results(&db, &owner, None).unwrap()[0]
+                .installed_version
+                .is_none()
+        );
         db.as_public_mut()
             .as_package_data_mut()
             .remove(&target)

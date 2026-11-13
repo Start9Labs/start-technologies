@@ -2629,7 +2629,7 @@ PersistentKeepalive = 25`
       state: 'installed',
       manifest: MockManifestBitcoind,
     },
-    s9pk: '/media/startos/data/package-data/archive/installed/asdfasdf.s9pk',
+    s9pk: '/media/startos/data/package-data/archive/installed/bitcoind.s9pk',
     lastBackup: null,
     statusInfo: {
       error: null,
@@ -2910,7 +2910,7 @@ PersistentKeepalive = 25`
       state: 'installed',
       manifest: MockManifestBitcoinProxy,
     },
-    s9pk: '/media/startos/data/package-data/archive/installed/asdfasdf.s9pk',
+    s9pk: '/media/startos/data/package-data/archive/installed/btc-rpc-proxy.s9pk',
     lastBackup: null,
     statusInfo: {
       desired: { main: 'stopped' },
@@ -2944,7 +2944,7 @@ PersistentKeepalive = 25`
       state: 'installed',
       manifest: MockManifestLnd,
     },
-    s9pk: '/media/startos/data/package-data/archive/installed/asdfasdf.s9pk',
+    s9pk: '/media/startos/data/package-data/archive/installed/lnd.s9pk',
     lastBackup: null,
     statusInfo: {
       desired: { main: 'stopped' },
@@ -3084,7 +3084,18 @@ PersistentKeepalive = 25`
       '1.0.0:0': {
         ...bitcoinVersion,
         title: 'Bitcoin Alternative',
-        satisfiesPackages: { bitcoind: ['26.0.0:0'] },
+        satisfiesPackages: { bitcoind: ['26.0.0:0', '29.0.0:0'] },
+      },
+    },
+    otherVersions: {},
+  }
+  RegistryPackages['bitcoin-legacy'] = {
+    ...bitcoinRegistry,
+    best: {
+      '5.0.0:0': {
+        ...bitcoinVersion,
+        title: 'Bitcoin Legacy',
+        satisfiesPackages: { bitcoind: ['29.0.0:0'] },
       },
     },
     otherVersions: {},

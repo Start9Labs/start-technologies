@@ -97,6 +97,7 @@ export default class Marketplace {
                 this.configService.defaultRegistry,
             },
             queryParamsHandling: 'merge',
+            replaceUrl: true,
           })
         } else {
           this.marketplaceService.currentRegistryUrl$.next(
@@ -112,14 +113,20 @@ export default class Marketplace {
     combineLatest([
       this.marketplaceService.currentRegistry$.pipe(distinctUntilChanged()),
       inject(ActivatedRoute).queryParamMap.pipe(
-        map(params => [params.get('provides'), params.get('requireRange')]),
-        distinctUntilChanged(([a, b], [c, d]) => a === c && b === d),
+        map(params => [
+          params.get('provides'),
+          params.get('requireRange'),
+          params.get('providerId'),
+        ]),
+        distinctUntilChanged(
+          ([a, b, c], [d, e, f]) => a === d && b === e && c === f,
+        ),
       ),
     ]).pipe(
-      switchMap(([registry, [provides, range]]) => {
+      switchMap(([registry, [provides, range, providerId]]) => {
         return provides && range
           ? this.marketplaceService
-              .fetchProviders$(registry.url, provides, range)
+              .fetchProviders$(registry.url, provides, range, providerId)
               .pipe(
                 map(packages => ({ ...registry, packages })),
                 catchError(error => {

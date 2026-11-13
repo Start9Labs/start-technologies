@@ -966,4 +966,6 @@ export const ENGLISH: Record<string, number> = {
   "Provided by": 1114,
   "Select a dependency provider": 1115,
   'Unavailable': 1116,
+  'Lock provider': 1117,
+  'Unlock provider': 1118,
 }

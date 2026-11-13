@@ -965,4 +965,6 @@ export default {
   1114: 'Bereitgestellt von',
   1115: 'Abhängigkeitsanbieter auswählen',
   1116: 'Nicht verfügbar',
+  1117: 'Anbieter fixieren',
+  1118: 'Fixierung aufheben',
 } satisfies i18n

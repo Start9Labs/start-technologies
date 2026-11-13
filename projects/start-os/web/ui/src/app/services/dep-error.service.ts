@@ -92,11 +92,17 @@ export class DepErrorService {
   ): DependencyError | null {
     const binding = pkg.dependencyBindings?.[depId]
     if (!binding) return null
-    if (!binding.providerId && Object.keys(binding.candidates).length > 1) {
+    const selection = pkg.dependencySelections?.[depId]
+    if (
+      !binding.providerId &&
+      !selection?.pin &&
+      Object.keys(binding.candidates).length > 1
+    ) {
       return { type: 'selectionRequired' }
     }
     if (!binding.providerId) {
-      const installed = pkgs[depId]?.stateInfo.state
+      const installed =
+        pkgs[selection?.pin ? selection.providerId : depId]?.stateInfo.state
       return installed === 'installed' || installed === 'updating'
         ? { type: 'noCompatibleProvider' }
         : { type: 'notInstalled' }

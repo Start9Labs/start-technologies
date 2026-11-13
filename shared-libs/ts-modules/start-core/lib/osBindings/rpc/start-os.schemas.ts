@@ -3226,10 +3226,20 @@ export const SelectProviderParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof PackageId>>,
     z.ZodNullable<typeof PackageId>
   >
+  /**
+   * Locks to this ID without fallback.
+   */
+  locked: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   id: PackageId,
   dependencyId: PackageId,
   providerId: wire(PackageId.nullable().optional(), PackageId.nullable()),
+  /**
+   * Locks to this ID without fallback.
+   */
+  locked: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Locks to this ID without fallback.',
+  }),
 }).meta({
   id: 'SelectProviderParams',
 })

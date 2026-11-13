@@ -6,7 +6,7 @@ import {
   runInInjectionContext,
   signal,
 } from '@angular/core'
-import { BehaviorSubject, firstValueFrom, of } from 'rxjs'
+import { BehaviorSubject, firstValueFrom, of, Subject } from 'rxjs'
 import { loadTypeScript } from './typescript-loader.mjs'
 
 loadTypeScript(
@@ -22,7 +22,7 @@ loadTypeScript(
     ['patch-db-client', 'export class PatchDB {}'],
     [
       '@start9labs/shared',
-      'export class DialogService {}; export class TaskService {}; export class i18nPipe {};',
+      'export class DialogService {}; export class TaskService {}; export class i18nPipe {}; export class LocalizePipe {};',
     ],
     [
       '@taiga-ui/core',
@@ -30,7 +30,16 @@ loadTypeScript(
     ],
     [
       '@taiga-ui/kit',
-      'export class TuiAvatar {}; export class TuiFade {}; export class TuiChevron {}; export class TuiSelect {}; export class TuiSkeleton {};',
+      'export class TuiAvatar {}; export class TuiFade {}; export class TuiChevron {}; export class TuiSelect {}; export class TuiSkeleton {}; export class TuiRadioList {}; export class TuiButtonLoading {};',
+    ],
+    ['@taiga-ui/layout', 'export class TuiForm {}; export class TuiHeader {};'],
+    [
+      '@taiga-ui/polymorpheus',
+      'export const injectContext = () => {}; export class PolymorpheusComponent { constructor(component) {this.component = component} }',
+    ],
+    [
+      '@start9labs/marketplace',
+      'export const FALLBACK_ICON = "fallback"; export const registryIconUrl = () => "icon";',
     ],
     ['src/app/services/action.service', 'export class ActionService {};'],
     ['src/app/services/api/embassy-api.service', 'export class ApiService {};'],
@@ -44,7 +53,7 @@ loadTypeScript(
     ],
   ]),
 )
-const { dependencyProvider } =
+const { dependencyProvider, dependencyCandidates } =
   await import('../src/app/utils/dependency-provider.ts')
 const { hasCurrentDeps } = await import('../src/app/utils/has-deps.ts')
 const { getLiveTasks } = await import('../src/app/utils/get-package-data.ts')
@@ -188,6 +197,44 @@ test('missing and incompatible installations have distinct dependency errors', a
     f.source.next(packages)
     assert.deepEqual((await f.read()).consumer.bitcoin, { type })
   }
+})
+
+test('a missing pin is unsatisfied even with multiple compatible alternatives', async t => {
+  const consumer = dependent('consumer', null)
+  consumer.dependencySelections.bitcoin = {
+    providerId: 'pinned',
+    pin: { title: 'Pinned provider', icon: 'data:image/png;base64,AQID' },
+  }
+  const packages = {
+    consumer,
+    bitcoin: pkg('bitcoin'),
+    alternate: pkg('alternate'),
+  }
+  const f = errors(t, packages)
+  assert.deepEqual((await f.read()).consumer.bitcoin, { type: 'notInstalled' })
+  packages.pinned = pkg('pinned')
+  f.source.next(packages)
+  assert.deepEqual((await f.read()).consumer.bitcoin, {
+    type: 'noCompatibleProvider',
+  })
+})
+
+test('provider choices exclude removed candidates while retaining active updates', () => {
+  const consumer = dependent()
+  const literal = pkg('bitcoin')
+  literal.stateInfo.state = 'removing'
+  const alternate = pkg('alternate')
+  alternate.stateInfo.state = 'updating'
+  assert.deepEqual(
+    Object.keys(
+      dependencyCandidates(
+        consumer,
+        { bitcoin: literal, alternate },
+        'bitcoin',
+      ),
+    ),
+    ['alternate'],
+  )
 })
 
 test('provider updates retain the active dependency contract', async t => {
@@ -351,11 +398,12 @@ test('logical task execution addresses the provider; dismissal addresses the tas
 const { ServiceDependenciesComponent } =
   await import('../src/app/routes/portal/routes/services/components/dependencies.component.ts')
 
-test('provider selector persists owner-scoped preferences, clears Automatic, and rolls back a rejected choice', async t => {
+test('provider modal selects unlocked; missing pins remain switchable with a sole alternative', async t => {
   const owner = dependent()
-  owner.dependencySelections.bitcoin = 'alternate'
-  const calls = []
-  const resets = []
+  owner.dependencySelections.bitcoin = { providerId: 'alternate', pin: null }
+  const calls = [],
+    dialogs = [],
+    replies = []
   let reject = false
   const injector = createEnvironmentInjector([
     {
@@ -363,9 +411,7 @@ test('provider selector persists owner-scoped preferences, clears Automatic, and
       useValue: {
         rpc: {
           package: {
-            selectDependencyProvider: async request => {
-              calls.push(request)
-            },
+            selectDependencyProvider: async request => calls.push(request),
           },
         },
       },
@@ -380,7 +426,17 @@ test('provider selector persists owner-scoped preferences, clears Automatic, and
         },
       },
     },
-    { provide: i18nPipe, useValue: { transform: value => value } },
+    {
+      provide: DialogService,
+      useValue: {
+        openComponent: (_, options) => {
+          dialogs.push(options)
+          const reply = new Subject()
+          replies.push(reply)
+          return reply
+        },
+      },
+    },
   ])
   t.after(() => injector.destroy())
   const component = runInInjectionContext(
@@ -388,26 +444,60 @@ test('provider selector persists owner-scoped preferences, clears Automatic, and
     () => new ServiceDependenciesComponent(),
   )
   component.pkg = signal(owner)
-  const alternate = pkg('alternate')
-  alternate.stateInfo.manifest.title = 'Alternate provider'
-  component.services = signal({ alternate })
-  assert.equal(
-    component.stringify('alternate'),
-    'Alternate provider (alternate)',
-  )
-  assert.equal(component.stringify('unavailable'), 'unavailable')
-  assert.equal(component.stringify(''), 'Automatic')
-  const control = { reset: value => resets.push(value) }
-  await component.select('bitcoin', 'alternate', control)
-  await component.select('bitcoin', '', control)
-  assert.deepEqual(calls, [
-    { id: 'consumer', dependencyId: 'bitcoin', providerId: 'alternate' },
-    { id: 'consumer', dependencyId: 'bitcoin', providerId: null },
+  component.services = signal({
+    alternate: pkg('alternate'),
+    bitcoin: pkg('bitcoin'),
+  })
+  assert.equal(component.canSwitch('bitcoin'), true)
+  component.switchProvider('bitcoin')
+  assert.equal(dialogs[0].data.providerId, 'alternate')
+  assert.deepEqual(Object.keys(dialogs[0].data.candidates), [
+    'bitcoin',
+    'alternate',
   ])
+  replies[0].next('bitcoin')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(calls, [
+    {
+      id: 'consumer',
+      dependencyId: 'bitcoin',
+      providerId: 'bitcoin',
+      locked: false,
+    },
+  ])
+  await component.setProvider('bitcoin', 'alternate', true)
+  assert.equal(calls.at(-1).locked, true)
+  owner.dependencyBindings.bitcoin.candidates = { alternate: ['26.0.0:0'] }
+  assert.equal(component.canSwitch('bitcoin'), false)
+  owner.dependencySelections.bitcoin = {
+    providerId: 'missing',
+    pin: { title: 'Cached title', icon: 'data:image/png;base64,AQID' },
+  }
+  owner.dependencyBindings.bitcoin.providerId = null
+  assert.equal(component.canSwitch('bitcoin'), true)
+  component.switchProvider('bitcoin')
+  assert.equal(dialogs[1].data.providerId, 'missing')
+  replies[1].complete()
+  assert.equal(calls.length, 2)
   reject = true
-  await component.select('bitcoin', 'bitcoin', control)
-  assert.deepEqual(resets, ['alternate'])
+  await component.setProvider('bitcoin', 'missing', false)
+  assert.equal(owner.dependencySelections.bitcoin.pin.title, 'Cached title')
   assert.equal(component.saving(), false)
+})
+
+test('cached pin icons are usable without the provider package or archive', async () => {
+  const { PackageIconService: ProductionIcons } =
+    await import('../src/app/services/package-icon.service.ts')
+  const icon = 'data:image/png;base64,AQID'
+  assert.equal(
+    await firstValueFrom(
+      ProductionIcons.prototype.get.call(
+        {},
+        { title: 'Removed provider', icon },
+      ),
+    ),
+    icon,
+  )
 })
 
 const { StandardActionsService } =

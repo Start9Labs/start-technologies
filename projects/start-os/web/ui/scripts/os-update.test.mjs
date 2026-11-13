@@ -2651,6 +2651,19 @@ test('provider discovery rejects unrelated releases returned by legacy registrie
     packages.map(pkg => pkg.id),
     ['alternate', 'bitcoin'],
   )
+  const pinned = await firstValueFrom(
+    service.fetchProviders$('registry', 'bitcoin', '>=26.0.0', 'alternate'),
+  )
+  assert.deepEqual(
+    pinned.map(pkg => pkg.id),
+    ['alternate'],
+  )
+  assert.deepEqual(
+    await firstValueFrom(
+      service.fetchProviders$('registry', 'bitcoin', '>=26.0.0', 'missing'),
+    ),
+    [],
+  )
 })
 
 test('provider marketplace preserves its request and list across tile navigation', async t => {
@@ -2732,8 +2745,87 @@ test('provider marketplace preserves its request and list across tile navigation
   assert.equal(component.registry(), undefined)
   replies[1].next([])
   assert.deepEqual(component.registry().packages, [])
+  params.next(
+    convertToParamMap({
+      registry: 'registry',
+      provides: 'bitcoin',
+      requireRange: '>=27.0.0',
+      providerId: 'pinned',
+    }),
+  )
+  assert.equal(calls.length, 3)
+  replies[2].next([])
   assert.deepEqual(calls, [
-    ['registry', 'bitcoin', '>=26.0.0'],
-    ['registry', 'bitcoin', '>=27.0.0'],
+    ['registry', 'bitcoin', '>=26.0.0', null],
+    ['registry', 'bitcoin', '>=27.0.0', null],
+    ['registry', 'bitcoin', '>=27.0.0', 'pinned'],
   ])
+})
+
+test('automatic registry resolution replaces history in both marketplaces', async t => {
+  const { default: StartOSMarketplace } =
+    await import('../src/app/routes/portal/routes/marketplace/marketplace.component.ts')
+  const { MainComponent: BrochureMarketplace } =
+    await import('../../../../../projects/brochure-marketplace/src/app/components/main.component.ts')
+  const { StorageService } = await import('src/app/services/storage.service')
+  const { defaultRegistries } = await import('@start9labs/shared')
+  for (const Component of [StartOSMarketplace, BrochureMarketplace]) {
+    const navigations = [],
+      failures = new Subject()
+    const route = {
+      queryParamMap: new BehaviorSubject(
+        convertToParamMap({ search: 'bitcoin', providerId: 'pinned' }),
+      ),
+      snapshot: { queryParamMap: convertToParamMap({}) },
+    }
+    const injector = createEnvironmentInjector([
+      {
+        provide: MarketplaceService,
+        useValue: {
+          currentRegistry$: of({ url: 'registry', info: {}, packages: [] }),
+          currentRegistryUrl$: new Subject(),
+          lastSelectedRegistry: 'https://saved.registry',
+          registryError$: failures,
+        },
+      },
+      { provide: ActivatedRoute, useValue: route },
+      {
+        provide: Router,
+        useValue: { navigate: async (...args) => navigations.push(args) },
+      },
+      {
+        provide: ConfigService,
+        useValue: { defaultRegistry: 'https://default.registry' },
+      },
+      {
+        provide: StorageService,
+        useValue: { get: () => 'https://saved.registry' },
+      },
+      {
+        provide: ErrorService,
+        useValue: { handleError: error => assert.fail(String(error)) },
+      },
+      { provide: DialogService, useValue: { openAlert: () => of(undefined) } },
+      { provide: i18nPipe, useValue: { transform: value => value } },
+    ])
+    t.after(() => injector.destroy())
+    runInInjectionContext(injector, () => new Component())
+    assert.equal(navigations[0][1].replaceUrl, true)
+    assert.equal(navigations[0][1].queryParamsHandling, 'merge')
+    assert.equal(
+      navigations[0][1].queryParams.registry,
+      'https://saved.registry',
+    )
+    if (Component === BrochureMarketplace) {
+      route.snapshot.queryParamMap = convertToParamMap({
+        registry: 'https://unreachable.registry',
+      })
+      failures.next('https://unreachable.registry')
+      assert.equal(navigations.at(-1)[1].replaceUrl, true)
+      assert.equal(
+        navigations.at(-1)[1].queryParams.registry,
+        defaultRegistries.start9,
+      )
+    }
+  }
 })

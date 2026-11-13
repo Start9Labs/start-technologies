@@ -4894,6 +4894,10 @@
             "dependencyId": { "$ref": "#/$defs/PackageId" },
             "providerId": {
               "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
+            },
+            "locked": {
+              "description": "Locks to this ID without fallback.",
+              "type": "boolean"
             }
           },
           "required": ["id", "dependencyId"],
@@ -4907,6 +4911,10 @@
         "dependencyId": { "$ref": "#/$defs/PackageId" },
         "providerId": {
           "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
+        },
+        "locked": {
+          "description": "Locks to this ID without fallback.",
+          "type": "boolean"
         }
       },
       "required": ["id", "dependencyId"],

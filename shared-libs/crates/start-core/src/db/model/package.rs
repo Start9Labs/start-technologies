@@ -409,7 +409,8 @@ pub struct PackageDataEntry {
     pub last_backup: Option<DateTime<Utc>>,
     pub current_dependencies: CurrentDependencies,
     #[serde(default)]
-    pub dependency_selections: BTreeMap<PackageId, PackageId>,
+    pub dependency_selections:
+        BTreeMap<PackageId, crate::dependencies::providers::DependencySelection>,
     #[serde(default)]
     pub dependency_bindings: BTreeMap<PackageId, crate::dependencies::providers::DependencyBinding>,
     pub actions: BTreeMap<ActionId, ActionMetadata>,

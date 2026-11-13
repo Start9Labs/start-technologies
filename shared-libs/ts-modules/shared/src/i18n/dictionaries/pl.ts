@@ -965,4 +965,6 @@ export default {
   1114: 'Dostarczane przez',
   1115: 'Wybierz dostawcę zależności',
   1116: 'Niedostępny',
+  1117: 'Przypnij dostawcę',
+  1118: 'Odepnij dostawcę',
 } satisfies i18n

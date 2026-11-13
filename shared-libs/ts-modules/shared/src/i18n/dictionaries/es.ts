@@ -965,4 +965,6 @@ export default {
   1114: 'Proporcionado por',
   1115: 'Selecciona un proveedor de dependencias',
   1116: 'No disponible',
+  1117: 'Fijar proveedor',
+  1118: 'Desfijar proveedor',
 } satisfies i18n

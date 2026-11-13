@@ -97,6 +97,7 @@ function harness(moduleOverrides = new Map()) {
       if (request === '@start9labs/shared') return shared()
       if (request === '@start9labs/marketplace')
         return {
+          FALLBACK_ICON: 'data:image/png;base64,AQID',
           ...load('shared-libs/ts-modules/marketplace/src/types.ts'),
           ...load(
             'shared-libs/ts-modules/marketplace/src/util/compatible-versions.ts',
@@ -459,7 +460,21 @@ test('StartOS provider selection survives subscription bootstrap and rejects sta
   const data = {
     ui: {},
     serverInfo: { registries: {}, trustedKeys: {}, registryKeys: {} },
-    packageData: { consumer: owner },
+    packageData: {
+      consumer: owner,
+      first: {
+        stateInfo: {
+          state: 'installed',
+          manifest: { id: 'first', title: 'First' },
+        },
+      },
+      second: {
+        stateInfo: {
+          state: 'installed',
+          manifest: { id: 'second', title: 'Second' },
+        },
+      },
+    },
   }
   const { dependencies, tokens, load } = harness(
     new Map([
@@ -483,7 +498,7 @@ test('StartOS provider selection survives subscription bootstrap and rejects sta
   })
   const { dump } = await client.rpc.db.subscribe({})
   assert.equal(
-    dump.value.packageData.consumer.dependencySelections.logical,
+    dump.value.packageData.consumer.dependencySelections.logical.providerId,
     'second',
   )
   assert.equal(
@@ -497,7 +512,8 @@ test('StartOS provider selection survives subscription bootstrap and rejects sta
       providerId: 'removed',
     }),
   )
-  assert.equal(owner.dependencySelections.logical, 'second')
+  assert.equal(owner.dependencySelections.logical.providerId, 'second')
+  assert.equal(owner.dependencySelections.logical.pin, null)
   await client.rpc.package.selectDependencyProvider({
     id: 'consumer',
     dependencyId: 'logical',
@@ -505,6 +521,35 @@ test('StartOS provider selection survives subscription bootstrap and rejects sta
   })
   assert.equal(Object.keys(owner.dependencySelections).length, 0)
   assert.equal(owner.dependencyBindings.logical.providerId, 'second')
+  await client.rpc.package.selectDependencyProvider({
+    id: 'consumer',
+    dependencyId: 'logical',
+    providerId: 'second',
+    locked: true,
+  })
+  assert.equal(owner.dependencySelections.logical.pin.title, 'Second')
+  assert.equal(
+    owner.dependencySelections.logical.pin.icon,
+    'data:image/png;base64,AQID',
+  )
+  delete data.packageData.second
+  delete owner.dependencyBindings.logical.candidates.second
+  owner.dependencyBindings.logical.providerId = null
+  owner.dependencyBindings.logical.versions = []
+  const afterRemoval = await client.rpc.db.subscribe({})
+  assert.equal(
+    afterRemoval.dump.value.packageData.consumer.dependencySelections.logical
+      .pin.title,
+    'Second',
+  )
+  await client.rpc.package.selectDependencyProvider({
+    id: 'consumer',
+    dependencyId: 'logical',
+    providerId: 'second',
+    locked: false,
+  })
+  assert.equal(owner.dependencySelections.logical.pin, null)
+  assert.equal(owner.dependencyBindings.logical.providerId, 'first')
 })
 
 test('StartOS trust mock rejects whole batches and imports the requested trust atomically', async () => {

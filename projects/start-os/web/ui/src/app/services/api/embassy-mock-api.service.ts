@@ -59,6 +59,7 @@ import {
 import { ConfigService } from 'src/app/services/config.service'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
+import { getManifest } from 'src/app/utils/get-package-data'
 import { parsePemPublicKey, parsePublicKeys } from 'src/app/utils/public-keys'
 import { Mock } from './api.fixures'
 import { BTC_ICON, LND_ICON, PROXY_ICON } from './api-icons'
@@ -1423,16 +1424,36 @@ export class MockApiService extends ApiService {
       id,
       dependencyId,
       providerId,
+      locked = false,
     }) => {
       const owner = mockPatchData.packageData[id]
       const binding = owner?.dependencyBindings?.[dependencyId]
       if (!owner || !binding) throw new Error('Unknown dependency')
-      if (providerId && !binding.candidates[providerId])
+      const previous = owner.dependencySelections[dependencyId]
+      const unlocking =
+        !locked && !!previous?.pin && previous.providerId === providerId
+      if (providerId && !binding.candidates[providerId] && !unlocking)
         throw new Error('Incompatible provider')
-      const selected = providerId || binding.providerId
+      const candidates = Object.keys(binding.candidates)
+      const selected =
+        providerId && binding.candidates[providerId]
+          ? providerId
+          : binding.providerId ||
+            (candidates.length === 1 ? candidates[0]! : null)
       const selections = { ...owner.dependencySelections }
-      if (providerId) selections[dependencyId] = providerId
-      else delete selections[dependencyId]
+      if (providerId) {
+        const provider = mockPatchData.packageData[providerId]
+        const pin =
+          locked && provider
+            ? {
+                title: getManifest(provider).title,
+                icon: await this.getStaticObjectUrl(
+                  `/s9pk/installed/${providerId}.s9pk/icon`,
+                ),
+              }
+            : null
+        selections[dependencyId] = { providerId, pin }
+      } else delete selections[dependencyId]
       const nextBinding: T.DependencyBinding = {
         ...binding,
         providerId: selected,
@@ -1487,24 +1508,56 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
 
       setTimeout(async () => {
-        const patch2: RemoveOperation[] = [
-          {
-            op: PatchOp.REMOVE,
-            path: `/packageData/${params.id}`,
-          },
-        ]
-        this.mockRevision(patch2)
+        delete mockPatchData.packageData[params.id]
+        this.mockRevision([
+          { op: PatchOp.REMOVE, path: `/packageData/${params.id}` },
+        ])
       }, this.revertTime)
 
-      const patch: ReplaceOperation<T.PackageState['state']>[] = [
+      const provider = mockPatchData.packageData[params.id]
+      if (!provider) throw new Error('Unknown package')
+      provider.stateInfo = {
+        state: 'removing',
+        manifest: getManifest(provider),
+      }
+      const patch: Operation<T.PackageDataEntry>[] = [
         {
           op: PatchOp.REPLACE,
-          path: `/packageData/${params.id}/stateInfo/state`,
-          value: 'removing',
+          path: `/packageData/${params.id}`,
+          value: provider,
         },
       ]
-
-      this.mockRevision(patch)
+      for (const [id, owner] of Object.entries(mockPatchData.packageData)) {
+        for (const [dependencyId, binding] of Object.entries(
+          owner.dependencyBindings || {},
+        )) {
+          if (!(params.id in binding.candidates)) continue
+          const candidates = { ...binding.candidates }
+          delete candidates[params.id]
+          const remaining = Object.keys(candidates)
+          const selected =
+            binding.providerId !== params.id
+              ? binding.providerId
+              : owner.dependencySelections[dependencyId]?.pin
+                ? null
+                : remaining.length === 1
+                  ? remaining[0]!
+                  : null
+          const next = {
+            ...binding,
+            candidates,
+            providerId: selected,
+            versions: selected ? candidates[selected] || [] : [],
+          }
+          owner.dependencyBindings[dependencyId] = next
+        }
+        patch.push({
+          op: PatchOp.REPLACE,
+          path: `/packageData/${id}`,
+          value: owner,
+        })
+      }
+      await this.mockRevision(patch)
 
       return null
     },

@@ -3811,6 +3811,17 @@ export const PreDownloadAlert: z.ZodObject<{
 })
 
 /**
+ * Presentation retained while the pinned provider is absent.
+ */
+export const ProviderPin: z.ZodObject<{
+  title: z.ZodString
+  icon: typeof DataUrl
+}> = /* @__PURE__ */ object({ title: z.string(), icon: DataUrl }).meta({
+  id: 'ProviderPin',
+  description: 'Presentation retained while the pinned provider is absent.',
+})
+
+/**
  * Auth gate enforced by the OS reverse proxy on incoming requests.
  *
  * - `Bearer { tokens }`: any of `tokens` is accepted as `Authorization: Bearer <token>`.
@@ -4777,6 +4788,24 @@ export const DependencyMetadata: z.ZodIntersection<
   .meta({
     id: 'DependencyMetadata',
   })
+
+/**
+ * A pin forbids fallback and retains presentation after the provider is removed.
+ */
+export const DependencySelection: z.ZodObject<{
+  providerId: typeof PackageId
+  pin: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ProviderPin>>,
+    z.ZodNullable<typeof ProviderPin>
+  >
+}> = /* @__PURE__ */ object({
+  providerId: PackageId,
+  pin: wire(ProviderPin.nullable().optional(), ProviderPin.nullable()),
+}).meta({
+  id: 'DependencySelection',
+  description:
+    'A pin forbids fallback and retains presentation after the provider is removed.',
+})
 export const ExportActionParams: z.ZodObject<{
   id: typeof ActionId
   metadata: typeof ActionMetadata
@@ -6648,8 +6677,8 @@ export const PackageDataEntry: z.ZodObject<{
   >
   currentDependencies: typeof CurrentDependencies
   dependencySelections: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof PackageId>>,
-    z.ZodRecord<z.ZodString, typeof PackageId>
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof DependencySelection>>,
+    z.ZodRecord<z.ZodString, typeof DependencySelection>
   >
   dependencyBindings: z.ZodCodec<
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof DependencyBinding>>,
@@ -6680,8 +6709,8 @@ export const PackageDataEntry: z.ZodObject<{
   lastBackup: wire(z.string().nullable().optional(), z.string().nullable()),
   currentDependencies: CurrentDependencies,
   dependencySelections: wire(
-    z.record(z.string(), PackageId).optional(),
-    z.record(z.string(), PackageId),
+    z.record(z.string(), DependencySelection).optional(),
+    z.record(z.string(), DependencySelection),
   ),
   dependencyBindings: wire(
     z.record(z.string(), DependencyBinding).optional(),

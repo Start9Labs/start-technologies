@@ -12,9 +12,43 @@ use crate::db::model::package::{
 };
 use crate::prelude::*;
 use crate::registry::package::index::PackageMetadata;
+use crate::s9pk::S9pk;
 use crate::service::action::{conditional_task_targets, reset_task_conditions};
 use crate::status::DesiredStatus;
 use crate::util::VersionString;
+use crate::util::data_url::DataUrl;
+
+/// A pin forbids fallback and retains presentation after the provider is removed.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, HasModel, VisitFields)]
+#[serde(rename_all = "camelCase")]
+#[model = "Model<Self>"]
+pub struct DependencySelection {
+    pub provider_id: PackageId,
+    #[serde(default)]
+    pub pin: Option<ProviderPin>,
+}
+rpc_toolkit::reflect_ts!(DependencySelection);
+rpc_toolkit::ts_export!(DependencySelection, namespaces = [""]);
+
+/// Presentation retained while the pinned provider is absent.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, HasModel, VisitFields)]
+#[serde(rename_all = "camelCase")]
+#[model = "Model<Self>"]
+pub struct ProviderPin {
+    pub title: String,
+    pub icon: DataUrl<'static>,
+}
+rpc_toolkit::reflect_ts!(ProviderPin);
+rpc_toolkit::ts_export!(ProviderPin, namespaces = [""]);
+
+impl From<PackageId> for DependencySelection {
+    fn from(provider_id: PackageId) -> Self {
+        Self {
+            provider_id,
+            pin: None,
+        }
+    }
+}
 
 /// Observed providers use active manifests; staged updates do not change the dependency contract.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize, HasModel, VisitFields)]
@@ -89,22 +123,26 @@ fn bindings_for(
                         .then(|| (id.clone(), versions))
                 })
                 .collect();
-            // A saved preference returns when available; fallback never elects among several candidates.
-            let provider_id = owner
-                .dependency_selections
-                .get(dependency)
-                .filter(|id| candidates.contains_key(*id))
-                .or_else(|| {
-                    owner
-                        .dependency_bindings
-                        .get(dependency)
-                        .and_then(|binding| binding.provider_id.as_ref())
-                        .filter(|id| candidates.contains_key(*id))
-                })
-                .cloned()
-                .or_else(|| {
-                    (candidates.len() == 1).then(|| candidates.keys().next().unwrap().clone())
-                });
+            let selection = owner.dependency_selections.get(dependency);
+            let preferred = selection
+                .map(|selection| &selection.provider_id)
+                .filter(|id| candidates.contains_key(*id));
+            let provider_id = if selection.is_some_and(|selection| selection.pin.is_some()) {
+                preferred.cloned()
+            } else {
+                preferred
+                    .or_else(|| {
+                        owner
+                            .dependency_bindings
+                            .get(dependency)
+                            .and_then(|binding| binding.provider_id.as_ref())
+                            .filter(|id| candidates.contains_key(*id))
+                    })
+                    .cloned()
+                    .or_else(|| {
+                        (candidates.len() == 1).then(|| candidates.keys().next().unwrap().clone())
+                    })
+            };
             let versions = provider_id
                 .as_ref()
                 .and_then(|id| candidates.get(id))
@@ -277,37 +315,82 @@ pub struct SelectProviderParams {
     pub id: PackageId,
     pub dependency_id: PackageId,
     pub provider_id: Option<PackageId>,
+    /// Locks to this ID without fallback.
+    #[serde(default)]
+    pub locked: bool,
 }
 rpc_toolkit::reflect_ts!(SelectProviderParams);
 
+fn validate_selection(
+    packages: &AllPackageData,
+    params: &SelectProviderParams,
+) -> Result<(), Error> {
+    let owner = packages.0.get(&params.id).or_not_found(&params.id)?;
+    let bindings = bindings_for(packages, owner);
+    let binding = bindings
+        .get(&params.dependency_id)
+        .or_not_found(&params.dependency_id)?;
+    if let Some(provider) = &params.provider_id {
+        let unlocking = !params.locked
+            && owner
+                .dependency_selections
+                .get(&params.dependency_id)
+                .is_some_and(|selection| {
+                    selection.provider_id == *provider && selection.pin.is_some()
+                });
+        if !binding.candidates.contains_key(provider) && !unlocking {
+            return Err(Error::new(
+                eyre!("{}", t!("dependencies.providers.incompatible")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn provider_pin(ctx: &RpcContext, provider: &PackageId) -> Result<ProviderPin, Error> {
+    let path = ctx
+        .db
+        .peek()
+        .await
+        .as_public()
+        .as_package_data()
+        .as_idx(provider)
+        .or_not_found(provider)?
+        .as_s9pk()
+        .de()?;
+    let s9pk = S9pk::open(path, Some(provider)).await?;
+    Ok(ProviderPin {
+        title: s9pk.as_manifest().metadata.title.to_string(),
+        icon: s9pk.icon_data_url().await?,
+    })
+}
+
 pub async fn select_provider(ctx: RpcContext, params: SelectProviderParams) -> Result<(), Error> {
+    validate_selection(
+        &ctx.db.peek().await.as_public().as_package_data().de()?,
+        &params,
+    )?;
+    let pin = match (&params.provider_id, params.locked) {
+        (Some(provider), true) => Some(provider_pin(&ctx, provider).await?),
+        _ => None,
+    };
     ctx.db
         .mutate(|db| {
-            let packages = db.as_public().as_package_data().de()?;
-            let package = packages.0.get(&params.id).or_not_found(&params.id)?;
-            let bindings = bindings_for(&packages, package);
-            let binding = bindings
-                .get(&params.dependency_id)
-                .or_not_found(&params.dependency_id)?;
-            if params
-                .provider_id
-                .as_ref()
-                .is_some_and(|id| !binding.candidates.contains_key(id))
-            {
-                return Err(Error::new(
-                    eyre!("{}", t!("dependencies.providers.incompatible")),
-                    ErrorKind::InvalidRequest,
-                ));
-            }
+            validate_selection(&db.as_public().as_package_data().de()?, &params)?;
             db.as_public_mut()
                 .as_package_data_mut()
                 .as_idx_mut(&params.id)
                 .or_not_found(&params.id)?
                 .mutate(|package| {
-                    if let Some(provider) = &params.provider_id {
-                        package
-                            .dependency_selections
-                            .insert(params.dependency_id.clone(), provider.clone());
+                    if let Some(provider) = params.provider_id {
+                        package.dependency_selections.insert(
+                            params.dependency_id,
+                            DependencySelection {
+                                provider_id: provider,
+                                pin,
+                            },
+                        );
                     } else {
                         package.dependency_selections.remove(&params.dependency_id);
                     }
@@ -316,6 +399,47 @@ pub async fn select_provider(ctx: RpcContext, params: SelectProviderParams) -> R
         })
         .await
         .result
+}
+
+/// Captures the latest presentation before uninstall removes the provider archive.
+pub(crate) async fn refresh_pins(ctx: &RpcContext, provider: &PackageId) -> Result<(), Error> {
+    let packages = ctx.db.peek().await.as_public().as_package_data().de()?;
+    if !packages.0.values().any(|owner| {
+        owner
+            .dependency_selections
+            .values()
+            .any(|selection| selection.provider_id == *provider && selection.pin.is_some())
+    }) {
+        return Ok(());
+    }
+    let pin = provider_pin(ctx, provider).await?;
+    ctx.db
+        .mutate(|db| refresh_cached_pins(db, provider, &pin))
+        .await
+        .result
+}
+
+fn refresh_cached_pins(
+    db: &mut DatabaseModel,
+    provider: &PackageId,
+    pin: &ProviderPin,
+) -> Result<(), Error> {
+    for owner in db.as_public().as_package_data().keys()? {
+        db.as_public_mut()
+            .as_package_data_mut()
+            .as_idx_mut(&owner)
+            .or_not_found(&owner)?
+            .as_dependency_selections_mut()
+            .mutate(|selections| {
+                for selection in selections.values_mut().filter(|selection| {
+                    selection.provider_id == *provider && selection.pin.is_some()
+                }) {
+                    selection.pin = Some(pin.clone());
+                }
+                Ok(())
+            })?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize, Serialize, VisitFields)]
@@ -467,6 +591,132 @@ mod tests {
         }
     }
 
+    fn pin(title: &str) -> ProviderPin {
+        ProviderPin {
+            title: title.into(),
+            icon: DataUrl::from_vec("image/png", vec![1, 2, 3]),
+        }
+    }
+
+    #[test]
+    fn pinned_provider_never_falls_back_and_returns_when_reinstalled() {
+        let mut packages = packages();
+        packages.0.insert(
+            "alternative".parse().unwrap(),
+            serde_json::from_value(entry(
+                "alternative",
+                "3:0",
+                json!({"target":["2.2:0"]}),
+                json!({}),
+            ))
+            .unwrap(),
+        );
+        packages
+            .0
+            .get_mut("consumer")
+            .unwrap()
+            .dependency_selections
+            .insert(
+                "target".parse().unwrap(),
+                DependencySelection {
+                    provider_id: "provider".parse().unwrap(),
+                    pin: Some(pin("Chosen provider")),
+                },
+            );
+        assert_eq!(
+            resolve(&packages).provider_id,
+            Some("provider".parse().unwrap())
+        );
+        let provider = packages.0.remove("provider").unwrap();
+        assert!(resolve(&packages).provider_id.is_none());
+        assert_eq!(resolve(&packages).candidates.len(), 1);
+        let params = SelectProviderParams {
+            id: "consumer".parse().unwrap(),
+            dependency_id: "target".parse().unwrap(),
+            provider_id: Some("provider".parse().unwrap()),
+            locked: false,
+        };
+        assert!(validate_selection(&packages, &params).is_ok());
+        assert!(
+            validate_selection(
+                &packages,
+                &SelectProviderParams {
+                    locked: true,
+                    ..params
+                }
+            )
+            .is_err()
+        );
+        packages.0.insert("provider".parse().unwrap(), provider);
+        assert_eq!(
+            resolve(&packages).provider_id,
+            Some("provider".parse().unwrap())
+        );
+        packages
+            .0
+            .get_mut("provider")
+            .unwrap()
+            .state_info
+            .as_manifest_mut(ManifestPreference::Old)
+            .metadata
+            .satisfies_packages
+            .clear();
+        assert!(resolve(&packages).provider_id.is_none());
+        packages
+            .0
+            .get_mut("consumer")
+            .unwrap()
+            .dependency_selections
+            .get_mut("target")
+            .unwrap()
+            .pin = None;
+        assert_eq!(
+            resolve(&packages).provider_id,
+            Some("alternative".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn pinned_presentation_is_refreshed_and_survives_provider_removal_and_serialization() {
+        let mut packages = packages();
+        let selections = &mut packages
+            .0
+            .get_mut("consumer")
+            .unwrap()
+            .dependency_selections;
+        selections.insert(
+            "target".parse().unwrap(),
+            DependencySelection {
+                provider_id: "provider".parse().unwrap(),
+                pin: Some(pin("Old title")),
+            },
+        );
+        selections.insert(
+            "unlocked".parse().unwrap(),
+            "provider".parse::<PackageId>().unwrap().into(),
+        );
+        let mut db = db(packages);
+        let updated = pin("Updated title");
+        refresh_cached_pins(&mut db, &"provider".parse().unwrap(), &updated).unwrap();
+        db.as_public_mut()
+            .as_package_data_mut()
+            .remove(&"provider".parse().unwrap())
+            .unwrap();
+        let stored: AllPackageData = serde_json::from_value(
+            serde_json::to_value(db.as_public().as_package_data().de().unwrap()).unwrap(),
+        )
+        .unwrap();
+        let selection = &stored.0["consumer"].dependency_selections["target"];
+        assert_eq!(selection.pin.as_ref(), Some(&updated));
+        assert_eq!(selection.provider_id, "provider".parse().unwrap());
+        assert!(
+            stored.0["consumer"].dependency_selections["unlocked"]
+                .pin
+                .is_none()
+        );
+        assert!(resolve(&stored).provider_id.is_none());
+    }
+
     #[test]
     fn initialization_materializes_legacy_collections_without_losing_saved_intent() {
         let mut value = serde_json::to_value(packages()).unwrap();
@@ -487,7 +737,10 @@ mod tests {
             .as_idx_mut(&consumer)
             .unwrap()
             .as_dependency_selections_mut()
-            .insert(&"target".parse().unwrap(), &"unavailable".parse().unwrap())
+            .insert(
+                &"target".parse().unwrap(),
+                &DependencySelection::from("unavailable".parse::<PackageId>().unwrap()),
+            )
             .unwrap();
         initialize_bindings(&mut db, &consumer).unwrap();
         assert_eq!(
@@ -497,7 +750,8 @@ mod tests {
                 .unwrap()
                 .as_dependency_selections()
                 .de()
-                .unwrap()["target"],
+                .unwrap()["target"]
+                .provider_id,
             "unavailable".parse().unwrap()
         );
         assert_eq!(
@@ -599,7 +853,10 @@ mod tests {
             .get_mut("consumer")
             .unwrap()
             .dependency_selections
-            .insert("target".parse().unwrap(), "provider".parse().unwrap());
+            .insert(
+                "target".parse().unwrap(),
+                "provider".parse::<PackageId>().unwrap().into(),
+            );
         let mut db = db(packages);
         let consumer = "consumer".parse().unwrap();
         let target = "target".parse().unwrap();
@@ -644,7 +901,7 @@ mod tests {
             .as_idx_mut(&consumer)
             .unwrap()
             .as_dependency_selections_mut()
-            .insert(&target, &alternative)
+            .insert(&target, &DependencySelection::from(alternative.clone()))
             .unwrap();
         assert!(refresh_bindings(&mut db, &consumer).unwrap());
         assert!(!tasks(&db)[&task_id].active);
@@ -748,7 +1005,10 @@ mod tests {
             .get_mut("consumer")
             .unwrap()
             .dependency_selections
-            .insert("target".parse().unwrap(), "provider".parse().unwrap());
+            .insert(
+                "target".parse().unwrap(),
+                "provider".parse::<PackageId>().unwrap().into(),
+            );
         assert_eq!(
             resolve(&packages).provider_id,
             Some("provider".parse().unwrap())
@@ -839,7 +1099,10 @@ mod tests {
             .get_mut("consumer")
             .unwrap()
             .dependency_selections
-            .insert("target".parse().unwrap(), "provider".parse().unwrap());
+            .insert(
+                "target".parse().unwrap(),
+                "provider".parse::<PackageId>().unwrap().into(),
+            );
         let original = packages.0.remove("provider").unwrap();
         let fallback = resolve(&packages);
         assert_eq!(fallback.provider_id, Some("alternative".parse().unwrap()));

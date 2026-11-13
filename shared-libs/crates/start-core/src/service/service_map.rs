@@ -544,6 +544,9 @@ impl ServiceMap {
         force: bool,
     ) -> Result<impl Future<Output = Result<(), Error>> + Send + 'static, Error> {
         let mut guard = self.get_mut(&id).await;
+        crate::dependencies::providers::refresh_pins(&ctx, &id)
+            .await
+            .log_err();
         ctx.db
             .mutate(|db| {
                 let entry = db

@@ -965,4 +965,6 @@ export default {
   1114: 'Fourni par',
   1115: 'Sélectionner un fournisseur de dépendance',
   1116: 'Indisponible',
+  1117: 'Verrouiller le fournisseur',
+  1118: 'Déverrouiller le fournisseur',
 } satisfies i18n
