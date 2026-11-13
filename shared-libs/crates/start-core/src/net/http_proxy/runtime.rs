@@ -107,7 +107,11 @@ impl HttpProxySockets {
     ) -> Result<HttpProxyMounts, Error> {
         let root = self.prepare_provider(provider).await?;
         let ingress = root.join("in");
-        std::os::unix::fs::chown(&ingress, Some(100000), Some(100000))?;
+        std::os::unix::fs::chown(
+            &ingress,
+            Some(crate::lxc::BASE_IDMAP.to_id),
+            Some(crate::lxc::BASE_IDMAP.to_id),
+        )?;
         tokio::fs::set_permissions(&ingress, std::fs::Permissions::from_mode(0o770)).await?;
         let target = create_directory_beneath(
             rootfs,
