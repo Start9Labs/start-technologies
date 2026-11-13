@@ -30,7 +30,6 @@ normative:
   RFC5890:
   RFC6887:
   RFC8259:
-  RFC8446:
   RFC9110:
   START-RPC-SESSION:
     title: Signed RPC session protocol, version 1
@@ -102,7 +101,8 @@ host. Commands are JSON-RPC 2.0 over encrypted WebSocket sessions. AGCP
 carries the self-provisioning model of the Port Control Protocol (PCP) to
 an authenticated transport, and a gateway
 that implements AGCP alongside PCP, UPnP IGD, or DNS UPDATE refuses those
-protocols from any host that has enrolled with AGCP.
+protocols from any host that has enrolled with AGCP. A host uses AGCP
+whenever its gateway supports it, regardless of whether enrollment succeeds.
 
 --- middle
 
@@ -159,8 +159,8 @@ protocol {{START-RPC-SESSION}}.
 4. PCP compatibility. The mapping model is a superset of PCP MAP's, so a
    gateway can serve both protocols from one set of mapping state, and a
    host can fall back to PCP on gateways that do not implement AGCP.
-5. No downgrade. Once a host enrolls, neither it nor its gateway accepts a
-   weaker protocol for the same operations ({{coexistence}}).
+5. No downgrade. A client uses AGCP whenever its gateway supports it;
+   refusal or failure never selects a weaker protocol ({{coexistence}}).
 
 Administration of the gateway itself (configuring its interfaces, its
 users, or grants on behalf of other hosts) is out of scope.
@@ -184,10 +184,10 @@ the gateway ({{bindings}}): a link-layer address on a directly attached
 segment, or a tunnel peer.
 
 Identity:
-: the verified signing public key in a peer's signed-session proof.
+: the shared `AnyVerifyingKey` verified from a peer's signed-session proof.
 
 Fingerprint:
-: the shared SHA-256 representation of an identity's public key
+: the shared identity owner's representation of a public-key digest
 ({{fingerprints}}).
 
 Enrollment:
@@ -213,17 +213,18 @@ state.
 
 This section is informative.
 
-1. The host discovers the gateway's AGCP endpoint ({{discovery}}) and
-   opens its `/agcp/v1` WebSocket endpoint. The host and gateway complete
-   signed-session admission, proving their signing identities and deriving
-   fresh directional encryption keys ({{transport}}).
+1. The host discovers the gateway's AGCP endpoint ({{discovery}}), records
+   its support ({{gateway-records}}), and opens `/agcp/v1` over WebSocket.
+   The host and gateway complete signed-session admission, proving
+   possession of their signing keys and deriving fresh directional
+   encryption keys ({{transport}}).
 2. The gateway determines the connection's binding from its own view of
    the network ({{bindings}}): the neighbor-table entry for the source
    address on a link, or the tunnel peer that carried it.
 3. The host calls `enrollment.enroll`. If the binding is permitted to use
    AGCP and has no enrolled identity, the gateway enrolls the presented
    identity (trust on first use), records it, and removes any state the
-   binding held through other provisioning protocols ({{coexistence}}). The host pins the gateway's identity.
+   binding held through other provisioning protocols ({{coexistence}}).
 4. The host reads the capabilities available to it from `gateway.info`.
 5. The host provisions grants with `mapping.set`, `sni-route.set`,
    `pinhole.set`, `filter.set`, and `dns-record.set`, each targeting an
@@ -244,13 +245,9 @@ shared transport controls. The client performs an HTTP/1.1 upgrade
 JSON-RPC request. AGCP's application version is independent of the
 signed-session transport version.
 
-Clients MUST support `ws://` and `wss://`; gateways advertise the scheme
-and port they serve ({{discovery}}). Signed-session encryption is mandatory
-with either scheme. When TLS is used, it provides an additional layer
-with the deployment's normal server-certificate validation; TLS 1.3
-{{RFC8446}} is RECOMMENDED. AGCP does not require TLS client certificates.
-Clients MUST NOT follow upgrade redirects or retry a failed `wss://`
-connection over `ws://`.
+AGCP endpoints use `ws://`. Signed-session admission and record encryption
+are mandatory; installing a gateway TLS certificate is not required.
+Clients MUST NOT follow upgrade redirects.
 
 ## Signed-Session Admission {#admission}
 
@@ -268,22 +265,25 @@ uses the shared non-continuation target `"rpc"`; this value does not select
 an HTTP endpoint. Each physical connection uses fresh ephemeral keys and
 a fresh signed commitment and nonce. The server's signed response binds the
 complete client hello; both peers verify the exchange before accepting
-encrypted application data. Implementations MUST support the shared
-protocol's Ed25519 signing identity. Ephemeral X25519 keys are not
-enrollment identities. The gateway uses its persistent signing identity
-from the shared RPC integration. A host retains its signing key for the
-lifetime of the enrollment.
+encrypted application data. Identity keys and signatures use the shared
+algorithm-tagged `AnyVerifyingKey` and `AnySignature` representations and
+verification. AGCP MUST NOT impose an additional signing-algorithm
+restriction; client and server signing schemes need not match. Ephemeral
+X25519 keys are not enrollment identities. The gateway obtains its signing
+identity from the shared RPC integration. A host retains its signing key
+for the lifetime of the enrollment.
 
 A valid proof from an unknown key completes admission without granting
 AGCP authority. The gateway authorizes the verified client identity
 against the connection's binding and its live enrollment ({{enrollment}}),
 not an identity supplied in RPC parameters, HTTP headers, or cookies.
-The client checks the verified server signing identity against its gateway
-record before sending any RPC ({{client-pinning}}). Without a gateway
-record, the client accepts the verified server identity only for
-`gateway.info`, `enrollment.enroll`, and `enrollment.status`.
+The client MUST accept any server signing key whose session proof passes
+shared verification, including a replacement key on a later connection.
+Clients MUST NOT pin the server key or require user approval of its
+replacement. This proves possession of the presented key, not that the
+peer is the intended gateway ({{security}}).
 
-Admission, proof, pin, or record-authentication failure MUST terminate the
+Admission, proof, or record-authentication failure MUST terminate the
 connection without sending further RPCs or selecting a plaintext RPC
 transport. A lost connection leaves the result of an unanswered call
 unknown; clients MUST NOT automatically replay it. They can reconnect with
@@ -323,17 +323,16 @@ parameters; AGCP errors use the codes in {{errors}}.
 
 ## Fingerprints {#fingerprints}
 
-Fingerprints MUST use the shared identity format of
-{{START-RPC-INTEGRATION}}: for Ed25519, SHA-256 of the raw 32-octet public
-key, rendered as `SHA256:` followed by 64 lowercase hexadecimal characters.
-Protocol fields, discovery hints, and user-facing displays use this same
-full fingerprint. The shared identity owner defines fingerprints for any
-additional signing scheme.
+Fingerprints MUST come from the shared identity-fingerprint owner of
+{{START-RPC-INTEGRATION}} for the presented `AnyVerifyingKey`. Protocol
+fields, discovery hints, and user-facing displays use that owner's full
+string unchanged. AGCP MUST NOT define a separate digest, key encoding,
+or algorithm-specific fingerprint format.
 
-Enrollment and gateway records store the verified signing public key;
-a fingerprint is for comparison, not a client-supplied identity or a
-substitute for verification of the signed-session proof. A gateway's
-`fingerprint` result MUST match its verified session identity.
+Enrollments store the verified `AnyVerifyingKey`. Fingerprints support
+operator comparison of enrolled client identities and diagnosis; they do
+not authorize a caller or pin a gateway key. A gateway's `fingerprint`
+result MUST match its verified session identity.
 
 ## Bindings {#bindings}
 
@@ -362,9 +361,12 @@ provisioning protocols ({{coexistence}}); it confers no authority without the en
 ## Permission {#permission}
 
 A gateway maintains, per binding, whether that binding is permitted to
-enroll. On shared links, gateways SHOULD default this to not permitted and
-let an operator grant it per host. A gateway MAY treat a tunnel peer that
-an operator admitted as permitted.
+request provisioning. This permission gates AGCP enrollment and equivalent
+state-changing operations through the protocols of {{coexistence-gateway}};
+a denied binding MUST NOT obtain equivalent grants through another
+protocol. On shared links, gateways SHOULD default this to not permitted
+and let an operator grant it per host. A gateway MAY treat a tunnel peer
+that an operator admitted as permitted.
 
 ## Enrollment {#enrollment}
 
@@ -404,24 +406,21 @@ that it can be compared against the fingerprint the host displays.
 A gateway MAY enroll one identity for several bindings (a host with
 several interfaces); each is enrolled independently.
 
-## Client Pinning {#client-pinning}
+## Known AGCP Gateways {#gateway-records}
 
-On its first successful `enrollment.enroll` call with a gateway, whether
-the result is enrolled or pending, the client records a gateway record:
-the server's identity and the gateway's attachment identifier, which is
-the link-layer address of the gateway on the link the client reached it
-through, or the tunnel peer identity of the gateway.
+When a client learns that a gateway supports AGCP, it MUST record that
+support durably, regardless of whether the client is permitted or enrolled.
+An advertised or configured AGCP endpoint, or an AGCP reply including an
+authorization error, establishes support. The record identifies the
+gateway's attachment: its link-layer address on the link the client reaches
+it through, or its authenticated tunnel peer identity. It does not pin the
+gateway's signing key.
 
-Thereafter the client MUST verify the signed-session server identity
-against the record on every connection, before sending an RPC. This is a
-hard pin, not the shared clients' advisory identity-change history. A
-mismatch MUST be treated as a failure and surfaced to the user; the client
-MUST NOT re-enroll with, or fall back to another protocol toward, a gateway
-whose attachment identifier matches a record but whose identity does not.
-
-A client MAY remove a gateway record on user action, after
-`enrollment.leave`, or on receiving NOT_ENROLLED ({{errors}}) from a server
-that authenticated with the recorded identity.
+A recorded gateway MUST be contacted through AGCP ({{coexistence-client}}).
+Key changes, refusals, connection failures, and NOT_ENROLLED replies MUST
+NOT clear the record or enable fallback. A client MAY forget support only
+on explicit local user action; leaving an enrollment does not itself
+establish that the gateway lacks AGCP support.
 
 Clients SHOULD use a distinct identity key for each gateway record
 ({{privacy}}).
@@ -892,15 +891,14 @@ Gateways advertise AGCP by DNS-Based Service Discovery {{RFC6763}}, with
 service type `_agcp._tcp`, over Multicast DNS {{RFC6762}} on their
 attached links and MAY also answer it through their unicast DNS service.
 The SRV record gives the target hostname and port. The TXT record MUST
-carry `v=1` and `tls=0` for `ws://` or `tls=1` for `wss://`, and MAY carry
-`fp=` with the gateway's fingerprint. The endpoint path is `/agcp/v1`;
-configured endpoints MAY include a deployment prefix. The selected target
-hostname is the signed-session signing context, and the gateway MUST
-accept that name under its ingress policy.
+carry `v=1` and MAY carry `fp=` with the gateway's fingerprint. The endpoint
+is `ws://` at path `/agcp/v1`; configured endpoints MAY include a deployment
+prefix. The selected target hostname is the signed-session signing
+context, and the gateway MUST accept that name under its ingress policy.
 
 Discovery hints are unauthenticated. A client MUST NOT treat the TXT
-fingerprint as authentication or let discovery override a gateway record
-or a configured endpoint's scheme.
+fingerprint as gateway authentication. Missing or changed advertisements
+MUST NOT erase recorded AGCP support ({{gateway-records}}).
 
 A client selects the gateway that is its default router on the link, or
 the tunnel peer that routes its traffic. Gateways MAY additionally provide
@@ -909,7 +907,7 @@ configuration.
 
 A PCP server MAY also signal AGCP support in its responses by an
 implementation-specific option. Neither the presence nor the absence of
-any discovery signal overrides a gateway record ({{client-pinning}}).
+any discovery signal overrides recorded AGCP support ({{gateway-records}}).
 
 # Coexistence with Other Provisioning Protocols {#coexistence}
 
@@ -918,7 +916,8 @@ any discovery signal overrides a gateway record ({{client-pinning}}).
 These rules cover every protocol by which a host can provision the state
 AGCP grants without AGCP's enrolled identity and ownership checks: PCP,
 UPnP IGD, and DNS UPDATE {{RFC2136}}, whether or not signed with TSIG
-{{RFC8945}}. A gateway that implements AGCP alongside any of them:
+{{RFC8945}}. The per-binding permission of {{permission}} applies to all of
+these protocols. A gateway that implements AGCP alongside any of them:
 
 - MUST keep one state for each kind of grant across all of them, so that
   an external port, server name, or DNS name held through one protocol is
@@ -936,11 +935,15 @@ Mappings and records created by the operator are unaffected.
 
 ## Client Behavior {#coexistence-client}
 
-A client that holds a gateway record ({{client-pinning}}) MUST NOT use
-any protocol of {{coexistence-gateway}} toward that gateway.
-When it cannot reach the gateway over AGCP, it MUST report the failure
-rather than fall back. Toward gateways it holds no record for, a client
-MAY use those protocols.
+A client MUST use AGCP whenever its gateway supports it, whether or not
+the client has enrolled or is authorized. It MUST NOT use any protocol of
+{{coexistence-gateway}} toward a gateway known to support AGCP
+({{gateway-records}}). Refusal, pending enrollment, NOT_ENROLLED, and
+transport failure MUST be reported rather than trigger fallback.
+
+A client MAY use those protocols only toward gateways that do not support
+AGCP. An AGCP refusal or failed connection is not evidence that the
+protocol is unsupported.
 
 # Security Considerations {#security}
 
@@ -951,34 +954,45 @@ long enough to complete signed-session admission and enroll its own key,
 which on a shared link means actively diverting traffic by ARP or Neighbor
 Discovery spoofing, and must do so before the genuine host first enrolls.
 The genuine host's later enrollment then appears to the operator as a
-pending identity for an already enrolled binding. The client's first
-gateway pin is also trust on first use; an active interceptor can
-substitute a gateway identity before that pin exists. The permission of
+pending identity for an already enrolled binding. The permission of
 {{permission}} limits the exposure to hosts the operator chose to trust,
 and gateways MAY require operator approval of every enrollment.
 
 After enrollment:
 : A forged address gains nothing: AGCP requires the enrolled key, and the
 gateway refuses the other provisioning protocols for the binding
-({{coexistence}}). Gateway pinning prevents a diverted connection from
-accepting a substituted server identity. A transparent relay cannot read
-or alter encrypted RPCs or acquire the host's enrollment authority.
+({{coexistence}}). A transparent relay cannot read or alter encrypted RPCs
+or acquire the host's enrollment authority.
+
+Gateway impersonation:
+: Clients accept any valid server proof, including after key replacement.
+An active interceptor can therefore terminate a session as a false gateway,
+read the client's control requests, and fabricate responses and events,
+including external addresses and apparent grant success. This can deny
+service or mislead the host about reachability; encryption does not
+authenticate the intended gateway. The interceptor cannot change an
+honest gateway's grants under the enrolled client's key without that
+client's signing authority. Client-key proofs bind fresh ephemeral keys;
+relaying an intact exchange does not reveal its session keys.
 
 Downgrade:
-: An attacker able to block AGCP cannot induce an enrolled client to use
-PCP, UPnP, or DNS UPDATE ({{coexistence-client}}), and cannot use them itself for the
-binding ({{coexistence-gateway}}). A client that has never enrolled with a
-gateway has no such protection.
+: Once a client knows a gateway supports AGCP, blocking or refusing AGCP
+cannot make it use PCP, UPnP, or DNS UPDATE ({{coexistence-client}}).
+Support records are independent of enrollment and server signing keys;
+a forged NOT_ENROLLED reply cannot erase them. Before support is known,
+an attacker can suppress discovery; falsely advertising support can
+instead deny legacy fallback. An enrolled binding also retains the
+gateway-side refusal of weaker protocols ({{coexistence-gateway}}).
 
 Replay and clocks:
 : Admission inherits the shared signed-request timestamp and nonce policy
 ({{START-RPC-SESSION}}, {{START-RPC-INTEGRATION}}). With a synchronized
-verifier clock, proof timestamps more than 30 seconds from its current
-time fail; signing delays and clock skew can prevent admission. Unsynchronized
-verifiers use the shared bounded nonce cache, not an AGCP-specific clock
-exception. Fresh ephemeral keys, transcript binding, and record counters
-prevent a captured hello from executing an RPC without its ephemeral
-secret. Implementations MUST NOT retain prepared hellos for reconnection.
+gateway clock, client proof timestamps more than 30 seconds from its
+current time fail; signing delays and clock skew can prevent admission.
+An unsynchronized gateway uses the shared bounded nonce cache, not an
+AGCP-specific clock exception. Fresh ephemeral keys, transcript binding,
+and record counters prevent a captured hello from executing an RPC without
+its ephemeral secret. Implementations MUST NOT retain prepared hellos for reconnection.
 
 Blast radius:
 : Pinholes and filters affect only the reachability of the host that holds
@@ -1018,9 +1032,9 @@ An identity is a stable identifier. A host that used one key with every
 gateway would let gateways, or anyone who observes enrollments, correlate
 the host across networks. Clients SHOULD use a distinct key per gateway
 record. The first signed-session message exposes the client's public
-identity on `ws://`, including to passive observers before enrollment.
-`wss://` protects that message and its HTTP upgrade metadata; application
-encryption alone does not hide them.
+identity to passive observers before enrollment. Application encryption
+does not hide that identity or the HTTP upgrade metadata; an active false
+gateway can also read the control requests it receives ({{security}}).
 
 A gateway's fingerprint in its DNS-SD TXT record identifies the gateway to
 every host on the link; gateways MAY omit it.
@@ -1094,15 +1108,16 @@ others added.
 The signed RPC session protocol {{START-RPC-SESSION}} supplies the
 transport's identity proofs, key exchange, encryption, and framing. AGCP
 adds binding-scoped enrollment, ownership, and grant semantics over that
-transport. Its hard gateway pins ({{client-pinning}}) are stricter than the
-advisory identity observations described in {{START-RPC-INTEGRATION}}.
+transport. Gateway proofs establish possession of the presented key;
+AGCP clients accept signing-key replacement without enrollment or approval.
+Gateway-side enrollment still controls each client's authority.
 
 # Example {#example}
 
 This section is informative. A host enrolls, maps TCP port 8333, adds an SNI
 route for a hostname on the shared port 443, and denies a prefix, as a host without
 the `filter-deny` capability. Signed-session admission has completed and
-the client has verified the gateway identity. Each block shows decrypted
+the client has verified the server's session proof. Each block shows decrypted
 logical request and response messages; these JSON bytes travel only inside
 the shared encrypted record framing.
 
