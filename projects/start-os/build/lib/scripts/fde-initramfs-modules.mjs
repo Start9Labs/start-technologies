@@ -1,6 +1,14 @@
-import { copyFile, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { admitModuleConfiguration } from './fde-initramfs-control.mjs'
 import { filesUnder, kernelDirectory } from './fde-initramfs-paths.mjs'
@@ -29,7 +37,7 @@ async function nativeQuery(command, args) {
  * Admits source module bytes, native subset indexes and dependencies under effective configuration.
  * Sources/query providers remain authenticated; all inputs remain stable through use.
  * Native tools parse source references, never candidate module bytes; no module is inserted.
- * Firmware and optional weak dependencies retain separate admission obligations.
+ * Firmware and configured alias/request coverage retain separate admission obligations.
  */
 export async function admitKernelModules(root) {
   root = await realpath(root)
@@ -87,6 +95,25 @@ export async function admitKernelModules(root) {
         throw Error(`Unsupported source module name: ${source}`)
       modules.push(name)
     }
+    async function requireDependency(path) {
+      const dependency = await publicSourcePath(path)
+      if (!admitted.has(dependency))
+        throw Error(`Missing native module dependency: ${dependency}`)
+    }
+    const subjects = join(reference, 'subjects.json')
+    await writeFile(subjects, JSON.stringify(modules), { mode: 0o600 })
+    const weakDependencies = JSON.parse(
+      await nativeQuery('/usr/bin/python3', [
+        '-I',
+        fileURLToPath(new URL('./fde-module-weakdeps.py', import.meta.url)),
+        configuration.library,
+        join('/', kernel.path),
+        subjects,
+        ...configuration.paths,
+      ]),
+    )
+    for (const dependency of weakDependencies)
+      await requireDependency(dependency)
     for (const name of modules) {
       // --ignore-install also suppresses soft dependencies.
       const dependencies = await nativeQuery(configuration.executable, [
@@ -100,9 +127,7 @@ export async function admitKernelModules(root) {
         if (line.startsWith('builtin ')) continue
         const match = /^insmod (\S+)(?: .*)?$/.exec(line)
         if (!match) throw Error(`Unsupported native module dependency: ${line}`)
-        const dependency = await publicSourcePath(match[1])
-        if (!admitted.has(dependency))
-          throw Error(`Missing native module dependency: ${dependency}`)
+        await requireDependency(match[1])
       }
     }
   } finally {

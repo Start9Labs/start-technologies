@@ -388,7 +388,7 @@ export async function admitModuleConfiguration(root) {
     throw Error(
       'Pre-verification module configuration invokes external commands',
     )
-  return { executable, paths }
+  return { executable, library, paths }
 }
 
 /** Hardens reviewed scripts, rules and module configuration, not the complete executable closure. */

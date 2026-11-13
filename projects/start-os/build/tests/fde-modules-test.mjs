@@ -96,7 +96,72 @@ test('effective soft dependencies already present retain native resolution', asy
   await admitKernelModules(root)
 })
 
+for (const [name, dependency] of [
+  ['present weak dependency', 'tpm_st33zp24'],
+  [
+    'unavailable optional weak dependency',
+    'startos_fde_unavailable_fixture_module',
+  ],
+]) {
+  test(`${name} retains native lookup semantics`, async t => {
+    const root = await context(t)
+    await mkdir(join(root, 'etc/modprobe.d'), { recursive: true })
+    await writeFile(
+      join(root, 'etc/modprobe.d/weak.conf'),
+      `weakdep tpm_st33zp24_i2c ${dependency}\n`,
+    )
+    await admitKernelModules(root)
+  })
+}
+
+test('weak dependency cycles remain native one-hop queries', async t => {
+  const root = await context(t)
+  await mkdir(join(root, 'etc/modprobe.d'), { recursive: true })
+  await writeFile(
+    join(root, 'etc/modprobe.d/weak.conf'),
+    'weakdep tpm_st33zp24_i2c tpm_st33zp24\nweakdep tpm_st33zp24 tpm_st33zp24_i2c\n',
+  )
+  await admitKernelModules(root)
+})
+
+test('weak dependency configuration keeps native directory precedence', async t => {
+  const root = await context(t)
+  for (const directory of ['usr/lib/modprobe.d', 'etc/modprobe.d'])
+    await mkdir(join(root, directory), { recursive: true })
+  await writeFile(
+    join(root, 'usr/lib/modprobe.d/weak.conf'),
+    'weakdep tpm_st33zp24_i2c dummy\n',
+  )
+  await writeFile(
+    join(root, 'etc/modprobe.d/weak.conf'),
+    'weakdep tpm_st33zp24_i2c tpm_st33zp24\n',
+  )
+  await admitKernelModules(root)
+})
+
 for (const [name, mutate, pattern] of [
+  [
+    'transitive available weak dependency omitted from candidate',
+    async root => {
+      await mkdir(join(root, 'etc/modprobe.d'), { recursive: true })
+      await writeFile(
+        join(root, 'etc/modprobe.d/weak.conf'),
+        'weakdep tpm_st33zp24_i2c tpm_st33zp24\nweakdep tpm_st33zp24 dummy\n',
+      )
+    },
+    /Missing native module dependency: .*dummy\.ko/,
+  ],
+  [
+    'available weak dependency omitted from candidate',
+    async root => {
+      await mkdir(join(root, 'etc/modprobe.d'), { recursive: true })
+      await writeFile(
+        join(root, 'etc/modprobe.d/weak.conf'),
+        'weakdep tpm_st33zp24_i2c dummy\n',
+      )
+    },
+    /Missing native module dependency: .*dummy\.ko/,
+  ],
   [
     'effective configuration adds a missing soft dependency',
     async root => {

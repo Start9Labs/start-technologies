@@ -20,6 +20,7 @@ import test from 'node:test'
 
 import { inspectSourceElf } from '../lib/scripts/fde-initramfs-dependencies.mjs'
 import { prepareNativeHooks } from '../lib/scripts/fde-initramfs-hooks.mjs'
+import { kernelDirectory } from '../lib/scripts/fde-initramfs-paths.mjs'
 import { requireNativeHookFunctions } from '../lib/scripts/fde-initramfs-producer.mjs'
 import { runSource } from '../lib/scripts/fde-reviewed-source.mjs'
 
@@ -254,6 +255,56 @@ for (const [name, mutate, pattern] of [
     const before = await references()
     await assert.rejects(admitted.admitProviders(root), pattern)
     assert.deepEqual(await references(), before)
+  })
+}
+
+const firmware = 'usr/lib/firmware/ath9k_htc/htc_7010-1.4.0.fw'
+const otherFirmware = 'usr/lib/firmware/ath9k_htc/htc_9271-1.4.0.fw'
+
+async function firmwareContext(t) {
+  const state = await context(t)
+  const { version } = await kernelDirectory('/')
+  const result = shell(
+    `. /usr/share/initramfs-tools/hook-functions
+add_firmware ath9k_htc/htc_7010-1.4.0.fw
+add_firmware ath9k_htc/htc_9271-1.4.0.fw
+`,
+    { DESTDIR: state.root, version, verbose: 'n' },
+  )
+  assert.equal(result.status, 0, result.stderr)
+  return state
+}
+
+test('native included firmware reuses same-path provider admission', async t => {
+  const { root, admitted } = await firmwareContext(t)
+  await admitted.admitProviders(root)
+})
+
+for (const [name, mutate, pattern] of [
+  [
+    'genuine firmware substituted at another source path',
+    root => copyFile(join('/', otherFirmware), join(root, firmware)),
+    /Command failed/,
+  ],
+  [
+    'genuine firmware relocated',
+    root =>
+      copyFile(join('/', firmware), join(root, 'usr/lib/firmware/unknown.fw')),
+    /ENOENT|Unsupported regular provider path/,
+  ],
+  [
+    'firmware alias redirected to another admitted blob',
+    async root => {
+      await rm(join(root, firmware))
+      await symlink('htc_9271-1.4.0.fw', join(root, firmware))
+    },
+    /Unsupported copied provider alias/,
+  ],
+]) {
+  test(`${name} rejects passively`, async t => {
+    const { root, admitted } = await firmwareContext(t)
+    await mutate(root)
+    await assert.rejects(admitted.admitProviders(root), pattern)
   })
 }
 
