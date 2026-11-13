@@ -366,6 +366,7 @@ async fn provider_pin(ctx: &RpcContext, provider: &PackageId) -> Result<Provider
     })
 }
 
+/// Locks constrain automatic fallback, not explicit provider selection.
 pub async fn select_provider(ctx: RpcContext, params: SelectProviderParams) -> Result<(), Error> {
     validate_selection(
         &ctx.db.peek().await.as_public().as_package_data().de()?,
@@ -626,6 +627,18 @@ mod tests {
         assert_eq!(
             resolve(&packages).provider_id,
             Some("provider".parse().unwrap())
+        );
+        assert!(
+            validate_selection(
+                &packages,
+                &SelectProviderParams {
+                    id: "consumer".parse().unwrap(),
+                    dependency_id: "target".parse().unwrap(),
+                    provider_id: Some("alternative".parse().unwrap()),
+                    locked: false,
+                }
+            )
+            .is_ok()
         );
         let provider = packages.0.remove("provider").unwrap();
         assert!(resolve(&packages).provider_id.is_none());

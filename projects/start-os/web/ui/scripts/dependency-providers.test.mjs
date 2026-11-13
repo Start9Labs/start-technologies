@@ -35,7 +35,7 @@ loadTypeScript(
     ['@taiga-ui/layout', 'export class TuiForm {}; export class TuiHeader {};'],
     [
       '@taiga-ui/polymorpheus',
-      'export const injectContext = () => {}; export class PolymorpheusComponent { constructor(component) {this.component = component} }',
+      'import {inject, InjectionToken} from "@angular/core"; export const CONTEXT = new InjectionToken("provider-dialog"); export const injectContext = () => inject(CONTEXT); export class PolymorpheusComponent { constructor(component) {this.component = component} }',
     ],
     [
       '@start9labs/marketplace',
@@ -398,7 +398,7 @@ test('logical task execution addresses the provider; dismissal addresses the tas
 const { ServiceDependenciesComponent } =
   await import('../src/app/routes/portal/routes/services/components/dependencies.component.ts')
 
-test('provider modal selects unlocked; missing pins remain switchable with a sole alternative', async t => {
+test('provider modal submits choice and lock together; settings stay reachable without alternatives', async t => {
   const owner = dependent()
   owner.dependencySelections.bitcoin = { providerId: 'alternate', pin: null }
   const calls = [],
@@ -448,14 +448,17 @@ test('provider modal selects unlocked; missing pins remain switchable with a sol
     alternate: pkg('alternate'),
     bitcoin: pkg('bitcoin'),
   })
-  assert.equal(component.canSwitch('bitcoin'), true)
+  assert.deepEqual(component.providerChoices('bitcoin'), [
+    'bitcoin',
+    'alternate',
+  ])
   component.switchProvider('bitcoin')
   assert.equal(dialogs[0].data.providerId, 'alternate')
   assert.deepEqual(Object.keys(dialogs[0].data.candidates), [
     'bitcoin',
     'alternate',
   ])
-  replies[0].next('bitcoin')
+  replies[0].next({ providerId: 'bitcoin', locked: false })
   await new Promise(resolve => setImmediate(resolve))
   assert.deepEqual(calls, [
     {
@@ -465,24 +468,105 @@ test('provider modal selects unlocked; missing pins remain switchable with a sol
       locked: false,
     },
   ])
-  await component.setProvider('bitcoin', 'alternate', true)
+  await component.setProvider('bitcoin', {
+    providerId: 'alternate',
+    locked: true,
+  })
   assert.equal(calls.at(-1).locked, true)
   owner.dependencyBindings.bitcoin.candidates = { alternate: ['26.0.0:0'] }
-  assert.equal(component.canSwitch('bitcoin'), false)
+  assert.deepEqual(component.providerChoices('bitcoin'), ['alternate'])
   owner.dependencySelections.bitcoin = {
     providerId: 'missing',
     pin: { title: 'Cached title', icon: 'data:image/png;base64,AQID' },
   }
   owner.dependencyBindings.bitcoin.providerId = null
-  assert.equal(component.canSwitch('bitcoin'), true)
+  assert.deepEqual(component.providerChoices('bitcoin'), [
+    'alternate',
+    'missing',
+  ])
   component.switchProvider('bitcoin')
   assert.equal(dialogs[1].data.providerId, 'missing')
+  assert.deepEqual(dialogs[1].data.pin, owner.dependencySelections.bitcoin.pin)
+  owner.dependencyBindings.bitcoin.candidates = {}
+  assert.deepEqual(component.providerChoices('bitcoin'), ['missing'])
   replies[1].complete()
   assert.equal(calls.length, 2)
   reject = true
-  await component.setProvider('bitcoin', 'missing', false)
+  await component.setProvider('bitcoin', {
+    providerId: 'missing',
+    locked: false,
+  })
   assert.equal(owner.dependencySelections.bitcoin.pin.title, 'Cached title')
   assert.equal(component.saving(), false)
+})
+
+const { ProviderSelection } =
+  await import('../src/app/routes/portal/routes/services/components/provider-selection.ts')
+const { CONTEXT } = await import('@taiga-ui/polymorpheus')
+
+function providerDialog(t, data) {
+  const submitted = []
+  const injector = createEnvironmentInjector([
+    {
+      provide: CONTEXT,
+      useValue: { data, completeWith: value => submitted.push(value) },
+    },
+  ])
+  t.after(() => injector.destroy())
+  return {
+    dialog: runInInjectionContext(injector, () => new ProviderSelection()),
+    submitted,
+  }
+}
+
+test('modal lock is draft state until confirmed, and changing providers starts unlocked', t => {
+  const { dialog, submitted } = providerDialog(t, {
+    providerId: 'bitcoin',
+    pin: null,
+    candidates: { bitcoin: ['26.0.0'], alternate: ['26.0.0'] },
+    services: {},
+  })
+  dialog.locked.set(true)
+  assert.deepEqual(submitted, [])
+  dialog.chooseProvider('alternate')
+  assert.equal(dialog.locked(), false)
+  dialog.locked.set(true)
+  dialog.select()
+  assert.deepEqual(submitted, [{ providerId: 'alternate', locked: true }])
+})
+
+test('a missing pin can be unlocked in the modal instead of selecting its alternative', t => {
+  const pin = { title: 'Cached provider', icon: 'data:image/png;base64,AQID' }
+  const { dialog, submitted } = providerDialog(t, {
+    providerId: 'missing',
+    pin,
+    candidates: { alternate: ['26.0.0'] },
+    services: {},
+  })
+  assert.deepEqual(dialog.providers, ['alternate', 'missing'])
+  assert.equal(dialog.providerId(), 'missing')
+  assert.equal(dialog.locked(), true)
+  assert.equal(dialog.canSelect(), false)
+  dialog.select()
+  assert.deepEqual(submitted, [])
+  dialog.locked.set(false)
+  assert.equal(dialog.canSelect(), true)
+  dialog.select()
+  assert.deepEqual(submitted, [{ providerId: 'missing', locked: false }])
+})
+
+test('a compatible pin is listed once and a replacement starts unlocked', t => {
+  const { dialog, submitted } = providerDialog(t, {
+    providerId: 'bitcoin',
+    pin: { title: 'Bitcoin', icon: 'icon' },
+    candidates: { bitcoin: ['26.0.0'], alternate: ['26.0.0'] },
+    services: {},
+  })
+  assert.deepEqual(dialog.providers, ['bitcoin', 'alternate'])
+  assert.equal(dialog.locked(), true)
+  dialog.chooseProvider('alternate')
+  dialog.select()
+  assert.deepEqual(submitted, [{ providerId: 'alternate', locked: false }])
 })
 
 test('cached pin icons are usable without the provider package or archive', async () => {

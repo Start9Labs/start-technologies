@@ -16,6 +16,18 @@ export function dependencyProvider(
   return target
 }
 
+export function dependencyProviderChoices(
+  candidates: Record<string, string[]>,
+  pinnedProviderId: string | null,
+): string[] {
+  return Array.from(
+    new Set([
+      ...Object.keys(candidates),
+      ...(pinnedProviderId ? [pinnedProviderId] : []),
+    ]),
+  )
+}
+
 export function dependencyCandidates(
   owner: PackageDataEntry,
   services: Record<string, PackageDataEntry>,

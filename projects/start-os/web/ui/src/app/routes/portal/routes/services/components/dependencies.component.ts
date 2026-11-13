@@ -15,10 +15,17 @@ import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { PkgDependencyErrors } from 'src/app/services/dep-error.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
-import { dependencyCandidates } from 'src/app/utils/dependency-provider'
+import {
+  dependencyCandidates,
+  dependencyProviderChoices,
+} from 'src/app/utils/dependency-provider'
 import { getManifest } from 'src/app/utils/get-package-data'
 import { ToManifestPipe } from '../../../pipes/to-manifest'
-import { PROVIDER_SELECTION, ProviderSelectionData } from './provider-selection'
+import {
+  PROVIDER_SELECTION,
+  ProviderSelectionData,
+  ProviderSelectionValue,
+} from './provider-selection'
 
 @Component({
   selector: 'service-dependencies',
@@ -29,6 +36,7 @@ import { PROVIDER_SELECTION, ProviderSelectionData } from './provider-selection'
       @let binding = pkg().dependencyBindings?.[d.key];
       @let selection = pkg().dependencySelections?.[d.key];
       @let pinned = selection?.pin;
+      @let choices = providerChoices(d.key);
       @let providerId = pinned ? selection?.providerId : binding?.providerId;
       @let provider = providerId ? services[providerId] : undefined;
       @let manifest = provider ? (provider | toManifest) : null;
@@ -87,25 +95,26 @@ import { PROVIDER_SELECTION, ProviderSelectionData } from './provider-selection'
             <span tuiSubtitle>{{ 'Loading' | i18n }}</span>
           }
         </a>
-        @if (providerId) {
-          <button
-            tuiIconButton
-            size="s"
-            appearance="flat-grayscale"
-            [iconStart]="pinned ? '@tui.lock' : '@tui.lock-open'"
-            [attr.aria-pressed]="!!pinned"
-            [loading]="saving()"
-            (click)="setProvider(d.key, providerId, !pinned)"
-          >
-            {{ (pinned ? 'Unlock provider' : 'Lock provider') | i18n }}
-          </button>
-        }
-        @if (canSwitch(d.key)) {
+        @if (pinned && choices.length === 1) {
           <button
             tuiButton
             size="s"
-            appearance="flat-grayscale"
-            [disabled]="saving()"
+            appearance="primary"
+            iconStart="@tui.lock-open"
+            [loading]="saving()"
+            (click)="
+              setProvider(d.key, { providerId: providerId!, locked: false })
+            "
+          >
+            {{ 'Unlock' | i18n }}
+          </button>
+        } @else if (choices.length) {
+          <button
+            tuiButton
+            size="s"
+            appearance="primary"
+            iconStart="@tui.shuffle"
+            [loading]="saving()"
             (click)="switchProvider(d.key)"
           >
             {{ 'Switch' | i18n }}
@@ -154,12 +163,11 @@ export class ServiceDependenciesComponent {
   public readonly services = input.required<Record<string, PackageDataEntry>>()
   public readonly errors = input.required<PkgDependencyErrors>()
 
-  protected canSwitch(id: string) {
-    return (
-      Object.keys(dependencyCandidates(this.pkg(), this.services(), id))
-        .length > 1 ||
-      (!!this.pkg().dependencySelections?.[id]?.pin &&
-        !this.pkg().dependencyBindings?.[id]?.providerId)
+  protected providerChoices(id: string) {
+    const selection = this.pkg().dependencySelections?.[id]
+    return dependencyProviderChoices(
+      dependencyCandidates(this.pkg(), this.services(), id),
+      selection?.pin ? selection.providerId : null,
     )
   }
 
@@ -169,18 +177,18 @@ export class ServiceDependenciesComponent {
       providerId: selection?.pin
         ? selection.providerId
         : (this.pkg().dependencyBindings?.[id]?.providerId ?? null),
+      pin: selection?.pin ?? null,
       candidates: dependencyCandidates(this.pkg(), this.services(), id),
       services: this.services(),
     }
     this.dialogs
-      .openComponent<string>(PROVIDER_SELECTION, { data })
-      .subscribe(providerId => void this.setProvider(id, providerId, false))
+      .openComponent<ProviderSelectionValue>(PROVIDER_SELECTION, { data })
+      .subscribe(value => void this.setProvider(id, value))
   }
 
   protected async setProvider(
     dependencyId: string,
-    providerId: string,
-    locked: boolean,
+    value: ProviderSelectionValue,
   ) {
     this.saving.set(true)
     try {
@@ -188,8 +196,7 @@ export class ServiceDependenciesComponent {
         this.api.rpc.package.selectDependencyProvider({
           id: getManifest(this.pkg()).id,
           dependencyId,
-          providerId,
-          locked,
+          ...value,
         }),
       )
     } finally {
