@@ -27,6 +27,7 @@ import {
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreIconDirective } from './store-icon.directive'
 
+// Connection status belongs in the catalog header and registry management.
 @Component({
   selector: 'marketplace-registry-select',
   template: `

@@ -41,11 +41,18 @@ import {
   TuiChevron,
   TuiSkeleton,
 } from '@taiga-ui/kit'
-import { TuiCardLarge, TuiHeader, TuiNavigation } from '@taiga-ui/layout'
+import {
+  TuiBlockStatus,
+  TuiCardLarge,
+  TuiHeader,
+  TuiNavigation,
+} from '@taiga-ui/layout'
 
 import { filterPackages } from '../pipes/filter-packages.pipe'
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreDataWithUrl } from '../types'
+import { isRegistryLoading } from '../registry-state'
+import { RegistryConnectionStatus } from './registry-status'
 
 const ICONS: Record<string, string> = {
   all: '@tui.layout-grid',
@@ -119,13 +126,22 @@ const ICONS: Record<string, string> = {
           }
           <header tuiHeader="h4">
             <hgroup tuiTitle>
-              <h2>
+              <h2 [tuiSkeleton]="loading()">
                 @if (current()) {
                   {{ name() | localize }}
                 }
               </h2>
             </hgroup>
             <aside tuiAccessories>
+              @if (current(); as registry) {
+                @if (registry.status; as status) {
+                  <marketplace-registry-status
+                    [status]="status"
+                    [url]="registry.url"
+                    [error]="registry.error"
+                  />
+                }
+              }
               <button
                 appearance="secondary-grayscale"
                 tuiButton
@@ -145,11 +161,17 @@ const ICONS: Record<string, string> = {
             </aside>
           </header>
           <section>
-            @if (current()) {
+            @if (!loading()) {
               @for ($implicit of packages(); track $index) {
                 <ng-container
                   *ngTemplateOutlet="template(); context: { $implicit }"
                 />
+              } @empty {
+                <tui-block-status>
+                  <p>
+                    {{ 'The list is empty' | i18n }}
+                  </p>
+                </tui-block-status>
               }
             } @else {
               @for (_ of '-'.repeat(6); track $index) {
@@ -246,6 +268,8 @@ const ICONS: Record<string, string> = {
     tuiButtonOptionsProvider({ size: 's', appearance: 'flat-grayscale' }),
   ],
   imports: [
+    RegistryConnectionStatus,
+    TuiBlockStatus,
     TuiNavigation,
     TuiInput,
     TuiNotification,
@@ -296,6 +320,11 @@ export class MarketplaceComponent {
       : undefined
   })
 
+  protected readonly loading = computed(
+    (current = this.current()) =>
+      !current || isRegistryLoading(current.status, current.packages.length),
+  )
+
   protected readonly warning = computed(() => {
     const url = this.selected()
 
@@ -303,6 +332,7 @@ export class MarketplaceComponent {
   })
 
   protected readonly categories = computed(() => {
+    if (this.loading()) return undefined
     const info = this.current()?.info?.categories
     if (!info) return undefined
 
@@ -315,7 +345,6 @@ export class MarketplaceComponent {
     )
   })
 
-  // Registry switches can leave the selected category unavailable.
   protected readonly effectiveCategory = computed(() => {
     const cats = this.categories()
     const cat = this.category()

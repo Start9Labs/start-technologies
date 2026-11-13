@@ -1,0 +1,562 @@
+# Backups
+
+Back up your server's services and shared volumes to a backup target, review past backups, and restore from them. Targets are under **System → Backup Targets**; creating, reviewing and restoring backups is under **System → Backups**.
+
+> [!IMPORTANT]
+> Creating backups is an essential responsibility of self-hosting. If you do not make backups, you _will_ eventually lose your data.
+
+## Important Info
+
+1. Backups are encrypted using your master password. If you change your password, prior backups retain the original password.
+
+1. Services may choose to exclude certain files or folders from the backup. For example, Bitcoin excludes the blockchain, since it can be recovered by re-syncing.
+
+1. Backups can take minutes or hours to complete, depending on your hardware and quantity of data.
+
+1. To back up a service, StartOS first stops it (if it was running), performs the backup, then restarts it — but only if it was running beforehand. A service that was already stopped stays stopped. Consequently a service cannot be used while it is backing up, though you may continue to use your server and other services in the meantime.
+
+1. Select [shared volumes](shared-volumes.md) independently of services. A service backup excludes its attached volume contents; an unavailable volume source fails that volume's item without preventing unrelated service backups.
+
+1. Each backup updates the current state on its target. Volume backups copy the entire backing folder and retain the previous successful copy until its replacement has been saved, requiring space for the replacement. Keep backups on multiple targets for protection against loss of a drive or network share.
+
+1. A backup keeps each service image for the server's architecture (x86, ARM, or RISC-V). On another architecture, StartOS restores that image under emulation. Reinstall or update the service from the marketplace after the restore so StartOS can select its package for the new server architecture, including a native image where available.
+
+## Backup Targets
+
+A backup target is where StartOS stores encrypted backups. The **Backup Targets** page lists each target with its type, path, status, the time of this server's last backup to it, and its free space, so you can confirm a backup will fit before you start. StartOS rechecks a target's status and free space when you open the page if they have not been checked in the last 10 minutes.
+
+To add a target, select **Add** and choose a type:
+
+- **Local folder**: a new folder on this server's data drive. It is the easiest to set up, but it does not protect you if that drive fails, and removing the target deletes it.
+- **External drive**: a [drive connected to this server](#external-drive). Backups survive a failure of the server and are kept when you remove the target.
+- **CIFS share**: a [shared folder on a NAS or another computer](#cifs-share) on your network. Backups are kept when you remove the target.
+
+Stored CIFS targets and their credentials are carried forward automatically when upgrading.
+
+Select a target's settings button to open **Manage**, where you can see its details, rename it and remove it. For a CIFS share you can also update the hostname, path, username and password; leave the password blank to keep it. Changes apply when you **Save**.
+
+Removing an external drive or CIFS share target leaves its backups on the drive or share. A local folder target is deleted together with every backup in it, so its **Delete** button asks you to type the target's name to confirm.
+
+### External Drive
+
+`Btrfs` is the recommended format of your backup drive. Existing `EXT4` backup drives remain supported. `fat32` and `exFAT` are _not_ recommended and may not work.
+
+> [!WARNING]
+> Backing up to USB thumb drives or SD card media is not recommended unless you are using high-endurance, high-quality storage. Low-quality flash memory is prone to corruption and failure over time.
+>
+> If you are using a Raspberry Pi, backup drive _must_ be self-powered, or be connected via a powered USB hub, to prevent possible data corruption.
+
+To use a drive that already contains backups, such as one moved from another server or a target you removed, add it as an external drive target. The partition list marks each partition that contains a StartOS backup; choose it and leave the folder blank.
+
+For a new drive or a new backup folder:
+
+1. Plug the drive into your server.
+
+1. In **System → Backup Targets**, select **Add**, then **External drive**.
+
+1. Choose the drive, then one of its partitions. To prepare a new drive, or one formatted for another system, choose **Erase and format this drive** instead: after a confirmation, StartOS erases everything on the drive and creates a single `Btrfs` partition. The server's own system and data drives are not offered.
+
+1. Keep the suggested name, taken from the partition's label or the drive's make and model, or enter one that is easier to recognize.
+
+1. Optionally enter a folder on the drive to use. Leaving it blank uses the whole partition.
+
+### CIFS Share
+
+A CIFS share sends your encrypted backup over the LAN to a shared folder on another device. First, create a shared folder on the target device, then add it in StartOS.
+
+> [!IMPORTANT]
+> The target device must share the folder over SMB 3.0 or later. StartOS cannot connect to a share that only offers SMB1 or SMB2, and has no setting to change this.
+
+#### Step 1. Create a Shared Folder
+
+{{#tabs global="backup-target"}}
+
+{{#tab name="Mac"}}
+
+1. Identify or create a folder to store your server backups.
+
+   > [!TIP]
+   > This folder can be located on an external drive connected to your Mac.
+
+1. Go to `System Settings > General > Sharing` and click the "info" icon.
+
+1. Click the toggle to enable file sharing, then click the "plus" icon and select your backups folder.
+
+1. Click "Options" and ensure "Share files and folders using SMB" is checked.
+
+1. Check the box next to the user who owns the folder, then click "Done".
+
+> [!WARNING]
+> If the user you want to share the folder with is tied to an Apple ID, StartOS cannot log in as that user. Create a separate user for the share instead: open `System Settings > Users & Groups` and click "Add User". Set "New Account" to `Sharing Only`, then give it a short name such as `start9` and a simple local password. Back in the sharing window, give that user "Read & Write" access to your backups folder, and check the box next to it under "Options".
+
+> [!TIP]
+> You can find the hostname at the top of the sharing window. The hostname will be an address beginning with `smb://`. To use as hostname, disregard the `smb://` and simply enter the IP address that follows it. Alternatively, you can use the computer hostname (open Terminal and type `hostname`). Either method will work.
+
+{{#endtab}}
+
+{{#tab name="Windows"}}
+
+1. Identify or create a folder to store your server backups.
+
+   > [!TIP]
+   > This folder can be located on an external drive connected to your Windows machine.
+
+1. Right click the folder and click "Properties".
+
+1. Click "Sharing".
+
+1. Click "Share".
+
+1. Select a user you want to use for login and click "Share".
+
+   > [!WARNING]
+   > If you get a dialog about your network being "Public", you may wish to change to "Private" if this is your home network. Otherwise you may turn on network sharing for public networks.
+
+1. Note the share name shown in the network path (e.g. `\\COMPUTERNAME\SharedFolder` — the share name is `SharedFolder`). You will need this when connecting from StartOS.
+
+{{#endtab}}
+
+{{#tab name="Ubuntu"}}
+
+1.  Install Samba if not already:
+
+    ```
+    sudo apt install samba && sudo systemctl enable smbd
+    ```
+
+1.  Add your user to samba, replacing `$USER` with your Linux username.
+
+    ```
+    sudo smbpasswd -a $USER
+    ```
+
+    You will be prompted for your linux password. Then, you must create a new SMB password for the user with permission to write to your new backup share. Keep the password somewhere safe, such as Vaultwarden.
+
+1.  Identify or create a folder to store your server backups. For example:
+
+    ```
+    mkdir -p /home/$USER/start9-backup
+    ```
+
+    replacing `$USER` with your Linux username and "start9-backup" with whatever you want the folder to be named.
+
+    > [!TIP]
+    > This folder can be located on an external drive connected to your Linux machine.
+
+1.  Configure Samba by adding the following to the end of your `/etc/samba/smb.conf` file:
+
+    ```
+    [start9-backup]
+        path = /home/$USER/start9-backup
+        create mask = 0600
+        directory mask = 0700
+        read only = no
+        guest ok = no
+    ```
+
+    Where:
+    - `[start9-backup]` is the share name — you can change it, but _remember the name_, you will need it later.
+    - `path` is the full directory path to the folder you created above.
+
+1.  Restart Samba to apply the changes:
+
+    ```
+    sudo systemctl restart smbd
+    ```
+
+1.  If your installation of Ubuntu is running a firewall by default or due to your own custom configuration, enter this command to allow connections to Samba. If it generates an error, you can safely ignore it:
+
+    ```
+    sudo ufw allow Samba
+    ```
+
+{{#endtab}}
+
+{{#tab name="Mint"}}
+
+1.  Install Samba if not already:
+
+    ```
+    sudo apt install samba && sudo systemctl enable smbd
+    ```
+
+1.  Add your user to samba, replacing `$USER` with your Linux username.
+
+    ```
+    sudo usermod -a -G sambashare $USER
+    sudo smbpasswd -a $USER
+    ```
+
+    You will be prompted for your linux password. Then, you must create a new SMB password for the user with permission to write to your new backup share. Keep the password somewhere safe, such as Vaultwarden.
+
+1.  Identify or create a folder to store your server backups.
+
+    > [!TIP]
+    > This folder can be located on an external drive connected to your Linux machine.
+
+1.  Right click the folder and click "Sharing Options".
+
+1.  Select "Share this folder" and give the folder a Share name. _Remember the name_, you will need it later. Click "Create Share".
+
+1.  If your installation of Mint is running a firewall by default or due to your own custom configuration, enter this command to allow connections to Samba. If it generates an error, you can safely ignore it:
+
+    ```
+    sudo ufw allow Samba
+    ```
+
+{{#endtab}}
+
+{{#tab name="Other Linux"}}
+
+1.  Install Samba if it is not already installed.
+    - Arch:
+
+      ```
+      sudo pacman -S samba
+      ```
+
+    - Debian and Debian-based:
+
+      ```
+      sudo apt install samba
+      ```
+
+    - CentOS/Redhat
+
+      ```
+      sudo yum install samba
+      ```
+
+    - Fedora
+      ```
+      sudo dnf install samba
+      ```
+
+1.  Identify or create a folder to store your server backups. Make a note of the directory path. For example:
+
+    ```
+    mkdir -p /home/$USER/start9-backup
+    ```
+
+    replacing `$USER` with your Linux username and "start9-backup" with whatever you want the folder to be named.
+
+    > [!TIP]
+    > This folder can be located on an external drive connected to your Linux machine.
+
+    > [!WARNING]
+    > If you are on Fedora 38+, you need to do an extra step to allow the Samba share in SELinux:
+    >
+    > ```
+    > sudo semanage fcontext --add --type "samba_share_t" "/home/$USER/start9-backup(/.*)?"
+    > sudo restorecon -R /home/$USER/start9-backup
+    > ```
+
+1.  Configure Samba by adding the following to the end of your `/etc/samba/smb.conf` file:
+
+    ```
+    [backup-share]
+        path = /home/$USER/start9-backup
+        create mask = 0600
+        directory mask = 0700
+        read only = no
+        guest ok = no
+    ```
+
+    Where:
+    - `[backup-share]` can be replaced with whatever you want (must remain inside brackets). This is your `Share Name`. _Remember the name_, you will need it later.
+    - `path` is the directory path to the share folder from above.
+
+1.  Open a terminal and enter the following command, replacing `$USER` with your Linux username:
+
+    ```
+    sudo smbpasswd -a $USER
+    ```
+
+    This creates a password for the Local Network Share. Keep it somewhere safe, such as Vaultwarden.
+
+1.  Enable and restart Samba to apply the changes:
+
+    ```
+    sudo systemctl enable smbd
+    sudo systemctl restart smbd
+    ```
+
+1.  If your Linux system has a firewall enabled by default or due to custom configuration, you may need to allow connections to Samba. The command varies depending on the firewall in use:
+    - For systems using UFW (commonly found on Debian-based distros):
+
+      ```
+      sudo ufw allow Samba
+      ```
+
+    - For systems using firewalld (common on RHEL-based distros):
+
+      ```
+      sudo firewall-cmd --permanent --add-service=samba
+      sudo firewall-cmd --reload
+      ```
+
+{{#endtab}}
+
+{{#tab name="Synology"}}
+
+1. In the Synology UI, go to `Control Panel > Shared Folder` and choose the folder you want to use as the destination for the backup.
+
+   > [!NOTE]
+   > Do not select an encrypted folder. Encrypted folders on Synology enforce a character limit of 143 characters. StartOS backups use folder/file names that are longer than 143 characters. The backup process will fail if you try to backup to an encrypted folder.
+
+1. Go to `Control Panel > File Services > SMB` and click the SMB tab if it isn't already selected. Ensure that "Enable SMB service" is checked.
+
+1. Under Advanced Settings on the same tab, set "Min SMB protocol" to `SMB2` and "Max SMB protocol" to `SMB3`.
+
+1. Take note of your device name. Just under "Note" in a pale blue box, you will see "PC (Windows Explorer):" and "Mac (Finder):". These both provide network addresses that contain your device's name. This is the "Hostname" you will need when connecting from StartOS.
+
+1. Still in File Services, click on the rsync tab. Click the checkbox to enable the rsync service.
+
+1. Click "File Station" and locate the desired destination folder. Right click the folder, then _Properties > General_. Next to "Location" will be a folder location. The portion of the location _without the volume label_ is the value you will use for the "Path". For example, if the Location is `/volume1/Backups`, the value you care about is `Backups`.
+
+{{#endtab}}
+
+{{#tab name="TrueNAS SCALE"}}
+
+1. Ensure you have already created a storage pool. If you need help, see the [TrueNAS SCALE documentation](https://www.truenas.com/docs/scale/scaletutorials/storage/pools/createpoolscale/#creating-a-pool).
+
+1. Create a dataset for backups. Go to `Datasets`, select your pool, and click "Add Dataset". Give it a name (e.g. `start9-backup`) and click "Save".
+
+1. Create a user for writing backups. Go to `Credentials > Local Users` and click "Add". Enter a Full Name, Username, and Password. Set Shell to `nologin`. Click "Save".
+
+1. Go to `System > Services`. Enable "SMB" and check "Start Automatically".
+
+1. Go to `Shares` and click "Add" under "Windows (SMB) Shares". Set the Path to your dataset (e.g. `/mnt/pool/start9-backup`). Give the share a name. Click "Save".
+
+1. When prompted to configure the ACL, click "Configure Now". Under "User", select the user you created and set permissions to "Full Control". Click **Save**.
+
+{{#endtab}}
+
+{{#tab name="TrueNAS CORE"}}
+
+1. Ensure you have already created a ZFS pool in `Storage > Pools`. If you need help, see the [TrueNAS CORE documentation](https://www.truenas.com/docs/core/coretutorials/storage/pools/poolcreate/).
+
+1. Create a user for writing backups. Go to `Accounts > Users > ADD`. Enter a Full Name, Username, and Password. Near the bottom, set "Shell" to `nologin` and enable "Samba Authentication". Click "SUBMIT".
+
+1. Go to `Services > SMB`. Enable SMB and check the box "Start Automatically".
+
+1. Open a shell and create your backups directory. For example:
+
+   ```
+   mkdir /mnt/zpooldisk1/start9backupshare
+   ```
+
+1. Under `Sharing > Windows Shares (SMB)`, click "ADD". Set the path to the directory you created. Give the share a name and click "SUBMIT".
+
+1. A "Configure ACL" dialog will appear. Click "CONFIGURE NOW".
+
+1. On the "Edit ACL" screen, click "Apply User" and select the user you created. Set `Permissions Type` to "Basic" and `Permissions` to "Full Control". Click **SAVE**.
+
+{{#endtab}}
+
+{{#endtabs}}
+
+#### Step 2. Add It in StartOS
+
+The **Hostname** field accepts an IP address, a DNS name containing a dot (such as `nas.home.arpa`), a `.local` mDNS name, or a bare NetBIOS computer name. For DNS, enter the full name rather than a bare name such as `nas`.
+
+1. In **System → Backup Targets**, select **Add**, then **CIFS share**.
+
+1. Complete the form. The hostname becomes the target's name:
+
+{{#tabs global="backup-target"}}
+
+{{#tab name="Mac"}}
+
+1. **Hostname**: The hostname or IP address of your Mac (see the tip in the section above).
+1. **Path**: The _name_ of your shared folder, _not_ the full directory path.
+1. **Username**: The Mac user you gave access to the shared folder.
+1. **Password**: Your password for the above user.
+
+> [!WARNING]
+> If you receive `Filesystem I/O Error mount error(13): Permission denied` and the username belongs to an account tied to an Apple ID, go back to [Step 1](#step-1-create-a-shared-folder) and create a `Sharing Only` user for the share.
+
+{{#endtab}}
+
+{{#tab name="Windows"}}
+
+1. **Hostname**: Your Windows computer name (shown after `\\` in the sharing dialog).
+1. **Path**: The share name from the sharing dialog (e.g. `SharedFolder`), _not_ the full directory path.
+1. **Username**: Your Windows user who owns the shared folder.
+1. **Password**: Your password for the above user. You _cannot_ use a PIN.
+
+> [!WARNING]
+> Ensure you are not using a PIN and that Office365 accounts are not in use — try a regular local user instead. If you receive `mount error(115): Operation now in progress`, navigate to `Start > Settings > Network & Internet > Ethernet (or WiFi)` and select the "Private" profile.
+
+{{#endtab}}
+
+{{#tab name="Ubuntu"}}
+
+1. **Hostname**: The name of your Linux machine on the LAN.
+1. **Path**: The share name from your Samba config (e.g. `start9-backup`), _not_ the full directory path.
+1. **Username**: Your Linux username on the remote machine.
+1. **Password**: The SMB password you created with `smbpasswd`.
+
+{{#endtab}}
+
+{{#tab name="Mint"}}
+
+1. **Hostname**: The name of your Linux machine on the LAN.
+1. **Path**: The "Share Name" from the sharing dialog, _not_ the full directory path.
+1. **Username**: Your Linux username on the remote machine.
+1. **Password**: The SMB password you created with `smbpasswd`.
+
+{{#endtab}}
+
+{{#tab name="Other Linux"}}
+
+1. **Hostname**: The name of your Linux machine on the LAN.
+1. **Path**: The "Share Name" from your Samba config, _not_ the full directory path (e.g. `backup-share`).
+1. **Username**: Your Linux username on the remote machine.
+1. **Password**: The SMB password you created with `smbpasswd`.
+
+{{#endtab}}
+
+{{#tab name="Synology"}}
+
+1. **Hostname**: The name of your Synology device on the LAN.
+1. **Path**: The _name_ of your shared folder, _not_ the full directory path (e.g. `Backups`).
+1. **Username**: Your Synology user who owns the shared folder.
+1. **Password**: Your password for the above user.
+
+{{#endtab}}
+
+{{#tab name="TrueNAS SCALE"}}
+
+1. **Hostname**: The name of your TrueNAS device on the LAN (e.g. `truenas.local`).
+1. **Path**: The share name you chose when creating the SMB share, _not_ the full directory path.
+1. **Username**: The TrueNAS user you created for backups.
+1. **Password**: Your password for the above user.
+
+{{#endtab}}
+
+{{#tab name="TrueNAS CORE"}}
+
+1. **Hostname**: The name of your TrueNAS device on the LAN (e.g. `truenas.local`).
+1. **Path**: The share name you chose when creating the SMB share, _not_ the full directory path.
+1. **Username**: The TrueNAS user you created for backups.
+1. **Password**: Your password for the above user.
+
+{{#endtab}}
+
+{{#endtabs}}
+
+> [!WARNING]
+> If you receive `Filesystem I/O Error mount error(13): Permission denied`, ensure you have entered the correct values in the Username and Password fields. Any other `mount error` can mean the target device does not offer SMB 3; check its SMB settings.
+
+## Creating a Backup
+
+1. In **System → Backups**, select **Create**.
+
+1. Choose a target. Unavailable targets cannot be selected.
+
+1. Select the services and volumes to back up, or click "Toggle all", then click "Done".
+
+1. Enter your master password.
+
+While a backup runs, its progress appears at the top of the page. Wait for the `Backup Complete` notification before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before raising that notification, so the drive is safe to remove once it appears. The progress card reads `Complete` first, while StartOS is still finishing — the notification is the one to wait for.
+
+## History
+
+The **Backups** page lists past backups, newest first, with when each started, how long it took, its target and its result: **Succeeded**, **Completed with errors** or **Failed**. Select a backup's report button to see which services and volumes were backed up, and any errors.
+
+## Restoring Backups
+
+Restore previously created backups to recover individual services, volumes or your entire server. This is for disaster recovery when a service is accidentally uninstalled or when your data drive is lost or corrupted.
+
+### Restoring Individual Services or Volumes
+
+Services must be uninstalled before they can be restored. A volume is restored as a new local copy.
+
+1. In **System → Backups**, select **Restore**.
+
+1. Choose a backup. The list shows every server backup on every target, newest first, and explains why any of them cannot be chosen, such as an unavailable target. This server's backups are marked **This server**.
+
+1. Enter the password that was used to create the backup.
+
+1. Select the services and volumes you want to restore and click "Restore selected".
+
+Each restored volume receives a new identity and starts with no service grants, even if its backup came from an external drive or CIFS share. Existing local and remote data is untouched. Grant the new local copy from [Shared Volumes](shared-volumes.md) and update consumers' saved selections.
+
+> [!TIP]
+> If the backup came from a different system architecture (x86, ARM, or RISC-V), StartOS runs its service images under emulation. After the restore, _reinstall_ or update each service from the marketplace so StartOS can select its package for the new server architecture. Do not uninstall it, since uninstalling deletes its data.
+
+### Restoring an Entire Server
+
+If your StartOS data drive is lost or corrupted and you need to restore your entire server, choose **Restore from Backup** during [initial setup](initial-setup.md).
+
+## Targets That Need Attention
+
+A target that needs attention shows a yellow button in its row, and a warning icon appears beside **Backups** in the System menu and on **System** in the top bar.
+
+### Old Backups
+
+New backups are written to a `StartOSBackupsV2` folder on the target, replacing the older `StartOSBackups` (V1) format written by StartOS 0.4 betas. A backup made on StartOS 0.3.5.1 is a different, older backup: it is not removed by **Delete old backup**, and StartOS 0.4 never touches it. To free that space, delete it yourself from the drive.
+
+- When you choose a target that still holds a V1 backup for this server, StartOS warns you before backing up and shows how much free space remains on the target.
+- After a backup completes, if the target still contains this server's V1 backup, StartOS raises a notification reminding you it is no longer needed.
+- A target holding this server's V1 backup shows a **Delete old backup** button. The dialog names this server's latest current backup, or warns that there is none yet. After you confirm, StartOS removes this server's old V1 backup immediately and reclaims the space it occupied in the background, raising a notification once the space has been fully freed (on a large backup this can take a while). Your current `StartOSBackupsV2` backup, and any backups belonging to other servers that share the target, are untouched.
+
+> [!WARNING]
+> Before backing up, check the free space remaining on the target and make sure your selected services and volumes will fit. If space is tight, use **Delete old backup** to reclaim the space this server's old backup occupies, or choose another target. A backup started while that space is still being reclaimed in the background waits for the reclamation to finish first, shown as an initial `Reclaiming Space` phase in the backup's progress.
+
+### Backup Format Upgrades
+
+Existing backups remain usable for backups and restores with their original filesystem encryption/checksum format until explicitly converted. Normal mounts do not start conversion. The folder remains `StartOSBackupsV2`; this is separate from the older `StartOSBackups` folder cleanup described above.
+
+A target holding this server's old-format backup shows an **Update format** button. Select it, review how long conversion may take for that kind of target, select **Convert backup** and enter the backup's master password. Choosing that target to create a backup also offers **Update format** or **Skip**; skipping continues backup creation using the existing format.
+
+Conversion runs in the background, and the target is unavailable until it finishes. The target's button reads **Conversion in progress**; select it to view weighted overall progress, all conversion phases, and byte/object counts. The completion notification names the target and reports success or the failure's error message. A failed attempt offers **Retry conversion**, or **Resume conversion** when it was interrupted. **Resume conversion** revalidates the password and continues from durable migration state. Closing the dialog does not cancel the operation.
+
+Conversion upgrades encryption authentication and current-version references by rewriting encrypted data. It moves content in batches rather than keeping a second complete copy; free space is still needed for one batch of rewritten data and new index metadata. On a large or remote backup, this can take substantially longer than an ordinary incremental backup. Conversion requires exclusive offline access. Leave the target connected until it finishes; after interruption, explicitly resume conversion before using that store again.
+
+An unreadable encrypted object or log frame does not block the upgrade of healthy data. Damaged data stays unreadable; filesystem I/O failures leave the upgrade resumable.
+
+Without its saved key metadata, StartOS cannot decrypt a managed store. A retry moves such keyless encrypted data to the target's trash for reclamation before starting over. This includes failed first backups from older releases. Partially populated key metadata is rejected instead.
+
+> [!WARNING]
+> Older StartOS releases cannot read an upgraded backup. Upgraded backups reject substitutions of individual stored records against their authenticated current references. An upgrade cannot establish the provenance of older data, prevent rollback to an entire genuine older backup view, or revoke previously copied backup data and key-wrapping metadata.
+
+The discovery date shown before unlocking a backup is editable plaintext. After unlocking a converted backup, the date inside encrypted backup metadata belongs to the authenticated backup view. A genuine older view retains its older protected date; that date does not establish that no newer backup exists.
+
+When restoring, the backup list marks each old-format backup with an **Old format** tag. An old-format backup remains restorable without conversion, but once conversion has started it must finish before that backup can be restored; other servers' backups on the same target remain independent. Conversion and resumption happen on the server the backup belongs to. If initial setup cannot restore an interrupted backup, finish conversion on its original server before retrying setup recovery. The setup wizard does not automatically convert a backup.
+
+## Command-Line Passwords
+
+`start-cli backup target mount`, `start-cli backup target info`, `start-cli package backup restore`, and `start-cli backup volume restore` prompt for the backup password instead of accepting it as a positional argument. Automation can supply it through `BACKUP_PASSWORD`. CIFS target add/update commands similarly prompt for the share password or read `CIFS_PASSWORD`; an empty password selects passwordless access. The `PASSWORD` variable used for CLI authentication remains separate.
+
+Avoid typing secret values into shell commands, where shell history can retain them. The standalone `startos-backup-fs` utility reads its filesystem credential from standard input or `--password-file`; password changes read the replacement credential from `--new-password-file`. It does not accept plaintext password arguments. For StartOS-managed backups, this utility uses the filesystem key managed by StartOS, not the master password accepted by `start-cli`.
+
+## Read-only Snapshots
+
+The low-level `startos-backup-fs` utility can retain named recovery points without duplicating unchanged file content. Upgraded stores never overwrite stored data in place; a snapshot retains a selected view while the current backup continues to update normally. Retention is manual: delete points when they are no longer needed.
+
+Snapshots require a new-format or explicitly converted store. The low-level conversion command is `startos-backup-fs convert /path/to/crypt --password-file /protected/filesystem-key`.
+
+Snapshot operations require exclusive offline access. Finish backups and unmount the decrypted filesystem before creating, listing, deleting, or mounting a recovery point. Use the filesystem credential described above, not the StartOS master password:
+
+```sh
+startos-backup-fs snapshot create /path/to/crypt before-update --password-file /protected/filesystem-key
+startos-backup-fs snapshot list /path/to/crypt --password-file /protected/filesystem-key
+startos-backup-fs mount /path/to/crypt /mnt/recovery --snapshot before-update --password-file /protected/filesystem-key
+fusermount3 -u /mnt/recovery
+startos-backup-fs snapshot delete /path/to/crypt before-update --password-file /protected/filesystem-key
+```
+
+The backing directory is `StartOSBackupsV2/<server-id>/crypt` on the mounted target. Protect the credential file with owner-only permissions. A recovery mount is read-only. Snapshot names use letters, digits, `-`, `_`, or `.`, up to 128 characters; `.` and `..` are reserved.
+
+Snapshot indices are stored in bounded, shared chunks. Metadata and retained changed data require space; the catalog of snapshot descriptors has a 64 MiB limit. After a point is deleted, storage it alone used is reclaimed once the files holding it are mostly unused by the current backup and other retained points. Snapshots share the target's hardware and do not replace backups on separate devices.
+
+## Best Practices
+
+Even with proper backups the risk of data corruption is always non-zero. Therefore it is recommended to take additional care when backing up highly valuable or irreplaceable data like a lightning node:
+
+- High quality SSDs should be favored over HDDs as a backup target.
+- Backup to multiple targets.
+- If backing up to multiple targets make sure all backups are up to date.
+- Set up [continuous backups](/bitcoin-guides/continuous-backups.html) where a service offers them. A StartOS backup holds LND's channel backup only as of the moment it was taken, and leaves Bark Wallet's database out entirely; a continuous backup keeps a current, encrypted copy on storage you choose.

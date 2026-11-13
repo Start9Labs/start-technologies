@@ -428,18 +428,15 @@ async fn os_version_edits_preserve_omitted_metadata_assets_and_signers() {
 
 #[tokio::test]
 async fn legacy_devices_can_discover_headline_free_releases() {
+    use crate::middleware::auth::signature::{
+        AUTH_SIG_HEADER, SignatureHeader, rpc_request_body, send_http,
+    };
     use crate::registry::device_info::DEVICE_INFO_HEADER;
 
     let uploader = SigningKey::from_bytes(&[12; 32]);
     let key = AnyVerifyingKey::Ed25519(uploader.verifying_key());
     let temp = tempfile::tempdir().unwrap();
-    let key_path = temp.path().join("identity.pem");
-    write_signing_key(&uploader, &key_path).await.unwrap();
-    let cli = CliContext::init(ClientConfig {
-        id_key_path: Some(key_path),
-        ..Default::default()
-    })
-    .unwrap();
+    let signer = crate::sign::Signer::Key(crate::sign::AnySigningKey::Ed25519(uploader.clone()));
     for startwrt in [false, true] {
         let mut ctx = context(temp.path().join(startwrt.to_string()), key.clone()).await;
         Arc::get_mut(&mut ctx.0).unwrap().startwrt = startwrt;
@@ -492,13 +489,21 @@ async fn legacy_devices_can_discover_headline_free_releases() {
                         http::HeaderValue::from_static(header),
                     );
                 }
-                let result = crate::middleware::auth::signature::call_remote(
-                    &cli,
+                let body = rpc_request_body(method, imbl_value::json!({ "sourceVersion": source }))
+                    .unwrap();
+                headers.insert(
+                    AUTH_SIG_HEADER.parse::<http::HeaderName>().unwrap(),
+                    SignatureHeader::sign(&signer, body.as_bytes(), url.host_str().unwrap())
+                        .await
+                        .unwrap()
+                        .to_header(),
+                );
+                let result = send_http(
+                    ctx.client.clone(),
                     url.join("rpc/v0").unwrap(),
                     headers,
-                    url.host_str(),
-                    method,
-                    imbl_value::json!({ "sourceVersion": source }),
+                    body,
+                    usize::MAX,
                 )
                 .await
                 .unwrap();

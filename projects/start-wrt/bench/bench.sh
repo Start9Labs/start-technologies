@@ -520,13 +520,12 @@ echo "$out"
 EOF
 )
 
-# Signs as the web UI does: start-core's X-Start-Auth-Sig over the exact request body.
 UI_SIGN=$(
 	cat <<'EOF'
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const [repoRoot, keyFile, ip, method, params] = process.argv.slice(1)
-const { blake3 } = require(require.resolve('@noble/hashes/blake3', { paths: [repoRoot] }))
+const { auth } = require(require('node:path').join(repoRoot, 'shared-libs/ts-modules/start-core/dist'))
 const password = fs.readFileSync(0, 'utf8').replace(/\n$/, '')
 
 let key
@@ -536,43 +535,20 @@ try {
 	key = crypto.generateKeyPairSync('ed25519').privateKey
 	fs.writeFileSync(keyFile, key.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 })
 }
-const spki = crypto.createPublicKey(key).export({ type: 'spki', format: 'der' })
-const pem = `-----BEGIN PUBLIC KEY-----\n${spki.toString('base64').match(/.{1,64}/g).join('\n')}\n-----END PUBLIC KEY-----\n`
-const b64url = bytes => Buffer.from(bytes).toString('base64url')
+const pem = crypto.createPublicKey(key).export({ type: 'spki', format: 'pem' })
 
-function sign(body) {
-	const bytes = Buffer.from(body)
-	const timestamp = BigInt(Math.floor(Date.now() / 1000))
-	const nonce = crypto.randomBytes(8).readBigUInt64BE()
-	const hash = blake3(bytes)
-	const context = Buffer.from(ip)
-	const commitment = Buffer.alloc(24)
-	commitment.writeBigInt64BE(timestamp, 0)
-	commitment.writeBigUInt64BE(nonce, 8)
-	commitment.writeBigUInt64BE(BigInt(bytes.length), 16)
-	const message = Buffer.concat([
-		Buffer.from('Start-Auth-Sig v2\0'),
-		Buffer.from([context.length]),
-		context,
-		Buffer.from([3]),
-		commitment,
-		hash,
-	])
-	const signature = crypto.sign(null, message, key)
-	return new URLSearchParams({
-		commitment: 'request',
-		timestamp: timestamp.toString(),
-		nonce: nonce.toString(),
-		size: bytes.length.toString(),
-		blake3: b64url(hash),
-		signer: b64url(spki),
-		signature: b64url(Buffer.concat([Buffer.from('3049300506032b65700440', 'hex'), signature])),
-	}).toString()
+async function main() {
+	const privateKey = await crypto.webcrypto.subtle.importKey(
+		'pkcs8', key.export({ type: 'pkcs8', format: 'der' }), 'Ed25519', false, ['sign'],
+	)
+	const identity = { privateKey, pubkeyPem: pem }
+	const login = JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'auth.login', params: { password, pubkey: pem } })
+	const req = JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: JSON.parse(params) })
+	const sign = body => auth.signRequest(identity, ip, Buffer.from(body))
+	const [loginSig, reqSig, retrySig] = await Promise.all([sign(login), sign(req), sign(req)])
+	console.log([ip, login, loginSig, req, reqSig, retrySig].join('\n'))
 }
-
-const login = JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'auth.login', params: { password, pubkey: pem } })
-const req = JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: JSON.parse(params) })
-console.log([ip, login, sign(login), req, sign(req), sign(req)].join('\n'))
+main()
 EOF
 )
 

@@ -1835,6 +1835,50 @@ pub fn to_tmp_path(path: impl AsRef<Path>) -> Result<PathBuf, Error> {
     }
 }
 
+pub(crate) fn paths_overlap(source: &Path, destination: &Path) -> bool {
+    source.starts_with(destination) || destination.starts_with(source)
+}
+
+/// Conservative case-insensitive components for configured-source comparisons.
+pub(crate) fn case_folded(path: &Path) -> PathBuf {
+    path.components()
+        .filter_map(|part| match part {
+            std::path::Component::Normal(name) => Some(name.to_string_lossy().to_lowercase()),
+            _ => None,
+        })
+        .collect()
+}
+
+pub(crate) async fn file_identity(path: impl AsRef<Path>) -> Result<(u64, u64), Error> {
+    let path = path.as_ref();
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, path.display().to_string()))?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+/// Detects overlapping directory identities across symlinks and mount aliases.
+pub(crate) async fn directories_overlap(left: &Path, right: &Path) -> Result<bool, Error> {
+    let left_id = file_identity(left).await?;
+    let right_id = file_identity(right).await?;
+    for (path, sought) in [(left, right_id), (right, left_id)] {
+        let mut path = path.to_owned();
+        let mut previous = file_identity(&path).await?;
+        loop {
+            if previous == sought {
+                return Ok(true);
+            }
+            path.push("..");
+            let parent = file_identity(&path).await?;
+            if parent == previous {
+                break;
+            }
+            previous = parent;
+        }
+    }
+    Ok(false)
+}
+
 pub async fn canonicalize(
     path: impl AsRef<Path> + Send + Sync,
     create_parent: bool,
@@ -1923,14 +1967,38 @@ impl AtomicFile {
         Ok(())
     }
 
-    pub async fn save(mut self) -> Result<(), Error> {
-        use tokio::io::AsyncWriteExt;
+    async fn finish_writes(&mut self) -> Result<(), Error> {
         if let Some(file) = self.file.as_mut() {
             file.flush().await?;
             file.shutdown().await?;
             file.sync_all().await?;
         }
-        drop(self.file.take());
+        Ok(())
+    }
+
+    /// Publishes complete contents without replacing an existing destination.
+    /// Returns false if the destination already exists.
+    /// Temporary files must differ from the destination and concurrent writers, on the same filesystem.
+    pub async fn save_no_replace(mut self) -> Result<bool, Error> {
+        self.finish_writes().await?;
+        let published = match tokio::fs::hard_link(&self.tmp_path, &self.path).await {
+            Ok(()) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
+            Err(error) => {
+                return Err(error).with_ctx(|_| {
+                    (
+                        ErrorKind::Filesystem,
+                        format!("link {:?} -> {:?}", self.tmp_path, self.path),
+                    )
+                });
+            }
+        };
+        self.rollback().await?;
+        Ok(published)
+    }
+
+    pub async fn save(mut self) -> Result<(), Error> {
+        self.finish_writes().await?;
         tokio::fs::rename(&self.tmp_path, &self.path)
             .await
             .with_ctx(|_| {
@@ -1939,6 +2007,7 @@ impl AtomicFile {
                     format!("mv {} -> {}", self.tmp_path.display(), self.path.display()),
                 )
             })?;
+        drop(self.file.take());
         Ok(())
     }
 }
@@ -1965,6 +2034,23 @@ impl Drop for AtomicFile {
 
 #[cfg(test)]
 mod test {
+    #[tokio::test]
+    async fn atomic_publication_does_not_replace_existing_contents() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("identity");
+        let candidate = temp.path().join("candidate");
+        super::write_file_private_atomic(&path, b"original")
+            .await
+            .unwrap();
+        let mut file = super::AtomicFile::new(&path, Some(&candidate))
+            .await
+            .unwrap();
+        file.write_all(b"replacement").await.unwrap();
+        assert!(!file.save_no_replace().await.unwrap());
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), b"original");
+        assert!(!candidate.exists());
+    }
+
     #[tokio::test]
     async fn write_file_private_atomic_replaces_a_readable_file() {
         use std::os::unix::fs::PermissionsExt;
@@ -2256,6 +2342,22 @@ mod test {
         }
 
         tokio::fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn directory_overlap_follows_aliases_and_distinguishes_sibling_folders() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("photos");
+        let nested = source.join("backup/crypt");
+        let sibling = root.path().join("photos-old");
+        tokio::fs::create_dir_all(&nested).await.unwrap();
+        tokio::fs::create_dir(&sibling).await.unwrap();
+        let alias = root.path().join("alias");
+        tokio::fs::symlink(&source, &alias).await.unwrap();
+        assert!(directories_overlap(&source, &source).await.unwrap());
+        assert!(directories_overlap(&alias, &nested).await.unwrap());
+        assert!(directories_overlap(&nested, &alias).await.unwrap());
+        assert!(!directories_overlap(&alias, &sibling).await.unwrap());
     }
 
     #[tokio::test]

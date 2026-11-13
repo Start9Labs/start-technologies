@@ -1,5 +1,6 @@
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
 import { inject, Injectable } from '@angular/core'
+import { MockContinuation } from './mock-continuation'
 import { pauseFor, RPCErrorDetails, RpcError } from '@start9labs/shared'
 import { GIT_HASH } from 'src/app/utils/workspace-config'
 import {
@@ -43,6 +44,8 @@ import {
   CheckInitializedRes,
   SetInitialPasswordReq,
   SetupStatusRes,
+  SetupFlashReq,
+  SetupFlashStream,
   LogEntry,
   LogsResponse,
   DeviceFromApi,
@@ -126,10 +129,18 @@ function mockWidths(band: string, channel: number, listed: number[]): number[] {
   ]
 }
 
+const MOCK_UPDATE_GUID = 'mock-guid-1234'
+
 @Injectable({
   providedIn: 'root',
 })
 export class MockApiService extends ApiService {
+  openWebsocket(guid: string) {
+    return new MockContinuation(
+      guid === MOCK_UPDATE_GUID ? { overall: true, phases: [] } : undefined,
+    )
+  }
+
   async login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>> {
     await pauseFor(250)
 
@@ -324,7 +335,9 @@ export class MockApiService extends ApiService {
 
   async systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes> {
     await pauseFor(500)
-    return { target: '1.5.0', progress: 'mock-guid-1234' }
+    const target = params.targetVersion ?? '1.5.0'
+    this.mockSystemInfo.version = target
+    return { target, progress: MOCK_UPDATE_GUID }
   }
 
   async systemRestart(): Promise<null> {
@@ -1174,13 +1187,28 @@ export class MockApiService extends ApiService {
     return { setupMode: false, disk: { emmcFound: true, hasFirmware: true } }
   }
 
-  async getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>> {
-    await pauseFor(250)
+  async setupFlash(
+    params: SetupFlashReq,
+    options?: import('@start9labs/start-core').RpcStreamOptions,
+  ): Promise<SetupFlashStream> {
+    options?.signal?.throwIfAborted()
+    await pauseFor(250, options?.signal)
+    options?.signal?.throwIfAborted()
     return {
-      kty: 'EC',
-      crv: 'P-256',
-      x: 'yHTDYSfjU809fkSv9MmN4wuojf5c3cnD7ZDN13n-jz4',
-      y: '8Mpkn744A5KDag0DmX2YivB63srjbugYZzWc3JOpQXI',
+      initial: null,
+      items: (async function* () {
+        for (let step = 1; step <= 3; step++) {
+          await pauseFor(250, options?.signal)
+          options?.signal?.throwIfAborted()
+          yield {
+            phase: 'status' as const,
+            message: 'Configuring system...',
+            step,
+            totalSteps: 3,
+          }
+        }
+        return null
+      })(),
     }
   }
 

@@ -50,15 +50,18 @@ have tested and stop.
 - **Serial console** — `/dev/wrt-console` on this machine: boot output, panics, and hangs, and
   a root shell once `bench.sh console login` answers its `login` prompt. It is the recovery
   path whenever SSH is gone.
-- **Web UI and RPC** — `bench.sh ui rpc <method>` signs each call with a key it enrolled through
-  the daemon's login, exactly as the web UI does, against the router's LAN address. `bench.sh ui tunnel`
+- **Web UI and RPC** — `bench.sh ui rpc <method>` exercises legacy signed HTTP with a key
+  enrolled through the daemon's login. It sends the request through SSH for local execution
+  against the router's LAN address. `bench.sh ui tunnel`
   puts the UI at `https://127.0.0.1:8443/` for a headless browser. Both work whatever Remote
   Access is set to.
 
 [`bench/bench.sh`](bench/bench.sh) drives all of it; `bench.sh --help` lists the commands.
 Run `bash projects/start-wrt/bench/bench.test.sh` from the repo root for the harness's
 host-mocked regression tests; they need Bash, Node.js, and the root npm dependencies, not a
-physical bench, and `bench.sh ui` needs the same dependencies.
+physical bench. Build the shared SDK core first with
+`make -C shared-libs/ts-modules/start-core dist`; the tests and `bench.sh ui` use its
+CommonJS `auth.signRequest` for HTTP compatibility signing.
 Its state — the console log, config snapshots, and the UI signing key — lives in
 `~/.local/state/startwrt-bench/`, outside the repo. A snapshot is a `sysupgrade` backup:
 it holds the router's password hash and private keys, so it never leaves that directory.

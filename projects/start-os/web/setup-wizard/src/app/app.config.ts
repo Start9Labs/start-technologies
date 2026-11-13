@@ -11,6 +11,7 @@ import {
   withPreloading,
 } from '@angular/router'
 import {
+  AUTH_SIGNING_HOST,
   I18N_PROVIDERS,
   provideSetupLogsService,
   RELATIVE_URL,
@@ -48,7 +49,9 @@ export const APP_CONFIG: ApplicationConfig = {
       withPreloading(PreloadAllModules),
     ),
     I18N_PROVIDERS,
-    provideSetupLogsService(ApiService, api => api.rpc.setup.logs.follow({})),
+    provideSetupLogsService(ApiService, (api, options) =>
+      api.streams.setup.logs.follow({}, options),
+    ),
     tuiButtonOptionsProvider({ size: 'm' }),
     {
       provide: ApiService,
@@ -58,6 +61,9 @@ export const APP_CONFIG: ApplicationConfig = {
       provide: RELATIVE_URL,
       useValue: `/${api.url}/${api.version}`,
     },
+    ...(api.signAs
+      ? [{ provide: AUTH_SIGNING_HOST, useValue: api.signAs }]
+      : []),
     {
       provide: VERSION,
       useValue: version,

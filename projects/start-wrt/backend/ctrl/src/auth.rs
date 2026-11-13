@@ -14,18 +14,17 @@ use patch_db::{HasModel, ModelExt, PatchDb};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{from_fn_async, CallRemote, Empty, HandlerArgs, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
-use startos::auth::{AuthKeys, LoginAttempt, LoginContext, Session};
+use startos::auth::{AuthKeys, LoginAttempt, LoginContext, PasswordType, Session};
 use startos::context::setup::CURRENT_SECRET;
 use startos::middleware::auth::local::LocalAuthContext;
 use startos::middleware::auth::signature::{
     check_enrolled, url_host_str, HasUnenrolledKeys, LoginMetadata, NonceCache,
-    SignatureAuthContext,
+    SignatureAuthContext, SignatureAuthorizationContext,
 };
 use startos::middleware::auth::DbContext;
 use startos::prelude::{Model, TypedPatchDb};
 use startos::rpc_continuations::OpenAuthedContinuations;
 use startos::sign::AnyVerifyingKey;
-use startos::util::crypto::EncryptedWire;
 use startos::util::sync::SyncMutex;
 use tokio::io::AsyncWriteExt;
 use tracing::instrument;
@@ -164,17 +163,13 @@ impl AsRef<Jwk> for ServerContext {
     }
 }
 
-/// Decrypts a password encrypted to the key from `setup.get-pubkey`.
 pub(crate) fn decrypt_password(
     ctx: &ServerContext,
-    password: EncryptedWire,
+    password: PasswordType,
 ) -> Result<String, Error> {
-    password.decrypt(ctx).ok_or_else(|| {
-        Error::new(
-            eyre!("could not decrypt the password; reload the page and try again"),
-            ErrorKind::InvalidRequest,
-        )
-    })
+    password
+        .decrypt_in_session(ctx, ctx)
+        .map_err(|error| Error::new(error.source, ErrorKind::InvalidRequest))
 }
 
 impl AsRef<OpenAuthedContinuations<Option<InternedString>>> for ServerContext {
@@ -191,16 +186,38 @@ impl DbContext for ServerContext {
 }
 
 impl SignatureAuthContext for ServerContext {
-    type AdditionalMetadata = LoginMetadata;
-    type CheckPubkeyRes = Option<InternedString>;
-    /// Routine requests never write to flash.
-    const LAST_ACTIVE_RESOLUTION: TimeDelta = TimeDelta::hours(1);
+    fn server_identity(&self) -> Result<startos::sign::Signer, startos::Error> {
+        ServerContext::server_identity(self)
+    }
+    fn replay_check(&self) -> startos::middleware::auth::signature::RequestReplayCheck {
+        ServerContext::replay_check(self)
+    }
+    fn with_secure_session(
+        self,
+        session: startos::middleware::auth::session::SecureSession,
+    ) -> Self {
+        ServerContext::with_secure_session(self, session)
+    }
     fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {
         self.auth.nonce_cache.mutate(f)
     }
     async fn clock_synced(&self) -> bool {
         tokio::fs::metadata(TIME_VALID_PATH).await.is_ok()
     }
+    async fn sig_context(
+        &self,
+        _: &http::Extensions,
+    ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, startos::Error>> + Send {
+        signing_identities(interface_addresses(), self.ddns_identity().await)
+            .into_iter()
+            .map(Ok)
+    }
+}
+impl SignatureAuthorizationContext for ServerContext {
+    type AdditionalMetadata = LoginMetadata;
+    type CheckPubkeyRes = Option<InternedString>;
+    /// Routine requests never write to flash.
+    const LAST_ACTIVE_RESOLUTION: TimeDelta = TimeDelta::hours(1);
     fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
         &self.auth.open_authed_continuations
     }
@@ -214,29 +231,14 @@ impl SignatureAuthContext for ServerContext {
         }
         Ok(())
     }
-    async fn sig_context(
-        &self,
-        _: &http::Extensions,
-    ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, startos::Error>> + Send {
-        signing_identities(interface_addresses(), self.ddns_identity().await)
-            .into_iter()
-            .map(Ok)
-    }
     fn check_pubkey(
         &self,
         db: &Model<Self::Database>,
         pubkey: Option<&AnyVerifyingKey>,
         metadata: Self::AdditionalMetadata,
     ) -> Result<Self::CheckPubkeyRes, startos::Error> {
-        let now = Utc::now();
-        let clock_trusted = Path::new(TIME_VALID_PATH).exists();
         check_enrolled(pubkey, metadata.login, |key| {
-            Ok(db
-                .as_session_pubkeys()
-                .de()?
-                .0
-                .get(&**key)
-                .is_some_and(|session| !sign_in_ended(session.logged_in, now, clock_trusted)))
+            self.auth_key_is_enrolled(db, key)
         })
     }
     async fn post_auth_hook(
@@ -257,6 +259,19 @@ impl LocalAuthContext for ServerContext {
 }
 
 impl LoginContext for ServerContext {
+    fn auth_key_is_enrolled(
+        &self,
+        db: &Model<Self::Database>,
+        key: &InternedString,
+    ) -> Result<bool, startos::Error> {
+        let now = Utc::now();
+        let clock_trusted = Path::new(TIME_VALID_PATH).exists();
+        Ok(Self::access_auth_keys(&mut db.clone())
+            .de()?
+            .0
+            .get(&**key)
+            .is_some_and(|session| !sign_in_ended(session.logged_in, now, clock_trusted)))
+    }
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys> {
         db.as_session_pubkeys_mut()
     }
@@ -660,8 +675,7 @@ pub async fn check_initialized_impl(_ctx: ServerContext) -> Result<CheckInitiali
 #[derive(Debug, Clone, Deserialize, Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SetInitialPasswordParams {
-    /// Encrypted to the key from `setup.get-pubkey`.
-    pub password: EncryptedWire,
+    pub password: PasswordType,
     /// IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
     #[serde(default)]
     pub timezone: Option<String>,
@@ -753,7 +767,7 @@ mod tests {
     use super::*;
 
     const LAST_ACTIVE_RESOLUTION: TimeDelta =
-        <ServerContext as SignatureAuthContext>::LAST_ACTIVE_RESOLUTION;
+        <ServerContext as SignatureAuthorizationContext>::LAST_ACTIVE_RESOLUTION;
 
     #[test]
     fn login_clients_are_named_by_user_agent() {
@@ -784,18 +798,24 @@ mod tests {
     }
 
     #[test]
-    fn initial_password_must_be_encrypted() {
+    fn initial_password_requires_admission_for_unwrapped_input() {
         let plaintext = json!({ "password": "initial-admin-password" });
-        assert!(imbl_value::from_value::<SetInitialPasswordParams>(plaintext).is_err());
+        let params = imbl_value::from_value::<SetInitialPasswordParams>(plaintext).unwrap();
+        let error = decrypt_password(&ServerContext::default(), params.password).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
     }
 
     #[tokio::test]
     async fn passwords_encrypted_to_another_key_are_rejected() {
         let other = Jwk::generate_ec_key(josekit::jwk::alg::ec::EcCurve::P256).unwrap();
-        let wire =
-            EncryptedWire::encrypt("initial-admin-password", &other.to_public_key().unwrap())
-                .unwrap();
-        assert!(decrypt_password(&ServerContext::default(), wire).is_err());
+        let wire = startos::util::crypto::EncryptedWire::encrypt(
+            "initial-admin-password",
+            &other.to_public_key().unwrap(),
+        )
+        .unwrap();
+        let error = decrypt_password(&ServerContext::default(), PasswordType::EncryptedWire(wire))
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
     }
 
     #[test]

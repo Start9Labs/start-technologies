@@ -5,11 +5,12 @@ use std::time::Duration;
 use axum::extract::ws::Message;
 use imbl_value::InternedString;
 use serde::{Deserialize, Serialize};
-use startos::util::net::WebSocket;
+use startos::middleware::auth::session::SessionContext;
+use startos::rpc_continuations::WebSocket;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use crate::continuations::{Guid, RpcContinuation};
+use crate::continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::invoke::Invoke;
 use crate::prelude::*;
 use crate::ServerContext;
@@ -57,7 +58,7 @@ rpc_toolkit::reflect_ts!(FollowLogsParams);
 
 #[derive(Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct FollowLogsRes {
-    /// Streams each new [`LogEntry`] as JSON from `/ws/rpc/{guid}`.
+    /// Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.
     pub guid: Guid,
 }
 rpc_toolkit::reflect_ts!(FollowLogsRes);
@@ -70,7 +71,13 @@ pub async fn follow_logs(
     ctx.continuations
         .add(
             guid.clone(),
-            RpcContinuation::ws_authed(ctx.clone(), signer, stream_logs, Duration::from_secs(30)),
+            RpcContinuation::ws_authed(
+                startos::auth::continuation_subscription(&ctx, signer).await?,
+                WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
+                stream_logs,
+                Duration::from_secs(30),
+            ),
         )
         .await;
     Ok(FollowLogsRes { guid })
@@ -273,6 +280,45 @@ pub async fn get_logs(_ctx: ServerContext) -> Result<LogsResponse, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_revoked_key_cannot_bind_logs_after_its_request_was_authorized() {
+        use startos::middleware::auth::signature::{LoginMetadata, SignatureAuthorizationContext};
+        use startos::middleware::auth::DbContext;
+        use startos::sign::{AnySigningKey, Signer};
+
+        let (_, context, _server, _, _) = crate::rpc::tests::server().await;
+        let signer: Signer = AnySigningKey::generate().into();
+        let key = crate::rpc::tests::enroll(&context, &signer).await;
+        let public = signer.verifying_key().await.unwrap();
+        context
+            .check_pubkey(
+                &context.db().peek().await,
+                Some(&public),
+                LoginMetadata { login: false },
+            )
+            .unwrap();
+        let registered = startos::auth::continuation_subscription(&context, Some(key.clone()))
+            .await
+            .unwrap();
+        context.unenroll([key.clone()]).await.unwrap();
+        assert!(futures::FutureExt::now_or_never(registered).is_some());
+        let Err(error) = follow_logs(
+            context.clone(),
+            FollowLogsParams {
+                signer: Some(key.clone()),
+            },
+        )
+        .await
+        else {
+            panic!("revoked request created a new log continuation")
+        };
+        assert_eq!(error.kind, crate::error::ErrorKind::Authorization);
+        crate::rpc::tests::enroll(&context, &signer).await;
+        assert!(follow_logs(context, FollowLogsParams { signer: Some(key) })
+            .await
+            .is_ok());
+    }
 
     #[test]
     fn test_parse_typical_line() {

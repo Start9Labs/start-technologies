@@ -5,7 +5,6 @@ use std::time::Duration;
 use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
 use exver::{Version, VersionRange};
-use futures::{StreamExt, TryStreamExt};
 use http::HeaderMap;
 use imbl_value::json;
 use itertools::Itertools;
@@ -19,9 +18,9 @@ use crate::PLATFORM;
 use crate::context::{CliContext, DiagnosticContext};
 use crate::middleware::auth::signature;
 use crate::prelude::*;
-use crate::progress::{FullProgress, FullProgressTracker, PhasedProgressBar, ProgressUnits};
+use crate::progress::{FullProgress, FullProgressTracker, ProgressUnits};
 use crate::registry::os::index::OsVersionInfo;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::update::{UpdateProgressHandles, UpdateSystemRes, do_update, target_asset};
 use crate::version::{Current, VersionT};
 
@@ -60,9 +59,19 @@ impl DiagnosticUpdateSystemParams {
 }
 
 #[instrument(skip_all)]
+/// Observation ends with the independently owned update task's actual result.
 pub async fn update_system(
-    ctx: DiagnosticContext,
-    params: DiagnosticUpdateSystemParams,
+    HandlerArgs {
+        context: ctx,
+        params,
+        rpc_stream,
+        ..
+    }: HandlerArgs<
+        DiagnosticContext,
+        DiagnosticUpdateSystemParams,
+        rpc_toolkit::Empty,
+        FullProgress,
+    >,
 ) -> Result<UpdateSystemRes, Error> {
     params.authorize()?;
     let DiagnosticUpdateSystemParams {
@@ -92,6 +101,7 @@ pub async fn update_system(
         report_progress,
         guard,
         trust,
+        rpc_stream,
     )
     .await
 }
@@ -103,6 +113,7 @@ async fn run_update(
     report_progress: bool,
     guard: Arc<()>,
     trust: bool,
+    rpc_stream: Option<rpc_toolkit::RpcStream<FullProgress>>,
 ) -> Result<UpdateSystemRes, Error> {
     let target_range = target.unwrap_or(VersionRange::Any);
     let client = Client::new();
@@ -110,6 +121,9 @@ async fn run_update(
     let current_version = Current::default().semver();
     let mut available = get_versions(&client, registry, &current_version, &target_range).await?;
     let Some((target_version, asset, notes)) = available.pop_last().and_then(target_asset) else {
+        if let Some(stream) = rpc_stream {
+            let _ = stream.close(Ok::<_, Error>(()));
+        }
         return Ok(UpdateSystemRes {
             target: None,
             progress: None,
@@ -160,13 +174,24 @@ async fn run_update(
         let _ = done_tx.send(res);
     });
 
-    let progress = if report_progress {
+    let progress = if let Some(stream) = rpc_stream {
+        let source = crate::progress::progress_until_complete(tracker, async move {
+            done_rx.await.with_kind(ErrorKind::Cancelled)?
+        });
+        tokio::spawn(async move {
+            let result = stream.forward(source).await;
+            let _ = stream.close(result);
+        });
+        None
+    } else if report_progress {
         let guid = Guid::new();
         let tracker = tracker.clone();
         ctx.rpc_continuations
             .add(
                 guid.clone(),
                 RpcContinuation::ws(
+                    WebSocketPolicy::Public,
+                    ctx.secure_session().cloned(),
                     move |ws| async move {
                         if let Err(e) = stream_progress(ws, tracker, done_rx).await {
                             tracing::error!(
@@ -191,72 +216,28 @@ async fn run_update(
 }
 
 async fn stream_progress(
-    mut ws: crate::util::net::WebSocket,
+    ws: crate::rpc_continuations::WebSocket,
     tracker: FullProgressTracker,
-    mut done_rx: oneshot::Receiver<Result<(), Error>>,
+    done_rx: oneshot::Receiver<Result<(), Error>>,
 ) -> Result<(), Error> {
-    use axum::extract::ws::Message;
-
-    let mut stream = tracker.stream(Some(Duration::from_millis(300)));
-    let result: Result<(), Error> = loop {
-        tokio::select! {
-            snap = stream.next() => {
-                let Some(snap) = snap else { break Ok(()); };
-                ws.send(Message::Text(
-                    serde_json::to_string(&Some(&snap))
-                        .with_kind(ErrorKind::Serialization)?
-                        .into(),
-                ))
-                .await
-                .with_kind(ErrorKind::Network)?;
-            }
-            res = &mut done_rx => {
-                break res.unwrap_or_else(|_| Err(Error::new(eyre!("update task aborted"), ErrorKind::Cancelled)));
-            }
-        }
-    };
-    let mut final_snap = tracker.snapshot();
-    if result.is_ok() {
-        for phase in &mut final_snap.phases {
-            phase.progress.set_complete();
-        }
-        final_snap.overall.set_complete();
-    }
-    ws.send(Message::Text(
-        serde_json::to_string(&Some(&final_snap))
-            .with_kind(ErrorKind::Serialization)?
-            .into(),
-    ))
+    crate::progress::forward_progress(
+        ws,
+        crate::progress::progress_with_null(crate::progress::progress_until_complete(
+            tracker,
+            async move { done_rx.await.with_kind(ErrorKind::Cancelled)? },
+        )),
+    )
     .await
-    .with_kind(ErrorKind::Network)?;
-    ws.send(Message::Text(
-        serde_json::to_string::<Option<&FullProgress>>(&None)
-            .with_kind(ErrorKind::Serialization)?
-            .into(),
-    ))
-    .await
-    .with_kind(ErrorKind::Network)?;
-    let close_msg: Result<&str, String> = match &result {
-        Ok(()) => Ok("complete"),
-        Err(e) => Err(e.to_string()),
-    };
-    ws.close_result(close_msg).await.log_err();
-    result
 }
 
 async fn get_versions(
     client: &Client,
-    mut registry: Url,
+    registry: Url,
     source: &Version,
     target: &VersionRange,
 ) -> Result<BTreeMap<Version, OsVersionInfo>, Error> {
-    registry
-        .path_segments_mut()
-        .map_err(|_| Error::new(eyre!("cannot extend URL path"), ErrorKind::ParseUrl))?
-        .push("rpc")
-        .push("v0");
-    let res = signature::call_remote_with_client(
-        None,
+    let registry = crate::registry::package::promote::registry_rpc_url(&registry)?;
+    let res = signature::call_http(
         client.clone(),
         registry,
         HeaderMap::new(),
@@ -277,57 +258,24 @@ pub async fn cli_update_system(
         context,
         parent_method,
         method,
+        params: DiagnosticUpdateSystemParams { progress, .. },
         raw_params,
         ..
     }: HandlerArgs<CliContext, DiagnosticUpdateSystemParams>,
 ) -> Result<(), Error> {
-    let res = from_value::<UpdateSystemRes>(
-        context
-            .call_remote::<DiagnosticContext>(
-                &parent_method.into_iter().chain(method).join("."),
-                raw_params,
-            )
-            .await?,
-    )?;
-    match res.target {
-        None => println!("{}", t!("update.no-updates-available")),
-        Some(v) => {
-            if let Some(progress) = res.progress {
-                let mut ws = context.ws_continuation(progress).await?;
-                let mut bar = PhasedProgressBar::new(&t!(
-                    "update.updating-to-version",
-                    version = v.to_string()
-                ));
-                let mut prev = None;
-                while let Some(msg) = ws.try_next().await.with_kind(ErrorKind::Network)? {
-                    if let tokio_tungstenite::tungstenite::Message::Text(msg) = msg {
-                        if let Some(snap) = serde_json::from_str::<Option<FullProgress>>(&msg)
-                            .with_kind(ErrorKind::Deserialization)?
-                        {
-                            bar.update(&snap);
-                            prev = Some(snap);
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                if let Some(mut prev) = prev {
-                    for phase in &mut prev.phases {
-                        phase.progress.set_complete();
-                    }
-                    prev.overall.set_complete();
-                    bar.update(&prev);
-                }
-                println!("{}", t!("update.complete-restart-to-apply"))
-            } else {
-                println!(
-                    "{}",
-                    t!("update.updating-to-version", version = v.to_string())
-                )
-            }
-        }
+    let method = parent_method.into_iter().chain(method).join(".");
+    if !progress {
+        super::display_update_started(from_value(
+            context
+                .call_remote::<DiagnosticContext>(&method, raw_params)
+                .await?,
+        )?);
+        return Ok(());
     }
-    Ok(())
+    let response = context
+        .call_diagnostic_stream::<FullProgress, ()>(&method, raw_params)
+        .await?;
+    super::render_update_progress(response).await
 }
 
 #[cfg(test)]
@@ -336,6 +284,36 @@ mod tests {
 
     use super::*;
     use crate::net::static_server::UiContext;
+
+    #[tokio::test]
+    async fn version_queries_keep_public_http_and_deployment_prefixes() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let registry = format!("http://{}/prefix/", listener.local_addr().unwrap())
+            .parse()
+            .unwrap();
+        let app = axum::Router::new().route(
+            "/prefix/rpc/v0",
+            axum::routing::post(
+                |headers: HeaderMap, axum::Json(body): axum::Json<serde_json::Value>| async move {
+                    assert!(headers.get(signature::AUTH_SIG_HEADER).is_none());
+                    assert_eq!(body["method"], "os.version.get");
+                    assert_eq!(body["params"]["sourceVersion"], "0.4.2");
+                    axum::Json(serde_json::json!({"jsonrpc":"2.0","id":0,"result":{}}))
+                },
+            ),
+        );
+        let _server: crate::util::future::NonDetachingJoinHandle<()> =
+            tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }).into();
+        let versions = get_versions(
+            &Client::new(),
+            registry,
+            &"0.4.2".parse().unwrap(),
+            &"*".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(versions.is_empty());
+    }
 
     #[test]
     fn trust_override_requires_injected_local_authentication() {

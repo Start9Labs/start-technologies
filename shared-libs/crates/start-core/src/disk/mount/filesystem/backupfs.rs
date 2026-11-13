@@ -1,4 +1,3 @@
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use backup_fs_protocol::{CONVERT_COMMAND, FormatStatus, INSPECT_COMMAND, MOUNT_COMMAND};
@@ -89,18 +88,9 @@ impl<DataDir: AsRef<Path> + Send + Sync, Password: AsRef<str> + Send + Sync> Fil
     async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("BackupFS");
-        sha.update(
-            tokio::fs::canonicalize(self.data_dir.as_ref())
-                .await
-                .with_ctx(|_| {
-                    (
-                        crate::ErrorKind::Filesystem,
-                        self.data_dir.as_ref().display().to_string(),
-                    )
-                })?
-                .as_os_str()
-                .as_bytes(),
-        );
+        let (device, inode) = crate::util::io::file_identity(self.data_dir.as_ref()).await?;
+        sha.update(device.to_le_bytes());
+        sha.update(inode.to_le_bytes());
         Ok(sha.finalize())
     }
 }
@@ -108,6 +98,35 @@ impl<DataDir: AsRef<Path> + Send + Sync, Password: AsRef<str> + Send + Sync> Fil
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn mount_identity_follows_the_directory_not_its_reused_path() {
+        let root = tempfile::tempdir().unwrap();
+        let store = root.path().join("store");
+        let alias = root.path().join("alias");
+        tokio::fs::create_dir(&store).await.unwrap();
+        tokio::fs::symlink(&store, &alias).await.unwrap();
+        let original = BackupFS::new(&store, "secret").source_hash().await.unwrap();
+        assert_eq!(
+            original,
+            BackupFS::new(&alias, "secret").source_hash().await.unwrap()
+        );
+        tokio::fs::rename(&store, root.path().join("old-store"))
+            .await
+            .unwrap();
+        tokio::fs::create_dir(&store).await.unwrap();
+        assert_ne!(
+            original,
+            BackupFS::new(&store, "secret").source_hash().await.unwrap()
+        );
+        assert_eq!(
+            original,
+            BackupFS::new(root.path().join("old-store"), "secret")
+                .source_hash()
+                .await
+                .unwrap()
+        );
+    }
 
     #[test]
     fn conversion_argv_contains_only_the_operation_and_store_path() {

@@ -135,8 +135,14 @@ export const ApiState: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['error', 'initializing', 'running']).meta({
   id: 'ApiState',
 })
+
+/**
+ * A registered-target identity; migrated CIFS targets retain their existing IDs.
+ */
 export const BackupTargetId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'BackupTargetId',
+  description:
+    'A registered-target identity; migrated CIFS targets retain their existing IDs.',
 })
 export const Base64: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Base64',
@@ -863,8 +869,19 @@ export const LogsParams: z.ZodIntersection<
       limit: wire(z.int().nullable().optional(), z.int().nullable()),
       cursor: wire(z.string().nullable().optional(), z.string().nullable()),
       boot: wire(
-        z.union([z.number(), z.string()]).nullable().optional(),
-        z.union([z.number(), z.string()]).nullable(),
+        z
+          .union([
+            z.number().int().min(-2147483648).max(2147483647),
+            z.string(),
+          ])
+          .nullable()
+          .optional(),
+        z
+          .union([
+            z.number().int().min(-2147483648).max(2147483647),
+            z.string(),
+          ])
+          .nullable(),
       ),
       before: wire(z.boolean().optional(), z.boolean()),
     }),
@@ -1151,6 +1168,10 @@ export const PackageVersionCount: z.ZodObject<{
 }).meta({
   id: 'PackageVersionCount',
 })
+export const PartitionTable: z.ZodEnum<{ mbr: 'mbr'; gpt: 'gpt' }> =
+  /* @__PURE__ */ z.enum(['mbr', 'gpt']).meta({
+    id: 'PartitionTable',
+  })
 export const PathOrUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'PathOrUrl',
 })
@@ -1199,6 +1220,9 @@ export const QueryDnsRes: z.ZodObject<{
   id: 'QueryDnsRes',
   description:
     "What a public domain currently resolves to, per address family. A public\ndomain is DualStack: the operator points an `A` record at the gateway's WAN\nIPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.",
+})
+export const ReaderParams: typeof empty = /* @__PURE__ */ empty.meta({
+  id: 'ReaderParams',
 })
 
 /**
@@ -1291,6 +1315,13 @@ export const RegistryKeyDropped: z.ZodIntersection<
     description:
       'A key a connected registry stopped offering; its trust is unchanged.',
   })
+export const RegistryStatus: z.ZodEnum<{
+  connecting: 'connecting'
+  connected: 'connected'
+  error: 'error'
+}> = /* @__PURE__ */ z.enum(['connecting', 'connected', 'error']).meta({
+  id: 'RegistryStatus',
+})
 export const RemoveAssetParams: z.ZodObject<{
   version: z.ZodString
   platform: z.ZodString
@@ -1505,6 +1536,73 @@ export const SetupInfo: z.ZodObject<{
 }).meta({
   id: 'SetupInfo',
 })
+export const SharedVolumeAvailability: z.ZodEnum<{
+  unknown: 'unknown'
+  available: 'available'
+  unavailable: 'unavailable'
+}> = /* @__PURE__ */ z.enum(['unknown', 'available', 'unavailable']).meta({
+  id: 'SharedVolumeAvailability',
+})
+export const SharedVolumeBackupInfo: z.ZodObject<{
+  name: z.ZodString
+  timestamp: z.ZodString
+  /**
+   * Identifies the completed copy beneath the volume's encrypted `data` directory.
+   */
+  generation: z.ZodString
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  timestamp: z.string(),
+  /**
+   * Identifies the completed copy beneath the volume's encrypted `data` directory.
+   */
+  generation: z.string().meta({
+    description:
+      "Identifies the completed copy beneath the volume's encrypted `data` directory.",
+  }),
+}).meta({
+  id: 'SharedVolumeBackupInfo',
+})
+export const SharedVolumeDrive: z.ZodObject<{
+  vendor: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  model: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  label: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  capacity: z.ZodInt
+}> = /* @__PURE__ */ object({
+  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
+  model: wire(z.string().nullable().optional(), z.string().nullable()),
+  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  capacity: z.int(),
+}).meta({
+  id: 'SharedVolumeDrive',
+})
+export const SharedVolumeGrant: z.ZodObject<{ readonly: z.ZodBoolean }> =
+  /* @__PURE__ */ object({ readonly: z.boolean() }).meta({
+    id: 'SharedVolumeGrant',
+  })
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export const SharedVolumeId: z.ZodString = /* @__PURE__ */ z.string().meta({
+  id: 'SharedVolumeId',
+  description: 'A 32-character uppercase base32 volume identity.',
+})
+export const SharedVolumeUnavailableReason: z.ZodEnum<{
+  sourceUnavailable: 'sourceUnavailable'
+  timeout: 'timeout'
+}> = /* @__PURE__ */ z.enum(['sourceUnavailable', 'timeout']).meta({
+  id: 'SharedVolumeUnavailableReason',
+})
 export const ShutdownParams: z.ZodObject<{
   /**
    * Block until graceful teardown completes (default over the CLI; the
@@ -1572,6 +1670,27 @@ export const StartStop: z.ZodEnum<{ start: 'start'; stop: 'stop' }> =
   /* @__PURE__ */ z.enum(['start', 'stop']).meta({
     id: 'StartStop',
   })
+
+/**
+ * RPC reply metadata for live database synchronization.
+ */
+export const SyncDbMetadata: z.ZodObject<{
+  /**
+   * Database revision the caller must observe before using the result.
+   */
+  patchSequence: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+}> = /* @__PURE__ */ object({
+  /**
+   * Database revision the caller must observe before using the result.
+   */
+  patchSequence: z.int().nullable().optional().meta({
+    description:
+      'Database revision the caller must observe before using the result.',
+  }),
+}).meta({
+  id: 'SyncDbMetadata',
+  description: 'RPC reply metadata for live database synchronization.',
+})
 export const TaskCondition: z.ZodEnum<{
   'input-not-matches': 'input-not-matches'
 }> = /* @__PURE__ */ z.enum(['input-not-matches']).meta({
@@ -1775,10 +1894,7 @@ export const ActionMetadata: z.ZodObject<{
     typeof ActionVisibility
   >
   /**
-   * One of: "only-stopped", "only-running", "all"
-   *   - "only-stopped" - the action can only be run when the service is stopped
-   *   - "only-running" - the action can only be run when the service is running
-   *   - "any" - the action can only be run regardless of the service's status
+   * Service run states that permit this action.
    */
   allowedStatuses: typeof AllowedStatuses
   hasInput: z.ZodBoolean
@@ -1831,14 +1947,10 @@ export const ActionMetadata: z.ZodObject<{
       'One of: "enabled", "hidden", or { disabled: "" }\n  - "enabled" - the action is available be run\n  - "hidden" - the action cannot be seen or run\n  - { disabled: "example explanation" } means the action is visible but cannot be run. Replace "example explanation" with a reason why the action is disable to prevent user confusion.',
   }),
   /**
-   * One of: "only-stopped", "only-running", "all"
-   *   - "only-stopped" - the action can only be run when the service is stopped
-   *   - "only-running" - the action can only be run when the service is running
-   *   - "any" - the action can only be run regardless of the service's status
+   * Service run states that permit this action.
    */
   allowedStatuses: AllowedStatuses.meta({
-    description:
-      'One of: "only-stopped", "only-running", "all"\n  - "only-stopped" - the action can only be run when the service is stopped\n  - "only-running" - the action can only be run when the service is running\n  - "any" - the action can only be run regardless of the service\'s status',
+    description: 'Service run states that permit this action.',
   }),
   hasInput: z.boolean(),
   /**
@@ -2300,20 +2412,6 @@ export const AlpnInfo: z.ZodArray<typeof MaybeUtf8String> = /* @__PURE__ */ z
     description:
       'The protocols a binding answers with, carried on the wire as the list itself.',
   })
-export const AttachParams: z.ZodObject<{
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof EncryptedWire>>,
-    z.ZodNullable<typeof EncryptedWire>
-  >
-  guid: z.ZodString
-  kiosk: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  password: wire(EncryptedWire.nullable().optional(), EncryptedWire.nullable()),
-  guid: z.string(),
-  kiosk: z.boolean(),
-}).meta({
-  id: 'AttachParams',
-})
 
 /**
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
@@ -2323,15 +2421,10 @@ export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
     id: 'AuthKeys',
     description: 'Enrolled sign-ins indexed by canonical DER64 SPKI.',
   })
-export const BackupReport: z.ZodObject<{
-  server: typeof ServerBackupReport
-  packages: z.ZodRecord<z.ZodString, typeof PackageBackupReport>
-}> = /* @__PURE__ */ object({
-  server: ServerBackupReport,
-  packages: z.record(z.string(), PackageBackupReport),
-}).meta({
-  id: 'BackupReport',
-})
+export const BackupInitParams: z.ZodObject<{ id: typeof Guid }> =
+  /* @__PURE__ */ object({ id: Guid }).meta({
+    id: 'BackupInitParams',
+  })
 export const BackupTargetFS: z.ZodUnion<
   readonly [
     z.ZodIntersection<
@@ -2955,36 +3048,51 @@ export const GetOutboundGatewayParams: z.ZodObject<{
 }).meta({
   id: 'GetOutboundGatewayParams',
 })
-export const GetPackageParams: z.ZodObject<{
-  id: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PackageId>>,
-    z.ZodNullable<typeof PackageId>
-  >
-  targetVersion: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sourceVersion: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Version>>,
-    z.ZodNullable<typeof Version>
-  >
-  otherVersions: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PackageDetailLevel>>,
-    z.ZodNullable<typeof PackageDetailLevel>
-  >
-  allRevisions: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-}> = /* @__PURE__ */ object({
-  id: wire(PackageId.nullable().optional(), PackageId.nullable()),
-  targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
-  sourceVersion: wire(Version.nullable().optional(), Version.nullable()),
-  otherVersions: wire(
-    PackageDetailLevel.nullable().optional(),
-    PackageDetailLevel.nullable(),
-  ),
-  allRevisions: wire(z.boolean().optional(), z.boolean()),
-}).meta({
-  id: 'GetPackageParams',
-})
+export const GetPackageAccessParams: z.ZodObject<{ id: typeof PackageId }> =
+  /* @__PURE__ */ object({ id: PackageId }).meta({
+    id: 'GetPackageAccessParams',
+  })
+export const GetPackageParams: z.ZodIntersection<
+  z.ZodObject<{
+    id: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof PackageId>>,
+      z.ZodNullable<typeof PackageId>
+    >
+    targetVersion: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+    sourceVersion: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof Version>>,
+      z.ZodNullable<typeof Version>
+    >
+    otherVersions: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof PackageDetailLevel>>,
+      z.ZodNullable<typeof PackageDetailLevel>
+    >
+    allRevisions: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  }>,
+  typeof ReaderParams
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      id: wire(PackageId.nullable().optional(), PackageId.nullable()),
+      targetVersion: wire(
+        z.string().nullable().optional(),
+        z.string().nullable(),
+      ),
+      sourceVersion: wire(Version.nullable().optional(), Version.nullable()),
+      otherVersions: wire(
+        PackageDetailLevel.nullable().optional(),
+        PackageDetailLevel.nullable(),
+      ),
+      allRevisions: wire(z.boolean().optional(), z.boolean()),
+    }),
+    ReaderParams,
+  )
+  .meta({
+    id: 'GetPackageParams',
+  })
 export const GetServiceInterfaceParams: z.ZodObject<{
   packageId: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof PackageId>>,
@@ -3081,6 +3189,19 @@ export const GetSystemSmtpParams: z.ZodObject<{
   callback: wire(CallbackId.nullable().optional(), CallbackId.nullable()),
 }).meta({
   id: 'GetSystemSmtpParams',
+})
+export const GrantedSharedVolume: z.ZodObject<{
+  id: typeof SharedVolumeId
+  name: z.ZodString
+  readonly: z.ZodBoolean
+  availability: typeof SharedVolumeAvailability
+}> = /* @__PURE__ */ object({
+  id: SharedVolumeId,
+  name: z.string(),
+  readonly: z.boolean(),
+  availability: SharedVolumeAvailability,
+}).meta({
+  id: 'GrantedSharedVolume',
 })
 export const HardwareRequirements: z.ZodObject<{
   device: z.ZodCodec<
@@ -3356,8 +3477,12 @@ export const LegacyAlpnInfo: z.ZodUnion<
   .meta({
     id: 'LegacyAlpnInfo',
   })
-export const ListPackageSignersParams: z.ZodObject<{ id: typeof PackageId }> =
-  /* @__PURE__ */ object({ id: PackageId }).meta({
+export const ListPackageSignersParams: z.ZodIntersection<
+  z.ZodObject<{ id: typeof PackageId }>,
+  typeof ReaderParams
+> = /* @__PURE__ */ z
+  .intersection(object({ id: PackageId }), ReaderParams)
+  .meta({
     id: 'ListPackageSignersParams',
   })
 export const ListServiceInterfacesParams: z.ZodObject<{
@@ -3380,10 +3505,22 @@ export const LogFollowResponse: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
-  guid: typeof Guid
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
 }> = /* @__PURE__ */ object({
   startCursor: wire(z.string().nullable().optional(), z.string().nullable()),
-  guid: Guid,
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Present for ordinary replies; typed observations use same-ID events.',
+  }),
 }).meta({
   id: 'LogFollowResponse',
 })
@@ -3536,6 +3673,24 @@ export const MetricsSummary: z.ZodObject<{
 }).meta({
   id: 'MetricsSummary',
 })
+export const MountSharedVolumeParams: z.ZodObject<{
+  id: typeof SharedVolumeId
+  subcontainer: typeof Guid
+  mountpoint: z.ZodString
+  subpath: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  readonly: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  id: SharedVolumeId,
+  subcontainer: Guid,
+  mountpoint: z.string(),
+  subpath: wire(z.string().nullable().optional(), z.string().nullable()),
+  readonly: z.boolean(),
+}).meta({
+  id: 'MountSharedVolumeParams',
+})
 export const MountTarget: z.ZodCodec<
   z.ZodObject<{
     packageId: typeof PackageId
@@ -3643,6 +3798,18 @@ export const OsVersionInfo: z.ZodObject<{
 }).meta({
   id: 'OsVersionInfo',
 })
+export const PackageAccessControl: z.ZodObject<{
+  private: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  readers: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof Guid>>,
+    z.ZodArray<typeof Guid>
+  >
+}> = /* @__PURE__ */ object({
+  private: wire(z.boolean().optional(), z.boolean()),
+  readers: wire(z.array(Guid).optional(), z.array(Guid)),
+}).meta({
+  id: 'PackageAccessControl',
+})
 export const PackageBackupInfo: z.ZodObject<{
   title: z.ZodString
   version: typeof Version
@@ -3678,6 +3845,12 @@ export const PackageInfoShort: z.ZodObject<{
   releaseNotes: typeof LocaleString
 }> = /* @__PURE__ */ object({ releaseNotes: LocaleString }).meta({
   id: 'PackageInfoShort',
+})
+export const PackageReaderParams: z.ZodObject<{
+  id: typeof PackageId
+  signer: typeof Guid
+}> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
+  id: 'PackageReaderParams',
 })
 export const PassthroughInfo: z.ZodObject<{
   hostname: z.ZodString
@@ -4012,6 +4185,31 @@ export const RestorePackageParams: z.ZodObject<{
 }).meta({
   id: 'RestorePackageParams',
 })
+export const RestoreVolumeParams: z.ZodObject<{
+  targetId: typeof BackupTargetId
+  password: z.ZodString
+  ids: z.ZodArray<typeof SharedVolumeId>
+  serverId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  targetId: BackupTargetId,
+  password: z.string(),
+  ids: z.array(SharedVolumeId),
+  serverId: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'RestoreVolumeParams',
+})
+export const RestoreVolumeResult: z.ZodObject<{
+  restored: z.ZodRecord<z.ZodString, typeof SharedVolumeId>
+  errors: z.ZodRecord<z.ZodString, z.ZodString>
+}> = /* @__PURE__ */ object({
+  restored: z.record(z.string(), SharedVolumeId),
+  errors: z.record(z.string(), z.string()),
+}).meta({
+  id: 'RestoreVolumeResult',
+})
 export const RetireBindingParams: z.ZodObject<{
   id: typeof HostId
   internalPort: z.ZodInt
@@ -4111,6 +4309,12 @@ export const SetOutboundGatewayParams: z.ZodObject<{
 }).meta({
   id: 'SetOutboundGatewayParams',
 })
+export const SetPackagePrivateParams: z.ZodObject<{
+  id: typeof PackageId
+  private: z.ZodBoolean
+}> = /* @__PURE__ */ object({ id: PackageId, private: z.boolean() }).meta({
+  id: 'SetPackagePrivateParams',
+})
 export const SetStaticDnsParams: z.ZodObject<{
   gateway: typeof GatewayId
   servers: z.ZodCodec<
@@ -4126,35 +4330,6 @@ export const SetStaticDnsParams: z.ZodObject<{
 }).meta({
   id: 'SetStaticDnsParams',
 })
-export const SetupExecuteParams: z.ZodObject<{
-  guid: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof EncryptedWire>>,
-    z.ZodNullable<typeof EncryptedWire>
-  >
-  recoverySource: z.ZodCodec<
-    z.ZodOptional<
-      z.ZodNullable<ReturnType<typeof RecoverySource<typeof EncryptedWire>>>
-    >,
-    z.ZodNullable<ReturnType<typeof RecoverySource<typeof EncryptedWire>>>
-  >
-  kiosk: z.ZodBoolean
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  guid: z.string(),
-  password: wire(EncryptedWire.nullable().optional(), EncryptedWire.nullable()),
-  recoverySource: wire(
-    RecoverySource(EncryptedWire).nullable().optional(),
-    RecoverySource(EncryptedWire).nullable(),
-  ),
-  kiosk: z.boolean(),
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'SetupExecuteParams',
-})
 export const SetupResult: z.ZodObject<{
   hostname: typeof ServerHostname
   rootCa: typeof literal_0
@@ -4166,10 +4341,142 @@ export const SetupResult: z.ZodObject<{
 }).meta({
   id: 'SetupResult',
 })
+export const SharedVolumeInspection: z.ZodObject<{
+  availability: z.ZodCodec<
+    z.ZodOptional<typeof SharedVolumeAvailability>,
+    typeof SharedVolumeAvailability
+  >
+  available: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  error: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  checkedAt: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  availability: wire(
+    SharedVolumeAvailability.optional(),
+    SharedVolumeAvailability,
+  ),
+  available: wire(z.int().nullable().optional(), z.int().nullable()),
+  error: wire(z.string().nullable().optional(), z.string().nullable()),
+  checkedAt: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'SharedVolumeInspection',
+})
+export const SharedVolumeMountResult: z.ZodUnion<
+  readonly [
+    z.ZodObject<{ kind: z.ZodLiteral<'mounted'> }>,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'unavailable'> }>,
+      z.ZodObject<{ reason: typeof SharedVolumeUnavailableReason }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    object({ kind: z.literal('mounted') }),
+    z.intersection(
+      object({ kind: z.literal('unavailable') }),
+      object({ reason: SharedVolumeUnavailableReason }),
+    ),
+  ])
+  .meta({
+    id: 'SharedVolumeMountResult',
+  })
+export const SharedVolumeSource: z.ZodUnion<
+  readonly [
+    z.ZodObject<{
+      /**
+       * Managed Btrfs subvolume on the encrypted data partition.
+       */
+      kind: z.ZodLiteral<'local'>
+    }>,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'disk'> }>,
+      z.ZodObject<{
+        logicalname: z.ZodString
+        path: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+        /**
+         * The drive as reported when the source was created, for display.
+         */
+        drive: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<typeof SharedVolumeDrive>>,
+          z.ZodNullable<typeof SharedVolumeDrive>
+        >
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'cifs'> }>,
+      z.ZodObject<{
+        hostname: z.ZodString
+        path: z.ZodString
+        username: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+      }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    object({
+      /**
+       * Managed Btrfs subvolume on the encrypted data partition.
+       */
+      kind: z.literal('local').meta({
+        description: 'Managed Btrfs subvolume on the encrypted data partition.',
+      }),
+    }),
+    z.intersection(
+      object({ kind: z.literal('disk') }),
+      object({
+        logicalname: z.string(),
+        path: wire(z.string().optional(), z.string()),
+        /**
+         * The drive as reported when the source was created, for display.
+         */
+        drive: wire(
+          SharedVolumeDrive.nullable().optional(),
+          SharedVolumeDrive.nullable(),
+        ).meta({
+          description:
+            'The drive as reported when the source was created, for display.',
+        }),
+      }),
+    ),
+    z.intersection(
+      object({ kind: z.literal('cifs') }),
+      object({
+        hostname: z.string(),
+        path: z.string(),
+        username: wire(z.string().optional(), z.string()),
+      }),
+    ),
+  ])
+  .meta({
+    id: 'SharedVolumeSource',
+  })
 export const SideloadResponse: z.ZodObject<{
   upload: typeof Guid
-  progress: typeof Guid
-}> = /* @__PURE__ */ object({ upload: Guid, progress: Guid }).meta({
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
+  progress: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
+}> = /* @__PURE__ */ object({
+  upload: Guid,
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
+  progress: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Legacy progress continuation, absent for rpcstream observers.',
+  }),
+}).meta({
   id: 'SideloadResponse',
 })
 export const SignAssetParams: z.ZodObject<{
@@ -4382,13 +4689,22 @@ export const UpdateSystemRes: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
   progress: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof Guid>>,
     z.ZodNullable<typeof Guid>
   >
 }> = /* @__PURE__ */ object({
   target: wire(z.string().nullable().optional(), z.string().nullable()),
-  progress: wire(Guid.nullable().optional(), Guid.nullable()),
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
+  progress: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Legacy progress continuation, absent for rpcstream observers.',
+  }),
 }).meta({
   id: 'UpdateSystemRes',
 })
@@ -4449,28 +4765,20 @@ export const UrlPluginRegistration: z.ZodObject<{
 }> = /* @__PURE__ */ object({ tableAction: ActionId }).meta({
   id: 'UrlPluginRegistration',
 })
-export const VerifyCifsParams: z.ZodObject<{
-  hostname: z.ZodString
-  path: z.ZodString
-  username: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof EncryptedWire>>,
-    z.ZodNullable<typeof EncryptedWire>
-  >
-}> = /* @__PURE__ */ object({
-  hostname: z.string(),
-  path: z.string(),
-  username: z.string(),
-  password: wire(EncryptedWire.nullable().optional(), EncryptedWire.nullable()),
-}).meta({
-  id: 'VerifyCifsParams',
-})
 export const VersionSignerParams: z.ZodObject<{
   version: z.ZodString
   signer: typeof Guid
 }> = /* @__PURE__ */ object({ version: z.string(), signer: Guid }).meta({
   id: 'VersionSignerParams',
 })
+export const VolumeBackupReport: z.ZodIntersection<
+  z.ZodObject<{ name: z.ZodString }>,
+  typeof PackageBackupReport
+> = /* @__PURE__ */ z
+  .intersection(object({ name: z.string() }), PackageBackupReport)
+  .meta({
+    id: 'VolumeBackupReport',
+  })
 export const WifiInfo: z.ZodObject<{
   enabled: z.ZodBoolean
   interface: z.ZodCodec<
@@ -4624,6 +4932,20 @@ export const AddPublicDomainRes: z.ZodObject<{
 }).meta({
   id: 'AddPublicDomainRes',
 })
+export const AttachParams: z.ZodObject<{
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
+    z.ZodNullable<typeof PasswordType>
+  >
+  guid: z.ZodString
+  kiosk: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  password: wire(PasswordType.nullable().optional(), PasswordType.nullable()),
+  guid: z.string(),
+  kiosk: z.boolean(),
+}).meta({
+  id: 'AttachParams',
+})
 export const BackupInfo: z.ZodObject<{
   version: z.ZodString
   timestamp: z.ZodCodec<
@@ -4631,10 +4953,18 @@ export const BackupInfo: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   packageBackups: z.ZodRecord<z.ZodString, typeof PackageBackupInfo>
+  sharedVolumeBackups: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof SharedVolumeBackupInfo>>,
+    z.ZodRecord<z.ZodString, typeof SharedVolumeBackupInfo>
+  >
 }> = /* @__PURE__ */ object({
   version: z.string(),
   timestamp: wire(z.string().nullable().optional(), z.string().nullable()),
   packageBackups: z.record(z.string(), PackageBackupInfo),
+  sharedVolumeBackups: wire(
+    z.record(z.string(), SharedVolumeBackupInfo).optional(),
+    z.record(z.string(), SharedVolumeBackupInfo),
+  ),
 }).meta({
   id: 'BackupInfo',
 })
@@ -4648,6 +4978,10 @@ export const BackupParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodArray<typeof PackageId>>>,
     z.ZodNullable<z.ZodArray<typeof PackageId>>
   >
+  sharedVolumeIds: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof SharedVolumeId>>>,
+    z.ZodNullable<z.ZodArray<typeof SharedVolumeId>>
+  >
   password: typeof PasswordType
 }> = /* @__PURE__ */ object({
   targetId: BackupTargetId,
@@ -4659,32 +4993,64 @@ export const BackupParams: z.ZodObject<{
     z.array(PackageId).nullable().optional(),
     z.array(PackageId).nullable(),
   ),
+  sharedVolumeIds: wire(
+    z.array(SharedVolumeId).nullable().optional(),
+    z.array(SharedVolumeId).nullable(),
+  ),
   password: PasswordType,
 }).meta({
   id: 'BackupParams',
 })
-export const CifsBackupTarget: z.ZodObject<{
-  hostname: z.ZodString
-  path: z.ZodString
-  username: z.ZodString
-  mountable: z.ZodBoolean
-  available: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
+export const BackupReport: z.ZodObject<{
+  server: typeof ServerBackupReport
+  packages: z.ZodRecord<z.ZodString, typeof PackageBackupReport>
+  sharedVolumes: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof VolumeBackupReport>>,
+    z.ZodRecord<z.ZodString, typeof VolumeBackupReport>
   >
-  startOs: z.ZodRecord<z.ZodString, typeof StartOsRecoveryInfo>
-  legacyBackup: z.ZodBoolean
 }> = /* @__PURE__ */ object({
-  hostname: z.string(),
-  path: z.string(),
-  username: z.string(),
-  mountable: z.boolean(),
-  available: wire(z.int().nullable().optional(), z.int().nullable()),
-  startOs: z.record(z.string(), StartOsRecoveryInfo),
-  legacyBackup: z.boolean(),
+  server: ServerBackupReport,
+  packages: z.record(z.string(), PackageBackupReport),
+  sharedVolumes: wire(
+    z.record(z.string(), VolumeBackupReport).optional(),
+    z.record(z.string(), VolumeBackupReport),
+  ),
 }).meta({
-  id: 'CifsBackupTarget',
+  id: 'BackupReport',
 })
+
+/**
+ * A registered backup destination and its last source observation.
+ */
+export const BackupTarget: z.ZodIntersection<
+  z.ZodObject<{
+    name: z.ZodString
+    source: typeof SharedVolumeSource
+    startOs: z.ZodCodec<
+      z.ZodOptional<z.ZodRecord<z.ZodString, typeof StartOsRecoveryInfo>>,
+      z.ZodRecord<z.ZodString, typeof StartOsRecoveryInfo>
+    >
+    legacyBackup: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  }>,
+  typeof SharedVolumeInspection
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      name: z.string(),
+      source: SharedVolumeSource,
+      startOs: wire(
+        z.record(z.string(), StartOsRecoveryInfo).optional(),
+        z.record(z.string(), StartOsRecoveryInfo),
+      ),
+      legacyBackup: wire(z.boolean().optional(), z.boolean()),
+    }),
+    SharedVolumeInspection,
+  )
+  .meta({
+    id: 'BackupTarget',
+    description:
+      'A registered backup destination and its last source observation.',
+  })
 export const ClearBindingsParams: z.ZodObject<{
   except: z.ZodCodec<
     z.ZodOptional<z.ZodArray<typeof BindId>>,
@@ -4866,8 +5232,23 @@ export const ImageConfigRepr: z.ZodObject<{
 })
 export const InitProgressRes: z.ZodObject<{
   progress: typeof FullProgress
-  guid: typeof Guid
-}> = /* @__PURE__ */ object({ progress: FullProgress, guid: Guid }).meta({
+  /**
+   * Present for ordinary replies; typed streams use same-ID events.
+   */
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
+}> = /* @__PURE__ */ object({
+  progress: FullProgress,
+  /**
+   * Present for ordinary replies; typed streams use same-ID events.
+   */
+  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Present for ordinary replies; typed streams use same-ID events.',
+  }),
+}).meta({
   id: 'InitProgressRes',
 })
 export const InstallParams: z.ZodObject<{
@@ -5048,10 +5429,49 @@ export const NotificationWithId: z.ZodIntersection<
 > = /* @__PURE__ */ z.intersection(object({ id: z.int() }), Notification).meta({
   id: 'NotificationWithId',
 })
+
+/**
+ * Compatible releases from the selected StartOS update source.
+ */
+export const OsUpdateCache: z.ZodObject<{
+  registry: z.ZodString
+  versions: z.ZodRecord<z.ZodString, typeof OsVersionInfo>
+  status: z.ZodCodec<
+    z.ZodOptional<typeof RegistryStatus>,
+    typeof RegistryStatus
+  >
+  /**
+   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   */
+  error: z.ZodOptional<z.ZodNullable<z.ZodString>>
+}> = /* @__PURE__ */ object({
+  registry: z.string(),
+  versions: z.record(z.string(), OsVersionInfo),
+  status: wire(RegistryStatus.optional(), RegistryStatus),
+  /**
+   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   */
+  error: z.string().nullable().optional().meta({
+    description:
+      'Failure of the latest synchronization attempt; absent while connecting or connected.',
+  }),
+}).meta({
+  id: 'OsUpdateCache',
+  description: 'Compatible releases from the selected StartOS update source.',
+})
 export const OsVersionInfoMap: z.ZodRecord<z.ZodString, typeof OsVersionInfo> =
   /* @__PURE__ */ z.record(z.string(), OsVersionInfo).meta({
     id: 'OsVersionInfoMap',
   })
+export const PackageAccess: z.ZodObject<{
+  private: z.ZodBoolean
+  readers: z.ZodRecord<z.ZodString, typeof SignerInfo>
+}> = /* @__PURE__ */ object({
+  private: z.boolean(),
+  readers: z.record(z.string(), SignerInfo),
+}).meta({
+  id: 'PackageAccess',
+})
 export const PackageMetadata: z.ZodObject<{
   title: z.ZodString
   description: typeof Description
@@ -5382,12 +5802,75 @@ export const SetDependenciesParams: z.ZodObject<{
 }).meta({
   id: 'SetDependenciesParams',
 })
+export const SetupExecuteParams: z.ZodObject<{
+  guid: z.ZodString
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
+    z.ZodNullable<typeof PasswordType>
+  >
+  recoverySource: z.ZodCodec<
+    z.ZodOptional<
+      z.ZodNullable<ReturnType<typeof RecoverySource<typeof PasswordType>>>
+    >,
+    z.ZodNullable<ReturnType<typeof RecoverySource<typeof PasswordType>>>
+  >
+  kiosk: z.ZodBoolean
+  hostname: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  guid: z.string(),
+  password: wire(PasswordType.nullable().optional(), PasswordType.nullable()),
+  recoverySource: wire(
+    RecoverySource(PasswordType).nullable().optional(),
+    RecoverySource(PasswordType).nullable(),
+  ),
+  kiosk: z.boolean(),
+  hostname: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'SetupExecuteParams',
+})
 export const SetupProgress: z.ZodObject<{
   progress: typeof FullProgress
-  guid: typeof Guid
-}> = /* @__PURE__ */ object({ progress: FullProgress, guid: Guid }).meta({
+  /**
+   * Present for ordinary replies; typed streams use same-ID events.
+   */
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
+}> = /* @__PURE__ */ object({
+  progress: FullProgress,
+  /**
+   * Present for ordinary replies; typed streams use same-ID events.
+   */
+  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Present for ordinary replies; typed streams use same-ID events.',
+  }),
+}).meta({
   id: 'SetupProgress',
 })
+export const SharedVolume: z.ZodIntersection<
+  z.ZodObject<{
+    name: z.ZodString
+    source: typeof SharedVolumeSource
+    grants: z.ZodRecord<z.ZodString, typeof SharedVolumeGrant>
+  }>,
+  typeof SharedVolumeInspection
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      name: z.string(),
+      source: SharedVolumeSource,
+      grants: z.record(z.string(), SharedVolumeGrant),
+    }),
+    SharedVolumeInspection,
+  )
+  .meta({
+    id: 'SharedVolume',
+  })
 export const SideloadParams: z.ZodObject<{
   acceptSigners: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
@@ -5559,6 +6042,9 @@ export const UpdateSystemParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * Requests a legacy progress GUID; rpcstream observes completion independently.
+   */
   progress: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   registry: z.string(),
@@ -5580,7 +6066,13 @@ export const UpdateSystemParams: z.ZodObject<{
       'Accepts an untrusted signer without skipping signature or integrity verification.',
   }),
   targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
-  progress: wire(z.boolean().optional(), z.boolean()),
+  /**
+   * Requests a legacy progress GUID; rpcstream observes completion independently.
+   */
+  progress: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Requests a legacy progress GUID; rpcstream observes completion independently.',
+  }),
 }).meta({
   id: 'UpdateSystemParams',
 })
@@ -5602,6 +6094,22 @@ export const UrlPluginExportUrlParams: z.ZodObject<{
   overflowActions: z.array(ActionId),
 }).meta({
   id: 'UrlPluginExportUrlParams',
+})
+export const VerifyCifsParams: z.ZodObject<{
+  hostname: z.ZodString
+  path: z.ZodString
+  username: z.ZodString
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
+    z.ZodNullable<typeof PasswordType>
+  >
+}> = /* @__PURE__ */ object({
+  hostname: z.string(),
+  path: z.string(),
+  username: z.string(),
+  password: wire(PasswordType.nullable().optional(), PasswordType.nullable()),
+}).meta({
+  id: 'VerifyCifsParams',
 })
 export const WifiListInfo: z.ZodObject<{
   ssids: z.ZodRecord<z.ZodString, typeof SignalStrength>
@@ -5714,46 +6222,29 @@ export const AddSslOptions: z.ZodCodec<
 ).meta({
   id: 'AddSslOptions',
 })
-export const BackupTarget: z.ZodUnion<
-  readonly [
-    z.ZodIntersection<
-      z.ZodObject<{ type: z.ZodLiteral<'disk'> }>,
-      z.ZodIntersection<
-        z.ZodObject<{
-          vendor: z.ZodCodec<
-            z.ZodOptional<z.ZodNullable<z.ZodString>>,
-            z.ZodNullable<z.ZodString>
-          >
-          model: z.ZodCodec<
-            z.ZodOptional<z.ZodNullable<z.ZodString>>,
-            z.ZodNullable<z.ZodString>
-          >
-        }>,
-        typeof PartitionInfo
-      >
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ type: z.ZodLiteral<'cifs'> }>,
-      typeof CifsBackupTarget
-    >,
-  ]
-> = /* @__PURE__ */ z
-  .union([
-    z.intersection(
-      object({ type: z.literal('disk') }),
-      z.intersection(
-        object({
-          vendor: wire(z.string().nullable().optional(), z.string().nullable()),
-          model: wire(z.string().nullable().optional(), z.string().nullable()),
-        }),
-        PartitionInfo,
-      ),
-    ),
-    z.intersection(object({ type: z.literal('cifs') }), CifsBackupTarget),
-  ])
-  .meta({
-    id: 'BackupTarget',
-  })
+
+/**
+ * A completed background backup with its original target name and final report.
+ */
+export const BackupRun: z.ZodObject<{
+  id: z.ZodString
+  targetId: typeof BackupTargetId
+  targetName: z.ZodString
+  startedAt: z.ZodString
+  completedAt: z.ZodString
+  report: typeof BackupReport
+}> = /* @__PURE__ */ object({
+  id: z.string(),
+  targetId: BackupTargetId,
+  targetName: z.string(),
+  startedAt: z.string(),
+  completedAt: z.string(),
+  report: BackupReport,
+}).meta({
+  id: 'BackupRun',
+  description:
+    'A completed background backup with its original target name and final report.',
+})
 export const BindingSetAddressEnabledParams: z.ZodObject<{
   internalPort: z.ZodInt
   address: typeof HostnameInfo
@@ -5905,6 +6396,47 @@ export const DerivedAddressInfo: z.ZodObject<{
 }).meta({
   id: 'DerivedAddressInfo',
 })
+export const DiskInfo: z.ZodObject<{
+  logicalname: z.ZodString
+  stablePath: z.ZodString
+  partitionTable: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PartitionTable>>,
+    z.ZodNullable<typeof PartitionTable>
+  >
+  vendor: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  model: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  partitions: z.ZodArray<typeof PartitionInfo>
+  capacity: z.ZodInt
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  filesystem: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  logicalname: z.string(),
+  stablePath: z.string(),
+  partitionTable: wire(
+    PartitionTable.nullable().optional(),
+    PartitionTable.nullable(),
+  ),
+  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
+  model: wire(z.string().nullable().optional(), z.string().nullable()),
+  partitions: z.array(PartitionInfo),
+  capacity: z.int(),
+  guid: wire(z.string().nullable().optional(), z.string().nullable()),
+  filesystem: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'DiskInfo',
+})
 export const ImageConfig: z.ZodCodec<
   typeof ImageConfigRepr,
   z.ZodObject<{
@@ -5925,9 +6457,24 @@ export const ImageConfig: z.ZodCodec<
   id: 'ImageConfig',
 })
 export const MetricsFollowResponse: z.ZodObject<{
-  guid: typeof Guid
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
   metrics: typeof Metrics
-}> = /* @__PURE__ */ object({ guid: Guid, metrics: Metrics }).meta({
+}> = /* @__PURE__ */ object({
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Present for ordinary replies; typed observations use same-ID events.',
+  }),
+  metrics: Metrics,
+}).meta({
   id: 'MetricsFollowResponse',
 })
 export const NetworkGatewayInfo: z.ZodObject<{
@@ -6207,17 +6754,25 @@ export const LegacyProxySslOptions: z.ZodIntersection<
   .meta({
     id: 'LegacyProxySslOptions',
   })
-export const PackageInfo: z.ZodObject<{
-  authorized: z.ZodRecord<z.ZodString, z.ZodString>
-  versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
-  categories: z.ZodArray<z.ZodString>
-}> = /* @__PURE__ */ object({
-  authorized: z.record(z.string(), z.string()),
-  versions: z.record(z.string(), PackageVersionInfo),
-  categories: z.array(z.string()),
-}).meta({
-  id: 'PackageInfo',
-})
+export const PackageInfo: z.ZodIntersection<
+  z.ZodObject<{
+    authorized: z.ZodRecord<z.ZodString, z.ZodString>
+    versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
+    categories: z.ZodArray<z.ZodString>
+  }>,
+  typeof PackageAccessControl
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      authorized: z.record(z.string(), z.string()),
+      versions: z.record(z.string(), PackageVersionInfo),
+      categories: z.array(z.string()),
+    }),
+    PackageAccessControl,
+  )
+  .meta({
+    id: 'PackageInfo',
+  })
 
 /**
  * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
@@ -6320,6 +6875,10 @@ export const Manifest: z.ZodIntersection<
     canMigrateFrom: z.ZodString
     images: z.ZodRecord<z.ZodString, typeof ImageConfig>
     volumes: z.ZodArray<typeof VolumeId>
+    /**
+     * Enables user-managed grants to shared volumes; grants default to none.
+     */
+    sharedVolumes: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
     dependencies: z.ZodCodec<
       z.ZodOptional<typeof Dependencies>,
       typeof Dependencies
@@ -6339,6 +6898,13 @@ export const Manifest: z.ZodIntersection<
       canMigrateFrom: z.string(),
       images: z.record(z.string(), ImageConfig),
       volumes: z.array(VolumeId),
+      /**
+       * Enables user-managed grants to shared volumes; grants default to none.
+       */
+      sharedVolumes: wire(z.boolean().optional(), z.boolean()).meta({
+        description:
+          'Enables user-managed grants to shared volumes; grants default to none.',
+      }),
       dependencies: wire(Dependencies.optional(), Dependencies),
       hardwareRequirements: wire(
         HardwareRequirements.optional(),
@@ -6358,6 +6924,37 @@ export const PackageIndex: z.ZodObject<{
   packages: z.record(z.string(), PackageInfo),
 }).meta({
   id: 'PackageIndex',
+})
+
+/**
+ * Last synchronized package listings and registry trust proposals.
+ */
+export const RegistryCache: z.ZodObject<{
+  info: typeof RegistryInfo
+  packages: z.ZodRecord<z.ZodString, typeof GetPackageResponse>
+  status: z.ZodCodec<
+    z.ZodOptional<typeof RegistryStatus>,
+    typeof RegistryStatus
+  >
+  /**
+   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   */
+  error: z.ZodOptional<z.ZodNullable<z.ZodString>>
+}> = /* @__PURE__ */ object({
+  info: RegistryInfo,
+  packages: z.record(z.string(), GetPackageResponse),
+  status: wire(RegistryStatus.optional(), RegistryStatus),
+  /**
+   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   */
+  error: z.string().nullable().optional().meta({
+    description:
+      'Failure of the latest synchronization attempt; absent while connecting or connected.',
+  }),
+}).meta({
+  id: 'RegistryCache',
+  description:
+    'Last synchronized package listings and registry trust proposals.',
 })
 export const BindOptions: z.ZodCodec<
   typeof CompatibleBindOptions,
@@ -6804,21 +7401,56 @@ export const AllPackageData: z.ZodRecord<z.ZodString, typeof PackageDataEntry> =
 export const Public: z.ZodObject<{
   serverInfo: typeof ServerInfo
   packageData: typeof AllPackageData
+  registryCache: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof RegistryCache>>,
+    z.ZodRecord<z.ZodString, typeof RegistryCache>
+  >
+  osUpdateCache: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof OsUpdateCache>>,
+    z.ZodNullable<typeof OsUpdateCache>
+  >
+  disks: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof DiskInfo>>,
+    z.ZodArray<typeof DiskInfo>
+  >
+  sharedVolumes: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof SharedVolume>>,
+    z.ZodRecord<z.ZodString, typeof SharedVolume>
+  >
+  backupTargets: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof BackupTarget>>,
+    z.ZodRecord<z.ZodString, typeof BackupTarget>
+  >
   /**
-   * UI-owned state. Outside `version` migrations, the backend never reads or
-   * modifies its contents.
+   * UI-owned state; backend domain logic accesses its contents only during migrations.
    */
   ui: z.ZodUnknown
 }> = /* @__PURE__ */ object({
   serverInfo: ServerInfo,
   packageData: AllPackageData,
+  registryCache: wire(
+    z.record(z.string(), RegistryCache).optional(),
+    z.record(z.string(), RegistryCache),
+  ),
+  osUpdateCache: wire(
+    OsUpdateCache.nullable().optional(),
+    OsUpdateCache.nullable(),
+  ),
+  disks: wire(z.array(DiskInfo).optional(), z.array(DiskInfo)),
+  sharedVolumes: wire(
+    z.record(z.string(), SharedVolume).optional(),
+    z.record(z.string(), SharedVolume),
+  ),
+  backupTargets: wire(
+    z.record(z.string(), BackupTarget).optional(),
+    z.record(z.string(), BackupTarget),
+  ),
   /**
-   * UI-owned state. Outside `version` migrations, the backend never reads or
-   * modifies its contents.
+   * UI-owned state; backend domain logic accesses its contents only during migrations.
    */
   ui: z.unknown().meta({
     description:
-      'UI-owned state. Outside `version` migrations, the backend never reads or\nmodifies its contents.',
+      'UI-owned state; backend domain logic accesses its contents only during migrations.',
   }),
 }).meta({
   id: 'Public',
