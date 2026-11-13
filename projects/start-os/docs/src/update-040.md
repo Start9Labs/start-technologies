@@ -169,7 +169,7 @@ Once all services are updated, you can start them. Wait for all services to full
 
 ### Step 11: Create a Backup!
 
-Create a [full system backup](backup-create.md). Ideally this is to a separate drive (or network folder) than 0.3.5.
+Create a [full system backup](backups.md#creating-a-backup). Ideally this is to a separate drive (or network folder) than 0.3.5.
 
 > [!WARNING]
 > 0.3.5 backups and 0.4.0 backups are **ENTIRELY INCOMPATIBLE**. 0.3.5 backups **cannot** be restored onto 0.4.0. and 0.4.0 backups **cannot** be restored on 0.3.5.1.

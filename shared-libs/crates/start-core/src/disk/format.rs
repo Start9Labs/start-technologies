@@ -62,9 +62,14 @@ pub async fn format(
     })?;
 
     // Detached from the request: a dropped connection does not stop it mid-way.
-    tokio::spawn(erase_and_partition(disk, capacity, block_size, label))
-        .await
-        .with_kind(ErrorKind::Unknown)?
+    let disk_updates = ctx.disk_updates.clone();
+    tokio::spawn(async move {
+        let result = erase_and_partition(disk, capacity, block_size, label).await;
+        disk_updates.send_replace(());
+        result
+    })
+    .await
+    .with_kind(ErrorKind::Unknown)?
 }
 
 async fn erase_and_partition(
@@ -192,9 +197,54 @@ async fn canonical(path: &Path) -> PathBuf {
 }
 
 async fn refuse_protected(os: &OsPartitionInfo, disk: &Path) -> Result<(), Error> {
+    let devices = drive_devices(disk).await?;
+    refuse_system(os, disk, &devices).await?;
+    if let Some(by) = in_use(&devices).await? {
+        return Err(refused(t!(
+            "disk.format.in-use",
+            disk = disk.display(),
+            by = by
+        )));
+    }
+    Ok(())
+}
+
+/// Refuses the drive holding the OS, its data, or the boot medium.
+pub(crate) async fn refuse_system_drive(os: &OsPartitionInfo, disk: &Path) -> Result<(), Error> {
+    refuse_system(os, disk, &drive_devices(disk).await?).await
+}
+
+/// The drive a partition belongs to; a whole drive is its own.
+pub(crate) async fn parent_drive(device: &Path) -> Result<PathBuf, Error> {
+    let device = canonical(device).await;
+    let name = device.file_name().ok_or_else(|| {
+        Error::new(
+            eyre!("invalid device path: {}", device.display()),
+            ErrorKind::BlockDevice,
+        )
+    })?;
+    let sys = tokio::fs::canonicalize(Path::new("/sys/class/block").join(name))
+        .await
+        .with_ctx(|_| (ErrorKind::BlockDevice, device.display().to_string()))?;
+    if tokio::fs::try_exists(sys.join("partition")).await? {
+        if let Some(parent) = sys.parent().and_then(Path::file_name) {
+            return Ok(Path::new("/dev").join(parent));
+        }
+    }
+    Ok(device)
+}
+
+async fn drive_devices(disk: &Path) -> Result<Vec<PathBuf>, Error> {
     let mut devices = vec![disk.to_owned()];
     devices.extend(list_partitions(disk).await?);
+    Ok(devices)
+}
 
+async fn refuse_system(
+    os: &OsPartitionInfo,
+    disk: &Path,
+    devices: &[PathBuf],
+) -> Result<(), Error> {
     if devices
         .iter()
         .any(|d| os.contains(d) || os.data.as_deref() == Some(d))
@@ -221,13 +271,6 @@ async fn refuse_protected(os: &OsPartitionInfo, disk: &Path) -> Result<(), Error
                 disk = disk.display()
             )));
         }
-    }
-    if let Some(by) = in_use(&devices).await? {
-        return Err(refused(t!(
-            "disk.format.in-use",
-            disk = disk.display(),
-            by = by
-        )));
     }
     Ok(())
 }

@@ -283,7 +283,7 @@ export class MockApiService extends ApiService {
     language: 'en_US',
     date: new Date().toISOString(),
     theme: 'system',
-    remoteAccess: 'default',
+    remoteAccess: 'never',
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   }
 

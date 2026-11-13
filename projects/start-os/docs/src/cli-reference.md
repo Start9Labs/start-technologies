@@ -403,9 +403,11 @@ Clear a pending service task.
 
 - `--force` — Force clear even if running
 
-### `start-cli package backup restore <TARGET_ID> <PASSWORD> [IDS...]`
+### `start-cli package backup restore <TARGET_ID> [IDS...]`
 
 Restore one or more packages from a backup.
+
+- `--server-id <ID>` — Server identifier
 
 ### Service Host Management
 
@@ -450,14 +452,25 @@ Enable or disable a specific address binding for a service.
 
 ## Backups
 
-Create backups and manage backup targets (network shares).
+Create backups and manage registered local-folder, drive-folder and network-share targets. Register local and drive targets in **System → Backup Targets**, then obtain their IDs with `start-cli backup target list`. Direct `disk-<logicalname>` IDs are replaced by registered IDs; existing `cifs-N` IDs remain valid.
+
+Target info/mount and package restore read the backup password from `BACKUP_PASSWORD` or prompt for it. CIFS add/update read `CIFS_PASSWORD` or prompt; an empty password selects guest access.
 
 ### `start-cli backup create <TARGET_ID> <PASSWORD>`
 
-Create a backup of all or selected packages.
+Create a backup of all or selected packages. The backup continues in the background; `start-cli backup history list` reports its result.
 
 - `--old-password <PASS>` — Previous backup password (for re-encryption)
 - `--package-ids <IDS>` — Limit to specific packages
+- `--shared-volume-ids <IDS>` — Limit to specific shared volumes
+
+### `start-cli backup history list`
+
+List past backups and their reports, newest first.
+
+- `--offset <N>` — Number of most recent backups to skip (default `0`)
+- `--limit <N>` — Maximum number of backups to return (default `10`)
+- `--format` — Output format
 
 ### `start-cli backup target list`
 
@@ -465,13 +478,13 @@ List configured backup targets.
 
 - `--format` — Output format
 
-### `start-cli backup target info <TARGET_ID> <SERVER_ID> <PASSWORD>`
+### `start-cli backup target info <TARGET_ID> <SERVER_ID>`
 
 Display backup information for a target.
 
 - `--format` — Output format
 
-### `start-cli backup target mount <TARGET_ID> <PASSWORD>`
+### `start-cli backup target mount <TARGET_ID>`
 
 Mount a backup target.
 
@@ -488,11 +501,11 @@ Delete this server's legacy (V1) backup from a target. The backup is removed
 immediately; its space is reclaimed in the background, with a notification
 when it finishes.
 
-### `start-cli backup target cifs add <HOSTNAME> <PATH> <USERNAME> [PASSWORD]`
+### `start-cli backup target cifs add <HOSTNAME> <PATH> <USERNAME>`
 
 Add a new CIFS/SMB network share as a backup target.
 
-### `start-cli backup target cifs update <ID> <HOSTNAME> <PATH> <USERNAME> [PASSWORD]`
+### `start-cli backup target cifs update <ID> <HOSTNAME> <PATH> <USERNAME>`
 
 Update an existing CIFS backup target.
 
@@ -756,14 +769,7 @@ Disable kiosk mode.
 
 ## Disks
 
-List, repair, and format storage devices.
-
-### `start-cli disk list`
-
-List all disks and partitions. Unmountable partitions and EFI system
-partitions are omitted.
-
-- `--format` — Output format
+Repair and format storage devices.
 
 ### `start-cli disk repair`
 

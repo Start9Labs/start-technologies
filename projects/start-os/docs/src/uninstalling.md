@@ -10,7 +10,7 @@ Uninstalling removes a service from StartOS. A regular uninstall deletes the ser
 
 If other installed services depend on it, the warning also says that they will no longer work properly and may crash. See [Dependencies](dependencies.md).
 
-Uninstalling deletes the service's data and its logs. Your backups are untouched, so you can bring the service back by [restoring it from a backup](backup-restore.md).
+Uninstalling deletes the service's data and its logs. Your backups are untouched, so you can bring the service back by [restoring it from a backup](backups.md#restoring-individual-services-or-volumes).
 
 ## When a Service Fails to Launch
 
