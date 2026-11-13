@@ -800,6 +800,9 @@ mod test {
         DatabaseModel::from(imbl_value::json!({
             "public": {
                 "ui": {},
+                "disks": [],
+                "sharedVolumes": {},
+                "backupTargets": {},
                 "serverInfo": {
                     "hostname": "server",
                     "network": {

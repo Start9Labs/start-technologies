@@ -1,6 +1,6 @@
 import type { Api, ApiClient, Params, Result } from './api.types'
 import { inject, Injectable } from '@angular/core'
-import { WA_SESSION_STORAGE } from '@ng-web-apis/common'
+import { WA_CRYPTO, WA_SESSION_STORAGE } from '@ng-web-apis/common'
 import {
   FALLBACK_ICON,
   GetPackageRes,
@@ -47,6 +47,7 @@ import {
 } from 'rxjs'
 import { WebSocketSubject } from 'rxjs/webSocket'
 import {
+  BackupTargetEntry,
   DataModel,
   InstallingState,
   PackageDataEntry,
@@ -57,13 +58,15 @@ import {
 import { ConfigService } from 'src/app/services/config.service'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
+import { getCurrentManifest, getManifest } from 'src/app/utils/get-package-data'
+import { getDriveName } from 'src/app/utils/get-drive-name'
 import { parsePemPublicKey, parsePublicKeys } from 'src/app/utils/public-keys'
+import { BackupRun } from 'src/app/routes/portal/routes/system/routes/backups/backup.types'
 import { Mock } from './api.fixures'
 import { BTC_ICON, LND_ICON, PROXY_ICON } from './api-icons'
 import {
   ActionRes,
   CheckDnsRes,
-  CifsBackupTarget,
   DiagnosticErrorRes,
   FollowPackageLogsReq,
   FollowServerLogsReq,
@@ -88,6 +91,15 @@ import { mockPatchData } from './mock-patch'
 import markdown from './md-sample.md'
 
 const UI_KEY = '_startos/mock-ui'
+
+type SourceCollection = 'sharedVolumes' | 'backupTargets'
+
+const UNKNOWN_SOURCE: Result<'volumes.inspect'> = {
+  availability: 'unknown',
+  available: null,
+  error: null,
+  checkedAt: null,
+}
 
 const PROGRESS: T.FullProgress = {
   overall: {
@@ -131,7 +143,24 @@ export class MockApiService extends ApiService {
   private readonly cache = inject(PATCH_CACHE)
   private readonly gitHash = inject(ConfigService).gitHash
   private readonly revertTime = 1800
+  private readonly crypto = inject(WA_CRYPTO)
+  private drives?: Map<string, number>
+  private history?: BackupRun[]
   private readonly conversionJobs: T.ServerStatus['backupConversions'] = {}
+
+  private get attachedDrives() {
+    return (this.drives ??= new Map(
+      Mock.Disks.flatMap(disk => disk.partitions).map(partition => [
+        Mock.driveLink(partition.logicalname),
+        partition.available ?? partition.capacity,
+      ]),
+    ))
+  }
+
+  private get backupHistory() {
+    return (this.history ??= structuredClone(Mock.BackupHistory))
+  }
+
   private readonly pushSubscriptions = new Map<
     string,
     Params<'notification.push.subscribe'>
@@ -291,30 +320,31 @@ export class MockApiService extends ApiService {
       },
       hardware: null,
     }),
-    'server.trusted-keys.connect-registry': async ({ url, name }) => {
+    'server.registries.add': async ({ url, name }) => {
       await pauseFor(2000)
       const normalized = registryUrl(url)
       const info = this.mockRegistryInfo(normalized)
       const { added } = this.importRegistryKeys(normalized, info)
       for (const id of added)
         mockPatchData.serverInfo.trustedKeys[id]!.marketplace = true
-      for (const saved of Object.keys(mockPatchData.ui.registries)) {
+      for (const saved of Object.keys(mockPatchData.serverInfo.registries)) {
         if (sameUrl(saved, normalized))
-          delete mockPatchData.ui.registries[saved]
+          delete mockPatchData.serverInfo.registries[saved]
       }
-      mockPatchData.ui.registries[normalized] = name ?? info.name
+      mockPatchData.serverInfo.registries[normalized] = name ?? info.name
       await this.publishTrust()
       return added
     },
-    'server.trusted-keys.remove-registry': async ({ url }) => {
+    'server.registries.remove': async ({ url }) => {
       await pauseFor(2000)
-      if (sameUrl(url, mockPatchData.ui.startosRegistry))
+      if (sameUrl(url, mockPatchData.serverInfo.osRegistry))
         throw new Error(
           'This registry provides StartOS updates. Choose another registry for StartOS updates before removing it.',
         )
       const offered = this.offeredKeys(url)
-      for (const saved of Object.keys(mockPatchData.ui.registries)) {
-        if (sameUrl(saved, url)) delete mockPatchData.ui.registries[saved]
+      for (const saved of Object.keys(mockPatchData.serverInfo.registries)) {
+        if (sameUrl(saved, url))
+          delete mockPatchData.serverInfo.registries[saved]
       }
       for (const saved of Object.keys(mockPatchData.serverInfo.registryKeys)) {
         if (sameUrl(saved, url))
@@ -326,10 +356,10 @@ export class MockApiService extends ApiService {
         return key?.removable && key.origin !== 'manual'
       })
     },
-    'server.trusted-keys.set-os-registry': async ({ url }) => {
+    'server.registries.set-os': async ({ url }) => {
       await pauseFor(2000)
       if (
-        !Object.keys(mockPatchData.ui.registries).some(saved =>
+        !Object.keys(mockPatchData.serverInfo.registries).some(saved =>
           sameUrl(saved, url),
         )
       )
@@ -339,7 +369,7 @@ export class MockApiService extends ApiService {
       )
       for (const id of enabled)
         mockPatchData.serverInfo.trustedKeys[id]!.os = true
-      mockPatchData.ui.startosRegistry = registryUrl(url)
+      mockPatchData.serverInfo.osRegistry = registryUrl(url)
       await this.publishTrust()
       return enabled
     },
@@ -470,13 +500,27 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
       return null
     },
-    'disk.list': async () => {
-      await pauseFor(1000)
-      return Mock.Disks
-    },
-    'disk.format': async ({ disk }) => {
+    'disk.format': async ({ disk, label }) => {
       await pauseFor(3000)
-      return `${disk}1`
+      const partition = `${disk}1`
+      const drive = Mock.Disks.find(d => d.logicalname === disk)!
+      this.attachedDrives.set(Mock.driveLink(partition), drive.capacity)
+      drive.partitions = [
+        {
+          logicalname: partition,
+          stablePath: `${drive.stablePath}-part1`,
+          label: label ?? 'StartOS Backups',
+          capacity: drive.capacity,
+          used: 0,
+          available: drive.capacity,
+          startOs: {},
+          legacyBackup: false,
+          guid: null,
+          filesystem: 'btrfs',
+        },
+      ]
+      await this.publishDisks()
+      return partition
     },
     'server.set-hostname': async params => {
       await pauseFor(1000)
@@ -853,13 +897,120 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
       return null
     },
+    'volumes.create': async ({ name, source }) => {
+      await pauseFor(1000)
+      const id = this.guid()
+      const volume: T.SharedVolume = {
+        name,
+        source: this.mockSource(source),
+        grants: {},
+        ...UNKNOWN_SOURCE,
+      }
+      await this.mockRevision<unknown>([
+        {
+          op: PatchOp.ADD,
+          path: `/sharedVolumes/${id}`,
+          value: volume,
+        },
+      ])
+      this.queueSourceCheck('sharedVolumes', id)
+      return id
+    },
+    'volumes.update-cifs': async ({ id, hostname, path, username }) => {
+      await pauseFor(1000)
+      const volume: T.SharedVolume | undefined = this.mockData(
+        `/sharedVolumes/${id}`,
+      )
+      if (!volume || volume.source.kind !== 'cifs')
+        throw new Error('CIFS volume not found')
+      await this.mockRevision<unknown>([
+        {
+          op: PatchOp.REPLACE,
+          path: `/sharedVolumes/${id}`,
+          value: {
+            ...volume,
+            source: this.mockSource({ kind: 'cifs', hostname, path, username }),
+            ...UNKNOWN_SOURCE,
+          },
+        },
+      ])
+      this.queueSourceCheck('sharedVolumes', id)
+      return null
+    },
+    'volumes.rename': async ({ id, name }) => {
+      const volume: T.SharedVolume | undefined = this.mockData(
+        `/sharedVolumes/${id}`,
+      )
+      if (!volume) throw new Error('Volume not found')
+      await this.mockRevision([
+        { op: PatchOp.REPLACE, path: `/sharedVolumes/${id}/name`, value: name },
+      ])
+      return null
+    },
+    'volumes.set-grant': async ({ id, packageId, grant }) => {
+      const volume: T.SharedVolume | undefined = this.mockData(
+        `/sharedVolumes/${id}`,
+      )
+      if (!volume) throw new Error('Volume not found')
+      if (grant) {
+        const pkg = this.mockData(`/packageData/${packageId}`) as
+          | PackageDataEntry
+          | undefined
+        if (!pkg || !getCurrentManifest(pkg).sharedVolumes)
+          throw new Error('This service cannot use shared volumes')
+      }
+      const grants = { ...volume.grants }
+      if (grant) grants[packageId] = grant
+      else delete grants[packageId]
+      await this.mockRevision([
+        {
+          op: PatchOp.REPLACE,
+          path: `/sharedVolumes/${id}/grants`,
+          value: grants,
+        },
+      ])
+      return null
+    },
+    'volumes.remove': async ({ id }) => {
+      const volume: T.SharedVolume | undefined = this.mockData(
+        `/sharedVolumes/${id}`,
+      )
+      if (!volume) return null
+      if (volume.source.kind === 'local') {
+        await this.mockRevision([
+          {
+            op: PatchOp.REPLACE,
+            path: `/sharedVolumes/${id}/grants`,
+            value: {},
+          },
+        ])
+      }
+      await this.mockRevision([
+        { op: PatchOp.REMOVE, path: `/sharedVolumes/${id}` },
+      ])
+      return null
+    },
+    'volumes.inspect': async ({ id }) => {
+      await pauseFor(1000)
+      return this.checkSource('sharedVolumes', id)
+    },
     'backup.target.list': async params => {
       await pauseFor(2000)
-      return structuredClone(Mock.BackupTargets)
+      return structuredClone(
+        this.mockData('/backupTargets'),
+      ) as DataModel['backupTargets']
+    },
+    'backup.history.list': async ({ offset, limit }) => {
+      await pauseFor(500)
+      return {
+        runs: structuredClone(this.backupHistory.slice(offset, offset + limit)),
+        total: this.backupHistory.length,
+      }
     },
     'backup.target.convert': async params => {
-      const backup =
-        Mock.BackupTargets[params.targetId]?.startOs[params.serverId]
+      const backup: T.StartOsRecoveryInfo | undefined = structuredClone(
+        this.backupTarget(params.targetId)?.startOs[params.serverId],
+      )
       if (!backup) throw new Error('Backup not found')
       const jobs = (this.conversionJobs[params.targetId] ??= {})
       if (jobs[params.serverId]?.state === 'running')
@@ -870,45 +1021,123 @@ export class MockApiService extends ApiService {
         error: null,
       }
       backup.formatStatus = 'interrupted'
+      await this.publishBackup(params, backup)
       void this.simulateConversion(params, backup)
       return null
     },
-    'backup.target.cifs.add': async params => {
-      await pauseFor(2000)
-      const { hostname, path, username } = params
-      return {
-        latfgvwdbhjsndmk: {
-          type: 'cifs',
-          hostname,
-          path,
-          username,
-          mountable: true,
-          available: 50000000000,
-          startOs: {},
-          legacyBackup: false,
+    'backup.target.create': async ({ name, source }) => {
+      await pauseFor(1000)
+      const id = this.guid()
+      await this.mockRevision<unknown>([
+        {
+          op: PatchOp.ADD,
+          path: `/backupTargets/${id}`,
+          value: {
+            name,
+            source: this.mockSource(source),
+            ...UNKNOWN_SOURCE,
+            startOs: {},
+            legacyBackup: false,
+          },
         },
+      ])
+      this.queueSourceCheck('backupTargets', id)
+      return id
+    },
+    'backup.target.find': async () => {
+      await this.publishDisks()
+      const added: string[] = []
+      for (const partition of Mock.Disks.flatMap(disk => disk.partitions)) {
+        if (!Object.keys(partition.startOs).length) continue
+        const storedSource = Mock.diskSource(partition.logicalname)
+        const logicalname = storedSource.logicalname
+        const targets: Record<string, T.BackupTarget> =
+          this.mockData('/backupTargets')
+        if (
+          Object.values(targets).some(
+            ({ source }) =>
+              source.kind === 'disk' &&
+              source.logicalname === logicalname &&
+              !source.path,
+          )
+        )
+          continue
+        added.push(
+          await this.rpc.backup.target.create({
+            name: partition.label?.trim()
+              ? partition.label
+              : getDriveName(storedSource.drive) || partition.logicalname,
+            source: {
+              kind: 'disk',
+              logicalname: partition.logicalname,
+              path: '',
+            },
+          }),
+        )
       }
+      return added
+    },
+    'backup.target.rename': async ({ id, name }) => {
+      await this.mockRevision<unknown>([
+        { op: PatchOp.REPLACE, path: `/backupTargets/${id}/name`, value: name },
+      ])
+      return null
+    },
+    'backup.target.update-cifs': async ({ id, hostname, path, username }) => {
+      await pauseFor(1000)
+      const target = this.cifsTarget(id)
+      await this.mockRevision<unknown>([
+        {
+          op: PatchOp.REPLACE,
+          path: `/backupTargets/${id}`,
+          value: {
+            ...target,
+            source: this.mockSource({ kind: 'cifs', hostname, path, username }),
+            ...UNKNOWN_SOURCE,
+            startOs: {},
+            legacyBackup: false,
+          },
+        },
+      ])
+      this.queueSourceCheck('backupTargets', id)
+      return null
+    },
+    'backup.target.remove': async ({ id }) => {
+      await pauseFor(1000)
+      if (this.backupTarget(id))
+        await this.mockRevision([
+          { op: PatchOp.REMOVE, path: `/backupTargets/${id}` },
+        ])
+      return null
+    },
+    'backup.target.inspect': async ({ id }) => {
+      await pauseFor(1000)
+      return this.checkSource('backupTargets', id)
+    },
+    'backup.target.cifs.add': async params => {
+      const id = await this.rpc.backup.target.create({
+        name: `${params.hostname}:${params.path}`,
+        source: { kind: 'cifs', ...params },
+      })
+      return { [id]: this.backupTarget(id)! }
     },
     'backup.target.cifs.update': async params => {
-      await pauseFor(2000)
-      const { id, hostname, path, username } = params
-      return {
-        [id]: {
-          ...(Mock.BackupTargets[id] as CifsBackupTarget),
-          hostname,
-          path,
-          username,
-        },
-      }
+      await this.rpc.backup.target.updateCifs(params)
+      return { [params.id]: this.backupTarget(params.id)! }
     },
     'backup.target.cifs.remove': async params => {
-      await pauseFor(2000)
-      return null
+      this.cifsTarget(params.id)
+      return this.rpc.backup.target.remove(params)
     },
     'backup.target.delete-legacy': async params => {
       await pauseFor(2000)
-      const target = Mock.BackupTargets[params.targetId]
-      if (target) target.legacyBackup = false
+      await this.mockRevision<unknown>([
+        {
+          op: PatchOp.REPLACE,
+          path: `/backupTargets/${params.targetId}/legacyBackup`,
+          value: false,
+        },
+      ])
       return null
     },
     'backup.target.info': async params => {
@@ -916,17 +1145,29 @@ export class MockApiService extends ApiService {
       return Mock.BackupInfo
     },
     'backup.create': async params => {
+      const startedAt = new Date().toISOString()
       await pauseFor(2000)
+      const target = this.backupTarget(params.targetId)
+      if (!target) throw new Error('Backup target not found')
+      const targetName = target.name
+      const source = structuredClone(target.source)
       const serverPath = '/serverInfo/statusInfo/backupProgress'
-      const ids = params.packageIds || []
-      // One phase per package plus a trailing "OS Data" phase (the host
-      // writes os-backup.json + LUKS folder after the per-package loop).
-      const phaseCount = ids.length + 1
+      const ids =
+        params.packageIds ?? Object.keys(this.mockData('/packageData'))
+      const volumes =
+        params.sharedVolumeIds ?? Object.keys(this.mockData('/sharedVolumes'))
+      const report: T.BackupReport = {
+        server: { attempted: true, error: null },
+        packages: {},
+        sharedVolumes: {},
+      }
+      const phaseCount = ids.length + volumes.length + 1
 
       setTimeout(async () => {
         for (let i = 0; i < ids.length; i++) {
           const id = ids[i]!
           const appPath = `/packageData/${id}/statusInfo/desired/main`
+          const previous = this.mockData(appPath) as T.DesiredStatus['main']
           const appPatch: ReplaceOperation<T.DesiredStatus['main']>[] = [
             {
               op: PatchOp.REPLACE,
@@ -952,7 +1193,7 @@ export class MockApiService extends ApiService {
           this.mockRevision([
             {
               ...appPatch[0]!,
-              value: 'stopped',
+              value: previous,
             },
           ])
 
@@ -967,10 +1208,55 @@ export class MockApiService extends ApiService {
             value: { done: i + 1, total: phaseCount, units: null },
           }
           this.mockRevision([completePhase, advanceOverall])
+          const manifest = getManifest(this.mockData(`/packageData/${id}`))
+          Mock.BackupInfo.packageBackups[id] = {
+            title: manifest.title,
+            version: manifest.version,
+            osVersion: this.mockData('/serverInfo/version'),
+            timestamp: new Date().toISOString(),
+          }
+          report.packages[id] = { error: null, duration_ms: 8000 }
+        }
+        for (const [offset, id] of volumes.entries()) {
+          const volume = this.mockData(`/sharedVolumes/${id}`) as
+            | T.SharedVolume
+            | undefined
+          const inspection = volume
+            ? await this.rpc.volumes.inspect({ id })
+            : null
+          const error =
+            inspection?.error ?? (volume ? null : 'Volume not found')
+          report.sharedVolumes[id] = {
+            name: volume?.name ?? id,
+            error,
+            duration_ms: 1000,
+          }
+          if (!error && volume)
+            Mock.BackupInfo.sharedVolumeBackups[id] = {
+              name: volume.name,
+              timestamp: new Date().toISOString(),
+              generation: this.guid(),
+            }
+          await pauseFor(1000)
+          await this.mockRevision<T.Progress>([
+            {
+              op: PatchOp.REPLACE,
+              path: `${serverPath}/phases/${ids.length + offset}/progress`,
+              value: true,
+            },
+            {
+              op: PatchOp.REPLACE,
+              path: `${serverPath}/overall`,
+              value: {
+                done: ids.length + offset + 1,
+                total: phaseCount,
+                units: null,
+              },
+            },
+          ])
         }
 
-        // OS Data phase
-        const osIdx = ids.length
+        const osIdx = ids.length + volumes.length
         await pauseFor(1500)
         const completeOsPhase: ReplaceOperation<T.Progress> = {
           op: PatchOp.REPLACE,
@@ -986,6 +1272,15 @@ export class MockApiService extends ApiService {
 
         await pauseFor(800)
 
+        this.backupHistory.unshift({
+          id: this.guid(),
+          targetId: params.targetId,
+          targetName,
+          startedAt,
+          completedAt: new Date().toISOString(),
+          report,
+        })
+
         const lastPatch: ReplaceOperation<T.ServerStatus['backupProgress']>[] =
           [
             {
@@ -995,32 +1290,40 @@ export class MockApiService extends ApiService {
             },
           ]
         this.mockRevision(lastPatch)
+        if (utils.deepEqual(this.backupTarget(params.targetId)?.source, source))
+          await this.mockRevision<unknown>([
+            {
+              op: PatchOp.ADD,
+              path: `/backupTargets/${params.targetId}/startOs/${Mock.ServerId}`,
+              value: {
+                hostname: this.mockData('/serverInfo/hostname'),
+                timestamp: new Date().toISOString(),
+                version: this.mockData('/serverInfo/version'),
+                formatStatus: 'current',
+              },
+            },
+          ])
 
-        // Feature 1: a completed backup whose target still holds a legacy (V1)
-        // folder raises a warning notification — bumps the unread badge and
-        // lands in the notifications list, pointing the user at the create page.
-        if (Mock.BackupTargets[params.targetId]?.legacyBackup) {
-          const count = mockPatchData.serverInfo.unreadNotificationCount + 1
-          mockPatchData.serverInfo.unreadNotificationCount = count
-          Mock.Notifications.unshift({
-            id: Math.max(0, ...Mock.Notifications.map(n => n.id)) + 1,
+        await this.notify({
+          packageId: null,
+          code: 1,
+          level: Object.values(report.sharedVolumes).some(item => item.error)
+            ? 'warning'
+            : 'success',
+          title: 'Backup complete',
+          message: 'Backup complete',
+          data: report,
+        })
+        if (this.backupTarget(params.targetId)?.legacyBackup) {
+          await this.notify({
             packageId: null,
-            createdAt: new Date().toISOString(),
             code: 0,
             level: 'warning',
             title: 'Old Backup Still Present',
             message:
-              'This backup target still contains an old-format (V1) backup that is no longer needed. To free up space on the drive, go to the backup creation page and delete it.',
+              'This backup target still contains an old-format (V1) backup that is no longer needed. To free up space on the drive, open this target on the Backups page and delete it.',
             data: null,
-            seen: false,
           })
-          this.mockRevision([
-            {
-              op: PatchOp.REPLACE,
-              path: '/serverInfo/unreadNotificationCount',
-              value: count,
-            },
-          ])
         }
       }, 500)
 
@@ -1034,6 +1337,10 @@ export class MockApiService extends ApiService {
             overall: { done: 0, total: phaseCount, units: null },
             phases: [
               ...ids.map(id => ({ name: id, progress: null })),
+              ...volumes.map(id => ({
+                name: this.mockData(`/sharedVolumes/${id}`)?.name ?? id,
+                progress: null,
+              })),
               { name: 'OS Data', progress: null },
             ],
           },
@@ -1219,6 +1526,33 @@ export class MockApiService extends ApiService {
       this.mockRevision(patch)
 
       return null
+    },
+    'backup.volume.restore': async ({ ids }) => {
+      const result: Result<'backup.volume.restore'> = {
+        restored: {},
+        errors: {},
+      }
+      for (const id of ids ??
+        Object.keys(Mock.BackupInfo.sharedVolumeBackups)) {
+        const info = Mock.BackupInfo.sharedVolumeBackups[id]
+        if (!info) {
+          result.errors[id] = 'Volume not found in backup'
+          continue
+        }
+        const restored = await this.rpc.volumes.create({
+          name: info.name,
+          source: { kind: 'local' },
+        })
+        await this.mockRevision([
+          {
+            op: PatchOp.REPLACE,
+            path: `/sharedVolumes/${restored}/availability`,
+            value: 'available',
+          },
+        ])
+        result.restored[id] = restored
+      }
+      return result
     },
     'package.backup.restore': async params => {
       await pauseFor(2000)
@@ -2498,6 +2832,24 @@ export class MockApiService extends ApiService {
     }
   }
 
+  private async notify(
+    notification: Omit<T.NotificationWithId, 'id' | 'createdAt' | 'seen'>,
+  ) {
+    Mock.Notifications.unshift({
+      ...notification,
+      id: Math.max(0, ...Mock.Notifications.map(item => item.id)) + 1,
+      createdAt: new Date().toISOString(),
+      seen: false,
+    })
+    await this.mockRevision([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/unreadNotificationCount',
+        value: this.mockData('/serverInfo/unreadNotificationCount') + 1,
+      },
+    ])
+  }
+
   private offeredKeys(url: string): string[] {
     return Object.entries(mockPatchData.serverInfo.registryKeys)
       .filter(([saved]) => sameUrl(saved, url))
@@ -2567,7 +2919,7 @@ export class MockApiService extends ApiService {
     return {
       ...Mock.RegistryInfo,
       name:
-        Object.entries(mockPatchData.ui.registries).find(([saved]) =>
+        Object.entries(mockPatchData.serverInfo.registries).find(([saved]) =>
           sameUrl(saved, url),
         )?.[1] || 'Example Registry',
     }
@@ -2577,7 +2929,7 @@ export class MockApiService extends ApiService {
     const listed = new Set(
       Object.entries(mockPatchData.serverInfo.registryKeys)
         .filter(([url]) =>
-          Object.keys(mockPatchData.ui.registries).some(saved =>
+          Object.keys(mockPatchData.serverInfo.registries).some(saved =>
             sameUrl(saved, url),
           ),
         )
@@ -2603,13 +2955,13 @@ export class MockApiService extends ApiService {
       },
       {
         op: PatchOp.REPLACE,
-        path: '/ui/registries',
-        value: structuredClone(mockPatchData.ui.registries),
+        path: '/serverInfo/registries',
+        value: structuredClone(mockPatchData.serverInfo.registries),
       },
       {
         op: PatchOp.REPLACE,
-        path: '/ui/startosRegistry',
-        value: mockPatchData.ui.startosRegistry,
+        path: '/serverInfo/osRegistry',
+        value: mockPatchData.serverInfo.osRegistry,
       },
     ])
   }
@@ -2622,6 +2974,131 @@ export class MockApiService extends ApiService {
         value: structuredClone(this.conversionJobs),
       },
     ])
+  }
+
+  private backupTarget(id: string): BackupTargetEntry | undefined {
+    return this.mockData('/backupTargets')[id]
+  }
+
+  private cifsTarget(id: string) {
+    const target = this.backupTarget(id)
+    if (target?.source.kind !== 'cifs') throw new Error('CIFS target not found')
+    return target
+  }
+
+  private mockSource(
+    source: Params<'volumes.create'>['source'],
+  ): T.SharedVolumeSource {
+    switch (source.kind) {
+      case 'cifs':
+        return {
+          kind: 'cifs',
+          hostname: source.hostname,
+          path: `/${source.path.replace(/^\/+/, '')}`,
+          username: source.username ?? '',
+        }
+      case 'disk':
+        return Mock.diskSource(source.logicalname, source.path)
+      default:
+        return source
+    }
+  }
+
+  private async publishBackup(
+    { targetId, serverId }: { targetId: string; serverId: string },
+    backup: T.StartOsRecoveryInfo,
+  ): Promise<void> {
+    await this.mockRevision<unknown>([
+      {
+        op: PatchOp.REPLACE,
+        path: `/backupTargets/${targetId}/startOs/${serverId}`,
+        value: structuredClone(backup),
+      },
+    ])
+  }
+
+  private queueSourceCheck(collection: SourceCollection, id: string) {
+    void pauseFor(1000).then(() => {
+      if (this.mockData(`/${collection}`)[id])
+        return this.checkSource(collection, id)
+    })
+  }
+
+  private async checkSource(
+    collection: SourceCollection,
+    id: string,
+  ): Promise<Result<'volumes.inspect'>> {
+    const volume: { source: T.SharedVolumeSource } | undefined = this.mockData(
+      `/${collection}`,
+    )[id]
+    if (!volume) throw new Error('Not found')
+    const prefix =
+      'The volume source is unavailable. Check the source, network and credentials.: '
+    const { source } = volume
+    const result: Omit<Result<'volumes.inspect'>, 'checkedAt'> = source.kind ===
+    'local'
+      ? { availability: 'available', available: 812400000000, error: null }
+      : source.kind === 'disk'
+        ? this.attachedDrives.has(source.logicalname)
+          ? {
+              availability: 'available',
+              available: this.attachedDrives.get(source.logicalname)!,
+              error: null,
+            }
+          : {
+              availability: 'unavailable',
+              available: null,
+              error: `${prefix}mount: special device ${source.logicalname} does not exist`,
+            }
+        : source.hostname.endsWith('.invalid')
+          ? {
+              availability: 'unavailable',
+              available: null,
+              error: `${prefix}mount error(113): could not connect to ${source.hostname}`,
+            }
+          : {
+              availability: 'available',
+              available: 3215000000000,
+              error: null,
+            }
+    const inspection = { ...result, checkedAt: new Date().toISOString() }
+    const partition =
+      collection === 'backupTargets' && source.kind === 'disk' && !source.path
+        ? Mock.Disks.flatMap(disk => disk.partitions).find(
+            partition =>
+              Mock.driveLink(partition.logicalname) === source.logicalname,
+          )
+        : undefined
+    await this.mockRevision<unknown>(
+      Object.entries({
+        ...inspection,
+        ...(partition && result.availability === 'available'
+          ? { startOs: partition.startOs, legacyBackup: partition.legacyBackup }
+          : {}),
+      }).map(([key, value]) => ({
+        op: PatchOp.REPLACE,
+        path: `/${collection}/${id}/${key}`,
+        value,
+      })),
+    )
+    return inspection
+  }
+
+  private async publishDisks(): Promise<void> {
+    await this.mockRevision<unknown>([
+      {
+        op: PatchOp.REPLACE,
+        path: '/disks',
+        value: structuredClone(Mock.Disks),
+      },
+    ])
+  }
+
+  private guid(): string {
+    return Array.from(
+      this.crypto.getRandomValues(new Uint8Array(32)),
+      value => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[value & 31],
+    ).join('')
   }
 
   private async simulateConversion(
@@ -2664,6 +3141,7 @@ export class MockApiService extends ApiService {
       phase.complete()
     }
     backup.formatStatus = 'current'
+    await this.publishBackup(params, backup)
     job.state = 'complete'
     progress.complete()
     job.progress = progress.snapshot()

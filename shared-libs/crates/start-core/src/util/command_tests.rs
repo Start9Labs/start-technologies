@@ -79,6 +79,46 @@ async fn command_stream_short_writes_and_concurrent_input_stderr() {
 }
 
 #[tokio::test]
+async fn command_forward_stderr_preserves_capture_and_pipeline_errors() {
+    let mut command = Command::new("sh");
+    command.args(["-c", "printf output; printf progress >&2"]);
+    assert_eq!(
+        command
+            .forward_stderr(true)
+            .invoke(ErrorKind::Docker)
+            .await
+            .unwrap(),
+        b"output"
+    );
+
+    let mut second = Command::new("cat");
+    let mut streamed = Vec::new();
+    command
+        .pipe(&mut second)
+        .forward_stderr(true)
+        .output_to(&mut streamed)
+        .invoke(ErrorKind::Docker)
+        .await
+        .unwrap();
+    assert_eq!(streamed, b"output");
+
+    for pipeline in [false, true] {
+        let mut command = Command::new("sh");
+        command.args(["-c", "printf 'build failed' >&2; exit 7"]);
+        let mut second = Command::new("cat");
+        let mut command = command.forward_stderr(true);
+        let error = if pipeline {
+            command.pipe(&mut second).invoke(ErrorKind::Docker).await
+        } else {
+            command.invoke(ErrorKind::Docker).await
+        }
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Docker);
+        assert!(error.to_string().contains("build failed"));
+    }
+}
+
+#[tokio::test]
 async fn command_stream_bounded_duplex() {
     let (mut writer, mut reader) = tokio::io::duplex(1024);
     let mut cmd = fixture("import sys; sys.stdout.buffer.write(b'x'*4194304)");

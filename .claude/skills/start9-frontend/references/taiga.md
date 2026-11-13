@@ -52,6 +52,10 @@ nothing may import it. When in doubt: the official MCP
   hover/active), `tuiAppearanceFocus`, `tuiAppearanceMode`. Bundled names: `primary`,
   `secondary`, `flat`, `outline`, `action`, `accent`, `icon`, `floating`, `textfield`,
   `neutral`/`positive`/`negative`/`warning`/`info` (+ `-grayscale` variants used fleet-wide).
+- `tuiAppearanceMode="checked"` draws a picked badge, chip or card in its appearance's checked
+  styling, not a `._on` class with its own border and shadow. Only `outline*`, `secondary*` and
+  the status appearances define one, and `floating` has none:
+  `<span tuiBadge appearance="outline-grayscale" tuiAppearanceMode="checked">Selected</span>`.
 - **Custom appearance = CSS, not TS**, in the theme sheet with the state mixins:
 
 ```scss
@@ -181,4 +185,7 @@ Handles paste/drop/autofill/predictive keyboards; SSR-safe. Never keydown-regex 
 | Radio group                                     | `tuiGroup` of `tuiRadio` rows           | `tui-radio-list` + `[items]` + `[itemContent]`                                                                  |
 | Full-width row in a dialog/card/list            | `inline-size: 100%` + padding CSS       | `tuiCell` + `tuiCellStretch`; its gutter is in styling.md                                                       |
 | Copy button, rating, pagination, PIN, carousel… | write it                                | it's in kit — check the docs first                                                                              |
+| Pill, tag or labelled chip                      | padded span + border-radius CSS         | `tuiChip` / `tuiBadge` with `iconStart`/`iconEnd`; `iconStart="@img.<url>"` for a picture                       |
+| Inline code                                     | global `code { padding; background }`   | `<code tuiChip size="xs">`                                                                                      |
+| Icon in a tinted circle, logo tile              | sized div + `place-items: center`       | `tuiAvatar="@tui.x" appearance="negative"`; `<span tuiAvatar [round]="false"><img …></span>`                    |
 | Empty state                                     | custom illustration div                 | `tui-block-status`                                                                                              |

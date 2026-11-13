@@ -1,22 +1,24 @@
 import { T } from '@start9labs/start-core'
 import { TuiDialogContext } from '@taiga-ui/core'
-import {
-  CifsBackupTarget,
-  DiskBackupTarget,
-} from 'src/app/services/api/api.types'
-import { MappedBackupTarget } from './backup.service'
+import { Result } from 'src/app/services/api/api.types'
 
-export type BackupContext = TuiDialogContext<
-  void,
-  MappedBackupTarget<CifsBackupTarget | DiskBackupTarget>
->
+export type BackupContext = TuiDialogContext<void, { id: string }>
+export type BackupRun = T.BackupRun
+export type BackupHistory = Result<'backup.history.list'>
+export const EMPTY_HISTORY: BackupHistory = { runs: [], total: 0 }
 
-export interface RecoverOption extends T.PackageBackupInfo {
-  id: string
-  checked: boolean
-  installed: boolean
-  newerOs: boolean
-}
+export type RecoverOption =
+  | (T.PackageBackupInfo & {
+      kind: 'package'
+      id: string
+      installed: boolean
+      newerOs: boolean
+    })
+  | (Pick<T.SharedVolumeBackupInfo, 'timestamp'> & {
+      kind: 'volume'
+      id: string
+      title: string
+    })
 
 export interface RecoverData {
   targetId: string

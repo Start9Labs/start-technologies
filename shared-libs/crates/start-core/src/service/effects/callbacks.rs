@@ -34,13 +34,26 @@ use crate::{GatewayId, HostId, PackageId, ServiceInterfaceId};
 /// A new subscription is created if a handler is registered again.
 pub struct DbWatchedCallbacks<K: Ord> {
     label: &'static str,
+    arguments: fn(Value) -> Result<Vector<Value>, Error>,
     inner: SyncMutex<BTreeMap<K, (NonDetachingJoinHandle<()>, Vec<CallbackHandler>)>>,
 }
 
 impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
     pub fn new(label: &'static str) -> Self {
+        Self::with_arguments(label, |value| Ok(vector![value]))
+    }
+
+    pub fn invalidation(label: &'static str) -> Self {
+        Self::with_arguments(label, |_| Ok(vector![]))
+    }
+
+    fn with_arguments(
+        label: &'static str,
+        arguments: fn(Value) -> Result<Vector<Value>, Error>,
+    ) -> Self {
         Self {
             label,
+            arguments,
             inner: SyncMutex::new(BTreeMap::new()),
         }
     }
@@ -51,15 +64,16 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
         watch: TypedDbWatch<T>,
         handler: CallbackHandler,
     ) {
-        self.add_projected(key, watch, handler, Ok);
+        self.add_filtered(key, watch, |_| true, handler)
     }
 
-    pub fn add_projected<T: Send + 'static>(
+    /// Fires on the first change the filter accepts.
+    pub fn add_filtered<T: Send + 'static>(
         self: &Arc<Self>,
         key: K,
         watch: TypedDbWatch<T>,
+        mut relevant: impl FnMut(&Value) -> bool + Send + 'static,
         handler: CallbackHandler,
-        project: fn(Value) -> Result<Value, Error>,
     ) {
         self.inner.mutate(|map| {
             map.entry(key.clone())
@@ -70,22 +84,22 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                     (
                         tokio::spawn(async move {
                             let mut watch = watch.untyped();
-                            if watch.changed().await.is_ok() {
-                                if let Some(cbs) = this.inner.mutate(|map| {
-                                    map.remove(&k).and_then(CallbackHandlers::detach_watcher)
-                                }) {
-                                    if let Err(e) = async {
-                                        let value = project(
-                                            watch.peek_and_mark_seen().unwrap_or_default(),
-                                        )?;
-                                        cbs.call(vector![value]).await
-                                    }
-                                    .await
+                            while watch.changed().await.is_ok() {
+                                let value = watch.peek_and_mark_seen().unwrap_or_default();
+                                if !relevant(&value) {
+                                    continue;
+                                }
+                                if let Some(cbs) =
+                                    this.remove(&k).and_then(CallbackHandlers::detach_watcher)
+                                {
+                                    if let Err(e) =
+                                        async { cbs.call((this.arguments)(value)?).await }.await
                                     {
                                         tracing::error!("Error in {label} callback: {e}");
                                         tracing::debug!("{e:?}");
                                     }
                                 }
+                                break;
                             }
                         })
                         .into(),
@@ -95,6 +109,10 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                 .1
                 .push(handler);
         })
+    }
+
+    fn remove(&self, key: &K) -> Option<(NonDetachingJoinHandle<()>, Vec<CallbackHandler>)> {
+        self.inner.mutate(|map| map.remove(key))
     }
 
     pub fn gc(&self) {
@@ -107,6 +125,67 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_callback_arguments_use_the_service_projection() {
+        use crate::net::forward::AvailablePorts;
+        use crate::net::host::binding::{BindInfo, BindOptions};
+        use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
+
+        let mut binding = BindInfo::new(
+            &mut AvailablePorts::new(),
+            BindOptions {
+                preferred_external_port: 8080,
+                add_ssl: None,
+                secure: None,
+                proxy: None,
+            },
+            false,
+        )
+        .unwrap();
+        binding.addresses.available.insert(HostnameInfo {
+            hostname: "192.0.2.10".into(),
+            port: Some(8080),
+            ssl: false,
+            public: false,
+            metadata: HostnameMetadata::Ipv4 {
+                gateway: "eth0".parse().unwrap(),
+            },
+        });
+        binding
+            .addresses
+            .insecure
+            .insert(("192.0.2.10".into(), 8080, "eth0".parse().unwrap()));
+        let mut host = Host::default();
+        host.bindings.insert(80, binding);
+        let callbacks = ServiceCallbacks::default();
+        let arguments = callbacks.get_host_info.arguments;
+        let values = arguments(imbl_value::to_value(&host).unwrap()).unwrap();
+        assert_eq!(values.len(), 1);
+        let projected: Host = imbl_value::from_value(values[0].clone()).unwrap();
+        assert!(projected.bindings[&80].addresses.available.is_empty());
+        assert_eq!(arguments(Value::Null).unwrap(), vector![Value::Null]);
+    }
+
+    #[test]
+    fn invalidation_callbacks_do_not_disclose_the_watched_value() {
+        let callbacks = DbWatchedCallbacks::<()>::invalidation("volumes");
+        assert!(
+            (callbacks.arguments)(Value::from("private catalog"))
+                .unwrap()
+                .is_empty()
+        );
+        let callbacks = DbWatchedCallbacks::<()>::new("existing reader");
+        assert_eq!(
+            (callbacks.arguments)(Value::from("value")).unwrap(),
+            vector![Value::from("value")]
+        );
+    }
+}
+
 pub struct ServiceCallbacks {
     inner: SyncMutex<ServiceCallbackMap>,
     get_host_info: Arc<DbWatchedCallbacks<(PackageId, HostId)>>,
@@ -115,18 +194,22 @@ pub struct ServiceCallbacks {
     list_service_interfaces: Arc<DbWatchedCallbacks<PackageId>>,
     get_system_smtp: Arc<DbWatchedCallbacks<()>>,
     get_service_manifest: Arc<DbWatchedCallbacks<PackageId>>,
+    get_shared_volumes: Arc<DbWatchedCallbacks<PackageId>>,
 }
 
 impl Default for ServiceCallbacks {
     fn default() -> Self {
         Self {
             inner: SyncMutex::new(ServiceCallbackMap::default()),
-            get_host_info: Arc::new(DbWatchedCallbacks::new("host info")),
+            get_host_info: Arc::new(DbWatchedCallbacks::with_arguments("host info", |value| {
+                Ok(vector![super::net::host::project_host_info(value)?])
+            })),
             get_status: Arc::new(DbWatchedCallbacks::new("get_status")),
             get_service_interface: Arc::new(DbWatchedCallbacks::new("get_service_interface")),
             list_service_interfaces: Arc::new(DbWatchedCallbacks::new("list_service_interfaces")),
             get_system_smtp: Arc::new(DbWatchedCallbacks::new("get_system_smtp")),
             get_service_manifest: Arc::new(DbWatchedCallbacks::new("get_service_manifest")),
+            get_shared_volumes: Arc::new(DbWatchedCallbacks::invalidation("get_shared_volumes")),
         }
     }
 }
@@ -163,6 +246,7 @@ impl ServiceCallbacks {
         self.list_service_interfaces.gc();
         self.get_system_smtp.gc();
         self.get_service_manifest.gc();
+        self.get_shared_volumes.gc();
     }
 
     pub(super) fn add_get_service_interface<T: Send + 'static>(
@@ -200,12 +284,8 @@ impl ServiceCallbacks {
         watch: TypedDbWatch<Host>,
         handler: CallbackHandler,
     ) {
-        self.get_host_info.add_projected(
-            (package_id, host_id),
-            watch,
-            handler,
-            super::net::host::project_host_info,
-        );
+        self.get_host_info
+            .add((package_id, host_id), watch, handler);
     }
 
     pub(super) fn add_get_ssl_certificate(
@@ -346,6 +426,25 @@ impl ServiceCallbacks {
                 .1
                 .push(handler);
         })
+    }
+
+    pub(super) fn add_get_shared_volumes<T: Send + 'static>(
+        &self,
+        package_id: PackageId,
+        watch: TypedDbWatch<T>,
+        relevant: impl FnMut(&Value) -> bool + Send + 'static,
+        handler: CallbackHandler,
+    ) {
+        self.get_shared_volumes
+            .add_filtered(package_id, watch, relevant, handler);
+    }
+
+    pub(crate) async fn invalidate_shared_volumes(&self, package: &PackageId) -> Result<(), Error> {
+        if let Some((watcher, handlers)) = self.get_shared_volumes.remove(package) {
+            drop(watcher);
+            CallbackHandlers(handlers).call(vector![]).await?;
+        }
+        Ok(())
     }
 
     pub(super) fn add_get_service_manifest(
