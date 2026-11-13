@@ -16,14 +16,19 @@ export const SYSTEM_MENU = [
   ],
   [
     {
-      icon: '@tui.copy-plus',
-      item: 'Create Backup',
-      link: 'backup',
+      icon: '@tui.folder-symlink',
+      item: 'Shared Volumes',
+      link: 'volumes',
+    },
+    {
+      icon: '@tui.hard-drive',
+      item: 'Backup Targets',
+      link: 'backup-targets',
     },
     {
       icon: '@tui.database-backup',
-      item: 'Restore Backup',
-      link: 'restore',
+      item: 'Backups',
+      link: 'backups',
     },
   ],
   [

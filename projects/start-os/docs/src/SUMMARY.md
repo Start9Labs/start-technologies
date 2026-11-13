@@ -62,13 +62,6 @@
 
 ---
 
-# Backups
-
-- [Creating Backups](backup-create.md)
-- [Restoring Backups](backup-restore.md)
-
----
-
 # System
 
 - [Notifications](notifications.md)
@@ -77,6 +70,8 @@
 - [SSH](ssh.md)
 - [Kernel Arguments](kernel-arguments.md)
 - [SMTP](smtp.md)
+- [Shared Volumes](shared-volumes.md)
+- [Backups](backups.md)
 - [WiFi](wifi.md)
 - [UPS Monitor](ups-monitor.md)
 - [Internationalization](internationalization.md)

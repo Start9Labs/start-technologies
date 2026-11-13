@@ -2,7 +2,7 @@ import { NgTemplateOutlet } from '@angular/common'
 import { Component, inject, Input, OnInit } from '@angular/core'
 import { FormGroup, ReactiveFormsModule } from '@angular/forms'
 import { RouterModule } from '@angular/router'
-import { IST } from '@start9labs/start-core'
+import { IST, T } from '@start9labs/start-core'
 import {
   tuiMarkControlAsTouchedAndValidate,
   TuiValueChanges,
@@ -30,10 +30,11 @@ export interface FormNote {
   top?: boolean
 }
 
-export interface FormContext<T> {
+export interface FormContext<Value> {
   spec: IST.InputSpec
-  buttons: ActionButton<T>[]
-  value?: T
+  buttons: ActionButton<Value>[]
+  /** Missing initial fields use the specification's defaults. */
+  value?: T.DeepPartial<Value>
   operations?: Operation[]
   note?: FormNote
 }
@@ -145,24 +146,25 @@ export interface FormContext<T> {
   ],
   providers: [InvalidService],
 })
-export class FormComponent<T extends Record<string, any>> implements OnInit {
+export class FormComponent<
+  Value extends Record<string, any>,
+> implements OnInit {
   private readonly confirm = inject(TuiConfirmService, { optional: true })
   private readonly formService = inject(FormService)
   private readonly invalidService = inject(InvalidService)
   protected readonly context = injectContext<
-    TuiDialogContext<void, FormContext<T>>
+    TuiDialogContext<void, FormContext<Value>>
   >({ optional: true })
 
   @Input() spec = this.context?.data.spec || {}
   @Input() buttons = this.context?.data.buttons || []
   @Input() operations = this.context?.data.operations || []
-  @Input() value?: T = this.context?.data.value
+  @Input() value: FormContext<Value>['value'] = this.context?.data.value
   @Input() note = this.context?.data.note
 
   form = new FormGroup({})
 
   ngOnInit() {
-    this.confirm?.markAsPristine()
     this.form = this.formService.createForm(this.spec, this.value)
     this.process(this.operations)
   }
@@ -173,12 +175,12 @@ export class FormComponent<T extends Record<string, any>> implements OnInit {
     this.markAsDirty()
   }
 
-  async onClick(handler: Required<ActionButton<T>>['handler']) {
+  async onClick(handler: Required<ActionButton<Value>>['handler']) {
     trim(this.form)
     tuiMarkControlAsTouchedAndValidate(this.form)
     this.invalidService.scrollIntoView()
 
-    if (this.form.valid && (await handler(this.form.value as T))) {
+    if (this.form.valid && (await handler(this.form.value as Value))) {
       this.close()
     }
   }
