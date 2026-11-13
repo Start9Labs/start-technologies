@@ -24,6 +24,7 @@ author:
 normative:
   RFC2136:
   RFC4632:
+  RFC4861:
   RFC6455:
   RFC6762:
   RFC6763:
@@ -59,6 +60,7 @@ normative:
     target: https://github.com/Start9Labs/start-technologies/blob/master/rfcs/draft-start9-pcp-hostname.md
 informative:
   RFC4033:
+  RFC4862:
   RFC6335:
   RFC6970:
   RFC7652:
@@ -461,11 +463,12 @@ it to another binding, as PCP requires for released internal addresses
 ### IPv6 Attribution {#ipv6-attribution}
 
 The gateway's address tracker owns IPv6 attribution. It MUST automatically
-learn and verify addresses, including SLAAC addresses, without requiring
-manual assignment or a separate address-registration action. Each address
-on an interface MUST be attributed to at most one binding.
+learn and verify addresses, including SLAAC addresses {{RFC4862}}, without
+requiring manual assignment or a separate address-registration action.
+Each address on an interface MUST be attributed to at most one binding.
 
-Neighbor observations supply candidates, not immediate ownership changes.
+Neighbor Discovery {{RFC4861}} observations supply candidates, not
+immediate ownership changes.
 Before admitting a newly observed address or reassigning an existing one,
 the gateway MUST corroborate the candidate's association with the binding
 through automatic active verification on the arrival link or a stronger
@@ -486,8 +489,6 @@ gateway MUST attempt automatic resolution and verification before
 returning NOT_OWNED. It MUST NOT require the host to generate unrelated
 traffic to repopulate the neighbor cache. Confirmed reassignment withdraws
 the previous binding's grants before the new attribution takes effect.
-Gateways SHOULD reuse their existing persistent history and probe
-facilities, with the verification and exclusivity requirements above.
 
 ## Capabilities, Policy, and Quotas {#policy}
 
@@ -576,10 +577,8 @@ caller.
 : an object with `maxLifetime` (seconds), `maxBatch` (the connection's
 pending-call limit, {{jsonrpc}}), the per-kind quotas
 `maxMappings`, `maxSniRoutes`, `maxPinholes`, `maxFilters`, and
-`maxDnsRecords`, and `dnsDomains`, any domain-scope grants the gateway
-advertises for DNS records ({{dns-records}}). An empty `dnsDomains` array
-does not rule out names authorized by other implementation-specific
-policy; the gateway decides authorization on each DNS request.
+`maxDnsRecords`, and `dnsDomains`, the domains the gateway currently
+authorizes for the enrollment's DNS records ({{dns-records}}).
 
 ## enrollment.enroll {#m-enroll}
 
@@ -838,6 +837,12 @@ set nor a default SNI-based policy. The `dns-record` capability permits
 requests but does not guarantee authorization for a particular name.
 SNI routes are not proof of DNS-name ownership ({{security}}).
 
+The `dnsDomains` limit of `gateway.info` lists domains, in the form of
+`name`, that the gateway currently authorizes for the enrollment; a name
+at or below a listed domain is authorized. The list need not be
+exhaustive: an empty or partial list does not rule out names that other
+implementation-specific policy authorizes.
+
 A request to redirect an unauthorized name MUST fail with NOT_PERMITTED
 (code 1009, `data.kind` equal to `"NOT_PERMITTED"`), without creating or
 changing a record. A record whose name policy no longer permits is
@@ -944,7 +949,11 @@ The client selects its gateway's actual address and outgoing interface
 from local routing state, or from the configuration of its authenticated
 tunnel peer. It MUST connect to that address, preserving the selected
 hostname as the signing context. An SRV/A/AAAA answer MUST NOT replace
-the selected gateway address with another host. Gateways MAY additionally
+the selected gateway address with another host. A gateway that advertises
+AGCP on a link MUST serve the endpoint, at the advertised port, on each
+address that hosts on that link use as their router, including the
+link-local address from which it sends IPv6 Router Advertisements
+{{RFC4861}}. Gateways MAY additionally
 provide endpoint hints by configuration, for example alongside a tunnel's
 peer configuration.
 
@@ -1081,8 +1090,8 @@ active hostile LAN peer: an attacker that diverts traffic or answers
 verification probes can corrupt attribution and thereby redirect or
 expose traffic through grants under its own enrollment. An enrolled key
 protects enrollment authority, not the truth of neighbor evidence.
-Implementations may use stronger network protections, but normal SLAAC
-operation MUST NOT depend on manual key comparison or address assignment.
+Implementations may add stronger network protections to the automatic
+attribution of {{ipv6-attribution}}.
 
 Resource exhaustion:
 : Gateways bound per-enrollment state through the quotas of {{policy}},
