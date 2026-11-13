@@ -1,7 +1,7 @@
 import { Component, computed, inject, input, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { i18nPipe, TaskService } from '@start9labs/shared'
-import { T } from '@start9labs/start-core'
+import { T, utils } from '@start9labs/start-core'
 import { TuiButton, TuiDataList, TuiDropdown, TuiIcon } from '@taiga-ui/core'
 import { TuiBadge, TuiChevron, TuiSwitch, TuiTooltip } from '@taiga-ui/kit'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
@@ -82,6 +82,7 @@ import { DomainHealthService } from './domain-health.service'
           {{ address.type }}
         </span>
       </td>
+      <td class="transport">{{ transportLabels[address.transport] }}</td>
       @if (showCert()) {
         <td class="cert-cell">
           <div class="cert">
@@ -241,8 +242,12 @@ import { DomainHealthService } from './domain-health.service'
         padding-inline: 0.5rem;
       }
 
-      .cert-cell {
+      .transport {
         grid-area: 2 / 1 / 2 / 3;
+      }
+
+      .cert-cell {
+        grid-area: 3 / 1 / 3 / 3;
 
         .cert-icon {
           display: none;
@@ -250,16 +255,15 @@ import { DomainHealthService } from './domain-health.service'
       }
 
       .url-cell {
+        grid-area: 4 / 1 / 4 / 3;
+      }
+
+      &._no-cert .url-cell {
         grid-area: 3 / 1 / 3 / 3;
       }
 
-      // With no cert row, the URL takes its place directly under the header.
-      &._no-cert .url-cell {
-        grid-area: 2 / 1 / 2 / 3;
-      }
-
       td:last-child {
-        grid-area: 1 / 3 / 4 / 5;
+        grid-area: 1 / 3 / 5 / 5;
         align-self: center;
         justify-self: end;
       }
@@ -292,14 +296,8 @@ export class GatewayItemComponent {
   readonly toggling = signal(false)
   readonly currentlyMasked = signal(true)
   readonly guaOpen = signal(false)
-  // The Certificate Authority column only shows when some address is SSL; kept
-  // in sync with GatewayComponent's header (both derive from the same data).
-  readonly showCert = computed(
-    () =>
-      this.value()?.gatewayGroups.some(g =>
-        g.addresses.some(a => a.certificate !== '-'),
-      ) ?? false,
-  )
+  readonly showCert = input(false)
+  readonly transportLabels = utils.transportLabels
   readonly urlHtml = computed(() => {
     const { url, hostnameInfo } = this.address()
     const idx = url.indexOf(hostnameInfo.hostname)

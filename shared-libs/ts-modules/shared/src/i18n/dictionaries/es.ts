@@ -1020,4 +1020,5 @@ export default {
   1219: 'Crear',
   1220: 'Restaurar',
   1221: 'Ir a destinos de copia de seguridad',
+  1222: 'Transporte',
 } satisfies i18n

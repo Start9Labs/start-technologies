@@ -451,7 +451,7 @@ export const mockPatchData: DataModel = {
               ],
             },
             options: {
-              transport: 'both',
+              transport: 'tcp',
               preferredExternalPort: 80,
               addSsl: {
                 upstreamCertValidation: null,
@@ -1121,7 +1121,7 @@ export const mockPatchData: DataModel = {
           bindingRanges: {
             49152: {
               enabled: true,
-              transport: 'both',
+              transport: 'udp',
               externalStartPort: 49152,
               numberOfPorts: 100,
               // Same per-address model as a single-port binding, IPv4-only and
@@ -1179,10 +1179,10 @@ export const mockPatchData: DataModel = {
                 ],
               },
               interface: {
-                id: 'zmq',
-                name: 'ZMQ',
-                description: 'Bitcoin ZMQ notification endpoints',
-                scheme: 'tcp',
+                id: 'udp-relay',
+                name: 'UDP Relay',
+                description: 'UDP-only relay ports',
+                scheme: 'udp',
               },
             },
           },
@@ -1271,7 +1271,7 @@ export const mockPatchData: DataModel = {
                 addSsl: null,
                 preferredExternalPort: 48332,
                 secure: { ssl: false },
-                proxy: null,
+                proxy: { type: 'http', addXForwardedHeaders: true, auth: null },
               },
               interfaces: {
                 rpc: {

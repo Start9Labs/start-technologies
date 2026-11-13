@@ -1,5 +1,6 @@
 import { Component, input, signal } from '@angular/core'
 import { i18nPipe } from '@start9labs/shared'
+import { utils } from '@start9labs/start-core'
 import { TuiButton } from '@taiga-ui/core'
 import {
   MappedServiceInterface,
@@ -14,10 +15,11 @@ import { PluginActionsComponent } from './actions.component'
     <td>
       {{
         address().scheme?.toUpperCase() ??
-          (address().hostnameInfo.ssl ? 'SSL' : 'TCP/UDP')
+          (address().hostnameInfo.ssl ? 'SSL' : '—')
       }}
     </td>
-    <td [style.grid-area]="'2 / 1 / 2 / 2'">
+    <td>{{ transportLabels[address().transport] }}</td>
+    <td class="url-cell">
       <div class="url">
         @if (address().masked && currentlyMasked()) {
           <span>
@@ -71,7 +73,11 @@ import { PluginActionsComponent } from './actions.component'
         display: none;
       }
 
-      grid-template-columns: 1fr auto;
+      grid-template-columns: 1fr auto auto;
+
+      .url-cell {
+        grid-area: 2 / 1 / 2 / 3;
+      }
 
       td {
         width: auto !important;
@@ -79,7 +85,7 @@ import { PluginActionsComponent } from './actions.component'
       }
 
       td:last-child {
-        grid-area: 1 / 2 / 3 / 3;
+        grid-area: 1 / 3 / 3 / 4;
         align-self: center;
       }
     }
@@ -88,6 +94,7 @@ import { PluginActionsComponent } from './actions.component'
 })
 export class PluginItemComponent {
   readonly currentlyMasked = signal(true)
+  readonly transportLabels = utils.transportLabels
 
   readonly address = input.required<PluginAddress>()
   readonly pluginGroup = input.required<PluginAddressGroup>()

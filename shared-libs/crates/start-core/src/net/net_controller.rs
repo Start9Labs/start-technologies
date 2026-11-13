@@ -252,7 +252,7 @@ impl NetController {
                 HostId::admin(),
                 80,
                 BindOptions {
-                    transport: Default::default(),
+                    transport: Transport::Tcp,
                     preferred_external_port: 80,
                     add_ssl: Some(AddSslOptions {
                         preferred_external_port: 443,

@@ -1020,4 +1020,5 @@ export default {
   1219: 'Erstellen',
   1220: 'Wiederherstellen',
   1221: 'Zu den Backup-Zielen',
+  1222: 'Transport',
 } satisfies i18n

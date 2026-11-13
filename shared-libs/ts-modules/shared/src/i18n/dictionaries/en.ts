@@ -1021,4 +1021,5 @@ export const ENGLISH: Record<string, number> = {
   'Create': 1219, // as in, create a backup
   'Restore': 1220, // as in, restore from a backup
   'Go to Backup Targets': 1221,
+  'Transport': 1222,
 }
