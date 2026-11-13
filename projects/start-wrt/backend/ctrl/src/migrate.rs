@@ -41,6 +41,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::ReissueRootCa,
     Migration::NameProfileFirewallSections,
     Migration::BindLuciToLoopback,
+    Migration::DisableFlowOffloading,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -76,6 +77,8 @@ enum Migration {
     NameProfileFirewallSections,
     /// Earlier images served LuCI's uhttpd on every address.
     BindLuciToLoopback,
+    /// Earlier releases offloaded established forwarded connections.
+    DisableFlowOffloading,
 }
 
 impl Migration {
@@ -95,6 +98,7 @@ impl Migration {
             Migration::ReissueRootCa => reissue_root_ca(root).await,
             Migration::NameProfileFirewallSections => name_profile_firewall_sections(root).await,
             Migration::BindLuciToLoopback => bind_luci_to_loopback(root).await,
+            Migration::DisableFlowOffloading => disable_flow_offloading(root).await,
         }
     }
 
@@ -127,6 +131,9 @@ impl Migration {
                 "name each profile's firewall sections so saving a profile keeps changes made in LuCI"
             }
             Migration::BindLuciToLoopback => "serve LuCI only over HTTPS",
+            Migration::DisableFlowOffloading => {
+                "stop offloading established connections, which stalled traffic to Wi-Fi devices from other profiles"
+            }
         }
     }
 }
@@ -416,6 +423,28 @@ async fn enable_flow_offloading(root: &Path) -> Result<(), Error> {
         if let Some(mut defaults) = section.get_typed::<FirewallDefaults>()? {
             if defaults.flow_offloading.is_none() {
                 defaults.flow_offloading = Some("1".to_string());
+                section.set(&defaults)?;
+                changed = true;
+            }
+            break;
+        }
+    }
+    if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+/// Clears `1`, the value an earlier release wrote. An owner's `1` reads the
+/// same and is cleared too; any other value stays.
+async fn disable_flow_offloading(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["firewall"]).await?;
+    let mut changed = false;
+    for section in &mut cfgs["firewall"].sections {
+        if let Some(mut defaults) = section.get_typed::<FirewallDefaults>()? {
+            if defaults.flow_offloading.as_deref().map(str::trim) == Some("1") {
+                defaults.flow_offloading = None;
                 section.set(&defaults)?;
                 changed = true;
             }
@@ -854,7 +883,7 @@ config forwarding
         assert_eq!(read(&dir, "etc/config/uhttpd"), migrated[5]);
         assert_eq!(wan_ipv6(&dir).as_deref(), Some("1"));
         assert!(migrated[1].contains("option dest 'vlan_guest'"));
-        assert!(migrated[1].contains("option flow_offloading '1'"));
+        assert!(!migrated[1].contains("flow_offloading"));
         assert!(migrated[2].contains("option lan_access 'all'"));
         assert!(migrated[2].contains("option lan_access 'same_profile'"));
         assert!(migrated[5].contains("list listen_http '127.0.0.1:8080'"));
@@ -1020,24 +1049,37 @@ config forwarding
     }
 
     #[tokio::test]
-    async fn flow_offloading_is_enabled_unless_set() {
+    async fn flow_offloading_stays_off_from_before_it_shipped() {
         let dir = router(Some("9\n"), true);
         write(&dir, "etc/config/firewall", SHIPPED_FIREWALL_DEFAULTS);
         run(dir.path()).await.unwrap();
         assert_eq!(record(&dir), current());
-        let firewall = read(&dir, "etc/config/firewall");
-        assert!(
-            firewall.contains("option flow_offloading '1'"),
-            "{firewall}"
-        );
-        assert!(firewall.contains("option syn_flood '1'"), "{firewall}");
-        assert!(firewall.contains("option forward 'REJECT'"), "{firewall}");
+        assert_eq!(read(&dir, "etc/config/firewall"), SHIPPED_FIREWALL_DEFAULTS);
 
         let disabled = format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '0'\n");
         let dir = router(Some("9\n"), true);
         write(&dir, "etc/config/firewall", &disabled);
         run(dir.path()).await.unwrap();
         assert_eq!(read(&dir, "etc/config/firewall"), disabled);
+    }
+
+    #[tokio::test]
+    async fn flow_offloading_an_earlier_release_enabled_is_cleared() {
+        let offloaded = format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '1'\n");
+        let before = format!("{}\n", MIGRATIONS.len() - 1);
+        let dir = router(Some(&before), true);
+        write(&dir, "etc/config/firewall", &offloaded);
+        run(dir.path()).await.unwrap();
+        assert_eq!(record(&dir), current());
+        assert_eq!(read(&dir, "etc/config/firewall"), SHIPPED_FIREWALL_DEFAULTS);
+
+        for kept in ["0", "yes"] {
+            let chosen = format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '{kept}'\n");
+            let dir = router(Some(&before), true);
+            write(&dir, "etc/config/firewall", &chosen);
+            run(dir.path()).await.unwrap();
+            assert_eq!(read(&dir, "etc/config/firewall"), chosen);
+        }
     }
 
     #[tokio::test]
