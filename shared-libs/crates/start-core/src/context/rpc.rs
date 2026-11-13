@@ -96,6 +96,16 @@ impl Drop for RpcContextSeed {
     }
 }
 
+async fn close_after_teardown(
+    teardown: impl Future<Output = Result<(), Error>>,
+    is_closed: &AtomicBool,
+    closed: &watch::Sender<bool>,
+) {
+    teardown.await.log_err();
+    is_closed.store(true, Ordering::SeqCst);
+    closed.send_replace(true);
+}
+
 pub struct Hardware {
     pub devices: Vec<LshwDevice>,
     pub ram: u64,
@@ -524,19 +534,18 @@ impl RpcContext {
     }
 
     #[instrument(skip_all)]
-    pub async fn shutdown(self) -> Result<(), Error> {
+    pub async fn shutdown(self) {
         self.crons.mutate(|c| std::mem::take(c));
-        self.services.shutdown_all().await?;
-        self.is_closed.store(true, Ordering::SeqCst);
-        self.closed.send_replace(true);
+        close_after_teardown(
+            self.services.shutdown_all(),
+            &self.0.is_closed,
+            &self.0.closed,
+        )
+        .await;
         tracing::info!("{}", t!("context.rpc.rpc-context-shutdown"));
-        Ok(())
     }
 
-    /// Resolves once graceful teardown (`shutdown`) has completed. Used by the
-    /// `wait` path of the server shutdown/restart RPC so a caller can block
-    /// until containers are stopped (it won't outlive the webserver teardown
-    /// that immediately follows).
+    /// Resolves once service teardown has finished, failed or not.
     pub async fn wait_closed(&self) {
         let mut rx = self.0.closed.subscribe();
         let _ = rx.wait_for(|closed| *closed).await;
@@ -737,6 +746,22 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-client-generation", HeaderValue::from_static(generation));
         Client::builder().default_headers(headers).build().unwrap()
+    }
+
+    #[tokio::test]
+    async fn failed_teardown_still_closes_the_context() {
+        let is_closed = AtomicBool::new(false);
+        let closed = watch::Sender::new(false);
+
+        close_after_teardown(
+            async { Err(Error::new(eyre!("teardown failed"), ErrorKind::Unknown)) },
+            &is_closed,
+            &closed,
+        )
+        .await;
+
+        assert!(is_closed.load(Ordering::SeqCst));
+        assert!(*closed.borrow());
     }
 
     #[tokio::test]
