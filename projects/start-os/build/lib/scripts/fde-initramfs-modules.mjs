@@ -2,6 +2,7 @@ import { copyFile, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
+import { admitModuleConfiguration } from './fde-initramfs-control.mjs'
 import { filesUnder, kernelDirectory } from './fde-initramfs-paths.mjs'
 import {
   publicSourceFile,
@@ -25,7 +26,7 @@ async function nativeQuery(command, args) {
 }
 
 /**
- * Admits same-kernel source module bytes, native subset indexes and source modprobe dependencies.
+ * Admits source module bytes, native subset indexes and dependencies under effective configuration.
  * Sources/query providers remain authenticated; all inputs remain stable through use.
  * Native tools parse source references, never candidate module bytes; no module is inserted.
  * Firmware and optional weak dependencies retain separate admission obligations.
@@ -35,6 +36,7 @@ export async function admitKernelModules(root) {
   const kernel = await kernelDirectory(root)
   if (kernel.version !== (await kernelDirectory('/')).version)
     throw Error('Copied kernel module version differs from source')
+  const configuration = await admitModuleConfiguration(root)
   const files = await filesUnder(root, kernel.path)
   const sourceFiles = new Map()
   for (const file of files)
@@ -86,10 +88,10 @@ export async function admitKernelModules(root) {
       modules.push(name)
     }
     for (const name of modules) {
-      const dependencies = await nativeQuery('/usr/sbin/modprobe', [
+      // --ignore-install also suppresses soft dependencies.
+      const dependencies = await nativeQuery(configuration.executable, [
         '--show-depends',
-        '--ignore-install',
-        '--config=/dev/null',
+        ...configuration.paths.flatMap(path => ['--config', path]),
         `--set-version=${kernel.version}`,
         '--',
         name,

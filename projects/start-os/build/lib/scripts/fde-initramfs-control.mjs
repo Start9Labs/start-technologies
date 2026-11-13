@@ -344,8 +344,8 @@ async function admittedModuleProviders(root) {
   return { executable, library }
 }
 
-/** Native query providers and candidate files must stay stable through hardening. */
-async function auditModuleConfiguration(root) {
+/** Returns query/configuration paths after CLI/shared-library admission; inputs remain stable through use. */
+export async function admitModuleConfiguration(root) {
   const { path: modulePath, version } = await kernelDirectory(root)
   const moduleRoot = join(root, modulePath)
   for (const name of ['modules.softdep', 'modules.weakdep']) {
@@ -388,6 +388,7 @@ async function auditModuleConfiguration(root) {
     throw Error(
       'Pre-verification module configuration invokes external commands',
     )
+  return { executable, paths }
 }
 
 /** Hardens reviewed scripts, rules and module configuration, not the complete executable closure. */
@@ -413,7 +414,7 @@ export async function harden(root) {
   }
   if (!original.has('conf/arch.conf'))
     throw Error('Missing architecture configuration')
-  await auditModuleConfiguration(root)
+  await admitModuleConfiguration(root)
 
   const output = new Map(original)
   let init = output.get('init')

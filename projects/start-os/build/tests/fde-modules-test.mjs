@@ -36,6 +36,8 @@ async function context(t) {
       '-c',
       `
 . /usr/share/initramfs-tools/hook-functions
+copy_exec /usr/sbin/modprobe
+for library in /usr/lib/*/libkmod.so.2; do copy_exec "$library"; done
 : > "$__MODULES_TO_ADD"
 manual_add_modules '=drivers/char/tpm'
 apply_add_modules
@@ -84,7 +86,39 @@ test('genuine native TPM modules and subset metadata admit without insertion', a
   assert.match(dependencies.stdout, /tpm_st33zp24_i2c\.ko\.xz/)
 })
 
+test('effective soft dependencies already present retain native resolution', async t => {
+  const root = await context(t)
+  await mkdir(join(root, 'etc/modprobe.d'), { recursive: true })
+  await writeFile(
+    join(root, 'etc/modprobe.d/extra.conf'),
+    'softdep tpm_st33zp24_i2c pre: tpm_st33zp24\n',
+  )
+  await admitKernelModules(root)
+})
+
 for (const [name, mutate, pattern] of [
+  [
+    'effective configuration adds a missing soft dependency',
+    async root => {
+      await mkdir(join(root, 'etc/modprobe.d'), { recursive: true })
+      await writeFile(
+        join(root, 'etc/modprobe.d/extra.conf'),
+        'softdep tpm_st33zp24_i2c pre: dummy\n',
+      )
+    },
+    /Missing native module dependency: .*dummy\.ko/,
+  ],
+  [
+    'effective configuration invokes an external command',
+    async root => {
+      await mkdir(join(root, 'etc/modprobe.d'), { recursive: true })
+      await writeFile(
+        join(root, 'etc/modprobe.d/extra.conf'),
+        'install tpm_st33zp24_i2c /bin/false\n',
+      )
+    },
+    /Pre-verification module configuration invokes external commands/,
+  ],
   [
     'module byte substitution',
     root => copyFile(join('/', dependent), join(root, core)),
