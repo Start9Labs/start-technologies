@@ -2328,6 +2328,196 @@ net.tunnel.timeout-waiting-for-remove:
   fr_FR: "délai d'attente dépassé pour la suppression de la passerelle %{gateway} de la base de données"
   pl_PL: "upłynął limit czasu oczekiwania na usunięcie bramy %{gateway} z bazy danych"
 
+# nut.rs
+nut.field-device-or-address:
+  en_US: "device or address"
+  de_DE: "Gerät oder Adresse"
+  es_ES: "dispositivo o dirección"
+  fr_FR: "périphérique ou adresse"
+  pl_PL: "urządzenie lub adres"
+
+nut.field-driver:
+  en_US: "driver"
+  de_DE: "Treiber"
+  es_ES: "controlador"
+  fr_FR: "pilote"
+  pl_PL: "sterownik"
+
+nut.field-monitor-password:
+  en_US: "monitor password"
+  de_DE: "Monitor-Passwort"
+  es_ES: "contraseña de monitorización"
+  fr_FR: "mot de passe de surveillance"
+  pl_PL: "hasło monitora"
+
+nut.field-monitor-username:
+  en_US: "monitor username"
+  de_DE: "Monitor-Benutzername"
+  es_ES: "nombre de usuario de monitorización"
+  fr_FR: "nom d’utilisateur de surveillance"
+  pl_PL: "nazwa użytkownika monitora"
+
+nut.field-network-client-password:
+  en_US: "client password"
+  de_DE: "Client-Passwort"
+  es_ES: "contraseña del cliente"
+  fr_FR: "mot de passe du client"
+  pl_PL: "hasło klienta"
+
+nut.field-network-client-username:
+  en_US: "client username"
+  de_DE: "Client-Benutzername"
+  es_ES: "nombre de usuario del cliente"
+  fr_FR: "nom d’utilisateur du client"
+  pl_PL: "nazwa użytkownika klienta"
+
+nut.field-product-id:
+  en_US: "product ID"
+  de_DE: "Produkt-ID"
+  es_ES: "ID de producto"
+  fr_FR: "identifiant de produit"
+  pl_PL: "identyfikator produktu"
+
+nut.field-serial:
+  en_US: "serial number"
+  de_DE: "Seriennummer"
+  es_ES: "número de serie"
+  fr_FR: "numéro de série"
+  pl_PL: "numer seryjny"
+
+nut.field-server-host:
+  en_US: "server host"
+  de_DE: "Server-Host"
+  es_ES: "host del servidor"
+  fr_FR: "hôte du serveur"
+  pl_PL: "host serwera"
+
+nut.field-ups-name:
+  en_US: "UPS name"
+  de_DE: "USV-Name"
+  es_ES: "nombre del SAI"
+  fr_FR: "nom de l’onduleur"
+  pl_PL: "nazwa UPS"
+
+nut.field-vendor-id:
+  en_US: "vendor ID"
+  de_DE: "Hersteller-ID"
+  es_ES: "ID de fabricante"
+  fr_FR: "identifiant de fabricant"
+  pl_PL: "identyfikator producenta"
+
+nut.invalid-identifier:
+  en_US: "Invalid NUT %{field}: use letters, numbers, dots, underscores, or hyphens"
+  de_DE: "Ungültiges NUT-Feld %{field}: Verwenden Sie Buchstaben, Zahlen, Punkte, Unterstriche oder Bindestriche"
+  es_ES: "Campo NUT %{field} no válido: use letras, números, puntos, guiones bajos o guiones"
+  fr_FR: "Champ NUT %{field} invalide : utilisez des lettres, des chiffres, des points, des traits de soulignement ou des traits d'union"
+  pl_PL: "Nieprawidłowe pole NUT %{field}: użyj liter, cyfr, kropek, podkreśleń lub myślników"
+
+nut.invalid-port:
+  en_US: "NUT port must be greater than 0"
+  de_DE: "Der NUT-Port muss größer als 0 sein"
+  es_ES: "El puerto NUT debe ser mayor que 0"
+  fr_FR: "Le port NUT doit être supérieur à 0"
+  pl_PL: "Port NUT musi być większy niż 0"
+
+nut.invalid-quoted:
+  en_US: "Invalid NUT %{field}: use printable ASCII except backslash or double quote"
+  de_DE: "Ungültiges NUT-Feld %{field}: Verwenden Sie druckbare ASCII-Zeichen außer Rückstrich oder doppeltem Anführungszeichen"
+  es_ES: "Campo NUT %{field} no válido: use caracteres ASCII imprimibles excepto barra inversa o comillas dobles"
+  fr_FR: "Champ NUT %{field} invalide : utilisez des caractères ASCII imprimables sauf barre oblique inverse ou guillemet double"
+  pl_PL: "Nieprawidłowe pole NUT %{field}: użyj drukowalnych znaków ASCII z wyjątkiem ukośnika odwrotnego i cudzysłowu"
+
+nut.invalid-token:
+  en_US: "Invalid NUT %{field}: use visible ASCII except #, backslash, or double quote"
+  de_DE: "Ungültiges NUT-Feld %{field}: Verwenden Sie sichtbare ASCII-Zeichen außer #, Rückstrich oder doppeltem Anführungszeichen"
+  es_ES: "Campo NUT %{field} no válido: use caracteres ASCII visibles excepto #, barra inversa o comillas dobles"
+  fr_FR: "Champ NUT %{field} invalide : utilisez des caractères ASCII visibles sauf #, barre oblique inverse ou guillemet double"
+  pl_PL: "Nieprawidłowe pole NUT %{field}: użyj widocznych znaków ASCII z wyjątkiem #, ukośnika odwrotnego i cudzysłowu"
+
+nut.disabled:
+  en_US: "Network UPS Tools is disabled"
+  de_DE: "Network UPS Tools ist deaktiviert"
+  es_ES: "Network UPS Tools está desactivado"
+  fr_FR: "Network UPS Tools est désactivé"
+  pl_PL: "Network UPS Tools jest wyłączony"
+
+nut.enabled-without-settings:
+  en_US: "Network UPS Tools cannot be enabled without configuration"
+  de_DE: "Network UPS Tools kann nicht ohne Konfiguration aktiviert werden"
+  es_ES: "Network UPS Tools no puede activarse sin configuración"
+  fr_FR: "Network UPS Tools ne peut pas être activé sans configuration"
+  pl_PL: "Nie można włączyć Network UPS Tools bez konfiguracji"
+
+nut.list-ups-failed:
+  en_US: "Could not list the UPS devices on the NUT server at %{target}: %{error}"
+  de_DE: "Die USV-Geräte auf dem NUT-Server unter %{target} konnten nicht aufgelistet werden: %{error}"
+  es_ES: "No se pudieron listar los dispositivos SAI del servidor NUT en %{target}: %{error}"
+  fr_FR: "Impossible de lister les onduleurs du serveur NUT à %{target} : %{error}"
+  pl_PL: "Nie udało się pobrać listy urządzeń UPS z serwera NUT pod adresem %{target}: %{error}"
+
+nut.list-ups-timeout:
+  en_US: "the NUT server did not respond"
+  de_DE: "der NUT-Server hat nicht geantwortet"
+  es_ES: "el servidor NUT no respondió"
+  fr_FR: "le serveur NUT n'a pas répondu"
+  pl_PL: "serwer NUT nie odpowiedział"
+
+nut.monitor-auth-failed:
+  en_US: "NUT rejected the monitoring login. Check the monitor username, password, and permissions on the UPS server."
+  de_DE: "NUT hat die Monitor-Anmeldung abgelehnt. Prüfen Sie Benutzername, Passwort und Berechtigungen auf dem USV-Server."
+  es_ES: "NUT rechazó el inicio de sesión de monitorización. Compruebe el usuario, la contraseña y los permisos en el servidor del SAI."
+  fr_FR: "NUT a refusé la connexion de surveillance. Vérifiez le nom d’utilisateur, le mot de passe et les autorisations sur le serveur de l’onduleur."
+  pl_PL: "NUT odrzucił logowanie monitora. Sprawdź nazwę użytkownika, hasło i uprawnienia na serwerze UPS."
+
+nut.monitor-check-timeout:
+  en_US: "NUT monitoring verification timed out. Check the UPS server and network connection."
+  de_DE: "Die Überprüfung der NUT-Überwachung hat das Zeitlimit überschritten. Prüfen Sie den USV-Server und die Netzwerkverbindung."
+  es_ES: "La verificación de monitorización de NUT agotó el tiempo de espera. Compruebe el servidor del SAI y la conexión de red."
+  fr_FR: "La vérification de la surveillance NUT a expiré. Vérifiez le serveur de l’onduleur et la connexion réseau."
+  pl_PL: "Przekroczono czas weryfikacji monitorowania NUT. Sprawdź serwer UPS i połączenie sieciowe."
+
+nut.monitor-not-running:
+  en_US: "The NUT shutdown monitor is not running. Check the NUT configuration and restart monitoring."
+  de_DE: "Der NUT-Abschaltmonitor läuft nicht. Prüfen Sie die NUT-Konfiguration und starten Sie die Überwachung neu."
+  es_ES: "El monitor de apagado de NUT no está en ejecución. Compruebe la configuración de NUT y reinicie la monitorización."
+  fr_FR: "Le moniteur d’arrêt NUT ne fonctionne pas. Vérifiez la configuration NUT et redémarrez la surveillance."
+  pl_PL: "Monitor wyłączania NUT nie działa. Sprawdź konfigurację NUT i uruchom ponownie monitorowanie."
+
+nut.scan-failed:
+  en_US: "Could not scan for UPS devices: %{error}"
+  de_DE: "USV-Geräte konnten nicht gesucht werden: %{error}"
+  es_ES: "No se pudieron buscar dispositivos SAI: %{error}"
+  fr_FR: "Impossible de rechercher des onduleurs : %{error}"
+  pl_PL: "Nie udało się wyszukać urządzeń UPS: %{error}"
+
+nut.scan-timeout:
+  en_US: "Scanning for UPS devices timed out"
+  de_DE: "Die Suche nach USV-Geräten hat das Zeitlimit überschritten"
+  es_ES: "La búsqueda de dispositivos SAI agotó el tiempo de espera"
+  fr_FR: "La recherche d'onduleurs a expiré"
+  pl_PL: "Przekroczono limit czasu wyszukiwania urządzeń UPS"
+
+nut.reserved-username:
+  en_US: "NUT username %{username} is reserved for local shutdown monitoring"
+  de_DE: "Der NUT-Benutzername %{username} ist für die lokale Abschaltüberwachung reserviert"
+  es_ES: "El nombre de usuario NUT %{username} está reservado para la monitorización local de apagado"
+  fr_FR: "Le nom d’utilisateur NUT %{username} est réservé à la surveillance locale de l’arrêt"
+  pl_PL: "Nazwa użytkownika NUT %{username} jest zarezerwowana do lokalnego monitorowania wyłączania"
+
+nut.status-command-failed:
+  en_US: "NUT status command failed for %{target}: %{error}"
+  de_DE: "NUT-Statusbefehl für %{target} fehlgeschlagen: %{error}"
+  es_ES: "El comando de estado de NUT falló para %{target}: %{error}"
+  fr_FR: "La commande d'état NUT a échoué pour %{target} : %{error}"
+  pl_PL: "Polecenie statusu NUT nie powiodło się dla %{target}: %{error}"
+
+nut.status-missing:
+  en_US: "NUT status for %{target} did not include ups.status"
+  de_DE: "Der NUT-Status für %{target} enthielt kein ups.status"
+  es_ES: "El estado de NUT para %{target} no incluyó ups.status"
+  fr_FR: "L'état NUT pour %{target} ne contenait pas ups.status"
+  pl_PL: "Status NUT dla %{target} nie zawierał ups.status"
+
 # net/wifi.rs
 net.wifi.password-no-special-characters:
   en_US: "WiFi Password may not have special characters"
