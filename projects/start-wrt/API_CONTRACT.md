@@ -1420,6 +1420,10 @@ struct OutboundVpn {
     /// Seconds since the tunnel's latest handshake, measured on the router.
     /// null when it has never completed one.
     last_handshake_secs: Option<u64>,
+    /// Private addresses behind the tunnel may reach the router's web interface.
+    admin_web: bool,
+    /// Private addresses behind the tunnel may reach the router's SSH server.
+    admin_ssh: bool,
 }
 
 #[serde(rename_all = "kebab-case")]
@@ -1449,6 +1453,10 @@ struct OutboundVpnCreateRequest {
     /// Replaces the .conf's `DNS =` servers. null/absent keeps them.
     #[serde(default)]
     dns: Option<Vec<IpAddr>>,
+    #[serde(default)]
+    admin_web: bool,
+    #[serde(default)]
+    admin_ssh: bool,
 }
 
 #[derive(Serialize)]
@@ -1505,6 +1513,16 @@ struct OutboundVpnCreateResponse {
 // fallback as a unicast route over it. With no MTU in the .conf, a chained
 // VPN gets the chain MTU: the target's MTU (default 1420) less 60 (IPv4
 // endpoint) or 80 (IPv6), floored at 1280.
+//
+// Router access: with `admin_web` (TCP 443 and 80) or `admin_ssh` (TCP 22),
+// the VPN keeps its `vpn_<iface>` zone whether or not a profile routes through
+// it, and `startwrt_vpn_admin_<iface>_<port>_<n>` input rules admit those ports
+// from RFC 1918 and ULA sources in that zone. Each such VPN gets a routing
+// table from 5345 up (above the shared divert table) holding a default route
+// through its tunnel, and `vpn_admin_<iface>_rule_<n>` ip rules (priority 120)
+// sending traffic from each of the tunnel's own addresses through it, so
+// replies reach clients on any subnet behind the server. The peer's AllowedIPs
+// still decide which sources WireGuard accepts.
 ```
 
 ### `vpn-client.update`
@@ -1524,6 +1542,12 @@ struct OutboundVpnUpdateRequest {
     /// Replaces the interface's `list dns`. null/absent keeps it.
     #[serde(default)]
     dns: Option<Vec<IpAddr>>,
+    /// null/absent keeps it.
+    #[serde(default)]
+    admin_web: Option<bool>,
+    /// null/absent keeps it.
+    #[serde(default)]
+    admin_ssh: Option<bool>,
 }
 // Response: null
 // Backend: updates label+target metadata and the interface `mtu` and `dns`

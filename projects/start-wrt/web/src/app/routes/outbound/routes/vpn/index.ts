@@ -30,6 +30,7 @@ import {
   TuiInputNumber,
   TuiSelect,
   TuiSkeleton,
+  TuiSwitch,
 } from '@taiga-ui/kit'
 import { TuiHeader } from '@taiga-ui/layout'
 import { filter } from 'rxjs'
@@ -137,6 +138,25 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
           }
         </div>
       </section>
+      <fieldset>
+        <legend>{{ 'Router access' | i18n }}</legend>
+        <label tuiLabel>
+          <input tuiSwitch type="checkbox" formControlName="admin_web" />
+          {{ 'Allow access to the web interface' | i18n }}
+        </label>
+        <label tuiLabel>
+          <input tuiSwitch type="checkbox" formControlName="admin_ssh" />
+          {{ 'Allow SSH access' | i18n }}
+        </label>
+        @if (form.value.admin_web || form.value.admin_ssh) {
+          <div tuiNotification size="s" appearance="warning">
+            {{
+              "Anyone this VPN's server lets through can reach these, including the server's operator. Allow them only on a VPN server you control, such as StartTunnel."
+                | i18n
+            }}
+          </div>
+        }
+      </fieldset>
       @if (data()) {
         <footer appFooter>
           <button
@@ -179,6 +199,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
     Form,
     VPNSummary,
     TuiSkeleton,
+    TuiSwitch,
     i18nPipe,
   ],
 })

@@ -17,6 +17,7 @@ import {
   TuiFile,
   TuiFiles,
   TuiSelect,
+  TuiSwitch,
 } from '@taiga-ui/kit'
 import { TuiForm } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
@@ -90,6 +91,25 @@ import {
           }}
         </div>
       }
+      <fieldset>
+        <legend>{{ 'Router access' | i18n }}</legend>
+        <label tuiLabel>
+          <input tuiSwitch type="checkbox" formControlName="admin_web" />
+          {{ 'Allow access to the web interface' | i18n }}
+        </label>
+        <label tuiLabel>
+          <input tuiSwitch type="checkbox" formControlName="admin_ssh" />
+          {{ 'Allow SSH access' | i18n }}
+        </label>
+        @if (form.value.admin_web || form.value.admin_ssh) {
+          <div tuiNotification size="s" appearance="warning">
+            {{
+              "Anyone this VPN's server lets through can reach these, including the server's operator. Allow them only on a VPN server you control, such as StartTunnel."
+                | i18n
+            }}
+          </div>
+        }
+      </fieldset>
       <footer>
         <button
           tuiButton
@@ -122,6 +142,7 @@ import {
     TuiButton,
     TuiInput,
     TuiNotification,
+    TuiSwitch,
     i18nPipe,
   ],
 })

@@ -850,6 +850,8 @@ export const OutboundVpnCreateRequest: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
     z.ZodNullable<z.ZodArray<z.ZodString>>
   >
+  admin_web: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  admin_ssh: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   label: z.string(),
   target: z.string(),
@@ -868,6 +870,8 @@ export const OutboundVpnCreateRequest: z.ZodObject<{
   ).meta({
     description: "Replaces the config's `DNS =` servers. Absent keeps them.",
   }),
+  admin_web: wire(z.boolean().optional(), z.boolean()),
+  admin_ssh: wire(z.boolean().optional(), z.boolean()),
 }).meta({
   id: 'OutboundVpnCreateRequest',
 })
@@ -914,6 +918,20 @@ export const OutboundVpnUpdateRequest: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
     z.ZodNullable<z.ZodArray<z.ZodString>>
   >
+  /**
+   * Absent keeps it.
+   */
+  admin_web: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+    z.ZodNullable<z.ZodBoolean>
+  >
+  /**
+   * Absent keeps it.
+   */
+  admin_ssh: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+    z.ZodNullable<z.ZodBoolean>
+  >
 }> = /* @__PURE__ */ object({
   id: z.string(),
   label: z.string(),
@@ -935,6 +953,24 @@ export const OutboundVpnUpdateRequest: z.ZodObject<{
   ).meta({
     description:
       'Replaces the resolvers reached through the tunnel. Absent keeps them.',
+  }),
+  /**
+   * Absent keeps it.
+   */
+  admin_web: wire(
+    z.boolean().nullable().optional(),
+    z.boolean().nullable(),
+  ).meta({
+    description: 'Absent keeps it.',
+  }),
+  /**
+   * Absent keeps it.
+   */
+  admin_ssh: wire(
+    z.boolean().nullable().optional(),
+    z.boolean().nullable(),
+  ).meta({
+    description: 'Absent keeps it.',
   }),
 }).meta({
   id: 'OutboundVpnUpdateRequest',
@@ -2226,6 +2262,14 @@ export const OutboundVpn: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodInt>>,
     z.ZodNullable<z.ZodInt>
   >
+  /**
+   * Private addresses behind the tunnel may reach the router's web interface.
+   */
+  admin_web: z.ZodBoolean
+  /**
+   * Private addresses behind the tunnel may reach the router's SSH server.
+   */
+  admin_ssh: z.ZodBoolean
 }> = /* @__PURE__ */ object({
   id: z.string(),
   label: z.string(),
@@ -2275,6 +2319,20 @@ export const OutboundVpn: z.ZodObject<{
   ).meta({
     description:
       "Seconds since the tunnel's latest handshake, measured on the router.\n`None` when it has never completed one.",
+  }),
+  /**
+   * Private addresses behind the tunnel may reach the router's web interface.
+   */
+  admin_web: z.boolean().meta({
+    description:
+      "Private addresses behind the tunnel may reach the router's web interface.",
+  }),
+  /**
+   * Private addresses behind the tunnel may reach the router's SSH server.
+   */
+  admin_ssh: z.boolean().meta({
+    description:
+      "Private addresses behind the tunnel may reach the router's SSH server.",
   }),
 }).meta({
   id: 'OutboundVpn',

@@ -1972,6 +1972,8 @@ export class MockApiService extends ApiService {
       dns: ['10.2.0.1'],
       status: 'connected',
       last_handshake_secs: 42,
+      admin_web: false,
+      admin_ssh: false,
     },
     {
       id: 'wg_mullvad',
@@ -1985,6 +1987,8 @@ export class MockApiService extends ApiService {
       dns: ['10.64.0.1'],
       status: 'connected',
       last_handshake_secs: 17,
+      admin_web: false,
+      admin_ssh: false,
     },
     {
       id: 'wg_ivpn',
@@ -2002,6 +2006,8 @@ export class MockApiService extends ApiService {
       dns: [],
       status: 'not-responding',
       last_handshake_secs: null,
+      admin_web: false,
+      admin_ssh: false,
     },
   ]
 
@@ -2041,6 +2047,8 @@ export class MockApiService extends ApiService {
         dns: params.dns ?? configDnsServers(params.config),
         status: 'idle',
         last_handshake_secs: null,
+        admin_web: params.admin_web ?? false,
+        admin_ssh: params.admin_ssh ?? false,
       },
     ]
     this.logActivity(
@@ -2061,6 +2069,8 @@ export class MockApiService extends ApiService {
             target: params.target,
             mtu: params.mtu ?? null,
             dns: params.dns ?? c.dns,
+            admin_web: params.admin_web ?? c.admin_web,
+            admin_ssh: params.admin_ssh ?? c.admin_ssh,
           }
         : c,
     )

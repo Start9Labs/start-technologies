@@ -589,4 +589,8 @@ export default {
   640: 'Votre trafic',
   641: 'Pour supprimer ce VPN, modifiez d’abord {vpns} pour qu’ils se connectent via autre chose.',
   642: 'Pour désactiver ce VPN, modifiez d’abord {vpns} pour qu’ils se connectent via autre chose.',
+  643: 'Accès au routeur',
+  644: 'Autoriser l’accès à l’interface web',
+  645: 'Autoriser l’accès SSH',
+  646: 'Toute personne que le serveur de ce VPN laisse passer peut y accéder, y compris l’opérateur du serveur. Ne les autorisez que sur un serveur VPN que vous contrôlez, comme StartTunnel.',
 } satisfies i18n

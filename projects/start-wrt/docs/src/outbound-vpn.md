@@ -11,6 +11,7 @@ Route your network's Internet traffic through one or more WireGuard VPN provider
    - **Config File** — Upload a WireGuard `.conf` file from your VPN provider — drop it into the dialog or click to browse. Most providers (Mullvad, ProtonVPN, IVPN, etc.) offer WireGuard config file downloads from their account dashboard.
    - **Connects via** — How this VPN reaches its own VPN server. The dropdown lists **Internet** along with your existing VPNs. Select **Internet** to connect over your WAN, or select another VPN to carry this one's tunnel, so traffic passes through that VPN first for additional privacy.
    - **DNS Servers** — Optional. Replaces the DNS servers in the config file's `DNS =` line. If the config has no DNS servers and you leave this blank, the dialog warns you — see [DNS](#dns).
+   - **Router access** — Optional. Lets the private network behind the VPN's server reach this router; see [Router Access](#router-access).
 
 1. Click "Add VPN".
 
@@ -72,6 +73,23 @@ Like the rest of the profile's traffic, these queries fail closed: if the tunnel
 
 If none of the three is set, the profile's DNS goes to your ISP's DNS servers outside the tunnel, and your ISP can see the names your devices look up. The profile's DNS column then shows **System (outside VPN)**. To fix this, enter DNS servers on the VPN's detail page — your provider's own servers, or a public resolver.
 
+## Router Access
+
+An outbound VPN can let devices on the private network behind its server reach the router itself: its web interface, its SSH server, or both. This is how you manage a router you cannot reach directly, such as one behind [CGNAT](cgnat.md). The router connects out to a WireGuard server with a public address, such as [StartTunnel](/start-tunnel/) or one you run on a VPS or dedicated server, and you connect your laptop or phone to the same server. The VPN does not need to carry any profile's traffic.
+
+1. Add the server's WireGuard config as an outbound VPN, or open an existing one's detail page.
+
+1. Under **Router access**, turn on **Allow access to the web interface**, **Allow SSH access**, or both, and save.
+
+1. Connect your device to the same VPN server, then browse to the router's address in the tunnel: the config file's `Address` without its prefix length, such as `https://10.59.246.2`.
+
+The router accepts these connections only from private addresses (RFC 1918, and ULA for IPv6) arriving through the tunnel, and answers through the tunnel whichever of the server's networks your device is on. WireGuard drops traffic from any address the config's `AllowedIPs` does not cover, so `AllowedIPs` must include the network your device is on.
+
+> [!WARNING]
+> Anyone the VPN server lets through can reach the router's login page, including the server's operator. Turn router access on only for a server you control, never for a commercial VPN provider.
+
+Your browser trusts the router's tunnel address once your device trusts your [Root CA](trust-ca.md).
+
 ## VPN Detail Page
 
 Click a VPN label in the table to open its detail page, which shows:
@@ -86,6 +104,7 @@ Click a VPN label in the table to open its detail page, which shows:
 - **Used by** — Which [Security Profiles](security-profiles.md) currently route their traffic through this VPN. Check this before making changes to understand the impact.
 - **Label** — Edit the display name.
 - **Connects via** — Change what this VPN connects via (Internet or another VPN). Only choices that would not create a circular chain are offered.
+- **Router access** — Whether the private network behind the VPN's server can reach the router's web interface and SSH server. See [Router Access](#router-access).
 - **MTU** — The tunnel's packet size limit. Leave blank to use the default: ~1420, or for a VPN connecting through another, the chained MTU described under [VPN Chaining](#vpn-chaining). Lower it — down to a minimum of 1280 — if the VPN connects but requests time out.
 
 To delete a VPN, click "Delete" on its detail page. If any Security Profiles route through the VPN, you will be asked to confirm — those profiles will switch to the regular WAN connection.
