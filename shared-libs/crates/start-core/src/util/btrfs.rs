@@ -5,6 +5,9 @@ use tokio::process::Command;
 use crate::prelude::*;
 use crate::util::Invoke;
 
+#[cfg(test)]
+pub(crate) mod tests;
+
 /// Subvolume roots always have this inode number (BTRFS_FIRST_FREE_OBJECTID).
 const SUBVOL_INO: u64 = 256;
 
@@ -56,23 +59,90 @@ pub async fn snapshot_subvolume(src: impl AsRef<Path>, dst: impl AsRef<Path>) ->
     Ok(())
 }
 
-/// Deletes `path` whether it is a subvolume (freed asynchronously by the
-/// btrfs cleaner), a plain directory, or absent. `btrfs subvolume delete`
-/// refuses a subvolume containing nested ones; rather than walk the tree we
-/// fall back to a plain recursive remove, accepting that nested subvolume
-/// roots (which package volumes should never contain) may survive it.
+/// Removes subvolume roots without walking files or waiting for space reclamation.
+/// Nested deletion can partially complete before an error; plain directories delete recursively.
 pub async fn delete_tree(path: impl AsRef<Path>) -> Result<(), Error> {
     let path = path.as_ref();
-    if is_subvolume(path).await
-        && Command::new("btrfs")
-            .args(["subvolume", "delete"])
+    if is_subvolume(path).await {
+        Command::new("btrfs")
+            .args(["subvolume", "delete", "--recursive"])
             .arg(path)
             .timeout(Some(std::time::Duration::from_secs(60)))
             .invoke(ErrorKind::Filesystem)
-            .await
-            .is_ok()
-    {
+            .await?;
+        Ok(())
+    } else {
+        crate::util::io::delete_dir(path).await
+    }
+}
+
+pub(crate) const CONVERT_TMP_SUFFIX: &str = ".convert-tmp";
+pub(crate) const CONVERT_OLD_SUFFIX: &str = ".convert-old";
+
+fn conversion_paths(path: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let name = path.file_name().expect("volume root");
+    let mut temporary = name.to_os_string();
+    temporary.push(CONVERT_TMP_SUFFIX);
+    let mut original = name.to_os_string();
+    original.push(CONVERT_OLD_SUFFIX);
+    (
+        path.with_file_name(temporary),
+        path.with_file_name(original),
+    )
+}
+
+pub(crate) async fn recover_conversion(path: &Path) -> Result<(), Error> {
+    let (temporary, original) = conversion_paths(path);
+    delete_tree(&temporary).await?;
+    if tokio::fs::try_exists(&original).await? {
+        if tokio::fs::try_exists(path).await? {
+            delete_tree(&original).await?;
+        } else {
+            crate::util::io::rename(&original, path).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Commits deletion even when a preceding interrupted attempt removed the root.
+pub(crate) async fn delete_volume_root(path: &Path) -> Result<(), Error> {
+    recover_conversion(path).await?;
+    delete_tree(path).await?;
+    let parent = path.parent().expect("volume root");
+    if is_btrfs(parent).await {
+        Command::new("btrfs")
+            .args(["filesystem", "sync"])
+            .arg(parent)
+            .timeout(Some(std::time::Duration::from_secs(60)))
+            .invoke(ErrorKind::Filesystem)
+            .await?;
+    }
+    Ok(())
+}
+
+/// The caller must exclude mounts and writers throughout conversion.
+pub(crate) async fn convert_directory(
+    path: &Path,
+    counter: std::sync::Arc<crate::util::io::Counter>,
+) -> Result<(), Error> {
+    recover_conversion(path).await?;
+    if !tokio::fs::try_exists(path).await? || is_subvolume(path).await {
         return Ok(());
     }
-    crate::util::io::delete_dir(path).await
+    let (temporary, original) = conversion_paths(path);
+    create_subvolume(&temporary).await?;
+    if let Err(error) = crate::util::clone::clone_tree(path, &temporary, counter).await {
+        delete_tree(&temporary).await.log_err();
+        return Err(error);
+    }
+    if let Err(error) = crate::util::io::rename(path, &original).await {
+        delete_tree(&temporary).await.log_err();
+        return Err(error);
+    }
+    if let Err(error) = crate::util::io::rename(&temporary, path).await {
+        crate::util::io::rename(&original, path).await.log_err();
+        delete_tree(&temporary).await.log_err();
+        return Err(error);
+    }
+    delete_tree(&original).await
 }

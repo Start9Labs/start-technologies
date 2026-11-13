@@ -42,7 +42,7 @@ function manifest(emulateMissing?: boolean) {
 
 test('defaults to the binding transport enforcement compatibility floor', () => {
   expect(buildManifest(versions, manifest(), Dependencies.of()).osVersion).toBe(
-    '0.4.2.2',
+    '0.4.3',
   )
 })
 
@@ -91,4 +91,37 @@ test('images can require a native architecture', () => {
 
   expect(built.images.main.emulateMissing).toBe(false)
   expect(built.hardwareRequirements.arch).toEqual(['aarch64'])
+})
+
+test('shared-volume capability defaults to false and preserves explicit opt-in', () => {
+  expect(
+    buildManifest(versions, manifest(), Dependencies.of()).sharedVolumes,
+  ).toBe(false)
+  const optedIn = setupManifest({ ...manifest(), sharedVolumes: true })
+  const built = buildManifest(versions, optedIn, Dependencies.of())
+  expect(built.sharedVolumes).toBe(true)
+  expect(built.osVersion).toBe('0.4.3')
+})
+
+test('an explicit compatibility override cannot understate shared-volume support', () => {
+  for (const osVersion of ['0.4.2', '0.4.1.1']) {
+    expect(() =>
+      buildManifest(
+        versions,
+        setupManifest({ ...manifest(), sharedVolumes: true, osVersion }),
+        Dependencies.of(),
+      ),
+    ).toThrow('Shared volumes require StartOS 0.4.3 or later')
+  }
+  expect(
+    buildManifest(
+      versions,
+      setupManifest({
+        ...manifest(),
+        sharedVolumes: true,
+        osVersion: '0.4.3',
+      }),
+      Dependencies.of(),
+    ).osVersion,
+  ).toBe('0.4.3')
 })

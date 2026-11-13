@@ -300,12 +300,24 @@
                 { "type": "null" }
               ]
             },
+            "sharedVolumeIds": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/SharedVolumeId" }
+                },
+                { "type": "null" }
+              ]
+            },
             "password": { "$ref": "#/$defs/PasswordType" }
           },
           "required": ["targetId", "password"],
           "additionalProperties": true
         },
-        "BackupTargetId": { "type": "string" },
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        },
         "PasswordType": {
           "anyOf": [{ "$ref": "#/$defs/EncryptedWire" }, { "type": "string" }]
         },
@@ -315,7 +327,11 @@
           "required": ["encrypted"],
           "additionalProperties": true
         },
-        "PackageId": { "type": "string" }
+        "PackageId": { "type": "string" },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
       },
       "type": "object",
       "properties": {
@@ -329,9 +345,163 @@
             { "type": "null" }
           ]
         },
+        "sharedVolumeIds": {
+          "anyOf": [
+            { "type": "array", "items": { "$ref": "#/$defs/SharedVolumeId" } },
+            { "type": "null" }
+          ]
+        },
         "password": { "$ref": "#/$defs/PasswordType" }
       },
       "required": ["targetId", "password"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.history.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "HistoryParams": {
+          "type": "object",
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["offset", "limit"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "offset": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["offset", "limit"],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "BackupHistory": {
+          "type": "object",
+          "properties": {
+            "runs": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/BackupRun" }
+            },
+            "total": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["runs", "total"],
+          "additionalProperties": true
+        },
+        "BackupRun": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "targetName": { "type": "string" },
+            "startedAt": { "type": "string" },
+            "completedAt": { "type": "string" },
+            "report": { "$ref": "#/$defs/BackupReport" }
+          },
+          "required": [
+            "id",
+            "targetId",
+            "targetName",
+            "startedAt",
+            "completedAt",
+            "report"
+          ],
+          "additionalProperties": true,
+          "description": "A completed background backup with its original target name and final report."
+        },
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        },
+        "BackupReport": {
+          "type": "object",
+          "properties": {
+            "server": { "$ref": "#/$defs/ServerBackupReport" },
+            "packages": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/PackageBackupReport" }
+            },
+            "sharedVolumes": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/VolumeBackupReport" }
+            }
+          },
+          "required": ["server", "packages", "sharedVolumes"],
+          "additionalProperties": true
+        },
+        "ServerBackupReport": {
+          "type": "object",
+          "properties": {
+            "attempted": { "type": "boolean" },
+            "error": { "type": ["string", "null"] }
+          },
+          "required": ["attempted", "error"],
+          "additionalProperties": true
+        },
+        "PackageBackupReport": {
+          "type": "object",
+          "properties": {
+            "error": { "type": ["string", "null"] },
+            "duration_ms": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["error", "duration_ms"],
+          "additionalProperties": true
+        },
+        "VolumeBackupReport": {
+          "allOf": [
+            {
+              "type": "object",
+              "properties": { "name": { "type": "string" } },
+              "required": ["name"],
+              "additionalProperties": true
+            },
+            { "$ref": "#/$defs/PackageBackupReport" }
+          ]
+        }
+      },
+      "type": "object",
+      "properties": {
+        "runs": { "type": "array", "items": { "$ref": "#/$defs/BackupRun" } },
+        "total": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["runs", "total"],
       "additionalProperties": true
     }
   },
@@ -369,96 +539,83 @@
       "additionalProperties": { "$ref": "#/$defs/BackupTarget" },
       "$defs": {
         "BackupTarget": {
+          "allOf": [
+            {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "source": { "$ref": "#/$defs/SharedVolumeSource" },
+                "startOs": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/StartOsRecoveryInfo"
+                  }
+                },
+                "legacyBackup": { "type": "boolean" }
+              },
+              "required": ["name", "source", "startOs", "legacyBackup"],
+              "additionalProperties": true
+            },
+            { "$ref": "#/$defs/SharedVolumeInspection" }
+          ],
+          "description": "A registered backup destination and its last source observation."
+        },
+        "SharedVolumeSource": {
           "anyOf": [
             {
-              "allOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "type": { "type": "string", "const": "disk" }
-                  },
-                  "required": ["type"],
-                  "additionalProperties": true
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "vendor": { "type": ["string", "null"] },
-                    "model": { "type": ["string", "null"] }
-                  },
-                  "required": ["vendor", "model"],
-                  "additionalProperties": true
-                },
-                { "$ref": "#/$defs/PartitionInfo" }
-              ]
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "local",
+                  "description": "Managed Btrfs subvolume on the encrypted data partition."
+                }
+              },
+              "required": ["kind"],
+              "additionalProperties": true
             },
             {
-              "allOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "type": { "type": "string", "const": "cifs" }
-                  },
-                  "required": ["type"],
-                  "additionalProperties": true
-                },
-                { "$ref": "#/$defs/CifsBackupTarget" }
-              ]
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "disk" },
+                "logicalname": { "type": "string" },
+                "path": { "type": "string" },
+                "drive": {
+                  "description": "The drive as reported when the source was created, for display.",
+                  "anyOf": [
+                    { "$ref": "#/$defs/SharedVolumeDrive" },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["kind", "logicalname", "path", "drive"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "cifs" },
+                "hostname": { "type": "string" },
+                "path": { "type": "string" },
+                "username": { "type": "string" }
+              },
+              "required": ["kind", "hostname", "path", "username"]
             }
           ]
         },
-        "PartitionInfo": {
+        "SharedVolumeDrive": {
           "type": "object",
           "properties": {
-            "logicalname": { "type": "string" },
-            "stablePath": { "type": "string" },
+            "vendor": { "type": ["string", "null"] },
+            "model": { "type": ["string", "null"] },
             "label": { "type": ["string", "null"] },
             "capacity": {
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
-            },
-            "used": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                { "type": "null" }
-              ]
-            },
-            "available": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                { "type": "null" }
-              ]
-            },
-            "startOs": {
-              "type": "object",
-              "propertyNames": { "type": "string" },
-              "additionalProperties": { "$ref": "#/$defs/StartOsRecoveryInfo" }
-            },
-            "legacyBackup": { "type": "boolean" },
-            "guid": { "type": ["string", "null"] },
-            "filesystem": { "type": ["string", "null"] }
+            }
           },
-          "required": [
-            "logicalname",
-            "stablePath",
-            "label",
-            "capacity",
-            "used",
-            "available",
-            "startOs",
-            "legacyBackup",
-            "guid",
-            "filesystem"
-          ],
+          "required": ["vendor", "model", "label", "capacity"],
           "additionalProperties": true
         },
         "StartOsRecoveryInfo": {
@@ -479,13 +636,10 @@
           "enum": ["legacy", "current", "interrupted", "unknown"],
           "description": "Unauthenticated discovery hints; opening the store validates its actual state."
         },
-        "CifsBackupTarget": {
+        "SharedVolumeInspection": {
           "type": "object",
           "properties": {
-            "hostname": { "type": "string" },
-            "path": { "type": "string" },
-            "username": { "type": "string" },
-            "mountable": { "type": "boolean" },
+            "availability": { "$ref": "#/$defs/SharedVolumeAvailability" },
             "available": {
               "anyOf": [
                 {
@@ -496,23 +650,15 @@
                 { "type": "null" }
               ]
             },
-            "startOs": {
-              "type": "object",
-              "propertyNames": { "type": "string" },
-              "additionalProperties": { "$ref": "#/$defs/StartOsRecoveryInfo" }
-            },
-            "legacyBackup": { "type": "boolean" }
+            "error": { "type": ["string", "null"] },
+            "checkedAt": { "type": ["string", "null"] }
           },
-          "required": [
-            "hostname",
-            "path",
-            "username",
-            "mountable",
-            "available",
-            "startOs",
-            "legacyBackup"
-          ],
+          "required": ["availability", "available", "error", "checkedAt"],
           "additionalProperties": true
+        },
+        "SharedVolumeAvailability": {
+          "type": "string",
+          "enum": ["unknown", "available", "unavailable"]
         }
       }
     }
@@ -528,7 +674,10 @@
           "required": ["id"],
           "additionalProperties": true
         },
-        "BackupTargetId": { "type": "string" }
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        }
       },
       "type": "object",
       "properties": { "id": { "$ref": "#/$defs/BackupTargetId" } },
@@ -553,7 +702,10 @@
           "required": ["id", "hostname", "path", "username"],
           "additionalProperties": true
         },
-        "BackupTargetId": { "type": "string" }
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        }
       },
       "type": "object",
       "properties": {
@@ -573,96 +725,83 @@
       "additionalProperties": { "$ref": "#/$defs/BackupTarget" },
       "$defs": {
         "BackupTarget": {
+          "allOf": [
+            {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "source": { "$ref": "#/$defs/SharedVolumeSource" },
+                "startOs": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/StartOsRecoveryInfo"
+                  }
+                },
+                "legacyBackup": { "type": "boolean" }
+              },
+              "required": ["name", "source", "startOs", "legacyBackup"],
+              "additionalProperties": true
+            },
+            { "$ref": "#/$defs/SharedVolumeInspection" }
+          ],
+          "description": "A registered backup destination and its last source observation."
+        },
+        "SharedVolumeSource": {
           "anyOf": [
             {
-              "allOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "type": { "type": "string", "const": "disk" }
-                  },
-                  "required": ["type"],
-                  "additionalProperties": true
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "vendor": { "type": ["string", "null"] },
-                    "model": { "type": ["string", "null"] }
-                  },
-                  "required": ["vendor", "model"],
-                  "additionalProperties": true
-                },
-                { "$ref": "#/$defs/PartitionInfo" }
-              ]
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "local",
+                  "description": "Managed Btrfs subvolume on the encrypted data partition."
+                }
+              },
+              "required": ["kind"],
+              "additionalProperties": true
             },
             {
-              "allOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "type": { "type": "string", "const": "cifs" }
-                  },
-                  "required": ["type"],
-                  "additionalProperties": true
-                },
-                { "$ref": "#/$defs/CifsBackupTarget" }
-              ]
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "disk" },
+                "logicalname": { "type": "string" },
+                "path": { "type": "string" },
+                "drive": {
+                  "description": "The drive as reported when the source was created, for display.",
+                  "anyOf": [
+                    { "$ref": "#/$defs/SharedVolumeDrive" },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["kind", "logicalname", "path", "drive"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "cifs" },
+                "hostname": { "type": "string" },
+                "path": { "type": "string" },
+                "username": { "type": "string" }
+              },
+              "required": ["kind", "hostname", "path", "username"]
             }
           ]
         },
-        "PartitionInfo": {
+        "SharedVolumeDrive": {
           "type": "object",
           "properties": {
-            "logicalname": { "type": "string" },
-            "stablePath": { "type": "string" },
+            "vendor": { "type": ["string", "null"] },
+            "model": { "type": ["string", "null"] },
             "label": { "type": ["string", "null"] },
             "capacity": {
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
-            },
-            "used": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                { "type": "null" }
-              ]
-            },
-            "available": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                { "type": "null" }
-              ]
-            },
-            "startOs": {
-              "type": "object",
-              "propertyNames": { "type": "string" },
-              "additionalProperties": { "$ref": "#/$defs/StartOsRecoveryInfo" }
-            },
-            "legacyBackup": { "type": "boolean" },
-            "guid": { "type": ["string", "null"] },
-            "filesystem": { "type": ["string", "null"] }
+            }
           },
-          "required": [
-            "logicalname",
-            "stablePath",
-            "label",
-            "capacity",
-            "used",
-            "available",
-            "startOs",
-            "legacyBackup",
-            "guid",
-            "filesystem"
-          ],
+          "required": ["vendor", "model", "label", "capacity"],
           "additionalProperties": true
         },
         "StartOsRecoveryInfo": {
@@ -683,13 +822,10 @@
           "enum": ["legacy", "current", "interrupted", "unknown"],
           "description": "Unauthenticated discovery hints; opening the store validates its actual state."
         },
-        "CifsBackupTarget": {
+        "SharedVolumeInspection": {
           "type": "object",
           "properties": {
-            "hostname": { "type": "string" },
-            "path": { "type": "string" },
-            "username": { "type": "string" },
-            "mountable": { "type": "boolean" },
+            "availability": { "$ref": "#/$defs/SharedVolumeAvailability" },
             "available": {
               "anyOf": [
                 {
@@ -700,23 +836,15 @@
                 { "type": "null" }
               ]
             },
-            "startOs": {
-              "type": "object",
-              "propertyNames": { "type": "string" },
-              "additionalProperties": { "$ref": "#/$defs/StartOsRecoveryInfo" }
-            },
-            "legacyBackup": { "type": "boolean" }
+            "error": { "type": ["string", "null"] },
+            "checkedAt": { "type": ["string", "null"] }
           },
-          "required": [
-            "hostname",
-            "path",
-            "username",
-            "mountable",
-            "available",
-            "startOs",
-            "legacyBackup"
-          ],
+          "required": ["availability", "available", "error", "checkedAt"],
           "additionalProperties": true
+        },
+        "SharedVolumeAvailability": {
+          "type": "string",
+          "enum": ["unknown", "available", "unavailable"]
         }
       }
     }
@@ -737,7 +865,10 @@
           "additionalProperties": true,
           "description": "Selects an existing server backup and its unlocking credential."
         },
-        "BackupTargetId": { "type": "string" },
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        },
         "PasswordType": {
           "anyOf": [{ "$ref": "#/$defs/EncryptedWire" }, { "type": "string" }]
         },
@@ -760,6 +891,73 @@
     }
   },
   {
+    "name": "backup.target.create",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "CreateSharedVolumeParams": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "source": { "$ref": "#/$defs/CreateSharedVolumeSource" }
+          },
+          "required": ["name", "source"],
+          "additionalProperties": true
+        },
+        "CreateSharedVolumeSource": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "kind": { "type": "string", "const": "local" } },
+              "required": ["kind"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "disk" },
+                "logicalname": { "type": "string" },
+                "path": { "type": "string" }
+              },
+              "required": ["kind", "logicalname"]
+            },
+            {
+              "allOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": { "type": "string", "const": "cifs" }
+                  },
+                  "required": ["kind"],
+                  "additionalProperties": true
+                },
+                { "$ref": "#/$defs/Cifs" }
+              ]
+            }
+          ]
+        },
+        "Cifs": {
+          "type": "object",
+          "properties": {
+            "hostname": { "type": "string" },
+            "path": { "type": "string" },
+            "username": { "type": "string" },
+            "password": { "type": ["string", "null"] }
+          },
+          "required": ["hostname", "path", "username"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "source": { "$ref": "#/$defs/CreateSharedVolumeSource" }
+      },
+      "required": ["name", "source"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "backup.target.delete-legacy",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -770,11 +968,23 @@
           "required": ["targetId"],
           "additionalProperties": true
         },
-        "BackupTargetId": { "type": "string" }
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        }
       },
       "type": "object",
       "properties": { "targetId": { "$ref": "#/$defs/BackupTargetId" } },
       "required": ["targetId"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.target.find",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
       "additionalProperties": true
     }
   },
@@ -810,7 +1020,10 @@
           "required": ["targetId", "serverId", "password"],
           "additionalProperties": true
         },
-        "BackupTargetId": { "type": "string" }
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        }
       },
       "type": "object"
     },
@@ -826,9 +1039,21 @@
               "type": "object",
               "propertyNames": { "type": "string" },
               "additionalProperties": { "$ref": "#/$defs/PackageBackupInfo" }
+            },
+            "sharedVolumeBackups": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "$ref": "#/$defs/SharedVolumeBackupInfo"
+              }
             }
           },
-          "required": ["version", "timestamp", "packageBackups"],
+          "required": [
+            "version",
+            "timestamp",
+            "packageBackups",
+            "sharedVolumeBackups"
+          ],
           "additionalProperties": true
         },
         "PackageBackupInfo": {
@@ -842,7 +1067,20 @@
           "required": ["title", "version", "osVersion", "timestamp"],
           "additionalProperties": true
         },
-        "Version": { "type": "string" }
+        "Version": { "type": "string" },
+        "SharedVolumeBackupInfo": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "timestamp": { "type": "string" },
+            "generation": {
+              "type": "string",
+              "description": "Identifies the completed copy beneath the volume's encrypted `data` directory."
+            }
+          },
+          "required": ["name", "timestamp", "generation"],
+          "additionalProperties": true
+        }
       },
       "type": "object",
       "properties": {
@@ -852,9 +1090,88 @@
           "type": "object",
           "propertyNames": { "type": "string" },
           "additionalProperties": { "$ref": "#/$defs/PackageBackupInfo" }
+        },
+        "sharedVolumeBackups": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/SharedVolumeBackupInfo" }
         }
       },
-      "required": ["version", "timestamp", "packageBackups"],
+      "required": [
+        "version",
+        "timestamp",
+        "packageBackups",
+        "sharedVolumeBackups"
+      ],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.target.inspect",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "TargetParams": {
+          "type": "object",
+          "properties": { "id": { "$ref": "#/$defs/BackupTargetId" } },
+          "required": ["id"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        }
+      },
+      "type": "object",
+      "properties": { "id": { "$ref": "#/$defs/BackupTargetId" } },
+      "required": ["id"],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SharedVolumeInspection": {
+          "type": "object",
+          "properties": {
+            "availability": { "$ref": "#/$defs/SharedVolumeAvailability" },
+            "available": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "error": { "type": ["string", "null"] },
+            "checkedAt": { "type": ["string", "null"] }
+          },
+          "required": ["availability", "available", "error", "checkedAt"],
+          "additionalProperties": true
+        },
+        "SharedVolumeAvailability": {
+          "type": "string",
+          "enum": ["unknown", "available", "unavailable"]
+        }
+      },
+      "type": "object",
+      "properties": {
+        "availability": { "$ref": "#/$defs/SharedVolumeAvailability" },
+        "available": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            { "type": "null" }
+          ]
+        },
+        "error": { "type": ["string", "null"] },
+        "checkedAt": { "type": ["string", "null"] }
+      },
+      "required": ["availability", "available", "error", "checkedAt"],
       "additionalProperties": true
     }
   },
@@ -882,96 +1199,83 @@
       "additionalProperties": { "$ref": "#/$defs/BackupTarget" },
       "$defs": {
         "BackupTarget": {
+          "allOf": [
+            {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "source": { "$ref": "#/$defs/SharedVolumeSource" },
+                "startOs": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/StartOsRecoveryInfo"
+                  }
+                },
+                "legacyBackup": { "type": "boolean" }
+              },
+              "required": ["name", "source", "startOs", "legacyBackup"],
+              "additionalProperties": true
+            },
+            { "$ref": "#/$defs/SharedVolumeInspection" }
+          ],
+          "description": "A registered backup destination and its last source observation."
+        },
+        "SharedVolumeSource": {
           "anyOf": [
             {
-              "allOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "type": { "type": "string", "const": "disk" }
-                  },
-                  "required": ["type"],
-                  "additionalProperties": true
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "vendor": { "type": ["string", "null"] },
-                    "model": { "type": ["string", "null"] }
-                  },
-                  "required": ["vendor", "model"],
-                  "additionalProperties": true
-                },
-                { "$ref": "#/$defs/PartitionInfo" }
-              ]
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "local",
+                  "description": "Managed Btrfs subvolume on the encrypted data partition."
+                }
+              },
+              "required": ["kind"],
+              "additionalProperties": true
             },
             {
-              "allOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "type": { "type": "string", "const": "cifs" }
-                  },
-                  "required": ["type"],
-                  "additionalProperties": true
-                },
-                { "$ref": "#/$defs/CifsBackupTarget" }
-              ]
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "disk" },
+                "logicalname": { "type": "string" },
+                "path": { "type": "string" },
+                "drive": {
+                  "description": "The drive as reported when the source was created, for display.",
+                  "anyOf": [
+                    { "$ref": "#/$defs/SharedVolumeDrive" },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["kind", "logicalname", "path", "drive"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "cifs" },
+                "hostname": { "type": "string" },
+                "path": { "type": "string" },
+                "username": { "type": "string" }
+              },
+              "required": ["kind", "hostname", "path", "username"]
             }
           ]
         },
-        "PartitionInfo": {
+        "SharedVolumeDrive": {
           "type": "object",
           "properties": {
-            "logicalname": { "type": "string" },
-            "stablePath": { "type": "string" },
+            "vendor": { "type": ["string", "null"] },
+            "model": { "type": ["string", "null"] },
             "label": { "type": ["string", "null"] },
             "capacity": {
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
-            },
-            "used": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                { "type": "null" }
-              ]
-            },
-            "available": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                { "type": "null" }
-              ]
-            },
-            "startOs": {
-              "type": "object",
-              "propertyNames": { "type": "string" },
-              "additionalProperties": { "$ref": "#/$defs/StartOsRecoveryInfo" }
-            },
-            "legacyBackup": { "type": "boolean" },
-            "guid": { "type": ["string", "null"] },
-            "filesystem": { "type": ["string", "null"] }
+            }
           },
-          "required": [
-            "logicalname",
-            "stablePath",
-            "label",
-            "capacity",
-            "used",
-            "available",
-            "startOs",
-            "legacyBackup",
-            "guid",
-            "filesystem"
-          ],
+          "required": ["vendor", "model", "label", "capacity"],
           "additionalProperties": true
         },
         "StartOsRecoveryInfo": {
@@ -992,13 +1296,10 @@
           "enum": ["legacy", "current", "interrupted", "unknown"],
           "description": "Unauthenticated discovery hints; opening the store validates its actual state."
         },
-        "CifsBackupTarget": {
+        "SharedVolumeInspection": {
           "type": "object",
           "properties": {
-            "hostname": { "type": "string" },
-            "path": { "type": "string" },
-            "username": { "type": "string" },
-            "mountable": { "type": "boolean" },
+            "availability": { "$ref": "#/$defs/SharedVolumeAvailability" },
             "available": {
               "anyOf": [
                 {
@@ -1009,23 +1310,15 @@
                 { "type": "null" }
               ]
             },
-            "startOs": {
-              "type": "object",
-              "propertyNames": { "type": "string" },
-              "additionalProperties": { "$ref": "#/$defs/StartOsRecoveryInfo" }
-            },
-            "legacyBackup": { "type": "boolean" }
+            "error": { "type": ["string", "null"] },
+            "checkedAt": { "type": ["string", "null"] }
           },
-          "required": [
-            "hostname",
-            "path",
-            "username",
-            "mountable",
-            "available",
-            "startOs",
-            "legacyBackup"
-          ],
+          "required": ["availability", "available", "error", "checkedAt"],
           "additionalProperties": true
+        },
+        "SharedVolumeAvailability": {
+          "type": "string",
+          "enum": ["unknown", "available", "unavailable"]
         }
       }
     }
@@ -1046,7 +1339,10 @@
           "required": ["targetId", "password", "allowPartial"],
           "additionalProperties": true
         },
-        "BackupTargetId": { "type": "string" }
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        }
       },
       "type": "object",
       "properties": {
@@ -1056,6 +1352,56 @@
         "allowPartial": { "type": "boolean" }
       },
       "required": ["targetId", "password", "allowPartial"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.target.remove",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "TargetParams": {
+          "type": "object",
+          "properties": { "id": { "$ref": "#/$defs/BackupTargetId" } },
+          "required": ["id"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        }
+      },
+      "type": "object",
+      "properties": { "id": { "$ref": "#/$defs/BackupTargetId" } },
+      "required": ["id"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.target.rename",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RenameTargetParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/BackupTargetId" },
+            "name": { "type": "string" }
+          },
+          "required": ["id", "name"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/BackupTargetId" },
+        "name": { "type": "string" }
+      },
+      "required": ["id", "name"],
       "additionalProperties": true
     }
   },
@@ -1076,7 +1422,10 @@
           },
           "additionalProperties": true
         },
-        "BackupTargetId": { "type": "string" }
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        }
       },
       "type": "object",
       "properties": {
@@ -1084,6 +1433,129 @@
           "anyOf": [{ "$ref": "#/$defs/BackupTargetId" }, { "type": "null" }]
         }
       },
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.target.update-cifs",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "UpdateCifsTargetParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/BackupTargetId" },
+            "hostname": { "type": "string" },
+            "path": { "type": "string" },
+            "username": { "type": "string" },
+            "password": {
+              "description": "Omitted keeps the stored password; empty clears it.",
+              "type": ["string", "null"]
+            }
+          },
+          "required": ["id", "hostname", "path", "username"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/BackupTargetId" },
+        "hostname": { "type": "string" },
+        "path": { "type": "string" },
+        "username": { "type": "string" },
+        "password": {
+          "description": "Omitted keeps the stored password; empty clears it.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["id", "hostname", "path", "username"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "backup.volume.restore",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RestoreVolumeParams": {
+          "type": "object",
+          "properties": {
+            "targetId": { "$ref": "#/$defs/BackupTargetId" },
+            "password": { "type": "string" },
+            "ids": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/SharedVolumeId" }
+            },
+            "serverId": { "type": ["string", "null"] }
+          },
+          "required": ["targetId", "password", "ids"],
+          "additionalProperties": true
+        },
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "targetId": { "$ref": "#/$defs/BackupTargetId" },
+        "password": { "type": "string" },
+        "ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SharedVolumeId" }
+        },
+        "serverId": { "type": ["string", "null"] }
+      },
+      "required": ["targetId", "password", "ids"],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RestoreVolumeResult": {
+          "type": "object",
+          "properties": {
+            "restored": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "$ref": "#/$defs/SharedVolumeId" }
+            },
+            "errors": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "type": "string" }
+            }
+          },
+          "required": ["restored", "errors"],
+          "additionalProperties": true
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "restored": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/SharedVolumeId" }
+        },
+        "errors": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["restored", "errors"],
       "additionalProperties": true
     }
   },
@@ -1284,24 +1756,6 @@
         }
       },
       "type": "object"
-    }
-  },
-  {
-    "name": "disk.list",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "format": {
-          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
-        }
-      },
-      "$defs": {
-        "IoFormat": {
-          "type": "string",
-          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
-        }
-      }
     }
   },
   {
@@ -3179,7 +3633,10 @@
           "required": ["targetId", "password", "ids"],
           "additionalProperties": true
         },
-        "BackupTargetId": { "type": "string" },
+        "BackupTargetId": {
+          "type": "string",
+          "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
+        },
         "PackageId": { "type": "string" }
       },
       "type": "object",
@@ -12280,6 +12737,276 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.create",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "CreateSharedVolumeParams": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "source": { "$ref": "#/$defs/CreateSharedVolumeSource" }
+          },
+          "required": ["name", "source"],
+          "additionalProperties": true
+        },
+        "CreateSharedVolumeSource": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": { "kind": { "type": "string", "const": "local" } },
+              "required": ["kind"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "disk" },
+                "logicalname": { "type": "string" },
+                "path": { "type": "string" }
+              },
+              "required": ["kind", "logicalname"]
+            },
+            {
+              "allOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": { "type": "string", "const": "cifs" }
+                  },
+                  "required": ["kind"],
+                  "additionalProperties": true
+                },
+                { "$ref": "#/$defs/Cifs" }
+              ]
+            }
+          ]
+        },
+        "Cifs": {
+          "type": "object",
+          "properties": {
+            "hostname": { "type": "string" },
+            "path": { "type": "string" },
+            "username": { "type": "string" },
+            "password": { "type": ["string", "null"] }
+          },
+          "required": ["hostname", "path", "username"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "source": { "$ref": "#/$defs/CreateSharedVolumeSource" }
+      },
+      "required": ["name", "source"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.inspect",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SharedVolumeParams": {
+          "type": "object",
+          "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
+          "required": ["id"],
+          "additionalProperties": true
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
+      },
+      "type": "object",
+      "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
+      "required": ["id"],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SharedVolumeInspection": {
+          "type": "object",
+          "properties": {
+            "availability": { "$ref": "#/$defs/SharedVolumeAvailability" },
+            "available": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "error": { "type": ["string", "null"] },
+            "checkedAt": { "type": ["string", "null"] }
+          },
+          "required": ["availability", "available", "error", "checkedAt"],
+          "additionalProperties": true
+        },
+        "SharedVolumeAvailability": {
+          "type": "string",
+          "enum": ["unknown", "available", "unavailable"]
+        }
+      },
+      "type": "object",
+      "properties": {
+        "availability": { "$ref": "#/$defs/SharedVolumeAvailability" },
+        "available": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            { "type": "null" }
+          ]
+        },
+        "error": { "type": ["string", "null"] },
+        "checkedAt": { "type": ["string", "null"] }
+      },
+      "required": ["availability", "available", "error", "checkedAt"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.remove",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SharedVolumeParams": {
+          "type": "object",
+          "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
+          "required": ["id"],
+          "additionalProperties": true
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
+      },
+      "type": "object",
+      "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
+      "required": ["id"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.rename",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RenameSharedVolumeParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/SharedVolumeId" },
+            "name": { "type": "string" }
+          },
+          "required": ["id", "name"],
+          "additionalProperties": true
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/SharedVolumeId" },
+        "name": { "type": "string" }
+      },
+      "required": ["id", "name"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.set-grant",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SetSharedVolumeGrantParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/SharedVolumeId" },
+            "packageId": { "$ref": "#/$defs/PackageId" },
+            "grant": {
+              "anyOf": [
+                { "$ref": "#/$defs/SharedVolumeGrant" },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["id", "packageId"],
+          "additionalProperties": true
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        },
+        "PackageId": { "type": "string" },
+        "SharedVolumeGrant": {
+          "type": "object",
+          "properties": { "readonly": { "type": "boolean" } },
+          "required": ["readonly"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/SharedVolumeId" },
+        "packageId": { "$ref": "#/$defs/PackageId" },
+        "grant": {
+          "anyOf": [{ "$ref": "#/$defs/SharedVolumeGrant" }, { "type": "null" }]
+        }
+      },
+      "required": ["id", "packageId"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.update-cifs",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "UpdateCifsSharedVolumeParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/SharedVolumeId" },
+            "hostname": { "type": "string" },
+            "path": { "type": "string" },
+            "username": { "type": "string" },
+            "password": {
+              "description": "Omitted keeps the stored password; empty clears it.",
+              "type": ["string", "null"]
+            }
+          },
+          "required": ["id", "hostname", "path", "username"],
+          "additionalProperties": true
+        },
+        "SharedVolumeId": {
+          "type": "string",
+          "description": "A 32-character uppercase base32 volume identity."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/SharedVolumeId" },
+        "hostname": { "type": "string" },
+        "path": { "type": "string" },
+        "username": { "type": "string" },
+        "password": {
+          "description": "Omitted keeps the stored password; empty clears it.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["id", "hostname", "path", "username"],
       "additionalProperties": true
     }
   },
