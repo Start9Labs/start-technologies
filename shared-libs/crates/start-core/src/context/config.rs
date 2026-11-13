@@ -19,7 +19,7 @@ pub const DEVICE_CONFIG_PATH: &str = "/media/startos/config/config.yaml";
 pub const CONFIG_PATH: &str = "/etc/startos/config.yaml";
 pub const CONFIG_PATH_LOCAL: &str = ".startos/config.yaml";
 
-/// The target selected when `-H`/`-r` is omitted.
+/// The profile selected when `-H`/`-r` is omitted.
 pub const DEFAULT_PROFILE: &str = "default";
 
 /// Named `host`/`registry` targets — the namespace every config file shares
@@ -50,14 +50,7 @@ impl<'de> Deserialize<'de> for Profiles {
                 Ok(Profiles::default())
             }
             fn visit_str<E>(self, value: &str) -> Result<Profiles, E> {
-                Ok(if value.trim().is_empty() {
-                    Profiles::default()
-                } else {
-                    Profiles(BTreeMap::from([(
-                        DEFAULT_PROFILE.to_owned(),
-                        value.to_owned(),
-                    )]))
-                })
+                Ok(Profiles::bare(value))
             }
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Profiles, A::Error> {
                 let mut profiles = BTreeMap::new();
@@ -71,6 +64,16 @@ impl<'de> Deserialize<'de> for Profiles {
     }
 }
 impl Profiles {
+    fn bare(value: &str) -> Self {
+        if value.trim().is_empty() {
+            Profiles::default()
+        } else {
+            Profiles(BTreeMap::from([(
+                DEFAULT_PROFILE.to_owned(),
+                value.to_owned(),
+            )]))
+        }
+    }
     fn merge_under(&mut self, lower: Profiles) {
         for (name, url) in lower.0 {
             self.0.entry(name).or_insert(url);
@@ -81,13 +84,10 @@ impl Profiles {
 impl std::str::FromStr for Profiles {
     type Err = std::convert::Infallible;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Ok(if value.trim().is_empty() || value == DEFAULT_PROFILE {
+        Ok(if value == DEFAULT_PROFILE {
             Profiles::default()
         } else {
-            Profiles(BTreeMap::from([(
-                DEFAULT_PROFILE.to_owned(),
-                value.to_owned(),
-            )]))
+            Profiles::bare(value)
         })
     }
 }
