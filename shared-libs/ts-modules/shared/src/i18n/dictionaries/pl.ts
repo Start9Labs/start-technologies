@@ -1077,7 +1077,6 @@ export default {
   1276: 'Moc maksymalna',
   1277: 'Ochrona przed wyłączeniem',
   1278: 'Aktywna',
-  1279: 'Automatycznie',
   1280: 'Dostarczane przez',
   1281: 'Wybierz dostawcę zależności',
   1282: 'Przypnij dostawcę',

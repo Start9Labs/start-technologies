@@ -1078,7 +1078,6 @@ export const ENGLISH: Record<string, number> = {
   'Max output': 1276,
   'Shutdown protection': 1277,
   'Active': 1278,
-  'Automatic': 1279,
   'Provided by': 1280,
   'Select a dependency provider': 1281,
   'Lock provider': 1282,

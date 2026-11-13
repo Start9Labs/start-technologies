@@ -1077,7 +1077,6 @@ export default {
   1276: 'Potencia máxima',
   1277: 'Protección de apagado',
   1278: 'Activa',
-  1279: 'Automático',
   1280: 'Proporcionado por',
   1281: 'Selecciona un proveedor de dependencias',
   1282: 'Fijar proveedor',

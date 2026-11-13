@@ -1077,7 +1077,6 @@ export default {
   1276: 'Max. Leistung',
   1277: 'Abschaltschutz',
   1278: 'Aktiv',
-  1279: 'Automatisch',
   1280: 'Bereitgestellt von',
   1281: 'Abhängigkeitsanbieter auswählen',
   1282: 'Anbieter fixieren',

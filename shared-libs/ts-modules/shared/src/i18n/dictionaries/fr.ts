@@ -1077,7 +1077,6 @@ export default {
   1276: 'Puissance maximale',
   1277: 'Protection d’arrêt',
   1278: 'Active',
-  1279: 'Automatique',
   1280: 'Fourni par',
   1281: 'Sélectionner un fournisseur de dépendance',
   1282: 'Verrouiller le fournisseur',
