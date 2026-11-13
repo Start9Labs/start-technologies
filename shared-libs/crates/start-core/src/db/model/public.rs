@@ -17,12 +17,13 @@ use crate::db::DbAccessByKey;
 use crate::db::model::Database;
 use crate::db::model::package::AllPackageData;
 use crate::net::acme::AcmeProvider;
-use crate::net::host::Host;
 use crate::net::host::binding::{
     AddSslOptions, BindInfo, BindOptions, Bindings, DerivedAddressInfo, NetInfo,
 };
+use crate::net::host::{Host, SERVER_UI_SSL_PORT};
 use crate::net::ssl::x509_sha256_fingerprint;
 use crate::net::vhost::{AlpnInfo, PassthroughInfo};
+use crate::nut::NutConfig;
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::system::{KeyboardOptions, SmtpValue};
@@ -84,7 +85,7 @@ impl Public {
                                     options: BindOptions {
                                         preferred_external_port: 80,
                                         add_ssl: Some(AddSslOptions {
-                                            preferred_external_port: 443,
+                                            preferred_external_port: SERVER_UI_SSL_PORT,
                                             alpn: Some(AlpnInfo(vec![
                                                 MaybeUtf8String("h2".into()),
                                                 MaybeUtf8String("http/1.1".into()),
@@ -96,7 +97,7 @@ impl Public {
                                     },
                                     net: NetInfo {
                                         assigned_port: None,
-                                        assigned_ssl_port: Some(443),
+                                        assigned_ssl_port: Some(SERVER_UI_SSL_PORT),
                                     },
                                     addresses: DerivedAddressInfo::default(),
                                     interfaces: BTreeMap::new(),
@@ -158,6 +159,7 @@ impl Public {
                 governor: None,
                 epp: None,
                 smtp: None,
+                nut: NutConfig::default(),
                 echoip_urls: default_echoip_urls(),
                 ram: 0,
                 devices: Vec::new(),
@@ -220,6 +222,8 @@ pub struct ServerInfo {
     #[serde(default)]
     pub epp: Option<Epp>,
     pub smtp: Option<SmtpValue>,
+    #[serde(default)]
+    pub nut: NutConfig,
     #[serde(default = "default_echoip_urls")]
     pub echoip_urls: Vec<Url>,
     pub ram: u64,

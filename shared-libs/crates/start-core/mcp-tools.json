@@ -361,7 +361,24 @@
     "name": "backup.history.list",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/HistoryParams" }
+      ],
       "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
         "HistoryParams": {
           "type": "object",
           "properties": {
@@ -380,21 +397,7 @@
           "additionalProperties": true
         }
       },
-      "type": "object",
-      "properties": {
-        "offset": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        }
-      },
-      "required": ["offset", "limit"],
-      "additionalProperties": true
+      "type": "object"
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4583,6 +4586,52 @@
       "type": "object",
       "propertyNames": { "type": "string" },
       "additionalProperties": { "$ref": "#/$defs/BindInfo" }
+    }
+  },
+  {
+    "name": "package.host.binding.reassign-port",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "$ref": "#/$defs/RequiresPackageId" },
+        { "$ref": "#/$defs/RequiresHostId" },
+        { "$ref": "#/$defs/ReassignPortParams" }
+      ],
+      "$defs": {
+        "RequiresPackageId": {
+          "type": "object",
+          "properties": { "package": { "$ref": "#/$defs/PackageId" } },
+          "required": ["package"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" },
+        "RequiresHostId": {
+          "type": "object",
+          "properties": { "host": { "$ref": "#/$defs/HostId" } },
+          "required": ["host"],
+          "additionalProperties": true
+        },
+        "HostId": { "type": "string" },
+        "ReassignPortParams": {
+          "type": "object",
+          "properties": {
+            "internalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "externalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "ssl": { "type": "boolean" }
+          },
+          "required": ["internalPort", "externalPort"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object"
     }
   },
   {
@@ -9816,6 +9865,15 @@
     }
   },
   {
+    "name": "server.clear-nut",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "server.clear-smtp",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -10755,6 +10813,48 @@
     }
   },
   {
+    "name": "server.host.binding.reassign-port",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "ReassignPortParams": {
+          "type": "object",
+          "properties": {
+            "internalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "externalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "ssl": { "type": "boolean" }
+          },
+          "required": ["internalPort", "externalPort"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "internalPort": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "externalPort": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "ssl": { "type": "boolean" }
+      },
+      "required": ["internalPort", "externalPort"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "server.host.binding.set-address-enabled",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11647,6 +11747,91 @@
     }
   },
   {
+    "name": "server.nut-list-ups",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "ListNutUpsParams": {
+          "type": "object",
+          "properties": {
+            "host": { "type": "string" },
+            "port": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["host"],
+          "additionalProperties": true,
+          "description": "Address of the NUT server to list UPS devices from."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "host": { "type": "string" },
+        "port": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["host"],
+      "additionalProperties": true,
+      "description": "Address of the NUT server to list UPS devices from."
+    }
+  },
+  {
+    "name": "server.nut-scan",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "server.nut-status",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "NutStatus": {
+          "type": "object",
+          "properties": {
+            "target": { "type": "string" },
+            "variables": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "type": "string" }
+            },
+            "monitoringError": { "type": ["string", "null"] }
+          },
+          "required": ["target", "variables", "monitoringError"],
+          "additionalProperties": true,
+          "description": "Current variables reported by the configured UPS."
+        }
+      },
+      "type": "object",
+      "properties": {
+        "target": { "type": "string" },
+        "variables": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "type": "string" }
+        },
+        "monitoringError": { "type": ["string", "null"] }
+      },
+      "required": ["target", "variables", "monitoringError"],
+      "additionalProperties": true,
+      "description": "Current variables reported by the configured UPS."
+    }
+  },
+  {
     "name": "server.rebuild",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11935,6 +12120,107 @@
       "required": ["level"],
       "additionalProperties": true,
       "description": "Sets verbosity for StartOS backend code in the running daemon."
+    }
+  },
+  {
+    "name": "server.set-nut",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SetNutParams": {
+          "type": "object",
+          "properties": { "config": { "$ref": "#/$defs/NutConfig" } },
+          "required": ["config"],
+          "additionalProperties": true,
+          "description": "Parameters for replacing the stored NUT configuration."
+        },
+        "NutConfig": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "Whether StartOS should run NUT monitoring.",
+              "type": "boolean"
+            },
+            "settings": {
+              "description": "Retained server or client settings, including while monitoring is disabled.",
+              "anyOf": [{ "$ref": "#/$defs/NutSettings" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true,
+          "description": "Stored NUT configuration and its independent enabled state."
+        },
+        "NutSettings": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "server",
+                  "description": "Serve and monitor a UPS connected directly to this StartOS host."
+                },
+                "device": { "$ref": "#/$defs/NutDevice" },
+                "listenAll": { "type": "boolean" },
+                "remoteUsername": { "type": ["string", "null"] },
+                "remotePassword": { "type": ["string", "null"] }
+              },
+              "required": ["mode", "device"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "client",
+                  "description": "Monitor a UPS exposed by another NUT server."
+                },
+                "upsName": { "type": "string" },
+                "host": { "type": "string" },
+                "port": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "monitorUsername": { "type": "string" },
+                "monitorPassword": { "type": "string" }
+              },
+              "required": [
+                "mode",
+                "upsName",
+                "host",
+                "monitorUsername",
+                "monitorPassword"
+              ]
+            }
+          ],
+          "description": "Directly connected UPS server settings or remote NUT client settings."
+        },
+        "NutDevice": {
+          "type": "object",
+          "properties": {
+            "driver": { "type": "string" },
+            "port": { "type": "string" },
+            "vendorId": { "type": ["string", "null"] },
+            "productId": { "type": ["string", "null"] },
+            "serial": { "type": ["string", "null"] },
+            "bus": { "type": ["string", "null"] },
+            "busPort": {
+              "description": "Pins devices without a serial number to the selected USB port.",
+              "type": ["string", "null"]
+            },
+            "vendor": { "type": ["string", "null"] },
+            "product": { "type": ["string", "null"] }
+          },
+          "required": ["driver", "port"],
+          "additionalProperties": true,
+          "description": "A UPS detected on USB, with the driver settings that address it."
+        }
+      },
+      "type": "object",
+      "properties": { "config": { "$ref": "#/$defs/NutConfig" } },
+      "required": ["config"],
+      "additionalProperties": true,
+      "description": "Parameters for replacing the stored NUT configuration."
     }
   },
   {

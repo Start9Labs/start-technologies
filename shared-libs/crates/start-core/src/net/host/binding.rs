@@ -29,6 +29,8 @@ use crate::util::serde::{HandlerExtSerde, display_serializable};
 use crate::util::tui::choose_custom_display;
 use crate::{GatewayId, HostId, ServiceInterfaceId};
 
+mod reassign;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct BindId {
@@ -874,6 +876,15 @@ rpc_toolkit::ts_export!(BasicCredential, namespaces = [""]);
 pub fn binding<C: Context, Kind: HostApiKind>()
 -> ParentHandler<C, Kind::Params, Kind::InheritedParams> {
     ParentHandler::<C, Kind::Params, Kind::InheritedParams>::new()
+        .subcommand(
+            "reassign-port",
+            from_fn_async(reassign::reassign_port::<Kind>)
+                .with_metadata("sync_db", Value::Bool(true))
+                .with_inherited(Kind::inheritance)
+                .no_display()
+                .with_about("about.reassign-binding-port")
+                .with_call_remote::<CliContext>(),
+        )
         .subcommand(
             "list",
             from_fn_async(list_bindings::<Kind>)

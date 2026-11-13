@@ -4,7 +4,7 @@ PostgreSQL is the most common database sidecar in StartOS packages. The pattern 
 
 ## Solution
 
-Generate a password in `setupOnInit` and store it in a file model. In `setupMain`, create a PostgreSQL subcontainer with `sdk.useEntrypoint(['--listen_addresses=127.0.0.1'])` and pass credentials via env vars. Health-check with `pg_isready`. The app daemon connects via `localhost:5432` and declares `requires: ['postgres']`. For backups, use `sdk.Backups.withPgDump()` which handles dump and restore automatically.
+Generate a password in `setupOnInit` and store it in a file model. In `setupMain`, create a PostgreSQL subcontainer with `sdk.useEntrypoint(['--listen_addresses=127.0.0.1'])` and pass credentials via env vars. Health-check with `pg_isready`. The app daemon connects via `localhost:5432` and declares `requires: ['postgres']`. For backups, use `sdk.Backups.withPgDump()`, which handles dump and restore. PostgreSQL's data files are not guaranteed portable across CPU architectures, so a dump is the safe choice (see [Databases: copy the volume or dump it](recipe-backups.md#databases-copy-the-volume-or-dump-it)).
 
 **Reference:** [Main](main.md) · [Initialization](init.md) · [File Models](file-models.md)
 
