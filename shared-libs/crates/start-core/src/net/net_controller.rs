@@ -23,24 +23,21 @@ use crate::net::forward::{
     ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, nft_rule, nft_rule_v6,
 };
 use crate::net::gateway::{NetworkInterfaceController, WildcardListener};
-use crate::net::host::binding::{AddSslOptions, BindId, BindOptions, UpstreamCertValidation};
-use crate::net::host::{Host, Hosts, SERVER_UI_SSL_PORT, host_for, host_for_existing};
+use crate::net::host::binding::{BindId, BindOptions, UpstreamCertValidation};
+use crate::net::host::{Host, Hosts, host_for, host_for_existing};
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::service_interface::{
     AddressInfo, HostnameInfo, HostnameMetadata, ServiceInterface, ServiceInterfaceType,
 };
 use crate::net::socks::SocksController;
 use crate::net::transport::Transport;
-use crate::net::vhost::{
-    AlpnInfo, DynVHostTarget, PlainHttpProxy, ProxyTarget, VHostController, VHostKey,
-};
+use crate::net::vhost::{DynVHostTarget, PlainHttpProxy, ProxyTarget, VHostController, VHostKey};
 use crate::net::web_server::WebServerAcceptorSetter;
 use crate::net::{SERVICE_OUTBOUND_REJECT_RULE_PRIORITY, SERVICE_OUTBOUND_RULE_PRIORITY};
 use crate::prelude::*;
 use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
-use crate::util::serde::MaybeUtf8String;
 use crate::util::sync::{SyncMutex, Watch};
 use crate::{GatewayId, HOST_IP, HostId, Id, OptionExt, PackageId, ServiceInterfaceId};
 
@@ -248,24 +245,7 @@ impl NetController {
         })?;
         service.clear_bindings(Default::default()).await?;
         service
-            .bind(
-                HostId::admin(),
-                80,
-                BindOptions {
-                    transport: Transport::Tcp,
-                    preferred_external_port: 80,
-                    add_ssl: Some(AddSslOptions {
-                        preferred_external_port: SERVER_UI_SSL_PORT,
-                        alpn: Some(AlpnInfo(vec![
-                            MaybeUtf8String("h2".into()),
-                            MaybeUtf8String("http/1.1".into()),
-                        ])),
-                        upstream_cert_validation: Default::default(),
-                    }),
-                    secure: None,
-                    proxy: None,
-                },
-            )
+            .bind(HostId::admin(), 80, BindOptions::server_ui())
             .await?;
 
         // Sync the OS's own UI as a service interface (idempotent — the OS's
@@ -1749,7 +1729,9 @@ mod tests {
 
     use super::*;
     use crate::db::model::public::IpInfo;
-    use crate::net::host::binding::Security;
+    use crate::net::host::binding::{AddSslOptions, Security};
+    use crate::net::vhost::AlpnInfo;
+    use crate::util::serde::MaybeUtf8String;
 
     fn bind_options(
         add_ssl: bool,

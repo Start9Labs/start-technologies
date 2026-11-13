@@ -1,6 +1,6 @@
 use super::*;
 use crate::db::model::public::IpInfo;
-use crate::net::host::binding::{ProxyOptions, Security};
+use crate::net::host::binding::{AddSslOptions, ProxyOptions, Security};
 
 fn options() -> BindOptions {
     BindOptions {

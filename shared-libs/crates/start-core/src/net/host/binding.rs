@@ -25,7 +25,7 @@ use crate::net::service_interface::{
 use crate::net::vhost::AlpnInfo;
 use crate::prelude::*;
 use crate::util::FromStrParser;
-use crate::util::serde::{HandlerExtSerde, display_serializable};
+use crate::util::serde::{HandlerExtSerde, MaybeUtf8String, display_serializable};
 use crate::util::tui::choose_custom_display;
 use crate::{GatewayId, HostId, ServiceInterfaceId};
 
@@ -733,6 +733,23 @@ rpc_toolkit::reflect_ts!(BindOptions);
 rpc_toolkit::ts_export!(BindOptions, namespaces = [""]);
 
 impl BindOptions {
+    pub(crate) fn server_ui() -> Self {
+        Self {
+            transport: crate::net::transport::Transport::Tcp,
+            preferred_external_port: 80,
+            add_ssl: Some(AddSslOptions {
+                preferred_external_port: super::SERVER_UI_SSL_PORT,
+                alpn: Some(AlpnInfo(vec![
+                    MaybeUtf8String("h2".into()),
+                    MaybeUtf8String("http/1.1".into()),
+                ])),
+                upstream_cert_validation: None,
+            }),
+            secure: None,
+            proxy: None,
+        }
+    }
+
     /// The container terminates TLS itself; the OS fronts its port with an
     /// SNI-passthrough listener that pipes the raw TLS stream through.
     pub fn serves_own_tls(&self) -> bool {
@@ -1736,6 +1753,14 @@ mod test {
                 scope_id: 0,
             },
         }
+    }
+
+    #[test]
+    fn server_ui_declares_tcp() {
+        assert_eq!(
+            BindOptions::server_ui().transport,
+            crate::net::transport::Transport::Tcp,
+        );
     }
 
     #[test]
