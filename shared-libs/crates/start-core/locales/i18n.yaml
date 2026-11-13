@@ -3101,6 +3101,14 @@ sign.commitment.request.unsupported-type:
   fr_FR: "Type d'engagement de requête non pris en charge %{ty}"
   pl_PL: "Nieobsługiwany typ zobowiązania żądania %{ty}"
 
+# sign/instance.rs
+sign.instance.invalid-database:
+  en_US: "Server identity database must be an object"
+  de_DE: "Die Datenbank der Serveridentität muss ein Objekt sein"
+  es_ES: "La base de datos de identidad del servidor debe ser un objeto"
+  fr_FR: "La base de données d'identité du serveur doit être un objet"
+  pl_PL: "Baza danych tożsamości serwera musi być obiektem"
+
 # sign/mod.rs
 sign.context-too-long:
   en_US: "Signing context is longer than 255 bytes"

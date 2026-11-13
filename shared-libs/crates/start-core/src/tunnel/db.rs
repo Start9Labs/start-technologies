@@ -36,6 +36,8 @@ use crate::util::serde::{HandlerExtSerde, apply_expr};
 #[model = "Model<Self>"]
 pub struct TunnelDatabase {
     #[serde(default)]
+    pub server_identity_key: crate::sign::instance::StoredIdentityKey,
+    #[serde(default)]
     #[visit(ts(skip))]
     pub migrations: BTreeSet<InternedString>,
     pub webserver: WebserverInfo,

@@ -255,7 +255,12 @@ impl VersionT for Version {
                 let package_s9pk = tokio::fs::File::open(s9pk_path).await?;
                 let file = MultiCursorFile::open(&package_s9pk).await?;
 
-                let key = ctx.db.peek().await.into_private().into_developer_key();
+                let key = ctx
+                    .db
+                    .peek()
+                    .await
+                    .into_private()
+                    .into_server_identity_key();
                 let registry_url =
                     Url::parse("https://registry.start9.com/").with_kind(ErrorKind::ParseUrl)?;
 

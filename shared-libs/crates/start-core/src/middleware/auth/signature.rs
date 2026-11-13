@@ -399,7 +399,8 @@ impl SigningContext for CliContext {
 impl SigningContext for RpcContext {
     fn signing_key(&self) -> Result<Signer, Error> {
         Ok(Signer::Key(AnySigningKey::Ed25519(
-            self.account.peek(|account| account.developer_key.clone()),
+            self.account
+                .peek(|account| account.server_identity_key.clone()),
         )))
     }
 }

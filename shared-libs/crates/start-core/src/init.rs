@@ -223,7 +223,7 @@ pub async fn init(
 
     load_ssh_keys.start();
     crate::developer::write_signing_key(
-        &peek.as_private().as_developer_key().de()?.0,
+        &peek.as_private().as_server_identity_key().de()?.0,
         OS_ID_KEY_PATH,
     )
     .await?;
