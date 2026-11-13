@@ -30,6 +30,10 @@ StartWRT supports DHCP, static IP, and PPPoE WAN connections, which covers the v
 
 Yes. StartWRT is built on OpenWrt, and the full CLI is accessible over [SSH](ssh.md). You can use `apk` to install packages, edit UCI files directly, and run standard Linux networking tools. Changes made via the CLI are respected by the web interface.
 
+## How do I manage my router when I'm away from home?
+
+Connect to one of its [Inbound VPNs](inbound-vpn.md). VPN clients join your network as local devices, with the access their [Security Profile](security-profiles.md) grants, so once connected you browse to the web interface exactly as you would at home. If your router sits behind another router, forward the VPN's WireGuard port on that upstream router. If your ISP uses [CGNAT](cgnat.md), inbound connections cannot reach your router at all.
+
 ## What happens if I forget my admin password?
 
 You have two options:
@@ -59,7 +63,7 @@ Absolutely. StartWRT and [StartOS](/start-os/) are complementary products. Start
 
 ## Why can't my StartOS server or game console open ports on its own?
 
-Automatic port forwarding (UPnP/PCP) is off for every device until you allow it. Open the device's [detail page](devices.md#device-detail-page) and turn on **Allow automatic port forwarding**. A device can only ever forward ports to itself, and the router refuses requests for ports a manual [Published Ports](published-ports.md) rule or the router itself uses — remote access to its web interface, SSH, or an inbound VPN. See [Automatic port forwarding](published-ports.md#automatic-port-forwarding).
+Automatic port forwarding (UPnP/PCP) is off for every device until you allow it. Open the device's [detail page](devices.md#device-detail-page) and turn on **Allow automatic port forwarding**. A device can only ever forward ports to itself, and the router refuses requests for ports a manual [Published Ports](published-ports.md) rule or one of the router's [Inbound VPNs](inbound-vpn.md) uses. See [Automatic port forwarding](published-ports.md#automatic-port-forwarding).
 
 ## Why can't my phone resolve `.local` names over the VPN?
 

@@ -3296,7 +3296,6 @@ pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<(), Error> {
         &UciPreferences {
             language: "en_US".to_string(),
             theme: "system".to_string(),
-            remote_access: "default".to_string(),
         },
         Some("preferences"),
     )?;
@@ -8955,7 +8954,7 @@ config dhcp 'guest'
         append(
             dir.path(),
             "firewall",
-            "\nconfig rule 'startwrt_remote_443_ipv4_10'\n\toption src 'wan'\n\toption dest_port '443'\n\toption target 'ACCEPT'\n",
+            "\nconfig rule 'wan_https'\n\toption src 'wan'\n\toption dest_port '443'\n\toption target 'ACCEPT'\n",
         );
 
         let snapshot = |name: &str| std::fs::read_to_string(dir.path().join(name)).unwrap();

@@ -13,7 +13,7 @@ Rust crates powering the StartWRT router daemon and CLI — members of the root 
 Other directories:
 
 - `firstboot_config/` — Factory-default UCI configs, copied into the OpenWrt image's `/etc/config/` at image staging time (`../build/stage-files.sh`)
-- `hotplug/` — Interface hotplug scripts (proxy ARP, published ports, port control, remote access, SmartDNS), staged into the image's `/etc/hotplug.d/iface/`
+- `hotplug/` — Interface hotplug scripts (proxy ARP, published ports, port control, SmartDNS), staged into the image's `/etc/hotplug.d/iface/`
 - `nftables/` — nftables include files auto-loaded by fw4, staged into the image's `/usr/share/nftables.d/table-pre/`; those in `nftables/ruleset-pre/` go to `/usr/share/nftables.d/ruleset-pre/`, outside `table inet fw4`, and those in `nftables/chain-pre/<chain>/` go to `/usr/share/nftables.d/chain-pre/<chain>/`, at the top of that fw4 chain
 - `config_experiments/` — Reference UCI configs for manual testing
 - `notes/` — Research notes

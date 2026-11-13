@@ -152,10 +152,7 @@ cat > "${FILES_DIR}/etc/inittab" << 'INITTABEOF'
 ::respawnlate:/usr/sbin/startwrt-serial
 INITTABEOF
 
-# Hotplug script for remote access re-evaluation on WAN IP change
 mkdir -p "${FILES_DIR}/etc/hotplug.d/iface"
-cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-remote-access "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-remote-access"
-chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-remote-access"
 cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-proxy-arp "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-proxy-arp"
 chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-proxy-arp"
 cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-published-ports "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-published-ports"

@@ -129,8 +129,8 @@ pub struct FirewallRedirect {
     #[uci(default)]
     pub _apf_mac: Option<String>,
     /// Published-port metadata: "1" once the user has confirmed forwarding a
-    /// port the router itself answers on from the WAN (remote access, SSH,
-    /// VPN), so later saves don't re-prompt for the same collision.
+    /// port the router itself answers on from the WAN, so later saves don't
+    /// re-prompt for the same collision.
     #[uci(default)]
     pub _pp_wan_override: Option<String>,
 }

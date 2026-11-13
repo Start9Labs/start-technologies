@@ -283,7 +283,6 @@ export class MockApiService extends ApiService {
     language: 'en_US',
     date: new Date().toISOString(),
     theme: 'system',
-    remoteAccess: 'default',
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   }
 
@@ -346,14 +345,6 @@ export class MockApiService extends ApiService {
     if (params.language !== undefined)
       this.mockSystemInfo.language = params.language
     if (params.theme !== undefined) this.mockSystemInfo.theme = params.theme
-    if (params.remoteAccess !== undefined) {
-      this.mockSystemInfo.remoteAccess = params.remoteAccess
-      this.logActivity(
-        'system',
-        'remote-access',
-        `Updated remote access to '${params.remoteAccess}'`,
-      )
-    }
     return null
   }
 
@@ -1834,21 +1825,22 @@ export class MockApiService extends ApiService {
 
     const sniMac = '00:1A:2B:3C:4D:5E'
     const pending = params.ports
-      .filter(
-        p =>
-          p.enabled && p.ipv4 && !p.override_wan_ports && p.protocol !== 'udp',
-      )
+      .filter(p => p.enabled && p.ipv4 && !p.override_wan_ports)
       .map(p => {
         const spec = p.ipv4_public_port || p.ports
         const [lo, hi = lo] = spec.split('-').map(Number)
         const router_service_ports =
-          this.mockSystemInfo.remoteAccess !== 'never'
-            ? ['80', '443', '22'].filter(
-                rp => Number(rp) >= lo && Number(rp) <= hi,
-              )
-            : []
+          p.protocol === 'tcp'
+            ? []
+            : this.mockVpnServers
+                .map(server => server.listen_port)
+                .filter(port => port >= lo && port <= hi)
+                .map(String)
         const hostname_route_ports =
-          this.autoForwardAllowed.has(sniMac) && lo <= 443 && 443 <= hi
+          p.protocol !== 'udp' &&
+          this.autoForwardAllowed.has(sniMac) &&
+          lo <= 443 &&
+          443 <= hi
             ? [
                 {
                   ports: '443',

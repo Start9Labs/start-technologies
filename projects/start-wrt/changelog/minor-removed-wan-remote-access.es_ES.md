@@ -1,0 +1,1 @@
+- **Se eliminó el ajuste de Acceso remoto.** La interfaz web y SSH aceptan conexiones solo desde su red local y (cuando se autoriza expresamente) sus VPN entrantes. Para administrar el router fuera de casa, conéctese a través de una VPN entrante.

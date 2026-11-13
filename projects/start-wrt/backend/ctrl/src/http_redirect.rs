@@ -262,8 +262,8 @@ mod tests {
     const TCP: &str = "\tlist proto 'tcp'\n";
     const UDP: &str = "\tlist proto 'udp'\n";
 
-    const REMOTE_443: &str = "config rule 'startwrt_remote_443'\n\
-        \toption name 'startwrt_remote_443'\n\
+    const WAN_443: &str = "config rule 'wan_https'\n\
+        \toption name 'Allow HTTPS from WAN'\n\
         \toption src 'wan'\n\
         \tlist proto 'tcp'\n\
         \toption dest_port '443'\n\
@@ -317,8 +317,8 @@ mod tests {
     #[tokio::test]
     async fn nothing_published_means_no_redirect() {
         assert!(!desired_for("", &[]).await);
-        // Remote Access: the router answers 443 itself.
-        assert!(!desired_for(REMOTE_443, &[]).await);
+        // The router answers 443 itself.
+        assert!(!desired_for(WAN_443, &[]).await);
     }
 
     #[tokio::test]
@@ -365,7 +365,7 @@ mod tests {
         assert!(with_firewall(ADMISSION_80, admission_present).await);
         assert!(!with_firewall(&route_rule_80(), admission_present).await);
         assert!(!with_firewall(ADMISSION_443, admission_present).await);
-        assert!(!with_firewall(REMOTE_443, admission_present).await);
+        assert!(!with_firewall(WAN_443, admission_present).await);
         assert!(!with_firewall("", admission_present).await);
     }
 
@@ -374,7 +374,7 @@ mod tests {
         assert!(with_firewall(ADMISSION_80, port_admitted).await);
         assert!(with_firewall(&route_rule_80(), port_admitted).await);
         assert!(!with_firewall(ADMISSION_443, port_admitted).await);
-        assert!(!with_firewall(REMOTE_443, port_admitted).await);
+        assert!(!with_firewall(WAN_443, port_admitted).await);
         assert!(!with_firewall("", port_admitted).await);
     }
 

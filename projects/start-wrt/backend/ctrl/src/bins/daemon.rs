@@ -283,9 +283,6 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::vpn_client::heal_vpn_clients("/etc/config").await {
             tracing::error!("Outbound VPN repair failed: {e}");
         }
-        if let Err(e) = crate::system::apply_remote_access(ctx.clone()).await {
-            tracing::error!("Remote access rule apply failed: {e}");
-        }
         if let Err(e) = crate::dns::heal_smartdns_conf("/etc/config").await {
             tracing::error!("SmartDNS config repair failed: {e}");
         }

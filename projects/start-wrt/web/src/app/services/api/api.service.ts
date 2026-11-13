@@ -225,12 +225,9 @@ export type SetPasswordReq = RpcParamType<Api, 'auth.set-password'>
 
 export type Theme = 'dark' | 'light' | 'system'
 
-export type RemoteAccess = 'default' | 'never' | 'always'
-
 export type SetPreferencesReq = Partial<{
   language: string
   theme: Theme
-  remoteAccess: RemoteAccess
 }>
 
 export type VpnServerPeer = Bindings.VpnServerPeer

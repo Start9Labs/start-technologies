@@ -34,9 +34,8 @@ have tested and stop.
 
 - **`wrt-bench`** — an SSH alias for the router under test, reached as `root` at its WAN
   address on the bench's own management port (`bench.sh mgmt`, 2222 by default): a second
-  dropbear plus a `bench_mgmt_ssh` firewall rule admitting this machine alone. Remote Access
-  never governs that port, so ports 22, 80, and 443 behave exactly as the product sets them
-  and every Remote Access mode is testable. The router sits behind an upstream NAT whose LAN
+  dropbear plus a `bench_mgmt_ssh` firewall rule admitting this machine alone, so ports 22,
+  80, and 443 behave exactly as the product sets them. The router sits behind an upstream NAT whose LAN
   this machine is on, and **this machine is the WAN-side client** for every inbound test.
 - **`os-bench`** — an SSH alias for a StartOS server wired to a router LAN port, reached as
   `start9` through `ProxyJump wrt-bench`. It is the real LAN client for anything StartOS and
@@ -72,7 +71,7 @@ as what its upstream router offers.
 
 - **Wi-Fi** — no Wi-Fi client: association, password-to-profile assignment, schedules, RF.
 - **Sources on the public Internet** — the only WAN-side client sits on a private upstream
-  network: global-source Remote Access, port forwards and hostname routes reached from the
+  network: port forwards and hostname routes reached from the
   Internet, ACME and DDNS against a real zone.
 - **A second WAN-side client or an inbound VPN peer** — either needs root on this machine.
 - **Upstream conditions** — PPPoE, static WAN, CGNAT, a lost WAN link, prefix delegation;
@@ -172,10 +171,6 @@ as what its upstream router offers.
      IdentitiesOnly yes
    ```
 
-   Then run `bench.sh mgmt install`, which reaches the router on port 22 while Remote Access
-   is on and adds the management port. Run it again after a fresh reflash, or when this
-   machine's address changes.
-
 3. **Console access**, scoped to one adapter rather than the `dialout` group. Read the
    adapter's IDs with `udevadm info -a -n /dev/ttyUSB0 | grep -m3 -E 'idVendor|idProduct|serial'`,
    then write `/etc/udev/rules.d/99-wrt-console.rules` and replug the adapter:
@@ -195,6 +190,10 @@ as what its upstream router offers.
    install -d -m 700 ~/.config/startwrt-bench
    (umask 077; read -rsp 'Router password: ' p; echo; printf '%s\n' "$p" >~/.config/startwrt-bench/root-password)
    ```
+
+   Then run `bench.sh console start`, `bench.sh console login`, and `bench.sh mgmt install`,
+   which adds the management port over the console. Run `mgmt install` again after a fresh
+   reflash, or when this machine's address changes.
 
 5. **`CLAUDE.local.md`** at the repo root (gitignored by `*.local.md`), loaded by every Claude
    Code session in that checkout. A worktree needs its own copy.

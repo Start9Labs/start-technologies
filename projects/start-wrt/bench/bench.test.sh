@@ -77,16 +77,17 @@ smoke_vlan_client() {
 			;;
 		esac
 	}
-	ssh_option() { echo 192.0.2.1; }
-	wrt() {
-		case $1 in
-		'uci -q get startwrt.preferences.remote_access') echo always ;;
-		esac
-	}
-	wrt22() { return 0; }
-	curl() { echo 200; }
+	ssh_option() { echo 192.168.1.2; }
+	wrt() { return 0; }
+	wrt22() { return 255; }
+	curl() { echo "${WAN_UI_STATUS:-000}"; }
 	os() { return 1; }
 	cmd_smoke
+}
+
+smoke_wan_ui_open() {
+	WAN_UI_STATUS=200
+	smoke_vlan_client
 }
 
 rpc_json_encoding() {
@@ -166,6 +167,7 @@ check 1 required_os_alias
 check 1 missing_veth
 check 1 failed_router_probe
 check 0 smoke_vlan_client
+check 1 smoke_wan_ui_open
 check 0 rpc_json_encoding
 check 1 invalid_rpc_json
 [ "$FAILURES" = 0 ]

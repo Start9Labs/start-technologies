@@ -9,7 +9,7 @@ import {
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
 import { WA_LOCAL_STORAGE } from '@ng-web-apis/common'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
-import { TuiAnimated, TuiValueChanges } from '@taiga-ui/cdk'
+import { TuiValueChanges } from '@taiga-ui/cdk'
 import {
   TUI_DARK_MODE,
   TUI_DARK_MODE_KEY,
@@ -19,8 +19,6 @@ import {
   TuiFilterByInputPipe,
   TuiIcon,
   TuiLabel,
-  TuiNotification,
-  TuiRadio,
   TuiTextfield,
   tuiTextfieldOptionsProvider,
   TuiTitle,
@@ -34,17 +32,13 @@ import {
   TuiDataListWrapper,
   TuiSelect,
 } from '@taiga-ui/kit'
-import { TuiElasticContainer, TuiHeader } from '@taiga-ui/layout'
+import { TuiHeader } from '@taiga-ui/layout'
 import { filter } from 'rxjs'
 import { Footer } from 'src/app/components/footer'
 import { Form } from 'src/app/components/form'
 import { MarkdownPipe, ROOT_CA_DOWNLOAD_HREF } from '@start9labs/shared'
 import { ActionService } from 'src/app/services/action.service'
-import {
-  ApiService,
-  RemoteAccess,
-  Theme,
-} from 'src/app/services/api/api.service'
+import { ApiService, Theme } from 'src/app/services/api/api.service'
 import { SystemService } from 'src/app/services/system.service'
 import { UPDATE_PROGRESS_DIALOG } from './update-progress-dialog'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
@@ -133,30 +127,6 @@ const getTheme = (theme: string): Theme =>
         />
       </tui-textfield>
       <fieldset>
-        <legend>{{ 'Remote Access' | i18n }}</legend>
-        @for (value of ['default', 'never', 'always']; track $index) {
-          <label tuiLabel>
-            <input
-              type="radio"
-              tuiRadio
-              formControlName="remote"
-              [value]="value"
-            />
-            {{ $index ? (value | i18n) : ('When behind NAT (Default)' | i18n) }}
-          </label>
-        }
-      </fieldset>
-      <tui-elastic-container>
-        @if (form.value.remote === 'always') {
-          <div tuiAnimated tuiNotification appearance="warning">
-            {{
-              'This setting is not recommended as your router will be exposed to the internet'
-                | i18n
-            }}
-          </div>
-        }
-      </tui-elastic-container>
-      <fieldset>
         <legend>{{ 'Security' | i18n }}</legend>
         <section class="g-secondary">
           {{
@@ -226,10 +196,6 @@ const getTheme = (theme: string): Theme =>
         display: flex;
       }
 
-      label {
-        text-transform: capitalize;
-      }
-
       tui-textfield {
         max-width: 25rem;
       }
@@ -254,11 +220,9 @@ const getTheme = (theme: string): Theme =>
     TuiDataList,
     TuiIcon,
     TuiLabel,
-    TuiNotification,
     TuiAppearance,
     TuiTextfield,
     TuiChevron,
-    TuiRadio,
     TuiSelect,
     TuiComboBox,
     TuiFilterByInputPipe,
@@ -267,8 +231,6 @@ const getTheme = (theme: string): Theme =>
     TuiAccordion,
     MarkdownPipe,
     NgDompurifyPipe,
-    TuiElasticContainer,
-    TuiAnimated,
     i18nPipe,
   ],
 })
@@ -306,7 +268,6 @@ export default class General {
         ? 'dark'
         : 'light') as Theme,
     language: 'en_US' as Language,
-    remote: 'default',
     timezone: 'UTC',
   })
 
@@ -320,7 +281,6 @@ export default class General {
         this.form.reset({
           theme: getTheme(info.theme),
           language: info.language as Language,
-          remote: info.remoteAccess ?? 'default',
           // Show the actual device zone; default to UTC when unset (mirrors
           // LuCI). No browser fallback — that masked an unset device as set.
           timezone: (info.timezone || 'UTC').replaceAll(' ', '_'),
@@ -373,7 +333,6 @@ export default class General {
       this.form.reset({
         theme: getTheme(info.theme),
         language: info.language as Language,
-        remote: info.remoteAccess ?? 'default',
         timezone: (info.timezone || 'UTC').replaceAll(' ', '_'),
       })
       this.onTheme(info.theme)
@@ -387,7 +346,6 @@ export default class General {
         await this.api.setPreferences({
           theme: this.form.value.theme!,
           language: this.form.value.language,
-          remoteAccess: this.form.value.remote as RemoteAccess,
         })
 
         await this.api.setTimezone({ timezone: this.form.value.timezone! })

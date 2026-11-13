@@ -4661,12 +4661,9 @@ config rule
         );
     }
 
-    /// The WAN-input ACCEPT rules the router writes for its own services:
-    /// Remote Access in `default` (behind-NAT) mode — src_ip-scoped, one
-    /// family per rule — plus an unscoped SSH rule (`always` shape), a
-    /// WireGuard listen rule (UDP), an IPv6-only twin, and a disabled rule.
-    const ROUTER_SERVICE_RULES: &str = "config rule 'startwrt_remote_443_a'
-\toption name 'startwrt_remote_443_a'
+    /// WAN-input ACCEPT rules for services the router answers on itself.
+    const ROUTER_SERVICE_RULES: &str = "config rule 'wan_https'
+\toption name 'wan_https'
 \toption src 'wan'
 \toption src_ip '192.168.0.0/16'
 \toption dest_port '443'
@@ -4674,8 +4671,8 @@ config rule
 \toption target 'ACCEPT'
 \toption family 'ipv4'
 
-config rule 'startwrt_remote_22'
-\toption name 'startwrt_remote_22'
+config rule 'wan_ssh'
+\toption name 'wan_ssh'
 \toption src 'wan'
 \toption dest_port '22'
 \tlist proto 'tcp'
@@ -4688,8 +4685,8 @@ config rule 'allow_wireguard_vpn0'
 \tlist proto 'udp'
 \toption target 'ACCEPT'
 
-config rule 'remote_v6_only'
-\toption name 'remote_v6_only'
+config rule 'wan_v6_only'
+\toption name 'wan_v6_only'
 \toption src 'wan'
 \toption dest_port '8443'
 \tlist proto 'tcp'
@@ -4743,9 +4740,8 @@ config rule 'apf_sni_8444'
     }
 
     #[tokio::test]
-    async fn router_collision_detected_for_remote_access_and_vpn() {
-        // TCP 443 hits the (src_ip-scoped, behind-NAT-mode) remote rule: the
-        // DNAT has no source scoping, so the scoped rule still loses.
+    async fn router_collision_detected_for_router_services() {
+        // An unscoped DNAT still beats a src_ip-scoped rule.
         let hits = collisions_for(vec![make_input(|p| p.ports = "443".into())]).await;
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, "valid-id");
@@ -4780,7 +4776,7 @@ config rule 'apf_sni_8444'
 
     #[tokio::test]
     async fn router_collision_respects_transport_and_flags() {
-        // UDP-only on 443 shares no transport with the TCP remote rule; TCP
+        // UDP-only on 443 shares no transport with the TCP rule; TCP
         // on the WireGuard port shares none with its UDP rule.
         assert!(collisions_for(vec![make_input(|p| {
             p.ports = "443".into();

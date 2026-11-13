@@ -20,7 +20,7 @@ usage() {
 	cat <<'EOF'
 Usage: bench.sh <command> [args]
 
-  mgmt install|status|remove        the bench's own SSH port on the router, independent of Remote Access
+  mgmt install|status|remove        the bench's own SSH port on the router; install and remove run on the console
   preflight [--with-os]             check the bench hosts, the console, and router capabilities;
                                     os-bench fails the check only with --with-os
   deployed                          compare the local startwrt build with the router's binary
@@ -127,7 +127,7 @@ EOF
 			bad "router capability check failed"
 		fi
 	else
-		bad "ssh $WRT_HOST unreachable (is Remote Access on? recover over the console)"
+		bad "ssh $WRT_HOST unreachable (is the management port installed? recover over the console)"
 	fi
 
 	echo "LAN client ($OS_HOST)"
@@ -445,38 +445,23 @@ cmd_lan_client() {
 	wrt "sh /tmp/bench/lan-client.sh$args"
 }
 
-is_rfc1918() {
-	case $1 in
-	10.* | 192.168.* | 172.1[6-9].* | 172.2[0-9].* | 172.3[01].*) return 0 ;;
-	*) return 1 ;;
-	esac
-}
-
 cmd_mgmt() {
 	case ${1:-status} in
 	install)
-		local me
-		me=$(wrt22 'echo "${SSH_CLIENT%% *}"') || die "install needs SSH on port 22, which Remote Access opens"
-		wrt22 "set -e
-uci -q delete dropbear.bench || true
-uci set dropbear.bench=dropbear
-uci set dropbear.bench.enable=1
-uci set dropbear.bench.Port=$MGMT_PORT
-uci set dropbear.bench.PasswordAuth=off
-uci set dropbear.bench.RootPasswordAuth=off
-uci commit dropbear
-uci -q delete firewall.bench_mgmt || true
-uci set firewall.bench_mgmt=rule
-uci set firewall.bench_mgmt.name=bench_mgmt_ssh
-uci set firewall.bench_mgmt.src=wan
-uci set firewall.bench_mgmt.family=ipv4
-uci set firewall.bench_mgmt.src_ip=$me
-uci set firewall.bench_mgmt.proto=tcp
-uci set firewall.bench_mgmt.dest_port=$MGMT_PORT
-uci set firewall.bench_mgmt.target=ACCEPT
-uci commit firewall
-/etc/init.d/dropbear reload
-/etc/init.d/firewall reload >/dev/null 2>&1"
+		local wan me
+		wan=$(getent ahostsv4 "$(ssh_option "$WRT_HOST" hostname)" | awk 'NR == 1 { print $1 }')
+		me=$(ip -4 route get "$wan" 2>/dev/null | grep -Eo 'src [0-9.]+' | cut -d" " -f2)
+		[ -n "$me" ] || die "no local route to $WRT_HOST"
+		cmd_console run "uci -q delete dropbear.bench; uci set dropbear.bench=dropbear \
+&& uci set dropbear.bench.enable=1 && uci set dropbear.bench.Port=$MGMT_PORT \
+&& uci set dropbear.bench.PasswordAuth=off && uci set dropbear.bench.RootPasswordAuth=off \
+&& uci commit dropbear && { uci -q delete firewall.bench_mgmt; true; } \
+&& uci set firewall.bench_mgmt=rule && uci set firewall.bench_mgmt.name=bench_mgmt_ssh \
+&& uci set firewall.bench_mgmt.src=wan && uci set firewall.bench_mgmt.family=ipv4 \
+&& uci set firewall.bench_mgmt.src_ip=$me && uci set firewall.bench_mgmt.proto=tcp \
+&& uci set firewall.bench_mgmt.dest_port=$MGMT_PORT && uci set firewall.bench_mgmt.target=ACCEPT \
+&& uci commit firewall && /etc/init.d/dropbear reload && /etc/init.d/firewall reload >/dev/null 2>&1" ||
+			die "install runs on the console: bench.sh console start, then console login"
 		sleep 2
 		ssh -p "$MGMT_PORT" -o BatchMode=yes -o ConnectTimeout=5 "$WRT_HOST" true ||
 			die "management port $MGMT_PORT does not answer"
@@ -488,8 +473,8 @@ uci commit firewall
 		wrt "uci -q show dropbear.bench; uci -q show firewall.bench_mgmt" || die "no management SSH"
 		;;
 	remove)
-		wrt22 "uci -q delete dropbear.bench; uci -q delete firewall.bench_mgmt; uci commit dropbear; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1; /etc/init.d/dropbear reload" ||
-			die "remove needs SSH on port 22, which Remote Access opens"
+		cmd_console run "uci -q delete dropbear.bench; uci -q delete firewall.bench_mgmt; uci commit dropbear; uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1; /etc/init.d/dropbear reload" ||
+			die "remove runs on the console: bench.sh console start, then console login"
 		echo "management SSH removed; point $WRT_HOST back at port 22"
 		;;
 	*) die "unknown mgmt command: $1" ;;
@@ -632,21 +617,15 @@ cmd_smoke() {
 	cmd_lan_client down "$name" >/dev/null
 
 	echo "WAN (this machine)"
-	local mode expect ui ssh22
+	local ui ssh22
 	wan=$(ssh_option "$WRT_HOST" hostname)
-	mode=$(wrt 'uci -q get startwrt.preferences.remote_access' || echo default)
-	case $mode in
-	always) expect=open ;;
-	never) expect=closed ;;
-	*) is_rfc1918 "$wan" && expect=open || expect=closed ;;
-	esac
 	ui=$(curl -sk -o /dev/null -m 10 -w '%{http_code}' "https://$wan/" || true)
 	wrt22 true 2>/dev/null && ssh22=open || ssh22=closed
 	[ "$ui" = 200 ] && ui=open || ui=closed
-	if [ "$ui" = "$expect" ] && [ "$ssh22" = "$expect" ]; then
-		ok "Remote Access $mode: UI and SSH on port 22 $expect from WAN"
+	if [ "$ui" = closed ] && [ "$ssh22" = closed ]; then
+		ok "UI and SSH on port 22 closed from WAN"
 	else
-		bad "Remote Access $mode: expected $expect from WAN, UI $ui, SSH on port 22 $ssh22"
+		bad "expected UI and SSH on port 22 closed from WAN, UI $ui, SSH on port 22 $ssh22"
 	fi
 
 	echo "router log"

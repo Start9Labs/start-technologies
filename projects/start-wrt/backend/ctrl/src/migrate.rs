@@ -11,7 +11,7 @@ use openssl::x509::X509;
 use startos::net::ssl::reissue_root_cert;
 use startos::util::io::{delete_file, maybe_read_file_to_string};
 use tokio::io::AsyncWriteExt;
-use uciedit::openwrt::{Dhcp, DhcpHost, InterfaceProto, NetworkInterface};
+use uciedit::openwrt::{Dhcp, DhcpHost, FirewallRule, InterfaceProto, NetworkInterface};
 use uciedit::{dump_all, parse_all, Arena, TypedSection};
 
 use crate::prelude::*;
@@ -42,6 +42,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::NameProfileFirewallSections,
     Migration::BindLuciToLoopback,
     Migration::DisableFlowOffloading,
+    Migration::RemoveWanRemoteAccess,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -79,6 +80,8 @@ enum Migration {
     BindLuciToLoopback,
     /// Earlier releases offloaded established forwarded connections.
     DisableFlowOffloading,
+    /// Earlier releases could serve the web interface and SSH on the WAN.
+    RemoveWanRemoteAccess,
 }
 
 impl Migration {
@@ -99,6 +102,7 @@ impl Migration {
             Migration::NameProfileFirewallSections => name_profile_firewall_sections(root).await,
             Migration::BindLuciToLoopback => bind_luci_to_loopback(root).await,
             Migration::DisableFlowOffloading => disable_flow_offloading(root).await,
+            Migration::RemoveWanRemoteAccess => remove_wan_remote_access(root).await,
         }
     }
 
@@ -133,6 +137,9 @@ impl Migration {
             Migration::BindLuciToLoopback => "serve LuCI only over HTTPS",
             Migration::DisableFlowOffloading => {
                 "stop offloading established connections, which stalled traffic to Wi-Fi devices from other profiles"
+            }
+            Migration::RemoveWanRemoteAccess => {
+                "stop serving the web interface and SSH on the WAN port"
             }
         }
     }
@@ -457,6 +464,39 @@ async fn disable_flow_offloading(root: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+#[derive(Debug, TypedSection, Default)]
+#[uci(ty = "preferences")]
+struct RemoteAccessPreference {
+    remote_access: Option<String>,
+}
+
+async fn remove_wan_remote_access(root: &Path) -> Result<(), Error> {
+    const PREFIX: &str = "startwrt_remote_";
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["firewall", "startwrt"]).await?;
+    let rules = cfgs["firewall"].sections.len();
+    cfgs["firewall"].sections.retain(|section| {
+        !section.name().is_some_and(|n| n.starts_with(PREFIX))
+            && !section
+                .get::<FirewallRule>()
+                .is_ok_and(|rule| rule.name.starts_with(PREFIX))
+    });
+    let mut changed = cfgs["firewall"].sections.len() != rules;
+    for section in &mut cfgs["startwrt"].sections {
+        if let Some(mut prefs) = section.get_typed::<RemoteAccessPreference>()? {
+            if prefs.remote_access.is_some() {
+                prefs.remote_access = None;
+                section.set(&prefs)?;
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
 async fn strip_unreferenced_wan_zone_vpns(root: &Path) -> Result<(), Error> {
     let arena = Arena::new();
     let mut cfgs = parse_all(uci_root(root), &arena, &["firewall", "startwrt"]).await?;
@@ -743,6 +783,14 @@ config host 'host_aabbccddeeff'
             std::fs::write(ca, "ca").unwrap();
         }
         dir
+    }
+
+    fn pending_from(migration: Migration) -> String {
+        let index = MIGRATIONS
+            .iter()
+            .position(|m| std::mem::discriminant(m) == std::mem::discriminant(&migration))
+            .unwrap();
+        format!("{index}\n")
     }
 
     fn write(dir: &tempfile::TempDir, path: &str, text: &str) {
@@ -1066,7 +1114,7 @@ config forwarding
     #[tokio::test]
     async fn flow_offloading_an_earlier_release_enabled_is_cleared() {
         let offloaded = format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '1'\n");
-        let before = format!("{}\n", MIGRATIONS.len() - 1);
+        let before = pending_from(Migration::DisableFlowOffloading);
         let dir = router(Some(&before), true);
         write(&dir, "etc/config/firewall", &offloaded);
         run(dir.path()).await.unwrap();
@@ -1080,6 +1128,54 @@ config forwarding
             run(dir.path()).await.unwrap();
             assert_eq!(read(&dir, "etc/config/firewall"), chosen);
         }
+    }
+
+    #[tokio::test]
+    async fn wan_remote_access_is_removed() {
+        let firewall = "config rule 'startwrt_remote_443_ipv4_10'
+\toption name 'startwrt_remote_443_ipv4_10'
+\toption src 'wan'
+\toption src_ip '10.0.0.0/8'
+\toption dest_port '443'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+
+config rule
+\toption name 'startwrt_remote_22'
+\toption src 'wan'
+\toption dest_port '22'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+
+config rule 'allow_wireguard_vpn0'
+\toption name 'Allow-WireGuard-vpn0'
+\toption src 'wan'
+\toption dest_port '51820'
+\tlist proto 'udp'
+\toption target 'ACCEPT'
+";
+        let before = pending_from(Migration::RemoveWanRemoteAccess);
+        let dir = router(Some(&before), true);
+        write(&dir, "etc/config/firewall", firewall);
+        write(
+            &dir,
+            "etc/config/startwrt",
+            "config preferences 'preferences'\n\toption language 'de_DE'\n\toption remote_access 'always'\n",
+        );
+        run(dir.path()).await.unwrap();
+        assert_eq!(record(&dir), current());
+        let firewall = read(&dir, "etc/config/firewall");
+        assert!(!firewall.contains("startwrt_remote_"), "{firewall}");
+        assert!(firewall.contains("allow_wireguard_vpn0"), "{firewall}");
+        assert_eq!(
+            read(&dir, "etc/config/startwrt"),
+            "config preferences 'preferences'\n\toption language 'de_DE'\n"
+        );
+
+        let dir = router(Some(&before), true);
+        write(&dir, "etc/config/firewall", SHIPPED_FIREWALL_DEFAULTS);
+        run(dir.path()).await.unwrap();
+        assert_eq!(read(&dir, "etc/config/firewall"), SHIPPED_FIREWALL_DEFAULTS);
     }
 
     #[tokio::test]

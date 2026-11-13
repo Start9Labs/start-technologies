@@ -1,0 +1,1 @@
+- **Usunięto ustawienie Dostęp zdalny.** Interfejs WWW i SSH przyjmują połączenia wyłącznie z sieci lokalnej i (po wyraźnym zezwoleniu) przez przychodzące sieci VPN. Aby zarządzać routerem poza domem, połącz się przez przychodzącą sieć VPN.

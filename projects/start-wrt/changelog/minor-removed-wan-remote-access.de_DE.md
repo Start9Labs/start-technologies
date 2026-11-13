@@ -1,0 +1,1 @@
+- **Die Einstellung „Fernzugriff“ wurde entfernt.** Die Weboberfläche und SSH nehmen Verbindungen nur aus Ihrem lokalen Netzwerk und (sofern ausdrücklich freigegeben) über Ihre eingehenden VPNs an. Um den Router von unterwegs zu verwalten, verbinden Sie sich über ein eingehendes VPN.

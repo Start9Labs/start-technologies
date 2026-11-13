@@ -1264,14 +1264,9 @@ export const SetPreferencesReq: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
-  remoteAccess: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
 }> = /* @__PURE__ */ object({
   language: wire(z.string().nullable().optional(), z.string().nullable()),
   theme: wire(z.string().nullable().optional(), z.string().nullable()),
-  remoteAccess: wire(z.string().nullable().optional(), z.string().nullable()),
 }).meta({
   id: 'SetPreferencesReq',
 })
@@ -1341,7 +1336,6 @@ export const SystemInfoResponse: z.ZodObject<{
   language: z.ZodString
   date: z.ZodString
   theme: z.ZodString
-  remoteAccess: z.ZodString
   timezone: z.ZodString
 }> = /* @__PURE__ */ object({
   version: z.string(),
@@ -1349,7 +1343,6 @@ export const SystemInfoResponse: z.ZodObject<{
   language: z.string(),
   date: z.string(),
   theme: z.string(),
-  remoteAccess: z.string(),
   timezone: z.string(),
 }).meta({
   id: 'SystemInfoResponse',
@@ -3902,10 +3895,6 @@ export const Api = {
     system: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
-        'apply-remote-access': {
-          _PARAMS: /* @__PURE__ */ empty,
-          _RETURN: /* @__PURE__ */ z.unknown(),
-        },
         'factory-reset': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),

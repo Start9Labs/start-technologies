@@ -16,29 +16,6 @@ When a firmware update is available, a "vX.Y.Z released!" panel appears at the t
 
 Theme and Language changes are previewed immediately when you select them, and saved when you click "Save". If you leave the page without saving, the preview reverts to your saved settings.
 
-### Remote Access
-
-Controls whether the web interface (and SSH) accepts connections arriving on the WAN port — ports 80, 443, and 22. Devices on your local network can always reach the web interface at `router.lan`, whatever this is set to.
-
-**To manage your router when you are away from home, use an [Inbound VPN](inbound-vpn.md)** — this works regardless of the Remote Access setting. VPN clients join your network as local devices (with the access granted by their [Security Profile](security-profiles.md)), so once connected you browse to the web interface exactly as you would at home. No port forwards or address whitelists on the router are needed. If your router sits behind another router, forward the VPN's WireGuard port on that upstream router; if your ISP uses [CGNAT](cgnat.md), inbound connections cannot reach your router at all — consider [StartTunnel](/start-tunnel/) as a gateway.
-
-The options control direct WAN-side access only:
-
-- **When behind NAT** (default) — WAN-side connections are accepted only from private source addresses (RFC 1918 for IPv4, ULA for IPv6), and only while the router's own WAN address is itself private. This is for routers that sit behind another router (e.g. an ISP box): devices on that upstream network can reach the web interface. From the public Internet, the web interface is never reachable in this mode — even if a public, globally routable address later appears on the WAN.
-- **Never** — No WAN-side access at all, even from an upstream private network. The web interface is reachable only from the local network (including through an Inbound VPN).
-- **Always** — WAN-side connections are accepted from any address. With a public IP, the web interface is reachable from anywhere on the Internet via the WAN IP or a [Dynamic DNS](ddns.md) domain.
-
-Changing the setting ends any open WAN-side SSH session from an address the new setting does not accept. Sessions from addresses it still accepts stay open.
-
-> [!WARNING]
-> Selecting "Always" exposes your router's admin interface to the public Internet. Only use this if you understand the security implications and have a strong admin password.
-
-> [!NOTE]
-> While Remote Access accepts WAN connections — "Always", or "When behind NAT" while the router's WAN address is private — the ports it uses are protected from [Published Ports](published-ports.md): publishing 80, 443, or 22 to a device asks for confirmation first, and a device's [automatic port forwarding](published-ports.md#automatic-port-forwarding) request for them is refused. [Hostname routes](published-ports.md#hostname-routes-shared-ports) are the exception — they share port 443 with Remote Access, each connection going to the device whose hostname it names and everything else to the router.
-
-> [!NOTE]
-> While port 443 is published to a device — by a [Published Port](published-ports.md) or a device's [hostname routes](published-ports.md#hostname-routes-shared-ports) — and port 80 is not, plain `http://` to the router's WAN address is answered with a redirect to `https://` instead of the web interface, under every option above, "Never" included. See [Reaching a Published Port from Your Own Network](published-ports.md#reaching-a-published-port-from-your-own-network).
-
 ### Security
 
 - **Download Root CA** — Download the router's Root CA: a configuration profile on iPhone and iPad, `startwrt-ca.crt` elsewhere. See [Trusting Your Root CA](trust-ca.md) for installation instructions.

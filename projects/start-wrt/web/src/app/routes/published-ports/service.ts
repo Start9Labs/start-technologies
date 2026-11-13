@@ -75,7 +75,7 @@ export class PublishedPortsService extends FormService<PublishedPortDisplay[]> {
       parts.push(
         fill(
           this.i18n.transform(
-            'Port(s) {ports} are used by this router itself — for remote access to its web interface, SSH, or a VPN server. Publishing them will send that traffic to the selected device instead, cutting those services off from outside your network.',
+            'Port(s) {ports} are used by this router itself, such as for a VPN server. Publishing them will send that traffic to the selected device instead, cutting those services off from outside your network.',
           ),
           { ports: routerPorts.join(', ') },
         ),

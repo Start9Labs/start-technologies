@@ -105,7 +105,7 @@ use startos::net::port_map::server::igd::{
     SCPD_PATH, SSDP_MULTICAST, SSDP_PORT,
 };
 use startos::net::port_map::server::{handle, GatewayBackend, MappingEntry, PCP_PORT};
-use startos::tunnel::forward::sni::{FallbackSource, SniDemux, SniRoute};
+use startos::tunnel::forward::sni::{SniDemux, SniRoute};
 use tokio::io::Interest;
 use tokio::net::UdpSocket;
 use uciedit::openwrt::{DhcpHost, FirewallRedirect, FirewallRule, FirewallTarget};
@@ -414,10 +414,6 @@ impl PortControl {
             if let Err(e) = self.sync_sni_rules().await {
                 tracing::warn!("port-control: reconciling SNI admission failed: {e}");
             }
-        }
-        let wans: std::collections::BTreeSet<Ipv4Addr> = doomed.iter().map(|r| r.ext_ip).collect();
-        for wan in wans {
-            self.sync_sni_fallback(wan).await;
         }
     }
 
@@ -820,7 +816,6 @@ impl PortControl {
             "port-control: SNI route(s) {hostnames:?} on {source} -> {target} \
              (lease {lifetime:?}s)"
         );
-        self.sync_sni_fallback(*source.ip()).await;
         Ok(())
     }
 
@@ -852,7 +847,6 @@ impl PortControl {
         if let Err(e) = self.sync_sni_rules().await {
             tracing::warn!("port-control: reconciling SNI admission failed: {e}");
         }
-        self.sync_sni_fallback(*source.ip()).await;
     }
 
     async fn remove_sni_routes_for_ips(&self, ips: &[String]) {
@@ -879,11 +873,6 @@ impl PortControl {
         }
         if let Err(e) = self.sync_sni_rules().await {
             tracing::warn!("port-control: reconciling SNI admission failed: {e}");
-        }
-        let wans: std::collections::BTreeSet<Ipv4Addr> =
-            routes.iter().map(|route| route.ext_ip).collect();
-        for wan in wans {
-            self.sync_sni_fallback(wan).await;
         }
     }
 
@@ -912,45 +901,6 @@ impl PortControl {
         }
         if let Err(e) = self.sync_sni_rules().await {
             tracing::warn!("port-control: reconciling SNI admission failed: {e}");
-        }
-        let wans: std::collections::BTreeSet<Ipv4Addr> =
-            routes.iter().map(|route| route.ext_ip).collect();
-        for wan in wans {
-            self.sync_sni_fallback(wan).await;
-        }
-    }
-
-    /// Mirrors Remote Access source policy for unknown SNI on port 443.
-    pub(crate) async fn sync_sni_fallback(&self, wan: Ipv4Addr) {
-        let has_443 = self
-            .sni
-            .snapshot()
-            .iter()
-            .any(|r| r.ext_port == 443 && r.ext_ip == wan);
-        let mode = {
-            let uci_root = self.uci_root.clone();
-            uci_task(move || async move {
-                let arena = Arena::new();
-                let cfgs = parse_all(&uci_root, &arena, &["startwrt"]).await?;
-                Ok(crate::system::preferences(&cfgs["startwrt"])?.remote_access)
-            })
-            .await
-        };
-        let ui = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 443);
-        let source = match mode.as_ref() {
-            Ok(mode) => remote_access_fallback_source(Ok(mode), wan),
-            Err(e) => {
-                tracing::warn!("port-control: reading Remote Access preference failed: {e}");
-                remote_access_fallback_source(Err(()), wan)
-            }
-        };
-        match (has_443, source) {
-            (true, Some(source)) => {
-                if let Err(code) = self.sni.register_local_fallback(wan, 443, ui, source) {
-                    tracing::warn!("port-control: remote-access fallback on 443 refused ({code})");
-                }
-            }
-            _ => self.sni.unregister_fallback(wan, 443, ui),
         }
     }
 
@@ -1029,9 +979,6 @@ impl PortControl {
         }
         if let Err(e) = self.sync_sni_rules().await {
             tracing::warn!("port-control: reconciling SNI admission failed: {e}");
-        }
-        if let Some(ip) = wan {
-            self.sync_sni_fallback(ip).await;
         }
     }
 }
@@ -1410,16 +1357,7 @@ async fn apply_forward_uci(
                 return Ok(ApplyOutcome::Conflict);
             }
         }
-        // Ports the router answers on itself from the WAN — Remote Access
-        // (80/443/22) and the VPN server's listen port — are input-chain
-        // ACCEPT *rules*, invisible to the redirect scan above. nftables
-        // applies prerouting DNAT before the routing decision, so granting one
-        // of these would silently divert the router's own web UI, SSH, or
-        // inbound VPN to the requesting device (issue #3451; the manual path
-        // surfaces the same collision as a confirmation dialog the user can
-        // override — see `published_ports::set`). A protocol client can't be
-        // asked, so refuse, as StartTunnel reserves the port its HTTP→HTTPS
-        // redirect owns.
+        // Prerouting DNAT would divert a port the router answers on itself.
         if reserves_wan_port(&cfgs["firewall"], want) {
             return Ok(ApplyOutcome::Conflict);
         }
@@ -1511,15 +1449,6 @@ fn desired_sni_rule(port: u16, redirect: Option<Ipv4Addr>) -> FirewallRule {
     }
 }
 
-/// Mirrors Remote Access firewall source policy.
-fn remote_access_fallback_source(mode: Result<&str, ()>, wan: Ipv4Addr) -> Option<FallbackSource> {
-    match mode {
-        Ok("always") => Some(FallbackSource::Any),
-        Ok("default") if wan.is_private() => Some(FallbackSource::PrivateOnly),
-        _ => None,
-    }
-}
-
 fn protocols_include_tcp(protocols: &[String]) -> bool {
     protocols.is_empty()
         || protocols.iter().any(|protocol| {
@@ -1566,15 +1495,6 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
             continue;
         };
         if rule._apf_label.as_deref() == Some(KIND_SNI) {
-            continue;
-        }
-        // Remote Access on 443 is served through the SNI fallback.
-        if port == 443
-            && (rule.name.starts_with(crate::system::REMOTE_RULE_PREFIX)
-                || sec
-                    .name()
-                    .is_some_and(|n| n.starts_with(crate::system::REMOTE_RULE_PREFIX)))
-        {
             continue;
         }
         if rule.target != FirewallTarget::ACCEPT || rule.enabled.as_deref() == Some("0") {
@@ -2763,19 +2683,18 @@ config redirect 'pp_stale'
         assert!(!written.contains("apf_"));
     }
 
-    /// Input-chain ACCEPTs for services the router answers on itself: Remote
-    /// Access (`system.rs`) and a VPN server's listen port (`vpn_server.rs`),
-    /// plus three that must *not* reserve anything.
+    /// Input-chain ACCEPTs for services the router answers on itself, plus
+    /// three that must *not* reserve anything.
     const ROUTER_FW: &str = "\
-config rule 'startwrt_remote_443'
-\toption name 'Remote access 443'
+config rule 'wan_https'
+\toption name 'Allow HTTPS from WAN'
 \toption src 'wan'
 \toption dest_port '443'
 \tlist proto 'tcp'
 \toption target 'ACCEPT'
 
-config rule 'startwrt_remote_22'
-\toption name 'Remote access 22'
+config rule 'wan_ssh'
+\toption name 'Allow SSH from WAN'
 \toption src 'wan'
 \toption dest_port '22'
 \tlist proto 'tcp'
@@ -2788,8 +2707,8 @@ config rule 'wg_listen'
 \tlist proto 'udp'
 \toption target 'ACCEPT'
 
-config rule 'remote_v6_only'
-\toption name 'Remote access over IPv6'
+config rule 'wan_v6_only'
+\toption name 'Allow 8443 over IPv6'
 \toption src 'wan'
 \toption dest_port '8443'
 \toption family 'ipv6'
@@ -2830,9 +2749,7 @@ config rule 'wan_to_lan'
         .unwrap()
     }
 
-    // A prerouting DNAT beats an input-chain ACCEPT, so granting one of these
-    // would divert the router's own web UI, SSH, or inbound VPN to the
-    // requesting device.
+    // A prerouting DNAT beats an input-chain ACCEPT.
     #[tokio::test]
     async fn apply_refuses_ports_the_router_answers_on() {
         assert!(matches!(apply_at(443, 1).await, ApplyOutcome::Conflict));
@@ -3414,24 +3331,18 @@ config host
     }
 
     #[tokio::test]
-    async fn remote_access_coexists_on_443_only() {
+    async fn router_input_rules_refuse_sni() {
         let dir = temp_root(ROUTER_FW);
         let arena = Arena::new();
         let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
         let fw = &cfgs["firewall"];
-        assert!(
-            !sni_port_conflicts(fw, 443),
-            "RA's 443 rides the UI fallback"
-        );
-        assert!(sni_port_conflicts(fw, 22), "RA's SSH keeps its refusal");
+        assert!(sni_port_conflicts(fw, 443));
+        assert!(sni_port_conflicts(fw, 22));
 
         let dir = temp_root(MANUAL_FW);
         let arena = Arena::new();
         let cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
-        assert!(
-            sni_port_conflicts(&cfgs["firewall"], 443),
-            "a manual DNAT on 443 is not Remote Access"
-        );
+        assert!(sni_port_conflicts(&cfgs["firewall"], 443));
     }
 
     #[tokio::test]
@@ -3454,29 +3365,6 @@ config host
         )
         .await
         .unwrap();
-    }
-
-    #[test]
-    fn fallback_source_mirrors_remote_access_modes() {
-        let private_wan = Ipv4Addr::new(192, 168, 10, 92);
-        let public_wan = Ipv4Addr::new(203, 0, 113, 7);
-        assert_eq!(
-            remote_access_fallback_source(Ok("default"), private_wan),
-            Some(FallbackSource::PrivateOnly)
-        );
-        assert_eq!(
-            remote_access_fallback_source(Ok("default"), public_wan),
-            None
-        );
-        assert_eq!(
-            remote_access_fallback_source(Ok("always"), public_wan),
-            Some(FallbackSource::Any)
-        );
-        assert_eq!(
-            remote_access_fallback_source(Ok("never"), private_wan),
-            None
-        );
-        assert_eq!(remote_access_fallback_source(Err(()), private_wan), None);
     }
 
     #[tokio::test]
@@ -3607,8 +3495,8 @@ config host
              \toption enabled '1'\n\
              \toption _apf_label 'SNI'\n\
              \n\
-             config rule 'startwrt_remote_80'\n\
-             \toption name 'Remote access 80'\n\
+             config rule 'wan_http'\n\
+             \toption name 'Allow HTTP from WAN'\n\
              \toption src 'wan'\n\
              \tlist proto 'tcp'\n\
              \toption dest_port '80'\n\
@@ -3619,7 +3507,7 @@ config host
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
         assert!(!written.contains("apf_sni_9443"), "stray rule purged");
         assert!(
-            written.contains("startwrt_remote_80"),
+            written.contains("wan_http"),
             "non-SNI rules survive the purge"
         );
 

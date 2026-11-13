@@ -1,0 +1,1 @@
+- **Le paramètre Accès à distance a été supprimé.** L’interface web et SSH n’acceptent les connexions que depuis votre réseau local et (lorsque c’est explicitement autorisé) vos VPN entrants. Pour gérer le routeur hors de chez vous, connectez-vous via un VPN entrant.

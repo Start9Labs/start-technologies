@@ -99,7 +99,7 @@ setup
   ├─ status             # Setup mode detection, disk state
   └─ get-pubkey         # Ephemeral key the setup password is encrypted to
 
-system                  # System settings, remote access, restart, factory reset,
+system                  # System settings, restart, factory reset,
                         # OTA update (newer-versions / update)
 
 devices                 # Device enumeration, rename, forget, data usage
@@ -198,7 +198,7 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 
 | Module                            | Purpose                                                                                                                                                                                                                                                      |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `system.rs`                       | System settings, timezone, remote access rules, logs, OTA entry points, restart, factory reset                                                                                                                                                               |
+| `system.rs`                       | System settings, timezone, logs, OTA entry points, restart, factory reset                                                                                                                                                                                    |
 | `devices.rs`                      | Device enumeration from ARP/DHCP, rename, forget (flush ARP + lease)                                                                                                                                                                                         |
 | `wan.rs` / `lan.rs`               | WAN/LAN interface configuration                                                                                                                                                                                                                              |
 | `usb_ports.rs`                    | USB ports as LAN ports: records each physical USB port an adapter is plugged into, bridges the adapter into `br-usb_eth<N>`, joined to `br-lan` by the `usb_eth<N>` veth, and removes an empty port on request                                               |

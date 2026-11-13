@@ -215,7 +215,6 @@ struct SystemInfoResponse {
     language: String,
     date: String,  // ISO 8601
     theme: String,  // "dark" | "light" | "system"
-    remote_access: String,  // wire: `remoteAccess`; "default" | "never" | "always"
     timezone: String,  // IANA timezone name (e.g. "America/New_York")
 }
 ```
@@ -304,27 +303,9 @@ type Progress = null | boolean | { done: number; total: number | null; units: st
 struct SetPreferencesReq {
     language: Option<String>,  // "en_US" | "es_ES" | "de_DE" | "fr_FR" | "pl_PL"
     theme: Option<String>,  // "dark" | "light" | "system"
-    remote_access: Option<String>,  // wire: `remoteAccess`; "default" | "never" | "always"
 }
 // Response: null
 // A value outside its set is rejected with InvalidValue.
-```
-
-### `system.apply-remote-access`
-
-Internal endpoint, **not called from the frontend**. `startwrt-cli` runs it in
-its own process (it is not registered with `with_call_remote`), so the hook
-never reaches the daemon. Fired by the
-`/etc/hotplug.d/iface/99-startwrt-remote-access` hook (in `backend/hotplug/`)
-on `ifup`, `ifupdate`, and `ifdown` of `wan` or `wan6`.
-
-```rust
-// Request: {}
-// Response: null
-// Backend: re-applies the remote-access preference to the firewall against the
-// current WAN IPs, reloads the firewall, and kills WAN-side dropbear (SSH)
-// sessions from sources the mode no longer admits, so they don't survive a rule
-// change via conntrack ESTABLISHED state
 ```
 
 ### `system.set-timezone`
@@ -1239,9 +1220,8 @@ struct PublishedPortsSetResult {
 ```
 
 The request is applied **unless** an enabled IPv4 forward without
-`override_wan_ports` would capture a port already in use on the WAN — a live input-chain ACCEPT rule: Remote Access (80/443/22, including
-"When behind NAT" mode whenever the WAN address is private) or the VPN
-server's listen port. nftables applies prerouting DNAT before the routing
+`override_wan_ports` would capture a port already in use on the WAN — a live input-chain ACCEPT rule, such as a VPN
+server's listen port or a rule added in LuCI. nftables applies prerouting DNAT before the routing
 decision, so such a forward silently diverts those router services to the
 device (issue #3451). In that case nothing is applied and
 `pending_wan_port_collisions` names the offending ports; the UI shows a
@@ -1253,8 +1233,8 @@ hostnames and owning devices filled in from the live demux — the real holder i
 hostname routes, and the dialog names them rather than blaming the router.
 The split is informational only: the override works identically and removes
 the displaced hostname routes when the manual rule is saved.
-Detection is transport-aware (Remote Access is TCP, WireGuard is UDP — a
-UDP-only forward on 443 collides with nothing) and skipped in configs-only
+Detection is transport-aware (WireGuard is UDP, so a TCP-only forward on its
+port collides with nothing) and skipped in configs-only
 mode (the CLI editor confirms implicitly).
 The automatic (PCP/UPnP) path refuses the same collision outright — a
 protocol client can't be asked.
@@ -1307,12 +1287,7 @@ by ClientHello SNI so several devices/hostnames share one port. These live in
 daemon memory (not UCI), always carry a lease (≤1h, device-renewed), and do
 not survive a daemon restart — the device re-asserts them. A demuxed port
 reads as router-reserved to manual and plain-auto forwards. Ports the router
-answers on itself refuse hostname routes — except 443, where Remote Access
-coexists with the demux: while routes share the port, connections naming no
-routed hostname (e.g. browsing the router by IP, which sends no SNI) are piped
-to the router's own UI, admitted from exactly the sources the Remote Access
-mode allows (any in "always"; RFC1918 in "default" behind NAT; none in
-"never"). A route is granted only once its listener is actually bound
+answers on itself refuse hostname routes. A route is granted only once its listener is actually bound
 (`NO_RESOURCES` / UPnP fault 501 otherwise), so a granted route can never
 leave the port open with nothing serving it.
 
@@ -2483,7 +2458,6 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `system.restart`                    | System          |                             |
 | `system.factory-reset`              | System          |                             |
 | `system.set-preferences`            | System          |                             |
-| `system.apply-remote-access`        | System          | Internal, hotplug           |
 | `system.set-timezone`               | System          |                             |
 | `system.get-timezones`              | System          | No auth                     |
 | `system.logs`                       | System          |                             |
