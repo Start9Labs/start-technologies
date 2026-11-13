@@ -23,7 +23,6 @@ use crate::db::model::{Database, DatabaseModel};
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::BackupWrite;
 use crate::disk::mount::guard::GenericMountGuard;
-use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, PhaseProgressTrackerHandle};
 use crate::shared_volumes::SharedVolumeId;
@@ -71,12 +70,8 @@ impl BackupStatusGuard {
         }
     }
 
-    async fn handle_result(
-        mut self,
-        legacy_backup: bool,
-        result: Result<BackupReport, Error>,
-    ) -> Result<(), Error> {
-        let failed = result.is_err();
+    /// Backup outcomes belong in history rather than notifications.
+    async fn handle_result(mut self, result: Result<BackupReport, Error>) -> Result<(), Error> {
         let report = match result {
             Ok(report) => report,
             Err(error) => {
@@ -92,25 +87,6 @@ impl BackupStatusGuard {
                 }
             }
         };
-        let (level, title, message) = if failed {
-            (
-                NotificationLevel::Error,
-                t!("backup.bulk.failed-title"),
-                t!("backup.bulk.failed-message"),
-            )
-        } else if report.has_failures() {
-            (
-                NotificationLevel::Warning,
-                t!("backup.bulk.complete-title"),
-                t!("backup.bulk.complete-with-failures"),
-            )
-        } else {
-            (
-                NotificationLevel::Success,
-                t!("backup.bulk.complete-title"),
-                t!("backup.bulk.complete-message"),
-            )
-        };
         let run = super::history::BackupRun::finished(
             self.target_id.clone(),
             self.target_name.clone(),
@@ -122,19 +98,7 @@ impl BackupStatusGuard {
             .unwrap()
             .mutate(|db| {
                 super::history::record(db, &run)?;
-                clear_backup_progress(db)?;
-                notify(
-                    db,
-                    None,
-                    level,
-                    title.to_string(),
-                    message.to_string(),
-                    run.report,
-                )?;
-                if !failed && legacy_backup {
-                    notify_legacy_present(db)?;
-                }
-                Ok(())
+                clear_backup_progress(db)
             })
             .await
             .result?;
@@ -159,17 +123,6 @@ impl Drop for BackupStatusGuard {
             });
         }
     }
-}
-
-fn notify_legacy_present(db: &mut DatabaseModel) -> Result<(), Error> {
-    notify(
-        db,
-        None,
-        NotificationLevel::Warning,
-        t!("backup.bulk.legacy-present-title").to_string(),
-        t!("backup.bulk.legacy-present-message").to_string(),
-        (),
-    )
 }
 
 /// Power deferral covers service and shared-volume backups through status cleanup.
@@ -264,7 +217,6 @@ pub async fn backup_all(
     tokio::task::spawn(async move {
         let _disk_refresh = disk_refresh;
         let _progress_db_sync = progress_db_sync;
-        let mut legacy_present = false;
         let result = async {
             let mut backup_guard =
                 BackupMountGuard::mount(disk_guard.clone(), &server_id, &old_password_decrypted)
@@ -272,9 +224,6 @@ pub async fn backup_all(
             if old_password.is_some() {
                 backup_guard.change_password(&password)?;
             }
-            legacy_present =
-                crate::disk::util::has_legacy_backup(backup_guard.backup_disk_path(), &server_id)
-                    .await;
             perform_backup(
                 &ctx,
                 progress,
@@ -291,10 +240,7 @@ pub async fn backup_all(
         super::target::catalog::refresh(&ctx.db, &target_id)
             .await
             .log_err();
-        status_guard
-            .handle_result(legacy_present, result)
-            .await
-            .log_err();
+        status_guard.handle_result(result).await.log_err();
     });
     Ok(())
 }

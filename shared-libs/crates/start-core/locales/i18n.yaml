@@ -1811,61 +1811,12 @@ init.initializing:
   pl_PL: "Inicjalizowanie..."
 
 # backup/backup_bulk.rs
-backup.bulk.complete-title:
-  en_US: "Backup Complete"
-  de_DE: "Sicherung abgeschlossen"
-  es_ES: "Copia de seguridad completada"
-  fr_FR: "Sauvegarde terminée"
-  pl_PL: "Kopia zapasowa zakończona"
-
-backup.bulk.complete-message:
-  en_US: "Your backup has completed"
-  de_DE: "Ihre Sicherung wurde abgeschlossen"
-  es_ES: "Su copia de seguridad se ha completado"
-  fr_FR: "Votre sauvegarde est terminée"
-  pl_PL: "Twoja kopia zapasowa została zakończona"
-
-backup.bulk.complete-with-failures:
-  en_US: "Your backup has completed, but some package(s) failed to backup"
-  de_DE: "Ihre Sicherung wurde abgeschlossen, aber einige Pakete konnten nicht gesichert werden"
-  es_ES: "Su copia de seguridad se completó, pero algunos paquetes fallaron"
-  fr_FR: "Votre sauvegarde est terminée, mais certains paquets n'ont pas pu être sauvegardés"
-  pl_PL: "Twoja kopia zapasowa została zakończona, ale niektóre pakiety nie zostały zapisane"
-
-backup.bulk.legacy-present-title:
-  en_US: "Old Backup Still Present"
-  de_DE: "Alte Sicherung noch vorhanden"
-  es_ES: "Copia de seguridad antigua aún presente"
-  fr_FR: "Ancienne sauvegarde toujours présente"
-  pl_PL: "Stara kopia zapasowa nadal obecna"
-
-backup.bulk.legacy-present-message:
-  en_US: "This backup target still contains an old-format (V1) backup that is no longer needed. To free up space on the drive, open this target on the Backups page and delete it."
-  de_DE: "Dieses Sicherungsziel enthält noch eine Sicherung im alten Format (V1), die nicht mehr benötigt wird. Um Speicherplatz auf dem Laufwerk freizugeben, öffnen Sie dieses Ziel auf der Seite Backups und löschen Sie sie."
-  es_ES: "Este destino de copia de seguridad todavía contiene una copia en formato antiguo (V1) que ya no es necesaria. Para liberar espacio en la unidad, abra este destino en la página Copias de seguridad y elimínela."
-  fr_FR: "Cette cible de sauvegarde contient encore une sauvegarde à l'ancien format (V1) qui n'est plus nécessaire. Pour libérer de l'espace sur le disque, ouvrez cette cible sur la page Sauvegardes et supprimez-la."
-  pl_PL: "Ten cel kopii zapasowej nadal zawiera kopię w starym formacie (V1), która nie jest już potrzebna. Aby zwolnić miejsce na dysku, otwórz to miejsce docelowe na stronie Kopie zapasowe i usuń ją."
-
 backup.bulk.failed-error:
   en_US: "Backup Failed: %{error}"
   de_DE: "Sicherung fehlgeschlagen: %{error}"
   es_ES: "Copia de seguridad fallida: %{error}"
   fr_FR: "Échec de la sauvegarde : %{error}"
   pl_PL: "Kopia zapasowa nie powiodła się: %{error}"
-
-backup.bulk.failed-title:
-  en_US: "Backup Failed"
-  de_DE: "Sicherung fehlgeschlagen"
-  es_ES: "Copia de seguridad fallida"
-  fr_FR: "Échec de la sauvegarde"
-  pl_PL: "Kopia zapasowa nie powiodła się"
-
-backup.bulk.failed-message:
-  en_US: "Your backup failed to complete."
-  de_DE: "Ihre Sicherung konnte nicht abgeschlossen werden."
-  es_ES: "Su copia de seguridad no se pudo completar."
-  fr_FR: "Votre sauvegarde n'a pas pu être terminée."
-  pl_PL: "Twoja kopia zapasowa nie została ukończona."
 
 backup.bulk.password-mismatch:
   en_US: "The existing backup on this target was encrypted with a different password. Provide the password that was used to create it."
@@ -5257,6 +5208,20 @@ help.arg.asset-url:
   fr_FR: "URL de la ressource"
   pl_PL: "URL zasobu"
 
+help.arg.backup-history-limit:
+  en_US: "Maximum number of backups to return"
+  de_DE: "Maximale Anzahl zurückzugebender Sicherungen"
+  es_ES: "Número máximo de copias de seguridad a devolver"
+  fr_FR: "Nombre maximum de sauvegardes à retourner"
+  pl_PL: "Maksymalna liczba kopii zapasowych do zwrócenia"
+
+help.arg.backup-history-offset:
+  en_US: "Number of most recent backups to skip"
+  de_DE: "Anzahl der neuesten Sicherungen, die übersprungen werden"
+  es_ES: "Número de copias de seguridad más recientes que se omiten"
+  fr_FR: "Nombre de sauvegardes les plus récentes à ignorer"
+  pl_PL: "Liczba najnowszych kopii zapasowych do pominięcia"
+
 help.arg.backup-password:
   en_US: "Password for backup encryption"
   de_DE: "Passwort für Backup-Verschlüsselung"
@@ -6170,6 +6135,13 @@ about.commands-backup:
   fr_FR: "Commandes liées à la création de sauvegardes et aux cibles de sauvegarde"
   pl_PL: "Polecenia związane z tworzeniem kopii zapasowych i celami kopii zapasowych"
 
+about.commands-backup-history:
+  en_US: "Commands related to backup history"
+  de_DE: "Befehle zum Sicherungsverlauf"
+  es_ES: "Comandos relacionados con el historial de copias de seguridad"
+  fr_FR: "Commandes liées à l'historique des sauvegardes"
+  pl_PL: "Polecenia związane z historią kopii zapasowych"
+
 about.commands-backup-target:
   en_US: "Commands related to a backup target"
   de_DE: "Befehle zu einem Backup-Ziel"
@@ -6982,6 +6954,13 @@ about.list-available-wifi-networks:
   es_ES: "Listar redes wifi disponibles"
   fr_FR: "Lister les réseaux wifi disponibles"
   pl_PL: "Wyświetl dostępne sieci wifi"
+
+about.list-backup-history:
+  en_US: "List past backups and their reports, newest first"
+  de_DE: "Vergangene Sicherungen und ihre Berichte auflisten, neueste zuerst"
+  es_ES: "Listar las copias de seguridad anteriores y sus informes, de la más reciente a la más antigua"
+  fr_FR: "Lister les sauvegardes passées et leurs rapports, les plus récentes en premier"
+  pl_PL: "Wyświetl poprzednie kopie zapasowe i ich raporty, od najnowszych"
 
 about.list-bindings-for-host:
   en_US: "List bindings for a host"

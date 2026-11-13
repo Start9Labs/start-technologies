@@ -5430,7 +5430,18 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
             list: {
-              _PARAMS: /* @__PURE__ */ HistoryParams,
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                HistoryParams,
+              ),
               _RETURN: /* @__PURE__ */ BackupHistory,
             },
           },

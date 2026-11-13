@@ -1309,27 +1309,6 @@ export class MockApiService extends ApiService {
             },
           ])
 
-        await this.notify({
-          packageId: null,
-          code: 1,
-          level: Object.values(report.sharedVolumes).some(item => item.error)
-            ? 'warning'
-            : 'success',
-          title: 'Backup complete',
-          message: 'Backup complete',
-          data: report,
-        })
-        if (this.backupTarget(params.targetId)?.legacyBackup) {
-          await this.notify({
-            packageId: null,
-            code: 0,
-            level: 'warning',
-            title: 'Old Backup Still Present',
-            message:
-              'This backup target still contains an old-format (V1) backup that is no longer needed. To free up space on the drive, open this target on the Backups page and delete it.',
-            data: null,
-          })
-        }
         await this.mockRevision([
           { op: PatchOp.REPLACE, path: serverPath, value: null },
         ])
@@ -2841,24 +2820,6 @@ export class MockApiService extends ApiService {
           ? 'gateway'
           : 'public-fallback',
     }
-  }
-
-  private async notify(
-    notification: Omit<T.NotificationWithId, 'id' | 'createdAt' | 'seen'>,
-  ) {
-    Mock.Notifications.unshift({
-      ...notification,
-      id: Math.max(0, ...Mock.Notifications.map(item => item.id)) + 1,
-      createdAt: new Date().toISOString(),
-      seen: false,
-    })
-    await this.mockRevision([
-      {
-        op: PatchOp.REPLACE,
-        path: '/serverInfo/unreadNotificationCount',
-        value: this.mockData('/serverInfo/unreadNotificationCount') + 1,
-      },
-    ])
   }
 
   private offeredKeys(url: string): string[] {

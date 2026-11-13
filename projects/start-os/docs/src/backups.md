@@ -461,7 +461,7 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 
 1. Enter your master password.
 
-While a backup runs, its progress appears at the top of the page. Wait for the `Backup Complete` notification before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before raising that notification, so the drive is safe to remove once it appears. The progress card reads `Complete` first, while StartOS is still finishing — the notification is the one to wait for.
+While a backup runs, its progress appears at the top of the page. Wait for the progress card to disappear and the backup to appear in **History** before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before recording a successful backup in history. The progress card reads `Complete` first, while StartOS is still finishing.
 
 ## History
 
@@ -501,7 +501,6 @@ A target that needs attention shows a yellow button in its row, and a warning ic
 New backups are written to a `StartOSBackupsV2` folder on the target, replacing the older `StartOSBackups` (V1) format written by StartOS 0.4 betas. A backup made on StartOS 0.3.5.1 is a different, older backup: it is not removed by **Delete old backup**, and StartOS 0.4 never touches it. To free that space, delete it yourself from the drive.
 
 - When you choose a target that still holds a V1 backup for this server, StartOS warns you before backing up and shows how much free space remains on the target.
-- After a backup completes, if the target still contains this server's V1 backup, StartOS raises a notification reminding you it is no longer needed.
 - A target holding this server's V1 backup shows a **Delete old backup** button. The dialog names this server's latest current backup, or warns that there is none yet. After you confirm, StartOS removes this server's old V1 backup immediately and reclaims the space it occupied in the background, raising a notification once the space has been fully freed (on a large backup this can take a while). Your current `StartOSBackupsV2` backup, and any backups belonging to other servers that share the target, are untouched.
 
 > [!WARNING]

@@ -55,10 +55,7 @@ async fn active_backup(action: PowerAction) -> (tempfile::TempDir, TypedPatchDb<
 #[tokio::test]
 async fn volume_only_reports_release_progress_without_cancelling_deferred_power() {
     for action in [PowerAction::Restart, PowerAction::Shutdown] {
-        for (error, level) in [
-            (None, NotificationLevel::Success),
-            (Some("source disconnected"), NotificationLevel::Warning),
-        ] {
+        for error in [None, Some("source disconnected")] {
             let (_directory, db) = active_backup(action).await;
             let volume = SharedVolumeId::new();
             let report = BackupReport {
@@ -79,7 +76,7 @@ async fn volume_only_reports_release_progress_without_cancelling_deferred_power(
                 )]),
             };
             BackupStatusGuard::new(db.clone(), "cifs-1".parse().unwrap(), "Archive".into())
-                .handle_result(false, Ok(report))
+                .handle_result(Ok(report))
                 .await
                 .unwrap();
             let model = db.peek().await;
@@ -97,7 +94,7 @@ async fn volume_only_reports_release_progress_without_cancelling_deferred_power(
                 error
             );
             let notifications = model.as_private().as_notifications().de().unwrap();
-            assert_eq!(notifications.0.values().next().unwrap().level, level);
+            assert!(notifications.0.is_empty());
         }
     }
 }
@@ -131,6 +128,93 @@ async fn dropped_backup_releases_progress_without_cancelling_deferred_power() {
         );
         assert!(!status.as_shutting_down().de().unwrap());
         assert!(!status.as_restarting().de().unwrap());
+    }
+}
+
+#[tokio::test]
+async fn backup_outcomes_persist_in_history_without_notifications() {
+    for (package_error, volume_error, fatal_error) in [
+        (None, None, None),
+        (Some("service stopped"), None, None),
+        (None, Some("volume unavailable"), None),
+        (None, None, Some("disk disconnected")),
+    ] {
+        let (_directory, db) = active_backup(PowerAction::Restart).await;
+        let guard =
+            BackupStatusGuard::new(db.clone(), "cifs-1".parse().unwrap(), "Backup Drive".into());
+        let started_at = guard.started_at;
+        let volume_id = SharedVolumeId::new();
+        let report: BackupReport = serde_json::from_value(serde_json::json!({
+            "server": {"attempted": true, "error": null},
+            "packages": {"test": {"error": package_error, "duration_ms": 10}},
+            "sharedVolumes": {(volume_id.to_string()): {"name": "Documents", "error": volume_error, "duration_ms": 20}}
+        })).unwrap();
+        let expected_report = if fatal_error.is_some() {
+            serde_json::json!({
+                "server": {"attempted": true, "error": "Filesystem I/O Error: disk disconnected"},
+                "packages": {},
+                "sharedVolumes": {}
+            })
+        } else {
+            serde_json::to_value(&report).unwrap()
+        };
+        let result = if let Some(error) = fatal_error {
+            Err(Error::new(eyre!(error), ErrorKind::Filesystem))
+        } else {
+            Ok(report)
+        };
+        guard.handle_result(result).await.unwrap();
+
+        let snapshot = db.peek().await;
+        assert_eq!(
+            snapshot
+                .as_public()
+                .as_server_info()
+                .as_status_info()
+                .as_deferred_power_action()
+                .de()
+                .unwrap(),
+            Some(PowerAction::Restart)
+        );
+        let runs = snapshot.as_private().as_backup_history().de().unwrap();
+        assert_eq!(runs.len(), 1);
+        let run = runs.into_values().next().unwrap();
+        assert_eq!(run.target_id.to_string(), "cifs-1");
+        assert_eq!(run.target_name, "Backup Drive");
+        assert_eq!(run.started_at, started_at);
+        assert!(run.completed_at >= started_at);
+        assert_eq!(serde_json::to_value(&run.report).unwrap(), expected_report);
+        assert!(
+            snapshot
+                .as_public()
+                .as_server_info()
+                .as_status_info()
+                .as_backup_progress()
+                .de()
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            snapshot
+                .as_private()
+                .as_notifications()
+                .as_entries()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            snapshot
+                .as_public()
+                .as_server_info()
+                .as_unread_notification_count()
+                .de()
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            serde_json::to_value(snapshot.as_private().as_push().de().unwrap()).unwrap(),
+            serde_json::to_value(crate::notifications::push::PushState::default()).unwrap()
+        );
     }
 }
 
