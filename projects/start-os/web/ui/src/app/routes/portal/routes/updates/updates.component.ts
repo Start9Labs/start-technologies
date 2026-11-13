@@ -7,6 +7,7 @@ import {
   StoreIconDirective,
   StoreIdentity,
   RegistryConnectionStatus,
+  RegistryStatePipe,
   isRegistryLoading,
 } from '@start9labs/marketplace'
 import { i18nPipe } from '@start9labs/shared'
@@ -104,7 +105,7 @@ interface UpdatesData {
               icon="@tui.triangle-alert"
               class="g-warning"
               role="img"
-              [attr.aria-label]="'Error' | i18n"
+              [attr.aria-label]="(registry.status | registryState).label | i18n"
               [attr.aria-hidden]="false"
             />
           }
@@ -267,6 +268,7 @@ interface UpdatesData {
     TuiBadgeNotification,
     UpdatesCount,
     RegistryConnectionStatus,
+    RegistryStatePipe,
     RegistryRetry,
     TuiIcon,
     TuiFade,

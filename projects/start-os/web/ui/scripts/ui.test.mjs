@@ -4154,7 +4154,7 @@ const { PackageIconService: ProductionPackageIconService } =
   await import('../src/app/services/package-icon.service.ts')
 const { default: MarketplacePage } =
   await import('../src/app/routes/portal/routes/marketplace/marketplace.component.ts')
-const { RegistryRetry } =
+const { RegistryRefresh } =
   await import('../src/app/routes/portal/components/registry-retry.ts')
 
 const registryEntry = (version = '1.0.0:0', status = 'connected') => ({
@@ -4281,10 +4281,13 @@ function marketplaceFixture(t, entries = {}) {
     routeParams,
     makePage: () =>
       runInInjectionContext(injector, () => new MarketplacePage()),
-    makeRetry(url) {
-      const retry = runInInjectionContext(injector, () => new RegistryRetry())
-      retry.registryRetry = () => url
-      return retry
+    makeRefresh(url) {
+      const refresh = runInInjectionContext(
+        injector,
+        () => new RegistryRefresh(),
+      )
+      refresh.registryRefresh = () => url
+      return refresh
     },
     watch(observable) {
       const values = []
@@ -4410,13 +4413,24 @@ test('malformed saved registries do not terminate valid registry listings or cac
   assert.deepEqual(f.queries, [])
 })
 
+for (const status of ['connected', 'connecting', 'error']) {
+  test(`manual refresh queues synchronization while ${status} without connecting or querying`, async t => {
+    const url = 'https://registry.test/'
+    const f = marketplaceFixture(t, { [url]: registryEntry('1.0.0:0', status) })
+    await f.makeRefresh(url).refresh()
+    assert.deepEqual(f.refreshes, [{ url }])
+    assert.deepEqual(f.connections, [])
+    assert.deepEqual(f.queries, [])
+  })
+}
+
 test('the visible refresh action retries failed icons when the refreshed cache arrives and shares successful loads', async t => {
   const entry = registryEntry()
   const icon = 'blake3/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png'
   entry.packages.example.best['1.0.0:0'].icon = icon
   const f = marketplaceFixture(t, { 'https://registry.test/': entry })
   f.makePage()
-  const retry = f.makeRetry('https://registry.test/')
+  const refresh = f.makeRefresh('https://registry.test/')
   const visible = f.watch(
     f.service.currentRegistry$.pipe(
       switchMap(store =>
@@ -4428,7 +4442,7 @@ test('the visible refresh action retries failed icons when the refreshed cache a
   f.iconResponses[0].reject(new Error('Icon temporarily unavailable'))
   await tick()
   assert.equal(visible.at(-1), 'fallback.png')
-  await retry.retry()
+  await refresh.refresh()
   assert.deepEqual(f.refreshes, [{ url: 'https://registry.test/' }])
   assert.deepEqual(f.connections, [])
   assert.equal(f.iconRequests.length, 1)

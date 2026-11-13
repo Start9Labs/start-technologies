@@ -15,7 +15,7 @@ classes('patch-db-client', ['PatchDB'])
 classes('@start9labs/shared', ['i18nPipe', 'TaskService'])
 classes(
   '@start9labs/marketplace',
-  ['StoreIconDirective', 'RegistryConnectionStatus'],
+  ['StoreIconDirective', 'RegistryConnectionStatus', 'RegistryStatePipe'],
   `export { isRegistryLoading } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/marketplace/src/registry-state.ts', import.meta.url).href)};`,
 )
 classes(

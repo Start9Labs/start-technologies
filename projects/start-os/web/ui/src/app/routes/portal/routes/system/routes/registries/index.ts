@@ -23,7 +23,10 @@ import { defaultIfEmpty, firstValueFrom } from 'rxjs'
 import { TRUSTED_KEYS_NOTICE } from 'src/app/components/trusted-keys/notice'
 import { BackDirective } from 'src/app/routes/portal/components/back'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
-import { RegistryRetry } from 'src/app/routes/portal/components/registry-retry'
+import {
+  RegistryRefresh,
+  RegistryRetry,
+} from 'src/app/routes/portal/components/registry-retry'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { OSService } from 'src/app/services/os.service'
@@ -104,6 +107,9 @@ interface Row extends Pick<T.RegistryCache, 'status' | 'error'> {
                 >
                   {{ 'More' | i18n }} {{ row.name }}
                   <tui-data-list *tuiDropdown="let close" (click)="close()">
+                    <button tuiOption [registryRefresh]="row.url">
+                      {{ 'Refresh registry' | i18n }}
+                    </button>
                     <button tuiOption (click)="manageKeys(row.url)">
                       {{ 'Manage keys' | i18n }}
                     </button>
@@ -191,6 +197,7 @@ interface Row extends Pick<T.RegistryCache, 'status' | 'error'> {
   `,
   imports: [
     RegistryConnectionStatus,
+    RegistryRefresh,
     RegistryRetry,
     BackDirective,
     DocsLinkDirective,
