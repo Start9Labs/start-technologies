@@ -8,7 +8,12 @@ export type DataModel = {
     keyboard: FullKeyboard | null
   }
   packageData: AllPackageData
+  sharedVolumes: T.Public['sharedVolumes']
+  disks: T.Public['disks']
+  backupTargets: T.Public['backupTargets']
 }
+
+export type BackupTargetEntry = T.BackupTarget
 
 export type UIData = {
   snakeHighScore: number
@@ -56,11 +61,3 @@ export type InstallingInfo = {
   progress: T.FullProgress
   newManifest: T.Manifest
 }
-
-// @TODO 041
-// export type ServerStatusInfo = Omit<T.ServerStatus, 'backupProgress'> & {
-//   currentBackup: null | {
-//     job: BackupJob
-//     backupProgress: Record<string, boolean>
-//   }
-// }

@@ -78,9 +78,7 @@ export class NotificationService {
       case 1:
         this.dialogs
           .openComponent(REPORT, {
-            label: 'Backup Report',
             data: { content: data, createdAt },
-            size: 'l',
           })
           .subscribe()
         break
