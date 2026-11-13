@@ -592,16 +592,7 @@ impl RpcContext {
 
         // Conversion requires unmounted, quiescent roots before observers and services start.
         optimize_storage.start();
-        if let Err(e) = self.lxc_manager.gc().await {
-            tracing::error!(
-                "{}",
-                t!(
-                    "lxc.mod.error-cleaning-up-containers",
-                    error = e.to_string()
-                )
-            );
-            tracing::debug!("{e:?}");
-        }
+        self.lxc_manager.gc().await?;
         let peek = self.db.peek().await;
         let mut installed = BTreeSet::new();
         let mut all = BTreeSet::new();

@@ -60,6 +60,9 @@ const USERSPACE_FILESYSTEM_PATHS: &[&str] = &["/dev/fuse"];
 const VIRTUAL_NETWORKING_PATHS: &[&str] = &["/dev/net/tun"];
 const HARDWARE_VIRTUALIZATION_PATHS: &[&str] = &["/dev/kvm"];
 
+#[cfg(all(test, target_os = "linux"))]
+mod gc_tests;
+
 /// Patterns that can still match at or beneath `path`.
 #[cfg(target_os = "linux")]
 fn match_device_patterns<'a>(path: &Path, matches: &[&'a str]) -> Option<Vec<&'a str>> {
@@ -152,10 +155,10 @@ impl LxcManager {
         Ok(container)
     }
 
-    /// Stops and destroys every LXC container this manager does not track.
+    /// Stops and destroys untracked LXC containers.
     ///
-    /// Containers left by a previous `startd` instance keep running and hold their volumes. The
-    /// caller must run this at startup before any service starts.
+    /// Fails when an untracked container may still be running; destroy failures are only logged.
+    /// Startup requires success before volume maintenance or service initialization.
     pub async fn gc(&self) -> Result<(), Error> {
         let containers = self.containers.lock().await;
         let expected = BTreeSet::from_iter(
@@ -177,7 +180,8 @@ impl LxcManager {
                         .invoke(ErrorKind::Lxc)
                         .await?;
                 }
-                destroy_stopped(container).await
+                destroy_stopped(container).await.log_err();
+                Ok::<_, Error>(())
             }
         }))
         .await
