@@ -152,56 +152,83 @@ impl LxcManager {
         Ok(container)
     }
 
+    /// Stops and destroys every LXC container this manager does not track.
+    ///
+    /// Containers left by a previous `startd` instance keep running and hold their volumes. The
+    /// caller must run this at startup before any service starts.
     pub async fn gc(&self) -> Result<(), Error> {
+        let containers = self.containers.lock().await;
         let expected = BTreeSet::from_iter(
-            self.containers
-                .lock()
-                .await
+            containers
                 .iter()
                 .filter_map(|g| g.upgrade())
                 .map(|g| (*g).clone()),
         );
-        for container in String::from_utf8(
-            Command::new("lxc-ls")
-                .arg("-1")
-                .invoke(ErrorKind::Lxc)
-                .await?,
-        )?
-        .lines()
-        .map(|s| s.trim())
-        {
-            if !expected.contains(&ContainerId::try_from(container)?) {
-                let rootfs_path = Path::new(LXC_CONTAINER_DIR).join(container).join("rootfs");
-                if tokio::fs::metadata(&rootfs_path).await.is_ok() {
-                    unmount(
-                        Path::new(LXC_CONTAINER_DIR).join(container).join("rootfs"),
-                        true,
-                    )
-                    .await
-                    .log_err();
-                    if tokio_stream::wrappers::ReadDirStream::new(
-                        tokio::fs::read_dir(&rootfs_path).await?,
-                    )
-                    .count()
-                    .await
-                        > 0
-                    {
-                        return Err(Error::new(
-                            eyre!("{}", t!("lxc.mod.rootfs-not-empty")),
-                            ErrorKind::InvalidRequest,
-                        ));
-                    }
+        let running = lxc_ls(&["--running"]).await?;
+        let listed = lxc_ls(&[]).await?;
+        let mut errs = ErrorCollection::new();
+        for res in futures::future::join_all(listed.difference(&expected).map(|container| {
+            let running = running.contains(container);
+            async move {
+                if running {
+                    Command::new("lxc-stop")
+                        .arg("--name")
+                        .arg(&**container)
+                        .invoke(ErrorKind::Lxc)
+                        .await?;
                 }
-                Command::new("lxc-destroy")
-                    .arg("--force")
-                    .arg("--name")
-                    .arg(container)
-                    .invoke(ErrorKind::Lxc)
-                    .await?;
+                destroy_stopped(container).await
             }
+        }))
+        .await
+        {
+            errs.handle(res);
         }
-        Ok(())
+        drop(containers);
+        errs.into_result()
     }
+}
+
+async fn lxc_ls(filter: &[&str]) -> Result<BTreeSet<ContainerId>, Error> {
+    String::from_utf8(
+        Command::new("lxc-ls")
+            .arg("-1")
+            .args(filter)
+            .invoke(ErrorKind::Lxc)
+            .await?,
+    )?
+    .lines()
+    .map(str::trim)
+    .filter(|s| !s.is_empty())
+    .map(|s| Ok(ContainerId::try_from(s)?))
+    .collect()
+}
+
+/// Refuses to destroy a container whose rootfs still holds files after unmounting.
+async fn destroy_stopped(container: &ContainerId) -> Result<(), Error> {
+    let rootfs_path = Path::new(LXC_CONTAINER_DIR)
+        .join(&**container)
+        .join("rootfs");
+    if tokio::fs::metadata(&rootfs_path).await.is_ok() {
+        unmount(&rootfs_path, true).await.log_err();
+        if tokio_stream::wrappers::ReadDirStream::new(tokio::fs::read_dir(&rootfs_path).await?)
+            .count()
+            .await
+            > 0
+        {
+            return Err(Error::new(
+                eyre!("{}", t!("lxc.mod.rootfs-not-empty")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+    }
+    Command::new("lxc-destroy")
+        .arg("--force")
+        .arg("--name")
+        .arg(&**container)
+        .invoke(ErrorKind::Lxc)
+        .await?;
+    Ok(())
 }
 
 pub struct LxcContainer {
@@ -512,24 +539,7 @@ impl LxcContainer {
             log_mount.unmount(false).await?;
         }
         self.rootfs.take().unmount(true).await?;
-        let rootfs_path = self.rootfs_dir();
-        if tokio::fs::metadata(&rootfs_path).await.is_ok()
-            && tokio_stream::wrappers::ReadDirStream::new(tokio::fs::read_dir(&rootfs_path).await?)
-                .count()
-                .await
-                > 0
-        {
-            return Err(Error::new(
-                eyre!("{}", t!("lxc.mod.rootfs-not-empty")),
-                ErrorKind::InvalidRequest,
-            ));
-        }
-        Command::new("lxc-destroy")
-            .arg("--force")
-            .arg("--name")
-            .arg(&**self.guid)
-            .invoke(ErrorKind::Lxc)
-            .await?;
+        destroy_stopped(&self.guid).await?;
 
         #[allow(unused_assignments)]
         {
