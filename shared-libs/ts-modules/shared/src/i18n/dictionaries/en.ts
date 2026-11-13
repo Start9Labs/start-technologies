@@ -144,10 +144,7 @@ export const ENGLISH: Record<string, number> = {
   'Deleting': 158,
   'Changing registry': 159,
   'Loading': 160,
-  'Registry already added': 161,
   'Validating registry': 162,
-  'Are you sure you want to delete this registry?': 163,
-  'Add Custom Registry': 164,
   'The domain or URL of the custom registry': 165,
   'Must be a valid URL': 166,
   'installed from': 167,
@@ -747,7 +744,6 @@ export const ENGLISH: Record<string, number> = {
   'Option 1': 868,
   'Option 2': 870,
   'OK': 872,
-  'Save this registry': 874,
   'Package a service': 875,
   'Get a Start9 server': 876,
   'Could not reach registry': 877,
@@ -1021,4 +1017,7 @@ export const ENGLISH: Record<string, number> = {
   'Create': 1219, // as in, create a backup
   'Restore': 1220, // as in, restore from a backup
   'Go to Backup Targets': 1221,
+  'View custom registry': 1222,
+  'Custom': 1223, // as in, a custom registry
+  'Enter a domain or URL': 1224,
 }

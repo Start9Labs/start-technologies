@@ -3897,7 +3897,7 @@ test('a late registry metadata response cannot restore a removed registry', asyn
   )
   const subscription = service.marketplace$.subscribe()
   t.after(() => subscription.unsubscribe())
-  await service.delete('https://registry.test')
+  await service.removeRegistry('https://registry.test')
   metadata.resolve({ name: 'New name', categories: {} })
   await new Promise(setImmediate)
   assert.deepEqual(await firstValueFrom(service.registries$), [])

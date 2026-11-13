@@ -1,3 +1,5 @@
+import { sameUrl } from '../util/misc.util'
+
 export type AccessType =
   | 'tor'
   | 'mdns'
@@ -30,6 +32,10 @@ export const defaultRegistries = {
   start9: 'https://registry.start9.com/',
   community: 'https://community-registry.start9.com/',
 } as const
+
+export function isDefaultRegistry(url: string): boolean {
+  return Object.values(defaultRegistries).some(d => sameUrl(d, url))
+}
 
 export const knownRegistries = {
   ...defaultRegistries,

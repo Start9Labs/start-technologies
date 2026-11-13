@@ -298,12 +298,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
     return this.api.rpc.server.registries.add({ url, name: null })
   }
 
-  async add(rawUrl: string): Promise<string> {
-    const url = registryUrl(rawUrl)
-    await this.connectRegistry(url)
-    return url
-  }
-
   /** Resolves to the registry-added keys no connected registry still offers. */
   async removeRegistry(url: string): Promise<string[]> {
     const orphaned = await this.api.rpc.server.registries.remove({
@@ -316,10 +310,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
     }
 
     return orphaned
-  }
-
-  async delete(url: string): Promise<void> {
-    await this.removeRegistry(url)
   }
 
   /** Resolves to the keys it newly trusted for StartOS updates. */
