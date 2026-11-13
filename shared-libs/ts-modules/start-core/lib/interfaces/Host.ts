@@ -37,6 +37,7 @@ export const knownProtocols = {
   http: {
     secure: null,
     defaultPort: 80,
+    transport: 'tcp',
     withSsl: 'https',
     alpn: ['http/1.1'] as AlpnInfo,
     proxy: defaultHttpProxy,
@@ -44,11 +45,13 @@ export const knownProtocols = {
   https: {
     secure: { ssl: true },
     defaultPort: 443,
+    transport: 'tcp',
     proxy: defaultHttpProxy,
   },
   ws: {
     secure: null,
     defaultPort: 80,
+    transport: 'tcp',
     withSsl: 'wss',
     alpn: ['http/1.1'] as AlpnInfo,
     proxy: defaultHttpProxy,
@@ -56,16 +59,19 @@ export const knownProtocols = {
   wss: {
     secure: { ssl: true },
     defaultPort: 443,
+    transport: 'tcp',
     proxy: defaultHttpProxy,
   },
   ssh: {
     secure: { ssl: false },
     defaultPort: 22,
+    transport: 'tcp',
     proxy: null,
   },
   dns: {
     secure: { ssl: false },
     defaultPort: 53,
+    transport: 'both',
     proxy: null,
   },
 } as const
@@ -75,7 +81,7 @@ export type Scheme = string | null
 type BindOptionsByKnownProtocol = {
   protocol: keyof typeof knownProtocols
   preferredExternalPort?: BindOptions['preferredExternalPort']
-  /** Forward TCP, UDP, or both. Defaults to both. */
+  /** Defaults to the configured transport in `knownProtocols`. */
   transport?: BindOptions['transport']
   addSsl?: Partial<AddSslOptions> | null
   proxy?: BindOptions['proxy']
@@ -347,7 +353,7 @@ export class MultiHost {
       id: this.options.id,
       internalPort,
       preferredExternalPort,
-      transport: options.transport,
+      transport: options.transport ?? protoInfo.transport,
       addSsl,
       secure,
       proxy,

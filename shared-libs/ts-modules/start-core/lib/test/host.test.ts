@@ -16,6 +16,56 @@ function fixture() {
 }
 
 describe('MultiHost binding transports', () => {
+  test.each([
+    ['http', 'tcp'],
+    ['https', 'tcp'],
+    ['ws', 'tcp'],
+    ['wss', 'tcp'],
+    ['ssh', 'tcp'],
+    ['dns', 'both'],
+  ] as const)('%s defaults to %s', async (protocol, transport) => {
+    const { host, bind } = fixture()
+    await host.bindPort(8080, { protocol })
+    expect(bind).toHaveBeenCalledWith(expect.objectContaining({ transport }))
+  })
+
+  test('explicit UDP overrides the HTTP default for raw forwarding', async () => {
+    const { host, bind } = fixture()
+    await host.bindPort(8080, {
+      protocol: 'http',
+      transport: 'udp',
+      addSsl: null,
+      proxy: null,
+    })
+    expect(bind).toHaveBeenCalledWith(
+      expect.objectContaining({ transport: 'udp', addSsl: null, proxy: null }),
+    )
+  })
+
+  test.each([
+    [{ protocol: 'ssh', transport: 'udp', addSsl: {} }, 'addSsl'],
+    [{ protocol: 'dns', transport: 'udp', proxy: {} }, 'proxy'],
+    [{ protocol: 'http', transport: 'udp' }, 'proxy'],
+    [
+      { protocol: 'https', transport: 'udp', proxy: null, addSsl: null },
+      'secure',
+    ],
+  ] as const)(
+    'propagates backend rejection of UDP %j without dropping %s',
+    async (options, feature) => {
+      const { host, bind } = fixture()
+      const error = new Error('Backend rejected UDP with stream options')
+      bind.mockRejectedValueOnce(error)
+      await expect(host.bindPort(8080, options)).rejects.toBe(error)
+      expect(bind).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transport: 'udp',
+          [feature]: expect.any(Object),
+        }),
+      )
+    },
+  )
+
   test.each(['tcp', 'udp', 'both'] as const)(
     'forwards %s for known and explicit application protocols',
     async transport => {
@@ -72,6 +122,7 @@ describe('MultiHost.bindPort HTTP proxy configuration', () => {
         id: 'service',
         internalPort: 8080,
         preferredExternalPort: port,
+        transport: 'tcp',
         secure,
         addSsl: { preferredExternalPort: 443, alpn },
         proxy: { type: 'http', addXForwardedHeaders: true, auth: null },
@@ -224,6 +275,7 @@ describe('MultiHost.bindPort HTTP proxy configuration', () => {
       id: 'service',
       internalPort: 8080,
       preferredExternalPort: 8443,
+      transport: 'tcp',
       secure: { ssl: true },
       proxy: { type: 'http', addXForwardedHeaders: true, auth },
       addSsl: {
@@ -235,17 +287,18 @@ describe('MultiHost.bindPort HTTP proxy configuration', () => {
   })
 
   test.each([
-    ['ssh', 22],
-    ['dns', 53],
+    ['ssh', 22, 'tcp'],
+    ['dns', 53, 'both'],
   ] as const)(
     '%s binds raw traffic without HTTP features',
-    async (protocol, port) => {
+    async (protocol, port, transport) => {
       const { host, bind } = fixture()
       await host.bindPort(8080, { protocol })
       expect(bind).toHaveBeenCalledWith({
         id: 'service',
         internalPort: 8080,
         preferredExternalPort: port,
+        transport,
         secure: { ssl: false },
         addSsl: null,
         proxy: null,
@@ -255,6 +308,7 @@ describe('MultiHost.bindPort HTTP proxy configuration', () => {
         id: 'service',
         internalPort: 8080,
         preferredExternalPort: port,
+        transport,
         secure: { ssl: false },
         addSsl: { preferredExternalPort: 443, alpn: null },
         proxy: null,
