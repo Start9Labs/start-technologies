@@ -32,7 +32,7 @@ impl<L: GenericMountGuard> VerifiedMounts<L> {
     }
 
     pub fn push(&mut self, mount: MountGuard) {
-        self.mounts.push(mount);
+        self.mounts.push(mount.with_strict_unmount());
     }
 
     pub async fn unmount(mut self) -> Result<(), Error> {
@@ -79,11 +79,12 @@ impl RootComposition {
             working_upper: runtime.join("working-upper"),
         };
         let result = async {
-            let lower = composition.layers.lower.as_ref().unwrap();
-            composition.layers.mounts.push(
+            let rootfs = composition.layers.lower().rootfs().to_owned();
+            let overlay = composition.layers.lower().overlay().to_owned();
+            composition.layers.push(
                 MountGuard::mount(
                     &OverlayFs::new(
-                        vec![lower.overlay(), lower.rootfs()],
+                        vec![&overlay, &rootfs],
                         runtime.join("running-upper"),
                         runtime.join("running-work"),
                     ),
@@ -104,21 +105,16 @@ impl RootComposition {
                     ReadWrite,
                 ),
                 (volume.to_owned(), root.join("media/startos/root"), ReadOnly),
-                (
-                    lower.rootfs().to_owned(),
-                    root.join("media/startos/current"),
-                    ReadOnly,
-                ),
+                (rootfs.clone(), root.join("media/startos/current"), ReadOnly),
             ] {
                 composition
                     .layers
-                    .mounts
                     .push(MountGuard::mount(&Bind::new(source), target, mode).await?);
             }
-            composition.layers.mounts.push(
+            composition.layers.push(
                 MountGuard::mount(
                     &crate::os_overlay::working_filesystem(
-                        lower.overlay(),
+                        &overlay,
                         &composition.working_upper,
                         &runtime.join("working-work"),
                     ),

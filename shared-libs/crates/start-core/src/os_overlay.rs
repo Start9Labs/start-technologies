@@ -240,7 +240,7 @@ impl VerityImage {
             let filesystem = SquashfsDevice(BlockDev::new(mapping.path()));
             match MountGuard::mount(&filesystem, &mountpoint, ReadOnly).await {
                 Ok(mount) => Ok(VerityMount {
-                    mount,
+                    mount: mount.with_strict_unmount(),
                     mapping: Some(mapping),
                 }),
                 Err(error) => {
@@ -254,18 +254,23 @@ impl VerityImage {
 
     /// Requires every mount using the mapping to be unmounted first.
     pub async fn close(name: &str) -> Result<(), Error> {
-        verity_command()
-            .arg("close")
-            .arg("--")
-            .arg(name)
-            .invoke(ErrorKind::Filesystem)
-            .await?;
-        Ok(())
+        deactivate_verity(name, &[]).await
     }
 }
 
+async fn deactivate_verity(name: &str, options: &[&str]) -> Result<(), Error> {
+    verity_command()
+        .arg("close")
+        .args(options)
+        .arg("--")
+        .arg(name)
+        .invoke(ErrorKind::Filesystem)
+        .await?;
+    Ok(())
+}
+
 /// A fully read signed mapping, closed on drop while the runtime remains active.
-/// External mounts must end before closing; failed close retains kernel protection.
+/// External references must end before explicit close; drop requests native deferred removal.
 #[derive(Debug)]
 pub struct VerityMapping {
     name: Option<String>,
@@ -281,7 +286,9 @@ impl VerityMapping {
     }
 
     async fn close_inner(mut self) -> Result<(), Error> {
-        VerityImage::close(&self.name.take().unwrap()).await
+        VerityImage::close(self.name.as_ref().unwrap()).await?;
+        self.name.take();
+        Ok(())
     }
 
     fn persist(mut self) {
@@ -293,7 +300,7 @@ impl Drop for VerityMapping {
     fn drop(&mut self) {
         if let Some(name) = self.name.take() {
             tokio::spawn(async move {
-                VerityImage::close(&name).await.log_err();
+                deactivate_verity(&name, &["--deferred"]).await.log_err();
             });
         }
     }
@@ -354,10 +361,7 @@ impl Drop for VerityMount {
 }
 
 async fn unmount_verity(mount: MountGuard, mapping: VerityMapping) -> Result<(), Error> {
-    if let Err(error) = mount.unmount(false).await {
-        mapping.persist();
-        return Err(error);
-    }
+    mount.unmount(false).await?;
     mapping.close_inner().await
 }
 
@@ -1378,6 +1382,51 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
+    async fn wait_mapping_removed(name: &str) {
+        tokio::process::Command::new("udevadm")
+            .args(["wait", "--removed", "--timeout=10"])
+            .arg(format!("/dev/mapper/{name}"))
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+        assert!(
+            tokio::process::Command::new("dmsetup")
+                .args(["info", name])
+                .invoke(ErrorKind::Filesystem)
+                .await
+                .is_err()
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires CAP_SYS_ADMIN, native veritysetup, udev and loop devices"]
+    async fn busy_verity_close_retains_protection_and_defers_kernel_cleanup() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("data");
+        let tree = temp.path().join("tree");
+        let bytes = image_bytes(b"verified data");
+        fs::write(&data, &bytes).unwrap();
+        let verity = VerityImage::format(&data, &tree).await.unwrap();
+        let name = format!("verity-busy-{}", Guid::new());
+        let mapping = verity.open(&data, &tree, &name).await.unwrap();
+        let mut reader = open_file(mapping.path()).await.unwrap();
+        assert!(mapping.close().await.is_err());
+        let mut observed = Vec::new();
+        reader.read_to_end(&mut observed).await.unwrap();
+        assert_eq!(observed, bytes);
+        assert!(
+            tokio::process::Command::new("dmsetup")
+                .args(["info", &name])
+                .invoke(ErrorKind::Filesystem)
+                .await
+                .is_ok()
+        );
+        drop(reader);
+        wait_mapping_removed(&name).await;
+    }
+
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     #[ignore = "requires CAP_SYS_ADMIN and loop devices"]
     async fn verity_mount_retains_protection_through_handoff_and_cleans_failures() {
@@ -1408,6 +1457,20 @@ mod tests {
         mount.unmount().await.unwrap();
         assert!(!device.exists());
 
+        let name = format!("verity-busy-mount-{}", Guid::new());
+        let mount = verity.mount(&image, &tree, &name, &at).await.unwrap();
+        let mut reader = open_file(at.join("setting")).await.unwrap();
+        assert!(mount.unmount().await.is_err());
+        assert!(crate::disk::mount::util::is_mountpoint(&at).await.unwrap());
+        let mut observed = Vec::new();
+        reader.read_to_end(&mut observed).await.unwrap();
+        assert_eq!(observed, b"verified setting");
+        drop(reader);
+        crate::disk::mount::util::unmount(&at, false).await.unwrap();
+        wait_mapping_removed(&name).await;
+
+        let name = format!("verity-handoff-{}", Guid::new());
+        let device = PathBuf::from(format!("/dev/mapper/{name}"));
         let mount = verity.mount(&image, &tree, &name, &at).await.unwrap();
         assert_eq!(mount.persist(), at);
         assert!(device.exists());
@@ -1421,6 +1484,8 @@ mod tests {
         VerityImage::close(&name).await.unwrap();
         assert!(!device.exists());
 
+        let name = format!("verity-dependent-{}", Guid::new());
+        let device = PathBuf::from(format!("/dev/mapper/{name}"));
         let mount = verity.mount(&image, &tree, &name, &at).await.unwrap();
         let dependent = temp.path().join("dependent");
         fs::create_dir(&dependent).unwrap();
@@ -1442,9 +1507,12 @@ mod tests {
             .invoke(ErrorKind::Filesystem)
             .await
             .unwrap();
-        VerityImage::close(&name).await.unwrap();
+        crate::disk::mount::util::unmount(&at, false).await.unwrap();
+        wait_mapping_removed(&name).await;
         assert!(!device.exists());
 
+        let name = format!("verity-failed-mount-{}", Guid::new());
+        let device = PathBuf::from(format!("/dev/mapper/{name}"));
         let not_directory = temp.path().join("not-directory");
         fs::write(&not_directory, b"occupied").unwrap();
         assert!(
@@ -1455,6 +1523,8 @@ mod tests {
         );
         assert!(!device.exists());
         fs::write(&image, image_bytes(b"not SquashFS")).unwrap();
+        let name = format!("verity-not-squashfs-{}", Guid::new());
+        let device = PathBuf::from(format!("/dev/mapper/{name}"));
         let other_tree = temp.path().join("other-tree");
         let not_squashfs = VerityImage::format(&image, &other_tree).await.unwrap();
         assert!(

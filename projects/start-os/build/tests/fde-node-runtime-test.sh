@@ -23,8 +23,7 @@ docker run --rm --pull=never -i \
     --mount "type=bind,src=$repo,dst=/fde-repo,readonly" \
     "$image" /bin/bash -se <<'SH'
 set -euo pipefail
-export PATH=/node-runtime/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
-export LD_LIBRARY_PATH=/node-runtime/usr/lib/x86_64-linux-gnu
+source /fde-repo/projects/start-os/build/tests/fde-node-runtime-env.sh
 cd /fde-repo
 node projects/start-os/build/tests/fde-node-runtime-test.mjs /fde-providers /node-runtime/usr/bin/node "$LD_LIBRARY_PATH"
 node projects/start-os/build/tests/fde-initramfs-archive-test.mjs

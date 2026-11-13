@@ -31,8 +31,7 @@ docker run --rm --pull=never -i \
     --mount type=bind,src=/dev/urandom,dst=/dev/urandom,readonly \
     "$image" /bin/bash -se -- "${tests[@]}" <<'SH'
 set -euo pipefail
-export PATH=/node-runtime/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
-export LD_LIBRARY_PATH=/node-runtime/usr/lib/x86_64-linux-gnu
+source /fde-repo/projects/start-os/build/tests/fde-node-runtime-env.sh
 for file do
     node "/fde-repo/projects/start-os/build/tests/$file" /fde-hook-sources
 done
