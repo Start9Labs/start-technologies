@@ -628,16 +628,23 @@ const output = process.env.DROP_COMMENTS ? english.replace(/<!--.*?-->/g, '') : 
 process.stdout.write('Translated ' + locale + '.\\n\\n' + output + '\\n')
 `,
   )
-  const editor = write(
+  const edits = join(root, 'editor-calls')
+  const editor = nodeExecutable(
     'bin/edit-notes',
-    `#!/bin/sh\nfor file; do case "$file" in */en_US.md) printf '\\nEdited by hand.\\n' >> "$file" ;; esac; done\n`,
+    `import { appendFileSync } from 'node:fs'
+import { basename } from 'node:path'
+const files = process.argv.slice(2)
+appendFileSync(process.env.EDITS, JSON.stringify(files.map(file => basename(file))) + '\\n')
+for (const file of files)
+  if (basename(file) === 'en_US.md') appendFileSync(file, '\\nEdited by hand.\\n')
+`,
   )
-  chmodSync(editor, 0o755)
   Object.assign(env, {
     PATH: `${join(root, 'bin')}:${env.PATH}`,
     STATE: state,
     CALLS: calls,
     TRANSLATIONS: translations,
+    EDITS: edits,
     COMMIT: tagged,
     VISUAL: editor,
   })
@@ -658,6 +665,13 @@ process.stdout.write('Translated ' + locale + '.\\n\\n' + output + '\\n')
   }
 
   manage('create-gh-release', ' \r')
+  assert.deepEqual(
+    text(edits)
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line)),
+    [['en_US.md']],
+  )
   let recorded = ghCalls()
   assert.deepEqual(
     recorded.map(args => args[1]),
