@@ -26,7 +26,7 @@ import {
   requireSameBytes,
   requireSameFile,
 } from './fde-initramfs-providers.mjs'
-import { runSource } from './fde-reviewed-source.mjs'
+import { replaceOnce, runSource } from './fde-reviewed-source.mjs'
 
 const depmodInputs = [
   'modules.order',
@@ -55,11 +55,39 @@ export async function collectSourceModuleInputs(destination, version, modules) {
   ])
 }
 
+/** Retains native firmware selection and optional absence; selected-copy failures are terminal. */
+export function builtinFirmwareFunctions(bytes) {
+  requireNativeHookFunctions(bytes)
+  const checked = replaceOnce(
+    bytes.toString(),
+    'copy_file firmware "${found_fwloc}"',
+    'copy_file firmware "${found_fwloc}" || exit "$?"',
+  )
+  return replaceOnce(
+    checked,
+    'echo "W: Possible missing firmware /lib/firmware/${firmware} for built-in driver ${builtin_modname}" >&2',
+    ':',
+  )
+}
+
+export async function collectSourceBuiltinFirmwareInputs(destination, version) {
+  const functions = builtinFirmwareFunctions(
+    await readFile('/usr/share/initramfs-tools/hook-functions'),
+  )
+  await nativeQuery('/bin/sh', [
+    '-c',
+    `${functions}\nDESTDIR="$1"\nversion="$2"\nverbose=n\nadd_builtin_firmware\n`,
+    'fde-source-builtin-firmware',
+    destination,
+    version,
+  ])
+}
+
 /**
  * Admits source module bytes, native subset indexes and dependencies under effective configuration.
  * Provider identity admission precedes this call; authenticated sources and all inputs remain stable.
  * Native tools parse source references, never candidate module bytes; no module is inserted.
- * Built-in firmware, configured alias/request coverage and full generator admission remain separate.
+ * Source-unavailable firmware stays optional; configured requests and full generator admission remain separate.
  */
 export async function admitKernelModules(root) {
   root = await realpath(root)
@@ -156,6 +184,7 @@ export async function admitKernelModules(root) {
     await mkdir(join(closure, 'usr/lib'), { recursive: true })
     await copyRootAliases(root, closure)
     await collectSourceModuleInputs(closure, kernel.version, modules)
+    await collectSourceBuiltinFirmwareInputs(closure, kernel.version)
     async function requireCollected(path) {
       for (const entry of await readdir(join(closure, path), {
         withFileTypes: true,

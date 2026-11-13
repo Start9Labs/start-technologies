@@ -18,6 +18,8 @@ import test from 'node:test'
 
 import {
   admitKernelModules,
+  builtinFirmwareFunctions,
+  collectSourceBuiltinFirmwareInputs,
   collectSourceModuleInputs,
 } from '../lib/scripts/fde-initramfs-modules.mjs'
 import { kernelDirectory } from '../lib/scripts/fde-initramfs-paths.mjs'
@@ -116,6 +118,81 @@ test('native collector firmware copy diagnostics reject even with successful sta
     collectSourceModuleInputs(destination, kernel.version, ['ath9k_htc']),
     /Native module query diagnostics/,
   )
+})
+
+async function builtinFirmwareContext(t) {
+  const root = await mkdtemp('/var/tmp/fde-builtin-firmware-')
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await mkdir(join(root, 'usr/lib'), { recursive: true })
+  await symlink('usr/lib', join(root, 'lib'))
+  return root
+}
+
+async function optionalFirmwareCopy(root, firmware, functions) {
+  return runSource('/bin/sh', [
+    '-c',
+    `${functions}\nDESTDIR="$1"\nversion="$2"\nverbose=n\nif ! add_firmware "$3"; then :; fi\n`,
+    'fde-native-optional-firmware',
+    root,
+    kernel.version,
+    firmware,
+  ])
+}
+
+const sourceFunctions = await readFile(
+  '/usr/share/initramfs-tools/hook-functions',
+)
+const builtinFunctions = builtinFirmwareFunctions(sourceFunctions)
+const selectedFirmware = 'ath9k_htc/htc_7010-1.4.0.fw'
+
+test('built-in firmware source context drift rejects before evaluation', () => {
+  assert.throws(
+    () =>
+      builtinFirmwareFunctions(
+        Buffer.concat([sourceFunctions, Buffer.from('\n')]),
+      ),
+    /Unsupported generated context/,
+  )
+})
+
+test('native firmware selection and already-copied input retain source bytes', async t => {
+  const root = await builtinFirmwareContext(t)
+  for (let attempt = 0; attempt < 2; attempt++)
+    await optionalFirmwareCopy(root, selectedFirmware, builtinFunctions)
+  assert.deepEqual(
+    await readFile(join(root, 'usr/lib/firmware', selectedFirmware)),
+    await readFile(join('/usr/lib/firmware', selectedFirmware)),
+  )
+})
+
+test('source-unavailable firmware remains optional', async t => {
+  const root = await builtinFirmwareContext(t)
+  const result = await optionalFirmwareCopy(
+    root,
+    'startos-fde-unavailable-fixture.fw',
+    builtinFunctions,
+  )
+  assert.equal(result.stderr, '')
+})
+
+test('selected firmware copy failure escapes native optional handling', async t => {
+  const root = await builtinFirmwareContext(t)
+  await writeFile(join(root, 'usr/lib/firmware'), 'blocked')
+  const original = await optionalFirmwareCopy(
+    root,
+    selectedFirmware,
+    sourceFunctions,
+  )
+  assert.notEqual(original.stderr, '')
+  await assert.rejects(
+    optionalFirmwareCopy(root, selectedFirmware, builtinFunctions),
+    /Command failed/,
+  )
+})
+
+test('genuine built-in metadata is consumed by the native collector', async t => {
+  const root = await builtinFirmwareContext(t)
+  await collectSourceBuiltinFirmwareInputs(root, kernel.version)
 })
 
 test('effective soft dependencies already present retain native resolution', async t => {
