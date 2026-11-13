@@ -416,13 +416,20 @@ impl SignatureAuthContext for RegistryContext {
         db: &mut Model<Self::Database>,
         keys: &BTreeSet<InternedString>,
     ) -> Result<(), Error> {
+        if keys.is_empty() {
+            return Ok(());
+        }
         for (_, signer) in db.as_index_mut().as_signers_mut().as_entries_mut()? {
             signer.as_keys_mut().mutate(|signer_keys| {
                 signer_keys.retain(|k| !keys.contains(&*k.interned_der64()));
                 Ok(())
             })?;
         }
-        Ok(())
+        let signers = db.as_index().as_signers().de()?;
+        db.as_index_mut().as_package_mut().mutate(|index| {
+            index.retain_registered_signatures(&signers);
+            Ok(())
+        })
     }
     async fn sig_context(
         &self,

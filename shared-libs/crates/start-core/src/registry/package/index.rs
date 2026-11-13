@@ -25,7 +25,8 @@ use crate::s9pk::merkle_archive::source::FileSource;
 use crate::service::effects::plugin::PluginId;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 #[cfg(test)]
-use crate::sign::{AnySignature, AnyVerifyingKey};
+use crate::sign::AnySignature;
+use crate::sign::AnyVerifyingKey;
 use crate::util::VersionString;
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
@@ -38,6 +39,16 @@ pub struct PackageIndex {
 
 rpc_toolkit::reflect_ts!(PackageIndex);
 rpc_toolkit::ts_export!(PackageIndex, namespaces = [""]);
+
+impl PackageIndex {
+    pub fn retain_registered_signatures(&mut self, signers: &BTreeMap<Guid, SignerInfo>) {
+        for package in self.packages.values_mut() {
+            for version in package.versions.values_mut() {
+                version.retain_registered_signatures(signers);
+            }
+        }
+    }
+}
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -204,6 +215,7 @@ impl PackageVersionInfo {
             )],
         })
     }
+    /// Persisted package signatures must belong to keys in `FullIndex.signers`.
     pub fn retain_registered_signatures(&mut self, signers: &BTreeMap<Guid, SignerInfo>) {
         let keys: BTreeSet<&AnyVerifyingKey> = signers.values().flat_map(|s| &s.keys).collect();
         for (_, asset) in &mut self.s9pks {

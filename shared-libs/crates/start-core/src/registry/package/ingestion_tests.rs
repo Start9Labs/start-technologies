@@ -127,8 +127,7 @@ async fn local_package() -> S9pk {
 }
 
 #[tokio::test]
-async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserves_mirror_and_promotion()
- {
+async fn registry_cli_filters_signatures_on_upload_mirror_and_promotion() {
     use crate::context::config::{ClientConfig, Profiles};
     use crate::developer::write_signing_key;
     use crate::registry::package::add::cli_add_package_impl;
@@ -138,6 +137,28 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     let uploader = AnyVerifyingKey::Ed25519(uploader_key.verifying_key());
     let temp = tempfile::tempdir().unwrap();
     let ctx = context(temp.path().join("first"), uploader.clone()).await;
+    let target = context(temp.path().join("second"), uploader.clone()).await;
+    let embedded: AnyVerifyingKey = serde_json::from_value(vectors()["embedded"].clone()).unwrap();
+    let publisher: AnyVerifyingKey =
+        serde_json::from_value(vectors()["endorsements"][0]["signer"].clone()).unwrap();
+    for (registry, keys) in [
+        (&ctx, BTreeSet::from([embedded.clone(), publisher.clone()])),
+        (&target, BTreeSet::from([publisher.clone()])),
+    ] {
+        registry
+            .db
+            .mutate(|db| {
+                db.as_index_mut().as_signers_mut().add_signer(&SignerInfo {
+                    name: "Publisher".into(),
+                    contact: vec![],
+                    keys,
+                    gpg_exports: Default::default(),
+                })
+            })
+            .await
+            .result
+            .unwrap();
+    }
     let before = ctx.db.peek().await.as_index().de().unwrap();
     let (host, requests, host_task) = server(
         [
@@ -148,7 +169,6 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     )
     .await;
     let (registry, registry_task) = registry_server(ctx.clone()).await;
-    let target = context(temp.path().join("second"), uploader.clone()).await;
     let (destination, destination_task) = registry_server(target.clone()).await;
     let key_path = temp.path().join("identity.pem");
     write_signing_key(&uploader_key, &key_path).await.unwrap();
@@ -175,7 +195,10 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     assert_eq!(before.trust_signers, after.trust_signers);
     let version: crate::util::VersionString = "1.0.0:0".parse().unwrap();
     let asset = &after.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
-    assert_eq!(asset.signatures.len(), 5);
+    assert_eq!(
+        asset.signatures.keys().collect::<BTreeSet<_>>(),
+        [&uploader, &embedded, &publisher].into()
+    );
     for (key, signature) in &asset.signatures {
         key.verify_commitment(&asset.commitment, "s9pk", signature)
             .unwrap();
@@ -215,7 +238,13 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     .unwrap();
     let promoted = target.db.peek().await.as_index().de().unwrap();
     let promoted = &promoted.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
-    assert_eq!(promoted.signatures, asset.signatures);
+    assert_eq!(
+        promoted.signatures.keys().collect::<BTreeSet<_>>(),
+        [&uploader, &publisher].into()
+    );
+    for (key, signature) in &promoted.signatures {
+        assert_eq!(Some(signature), asset.signatures.get(key));
+    }
     assert_eq!(promoted.urls, mirrored.urls);
 
     ctx.db
@@ -299,7 +328,7 @@ async fn registry_rejects_submitted_invalid_signatures_atomically_and_defaults_o
         serde_json::to_value(ctx.db.peek().await.as_index().de().unwrap()).unwrap(),
         after
     );
-    assert_ne!(before, after);
+    assert_eq!(before, after);
     assert!(requests.lock().unwrap().iter().all(Option::is_none));
     task.abort();
 }
@@ -416,7 +445,7 @@ async fn registry_validates_every_package_url_without_importing_remote_endorseme
         ctx.clone(),
         AddPackageParams {
             urls: urls.clone(),
-            uploader,
+            uploader: uploader.clone(),
             commitment,
             signature,
             signatures: Default::default(),
@@ -428,9 +457,80 @@ async fn registry_validates_every_package_url_without_importing_remote_endorseme
     let version: crate::util::VersionString = "1.0.0:0".parse().unwrap();
     let asset = &index.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
     assert_eq!(asset.urls, urls);
-    assert_eq!(asset.signatures.len(), 2);
+    assert_eq!(
+        asset.signatures.keys().collect::<BTreeSet<_>>(),
+        [&uploader].into()
+    );
     assert!(requests.lock().unwrap().iter().all(Option::is_none));
     task.abort();
+}
+
+#[tokio::test]
+async fn removing_registry_signers_or_keys_prunes_stored_package_signatures() {
+    use crate::registry::admin::{EditSignerParams, RemoveSignerParams, edit_signer, remove_signer};
+    use crate::registry::package::index::tests::version_info_signed_by;
+
+    let (publisher, mut info) = version_info_signed_by(1);
+    let (retired, retired_info) = version_info_signed_by(2);
+    let (removed, removed_info) = version_info_signed_by(3);
+    info.merge_with(retired_info, true).unwrap();
+    info.merge_with(removed_info, true).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let ctx = context(temp.path().into(), publisher.clone()).await;
+    let id: crate::PackageId = "test".parse().unwrap();
+    let version: crate::util::VersionString = "1.0.0:0".parse().unwrap();
+    let signer = ctx
+        .db
+        .mutate(|db| {
+            let signer = db.as_index_mut().as_signers_mut().add_signer(&SignerInfo {
+                name: "Retiring publisher".into(),
+                contact: vec![],
+                keys: [retired.clone(), removed.clone()].into(),
+                gpg_exports: Default::default(),
+            })?;
+            db.as_index_mut()
+                .as_package_mut()
+                .as_packages_mut()
+                .upsert(&id, || Ok(Default::default()))?
+                .as_versions_mut()
+                .insert(&version, &info)?;
+            Ok(signer)
+        })
+        .await
+        .result
+        .unwrap();
+
+    let edit: EditSignerParams = serde_json::from_value(serde_json::json!({
+        "id": signer,
+        "addContact": [],
+        "addKey": [],
+        "removeContact": [],
+        "removeKey": [retired],
+    }))
+    .unwrap();
+    edit_signer(ctx.clone(), edit).await.unwrap();
+    let index = ctx.db.peek().await.as_index().de().unwrap();
+    assert_eq!(
+        index.package.packages[&id].versions[&version].s9pks[0]
+            .1
+            .signatures
+            .keys()
+            .collect::<BTreeSet<_>>(),
+        [&publisher, &removed].into()
+    );
+
+    remove_signer(ctx.clone(), RemoveSignerParams { id: signer })
+        .await
+        .unwrap();
+    let index = ctx.db.peek().await.as_index().de().unwrap();
+    assert_eq!(
+        index.package.packages[&id].versions[&version].s9pks[0]
+            .1
+            .signatures
+            .keys()
+            .collect::<BTreeSet<_>>(),
+        [&publisher].into()
+    );
 }
 
 #[tokio::test]

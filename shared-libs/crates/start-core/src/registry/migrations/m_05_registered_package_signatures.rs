@@ -3,7 +3,7 @@ use std::path::Path;
 
 use super::RegistryMigration;
 use crate::prelude::*;
-use crate::registry::package::index::PackageVersionInfo;
+use crate::registry::package::index::PackageIndex;
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::Guid;
 
@@ -11,19 +11,9 @@ pub struct RegisteredPackageSignatures;
 impl RegistryMigration for RegisteredPackageSignatures {
     fn action(&self, db: &mut Value, _: &Path) -> Result<(), Error> {
         let signers: BTreeMap<Guid, SignerInfo> = from_value(db["index"]["signers"].clone())?;
-        let Some(packages) = db["index"]["package"]["packages"].as_object_mut() else {
-            return Ok(());
-        };
-        for (_, package) in packages.iter_mut() {
-            let Some(versions) = package["versions"].as_object_mut() else {
-                continue;
-            };
-            for (_, version) in versions.iter_mut() {
-                let mut info: PackageVersionInfo = from_value(version.clone())?;
-                info.retain_registered_signatures(&signers);
-                *version = to_value(&info)?;
-            }
-        }
+        let mut packages: PackageIndex = from_value(db["index"]["package"].clone())?;
+        packages.retain_registered_signatures(&signers);
+        db["index"]["package"] = to_value(&packages)?;
         Ok(())
     }
 }
@@ -33,6 +23,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+    use crate::registry::package::index::PackageVersionInfo;
     use crate::registry::package::index::tests::{signers_with, version_info_signed_by};
 
     #[test]
@@ -43,7 +34,14 @@ mod tests {
         let mut db = imbl_value::json!({
             "index": {
                 "signers": to_value(&signers_with([publisher.clone()])).unwrap(),
-                "package": { "packages": { "test": { "versions": { "1.0.0:0": to_value(&info).unwrap() } } } },
+                "package": {
+                    "categories": {},
+                    "packages": { "test": {
+                        "authorized": {},
+                        "categories": [],
+                        "versions": { "1.0.0:0": to_value(&info).unwrap() },
+                    } },
+                },
             }
         });
 
