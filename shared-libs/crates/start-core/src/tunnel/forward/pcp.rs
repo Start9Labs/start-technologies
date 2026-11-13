@@ -287,12 +287,13 @@ impl TunnelContext {
         transport: Transport,
     ) -> bool {
         let _guard = self.forward_write_lock.lock().await;
-        let key = ForwardAddress::new(source, transport);
-        let entry = current_forward(self, key)
-            .await
-            .or(current_forward(self, source.into())
+        let key = ForwardAddress::new(source, transport.clone());
+        let entry =
+            current_forward(self, key.clone())
                 .await
-                .filter(|e| matches!(e, PortForward::Sni { .. }) && transport != Transport::Udp));
+                .or(current_forward(self, source.into()).await.filter(|e| {
+                    matches!(e, PortForward::Sni { .. }) && transport != Transport::udp()
+                }));
         match entry {
             Some(PortForward::Dnat { target, auto, .. })
                 if *target.ip() == peer && (!auto_only || auto) =>
@@ -403,15 +404,15 @@ impl TunnelContext {
             .mutate(|db| {
                 db.as_port_forwards_mut().mutate(|pf| {
                     use crate::tunnel::db::{PortForward, SniRoute};
-                    let tcp_key = ForwardAddress::new(source, Transport::Tcp);
+                    let tcp_key = ForwardAddress::new(source, Transport::tcp());
                     let previous_key = if pf.0.contains_key(&tcp_key) {
-                        tcp_key
+                        tcp_key.clone()
                     } else {
                         source.into()
                     };
                     let previous = pf.0.get(&previous_key).cloned();
                     if let Some(conflict) = pf
-                        .overlapping(tcp_key, 1)
+                        .overlapping(tcp_key.clone(), 1)
                         .filter(|key| *key != previous_key)
                     {
                         return Err(Error::new(
@@ -432,9 +433,9 @@ impl TunnelContext {
                             else {
                                 unreachable!()
                             };
-                            if previous_key.transport == Transport::Both {
+                            if previous_key.transport == Transport::default() {
                                 pf.0.insert(
-                                    ForwardAddress::new(source, Transport::Udp),
+                                    ForwardAddress::new(source, Transport::udp()),
                                     dnat.clone(),
                                 );
                             }
@@ -520,7 +521,7 @@ impl TunnelContext {
                 target,
                 &enabled_hostnames,
                 dnat_enabled.then_some(dnat_target),
-                || self.restore_persisted_forward(previous_key, Some(dnat)),
+                || self.restore_persisted_forward(previous_key.clone(), Some(dnat)),
             )
             .await?;
         } else if let Err(code) = self.sni.register(
@@ -535,25 +536,28 @@ impl TunnelContext {
         }
         if let Some((dnat_target, dnat_enabled)) = converted_dnat {
             if let Some(rc) = self.active_forwards.mutate(|m| {
-                m.remove(&ForwardAddress::new(source, Transport::Tcp))
+                m.remove(&ForwardAddress::new(source, Transport::tcp()))
                     .or_else(|| m.remove(&source.into()))
             }) {
                 drop(rc);
                 self.forward.gc().await.log_err();
             }
-            if previous_key.transport == Transport::Both && dnat_enabled {
+            if previous_key.transport == Transport::default() && dnat_enabled {
                 let prefix = crate::tunnel::forward::igd::prefix_for(self, dnat_target.ip()).await;
                 let rc = self
                     .forward
-                    .add_forward_range(source, dnat_target, 1, prefix, None, Transport::Udp)
+                    .add_forward_range(source, dnat_target, 1, prefix, None, Transport::udp())
                     .await
                     .map_err(|_| crate::net::port_map::pcp::RESULT_NO_RESOURCES)?;
                 self.active_forwards
-                    .mutate(|m| m.insert(ForwardAddress::new(source, Transport::Udp), rc));
+                    .mutate(|m| m.insert(ForwardAddress::new(source, Transport::udp()), rc));
             }
-            let carried = self
-                .leases
-                .mutate(|l| l.remove(&LeaseKey::Dnat(ForwardAddress::new(source, Transport::Tcp))));
+            let carried = self.leases.mutate(|l| {
+                l.remove(&LeaseKey::Dnat(ForwardAddress::new(
+                    source,
+                    Transport::tcp(),
+                )))
+            });
             if let Some(exp) = carried {
                 self.leases.mutate(|l| {
                     l.insert(LeaseKey::SniFallback(source), exp);
@@ -749,10 +753,12 @@ fn restore_forward_entry(
 ) {
     let source = source.into();
     forwards.0.remove(&source.address.into());
-    if source.transport == Transport::Both && matches!(&previous, Some(PortForward::Dnat { .. })) {
+    if source.transport == Transport::default()
+        && matches!(&previous, Some(PortForward::Dnat { .. }))
+    {
         forwards
             .0
-            .remove(&ForwardAddress::new(source.address, Transport::Udp));
+            .remove(&ForwardAddress::new(source.address, Transport::udp()));
     }
     match previous {
         Some(forward) => {
@@ -831,10 +837,13 @@ fn peer_forward_source(
         .0
         .iter()
         .find(|(source, entry)| {
-            entry.transport(**source).protocols().contains(&transport)
+            entry
+                .transport((**source).clone())
+                .protocols()
+                .contains(&transport)
                 && peer_forward_matches(entry, target)
         })
-        .map(|(source, entry)| (*source, matches!(entry, PortForward::Sni { .. })))
+        .map(|(source, entry)| (source.clone(), matches!(entry, PortForward::Sni { .. })))
 }
 
 /// Removes automatic mappings matching PCP's transport, internal port, and client.
@@ -898,7 +907,7 @@ fn mapping_entries(forwards: &PortForwards, peer: Ipv4Addr) -> Vec<MappingEntry>
             };
             out.extend(
                 forward
-                    .transport(*source)
+                    .transport(source.clone())
                     .protocols()
                     .iter()
                     .map(|protocol| MappingEntry {
@@ -1137,23 +1146,23 @@ mod tests {
     #[test]
     fn tcp_and_udp_mappings_have_independent_identity_and_listing() {
         let source: SocketAddrV4 = "203.0.113.1:5000".parse().unwrap();
-        let tcp = ForwardAddress::new(source, Transport::Tcp);
-        let udp = ForwardAddress::new(source, Transport::Udp);
+        let tcp = ForwardAddress::new(source, Transport::tcp());
+        let udp = ForwardAddress::new(source, Transport::udp());
         let target: SocketAddrV4 = "10.59.0.2:6000".parse().unwrap();
         let mut forwards = PortForwards(Default::default());
         forwards
             .0
-            .insert(tcp, owned_dnat(&target.to_string(), 2, true, true));
+            .insert(tcp.clone(), owned_dnat(&target.to_string(), 2, true, true));
         forwards
             .0
-            .insert(udp, owned_dnat(&target.to_string(), 2, true, true));
+            .insert(udp.clone(), owned_dnat(&target.to_string(), 2, true, true));
         assert_eq!(
             peer_forward_source(&forwards, &target, TransportProtocol::Tcp),
-            Some((tcp, false))
+            Some((tcp.clone(), false))
         );
         assert_eq!(
             peer_forward_source(&forwards, &target, TransportProtocol::Udp),
-            Some((udp, false))
+            Some((udp.clone(), false))
         );
         assert_eq!(mapping_entries(&forwards, *target.ip()).len(), 4);
         forwards.0.remove(&tcp);
@@ -1167,18 +1176,18 @@ mod tests {
         );
         assert_eq!(
             peer_forward_source(&forwards, &target, TransportProtocol::Udp),
-            Some((udp, false))
+            Some((udp.clone(), false))
         );
     }
 
     #[test]
     fn failed_sni_registration_does_not_remove_an_independent_udp_mapping() {
         let source: SocketAddrV4 = "203.0.113.1:443".parse().unwrap();
-        let udp = ForwardAddress::new(source, Transport::Udp);
+        let udp = ForwardAddress::new(source, Transport::udp());
         let mut forwards = PortForwards(Default::default());
         forwards
             .0
-            .insert(udp, owned_dnat("10.59.0.2:443", 1, true, true));
+            .insert(udp.clone(), owned_dnat("10.59.0.2:443", 1, true, true));
         let sni = PortForward::Sni {
             routes: Default::default(),
             fallback: Some(route(None, true, true)),

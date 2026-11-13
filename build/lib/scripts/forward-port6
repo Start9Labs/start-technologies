@@ -19,12 +19,13 @@ if [ -z "$sip" ] || [ -z "$dip" ] || [ -z "$dprefix" ] || [ -z "$sport" ] || [ -
     exit 1
 fi
 
-transport="${transport:-both}"
-case "$transport" in
-    tcp | udp) protocols=("$transport") ;;
-    both) protocols=(tcp udp) ;;
-    *) echo "invalid transport: $transport" >&2; exit 1 ;;
-esac
+IFS=, read -r -a protocols <<< "${transport:-tcp,udp}"
+for protocol in "${protocols[@]}"; do
+    case "$protocol" in
+        tcp | udp) ;;
+        *) echo "invalid transport: $protocol" >&2; exit 1 ;;
+    esac
+done
 # Bracketed for IPv6 dnat target.
 dnat="th dport $sport dnat to [$dip]:$dport"
 

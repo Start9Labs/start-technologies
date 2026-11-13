@@ -42,7 +42,7 @@ const host = (available: T.HostnameInfo[]): T.Host => ({
     80: {
       enabled: true,
       options: {
-        transport: 'both',
+        transport: ['tcp', 'udp'],
         preferredExternalPort: 80,
         addSsl: null,
         secure: null,

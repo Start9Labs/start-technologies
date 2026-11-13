@@ -1442,15 +1442,9 @@ export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
   /* @__PURE__ */ object({ now: z.string(), uptime: z.int() }).meta({
     id: 'TimeInfo',
   })
-
-/**
- * Transports forwarded by a binding. Omitted declarations retain TCP and UDP.
- */
-export const Transport: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp'; both: 'both' }> =
-  /* @__PURE__ */ z.enum(['tcp', 'udp', 'both']).meta({
-    id: 'Transport',
-    description:
-      'Transports forwarded by a binding. Omitted declarations retain TCP and UDP.',
+export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
+  /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
+    id: 'TransportProtocol',
   })
 export const TrustCaParams: z.ZodObject<{ cert: typeof literal_0 }> =
   /* @__PURE__ */ object({ cert: literal_0 }).meta({
@@ -3968,6 +3962,13 @@ export const TestSmtpParams: z.ZodObject<{
 }).meta({
   id: 'TestSmtpParams',
 })
+export const TransportWire: z.ZodUnion<
+  readonly [typeof TransportProtocol, z.ZodArray<typeof TransportProtocol>]
+> = /* @__PURE__ */ z
+  .union([TransportProtocol, z.array(TransportProtocol)])
+  .meta({
+    id: 'TransportWire',
+  })
 export const UmountParams: z.ZodObject<{
   targetId: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof BackupTargetId>>,
@@ -4905,6 +4906,19 @@ export const SideloadParams: z.ZodObject<{
 })
 
 /**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export const Transport: z.ZodCodec<
+  typeof TransportWire,
+  z.ZodArray<typeof TransportProtocol>
+> = /* @__PURE__ */ wire(TransportWire, z.array(TransportProtocol)).meta({
+  id: 'Transport',
+  description:
+    'Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.',
+})
+
+/**
  * Signing-key material and independent package and OS-update trust.
  */
 export const TrustedKey: z.ZodObject<{
@@ -5346,12 +5360,6 @@ export const SessionList: z.ZodObject<{
 }).meta({
   id: 'SessionList',
 })
-export const BackupHistory: z.ZodObject<{
-  runs: z.ZodArray<typeof BackupRun>
-  total: z.ZodInt
-}> = /* @__PURE__ */ object({ runs: z.array(BackupRun), total: z.int() }).meta({
-  id: 'BackupHistory',
-})
 
 /**
  * Parameters for replacing the stored NUT configuration.
@@ -5361,6 +5369,12 @@ export const SetNutParams: z.ZodObject<{ config: typeof NutConfig }> =
     id: 'SetNutParams',
     description: 'Parameters for replacing the stored NUT configuration.',
   })
+export const BackupHistory: z.ZodObject<{
+  runs: z.ZodArray<typeof BackupRun>
+  total: z.ZodInt
+}> = /* @__PURE__ */ object({ runs: z.array(BackupRun), total: z.int() }).meta({
+  id: 'BackupHistory',
+})
 
 /**
  * Active DNS authority and its bootstrap gateway.

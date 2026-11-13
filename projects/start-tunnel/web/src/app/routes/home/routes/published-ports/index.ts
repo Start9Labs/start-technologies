@@ -88,7 +88,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
               <td tuiTd>{{ forward.sni || '—' }}</td>
               <td tuiTd>{{ span(forward.externalport, forward.count) }}</td>
               <td tuiTd>{{ span(forward.internalport, forward.count) }}</td>
-              <td tuiTd>{{ transportLabels[forward.transport] }}</td>
+              <td tuiTd>{{ transportLabel(forward.transport) }}</td>
               <td tuiTd>{{ forward.externalip }}</td>
               <td tuiTd [style.padding-inline-end.rem]="0.625">
                 <button
@@ -170,7 +170,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
               <td tuiTd>{{ forward.sni || '—' }}</td>
               <td tuiTd>{{ span(forward.externalport, forward.count) }}</td>
               <td tuiTd>{{ span(forward.internalport, forward.count) }}</td>
-              <td tuiTd>{{ transportLabels[forward.transport] }}</td>
+              <td tuiTd>{{ transportLabel(forward.transport) }}</td>
               <td tuiTd>{{ forward.externalip }}</td>
             </tr>
           } @empty {
@@ -267,7 +267,7 @@ export default class PublishedPorts {
     { initialValue: [] },
   )
 
-  protected readonly transportLabels = utils.transportLabels
+  protected readonly transportLabel = utils.transportLabel
   protected readonly portForwards = toSignal(this.patch.watch$('portForwards'))
   protected readonly pinholes = toSignal(this.patch.watch$('pinholes6'))
   protected readonly forwards = computed(() => [

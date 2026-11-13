@@ -14,10 +14,10 @@ export function parseForwardKey(key: string): {
 } {
   const separator = key.indexOf('@')
   return separator < 0
-    ? { address: key, transport: 'both' }
+    ? { address: key, transport: ['tcp', 'udp'] }
     : {
         address: key.slice(separator + 1),
-        transport: key.slice(0, separator) as T.Transport,
+        transport: [key.slice(0, separator) as T.Transport[number]],
       }
 }
 
@@ -25,7 +25,7 @@ function forwardTransport(
   forward: T.Tunnel.PortForward,
   declared: T.Transport,
 ): T.Transport {
-  return forward.kind === 'sni' ? 'tcp' : declared
+  return forward.kind === 'sni' ? ['tcp'] : declared
 }
 
 export function portEightyForwarded(
@@ -34,7 +34,7 @@ export function portEightyForwarded(
 ): boolean {
   return Object.entries(forwards).some(([key, forward]) => {
     const { address, transport } = parseForwardKey(key)
-    if (forwardTransport(forward, transport) === 'udp') return false
+    if (!forwardTransport(forward, transport).includes('tcp')) return false
     const separator = address.lastIndexOf(':')
     if (address.slice(0, separator) !== ip) return false
     const start = Number(address.slice(separator + 1))

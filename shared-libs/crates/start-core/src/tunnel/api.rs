@@ -1367,7 +1367,7 @@ pub async fn add_forward(
         .mutate(|db| {
             db.as_webserver().de()?.check_plain_forward(source.address, count)?;
             db.as_port_forwards_mut().mutate(|pf| {
-                if let Some(conflict) = pf.overlapping(source, count) {
+                if let Some(conflict) = pf.overlapping(source.clone(), count) {
                     return Err(Error::new(
                         eyre!(
                             "external ports {external_port}-{} overlap an existing forward at {conflict}",
@@ -1379,7 +1379,7 @@ pub async fn add_forward(
                 if pf
                     .0
                     .insert(
-                        source,
+                        source.clone(),
                         PortForward::Dnat {
                             target,
                             label: label.clone(),
@@ -1411,7 +1411,7 @@ pub async fn add_forward(
             count,
             prefix,
             None,
-            source.transport,
+            source.transport.clone(),
         )
         .await
     {
@@ -1645,7 +1645,7 @@ fn update_forward_enabled(
                 count,
                 ..
             } => {
-                if enabled && source.transport != Transport::Udp {
+                if enabled && source.transport != Transport::udp() {
                     web.check_plain_forward(source.address, *count)?;
                 }
                 *e = enabled;
@@ -1707,7 +1707,7 @@ async fn set_forward_enabled_at(
     let _guard = ctx.forward_write_lock.lock().await;
     let toggle = ctx
         .db
-        .mutate(|db| update_forward_enabled(db, source, enabled, hostname.as_deref()))
+        .mutate(|db| update_forward_enabled(db, source.clone(), enabled, hostname.as_deref()))
         .await
         .result?;
 
@@ -1723,7 +1723,7 @@ async fn set_forward_enabled_at(
                         count,
                         prefix,
                         None,
-                        source.transport,
+                        source.transport.clone(),
                     )
                     .await?;
                 ctx.active_forwards.mutate(|m| {
@@ -1829,7 +1829,7 @@ pub async fn add_pinhole(
         count,
         label,
         false,
-        Transport::Both,
+        Transport::default(),
     )
     .await
 }
@@ -2228,7 +2228,7 @@ mod tests {
         use crate::tunnel::db::PortForwards;
         use crate::tunnel::web::WebserverInfo;
 
-        let source = "203.0.113.4:442".parse().unwrap();
+        let source: ForwardAddress = "203.0.113.4:442".parse().unwrap();
         let target = "10.0.0.2:8442".parse().unwrap();
         let mut db = Model::new(&TunnelDatabase::default()).unwrap();
         db.as_webserver_mut()
@@ -2240,7 +2240,7 @@ mod tests {
             .unwrap();
         db.as_port_forwards_mut()
             .ser(&PortForwards(BTreeMap::from([(
-                source,
+                source.clone(),
                 PortForward::Dnat {
                     target,
                     label: None,
@@ -2250,7 +2250,7 @@ mod tests {
                 },
             )])))
             .unwrap();
-        let error = update_forward_enabled(&mut db, source, true, None)
+        let error = update_forward_enabled(&mut db, source.clone(), true, None)
             .err()
             .unwrap();
         assert_eq!(error.kind, ErrorKind::InvalidRequest);
@@ -2258,9 +2258,9 @@ mod tests {
             db.as_port_forwards().de().unwrap().0[&source],
             PortForward::Dnat { enabled: false, .. }
         ));
-        update_forward_enabled(&mut db, source, false, None).unwrap();
+        update_forward_enabled(&mut db, source.clone(), false, None).unwrap();
         db.as_webserver_mut().as_enabled_mut().ser(&false).unwrap();
-        let toggle = update_forward_enabled(&mut db, source, true, None).unwrap();
+        let toggle = update_forward_enabled(&mut db, source.clone(), true, None).unwrap();
         assert!(matches!(toggle, ForwardToggle::Dnat { target: t, count: 3 } if t == target));
         assert!(matches!(
             db.as_port_forwards().de().unwrap().0[&source],
@@ -2279,7 +2279,7 @@ mod tests {
         use crate::tunnel::db::{PortForwards, SniRoute};
         use crate::tunnel::web::WebserverInfo;
 
-        let source = "203.0.113.4:443".parse().unwrap();
+        let source: ForwardAddress = "203.0.113.4:443".parse().unwrap();
         let target = "10.0.0.2:443".parse().unwrap();
         let mut db = Model::new(&TunnelDatabase::default()).unwrap();
         db.as_webserver_mut()
@@ -2291,7 +2291,7 @@ mod tests {
             .unwrap();
         db.as_port_forwards_mut()
             .ser(&PortForwards(BTreeMap::from([(
-                source,
+                source.clone(),
                 PortForward::Sni {
                     routes: BTreeMap::from([(
                         "service.example.com".to_owned(),
@@ -2307,7 +2307,7 @@ mod tests {
             )])))
             .unwrap();
         assert!(matches!(
-            update_forward_enabled(&mut db, source, true, Some("service.example.com")).unwrap(),
+            update_forward_enabled(&mut db, source.clone(), true, Some("service.example.com")).unwrap(),
             ForwardToggle::Sni { target: t, .. } if t == target
         ));
     }

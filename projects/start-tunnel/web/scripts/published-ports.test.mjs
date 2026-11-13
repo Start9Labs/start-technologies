@@ -52,19 +52,19 @@ test('rows retain protocol-specific operation keys and separate transport from I
         source: 'tcp@192.0.2.1:5000',
         externalip: '192.0.2.1',
         externalport: '5000',
-        transport: 'tcp',
+        transport: ['tcp'],
       },
       {
         source: 'udp@192.0.2.1:5000',
         externalip: '192.0.2.1',
         externalport: '5000',
-        transport: 'udp',
+        transport: ['udp'],
       },
       {
         source: '192.0.2.1:7000',
         externalip: '192.0.2.1',
         externalport: '7000',
-        transport: 'both',
+        transport: ['tcp', 'udp'],
       },
     ],
   )
@@ -72,7 +72,7 @@ test('rows retain protocol-specific operation keys and separate transport from I
   assert.equal(row.externalip, '2001:db8::2')
   assert.equal(row.externalport, '5000')
   assert.equal(row.internalport, '7000')
-  assert.equal(row.transport, 'udp')
+  assert.deepEqual(row.transport, ['udp'])
   assert.equal(row.source, 'udp@[2001:db8::2]:5000')
 })
 
@@ -89,7 +89,7 @@ test('SNI rows report TCP and UDP mappings do not reserve the HTTP redirect', ()
     },
     fallback: null,
   }
-  assert.equal(mapForwards({ '192.0.2.1:443': sni }, [])[0].transport, 'tcp')
+  assert.deepEqual(mapForwards({ '192.0.2.1:443': sni }, [])[0].transport, ['tcp'])
   assert.equal(
     portEightyForwarded({ 'udp@192.0.2.1:79': dnat }, '192.0.2.1'),
     false,

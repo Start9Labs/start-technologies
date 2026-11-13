@@ -608,13 +608,14 @@ export class MockApiService extends ApiService {
 }
 
 function pinholeKeys(params: T.Tunnel.RemovePinholeParamsInput): string[] {
+  const selected = new Set([params.transport ?? ['tcp', 'udp']].flat())
   return Object.keys(mockTunnelData.pinholes6).filter(key => {
     const { address, transport } = parseForwardKey(key)
     return (
       address === `[${params.gua}]:${params.externalPort}` &&
-      (!params.transport ||
-        params.transport === 'both' ||
-        params.transport === transport)
+      ((selected.has('tcp') && selected.has('udp')) ||
+        (selected.size === transport.length &&
+          transport.every(p => selected.has(p))))
     )
   })
 }

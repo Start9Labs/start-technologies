@@ -44,11 +44,11 @@ pub async fn apply_pinhole(
     count: u16,
     transport: Transport,
 ) -> Result<(), Error> {
-    let comment = tag(gua, external_port, transport);
-    let protocols = match transport {
-        Transport::Tcp => "tcp",
-        Transport::Udp => "udp",
-        Transport::Both => "{ tcp, udp }",
+    let comment = tag(gua, external_port, transport.clone());
+    let protocols = if transport.protocols().len() > 1 {
+        format!("{{ {} }}", transport)
+    } else {
+        transport.to_string()
     };
     let ext = port_span(external_port, count);
     let int = port_span(internal_port, count);
@@ -119,13 +119,13 @@ fn upsert_pinhole(
     label: Option<String>,
     auto: bool,
 ) -> Result<bool, Error> {
-    if let Some(conflict) = pinholes.overlapping(key, count) {
+    if let Some(conflict) = pinholes.overlapping(key.clone(), count) {
         return Err(Error::new(
             eyre!("{key} overlaps an existing pinhole at {conflict}"),
             ErrorKind::InvalidRequest,
         ));
     }
-    let pinhole = pinholes.0.entry(key).or_insert_with(|| Pinhole {
+    let pinhole = pinholes.0.entry(key.clone()).or_insert_with(|| Pinhole {
         label: auto.then(|| "PCP".to_string()),
         enabled: true,
         count,
@@ -160,7 +160,10 @@ pub async fn add_pinhole(
     transport: Transport,
 ) -> Result<(), Error> {
     let _guard = ctx.forward_write_lock.lock().await;
-    let key = PinholeAddress::new(SocketAddrV6::new(gua, external_port, 0, 0), transport);
+    let key = PinholeAddress::new(
+        SocketAddrV6::new(gua, external_port, 0, 0),
+        transport.clone(),
+    );
     let enabled = ctx
         .db
         .mutate(|db| {
@@ -190,9 +193,9 @@ pub async fn set_pinhole_enabled(
             db.as_pinholes6_mut().mutate(|ph| {
                 let mut changed = Vec::new();
                 for (key, entry) in &mut ph.0 {
-                    if matches_key(*key, gua, external_port, transport) {
+                    if matches_key(key, gua, external_port, &transport) {
                         entry.enabled = enabled;
-                        changed.push((*key, entry.clone()));
+                        changed.push((key.clone(), entry.clone()));
                     }
                 }
                 if changed.is_empty() {
@@ -217,7 +220,7 @@ pub async fn set_pinhole_enabled(
             )
             .await?;
         } else {
-            remove_pinhole_rules(gua, external_port, key.transport).await?;
+            remove_pinhole_rules(gua, external_port, key.transport.clone()).await?;
         }
     }
     Ok(())
@@ -235,7 +238,7 @@ pub async fn set_pinhole_label(
             db.as_pinholes6_mut().mutate(|ph| {
                 let mut found = false;
                 for (key, entry) in &mut ph.0 {
-                    if matches_key(*key, gua, external_port, transport) {
+                    if matches_key(key, gua, external_port, &transport) {
                         entry.label = label.clone();
                         found = true;
                     }
@@ -253,10 +256,10 @@ pub async fn set_pinhole_label(
         .result
 }
 
-fn matches_key(key: PinholeAddress, gua: Ipv6Addr, port: u16, transport: Transport) -> bool {
+fn matches_key(key: &PinholeAddress, gua: Ipv6Addr, port: u16, transport: &Transport) -> bool {
     *key.ip() == gua
         && key.port() == port
-        && (transport == Transport::Both || key.transport == transport)
+        && (transport == &Transport::default() || &key.transport == transport)
 }
 
 /// Returns whether a pinhole was removed.
@@ -275,10 +278,10 @@ pub async fn remove_pinhole(
                 let keys: Vec<_> =
                     ph.0.iter()
                         .filter(|(key, entry)| {
-                            matches_key(**key, gua, external_port, transport)
+                            matches_key(key, gua, external_port, &transport)
                                 && (!auto_only || entry.auto)
                         })
-                        .map(|(key, _)| *key)
+                        .map(|(key, _)| key.clone())
                         .collect();
                 for key in &keys {
                     ph.0.remove(key);
@@ -291,12 +294,12 @@ pub async fn remove_pinhole(
         .log_err()
         .unwrap_or_default();
     for key in &removed {
-        remove_pinhole_rules(gua, external_port, key.transport)
+        remove_pinhole_rules(gua, external_port, key.transport.clone())
             .await
             .log_err();
         crate::tunnel::forward::lease::forget(
             ctx,
-            &crate::tunnel::forward::lease::LeaseKey::Pinhole(*key),
+            &crate::tunnel::forward::lease::LeaseKey::Pinhole(key.clone()),
         );
     }
     !removed.is_empty()
@@ -306,8 +309,8 @@ pub async fn remove_pinhole(
 pub async fn seed_pinholes(ctx: &TunnelContext) -> Result<(), Error> {
     for (key, ph) in ctx.db.peek().await.as_pinholes6().de()?.0 {
         // Upgrades retain socket-only pinhole tags in the kernel.
-        if key.transport != Transport::Both {
-            remove_pinhole_rules(*key.ip(), key.port(), Transport::Both).await?;
+        if key.transport != Transport::default() {
+            remove_pinhole_rules(*key.ip(), key.port(), Transport::default()).await?;
         }
         if !ph.enabled {
             continue;
@@ -331,19 +334,24 @@ mod tests {
     #[test]
     fn protocol_pinhole_updates_preserve_the_other_transport() {
         let address = "[2001:db8::2]:5000".parse().unwrap();
-        let tcp = PinholeAddress::new(address, Transport::Tcp);
-        let udp = PinholeAddress::new(address, Transport::Udp);
+        let tcp = PinholeAddress::new(address, Transport::tcp());
+        let udp = PinholeAddress::new(address, Transport::udp());
         let mut pinholes = Pinholes6::default();
-        upsert_pinhole(&mut pinholes, tcp, 6000, 2, None, true).unwrap();
-        upsert_pinhole(&mut pinholes, udp, 7000, 2, None, true).unwrap();
+        upsert_pinhole(&mut pinholes, tcp.clone(), 6000, 2, None, true).unwrap();
+        upsert_pinhole(&mut pinholes, udp.clone(), 7000, 2, None, true).unwrap();
         pinholes.0.get_mut(&udp).unwrap().enabled = false;
-        upsert_pinhole(&mut pinholes, tcp, 8000, 2, None, true).unwrap();
+        upsert_pinhole(&mut pinholes, tcp.clone(), 8000, 2, None, true).unwrap();
         assert!(!pinholes.0[&udp].enabled);
         assert_eq!(pinholes.0[&udp].internal_port(5000), 7000);
         assert_eq!(pinholes.0[&tcp].internal_port(5000), 8000);
-        assert!(matches_key(tcp, *address.ip(), 5000, Transport::Tcp));
-        assert!(!matches_key(udp, *address.ip(), 5000, Transport::Tcp));
-        assert!(matches_key(udp, *address.ip(), 5000, Transport::Both));
+        assert!(matches_key(&tcp, *address.ip(), 5000, &Transport::tcp()));
+        assert!(!matches_key(&udp, *address.ip(), 5000, &Transport::tcp()));
+        assert!(matches_key(
+            &udp,
+            *address.ip(),
+            5000,
+            &Transport::default()
+        ));
     }
 
     const KEY: &str = "[2001:db8::2]:443";

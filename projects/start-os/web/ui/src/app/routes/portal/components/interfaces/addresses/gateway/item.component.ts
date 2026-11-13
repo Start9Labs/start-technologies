@@ -82,7 +82,7 @@ import { DomainHealthService } from './domain-health.service'
           {{ address.type }}
         </span>
       </td>
-      <td class="transport">{{ transportLabels[address.transport] }}</td>
+      <td class="transport">{{ transportLabel(address.transport) }}</td>
       @if (showCert()) {
         <td class="cert-cell">
           <div class="cert">
@@ -297,7 +297,7 @@ export class GatewayItemComponent {
   readonly currentlyMasked = signal(true)
   readonly guaOpen = signal(false)
   readonly showCert = input(false)
-  readonly transportLabels = utils.transportLabels
+  readonly transportLabel = utils.transportLabel
   readonly urlHtml = computed(() => {
     const { url, hostnameInfo } = this.address()
     const idx = url.indexOf(hostnameInfo.hostname)

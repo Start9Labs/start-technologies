@@ -647,15 +647,9 @@ export const SubnetParams: z.ZodObject<{ subnet: z.ZodString }> =
   /* @__PURE__ */ object({ subnet: z.string() }).meta({
     id: 'SubnetParams',
   })
-
-/**
- * Transports forwarded by a binding. Omitted declarations retain TCP and UDP.
- */
-export const Transport: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp'; both: 'both' }> =
-  /* @__PURE__ */ z.enum(['tcp', 'udp', 'both']).meta({
-    id: 'Transport',
-    description:
-      'Transports forwarded by a binding. Omitted declarations retain TCP and UDP.',
+export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
+  /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
+    id: 'TransportProtocol',
   })
 export const TunnelCertData: z.ZodObject<{
   key: typeof literal_0
@@ -989,17 +983,6 @@ export const RemoveKeyParams: z.ZodObject<{ key: typeof AnyVerifyingKey }> =
   /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
     id: 'RemoveKeyParams',
   })
-export const RemovePinholeParams: z.ZodObject<{
-  gua: z.ZodString
-  externalPort: z.ZodInt
-  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
-}> = /* @__PURE__ */ object({
-  gua: z.string(),
-  externalPort: z.int(),
-  transport: wire(Transport.optional(), Transport),
-}).meta({
-  id: 'RemovePinholeParams',
-})
 export const RemovePortForwardParams: z.ZodObject<{
   source: typeof ForwardAddress
   /**
@@ -1031,19 +1014,6 @@ export const SetDeviceKindParams: z.ZodObject<{
   kind: WgClientKind,
 }).meta({
   id: 'SetDeviceKindParams',
-})
-export const SetPinholeEnabledParams: z.ZodObject<{
-  gua: z.ZodString
-  externalPort: z.ZodInt
-  enabled: z.ZodBoolean
-  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
-}> = /* @__PURE__ */ object({
-  gua: z.string(),
-  externalPort: z.int(),
-  enabled: z.boolean(),
-  transport: wire(Transport.optional(), Transport),
-}).meta({
-  id: 'SetPinholeEnabledParams',
 })
 export const SetPortForwardEnabledParams: z.ZodObject<{
   source: typeof ForwardAddress
@@ -1100,22 +1070,13 @@ export const SetSubnetDnsParams: z.ZodObject<{
 }).meta({
   id: 'SetSubnetDnsParams',
 })
-export const UpdatePinholeLabelParams: z.ZodObject<{
-  gua: z.ZodString
-  externalPort: z.ZodInt
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
-}> = /* @__PURE__ */ object({
-  gua: z.string(),
-  externalPort: z.int(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
-  transport: wire(Transport.optional(), Transport),
-}).meta({
-  id: 'UpdatePinholeLabelParams',
-})
+export const TransportWire: z.ZodUnion<
+  readonly [typeof TransportProtocol, z.ZodArray<typeof TransportProtocol>]
+> = /* @__PURE__ */ z
+  .union([TransportProtocol, z.array(TransportProtocol)])
+  .meta({
+    id: 'TransportWire',
+  })
 export const UpdatePortForwardLabelParams: z.ZodObject<{
   source: typeof ForwardAddress
   label: z.ZodCodec<
@@ -1331,10 +1292,63 @@ export const PortForwards: z.ZodRecord<z.ZodString, typeof PortForward> =
   /* @__PURE__ */ z.record(z.string(), PortForward).meta({
     id: 'PortForwards',
   })
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export const Transport: z.ZodCodec<
+  typeof TransportWire,
+  z.ZodArray<typeof TransportProtocol>
+> = /* @__PURE__ */ wire(TransportWire, z.array(TransportProtocol)).meta({
+  id: 'Transport',
+  description:
+    'Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.',
+})
 export const WgSubnetClients: z.ZodRecord<z.ZodString, typeof WgConfig> =
   /* @__PURE__ */ z.record(z.string(), WgConfig).meta({
     id: 'WgSubnetClients',
   })
+export const RemovePinholeParams: z.ZodObject<{
+  gua: z.ZodString
+  externalPort: z.ZodInt
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
+}> = /* @__PURE__ */ object({
+  gua: z.string(),
+  externalPort: z.int(),
+  transport: wire(Transport.optional(), Transport),
+}).meta({
+  id: 'RemovePinholeParams',
+})
+export const SetPinholeEnabledParams: z.ZodObject<{
+  gua: z.ZodString
+  externalPort: z.ZodInt
+  enabled: z.ZodBoolean
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
+}> = /* @__PURE__ */ object({
+  gua: z.string(),
+  externalPort: z.int(),
+  enabled: z.boolean(),
+  transport: wire(Transport.optional(), Transport),
+}).meta({
+  id: 'SetPinholeEnabledParams',
+})
+export const UpdatePinholeLabelParams: z.ZodObject<{
+  gua: z.ZodString
+  externalPort: z.ZodInt
+  label: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
+}> = /* @__PURE__ */ object({
+  gua: z.string(),
+  externalPort: z.int(),
+  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  transport: wire(Transport.optional(), Transport),
+}).meta({
+  id: 'UpdatePinholeLabelParams',
+})
 export const WgSubnetConfig: z.ZodObject<{
   name: z.ZodString
   clients: typeof WgSubnetClients

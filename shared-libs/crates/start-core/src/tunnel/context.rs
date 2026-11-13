@@ -363,7 +363,7 @@ impl TunnelContext {
                         .map(|s| s.prefix_len())
                         .unwrap_or(32);
                     active_forwards.insert(
-                        from,
+                        from.clone(),
                         forward
                             .add_forward_range(
                                 from.address,
@@ -649,7 +649,10 @@ impl TunnelContext {
                         .await
                         .unwrap_or(*src.ip());
                     want.insert(
-                        ForwardAddress::new(SocketAddrV4::new(ip, src.port()), src.transport),
+                        ForwardAddress::new(
+                            SocketAddrV4::new(ip, src.port()),
+                            src.transport.clone(),
+                        ),
                         PortForward::Dnat {
                             target: *target,
                             label: label.clone(),
@@ -666,7 +669,7 @@ impl TunnelContext {
                                 .await
                                 .unwrap_or(*src.ip());
                         let key = ForwardAddress::from(SocketAddrV4::new(ip, src.port()));
-                        match want.entry(key).or_insert_with(|| PortForward::Sni {
+                        match want.entry(key.clone()).or_insert_with(|| PortForward::Sni {
                             routes: BTreeMap::new(),
                             fallback: None,
                         }) {
@@ -685,7 +688,7 @@ impl TunnelContext {
                             .await
                             .unwrap_or(*src.ip());
                         let key = ForwardAddress::from(SocketAddrV4::new(ip, src.port()));
-                        match want.entry(key).or_insert_with(|| PortForward::Sni {
+                        match want.entry(key.clone()).or_insert_with(|| PortForward::Sni {
                             routes: BTreeMap::new(),
                             fallback: None,
                         }) {
@@ -707,7 +710,7 @@ impl TunnelContext {
 
         let old_dnat: BTreeSet<ForwardAddress> = old
             .iter()
-            .filter_map(|(src, e)| matches!(e, PortForward::Dnat { .. }).then_some(*src))
+            .filter_map(|(src, e)| matches!(e, PortForward::Dnat { .. }).then_some(src.clone()))
             .collect();
         let new_dnat: BTreeMap<ForwardAddress, (SocketAddrV4, u16, bool)> = want
             .iter()
@@ -717,7 +720,7 @@ impl TunnelContext {
                     enabled,
                     count,
                     ..
-                } => Some((*src, (*target, *count, *enabled))),
+                } => Some((src.clone(), (*target, *count, *enabled))),
                 _ => None,
             })
             .collect();
@@ -738,10 +741,17 @@ impl TunnelContext {
             let prefix = crate::tunnel::forward::igd::prefix_for(self, target.ip()).await;
             let rc = self
                 .forward
-                .add_forward_range(src.address, *target, *count, prefix, None, src.transport)
+                .add_forward_range(
+                    src.address,
+                    *target,
+                    *count,
+                    prefix,
+                    None,
+                    src.transport.clone(),
+                )
                 .await?;
             self.active_forwards.mutate(|m| {
-                m.insert(*src, rc);
+                m.insert(src.clone(), rc);
             });
         }
         self.forward.gc().await.log_err();
@@ -804,7 +814,7 @@ fn reconcile_sni_demux(
             } = entry
             {
                 if !enabled_only || fallback.enabled {
-                    out.insert(*source, fallback.target);
+                    out.insert(source.clone(), fallback.target);
                 }
             }
         }

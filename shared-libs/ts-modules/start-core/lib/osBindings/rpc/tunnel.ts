@@ -150,11 +150,7 @@ export type SetSubnetWanParamsInput = z.input<typeof schemas.SetSubnetWanParams>
 export type ShowConfigParamsInput = z.input<typeof schemas.ShowConfigParams>
 export type SubnetParamsInput = z.input<typeof schemas.SubnetParams>
 export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
-
-/**
- * Transports forwarded by a binding. Omitted declarations retain TCP and UDP.
- */
-export type TransportInput = z.input<typeof schemas.Transport>
+export type TransportProtocolInput = z.input<typeof schemas.TransportProtocol>
 export type TunnelCertDataInput = z.input<typeof schemas.TunnelCertData>
 export type TunnelUpdateResult = z.output<typeof schemas.TunnelUpdateResult>
 
@@ -186,26 +182,18 @@ export type AuthKeys = z.output<typeof schemas.AuthKeys>
 export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
-export type RemovePinholeParamsInput = z.input<
-  typeof schemas.RemovePinholeParams
->
 export type RemovePortForwardParamsInput = z.input<
   typeof schemas.RemovePortForwardParams
 >
 export type SetDeviceKindParamsInput = z.input<
   typeof schemas.SetDeviceKindParams
 >
-export type SetPinholeEnabledParamsInput = z.input<
-  typeof schemas.SetPinholeEnabledParams
->
 export type SetPortForwardEnabledParamsInput = z.input<
   typeof schemas.SetPortForwardEnabledParams
 >
 export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
-export type UpdatePinholeLabelParamsInput = z.input<
-  typeof schemas.UpdatePinholeLabelParams
->
+export type TransportWireInput = z.input<typeof schemas.TransportWire>
 export type UpdatePortForwardLabelParamsInput = z.input<
   typeof schemas.UpdatePortForwardLabelParams
 >
@@ -215,7 +203,22 @@ export type WgConfig = z.output<typeof schemas.WgConfig>
  * The server's sessions, by credential type.
  */
 export type Sessions = z.output<typeof schemas.Sessions>
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export type TransportInput = z.input<typeof schemas.Transport>
 export type WgSubnetClients = z.output<typeof schemas.WgSubnetClients>
+export type RemovePinholeParamsInput = z.input<
+  typeof schemas.RemovePinholeParams
+>
 export type SessionList = z.output<typeof schemas.SessionList>
+export type SetPinholeEnabledParamsInput = z.input<
+  typeof schemas.SetPinholeEnabledParams
+>
+export type UpdatePinholeLabelParamsInput = z.input<
+  typeof schemas.UpdatePinholeLabelParams
+>
 export type WgSubnetConfig = z.output<typeof schemas.WgSubnetConfig>
 export type Api = RpcSchemaTree<typeof schemas.Api>

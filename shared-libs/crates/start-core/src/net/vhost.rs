@@ -540,7 +540,7 @@ impl VHostController {
             for (ip, port, hostname) in take_ownership(owners, owner, want) {
                 match hostname {
                     Some(h) => self.port_map.remove_hostname(ip, port, h.to_string()),
-                    None => self.port_map.remove(ip, port, Transport::Tcp),
+                    None => self.port_map.remove(ip, port, Transport::tcp()),
                 }
             }
         });
@@ -559,7 +559,7 @@ impl VHostController {
                         *port,
                         *internal,
                         gateways.clone(),
-                        Transport::Tcp,
+                        Transport::tcp(),
                     ),
                 }
             }

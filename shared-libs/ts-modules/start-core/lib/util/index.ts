@@ -12,7 +12,7 @@ export type {
   FilledBindInfo,
   FilledServiceInterface,
 } from './filledAddress'
-export { addressTransport, transportLabels } from './addressTransport'
+export { addressTransport, transportLabel } from './addressTransport'
 export { getDefaultString } from './getDefaultString'
 export * from './ip'
 

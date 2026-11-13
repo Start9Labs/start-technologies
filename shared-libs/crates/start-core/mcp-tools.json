@@ -4204,10 +4204,11 @@
           ],
           "additionalProperties": true
         },
+        "TransportProtocol": { "type": "string", "enum": ["tcp", "udp"] },
         "Transport": {
-          "type": "string",
-          "enum": ["tcp", "udp", "both"],
-          "description": "Transports forwarded by a binding. Omitted declarations retain TCP and UDP."
+          "description": "Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/TransportProtocol" }
         },
         "AddSslOptions": {
           "type": "object",
@@ -10443,10 +10444,11 @@
           ],
           "additionalProperties": true
         },
+        "TransportProtocol": { "type": "string", "enum": ["tcp", "udp"] },
         "Transport": {
-          "type": "string",
-          "enum": ["tcp", "udp", "both"],
-          "description": "Transports forwarded by a binding. Omitted declarations retain TCP and UDP."
+          "description": "Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/TransportProtocol" }
         },
         "AddSslOptions": {
           "type": "object",

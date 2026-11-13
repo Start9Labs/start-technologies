@@ -471,15 +471,9 @@ export const TaskSeverity: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['optional', 'important', 'critical']).meta({
   id: 'TaskSeverity',
 })
-
-/**
- * Transports forwarded by a binding. Omitted declarations retain TCP and UDP.
- */
-export const Transport: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp'; both: 'both' }> =
-  /* @__PURE__ */ z.enum(['tcp', 'udp', 'both']).meta({
-    id: 'Transport',
-    description:
-      'Transports forwarded by a binding. Omitted declarations retain TCP and UDP.',
+export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
+  /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
+    id: 'TransportProtocol',
   })
 export const UploadLimits: z.ZodObject<{
   /**
@@ -956,21 +950,6 @@ export const BindId: z.ZodObject<{
   internalPort: z.ZodInt
 }> = /* @__PURE__ */ object({ id: HostId, internalPort: z.int() }).meta({
   id: 'BindId',
-})
-export const BindRangeParams: z.ZodObject<{
-  id: typeof HostId
-  internalStartPort: z.ZodInt
-  externalStartPort: z.ZodInt
-  numberOfPorts: z.ZodInt
-  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
-}> = /* @__PURE__ */ object({
-  id: HostId,
-  internalStartPort: z.int(),
-  externalStartPort: z.int(),
-  numberOfPorts: z.int(),
-  transport: wire(Transport.optional(), Transport),
-}).meta({
-  id: 'BindRangeParams',
 })
 export const CheckDependenciesParam: z.ZodObject<{
   packageIds: z.ZodCodec<
@@ -2094,6 +2073,13 @@ export const TaskTrigger: z.ZodObject<{
 }).meta({
   id: 'TaskTrigger',
 })
+export const TransportWire: z.ZodUnion<
+  readonly [typeof TransportProtocol, z.ZodArray<typeof TransportProtocol>]
+> = /* @__PURE__ */ z
+  .union([TransportProtocol, z.array(TransportProtocol)])
+  .meta({
+    id: 'TransportWire',
+  })
 export const UploadedFile: z.ZodObject<{
   /**
    * Untrusted original filename supplied by the uploader.
@@ -2589,6 +2575,19 @@ export const Task: z.ZodObject<{
 }).meta({
   id: 'Task',
 })
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export const Transport: z.ZodCodec<
+  typeof TransportWire,
+  z.ZodArray<typeof TransportProtocol>
+> = /* @__PURE__ */ wire(TransportWire, z.array(TransportProtocol)).meta({
+  id: 'Transport',
+  description:
+    'Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.',
+})
 export const UrlPluginClearUrlsParams: z.ZodObject<{
   except: z.ZodArray<typeof PluginHostnameInfo>
 }> = /* @__PURE__ */ object({ except: z.array(PluginHostnameInfo) }).meta({
@@ -2697,6 +2696,21 @@ export const AddSslOptions: z.ZodCodec<
   }),
 ).meta({
   id: 'AddSslOptions',
+})
+export const BindRangeParams: z.ZodObject<{
+  id: typeof HostId
+  internalStartPort: z.ZodInt
+  externalStartPort: z.ZodInt
+  numberOfPorts: z.ZodInt
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
+}> = /* @__PURE__ */ object({
+  id: HostId,
+  internalStartPort: z.int(),
+  externalStartPort: z.int(),
+  numberOfPorts: z.int(),
+  transport: wire(Transport.optional(), Transport),
+}).meta({
+  id: 'BindRangeParams',
 })
 export const CreateTaskParams: z.ZodIntersection<
   z.ZodObject<{ replayId: typeof ReplayId }>,

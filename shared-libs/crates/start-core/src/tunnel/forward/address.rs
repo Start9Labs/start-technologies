@@ -12,7 +12,7 @@ macro_rules! transport_address {
     ($name:ident, $socket:ty) => {
         /// Transport-qualified keys use `tcp@socket` or `udp@socket`; socket-only keys retain both.
         #[derive(
-            Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, VisitFields,
+            Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, VisitFields,
         )]
         #[serde(try_from = "String", into = "String")]
         #[visit(type_attributes(serde::try_from, serde::into))]
@@ -30,7 +30,7 @@ macro_rules! transport_address {
         }
         impl From<$socket> for $name {
             fn from(address: $socket) -> Self {
-                Self::new(address, Transport::Both)
+                Self::new(address, Transport::default())
             }
         }
         impl Deref for $name {
@@ -41,9 +41,10 @@ macro_rules! transport_address {
         }
         impl Display for $name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                match self.transport {
-                    Transport::Both => self.address.fmt(f),
-                    transport => write!(f, "{}@{}", transport.as_str(), self.address),
+                if self.transport == Transport::default() {
+                    self.address.fmt(f)
+                } else {
+                    write!(f, "{}@{}", self.transport, self.address)
                 }
             }
         }
@@ -62,10 +63,10 @@ macro_rules! transport_address {
             type Err = String;
             fn from_str(value: &str) -> Result<Self, Self::Err> {
                 let (transport, address) = match value.split_once('@') {
-                    Some(("tcp", address)) => (Transport::Tcp, address),
-                    Some(("udp", address)) => (Transport::Udp, address),
+                    Some(("tcp", address)) => (Transport::tcp(), address),
+                    Some(("udp", address)) => (Transport::udp(), address),
                     Some(_) => return Err("invalid forward transport".into()),
-                    None => (Transport::Both, value),
+                    None => (Transport::default(), value),
                 };
                 Ok(Self::new(
                     address.parse::<$socket>().map_err(|e| e.to_string())?,

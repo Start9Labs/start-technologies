@@ -32,12 +32,13 @@ if [ "$sport_end" -gt 65535 ] || [ "$dport_end" -gt 65535 ]; then
     exit 1
 fi
 
-transport="${transport:-both}"
-case "$transport" in
-    tcp | udp) protocols=("$transport") ;;
-    both) protocols=(tcp udp) ;;
-    *) echo "invalid transport: $transport" >&2; exit 1 ;;
-esac
+IFS=, read -r -a protocols <<< "${transport:-tcp,udp}"
+for protocol in "${protocols[@]}"; do
+    case "$protocol" in
+        tcp | udp) ;;
+        *) echo "invalid transport: $protocol" >&2; exit 1 ;;
+    esac
+done
 PRIVATE_SUBNETS='{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16 }'
 
 # DNAT clause (the part following $PROTO) and the internal-port matcher used by

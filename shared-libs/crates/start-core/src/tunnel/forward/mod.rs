@@ -69,7 +69,7 @@ pub async fn clear_for_peer(
             .0
             .iter()
             .filter(|(key, ph)| peer_guas.contains(key.ip()) && (!auto_only || ph.auto))
-            .map(|(key, _)| *key)
+            .map(|(key, _)| key.clone())
             .collect();
         for key in keys {
             pinhole::remove_pinhole(ctx, *key.ip(), key.port(), false, key.transport).await;
@@ -98,7 +98,7 @@ fn select_peer_forwards(
             PortForward::Dnat { target, auto, .. }
                 if target.ip() == &peer && (!auto_only || *auto) =>
             {
-                dnat_sources.push(*source);
+                dnat_sources.push(source.clone());
             }
             PortForward::Sni { routes, fallback } => {
                 for (host, route) in routes {

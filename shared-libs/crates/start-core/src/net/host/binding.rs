@@ -715,7 +715,10 @@ impl TryFrom<CompatibleBindOptions> for BindOptions {
             secure: options.secure,
             proxy,
         };
-        if options.transport == crate::net::transport::Transport::Udp
+        if !options
+            .transport
+            .protocols()
+            .contains(&crate::net::transport::TransportProtocol::Tcp)
             && (options.proxy.is_some()
                 || options.add_ssl.is_some()
                 || options.secure.is_some_and(|s| s.ssl))
@@ -735,7 +738,7 @@ rpc_toolkit::ts_export!(BindOptions, namespaces = [""]);
 impl BindOptions {
     pub(crate) fn server_ui() -> Self {
         Self {
-            transport: crate::net::transport::Transport::Tcp,
+            transport: crate::net::transport::Transport::tcp(),
             preferred_external_port: 80,
             add_ssl: Some(AddSslOptions {
                 preferred_external_port: super::SERVER_UI_SSL_PORT,
@@ -1759,7 +1762,7 @@ mod test {
     fn server_ui_declares_tcp() {
         assert_eq!(
             BindOptions::server_ui().transport,
-            crate::net::transport::Transport::Tcp,
+            crate::net::transport::Transport::tcp(),
         );
     }
 
@@ -1769,23 +1772,38 @@ mod test {
 
         let legacy = serde_json::json!({"preferredExternalPort": 5353});
         let options: BindOptions = serde_json::from_value(legacy.clone()).unwrap();
-        assert_eq!(options.transport, Transport::Both);
-        for (wire, transport) in [
-            ("tcp", Transport::Tcp),
-            ("udp", Transport::Udp),
-            ("both", Transport::Both),
+        assert_eq!(options.transport, Transport::default());
+        for (wire, transport, expected) in [
+            (
+                serde_json::json!("tcp"),
+                Transport::tcp(),
+                serde_json::json!(["tcp"]),
+            ),
+            (
+                serde_json::json!("udp"),
+                Transport::udp(),
+                serde_json::json!(["udp"]),
+            ),
+            (
+                serde_json::json!(["udp", "tcp"]),
+                Transport::default(),
+                serde_json::json!(["tcp", "udp"]),
+            ),
         ] {
             let mut input = legacy.clone();
-            input["transport"] = wire.into();
+            input["transport"] = wire;
             let options: BindOptions = serde_json::from_value(input).unwrap();
             assert_eq!(options.transport, transport);
-            assert_eq!(serde_json::to_value(options).unwrap()["transport"], wire);
+            assert_eq!(
+                serde_json::to_value(options).unwrap()["transport"],
+                expected
+            );
         }
         let range: RangeBindInfo = serde_json::from_value(serde_json::json!({
             "enabled": true, "externalStartPort": 42000, "numberOfPorts": 10,
         }))
         .unwrap();
-        assert_eq!(range.transport, Transport::Both);
+        assert_eq!(range.transport, Transport::default());
         assert!(
             serde_json::from_value::<BindOptions>(serde_json::json!({
                 "preferredExternalPort": 5353, "transport": "sctp",
@@ -1801,10 +1819,12 @@ mod test {
             serde_json::json!({"addSsl": {"preferredExternalPort": 443}}),
             serde_json::json!({"secure": {"ssl": true}}),
         ] {
-            let mut input = options;
-            input["preferredExternalPort"] = 5353.into();
-            input["transport"] = "udp".into();
-            assert!(serde_json::from_value::<BindOptions>(input).is_err());
+            for transport in [serde_json::json!("udp"), serde_json::json!(["udp", "udp"])] {
+                let mut input = options.clone();
+                input["preferredExternalPort"] = 5353.into();
+                input["transport"] = transport;
+                assert!(serde_json::from_value::<BindOptions>(input).is_err());
+            }
         }
     }
 

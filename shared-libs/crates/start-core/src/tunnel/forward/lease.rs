@@ -142,10 +142,10 @@ async fn reap_expired(ctx: &TunnelContext) -> Option<Instant> {
             continue;
         }
         match &key {
-            LeaseKey::Dnat(source) => reap_dnat(ctx, *source).await,
+            LeaseKey::Dnat(source) => reap_dnat(ctx, source.clone()).await,
             LeaseKey::Sni { source, hostname } => reap_sni(ctx, *source, hostname).await,
             LeaseKey::SniFallback(source) => reap_sni_fallback(ctx, *source).await,
-            LeaseKey::Pinhole(k) => reap_pinhole(ctx, *k).await,
+            LeaseKey::Pinhole(k) => reap_pinhole(ctx, k.clone()).await,
         }
         // Drop the lease unless a renewal extended it while we reaped.
         ctx.leases.mutate(|l| {
@@ -166,7 +166,7 @@ async fn reap_dnat(ctx: &TunnelContext, source: ForwardAddress) {
         .as_port_forwards()
         .de()
         .ok()
-        .and_then(|pf| pf.0.get(&source.into()).cloned())
+        .and_then(|pf| pf.0.get(&source).cloned())
         .is_some_and(|e| matches!(e, PortForward::Dnat { auto: true, .. }));
     if !auto {
         return;
@@ -240,7 +240,7 @@ async fn reap_pinhole(ctx: &TunnelContext, key: PinholeAddress) {
         *key.ip(),
         key.port(),
         true,
-        key.transport,
+        key.transport.clone(),
     )
     .await
     {

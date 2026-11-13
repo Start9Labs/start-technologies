@@ -1263,16 +1263,16 @@ fn uci_protocols(protocols: &[String]) -> Vec<TransportProtocol> {
             .iter()
             .any(|p| p.eq_ignore_ascii_case("all") || p.eq_ignore_ascii_case("tcpudp"))
     {
-        return Transport::Both.protocols().to_vec();
+        return Transport::default().protocols().iter().copied().collect();
     }
-    Transport::Both
+    Transport::default()
         .protocols()
         .iter()
         .copied()
         .filter(|p| {
             protocols
                 .iter()
-                .any(|name| name.eq_ignore_ascii_case(Transport::from(*p).as_str()))
+                .any(|name| name.eq_ignore_ascii_case(p.as_str()))
         })
         .collect()
 }
@@ -1297,9 +1297,9 @@ pub(crate) async fn split_legacy_forwards_uci(
                 continue;
             };
             let mut names = Vec::new();
-            for protocol in Transport::Both.protocols() {
+            for protocol in Transport::default().protocols() {
                 let mut entry = sec.get::<FirewallRedirect>()?;
-                let protocol = Transport::from(*protocol).as_str();
+                let protocol = protocol.as_str();
                 entry.proto = vec![protocol.to_string()];
                 let key = format!("{name}_{protocol}");
                 names.push(key.clone());
@@ -1335,9 +1335,10 @@ fn section_name(mac: &str, external_port: u16, transport: Transport) -> String {
         mac.replace(':', "").to_lowercase(),
         external_port
     );
-    match transport {
-        Transport::Both => base,
-        _ => format!("{base}_{}", transport.as_str()),
+    if transport == Transport::default() {
+        base
+    } else {
+        format!("{base}_{transport}")
     }
 }
 
@@ -1392,7 +1393,7 @@ fn desired_redirect(
     source: SocketAddrV4,
     target: SocketAddrV4,
     count: u16,
-    transport: Transport,
+    transport: &Transport,
 ) -> FirewallRedirect {
     FirewallRedirect {
         name: format!("Automatic port use ({kind})"),
@@ -1402,7 +1403,7 @@ fn desired_redirect(
         proto: transport
             .protocols()
             .iter()
-            .map(|p| Transport::from(*p).as_str().to_string())
+            .map(|p| p.as_str().to_string())
             .collect(),
         src_dport: Some(range_string(source.port(), count)),
         src_ip: None,
@@ -1501,7 +1502,7 @@ async fn apply_forward_uci(
         let zone = arp_iface
             .and_then(|iface| crate::published_ports::zone_for_arp_iface(&cfgs, iface))
             .unwrap_or_else(|| "lan".into());
-        let desired = desired_redirect(kind, mac, zone, source, target, count, transport);
+        let desired = desired_redirect(kind, mac, zone, source, target, count, &transport);
 
         // Any *other* enabled WAN-ingress DNAT redirect overlapping the
         // requested external range blocks the mapping — manual published ports
@@ -2438,10 +2439,10 @@ mod tests {
         let mac = "AA:BB:CC:DD:EE:FF";
         let source = "203.0.113.7:9100".parse().unwrap();
         let target = "192.168.1.50:9200".parse().unwrap();
-        for transport in [Transport::Tcp, Transport::Udp] {
+        for transport in [Transport::tcp(), Transport::udp()] {
             let outcome = apply_forward_uci(
                 dir.path(),
-                &section_name(mac, 9100, transport),
+                &section_name(mac, 9100, transport.clone()),
                 KIND_PCP,
                 mac,
                 Some("br-lan"),
@@ -2455,8 +2456,8 @@ mod tests {
             assert!(matches!(outcome, ApplyOutcome::Written));
         }
         let pc = PortControl::new(dir.path().to_path_buf());
-        let tcp_key = section_name(mac, 9100, Transport::Tcp);
-        let udp_key = section_name(mac, 9100, Transport::Udp);
+        let tcp_key = section_name(mac, 9100, Transport::tcp());
+        let udp_key = section_name(mac, 9100, Transport::udp());
         pc.bump_lease(tcp_key.clone(), MAX_LEASE);
         pc.bump_lease(udp_key.clone(), MAX_LEASE);
         let udp_expiry = pc.leases.lock().unwrap()[&udp_key];
@@ -2484,14 +2485,14 @@ mod tests {
         let target = "192.168.1.50:9200".parse().unwrap();
         apply_forward_uci(
             dir.path(),
-            &section_name(mac, 9100, Transport::Both),
+            &section_name(mac, 9100, Transport::default()),
             KIND_PCP,
             mac,
             Some("br-lan"),
             source,
             target,
             2,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -2789,7 +2790,7 @@ mod tests {
             source,
             target,
             1,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -2823,7 +2824,7 @@ config redirect 'pp_a'
     #[test]
     fn section_names_are_stable_and_uci_safe() {
         assert_eq!(
-            section_name("AA:BB:CC:DD:EE:FF", 8443, Transport::Both),
+            section_name("AA:BB:CC:DD:EE:FF", 8443, Transport::default()),
             "apf_aabbccddeeff_8443"
         );
     }
@@ -2900,7 +2901,7 @@ config redirect 'pp_a'
             source,
             target,
             1,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -2922,7 +2923,7 @@ config redirect 'pp_a'
             source,
             target,
             1,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -2941,7 +2942,7 @@ config redirect 'pp_a'
             source,
             target2,
             1,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3012,7 +3013,7 @@ config redirect 'pp_stale'
             source,
             target,
             1,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3046,7 +3047,7 @@ config redirect 'pp_stale'
             source,
             target,
             1,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3111,14 +3112,14 @@ config rule 'wan_to_lan'
         let dir = temp_root(ROUTER_FW);
         apply_forward_uci(
             dir.path(),
-            &section_name("11:22:33:44:55:66", port, Transport::Both),
+            &section_name("11:22:33:44:55:66", port, Transport::default()),
             KIND_PCP,
             "11:22:33:44:55:66",
             Some("br-lan"),
             SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), port),
             SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 60), port),
             count,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap()
@@ -3208,7 +3209,7 @@ config rule 'wan_to_lan'
             source,
             target,
             10,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3225,7 +3226,7 @@ config rule 'wan_to_lan'
             source,
             target,
             10,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3246,14 +3247,14 @@ config rule 'wan_to_lan'
             let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), ext);
             let outcome = apply_forward_uci(
                 dir.path(),
-                &section_name("AA:BB:CC:DD:EE:FF", ext, Transport::Both),
+                &section_name("AA:BB:CC:DD:EE:FF", ext, Transport::default()),
                 KIND_UPNP,
                 "AA:BB:CC:DD:EE:FF",
                 Some("br-lan"),
                 source,
                 target,
                 1,
-                Transport::Both,
+                Transport::default(),
             )
             .await
             .unwrap();
@@ -3285,14 +3286,14 @@ config redirect 'dns_override_lan'
         let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 53);
         let outcome = apply_forward_uci(
             dir.path(),
-            &section_name("AA:BB:CC:DD:EE:FF", 53, Transport::Both),
+            &section_name("AA:BB:CC:DD:EE:FF", 53, Transport::default()),
             KIND_PCP,
             "AA:BB:CC:DD:EE:FF",
             Some("br-lan"),
             source,
             target,
             1,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3313,7 +3314,7 @@ config redirect 'dns_override_lan'
             source,
             target,
             1,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3359,7 +3360,7 @@ config redirect 'dns_override_lan'
             source,
             target,
             1,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3374,7 +3375,7 @@ config redirect 'dns_override_lan'
             other_source,
             other_target,
             1,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3792,14 +3793,14 @@ config host
 
         let outcome = apply_forward_uci(
             dir.path(),
-            &section_name("11:22:33:44:55:66", 8443, Transport::Both),
+            &section_name("11:22:33:44:55:66", 8443, Transport::default()),
             KIND_PCP,
             "11:22:33:44:55:66",
             Some("br-lan"),
             source,
             SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 60), 8443),
             1,
-            Transport::Both,
+            Transport::default(),
         )
         .await
         .unwrap();

@@ -4,7 +4,15 @@ import {
   BindOptionsByProtocol,
   MultiHost,
 } from '../interfaces/Host'
-import { ProxyAuth } from '../osBindings'
+import { ProxyAuth, TransportInput } from '../osBindings'
+
+const selections: TransportInput[] = [
+  'tcp',
+  'udp',
+  ['tcp'],
+  ['udp'],
+  ['udp', 'tcp', 'tcp'],
+]
 
 function fixture() {
   const bind = jest.fn(async () => null)
@@ -17,12 +25,12 @@ function fixture() {
 
 describe('MultiHost binding transports', () => {
   test.each([
-    ['http', 'tcp'],
-    ['https', 'tcp'],
-    ['ws', 'tcp'],
-    ['wss', 'tcp'],
-    ['ssh', 'tcp'],
-    ['dns', 'both'],
+    ['http', ['tcp']],
+    ['https', ['tcp']],
+    ['ws', ['tcp']],
+    ['wss', ['tcp']],
+    ['ssh', ['tcp']],
+    ['dns', ['tcp', 'udp']],
   ] as const)('%s defaults to %s', async (protocol, transport) => {
     const { host, bind } = fixture()
     await host.bindPort(8080, { protocol })
@@ -66,9 +74,21 @@ describe('MultiHost binding transports', () => {
     },
   )
 
-  test.each(['tcp', 'udp', 'both'] as const)(
-    'forwards %s for known and explicit application protocols',
-    async transport => {
+  test('an empty selection reaches backend rejection rather than using defaults', async () => {
+    const { host, bind } = fixture()
+    const error = new Error('at least one transport is required')
+    bind.mockRejectedValueOnce(error)
+    await expect(
+      host.bindPort(5353, { protocol: 'dns', transport: [] }),
+    ).rejects.toBe(error)
+    expect(bind).toHaveBeenCalledWith(
+      expect.objectContaining({ transport: [] }),
+    )
+  })
+
+  test.each(selections.map(transport => ({ transport })))(
+    'forwards $transport for known and explicit application protocols',
+    async ({ transport }) => {
       for (const options of [
         { protocol: 'dns', transport },
         { protocol: null, preferredExternalPort: 5353, transport },
@@ -82,9 +102,9 @@ describe('MultiHost binding transports', () => {
     },
   )
 
-  test.each(['tcp', 'udp', 'both', undefined] as const)(
-    'forwards range transport %s without overriding an omitted declaration',
-    async transport => {
+  test.each([...selections, undefined].map(transport => ({ transport })))(
+    'forwards range transport $transport without overriding an omitted declaration',
+    async ({ transport }) => {
       const bindRange = jest.fn(async () => null)
       const host = new MultiHost({
         effects: { bindRange } as unknown as Effects,
@@ -122,7 +142,7 @@ describe('MultiHost.bindPort HTTP proxy configuration', () => {
         id: 'service',
         internalPort: 8080,
         preferredExternalPort: port,
-        transport: 'tcp',
+        transport: ['tcp'],
         secure,
         addSsl: { preferredExternalPort: 443, alpn },
         proxy: { type: 'http', addXForwardedHeaders: true, auth: null },
@@ -275,7 +295,7 @@ describe('MultiHost.bindPort HTTP proxy configuration', () => {
       id: 'service',
       internalPort: 8080,
       preferredExternalPort: 8443,
-      transport: 'tcp',
+      transport: ['tcp'],
       secure: { ssl: true },
       proxy: { type: 'http', addXForwardedHeaders: true, auth },
       addSsl: {
@@ -287,8 +307,8 @@ describe('MultiHost.bindPort HTTP proxy configuration', () => {
   })
 
   test.each([
-    ['ssh', 22, 'tcp'],
-    ['dns', 53, 'both'],
+    ['ssh', 22, ['tcp']],
+    ['dns', 53, ['tcp', 'udp']],
   ] as const)(
     '%s binds raw traffic without HTTP features',
     async (protocol, port, transport) => {

@@ -1064,10 +1064,18 @@ mod tests {
         use crate::net::transport::Transport;
 
         for (transport, stored, expected) in [
-            (Transport::Both, false, "both"),
-            (Transport::Both, true, "both"),
-            (Transport::Tcp, true, "tcp"),
-            (Transport::Udp, true, "udp"),
+            (
+                Transport::default(),
+                false,
+                serde_json::json!(["tcp", "udp"]),
+            ),
+            (
+                Transport::default(),
+                true,
+                serde_json::json!(["tcp", "udp"]),
+            ),
+            (Transport::tcp(), true, serde_json::json!(["tcp"])),
+            (Transport::udp(), true, serde_json::json!(["udp"])),
         ] {
             let mut ports = AvailablePorts::new();
             let mut host = host();
@@ -1079,7 +1087,7 @@ mod tests {
             if !stored {
                 range.remove("transport");
             }
-            let mut host = Model::<Host>::from(imbl_value::to_value(value).unwrap());
+            let mut host = Model::<Host>::from(imbl_value::to_value(&value).unwrap());
             host.update_addresses(
                 &ServerHostname::new(InternedString::intern("server")).unwrap(),
                 &Default::default(),
@@ -1291,7 +1299,7 @@ mod tests {
 
         let mut ports = AvailablePorts::new();
         let mut host = host();
-        host.add_binding_range(&mut ports, 42000, 43000, 10, false, Transport::Both)
+        host.add_binding_range(&mut ports, 42000, 43000, 10, false, Transport::default())
             .unwrap();
         host.as_binding_ranges_mut()
             .mutate(|ranges| {
@@ -1310,8 +1318,8 @@ mod tests {
             .unwrap()
             .remove(&42000)
             .unwrap();
-        for transport in [Transport::Tcp, Transport::Udp, Transport::Both] {
-            host.add_binding_range(&mut ports, 42000, 43000, 10, false, transport)
+        for transport in [Transport::tcp(), Transport::udp(), Transport::default()] {
+            host.add_binding_range(&mut ports, 42000, 43000, 10, false, transport.clone())
                 .unwrap();
             let after = host
                 .as_binding_ranges()

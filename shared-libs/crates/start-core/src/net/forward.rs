@@ -67,7 +67,7 @@ impl std::fmt::Display for ForwardRequirements {
             self.public_gateways,
             self.private_ips,
             self.secure,
-            self.transport.as_str()
+            self.transport
         )
     }
 }
@@ -1092,7 +1092,7 @@ impl InterfacePortForwardController {
             target,
             target_prefix,
             src_filter.as_ref(),
-            transport,
+            transport.clone(),
         )
         .await?;
         if src_filter.is_none() && !gateways.is_empty() {
@@ -1122,7 +1122,7 @@ impl InterfacePortForwardController {
             target,
             target_prefix,
             src_filter.as_ref(),
-            transport,
+            transport.clone(),
         )
         .await?;
         if src_filter.is_none() {
@@ -1205,7 +1205,7 @@ async fn forward(
         .env("dprefix", target_prefix.to_string())
         .env("sport", source.port().to_string())
         .env("dport", target.port().to_string())
-        .env("transport", transport.as_str())
+        .env("transport", transport.to_string())
         .env("count", count.to_string());
     if let Some(subnet) = src_filter {
         cmd.env("src_subnet", subnet.to_string());
@@ -1229,7 +1229,7 @@ async fn unforward(
         .env("dprefix", target_prefix.to_string())
         .env("sport", source.port().to_string())
         .env("dport", target.port().to_string())
-        .env("transport", transport.as_str())
+        .env("transport", transport.to_string())
         .env("count", count.to_string());
     if let Some(subnet) = src_filter {
         cmd.env("src_subnet", subnet.to_string());
@@ -1262,7 +1262,7 @@ pub(crate) async fn forward6(
         .env("dprefix", target_prefix.to_string())
         .env("sport", source.port().to_string())
         .env("dport", target.port().to_string())
-        .env("transport", transport.as_str())
+        .env("transport", transport.to_string())
         .env("bridge_subnet", START9_BRIDGE_V6_SUBNET);
     if let Some(subnet) = src_filter {
         cmd.env("src_subnet", subnet.to_string());
@@ -1287,7 +1287,7 @@ pub(crate) async fn unforward6(
         .env("dprefix", target_prefix.to_string())
         .env("sport", source.port().to_string())
         .env("dport", target.port().to_string())
-        .env("transport", transport.as_str());
+        .env("transport", transport.to_string());
     if let Some(subnet) = src_filter {
         cmd.env("src_subnet", subnet.to_string());
     }
@@ -1321,7 +1321,7 @@ mod tests {
         let source = "192.0.2.1:5000".parse().unwrap();
         let target = "10.0.3.2:5000".parse().unwrap();
         let mut state = PortForwardState::default();
-        for &protocol in Transport::Both.protocols() {
+        for &protocol in Transport::default().protocols() {
             state.mappings.insert(
                 (source, protocol),
                 ForwardMapping {
@@ -1335,7 +1335,7 @@ mod tests {
             );
         }
         let tcp = state
-            .add_forward(source, target, 1, 24, None, Transport::Tcp)
+            .add_forward(source, target, 1, 24, None, Transport::tcp())
             .await
             .unwrap();
         drop(both);

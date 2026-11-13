@@ -98,16 +98,28 @@ mod tests {
             "externalStartPort": 43000, "numberOfPorts": 10,
         });
         let params: BindRangeParams = serde_json::from_value(input.clone()).unwrap();
-        assert_eq!(params.transport, Transport::Both);
-        for (wire, transport) in [
-            ("tcp", Transport::Tcp),
-            ("udp", Transport::Udp),
-            ("both", Transport::Both),
+        assert_eq!(params.transport, Transport::default());
+        for (wire, transport, expected) in [
+            (
+                serde_json::json!("tcp"),
+                Transport::tcp(),
+                serde_json::json!(["tcp"]),
+            ),
+            (
+                serde_json::json!("udp"),
+                Transport::udp(),
+                serde_json::json!(["udp"]),
+            ),
+            (
+                serde_json::json!(["tcp", "udp"]),
+                Transport::default(),
+                serde_json::json!(["tcp", "udp"]),
+            ),
         ] {
-            input["transport"] = wire.into();
+            input["transport"] = wire;
             let params: BindRangeParams = serde_json::from_value(input.clone()).unwrap();
             assert_eq!(params.transport, transport);
-            assert_eq!(serde_json::to_value(params).unwrap()["transport"], wire);
+            assert_eq!(serde_json::to_value(params).unwrap()["transport"], expected);
         }
     }
 }

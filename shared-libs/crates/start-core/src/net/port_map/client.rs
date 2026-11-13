@@ -1113,10 +1113,10 @@ mod tests {
     fn plain_mapping_commands_select_exactly_the_requested_protocols() {
         let ip: IpAddr = "2001:db8::2".parse().unwrap();
         for (transport, expected) in [
-            (Transport::Tcp, vec![TransportProtocol::Tcp]),
-            (Transport::Udp, vec![TransportProtocol::Udp]),
+            (Transport::tcp(), vec![TransportProtocol::Tcp]),
+            (Transport::udp(), vec![TransportProtocol::Udp]),
             (
-                Transport::Both,
+                Transport::default(),
                 vec![TransportProtocol::Tcp, TransportProtocol::Udp],
             ),
         ] {
@@ -1126,7 +1126,7 @@ mod tests {
                 shards: Arc::new(SyncMutex::new(BTreeMap::from([(ip, send)]))),
             };
             for count in [1, 10] {
-                controller.ensure_range(ip, 5000, 6000, count, Vec::new(), transport);
+                controller.ensure_range(ip, 5000, 6000, count, Vec::new(), transport.clone());
                 for &protocol in &expected {
                     let Command::Ensure { key, spec } = recv.try_recv().unwrap() else {
                         panic!("expected ensure");
@@ -1137,7 +1137,7 @@ mod tests {
                 }
                 assert!(recv.try_recv().is_err());
             }
-            controller.ensure(ip, 5000, 6000, Vec::new(), transport);
+            controller.ensure(ip, 5000, 6000, Vec::new(), transport.clone());
             for &protocol in &expected {
                 let Command::Ensure { key, spec } = recv.try_recv().unwrap() else {
                     panic!("expected ensure");

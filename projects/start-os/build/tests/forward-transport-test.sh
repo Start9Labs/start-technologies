@@ -71,7 +71,7 @@ function protocols() {
 try {
   for (const v6 of [false, true]) {
     for (const count of (v6 ? [1] : [1, 3])) {
-      for (const transport of ['tcp', 'udp', 'both', undefined]) {
+      for (const transport of ['tcp', 'udp', 'tcp,udp', undefined]) {
         reset()
         run(v6, transport, count)
         const expected = transport === 'tcp' || transport === 'udp' ? [transport] : ['tcp', 'udp']
@@ -93,12 +93,12 @@ try {
         run(v6, transport, count, true)
         assert.equal(state().length, 0)
       }
-      for (const [before, after] of [['both', 'tcp'], ['both', 'udp'], ['tcp', 'udp'], ['udp', 'both']]) {
+      for (const [before, after] of [['tcp,udp', 'tcp'], ['tcp,udp', 'udp'], ['tcp', 'udp'], ['udp', 'tcp,udp']]) {
         reset()
         run(v6, before, count)
         run(v6, before, count, true)
         run(v6, after, count)
-        assert.deepEqual(protocols(), new Set(after === 'both' ? ['tcp', 'udp'] : [after]))
+        assert.deepEqual(protocols(), new Set(after === 'tcp,udp' ? ['tcp', 'udp'] : [after]))
       }
       reset()
       run(v6, 'tcp', count)
@@ -106,7 +106,7 @@ try {
       run(v6, 'udp', count, false, { dip: v6 ? 'fd00:3::3' : '10.0.3.3' })
       run(v6, 'udp', count, true, { dip: v6 ? 'fd00:3::3' : '10.0.3.3' })
       assert.deepEqual(state(), tcpRules, 'UDP removal leaves an independent TCP target untouched')
-      run(v6, 'both', count)
+      run(v6, 'tcp,udp', count)
       run(v6, 'udp', count, true)
       assert.deepEqual(protocols(), new Set(['tcp']), 'removing UDP from Both leaves TCP')
     }

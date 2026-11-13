@@ -720,7 +720,7 @@ impl NetServiceData {
                     public_gateways: fwd_public,
                     private_ips: fwd_private,
                     secure: bind.options.secure.is_some(),
-                    transport: bind.options.transport,
+                    transport: bind.options.transport.clone(),
                 };
                 if bind.options.proxy.is_some() {
                     http_ports.insert(external);
@@ -792,7 +792,12 @@ impl NetServiceData {
                         // DNAT (see the reconcile below).
                         gua_forwards.insert(
                             (*gua.ip(), gua.port()),
-                            (container_v6, *port, src_filter, bind.options.transport),
+                            (
+                                container_v6,
+                                *port,
+                                src_filter,
+                                bind.options.transport.clone(),
+                            ),
                         );
                     }
                 }
@@ -857,7 +862,7 @@ impl NetServiceData {
                         public_gateways,
                         private_ips,
                         secure: true,
-                        transport: range.transport,
+                        transport: range.transport.clone(),
                     },
                 ),
             );
@@ -877,7 +882,7 @@ impl NetServiceData {
         for (key, spec) in &binds.gua_forwards {
             if gua_forwards.get(key) != Some(spec) {
                 let &(gua, ext) = key;
-                let &(tgt, int, ref src, transport) = spec;
+                let (tgt, int, src, transport) = spec.clone();
                 if let Err(e) = ctrl
                     .forward
                     .unforward6(
@@ -897,7 +902,7 @@ impl NetServiceData {
         for (key, spec) in &gua_forwards {
             if binds.gua_forwards.get(key) != Some(spec) {
                 let &(gua, ext) = key;
-                let &(tgt, int, ref src, transport) = spec;
+                let (tgt, int, src, transport) = spec.clone();
                 // PCP candidates for the pinhole (only used for a WAN forward).
                 let gateways: Vec<(IpAddr, Option<u32>)> = if src.is_none() {
                     net_ifaces

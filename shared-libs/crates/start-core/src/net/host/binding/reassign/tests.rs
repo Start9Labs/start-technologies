@@ -537,15 +537,15 @@ fn service_rebinding_keeps_the_reassigned_port_for_every_tls_mode() {
         options(8443, None, true),
         options(8443, Some(9443), true),
         BindOptions {
-            transport: Transport::Tcp,
+            transport: Transport::tcp(),
             ..options(8080, None, false)
         },
         BindOptions {
-            transport: Transport::Udp,
+            transport: Transport::udp(),
             ..options(8080, None, false)
         },
     ] {
-        let transport = options.transport;
+        let transport = options.transport.clone();
         let ssl = !options.wants_plain_port();
         let mut ports = AvailablePorts::new();
         let mut bind = BindInfo::new(&mut ports, options.clone(), false).unwrap();

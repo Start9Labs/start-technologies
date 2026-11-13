@@ -260,7 +260,7 @@ fn remap_auto_dnat(
     target: SocketAddrV4,
     count: u16,
 ) -> bool {
-    if forwards.overlapping(source, count).is_some() {
+    if forwards.overlapping(source.clone(), count).is_some() {
         return false;
     }
     match forwards.0.get_mut(&source) {
@@ -312,7 +312,7 @@ pub(super) async fn apply_peer_forward_range(
     if transport == TransportProtocol::Tcp && web.reserves_plain_forward(source.address, count) {
         return Err(718);
     }
-    let existing = current_forward(ctx, source).await;
+    let existing = current_forward(ctx, source.clone()).await;
     if let Some(PortForward::Dnat {
         target: existing_target,
         count: existing_count,
@@ -354,7 +354,7 @@ pub(super) async fn apply_peer_forward_range(
                     .db
                     .mutate(|db| {
                         db.as_port_forwards_mut()
-                            .mutate(|pf| Ok(remap_auto_dnat(pf, source, target, count)))
+                            .mutate(|pf| Ok(remap_auto_dnat(pf, source.clone(), target, count)))
                     })
                     .await
                     .result
@@ -378,12 +378,12 @@ pub(super) async fn apply_peer_forward_range(
                         count,
                         prefix,
                         None,
-                        source.transport,
+                        source.transport.clone(),
                     )
                     .await
                     .map_err(|_| 501u16)?;
                 ctx.active_forwards.mutate(|m| {
-                    m.insert(source, rc);
+                    m.insert(source.clone(), rc);
                 });
             }
             if let Some(lt) = lifetime {
@@ -402,11 +402,11 @@ pub(super) async fn apply_peer_forward_range(
         .db
         .mutate(|db| {
             db.as_port_forwards_mut().mutate(|pf| {
-                if pf.overlapping(source, count).is_some() {
+                if pf.overlapping(source.clone(), count).is_some() {
                     return Ok(false);
                 }
                 pf.0.insert(
-                    source,
+                    source.clone(),
                     PortForward::Dnat {
                         target,
                         label: Some(protocol_label.to_string()),
@@ -434,7 +434,7 @@ pub(super) async fn apply_peer_forward_range(
             count,
             prefix,
             None,
-            source.transport,
+            source.transport.clone(),
         )
         .await
     {
@@ -454,7 +454,7 @@ pub(super) async fn apply_peer_forward_range(
         }
     };
     ctx.active_forwards.mutate(|m| {
-        m.insert(source, rc);
+        m.insert(source.clone(), rc);
     });
     if let Some(lt) = lifetime {
         lease::stamp(ctx, LeaseKey::Dnat(source), lt);

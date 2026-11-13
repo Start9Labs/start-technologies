@@ -116,7 +116,7 @@ impl Model<TunnelDatabase> {
                     }
                 };
                 if keep {
-                    keep_sources.insert(*k);
+                    keep_sources.insert(k.clone());
                 }
                 keep
             }))
@@ -220,7 +220,7 @@ impl PortForward {
     pub fn transport(&self, key: ForwardAddress) -> Transport {
         match self {
             Self::Dnat { .. } => key.transport,
-            Self::Sni { .. } => Transport::Tcp,
+            Self::Sni { .. } => Transport::tcp(),
         }
     }
 
@@ -319,8 +319,8 @@ impl Pinholes6 {
         let legacy: Vec<_> = self
             .0
             .iter()
-            .filter(|(key, entry)| key.transport == Transport::Both && entry.auto)
-            .map(|(key, entry)| (*key, entry.clone()))
+            .filter(|(key, entry)| key.transport == Transport::default() && entry.auto)
+            .map(|(key, entry)| (key.clone(), entry.clone()))
             .collect();
         for (key, entry) in &legacy {
             self.0.remove(key);
@@ -345,27 +345,27 @@ impl Pinholes6 {
             .find(|(other, entry)| {
                 **other != key
                     && other.ip() == key.ip()
-                    && other.transport.overlaps(key.transport)
+                    && other.transport.overlaps(&key.transport)
                     && other.port() <= key.port().saturating_add(count.saturating_sub(1))
                     && key.port()
                         <= other
                             .port()
                             .saturating_add(entry.count.max(1).saturating_sub(1))
             })
-            .map(|(key, _)| *key)
+            .map(|(key, _)| key.clone())
     }
 }
 impl PortForwards {
     /// Socket-only operations select both transport rows unless an exact entry exists.
     pub fn operation_keys(&self, source: ForwardAddress) -> Vec<ForwardAddress> {
-        if self.0.contains_key(&source) || source.transport != Transport::Both {
+        if self.0.contains_key(&source) || source.transport != Transport::default() {
             return vec![source];
         }
         let keys: Vec<_> = self
             .0
             .keys()
             .filter(|key| key.address == source.address)
-            .copied()
+            .cloned()
             .collect();
         if keys.is_empty() { vec![source] } else { keys }
     }
@@ -375,10 +375,10 @@ impl PortForwards {
             .0
             .iter()
             .filter(|(key, entry)| {
-                key.transport == Transport::Both
+                key.transport == Transport::default()
                     && matches!(entry, PortForward::Dnat { auto: true, .. })
             })
-            .map(|(key, entry)| (*key, entry.clone()))
+            .map(|(key, entry)| (key.clone(), entry.clone()))
             .collect();
         for (key, entry) in &legacy {
             self.0.remove(key);
@@ -403,21 +403,21 @@ impl PortForwards {
             .find(|(other, entry)| {
                 **other != key
                     && other.ip() == key.ip()
-                    && entry.transport(**other).overlaps(key.transport)
+                    && entry.transport((**other).clone()).overlaps(&key.transport)
                     && other.port() <= key.port().saturating_add(count.saturating_sub(1))
                     && key.port()
                         <= other
                             .port()
                             .saturating_add(entry.port_span().saturating_sub(1))
             })
-            .map(|(key, _)| *key)
+            .map(|(key, _)| key.clone())
     }
     pub fn occupied(&self, address: impl Into<ForwardAddress>) -> bool {
         let address = address.into();
         self.0.iter().any(|(key, entry)| {
             key.ip() == address.ip()
                 && entry
-                    .transport(*key)
+                    .transport(key.clone())
                     .protocols()
                     .contains(&crate::net::transport::TransportProtocol::Tcp)
                 && key.port() <= address.port()
@@ -790,8 +790,8 @@ fn sni_fallback_serde_backward_compat() {
 #[test]
 fn socket_only_controls_keep_addressing_both_split_protocol_rows() {
     let address: SocketAddrV4 = "192.0.2.1:5000".parse().unwrap();
-    let tcp = ForwardAddress::new(address, Transport::Tcp);
-    let udp = ForwardAddress::new(address, Transport::Udp);
+    let tcp = ForwardAddress::new(address, Transport::tcp());
+    let udp = ForwardAddress::new(address, Transport::udp());
     let entry = PortForward::Dnat {
         target: "10.59.0.2:6000".parse().unwrap(),
         label: None,
@@ -799,9 +799,15 @@ fn socket_only_controls_keep_addressing_both_split_protocol_rows() {
         count: 1,
         auto: true,
     };
-    let mut forwards = PortForwards(BTreeMap::from([(tcp, entry.clone()), (udp, entry.clone())]));
-    assert_eq!(forwards.operation_keys(address.into()), vec![tcp, udp]);
-    assert_eq!(forwards.operation_keys(tcp), vec![tcp]);
+    let mut forwards = PortForwards(BTreeMap::from([
+        (tcp.clone(), entry.clone()),
+        (udp.clone(), entry.clone()),
+    ]));
+    assert_eq!(
+        forwards.operation_keys(address.into()),
+        vec![tcp.clone(), udp.clone()]
+    );
+    assert_eq!(forwards.operation_keys(tcp.clone()), vec![tcp.clone()]);
     forwards.0.remove(&tcp);
     forwards.0.insert(
         address.into(),
