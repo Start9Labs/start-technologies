@@ -634,11 +634,11 @@ cmd_smoke() {
 	echo "WAN (this machine)"
 	local mode expect ui ssh22
 	wan=$(ssh_option "$WRT_HOST" hostname)
-	mode=$(wrt 'uci -q get startwrt.preferences.remote_access' || echo default)
+	mode=$(wrt 'uci -q get startwrt.preferences.remote_access' || echo never)
 	case $mode in
 	always) expect=open ;;
-	never) expect=closed ;;
-	*) is_rfc1918 "$wan" && expect=open || expect=closed ;;
+	behind-nat | default) is_rfc1918 "$wan" && expect=open || expect=closed ;;
+	*) expect=closed ;;
 	esac
 	ui=$(curl -sk -o /dev/null -m 10 -w '%{http_code}' "https://$wan/" || true)
 	wrt22 true 2>/dev/null && ssh22=open || ssh22=closed
