@@ -156,6 +156,10 @@ impl LoginContext for RpcContext {
         check_password(&db.as_private().as_password().de()?, password)
     }
     async fn post_login_hook(&self, password: &str) -> Result<(), Error> {
+        let _exclusive = self.password_changes.lock().await;
+        if Self::check_password(&self.db.peek().await, password).is_err() {
+            return Ok(());
+        }
         if tokio::fs::metadata("/media/startos/config/overlay/etc/shadow")
             .await
             .is_err()
@@ -194,7 +198,6 @@ pub async fn write_shadow(password: &str) -> Result<(), Error> {
     shadow_file.sync_all().await?;
     tokio::fs::copy("/media/startos/config/overlay/etc/shadow", "/etc/shadow").await?;
 
-    // MOK enrollment requires the password established during setup.
     crate::util::mok::enroll_mok(std::path::Path::new("/"))
         .await
         .log_err();
@@ -904,15 +907,8 @@ pub async fn reset_password_impl(
     ctx: RpcContext,
     ResetPasswordParams { new_password }: ResetPasswordParams,
 ) -> Result<(), Error> {
-    let new_password = new_password.unwrap_or_default().decrypt(&ctx)?;
-
-    let account = ctx.account.mutate(|account| {
-        account.set_password(&new_password)?;
-        Ok::<_, Error>(account.clone())
-    })?;
-    ctx.db.mutate(|d| account.save(d)).await.result?;
-    write_shadow(&new_password).await?;
-    Ok(())
+    let new_password = zeroize::Zeroizing::new(new_password.unwrap_or_default().decrypt(&ctx)?);
+    crate::account::reset_password(ctx, new_password).await
 }
 
 #[instrument(skip_all)]

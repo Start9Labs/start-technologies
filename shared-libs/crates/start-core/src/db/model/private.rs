@@ -19,7 +19,10 @@ use crate::util::serde::{Der64, Pem};
 #[model = "Model<Self>"]
 pub struct Private {
     pub key_store: KeyStore,
-    pub password: String, // argon2 hash
+    /// Encoded account authentication hash.
+    pub password: String,
+    #[serde(default)]
+    pub luks_credentials: Option<crate::account::LuksCredentials>,
     #[serde(default)]
     pub sessions: Sessions,
     #[serde(default = "generate_developer_key")]

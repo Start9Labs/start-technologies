@@ -64,6 +64,11 @@ pub struct PasswordChangePlan {
 }
 
 impl PasswordChangePlan {
+    /// Administrator authority preserved by successful abort.
+    pub fn previous_admin_slots(&self) -> AdminKeyslots {
+        self.admin.clone()
+    }
+
     /// Account authority to commit after installation verifies both target slots.
     pub fn new_admin_slots(&self) -> AdminKeyslots {
         AdminKeyslots {
@@ -182,6 +187,30 @@ impl LuksPool {
         })
     }
 
+    /// Tests every owned administrator slot without trying unrelated slots.
+    pub async fn accepts_admin_password(
+        &self,
+        admin: &AdminKeyslots,
+        password: &str,
+    ) -> Result<bool, Error> {
+        let (key, _cleanup) = self.password_file(password)?;
+        for (index, volume) in admin.volumes.iter().enumerate() {
+            let metadata = self.bound_metadata(index, &volume.id).await?;
+            if volume.slots.is_empty() || !volume.slots.is_subset(&metadata.slots) {
+                return Err(metadata_error());
+            }
+            for slot in &volume.slots {
+                if !self
+                    .accepts(&self.devices[index], &key, Some(*slot))
+                    .await?
+                {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    }
+
     /// Captures administrator authority and actual volume keys during password unlock.
     /// The caller retains keys only in protected volatile storage for this OS boot.
     pub async fn capture_unlock_keys(
@@ -228,6 +257,13 @@ impl LuksPool {
                 volumes: volumes.try_into().ok().unwrap(),
             },
         ))
+    }
+
+    pub(crate) fn protect_secret_handling(
+        &self,
+    ) -> Result<crate::fde::memory::ProcessSecretMemory, Error> {
+        crate::fde::memory::require_tmpfs(&self.runtime_dir)?;
+        crate::fde::memory::ProcessSecretMemory::protect()
     }
 
     fn volume_id(&self, index: usize, uuid: String) -> VolumeId {
@@ -326,11 +362,9 @@ impl LuksPool {
             if !plan.base_slots[i].is_subset(&metadata.slots) {
                 return Err(metadata_error());
             }
-            let key = self.secret_file(credential.bytes(i, &plan.admin.volumes[i].id)?)?;
-            require_password(
-                self.test_key(&self.devices[i], &key.0, None, credential.option())
-                    .await?,
-            )?;
+            let key = self
+                .authenticate_credential(i, &plan.admin.volumes[i].id, &credential)
+                .await?;
             for slot in &plan.admin.volumes[i].slots {
                 if self
                     .accepts(&self.devices[i], &new_key, Some(*slot))
@@ -398,12 +432,10 @@ impl LuksPool {
             if !plan.base_slots[i].is_subset(&metadata.slots) {
                 return Err(metadata_error());
             }
-            let key = self.secret_file(credential.bytes(i, &plan.admin.volumes[i].id)?)?;
-            require_password(
-                self.test_key(&self.devices[i], &key.0, None, credential.option())
+            credentials.push(
+                self.authenticate_credential(i, &plan.admin.volumes[i].id, &credential)
                     .await?,
-            )?;
-            credentials.push(key);
+            );
         }
         for (i, metadata) in metadata.iter().enumerate() {
             if metadata.slots.contains(&plan.target_slots[i]) {
@@ -429,25 +461,75 @@ impl LuksPool {
     pub async fn retire_password(&self, plan: &PasswordChangePlan, new: &str) -> Result<(), Error> {
         validate_new_password(new)?;
         let (key, _cleanup) = self.password_file(new)?;
-        let metadata = self.change_metadata(plan).await?;
+        let metadata = self.retirement_metadata(plan).await?;
         self.verify_targets(plan, &key).await?;
         for (i, metadata) in metadata.iter().enumerate() {
-            let manual: BTreeSet<_> = plan.base_slots[i]
-                .difference(&plan.admin.volumes[i].slots)
-                .copied()
-                .collect();
-            if !manual.is_subset(&metadata.slots) {
-                return Err(metadata_error());
-            }
             for slot in plan.admin.volumes[i].slots.intersection(&metadata.slots) {
                 if self.accepts(&self.devices[i], &key, Some(*slot)).await? {
                     return Err(metadata_error());
                 }
             }
         }
-        for (i, metadata) in metadata.iter().enumerate() {
-            for slot in plan.admin.volumes[i].slots.intersection(&metadata.slots) {
-                self.kill_slot(&self.devices[i], *slot, &key, "--key-file")
+        self.remove_old_admin_slots(plan, &metadata, [&key, &key], "--key-file")
+            .await?;
+        self.verify_targets(plan, &key).await?;
+        self.publish_headers().await
+    }
+
+    /// Finishes a durably committed account change without its old plaintext password.
+    /// The caller commits only after both target slots verify and retains exclusive slot ownership.
+    pub async fn retire_password_with_keys(
+        &self,
+        plan: &PasswordChangePlan,
+        keys: &VolumeKeys,
+    ) -> Result<(), Error> {
+        let metadata = self.retirement_metadata(plan).await?;
+        let credential = KeyCredential::VolumeKeys(keys);
+        let mut files = Vec::new();
+        for (index, volume) in plan.admin.volumes.iter().enumerate() {
+            files.push(
+                self.authenticate_credential(index, &volume.id, &credential)
+                    .await?,
+            );
+        }
+        self.remove_old_admin_slots(
+            plan,
+            &metadata,
+            [&files[0].0, &files[1].0],
+            credential.option(),
+        )
+        .await?;
+        self.publish_headers().await
+    }
+
+    async fn retirement_metadata(
+        &self,
+        plan: &PasswordChangePlan,
+    ) -> Result<[LuksMetadata; 2], Error> {
+        let metadata = self.change_metadata(plan).await?;
+        for (index, volume) in metadata.iter().enumerate() {
+            let manual: BTreeSet<_> = plan.base_slots[index]
+                .difference(&plan.admin.volumes[index].slots)
+                .copied()
+                .collect();
+            if !manual.is_subset(&volume.slots) || !volume.slots.contains(&plan.target_slots[index])
+            {
+                return Err(metadata_error());
+            }
+        }
+        Ok(metadata)
+    }
+
+    async fn remove_old_admin_slots(
+        &self,
+        plan: &PasswordChangePlan,
+        metadata: &[LuksMetadata; 2],
+        keys: [&Path; 2],
+        option: &str,
+    ) -> Result<(), Error> {
+        for (index, volume) in metadata.iter().enumerate() {
+            for slot in plan.admin.volumes[index].slots.intersection(&volume.slots) {
+                self.kill_slot(&self.devices[index], *slot, keys[index], option)
                     .await?;
             }
         }
@@ -461,8 +543,21 @@ impl LuksPool {
                 return Err(metadata_error());
             }
         }
-        self.verify_targets(plan, &key).await?;
-        self.publish_headers().await
+        Ok(())
+    }
+
+    async fn authenticate_credential(
+        &self,
+        index: usize,
+        id: &VolumeId,
+        credential: &KeyCredential<'_>,
+    ) -> Result<(PathBuf, GeneralBoxedGuard), Error> {
+        let file = self.secret_file(credential.bytes(index, id)?)?;
+        require_password(
+            self.test_key(&self.devices[index], &file.0, None, credential.option())
+                .await?,
+        )?;
+        Ok(file)
     }
 
     async fn kill_slot(
@@ -662,7 +757,7 @@ fn validate_change(old: &str, new: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn validate_new_password(new: &str) -> Result<(), Error> {
+pub(crate) fn validate_new_password(new: &str) -> Result<(), Error> {
     if new.is_empty() || new == DEFAULT_PASSWORD {
         return Err(Error::new(
             eyre!("{}", t!("error.invalid-request")),
@@ -1454,6 +1549,97 @@ esac
                 ring.remove(&key.id).unwrap();
             }
             assert!(pool.cached_unlock_keys().await.unwrap().is_none());
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native cryptsetup, RAM-backed fixtures and protected process memory"]
+    async fn real_luks_account_changes_resume_install_and_committed_retirement() {
+        use crate::account::password::change_encrypted_password;
+        use crate::account::{AccountInfo, LuksCredentials};
+        use crate::db::model::Database;
+        use crate::prelude::{PatchDb, TypedPatchDb};
+        use crate::util::sync::SyncRwLock;
+
+        for format in ["luks1", "luks2"] {
+            let directory = tempfile::tempdir_in("/dev/shm").unwrap();
+            let root = directory.path();
+            let mut pool = format_real_pool(root, format).await;
+            let memory = pool.protect_secret_handling().unwrap();
+            let (admin, keys) = pool.capture_unlock_keys(OLD).await.unwrap();
+            let initial_account =
+                AccountInfo::new(OLD, std::time::SystemTime::now(), None).unwrap();
+            let raw = PatchDb::open(root.join("account.db")).await.unwrap();
+            let mut initial = Database::init(&initial_account, false, None, None).unwrap();
+            initial.private.luks_credentials = Some(LuksCredentials::Stable { admin });
+            let db = TypedPatchDb::<Database>::load_or_init(raw, || async { Ok(initial) })
+                .await
+                .unwrap();
+            let account = SyncRwLock::new(initial_account);
+            let wrapper = root.join("cryptsetup-account-fixture");
+            std::fs::write(&wrapper, format!("#!/bin/sh\ncase \"$*\" in *package-data*) if [ \"$1\" = luksAddKey ] && [ -e '{0}/fail-add' ]; then exit 5; fi; if [ \"$1\" = luksKillSlot ] && [ -e '{0}/fail-kill' ]; then exit 5; fi;; esac\nexec /usr/sbin/cryptsetup \"$@\"\n", root.display())).unwrap();
+            std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
+            pool.cryptsetup = wrapper;
+            std::fs::write(root.join("fail-add"), "").unwrap();
+            assert!(
+                change_encrypted_password(&db, &account, &pool, &keys, NEW)
+                    .await
+                    .is_err()
+            );
+            let snapshot = db.peek().await;
+            crate::auth::check_password(&snapshot.as_private().as_password().de().unwrap(), OLD)
+                .unwrap();
+            assert!(matches!(
+                snapshot.as_private().as_luks_credentials().de().unwrap(),
+                Some(LuksCredentials::Installing { .. })
+            ));
+            drop(db);
+            let db = TypedPatchDb::<Database>::load(
+                PatchDb::open(root.join("account.db")).await.unwrap(),
+            )
+            .await
+            .unwrap();
+            let account = SyncRwLock::new(AccountInfo::load(&db.peek().await).unwrap());
+            std::fs::remove_file(root.join("fail-add")).unwrap();
+            std::fs::write(root.join("fail-kill"), "").unwrap();
+            assert!(
+                change_encrypted_password(&db, &account, &pool, &keys, OTHER)
+                    .await
+                    .is_err()
+            );
+            let snapshot = db.peek().await;
+            crate::auth::check_password(&snapshot.as_private().as_password().de().unwrap(), OTHER)
+                .unwrap();
+            crate::auth::check_password(&account.read().password, OTHER).unwrap();
+            assert!(matches!(
+                snapshot.as_private().as_luks_credentials().de().unwrap(),
+                Some(LuksCredentials::Retiring { .. })
+            ));
+            drop(db);
+            let db = TypedPatchDb::<Database>::load(
+                PatchDb::open(root.join("account.db")).await.unwrap(),
+            )
+            .await
+            .unwrap();
+            let account = SyncRwLock::new(AccountInfo::load(&db.peek().await).unwrap());
+            std::fs::remove_file(root.join("fail-kill")).unwrap();
+            change_encrypted_password(&db, &account, &pool, &keys, NEW)
+                .await
+                .unwrap();
+            let snapshot = db.peek().await;
+            crate::auth::check_password(&snapshot.as_private().as_password().de().unwrap(), NEW)
+                .unwrap();
+            let Some(LuksCredentials::Stable { admin }) =
+                snapshot.as_private().as_luks_credentials().de().unwrap()
+            else {
+                panic!("retirement did not finish")
+            };
+            assert!(pool.accepts_admin_password(&admin, NEW).await.unwrap());
+            pool.verify_password(NEW).await.unwrap();
+            pool.verify_password(MANUAL).await.unwrap();
+            assert!(pool.verify_password(OLD).await.is_err());
+            assert!(pool.verify_password(OTHER).await.is_err());
+            memory.check().unwrap();
         }
     }
 

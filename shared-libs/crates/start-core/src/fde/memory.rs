@@ -1,15 +1,15 @@
-//! Secret handling before initramfs handoff, not an OS-lifetime key cache.
+//! Secret handling while the caller excludes concurrent swap/core-handler changes.
 //!
-//! The boot owner must exclude concurrent swap/core-handler changes and untrusted
-//! execution until release finishes. Child tools inherit the zero core limit;
-//! exec resets dumpability, requiring a non-piped core handler in this phase.
+//! Child tools inherit the zero core limit. Exec resets dumpability and requires
+//! a non-piped core handler throughout secret-bearing subprocess execution.
 
 use std::path::Path;
 
 use crate::prelude::*;
 use crate::util::io::TmpDir;
 
-pub struct InitramfsMemory(());
+pub(crate) struct ProcessSecretMemory(());
+pub struct InitramfsMemory(ProcessSecretMemory);
 
 fn unsafe_memory() -> Error {
     Error::new(eyre!(t!("fde.memory.unsafe-environment")), ErrorKind::Bios)
@@ -22,12 +22,35 @@ fn check_kernel_state(swaps: &str, core_pattern: &str) -> Result<(), Error> {
     Ok(())
 }
 
-impl InitramfsMemory {
-    /// Protects this helper and child tools before bootstrap secrets enter memory.
-    pub fn protect(runtime: &Path) -> Result<Self, Error> {
+pub(crate) fn require_tmpfs(directory: &Path) -> Result<(), Error> {
+    #[cfg(target_os = "linux")]
+    {
+        let fs = nix::sys::statfs::statfs(directory).with_kind(ErrorKind::Filesystem)?;
+        if fs.filesystem_type() != nix::sys::statfs::TMPFS_MAGIC {
+            return Err(unsafe_memory());
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = directory;
+        Err(unsafe_memory())
+    }
+}
+
+impl ProcessSecretMemory {
+    #[cfg(target_os = "linux")]
+    fn check_environment() -> Result<(), Error> {
+        check_kernel_state(
+            &std::fs::read_to_string("/proc/swaps")?,
+            &std::fs::read_to_string("/proc/sys/kernel/core_pattern")?,
+        )
+    }
+
+    pub(crate) fn protect() -> Result<Self, Error> {
         #[cfg(target_os = "linux")]
         {
-            Self::check_environment(runtime)?;
+            Self::check_environment()?;
             let limit = libc::rlimit {
                 rlim_cur: 0,
                 rlim_max: 0,
@@ -38,35 +61,17 @@ impl InitramfsMemory {
                 return Err(Error::new(std::io::Error::last_os_error(), ErrorKind::Bios));
             }
             let protected = Self(());
-            protected.check(runtime)?;
+            protected.check()?;
             Ok(protected)
         }
         #[cfg(not(target_os = "linux"))]
-        {
-            let _ = runtime;
-            Err(unsafe_memory())
-        }
+        Err(unsafe_memory())
     }
 
-    #[cfg(target_os = "linux")]
-    fn check_environment(runtime: &Path) -> Result<(), Error> {
-        check_kernel_state(
-            &std::fs::read_to_string("/proc/swaps")?,
-            &std::fs::read_to_string("/proc/sys/kernel/core_pattern")?,
-        )?;
-        for directory in [runtime, Path::new(TmpDir::BASE)] {
-            let fs = nix::sys::statfs::statfs(directory).with_kind(ErrorKind::Filesystem)?;
-            if fs.filesystem_type() != nix::sys::statfs::TMPFS_MAGIC {
-                return Err(unsafe_memory());
-            }
-        }
-        Ok(())
-    }
-
-    pub fn check(&self, runtime: &Path) -> Result<(), Error> {
+    pub(crate) fn check(&self) -> Result<(), Error> {
         #[cfg(target_os = "linux")]
         {
-            Self::check_environment(runtime)?;
+            Self::check_environment()?;
             let mut limit = libc::rlimit {
                 rlim_cur: 0,
                 rlim_max: 0,
@@ -83,10 +88,29 @@ impl InitramfsMemory {
             Ok(())
         }
         #[cfg(not(target_os = "linux"))]
-        {
-            let _ = runtime;
-            Err(unsafe_memory())
+        Err(unsafe_memory())
+    }
+}
+
+impl InitramfsMemory {
+    /// Protects this helper and child tools before bootstrap secrets enter memory.
+    pub fn protect(runtime: &Path) -> Result<Self, Error> {
+        Self::check_filesystems(runtime)?;
+        let protected = Self(ProcessSecretMemory::protect()?);
+        protected.check(runtime)?;
+        Ok(protected)
+    }
+
+    fn check_filesystems(runtime: &Path) -> Result<(), Error> {
+        for directory in [runtime, Path::new(TmpDir::BASE)] {
+            require_tmpfs(directory)?;
         }
+        Ok(())
+    }
+
+    pub fn check(&self, runtime: &Path) -> Result<(), Error> {
+        Self::check_filesystems(runtime)?;
+        self.0.check()
     }
 }
 

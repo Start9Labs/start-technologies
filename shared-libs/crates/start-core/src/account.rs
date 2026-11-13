@@ -9,6 +9,10 @@ use crate::net::ssl::{CertBranding, gen_nistp256, make_root_cert};
 use crate::prelude::*;
 use crate::util::serde::{Der64, Pem};
 
+pub(crate) mod password;
+pub use password::LuksCredentials;
+pub(crate) use password::reset_password;
+
 fn hash_password(password: &str) -> Result<String, Error> {
     argon2::hash_encoded(
         password.as_bytes(),

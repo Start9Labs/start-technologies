@@ -16,7 +16,7 @@ use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{CallRemote, Context, Empty};
 use tokio::net::TcpStream;
 use tokio::process::Command;
-use tokio::sync::{RwLock, broadcast, oneshot, watch};
+use tokio::sync::{Mutex, RwLock, broadcast, oneshot, watch};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -70,6 +70,8 @@ pub struct RpcContextSeed {
     pub sync_db: watch::Sender<u64>,
     pub disk_updates: watch::Sender<()>,
     pub account: SyncRwLock<AccountInfo>,
+    /// Callers hold through slot, account and shadow changes.
+    pub password_changes: Mutex<()>,
     pub os_net_service: NetService,
     pub net_controller: Arc<NetController>,
     pub s9pk_arch: Option<&'static str>,
@@ -448,6 +450,7 @@ impl RpcContext {
             disk_updates: watch::Sender::new(()),
             db,
             account: SyncRwLock::new(account),
+            password_changes: Mutex::new(()),
             callbacks: net_controller.callbacks.clone(),
             net_controller,
             os_net_service,
