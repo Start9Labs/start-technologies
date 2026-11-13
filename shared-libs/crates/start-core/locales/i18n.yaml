@@ -2157,6 +2157,27 @@ net.host.binding.address-ssl:
   fr_FR: "SSL"
   pl_PL: "SSL"
 
+net.host.binding.reassign.no-assigned-port:
+  en_US: "The binding has no assigned port of the selected type"
+  de_DE: "Die Bindung hat keinen zugewiesenen Port des ausgewählten Typs"
+  es_ES: "La vinculación no tiene un puerto asignado del tipo seleccionado"
+  fr_FR: "La liaison n'a aucun port attribué du type sélectionné"
+  pl_PL: "Powiązanie nie ma przypisanego portu wybranego typu"
+
+net.host.binding.reassign.port-unavailable:
+  en_US: "Port %{port} is reserved or already allocated"
+  de_DE: "Port %{port} ist reserviert oder bereits zugewiesen"
+  es_ES: "El puerto %{port} está reservado o ya está asignado"
+  fr_FR: "Le port %{port} est réservé ou déjà attribué"
+  pl_PL: "Port %{port} jest zarezerwowany lub już przypisany"
+
+net.host.binding.reassign.server-ui-port:
+  en_US: "The server UI's SSL port must remain %{port}"
+  de_DE: "Der SSL-Port der Serveroberfläche muss %{port} bleiben"
+  es_ES: "El puerto SSL de la interfaz del servidor debe seguir siendo %{port}"
+  fr_FR: "Le port SSL de l'interface du serveur doit rester %{port}"
+  pl_PL: "Port SSL interfejsu serwera musi pozostać ustawiony na %{port}"
+
 # net/ssl.rs
 net.ssl.unreachable:
   en_US: "unreachable"
@@ -4163,6 +4184,13 @@ help.arg.binding-enabled:
   es_ES: "Habilitar o deshabilitar este enlace"
   fr_FR: "Activer ou désactiver cette liaison"
   pl_PL: "Włącz lub wyłącz to powiązanie"
+
+help.arg.binding-ssl-port:
+  en_US: "Reassign the SSL port instead of the non-SSL port"
+  de_DE: "Den SSL-Port statt des Nicht-SSL-Ports neu zuweisen"
+  es_ES: "Reasignar el puerto SSL en lugar del puerto no SSL"
+  fr_FR: "Réattribuer le port SSL au lieu du port non SSL"
+  pl_PL: "Przypisz ponownie port SSL zamiast portu bez SSL"
 
 help.arg.ca-certificate:
   en_US: "PEM-encoded CA certificate"
@@ -7255,6 +7283,13 @@ about.select-s9pk-for-device:
   es_ES: "Seleccionar el s9pk más compatible para un dispositivo destino"
   fr_FR: "Sélectionner le meilleur s9pk compatible pour un appareil cible"
   pl_PL: "Wybierz najlepiej kompatybilny s9pk dla urządzenia docelowego"
+
+about.reassign-binding-port:
+  en_US: "Change a binding's assigned external port"
+  de_DE: "Den zugewiesenen externen Port einer Bindung ändern"
+  es_ES: "Cambiar el puerto externo asignado de una vinculación"
+  fr_FR: "Modifier le port externe attribué à une liaison"
+  pl_PL: "Zmień przypisany port zewnętrzny powiązania"
 
 about.rebuild-service-container:
   en_US: "Rebuild service container"

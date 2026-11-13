@@ -263,6 +263,7 @@ export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
  * IPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.
  */
 export type QueryDnsRes = z.output<typeof schemas.QueryDnsRes>
+export type ReassignPortParamsInput = z.input<typeof schemas.ReassignPortParams>
 
 /**
  * A registry asset with a caller-selected commitment representation.
