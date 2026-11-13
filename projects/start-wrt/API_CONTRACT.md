@@ -215,7 +215,7 @@ struct SystemInfoResponse {
     language: String,
     date: String,  // ISO 8601
     theme: String,  // "dark" | "light" | "system"
-    remote_access: String,  // wire: `remoteAccess`; "default" | "never" | "always"
+    remote_access: String,  // wire: `remoteAccess`; "never" (default) | "behind-nat" | "always"
     timezone: String,  // IANA timezone name (e.g. "America/New_York")
 }
 ```
@@ -304,7 +304,7 @@ type Progress = null | boolean | { done: number; total: number | null; units: st
 struct SetPreferencesReq {
     language: Option<String>,  // "en_US" | "es_ES" | "de_DE" | "fr_FR" | "pl_PL"
     theme: Option<String>,  // "dark" | "light" | "system"
-    remote_access: Option<String>,  // wire: `remoteAccess`; "default" | "never" | "always"
+    remote_access: Option<String>,  // wire: `remoteAccess`; "never" (default) | "behind-nat" | "always"
 }
 // Response: null
 // A value outside its set is rejected with InvalidValue.
@@ -1311,7 +1311,7 @@ answers on itself refuse hostname routes — except 443, where Remote Access
 coexists with the demux: while routes share the port, connections naming no
 routed hostname (e.g. browsing the router by IP, which sends no SNI) are piped
 to the router's own UI, admitted from exactly the sources the Remote Access
-mode allows (any in "always"; RFC1918 in "default" behind NAT; none in
+mode allows (any in "always"; RFC1918 in "behind-nat" behind NAT; none in
 "never"). A route is granted only once its listener is actually bound
 (`NO_RESOURCES` / UPnP fault 501 otherwise), so a granted route can never
 leave the port open with nothing serving it.

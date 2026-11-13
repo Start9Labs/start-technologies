@@ -997,8 +997,10 @@ impl PortControl {
     /// Assumes `write_serial` is held.
     async fn sync_sni_rules_inner(&self, reload: bool) -> Result<(), Error> {
         let routes = self.sni.snapshot();
-        let mut want: std::collections::BTreeSet<u16> =
-            routes.iter().map(|route| route.ext_port).collect();
+        let mut want = std::collections::BTreeMap::new();
+        for route in &routes {
+            want.entry(route.ext_port).or_insert(route.ext_ip);
+        }
         let uci_root = self.uci_root.clone();
         let redirect = uci_task(move || async move {
             let arena = Arena::new();
@@ -1015,10 +1017,11 @@ impl PortControl {
         if redirect {
             crate::http_redirect::set_admitted(true);
         }
-        if scope.is_some() {
-            want.insert(crate::http_redirect::HTTP_PORT);
+        if let Some(wan) = scope {
+            want.insert(crate::http_redirect::HTTP_PORT, wan);
         }
-        self.sync_sni_rules_to(want, scope, reload).await?;
+        self.sync_sni_rules_to(want, scope.is_some(), reload)
+            .await?;
         // The gate shuts after the reload that removes the rule.
         if !redirect && reload {
             crate::http_redirect::set_admitted(false);
@@ -1036,8 +1039,8 @@ impl PortControl {
 
     async fn sync_sni_rules_to(
         &self,
-        want: std::collections::BTreeSet<u16>,
-        redirect: Option<Ipv4Addr>,
+        want: std::collections::BTreeMap<u16, Ipv4Addr>,
+        redirect: bool,
         reload: bool,
     ) -> Result<(), Error> {
         let uci_root = self.uci_root.clone();
@@ -1617,18 +1620,19 @@ fn sni_section_name(port: u16) -> String {
     format!("apf_sni_{port}")
 }
 
-/// The `SNI` label lets a build without the redirect purge its rule.
-fn desired_sni_rule(port: u16, redirect: Option<Ipv4Addr>) -> FirewallRule {
-    let redirect = redirect.filter(|_| port == crate::http_redirect::HTTP_PORT);
+/// Admits only the address the port's listener holds. The `SNI` label lets a build
+/// without the redirect purge its rule.
+fn desired_sni_rule(port: u16, dest: Ipv4Addr, redirect: bool) -> FirewallRule {
+    let redirect = redirect && port == crate::http_redirect::HTTP_PORT;
     FirewallRule {
-        name: if redirect.is_some() {
+        name: if redirect {
             crate::http_redirect::RULE_NAME.into()
         } else {
             "SNI demux (hostname routes)".into()
         },
         src: "wan".into(),
         proto: vec!["tcp".into()],
-        dest_ip: redirect.map(|wan| wan.to_string()),
+        dest_ip: Some(dest.to_string()),
         dest_port: Some(port.to_string()),
         target: FirewallTarget::ACCEPT,
         family: Some("ipv4".into()),
@@ -1642,7 +1646,7 @@ fn desired_sni_rule(port: u16, redirect: Option<Ipv4Addr>) -> FirewallRule {
 fn remote_access_fallback_source(mode: Result<&str, ()>, wan: Ipv4Addr) -> Option<FallbackSource> {
     match mode {
         Ok("always") => Some(FallbackSource::Any),
-        Ok("default") if wan.is_private() => Some(FallbackSource::PrivateOnly),
+        Ok("behind-nat") if wan.is_private() => Some(FallbackSource::PrivateOnly),
         _ => None,
     }
 }
@@ -1725,12 +1729,12 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
     false
 }
 
-/// Replaces SNI admission rules with one per requested port.
+/// Replaces SNI admission rules with one per requested port and listening address.
 /// Returns whether UCI changed.
 async fn reconcile_sni_rules_uci(
     uci_root: &Path,
-    want: std::collections::BTreeSet<u16>,
-    redirect: Option<Ipv4Addr>,
+    want: std::collections::BTreeMap<u16, Ipv4Addr>,
+    redirect: bool,
 ) -> Result<bool, Error> {
     let mut retries = UCI_RETRIES;
     loop {
@@ -1751,21 +1755,20 @@ async fn reconcile_sni_rules_uci(
                 .and_then(parse_port_range)
                 .map(|r| r.0);
             let keep = port.is_some_and(|p| {
-                let desired = desired_sni_rule(p, redirect);
-                want.contains(&p)
-                    && rule.name == desired.name
-                    && rule.dest_ip == desired.dest_ip
-                    && seen.insert(p)
+                want.get(&p).is_some_and(|&dest| {
+                    let desired = desired_sni_rule(p, dest, redirect);
+                    rule.name == desired.name && rule.dest_ip == desired.dest_ip && seen.insert(p)
+                })
             });
             if !keep {
                 changed = true;
             }
             keep
         });
-        for port in want.iter().filter(|p| !seen.contains(p)) {
+        for (&port, &dest) in want.iter().filter(|(p, _)| !seen.contains(p)) {
             cfgs["firewall"].append(
-                &desired_sni_rule(*port, redirect),
-                Some(&sni_section_name(*port)),
+                &desired_sni_rule(port, dest, redirect),
+                Some(&sni_section_name(port)),
             )?;
             changed = true;
         }
@@ -2632,7 +2635,7 @@ mod tests {
 
         // What an older `sync_sni_rules` asks for: the demux's ports alone.
         let _serial = pc.write_serial.lock().await;
-        pc.sync_sni_rules_to(Default::default(), None, false)
+        pc.sync_sni_rules_to(Default::default(), false, false)
             .await
             .unwrap();
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
@@ -2660,8 +2663,10 @@ mod tests {
         let dir = temp_root("");
         reconcile_sni_rules_uci(
             dir.path(),
-            [crate::http_redirect::HTTP_PORT, 443].into_iter().collect(),
-            Some(WAN),
+            [(crate::http_redirect::HTTP_PORT, WAN), (443, WAN)]
+                .into_iter()
+                .collect(),
+            true,
         )
         .await
         .unwrap();
@@ -2684,8 +2689,10 @@ mod tests {
         let dir = temp_root("");
         reconcile_sni_rules_uci(
             dir.path(),
-            [crate::http_redirect::HTTP_PORT].into_iter().collect(),
-            None,
+            [(crate::http_redirect::HTTP_PORT, WAN)]
+                .into_iter()
+                .collect(),
+            false,
         )
         .await
         .unwrap();
@@ -2702,22 +2709,68 @@ mod tests {
     #[tokio::test]
     async fn port_80_changing_hands_rewrites_its_rule() {
         let dir = temp_root("");
-        let want: std::collections::BTreeSet<u16> =
-            [crate::http_redirect::HTTP_PORT].into_iter().collect();
+        let want: std::collections::BTreeMap<u16, Ipv4Addr> =
+            [(crate::http_redirect::HTTP_PORT, WAN)]
+                .into_iter()
+                .collect();
         let firewall = || std::fs::read_to_string(dir.path().join("firewall")).unwrap();
 
-        assert!(reconcile_sni_rules_uci(dir.path(), want.clone(), None)
+        assert!(reconcile_sni_rules_uci(dir.path(), want.clone(), false)
             .await
             .unwrap());
         assert!(!firewall().contains(crate::http_redirect::RULE_NAME));
-        assert!(reconcile_sni_rules_uci(dir.path(), want.clone(), Some(WAN))
+        assert!(reconcile_sni_rules_uci(dir.path(), want.clone(), true)
             .await
             .unwrap());
         assert!(firewall().contains(crate::http_redirect::RULE_NAME));
         assert_eq!(firewall().matches("apf_sni_80").count(), 1);
-        assert!(!reconcile_sni_rules_uci(dir.path(), want, Some(WAN))
+        assert!(!reconcile_sni_rules_uci(dir.path(), want, true)
             .await
             .unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_hostname_routes_rule_admits_only_its_listening_address() {
+        let dir = temp_root(
+            "config rule 'apf_sni_443'\n\
+             \toption name 'SNI demux (hostname routes)'\n\
+             \toption src 'wan'\n\
+             \tlist proto 'tcp'\n\
+             \toption dest_port '443'\n\
+             \toption target 'ACCEPT'\n\
+             \toption family 'ipv4'\n\
+             \toption enabled '1'\n\
+             \toption _apf_label 'SNI'\n",
+        );
+        let firewall = || std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        let want = |listening: Ipv4Addr| -> std::collections::BTreeMap<u16, Ipv4Addr> {
+            [(443, listening)].into_iter().collect()
+        };
+
+        assert!(reconcile_sni_rules_uci(dir.path(), want(WAN), false)
+            .await
+            .unwrap());
+        assert!(
+            firewall().contains("option dest_ip '203.0.113.7'"),
+            "{}",
+            firewall()
+        );
+        assert_eq!(firewall().matches("apf_sni_443").count(), 1);
+
+        let renumbered = Ipv4Addr::new(198, 51, 100, 9);
+        assert!(reconcile_sni_rules_uci(dir.path(), want(renumbered), false)
+            .await
+            .unwrap());
+        assert!(
+            firewall().contains("option dest_ip '198.51.100.9'"),
+            "{}",
+            firewall()
+        );
+        assert!(
+            !reconcile_sni_rules_uci(dir.path(), want(renumbered), false)
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
@@ -3709,11 +3762,11 @@ config host
         let private_wan = Ipv4Addr::new(192, 168, 10, 92);
         let public_wan = Ipv4Addr::new(203, 0, 113, 7);
         assert_eq!(
-            remote_access_fallback_source(Ok("default"), private_wan),
+            remote_access_fallback_source(Ok("behind-nat"), private_wan),
             Some(FallbackSource::PrivateOnly)
         );
         assert_eq!(
-            remote_access_fallback_source(Ok("default"), public_wan),
+            remote_access_fallback_source(Ok("behind-nat"), public_wan),
             None
         );
         assert_eq!(
@@ -3881,5 +3934,9 @@ config host
         pc.sni_maintain().await;
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
         assert!(written.contains("apf_sni_8443"), "rule healed");
+        assert!(
+            written.contains("option dest_ip '203.0.113.7'"),
+            "rule admits only the listening address: {written}"
+        );
     }
 }
