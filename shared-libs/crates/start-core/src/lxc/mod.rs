@@ -33,6 +33,23 @@ use crate::util::rpc_client::UnixRpcClient;
 use crate::util::{FromStrParser, Invoke, new_guid};
 use crate::{InvalidId, PackageId};
 
+pub(crate) const BASE_IDMAP: IdMap = IdMap {
+    from_id: 0,
+    to_id: 100000,
+    range: 65536,
+};
+
+fn config_text(guid: &str, lang: &str) -> String {
+    format!(
+        include_str!("./config.template"),
+        guid = guid,
+        lang = lang,
+        id_from = BASE_IDMAP.from_id,
+        id_to = BASE_IDMAP.to_id,
+        id_count = BASE_IDMAP.range
+    )
+}
+
 const LXC_CONTAINER_DIR: &str = "/var/lib/lxc";
 const RPC_DIR: &str = "media/startos/rpc"; // must not be absolute path
 pub const CONTAINER_RPC_SERVER_SOCKET: &str = "service.sock"; // must not be absolute path
@@ -207,22 +224,14 @@ impl LxcContainer {
         let machine_id = hex::encode(rand::random::<[u8; 16]>());
         let container_dir = Path::new(LXC_CONTAINER_DIR).join(&*guid);
         tokio::fs::create_dir_all(&container_dir).await?;
-        let config_str = format!(
-            include_str!("./config.template"),
-            guid = &*guid,
-            lang = &lang,
-        );
+        let config_str = config_text(&guid, &lang);
         tokio::fs::write(container_dir.join("config"), config_str).await?;
         let rootfs_dir = container_dir.join("rootfs");
         let rootfs = OverlayGuard::mount(
             TmpMountGuard::mount(
                 &IdMapped::new(
                     BlockDev::new("/usr/lib/startos/container-runtime/rootfs.squashfs"),
-                    vec![IdMap {
-                        from_id: 0,
-                        to_id: 100000,
-                        range: 65536,
-                    }],
+                    vec![BASE_IDMAP],
                 ),
                 ReadOnly,
             )
@@ -231,29 +240,29 @@ impl LxcContainer {
         )
         .await?;
         Command::new("chown")
-            .arg("100000:100000")
+            .arg(format!("{0}:{0}", BASE_IDMAP.to_id))
             .arg(&rootfs_dir)
             .invoke(ErrorKind::Filesystem)
             .await?;
         write_file_owned_atomic(
             rootfs_dir.join("etc/machine-id"),
             format!("{machine_id}\n"),
-            100000,
-            100000,
+            BASE_IDMAP.to_id,
+            BASE_IDMAP.to_id,
         )
         .await?;
         write_file_owned_atomic(
             rootfs_dir.join("etc/hostname"),
             format!("{guid}\n"),
-            100000,
-            100000,
+            BASE_IDMAP.to_id,
+            BASE_IDMAP.to_id,
         )
         .await?;
         write_file_owned_atomic(
             rootfs_dir.join("etc/default/locale"),
             format!("LANG={lang}\n"),
-            100000,
-            100000,
+            BASE_IDMAP.to_id,
+            BASE_IDMAP.to_id,
         )
         .await?;
         Command::new("sed")
@@ -272,7 +281,7 @@ impl LxcContainer {
         let rpc_bind = TmpMountGuard::mount(&Bind::new(rpc_dir), ReadWrite).await?;
         Command::new("chown")
             .arg("-R")
-            .arg("100000:100000")
+            .arg(format!("{0}:{0}", BASE_IDMAP.to_id))
             .arg(rpc_bind.path())
             .invoke(ErrorKind::Filesystem)
             .await?;
@@ -281,8 +290,8 @@ impl LxcContainer {
             let log_mount =
                 MountGuard::mount(&Bind::new(path), &log_mount_point, MountType::ReadWrite).await?;
             Command::new("chown")
-                // This was needed as 100999 because the group id of journald
-                .arg("100000:100999")
+                // systemd-journal's container GID is 999.
+                .arg(format!("{}:{}", BASE_IDMAP.to_id, BASE_IDMAP.to_id + 999))
                 .arg(&log_mount_point)
                 .invoke(crate::ErrorKind::Filesystem)
                 .await?;
@@ -385,18 +394,29 @@ impl LxcContainer {
         self.rootfs.path()
     }
 
+    async fn info(&self, field: &str) -> Result<String, Error> {
+        Ok(String::from_utf8(
+            Command::new("lxc-info")
+                .arg("--name")
+                .arg(&**self.guid)
+                .arg(field)
+                .invoke(ErrorKind::Lxc)
+                .await?,
+        )?)
+    }
+
+    pub(crate) async fn pid(&self) -> Result<u32, Error> {
+        self.info("-pH")
+            .await?
+            .trim()
+            .parse::<u32>()
+            .with_kind(ErrorKind::Lxc)
+    }
+
     pub async fn ip(&self) -> Result<Ipv4Addr, Error> {
         let start = Instant::now();
-        let guid: &str = &self.guid;
         loop {
-            let output = String::from_utf8(
-                Command::new("lxc-info")
-                    .arg("--name")
-                    .arg(guid)
-                    .arg("-iH")
-                    .invoke(ErrorKind::Docker)
-                    .await?,
-            )?;
+            let output = self.info("-iH").await?;
             for line in output.lines() {
                 if let Ok(ip) = line.trim().parse() {
                     return Ok(ip);
@@ -430,14 +450,7 @@ impl LxcContainer {
         let start = Instant::now();
         let guid: &str = &self.guid;
         loop {
-            let output = String::from_utf8(
-                Command::new("lxc-info")
-                    .arg("--name")
-                    .arg(guid)
-                    .arg("-iH")
-                    .invoke(ErrorKind::Docker)
-                    .await?,
-            )?;
+            let output = self.info("-iH").await?;
             if let Some(ula) = output.lines().find_map(|line| {
                 line.trim()
                     .parse::<Ipv6Addr>()
@@ -583,7 +596,7 @@ impl LxcContainer {
                     .with_ctx(|_| (ErrorKind::Filesystem, format!("mkdir -p {p:?}")))?;
                 for p in parent.ancestors() {
                     Command::new("chown")
-                        .arg("100000:100000")
+                        .arg(format!("{0}:{0}", BASE_IDMAP.to_id))
                         .arg(media_dev.join(p))
                         .invoke(ErrorKind::Filesystem)
                         .await?;
@@ -599,7 +612,7 @@ impl LxcContainer {
                 .invoke(ErrorKind::Filesystem)
                 .await?;
             Command::new("chown")
-                .arg("100000:100000")
+                .arg(format!("{0}:{0}", BASE_IDMAP.to_id))
                 .arg(&target_path)
                 .invoke(ErrorKind::Filesystem)
                 .await?;
@@ -646,7 +659,7 @@ impl LxcContainer {
                 .invoke(ErrorKind::Filesystem)
                 .await?;
             Command::new("chown")
-                .arg("100000:100000")
+                .arg(format!("{0}:{0}", BASE_IDMAP.to_id))
                 .arg(&target_path)
                 .invoke(ErrorKind::Filesystem)
                 .await?;
@@ -810,6 +823,22 @@ mod test {
     use std::path::PathBuf;
 
     use super::*;
+
+    #[test]
+    fn config_renders_the_base_namespace_mapping() {
+        let config = config_text("test-container", "C.UTF-8");
+        assert!(
+            config
+                .lines()
+                .any(|line| line == "lxc.idmap = u 0 100000 65536")
+        );
+        assert!(
+            config
+                .lines()
+                .any(|line| line == "lxc.idmap = g 0 100000 65536")
+        );
+        assert!(config.contains("test-container"));
+    }
 
     const DEV: &[&str] = &[
         "/dev/dri/card0",

@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict')
+const { webcrypto } = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const test = require('node:test')
@@ -39,6 +40,8 @@ function harness(moduleOverrides = new Map()) {
       'StaleUiService',
       'PATCH_CACHE',
       'RELATIVE_URL',
+      'WA_CRYPTO',
+      'WA_SESSION_STORAGE',
     ].map(name => [name, Symbol(name)]),
   )
   dependencies.set(tokens.ConfigService, { gitHash: 'test-ui-build' })
@@ -82,6 +85,11 @@ function harness(moduleOverrides = new Map()) {
     const requireSource = request => {
       if (moduleOverrides.has(request)) return moduleOverrides.get(request)
       if (request === '@angular/core') return angular
+      if (request === '@ng-web-apis/common')
+        return {
+          WA_CRYPTO: tokens.WA_CRYPTO,
+          WA_SESSION_STORAGE: tokens.WA_SESSION_STORAGE,
+        }
       if (request === '@angular/common/http')
         return { HttpClient: tokens.HttpClient }
       if (request === '@start9labs/shared') return shared()
@@ -133,6 +141,7 @@ function harness(moduleOverrides = new Map()) {
     defaultView: { location: { host: 'server.test', protocol: 'https:' } },
   })
   dependencies.set(tokens.RELATIVE_URL, '/rpc/v1')
+  dependencies.set(tokens.WA_CRYPTO, webcrypto)
   return { dependencies, tokens, load }
 }
 
@@ -370,7 +379,6 @@ test('Brochure serves each registry root through its own client', async () => {
 })
 
 test('StartOS mock registry calls reach list and single-package fixtures', async () => {
-  const storage = Symbol('session storage')
   const pkg = { categories: [], best: {}, otherVersions: {} }
   const version = { ...pkg, best: { '1.0.0': {} } }
   const fixtures = {
@@ -379,14 +387,13 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
   }
   const { dependencies, tokens, load } = harness(
     new Map([
-      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: fixtures }],
       ['./mock-patch', { mockPatchData: {} }],
       ['./md-sample.md', ''],
     ]),
   )
-  dependencies.set(storage, null)
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: {} }))
   const client = new (load(
@@ -418,7 +425,6 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
 })
 
 test('StartOS trust mock rejects whole batches and imports the requested trust atomically', async () => {
-  const storage = Symbol('session storage')
   const ids = [
     'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=',
     'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
@@ -451,14 +457,13 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
   }
   const { dependencies, tokens, load } = harness(
     new Map([
-      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: {} }],
       ['./mock-patch', { mockPatchData: data }],
       ['./md-sample.md', ''],
     ]),
   )
-  dependencies.set(storage, null)
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
   const client = new (load(
@@ -502,7 +507,6 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
 
 test('StartOS BitTorrent mock uses address opt-ins and clears them when either parent is off', async () => {
   const { applyPatch } = require('fast-json-patch')
-  const storage = Symbol('session storage')
   const data = {
     ui: { registries: {} },
     serverInfo: {
@@ -514,7 +518,6 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
   }
   const { dependencies, tokens, load } = harness(
     new Map([
-      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: {} }],
       ['./mock-patch', { mockPatchData: data }],
@@ -527,7 +530,7 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
   const port = fixtures.BITTORRENT_INTERFACE.addressInfo.internalPort
   data.serverInfo.network.host.bindings[port] = fixtures.mockBitTorrentBinding()
   const binding = () => data.serverInfo.network.host.bindings[port]
-  dependencies.set(storage, null)
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
   const client = new (load(
@@ -585,10 +588,8 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
 })
 
 test('StartOS DNS mock updates the selected gateway using live gateway state', async () => {
-  const storage = Symbol('session storage')
   const { dependencies, tokens, load } = harness(
     new Map([
-      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: {} }],
       [
@@ -612,7 +613,7 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
   const cache = new BehaviorSubject({
     value: { serverInfo: { network: { gateways: { wg0: gateway } } } },
   })
-  dependencies.set(storage, null)
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, cache)
   const client = new (load(

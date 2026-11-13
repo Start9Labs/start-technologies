@@ -1840,6 +1840,50 @@ pub fn to_tmp_path(path: impl AsRef<Path>) -> Result<PathBuf, Error> {
     }
 }
 
+pub(crate) fn paths_overlap(source: &Path, destination: &Path) -> bool {
+    source.starts_with(destination) || destination.starts_with(source)
+}
+
+/// Conservative case-insensitive components for configured-source comparisons.
+pub(crate) fn case_folded(path: &Path) -> PathBuf {
+    path.components()
+        .filter_map(|part| match part {
+            std::path::Component::Normal(name) => Some(name.to_string_lossy().to_lowercase()),
+            _ => None,
+        })
+        .collect()
+}
+
+pub(crate) async fn file_identity(path: impl AsRef<Path>) -> Result<(u64, u64), Error> {
+    let path = path.as_ref();
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, path.display().to_string()))?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+/// Detects overlapping directory identities across symlinks and mount aliases.
+pub(crate) async fn directories_overlap(left: &Path, right: &Path) -> Result<bool, Error> {
+    let left_id = file_identity(left).await?;
+    let right_id = file_identity(right).await?;
+    for (path, sought) in [(left, right_id), (right, left_id)] {
+        let mut path = path.to_owned();
+        let mut previous = file_identity(&path).await?;
+        loop {
+            if previous == sought {
+                return Ok(true);
+            }
+            path.push("..");
+            let parent = file_identity(&path).await?;
+            if parent == previous {
+                break;
+            }
+            previous = parent;
+        }
+    }
+    Ok(false)
+}
+
 pub async fn canonicalize(
     path: impl AsRef<Path> + Send + Sync,
     create_parent: bool,
@@ -2261,6 +2305,22 @@ mod test {
         }
 
         tokio::fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn directory_overlap_follows_aliases_and_distinguishes_sibling_folders() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("photos");
+        let nested = source.join("backup/crypt");
+        let sibling = root.path().join("photos-old");
+        tokio::fs::create_dir_all(&nested).await.unwrap();
+        tokio::fs::create_dir(&sibling).await.unwrap();
+        let alias = root.path().join("alias");
+        tokio::fs::symlink(&source, &alias).await.unwrap();
+        assert!(directories_overlap(&source, &source).await.unwrap());
+        assert!(directories_overlap(&alias, &nested).await.unwrap());
+        assert!(directories_overlap(&nested, &alias).await.unwrap());
+        assert!(!directories_overlap(&alias, &sibling).await.unwrap());
     }
 
     #[tokio::test]

@@ -28,9 +28,13 @@ Each interface lists every address it can be reached at: its LAN and IPv6 addres
 
 A [gateway](gateways.md) carries your server's traffic. Your home router and a StartTunnel server are inbound and outbound gateways, and a VPN provider's WireGuard configuration is an outbound-only gateway. When you make an address public, StartOS asks the gateway to open the port, and closes it again when you turn the address off. StartTunnel does this on its own, and StartWRT does once you allow it for your server.
 
+## Shared Volumes
+
+[Shared volumes](shared-volumes.md) hold files that several services, or other devices, need to use. Each service already stores its own data, so most never need one. A shared volume lives in a managed local folder, an attached external-drive partition or a CIFS network share. Supporting services receive separate No Access, Read or Read/write grants. Deleting a managed local volume deletes its contents; removing an external-drive or network volume preserves the source's data.
+
 ## Backups
 
-StartOS [backs up](backup-create.md) the whole server, or only the services you choose, to a drive plugged into the server or to a shared folder on another computer on your network. Backups are encrypted with your master password; the server's own data drive is not encrypted with it, so anyone holding the server or its drive can read your services' data. Each new backup to a target updates the one already there. Keep backups on multiple targets to protect against losing a drive or network share; advanced users can also retain [read-only snapshots](backup-create.md#read-only-snapshots) on one target. You can [restore](backup-restore.md) a single service, or the whole server, including onto new hardware.
+StartOS [backs up](backups.md) the whole server, or only the services and volumes you choose, to a backup target: a folder on the server's data drive, a drive plugged into the server or a shared folder on another computer on your network. Backups are encrypted with your master password; the server's own data drive is not encrypted with it, so anyone holding the server or its drive can read your services' data. Each new backup to a target updates the one already there. Keep backups on multiple targets to protect against losing a drive or network share; advanced users can also retain [read-only snapshots](backups.md#read-only-snapshots) on one target. You can [restore](backups.md#restoring-backups) a single service, an independent volume or the whole server, including onto new hardware. A restored volume is a new local copy with no service grants.
 
 ## The command line
 

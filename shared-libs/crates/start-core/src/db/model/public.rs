@@ -43,6 +43,14 @@ pub static DB_UI_SEED_CELL: OnceLock<&'static str> = OnceLock::new();
 pub struct Public {
     pub server_info: ServerInfo,
     pub package_data: AllPackageData,
+    #[serde(default)]
+    pub disks: Vec<crate::disk::util::DiskInfo>,
+    #[serde(default)]
+    pub shared_volumes:
+        BTreeMap<crate::shared_volumes::SharedVolumeId, crate::shared_volumes::SharedVolume>,
+    #[serde(default)]
+    pub backup_targets:
+        BTreeMap<crate::backup::target::BackupTargetId, crate::backup::target::BackupTarget>,
     /// UI-owned state. Outside `version` migrations, the backend never reads or
     /// modifies its contents.
     pub ui: Value,
@@ -153,6 +161,9 @@ impl Public {
                 keyboard,
             },
             package_data: AllPackageData::default(),
+            disks: Vec::new(),
+            shared_volumes: BTreeMap::new(),
+            backup_targets: BTreeMap::new(),
             ui: serde_json::from_str(*DB_UI_SEED_CELL.get().unwrap_or(&"null"))
                 .with_kind(ErrorKind::Deserialization)?,
         })
