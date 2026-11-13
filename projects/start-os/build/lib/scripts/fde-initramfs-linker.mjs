@@ -1,18 +1,12 @@
-import {
-  lstat,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  readlink,
-  realpath,
-  rm,
-  symlink,
-} from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { checkedDirectory, filesUnder } from './fde-initramfs-paths.mjs'
+import {
+  checkedDirectory,
+  copyRootAliases,
+  filesUnder,
+} from './fde-initramfs-paths.mjs'
 import { requireNativeProducer } from './fde-initramfs-producer.mjs'
 import {
   requireSameBytes,
@@ -77,12 +71,7 @@ export async function admitLinkerCache(root) {
       join(root, 'usr'),
       image,
     ])
-    for (const entry of await readdir(root, { withFileTypes: true }))
-      if (entry.isSymbolicLink())
-        await symlink(
-          await readlink(join(root, entry.name)),
-          join(image, entry.name),
-        )
+    await copyRootAliases(root, image)
     await mkdir(join(image, 'var/cache/ldconfig'), { recursive: true })
     const result = await runSource('/usr/sbin/ldconfig', ['-r', image])
     if (result.stderr.trim())

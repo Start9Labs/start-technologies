@@ -2,6 +2,9 @@ import {
   copyFile,
   mkdir,
   mkdtemp,
+  readFile,
+  readdir,
+  readlink,
   realpath,
   rm,
   writeFile,
@@ -11,7 +14,12 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { admitModuleConfiguration } from './fde-initramfs-control.mjs'
-import { filesUnder, kernelDirectory } from './fde-initramfs-paths.mjs'
+import {
+  copyRootAliases,
+  filesUnder,
+  kernelDirectory,
+} from './fde-initramfs-paths.mjs'
+import { requireNativeHookFunctions } from './fde-initramfs-producer.mjs'
 import {
   publicSourceFile,
   publicSourcePath,
@@ -33,11 +41,25 @@ async function nativeQuery(command, args) {
   return result.stdout
 }
 
+/** Copies admitted source module inputs; rejects native diagnostics even on successful exit. */
+export async function collectSourceModuleInputs(destination, version, modules) {
+  const functions = await readFile('/usr/share/initramfs-tools/hook-functions')
+  requireNativeHookFunctions(functions)
+  await nativeQuery('/bin/sh', [
+    '-c',
+    `${functions.toString()}\nDESTDIR="$1"\nversion="$2"\nverbose=n\nshift 2\n_call_dracut_install "$@"\n`,
+    'fde-source-module-closure',
+    destination,
+    version,
+    ...modules,
+  ])
+}
+
 /**
  * Admits source module bytes, native subset indexes and dependencies under effective configuration.
- * Sources/query providers remain authenticated; all inputs remain stable through use.
+ * Provider identity admission precedes this call; authenticated sources and all inputs remain stable.
  * Native tools parse source references, never candidate module bytes; no module is inserted.
- * Firmware and configured alias/request coverage retain separate admission obligations.
+ * Built-in firmware, configured alias/request coverage and full generator admission remain separate.
  */
 export async function admitKernelModules(root) {
   root = await realpath(root)
@@ -129,6 +151,37 @@ export async function admitKernelModules(root) {
         if (!match) throw Error(`Unsupported native module dependency: ${line}`)
         await requireDependency(match[1])
       }
+    }
+    const closure = join(reference, 'closure')
+    await mkdir(join(closure, 'usr/lib'), { recursive: true })
+    await copyRootAliases(root, closure)
+    await collectSourceModuleInputs(closure, kernel.version, modules)
+    async function requireCollected(path) {
+      for (const entry of await readdir(join(closure, path), {
+        withFileTypes: true,
+      })) {
+        const required = join(path, entry.name)
+        if (entry.isDirectory()) await requireCollected(required)
+        else if (entry.isFile() || entry.isSymbolicLink()) {
+          const source = await publicSourcePath(join('/', required))
+          const copied = await realpath(join(root, required))
+          if (copied !== join(root, source))
+            throw Error(`Copied native module input differs: ${required}`)
+          if (!admitted.has(source))
+            await requireSameFile(copied, await publicSourceFile(source))
+        } else throw Error(`Unsupported native module input: ${required}`)
+      }
+    }
+    for (const entry of await readdir(closure, { withFileTypes: true })) {
+      if (entry.name === 'usr') await requireCollected('usr')
+      else if (
+        !entry.isSymbolicLink() ||
+        (await readlink(join(closure, entry.name))) !==
+          (await readlink(join(root, entry.name)))
+      )
+        throw Error(
+          `Native module input leaves admitted namespace: ${entry.name}`,
+        )
     }
   } finally {
     await rm(reference, { recursive: true, force: true })

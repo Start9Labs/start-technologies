@@ -1,4 +1,4 @@
-import { lstat, readdir } from 'node:fs/promises'
+import { lstat, readdir, readlink, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export async function checkedDirectory(root, relative) {
@@ -22,6 +22,16 @@ export async function filesUnder(root, relative) {
     else throw Error(`Unsupported generated file type: ${path}`)
   }
   return entries
+}
+
+/** Copies root aliases after provider admission; inputs remain stable through use. */
+export async function copyRootAliases(root, destination) {
+  for (const entry of await readdir(root, { withFileTypes: true }))
+    if (entry.isSymbolicLink())
+      await symlink(
+        await readlink(join(root, entry.name)),
+        join(destination, entry.name),
+      )
 }
 
 export async function kernelDirectory(root) {

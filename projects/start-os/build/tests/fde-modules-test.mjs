@@ -16,7 +16,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { admitKernelModules } from '../lib/scripts/fde-initramfs-modules.mjs'
+import {
+  admitKernelModules,
+  collectSourceModuleInputs,
+} from '../lib/scripts/fde-initramfs-modules.mjs'
 import { kernelDirectory } from '../lib/scripts/fde-initramfs-paths.mjs'
 import { runSource } from '../lib/scripts/fde-reviewed-source.mjs'
 
@@ -24,7 +27,7 @@ const kernel = await kernelDirectory('/')
 const core = `${kernel.path}/kernel/drivers/char/tpm/st33zp24/tpm_st33zp24.ko.xz`
 const dependent = `${kernel.path}/kernel/drivers/char/tpm/st33zp24/tpm_st33zp24_i2c.ko.xz`
 
-async function context(t) {
+async function context(t, additionalModules = []) {
   const root = await mkdtemp('/var/tmp/fde-module-candidate-')
   t.after(() => rm(root, { recursive: true, force: true }))
   await mkdir(join(root, kernel.path), { recursive: true })
@@ -39,13 +42,15 @@ async function context(t) {
 copy_exec /usr/sbin/modprobe
 for library in /usr/lib/*/libkmod.so.2; do copy_exec "$library"; done
 : > "$__MODULES_TO_ADD"
-manual_add_modules '=drivers/char/tpm'
+manual_add_modules '=drivers/char/tpm' "$@"
 apply_add_modules
 for metadata in modules.builtin modules.builtin.bin modules.builtin.modinfo modules.order; do
 cp -p "/usr/lib/modules/$version/$metadata" "$DESTDIR/usr/lib/modules/$version/$metadata"
 done
 /usr/sbin/depmod -a -b "$DESTDIR" "$version"
 `,
+      'fde-native-module-fixture',
+      ...additionalModules,
     ],
     {
       encoding: 'utf8',
@@ -84,6 +89,33 @@ test('genuine native TPM modules and subset metadata admit without insertion', a
   ])
   assert.match(dependencies.stdout, /tpm_st33zp24\.ko\.xz/)
   assert.match(dependencies.stdout, /tpm_st33zp24_i2c\.ko\.xz/)
+})
+
+test('native selected firmware and wireless dependency closure admit', async t => {
+  const root = await context(t, ['ath9k_htc'])
+  const before = await references()
+  await admitKernelModules(root)
+  assert.deepEqual(await references(), before)
+})
+
+test('missing native selected firmware rejects despite complete module indexes', async t => {
+  const root = await context(t, ['ath9k_htc'])
+  await rm(join(root, 'usr/lib/firmware/ath9k_htc/htc_7010-1.4.0.fw'))
+  const before = await references()
+  await assert.rejects(admitKernelModules(root), /ENOENT/)
+  assert.deepEqual(await references(), before)
+})
+
+test('native collector firmware copy diagnostics reject even with successful status', async t => {
+  const destination = await mkdtemp('/var/tmp/fde-failed-module-collection-')
+  t.after(() => rm(destination, { recursive: true, force: true }))
+  await mkdir(join(destination, 'usr/lib'), { recursive: true })
+  await symlink('usr/lib', join(destination, 'lib'))
+  await writeFile(join(destination, 'usr/lib/firmware'), 'blocked')
+  await assert.rejects(
+    collectSourceModuleInputs(destination, kernel.version, ['ath9k_htc']),
+    /Native module query diagnostics/,
+  )
 })
 
 test('effective soft dependencies already present retain native resolution', async t => {
