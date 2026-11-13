@@ -4,19 +4,18 @@ import {
   Manifest,
   MerkleArchiveCommitment,
   PackageId,
+  SideloadParams,
 } from '../osBindings'
 import { ArrayBufferReader, MerkleArchive } from './merkleArchive'
 import mime from 'mime'
 import { DirectoryContents } from './merkleArchive/directoryContents'
 import { FileContents } from './merkleArchive/fileContents'
+import { readTrailer, S9pkDiagnostic } from './trailer'
+export type { S9pkDiagnostic } from './trailer'
 
 const magicAndVersion = new Uint8Array([59, 59, 2])
+export const s9pkHeaderSize = magicAndVersion.length + MerkleArchive.headerSize
 
-/**
- * Compares two `Uint8Array` instances byte-by-byte for equality.
- *
- * @returns `true` if both arrays have the same length and identical bytes
- */
 export function compare(a: Uint8Array, b: Uint8Array) {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {
@@ -28,7 +27,7 @@ export function compare(a: Uint8Array, b: Uint8Array) {
 /**
  * Represents a parsed `.s9pk` package archive — the binary distribution format for StartOS services.
  *
- * An `S9pk` wraps a verified {@link Manifest}, a {@link MerkleArchive} containing the package's
+ * An `S9pk` wraps a parsed {@link Manifest}, a {@link MerkleArchive} containing the package's
  * assets (icon, license, dependency metadata), and the total archive size in bytes.
  *
  * @example
@@ -48,15 +47,34 @@ export class S9pk {
     readonly archive: MerkleArchive,
     /** The total size of the archive in bytes. */
     readonly size: number,
+    /** Claimed canonical DER64 signing identities; the backend must verify their signatures. */
+    readonly signers: readonly string[],
+    /** Supplemental signature map for backend verification against the archive. */
+    readonly signatures: Readonly<SideloadParams['signatures']>,
+    /** Optional metadata issues; these never replace base archive validation. */
+    readonly diagnostics: readonly S9pkDiagnostic[],
   ) {}
+  /** Reads a complete S9PK header and returns its format version. */
+  static async getVersion(source: Blob): Promise<number> {
+    const header = new Uint8Array(await source.slice(0, 3).arrayBuffer())
+    if (
+      header.length !== 3 ||
+      !compare(header.slice(0, 2), magicAndVersion.slice(0, 2))
+    ) {
+      throw new Error('Invalid Magic or Unexpected Version')
+    }
+    return header[2]
+  }
+
   /**
    * Deserializes an `S9pk` from a `Blob` (e.g. a `File` from a browser file input).
    *
    * Validates the magic bytes and version header, then parses the Merkle archive structure.
-   * If a `commitment` is provided, the archive is cryptographically verified against it.
+   * Signature bytes are not verified. Sideload callers forward the signature map and pin matched keys.
+   * An external commitment additionally pins the archive's Merkle root and size bound.
    *
    * @param source - The raw `.s9pk` file as a `Blob`
-   * @param commitment - An optional Merkle commitment to verify the archive against, or `null` to skip verification
+   * @param commitment - An optional Merkle commitment to verify the archive against, or `null` to skip external commitment pinning
    * @returns A fully parsed `S9pk` instance
    * @throws If the magic bytes are invalid or the archive fails verification
    */
@@ -64,15 +82,12 @@ export class S9pk {
     source: Blob,
     commitment: MerkleArchiveCommitment | null,
   ): Promise<S9pk> {
-    const header = new ArrayBufferReader(
-      await source
-        .slice(0, magicAndVersion.length + MerkleArchive.headerSize)
-        .arrayBuffer(),
-    )
-    const magicVersion = new Uint8Array(header.next(magicAndVersion.length))
-    if (!compare(magicVersion, magicAndVersion)) {
+    if ((await S9pk.getVersion(source)) !== magicAndVersion[2])
       throw new Error('Invalid Magic or Unexpected Version')
-    }
+    const header = new ArrayBufferReader(
+      await source.slice(0, s9pkHeaderSize).arrayBuffer(),
+    )
+    header.next(magicAndVersion.length)
 
     const archive = await MerkleArchive.deserialize(
       source,
@@ -89,7 +104,15 @@ export class S9pk {
       ),
     )
 
-    return new S9pk(manifest, archive, source.size)
+    const trailer = await readTrailer(source, archive)
+    return new S9pk(
+      manifest,
+      archive,
+      source.size,
+      trailer.signers,
+      trailer.signatures,
+      trailer.diagnostics,
+    )
   }
   /**
    * Extracts the package icon from the archive and returns it as a base64-encoded data URL.

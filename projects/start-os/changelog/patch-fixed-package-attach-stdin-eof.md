@@ -1,5 +1,0 @@
----
-user-facing: true
----
-
-- Commands run through `package attach` that read stdin to EOF finish after their input ends instead of hanging.

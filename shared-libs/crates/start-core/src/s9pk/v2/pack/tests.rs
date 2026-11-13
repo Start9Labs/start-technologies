@@ -274,7 +274,11 @@ async fn image_save_validates_exit_status_and_drains_large_trailing_padding() {
     let dest = workspace.join("export.squashfs");
     tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        image_from_command(Command::new("cat").arg(&archive), "--platform=linux/amd64"),
+        image_from_command(
+            Command::new("cat").arg(&archive),
+            "--platform=linux/amd64",
+            false,
+        ),
     )
     .await
     .unwrap()
@@ -290,14 +294,19 @@ async fn image_save_validates_exit_status_and_drains_large_trailing_padding() {
             .arg("sh")
             .arg(&archive),
         "--platform=linux/amd64",
+        true,
     )
     .await;
     assert!(format!("{:?}", failed.err().unwrap()).contains("export-failed-after-tar"));
     tokio::fs::write(&archive, b"truncated tar").await.unwrap();
     assert!(
-        image_from_command(Command::new("cat").arg(&archive), "--platform=linux/amd64",)
-            .await
-            .is_err()
+        image_from_command(
+            Command::new("cat").arg(&archive),
+            "--platform=linux/amd64",
+            false
+        )
+        .await
+        .is_err()
     );
     workspace.delete().await.unwrap();
 }
@@ -410,6 +419,12 @@ esac
             .unwrap(),
     )
     .unwrap();
+    assert_eq!(
+        serde_json::to_value(&metadata.env).unwrap(),
+        serde_json::json!({
+            "ARCH": "arm64", "EMPTY": "", "MULTILINE": "first\nsecond=value\n",
+        })
+    );
     assert_eq!(metadata.cmd.unwrap(), ["serve", "--arm64"]);
     assert_eq!(metadata.entrypoint.unwrap(), ["/app/start"]);
     assert_eq!(metadata.workdir, Path::new("/arm64"));
@@ -423,7 +438,7 @@ esac
             .to_vec(None)
             .await
             .unwrap(),
-        b"ARCH=arm64\nEMPTY="
+        b"ARCH=arm64\nEMPTY=\nMULTILINE=first\nsecond=value\n"
     );
     let source = files
         .get_path("images/aarch64/main.squashfs")

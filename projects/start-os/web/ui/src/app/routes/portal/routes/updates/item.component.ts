@@ -1,9 +1,12 @@
 import { DatePipe } from '@angular/common'
-import { Component, inject, input, signal } from '@angular/core'
+import { Component, computed, inject, input, signal } from '@angular/core'
 import { RouterLink } from '@angular/router'
 import {
   MarketplaceIconDirective,
   MarketplacePkg,
+  matchingTrustedKeys,
+  MarketplaceSignerChipsComponent,
+  packageSigners,
 } from '@start9labs/marketplace'
 import {
   DialogService,
@@ -37,13 +40,17 @@ import {
   PackageDataEntry,
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
+import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
 import { MarketplaceAlertsService } from '../marketplace/services/alerts.service'
 import UpdatesComponent from './updates.component'
 
 @Component({
   selector: 'updates-item',
   template: `
-    <tr (click)="expanded.set(!expanded())">
+    <tr
+      [class._note]="error() || !trusted().length"
+      (click)="expanded.set(!expanded())"
+    >
       <td>
         <div [style.gap.rem]="0.75" [style.padding-inline-end.rem]="1">
           <span
@@ -70,6 +77,15 @@ import UpdatesComponent from './updates.component'
             </span>
           </span>
         </div>
+        @if (error(); as error) {
+          <p class="note g-negative">{{ error }}</p>
+        } @else if (!trusted().length) {
+          <p class="note g-warning">
+            {{
+              "This service package isn't signed by anyone you trust." | i18n
+            }}
+          </p>
+        }
       </td>
       <td class="desktop">
         <div>
@@ -91,7 +107,7 @@ import UpdatesComponent from './updates.component'
           appearance="icon"
           [tuiChevron]="expanded()"
         >
-          {{ 'Show more' | i18n }}
+          {{ 'Details' | i18n }}
         </button>
         @if (local().stateInfo.state === 'updating') {
           <tui-progress-circle
@@ -111,7 +127,7 @@ import UpdatesComponent from './updates.component'
             tuiIconButton
             size="s"
             appearance="secondary"
-            iconStart="@tui.x"
+            iconStart="@tui.eye-off"
             (click.stop)="hide()"
           >
             {{ 'Hide' | i18n }}
@@ -131,9 +147,6 @@ import UpdatesComponent from './updates.component'
     </tr>
     <tr>
       <td colspan="5">
-        @if (error()) {
-          <p class="g-negative">{{ error() }}</p>
-        }
         <tui-expand [expanded]="expanded()">
           <p tuiTitle class="mobile">
             <b>{{ 'Package Hash' | i18n }}</b>
@@ -144,6 +157,10 @@ import UpdatesComponent from './updates.component'
             <span tuiSubtitle>
               {{ item().s9pks[0]?.[1]?.publishedAt | date }}
             </span>
+          </p>
+          <p tuiTitle>
+            <b>{{ 'Signed by' | i18n }}</b>
+            <marketplace-signer-chips [keys]="signers()" />
           </p>
           <p tuiTitle>
             <span>
@@ -158,7 +175,7 @@ import UpdatesComponent from './updates.component'
                   id: item().id,
                   flavor: item().flavor,
                 }"
-                [textContent]="'View listing' | i18n"
+                [textContent]="'View in Marketplace' | i18n"
               ></a>
               )
             </span>
@@ -185,7 +202,7 @@ import UpdatesComponent from './updates.component'
       vertical-align: middle;
     }
 
-    div {
+    td > div {
       display: flex;
       align-items: center;
       gap: 0.25rem;
@@ -193,10 +210,28 @@ import UpdatesComponent from './updates.component'
     }
 
     tr:first-child {
+      position: relative;
       min-height: var(--tui-height-l);
       word-break: break-word;
       clip-path: inset(0 round var(--tui-radius-s));
       cursor: pointer;
+
+      &._note td {
+        padding-block-end: 2.125rem;
+
+        &:first-child {
+          position: static;
+        }
+      }
+    }
+
+    .note {
+      position: absolute;
+      z-index: 1;
+      inset-inline: 3.5rem 0.75rem;
+      inset-block-end: 0.875rem;
+      margin: 0;
+      white-space: normal;
     }
 
     td {
@@ -243,10 +278,25 @@ import UpdatesComponent from './updates.component'
         grid-template-columns: 1fr min-content;
         align-items: center;
         padding: 0.5rem 0;
+
+        &._note {
+          padding-block-end: 0.875rem;
+
+          td {
+            padding-block-end: 0;
+          }
+        }
       }
 
       td[colspan]:only-child {
         padding: 0 0.5rem;
+      }
+
+      .note {
+        position: static;
+        margin: 0.25rem 0 0 2.75rem;
+        font: var(--tui-typography-body-s);
+        white-space: normal;
       }
 
       .desktop {
@@ -264,25 +314,26 @@ import UpdatesComponent from './updates.component'
     }
   `,
   imports: [
+    DatePipe,
+    InstallingProgressPipe,
+    LocalizePipe,
+    MarkdownPipe,
     MarketplaceIconDirective,
+    MarketplaceSignerChipsComponent,
+    NgDompurifyPipe,
     RouterLink,
-    TuiExpand,
+    SafeLinksDirective,
+    TuiAvatar,
     TuiButton,
     TuiButtonLoading,
     TuiChevron,
-    TuiAvatar,
-    TuiLink,
+    TuiExpand,
+    TuiFade,
     TuiIcon,
+    TuiLink,
     TuiProgressCircle,
     TuiSkeleton,
     TuiTitle,
-    TuiFade,
-    LocalizePipe,
-    MarkdownPipe,
-    NgDompurifyPipe,
-    SafeLinksDirective,
-    DatePipe,
-    InstallingProgressPipe,
     i18nPipe,
   ],
 })
@@ -292,6 +343,7 @@ export class UpdatesItemComponent {
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
   private readonly alerts = inject(MarketplaceAlertsService)
 
+  private readonly trust = inject(TrustedKeysService)
   readonly parent = inject(UpdatesComponent)
   readonly expanded = signal(false)
   readonly error = signal('')
@@ -302,8 +354,17 @@ export class UpdatesItemComponent {
     input.required<PackageDataEntry<InstalledState | UpdatingState>>()
   readonly pending = input.required<boolean>()
 
+  protected readonly signers = computed(() => packageSigners(this.item()))
+  protected readonly trusted = computed(() =>
+    matchingTrustedKeys(this.signers(), this.trust.keys() ?? {}, 'marketplace'),
+  )
+
   async update() {
-    const { id, version, preDownloadAlert } = this.item()
+    const trust = !this.trusted().length
+    if (trust && !(await this.alerts.alertUntrusted())) return
+
+    const pkg = this.item()
+    const { preDownloadAlert } = pkg
     const url = this.parent.current()?.url || ''
 
     if (
@@ -318,9 +379,9 @@ export class UpdatesItemComponent {
     this.ready.set(false)
 
     try {
-      await this.service.installPackage(id, version, url)
-    } catch (e: any) {
-      this.error.set(e.message)
+      await this.service.installPackage(pkg, url, trust)
+    } catch (e) {
+      this.error.set(e instanceof Error ? e.message : String(e))
     } finally {
       this.ready.set(true)
     }

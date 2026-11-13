@@ -8,6 +8,207 @@ This file tracks notable changes since the move to the monorepo, and is what eac
 [GitHub release](https://github.com/Start9Labs/start-technologies/releases) links to
 for the detail behind its highlights.
 
+## [0.4.2.1]
+
+### Changed
+
+- Choosing a registry for StartOS updates checks it for updates right away.
+
+- The StartOS update dialog is titled with the version it installs and lists who signed it above the release notes.
+
+- RPC and MCP clients manage connected registries under `server.registries`. `server.update-signers` is removed; use `server.trusted-keys`.
+- The database keeps connected registries and the StartOS update registry at `serverInfo.registries` and `serverInfo.osRegistry`, no longer under `ui`.
+
+- Expanding an update on the Updates tab shows who signed the package and its release notes, with a link to the full Marketplace listing.
+
+- The welcome notification after an update shows the release notes as published, in your language.
+
+### Removed
+
+- Removed the Donate to Start9 link from the start menu.
+
+### Fixed
+
+- When a service requires a version only an alternative implementation of its dependency provides, the Marketplace opens that implementation, ready to switch to.
+
+- Restore the Start9 and Community registries on servers missing either, such as some updated from 0.3.5 whose Marketplace showed no registries.
+
+- Support persistent kernel argument customizations across reboots and OS updates through administrator GRUB drop-ins.
+- Fix NVMe isolation tests retaining earlier settings, and add persistent PCIe-port power-management and combined tests with conflict detection.
+
+- After a StartOS update, the prompt to refresh the page appears once StartOS has finished starting, and no longer reappears after refreshing.
+
+- Allow proxied downloads and other outbound connections to use IPv4 while IPv6 DNS resolution is slow or failing.
+
+- Prevent failed service subcontainer starts from leaking processes that can exhaust memory and stall other services.
+
+## [0.4.2]
+
+### Added
+
+- Service actions can now let you upload and download files, with progress shown during uploads.
+
+### Fixed
+
+- Display apostrophes and other special characters correctly in action-form list headings.
+- Correct the maximum text-length error message.
+
+- Submitting an action's input no longer reloads the page.
+- Pressing Enter in SMTP settings saves changes instead of cancelling them; in the test-email field, it sends the email instead of reloading the page.
+
+- Long dropdown lists keep their background all the way down, so the page behind no longer shows through the options.
+
+- Show server-provided plaintext HTTP error details and preserve meaningful timeout and cancellation errors.
+
+- The installer no longer offers the USB drive it was booted from as the OS drive or the data drive.
+
+- Automatic firewall configuration (PCP) now opens IPv6 ports on home routers, so a public address published over IPv6 is reachable without a manual firewall rule.
+
+- Numeric forms preserve zero defaults and honor bounds set to zero.
+
+- Improved access to services through public domains over IPv6.
+- Service updates keep your public domains off if you switched them off.
+- For services that StartOS forwards directly, public domains and the public IP addresses they use now turn on and off together.
+
+- Preserve saved Ethernet and Wi-Fi settings across server restarts.
+
+- Improved wired network reliability on Server Pure.
+
+- Sideloaded packages appear in Installed services with upload progress before the upload finishes.
+
+- Show registry contact email addresses alongside GPG identities in Trusted Keys.
+
+- Record virtual-host client/service connection failures at trace level instead of flooding normal logs. Use `start-cli server set-log-level trace` for temporary `start-core`/`start-os` trace output, or choose `error`, `warn`, `info`, or `debug`. The startup log filter is restored when the daemon restarts.
+
+- Reject source-preserving proxy connections when the client's address cannot be preserved, instead of substituting the host's address. Services on unproxied TLS bindings need an IPv6 listener to accept IPv6 clients; TLS rejection does not trigger automatic IPv4 fallback.
+
+## [0.4.1.2]
+
+### Changed
+
+- Diagnostic updates honor your saved StartOS-update signing keys without needing the data drive. Accepting an untrusted signer requires an authenticated CLI running locally on the server.
+- Removed preseeded Alpha build keys from new installations and during migration; connected registries can offer those keys again for explicit trust.
+
+- Removed the Podman dependency from StartOS; legacy service conversion uses bundled system image archives offline.
+- Preserved images used only by legacy health checks or dependency configuration during conversion.
+
+- Reworked signing-key management makes it easier to see who signed packages and StartOS updates, inspect key details, and control trust separately for each in **System → Trusted Keys**. Manage registries and choose your StartOS update source under **System → Registries**. Keys listed by connected registries show their links and cannot be deleted while still listed.
+
+### Fixed
+
+- iPhones and iPads can install the Root CA of a server set up on StartOS 0.4.0 or 0.4.0.1. Its fingerprint changes on update, and devices that already trust it keep trusting the server.
+
+- Fixed migration from StartOS 0.3 and sideloading legacy service packages that use system images, including most services' backup procedures.
+
+## [0.4.1.1]
+
+### Fixed
+
+- Servers running StartOS 0.3.5 can update to this release.
+
+## [0.4.1]
+
+### Added
+
+- Added opt-in background conversion of existing backups to the authenticated filesystem format, with weighted overall progress, all phases listed upfront, explicit resumption after interruption, and success or failure notifications naming the target. Creating a backup offers to update this server’s older format or skip conversion; restoring marks each old-format server backup with an explanatory warning tag. Unconverted backups remain usable for backups and restores.
+
+- Added named read-only snapshots to the `startos-backup-fs` utility, with explicit creation, listing, deletion, and recovery mounts. Snapshots share unchanged data and retain earlier versions as the current backup changes; retention is managed manually.
+
+- Added bearer tokens for API clients that cannot sign requests: `start-cli auth token create --name <name>` prints a token once, and requests sent with `Authorization: Bearer <token>` authenticate as a session with that name, which the session list shows and can revoke. Tokens idle for 30 days are revoked like other sessions.
+
+- Added an MCP server at `/mcp`: AI agents and other MCP clients can call the StartOS API as tools over the streamable HTTP transport, authenticating with a bearer token from `start-cli auth token create`.
+
+- Added `package.exec` to the API, also offered as an MCP tool: it runs a command in a service's subcontainer to completion and returns its output and exit code, with optional standard input and a timeout.
+
+- Manage named trusted keyrings in a responsive System table with row edit/delete menus and independent package/OS trust switches. New keyrings trust packages only by default. Import Ed25519 public keys in PEM or armored GPG format, honoring revocations present in GPG exports and retaining full certificates with names and email addresses. Built-in keyrings stay first, with read-only names and no Delete option; either trust switch can still be changed.
+- Rename SSH Keys to SSH Access.
+- Show trusted package signers, block untrusted Marketplace installs, and require explicit confirmation before sideloading untrusted software.
+- Require trusted signers for CLI package installs and OS updates by default; `--trust` explicitly overrides signer trust while preserving signature and integrity checks.
+
+- Enable push from the Notifications settings modal to receive StartOS notifications while the UI is closed, including through browser-provided self-hosted UnifiedPush endpoints.
+
+- **Format a backup drive from StartOS.** `System > Create Backup` offers "Format a
+  drive", which erases a connected drive and leaves it with a single Btrfs partition
+  ready for backups. The drive holding StartOS or its data is refused. Also available
+  as `start-cli disk format`.
+
+- Included `lspci` and `lsusb` for PCI and USB hardware diagnostics.
+
+- Compatible security updates announced by your selected OS registry appear in Notifications and use browser push when enabled. Their Software Update link opens System → General.
+- Beta updates can replace an earlier build with the same OS version.
+
+### Changed
+
+- **The session API separates signed-in devices from bearer tokens.** `auth.session.list` returns sessions as `{ pubkeys, tokens }`, and `auth.session.kill` takes `pubkeys` and `tokens` in place of `ids`.
+
+- Store structurally typed keys without PEM armor while preserving existing sign-ins and trusted update signers during upgrades.
+
+- A service's Dependencies card shows the version of each dependency you have installed. A
+  dependency at an incompatible version opens the Marketplace on a compatible one.
+
+- Starting and loading health checks can show a clock while waiting for an external condition. All health statuses display nonempty service-provided messages as-is; empty messages use the status label.
+
+- Proxy plaintext service connections through StartOS when HTTP proxying is enabled. Applications see StartOS as the TCP peer; client IPs are available through `X-Forwarded-For` when forwarded-header generation is enabled.
+
+- Preserve client source IP addresses for raw TLS service connections that do not require HTTP proxying.
+
+### Fixed
+
+- Prevented stale backup data beyond a file's saved length from reappearing when the file grows after an interrupted write.
+
+- Allow retrying an interrupted first backup when no encryption key was saved, reclaiming its unusable encrypted data through the target trash.
+- Prevent concurrent first opens from publishing different encryption keys for the same backup store.
+
+- Reclaim unused data-drive chunks with an initial background Btrfs balance after upgrading and weekly maintenance thereafter.
+- Warn when data-drive metadata allocation space runs low, before services encounter write failures despite reported free space.
+
+- Network-folder backups and recovery accept dotted DNS hostnames. Bare computer names remain NetBIOS-only, and lookup errors identify the resolver used.
+
+- Accept subcontainer environment overrides through numbered `JSON_ENV_*` variables, including multiline values and variable removal.
+- Preserve multiline image environment defaults in `package attach`.
+- Respect explicit removal of `HOME` without restoring its default.
+
+- Show release highlights and their full-changelog link in the server's language before and after an update, with English fallback when a translation is unavailable.
+- Point the welcome notification's full-changelog link at the published changelog.
+
+- The server log records when no gateway grants a port mapping, with each gateway's reason, once per mapping until it is granted or its request changes.
+
+- Fixed dependency links leaving the Marketplace stuck loading.
+
+- Backups to network shares are much faster, especially over high-latency links such as remote sites reached through StartTunnel. Backup data is now written in large batches with many requests in flight, instead of waiting for a network round trip on each small write.
+
+- Updating from StartOS 0.3.5 carries each `.onion` address over on the ports it served there, including for services that finish migrating after Tor. An interface that had no Tor address on 0.3.5 gets none.
+
+- Commands run through `package attach` that read stdin to EOF finish after their input ends instead of hanging.
+
+- Fixed interface updates getting stuck after a StartOS update. The Refresh Needed dialog shows interface sync progress, offers Refresh after syncing completes, and provides recovery actions if syncing fails or stalls.
+
+- Fixed adding public domains through port-range interfaces in the web UI and CLI.
+- Enabled port ranges retain ownership of their configured domains when checking for duplicates.
+
+- Removing a gateway also clears the address choices services made on it.
+
+- Gateways selected for outbound traffic by the server or a service must be deselected before removal, preventing removal from cutting off outbound connectivity.
+
+- `start-container subcontainer exec` reports a command killed by a signal with the shell exit code (128 plus the signal number) instead of exiting 0 for SIGTERM or 1 for other signals.
+
+- Adding a tunnel reports an error after 30 seconds if its network interface remains unavailable, instead of waiting indefinitely.
+
+- The UI offers recovery actions when its cached copy is corrupted.
+- The UI picks up its own update sooner after a StartOS update.
+
+### Security
+
+- Strengthened backup encryption authentication and password-protected key wrapping, and removed backup encryption keys from process arguments and recovery errors. Authenticated current references reject substitutions of individual stored records; rollback to a genuine older complete backup view remains possible. Existing backups remain usable for backups and restores until explicit conversion. Conversion rewrites encrypted data, resumes after interruption, and prevents older StartOS releases from reading the converted target.
+
+- Enforce HTTP authentication on both plaintext and TLS service connections when an HTTP proxy authentication policy is configured.
+
+- Websites you visit can no longer use your browser to control a server that is being set up or is in diagnostic mode. During setup and diagnostics, open the server at its `.local` address or IP address. Thanks to dritzps for reporting this.
+
+- Update node-forge to 1.4.2.
+
+- Updated service-container system packages to include available Debian security fixes, including the Brotli decoder fix.
+
 ## [0.4.0.4]
 
 ### Fixed

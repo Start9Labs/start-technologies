@@ -4,6 +4,8 @@
 
 ---
 
+- [Overview](overview.md)
+
 # Getting Started
 
 - [Installing StartOS](installing-startos.md)
@@ -21,6 +23,7 @@
 - [Alternative Registries](alternative-registries.md)
 - [Installing](installing.md)
 - [Updating](updating.md)
+- [Uninstalling](uninstalling.md)
 - [Sideloading](sideloading.md)
 - [Flavors](flavors.md)
 - [Interfaces](interfaces.md)
@@ -68,14 +71,17 @@
 
 # System
 
+- [Notifications](notifications.md)
 - [Logs](logs.md)
 - [Server Name](server-name.md)
 - [SSH](ssh.md)
+- [Kernel Arguments](kernel-arguments.md)
 - [SMTP](smtp.md)
 - [WiFi](wifi.md)
 - [Internationalization](internationalization.md)
 - [Kiosk Mode](kiosk-mode.md)
 - [Updating StartOS](updating-startos.md)
+- [Trusted Keys](trusted-keys.md)
 - [Change Password](change-password.md)
 - [Forgot Password](forgot-password.md)
 

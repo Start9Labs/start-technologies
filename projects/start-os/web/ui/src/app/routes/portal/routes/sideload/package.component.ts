@@ -5,8 +5,13 @@ import {
   MarketplaceLinksComponent,
   MarketplaceReleaseNotesComponent,
 } from '@start9labs/marketplace'
-import { DialogService, EmptyPipe, MARKDOWN } from '@start9labs/shared'
-import { TuiTitle } from '@taiga-ui/core'
+import {
+  DialogService,
+  EmptyPipe,
+  i18nPipe,
+  MARKDOWN,
+} from '@start9labs/shared'
+import { TuiNotification, TuiTitle } from '@taiga-ui/core'
 import { TuiAvatar, TuiFade } from '@taiga-ui/kit'
 import { TuiHeader } from '@taiga-ui/layout'
 import { of } from 'rxjs'
@@ -25,10 +30,18 @@ import { MarketplacePkgSideload } from './sideload.utils'
       </span>
       <span tuiTitle tuiFade>{{ pkg().title }}</span>
       <span tuiAccessories>
-        <marketplace-controls [pkg]="pkg()" [file]="file()" />
         <ng-content />
       </span>
     </header>
+    @if (pkg().signatureDiagnostics.length) {
+      <div tuiNotification appearance="warning">
+        {{
+          'Some supplemental signature records could not be read and were ignored.'
+            | i18n
+        }}
+      </div>
+    }
+    <marketplace-controls [pkg]="pkg()" [file]="file()" />
     <marketplace-about [pkg]="pkg()" (static)="onStatic()" />
     <marketplace-release-notes [pkg]="pkg()" />
     @if (!(pkg().dependencyMetadata | empty)) {
@@ -62,20 +75,22 @@ import { MarketplacePkgSideload } from './sideload.utils'
     TuiAvatar,
     TuiTitle,
     TuiFade,
+    TuiNotification,
+    i18nPipe,
   ],
 })
 export class SideloadPackageComponent {
   private readonly dialog = inject(DialogService)
 
-  readonly pkg = input.required<MarketplacePkgSideload>()
-  readonly file = input.required<File>()
+  public readonly pkg = input.required<MarketplacePkgSideload>()
+  public readonly file = input.required<File>()
 
   onStatic() {
     this.dialog
       .openComponent(MARKDOWN, {
         label: 'License',
         size: 'l',
-        data: of(this.pkg()['license']),
+        data: of(this.pkg().fullLicense),
       })
       .subscribe()
   }

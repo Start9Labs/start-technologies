@@ -15,6 +15,7 @@ const mockDescription = {
 
 export namespace Mock {
   export const RegistryInfo: T.RegistryInfo = {
+    trustSigners: {},
     name: 'Start9 Registry',
     icon: REGISTRY_ICON,
     description:

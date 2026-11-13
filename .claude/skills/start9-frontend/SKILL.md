@@ -42,7 +42,7 @@ exactly what this skill exists to eliminate. Never guess a Taiga API: verify aga
 | `start-tunnel`         | `projects/start-tunnel/web`                     | 22      | 5.29  | **zoneless**               | dark                                 | yes (local dicts)  | JSON-RPC + PatchDB                                  |
 | `start-wrt`            | `projects/start-wrt/web`                        | 22      | 5.29  | **zoneless**               | dual (`TUI_DARK_MODE`)               | yes (local dicts)  | JSON-RPC, own HTTP stack, 5s polling                |
 | `brochure-marketplace` | `projects/brochure-marketplace`                 | 22      | 5.29  | zone.js (legacy)           | dark                                 | yes (shared)       | registry RPC direct                                 |
-| `start9-store`         | `ops/start9-store/web`                          | 22      | 5.29  | **zoneless**               | light                                | no                 | REST + Zod via `/api` BFF, **SSR**                  |
+| `start9-store`         | `ops/start9-store/web`                          | 22      | 5.32  | **zoneless**               | light                                | no                 | REST + Zod via `/api` BFF, **SSR**                  |
 | `ops-server`           | `ops/ops-server/web`                            | 22      | 5.29  | **zoneless**               | dark, `#07a4ff`, Montserrat          | no                 | REST `/_api`, same-origin Express                   |
 | `support-server`       | `ops/support-server/portal/web`                 | 22      | 5.29  | **zoneless**               | dual (theme setting), StartOS tokens | yes (local dicts)  | RPC `/api` + socket.io, same-origin; `mock/` in dev |
 | `start-equity`         | `ops/start-equity/web`                          | 22      | 5.29  | **zoneless**               | dual (OS, `TUI_DARK_MODE` toggle)    | no                 | REST `/_api`, same-origin Express; `MockApiService` |
@@ -153,11 +153,13 @@ providers: [ on a route     track $index [on entity lists]
 input<T | null>(null)       display: grid on :host of a wrapper around one child
 display: contents [on :host around one Taiga primitive]   outline: none
 [(tuiDropdownOpen)] [for a plain menu]                     .trim() [in a submit handler]
+box-shadow: 0 … rgb(        tui-icon { color              border-radius [on a hand-built pill/avatar/card]
 ```
 
 Softer review questions: does a `computed` just reshape for the template (→ pipe)? Is a value
 named but used once (→ inline)? Does a field alias a service's signal or a method wrap its call
 (→ expose the service to the template)? Do form controls rename the API's fields (→ same names,
 no mapping)? Is the same appearance/size attribute repeated (→ option provider)? Is there a
-second DOM for mobile (→ one DOM + `_mobile` CSS)? Did copy ship in Title Case (→ sentence
+second DOM for mobile (→ one DOM + `_mobile` CSS)? Does a light theme block reuse dark status
+text colours (→ Taiga light palette, see bootstrap.md)? Did copy ship in Title Case (→ sentence
 case)? Is a Taiga API used that you didn't verify against the docs?

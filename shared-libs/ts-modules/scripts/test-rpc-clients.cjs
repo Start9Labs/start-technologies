@@ -35,11 +35,13 @@ function harness(moduleOverrides = new Map()) {
       'HttpService',
       'AuthKeyService',
       'AuthService',
+      'ConfigService',
       'StaleUiService',
       'PATCH_CACHE',
       'RELATIVE_URL',
     ].map(name => [name, Symbol(name)]),
   )
+  dependencies.set(tokens.ConfigService, { gitHash: '' })
   const modules = new Map()
   const angular = {
     DOCUMENT: tokens.DOCUMENT,
@@ -72,6 +74,7 @@ function harness(moduleOverrides = new Map()) {
     }).outputText
     const shared = () => ({
       ...tokens,
+      ...load('shared-libs/ts-modules/shared/src/util/misc.util.ts'),
       pauseFor: async () => {},
       ...load('shared-libs/ts-modules/shared/src/types/rpc.types.ts'),
       ...load('shared-libs/ts-modules/shared/src/classes/rpc-error.ts'),
@@ -88,6 +91,8 @@ function harness(moduleOverrides = new Map()) {
         return { AuthService: tokens.AuthService }
       if (request.endsWith('http.service'))
         return { HttpService: tokens.HttpService }
+      if (request.endsWith('config.service'))
+        return { ConfigService: tokens.ConfigService }
       if (request.endsWith('stale-ui.service'))
         return { StaleUiService: tokens.StaleUiService }
       if (request.endsWith('patch-db-source'))
@@ -117,6 +122,7 @@ function harness(moduleOverrides = new Map()) {
         console: { ...console, error() {} },
         Buffer,
         URL,
+        structuredClone,
       },
       { filename },
     )
@@ -411,6 +417,89 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
   )
 })
 
+test('StartOS trust mock rejects whole batches and imports the requested trust atomically', async () => {
+  const storage = Symbol('session storage')
+  const ids = [
+    'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=',
+    'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
+    'MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=',
+  ]
+  const data = {
+    ui: {},
+    serverInfo: {
+      registries: { 'https://registry.test/': 'Registry' },
+      osRegistry: 'https://registry.test/',
+      registryKeys: { 'https://registry.test/': [ids[1]] },
+      trustedKeys: Object.fromEntries(
+        ids.map((id, index) => [
+          id,
+          {
+            publicKey: id,
+            name: `Key ${index}`,
+            origin: 'manual',
+            originRegistry: null,
+            gpgExports: [],
+            contact: [],
+            addedAt: '2026-01-01T00:00:00Z',
+            removable: false,
+            marketplace: false,
+            os: index === 2,
+          },
+        ]),
+      ),
+    },
+  }
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
+      ['src/app/utils/acme', {}],
+      ['./api.fixures', { Mock: {} }],
+      ['./mock-patch', { mockPatchData: data }],
+      ['./md-sample.md', ''],
+    ]),
+  )
+  dependencies.set(storage, null)
+  dependencies.set(tokens.AuthService, { isVerified$: of(true) })
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+  ).MockApiService)()
+  await client.rpc.db.subscribe({})
+  assert.equal(data.serverInfo.trustedKeys[ids[0]].removable, true)
+  assert.equal(data.serverInfo.trustedKeys[ids[1]].removable, false)
+  const original = JSON.stringify(data)
+  for (const requested of [
+    [ids[0], ids[1]],
+    [ids[0], ids[2]],
+    [ids[0], 'missing'],
+  ]) {
+    await assert.rejects(
+      client.rpc.server.trustedKeys.removeMany({ ids: requested }),
+    )
+    assert.equal(JSON.stringify(data), original)
+  }
+  const pem = `-----BEGIN PUBLIC KEY-----\n${ids[0]}\n-----END PUBLIC KEY-----\n`
+  await assert.rejects(
+    client.rpc.server.trustedKeys.add({
+      name: 'Publisher',
+      publicKeys: [pem, 'not a key'],
+      trustFor: 'os',
+    }),
+  )
+  assert.equal(JSON.stringify(data), original)
+  await client.rpc.server.trustedKeys.add({
+    name: 'Replacement',
+    publicKeys: [pem],
+    trustFor: 'os',
+  })
+  assert.equal(data.serverInfo.trustedKeys[ids[0]].name, 'Key 0')
+  assert.equal(data.serverInfo.trustedKeys[ids[0]].marketplace, false)
+  assert.equal(data.serverInfo.trustedKeys[ids[0]].os, true)
+  await client.rpc.server.trustedKeys.removeMany({ ids: [ids[0]] })
+  assert.equal(data.serverInfo.trustedKeys[ids[0]], undefined)
+  assert.equal(data.serverInfo.trustedKeys[ids[2]].os, true)
+})
+
 test('StartOS DNS mock updates the selected gateway using live gateway state', async () => {
   const storage = Symbol('session storage')
   const { dependencies, tokens, load } = harness(
@@ -418,7 +507,20 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
       ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: {} }],
-      ['./mock-patch', { mockPatchData: {} }],
+      [
+        './mock-patch',
+        {
+          mockPatchData: {
+            ui: {},
+            serverInfo: {
+              registries: {},
+              osRegistry: 'https://registry.test/',
+              trustedKeys: {},
+              registryKeys: {},
+            },
+          },
+        },
+      ],
       ['./md-sample.md', ''],
     ]),
   )

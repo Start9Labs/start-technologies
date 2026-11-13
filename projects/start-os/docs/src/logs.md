@@ -23,7 +23,7 @@ The view follows the end of the log, so new lines appear as they are written. Sc
 
 **Download**, at the bottom of any log view, saves the most recent 10,000 entries as an HTML file that opens in any browser, colored the same as it appears onscreen. The file is named for what it came from — `<service-id>-logs.html`, `os-logs.html`, or `kernel-logs.html`.
 
-Attach that file when you [contact support](https://start9.com/contact). It carries far more than the last error onscreen, and it is the fastest way to get an answer.
+Attach that file when you [ask for help](https://start9.com/help). It carries far more than the last error onscreen, and it is the fastest way to get an answer.
 
 ## From the Command Line
 
@@ -36,3 +36,19 @@ start-cli server kernel-logs
 ```
 
 In **Diagnostic Mode**, where StartOS has failed to start normally, the diagnostic page offers **View logs**. There is no download button there, so `start-cli diagnostic logs` is how to capture those. See the [FAQ](faq.md#startos-boots-into-diagnostic-mode).
+
+## Log Level
+
+Client and service connection failures, including refused backend ports and TLS errors, are logged at trace level rather than filling normal OS logs. Set the running daemon's verbosity with `start-cli server set-log-level <LEVEL>`, choosing `error`, `warn`, `info`, `debug`, or `trace`:
+
+```bash
+start-cli server set-log-level trace
+```
+
+Read the output in **System → OS Logs** or with `start-cli server logs --follow`. The selected level applies only to `start-core`/`start-os` code. Dependency logs keep their startup filter, which shows warnings and errors by default. Trace output can still contain sensitive details and substantial volume. Return to the packaged backend default after diagnosis:
+
+```bash
+start-cli server set-log-level debug
+```
+
+The setting lasts until the daemon restarts, when its startup filter, including any explicit `RUST_LOG` settings, is restored. More-specific startup directives retain their usual precedence. Explicit `debug`/`trace` directives for HTTP/WebSocket dependencies can feed their diagnostics back into followed logs. The command requires the same authentication as other server commands and changes no saved configuration.

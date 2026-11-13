@@ -23,7 +23,7 @@ config zone
 	option masq		1
 	option mtu_fix		1
 
-config forwarding
+config forwarding profile_lan_wan
 	option src		lan
 	option dest		wan
 

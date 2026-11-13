@@ -1,26 +1,25 @@
+use std::collections::HashSet;
 use std::ffi::OsString;
-use std::fs::File;
 use std::io;
-use std::io::Write;
-use std::os::fd::AsRawFd;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use chacha20::Key;
 use fuser::FileType;
 use log::error;
 use rand::rand_core::UnwrapErr;
 use rand::RngExt;
-use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
 
-use crate::atomic_file::AtomicFile;
 use crate::directory::{DirectoryContents, DirectoryEntry};
-use crate::error::{BkfsResult, BkfsResultExt};
+use crate::error::{BkfsError, BkfsResult, BkfsResultExt};
 use crate::inode::{Attributes, ContentId, FileData, Inode, InodeAttributes};
-use crate::seglog::{self, SegmentLog};
+use crate::references::StorageReferences;
+use crate::seglog::{self, RecordKey, SegmentLog};
+use crate::snapshot::{Catalog, Snapshot, SnapshotInfo};
 use crate::superblock::{Constants, Superblock};
-use crate::vault::EccParams;
+use crate::vault::{Binding, EccParams};
 use crate::{serde, BackupFSOptions, FUSE_ROOT_ID};
 
 #[derive(Clone)]
@@ -48,24 +47,24 @@ pub struct ControllerSeed {
     /// crash mid-rewrite converges to the newest replica on the next mount.
     sb_generation: AtomicU64,
     key: Key,
-    contents_dir: PathBuf,
-    dirents_dir: PathBuf,
+    format_version: u32,
+    catalog: Mutex<Catalog>,
     /// Log-structured inode store. Inodes are records here, not per-inode
     /// files. Behind a Mutex because the Controller is shared across the
     /// worker pool; sealing happens outside the lock (see `seglog`).
     log: Mutex<SegmentLog>,
-    /// Monotonic inode-number allocator. Seeded past the highest number ever
-    /// seen in the log at mount (ids are never reused), so a recovered
-    /// allocator can't collide with a surviving inode.
+    /// Seeded above the committed inode high-water mark.
     next_inode: AtomicU64,
-    /// Counts fast (non-durable) saves since the last syncfs. Both
-    /// dispatch-thread eviction and worker-thread content saves bump
-    /// this; when it reaches the batch threshold, the next caller
-    /// triggers a syncfs that flushes everything accumulated.
+    /// Content id whose block writes fail, for fault-injection tests.
+    #[cfg(test)]
+    fail_block_puts: AtomicU64,
+    /// Counts saves since the last commit.
     pending_saves: AtomicUsize,
-    /// Cached fd on the data dir for syncfs. Lazily opened and reused
-    /// so the batched syncfs path doesn't pay an open(2) on every call.
-    data_dir_fd: OnceLock<File>,
+    /// Saves after which a commit is due.
+    sync_batch: AtomicUsize,
+    /// Set once the batch threshold is reached; cleared by the next commit.
+    commit_due: AtomicBool,
+    chunks: Mutex<crate::chunks::ChunkCache>,
 }
 
 /// Dead-byte ratio above which a sealed segment is compacted on the next
@@ -82,41 +81,147 @@ fn compact_ratio() -> f64 {
     })
 }
 
+/// Live bytes a compaction pass may relocate when this mount appended fewer.
+/// `BACKUPFS_COMPACT_BUDGET` is in MiB.
+fn compact_budget() -> u64 {
+    use std::sync::OnceLock;
+    static BUDGET: OnceLock<u64> = OnceLock::new();
+    *BUDGET.get_or_init(|| {
+        std::env::var("BACKUPFS_COMPACT_BUDGET")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(256)
+            .saturating_mul(1 << 20)
+    })
+}
+
 impl Controller {
     pub fn new(config: BackupFSOptions) -> BkfsResult<Self> {
-        // The superblock is the anchor: it yields the master key and the
-        // authoritative format constants (validated/version-gated on open).
+        Self::open(config, None)
+    }
+
+    pub(crate) fn open(mut config: BackupFSOptions, snapshot: Option<&str>) -> BkfsResult<Self> {
+        if let Some(name) = snapshot {
+            crate::snapshot::validate_name(name)?;
+            config.readonly = true;
+        }
+        let password = Zeroizing::new(std::mem::take(&mut config.password));
         let superblock_path = config.data_dir.join("superblock");
         let t = std::time::Instant::now();
-        let sb = Superblock::open_or_create(&superblock_path, &config.password, config.readonly)?;
+        let sb = Superblock::open_or_create(&superblock_path, &password, config.readonly)?;
+        drop(password);
         log::info!("superblock opened in {:?}", t.elapsed());
+        if snapshot.is_some() && sb.format_version == 1 {
+            return Err(BkfsError::unsupported(
+                "convert this backup before using snapshots",
+            ));
+        }
         let key = sb.key;
         let constants = sb.constants;
-        // Opening the log replays existing segments, rebuilding the in-RAM
-        // index and the max-inode high-water mark. The segment size is pinned
-        // by the superblock, not the environment.
         let t = std::time::Instant::now();
-        let log = SegmentLog::open_sized(
+        let mut log = SegmentLog::open_format(
             config.data_dir.join("segments"),
             key,
             constants.segment_size,
+            constants.ecc(),
+            config.readonly,
+            sb.format_version,
         )?;
         log::info!("segment log opened in {:?}", t.elapsed());
-        let next_inode = (log.max_inode() + 1).max(FUSE_ROOT_ID + 1);
+        let next_inode = log.max_inode().saturating_add(1).max(FUSE_ROOT_ID + 1);
+        let catalog = Catalog::load(log.directory(), &key, log.catalog_reference())?;
+        log.pin(catalog.pins());
+        let snapshot = snapshot
+            .map(|name| {
+                catalog
+                    .entries
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| io::Error::from_raw_os_error(libc::ENOENT))
+            })
+            .transpose()?;
+        if let Some(snapshot) = &snapshot {
+            log.adopt_view(snapshot.index)?;
+        }
         Ok(Self(Arc::new(ControllerSeed {
             key,
-            contents_dir: config.data_dir.join("contents"),
-            dirents_dir: config.data_dir.join("dirents"),
+            format_version: sb.format_version,
+            catalog: Mutex::new(catalog),
             log: Mutex::new(log),
             next_inode: AtomicU64::new(next_inode),
             pending_saves: AtomicUsize::new(0),
-            data_dir_fd: OnceLock::new(),
+            sync_batch: AtomicUsize::new(crate::util::sync_batch()),
+            commit_due: AtomicBool::new(false),
+            chunks: Mutex::default(),
+            #[cfg(test)]
+            fail_block_puts: AtomicU64::new(u64::MAX),
             config,
             superblock_path,
             constants,
             created_unix: sb.created_unix,
             sb_generation: AtomicU64::new(sb.generation),
         })))
+    }
+
+    pub(crate) fn is_legacy(&self) -> bool {
+        self.0.format_version == 1
+    }
+
+    fn binding(&self) -> Binding {
+        if self.is_legacy() {
+            Binding::Legacy
+        } else {
+            Binding::Record
+        }
+    }
+
+    fn seal_record(&self, record: seglog::Record) -> BkfsResult<seglog::SealedRecord> {
+        seglog::seal_record(self.key(), self.ecc(), record, self.binding())
+    }
+
+    fn require_snapshots(&self) -> BkfsResult<()> {
+        if self.is_legacy() {
+            return Err(BkfsError::unsupported(
+                "convert this backup before using snapshots",
+            ));
+        }
+        Ok(())
+    }
+
+    /// The format-1 file holding a block or directory bucket.
+    fn legacy_object(&self, object: RecordKey) -> PathBuf {
+        crate::legacy::object_path(&self.0.config.data_dir, self.key(), object).expect("object key")
+    }
+
+    fn load_legacy_object(&self, object: RecordKey) -> BkfsResult<Option<Vec<u8>>> {
+        match std::fs::read(self.legacy_object(object)) {
+            Ok(blob) => Ok(Some(
+                crate::vault::open_bound(&blob, self.key(), Binding::Legacy)?.plaintext,
+            )),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Durability follows the next commit's backing barrier.
+    fn save_legacy_object(&self, object: RecordKey, plain: &[u8]) -> BkfsResult<()> {
+        use std::io::Write;
+        let sealed = crate::vault::seal_bound(plain, self.key(), self.ecc(), Binding::Legacy);
+        let mut file = crate::atomic_file::AtomicFile::create_buffered(self.legacy_object(object))?;
+        file.write_all(&sealed.bytes)?;
+        file.save_fast()?;
+        self.tick_save();
+        Ok(())
+    }
+
+    fn remove_legacy_object(&self, object: RecordKey) -> BkfsResult<()> {
+        self.check_rw()?;
+        match std::fs::remove_file(self.legacy_object(object)) {
+            Ok(()) => self.tick_save(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        Ok(())
     }
 
     /// ECC parameters for new writes, adopted from the superblock.
@@ -144,30 +249,21 @@ impl Controller {
         self.0.constants.dir_max_bucket as usize
     }
 
-    /// Append/replace an inode record in the log. `durable` fdatasyncs the
-    /// active segment before returning; otherwise durability rides the
-    /// batched syncfs. Sealing is done before taking the log lock.
-    pub fn log_put(&self, inode: Inode, attrs: &Attributes, durable: bool) -> BkfsResult<()> {
-        let rec = seglog::seal_inode(&self.key(), self.ecc(), inode, attrs)?;
-        let mut log = self.0.log.lock().unwrap();
-        log.append(&rec)?;
-        if durable {
-            log.sync()?;
-        }
-        Ok(())
+    /// Append/replace an inode record; the next commit publishes it.
+    pub fn log_put(&self, inode: Inode, attrs: &Attributes) -> BkfsResult<()> {
+        self.check_rw()?;
+        let rec = self.seal_record(seglog::Record::Inode {
+            inode: inode.0,
+            attrs: attrs.clone(),
+        })?;
+        self.0.log.lock().unwrap().append(&rec)
     }
 
-    /// Append a tombstone for `inode`. Callers that need the deletion durable
-    /// before removing the inode's content (block files / dir buckets) pass
-    /// `durable = true`.
-    pub fn log_tombstone(&self, inode: Inode, durable: bool) -> BkfsResult<()> {
-        let rec = seglog::seal_tombstone(&self.key(), self.ecc(), inode)?;
-        let mut log = self.0.log.lock().unwrap();
-        log.append(&rec)?;
-        if durable {
-            log.sync()?;
-        }
-        Ok(())
+    /// Removes the inode from the index at the next commit.
+    pub fn log_tombstone(&self, inode: Inode) -> BkfsResult<()> {
+        self.check_rw()?;
+        let rec = self.seal_record(seglog::Record::Tombstone { inode: inode.0 })?;
+        self.0.log.lock().unwrap().append(&rec)
     }
 
     pub fn log_load(&self, inode: Inode) -> BkfsResult<Option<Attributes>> {
@@ -186,18 +282,16 @@ impl Controller {
         id: ContentId,
         bytes: &[u8],
         codec: crate::compress::Codec,
-        durable: bool,
     ) -> BkfsResult<()> {
+        self.check_rw()?;
         // Compress before sealing (ciphertext is incompressible); the
         // extent's stored payload carries the compression tag.
         let stored = crate::compress::compress(bytes, codec);
-        let rec = seglog::seal_content(&self.key(), self.ecc(), id.0, &stored)?;
-        let mut log = self.0.log.lock().unwrap();
-        log.append(&rec)?;
-        if durable {
-            log.sync()?;
-        }
-        Ok(())
+        let rec = self.seal_record(seglog::Record::Content {
+            id: id.0,
+            bytes: stored,
+        })?;
+        self.0.log.lock().unwrap().append(&rec)
     }
 
     pub fn cpack_load(&self, id: ContentId) -> BkfsResult<Option<Vec<u8>>> {
@@ -212,14 +306,10 @@ impl Controller {
         }
     }
 
-    pub fn cpack_tombstone(&self, id: ContentId, durable: bool) -> BkfsResult<()> {
-        let rec = seglog::seal_content_tombstone(&self.key(), self.ecc(), id.0)?;
-        let mut log = self.0.log.lock().unwrap();
-        log.append(&rec)?;
-        if durable {
-            log.sync()?;
-        }
-        Ok(())
+    pub fn cpack_tombstone(&self, id: ContentId) -> BkfsResult<()> {
+        self.check_rw()?;
+        let rec = self.seal_record(seglog::Record::ContentTombstone { id: id.0 })?;
+        self.0.log.lock().unwrap().append(&rec)
     }
 
     /// Number of live inodes in the log index (used by tests to detect
@@ -232,12 +322,6 @@ impl Controller {
     #[cfg(test)]
     pub fn live_content_count(&self) -> usize {
         self.0.log.lock().unwrap().content_count()
-    }
-
-    /// No-op kept for the mount path: the log's replay (in `new`) already
-    /// rebuilt the index and the inode-number high-water mark.
-    pub fn load_inode_pool(&self) -> BkfsResult<()> {
-        Ok(())
     }
 
     /// Reclaim dead space in the log by compacting heavily-dead sealed
@@ -254,17 +338,18 @@ impl Controller {
         if ratio >= 1.0 {
             return Ok(0);
         }
-        self.0.log.lock().unwrap().compact(ratio)
+        let mut log = self.0.log.lock().unwrap();
+        let budget = compact_budget().max(log.appended());
+        log.compact(ratio, budget)
     }
 
-    /// Persist the in-RAM index checkpoint so the next mount can skip the log
-    /// replay. Best-effort and skipped on a read-only mount; a failure just
-    /// means the next mount replays as before.
+    /// Bounds replay work; the committed journal remains authoritative on failure.
     pub fn save_checkpoint(&self) {
         if self.0.config.readonly {
             return;
         }
-        if let Err(e) = self.0.log.lock().unwrap().save_checkpoint() {
+        let catalog = self.0.catalog.lock().unwrap();
+        if let Err(e) = self.0.log.lock().unwrap().close_session(&catalog.views()) {
             log::warn!("failed to write backup index checkpoint (non-fatal): {e}");
         }
     }
@@ -331,7 +416,7 @@ impl Controller {
             if !to_prune.is_empty() {
                 if let FileData::Directory(dir) = &mut inode.attrs.contents {
                     for name in &to_prune {
-                        dir.remove(self, inode.inode, name, true)?;
+                        dir.remove(self, inode.inode, name)?;
                     }
                 }
                 changed = true;
@@ -367,124 +452,303 @@ impl Controller {
             constants: self.0.constants,
             generation,
             created_unix: self.0.created_unix,
+            format_version: self.0.format_version,
+            migration_pending: false,
         };
         sb.persist(&self.0.superblock_path, password)
     }
 
     pub fn check_rw(&self) -> BkfsResult<()> {
-        if self.0.config.readonly {
-            BkfsResult::errno_notrace(libc::EROFS)
-        } else {
-            Ok(())
+        self.0.log.lock().unwrap().check_rw()
+    }
+
+    /// The stored block, or `None` for a hole.
+    pub(crate) fn block_load(&self, content: ContentId, idx: u64) -> BkfsResult<Option<Vec<u8>>> {
+        if self.is_legacy() {
+            return self.load_legacy_object(RecordKey::Block(content.0, idx));
         }
+        self.0.log.lock().unwrap().load_block(content.0, idx)
     }
 
-    /// Deterministic, key-dependent filename for content block
-    /// `(content, idx)`. The name is a keyed SHA-256 hash, so it leaks no
-    /// information about the inode or offset, yet is stable across runs —
-    /// editing one region of a file rewrites exactly one block file and
-    /// every other block keeps its name (the property that makes
-    /// rsync/rclone incremental copies cheap).
-    pub fn block_path(&self, content: ContentId, idx: u64) -> PathBuf {
-        // FROZEN as superblock `path_hash_scheme == 1`: the domain tag, the
-        // little-endian id encoding, and the 16-bit-dir / 112-bit-name split
-        // below all determine where bytes physically live and how reads find
-        // them. Changing any of it makes every existing block file
-        // unresolvable, so it must be gated by a FORMAT_VERSION /
-        // path_hash_scheme bump (validate-equality refuses a foreign scheme).
-        let mut hasher = Sha256::new();
-        hasher.update(self.0.key.as_slice());
-        hasher.update(b"block");
-        hasher.update(content.0.to_le_bytes());
-        hasher.update(idx.to_le_bytes());
-        let tag = hasher.finalize();
-        // 2-level layout: 16-bit bucket (≤65 536 dirs) + 112-bit filename.
-        // The 128-bit digest makes collisions cryptographically negligible.
-        let dir = u16::from_be_bytes([tag[0], tag[1]]);
-        let mut name = String::with_capacity(30);
-        for b in &tag[2..16] {
-            name.push_str(&format!("{b:02x}"));
+    /// Durability follows the next commit.
+    pub(crate) fn block_put(
+        &self,
+        content: ContentId,
+        idx: u64,
+        stored: Vec<u8>,
+    ) -> BkfsResult<()> {
+        self.check_rw()?;
+        #[cfg(test)]
+        if self.0.fail_block_puts.load(Ordering::SeqCst) == content.0 {
+            return BkfsResult::errno(libc::EIO);
         }
-        self.0.contents_dir.join(format!("{dir:04x}/{name}"))
-    }
-
-    /// Blocks have no legacy layout, so resolution is just [`Self::block_path`].
-    pub fn resolve_block_path(&self, content: ContentId, idx: u64) -> PathBuf {
-        self.block_path(content, idx)
-    }
-
-    /// Path of a spilled-directory bucket file, keyed by `(dir, gen, idx)`.
-    /// Part of FROZEN superblock `path_hash_scheme == 1` (see [`Self::block_path`]).
-    fn dir_bucket_path(&self, dir: Inode, gen: u64, idx: u32) -> PathBuf {
-        let mut hasher = Sha256::new();
-        hasher.update(self.0.key.as_slice());
-        hasher.update(b"dirbucket");
-        hasher.update(dir.0.to_le_bytes());
-        hasher.update(gen.to_le_bytes());
-        hasher.update(idx.to_le_bytes());
-        let tag = hasher.finalize();
-        let bucket = u16::from_be_bytes([tag[0], tag[1]]);
-        let mut name = String::with_capacity(30);
-        for b in &tag[2..16] {
-            name.push_str(&format!("{b:02x}"));
+        if self.is_legacy() {
+            return self.save_legacy_object(RecordKey::Block(content.0, idx), &stored);
         }
-        self.0.dirents_dir.join(format!("{bucket:04x}/{name}"))
+        let rec = seglog::seal_block(self.key(), self.ecc(), content.0, idx, stored)?;
+        self.0.log.lock().unwrap().append(&rec)?;
+        self.tick_save();
+        Ok(())
     }
 
-    /// Load one directory bucket; a missing file is an empty bucket.
+    pub(crate) fn block_remove(&self, content: ContentId, idx: u64) -> BkfsResult<()> {
+        if self.is_legacy() {
+            return self.remove_legacy_object(RecordKey::Block(content.0, idx));
+        }
+        if self
+            .0
+            .log
+            .lock()
+            .unwrap()
+            .remove(RecordKey::Block(content.0, idx))?
+        {
+            self.tick_save();
+        }
+        Ok(())
+    }
+
+    /// Makes block writes of one file fail until cleared.
+    #[cfg(test)]
+    pub(crate) fn fail_block_puts(&self, content: Option<ContentId>) {
+        self.0
+            .fail_block_puts
+            .store(content.map_or(u64::MAX, |c| c.0), Ordering::SeqCst);
+    }
+
+    /// Commits, then locates a block's frame in its segment file.
+    #[cfg(test)]
+    pub(crate) fn block_frame(&self, content: ContentId, idx: u64) -> (PathBuf, seglog::Location) {
+        let mut log = self.0.log.lock().unwrap();
+        log.sync().unwrap();
+        let loc = log.roots().blocks[&(content.0, idx)];
+        (seglog::segment_path(log.directory(), loc.segment), loc)
+    }
+
+    /// Bytes appended to segments since the store was opened.
+    #[cfg(test)]
+    pub(crate) fn appended_bytes(&self) -> u64 {
+        self.0.log.lock().unwrap().appended()
+    }
+
+    /// Forgets cached segment bytes after a test edits segment files.
+    #[cfg(test)]
+    pub(crate) fn drop_read_caches(&self) {
+        self.0.log.lock().unwrap().drop_read_caches();
+    }
+
+    /// Overwrites a committed block's frame so reading it fails.
+    #[cfg(test)]
+    pub(crate) fn corrupt_block(&self, content: ContentId, idx: u64) {
+        use std::os::unix::fs::FileExt;
+        let (path, loc) = self.block_frame(content, idx);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .write_all_at(&vec![0; loc.len as usize], loc.offset)
+            .unwrap();
+        self.drop_read_caches();
+    }
+
+    /// Block and directory-bucket records of the current view, by key.
+    #[cfg(test)]
+    pub(crate) fn indexed_storage(&self) -> std::collections::BTreeMap<String, (u64, u64, u32)> {
+        self.0
+            .log
+            .lock()
+            .unwrap()
+            .roots()
+            .entries()
+            .filter(|(key, _)| matches!(key, RecordKey::Block(..) | RecordKey::Bucket(..)))
+            .map(|(key, loc)| (format!("{key:?}"), (loc.segment, loc.offset, loc.len)))
+            .collect()
+    }
+
+    /// Whether the current view indexes the block.
+    #[cfg(test)]
+    pub(crate) fn block_exists(&self, content: ContentId, idx: u64) -> bool {
+        self.0
+            .log
+            .lock()
+            .unwrap()
+            .roots()
+            .blocks
+            .contains_key(&(content.0, idx))
+    }
+
+    /// Load one directory bucket; a missing bucket is empty.
     pub fn load_dir_bucket(
         &self,
         dir: Inode,
         gen: u64,
         idx: u32,
     ) -> BkfsResult<crate::directory::Bucket> {
-        match std::fs::read(self.dir_bucket_path(dir, gen, idx)) {
-            Ok(blob) => serde::deserialize_sealed(&blob, self.key()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Default::default()),
-            Err(e) => Err(e.into()),
+        let plain = if self.is_legacy() {
+            self.load_legacy_object(RecordKey::Bucket(dir.0, gen, idx))?
+        } else {
+            self.0.log.lock().unwrap().load_bucket(dir.0, gen, idx)?
+        };
+        match plain {
+            Some(plain) => serde::decode(&plain, serde::data_config()),
+            None => Ok(Default::default()),
         }
     }
 
     /// Persist one directory bucket. An empty bucket is removed rather than
-    /// written, so a bucket file exists iff it has entries.
+    /// written, so a bucket is indexed iff it has entries.
     pub fn save_dir_bucket(
         &self,
         dir: Inode,
         gen: u64,
         idx: u32,
         bucket: &crate::directory::Bucket,
-        durable: bool,
     ) -> BkfsResult<()> {
         self.check_rw()?;
         if bucket.is_empty() {
             return self.remove_dir_bucket(dir, gen, idx);
         }
-        let blob = serde::serialize_sealed(bucket, self.key(), self.ecc())?;
-        let mut file = AtomicFile::create_buffered(self.dir_bucket_path(dir, gen, idx))?;
-        file.write_all(&blob)?;
-        if durable {
-            file.save()
-        } else {
-            file.save_fast()?;
-            self.tick_save()?;
-            Ok(())
+        let plain = serde::encode(bucket, serde::data_config())?;
+        if self.is_legacy() {
+            return self.save_legacy_object(RecordKey::Bucket(dir.0, gen, idx), &plain);
         }
+        self.0
+            .log
+            .lock()
+            .unwrap()
+            .stage_bucket(dir.0, gen, idx, plain)?;
+        self.tick_save();
+        Ok(())
     }
 
-    /// Remove one directory bucket file, tolerating absence.
+    /// Remove one directory bucket, tolerating absence.
     pub fn remove_dir_bucket(&self, dir: Inode, gen: u64, idx: u32) -> BkfsResult<()> {
-        match std::fs::remove_file(self.dir_bucket_path(dir, gen, idx)) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.into()),
+        if self.is_legacy() {
+            return self.remove_legacy_object(RecordKey::Bucket(dir.0, gen, idx));
         }
+        if self
+            .0
+            .log
+            .lock()
+            .unwrap()
+            .remove(RecordKey::Bucket(dir.0, gen, idx))?
+        {
+            self.tick_save();
+        }
+        Ok(())
+    }
+
+    fn referenced_storage(
+        &self,
+        log: &SegmentLog,
+        roots: &seglog::Roots,
+    ) -> BkfsResult<(HashSet<RecordKey>, HashSet<u64>)> {
+        let mut keys = HashSet::new();
+        let mut packed = HashSet::new();
+        log.visit_records(
+            roots
+                .index
+                .iter()
+                .map(|(&inode, loc)| (RecordKey::Inode(inode), loc)),
+            |record| {
+                let seglog::Record::Inode { inode, attrs } = record else {
+                    return Err(crate::error::BkfsError::unsupported("invalid inode root"));
+                };
+                let references = StorageReferences::for_inode(inode, &attrs);
+                if let Some(content) = references.packed() {
+                    packed.insert(content);
+                }
+                references.visit(|key| {
+                    if roots.get(key).is_some() {
+                        keys.insert(key);
+                    }
+                });
+                Ok(())
+            },
+        )?;
+        Ok((keys, packed))
+    }
+
+    pub(crate) fn list_snapshots(&self) -> Vec<SnapshotInfo> {
+        self.0
+            .catalog
+            .lock()
+            .unwrap()
+            .entries
+            .values()
+            .map(|s| s.info.clone())
+            .collect()
+    }
+
+    pub(crate) fn create_snapshot(&self, name: &str) -> BkfsResult<SnapshotInfo> {
+        self.require_snapshots()?;
+        self.check_rw()?;
+        crate::snapshot::validate_name(name)?;
+        let mut catalog = self.0.catalog.lock().unwrap();
+        if catalog.entries.contains_key(name) {
+            return Err(io::Error::from_raw_os_error(libc::EEXIST).into());
+        }
+        let mut log = self.0.log.lock().unwrap();
+        let (ids, packed) = self.referenced_storage(&log, log.roots())?;
+        log.retain_storage(&ids, &packed)?;
+        let view = log
+            .save_checkpoint(&catalog.views())?
+            .ok_or_else(|| BkfsError::unsupported("snapshots require a converted backup"))?;
+        let info = SnapshotInfo {
+            name: name.to_owned(),
+            created_unix: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+        let mut next = catalog.clone();
+        next.entries.insert(
+            name.to_owned(),
+            Snapshot::new(info.clone(), view, log.roots()),
+        );
+        let reference = next.write(log.directory(), self.key(), self.ecc())?;
+        log.publish_catalog(reference, next.pins())?;
+        *catalog = next;
+        Ok(info)
+    }
+
+    pub(crate) fn delete_snapshot(&self, name: &str) -> BkfsResult<()> {
+        self.require_snapshots()?;
+        self.check_rw()?;
+        crate::snapshot::validate_name(name)?;
+        {
+            let mut catalog = self.0.catalog.lock().unwrap();
+            let mut next = catalog.clone();
+            if next.entries.remove(name).is_none() {
+                return Err(io::Error::from_raw_os_error(libc::ENOENT).into());
+            }
+            let mut log = self.0.log.lock().unwrap();
+            let reference = next.write(log.directory(), self.key(), self.ecc())?;
+            log.publish_catalog(reference, next.pins())?;
+            *catalog = next;
+        }
+        self.collect_garbage()?;
+        self.compact()?;
+        let catalog = self.0.catalog.lock().unwrap();
+        self.0
+            .log
+            .lock()
+            .unwrap()
+            .save_checkpoint(&catalog.views())?;
+        Ok(())
+    }
+
+    /// Drops index entries no current inode refers to.
+    pub(crate) fn collect_garbage(&self) -> BkfsResult<()> {
+        self.check_rw()?;
+        let mut log = self.0.log.lock().unwrap();
+        log.sync()?;
+        let (keys, packed) = self.referenced_storage(&log, log.roots())?;
+        log.retain_storage(&keys, &packed)?;
+        log.sync()
     }
 
     pub fn next_inode(&self) -> BkfsResult<Inode> {
         self.check_rw()?;
-        // Monotonic, never-reused. Needs no separate persistence: replay
-        // reseeds it past the highest inode ever recorded in the log, so a
-        // crash can never re-hand a number a surviving inode still uses.
         let id = self.0.next_inode.fetch_add(1, Ordering::Relaxed);
         if id == 0 || id == u64::MAX {
             return BkfsResult::errno(libc::EMFILE);
@@ -511,17 +775,10 @@ impl Controller {
         &self.0.config
     }
 
+    /// The next commit publishes the saved item.
     pub fn save<T: Save>(&self, item: T) -> BkfsResult<()> {
         self.check_rw()?;
         item.save(self)
-    }
-
-    /// As `save`, but skips per-file sync_all. The caller must account for
-    /// the write in `tick_save` (or call `syncfs` directly) so durability
-    /// eventually catches up.
-    pub fn save_fast<T: Save>(&self, item: T) -> BkfsResult<()> {
-        self.check_rw()?;
-        item.save_fast(self)
     }
 
     pub fn load<T: Load>(&self, args: T::Args<'_>) -> BkfsResult<T> {
@@ -532,67 +789,59 @@ impl Controller {
         T::exists(self, args)
     }
 
-    fn data_dir_fd(&self) -> io::Result<&File> {
-        if let Some(f) = self.0.data_dir_fd.get() {
-            return Ok(f);
-        }
-        let fd = File::open(&self.0.config.data_dir)?;
-        // Another thread may have raced us; either outcome is fine,
-        // the loser drops its fd.
-        let _ = self.0.data_dir_fd.set(fd);
-        Ok(self.0.data_dir_fd.get().unwrap())
-    }
-
-    /// Flush the entire backing filesystem's page cache and device
-    /// write cache. One syncfs replaces many per-file fsync calls when
-    /// batching writes with `save_fast`.
+    /// Publishes everything logged so far. Callers outside the format-1
+    /// barriers must log a consistent filesystem first; see
+    /// [`crate::handle::Handler::flush_all_dirty`].
     pub fn syncfs(&self) -> io::Result<()> {
-        let fd = self.data_dir_fd()?.as_raw_fd();
-        // Zero the pending counter under the same call — any races
-        // just cause an extra syncfs later, which is harmless.
+        self.chunk_cache()
+            .stage(self)
+            .map_err(|error| io::Error::from_raw_os_error(error.to_errno_log()))?;
         self.0.pending_saves.store(0, Ordering::Relaxed);
-        // SAFETY: fd is a valid fd we own (held in data_dir_fd).
-        if unsafe { libc::syncfs(fd) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
+        self.0.commit_due.store(false, Ordering::Relaxed);
+        self.0
+            .log
+            .lock()
+            .unwrap()
+            .sync()
+            .map_err(|error| io::Error::from_raw_os_error(error.to_errno_log()))
     }
 
-    /// Batch threshold for group-commit. Overridden via
-    /// `BACKUPFS_SYNC_BATCH`. Larger batches amortize more per-fsync
-    /// cost but widen the durability window.
-    fn sync_batch() -> usize {
-        static BATCH: OnceLock<usize> = OnceLock::new();
-        *BATCH.get_or_init(|| {
-            std::env::var("BACKUPFS_SYNC_BATCH")
-                .ok()
-                .and_then(|s| s.parse::<usize>().ok())
-                .filter(|&n| n > 0)
-                .unwrap_or(256)
-        })
-    }
-
-    /// Account for one fast save. When the batch threshold is reached,
-    /// issue a syncfs that flushes everything accumulated.
-    pub fn tick_save(&self) -> io::Result<()> {
-        let n = self.0.pending_saves.fetch_add(1, Ordering::Relaxed) + 1;
-        if n >= Self::sync_batch() {
+    /// Commits a format-1 store. Format-1 object removals take effect immediately.
+    pub(crate) fn sync_legacy(&self) -> BkfsResult<()> {
+        if self.is_legacy() {
             self.syncfs()?;
         }
         Ok(())
+    }
+
+    /// Counts one save toward the commit batch threshold.
+    pub fn tick_save(&self) {
+        if self.is_legacy() {
+            self.0.log.lock().unwrap().note_data_write();
+        }
+        let n = self.0.pending_saves.fetch_add(1, Ordering::Relaxed) + 1;
+        if n >= self.0.sync_batch.load(Ordering::Relaxed) {
+            self.0.commit_due.store(true, Ordering::Relaxed);
+        }
+    }
+
+    pub(crate) fn chunk_cache(&self) -> std::sync::MutexGuard<'_, crate::chunks::ChunkCache> {
+        self.0.chunks.lock().unwrap()
+    }
+
+    /// Whether enough saves have accumulated for the next request boundary to commit.
+    pub fn commit_due(&self) -> bool {
+        self.0.commit_due.load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_sync_batch(&self, saves: usize) {
+        self.0.sync_batch.store(saves, Ordering::Relaxed);
     }
 }
 
 pub trait Save {
     fn save(self, ctrl: &Controller) -> BkfsResult<()>;
-    /// Save without sync_all. Default falls back to `save`; implement
-    /// this for types whose save path supports the fast variant.
-    fn save_fast(self, ctrl: &Controller) -> BkfsResult<()>
-    where
-        Self: Sized,
-    {
-        self.save(ctrl)
-    }
 }
 
 pub trait Load: Sized {

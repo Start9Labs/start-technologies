@@ -44,6 +44,14 @@ Assign a custom name to easily identify this device. If left empty, the device's
 
 Reserve an IP address to assign a fixed IPv4 address that won't change between reboots. Useful for servers, printers, NAS devices, or anything you need to access by a consistent IP address. IPv6 addresses cannot be reserved: each device chooses its own IPv6 address, so the router has no say in it.
 
+### Permissions
+
+**Allow automatic port forwarding**: Lets this device open and renew its own port forwards via UPnP/PCP (used by StartOS servers, game consoles, and similar). Off by default; active forwards appear on the Published Ports page.
+
+**Allow DNS record publishing**: Lets this device publish DNS names for itself into the router, so every device on your network can resolve them (used by StartOS servers for private domains). Off by default; published names appear below the settings.
+
+**Allow IPv6 router advertisements**: Lets this device announce IPv6 routes to your other devices (needed by Thread border routers such as an Apple TV, HomePod, or Home Assistant). Off by default.
+
 ### Forget
 
 Removes an offline device from your device list. Any custom name or reserved IP settings will be lost. If the device reconnects, it will appear as a new device.`,
@@ -51,7 +59,7 @@ Removes an offline device from your device list. Any custom name or reserved IP 
 
 ### Port
 
-The physical Ethernet port identifier (e.g., eth0, eth1).
+The physical port: an Ethernet port (e.g., eth0, eth1), or a USB port with a USB Ethernet adapter (e.g., usb_eth0). A USB port appears the first time a network device is plugged into it, and keeps its profile while nothing is plugged in. Each port of a USB hub is a USB port of its own. A USB port with no adapter plugged in can be removed.
 
 ### Security Profile
 
@@ -59,7 +67,7 @@ The default security profile assigned to devices connected via the specified Eth
 
 ### WAN
 
-The Wide Area Network (WAN) port connects to your ISP modem or upstream network. Only one Ethernet port can be designated as WAN at a time.
+The Wide Area Network (WAN) port connects to your ISP modem or upstream network. Only one Ethernet port can be designated as WAN at a time. The WAN port must be an Ethernet port.
 
 ### Change WAN Port
 
@@ -180,14 +188,14 @@ Outbound VPNs route your internet traffic through encrypted tunnels to remote se
 
 ### VPN Chaining
 
-Route one VPN through another for additional privacy. Your traffic exits through multiple servers, making it harder to trace back to you. Note that chaining increases latency.
+Route one VPN through another for additional privacy. Your traffic passes through multiple servers, making it harder to trace back to you. Note that chaining increases latency.
 
 ### Getting Started
 
 Upload a WireGuard configuration file from your VPN provider (Mullvad, ProtonVPN, IVPN, etc.) to create a new VPN client.`,
   '/outbound/vpn': `## Outbound VPNs
 
-<details><summary>Label</summary> A friendly name to identify this VPN connection. Use something descriptive like "Mullvad Sweden" or "Work VPN". </details> <details><summary>Connects to</summary> Where traffic from this VPN should be routed:<ul><li><b>Internet:</b> Traffic exits directly to the internet through this VPN.</li><li><b>Another VPN:</b> Chain through another VPN first for extra privacy. Your traffic will be encrypted multiple times and exit through multiple servers.</li></ul><b>Note:</b> Chaining VPNs increases latency and may reduce speeds. </details> <details><summary>DNS Servers</summary> Resolvers reached through the tunnel by profiles routed through this VPN that have no DNS servers of their own. Leave blank to use the system's custom DNS servers through the tunnel — or, when the system uses your ISP's DNS, your ISP's servers outside it. </details> <details><summary>Connection Path</summary> Shows the full route your traffic takes from this VPN to the internet. For example: Mullvad → Proton → Internet means traffic is encrypted by Mullvad, sent through Proton, then exits to the internet.</details>`,
+<details><summary>Label</summary> A friendly name to identify this VPN connection. Use something descriptive like "Mullvad Sweden" or "Work VPN". </details> <details><summary>Connects via</summary> How this VPN reaches its own VPN server:<ul><li><b>Internet:</b> Directly over the internet.</li><li><b>Another VPN:</b> Through the other VPN's tunnel, for extra privacy. Your traffic is encrypted multiple times and passes through multiple servers, then leaves for the internet from this VPN's server.</li></ul><b>Note:</b> Chaining VPNs increases latency and may reduce speeds. </details> <details><summary>DNS Servers</summary> Resolvers reached through the tunnel by profiles routed through this VPN that have no DNS servers of their own. Leave blank to use the system's custom DNS servers through the tunnel — or, when the system uses your ISP's DNS, your ISP's servers outside it. </details> <details><summary>Connection Path</summary> Shows the encrypted tunnels your traffic travels through on its way to the internet. Each tunnel starts at the router and ends at its VPN server. When this VPN connects through another, its tunnel runs inside the other one: that VPN's server opens the outer tunnel and passes the inner one on to this VPN's server, where your traffic leaves for the internet.</details>`,
   '/outbound/dialog': `## Outbound VPNs
 
 VPN clients create an outbound connection to a VPN server, allowing devices to send and receive data as if they were directly connected to the private network. Masks your IP address, bypasses geographic restrictions, and protects sensitive data on public Wi-Fi networks.
@@ -200,9 +208,9 @@ A clear and descriptive name for the VPN connection, such as "Mullvad Sweden" or
 
 Upload a WireGuard **.conf** file from your VPN provider. This file contains the server address, keys, and connection settings needed to establish the tunnel. Most providers (Mullvad, ProtonVPN, IVPN, etc.) offer WireGuard config file downloads from their website or app.
 
-### Target
+### Connects via
 
-The next hop in the path of a layered VPN connection.
+How this VPN reaches its own VPN server: directly over the Internet, or through another VPN's tunnel.
 
 ### DNS Servers
 
@@ -409,11 +417,11 @@ Advanced options for power users. LuCI provides direct access to OpenWRT configu
 
 ### Create Backup
 
-Download a backup of all router settings, including security profiles, WiFi configuration, SSL certificates, and system preferences. Store the backup file in a safe location.
+Download a backup of all router settings, including security profiles, WiFi configuration, SSL certificates, and system preferences. The backup is encrypted with your admin password. Store the backup file in a safe location.
 
 ### Restore Backup
 
-Upload a previously created backup file to restore all settings. The router will reboot after restoring and all current settings will be overwritten.`,
+Upload a previously created backup file to restore all settings. Enter the admin password in effect when the backup was created. The router will reboot after restoring and all current settings will be overwritten.`,
   '/settings/general': `## Settings – General
 
 <details><summary>Preferences</summary> General preferences for the router's user interface and behavior.<h3>Theme</h3>Choose from dark or light theme, or keep your system settings applied to the UI.<h3>Language</h3>Configure the preferred language for the user interface of the router. This setting affects the language displayed for all menus, options, and other text elements within the router's web interface.<h3>Timezone</h3>Set the local timezone for the router. This affects scheduled events such as WAN blackout windows and WiFi blackout schedules. </details> <details><summary>Remote Access</summary> Enables remote access to manage the router's settings and configurations from outside the local network.<ul><li><b>When behind NAT</b> (Network Address Translation): Allows remote access only when the router is part of a private network using NAT. NAT is commonly used in home and small business networks where multiple devices share a single public IP address.</li><li><b>Never:</b> Completely disables remote access. Suitable for environments where security is paramount, such as in highly sensitive or isolated networks.</li><li><b>Always:</b> Enables remote access at all times. Ideal for environments where continuous remote management is necessary, such as in a business network where IT administrators need to maintain constant access to the router for monitoring and updates.</li></ul></details><details><summary>Security</summary> Download your Root CA certificate to trust HTTPS connections from additional devices. Installing this certificate allows browsers and apps to verify the router's identity without security warnings. </details> <details><summary>Updates</summary> When an update is available, a banner will appear at the top of this page. You can view release notes before updating. The router will experience brief downtime during the update process.</details>`,
@@ -451,22 +459,22 @@ The start and end times for the blackout period. WiFi will be disabled between t
 Select which days of the week the blackout window should be active.`,
   '/wifi/passwords': `## Wi-Fi – Passwords
 
-Manage wireless network passwords. Each entry represents a Wi-Fi network with its own password and security profile controlling access permissions.
+Manage wireless network passwords. Every password joins the same Wi-Fi network, named under Wi-Fi › Settings. The password a device connects with decides its security profile.
 
 ### Security Profile
 
 Controls what the connected device can access on the network. Assign a security profile to limit or grant access to specific resources.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Passwords
 
-Each entry represents a Wi-Fi network with its own password and security profile controlling access permissions.
+Every password joins the same Wi-Fi network, named under Wi-Fi › Settings. The password a device connects with decides its security profile.
 
 ### Label
 
-A descriptive name for this Wi-Fi network, such as "Home" or "Guest Network". This is the network name (SSID) that devices will see.
+A descriptive name for this password, such as "Home" or "Guest Network". It appears only in this interface; devices never see it.
 
 ### Password
 
-The password devices will use to connect. Must be at least 8 characters. Use the generate button to create a strong random password.
+The password devices will use to connect. Must be at least 8 characters. Use the generate button to create a strong random password. Changing a password may briefly disconnect all Wi-Fi devices. Devices using the old password must reconnect with the new one.
 
 ### Security Profile
 

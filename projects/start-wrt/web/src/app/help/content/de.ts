@@ -44,6 +44,14 @@ Vergeben Sie einen benutzerdefinierten Namen, um dieses Gerät einfach zu identi
 
 Reservieren Sie eine IP-Adresse, um eine feste IPv4-Adresse zuzuweisen, die sich zwischen Neustarts nicht ändert. Nützlich für Server, Drucker, NAS-Geräte oder alles, was Sie über eine gleichbleibende IP-Adresse erreichen müssen. IPv6-Adressen können nicht reserviert werden: Jedes Gerät wählt seine IPv6-Adresse selbst, der Router hat darauf keinen Einfluss.
 
+### Berechtigungen
+
+**Automatische Portweiterleitung erlauben**: Erlaubt diesem Gerät, eigene Portweiterleitungen über UPnP/PCP zu öffnen und zu erneuern (genutzt von StartOS-Servern, Spielkonsolen und Ähnlichem). Standardmäßig aus; aktive Weiterleitungen erscheinen auf der Seite „Veröffentlichte Ports“.
+
+**DNS-Einträge veröffentlichen erlauben**: Erlaubt diesem Gerät, DNS-Namen für sich selbst im Router zu veröffentlichen, sodass jedes Gerät in Ihrem Netzwerk sie auflösen kann (von StartOS-Servern für private Domains genutzt). Standardmäßig aus; veröffentlichte Namen erscheinen unterhalb der Einstellungen.
+
+**IPv6-Router-Advertisements erlauben**: Erlaubt diesem Gerät, Ihren anderen Geräten IPv6-Routen anzukündigen (erforderlich für Thread-Border-Router wie Apple TV, HomePod oder Home Assistant). Standardmäßig aus.
+
 ### Entfernen
 
 Entfernt ein Offline-Gerät aus Ihrer Geräteliste. Alle benutzerdefinierten Namen oder reservierten IP-Einstellungen gehen dabei verloren. Verbindet sich das Gerät erneut, erscheint es als neues Gerät.`,
@@ -51,7 +59,7 @@ Entfernt ein Offline-Gerät aus Ihrer Geräteliste. Alle benutzerdefinierten Nam
 
 ### Port
 
-Die Kennung des physischen Ethernet-Ports (z. B. eth0, eth1).
+Der physische Port: ein Ethernet-Port (z. B. eth0, eth1) oder ein USB-Port mit einem USB-Ethernet-Adapter (z. B. usb_eth0). Ein USB-Port erscheint, sobald zum ersten Mal ein Netzwerkgerät daran angeschlossen wird, und behält sein Profil, auch wenn nichts angeschlossen ist. Jeder Anschluss eines USB-Hubs ist ein eigener USB-Port. Ein USB-Port ohne angeschlossenen Adapter kann entfernt werden.
 
 ### Sicherheitsprofil
 
@@ -59,7 +67,7 @@ Das standardmäßige Sicherheitsprofil, das Geräten zugewiesen wird, die über 
 
 ### WAN
 
-Der WAN-Port (Wide Area Network) verbindet sich mit dem Modem Ihres ISP oder dem vorgelagerten Netzwerk. Es kann immer nur ein Ethernet-Port als WAN festgelegt werden.
+Der WAN-Port (Wide Area Network) verbindet sich mit dem Modem Ihres ISP oder dem vorgelagerten Netzwerk. Es kann immer nur ein Ethernet-Port als WAN festgelegt werden. Der WAN-Port muss ein Ethernet-Port sein.
 
 ### WAN-Port ändern
 
@@ -180,14 +188,14 @@ Ausgehende VPNs leiten Ihren Internetverkehr durch verschlüsselte Tunnel zu ent
 
 ### VPN-Verkettung
 
-Leiten Sie ein VPN durch ein anderes für zusätzliche Privatsphäre. Ihr Datenverkehr verlässt das Netz über mehrere Server, wodurch es schwieriger wird, ihn bis zu Ihnen zurückzuverfolgen. Beachten Sie, dass die Verkettung die Latenz erhöht.
+Leiten Sie ein VPN durch ein anderes für zusätzliche Privatsphäre. Ihr Datenverkehr läuft über mehrere Server, wodurch es schwieriger wird, ihn bis zu Ihnen zurückzuverfolgen. Beachten Sie, dass die Verkettung die Latenz erhöht.
 
 ### Erste Schritte
 
 Laden Sie eine WireGuard-Konfigurationsdatei von Ihrem VPN-Anbieter (Mullvad, ProtonVPN, IVPN usw.) hoch, um einen neuen VPN-Client zu erstellen.`,
   '/outbound/vpn': `## Ausgehende VPNs
 
-<details><summary>Bezeichnung</summary> Ein einprägsamer Name zur Identifizierung dieser VPN-Verbindung. Verwenden Sie etwas Aussagekräftiges wie „Mullvad Schweden“ oder „Arbeits-VPN“. </details> <details><summary>Verbindet sich mit</summary> Wohin der Datenverkehr von diesem VPN geleitet werden soll:<ul><li><b>Internet:</b> Der Datenverkehr gelangt über dieses VPN direkt ins Internet.</li><li><b>Ein weiteres VPN:</b> Zuerst durch ein weiteres VPN verketten für zusätzliche Privatsphäre. Ihr Datenverkehr wird mehrfach verschlüsselt und verlässt das Netz über mehrere Server.</li></ul><b>Hinweis:</b> Das Verketten von VPNs erhöht die Latenz und kann die Geschwindigkeit verringern. </details> <details><summary>DNS-Server</summary> Resolver, die über dieses VPN geroutete Profile ohne eigene DNS-Server durch den Tunnel erreichen. Leer lassen, um die benutzerdefinierten DNS-Server des Systems durch den Tunnel zu nutzen – oder, wenn das System das DNS Ihres Internetanbieters verwendet, dessen Server außerhalb des Tunnels. </details> <details><summary>Verbindungspfad</summary> Zeigt den vollständigen Weg, den Ihr Datenverkehr von diesem VPN ins Internet nimmt. Zum Beispiel: Mullvad → Proton → Internet bedeutet, dass der Datenverkehr von Mullvad verschlüsselt, durch Proton gesendet wird und dann ins Internet gelangt.</details>`,
+<details><summary>Bezeichnung</summary> Ein einprägsamer Name zur Identifizierung dieser VPN-Verbindung. Verwenden Sie etwas Aussagekräftiges wie „Mullvad Schweden“ oder „Arbeits-VPN“. </details> <details><summary>Verbindet sich über</summary> Wie dieses VPN seinen eigenen VPN-Server erreicht:<ul><li><b>Internet:</b> Direkt über das Internet.</li><li><b>Ein weiteres VPN:</b> Durch den Tunnel des anderen VPN, für zusätzliche Privatsphäre. Ihr Datenverkehr wird mehrfach verschlüsselt, läuft über mehrere Server und gelangt dann vom Server dieses VPN ins Internet.</li></ul><b>Hinweis:</b> Das Verketten von VPNs erhöht die Latenz und kann die Geschwindigkeit verringern. </details> <details><summary>DNS-Server</summary> Resolver, die über dieses VPN geroutete Profile ohne eigene DNS-Server durch den Tunnel erreichen. Leer lassen, um die benutzerdefinierten DNS-Server des Systems durch den Tunnel zu nutzen – oder, wenn das System das DNS Ihres Internetanbieters verwendet, dessen Server außerhalb des Tunnels. </details> <details><summary>Verbindungspfad</summary> Zeigt die verschlüsselten Tunnel, durch die Ihr Datenverkehr auf dem Weg ins Internet läuft. Jeder Tunnel beginnt am Router und endet an seinem VPN-Server. Wenn dieses VPN über ein anderes verbindet, verläuft sein Tunnel innerhalb des anderen: Der Server jenes VPN öffnet den äußeren Tunnel und leitet den inneren an den Server dieses VPN weiter, wo Ihr Datenverkehr ins Internet gelangt.</details>`,
   '/outbound/dialog': `## Ausgehende VPNs
 
 VPN-Clients stellen eine ausgehende Verbindung zu einem VPN-Server her und ermöglichen es Geräten, Daten so zu senden und zu empfangen, als wären sie direkt mit dem privaten Netzwerk verbunden. Verbirgt Ihre IP-Adresse, umgeht geografische Beschränkungen und schützt sensible Daten in öffentlichen Wi-Fi-Netzwerken.
@@ -200,9 +208,9 @@ Ein klarer und aussagekräftiger Name für die VPN-Verbindung, etwa „Mullvad S
 
 Laden Sie eine WireGuard- **.conf** -Datei von Ihrem VPN-Anbieter hoch. Diese Datei enthält die Serveradresse, die Schlüssel und die Verbindungseinstellungen, die zum Aufbau des Tunnels erforderlich sind. Die meisten Anbieter (Mullvad, ProtonVPN, IVPN usw.) bieten WireGuard-Konfigurationsdateien zum Download auf ihrer Website oder in ihrer App an.
 
-### Ziel
+### Verbindet sich über
 
-Der nächste Knoten im Pfad einer mehrschichtigen VPN-Verbindung.
+Wie dieses VPN seinen eigenen VPN-Server erreicht: direkt über das Internet oder durch den Tunnel eines anderen VPN.
 
 ### DNS-Server
 
@@ -409,11 +417,11 @@ Erweiterte Optionen für fortgeschrittene Benutzer. LuCI bietet direkten Zugriff
 
 ### Sicherung erstellen
 
-Laden Sie eine Sicherung aller Router-Einstellungen herunter, einschließlich Sicherheitsprofilen, WiFi-Konfiguration, SSL-Zertifikaten und Systemeinstellungen. Bewahren Sie die Sicherungsdatei an einem sicheren Ort auf.
+Laden Sie eine Sicherung aller Router-Einstellungen herunter, einschließlich Sicherheitsprofilen, WiFi-Konfiguration, SSL-Zertifikaten und Systemeinstellungen. Die Sicherung wird mit Ihrem Administrator-Passwort verschlüsselt. Bewahren Sie die Sicherungsdatei an einem sicheren Ort auf.
 
 ### Sicherung wiederherstellen
 
-Laden Sie eine zuvor erstellte Sicherungsdatei hoch, um alle Einstellungen wiederherzustellen. Der Router wird nach der Wiederherstellung neu gestartet, und alle aktuellen Einstellungen werden überschrieben.`,
+Laden Sie eine zuvor erstellte Sicherungsdatei hoch, um alle Einstellungen wiederherzustellen. Geben Sie das Administrator-Passwort ein, das beim Erstellen der Sicherung galt. Der Router wird nach der Wiederherstellung neu gestartet, und alle aktuellen Einstellungen werden überschrieben.`,
   '/settings/general': `## Einstellungen – Allgemein
 
 <details><summary>Einstellungen</summary> Allgemeine Einstellungen für die Benutzeroberfläche und das Verhalten des Routers.<h3>Design</h3>Wählen Sie zwischen dunklem oder hellem Design, oder behalten Sie die für die Benutzeroberfläche übernommenen Systemeinstellungen bei.<h3>Sprache</h3>Konfigurieren Sie die bevorzugte Sprache für die Benutzeroberfläche des Routers. Diese Einstellung beeinflusst die für alle Menüs, Optionen und sonstigen Textelemente angezeigte Sprache innerhalb der Weboberfläche des Routers.<h3>Zeitzone</h3>Legen Sie die lokale Zeitzone für den Router fest. Dies beeinflusst geplante Ereignisse wie WAN-Sperrzeiten und WiFi-Sperrzeitpläne. </details> <details><summary>Fernzugriff</summary> Ermöglicht den Fernzugriff zur Verwaltung der Einstellungen und Konfigurationen des Routers von außerhalb des lokalen Netzwerks.<ul><li><b>Wenn hinter NAT</b> (Network Address Translation): Erlaubt den Fernzugriff nur, wenn der Router Teil eines privaten Netzwerks ist, das NAT verwendet. NAT wird häufig in Heim- und Kleinunternehmensnetzwerken eingesetzt, in denen sich mehrere Geräte eine einzige öffentliche IP-Adresse teilen.</li><li><b>Nie:</b> Deaktiviert den Fernzugriff vollständig. Geeignet für Umgebungen, in denen Sicherheit oberste Priorität hat, etwa in hochsensiblen oder isolierten Netzwerken.</li><li><b>Immer:</b> Aktiviert den Fernzugriff jederzeit. Ideal für Umgebungen, in denen kontinuierliche Fernverwaltung erforderlich ist, etwa in einem Unternehmensnetzwerk, in dem IT-Administratoren ständigen Zugriff auf den Router für Überwachung und Aktualisierungen benötigen.</li></ul></details><details><summary>Sicherheit</summary> Laden Sie Ihr Root-CA-Zertifikat herunter, um HTTPS-Verbindungen von weiteren Geräten zu vertrauen. Durch die Installation dieses Zertifikats können Browser und Apps die Identität des Routers ohne Sicherheitswarnungen überprüfen. </details> <details><summary>Aktualisierungen</summary> Wenn eine Aktualisierung verfügbar ist, erscheint oben auf dieser Seite ein Banner. Sie können vor dem Aktualisieren die Versionshinweise einsehen. Der Router ist während des Aktualisierungsvorgangs kurzzeitig nicht erreichbar.</details>`,
@@ -453,22 +461,22 @@ Die Start- und Endzeiten für die Sperrzeit. WiFi wird zwischen diesen Zeiten an
 Wählen Sie aus, an welchen Wochentagen die Sperrzeit aktiv sein soll.`,
   '/wifi/passwords': `## Wi-Fi – Passwörter
 
-Verwalten Sie die Passwörter für drahtlose Netzwerke. Jeder Eintrag steht für ein Wi-Fi-Netzwerk mit eigenem Passwort und eigenem Sicherheitsprofil, das die Zugriffsberechtigungen steuert.
+Verwalten Sie die Passwörter für drahtlose Netzwerke. Jedes Passwort verbindet mit demselben Wi-Fi-Netzwerk, dessen Name unter Wi-Fi › Einstellungen festgelegt wird. Das Passwort, mit dem sich ein Gerät verbindet, bestimmt sein Sicherheitsprofil.
 
 ### Sicherheitsprofil
 
 Steuert, worauf das verbundene Gerät im Netzwerk zugreifen kann. Weisen Sie ein Sicherheitsprofil zu, um den Zugriff auf bestimmte Ressourcen einzuschränken oder zu gewähren.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Passwörter
 
-Jeder Eintrag steht für ein Wi-Fi-Netzwerk mit eigenem Passwort und eigenem Sicherheitsprofil, das die Zugriffsberechtigungen steuert.
+Jedes Passwort verbindet mit demselben Wi-Fi-Netzwerk, dessen Name unter Wi-Fi › Einstellungen festgelegt wird. Das Passwort, mit dem sich ein Gerät verbindet, bestimmt sein Sicherheitsprofil.
 
 ### Bezeichnung
 
-Ein aussagekräftiger Name für dieses Wi-Fi-Netzwerk, etwa „Zuhause“ oder „Gastnetzwerk“. Dies ist der Netzwerkname (SSID), den Geräte sehen.
+Ein aussagekräftiger Name für dieses Passwort, etwa „Zuhause“ oder „Gastnetzwerk“. Er erscheint nur in dieser Oberfläche; Geräte sehen ihn nie.
 
 ### Passwort
 
-Das Passwort, das Geräte zum Verbinden verwenden. Muss mindestens 8 Zeichen lang sein. Verwenden Sie die Schaltfläche zum Generieren, um ein starkes, zufälliges Passwort zu erstellen.
+Das Passwort, das Geräte zum Verbinden verwenden. Muss mindestens 8 Zeichen lang sein. Verwenden Sie die Schaltfläche zum Generieren, um ein starkes, zufälliges Passwort zu erstellen. Eine Passwortänderung kann kurzzeitig alle Wi-Fi-Geräte trennen. Geräte, die das alte Passwort verwenden, müssen sich mit dem neuen erneut verbinden.
 
 ### Sicherheitsprofil
 

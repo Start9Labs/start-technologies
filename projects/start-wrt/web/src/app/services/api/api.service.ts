@@ -15,6 +15,7 @@ export abstract class ApiService {
   abstract getUci(params: GetUciReq): Promise<GetUciRes>
   abstract setUci(params: SetUciReq): Promise<SetUciRes>
   abstract systemInfo(timeout?: number): Promise<SystemInfoRes>
+  abstract configCheck(): Promise<ConfigCheck>
   abstract systemNewerVersions(): Promise<VersionInfo[]>
   abstract systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes>
   abstract systemRestart(): Promise<null>
@@ -45,7 +46,9 @@ export abstract class ApiService {
   abstract profileGet(params: ProfileIdOpt): Promise<SecurityProfile>
   abstract profileCreate(params: ProfileCreateInput): Promise<ProfileId>
   abstract profileUpdate(params: ProfileUpdateInput): Promise<ProfileId>
-  abstract profileDelete(params: ProfileIdOpt): Promise<null>
+  abstract profileDelete(
+    params: ProfileDeleteParams,
+  ): Promise<ProfileDeleteResult>
   abstract profileScheduleGet(params: {
     interface: string
   }): Promise<ScheduleWindow[]>
@@ -60,6 +63,7 @@ export abstract class ApiService {
     params: SetInitialPasswordReq,
   ): Promise<RpcReturnType<Api, 'auth.set-initial-password'>>
   abstract setupStatus(): Promise<SetupStatusRes>
+  abstract getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>>
   abstract systemFactoryReset(): Promise<null>
   abstract systemLogs(): Promise<LogsResponse>
   abstract followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>>
@@ -112,15 +116,31 @@ export abstract class ApiService {
   abstract sshKeysAdd(params: SshKeysAddRequest): Promise<SshKeyFromApi>
   abstract ethernetGet(): Promise<EthernetConfig>
   abstract ethernetSet(params: EthernetSetConfig): Promise<EthernetSetResult>
+  abstract ethernetRemoveUsbPort(
+    params: RpcParamType<Api, 'ethernet.remove-usb-port'>,
+  ): Promise<null>
   abstract sshKeysDelete(params: SshKeysDeleteRequest): Promise<null>
   abstract activityList(
     params?: ActivityListParams,
   ): Promise<ActivityListResponse>
   abstract activityDelete(params: { id: number }): Promise<null>
   abstract activityClear(): Promise<null>
-  abstract backupCreate(): Promise<BackupCreateRes>
-  abstract backupRestore(): Promise<BackupRestoreRes>
+  abstract backupCreate(
+    params: RpcParamType<Api, 'backup.create'>,
+  ): Promise<BackupCreateRes>
+  abstract backupRestore(
+    params: RpcParamType<Api, 'backup.restore'>,
+  ): Promise<BackupRestoreRes>
   abstract diagnosticsCreate(): Promise<DiagnosticsCreateRes>
+
+  async encrypt(password: string): Promise<EncryptedWire> {
+    // A dynamic import of node-jose itself has only a default export.
+    const [{ encrypt }, pubkey] = await Promise.all([
+      import('./encrypt'),
+      this.getPubkey(),
+    ])
+    return encrypt(pubkey, password)
+  }
 }
 
 export type BackupCreateRes = RpcReturnType<Api, 'backup.create'>
@@ -133,11 +153,13 @@ export type EthernetPort = RpcReturnType<Api, 'ethernet.get'>['ports'][string]
 
 export type EthernetConfig = RpcReturnType<Api, 'ethernet.get'>
 
+export type UsbPortStatus = EthernetConfig['usb_ports'][string]
+
 export type EthernetSetPort = RpcParamType<Api, 'ethernet.set'>['ports'][string]
 
 export type EthernetSetConfig = RpcParamType<Api, 'ethernet.set'>
 
-export type AffectedPublishedPort = Bindings.AffectedPublishedPort
+export type DeviceLeavingProfile = Bindings.DeviceLeavingProfile
 
 export type EthernetSetResult = RpcReturnType<Api, 'ethernet.set'>
 
@@ -180,6 +202,12 @@ export type SetUciReq = RpcParamType<Api, 'uci.set'>
 export type SetUciRes = RpcReturnType<Api, 'uci.set'>
 
 export type SystemInfoRes = RpcReturnType<Api, 'system.info'>
+
+export type ConfigCheck = RpcReturnType<Api, 'config.check'>
+
+export type ConfigFinding = ConfigCheck['findings'][number]
+
+export type ConfigView = ConfigFinding['views'][number]
 
 export type VersionInfo = RpcReturnType<Api, 'system.newer-versions'>[number]
 
@@ -243,7 +271,7 @@ export type WifiPassword = RpcReturnType<Api, 'wifi.get'>['passwords'][number]
 export type WifiProfileId = Bindings.ProfileId
 
 export type WifiConfig = RpcReturnType<Api, 'wifi.get'> &
-  Pick<RpcParamType<Api, 'wifi.set'>, 'confirmPublishedPortDeletion'>
+  Pick<RpcParamType<Api, 'wifi.set'>, 'preview'>
 
 export type WifiSetResult = RpcReturnType<Api, 'wifi.set'>
 
@@ -261,6 +289,10 @@ export type WifiBlackoutSetResult = RpcReturnType<Api, 'wifi.blackout-set'>
 export type ProfileId = RpcReturnType<Api, 'profiles.set'>
 
 export type ProfileIdOpt = Bindings.ProfileIdOptInput
+
+export type ProfileDeleteParams = RpcParamType<Api, 'profiles.delete'>
+
+export type ProfileDeleteResult = RpcReturnType<Api, 'profiles.delete'>
 
 export type SecurityProfile = RpcReturnType<Api, 'profiles.get'>
 
@@ -281,6 +313,8 @@ export type SetInitialPasswordReq = RpcParamType<
 >
 
 export type SetupStatusRes = RpcReturnType<Api, 'setup.status'>
+
+export type EncryptedWire = Bindings.EncryptedWireInput
 
 export type SetupFlashReq = Events.FlashParamsInput
 
@@ -342,6 +376,7 @@ export type PublishedPortStatusValue =
   | 'active'
   | 'partial'
   | 'paused'
+  | 'inactive'
   | 'error'
   | 'disabled'
 

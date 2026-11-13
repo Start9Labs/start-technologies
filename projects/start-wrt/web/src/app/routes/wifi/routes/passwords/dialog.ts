@@ -1,4 +1,5 @@
-import { Component, inject, signal } from '@angular/core'
+import { Component, computed, inject, signal } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import {
   NonNullableFormBuilder,
   ReactiveFormsModule,
@@ -14,6 +15,7 @@ import {
   TuiError,
   TuiIcon,
   TuiInput,
+  TuiNotification,
   TuiTextfield,
   tuiTextfieldOptionsProvider,
 } from '@taiga-ui/core'
@@ -41,7 +43,7 @@ export interface WifiPasswordDialogData {
 // @TODO matt review
 export interface WifiPasswordDialogResult {
   label: string
-  password?: string
+  password: string
   profile: ProfileId | null
 }
 
@@ -57,22 +59,28 @@ export interface WifiPasswordDialogResult {
         />
       </tui-textfield>
       <tui-error formControlName="label" />
-      @if (!editing) {
-        <tui-textfield>
-          <label tuiLabel>{{ 'Password' | i18n }}</label>
-          <input tuiInput formControlName="password" type="password" />
-          <tui-icon tuiPassword />
-          <button
-            tuiIconButton
-            type="button"
-            iconStart="@tui.refresh-cw"
-            size="s"
-            (click)="generatePassword()"
-          >
-            {{ 'Generate' | i18n }}
-          </button>
-        </tui-textfield>
-        <tui-error formControlName="password" />
+      <tui-textfield>
+        <label tuiLabel>{{ 'Password' | i18n }}</label>
+        <input tuiInput formControlName="password" type="password" />
+        <tui-icon tuiPassword />
+        <button
+          tuiIconButton
+          type="button"
+          iconStart="@tui.refresh-cw"
+          size="s"
+          (click)="generatePassword()"
+        >
+          {{ 'Generate' | i18n }}
+        </button>
+      </tui-textfield>
+      <tui-error formControlName="password" />
+      @if (passwordChanged()) {
+        <div tuiNotification appearance="info">
+          {{
+            'Changing this password may briefly disconnect all Wi-Fi devices. Devices using the old password must reconnect with the new one.'
+              | i18n
+          }}
+        </div>
       }
       <tui-textfield tuiChevron>
         <label tuiLabel>{{ 'Security Profile' | i18n }}</label>
@@ -129,6 +137,7 @@ export interface WifiPasswordDialogResult {
     TuiPassword,
     TuiSelect,
     TuiChevron,
+    TuiNotification,
     TuiDataList,
     TuiAppearance,
     RouterLink,
@@ -143,7 +152,6 @@ class AddWifiPassword {
 
   private readonly api = inject(ApiService)
   private readonly entry = this.context.data.entry
-  protected readonly editing = !!this.entry
   protected readonly profiles = this.context.data.profiles
 
   protected readonly form = inject(NonNullableFormBuilder).group({
@@ -154,6 +162,15 @@ class AddWifiPassword {
     ],
     profile: [this.entry?.profile ?? '', Validators.required],
   })
+
+  private readonly password = toSignal(
+    this.form.controls.password.valueChanges,
+    { initialValue: this.form.controls.password.value },
+  )
+
+  protected readonly passwordChanged = computed(
+    () => !!this.entry && this.password() !== this.entry.password,
+  )
 
   constructor() {
     if (!this.entry) {
@@ -174,11 +191,7 @@ class AddWifiPassword {
       const { label, password, profile } = this.form.getRawValue()
       // @TODO matt review
       const resolved = this.profiles.find(p => p.fullname === profile) ?? null
-      this.context.completeWith({
-        label,
-        profile: resolved,
-        password: this.editing ? undefined : password,
-      })
+      this.context.completeWith({ label, profile: resolved, password })
     }
   }
 }

@@ -21,6 +21,7 @@ b3sum() {
     if [ "$#" -eq 2 ]; then sha256sum "$2"; else sha256sum; fi | cut -d' ' -f1
 }
 load_registry_index() { :; }
+resolve_os_commit() { :; }
 asset_url() {
     [ "$2" != img ] || echo "$S3_CDN/v$VERSION/image.img"
 }
@@ -43,6 +44,7 @@ cmd_pre_check() {
     DONE[push-gz]=1
     DONE[tag]=1
     DONE[create-gh-release]=1
+    DONE[publish-gh-release]=1
     DONE[index]=1
 }
 cmd_sign() {

@@ -30,6 +30,19 @@ components on semantic elements** (`<header appHeader></header> <main><router-ou
 <footer appFooter></footer>` — start9-store) or a `TuiNavigation` shell
 (`tuiNavigationHeader`/`tuiNavigationAside`/`tuiAsideItem` — start-wrt, start-tunnel).
 
+In a `TuiNavigation` shell the scroll area must end exactly at `main[tuiNavigationMain]`'s
+content box: its `tui-scrollbar` is `100%` tall less its own block padding
+(`block-size: calc(100% - 1.5rem)` beside `padding-block-start: 1.5rem`). Any taller and the
+section scrolls instead, dropping the sticky aside below the header and its footer off-screen,
+and the last card sits flush with the bottom rather than above main's 1.5rem bottom border.
+On mobile, where main's thin border replaces the scrollbar's end padding, translate
+`tui-scroll-controls` until the thumb's painted 0.25rem (it sits inside a 0.25rem transparent
+border) lands in that border — `translateX(0.625rem)` for start-tunnel's 0.375rem — rather than
+widening the margin; with no translate the bar covers the cards. A dual-theme app sets
+`--tui-theme-color` on the header and aside themselves, not on the shell: Taiga renders them as
+dark subtrees in the light theme too, so a value set higher up resolves the light token and
+leaves white chrome under white text.
+
 ### The canonical `app.config.ts` (zoneless)
 
 ```ts
@@ -132,3 +145,10 @@ Hex colors live **only** in the theme sheet. Components use `var(--tui-...)` exc
 `--tui-text-secondary`, `--tui-status-negative`, `--tui-background-neutral-1`,
 `--tui-border-normal`, `font: var(--tui-typography-body-l)`, `var(--tui-radius-m)`. A hex
 literal in a component is a review comment waiting to happen.
+
+Each theme defines its own status text colours. In a dual-theme sheet, the light block must not
+reuse the dark block's `--tui-text-negative`, `-positive` or `-warning` values. Those colours
+are tuned for dark backgrounds and are too faint on white (`#ff4961` ≈3.3:1, `#2dd55b`
+≈1.9:1). Either leave the light block on Taiga's light palette (`#eb1700`, `#008764`) or
+override it with a colour that reaches 4.5:1 against `--tui-background-base`. Error text is body
+text, so it needs body-text contrast.

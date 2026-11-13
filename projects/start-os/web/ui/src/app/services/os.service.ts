@@ -6,7 +6,6 @@ import {
   BehaviorSubject,
   combineLatest,
   distinctUntilChanged,
-  firstValueFrom,
   map,
   shareReplay,
 } from 'rxjs'
@@ -20,19 +19,29 @@ import { DataModel } from './patch-db/data-model'
 export class OSService {
   private readonly api = inject(ApiService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
+  private loadSequence = 0
 
-  private readonly catalog$ = new BehaviorSubject<T.OsVersionInfoMap>({})
+  private readonly catalog$ = new BehaviorSubject<{
+    versions: T.OsVersionInfoMap
+    gitHash: string | null
+  }>({ versions: {}, gitHash: null })
 
   readonly updateCandidates$ = combineLatest([
     this.catalog$,
     this.patch.watch$('serverInfo', 'version'),
   ]).pipe(
-    map(([catalog, installed]) => {
+    map(([{ versions, gitHash }, installed]) => {
       const current = Version.parse(installed)
-      return Object.entries(catalog)
-        .filter(
-          ([version]) => Version.parse(version).compare(current) === 'greater',
-        )
+      return Object.entries(versions)
+        .filter(([version, info]) => {
+          const comparison = Version.parse(version).compare(current)
+          return (
+            comparison === 'greater' ||
+            (comparison === 'equal' &&
+              !!info.gitHash &&
+              info.gitHash !== gitHash)
+          )
+        })
         .sort(([a], [b]) => Version.parse(b).compareForSort(Version.parse(a)))
         .map(([version, info]) => ({
           version,
@@ -75,15 +84,30 @@ export class OSService {
     this.updating$,
   ]).pipe(map(([available, updating]) => available && !updating))
 
-  async loadOS(): Promise<void> {
+  async publishesUpdates(registry: string): Promise<boolean> {
     const { id } = await getServerInfo(this.patch)
-    const { startosRegistry } = await firstValueFrom(this.patch.watch$('ui'))
+    const versions = await this.api.rpc.registry.os.version.get({
+      registry,
+      serverId: id,
+    })
 
-    this.catalog$.next(
-      await this.api.rpc.registry.os.version.get({
-        registry: startosRegistry,
+    return Object.keys(versions).length > 0
+  }
+
+  /** Older in-flight loads cannot replace a later request's catalog. */
+  async loadOS(registry?: string): Promise<void> {
+    const sequence = ++this.loadSequence
+    const { id, osRegistry } = await getServerInfo(this.patch)
+    registry ??= osRegistry
+
+    const [versions, gitHash] = await Promise.all([
+      this.api.rpc.registry.os.version.get({
+        registry,
         serverId: id,
       }),
-    )
+      this.api.rpc.gitInfo({}),
+    ])
+    if (sequence === this.loadSequence)
+      this.catalog$.next({ versions, gitHash: gitHash.trim() })
   }
 }

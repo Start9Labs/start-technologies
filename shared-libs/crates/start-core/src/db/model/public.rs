@@ -26,7 +26,9 @@ use crate::net::vhost::{AlpnInfo, PassthroughInfo};
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::system::{KeyboardOptions, SmtpValue};
-use crate::update::signers::{TrustedOsUpdateSigners, initial_signers};
+use crate::trusted_keys::{
+    Registries, TrustedKeys, initial_os_registry, initial_registries, initial_trusted_keys,
+};
 use crate::util::cpupower::{Epp, Governor};
 use crate::util::lshw::LshwDevice;
 use crate::util::serde::MaybeUtf8String;
@@ -41,6 +43,8 @@ pub static DB_UI_SEED_CELL: OnceLock<&'static str> = OnceLock::new();
 pub struct Public {
     pub server_info: ServerInfo,
     pub package_data: AllPackageData,
+    /// UI-owned state. Outside `version` migrations, the backend never reads or
+    /// modifies its contents.
     pub ui: Value,
 }
 
@@ -73,15 +77,14 @@ impl Public {
                                         preferred_external_port: 80,
                                         add_ssl: Some(AddSslOptions {
                                             preferred_external_port: 443,
-                                            add_x_forwarded_headers: false,
                                             alpn: Some(AlpnInfo(vec![
                                                 MaybeUtf8String("h2".into()),
                                                 MaybeUtf8String("http/1.1".into()),
                                             ])),
-                                            auth: None,
                                             upstream_cert_validation: Default::default(),
                                         }),
                                         secure: None,
+                                        proxy: None,
                                     },
                                     net: NetInfo {
                                         assigned_port: None,
@@ -127,12 +130,16 @@ impl Public {
                 },
                 status_info: ServerStatus {
                     backup_progress: None,
+                    backup_conversions: Default::default(),
                     update_progress: None,
                     shutting_down: false,
                     restarting: false,
                     restart: None,
                 },
-                trusted_os_update_signers: initial_signers(),
+                trusted_keys: initial_trusted_keys(),
+                registry_keys: BTreeMap::new(),
+                registries: initial_registries(),
+                os_registry: initial_os_registry(),
                 unread_notification_count: 0,
                 pubkey: ssh_key::PublicKey::from(&account.ssh_key)
                     .to_openssh()
@@ -181,8 +188,17 @@ pub struct ServerInfo {
     #[serde(default)]
     pub status_info: ServerStatus,
     pub unread_notification_count: u64,
+    #[serde(default = "initial_trusted_keys")]
+    pub trusted_keys: TrustedKeys,
+    /// Last observed trust proposals from connected registries.
     #[serde(default)]
-    pub trusted_os_update_signers: TrustedOsUpdateSigners,
+    pub registry_keys: BTreeMap<InternedString, BTreeSet<crate::sign::AnyVerifyingKey>>,
+    /// Connected registries; written only through `server.registries`.
+    #[serde(default)]
+    pub registries: Registries,
+    /// Registry that provides StartOS updates; always connected.
+    #[serde(default = "initial_os_registry")]
+    pub os_registry: Url,
     pub pubkey: String,
     pub ca_fingerprint: String,
     #[serde(default)]
@@ -484,6 +500,8 @@ rpc_toolkit::ts_export!(DomainSettings, namespaces = [""]);
 #[model = "Model<Self>"]
 pub struct ServerStatus {
     pub backup_progress: Option<FullProgress>,
+    #[serde(default)]
+    pub backup_conversions: crate::backup::target::conversion::ConversionJobs,
     pub update_progress: Option<FullProgress>,
     #[serde(default)]
     pub shutting_down: bool,

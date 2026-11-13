@@ -26,12 +26,13 @@ const FILENAME = new RegExp(
   `^(${TIERS.join('|')})-(${KINDS.join('|')})-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$`,
 )
 const PRODUCT = /^projects\/([a-z0-9]+(?:-[a-z0-9]+)*)$/
-const HIGHLIGHTS = /^## Highlights[ \t]*\r?$/m
 const LOCALE_PATTERN = '[a-z]{2}_[A-Z]{2}'
 const LOCALE = new RegExp(`^${LOCALE_PATTERN}$`)
 const TRANSLATION = new RegExp(`^(.+)\\.(${LOCALE_PATTERN})\\.md$`)
-const HIGHLIGHTS_MARKER = '<!-- highlights -->'
 const ENGLISH = 'en_US'
+const NOTES_ASSET = 'release-notes.json'
+const PRE_UPDATE_START = '<!-- pre-update -->'
+const PRE_UPDATE_END = '<!-- /pre-update -->'
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { maxBuffer: Infinity, ...options })
@@ -90,16 +91,17 @@ function fragmentBody(path, body) {
 function parseFragment(path, data, requireMetadata = true) {
   const match = fragmentFilename(path)
   let body = decodeUtf8(data).trim()
-  let userFacing = null
-  const metadata = /^---\r?\nuser-facing: (true|false)\r?\n---(?:\r?\n|$)/.exec(
-    body,
-  )
-  if (metadata) {
-    userFacing = metadata[1] === 'true'
+  let releaseNotes = null
+  const metadata =
+    /^---\r?\n(release-notes|user-facing): (true|false)\r?\n---(?:\r?\n|$)/.exec(
+      body,
+    )
+  if (metadata && (!requireMetadata || metadata[1] === 'release-notes')) {
+    releaseNotes = metadata[2] === 'true'
     body = body.slice(metadata[0].length).trim()
   } else if (requireMetadata || body.startsWith('---')) {
     throw new Error(
-      `${path}: expected frontmatter with user-facing: true or false`,
+      `${path}: expected frontmatter with release-notes: true or false`,
     )
   }
   return {
@@ -108,47 +110,21 @@ function parseFragment(path, data, requireMetadata = true) {
     kind: match[2],
     data,
     body: fragmentBody(path, body),
-    userFacing,
-    translations: new Map(),
+    releaseNotes,
   }
 }
 
 function collectFragments(entries, requireMetadata = true) {
   const fragments = new Map()
-  const translations = []
   for (const [path, data] of entries) {
-    const target = translationTarget(path)
-    if (target) {
-      fragmentFilename(target.path)
-      if (target.locale === ENGLISH)
-        throw new Error(`${path}: English belongs in the canonical fragment`)
-      translations.push({
-        ...target,
-        source: path,
-        data,
-        body: fragmentBody(path, decodeUtf8(data).trim()),
-      })
-    } else fragments.set(path, parseFragment(path, data, requireMetadata))
-  }
-  for (const { path, source, locale, data, body } of translations) {
-    const fragment = fragments.get(path)
-    if (!fragment)
-      throw new Error(`${source}: missing canonical fragment ${path}`)
-    fragment.translations.set(locale, { path: source, data, body })
+    if (translationTarget(path)) continue
+    fragments.set(path, parseFragment(path, data, requireMetadata))
   }
   return fragments
 }
 
-function fragmentFiles(fragment) {
-  return [fragment, ...fragment.translations.values()]
-}
-
 function sameFragment(a, b) {
-  const files = new Map(fragmentFiles(a).map(file => [file.path, file.data]))
-  return (
-    files.size === fragmentFiles(b).length &&
-    fragmentFiles(b).every(file => files.get(file.path)?.equals(file.data))
-  )
+  return a.path === b.path && a.data.equals(b.data)
 }
 
 function hasSymlink(path) {
@@ -260,7 +236,9 @@ function releaseTags(output) {
     name = name.replace(/\^\{\}$/, '')
     const match = /^([a-z0-9]+(?:-[a-z0-9]+)*)\/v(.+)$/.exec(name)
     if (!match || !Object.hasOwn(MANIFESTS, match[1])) continue
-    parseVersion(match[1], match[2])
+    const [, prerelease] = parseVersion(match[1], match[2])
+    if (match[1] === 'start-os' && prerelease?.match(/^rc\.[1-9][0-9]*$/))
+      continue
     if (!tags.has(name) || peeled) tags.set(name, sha)
   }
   return tags
@@ -354,21 +332,16 @@ function ownedFragments(release, earlier) {
         return (
           old &&
           sameFragment(old, fragment) &&
-          !fragmentFiles(fragment).some(file =>
-            deletedBetween(file.path, previous.commit, release.commit),
-          )
+          !deletedBetween(fragment.path, previous.commit, release.commit)
         )
       }),
   )
 }
 
-function fragmentLines(fragments, locale = ENGLISH) {
+function fragmentLines(fragments) {
   return [...fragments]
     .sort((a, b) => compareText(a.path, b.path))
-    .flatMap(fragment => [
-      fragment.translations.get(locale)?.body ?? fragment.body,
-      '',
-    ])
+    .flatMap(fragment => [fragment.body, ''])
 }
 
 function releaseSection(version, fragments) {
@@ -497,12 +470,8 @@ function notesPath(product, version, locale = ENGLISH) {
   return `${product}/release-notes/${version}${locale === ENGLISH ? '' : `.${locale}`}.md`
 }
 
-function noteLocales(product, version, fragments, ref) {
-  const locales = new Set(
-    fragments
-      .filter(fragment => fragment.userFacing)
-      .flatMap(fragment => [...fragment.translations.keys()]),
-  )
+function archivedLocales(product, version, ref) {
+  const locales = new Set()
   for (const path of notePaths(product, ref)) {
     const name = basename(path)
     if (
@@ -528,27 +497,12 @@ function notePaths(product, ref) {
       : []
 }
 
-function locales(product, version, ref) {
-  parseVersion(basename(product), version)
-  return noteLocales(
-    product,
-    version,
-    [...sourceFragments(product, ref).values()],
-    ref,
-  )
-}
-
 function archivedNotePaths(product, ref = 'HEAD') {
   const paths = new Set()
   for (const release of originReleases(ref, product, localTags())) {
     for (const locale of [
       ENGLISH,
-      ...noteLocales(
-        product,
-        release.version,
-        [...release.fragments.values()],
-        ref,
-      ),
+      ...archivedLocales(product, release.version, ref),
     ]) {
       const path = notesPath(product, release.version, locale)
       if (treeEntry(ref, path)) paths.add(path)
@@ -557,8 +511,18 @@ function archivedNotePaths(product, ref = 'HEAD') {
   return [...paths].sort(compareText)
 }
 
-function hasAudienceMetadata(fragments) {
-  return fragments.some(fragment => fragment.userFacing !== null)
+function hasReleaseNotesMetadata(fragments) {
+  return fragments.some(fragment => fragment.releaseNotes !== null)
+}
+
+function selectedByDefault(fragment) {
+  return fragment.releaseNotes === true || fragment.kind === 'security'
+}
+
+function noteItems(fragments) {
+  return [...fragments]
+    .sort((a, b) => compareText(a.path, b.path))
+    .map(({ path, kind, body }) => ({ path, kind, body }))
 }
 
 function localizedNotesSource(path, fallback, ref) {
@@ -568,108 +532,156 @@ function localizedNotesSource(path, fallback, ref) {
     : { path: fallback, notes: sourceFile(fallback, ref) }
 }
 
-function noteFraming(product, version, locale, ref) {
-  return localizedNotesSource(
-    notesPath(product, version, locale),
-    notesPath(product, version, ENGLISH),
+function sectionBounds(text, heading) {
+  const match = new RegExp(
+    `^${heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[ \\t]*$`,
+    'm',
+  ).exec(text)
+  if (!match) return null
+  const body = match.index + match[0].length
+  const next = /^## /m.exec(text.slice(body))
+  return { start: match.index, end: next ? body + next.index : text.length }
+}
+
+function placeSection(text, heading, bodies, anchors) {
+  if (!bodies.length) return text
+  const block = bodies.join('\n\n')
+  const bounds = sectionBounds(text, heading)
+  const position = bounds
+    ? bounds.end
+    : (anchors.map(anchor => anchor(text)).find(index => index != null) ??
+      text.length)
+  const before = text.slice(0, position).trimEnd()
+  const inserted = bounds ? block : `${heading}\n\n${block}`
+  return `${before}${before ? '\n\n' : ''}${inserted}\n\n${text.slice(position)}`
+}
+
+function insertNotes(text, items, ref) {
+  const labels = releaseNoteLabels(ref)
+  const highlights = `## ${releaseNoteLabel(labels, 'highlights-title', ENGLISH)}`
+  const security = `## ${releaseNoteLabel(labels, 'security-title', ENGLISH)}`
+  const important = value => /^## Important[ \t]*$/m.exec(value)?.index
+  const bodies = predicate =>
+    items.filter(predicate).map(item => item.body.trim())
+  text = placeSection(
+    text,
+    highlights,
+    bodies(item => item.kind !== 'security'),
+    [value => sectionBounds(value, security)?.start, important],
+  )
+  text = placeSection(
+    text,
+    security,
+    bodies(item => item.kind === 'security'),
+    [value => sectionBounds(value, highlights)?.end, important],
+  )
+  return text
+}
+
+function formatNotes(text) {
+  const trimmed = text.trim()
+  return trimmed
+    ? markdownFormatter()(Buffer.from(trimmed + '\n'))
+    : Buffer.alloc(0)
+}
+
+function compileNotes(path, notes, items, ref) {
+  const text = decodeUtf8(notes).replace(/\r\n/g, '\n')
+  const labels = releaseNoteLabels(ref)
+  for (const key of ['highlights-title', 'security-title']) {
+    const heading = `## ${releaseNoteLabel(labels, key, ENGLISH)}`
+    if (sectionBounds(text, heading))
+      throw new Error(
+        `${path}: remove ${heading}; it is compiled from fragments`,
+      )
+  }
+  return formatNotes(insertNotes(text, items, ref))
+}
+
+function renderNotes(product, version, ref) {
+  parseVersion(basename(product), version)
+  const path = notesPath(product, version)
+  const notes = sourceFile(path, ref)
+  const fragments = releaseFragments(product, version, ref)
+  if (!hasReleaseNotesMetadata(fragments) && notes.length) return notes
+  return compileNotes(
+    path,
+    notes,
+    noteItems(fragments.filter(selectedByDefault)),
     ref,
   )
 }
 
-function compileNotes(path, notes, fragments, locale = ENGLISH, ref) {
-  const text = decodeUtf8(notes)
-  const parts = text.split(HIGHLIGHTS_MARKER)
-  if (!hasAudienceMetadata(fragments) && parts.length === 1 && notes.length)
-    return notes
-  const labels = releaseNoteLabels(ref)
-  const visible = fragments.filter(fragment => fragment.userFacing)
-  const security = visible.filter(fragment => fragment.kind === 'security')
-  const securityHeading = `## ${releaseNoteLabel(labels, 'security-title', locale)}`
-  const englishSecurityHeading = `## ${releaseNoteLabel(labels, 'security-title', ENGLISH)}`
-  if (
-    text
-      .split(/\r?\n/)
-      .some(line =>
-        [securityHeading, englishSecurityHeading].includes(line.trimEnd()),
-      )
-  )
-    throw new Error(
-      `${path}: remove ${securityHeading}; it is compiled from fragments`,
-    )
-  const lines = [
-    ...fragmentLines(
-      visible.filter(fragment => fragment.kind !== 'security'),
-      locale,
-    ),
-    ...(security.length
-      ? [securityHeading, '', ...fragmentLines(security, locale)]
-      : []),
-  ]
-  let composed
-  if (parts.length > 2)
-    throw new Error(`${path}: expected one ${HIGHLIGHTS_MARKER}`)
-  const heading =
-    parts.length === 2
-      ? [...parts[0].matchAll(/^## [^\r\n]+\r?$/gm)].at(-1)
-      : null
-  const authored = HIGHLIGHTS.exec(text)
-  if (authored && authored.index !== heading?.index)
-    throw new Error(
-      `${path}: remove ## Highlights; it is compiled from fragments`,
-    )
-  if (parts.length === 2) {
-    const [before, after] = parts
-    const next = /^## /m.exec(after)
-    if (
-      !heading ||
-      before.slice(heading.index + heading[0].length).trim() ||
-      after.slice(0, next?.index ?? after.length).trim()
-    )
-      throw new Error(
-        `${path}: ${HIGHLIGHTS_MARKER} must occupy an empty section`,
-      )
-    composed = `${before.trimEnd()}\n\n${lines.join('\n')}\n${after.trimStart()}`
-  } else {
-    if (translationTarget(path) && notes.length)
-      throw new Error(`${path}: localized framing needs ${HIGHLIGHTS_MARKER}`)
-    const highlights = [
-      `## ${releaseNoteLabel(labels, 'highlights-title', locale)}`,
-      '',
-      ...lines,
-    ].join('\n')
-    const important = /^## Important[ \t]*\r?$/m.exec(text)
-    const position = important ? important.index : text.length
-    composed = `${text.slice(0, position).trimEnd()}\n\n${highlights}\n${text.slice(position)}`
-  }
-  return markdownFormatter()(Buffer.from(composed.trim() + '\n'))
-}
-
-function renderNotes(product, version, ref, locale = ENGLISH) {
+function releaseFragments(product, version, ref) {
   parseVersion(basename(product), version)
-  const { path, notes } = noteFraming(product, version, locale, ref)
   const fragments = sourceFragments(product, ref)
-  if (!fragments.size) return compileNotes(path, notes, [], locale, ref)
+  if (!fragments.size) return []
   const commit = decodeUtf8(
     git('rev-parse', '--verify', `${ref || 'HEAD'}^{commit}`),
   ).trim()
   const releases = originReleases(commit, product, localTags()).filter(
     release => release.version !== version,
   )
-  return compileNotes(
-    path,
-    notes,
-    ownedFragments({ product, version, commit, fragments }, releases),
-    locale,
-    ref,
-  )
+  return ownedFragments({ product, version, commit, fragments }, releases)
 }
 
-function renderNotesBundle(product, version, ref) {
-  return Object.fromEntries(
-    [ENGLISH, ...locales(product, version, ref)].map(locale => [
-      locale,
-      decodeUtf8(renderNotes(product, version, ref, locale)),
-    ]),
+function changedFragments(product, version, ref, since) {
+  const earlier = since ? sourceFragments(product, since) : new Map()
+  return releaseFragments(product, version, ref)
+    .filter(
+      fragment =>
+        !earlier.get(fragment.path) ||
+        !sameFragment(earlier.get(fragment.path), fragment),
+    )
+    .sort((a, b) => compareText(a.path, b.path))
+}
+
+// Security fragments are omitted: compose-notes always includes them.
+function noteCandidates(product, version, ref, since) {
+  return changedFragments(product, version, ref, since)
+    .filter(fragment => fragment.kind !== 'security')
+    .map(fragment => ({
+      path: fragment.path,
+      kind: fragment.kind,
+      body: fragment.body,
+      selected: selectedByDefault(fragment),
+    }))
+}
+
+function parseSelection(data, source) {
+  const items = JSON.parse(decodeUtf8(data))
+  if (
+    !Array.isArray(items) ||
+    items.some(
+      item =>
+        !KINDS.includes(item?.kind) ||
+        item.kind === 'security' ||
+        typeof item.body !== 'string' ||
+        !item.body.trim(),
+    )
+  )
+    throw new Error(
+      `${source}: expected an array of non-security { kind, body } highlights`,
+    )
+  return items
+}
+
+function composeNotes(product, version, ref, selectionPath, basePath, since) {
+  parseVersion(basename(product), version)
+  const items = [
+    ...parseSelection(readFileSync(selectionPath), selectionPath),
+    ...noteItems(
+      changedFragments(product, version, ref, since).filter(
+        fragment => fragment.kind === 'security',
+      ),
+    ),
+  ]
+  if (basePath === undefined) {
+    const path = notesPath(product, version)
+    return compileNotes(path, sourceFile(path, ref), items, ref)
+  }
+  return formatNotes(
+    insertNotes(decodeUtf8(readFileSync(basePath)), items, ref),
   )
 }
 
@@ -686,14 +698,56 @@ function preUpdateNotes(product, version, ref, locale = ENGLISH) {
 }
 
 function composeReleaseNotes(notes, warning) {
-  return warning ? `${warning}\n\n${notes}` : notes
+  return warning.trim()
+    ? `${PRE_UPDATE_START}\n\n${warning.trim()}\n\n${PRE_UPDATE_END}\n\n${notes}`
+    : notes
 }
 
-function releaseNotes(product, version, ref) {
+function releaseNotes(product, version, ref, edited) {
   return composeReleaseNotes(
-    decodeUtf8(renderNotes(product, version, ref)),
+    edited?.[ENGLISH] ?? decodeUtf8(renderNotes(product, version, ref)),
     preUpdateNotes(product, version, ref),
   )
+}
+
+function parseNotesBundle(data, source) {
+  let bundle
+  try {
+    bundle = JSON.parse(decodeUtf8(data))
+  } catch (error) {
+    throw new Error(`${source}: ${error.message}`)
+  }
+  if (
+    !bundle ||
+    typeof bundle !== 'object' ||
+    Array.isArray(bundle) ||
+    typeof bundle[ENGLISH] !== 'string' ||
+    Object.entries(bundle).some(
+      ([locale, notes]) => !isLocale(locale) || typeof notes !== 'string',
+    )
+  )
+    throw new Error(
+      `${source}: expected an object of locale -> notes with ${ENGLISH}`,
+    )
+  return bundle
+}
+
+function formatNotesBundle(path) {
+  const format = markdownFormatter()
+  const bundle = parseNotesBundle(readFileSync(path), path)
+  const formatted = Object.fromEntries(
+    Object.entries(bundle).map(([locale, notes]) => [
+      locale,
+      notes.trim() ? decodeUtf8(format(Buffer.from(notes))) : '',
+    ]),
+  )
+  writeFileSync(path, `${JSON.stringify(formatted, null, 2)}\n`)
+}
+
+function readNotesBundle(path) {
+  return path === undefined
+    ? undefined
+    : parseNotesBundle(readFileSync(path), path)
 }
 
 function releaseNoteLabels(ref) {
@@ -756,8 +810,10 @@ function placeChangelogLink(notes, link) {
   return `${body}${body ? '\n\n' : ''}${link}\n`
 }
 
-function registryNotes(product, version, ref, changelogRef) {
-  const bundle = renderNotesBundle(product, version, ref)
+function registryNotes(product, version, ref, changelogRef, edited) {
+  const bundle = edited
+    ? { ...edited }
+    : { [ENGLISH]: decodeUtf8(renderNotes(product, version, ref)) }
   const labels = releaseNoteLabels(ref)
   for (const path of notePaths(product, ref)) {
     const prefix = `${product}/release-notes/${version}.`
@@ -768,7 +824,7 @@ function registryNotes(product, version, ref, changelogRef) {
       locale !== ENGLISH &&
       !Object.hasOwn(bundle, locale)
     )
-      bundle[locale] = decodeUtf8(renderNotes(product, version, ref, locale))
+      bundle[locale] = bundle[ENGLISH]
   }
   const composed = Object.fromEntries(
     Object.entries(bundle).map(([locale, notes]) => {
@@ -838,22 +894,52 @@ function changedProducts(base) {
 }
 
 function unchangedFragment(fragment, source) {
-  const files = fragmentFiles(fragment)
-  for (const file of files) {
-    if (
-      deletedBetween(file.path, source, 'HEAD') ||
-      hasSymlink(file.path) ||
-      !existsSync(file.path) ||
-      !lstatSync(file.path).isFile() ||
-      !readFileSync(file.path).equals(file.data)
+  return !(
+    deletedBetween(fragment.path, source, 'HEAD') ||
+    hasSymlink(fragment.path) ||
+    !existsSync(fragment.path) ||
+    !lstatSync(fragment.path).isFile() ||
+    !readFileSync(fragment.path).equals(fragment.data)
+  )
+}
+
+function githubRepository() {
+  return process.env.GITHUB_REPOSITORY || '{owner}/{repo}'
+}
+
+function publishedNoteAssets() {
+  return memo('published note assets', () => {
+    const listing = decodeUtf8(
+      run('gh', [
+        'api',
+        '--paginate',
+        `repos/${githubRepository()}/releases`,
+        '--jq',
+        `.[] | .tag_name as $tag | .assets[] | select(.name == "${NOTES_ASSET}") | [$tag, .id] | @tsv`,
+      ]),
     )
-      return false
-  }
-  const paths = new Set(files.map(file => file.path))
-  return readdirSync(dirname(fragment.path)).every(name => {
-    const path = `${dirname(fragment.path)}/${name}`
-    return translationTarget(path)?.path !== fragment.path || paths.has(path)
+    return new Map(
+      listing
+        .split('\n')
+        .filter(Boolean)
+        .map(line => line.split('\t')),
+    )
   })
+}
+
+function publishedNotes(product, version) {
+  const tag = `${basename(product)}/v${version}`
+  const id = publishedNoteAssets().get(tag)
+  if (!id) return null
+  return parseNotesBundle(
+    run('gh', [
+      'api',
+      '-H',
+      'Accept: application/octet-stream',
+      `repos/${githubRepository()}/releases/assets/${id}`,
+    ]),
+    `${tag}: ${NOTES_ASSET}`,
+  )
 }
 
 function sync() {
@@ -869,41 +955,21 @@ function sync() {
       history,
       releases.filter(item => item.product === product),
     )
-    for (const [index, release] of releases.entries()) {
+    for (const release of releases) {
       if (release.product !== product) continue
-      const fragments = ownedFragments(release, releases.slice(0, index))
-      if (!hasAudienceMetadata(fragments)) continue
-      for (const locale of [
-        ENGLISH,
-        ...noteLocales(product, release.version, fragments, release.commit),
-      ]) {
+      const bundle = publishedNotes(product, release.version)
+      if (!bundle) continue
+      for (const [locale, notes] of Object.entries(bundle)) {
         const path = notesPath(product, release.version, locale)
         if (hasSymlink(path))
           throw new Error(`${path}: symlinks are not allowed`)
-        const source = taggedFile(path, release.commit)
-        const framing = noteFraming(
-          product,
-          release.version,
-          locale,
-          release.commit,
-        )
-        const compiled = compileNotes(
-          framing.path,
-          framing.notes,
-          fragments,
-          locale,
-          release.commit,
-        )
         const existing = existsSync(path) ? readFileSync(path) : Buffer.alloc(0)
-        if (
-          existing.length &&
-          !existing.equals(compiled) &&
-          !existing.equals(source)
-        )
-          throw new Error(
-            `${path}: release notes differ from the tagged source and compiled output`,
-          )
-        updates.push({ path, history: existing, compiled, consumed: [] })
+        updates.push({
+          path,
+          history: existing,
+          compiled: Buffer.from(notes),
+          consumed: [],
+        })
       }
     }
     updates.push({ path, history, compiled, consumed })
@@ -915,21 +981,32 @@ function sync() {
     }
     for (const [source, fragment] of consumed) {
       if (!unchangedFragment(fragment, source)) continue
-      for (const file of fragmentFiles(fragment)) unlinkSync(file.path)
+      unlinkSync(fragment.path)
+    }
+  }
+  for (const product of new Set(releases.map(release => release.product))) {
+    const directory = `${product}/changelog`
+    if (!existsSync(directory)) continue
+    for (const name of readdirSync(directory)) {
+      const target = translationTarget(`${directory}/${name}`)
+      if (target && !existsSync(target.path)) unlinkSync(`${directory}/${name}`)
     }
   }
 }
 
 const USAGE =
-  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | notes PRODUCT VERSION [--ref REF] [--locale LOCALE] | notes-bundle PRODUCT VERSION [--ref REF] | release-notes PRODUCT VERSION [--ref REF] | registry-notes PRODUCT VERSION [--ref REF] [--changelog-ref REF] | locales PRODUCT VERSION [--ref REF] | archives PRODUCT [--ref REF] | section VERSION | sync'
+  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | notes PRODUCT VERSION [--ref REF] | security PRODUCT VERSION [--ref REF] | candidates PRODUCT VERSION [--ref REF] [--since REF] | compose-notes PRODUCT VERSION --selection FILE [--ref REF] [--since REF] [--base FILE] | release-notes PRODUCT VERSION [--ref REF] [--notes FILE] | registry-notes PRODUCT VERSION [--ref REF] [--changelog-ref REF] [--notes FILE] | archives PRODUCT [--ref REF] | format-notes FILE | section VERSION | sync'
 
 try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
     options: {
       ref: { type: 'string' },
-      locale: { type: 'string' },
+      since: { type: 'string' },
+      selection: { type: 'string' },
+      base: { type: 'string' },
       'changelog-ref': { type: 'string' },
+      notes: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   })
@@ -942,12 +1019,14 @@ try {
     'check-version': [1, 2],
     render: [2],
     notes: [2],
-    'notes-bundle': [2],
+    security: [2],
+    candidates: [2],
+    'compose-notes': [2],
     'release-notes': [2],
     'registry-notes': [2],
-    locales: [2],
     archives: [1],
     section: [1],
+    'format-notes': [1],
     sync: [0],
   }
   if (
@@ -957,15 +1036,20 @@ try {
         ![
           'render',
           'notes',
-          'notes-bundle',
+          'security',
+          'candidates',
+          'compose-notes',
           'release-notes',
           'registry-notes',
-          'locales',
           'archives',
         ].includes(command)) ||
       (values['changelog-ref'] !== undefined && command !== 'registry-notes') ||
-      (values.locale !== undefined &&
-        (command !== 'notes' || !isLocale(values.locale))))
+      (values.notes !== undefined &&
+        !['release-notes', 'registry-notes'].includes(command)) ||
+      (values.since !== undefined &&
+        !['candidates', 'compose-notes'].includes(command)) ||
+      (values.selection === undefined) !== (command !== 'compose-notes') ||
+      (values.base !== undefined && command !== 'compose-notes'))
   ) {
     throw new Error(USAGE)
   }
@@ -981,18 +1065,38 @@ try {
   else if (command === 'render')
     process.stdout.write(render(productPath(args[0]), args[1], values.ref))
   else if (command === 'notes')
-    process.stdout.write(
-      renderNotes(productPath(args[0]), args[1], values.ref, values.locale),
+    process.stdout.write(renderNotes(productPath(args[0]), args[1], values.ref))
+  else if (command === 'security')
+    console.log(
+      releaseFragments(productPath(args[0]), args[1], values.ref).some(
+        fragment => fragment.kind === 'security',
+      ),
     )
-  else if (command === 'notes-bundle')
+  else if (command === 'candidates')
     console.log(
       JSON.stringify(
-        renderNotesBundle(productPath(args[0]), args[1], values.ref),
+        noteCandidates(productPath(args[0]), args[1], values.ref, values.since),
+      ),
+    )
+  else if (command === 'compose-notes')
+    process.stdout.write(
+      composeNotes(
+        productPath(args[0]),
+        args[1],
+        values.ref,
+        values.selection,
+        values.base,
+        values.since,
       ),
     )
   else if (command === 'release-notes')
     process.stdout.write(
-      releaseNotes(productPath(args[0]), args[1], values.ref),
+      releaseNotes(
+        productPath(args[0]),
+        args[1],
+        values.ref,
+        readNotesBundle(values.notes),
+      ),
     )
   else if (command === 'registry-notes')
     console.log(
@@ -1002,17 +1106,17 @@ try {
           args[1],
           values.ref,
           values['changelog-ref'],
+          readNotesBundle(values.notes),
         ),
       ),
     )
-  else if (command === 'locales')
-    console.log(locales(productPath(args[0]), args[1], values.ref).join(' '))
   else if (command === 'archives')
     process.stdout.write(
       archivedNotePaths(productPath(args[0]), values.ref)
         .map(path => `${path}\n`)
         .join(''),
     )
+  else if (command === 'format-notes') formatNotesBundle(args[0])
   else if (command === 'section')
     process.stdout.write(compiledSection(readFileSync(0), args[0]))
   else sync()

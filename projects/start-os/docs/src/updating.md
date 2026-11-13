@@ -5,8 +5,9 @@ StartOS makes it easy to keep your services up to date. When updates are availab
 ## Using the Updates Tab
 
 1. Click the **Updates** tab in the top navigation bar.
-1. Updates are organized by registry. Click a registry to accordion-open its available updates and reveal release notes for each service.
-1. Review the release notes, then click **Update**. If the package has a pre-download alert for your installed version, read it and select **Continue** to start the download or **Cancel** to leave the service unchanged.
+1. Updates are organized by registry. Click a registry to list its available updates.
+1. Click an update to expand it and see who signed it and its release notes. **View in Marketplace** opens its full listing. An update not signed by a key you trust shows a warning, and installing it asks you to confirm the risks first.
+1. Click **Update**, in the details or in the update's row. If the package has a pre-download alert for your installed version, read it and select **Continue** to start the download or **Cancel** to leave the service unchanged.
 
 ## Switching Registries
 

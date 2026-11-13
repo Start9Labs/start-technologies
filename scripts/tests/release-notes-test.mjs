@@ -6,7 +6,9 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -17,7 +19,9 @@ const MAIN =
   'Lede.\n\n## Highlights\n\n- Feature.\n\n## Important\n\nFollow up.\n'
 const FRAMING = 'Lede.\n\n## Important\n\nFollow up.\n'
 const PRE_UPDATE = '## ⚠️ Before You Update\n\n> Prepare first.'
-const METADATA = '---\nuser-facing: true\n---\n\n'
+const wrapped = warning =>
+  `<!-- pre-update -->\n\n${warning}\n\n<!-- /pre-update -->`
+const METADATA = '---\nrelease-notes: true\n---\n\n'
 
 function releaseFixture(t) {
   const f = fixture(t)
@@ -27,6 +31,7 @@ function releaseFixture(t) {
     'manage-release.sh',
     'changelog.mjs',
     'changelog-version.mjs',
+    'release-notes-select.mjs',
   ])
     copyFileSync(join(REPO, 'scripts', script), join(root, 'scripts', script))
   for (const config of ['package.json', '.prettierrc.json'])
@@ -38,7 +43,33 @@ function releaseFixture(t) {
     root,
     `projects/start-sdk/release-notes/${VERSION}.pre-update.md`,
   )
-  Object.assign(env, { VERSION, CHANGELOG_REF: 'fixture-ref' })
+  const published = join(root, '.published-notes.json')
+  f.nodeExecutable(
+    '.fallback-bin/gh',
+    `import { existsSync, readFileSync } from 'node:fs'
+const args = process.argv.slice(2)
+const path = ${JSON.stringify(published)}
+const notes = existsSync(path) ? JSON.parse(readFileSync(path)) : {}
+if (args.some(arg => arg.includes('/releases/assets/')))
+  process.stdout.write(JSON.stringify(notes[args.at(-1).split('/').pop()].notes))
+else if (args[0] === 'api')
+  for (const [id, { tag }] of Object.entries(notes)) console.log(tag + '\\t' + id)
+else process.exit(1)
+`,
+  )
+  Object.assign(env, {
+    VERSION,
+    CHANGELOG_REF: 'fixture-ref',
+    GITHUB_REPOSITORY: 'fixture/repo',
+    PATH: `${join(root, '.fallback-bin')}:${env.PATH}`,
+  })
+  function publishNotes(tag, notes) {
+    const all = existsSync(published)
+      ? JSON.parse(readFileSync(published, 'utf8'))
+      : {}
+    all[String(Object.keys(all).length + 1)] = { tag, notes }
+    writeFileSync(published, JSON.stringify(all))
+  }
   function script(
     command = 'notes',
     project = 'start-sdk',
@@ -80,7 +111,7 @@ function releaseFixture(t) {
     env.PATH = `${join(root, 'bin')}:${env.PATH}`
     return marker
   }
-  return { ...f, main, preUpdate, script, commit, blockPython }
+  return { ...f, main, preUpdate, script, commit, blockPython, publishNotes }
 }
 
 const text = path => readFileSync(path, 'utf8')
@@ -105,7 +136,7 @@ test('optional companion', t => {
   assert.equal(script().stdout, without)
   write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
   const combined = script().stdout
-  assert.equal(combined, PRE_UPDATE + '\n\n' + without)
+  assert.equal(combined, wrapped(PRE_UPDATE) + '\n\n' + without)
   linkLast(combined)
   assert.equal(combined.match(/Full changelog/g).length, 1)
   contains(combined, '/blob/fixture-ref/projects/start-sdk/CHANGELOG.md#123')
@@ -177,6 +208,10 @@ test('sparse deploy canonical versions and notes', t => {
     write(
       `projects/${project}/release-notes/${version}.pre-update.md`,
       PRE_UPDATE,
+    )
+    write(
+      `projects/${project}/changelog/patch-security-internal.md`,
+      '---\nrelease-notes: false\n---\n\n- Security correction.\n',
     )
   }
   git('init', '-q')
@@ -257,11 +292,15 @@ test('sparse deploy canonical versions and notes', t => {
     assert.deepEqual(JSON.parse(text(join(runnerTemp, 'release-notes.json'))), {
       releaseNotes: derived,
     })
+    if (project === 'start-os') {
+      assert.equal(text(join(runnerTemp, 'release-security')), 'true\n')
+      contains(deploy, '--git-hash "${{ github.sha }}" "${SECURITY_ARGS[@]}"')
+    }
     const fragmentPath = `checkout-${project}/projects/${project}/changelog/patch-fixed-feature.md`
-    write(fragmentPath, '---\nuser-facing: invalid\n---\n\n- Invalid.\n')
+    write(fragmentPath, '---\nrelease-notes: invalid\n---\n\n- Invalid.\n')
     const invalid = compile()
     assert.notEqual(invalid.status, 0)
-    contains(invalid.stderr, 'user-facing: true or false')
+    contains(invalid.stderr, 'release-notes: true or false')
     write(fragmentPath, METADATA + '- Generated feature.\n')
     env.VERSION = version
     assert.equal(script('notes', project, true, checkout).stdout, derived)
@@ -335,7 +374,7 @@ test('GitHub body carries the notes and changelog without the link', t => {
   excludes(body, '**[Full changelog')
   contains(
     body,
-    `\n${PRE_UPDATE}\n\n${MAIN.replace('Feature.', 'Fixed feature.')}\n<details>`,
+    `\n${wrapped(PRE_UPDATE)}\n\n${MAIN.replace('Feature.', 'Fixed feature.')}\n<details>`,
   )
   contains(body, '<details>\n<summary>Full changelog</summary>\n\n## [1.2.3]')
   contains(body, '- Fixed feature.\n\n</details>')
@@ -348,7 +387,7 @@ test('registry commands reject invalid highlights before writes', t => {
   const { root, write, run } = releaseFixture(t)
   write(
     'projects/start-wrt/changelog/patch-fixed-invalid.md',
-    '---\nuser-facing: invalid\n---\n\n- Invalid.\n',
+    '---\nrelease-notes: invalid\n---\n\n- Invalid.\n',
   )
   const marker = join(root, 'registry-write')
   for (const command of [
@@ -371,7 +410,7 @@ ${command}
       { encoding: 'utf8' },
     )
     assert.notEqual(result.status, 0)
-    contains(result.stderr, 'user-facing: true or false')
+    contains(result.stderr, 'release-notes: true or false')
     assert.equal(existsSync(marker), false)
   }
 })
@@ -384,7 +423,9 @@ test('main framing is optional', t => {
   write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
   unlinkSync(main)
   contains(script('notes').stdout, PRE_UPDATE)
-  contains(script('body').stdout, '## Highlights')
+  const body = script('body').stdout
+  contains(body, PRE_UPDATE)
+  excludes(body, '## Highlights')
 })
 
 test('existing changelog link is replaced', t => {
@@ -421,22 +462,16 @@ assert_metadata_matches_adopted`
       ],
       { encoding: 'utf8' },
     )
-  function blocked(name = '1.2.3.pre-update.md') {
+  function blocked(name = 'pre-update warnings') {
     const result = check()
     assert.notEqual(result.status, 0)
     contains(result.stderr, name)
-    contains(result.stderr, 'differs')
+    contains(result.stderr, 'differ')
   }
   write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
   blocked()
   git('add', preUpdate)
   blocked()
-  write(
-    `projects/start-sdk/release-notes/${VERSION}.md`,
-    MAIN + 'Uncommitted instruction.\n',
-  )
-  blocked('1.2.3.md')
-  write(`projects/start-sdk/release-notes/${VERSION}.md`, MAIN)
   commit()
   blocked()
   adopted = git('rev-parse', 'HEAD').trim()
@@ -463,28 +498,31 @@ assert_metadata_matches_adopted`
   blocked('changelog')
 })
 
-test('adopted release accepts compiled metadata after fragments are consumed', t => {
-  const { root, write, run, git, commit } = releaseFixture(t)
+test('adopted release accepts edited archived notes after fragments are consumed', t => {
+  const { root, write, run, git, commit, publishNotes } = releaseFixture(t)
   git('init', '-q')
   git('remote', 'add', 'origin', root)
-  write(`projects/start-sdk/release-notes/${VERSION}.md`, 'Lede.\n')
+  const notesPath = `projects/start-sdk/release-notes/${VERSION}.md`
+  write(notesPath, 'Lede.\n')
   const path = write(
     'projects/start-sdk/changelog/patch-fixed-public.md',
     METADATA + '- Released fix.\n',
   )
-  const translation = write(
-    'projects/start-sdk/changelog/patch-fixed-public.pl_PL.md',
-    '- Poprawka.\n',
-  )
-  const localizedPath = `projects/start-sdk/release-notes/${VERSION}.pl_PL.md`
-  write(localizedPath, '## Nowości\n\n<!-- highlights -->\n')
   commit()
   const adopted = git('rev-parse', 'HEAD').trim()
   git('-c', 'tag.gpgsign=false', 'tag', 'start-sdk/v1.2.3')
+  publishNotes('start-sdk/v1.2.3', {
+    en_US: 'Edited.\n',
+    pl_PL: 'Zmienione.\n',
+  })
   const synced = run(process.execPath, ['scripts/changelog.mjs', 'sync'])
   assert.equal(synced.status, 0, synced.stderr.toString())
   assert.equal(existsSync(path), false)
-  assert.equal(existsSync(translation), false)
+  assert.equal(text(join(root, notesPath)), 'Edited.\n')
+  assert.equal(
+    text(join(root, `projects/start-sdk/release-notes/${VERSION}.pl_PL.md`)),
+    'Zmienione.\n',
+  )
   commit()
   const command = `source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
 REPO_ROOT="$PWD"; PROJECT=start-sdk; VERSION=1.2.3; COMMIT="${adopted}"
@@ -492,12 +530,12 @@ assert_metadata_matches_adopted`
   const check = () => run('bash', ['-c', command], { encoding: 'utf8' })
   const result = check()
   assert.equal(result.status, 0, result.stderr)
-  const localized = text(join(root, localizedPath))
-  write(localizedPath, localized + '\nChanged translated notice.\n')
-  const translatedChange = check()
-  assert.notEqual(translatedChange.status, 0)
-  contains(translatedChange.stderr, 'release-note bundle')
-  write(localizedPath, localized)
+  const warning = `projects/start-sdk/release-notes/${VERSION}.pl_PL.pre-update.md`
+  write(warning, 'Nowe ostrzeżenie.\n')
+  const changedWarning = check()
+  assert.notEqual(changedWarning.status, 0)
+  contains(changedWarning.stderr, 'pre-update warnings differ')
+  unlinkSync(join(root, warning))
   write(
     'projects/start-sdk/changelog/patch-fixed-other.md',
     METADATA + '- New change.\n',
@@ -505,8 +543,8 @@ assert_metadata_matches_adopted`
   assert.notEqual(check().status, 0)
 })
 
-test('release uploads changelog from tag before publication', t => {
-  const { root, env, write, script, git, commit, nodeExecutable, run } =
+test('create-gh-release drafts edited, translated notes at the tagged commit before the tag', t => {
+  const { root, env, write, git, commit, nodeExecutable, run } =
     releaseFixture(t)
   delete env.CHANGELOG_REF
   git('init', '-q')
@@ -519,113 +557,213 @@ test('release uploads changelog from tag before publication', t => {
     'projects/start-sdk/changelog/patch-fixed-example.md',
     METADATA + '- Fixed the released feature.\n',
   )
+  write(
+    'projects/start-sdk/changelog/patch-changed-routine.md',
+    '---\nrelease-notes: false\n---\n\n- Routine change.\n',
+  )
   commit()
-  git('-c', 'tag.gpgsign=false', 'tag', 'start-sdk/v1.2.3')
+  const tagged = git('rev-parse', 'HEAD').trim()
+  const commitProjects = message => {
+    git('add', 'projects')
+    git(
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.com',
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '-qm',
+      message,
+    )
+  }
   const remote = join(root, 'origin.git')
   git('init', '--bare', '-q', remote)
   git('remote', 'add', 'origin', remote)
-  git('push', '-q', 'origin', 'HEAD:master', '--tags')
+  git('push', '-q', 'origin', 'HEAD:master')
   write(
     'projects/start-sdk/changelog/minor-added-later.md',
     METADATA + '- Later change.\n',
   )
-  git('add', 'projects')
-  git(
-    '-c',
-    'user.name=Fixture',
-    '-c',
-    'user.email=fixture@example.com',
-    '-c',
-    'commit.gpgsign=false',
-    'commit',
-    '-qm',
-    'later',
-  )
+  commitProjects('later')
   write(`projects/start-sdk/release-notes/${VERSION}.md`, 'Later lede.\n')
   write(
     `projects/start-sdk/release-notes/${VERSION}.pre-update.md`,
     PRE_UPDATE + '\nLater warning.\n',
   )
-  const captured = join(root, 'uploaded.md')
-  const bodyFile = join(root, 'release-body.md')
+  const state = join(root, 'gh-state')
   const calls = join(root, 'gh-calls')
+  const translations = join(root, 'claude-calls')
   nodeExecutable(
     'bin/gh',
-    `import { appendFileSync, copyFileSync } from 'node:fs'
+    `import { appendFileSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 const args = process.argv.slice(2)
+const state = process.env.STATE
+const flag = name => args[args.indexOf(name) + 1]
 appendFileSync(process.env.CALLS, JSON.stringify(args) + '\\n')
-if (args[1] === 'view') {
-  if (!process.env.EXISTING_RELEASE) process.exit(1)
-  console.log(process.env.RELEASE_DRAFT || 'false')
-}
-if (args.includes('--notes-file'))
-  copyFileSync(args[args.indexOf('--notes-file') + 1], process.env.BODY)
-if (args[1] === 'upload') {
+if (args[1] === 'download') {
+  if (!existsSync(state + '/release-notes.json')) process.exit(1)
+  copyFileSync(state + '/release-notes.json', flag('--output'))
+} else if (args[1] === 'view') {
+  if (!existsSync(state + '/release')) process.exit(1)
+  console.log(process.env.RELEASE_DRAFT || 'true')
+} else if (args[1] === 'create' || args[1] === 'edit') {
+  mkdirSync(state, { recursive: true })
+  writeFileSync(state + '/release', '')
+  if (args.includes('--notes-file')) copyFileSync(flag('--notes-file'), state + '/body.md')
+} else if (args[1] === 'upload') {
   if (process.env.FAIL_UPLOAD) process.exit(1)
-  copyFileSync(args.find(arg => arg.endsWith('/CHANGELOG.md')), process.env.CAPTURE)
+  for (const file of args.filter(arg => arg.startsWith('/')))
+    copyFileSync(file, state + '/' + file.split('/').pop())
 }
-if (args.includes('--draft=false') && process.env.FAIL_PUBLISH) process.exit(1)
 `,
   )
+  nodeExecutable(
+    'bin/claude',
+    `import { appendFileSync, readFileSync } from 'node:fs'
+const english = readFileSync(0, 'utf8').split('<english>\\n')[1].split('\\n</english>')[0]
+const locale = process.argv.at(-1).match(/into the (\\S+) locale/)[1]
+appendFileSync(process.env.TRANSLATIONS, locale + '\\n')
+const output = process.env.DROP_COMMENTS ? english.replace(/<!--.*?-->/g, '') : english
+process.stdout.write('Translated ' + locale + '.\\n\\n' + output + '\\n')
+`,
+  )
+  const editor = write(
+    'bin/edit-notes',
+    `#!/bin/sh\nfor file; do case "$file" in */en_US.md) printf '\\nEdited by hand.\\n' >> "$file" ;; esac; done\n`,
+  )
+  chmodSync(editor, 0o755)
   Object.assign(env, {
     PATH: `${join(root, 'bin')}:${env.PATH}`,
-    CAPTURE: captured,
-    BODY: bodyFile,
+    STATE: state,
     CALLS: calls,
+    TRANSLATIONS: translations,
+    COMMIT: tagged,
+    VISUAL: editor,
   })
   const ghCalls = () =>
     text(calls)
       .trim()
       .split('\n')
       .map(line => JSON.parse(line))
-  const taggedCommit = git('rev-parse', 'start-sdk/v1.2.3')
-  script('create-gh-release')
+  const manage = (command, keys = '\r', success = true) => {
+    const result = run(
+      'bash',
+      [join(root, 'scripts/manage-release.sh'), command, 'start-sdk'],
+      { encoding: 'utf8', input: keys },
+    )
+    if (success) assert.equal(result.status, 0, result.stderr)
+    else assert.notEqual(result.status, 0)
+    return result
+  }
+
+  manage('create-gh-release', ' \r')
   let recorded = ghCalls()
   assert.deepEqual(
     recorded.map(args => args[1]),
-    ['view', 'create', 'upload', 'edit'],
+    ['download', 'view', 'create', 'upload'],
   )
-  assert.ok(recorded[1].includes('--draft'))
-  assert.ok(recorded[1].includes('--verify-tag'))
-  assert.ok(recorded[3].includes('--draft=false'))
-  const body = text(bodyFile)
-  excludes(body, '**[Full changelog')
+  assert.ok(recorded[2].includes('--draft'))
+  assert.equal(recorded[2][recorded[2].indexOf('--target') + 1], tagged)
+  assert.ok(!recorded[2].includes('--verify-tag'))
+  assert.equal(git('tag', '--list').trim(), '')
+  const bundle = JSON.parse(text(join(state, 'release-notes.json')))
+  assert.equal(
+    bundle.en_US,
+    'Lede.\n\n## Highlights\n\n- Routine change.\n\n- Fixed the released feature.\n\n## Important\n\nFollow up.\n\nEdited by hand.\n',
+  )
+  assert.deepEqual(Object.keys(bundle).sort(), [
+    'de_DE',
+    'en_US',
+    'es_ES',
+    'fr_FR',
+    'pl_PL',
+  ])
+  assert.ok(bundle.pl_PL.startsWith('Translated pl_PL.\n\nLede.'))
+  assert.ok(bundle.pl_PL.includes('Edited by hand.'))
+  const body = text(join(state, 'body.md'))
+  contains(body, 'Edited by hand.')
   contains(body, '<details>\n<summary>Full changelog</summary>\n\n## [1.2.3]')
-  contains(body, 'Fixed the released feature.\n\n</details>')
-  excludes(body, 'Old change.')
+  contains(body, '### Changed\n\n- Routine change.')
+  contains(body, '### Fixed\n\n- Fixed the released feature.')
   excludes(body, 'Later change.')
   excludes(body, 'Later lede.')
   excludes(body, 'Later warning.')
-  contains(body, 'Lede.')
-  excludes(body, '<details open')
-  const uploaded = text(captured)
+  excludes(body, '**[Full changelog')
+  const uploaded = text(join(state, 'CHANGELOG.md'))
   contains(uploaded, '## [1.2.3]')
-  contains(uploaded, 'Fixed the released feature.')
   contains(uploaded, 'Old change.')
   excludes(uploaded, 'Later change.')
-  assert.equal(git('rev-parse', 'start-sdk/v1.2.3'), taggedCommit)
 
-  env.EXISTING_RELEASE = '1'
-  for (const draft of ['true', 'false']) {
+  git('-c', 'tag.gpgsign=false', 'tag', `start-sdk/v${VERSION}`, tagged)
+  delete env.COMMIT
+  unlinkSync(calls)
+  unlinkSync(translations)
+  env.VISUAL = 'true'
+  manage('create-gh-release', '')
+  recorded = ghCalls()
+  assert.deepEqual(
+    recorded.map(args => args[1]),
+    ['download', 'view', 'edit', 'upload'],
+  )
+  assert.equal(existsSync(translations), false)
+  assert.deepEqual(JSON.parse(text(join(state, 'release-notes.json'))), bundle)
+  excludes(text(join(state, 'body.md')), 'Later warning.')
+  assert.equal(text(join(state, 'CHANGELOG.md')), uploaded)
+
+  env.COMMIT = git('rev-parse', 'HEAD').trim()
+  const conflicting = manage('create-gh-release', '', false)
+  contains(conflicting.stderr, `differs from the commit start-sdk/v${VERSION}`)
+  assert.equal(text(join(state, 'CHANGELOG.md')), uploaded)
+  delete env.COMMIT
+
+  env.FORCE = '1'
+  manage('create-gh-release', '')
+  contains(text(join(state, 'CHANGELOG.md')), 'Later change.')
+  delete env.FORCE
+
+  const commenter = write(
+    'bin/comment-notes',
+    `#!/bin/sh\nfor file; do case "$file" in */en_US.md) printf '\\n<!-- keep -->\\n' >> "$file" ;; esac; done\n`,
+  )
+  chmodSync(commenter, 0o755)
+  Object.assign(env, { VISUAL: commenter, DROP_COMMENTS: '1' })
+  const mangled = manage('create-gh-release', '', false)
+  contains(mangled.stderr, "notes' HTML comments differ from the English notes")
+  assert.deepEqual(JSON.parse(text(join(state, 'release-notes.json'))), bundle)
+  delete env.DROP_COMMENTS
+  env.VISUAL = 'true'
+
+  const translatedBeforeOptOut = text(translations)
+  env.NO_TRANSLATE = '1'
+  manage('create-gh-release', '')
+  assert.deepEqual(JSON.parse(text(join(state, 'release-notes.json'))), {
+    en_US: bundle.en_US,
+  })
+  assert.equal(text(translations), translatedBeforeOptOut)
+  delete env.NO_TRANSLATE
+  git('tag', '-d', `start-sdk/v${VERSION}`)
+  env.COMMIT = tagged
+
+  for (const [draft, expected] of [
+    ['true', ['view', 'edit']],
+    ['false', ['view']],
+  ]) {
     env.RELEASE_DRAFT = draft
     unlinkSync(calls)
-    script('create-gh-release')
+    manage('publish-gh-release')
     recorded = ghCalls()
     assert.deepEqual(
       recorded.map(args => args[1]),
-      draft === 'true'
-        ? ['view', 'edit', 'upload', 'edit']
-        : ['view', 'edit', 'upload'],
+      expected,
     )
-    assert.equal(text(bodyFile), body)
-    assert.equal(text(captured), uploaded)
-    assert.ok(!recorded[1].includes('--draft'))
+    if (draft === 'true') assert.ok(recorded[1].includes('--draft=false'))
   }
+  delete env.RELEASE_DRAFT
 
+  rmSync(state, { recursive: true })
   env.FAIL_UPLOAD = '1'
-  env.EXISTING_RELEASE = ''
-  unlinkSync(calls)
-  const published = join(root, 'published')
+  const tagged$ = join(root, 'tagged')
   const failed = run(
     'bash',
     [
@@ -635,53 +773,32 @@ source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
 REPO_ROOT="$PWD"
 PROJECT=start-sdk; KIND=npm; VERSION=1.2.3; TAG=start-sdk/v1.2.3
 cmd_pre_check() { :; }
-cmd_tag() { :; }
-cmd_push() { touch "${published}"; }
+cmd_tag() { touch "${tagged$}"; }
+cmd_push() { :; }
 cmd_release
 `,
     ],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', input: '\r' },
   )
   assert.notEqual(failed.status, 0)
-  assert.equal(existsSync(published), false)
-  assert.ok(!ghCalls().some(args => args.includes('--draft=false')))
+  assert.equal(existsSync(tagged$), false)
   delete env.FAIL_UPLOAD
 
-  env.EXISTING_RELEASE = '1'
-  env.RELEASE_DRAFT = 'true'
-  env.FAIL_PUBLISH = '1'
-  script('create-gh-release', 'start-sdk', false)
-  delete env.FAIL_PUBLISH
-  script('create-gh-release')
+  rmSync(state, { recursive: true, force: true })
+  unlinkSync(calls)
   write(
     'projects/start-sdk/changelog/patch-fixed-example.md',
     'invalid fragment\n',
   )
-  git('add', 'projects')
-  git(
-    '-c',
-    'user.name=Fixture',
-    '-c',
-    'user.email=fixture@example.com',
-    '-c',
-    'commit.gpgsign=false',
-    'commit',
-    '-qm',
-    'invalid',
+  commitProjects('invalid')
+  env.COMMIT = git('rev-parse', 'HEAD').trim()
+  manage('create-gh-release', '\r', false)
+  assert.ok(
+    !ghCalls().some(args => ['create', 'edit', 'upload'].includes(args[1])),
   )
-  git('-c', 'tag.gpgsign=false', 'tag', '-f', 'start-sdk/v1.2.3')
-  git('push', '-q', '--force', 'origin', 'refs/tags/start-sdk/v1.2.3')
-  unlinkSync(captured)
-  for (const existing of ['', '1']) {
-    env.EXISTING_RELEASE = existing
-    if (existsSync(calls)) unlinkSync(calls)
-    script('create-gh-release', 'start-sdk', false)
-    assert.equal(existsSync(captured), false)
-    assert.equal(existsSync(calls), false)
-  }
 })
 
-test('resume requires a published release with inline changelog and attachment', t => {
+test('resume requires a drafted release with notes, inline changelog and attachment', t => {
   const { root, env, run, git, commit, nodeExecutable } = releaseFixture(t)
   git('init', '-q')
   git('remote', 'add', 'origin', root)
@@ -700,37 +817,93 @@ REPO_ROOT="$PWD"
 PROJECT=start-wrt; KIND=wrt; VERSION=1.2.3; TAG=start-wrt/v1.2.3
 missing_registry_assets() { echo missing; }
 detect_progress
-printf '%s' "\${DONE[create-gh-release]:-incomplete}"
+printf '%s %s' "\${DONE[create-gh-release]:-draft}" "\${DONE[publish-gh-release]:-publish}"
 `
-  for (const [metadata, complete] of [
-    [null, false],
-    [{ isDraft: false, assets: [], body: '' }, false],
-    [{ isDraft: false, assets: [{ name: 'CHANGELOG.md' }], body: MAIN }, false],
-    [
-      { isDraft: false, assets: [], body: '<summary>Full changelog</summary>' },
-      false,
-    ],
-    [
-      {
-        isDraft: true,
-        assets: [{ name: 'CHANGELOG.md' }],
-        body: '<summary>Full changelog</summary>',
-      },
-      false,
-    ],
-    [
-      {
-        isDraft: false,
-        assets: [{ name: 'CHANGELOG.md' }],
-        body: '<summary>Full changelog</summary>',
-      },
-      true,
-    ],
+  const summary = '<summary>Full changelog</summary>'
+  const assets = [{ name: 'CHANGELOG.md' }, { name: 'release-notes.json' }]
+  for (const [metadata, expected] of [
+    [null, 'draft publish'],
+    [{ isDraft: false, assets: [], body: '' }, 'draft publish'],
+    [{ isDraft: false, assets, body: MAIN }, 'draft publish'],
+    [{ isDraft: false, assets: [], body: summary }, 'draft publish'],
+    [{ isDraft: false, assets: [assets[0]], body: summary }, 'draft publish'],
+    [{ isDraft: true, assets, body: summary }, '1 publish'],
+    [{ isDraft: false, assets, body: summary }, '1 1'],
   ]) {
     env.RELEASE_METADATA = metadata ? JSON.stringify(metadata) : ''
     const result = run('bash', ['-c', command], { encoding: 'utf8' })
     assert.equal(result.status, 0, result.stderr)
-    assert.equal(result.stdout, complete ? '1' : 'incomplete')
+    assert.equal(result.stdout, expected)
+  }
+})
+
+test('the notes editor is VISUAL, EDITOR, then sensible-editor', t => {
+  const { root, env, run, nodeExecutable } = releaseFixture(t)
+  nodeExecutable('bin/sensible-editor', '')
+  const editor = vars => {
+    const result = run(
+      'bash',
+      [
+        '-c',
+        `source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh); notes_editor`,
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...env, PATH: `${join(root, 'bin')}:${env.PATH}`, ...vars },
+      },
+    )
+    assert.equal(result.status, 0, result.stderr)
+    return result.stdout.trim()
+  }
+  assert.equal(editor({ VISUAL: 'code --wait', EDITOR: 'nano' }), 'code --wait')
+  assert.equal(editor({ VISUAL: '', EDITOR: 'nano' }), 'nano')
+  assert.equal(editor({ VISUAL: '', EDITOR: '' }), 'sensible-editor')
+})
+
+test('untagged draft resume checks the commit after artifact adoption', t => {
+  const { root, env, write, run, git, commit, nodeExecutable } =
+    releaseFixture(t)
+  git('init', '-q')
+  commit()
+  const original = git('rev-parse', 'HEAD').trim()
+  write('projects/unrelated/file', 'Later build')
+  commit()
+  const newer = git('rev-parse', 'HEAD').trim()
+  nodeExecutable('bin/gh', 'console.log(process.env.DRAFT_SHA)')
+  env.PATH = `${join(root, 'bin')}:${env.PATH}`
+  env.DRAFT_SHA = original
+
+  for (const selected of [original, newer]) {
+    const result = run(
+      'bash',
+      [
+        '-c',
+        `
+source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"
+PROJECT=start-tunnel; KIND=deb; VERSION=1.2.3; TAG=start-tunnel/v1.2.3
+COMMIT=${original}
+cmd_pre_check() { DONE[create-gh-release]=1; }
+cmd_pull_alpha() { COMMIT=${selected}; }
+cmd_tag() { echo tagged; }
+cmd_publish_gh_release() { echo published; }
+cmd_push() { :; }
+cmd_sign() { :; }
+cmd_release
+`,
+      ],
+      { encoding: 'utf8' },
+    )
+    if (selected === original) {
+      assert.equal(result.status, 0, result.stderr)
+      contains(result.stdout, 'tagged\npublished')
+    } else {
+      assert.notEqual(result.status, 0)
+      contains(result.stderr, `Draft start-tunnel/v1.2.3 targets ${original}`)
+      contains(result.stderr, `selected artifacts were built from ${newer}`)
+      excludes(result.stdout, 'tagged')
+      excludes(result.stdout, 'published')
+    }
   }
 })
 
@@ -758,12 +931,7 @@ test('StartOS registry and packaged welcome', t => {
       `projects/start-os/release-notes/${name}`,
       readFileSync(join(source, name)),
     )
-  write(
-    `projects/start-os/release-notes/${version}.pl_PL.md`,
-    'Polskie nowości\n',
-  )
-  write(`projects/start-os/release-notes/${version}.de_DE.md`, 'Neuigkeiten\n')
-  write('projects/start-os/release-notes/0.4.0.1.pl_PL.md', 'Starsze wydanie\n')
+  write(`projects/start-os/release-notes/${version}.pl_PL.md`, 'Archived.\n')
   env.VERSION = version
   const combined = script('notes', 'start-os').stdout
   contains(combined, '## ⚠️ Before You Update')
@@ -777,11 +945,11 @@ test('StartOS registry and packaged welcome', t => {
   const copies = join(root, 'copies')
   const harness = write(
     'install.mk',
-    `mkdir = $(if $(filter %/release-notes,$(1)),mkdir -p "$(1)",true)
+    `mkdir = true
 rm = true
 ln = true
 ls-files = $(wildcard $(1)/*)
-cp = $(if $(filter %/release-notes.md,$(2))$(findstring /release-notes/,$(2)),printf '%s\\n' "$(2)" >> "${copies}"; cp "$(1)" "$(2)",true)
+cp = $(if $(filter %/release-notes.md,$(2)),printf '%s\\n' "$(2)" >> "${copies}"; cp "$(1)" "$(2)",true)
 include ${REPO}/projects/start-os/build.mk
 notes-inputs:
 \t@printf '%s\\n' $(filter $(STARTOS_RELEASE_NOTES_SRC),$(STARTOS_TARGETS))
@@ -799,10 +967,8 @@ notes-inputs:
     'shared-libs/crates/start-core/locales/release-notes.json',
   )
   contains(inputs.stdout, `${version}.md`)
-  contains(inputs.stdout, `${version}.pl_PL.md`)
-  contains(inputs.stdout, `${version}.de_DE.md`)
+  excludes(inputs.stdout, 'pl_PL')
   excludes(inputs.stdout, 'pre-update')
-  excludes(inputs.stdout, '0.4.0.1')
   const install = (makefile = harness) =>
     run(
       'make',
@@ -823,19 +989,10 @@ notes-inputs:
   const packaged = text(join(stage, 'release-notes.md'))
   assert.equal(packaged, text(join(source, `${version}.md`)))
   excludes(packaged, 'Before You Update')
-  excludes(packaged, 'only way to update')
-  contains(packaged, '## Highlights')
-  assert.equal(text(join(stage, 'release-notes/pl_PL.md')), 'Polskie nowości\n')
-  assert.equal(text(join(stage, 'release-notes/de_DE.md')), 'Neuigkeiten\n')
-  assert.deepEqual(readdirSync(join(stage, 'release-notes')).sort(), [
-    'de_DE.md',
-    'pl_PL.md',
-  ])
   assert.deepEqual(text(copies).trim().split('\n'), [
     join(stage, 'release-notes.md'),
-    join(stage, 'release-notes/de_DE.md'),
-    join(stage, 'release-notes/pl_PL.md'),
   ])
+  assert.equal(existsSync(join(stage, 'release-notes')), false)
   assert.deepEqual(renderTemps(), [])
 
   git('init', '-q')
@@ -849,27 +1006,8 @@ notes-inputs:
   )
   write(
     'projects/start-os/changelog/patch-changed-internal.md',
-    '---\nuser-facing: false\n---\n\n- Internal detail.\n',
+    '---\nrelease-notes: false\n---\n\n- Internal detail.\n',
   )
-  write(
-    `projects/start-os/release-notes/${version}.pl_PL.md`,
-    'Polska wersja.\n\n## Nowości\n\n<!-- highlights -->\n',
-  )
-  write(
-    `projects/start-os/release-notes/${version}.de_DE.md`,
-    '## Neuigkeiten\n\n<!-- highlights -->\n',
-  )
-  write(
-    'projects/start-os/changelog/patch-fixed-public.pl_PL.md',
-    '- Wygenerowana nowość.\n',
-  )
-  write(
-    'projects/start-os/changelog/patch-fixed-public.fr_FR.md',
-    '- Nouveauté générée.\n',
-  )
-  const polish = 'Polska wersja.\n\n## Nowości\n\n- Wygenerowana nowość.\n'
-  const german = '## Neuigkeiten\n\n- Generated highlight.\n'
-  const french = '## Nouveautés\n\n- Nouveauté générée.\n'
   commit()
   const generated = install()
   assert.equal(generated.status, 0, generated.stderr)
@@ -881,14 +1019,7 @@ notes-inputs:
   const registry = script('notes', 'start-os').stdout
   contains(registry, 'Generated highlight.')
   contains(registry, PRE_UPDATE.split('\n')[0])
-  excludes(welcome, 'Before You Update')
   excludes(registry, 'Internal detail.')
-  assert.equal(text(join(stage, 'release-notes/pl_PL.md')), polish)
-  assert.equal(text(join(stage, 'release-notes/de_DE.md')), german)
-  assert.equal(
-    text(join(stage, 'release-notes/fr_FR.md')),
-    'Lede.\n\n## Nouveautés\n\n- Nouveauté générée.\n\n## Important\n\nKeep this notice.\n',
-  )
   assert.deepEqual(renderTemps(), [])
 
   unlinkSync(join(root, `projects/start-os/release-notes/${version}.md`))
@@ -906,77 +1037,41 @@ notes-inputs:
 TAR_BIN = tar
 ssh = sh -c $(subst sudo ,,$1)
 ${remoteCopy}
-cp = $(if $(filter %/release-notes.md,$(2))$(findstring /release-notes/,$(2)),$(call remote-copy,$(1),$(2)),true)
+cp = $(if $(filter %/release-notes.md,$(2)),$(call remote-copy,$(1),$(2)),true)
 `,
   )
-  for (const path of [
-    'release-notes.md',
-    'release-notes/de_DE.md',
-    'release-notes/fr_FR.md',
-    'release-notes/pl_PL.md',
-  ])
-    unlinkSync(join(stage, path))
+  unlinkSync(join(stage, 'release-notes.md'))
   const remote = install(remoteHarness)
   assert.equal(remote.status, 0, remote.stderr)
   assert.equal(text(join(stage, 'release-notes.md')), generatedOnly)
-  assert.equal(text(join(stage, 'release-notes/de_DE.md')), german)
-  assert.equal(text(join(stage, 'release-notes/pl_PL.md')), polish)
-  assert.equal(text(join(stage, 'release-notes/fr_FR.md')), french)
   assert.deepEqual(renderTemps(), [])
 
   const copiedBeforeFailure = text(copies)
   write(
     'projects/start-os/changelog/patch-fixed-public.md',
-    '---\nuser-facing: invalid\n---\n\n- Invalid.\n',
+    '---\nrelease-notes: invalid\n---\n\n- Invalid.\n',
   )
   const failed = install()
   assert.notEqual(failed.status, 0)
-  contains(failed.stderr, 'user-facing: true or false')
-  assert.equal(text(join(stage, 'release-notes.md')), generatedOnly)
-  assert.equal(text(copies), copiedBeforeFailure)
-  assert.deepEqual(renderTemps(), [])
-
-  write(
-    'projects/start-os/changelog/patch-fixed-public.md',
-    METADATA + '- Updated English highlight.\n',
-  )
-  write(
-    `projects/start-os/release-notes/${version}.pl_PL.md`,
-    '## Nowości\n\n- Ręcznie napisane.\n',
-  )
-  const localeFailure = install()
-  assert.notEqual(localeFailure.status, 0)
-  contains(localeFailure.stderr, 'localized framing needs <!-- highlights -->')
+  contains(failed.stderr, 'release-notes: true or false')
   assert.equal(text(join(stage, 'release-notes.md')), generatedOnly)
   assert.equal(text(copies), copiedBeforeFailure)
   assert.deepEqual(renderTemps(), [])
 })
 
-test('registry payload composes localized notes, warnings, fallbacks and links', t => {
+test('registry payload composes edited locales, warnings, fallbacks and links', t => {
   const f = releaseFixture(t)
-  const { root, env, write, script, run, git, commit } = f
+  const { root, env, write, script, git, commit } = f
   delete env.CHANGELOG_REF
   git('init', '-q')
   git('remote', 'add', 'origin', root)
   write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
   write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
   write(
-    `projects/start-sdk/release-notes/${VERSION}.pl_PL.md`,
-    'Wstęp.\n\n## Nowości\n\n<!-- highlights -->\n\n## Ważne\n\nWażna uwaga.\n',
-  )
-  write(
     `projects/start-sdk/release-notes/${VERSION}.pl_PL.pre-update.md`,
     '## Przed aktualizacją\n\nPolskie ostrzeżenie.\n',
   )
-  write(
-    `projects/start-sdk/release-notes/${VERSION}.de_DE.md`,
-    '## Neuigkeiten\n\n<!-- highlights -->\n\n## Wichtig\n\nHinweis.\n',
-  )
   write(`projects/start-sdk/release-notes/${VERSION}.de_DE.pre-update.md`, '')
-  write(
-    `projects/start-sdk/release-notes/${VERSION}.es_ES.md`,
-    '## Novedades\n\n<!-- highlights -->\n',
-  )
   write(
     `projects/start-sdk/release-notes/${VERSION}.fr_FR.pre-update.md`,
     '## Avant la mise à jour\n\nAttention.\n',
@@ -986,114 +1081,88 @@ test('registry payload composes localized notes, warnings, fallbacks and links',
     METADATA + '- Feature.\n',
   )
   write(
-    'projects/start-sdk/changelog/patch-added-feature.pl_PL.md',
-    '- Funkcja.\n',
-  )
-  write(
-    'projects/start-sdk/changelog/patch-fixed-other.md',
-    METADATA + '- Another fix.\n',
-  )
-  write(
     'projects/start-sdk/changelog/patch-changed-internal.md',
-    '---\nuser-facing: false\n---\n\n- Internal.\n',
+    '---\nrelease-notes: false\n---\n\n- Internal.\n',
   )
   commit()
   const snapshot = git('rev-parse', 'HEAD').trim()
   const payload = () => JSON.parse(script('registry-notes').stdout)
-  const notes = payload()
-  const translations = notes.releaseNotes
-  const english = translations.en_US
-  assert.deepEqual(Object.keys(translations).sort(), [
+  const compiled = payload().releaseNotes
+  assert.deepEqual(Object.keys(compiled).sort(), [
+    'de_DE',
+    'en_US',
+    'fr_FR',
+    'pl_PL',
+  ])
+  assert.equal(script('notes').stdout, compiled.en_US)
+  contains(compiled.en_US, PRE_UPDATE)
+  contains(compiled.en_US, 'Lede.\n\n## Highlights\n\n- Feature.')
+  contains(compiled.en_US, '/releases/tag/start-sdk/v1.2.3')
+  linkLast(compiled.en_US)
+  contains(compiled.pl_PL, 'Polskie ostrzeżenie.')
+  contains(compiled.pl_PL, '- Feature.')
+  contains(compiled.pl_PL, 'Pełna lista zmian')
+  excludes(compiled.pl_PL, 'Prepare first.')
+  linkLast(compiled.pl_PL)
+  contains(compiled.de_DE, PRE_UPDATE)
+  contains(compiled.de_DE, 'Vollständiges Änderungsprotokoll')
+  contains(compiled.fr_FR, 'Attention.')
+  for (const body of Object.values(compiled)) excludes(body, 'Internal.')
+
+  const edited = write(
+    'edited.json',
+    JSON.stringify({
+      en_US: 'Edited English.\n',
+      pl_PL: 'Edytowane.\n',
+      es_ES: 'Editado.\n',
+    }),
+  )
+  env.NOTES_FILE = edited
+  const notes = payload().releaseNotes
+  assert.deepEqual(Object.keys(notes).sort(), [
     'de_DE',
     'en_US',
     'es_ES',
     'fr_FR',
     'pl_PL',
   ])
-  assert.equal(script('notes').stdout, english)
-  contains(english, PRE_UPDATE)
-  contains(english, 'Lede.')
-  contains(english, 'Follow up.')
-  contains(english, '/releases/tag/start-sdk/v1.2.3')
-  linkLast(english)
-  contains(translations.pl_PL, 'Wstęp.')
-  contains(translations.pl_PL, 'Ważna uwaga.')
-  contains(translations.pl_PL, '- Funkcja.')
-  contains(translations.pl_PL, '- Another fix.')
-  contains(translations.pl_PL, 'Polskie ostrzeżenie.')
-  contains(translations.pl_PL, 'Pełna lista zmian')
-  excludes(translations.pl_PL, 'Prepare first.')
-  linkLast(translations.pl_PL)
-  contains(translations.de_DE, PRE_UPDATE)
-  contains(translations.de_DE, '- Feature.')
-  contains(translations.de_DE, '- Another fix.')
-  contains(translations.de_DE, 'Vollständiges Änderungsprotokoll')
-  linkLast(translations.de_DE)
-  contains(translations.es_ES, PRE_UPDATE)
-  contains(translations.es_ES, 'Registro completo de cambios')
-  contains(translations.fr_FR, 'Attention.')
-  contains(translations.fr_FR, '- Feature.')
-  contains(translations.fr_FR, 'Journal complet des modifications')
-  for (const body of [english, ...Object.values(translations)]) {
-    excludes(body, 'Internal.')
-    excludes(body, '<!-- highlights -->')
-  }
-  const welcome = run(
-    process.execPath,
-    ['scripts/changelog.mjs', 'notes-bundle', 'projects/start-sdk', VERSION],
-    { encoding: 'utf8' },
+  assert.ok(
+    notes.en_US.startsWith(`${wrapped(PRE_UPDATE)}\n\nEdited English.\n`),
   )
-  assert.equal(welcome.status, 0, welcome.stderr)
-  excludes(welcome.stdout, 'Prepare first.')
-  excludes(welcome.stdout, 'Polskie ostrzeżenie.')
-  excludes(welcome.stdout, 'Attention.')
-  excludes(welcome.stdout, 'Full changelog')
+  contains(
+    notes.pl_PL,
+    'Polskie ostrzeżenie.\n\n<!-- /pre-update -->\n\nEdytowane.',
+  )
+  contains(notes.es_ES, `${wrapped(PRE_UPDATE)}\n\nEditado.`)
+  contains(notes.es_ES, 'Registro completo de cambios')
+  contains(notes.fr_FR, 'Attention.\n\n<!-- /pre-update -->\n\nEdited English.')
+  contains(notes.de_DE, 'Edited English.')
+  for (const body of Object.values(notes)) {
+    excludes(body, 'Feature.')
+    linkLast(body)
+  }
   const github = script('body').stdout
   contains(github, PRE_UPDATE)
-  contains(github, 'Lede.')
-  contains(github, 'Follow up.')
-  excludes(github, 'Wstęp.')
+  contains(github, 'Edited English.')
+  excludes(github, 'Edytowane.')
   excludes(github, 'Full changelog for')
+  delete env.NOTES_FILE
 
   env.CHANGELOG_REF = snapshot
   const pending = payload()
   contains(pending.releaseNotes.en_US, 'Full changelog fragments for v1.2.3')
-  contains(pending.releaseNotes.en_US, 'changes awaiting release.')
-  for (const [locale, label, description] of [
-    [
-      'de_DE',
-      'Alle Änderungsfragmente für v1.2.3',
-      'noch nicht veröffentlichte Änderungen.',
-    ],
-    [
-      'es_ES',
-      'Fragmentos del registro completo de cambios de v1.2.3',
-      'cambios pendientes de publicación.',
-    ],
-    [
-      'fr_FR',
-      'Fragments du journal complet des modifications de la v1.2.3',
-      'modifications en attente de publication.',
-    ],
-    [
-      'pl_PL',
-      'Fragmenty pełnej listy zmian w wersji 1.2.3',
-      'zmiany oczekujące na wydanie.',
-    ],
-  ]) {
-    const body = pending.releaseNotes[locale]
-    contains(body, label)
-    contains(body, description)
-    contains(body, `/tree/${snapshot}/projects/start-sdk/changelog`)
-  }
+  contains(
+    pending.releaseNotes.pl_PL,
+    `/tree/${snapshot}/projects/start-sdk/changelog`,
+  )
   env.NOTES_REF = snapshot
   write(
     `projects/start-sdk/release-notes/${VERSION}.pl_PL.pre-update.md`,
     'Later warning.\n',
   )
   write(
-    'projects/start-sdk/changelog/patch-fixed-other.md',
-    METADATA + '- Later fix.\n',
+    'projects/start-sdk/changelog/patch-added-feature.md',
+    METADATA + '- Later feature.\n',
   )
   assert.deepEqual(
     payload(),
@@ -1104,7 +1173,7 @@ test('registry payload composes localized notes, warnings, fallbacks and links',
   delete env.CHANGELOG_REF
 })
 
-test('registry and GitHub notes include localized Security without summary files', t => {
+test('registry and GitHub notes include every Security fragment without summary files', t => {
   const { root, main, write, script, git, commit } = releaseFixture(t)
   unlinkSync(main)
   git('init', '-q')
@@ -1118,47 +1187,29 @@ test('registry and GitHub notes include localized Security without summary files
     METADATA + '- Security fix.\n',
   )
   write(
-    'projects/start-sdk/changelog/patch-security-fix.pl_PL.md',
-    '- Poprawka bezpieczeństwa.\n',
-  )
-  write(
     'projects/start-sdk/changelog/patch-security-internal.md',
-    '---\nuser-facing: false\n---\n\n- Internal security detail.\n',
+    '---\nrelease-notes: false\n---\n\n- Unselected security detail.\n',
   )
   write(`projects/start-sdk/release-notes/${VERSION}.pre-update.md`, PRE_UPDATE)
   commit()
   const notes = JSON.parse(script('registry-notes').stdout).releaseNotes
-  for (const [locale, highlights, security, body] of [
-    ['en_US', 'Highlights', 'Security', 'Security fix.'],
-    ['pl_PL', 'Nowości', 'Bezpieczeństwo', 'Poprawka bezpieczeństwa.'],
-  ]) {
-    contains(notes[locale], `## ${highlights}`)
-    contains(notes[locale], `## ${security}\n\n- ${body}`)
-    contains(notes[locale], PRE_UPDATE)
-    excludes(notes[locale], 'Internal security detail.')
-    linkLast(notes[locale])
-  }
+  contains(notes, '## Highlights\n\n- Feature.')
+  contains(
+    notes,
+    '## Security\n\n- Security fix.\n\n- Unselected security detail.',
+  )
+  contains(notes, PRE_UPDATE)
+  linkLast(notes)
   assert.ok(
     !existsSync(join(root, `projects/start-sdk/release-notes/${VERSION}.md`)),
   )
-  assert.ok(
-    !existsSync(
-      join(root, `projects/start-sdk/release-notes/${VERSION}.pl_PL.md`),
-    ),
-  )
-  const github = script('body').stdout
-  contains(github, '## Security\n\n- Security fix.')
-  excludes(github, 'Poprawka bezpieczeństwa.')
+  contains(script('body').stdout, '## Security\n\n- Security fix.')
   write(
     `projects/start-sdk/release-notes/${VERSION}.md`,
     '## Important\n\nKeep this notice.\n',
   )
-  const fallback = JSON.parse(script('registry-notes').stdout).releaseNotes
-    .pl_PL
-  contains(fallback, '## Important\n\nKeep this notice.')
-  assert.ok(
-    fallback.indexOf('## Bezpieczeństwo') < fallback.indexOf('## Important'),
-  )
+  const framed = JSON.parse(script('registry-notes').stdout).releaseNotes
+  assert.ok(framed.indexOf('## Security') < framed.indexOf('## Important'))
 })
 
 test('older source catalogs fall back to shared pending-fragment labels', t => {
@@ -1172,8 +1223,8 @@ test('older source catalogs fall back to shared pending-fragment labels', t => {
   write(catalog, JSON.stringify(older))
   write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
   write(
-    `projects/start-sdk/release-notes/${VERSION}.pl_PL.md`,
-    '## Nowości\n\n<!-- highlights -->\n',
+    `projects/start-sdk/release-notes/${VERSION}.pl_PL.pre-update.md`,
+    'Ostrzeżenie.\n',
   )
   write(
     'projects/start-sdk/changelog/patch-fixed-feature.md',
@@ -1201,10 +1252,11 @@ test('registry publishers pass the complete LocaleString as the release-notes ar
   const { root, env, write, run, script } = releaseFixture(t)
   write(`projects/start-wrt/release-notes/${VERSION}.md`, MAIN)
   write(
-    `projects/start-wrt/release-notes/${VERSION}.pl_PL.md`,
-    'Polskie nowości.\n',
+    `projects/start-wrt/release-notes/${VERSION}.pl_PL.pre-update.md`,
+    'Polskie ostrzeżenie.\n',
   )
   const expected = JSON.parse(script('registry-notes', 'start-wrt').stdout)
+  assert.equal(typeof expected.releaseNotes, 'object')
   const capture = join(root, 'arguments')
   const harness = `
 source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
@@ -1250,8 +1302,10 @@ start-cli() {
       .map(line => line.slice(10))
       .join('\n')
       .replaceAll('${{ env.REGISTRY }}', 'fixture-registry')
+      .replaceAll('${{ github.sha }}', 'fixture-sha')
     const runnerTemp = join(root, 'runner')
     write('runner/release-notes.json', JSON.stringify(expected))
+    write('runner/release-security', 'true\n')
     const result = run(
       'bash',
       [
@@ -1263,20 +1317,28 @@ start-cli() {
     )
     assert.equal(result.status, 0, result.stderr)
     const args = text(capture).split('\0').slice(0, -1)
-    assert.deepEqual(JSON.parse(args[7]), expected.releaseNotes)
-    assert.equal(args.length, 9)
+    const notesIndex = workflow === 'startos-iso.yaml' ? 10 : 7
+    assert.deepEqual(JSON.parse(args[notesIndex]), expected.releaseNotes)
+    assert.equal(args.length, notesIndex + 2)
+    if (workflow === 'startos-iso.yaml')
+      assert.deepEqual(args.slice(5, 8), [
+        '--git-hash',
+        'fixture-sha',
+        '--security',
+      ])
+    else {
+      excludes(args.join(' '), '--git-hash')
+      excludes(args.join(' '), '--security')
+    }
   }
 })
 
-test('localized compiler failures prevent registry writes and warning edits block alpha adoption', t => {
+test('compiler failures prevent registry writes and warning edits block alpha adoption', t => {
   const { root, write, run, git, commit } = releaseFixture(t)
   git('init', '-q')
   git('remote', 'add', 'origin', root)
-  write(`projects/start-wrt/release-notes/${VERSION}.md`, FRAMING)
-  write(
-    `projects/start-wrt/release-notes/${VERSION}.pl_PL.md`,
-    '## Nowości\n\n<!-- highlights -->\n',
-  )
+  const framing = `projects/start-wrt/release-notes/${VERSION}.md`
+  write(framing, FRAMING)
   write(
     'projects/start-wrt/changelog/patch-fixed-feature.md',
     METADATA + '- Feature.\n',
@@ -1296,13 +1358,10 @@ REPO_ROOT="$PWD"; PROJECT=start-wrt; KIND=wrt; VERSION=1.2.3; COMMIT="${adopted}
   write(warning, 'Translated preparation.\n')
   const changed = check()
   assert.notEqual(changed.status, 0)
-  contains(changed.stderr, 'localized pre-update warnings')
+  contains(changed.stderr, 'pre-update warnings differ')
   unlinkSync(join(root, warning))
   const marker = join(root, 'registry-write')
-  write(
-    `projects/start-wrt/release-notes/${VERSION}.pl_PL.md`,
-    '## Nowości\n\n- Invalid authored highlights.\n',
-  )
+  write(framing, 'Lede.\n\n## Highlights\n\n- Invalid authored highlights.\n')
   for (const command of [
     'refresh_registry_notes fixture-registry',
     'cmd_register',
@@ -1322,20 +1381,20 @@ ${command}
       { encoding: 'utf8' },
     )
     assert.notEqual(failed.status, 0)
-    contains(failed.stderr, 'localized framing needs <!-- highlights -->')
+    contains(failed.stderr, 'remove ## Highlights')
     assert.equal(existsSync(marker), false)
   }
 })
 
-test('registry source refs pin shared link translations and reject mismatched alpha metadata', t => {
+test('registry source refs pin shared link translations', t => {
   const { root, env, write, script, run, git, commit } = releaseFixture(t)
   delete env.CHANGELOG_REF
   git('init', '-q')
   git('remote', 'add', 'origin', root)
   write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
   write(
-    `projects/start-sdk/release-notes/${VERSION}.pl_PL.md`,
-    '## Nowości\n\n<!-- highlights -->\n',
+    `projects/start-sdk/release-notes/${VERSION}.pl_PL.pre-update.md`,
+    'Ostrzeżenie.\n',
   )
   write(
     'projects/start-sdk/changelog/patch-fixed-feature.md',
@@ -1367,53 +1426,42 @@ test('registry source refs pin shared link translations and reject mismatched al
   )
   assert.equal(pinned.status, 0, pinned.stderr)
   assert.deepEqual(JSON.parse(pinned.stdout), original)
-  const mismatch = run(
-    'bash',
-    [
-      '-c',
-      `
-source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
-REPO_ROOT="$PWD"; PROJECT=start-sdk; KIND=npm; VERSION=1.2.3; COMMIT="${adopted}"
-assert_metadata_matches_adopted
-`,
-    ],
-    { encoding: 'utf8' },
-  )
-  assert.notEqual(mismatch.status, 0)
-  contains(mismatch.stderr, 'release-note bundle')
 })
 
-test('archived localized notes keep the changelog link last and its source URL', t => {
-  const { root, env, write, script, run, git, commit } = releaseFixture(t)
+test('edited notes keep the changelog link last and follow its source URL', t => {
+  const { root, env, write, script, run, git, commit, publishNotes } =
+    releaseFixture(t)
   git('init', '-q')
   git('remote', 'add', 'origin', root)
   write(`projects/start-sdk/release-notes/${VERSION}.md`, FRAMING)
-  write(
-    `projects/start-sdk/release-notes/${VERSION}.pl_PL.md`,
-    'Wstęp.\n\n## Przedmowa\n\nUwaga.\n\n## Nowości\n\n<!-- highlights -->\n\n## Ważne\n\nWażna uwaga.\n',
-  )
   write(
     'projects/start-sdk/changelog/patch-fixed-feature.md',
     METADATA + '- Feature.\n',
   )
   commit()
   git('-c', 'tag.gpgsign=false', 'tag', 'start-sdk/v1.2.3')
+  const bundle = {
+    en_US: 'Edited.\n',
+    pl_PL: 'Wstęp.\n\n## Nowości\n\n- Funkcja.\n',
+  }
+  env.NOTES_FILE = write('edited.json', JSON.stringify(bundle))
   env.CHANGELOG_REF = 'HEAD'
-  const pending = JSON.parse(script('registry-notes').stdout)
+  const pending = JSON.parse(script('registry-notes').stdout).releaseNotes
+  publishNotes('start-sdk/v1.2.3', bundle)
   const synced = run(process.execPath, ['scripts/changelog.mjs', 'sync'], {
     encoding: 'utf8',
   })
   assert.equal(synced.status, 0, synced.stderr)
   commit()
-  const archived = JSON.parse(script('registry-notes').stdout)
-  const polish = archived.releaseNotes.pl_PL
-  contains(polish, '/blob/HEAD/projects/start-sdk/CHANGELOG.md#123')
-  linkLast(polish)
-  const pendingPolish = pending.releaseNotes.pl_PL
-  contains(pendingPolish, 'Fragmenty pełnej listy zmian w wersji 1.2.3')
-  contains(pendingPolish, '/tree/HEAD/projects/start-sdk/changelog')
+  const archived = JSON.parse(script('registry-notes').stdout).releaseNotes
+  contains(archived.pl_PL, '/blob/HEAD/projects/start-sdk/CHANGELOG.md#123')
+  contains(pending.pl_PL, 'Fragmenty pełnej listy zmian w wersji 1.2.3')
+  contains(pending.pl_PL, '/tree/HEAD/projects/start-sdk/changelog')
+  for (const notes of [archived, pending])
+    for (const body of Object.values(notes)) linkLast(body)
   const withoutLink = body => body.replace(/^\*\*\[.+$/m, '<changelog link>')
-  assert.equal(withoutLink(polish), withoutLink(pendingPolish))
+  assert.equal(withoutLink(archived.pl_PL), withoutLink(pending.pl_PL))
+  delete env.NOTES_FILE
 })
 
 test('CLI capability gates registry writes and CI uploads without gating pure notes', t => {
@@ -1471,11 +1519,11 @@ enter_release_dir() { touch "${marker}"; }
     const source = text(join(REPO, '.github/workflows', workflow)).split(
       '\n  deploy:\n',
     )[1]
-    const install = source
-      .split('      - name: Install start-cli\n')[1]
+    const check = source
+      .split('      - name: Check start-cli registry notes support\n')[1]
       .split('\n      - name: ')[0]
     const command = `./scripts/manage-release.sh check-registry-notes-cli ${product}`
-    contains(install, command)
+    contains(check, command)
     assert.ok(source.indexOf(command) < source.indexOf(`- name: ${upload}`))
     assert.ok(
       source.indexOf(command) <
@@ -1499,6 +1547,38 @@ enter_release_dir() { touch "${marker}"; }
       '--help',
     ])
 })
+
+for (const [project, kind] of [
+  ['start-os', 'os'],
+  ['start-wrt', 'wrt'],
+]) {
+  for (const [name, indexCommand] of [
+    ['unavailable index', 'return 42'],
+    ['missing version', `printf '%s\\n' '{"versions":{}}'`],
+  ]) {
+    test(`cosign-registry rejects ${name} for ${project}`, t => {
+      const { root, env, run } = releaseFixture(t)
+      env.HOME = join(root, 'home')
+      const result = run(
+        'bash',
+        [
+          '-c',
+          `
+source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
+REPO_ROOT="$PWD"; PROJECT=${project}; KIND=${kind}; VERSION=${VERSION}; TAG=${project}/v${VERSION}
+mkdir -p "$(release_dir)"
+start-cli() { ${indexCommand}; }
+cmd_cosign_registry
+`,
+        ],
+        { encoding: 'utf8' },
+      )
+      assert.notEqual(result.status, 0)
+      contains(result.stderr, `has no ${VERSION} entry`)
+      excludes(result.stdout, 'Done. Developer signatures added')
+    })
+  }
+}
 
 test('historical CRLF English notes keep the changelog link last', t => {
   const { write, script } = releaseFixture(t)

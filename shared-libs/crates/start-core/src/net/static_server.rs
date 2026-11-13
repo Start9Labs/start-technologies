@@ -8,7 +8,7 @@ use async_compression::tokio::bufread::GzipEncoder;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{self as x, Request};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 use base64::Engine;
 use base64::display::Base64Display;
@@ -36,6 +36,8 @@ use crate::middleware::auth::Auth;
 use crate::middleware::auth::signature::verify_request_signature;
 use crate::middleware::cors::Cors;
 use crate::middleware::db::SyncDb;
+use crate::middleware::json::RequireJson;
+use crate::net::http::request_authority;
 use crate::prelude::*;
 use crate::rpc_continuations::{Guid, RpcContinuations};
 use crate::s9pk::S9pk;
@@ -48,10 +50,10 @@ use crate::util::io::{maybe_open_file, open_file};
 use crate::util::serde::BASE64;
 use crate::{PackageId, main_api};
 
-const NOT_FOUND: &[u8] = b"Not Found";
+const NOT_FOUND: &str = "Not Found";
 const METHOD_NOT_ALLOWED: &[u8] = b"Method Not Allowed";
 const NOT_AUTHORIZED: &[u8] = b"Not Authorized";
-const INTERNAL_SERVER_ERROR: &[u8] = b"Internal Server Error";
+const INTERNAL_SERVER_ERROR: &str = "Internal Server Error";
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL: &str = "no-cache";
 const PRIVATE_IMMUTABLE_CACHE_CONTROL: &str = "private, max-age=31536000, immutable";
@@ -65,6 +67,11 @@ pub trait UiContext: Context + AsRef<RpcContinuations> + Clone + Sized {
     fn middleware(server: Server<Self>) -> HttpServer<Self>;
     fn extend_router(self, router: Router) -> Router {
         router
+    }
+    /// Routes served by the context's RPC server.
+    #[allow(unused_variables)]
+    fn rpc_server_routes(self, server: HttpServer<Self>) -> Router {
+        Router::new()
     }
     /// Applies layers after the UI fallback is installed.
     fn apply_outer_layers(self, router: Router) -> Router {
@@ -84,8 +91,20 @@ impl UiContext for RpcContext {
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
         server
             .middleware(Cors::new())
-            .middleware(Auth::new().with_local_auth().with_signature_auth())
+            .middleware(
+                Auth::new()
+                    .with_local_auth()
+                    .with_bearer_auth()
+                    .with_signature_auth(),
+            )
             .middleware(SyncDb::new())
+    }
+    fn rpc_server_routes(self, server: HttpServer<Self>) -> Router {
+        crate::mcp::router(self, server).unwrap_or_else(|e| {
+            tracing::error!("MCP endpoint unavailable: {e}");
+            tracing::debug!("{e:?}");
+            Router::new()
+        })
     }
     fn extend_router(self, router: Router) -> Router {
         router
@@ -145,7 +164,10 @@ impl UiContext for InitContext {
         main_api()
     }
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
-        server.middleware(Cors::new())
+        server.middleware(RequireJson)
+    }
+    fn apply_outer_layers(self, router: Router) -> Router {
+        local_hosts_only(router)
     }
 }
 
@@ -154,10 +176,15 @@ impl UiContext for DiagnosticContext {
         UI_CELL.get().unwrap_or(&EMPTY_DIR)
     }
     fn api() -> ParentHandler<Self> {
-        main_api()
+        main_api().with_metadata("authenticated", Value::Bool(false))
     }
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
-        server.middleware(Cors::new())
+        server
+            .middleware(RequireJson)
+            .middleware(Auth::new().with_local_auth())
+    }
+    fn apply_outer_layers(self, router: Router) -> Router {
+        local_hosts_only(router)
     }
 }
 
@@ -171,8 +198,43 @@ impl UiContext for SetupContext {
         main_api()
     }
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
-        server.middleware(Cors::new())
+        server.middleware(RequireJson)
     }
+    fn apply_outer_layers(self, router: Router) -> Router {
+        local_hosts_only(router)
+    }
+}
+
+/// Serves requests addressed to an IP address, `localhost`, or a `.local` name.
+fn local_hosts_only(router: Router) -> Router {
+    router.layer(axum::middleware::from_fn(
+        |request: Request, next: axum::middleware::Next| async move {
+            if request_authority(&request).is_some_and(|authority| is_local_host(authority.host()))
+            {
+                next.run(request).await
+            } else {
+                (
+                    StatusCode::FORBIDDEN,
+                    [(CONTENT_TYPE, "text/plain; charset=utf-8")],
+                    t!("net.static-server.unrecognized-host").into_owned(),
+                )
+                    .into_response()
+            }
+        },
+    ))
+}
+
+fn is_local_host(host: &str) -> bool {
+    host.trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+        .is_ok()
+        || host.eq_ignore_ascii_case("localhost")
+        || host
+            .strip_suffix('.')
+            .unwrap_or(host)
+            .rsplit_once('.')
+            .is_some_and(|(_, tld)| tld.eq_ignore_ascii_case("local"))
 }
 
 pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
@@ -201,7 +263,7 @@ pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
                 move |x::Path(guid): x::Path<Guid>, request: x::Request| async move {
                     match AsRef::<RpcContinuations>::as_ref(&ctx).get_rest_handler(&guid).await {
                         None => not_found(),
-                        Some(cont) => cont(request).await.unwrap_or_else(server_error),
+                        Some(cont) => cont(request).await.unwrap_or_else(rest_continuation_error),
                     }
                 }
             }),
@@ -284,7 +346,8 @@ pub fn ui_router<C: UiContext>(ctx: C) -> Router {
     ));
     let router = ctx
         .clone()
-        .extend_router(rpc_router(ctx.clone(), server))
+        .extend_router(rpc_router(ctx.clone(), server.clone()))
+        .merge(ctx.clone().rpc_server_routes(server))
         .fallback(any(|request: Request| async move {
             serve_ui(request, C::ui_dir()).unwrap_or_else(server_error)
         }));
@@ -494,10 +557,10 @@ async fn if_authorized<
                 .peek()
                 .await
                 .as_private()
-                .as_session_pubkeys()
-                .de()?
-                .0
-                .contains_key(&*key);
+                .as_sessions()
+                .as_pubkeys()
+                .as_idx(&key)
+                .is_some();
         if !enrolled {
             return Err(Error::new(
                 eyre!("{}", t!("middleware.auth.unauthorized")),
@@ -524,10 +587,7 @@ pub fn unauthorized(err: Error, path: &str) -> Response {
 
 /// HTTP status code 404
 pub fn not_found() -> Response {
-    Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .body(NOT_FOUND.into())
-        .unwrap()
+    (StatusCode::NOT_FOUND, NOT_FOUND).into_response()
 }
 
 /// HTTP status code 405
@@ -541,10 +601,15 @@ pub fn method_not_allowed() -> Response {
 pub fn server_error(err: Error) -> Response {
     tracing::error!("internal server error: {}", err);
     tracing::debug!("{:?}", err);
-    Response::builder()
-        .status(StatusCode::INTERNAL_SERVER_ERROR)
-        .body(INTERNAL_SERVER_ERROR.into())
-        .unwrap()
+    (StatusCode::INTERNAL_SERVER_ERROR, INTERNAL_SERVER_ERROR).into_response()
+}
+
+fn rest_continuation_error(err: Error) -> Response {
+    if matches!(err.kind, ErrorKind::InvalidRequest) {
+        (StatusCode::BAD_REQUEST, err.source.to_string()).into_response()
+    } else {
+        server_error(err)
+    }
 }
 
 pub fn bad_request() -> Response {
@@ -1488,5 +1553,157 @@ mod tests {
 
         assert!(get("dependencies/lnd/icon").await.unwrap().is_none());
         assert!(get("LICENSE.md").await.unwrap().is_some());
+    }
+
+    #[derive(Clone)]
+    struct ContinuationTestContext(Arc<RpcContinuations>);
+
+    impl Context for ContinuationTestContext {}
+
+    impl AsRef<RpcContinuations> for ContinuationTestContext {
+        fn as_ref(&self) -> &RpcContinuations {
+            &self.0
+        }
+    }
+
+    fn continuation_test_router() -> (Arc<RpcContinuations>, Router) {
+        let continuations = Arc::new(RpcContinuations::new());
+        let context = ContinuationTestContext(continuations.clone());
+        let factory_context = context.clone();
+        let server = Server::new(
+            move || ready(Ok(factory_context.clone())),
+            ParentHandler::new(),
+        )
+        .for_http();
+        (continuations, rpc_router(context, server))
+    }
+
+    #[tokio::test]
+    async fn rest_continuation_errors_expose_only_invalid_request_messages() {
+        use tower_service::Service;
+
+        use crate::rpc_continuations::RpcContinuation;
+
+        let (continuations, mut router) = continuation_test_router();
+        for (kind, status) in [
+            (ErrorKind::InvalidRequest, StatusCode::BAD_REQUEST),
+            (ErrorKind::Filesystem, StatusCode::INTERNAL_SERVER_ERROR),
+            (ErrorKind::Network, StatusCode::INTERNAL_SERVER_ERROR),
+            (ErrorKind::Authorization, StatusCode::INTERNAL_SERVER_ERROR),
+        ] {
+            let guid = Guid::new();
+            let message = t!("service.action-files.size-limit", max = 3).into_owned();
+            let error_message = message.clone();
+            continuations
+                .add(
+                    guid.clone(),
+                    RpcContinuation::rest(
+                        move |_| ready(Err(Error::new(eyre!(error_message), kind))),
+                        Duration::from_secs(30),
+                    ),
+                )
+                .await;
+            let request = || {
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/rest/rpc/{guid}"))
+                    .body(Body::empty())
+                    .unwrap()
+            };
+            let response = router.call(request()).await.unwrap();
+            assert_eq!(response.status(), status);
+            assert_eq!(
+                response.headers()[CONTENT_TYPE],
+                "text/plain; charset=utf-8"
+            );
+            let expected = if status == StatusCode::BAD_REQUEST {
+                message.as_str()
+            } else {
+                INTERNAL_SERVER_ERROR
+            };
+            assert_eq!(body(response).await, expected);
+            let replay = router.call(request()).await.unwrap();
+            assert_eq!(replay.status(), StatusCode::NOT_FOUND);
+            assert_eq!(replay.headers()[CONTENT_TYPE], "text/plain; charset=utf-8");
+            assert_eq!(body(replay).await, NOT_FOUND);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expired_rest_continuations_return_a_plaintext_not_found() {
+        use tower_service::Service;
+
+        use crate::rpc_continuations::RpcContinuation;
+
+        let (continuations, mut router) = continuation_test_router();
+        let guid = Guid::new();
+        continuations
+            .add(
+                guid.clone(),
+                RpcContinuation::rest(
+                    |_| ready(Ok(StatusCode::NO_CONTENT.into_response())),
+                    Duration::from_secs(30),
+                ),
+            )
+            .await;
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::task::yield_now().await;
+        let response = router
+            .call(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/rest/rpc/{guid}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            response.headers()[CONTENT_TYPE],
+            "text/plain; charset=utf-8"
+        );
+        assert_eq!(body(response).await, NOT_FOUND);
+    }
+
+    async fn status_for_host(host: &str) -> StatusCode {
+        use tower_service::Service;
+
+        let mut router = local_hosts_only(Router::new().fallback(|| async { "ok" }));
+        router
+            .call(
+                http::Request::builder()
+                    .header(http::header::HOST, host)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    #[tokio::test]
+    async fn local_hosts_only_rejects_rebound_names() {
+        for host in [
+            "start.local",
+            "Start.LOCAL.",
+            "adjective-noun.local:80",
+            "192.168.1.5",
+            "192.168.1.5:80",
+            "[fe80::1]",
+            "[::1]:80",
+            "localhost",
+        ] {
+            assert_eq!(status_for_host(host).await, StatusCode::OK, "{host}");
+        }
+        for host in [
+            "attacker.example",
+            "start.local.attacker.example",
+            "local",
+            "192.168.1.5.nip.io",
+        ] {
+            assert_eq!(status_for_host(host).await, StatusCode::FORBIDDEN, "{host}");
+        }
     }
 }

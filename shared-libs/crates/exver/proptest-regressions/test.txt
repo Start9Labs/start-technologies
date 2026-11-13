@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc ffa42a6632aa2bb1340e151bbb2fa03e8b2b01ecc5a1200834169e2ac4907080 # shrinks to a = Anchor(Ok(Less), ExtendedVersion { flavor: None, upstream: Version { number: [0], prerelease: [] }, downstream: Version { number: [0], prerelease: [Number(0)] } }), obs = ExtendedVersion { flavor: None, upstream: Version { number: [0], prerelease: [] }, downstream: Version { number: [0], prerelease: [] } }
+cc 483cb12737fb1ca806631489cf2cce0eafd53ae7943f0b8786d2735e3093e0dd # shrinks to a = Or(Anchor(Ok(Less), ExtendedVersion { flavor: Some("a"), upstream: Version { number: [0], prerelease: [] }, downstream: Version { number: [0], prerelease: [] } }), Anchor(Ok(Less), ExtendedVersion { flavor: None, upstream: Version { number: [0], prerelease: [] }, downstream: Version { number: [0], prerelease: [] } }))

@@ -171,3 +171,55 @@ async fn add_image_resigns_with_workspace_key_and_preserves_original_on_key_fail
     );
     workspace.gc().await.unwrap();
 }
+
+#[tokio::test]
+async fn s9pk_sign_uses_identity_without_a_workspace_and_preserves_base() {
+    use crate::sign::AnyVerifyingKey;
+
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("package.s9pk");
+    let original = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/s9pk-trailer/base.s9pk"),
+    )
+    .unwrap();
+    tokio::fs::write(&path, &original).await.unwrap();
+    let identity = SigningKey::from_bytes(&[8; 32]);
+    let key_path = temp.path().join("identity.pem");
+    write_signing_key(&identity, &key_path).await.unwrap();
+    let ctx = CliContext::init(ClientConfig {
+        id_key_path: Some(key_path),
+        ..Default::default()
+    })
+    .unwrap();
+    let server = Server::new(
+        move || {
+            let ctx = ctx.clone();
+            async move { Ok(ctx) }
+        },
+        s9pk(),
+    );
+    server
+        .handle_command("sign", imbl_value::json!({"s9pk": path}))
+        .await
+        .unwrap();
+    let result = tokio::fs::read(&path).await.unwrap();
+    assert_eq!(&result[..original.len()], original);
+    server
+        .handle_command("sign", imbl_value::json!({"s9pk": path}))
+        .await
+        .unwrap();
+    assert_eq!(tokio::fs::read(&path).await.unwrap(), result);
+    let package = S9pk::open(&path, None).await.unwrap();
+    assert_eq!(package.signatures().await.unwrap().len(), 2);
+    assert!(
+        package
+            .signatures()
+            .await
+            .unwrap()
+            .contains_key(&AnyVerifyingKey::Ed25519(identity.verifying_key()))
+    );
+    assert_eq!(
+        package.as_archive().signer(),
+        SigningKey::from_bytes(&[7; 32]).verifying_key()
+    );
+}

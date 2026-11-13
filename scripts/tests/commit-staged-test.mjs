@@ -178,6 +178,7 @@ test('tag compiler workflow with local commit API', t => {
     'changelog.mjs',
     'changelog-version.mjs',
     'commit-staged.mjs',
+    'docs-versions.mjs',
   ]) {
     copyFileSync(join(REPO, 'scripts', name), join(f.root, 'scripts', name))
   }
@@ -190,27 +191,15 @@ test('tag compiler workflow with local commit API', t => {
   )
   f.write(
     'projects/start-sdk/changelog/patch-fixed-released.md',
-    '---\nuser-facing: true\n---\n\n- Released fix.\n\n- Second released fix.\n',
+    '---\nrelease-notes: true\n---\n\n- Released fix.\n\n- Second released fix.\n',
   )
   f.write(
     'projects/start-sdk/changelog/patch-security-released.md',
-    '---\nuser-facing: true\n---\n\n- Released security fix.\n',
-  )
-  f.write(
-    'projects/start-sdk/changelog/patch-security-released.pl_PL.md',
-    '- Poprawka bezpieczeństwa.\n',
+    '---\nrelease-notes: true\n---\n\n- Released security fix.\n',
   )
   f.write(
     'projects/start-sdk/changelog/patch-fixed-second-released.md',
-    '---\nuser-facing: false\n---\n\n- Third released fix.\n',
-  )
-  f.write(
-    'projects/start-sdk/changelog/patch-fixed-released.pl_PL.md',
-    '- Poprawka.\n\n- Druga poprawka.\n',
-  )
-  f.write(
-    'projects/start-sdk/release-notes/1.2.3.pl_PL.md',
-    '## Nowości\n\n<!-- highlights -->\n',
+    '---\nrelease-notes: false\n---\n\n- Third released fix.\n',
   )
   f.write('projects/start-sdk/CHANGELOG.md', '# Changelog\n')
   f.git('add', 'scripts', 'projects', 'package.json', '.prettierrc.json')
@@ -236,6 +225,16 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+const args = process.argv.slice(2)
+const published = JSON.parse(process.env.PUBLISHED_NOTES)
+if (args.some(arg => arg.endsWith('/releases/assets/1'))) {
+  process.stdout.write(JSON.stringify(published))
+  process.exit(0)
+}
+if (args.some(arg => arg.endsWith('/releases'))) {
+  console.log('start-sdk/v1.2.3\t1')
+  process.exit(0)
+}
 const payload = JSON.parse(readFileSync(0, 'utf8')).variables.input
 const remote = process.env.LOCAL_REMOTE
 const env = { ...process.env }
@@ -245,7 +244,7 @@ if (race) {
   writeFileSync(marker, '')
   payload.fileChanges = { deletions: [], additions: [{
     path: 'projects/start-sdk/changelog/patch-fixed-after-tag.md',
-    contents: Buffer.from('---\nuser-facing: false\n---\n\n- New work after the tag.\n').toString('base64'),
+    contents: Buffer.from('---\nrelease-notes: false\n---\n\n- New work after the tag.\n').toString('base64'),
   }] }
 }
 function git(args, input) {
@@ -295,7 +294,15 @@ console.log(JSON.stringify(race
     .join('\n')
   const runnerTemp = join(f.root, 'runner-temp')
   mkdirSync(runnerTemp)
+  const published = {
+    en_US:
+      '## Highlights\n\n- Released fix, reworded.\n\n## Security\n\n- Released security fix.\n',
+    pl_PL:
+      '## Nowości\n\n- Poprawka.\n\n## Bezpieczeństwo\n\n- Poprawka bezpieczeństwa.\n',
+  }
   Object.assign(f.env, {
+    PUBLISHED_NOTES: JSON.stringify(published),
+    GITHUB_REPOSITORY: 'fixture/repo',
     LOCAL_REMOTE: remote,
     RUNNER_TEMP: runnerTemp,
     GITHUB_REF_NAME: 'start-sdk/v1.2.3',
@@ -327,17 +334,11 @@ console.log(JSON.stringify(race
   assert.ok(!history.includes('New work after the tag.'))
   const notesPath = 'projects/start-sdk/release-notes/1.2.3.md'
   const notes = f.git('show', `origin/master:${notesPath}`)
-  assert.equal(
-    notes,
-    '## Highlights\n\n- Released fix.\n\n- Second released fix.\n\n## Security\n\n- Released security fix.\n',
-  )
+  assert.equal(notes, published.en_US)
   assert.match(result.stderr, /head moved/)
   const localizedPath = 'projects/start-sdk/release-notes/1.2.3.pl_PL.md'
   const localized = f.git('show', `origin/master:${localizedPath}`)
-  assert.equal(
-    localized,
-    '## Nowości\n\n- Poprawka.\n\n- Druga poprawka.\n\n## Bezpieczeństwo\n\n- Poprawka bezpieczeństwa.\n',
-  )
+  assert.equal(localized, published.pl_PL)
   assert.ok(existsSync(join(runnerTemp, 'scripts/changelog.mjs')))
   assert.deepEqual(
     readFileSync(join(runnerTemp, catalog)),
@@ -367,31 +368,6 @@ console.log(JSON.stringify(race
     history,
   )
   assert.equal(f.git('show', `origin/master:${notesPath}`), notes)
-  const flat = f.write(
-    'legacy-compiler/flat/changelog.mjs',
-    readFileSync(join(REPO, 'scripts/changelog.mjs')),
-  )
-  f.write(
-    'legacy-compiler/flat/changelog-version.mjs',
-    readFileSync(join(REPO, 'scripts/changelog-version.mjs')),
-  )
-  assert.ok(!existsSync(join(f.root, 'legacy-compiler', catalog)))
-  const legacy = f.run(
-    process.execPath,
-    [
-      flat,
-      'notes',
-      'projects/start-sdk',
-      '1.2.3',
-      '--locale',
-      'pl_PL',
-      '--ref',
-      'start-sdk/v1.2.3',
-    ],
-    { encoding: 'utf8' },
-  )
-  assert.equal(legacy.status, 0, legacy.stderr)
-  assert.equal(legacy.stdout, localized)
   f.git('read-tree', '-u', '--reset', 'start-sdk/v1.2.3')
   f.env.PROJECT = 'start-sdk'
   const archive = workflow

@@ -23,7 +23,7 @@ root OS image build. Sibling product crates (`start-cli`, `start-registry`,
   `startd` daemon, the `start-cli` client, and the `unshare-userns` applet. It
   also embeds the built web UIs at compile time via `include_dir!`
   (`web/dist/static/ui`, `web/dist/static/setup-wizard`) and the Patch-DB UI
-  seed (`web/patchdb-ui-seed.json`, or `*.beta.json` under the `beta` feature).
+  seed (`web/patchdb-ui-seed.json`).
   Because the UIs are embedded, the web build must run before the Rust build —
   the `Makefile` encodes this ordering.
 - **`start-container`** (`src/bin/start-container.rs`) — runs **inside** each
@@ -52,7 +52,7 @@ They consume the shared `@start9labs/shared` and `@start9labs/marketplace` libs
 from the shared TypeScript modules at `../../shared-libs/ts-modules`. The frontend talks to
 the backend exclusively over JSON-RPC, with reactive state via Patch-DB.
 
-`web/patchdb-ui-seed.json` / `patchdb-ui-seed.beta.json` seed initial UI state
+`web/patchdb-ui-seed.json` seeds initial UI state
 and are embedded into `startbox`.
 
 ## Container runtime
@@ -69,7 +69,7 @@ and [AGENTS](container-runtime/AGENTS.md) — read those before editing it.
 `backup-fs/` is the `startos-backup-fs` crate (a workspace member): an encrypted,
 erasure-coded FUSE filesystem used for StartOS backups. It builds to the
 `startos-backup-fs` binary (installed as `/usr/bin/startos-backup-fs` and
-`mount.backup-fs`).
+`mount.backup-fs`). Start-core invokes the helper directly and supplies its credential through standard input. Format 2 keeps inode, directory, and file-block records in append-only segments bound to authenticated current references. Existing format-1 stores remain readable and writable until explicit conversion; interrupted conversions require explicit resumption. Optional named read-only snapshots require format 2 and retain shared index views and pinned segments. See [the storage design](backup-fs/DESIGN.md) for format upgrades, snapshot metadata, and reclamation.
 
 ## Systemd units and cgroups
 
@@ -94,6 +94,13 @@ shared build infra). Product-specific maintainer scripts (e.g.
 turns the compiled bins + UIs + runtime squashfs into a `.deb`, `.squashfs`, and
 finally the `.iso`/`.img` for the target platform (x86_64, aarch64/Raspberry Pi,
 rockchip, riscv64).
+
+Persistent administrator GRUB drop-ins live in `/media/startos/config/grub.d/*.cfg`.
+The packaged `build/lib/grub-user.cfg` loader is installed as
+`/etc/default/grub.d/zz-startos-user.cfg` and sources them after image/platform
+defaults through `/media/startos/root/config`, available in the installation and
+update chroots as well as the running OS. The NVMe isolation helper owns only
+`90-nvme-isolation.cfg`; see [Kernel Arguments](docs/src/kernel-arguments.md).
 
 ## Build pipeline (cross-layer)
 

@@ -60,218 +60,6 @@ export const ActionResultV0: z.ZodObject<{
 }).meta({
   id: 'ActionResultV0',
 })
-export const ActionResultValue: z.ZodUnion<
-  readonly [
-    z.ZodIntersection<
-      z.ZodObject<{ type: z.ZodLiteral<'single'> }>,
-      z.ZodObject<{
-        /**
-         * The actual string value to display. The UI renders it as a single-line field —
-         * multi-line text belongs in a `multiline` value.
-         */
-        value: z.ZodString
-        /**
-         * (optional) Whether or not to include a copy to clipboard icon to copy the value
-         */
-        copyable: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to also display the value as a QR code
-         */
-        qr: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
-         */
-        masked: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
-         */
-        launchable: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-      }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ type: z.ZodLiteral<'multiline'> }>,
-      z.ZodObject<{
-        /**
-         * The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
-         */
-        value: z.ZodString
-        /**
-         * (optional) Whether or not to include a copy to clipboard icon to copy the value
-         */
-        copyable: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to also display the value as a QR code
-         */
-        qr: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
-         */
-        masked: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
-        /**
-         * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
-         */
-        filename: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
-      }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ type: z.ZodLiteral<'group'> }>,
-      z.ZodObject<{
-        /**
-         * An new group of nested values, experienced by the user as an accordion dropdown
-         */
-        value: z.ZodArray<typeof ActionResultMember>
-      }>
-    >,
-  ]
-> = /* @__PURE__ */ z
-  .union([
-    z.intersection(
-      object({ type: z.literal('single') }),
-      object({
-        /**
-         * The actual string value to display. The UI renders it as a single-line field —
-         * multi-line text belongs in a `multiline` value.
-         */
-        value: z.string().meta({
-          description:
-            'The actual string value to display. The UI renders it as a single-line field —\nmulti-line text belongs in a `multiline` value.',
-        }),
-        /**
-         * (optional) Whether or not to include a copy to clipboard icon to copy the value
-         */
-        copyable: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
-        }),
-        /**
-         * (optional) Whether or not to also display the value as a QR code
-         */
-        qr: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to also display the value as a QR code',
-        }),
-        /**
-         * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
-         */
-        masked: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information',
-        }),
-        /**
-         * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
-         */
-        launchable: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL',
-        }),
-      }),
-    ),
-    z.intersection(
-      object({ type: z.literal('multiline') }),
-      object({
-        /**
-         * The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
-         */
-        value: z.string().meta({
-          description:
-            'The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks',
-        }),
-        /**
-         * (optional) Whether or not to include a copy to clipboard icon to copy the value
-         */
-        copyable: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
-        }),
-        /**
-         * (optional) Whether or not to also display the value as a QR code
-         */
-        qr: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to also display the value as a QR code',
-        }),
-        /**
-         * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
-         */
-        masked: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information',
-        }),
-        /**
-         * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
-         */
-        filename: wire(
-          z.string().nullable().optional(),
-          z.string().nullable(),
-        ).meta({
-          description:
-            '(optional) Also offer the value as a download under this file name, such as "diagnostics.txt"',
-        }),
-      }),
-    ),
-    z.intersection(
-      object({ type: z.literal('group') }),
-      object({
-        /**
-         * An new group of nested values, experienced by the user as an accordion dropdown
-         */
-        get value(): z.ZodArray<typeof ActionResultMember> {
-          return z.array(ActionResultMember).meta({
-            description:
-              'An new group of nested values, experienced by the user as an accordion dropdown',
-          })
-        },
-      }),
-    ),
-  ])
-  .meta({
-    id: 'ActionResultValue',
-  })
 export const ActionVisibility: z.ZodUnion<
   readonly [
     z.ZodLiteral<'hidden'>,
@@ -287,6 +75,37 @@ export const ActionVisibility: z.ZodUnion<
   .meta({
     id: 'ActionVisibility',
   })
+
+/**
+ * Keys an import added, and keys it found already present.
+ */
+export const AddTrustedKeyRes: z.ZodObject<{
+  /**
+   * Trusted for packages.
+   */
+  added: z.ZodArray<z.ZodString>
+  /**
+   * GPG identities merged; explicit `trustFor` grants the requested permission.
+   */
+  existing: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  /**
+   * Trusted for packages.
+   */
+  added: z.array(z.string()).meta({
+    description: 'Trusted for packages.',
+  }),
+  /**
+   * GPG identities merged; explicit `trustFor` grants the requested permission.
+   */
+  existing: z.array(z.string()).meta({
+    description:
+      'GPG identities merged; explicit `trustFor` grants the requested permission.',
+  }),
+}).meta({
+  id: 'AddTrustedKeyRes',
+  description: 'Keys an import added, and keys it found already present.',
+})
 export const Algorithm: z.ZodEnum<{ ecdsa: 'ecdsa'; ed25519: 'ed25519' }> =
   /* @__PURE__ */ z.enum(['ecdsa', 'ed25519']).meta({
     id: 'Algorithm',
@@ -489,10 +308,53 @@ export const ContactInfo: z.ZodUnion<
   .meta({
     id: 'ContactInfo',
   })
+
+/**
+ * Lifecycle of a daemon-owned conversion attempt.
+ */
+export const ConversionState: z.ZodEnum<{
+  running: 'running'
+  complete: 'complete'
+  failed: 'failed'
+}> = /* @__PURE__ */ z.enum(['running', 'complete', 'failed']).meta({
+  id: 'ConversionState',
+  description: 'Lifecycle of a daemon-owned conversion attempt.',
+})
 export const CountEntry: z.ZodObject<{ label: z.ZodString; count: z.ZodInt }> =
   /* @__PURE__ */ object({ label: z.string(), count: z.int() }).meta({
     id: 'CountEntry',
   })
+export const CreateTokenParams: z.ZodObject<{ name: z.ZodString }> =
+  /* @__PURE__ */ object({ name: z.string() }).meta({
+    id: 'CreateTokenParams',
+  })
+export const CreatedToken: z.ZodObject<{
+  /**
+   * The session id the token authenticates as, for `auth.session.kill`.
+   */
+  id: z.ZodString
+  /**
+   * The bearer secret. It is not stored and cannot be retrieved again.
+   */
+  token: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * The session id the token authenticates as, for `auth.session.kill`.
+   */
+  id: z.string().meta({
+    description:
+      'The session id the token authenticates as, for `auth.session.kill`.',
+  }),
+  /**
+   * The bearer secret. It is not stored and cannot be retrieved again.
+   */
+  token: z.string().meta({
+    description:
+      'The bearer secret. It is not stored and cannot be retrieved again.',
+  }),
+}).meta({
+  id: 'CreatedToken',
+})
 export const DataUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'DataUrl',
 })
@@ -566,6 +428,23 @@ export const ErrorData: z.ZodObject<{
 }).meta({
   id: 'ErrorData',
 })
+export const FileCommitment: z.ZodObject<{
+  /**
+   * BLAKE3 digest encoded with padded standard Base64.
+   */
+  hash: z.ZodString
+  size: z.ZodInt
+}> = /* @__PURE__ */ object({
+  /**
+   * BLAKE3 digest encoded with padded standard Base64.
+   */
+  hash: z.string().meta({
+    description: 'BLAKE3 digest encoded with padded standard Base64.',
+  }),
+  size: z.int(),
+}).meta({
+  id: 'FileCommitment',
+})
 export const FileType: z.ZodEnum<{
   file: 'file'
   directory: 'directory'
@@ -573,6 +452,22 @@ export const FileType: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['file', 'directory', 'infer']).meta({
   id: 'FileType',
 })
+
+/**
+ * Unauthenticated discovery hints; opening the store validates its actual state.
+ */
+export const FormatStatus: z.ZodEnum<{
+  legacy: 'legacy'
+  current: 'current'
+  interrupted: 'interrupted'
+  unknown: 'unknown'
+}> = /* @__PURE__ */ z
+  .enum(['legacy', 'current', 'interrupted', 'unknown'])
+  .meta({
+    id: 'FormatStatus',
+    description:
+      'Unauthenticated discovery hints; opening the store validates its actual state.',
+  })
 export const GatewayId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'GatewayId',
 })
@@ -727,6 +622,83 @@ export const GitHash: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 export const Governor: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Governor',
 })
+
+/**
+ * An original public-key export and its self-certified identity claims.
+ */
+export const GpgPublicKeyExport: z.ZodObject<{
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.ZodString
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.ZodArray<z.ZodString>
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Original armor, preserving all certificate packets and headers.
+   */
+  armored: z.string().meta({
+    description:
+      'Original armor, preserving all certificate packets and headers.',
+  }),
+  /**
+   * Primary-key fingerprints of the certificates in this export.
+   */
+  fingerprints: z.array(z.string()).meta({
+    description: 'Primary-key fingerprints of the certificates in this export.',
+  }),
+  /**
+   * Self-certified user IDs containing names, comments, and email addresses.
+   */
+  userIds: z.array(z.string()).meta({
+    description:
+      'Self-certified user IDs containing names, comments, and email addresses.',
+  }),
+  /**
+   * Self-certified claims indexed by the signing key's canonical DER encoding.
+   */
+  identities: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "Self-certified claims indexed by the signing key's canonical DER encoding.",
+  }),
+  /**
+   * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
+   */
+  keyFingerprints: wire(
+    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
+  ).meta({
+    description:
+      "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+  }),
+}).meta({
+  id: 'GpgPublicKeyExport',
+  description:
+    'An original public-key export and its self-certified identity claims.',
+})
 export const Guid: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Guid',
 })
@@ -751,6 +723,12 @@ export const ImageId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'ImageId',
 })
 export const ImageMetadata: z.ZodObject<{
+  /**
+   * Image environment defaults. Absent in packages using a legacy `.env` file.
+   */
+  env: z.ZodOptional<
+    z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>>
+  >
   workdir: z.ZodString
   user: z.ZodString
   entrypoint: z.ZodCodec<
@@ -762,6 +740,13 @@ export const ImageMetadata: z.ZodObject<{
     z.ZodNullable<z.ZodArray<z.ZodString>>
   >
 }> = /* @__PURE__ */ object({
+  /**
+   * Image environment defaults. Absent in packages using a legacy `.env` file.
+   */
+  env: z.record(z.string(), z.string().nullable()).nullable().optional().meta({
+    description:
+      'Image environment defaults. Absent in packages using a legacy `.env` file.',
+  }),
   workdir: z.string(),
   user: z.string(),
   entrypoint: wire(
@@ -802,6 +787,24 @@ export const KeyboardOptions: z.ZodObject<{
 }).meta({
   id: 'KeyboardOptions',
 })
+export const LegacyHealthCheckResultKind: z.ZodIntersection<
+  z.ZodObject<{ result: z.ZodLiteral<'waiting'> }>,
+  z.ZodObject<{
+    message: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+  }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ result: z.literal('waiting') }),
+    object({
+      message: wire(z.string().nullable().optional(), z.string().nullable()),
+    }),
+  )
+  .meta({
+    id: 'LegacyHealthCheckResultKind',
+  })
 export const ListNotificationParams: z.ZodObject<{
   before: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodInt>>,
@@ -974,20 +977,15 @@ export const NamedHealthCheckResultKind: z.ZodUnion<
           z.ZodOptional<z.ZodNullable<z.ZodString>>,
           z.ZodNullable<z.ZodString>
         >
-      }>
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ result: z.ZodLiteral<'waiting'> }>,
-      z.ZodObject<{
-        message: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
+        waiting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
       }>
     >,
     z.ZodIntersection<
       z.ZodObject<{ result: z.ZodLiteral<'loading'> }>,
-      z.ZodObject<{ message: z.ZodString }>
+      z.ZodObject<{
+        message: z.ZodString
+        waiting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+      }>
     >,
     z.ZodIntersection<
       z.ZodObject<{ result: z.ZodLiteral<'failure'> }>,
@@ -1012,17 +1010,15 @@ export const NamedHealthCheckResultKind: z.ZodUnion<
       object({ result: z.literal('starting') }),
       object({
         message: wire(z.string().nullable().optional(), z.string().nullable()),
-      }),
-    ),
-    z.intersection(
-      object({ result: z.literal('waiting') }),
-      object({
-        message: wire(z.string().nullable().optional(), z.string().nullable()),
+        waiting: wire(z.boolean().optional(), z.boolean()),
       }),
     ),
     z.intersection(
       object({ result: z.literal('loading') }),
-      object({ message: z.string() }),
+      object({
+        message: z.string(),
+        waiting: wire(z.boolean().optional(), z.boolean()),
+      }),
     ),
     z.intersection(
       object({ result: z.literal('failure') }),
@@ -1077,6 +1073,32 @@ export const NotificationLevel: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['success', 'info', 'warning', 'error']).meta({
   id: 'NotificationLevel',
 })
+
+/**
+ * An OS update available for review.
+ */
+export const OsUpdateAvailable: z.ZodIntersection<
+  z.ZodObject<{
+    kind: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'os-update-available'>>,
+      z.ZodLiteral<'os-update-available'>
+    >
+  }>,
+  typeof empty
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      kind: wire(
+        z.literal('os-update-available').optional(),
+        z.literal('os-update-available'),
+      ),
+    }),
+    empty,
+  )
+  .meta({
+    id: 'OsUpdateAvailable',
+    description: 'An OS update available for review.',
+  })
 
 /**
  * An absent update preserves DNS intent; null servers select gateway DNS.
@@ -1216,6 +1238,59 @@ export const RegistryAsset = <Commitment extends z.ZodType>(
   })
   return self
 }
+
+/**
+ * A key a connected registry newly offers, imported untrusted.
+ */
+export const RegistryKeyAdded: z.ZodIntersection<
+  z.ZodObject<{
+    kind: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'registry-key-added'>>,
+      z.ZodLiteral<'registry-key-added'>
+    >
+  }>,
+  z.ZodObject<{ registry: z.ZodString; key: z.ZodString }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      kind: wire(
+        z.literal('registry-key-added').optional(),
+        z.literal('registry-key-added'),
+      ),
+    }),
+    object({ registry: z.string(), key: z.string() }),
+  )
+  .meta({
+    id: 'RegistryKeyAdded',
+    description: 'A key a connected registry newly offers, imported untrusted.',
+  })
+
+/**
+ * A key a connected registry stopped offering; its trust is unchanged.
+ */
+export const RegistryKeyDropped: z.ZodIntersection<
+  z.ZodObject<{
+    kind: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'registry-key-dropped'>>,
+      z.ZodLiteral<'registry-key-dropped'>
+    >
+  }>,
+  z.ZodObject<{ registry: z.ZodString; key: z.ZodString }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      kind: wire(
+        z.literal('registry-key-dropped').optional(),
+        z.literal('registry-key-dropped'),
+      ),
+    }),
+    object({ registry: z.string(), key: z.string() }),
+  )
+  .meta({
+    id: 'RegistryKeyDropped',
+    description:
+      'A key a connected registry stopped offering; its trust is unchanged.',
+  })
 export const RemoveAssetParams: z.ZodObject<{
   version: z.ZodString
   platform: z.ZodString
@@ -1452,9 +1527,6 @@ export const ShutdownParams: z.ZodObject<{
 }).meta({
   id: 'ShutdownParams',
 })
-export const SideloadParams: typeof empty = /* @__PURE__ */ empty.meta({
-  id: 'SideloadParams',
-})
 
 /**
  * So a signal strength is a number between 0-100, I want the null option to be 0 since there is no signal
@@ -1547,10 +1619,33 @@ export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
   /* @__PURE__ */ object({ now: z.string(), uptime: z.int() }).meta({
     id: 'TimeInfo',
   })
+export const TrustContext: z.ZodEnum<{ marketplace: 'marketplace'; os: 'os' }> =
+  /* @__PURE__ */ z.enum(['marketplace', 'os']).meta({
+    id: 'TrustContext',
+  })
 export const TrustedOsUpdateSigner: z.ZodObject<{ label: z.ZodString }> =
   /* @__PURE__ */ object({ label: z.string() }).meta({
     id: 'TrustedOsUpdateSigner',
   })
+export const UploadLimits: z.ZodObject<{
+  /**
+   * Maximum uploaded bytes, inclusive; null leaves the size unbounded.
+   */
+  maxSize: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Maximum uploaded bytes, inclusive; null leaves the size unbounded.
+   */
+  maxSize: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description:
+      'Maximum uploaded bytes, inclusive; null leaves the size unbounded.',
+  }),
+}).meta({
+  id: 'UploadLimits',
+})
 
 /**
  * How the OS reverse proxy validates the container's TLS certificate when it
@@ -1770,93 +1865,250 @@ export const ActionMetadata: z.ZodObject<{
 }).meta({
   id: 'ActionMetadata',
 })
-export const ActionResultMember: z.ZodIntersection<
-  z.ZodObject<{
-    /**
-     * A human-readable name or title of the value, such as "Last Active" or "Login Password"
-     */
-    name: z.ZodString
-    /**
-     * (optional) A description of the value, such as an explaining why it exists or how to use it
-     */
-    description: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
-  }>,
-  typeof ActionResultValue
+export const ActionResultValue: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'file'> }>,
+      z.ZodObject<{
+        /**
+         * The capability prepared by this action's prepare-download effect.
+         */
+        value: typeof Guid
+        /**
+         * Removes the exported file after completion, failure, cancellation, or expiry.
+         */
+        delete: z.ZodBoolean
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'single'> }>,
+      z.ZodObject<{
+        /**
+         * The actual string value to display. The UI renders it as a single-line field —
+         * multi-line text belongs in a `multiline` value.
+         */
+        value: z.ZodString
+        /**
+         * (optional) Whether or not to include a copy to clipboard icon to copy the value
+         */
+        copyable: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to also display the value as a QR code
+         */
+        qr: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
+         */
+        masked: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
+         */
+        launchable: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'multiline'> }>,
+      z.ZodObject<{
+        /**
+         * The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
+         */
+        value: z.ZodString
+        /**
+         * (optional) Whether or not to include a copy to clipboard icon to copy the value
+         */
+        copyable: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to also display the value as a QR code
+         */
+        qr: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
+         */
+        masked: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+          z.ZodNullable<z.ZodBoolean>
+        >
+        /**
+         * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
+         */
+        filename: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodString>>,
+          z.ZodNullable<z.ZodString>
+        >
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'group'> }>,
+      z.ZodObject<{
+        /**
+         * An new group of nested values, experienced by the user as an accordion dropdown
+         */
+        value: z.ZodArray<typeof ActionResultMember>
+      }>
+    >,
+  ]
 > = /* @__PURE__ */ z
-  .intersection(
-    object({
-      /**
-       * A human-readable name or title of the value, such as "Last Active" or "Login Password"
-       */
-      name: z.string().meta({
-        description:
-          'A human-readable name or title of the value, such as "Last Active" or "Login Password"',
+  .union([
+    z.intersection(
+      object({ type: z.literal('file') }),
+      object({
+        /**
+         * The capability prepared by this action's prepare-download effect.
+         */
+        value: Guid.meta({
+          description:
+            "The capability prepared by this action's prepare-download effect.",
+        }),
+        /**
+         * Removes the exported file after completion, failure, cancellation, or expiry.
+         */
+        delete: z.boolean().meta({
+          description:
+            'Removes the exported file after completion, failure, cancellation, or expiry.',
+        }),
       }),
-      /**
-       * (optional) A description of the value, such as an explaining why it exists or how to use it
-       */
-      description: wire(
-        z.string().nullable().optional(),
-        z.string().nullable(),
-      ).meta({
-        description:
-          '(optional) A description of the value, such as an explaining why it exists or how to use it',
+    ),
+    z.intersection(
+      object({ type: z.literal('single') }),
+      object({
+        /**
+         * The actual string value to display. The UI renders it as a single-line field —
+         * multi-line text belongs in a `multiline` value.
+         */
+        value: z.string().meta({
+          description:
+            'The actual string value to display. The UI renders it as a single-line field —\nmulti-line text belongs in a `multiline` value.',
+        }),
+        /**
+         * (optional) Whether or not to include a copy to clipboard icon to copy the value
+         */
+        copyable: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
+        }),
+        /**
+         * (optional) Whether or not to also display the value as a QR code
+         */
+        qr: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to also display the value as a QR code',
+        }),
+        /**
+         * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
+         */
+        masked: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information',
+        }),
+        /**
+         * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
+         */
+        launchable: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL',
+        }),
       }),
-    }),
-    ActionResultValue,
-  )
+    ),
+    z.intersection(
+      object({ type: z.literal('multiline') }),
+      object({
+        /**
+         * The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks
+         */
+        value: z.string().meta({
+          description:
+            'The actual string value to display. The UI renders it verbatim in a read-only monospace field that keeps its line breaks',
+        }),
+        /**
+         * (optional) Whether or not to include a copy to clipboard icon to copy the value
+         */
+        copyable: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
+        }),
+        /**
+         * (optional) Whether or not to also display the value as a QR code
+         */
+        qr: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to also display the value as a QR code',
+        }),
+        /**
+         * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
+         */
+        masked: wire(
+          z.boolean().nullable().optional(),
+          z.boolean().nullable(),
+        ).meta({
+          description:
+            '(optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information',
+        }),
+        /**
+         * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
+         */
+        filename: wire(
+          z.string().nullable().optional(),
+          z.string().nullable(),
+        ).meta({
+          description:
+            '(optional) Also offer the value as a download under this file name, such as "diagnostics.txt"',
+        }),
+      }),
+    ),
+    z.intersection(
+      object({ type: z.literal('group') }),
+      object({
+        /**
+         * An new group of nested values, experienced by the user as an accordion dropdown
+         */
+        get value(): z.ZodArray<typeof ActionResultMember> {
+          return z.array(ActionResultMember).meta({
+            description:
+              'An new group of nested values, experienced by the user as an accordion dropdown',
+          })
+        },
+      }),
+    ),
+  ])
   .meta({
-    id: 'ActionResultMember',
+    id: 'ActionResultValue',
   })
-export const ActionResultV1: z.ZodObject<{
-  /**
-   * Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
-   */
-  title: z.ZodString
-  /**
-   * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
-   */
-  message: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * (optional) Structured data to present inside the modal
-   */
-  result: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof ActionResultValue>>,
-    z.ZodNullable<typeof ActionResultValue>
-  >
-}> = /* @__PURE__ */ object({
-  /**
-   * Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
-   */
-  title: z.string().meta({
-    description:
-      'Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense',
-  }),
-  /**
-   * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
-   */
-  message: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      '(optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.',
-  }),
-  /**
-   * (optional) Structured data to present inside the modal
-   */
-  result: wire(
-    ActionResultValue.nullable().optional(),
-    ActionResultValue.nullable(),
-  ).meta({
-    description: '(optional) Structured data to present inside the modal',
-  }),
-}).meta({
-  id: 'ActionResultV1',
-})
 export const AddAdminParams: z.ZodObject<{ signer: typeof Guid }> =
   /* @__PURE__ */ object({ signer: Guid }).meta({
     id: 'AddAdminParams',
@@ -1866,12 +2118,20 @@ export const AddAssetParams: z.ZodObject<{
   platform: z.ZodString
   url: z.ZodString
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
   commitment: typeof Blake3Commitment
 }> = /* @__PURE__ */ object({
   version: z.string(),
   platform: z.string(),
   url: z.string(),
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
   commitment: Blake3Commitment,
 }).meta({
   id: 'AddAssetParams',
@@ -1886,10 +2146,18 @@ export const AddMirrorParams: z.ZodObject<{
   url: z.ZodString
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   url: z.string(),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddMirrorParams',
 })
@@ -1897,10 +2165,18 @@ export const AddPackageParams: z.ZodObject<{
   urls: z.ZodArray<z.ZodString>
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
+  >
 }> = /* @__PURE__ */ object({
   urls: z.array(z.string()),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ),
 }).meta({
   id: 'AddPackageParams',
 })
@@ -1969,11 +2245,23 @@ export const AddVersionParams: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  expectedGitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   version: z.string(),
   headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  expectedGitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  security: wire(z.boolean().optional(), z.boolean()),
 }).meta({
   id: 'AddVersionParams',
 })
@@ -2208,6 +2496,16 @@ export const CliSetDescriptionParams: z.ZodObject<{
 }).meta({
   id: 'CliSetDescriptionParams',
 })
+export const CompatibleHealthCheckResultKind: z.ZodUnion<
+  readonly [
+    typeof NamedHealthCheckResultKind,
+    typeof LegacyHealthCheckResultKind,
+  ]
+> = /* @__PURE__ */ z
+  .union([NamedHealthCheckResultKind, LegacyHealthCheckResultKind])
+  .meta({
+    id: 'CompatibleHealthCheckResultKind',
+  })
 export const ControlParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'ControlParams',
@@ -2438,16 +2736,33 @@ export const EditSignerParams: z.ZodObject<{
     z.ZodNullable<z.ZodString>
   >
   addContact: z.ZodArray<typeof ContactInfo>
-  addKey: z.ZodArray<typeof AnyVerifyingKey>
+  addKey: z.ZodArray<z.ZodString>
   removeContact: z.ZodArray<typeof ContactInfo>
   removeKey: z.ZodArray<typeof AnyVerifyingKey>
+  /**
+   * Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.
+   */
+  removeGpgExport: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
 }> = /* @__PURE__ */ object({
   id: Guid,
   setName: wire(z.string().nullable().optional(), z.string().nullable()),
   addContact: z.array(ContactInfo),
-  addKey: z.array(AnyVerifyingKey),
+  addKey: z.array(z.string()),
   removeContact: z.array(ContactInfo),
   removeKey: z.array(AnyVerifyingKey),
+  /**
+   * Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.
+   */
+  removeGpgExport: wire(
+    z.array(z.string()).optional(),
+    z.array(z.string()),
+  ).meta({
+    description:
+      'Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.',
+  }),
 }).meta({
   id: 'EditSignerParams',
 })
@@ -2912,17 +3227,6 @@ export const InitAcmeParams: z.ZodObject<{
 }).meta({
   id: 'InitAcmeParams',
 })
-export const InstallParams: z.ZodObject<{
-  registry: z.ZodString
-  id: typeof PackageId
-  version: typeof Version
-}> = /* @__PURE__ */ object({
-  registry: z.string(),
-  id: PackageId,
-  version: Version,
-}).meta({
-  id: 'InstallParams',
-})
 export const InstalledVersionParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'InstalledVersionParams',
@@ -2986,8 +3290,18 @@ export const IpInfo: z.ZodObject<{
   id: 'IpInfo',
 })
 export const KillParams: z.ZodObject<{
-  ids: z.ZodArray<typeof AnyVerifyingKey>
-}> = /* @__PURE__ */ object({ ids: z.array(AnyVerifyingKey) }).meta({
+  pubkeys: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
+    z.ZodArray<typeof AnyVerifyingKey>
+  >
+  tokens: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  pubkeys: wire(z.array(AnyVerifyingKey).optional(), z.array(AnyVerifyingKey)),
+  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
+}).meta({
   id: 'KillParams',
 })
 export const LegacyAlpnInfo: z.ZodUnion<
@@ -3216,14 +3530,6 @@ export const MountTarget: z.ZodCodec<
 ).meta({
   id: 'MountTarget',
 })
-export const NamedHealthCheckResult: z.ZodIntersection<
-  z.ZodObject<{ name: z.ZodString }>,
-  typeof NamedHealthCheckResultKind
-> = /* @__PURE__ */ z
-  .intersection(object({ name: z.string() }), NamedHealthCheckResultKind)
-  .meta({
-    id: 'NamedHealthCheckResult',
-  })
 export const Notification: z.ZodObject<{
   packageId: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof PackageId>>,
@@ -3248,15 +3554,21 @@ export const Notification: z.ZodObject<{
 }).meta({
   id: 'Notification',
 })
-export const OsUpdateSignerKeyParams: z.ZodObject<{
-  key: typeof AnyVerifyingKey
-}> = /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
-  id: 'OsUpdateSignerKeyParams',
-})
 export const OsVersionInfo: z.ZodObject<{
   headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
+  /**
+   * Commit that produced the OS image, if recorded at publication.
+   */
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
     z.ZodString,
@@ -3274,6 +3586,19 @@ export const OsVersionInfo: z.ZodObject<{
   headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
+  /**
+   * Commit that produced the OS image, if recorded at publication.
+   */
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()).meta({
+    description:
+      'Commit that produced the OS image, if recorded at publication.',
+  }),
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Whether the release includes security fixes.',
+  }),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),
   squashfs: z.record(z.string(), RegistryAsset(Blake3Commitment)),
@@ -3555,6 +3880,21 @@ export const RebuildParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'RebuildParams',
   })
+export const RegistryIdentity: z.ZodObject<{
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  icon: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof DataUrl>>,
+    z.ZodNullable<typeof DataUrl>
+  >
+}> = /* @__PURE__ */ object({
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
+}).meta({
+  id: 'RegistryIdentity',
+})
 export const RemoveAcmeParams: z.ZodObject<{ provider: typeof AcmeProvider }> =
   /* @__PURE__ */ object({ provider: AcmeProvider }).meta({
     id: 'RemoveAcmeParams',
@@ -3714,12 +4054,6 @@ export const SetMainStatus: z.ZodObject<{
 }> = /* @__PURE__ */ object({ status: SetMainStatusStatus }).meta({
   id: 'SetMainStatus',
 })
-export const SetOsUpdateSignerParams: z.ZodObject<{
-  key: typeof AnyVerifyingKey
-  label: z.ZodString
-}> = /* @__PURE__ */ object({ key: AnyVerifyingKey, label: z.string() }).meta({
-  id: 'SetOsUpdateSignerParams',
-})
 export const SetOutboundGatewayParams: z.ZodObject<{
   package: typeof PackageId
   gateway: z.ZodCodec<
@@ -3812,14 +4146,35 @@ export const SignAssetParams: z.ZodObject<{
 }).meta({
   id: 'SignAssetParams',
 })
+export const SignPackageParams: z.ZodObject<{
+  id: typeof PackageId
+  version: typeof Version
+  commitment: typeof MerkleArchiveCommitment
+  signature: typeof AnySignature
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  version: Version,
+  commitment: MerkleArchiveCommitment,
+  signature: AnySignature,
+}).meta({
+  id: 'SignPackageParams',
+})
 export const SignerInfo: z.ZodObject<{
   name: z.ZodString
   contact: z.ZodArray<typeof ContactInfo>
   keys: z.ZodArray<typeof AnyVerifyingKey>
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
 }> = /* @__PURE__ */ object({
   name: z.string(),
   contact: z.array(ContactInfo),
   keys: z.array(AnyVerifyingKey),
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ),
 }).meta({
   id: 'SignerInfo',
 })
@@ -3899,10 +4254,15 @@ export const StartOsRecoveryInfo: z.ZodObject<{
   hostname: typeof ServerHostname
   version: z.ZodString
   timestamp: z.ZodString
+  formatStatus: z.ZodCodec<
+    z.ZodOptional<typeof FormatStatus>,
+    typeof FormatStatus
+  >
 }> = /* @__PURE__ */ object({
   hostname: ServerHostname,
   version: z.string(),
   timestamp: z.string(),
+  formatStatus: wire(FormatStatus.optional(), FormatStatus),
 }).meta({
   id: 'StartOsRecoveryInfo',
   description:
@@ -4001,6 +4361,47 @@ export const UpdateTunnelParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ id: GatewayId, config: z.string() }).meta({
   id: 'UpdateTunnelParams',
 })
+export const UploadedFile: z.ZodObject<{
+  /**
+   * Untrusted original filename supplied by the uploader.
+   */
+  name: z.ZodString
+  /**
+   * The actual volume-relative destination of the installed file.
+   */
+  path: z.ZodString
+  /**
+   * Untrusted Content-Type supplied by the uploader.
+   */
+  mime: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  commitment: typeof FileCommitment
+}> = /* @__PURE__ */ object({
+  /**
+   * Untrusted original filename supplied by the uploader.
+   */
+  name: z.string().meta({
+    description: 'Untrusted original filename supplied by the uploader.',
+  }),
+  /**
+   * The actual volume-relative destination of the installed file.
+   */
+  path: z.string().meta({
+    description:
+      'The actual volume-relative destination of the installed file.',
+  }),
+  /**
+   * Untrusted Content-Type supplied by the uploader.
+   */
+  mime: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: 'Untrusted Content-Type supplied by the uploader.',
+  }),
+  commitment: FileCommitment,
+}).meta({
+  id: 'UploadedFile',
+})
 export const UrlPluginRegisterParams: z.ZodObject<{
   tableAction: typeof ActionId
 }> = /* @__PURE__ */ object({ tableAction: ActionId }).meta({
@@ -4068,25 +4469,93 @@ export const WifiListOut: z.ZodObject<{
 }).meta({
   id: 'WifiListOut',
 })
-export const ActionResult: z.ZodUnion<
-  readonly [
-    z.ZodIntersection<
-      z.ZodObject<{ version: z.ZodLiteral<'0'> }>,
-      typeof ActionResultV0
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ version: z.ZodLiteral<'1'> }>,
-      typeof ActionResultV1
-    >,
-  ]
+export const ActionResultMember: z.ZodIntersection<
+  z.ZodObject<{
+    /**
+     * A human-readable name or title of the value, such as "Last Active" or "Login Password"
+     */
+    name: z.ZodString
+    /**
+     * (optional) A description of the value, such as an explaining why it exists or how to use it
+     */
+    description: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+  }>,
+  typeof ActionResultValue
 > = /* @__PURE__ */ z
-  .union([
-    z.intersection(object({ version: z.literal('0') }), ActionResultV0),
-    z.intersection(object({ version: z.literal('1') }), ActionResultV1),
-  ])
+  .intersection(
+    object({
+      /**
+       * A human-readable name or title of the value, such as "Last Active" or "Login Password"
+       */
+      name: z.string().meta({
+        description:
+          'A human-readable name or title of the value, such as "Last Active" or "Login Password"',
+      }),
+      /**
+       * (optional) A description of the value, such as an explaining why it exists or how to use it
+       */
+      description: wire(
+        z.string().nullable().optional(),
+        z.string().nullable(),
+      ).meta({
+        description:
+          '(optional) A description of the value, such as an explaining why it exists or how to use it',
+      }),
+    }),
+    ActionResultValue,
+  )
   .meta({
-    id: 'ActionResult',
+    id: 'ActionResultMember',
   })
+export const ActionResultV1: z.ZodObject<{
+  /**
+   * Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
+   */
+  title: z.ZodString
+  /**
+   * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
+   */
+  message: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * (optional) Structured data to present inside the modal
+   */
+  result: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ActionResultValue>>,
+    z.ZodNullable<typeof ActionResultValue>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
+   */
+  title: z.string().meta({
+    description:
+      'Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense',
+  }),
+  /**
+   * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
+   */
+  message: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      '(optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.',
+  }),
+  /**
+   * (optional) Structured data to present inside the modal
+   */
+  result: wire(
+    ActionResultValue.nullable().optional(),
+    ActionResultValue.nullable(),
+  ).meta({
+    description: '(optional) Structured data to present inside the modal',
+  }),
+}).meta({
+  id: 'ActionResultV1',
+})
 export const AddPublicDomainRes: z.ZodObject<{
   dns: typeof QueryDnsRes
   port: typeof CheckPortRes
@@ -4193,6 +4662,26 @@ export const CompatibleAlpnInfo: z.ZodUnion<
   readonly [z.ZodArray<typeof MaybeUtf8String>, typeof LegacyAlpnInfo]
 > = /* @__PURE__ */ z.union([z.array(MaybeUtf8String), LegacyAlpnInfo]).meta({
   id: 'CompatibleAlpnInfo',
+})
+
+/**
+ * Latest observed conversion attempt for one target/server backup.
+ */
+export const ConversionJob: z.ZodObject<{
+  state: typeof ConversionState
+  progress: typeof FullProgress
+  error: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  state: ConversionState,
+  progress: FullProgress,
+  error: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'ConversionJob',
+  description:
+    'Latest observed conversion attempt for one target/server backup.',
 })
 export const CurrentDependencyInfo: z.ZodIntersection<
   z.ZodObject<{
@@ -4344,6 +4833,36 @@ export const InitProgressRes: z.ZodObject<{
 }> = /* @__PURE__ */ object({ progress: FullProgress, guid: Guid }).meta({
   id: 'InitProgressRes',
 })
+export const InstallParams: z.ZodObject<{
+  acceptSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
+    z.ZodNullable<typeof AcceptSigners>
+  >
+  registry: z.ZodString
+  id: typeof PackageId
+  version: typeof Version
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  acceptSigners: wire(
+    AcceptSigners.nullable().optional(),
+    AcceptSigners.nullable(),
+  ),
+  registry: z.string(),
+  id: PackageId,
+  version: Version,
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
+}).meta({
+  id: 'InstallParams',
+})
 export const MetadataSrc: z.ZodUnion<
   readonly [
     z.ZodObject<{ metadata: typeof Metadata }>,
@@ -4378,6 +4897,21 @@ export const MountParams: z.ZodObject<{
     id: 'MountParams',
   },
 )
+export const NamedHealthCheckResult: z.ZodCodec<
+  z.ZodIntersection<
+    z.ZodObject<{ name: z.ZodString }>,
+    typeof CompatibleHealthCheckResultKind
+  >,
+  z.ZodIntersection<
+    z.ZodObject<{ name: z.ZodString }>,
+    typeof NamedHealthCheckResultKind
+  >
+> = /* @__PURE__ */ wire(
+  z.intersection(object({ name: z.string() }), CompatibleHealthCheckResultKind),
+  z.intersection(object({ name: z.string() }), NamedHealthCheckResultKind),
+).meta({
+  id: 'NamedHealthCheckResult',
+})
 export const NetworkInterfaceInfo: z.ZodCodec<
   z.ZodObject<{
     /**
@@ -4655,6 +5189,46 @@ export const Progress: z.ZodUnion<
   .meta({
     id: 'Progress',
   })
+export const ProxyOptions: z.ZodIntersection<
+  z.ZodObject<{ type: z.ZodLiteral<'http'> }>,
+  z.ZodObject<{
+    /**
+     * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+     * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+     */
+    addXForwardedHeaders: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+    /**
+     * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+     */
+    auth: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
+      z.ZodNullable<typeof ProxyAuth>
+    >
+  }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ type: z.literal('http') }),
+    object({
+      /**
+       * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+       * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+       */
+      addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()).meta({
+        description:
+          'Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.',
+      }),
+      /**
+       * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+       */
+      auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()).meta({
+        description:
+          'Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.',
+      }),
+    }),
+  )
+  .meta({
+    id: 'ProxyOptions',
+  })
 export const RegistryInfo: z.ZodObject<{
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -4672,6 +5246,13 @@ export const RegistryInfo: z.ZodObject<{
     z.ZodNullable<typeof LocaleString>
   >
   categories: z.ZodRecord<z.ZodString, typeof Category>
+  /**
+   * Registry-selected signers, not an assertion of trust.
+   */
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof SignerInfo>>,
+    z.ZodRecord<z.ZodString, typeof SignerInfo>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -4685,6 +5266,15 @@ export const RegistryInfo: z.ZodObject<{
     description: "Markdown, shown above the registry's services.",
   }),
   categories: z.record(z.string(), Category),
+  /**
+   * Registry-selected signers, not an assertion of trust.
+   */
+  trustSigners: wire(
+    z.record(z.string(), SignerInfo).optional(),
+    z.record(z.string(), SignerInfo),
+  ).meta({
+    description: 'Registry-selected signers, not an assertion of trust.',
+  }),
 }).meta({
   id: 'RegistryInfo',
 })
@@ -4700,36 +5290,6 @@ export const ResetPasswordParams: z.ZodObject<{
   ),
 }).meta({
   id: 'ResetPasswordParams',
-})
-export const ServerStatus: z.ZodObject<{
-  backupProgress: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
-    z.ZodNullable<typeof FullProgress>
-  >
-  updateProgress: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
-    z.ZodNullable<typeof FullProgress>
-  >
-  shuttingDown: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  restarting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  restart: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof RestartReason>>,
-    z.ZodNullable<typeof RestartReason>
-  >
-}> = /* @__PURE__ */ object({
-  backupProgress: wire(
-    FullProgress.nullable().optional(),
-    FullProgress.nullable(),
-  ),
-  updateProgress: wire(
-    FullProgress.nullable().optional(),
-    FullProgress.nullable(),
-  ),
-  shuttingDown: wire(z.boolean().optional(), z.boolean()),
-  restarting: wire(z.boolean().optional(), z.boolean()),
-  restart: wire(RestartReason.nullable().optional(), RestartReason.nullable()),
-}).meta({
-  id: 'ServerStatus',
 })
 export const ServiceInterface: z.ZodObject<{
   id: typeof ServiceInterfaceId
@@ -4764,17 +5324,19 @@ export const ServiceInterface: z.ZodObject<{
 }).meta({
   id: 'ServiceInterface',
 })
-export const SessionList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sessions: typeof AuthKeys
+
+/**
+ * The server's sessions, by credential type.
+ */
+export const Sessions: z.ZodObject<{
+  pubkeys: typeof AuthKeys
+  tokens: z.ZodRecord<z.ZodString, typeof Session>
 }> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
-  sessions: AuthKeys,
+  pubkeys: AuthKeys,
+  tokens: z.record(z.string(), Session),
 }).meta({
-  id: 'SessionList',
+  id: 'Sessions',
+  description: "The server's sessions, by credential type.",
 })
 export const SetDependenciesParams: z.ZodObject<{
   dependencies: z.ZodArray<typeof DependencyRequirement>
@@ -4783,38 +5345,51 @@ export const SetDependenciesParams: z.ZodObject<{
 }).meta({
   id: 'SetDependenciesParams',
 })
-export const SetHealth: z.ZodIntersection<
-  z.ZodObject<{ id: typeof HealthCheckId }>,
-  typeof NamedHealthCheckResult
-> = /* @__PURE__ */ z
-  .intersection(object({ id: HealthCheckId }), NamedHealthCheckResult)
-  .meta({
-    id: 'SetHealth',
-  })
 export const SetupProgress: z.ZodObject<{
   progress: typeof FullProgress
   guid: typeof Guid
 }> = /* @__PURE__ */ object({ progress: FullProgress, guid: Guid }).meta({
   id: 'SetupProgress',
 })
-export const StatusInfo: z.ZodObject<{
-  health: z.ZodRecord<z.ZodString, typeof NamedHealthCheckResult>
-  error: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof ErrorData>>,
-    z.ZodNullable<typeof ErrorData>
+export const SideloadParams: z.ZodObject<{
+  acceptSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
+    z.ZodNullable<typeof AcceptSigners>
   >
-  started: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
+  /**
+   * DER64 supplemental signatures for the uploaded archive.
+   */
+  signatures: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
+    z.ZodRecord<z.ZodString, typeof AnySignature>
   >
-  desired: typeof DesiredStatus
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
-  health: z.record(z.string(), NamedHealthCheckResult),
-  error: wire(ErrorData.nullable().optional(), ErrorData.nullable()),
-  started: wire(z.string().nullable().optional(), z.string().nullable()),
-  desired: DesiredStatus,
+  acceptSigners: wire(
+    AcceptSigners.nullable().optional(),
+    AcceptSigners.nullable(),
+  ),
+  /**
+   * DER64 supplemental signatures for the uploaded archive.
+   */
+  signatures: wire(
+    z.record(z.string(), AnySignature).optional(),
+    z.record(z.string(), AnySignature),
+  ).meta({
+    description: 'DER64 supplemental signatures for the uploaded archive.',
+  }),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
+  }),
 }).meta({
-  id: 'StatusInfo',
+  id: 'SideloadParams',
 })
 export const Task: z.ZodObject<{
   packageId: typeof PackageId
@@ -4842,6 +5417,94 @@ export const Task: z.ZodObject<{
 }).meta({
   id: 'Task',
 })
+
+/**
+ * Signing-key material and independent package and OS-update trust.
+ */
+export const TrustedKey: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * `manual`, or the base URL of the registry that first offered the key.
+   */
+  origin: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+  /**
+   * Registry identity recorded when this key was first imported.
+   */
+  originRegistry: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof RegistryIdentity>>,
+    z.ZodNullable<typeof RegistryIdentity>
+  >
+  publicKey: typeof AnyVerifyingKey
+  /**
+   * Original GPG exports; signing trust is determined by `public_key`.
+   */
+  gpgExports: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
+    z.ZodArray<typeof GpgPublicKeyExport>
+  >
+  /**
+   * Contact details registries publish for the key's signer.
+   */
+  contact: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof ContactInfo>>,
+    z.ZodArray<typeof ContactInfo>
+  >
+  addedAt: z.ZodString
+  /**
+   * False while a connected registry offers the key.
+   */
+  removable: z.ZodBoolean
+  marketplace: z.ZodBoolean
+  os: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * `manual`, or the base URL of the registry that first offered the key.
+   */
+  origin: wire(z.string().optional(), z.string()).meta({
+    description:
+      '`manual`, or the base URL of the registry that first offered the key.',
+  }),
+  /**
+   * Registry identity recorded when this key was first imported.
+   */
+  originRegistry: wire(
+    RegistryIdentity.nullable().optional(),
+    RegistryIdentity.nullable(),
+  ).meta({
+    description: 'Registry identity recorded when this key was first imported.',
+  }),
+  publicKey: AnyVerifyingKey,
+  /**
+   * Original GPG exports; signing trust is determined by `public_key`.
+   */
+  gpgExports: wire(
+    z.array(GpgPublicKeyExport).optional(),
+    z.array(GpgPublicKeyExport),
+  ).meta({
+    description:
+      'Original GPG exports; signing trust is determined by `public_key`.',
+  }),
+  /**
+   * Contact details registries publish for the key's signer.
+   */
+  contact: wire(z.array(ContactInfo).optional(), z.array(ContactInfo)).meta({
+    description: "Contact details registries publish for the key's signer.",
+  }),
+  addedAt: z.string(),
+  /**
+   * False while a connected registry offers the key.
+   */
+  removable: z.boolean().meta({
+    description: 'False while a connected registry offers the key.',
+  }),
+  marketplace: z.boolean(),
+  os: z.boolean(),
+}).meta({
+  id: 'TrustedKey',
+  description:
+    'Signing-key material and independent package and OS-update trust.',
+})
 export const UpdateSystemParams: z.ZodObject<{
   registry: z.ZodString
   /**
@@ -4851,6 +5514,10 @@ export const UpdateSystemParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
     z.ZodNullable<typeof AcceptSigners>
   >
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   targetVersion: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -4867,6 +5534,13 @@ export const UpdateSystemParams: z.ZodObject<{
   ).meta({
     description:
       'Additional signer requirements checked before starting the update.',
+  }),
+  /**
+   * Accepts an untrusted signer without skipping signature or integrity verification.
+   */
+  trust: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts an untrusted signer without skipping signature or integrity verification.',
   }),
   targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
   progress: wire(z.boolean().optional(), z.boolean()),
@@ -4913,15 +5587,28 @@ export const WifiListInfo: z.ZodObject<{
 }).meta({
   id: 'WifiListInfo',
 })
+export const ActionResult: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{ version: z.ZodLiteral<'0'> }>,
+      typeof ActionResultV0
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ version: z.ZodLiteral<'1'> }>,
+      typeof ActionResultV1
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(object({ version: z.literal('0') }), ActionResultV0),
+    z.intersection(object({ version: z.literal('1') }), ActionResultV1),
+  ])
+  .meta({
+    id: 'ActionResult',
+  })
 export const AddSslOptions: z.ZodCodec<
   z.ZodObject<{
     preferredExternalPort: z.ZodInt
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.ZodOptional<z.ZodBoolean>
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -4934,25 +5621,9 @@ export const AddSslOptions: z.ZodCodec<
     upstreamCertValidation: z.ZodOptional<
       z.ZodNullable<typeof UpstreamCertValidation>
     >
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>
   }>,
   z.ZodObject<{
     preferredExternalPort: z.ZodInt
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.ZodBoolean
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -4963,29 +5634,10 @@ export const AddSslOptions: z.ZodCodec<
      * `None` (the default) validates against the StartOS root CA.
      */
     upstreamCertValidation: z.ZodNullable<typeof UpstreamCertValidation>
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: z.ZodNullable<typeof ProxyAuth>
   }>
 > = /* @__PURE__ */ wire(
   object({
     preferredExternalPort: z.int(),
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.boolean().optional().meta({
-      description:
-        'When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`\nand `X-Forwarded-For: <client-ip>` to incoming HTTP requests before\nforwarding them upstream. Setting this implies HTTP-aware proxying.',
-    }),
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -5002,31 +5654,9 @@ export const AddSslOptions: z.ZodCodec<
       description:
         'Certificate validation for the OS→container TLS leg when rewrapping.\n`None` (the default) validates against the StartOS root CA.',
     }),
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: ProxyAuth.nullable().optional().meta({
-      description:
-        'Optional reverse-proxy auth gate. When set, the OS reverse proxy\nwill validate the `Authorization` header on incoming HTTP requests\nagainst this configuration before forwarding them upstream.\nUnauthenticated requests get `401 Unauthorized` with an appropriate\n`WWW-Authenticate` challenge. For `Basic`, the authenticated\nusername is forwarded to the upstream service as `X-Forwarded-User`.\nSetting this implies HTTP-aware proxying.',
-    }),
   }),
   object({
     preferredExternalPort: z.int(),
-    /**
-     * When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-     * and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-     * forwarding them upstream. Setting this implies HTTP-aware proxying.
-     */
-    addXForwardedHeaders: z.boolean().meta({
-      description:
-        'When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`\nand `X-Forwarded-For: <client-ip>` to incoming HTTP requests before\nforwarding them upstream. Setting this implies HTTP-aware proxying.',
-    }),
     /**
      * The application protocols StartOS answers a client with, from those it
      * asked for. Unset answers with whatever it asked for.
@@ -5042,19 +5672,6 @@ export const AddSslOptions: z.ZodCodec<
     upstreamCertValidation: UpstreamCertValidation.nullable().meta({
       description:
         'Certificate validation for the OS→container TLS leg when rewrapping.\n`None` (the default) validates against the StartOS root CA.',
-    }),
-    /**
-     * Optional reverse-proxy auth gate. When set, the OS reverse proxy
-     * will validate the `Authorization` header on incoming HTTP requests
-     * against this configuration before forwarding them upstream.
-     * Unauthenticated requests get `401 Unauthorized` with an appropriate
-     * `WWW-Authenticate` challenge. For `Basic`, the authenticated
-     * username is forwarded to the upstream service as `X-Forwarded-User`.
-     * Setting this implies HTTP-aware proxying.
-     */
-    auth: ProxyAuth.nullable().meta({
-      description:
-        'Optional reverse-proxy auth gate. When set, the OS reverse proxy\nwill validate the `Authorization` header on incoming HTTP requests\nagainst this configuration before forwarding them upstream.\nUnauthenticated requests get `401 Unauthorized` with an appropriate\n`WWW-Authenticate` challenge. For `Basic`, the authenticated\nusername is forwarded to the upstream service as `X-Forwarded-User`.\nSetting this implies HTTP-aware proxying.',
     }),
   }),
 ).meta({
@@ -5325,9 +5942,69 @@ export const PackageVersionInfo: z.ZodIntersection<
   .meta({
     id: 'PackageVersionInfo',
   })
+export const ServerStatus: z.ZodObject<{
+  backupProgress: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
+    z.ZodNullable<typeof FullProgress>
+  >
+  backupConversions: z.ZodCodec<
+    z.ZodOptional<
+      z.ZodRecord<z.ZodString, z.ZodRecord<z.ZodString, typeof ConversionJob>>
+    >,
+    z.ZodRecord<z.ZodString, z.ZodRecord<z.ZodString, typeof ConversionJob>>
+  >
+  updateProgress: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof FullProgress>>,
+    z.ZodNullable<typeof FullProgress>
+  >
+  shuttingDown: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  restarting: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  restart: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof RestartReason>>,
+    z.ZodNullable<typeof RestartReason>
+  >
+}> = /* @__PURE__ */ object({
+  backupProgress: wire(
+    FullProgress.nullable().optional(),
+    FullProgress.nullable(),
+  ),
+  backupConversions: wire(
+    z.record(z.string(), z.record(z.string(), ConversionJob)).optional(),
+    z.record(z.string(), z.record(z.string(), ConversionJob)),
+  ),
+  updateProgress: wire(
+    FullProgress.nullable().optional(),
+    FullProgress.nullable(),
+  ),
+  shuttingDown: wire(z.boolean().optional(), z.boolean()),
+  restarting: wire(z.boolean().optional(), z.boolean()),
+  restart: wire(RestartReason.nullable().optional(), RestartReason.nullable()),
+}).meta({
+  id: 'ServerStatus',
+})
+export const SessionList: z.ZodObject<{
+  current: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  sessions: typeof Sessions
+}> = /* @__PURE__ */ object({
+  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  sessions: Sessions,
+}).meta({
+  id: 'SessionList',
+})
 export const SetBackupProgress: z.ZodObject<{ progress: typeof Progress }> =
   /* @__PURE__ */ object({ progress: Progress }).meta({
     id: 'SetBackupProgress',
+  })
+export const SetHealth: z.ZodIntersection<
+  z.ZodObject<{ id: typeof HealthCheckId }>,
+  typeof NamedHealthCheckResult
+> = /* @__PURE__ */ z
+  .intersection(object({ id: HealthCheckId }), NamedHealthCheckResult)
+  .meta({
+    id: 'SetHealth',
   })
 export const SetInitProgress: z.ZodObject<{ progress: typeof Progress }> =
   /* @__PURE__ */ object({ progress: Progress }).meta({
@@ -5359,28 +6036,30 @@ export const SetupStatusRes: z.ZodUnion<
   .meta({
     id: 'SetupStatusRes',
   })
+export const StatusInfo: z.ZodObject<{
+  health: z.ZodRecord<z.ZodString, typeof NamedHealthCheckResult>
+  error: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ErrorData>>,
+    z.ZodNullable<typeof ErrorData>
+  >
+  started: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  desired: typeof DesiredStatus
+}> = /* @__PURE__ */ object({
+  health: z.record(z.string(), NamedHealthCheckResult),
+  error: wire(ErrorData.nullable().optional(), ErrorData.nullable()),
+  started: wire(z.string().nullable().optional(), z.string().nullable()),
+  desired: DesiredStatus,
+}).meta({
+  id: 'StatusInfo',
+})
 export const TaskEntry: z.ZodObject<{
   task: typeof Task
   active: z.ZodBoolean
 }> = /* @__PURE__ */ object({ task: Task, active: z.boolean() }).meta({
   id: 'TaskEntry',
-})
-export const BindOptions: z.ZodObject<{
-  preferredExternalPort: z.ZodInt
-  addSsl: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof AddSslOptions>>,
-    z.ZodNullable<typeof AddSslOptions>
-  >
-  secure: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Security>>,
-    z.ZodNullable<typeof Security>
-  >
-}> = /* @__PURE__ */ object({
-  preferredExternalPort: z.int(),
-  addSsl: wire(AddSslOptions.nullable().optional(), AddSslOptions.nullable()),
-  secure: wire(Security.nullable().optional(), Security.nullable()),
-}).meta({
-  id: 'BindOptions',
 })
 export const CheckDependenciesResult: z.ZodObject<{
   packageId: typeof PackageId
@@ -5471,6 +6150,26 @@ export const GetPackageResponseFull: z.ZodObject<{
 }).meta({
   id: 'GetPackageResponseFull',
 })
+export const LegacyProxySslOptions: z.ZodIntersection<
+  z.ZodObject<{
+    addXForwardedHeaders: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+    auth: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
+      z.ZodNullable<typeof ProxyAuth>
+    >
+  }>,
+  typeof AddSslOptions
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()),
+      auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()),
+    }),
+    AddSslOptions,
+  )
+  .meta({
+    id: 'LegacyProxySslOptions',
+  })
 export const PackageInfo: z.ZodObject<{
   authorized: z.ZodRecord<z.ZodString, z.ZodString>
   versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
@@ -5547,52 +6246,35 @@ export const RangeBindInfo: z.ZodObject<{
   description:
     'Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).\n\nKeyed by `internal_start_port` in [`BindingRanges`]. The range covers\n`internal_start_port..(internal_start_port + number_of_ports)` and is\nforwarded through a single iptables rule per protocol per gateway,\npreserving the destination port number.',
 })
-export const BindInfo: z.ZodObject<{
-  enabled: z.ZodBoolean
-  options: typeof BindOptions
-  net: typeof NetInfo
-  addresses: typeof DerivedAddressInfo
-  /**
-   * Service interfaces exported from this binding (`Origin.export`). A single
-   * binding (host + internal port) may back several interfaces (e.g. a `ui`
-   * and an `api` on the same port), so this is keyed by interface id.
-   */
-  interfaces: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof ServiceInterface>>,
-    z.ZodRecord<z.ZodString, typeof ServiceInterface>
-  >
-}> = /* @__PURE__ */ object({
-  enabled: z.boolean(),
-  options: BindOptions,
-  net: NetInfo,
-  addresses: DerivedAddressInfo,
-  /**
-   * Service interfaces exported from this binding (`Origin.export`). A single
-   * binding (host + internal port) may back several interfaces (e.g. a `ui`
-   * and an `api` on the same port), so this is keyed by interface id.
-   */
-  interfaces: wire(
-    z.record(z.string(), ServiceInterface).optional(),
-    z.record(z.string(), ServiceInterface),
-  ).meta({
-    description:
-      'Service interfaces exported from this binding (`Origin.export`). A single\nbinding (host + internal port) may back several interfaces (e.g. a `ui`\nand an `api` on the same port), so this is keyed by interface id.',
-  }),
-}).meta({
-  id: 'BindInfo',
-})
-export const BindParams: z.ZodIntersection<
-  z.ZodObject<{ id: typeof HostId; internalPort: z.ZodInt }>,
-  typeof BindOptions
-> = /* @__PURE__ */ z
-  .intersection(object({ id: HostId, internalPort: z.int() }), BindOptions)
-  .meta({
-    id: 'BindParams',
-  })
 export const BindingRanges: z.ZodRecord<z.ZodString, typeof RangeBindInfo> =
   /* @__PURE__ */ z.record(z.string(), RangeBindInfo).meta({
     id: 'BindingRanges',
   })
+export const CompatibleBindOptions: z.ZodObject<{
+  preferredExternalPort: z.ZodInt
+  addSsl: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>,
+    z.ZodNullable<typeof LegacyProxySslOptions>
+  >
+  secure: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Security>>,
+    z.ZodNullable<typeof Security>
+  >
+  proxy: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof ProxyOptions>>,
+    z.ZodNullable<typeof ProxyOptions>
+  >
+}> = /* @__PURE__ */ object({
+  preferredExternalPort: z.int(),
+  addSsl: wire(
+    LegacyProxySslOptions.nullable().optional(),
+    LegacyProxySslOptions.nullable(),
+  ),
+  secure: wire(Security.nullable().optional(), Security.nullable()),
+  proxy: wire(ProxyOptions.nullable().optional(), ProxyOptions.nullable()),
+}).meta({
+  id: 'CompatibleBindOptions',
+})
 export const Manifest: z.ZodIntersection<
   z.ZodObject<{
     id: typeof PackageId
@@ -5640,10 +6322,34 @@ export const PackageIndex: z.ZodObject<{
 }).meta({
   id: 'PackageIndex',
 })
-export const Bindings: z.ZodRecord<z.ZodString, typeof BindInfo> =
-  /* @__PURE__ */ z.record(z.string(), BindInfo).meta({
-    id: 'Bindings',
-  })
+export const BindOptions: z.ZodCodec<
+  typeof CompatibleBindOptions,
+  z.ZodObject<{
+    preferredExternalPort: z.ZodInt
+    addSsl: z.ZodNullable<typeof AddSslOptions>
+    secure: z.ZodNullable<typeof Security>
+    /**
+     * HTTP request policy shared by every exposed leg of this binding.
+     */
+    proxy: z.ZodNullable<typeof ProxyOptions>
+  }>
+> = /* @__PURE__ */ wire(
+  CompatibleBindOptions,
+  object({
+    preferredExternalPort: z.int(),
+    addSsl: AddSslOptions.nullable(),
+    secure: Security.nullable(),
+    /**
+     * HTTP request policy shared by every exposed leg of this binding.
+     */
+    proxy: ProxyOptions.nullable().meta({
+      description:
+        'HTTP request policy shared by every exposed leg of this binding.',
+    }),
+  }),
+).meta({
+  id: 'BindOptions',
+})
 export const FullIndex: z.ZodObject<{
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -5660,6 +6366,10 @@ export const FullIndex: z.ZodObject<{
   package: typeof PackageIndex
   os: typeof OsIndex
   signers: z.ZodRecord<z.ZodString, typeof SignerInfo>
+  trustSigners: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof Guid>>,
+    z.ZodArray<typeof Guid>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -5670,6 +6380,7 @@ export const FullIndex: z.ZodObject<{
   package: PackageIndex,
   os: OsIndex,
   signers: z.record(z.string(), SignerInfo),
+  trustSigners: wire(z.array(Guid).optional(), z.array(Guid)),
 }).meta({
   id: 'FullIndex',
 })
@@ -5686,6 +6397,102 @@ export const InstallingInfo: z.ZodObject<{
 }).meta({
   id: 'InstallingInfo',
 })
+export const BindInfo: z.ZodObject<{
+  enabled: z.ZodBoolean
+  options: typeof BindOptions
+  net: typeof NetInfo
+  addresses: typeof DerivedAddressInfo
+  /**
+   * Service interfaces exported from this binding (`Origin.export`). A single
+   * binding (host + internal port) may back several interfaces (e.g. a `ui`
+   * and an `api` on the same port), so this is keyed by interface id.
+   */
+  interfaces: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof ServiceInterface>>,
+    z.ZodRecord<z.ZodString, typeof ServiceInterface>
+  >
+}> = /* @__PURE__ */ object({
+  enabled: z.boolean(),
+  options: BindOptions,
+  net: NetInfo,
+  addresses: DerivedAddressInfo,
+  /**
+   * Service interfaces exported from this binding (`Origin.export`). A single
+   * binding (host + internal port) may back several interfaces (e.g. a `ui`
+   * and an `api` on the same port), so this is keyed by interface id.
+   */
+  interfaces: wire(
+    z.record(z.string(), ServiceInterface).optional(),
+    z.record(z.string(), ServiceInterface),
+  ).meta({
+    description:
+      'Service interfaces exported from this binding (`Origin.export`). A single\nbinding (host + internal port) may back several interfaces (e.g. a `ui`\nand an `api` on the same port), so this is keyed by interface id.',
+  }),
+}).meta({
+  id: 'BindInfo',
+})
+export const BindParams: z.ZodIntersection<
+  z.ZodObject<{ id: typeof HostId; internalPort: z.ZodInt }>,
+  typeof BindOptions
+> = /* @__PURE__ */ z
+  .intersection(object({ id: HostId, internalPort: z.int() }), BindOptions)
+  .meta({
+    id: 'BindParams',
+  })
+export const InstallingState: z.ZodObject<{
+  installingInfo: typeof InstallingInfo
+}> = /* @__PURE__ */ object({ installingInfo: InstallingInfo }).meta({
+  id: 'InstallingState',
+})
+export const UpdatingState: z.ZodObject<{
+  manifest: typeof Manifest
+  s9pk: z.ZodString
+  installingInfo: typeof InstallingInfo
+}> = /* @__PURE__ */ object({
+  manifest: Manifest,
+  s9pk: z.string(),
+  installingInfo: InstallingInfo,
+}).meta({
+  id: 'UpdatingState',
+})
+export const Bindings: z.ZodRecord<z.ZodString, typeof BindInfo> =
+  /* @__PURE__ */ z.record(z.string(), BindInfo).meta({
+    id: 'Bindings',
+  })
+export const PackageState: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{ state: z.ZodLiteral<'installing'> }>,
+      typeof InstallingState
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ state: z.ZodLiteral<'restoring'> }>,
+      typeof InstallingState
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ state: z.ZodLiteral<'updating'> }>,
+      typeof UpdatingState
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ state: z.ZodLiteral<'installed'> }>,
+      typeof InstalledState
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ state: z.ZodLiteral<'removing'> }>,
+      typeof InstalledState
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(object({ state: z.literal('installing') }), InstallingState),
+    z.intersection(object({ state: z.literal('restoring') }), InstallingState),
+    z.intersection(object({ state: z.literal('updating') }), UpdatingState),
+    z.intersection(object({ state: z.literal('installed') }), InstalledState),
+    z.intersection(object({ state: z.literal('removing') }), InstalledState),
+  ])
+  .meta({
+    id: 'PackageState',
+  })
 export const Host: z.ZodObject<{
   bindings: typeof Bindings
   bindingRanges: z.ZodCodec<
@@ -5718,22 +6525,6 @@ export const Host: z.ZodObject<{
   }),
 }).meta({
   id: 'Host',
-})
-export const InstallingState: z.ZodObject<{
-  installingInfo: typeof InstallingInfo
-}> = /* @__PURE__ */ object({ installingInfo: InstallingInfo }).meta({
-  id: 'InstallingState',
-})
-export const UpdatingState: z.ZodObject<{
-  manifest: typeof Manifest
-  s9pk: z.ZodString
-  installingInfo: typeof InstallingInfo
-}> = /* @__PURE__ */ object({
-  manifest: Manifest,
-  s9pk: z.string(),
-  installingInfo: InstallingInfo,
-}).meta({
-  id: 'UpdatingState',
 })
 export const Hosts: z.ZodRecord<z.ZodString, typeof Host> = /* @__PURE__ */ z
   .record(z.string(), Host)
@@ -5786,40 +6577,6 @@ export const NetworkInfo: z.ZodObject<{
 }).meta({
   id: 'NetworkInfo',
 })
-export const PackageState: z.ZodUnion<
-  readonly [
-    z.ZodIntersection<
-      z.ZodObject<{ state: z.ZodLiteral<'installing'> }>,
-      typeof InstallingState
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ state: z.ZodLiteral<'restoring'> }>,
-      typeof InstallingState
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ state: z.ZodLiteral<'updating'> }>,
-      typeof UpdatingState
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ state: z.ZodLiteral<'installed'> }>,
-      typeof InstalledState
-    >,
-    z.ZodIntersection<
-      z.ZodObject<{ state: z.ZodLiteral<'removing'> }>,
-      typeof InstalledState
-    >,
-  ]
-> = /* @__PURE__ */ z
-  .union([
-    z.intersection(object({ state: z.literal('installing') }), InstallingState),
-    z.intersection(object({ state: z.literal('restoring') }), InstallingState),
-    z.intersection(object({ state: z.literal('updating') }), UpdatingState),
-    z.intersection(object({ state: z.literal('installed') }), InstalledState),
-    z.intersection(object({ state: z.literal('removing') }), InstalledState),
-  ])
-  .meta({
-    id: 'PackageState',
-  })
 export const PackageDataEntry: z.ZodObject<{
   stateInfo: typeof PackageState
   s9pk: z.ZodString
@@ -5888,10 +6645,28 @@ export const ServerInfo: z.ZodObject<{
     typeof ServerStatus
   >
   unreadNotificationCount: z.ZodInt
-  trustedOsUpdateSigners: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof TrustedOsUpdateSigner>>,
-    z.ZodRecord<z.ZodString, typeof TrustedOsUpdateSigner>
+  trustedKeys: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof TrustedKey>>,
+    z.ZodRecord<z.ZodString, typeof TrustedKey>
   >
+  /**
+   * Last observed trust proposals from connected registries.
+   */
+  registryKeys: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<typeof AnyVerifyingKey>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<typeof AnyVerifyingKey>>
+  >
+  /**
+   * Connected registries; written only through `server.registries`.
+   */
+  registries: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>>,
+    z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>
+  >
+  /**
+   * Registry that provides StartOS updates; always connected.
+   */
+  osRegistry: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
   pubkey: z.ZodString
   caFingerprint: z.ZodString
   ntpSynced: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
@@ -5937,10 +6712,35 @@ export const ServerInfo: z.ZodObject<{
   network: NetworkInfo,
   statusInfo: wire(ServerStatus.optional(), ServerStatus),
   unreadNotificationCount: z.int(),
-  trustedOsUpdateSigners: wire(
-    z.record(z.string(), TrustedOsUpdateSigner).optional(),
-    z.record(z.string(), TrustedOsUpdateSigner),
+  trustedKeys: wire(
+    z.record(z.string(), TrustedKey).optional(),
+    z.record(z.string(), TrustedKey),
   ),
+  /**
+   * Last observed trust proposals from connected registries.
+   */
+  registryKeys: wire(
+    z.record(z.string(), z.array(AnyVerifyingKey)).optional(),
+    z.record(z.string(), z.array(AnyVerifyingKey)),
+  ).meta({
+    description: 'Last observed trust proposals from connected registries.',
+  }),
+  /**
+   * Connected registries; written only through `server.registries`.
+   */
+  registries: wire(
+    z.record(z.string(), z.string().nullable()).optional(),
+    z.record(z.string(), z.string().nullable()),
+  ).meta({
+    description:
+      'Connected registries; written only through `server.registries`.',
+  }),
+  /**
+   * Registry that provides StartOS updates; always connected.
+   */
+  osRegistry: wire(z.string().optional(), z.string()).meta({
+    description: 'Registry that provides StartOS updates; always connected.',
+  }),
   pubkey: z.string(),
   caFingerprint: z.string(),
   ntpSynced: wire(z.boolean().optional(), z.boolean()),
@@ -5967,11 +6767,22 @@ export const AllPackageData: z.ZodRecord<z.ZodString, typeof PackageDataEntry> =
 export const Public: z.ZodObject<{
   serverInfo: typeof ServerInfo
   packageData: typeof AllPackageData
+  /**
+   * UI-owned state. Outside `version` migrations, the backend never reads or
+   * modifies its contents.
+   */
   ui: z.ZodUnknown
 }> = /* @__PURE__ */ object({
   serverInfo: ServerInfo,
   packageData: AllPackageData,
-  ui: z.unknown(),
+  /**
+   * UI-owned state. Outside `version` migrations, the backend never reads or
+   * modifies its contents.
+   */
+  ui: z.unknown().meta({
+    description:
+      'UI-owned state. Outside `version` migrations, the backend never reads or\nmodifies its contents.',
+  }),
 }).meta({
   id: 'Public',
 })

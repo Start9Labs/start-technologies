@@ -100,6 +100,87 @@ fn mdns_covers(mdns: &HostnameInfo, ip: &HostnameInfo) -> bool {
 }
 
 impl DerivedAddressInfo {
+    /// The UI and direct forwarding must agree on enabled/public address exposure.
+    /// An enabled plain-port public domain publishes its gateway GUAs in that state.
+    /// Public forwarding behind a Local or Disabled row is a correctness defect.
+    /// A new TLS row of a public domain stays off unless that domain was enabled
+    /// here and no row of it was disabled.
+    /// A plain domain groups its port's addresses, so the group stays on only if
+    /// everything public on the gateway was on, a Local GUA counting as public-off.
+    /// An operator action grouping addresses enables them before this runs.
+    pub(super) fn resolve_address_groups(&mut self, previous: &DerivedAddressInfo) {
+        let is_domain =
+            |a: &&HostnameInfo| matches!(a.metadata, HostnameMetadata::PublicDomain { .. });
+        let enabled = previous.enabled();
+        let disabled_domains: BTreeSet<_> = previous
+            .available
+            .iter()
+            .filter(is_domain)
+            .filter(|a| !enabled.contains(a))
+            .map(|a| a.hostname.clone())
+            .collect();
+        let enabled_domains: BTreeSet<_> = enabled
+            .iter()
+            .copied()
+            .filter(is_domain)
+            .map(|a| a.hostname.clone())
+            .collect();
+        let mut all_public = BTreeMap::<(GatewayId, bool), bool>::new();
+        for address in previous
+            .available
+            .iter()
+            .filter(|a| (a.public && a.metadata.is_ip()) || a.gua().is_some() || is_domain(a))
+        {
+            // `gua_wan` is current; a GUA's `public` flag waits for `set_available`.
+            let public = address.gua().map_or_else(
+                || enabled.contains(address),
+                |gua| previous.gua_wan.contains(&gua) && previous.public_ip_on(address),
+            );
+            for gateway in address.metadata.gateways() {
+                *all_public
+                    .entry((gateway.clone(), address.ssl))
+                    .or_insert(true) &= public;
+            }
+        }
+        let mut wan_groups = BTreeMap::new();
+        let mut withheld = Vec::new();
+        for address in &self.available {
+            let (HostnameMetadata::PublicDomain { gateway }, Some(port)) =
+                (&address.metadata, address.port)
+            else {
+                continue;
+            };
+            if !address.ssl {
+                let all_on = all_public
+                    .get(&(gateway.clone(), false))
+                    .or_else(|| all_public.get(&(gateway.clone(), true)))
+                    .is_some_and(|all| *all);
+                wan_groups.insert((gateway.clone(), port), all_on);
+            } else if !previous.available.contains(address)
+                && (disabled_domains.contains(&address.hostname)
+                    || !enabled_domains.contains(&address.hostname))
+            {
+                withheld.push(override_key(address));
+            }
+        }
+        self.disabled.extend(withheld);
+        for ((gateway, port), on) in wan_groups {
+            set_nonssl_wan_group(self, &gateway, port, on);
+        }
+    }
+
+    pub(super) fn set_available(&mut self, available: BTreeSet<HostnameInfo>) {
+        self.available = available
+            .into_iter()
+            .map(|mut address| {
+                if let Some(gua) = address.gua() {
+                    address.public = self.gua_wan.contains(&gua);
+                }
+                address
+            })
+            .collect();
+    }
+
     fn public_ip_on(&self, address: &HostnameInfo) -> bool {
         address.to_socket_addr().map_or(
             true, // should never happen, but would rather see them if it does
@@ -201,6 +282,32 @@ impl DerivedAddressInfo {
                 sa
             })
             .collect();
+    }
+
+    /// Drops IP overrides whose available addresses belong exclusively to this gateway.
+    pub fn forget_gateway(&mut self, gateway: &GatewayId) {
+        let available = &self.available;
+        for address in available
+            .iter()
+            .filter(|a| a.metadata.is_ip() && a.metadata.gateways().any(|g| g == gateway))
+            .filter(|address| {
+                !available.iter().any(|other| {
+                    other.metadata.is_ip()
+                        && override_key(other) == override_key(address)
+                        && !other.metadata.gateways().any(|g| g == gateway)
+                })
+            })
+        {
+            if let Some(sa) = address.to_socket_addr() {
+                self.enabled.remove(&sa);
+            }
+            if let Some(gua) = address.gua() {
+                self.gua_wan.remove(&gua);
+            }
+            let key = override_key(address);
+            self.disabled.remove(&key);
+            self.lan_enabled.remove(&key);
+        }
     }
 }
 
@@ -527,11 +634,86 @@ rpc_toolkit::reflect_ts!(Security);
 rpc_toolkit::ts_export!(Security, namespaces = [""]);
 
 #[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "CompatibleBindOptions")]
+#[visit(type_attributes(serde::try_from))]
 pub struct BindOptions {
     pub preferred_external_port: u16,
     pub add_ssl: Option<AddSslOptions>,
     pub secure: Option<Security>,
+    /// HTTP request policy shared by every exposed leg of this binding.
+    pub proxy: Option<ProxyOptions>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, VisitVariants)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum ProxyOptions {
+    Http {
+        /// Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+        /// Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+        #[serde(default)]
+        add_x_forwarded_headers: bool,
+        /// Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+        #[serde(default)]
+        auth: Option<ProxyAuth>,
+    },
+}
+
+rpc_toolkit::reflect_ts!(ProxyOptions);
+rpc_toolkit::ts_export!(ProxyOptions, namespaces = [""]);
+
+#[derive(Deserialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+struct CompatibleBindOptions {
+    preferred_external_port: u16,
+    add_ssl: Option<LegacyProxySslOptions>,
+    secure: Option<Security>,
+    proxy: Option<ProxyOptions>,
+}
+
+rpc_toolkit::reflect_ts!(CompatibleBindOptions);
+
+#[derive(Deserialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+struct LegacyProxySslOptions {
+    #[serde(flatten)]
+    ssl: AddSslOptions,
+    #[serde(default)]
+    add_x_forwarded_headers: bool,
+    #[serde(default)]
+    auth: Option<ProxyAuth>,
+}
+
+rpc_toolkit::reflect_ts!(LegacyProxySslOptions);
+
+impl TryFrom<CompatibleBindOptions> for BindOptions {
+    type Error = &'static str;
+
+    fn try_from(options: CompatibleBindOptions) -> Result<Self, Self::Error> {
+        let mut proxy = options.proxy;
+        let add_ssl = options.add_ssl.map(|legacy| {
+            if proxy.is_none() && (legacy.add_x_forwarded_headers || legacy.auth.is_some()) {
+                proxy = Some(ProxyOptions::Http {
+                    add_x_forwarded_headers: legacy.add_x_forwarded_headers,
+                    auth: legacy.auth,
+                });
+            }
+            legacy.ssl
+        });
+        let options = Self {
+            preferred_external_port: options.preferred_external_port,
+            add_ssl,
+            secure: options.secure,
+            proxy,
+        };
+        if options.serves_own_tls() && options.proxy.is_some() {
+            return Err("HTTP proxying requires TLS termination for a TLS container");
+        }
+        Ok(options)
+    }
 }
 
 rpc_toolkit::reflect_ts!(BindOptions);
@@ -594,11 +776,6 @@ rpc_toolkit::ts_export!(UpstreamCertValidation, namespaces = [""]);
 #[serde(rename_all = "camelCase")]
 pub struct AddSslOptions {
     pub preferred_external_port: u16,
-    /// When `true`, the OS reverse proxy adds `X-Forwarded-Proto: https`
-    /// and `X-Forwarded-For: <client-ip>` to incoming HTTP requests before
-    /// forwarding them upstream. Setting this implies HTTP-aware proxying.
-    #[serde(default)]
-    pub add_x_forwarded_headers: bool,
     /// The application protocols StartOS answers a client with, from those it
     /// asked for. Unset answers with whatever it asked for.
     #[serde(default, deserialize_with = "legacy_alpn::deserialize")]
@@ -609,15 +786,6 @@ pub struct AddSslOptions {
     /// `None` (the default) validates against the StartOS root CA.
     #[serde(default)]
     pub upstream_cert_validation: Option<UpstreamCertValidation>,
-    /// Optional reverse-proxy auth gate. When set, the OS reverse proxy
-    /// will validate the `Authorization` header on incoming HTTP requests
-    /// against this configuration before forwarding them upstream.
-    /// Unauthenticated requests get `401 Unauthorized` with an appropriate
-    /// `WWW-Authenticate` challenge. For `Basic`, the authenticated
-    /// username is forwarded to the upstream service as `X-Forwarded-User`.
-    /// Setting this implies HTTP-aware proxying.
-    #[serde(default)]
-    pub auth: Option<ProxyAuth>,
 }
 
 rpc_toolkit::reflect_ts!(AddSslOptions);
@@ -1070,11 +1238,13 @@ fn set_address_enabled_on(
         } else {
             addresses.enabled.remove(&sa);
         }
-        // Non-SSL Ipv4: a dual-stack public domain links this to the co-located
-        // GUA, so when one is present move the whole {IPv4, domain, GUA} group
-        // together (no domain => v4 and gua stay independent).
+        // Non-SSL: a dual-stack public domain links IPv4 and GUA, so when one is
+        // present move the whole {IPv4, domain, GUA} group together (no domain =>
+        // v4 and gua stay independent).
         if !address.ssl {
-            if let HostnameMetadata::Ipv4 { gateway } = &address.metadata {
+            if let HostnameMetadata::Ipv4 { gateway } | HostnameMetadata::Ipv6 { gateway, .. } =
+                &address.metadata
+            {
                 let port = sa.port();
                 if has_nonssl_public_domain(addresses, gateway, port) {
                     set_nonssl_wan_group(addresses, gateway, port, enabled);
@@ -1329,6 +1499,7 @@ async fn cli_set_address_enabled<Kind: HostApiKind>(
         params,
         inherited_params,
         raw_params,
+        ..
     }: HandlerArgs<CliContext, CliBindingSetAddressEnabledParams, Kind::Inheritance>,
 ) -> Result<(), Error> {
     call_with_address::<Kind>(
@@ -1351,6 +1522,7 @@ async fn cli_set_range_address_enabled<Kind: HostApiKind>(
         params,
         inherited_params,
         raw_params,
+        ..
     }: HandlerArgs<CliContext, CliBindingSetAddressEnabledParams, Kind::Inheritance>,
 ) -> Result<(), Error> {
     call_with_address::<Kind>(
@@ -1373,6 +1545,7 @@ async fn cli_set_gua_wan<Kind: HostApiKind>(
         params,
         inherited_params,
         raw_params,
+        ..
     }: HandlerArgs<CliContext, CliBindingSetGuaWanParams, Kind::Inheritance>,
 ) -> Result<(), Error> {
     call_with_address::<Kind>(
@@ -1548,12 +1721,11 @@ mod test {
             preferred_external_port: preferred,
             add_ssl: add_ssl.map(|preferred_external_port| AddSslOptions {
                 preferred_external_port,
-                add_x_forwarded_headers: false,
                 alpn: None,
                 upstream_cert_validation: None,
-                auth: None,
             }),
             secure: ssl.map(|ssl| Security { ssl }),
+            proxy: None,
         }
     }
 
@@ -1563,6 +1735,66 @@ mod test {
             "alpn": alpn,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn legacy_ssl_policy_normalizes_into_binding_http_proxy() {
+        for (headers, auth) in [
+            (true, serde_json::Value::Null),
+            (
+                false,
+                serde_json::json!({ "type": "bearer", "tokens": ["secret"] }),
+            ),
+            (
+                true,
+                serde_json::json!({ "type": "basic", "credentials": [{ "username": "alice", "password": "secret" }] }),
+            ),
+        ] {
+            let legacy = serde_json::json!({
+                "preferredExternalPort": 8080,
+                "secure": null,
+                "addSsl": { "preferredExternalPort": 8443, "addXForwardedHeaders": headers, "auth": auth },
+            });
+            let options: BindOptions = serde_json::from_value(legacy).unwrap();
+            let serialized = serde_json::to_value(&options).unwrap();
+            assert_eq!(serialized["proxy"]["type"], "http");
+            assert_eq!(serialized["proxy"]["addXForwardedHeaders"], headers);
+            assert_eq!(serialized["proxy"]["auth"]["type"], auth["type"]);
+            assert!(serialized["addSsl"].get("auth").is_none());
+            assert!(serialized["addSsl"].get("addXForwardedHeaders").is_none());
+            assert_eq!(serialized["addSsl"]["preferredExternalPort"], 8443);
+            let round_trip: BindOptions = serde_json::from_value(serialized.clone()).unwrap();
+            assert_eq!(serde_json::to_value(round_trip).unwrap(), serialized);
+        }
+    }
+
+    #[test]
+    fn http_proxy_is_independent_of_ssl_and_rejects_passthrough() {
+        let plain = serde_json::json!({
+            "preferredExternalPort": 8080,
+            "addSsl": null,
+            "secure": null,
+            "proxy": { "type": "http" },
+        });
+        let options: BindOptions = serde_json::from_value(plain.clone()).unwrap();
+        assert!(matches!(
+            options.proxy,
+            Some(ProxyOptions::Http {
+                add_x_forwarded_headers: false,
+                auth: None
+            })
+        ));
+        let mut passthrough = plain;
+        passthrough["secure"] = serde_json::json!({ "ssl": true });
+        assert!(serde_json::from_value::<BindOptions>(passthrough.clone()).is_err());
+        passthrough["addSsl"] = serde_json::json!({ "preferredExternalPort": 8443 });
+        assert!(serde_json::from_value::<BindOptions>(passthrough).is_ok());
+        let raw: BindOptions = serde_json::from_value(serde_json::json!({
+            "preferredExternalPort": 8333,
+            "addSsl": { "preferredExternalPort": 8443, "addXForwardedHeaders": false },
+        }))
+        .unwrap();
+        assert!(raw.proxy.is_none());
     }
 
     #[test]
@@ -1969,6 +2201,522 @@ mod test {
     }
 
     #[test]
+    fn public_domain_exposure_keeps_refreshed_gua_rows_enabled_and_public() {
+        let domain = HostnameInfo {
+            ssl: false,
+            public: true,
+            hostname: InternedString::intern("smp.example.com"),
+            port: Some(5223),
+            metadata: HostnameMetadata::PublicDomain {
+                gateway: GatewayId::from(InternedString::intern("eth0")),
+            },
+        };
+        let gua = HostnameInfo {
+            ssl: false,
+            ..ipv6_addr("2001:db8::1", 5223)
+        };
+        let mut info = DerivedAddressInfo::default();
+        info.available.insert(domain.clone());
+        info.disabled.insert(override_key(&gua));
+        refresh(&mut info, BTreeSet::from([domain.clone(), gua.clone()]));
+        let published = info.available.iter().find(|a| a.gua().is_some()).unwrap();
+        assert!(published.public);
+        assert!(info.enabled().contains(published));
+
+        let next_gua = HostnameInfo {
+            ssl: false,
+            ..ipv6_addr("2001:db8::2", 5223)
+        };
+        refresh(
+            &mut info,
+            BTreeSet::from([domain.clone(), next_gua.clone()]),
+        );
+        let published = info.available.iter().find(|a| a.gua().is_some()).unwrap();
+        assert!(published.public);
+        assert!(info.enabled().contains(published));
+
+        set_nonssl_wan_group(
+            &mut info,
+            &GatewayId::from(InternedString::intern("eth0")),
+            5223,
+            false,
+        );
+        refresh(&mut info, BTreeSet::from([domain, next_gua]));
+        assert!(
+            info.available
+                .iter()
+                .all(|a| a.gua().is_none() || !a.public)
+        );
+    }
+
+    fn refresh(info: &mut DerivedAddressInfo, available: BTreeSet<HostnameInfo>) {
+        let previous = info.clone();
+        info.set_available(available.clone());
+        info.resolve_address_groups(&previous);
+        info.set_available(available);
+    }
+
+    fn domain_row(hostname: &str, ssl: bool, port: u16) -> HostnameInfo {
+        HostnameInfo {
+            ssl,
+            public: true,
+            hostname: InternedString::intern(hostname),
+            port: Some(port),
+            metadata: HostnameMetadata::PublicDomain {
+                gateway: GatewayId::from(InternedString::intern("eth0")),
+            },
+        }
+    }
+
+    fn plain_wan_rows(port: u16) -> [HostnameInfo; 2] {
+        [
+            HostnameInfo {
+                ssl: false,
+                public: true,
+                hostname: InternedString::intern("203.0.113.1"),
+                port: Some(port),
+                metadata: HostnameMetadata::Ipv4 {
+                    gateway: GatewayId::from(InternedString::intern("eth0")),
+                },
+            },
+            HostnameInfo {
+                ssl: false,
+                ..ipv6_addr("2001:db8::1", port)
+            },
+        ]
+    }
+
+    fn assert_wan_group_off(info: &DerivedAddressInfo) {
+        assert!(info.gua_wan.is_empty());
+        assert!(info.enabled.is_empty());
+        assert!(info.enabled().iter().all(|a| !a.public));
+    }
+
+    #[test]
+    fn a_domain_disabled_over_tls_keeps_the_wan_group_off_on_the_same_port() {
+        let tls = domain_row("smp.example.com", true, 5223);
+        let mut info = DerivedAddressInfo::default();
+        info.available.insert(tls.clone());
+        info.disabled.insert(override_key(&tls));
+        info.enabled.insert("203.0.113.1:5223".parse().unwrap());
+        let refreshed: BTreeSet<_> = plain_wan_rows(5223)
+            .into_iter()
+            .chain([domain_row("smp.example.com", false, 5223)])
+            .collect();
+
+        refresh(&mut info, refreshed.clone());
+        assert_wan_group_off(&info);
+
+        refresh(&mut info, refreshed);
+        assert_wan_group_off(&info);
+    }
+
+    #[test]
+    fn a_domain_disabled_over_tls_stays_off_on_a_new_plain_port() {
+        let tls = domain_row("smp.example.com", true, 5224);
+        let plain = domain_row("smp.example.com", false, 5223);
+        let mut info = DerivedAddressInfo::default();
+        info.available.insert(tls.clone());
+        info.disabled.insert(override_key(&tls));
+        let refreshed: BTreeSet<_> = plain_wan_rows(5223)
+            .into_iter()
+            .chain([plain.clone()])
+            .collect();
+
+        refresh(&mut info, refreshed.clone());
+        assert_wan_group_off(&info);
+        assert!(info.disabled.contains(&override_key(&plain)));
+
+        let gateway = GatewayId::from(InternedString::intern("eth0"));
+        set_nonssl_wan_group(&mut info, &gateway, 5223, true);
+        refresh(&mut info, refreshed);
+        assert!(info.enabled().contains(&plain));
+        assert_eq!(info.gua_wan.len(), 1);
+    }
+
+    #[test]
+    fn a_disabled_domain_turns_off_an_enabled_domain_that_can_no_longer_be_disjoint() {
+        let on = domain_row("a.example.com", true, 5223);
+        let off = domain_row("b.example.com", true, 5223);
+        let mut info = DerivedAddressInfo::default();
+        info.available.extend([on, off.clone()]);
+        info.disabled.insert(override_key(&off));
+
+        refresh(
+            &mut info,
+            plain_wan_rows(5223)
+                .into_iter()
+                .chain([
+                    domain_row("a.example.com", false, 5223),
+                    domain_row("b.example.com", false, 5223),
+                ])
+                .collect(),
+        );
+        assert_wan_group_off(&info);
+    }
+
+    #[test]
+    fn a_disabled_tls_row_leaves_its_domains_existing_plain_row_alone() {
+        let tls = domain_row("smp.example.com", true, 443);
+        let plain = domain_row("smp.example.com", false, 5223);
+        let mut info = DerivedAddressInfo::default();
+        info.available.extend([tls.clone(), plain.clone()]);
+        info.disabled.insert(override_key(&tls));
+
+        refresh(&mut info, BTreeSet::from([tls, plain.clone()]));
+        assert!(info.enabled().contains(&plain));
+    }
+
+    #[test]
+    fn a_domain_disabled_on_a_plain_port_stays_off_over_tls() {
+        let plain = domain_row("smp.example.com", false, 5223);
+        let tls = domain_row("smp.example.com", true, 5224);
+        let mut info = DerivedAddressInfo::default();
+        info.available.insert(plain.clone());
+        info.disabled.insert(override_key(&plain));
+
+        refresh(&mut info, BTreeSet::from([tls.clone()]));
+        assert!(!info.enabled().contains(&tls));
+    }
+
+    #[test]
+    fn an_enabled_domain_stays_enabled_when_its_tls_port_moves() {
+        let mut info = DerivedAddressInfo::default();
+        info.available
+            .insert(domain_row("smp.example.com", true, 5224));
+        let moved = domain_row("smp.example.com", true, 5225);
+
+        refresh(&mut info, BTreeSet::from([moved.clone()]));
+        assert!(info.enabled().contains(&moved));
+    }
+
+    #[test]
+    fn a_domain_with_no_earlier_row_stays_off() {
+        let tls = domain_row("smp.example.com", true, 5224);
+        let plain = domain_row("smp.example.com", false, 5223);
+        let mut info = DerivedAddressInfo::default();
+
+        refresh(&mut info, BTreeSet::from([tls.clone(), plain.clone()]));
+        assert!(!info.enabled().contains(&tls));
+        assert!(!info.enabled().contains(&plain));
+    }
+
+    #[test]
+    fn an_enabled_domain_stays_enabled_when_its_gateway_changes() {
+        let mut info = DerivedAddressInfo::default();
+        info.available
+            .insert(domain_row("smp.example.com", true, 5224));
+        let moved = HostnameInfo {
+            metadata: HostnameMetadata::PublicDomain {
+                gateway: GatewayId::from(InternedString::intern("wg1")),
+            },
+            ..domain_row("smp.example.com", true, 5224)
+        };
+
+        refresh(&mut info, BTreeSet::from([moved.clone()]));
+        assert!(info.enabled().contains(&moved));
+    }
+
+    fn public_v4(port: u16) -> HostnameInfo {
+        plain_wan_rows(port)[0].clone()
+    }
+
+    #[test]
+    fn a_new_plain_domain_follows_public_addresses_that_are_all_on() {
+        let bare = "203.0.113.1:5223".parse().unwrap();
+        let plain = domain_row("smp.example.com", false, 5223);
+        let mut info = DerivedAddressInfo::default();
+        info.available.insert(public_v4(5223));
+        info.enabled.insert(bare);
+
+        refresh(
+            &mut info,
+            plain_wan_rows(5223)
+                .into_iter()
+                .chain([plain.clone()])
+                .collect(),
+        );
+        assert!(info.enabled().contains(&plain));
+        assert!(info.enabled.contains(&bare));
+        assert_eq!(info.gua_wan.len(), 1);
+    }
+
+    #[test]
+    fn a_new_plain_domain_follows_public_addresses_that_are_all_off() {
+        let plain = domain_row("smp.example.com", false, 5223);
+        let mut info = DerivedAddressInfo::default();
+        info.available.insert(public_v4(5223));
+
+        refresh(
+            &mut info,
+            plain_wan_rows(5223)
+                .into_iter()
+                .chain([plain.clone()])
+                .collect(),
+        );
+        assert_wan_group_off(&info);
+        assert!(!info.enabled().contains(&plain));
+    }
+
+    #[test]
+    fn a_new_plain_domain_turns_off_public_addresses_that_were_mixed() {
+        let off = domain_row("off.example.com", false, 5223);
+        let plain = domain_row("smp.example.com", false, 5223);
+        let mut info = DerivedAddressInfo::default();
+        info.available.extend([public_v4(5223), off.clone()]);
+        info.enabled.insert("203.0.113.1:5223".parse().unwrap());
+        info.disabled.insert(override_key(&off));
+
+        refresh(
+            &mut info,
+            plain_wan_rows(5223)
+                .into_iter()
+                .chain([off, plain.clone()])
+                .collect(),
+        );
+        assert_wan_group_off(&info);
+        assert!(!info.enabled().contains(&plain));
+    }
+
+    #[test]
+    fn a_domain_enabled_over_tls_turns_off_on_a_plain_port_beside_a_local_gua() {
+        let plain = domain_row("smp.example.com", false, 5223);
+        let mut info = DerivedAddressInfo::default();
+        info.available.extend([
+            domain_row("smp.example.com", true, 5223),
+            ipv6_addr("2001:db8::1", 5223),
+        ]);
+
+        refresh(
+            &mut info,
+            plain_wan_rows(5223)
+                .into_iter()
+                .chain([plain.clone()])
+                .collect(),
+        );
+        assert_wan_group_off(&info);
+        assert!(!info.enabled().contains(&plain));
+    }
+
+    #[test]
+    fn an_enabled_plain_domain_beside_a_local_gua_turns_off() {
+        let plain = domain_row("smp.example.com", false, 5223);
+        let rows: BTreeSet<_> = plain_wan_rows(5223)
+            .into_iter()
+            .chain([plain.clone()])
+            .collect();
+        let mut info = DerivedAddressInfo::default();
+        info.available = rows.clone();
+        info.enabled.insert("203.0.113.1:5223".parse().unwrap());
+
+        refresh(&mut info, rows);
+        assert_wan_group_off(&info);
+        assert!(!info.enabled().contains(&plain));
+    }
+
+    #[test]
+    fn a_renumbered_gua_joins_a_plain_group_that_was_all_on() {
+        let plain = domain_row("smp.example.com", false, 5223);
+        let old_gua = HostnameInfo {
+            ssl: false,
+            public: true,
+            ..ipv6_addr("2001:db8::1", 5223)
+        };
+        let new_gua = HostnameInfo {
+            ssl: false,
+            ..ipv6_addr("2001:db8::2", 5223)
+        };
+        let mut info = DerivedAddressInfo::default();
+        info.available.extend([plain.clone(), old_gua.clone()]);
+        info.enabled.insert(old_gua.to_socket_addr().unwrap());
+        info.gua_wan.insert(old_gua.gua().unwrap());
+
+        refresh(&mut info, BTreeSet::from([plain.clone(), new_gua.clone()]));
+        assert!(info.enabled().contains(&plain));
+        assert!(info.gua_wan.contains(&new_gua.gua().unwrap()));
+        assert!(info.enabled.contains(&new_gua.to_socket_addr().unwrap()));
+    }
+
+    #[test]
+    fn a_local_gua_is_public_off_so_public_ipv4_beside_it_is_mixed() {
+        let plain = domain_row("smp.example.com", false, 5223);
+        let mut info = DerivedAddressInfo::default();
+        info.available.extend(plain_wan_rows(5223));
+        info.enabled.insert("203.0.113.1:5223".parse().unwrap());
+
+        refresh(
+            &mut info,
+            plain_wan_rows(5223)
+                .into_iter()
+                .chain([plain.clone()])
+                .collect(),
+        );
+        assert_wan_group_off(&info);
+        assert!(!info.enabled().contains(&plain));
+    }
+
+    #[test]
+    fn a_disabled_public_gua_keeps_a_tls_to_plain_group_off() {
+        let gua = HostnameInfo {
+            public: true,
+            ..ipv6_addr("2001:db8::1", 5223)
+        };
+        let mut info = DerivedAddressInfo::default();
+        info.available
+            .extend([domain_row("smp.example.com", true, 5223), gua.clone()]);
+        info.gua_wan.insert(gua.gua().unwrap());
+        set_address_enabled_on(&mut info, &gua, true).unwrap();
+        set_address_enabled_on(&mut info, &gua, false).unwrap();
+        assert!(info.gua_wan.contains(&gua.gua().unwrap()));
+        assert!(!info.enabled().contains(&gua));
+
+        refresh(
+            &mut info,
+            BTreeSet::from([
+                domain_row("smp.example.com", false, 5223),
+                HostnameInfo { ssl: false, ..gua },
+            ]),
+        );
+        assert_wan_group_off(&info);
+    }
+
+    #[test]
+    fn a_domain_enabled_over_tls_stays_on_a_plain_port_with_public_bare_ips() {
+        let plain = domain_row("smp.example.com", false, 5223);
+        let tls_bare = "203.0.113.1:5224".parse().unwrap();
+        let mut info = DerivedAddressInfo::default();
+        info.available.extend([
+            domain_row("smp.example.com", true, 5224),
+            HostnameInfo {
+                ssl: true,
+                public: true,
+                hostname: InternedString::intern("203.0.113.1"),
+                port: Some(5224),
+                metadata: HostnameMetadata::Ipv4 {
+                    gateway: GatewayId::from(InternedString::intern("eth0")),
+                },
+            },
+        ]);
+        info.enabled.insert(tls_bare);
+
+        refresh(
+            &mut info,
+            plain_wan_rows(5223)
+                .into_iter()
+                .chain([plain.clone()])
+                .collect(),
+        );
+        assert!(info.enabled().contains(&plain));
+        assert!(info.enabled.contains(&"203.0.113.1:5223".parse().unwrap()));
+        assert_eq!(info.gua_wan.len(), 1);
+    }
+
+    #[test]
+    fn toggling_any_plain_group_member_moves_the_whole_group() {
+        let plain = domain_row("smp.example.com", false, 5223);
+        let [v4, gua] = plain_wan_rows(5223);
+        let gua = HostnameInfo {
+            public: true,
+            ..gua
+        };
+        let gateway = GatewayId::from(InternedString::intern("eth0"));
+        for member in [&plain, &v4, &gua] {
+            let mut info = DerivedAddressInfo::default();
+            info.available
+                .extend([plain.clone(), v4.clone(), gua.clone()]);
+            set_nonssl_wan_group(&mut info, &gateway, 5223, false);
+
+            set_address_enabled_on(&mut info, member, true).unwrap();
+            assert!(info.enabled().contains(&plain));
+            assert!(info.enabled.contains(&v4.to_socket_addr().unwrap()));
+            assert!(info.gua_wan.contains(&gua.gua().unwrap()));
+
+            set_address_enabled_on(&mut info, member, false).unwrap();
+            assert!(!info.enabled().contains(&plain));
+            assert!(!info.enabled.contains(&v4.to_socket_addr().unwrap()));
+            assert!(!info.gua_wan.contains(&gua.gua().unwrap()));
+        }
+    }
+
+    #[test]
+    fn a_new_public_domain_does_not_preempt_sibling_reconciliation() {
+        let domain = HostnameInfo {
+            ssl: false,
+            public: true,
+            hostname: InternedString::intern("smp.example.com"),
+            port: Some(5223),
+            metadata: HostnameMetadata::PublicDomain {
+                gateway: GatewayId::from(InternedString::intern("eth0")),
+            },
+        };
+        let gua = HostnameInfo {
+            ssl: false,
+            ..ipv6_addr("2001:db8::1", 5223)
+        };
+        let mut info = DerivedAddressInfo::default();
+        refresh(&mut info, BTreeSet::from([domain, gua]));
+        assert!(info.gua_wan.is_empty());
+        assert!(info.enabled.is_empty());
+        assert!(
+            info.available
+                .iter()
+                .all(|a| a.gua().is_none() || !a.public)
+        );
+    }
+
+    #[test]
+    fn a_public_domain_does_not_publish_other_exposures() {
+        let domain = HostnameInfo {
+            ssl: false,
+            public: true,
+            hostname: InternedString::intern("smp.example.com"),
+            port: Some(5223),
+            metadata: HostnameMetadata::PublicDomain {
+                gateway: GatewayId::from(InternedString::intern("eth0")),
+            },
+        };
+        let other_port = HostnameInfo {
+            ssl: false,
+            ..ipv6_addr("2001:db8::1", 443)
+        };
+        let other_gateway = HostnameInfo {
+            ssl: false,
+            metadata: HostnameMetadata::Ipv6 {
+                gateway: GatewayId::from(InternedString::intern("eth1")),
+                scope_id: 0,
+            },
+            ..ipv6_addr("2001:db8::2", 5223)
+        };
+        let mut info = DerivedAddressInfo::default();
+        info.available.insert(domain.clone());
+        refresh(
+            &mut info,
+            BTreeSet::from([domain.clone(), other_port, other_gateway]),
+        );
+        assert!(
+            info.available
+                .iter()
+                .all(|a| a.gua().is_none() || !a.public)
+        );
+
+        refresh(
+            &mut info,
+            BTreeSet::from([
+                HostnameInfo {
+                    ssl: true,
+                    ..domain
+                },
+                ipv6_addr("2001:db8::1", 5223),
+            ]),
+        );
+        assert!(
+            info.available
+                .iter()
+                .all(|a| a.gua().is_none() || !a.public)
+        );
+    }
+
+    #[test]
     fn shared_gua_public_wins_over_local() {
         let gw = GatewayId::from(InternedString::intern("wg1"));
         let mk = |ssl, public, host: &str, meta| HostnameInfo {
@@ -2333,6 +3081,115 @@ mod test {
                 .disabled
                 .contains(&(InternedString::intern("example.com"), 49152))
         );
+    }
+
+    #[test]
+    fn forget_gateway_drops_only_that_gateways_overrides() {
+        let gw = |id: &str| GatewayId::from(InternedString::intern(id));
+        let ip = |host: &str, metadata: HostnameMetadata| HostnameInfo {
+            ssl: false,
+            public: true,
+            hostname: InternedString::intern(host),
+            port: Some(3478),
+            metadata,
+        };
+        let mut info = DerivedAddressInfo::default();
+        info.available.extend([
+            ip(
+                "64.23.194.12",
+                HostnameMetadata::Ipv4 { gateway: gw("wg0") },
+            ),
+            ip(
+                "2604:a880:4:1d0:0:3:145f:5",
+                HostnameMetadata::Ipv6 {
+                    gateway: gw("wg0"),
+                    scope_id: 4,
+                },
+            ),
+            ip("10.59.88.5", HostnameMetadata::Ipv4 { gateway: gw("wg0") }),
+            ip(
+                "73.34.87.9",
+                HostnameMetadata::Ipv4 {
+                    gateway: gw("eno0"),
+                },
+            ),
+            ip(
+                "demo.local",
+                HostnameMetadata::Mdns {
+                    gateways: BTreeSet::from([gw("wg0"), gw("eno0")]),
+                },
+            ),
+        ]);
+        info.enabled.extend([
+            "64.23.194.12:3478".parse::<SocketAddr>().unwrap(),
+            "[2604:a880:4:1d0:0:3:145f:5]:3478".parse().unwrap(),
+            "73.34.87.9:3478".parse().unwrap(),
+        ]);
+        info.gua_wan
+            .insert("[2604:a880:4:1d0:0:3:145f:5]:3478".parse().unwrap());
+        info.disabled
+            .insert((InternedString::intern("demo.local"), 3478));
+        info.lan_enabled
+            .insert((InternedString::intern("10.59.88.5"), 3478));
+
+        info.forget_gateway(&gw("wg0"));
+
+        assert_eq!(
+            info.enabled,
+            BTreeSet::from(["73.34.87.9:3478".parse().unwrap()])
+        );
+        assert!(info.gua_wan.is_empty());
+        assert!(info.lan_enabled.is_empty());
+        assert_eq!(
+            info.disabled,
+            BTreeSet::from([(InternedString::intern("demo.local"), 3478)])
+        );
+    }
+
+    #[test]
+    fn forget_gateway_preserves_overrides_shared_with_another_gateway() {
+        let mut info = DerivedAddressInfo::default();
+        let enabled = BTreeSet::from(["64.23.194.12:3478".parse().unwrap()]);
+        let gua_wan = BTreeSet::from(["[2001:db8::1]:3478".parse().unwrap()]);
+        let disabled = BTreeSet::from([(InternedString::intern("10.0.0.1"), 3478)]);
+        let lan_enabled = BTreeSet::from([(InternedString::intern("10.0.0.2"), 3478)]);
+        info.enabled = enabled.clone();
+        info.gua_wan = gua_wan.clone();
+        info.disabled = disabled.clone();
+        info.lan_enabled = lan_enabled.clone();
+        for gateway in ["wg0", "eno0"] {
+            let gateway = GatewayId::from(InternedString::intern(gateway));
+            for (hostname, public) in [
+                ("64.23.194.12", true),
+                ("10.0.0.1", false),
+                ("10.0.0.2", false),
+                ("2001:db8::1", true),
+            ] {
+                info.available.insert(HostnameInfo {
+                    ssl: false,
+                    public,
+                    hostname: InternedString::intern(hostname),
+                    port: Some(3478),
+                    metadata: if hostname.contains(':') {
+                        HostnameMetadata::Ipv6 {
+                            gateway: gateway.clone(),
+                            scope_id: 4,
+                        }
+                    } else {
+                        HostnameMetadata::Ipv4 {
+                            gateway: gateway.clone(),
+                        }
+                    },
+                });
+            }
+        }
+
+        info.forget_gateway(&GatewayId::from(InternedString::intern("wg0")));
+
+        assert_eq!(info.enabled, enabled);
+        assert_eq!(info.gua_wan, gua_wan);
+        assert_eq!(info.disabled, disabled);
+        assert_eq!(info.lan_enabled, lan_enabled);
     }
 
     fn range_info(external_start_port: u16, number_of_ports: u16, enabled: bool) -> RangeBindInfo {

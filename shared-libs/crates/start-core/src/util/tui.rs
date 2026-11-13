@@ -16,6 +16,15 @@ fn noninteractive_err() -> Error {
     )
 }
 
+/// Reads a secret from an environment variable or a hidden terminal prompt.
+pub fn read_password(env: &str, prompt: &str) -> Result<String, Error> {
+    if let Ok(password) = std::env::var(env) {
+        Ok(password)
+    } else {
+        Ok(rpassword::prompt_password(prompt)?)
+    }
+}
+
 pub fn parse_as<'a, T>(what: &'a str) -> impl Fn(&str) -> Result<T, String> + 'a
 where
     T: FromStr,

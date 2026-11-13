@@ -4,6 +4,7 @@ import { pauseFor, RPCErrorDetails, RpcError } from '@start9labs/shared'
 import { GIT_HASH } from 'src/app/utils/workspace-config'
 import {
   ApiService,
+  ConfigCheck,
   ExecReq,
   ExecRes,
   GetFileReq,
@@ -33,6 +34,8 @@ import {
   WifiBlackoutSetResult,
   ScheduleWindow,
   ProfileId,
+  ProfileDeleteParams,
+  ProfileDeleteResult,
   ProfileIdOpt,
   SecurityProfile,
   ProfileCreateInput,
@@ -86,7 +89,7 @@ import {
   BackupRestoreRes,
   DiagnosticsCreateRes,
 } from './api.service'
-import { UciFile, UciSection } from './types'
+import { DhcpHostSection, UciFile, UciSection } from './types'
 import { dhcpLanSlaacDhcpv6 } from 'src/app/routes/lan/routes/ipv6/uci/mocks'
 import {
   configDnsServers,
@@ -274,7 +277,7 @@ export class MockApiService extends ApiService {
   }
 
   private mockSystemInfo: SystemInfoRes = {
-    version: '1.0.0',
+    version: '1.4.0',
     // Echo the bundle's own stamp so mock mode never trips stale-UI detection.
     gitHash: inject(GIT_HASH),
     language: 'en_US',
@@ -289,38 +292,39 @@ export class MockApiService extends ApiService {
     return { ...this.mockSystemInfo, date: new Date().toISOString() }
   }
 
+  async configCheck(): Promise<ConfigCheck> {
+    await pauseFor(100)
+    return { findings: [] }
+  }
+
   async systemNewerVersions(): Promise<VersionInfo[]> {
     await pauseFor(250)
 
     return [
       {
-        version: '1.0.1',
-        releaseNotes: `## Bug Fixes
+        version: '1.4.1',
+        releaseNotes: `## Fixes
 
-- Resolved issue with DHCP lease renewals
-- Fixed port forwarding rules not persisting after reboot
-- Corrected timezone display in system logs
+- Stability improvements for Wi-Fi and VPN connections
+- Translation updates
 
-## Security Updates
+## Security
 
-- Updated OpenSSL to latest version
-- Patched CVE-2024-1234 vulnerability`,
+- Updated OpenWrt packages`,
       },
       {
-        version: '1.0.2',
+        version: '1.5.0',
         releaseNotes: `## What's New
 
-- Improved Wi-Fi stability and range
-- Fixed intermittent connection drops on 5GHz band
-- Added support for WPA3 security protocol
-- Performance improvements for VPN connections`,
+- Interface refinements throughout
+- Faster startup after a reboot`,
       },
     ]
   }
 
   async systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes> {
     await pauseFor(500)
-    return { target: '1.0.2', progress: 'mock-guid-1234' }
+    return { target: '1.5.0', progress: 'mock-guid-1234' }
   }
 
   async systemRestart(): Promise<null> {
@@ -365,42 +369,42 @@ export class MockApiService extends ApiService {
     }
     return [
       {
-        profile: 'guest',
-        label: 'Family',
+        profile: 'lan',
+        label: 'Home',
         enabled: true,
         listen_port: 51820,
-        endpoint: '100.65.227.234',
-        public_key: 'aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5zA7bC9d=',
-        server_address: '192.168.1.1',
-        peers: [],
-      },
-      {
-        profile: 'lan',
-        label: 'Matt',
-        enabled: false,
-        listen_port: 51821,
-        endpoint: 'agf5d.start9.me',
+        endpoint: 'myhost.dyndns.org',
         public_key: 'xY5zA7bC9daB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3=',
         server_address: '192.168.1.1',
         peers: [
           {
-            name: 'tablet',
-            ip: '192.168.1.2',
+            name: 'Phone',
+            ip: '192.168.1.200',
             public_key: '2JIBoK+Bxe7MJzX9zV+lFjqHxLTvehLp3piEROaNJjw=',
           },
           {
-            name: 'Smartphone',
-            ip: '192.168.1.3',
+            name: 'Laptop',
+            ip: '192.168.1.201',
             public_key: 'bZIOgRYRGTX9x0OQsN1K+R63EhT2Pgo0WzYatTmzdDU=',
           },
         ],
+      },
+      {
+        profile: 'guest',
+        label: 'Friends',
+        enabled: false,
+        listen_port: 51821,
+        endpoint: '100.65.227.234',
+        public_key: 'aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5zA7bC9d=',
+        server_address: '192.168.2.1',
+        peers: [],
       },
     ]
   }
 
   private loadIpCounter(): number {
     const stored = localStorage.getItem('mock:vpn-ip-counter')
-    return stored ? parseInt(stored, 10) : 4
+    return stored ? parseInt(stored, 10) : 202
   }
 
   private persistVpnServers(): void {
@@ -573,7 +577,7 @@ export class MockApiService extends ApiService {
   }
 
   private mockWifi: WifiConfig = {
-    ssid: 'StartOS',
+    ssid: 'Home',
     broadcastSeparately: false,
     country: null,
     radios: {
@@ -599,6 +603,15 @@ export class MockApiService extends ApiService {
         password: 'password123',
       },
       {
+        label: 'Kids',
+        profile: {
+          fullname: 'Children',
+          interface: 'kids',
+          vlan_tag: 102,
+        },
+        password: 'Dn7cXfHs4uEgAw2R',
+      },
+      {
         label: 'Guest Wi-Fi',
         profile: {
           fullname: 'Guest',
@@ -606,6 +619,15 @@ export class MockApiService extends ApiService {
           vlan_tag: 100,
         },
         password: 'guestpass456',
+      },
+      {
+        label: 'Smart Home',
+        profile: {
+          fullname: 'Smart Devices',
+          interface: 'iot',
+          vlan_tag: 101,
+        },
+        password: 'Ym9pVtKe6jQrZh3F',
       },
     ],
   }
@@ -617,26 +639,27 @@ export class MockApiService extends ApiService {
 
   async wifiSet(params: WifiConfig): Promise<WifiSetResult> {
     await pauseFor(250)
+    if (params.preview) return { leavingProfile: [] }
     this.mockWifi = structuredClone(params)
     this.logActivity(
       'wifi',
       'updated',
       `Updated WiFi settings (SSID: '${params.ssid}')`,
     )
-    return { pendingPublishedPortDeletions: [] }
+    return { leavingProfile: [] }
   }
 
   private mockBlackoutWindows: ScheduleWindow[] = [
     {
-      startTime: '6:00',
-      endTime: '10:00',
-      days: [true, false, false, false, false, true, true],
+      startTime: '9:00',
+      endTime: '15:00',
+      days: [false, true, true, true, true, true, false],
     },
     {
       // Crosses midnight (end < start): renders as a head + tail per night.
-      startTime: '22:00',
+      startTime: '23:00',
       endTime: '06:00',
-      days: [false, true, true, true, true, true, false],
+      days: [true, true, true, true, true, true, true],
     },
   ]
 
@@ -711,38 +734,51 @@ export class MockApiService extends ApiService {
       interface: 'lan',
       vlan_tag: 1,
       gateway_ip: '192.168.1.1',
-      outbound: 'wan',
+      outbound: 'wg_mullvad',
       lan_access: 'ALL',
       wan_access: 'ALL',
       access_to_new_profiles: true,
       owns_lan: true,
-      dns_source: 'system',
+      dns_source: 'vpn',
       dns_override: [],
+    },
+    {
+      fullname: 'Children',
+      interface: 'kids',
+      vlan_tag: 102,
+      gateway_ip: '192.168.4.1',
+      outbound: 'wan',
+      lan_access: 'SAME_PROFILE',
+      wan_access: 'ALL',
+      access_to_new_profiles: false,
+      owns_lan: false,
+      dns_override: [
+        { address: '1.1.1.3', ssl: true },
+        { address: '1.0.0.3', ssl: false },
+      ],
+      dns_source: 'custom',
     },
     {
       fullname: 'Guest',
       interface: 'guest',
       vlan_tag: 100,
       gateway_ip: '192.168.2.1',
-      outbound: 'wan',
+      outbound: 'wg_proton',
       lan_access: 'SAME_PROFILE',
-      wan_access: { whitelist: ['1.1.1.1', '8.8.8.8', '9.9.9.9'] },
+      wan_access: { blacklist: ['192.0.2.0/24', '198.51.100.0/24'] },
       access_to_new_profiles: false,
       owns_lan: false,
-      dns_override: [
-        { address: '1.1.1.1', ssl: true },
-        { address: '8.8.8.8', ssl: false },
-      ],
-      dns_source: 'custom',
+      dns_source: 'vpn',
+      dns_override: [],
     },
     {
-      fullname: 'IoT',
+      fullname: 'Smart Devices',
       interface: 'iot',
       vlan_tag: 101,
       gateway_ip: '192.168.3.1',
       outbound: 'wan',
       lan_access: 'SAME_PROFILE',
-      wan_access: { blacklist: ['192.0.2.0/24', '198.51.100.0/24'] },
+      wan_access: { whitelist: ['1.1.1.1', '8.8.8.8', '9.9.9.9'] },
       access_to_new_profiles: false,
       owns_lan: false,
       dns_source: 'system',
@@ -985,10 +1021,32 @@ export class MockApiService extends ApiService {
     }
   }
 
-  async profileDelete(params: ProfileIdOpt): Promise<null> {
+  async profileDelete(
+    params: ProfileDeleteParams,
+  ): Promise<ProfileDeleteResult> {
     await pauseFor(250)
 
     const deleted = this.findProfile(params)
+    const inProfile = (ip: string | null | undefined) =>
+      !!deleted && !!ip && this.mockProfileOf(ip) === deleted
+    const result: ProfileDeleteResult = {
+      reservations: this.mockDeviceHosts
+        .filter(h => inProfile(h.options.ip))
+        .map(h => ({
+          mac: (h.options.mac ?? '').toUpperCase(),
+          name: this.lookupDeviceByMac(h.options.mac ?? '').name,
+          ipv4: h.options.ip ?? '',
+        })),
+      published_ports: this.mockPublishedPorts
+        .filter(p => inProfile(p.device_ipv4))
+        .map(p => ({
+          id: p.id,
+          label: p.label,
+          mac: p.device_mac.toUpperCase(),
+          name: this.lookupDeviceByMac(p.device_mac).name,
+        })),
+    }
+    if (params.preview) return result
 
     this.mockProfiles = this.mockProfiles.filter(p => p !== deleted)
 
@@ -1025,6 +1083,21 @@ export class MockApiService extends ApiService {
       )
       this.persistVpnServers()
 
+      // Cascade: delete its reservations and published ports
+      const reserved = new Set(result.reservations.map(r => r.ipv4))
+      const ports = new Set(result.published_ports.map(p => p.id))
+      const seen = new Set<string>()
+      this.mockDeviceHosts = this.mockDeviceHosts.flatMap(h => {
+        const mac = h.options.mac?.toUpperCase() ?? ''
+        const first = !seen.has(mac)
+        seen.add(mac)
+        if (!reserved.has(h.options.ip ?? '')) return [h]
+        return first ? [{ ...h, options: { ...h.options, ip: undefined } }] : []
+      })
+      this.mockPublishedPorts = this.mockPublishedPorts.filter(
+        p => !ports.has(p.id),
+      )
+
       // Cascade: reset any profiles using this one in lan_access other_profiles
       this.mockProfiles = this.mockProfiles.map(p => {
         if (
@@ -1051,10 +1124,18 @@ export class MockApiService extends ApiService {
         `Deleted profile '${deleted.fullname}'`,
       )
     }
-    return null
+    return result
   }
 
-  private mockSchedules: Record<string, ScheduleWindow[]> = {}
+  private mockSchedules: Record<string, ScheduleWindow[]> = {
+    kids: [
+      {
+        startTime: '21:00',
+        endTime: '07:00',
+        days: [true, true, true, true, true, true, true],
+      },
+    ],
+  }
 
   async profileScheduleGet(params: {
     interface: string
@@ -1091,6 +1172,16 @@ export class MockApiService extends ApiService {
   async setupStatus(): Promise<SetupStatusRes> {
     await pauseFor(250)
     return { setupMode: false, disk: { emmcFound: true, hasFirmware: true } }
+  }
+
+  async getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>> {
+    await pauseFor(250)
+    return {
+      kty: 'EC',
+      crv: 'P-256',
+      x: 'yHTDYSfjU809fkSv9MmN4wuojf5c3cnD7ZDN13n-jz4',
+      y: '8Mpkn744A5KDag0DmX2YivB63srjbugYZzWc3JOpQXI',
+    }
   }
 
   async systemFactoryReset(): Promise<null> {
@@ -1134,18 +1225,29 @@ export class MockApiService extends ApiService {
   private mockDeviceHosts = structuredClone(mockDhcpHosts)
   private mockDeviceDefs = structuredClone(MOCK_DEVICE_DEFS)
 
+  private mockReservations(macUpper: string): string[] {
+    return this.mockDeviceHosts.flatMap(h =>
+      h.options.mac?.toUpperCase() === macUpper && h.options.ip
+        ? [h.options.ip]
+        : [],
+    )
+  }
+
+  private mockProfileOf(ip: string) {
+    const subnet = ip.split('.').slice(0, 3).join('.')
+    return this.mockProfiles.find(p => p.gateway_ip.startsWith(`${subnet}.`))
+  }
+
   async devicesList(): Promise<DeviceFromApi[]> {
     await pauseFor(250)
 
     return this.mockDeviceDefs.map(def => {
       const mac = def.mac.toUpperCase()
-      const host = this.mockDeviceHosts.find(
-        h => h.options.mac?.toUpperCase() === mac,
-      )
       const device = this.lookupDeviceByMac(mac)
       const profile = this.mockProfiles.find(
         p => p.interface === def.profileInterface,
       )
+      const reserved = this.mockReservations(mac)
 
       // Mirror the backend's server-side name resolution chain:
       // UCI name → DHCP hostname → derived label (fingerprint/OUI) →
@@ -1166,9 +1268,21 @@ export class MockApiService extends ApiService {
         connection: def.status === 'online' ? def.connection : null,
         ipv4: device.ipv4,
         ipv6: device.ipv6,
-        ipv4_static: !!host?.options.ip,
+        ipv4_static: reserved.includes(device.ipv4 ?? ''),
+        ipv4_reservations: reserved.map(ip => ({
+          ipv4: ip,
+          profile: this.mockProfileOf(ip)?.fullname ?? null,
+          active: ip === device.ipv4,
+        })),
+        profile_network: profile ? `${profile.gateway_ip}/24` : null,
         allow_auto_port_forward: this.autoForwardAllowed.has(mac),
+        auto_port_forward_requests: this.autoForwardAllowed.has(mac)
+          ? []
+          : (this.autoForwardRequested.get(mac) ?? []),
         allow_dns_injection: this.dnsInjectionAllowed.has(mac),
+        dns_injection_requested:
+          !this.dnsInjectionAllowed.has(mac) &&
+          this.dnsInjectionRequested.has(mac),
         allow_router_advertisements: this.raAllowed.has(mac),
         security_profile: profile?.fullname ?? null,
         speed: def.status === 'online' ? def.speed : null,
@@ -1180,28 +1294,44 @@ export class MockApiService extends ApiService {
   async devicesUpdate(params: DeviceUpdateReq): Promise<null> {
     await pauseFor(250)
     const macUpper = params.mac.toUpperCase()
-    const existing = this.mockDeviceHosts.find(
-      h => h.options.mac?.toUpperCase() === macUpper,
+    const owned = (h: DhcpHostSection) =>
+      h.options.mac?.toUpperCase() === macUpper
+    const subnet = (ip: string) => ip.split('.').slice(0, 3).join('.')
+    const removed = new Set(params.remove_ipv4_reservations ?? [])
+    if (!params.ipv4_static && params.ipv4) removed.add(params.ipv4)
+    let reserved = this.mockReservations(macUpper).filter(
+      ip => !removed.has(ip),
     )
-    if (existing) {
-      if (params.name !== undefined) {
-        existing.options.name = params.name || undefined
-      }
-      existing.options.ip = params.ipv4_static ? params.ipv4 : undefined
-      // hostid untouched — backend bookkeeping, pinned by published-ports
-    } else {
-      this.mockDeviceHosts.push({
-        type: 'host',
-        name: `host_${params.mac.replace(/:/g, '').toLowerCase()}`,
-        options: {
-          mac: params.mac,
-          name: params.name || undefined,
-          ip: params.ipv4_static ? params.ipv4 : undefined,
-          dns: '1',
-        },
-        lists: {},
-      })
+    if (params.ipv4_static && params.ipv4) {
+      reserved = [
+        ...reserved.filter(ip => subnet(ip) !== subnet(params.ipv4)),
+        params.ipv4,
+      ]
     }
+    const settings: DhcpHostSection = this.mockDeviceHosts.find(owned) ?? {
+      type: 'host',
+      name: `host_${params.mac.replace(/:/g, '').toLowerCase()}`,
+      options: { mac: params.mac },
+      lists: {},
+    }
+    if (params.name !== undefined) {
+      settings.options.name = params.name || undefined
+    }
+    // hostid untouched — backend bookkeeping, pinned by published-ports
+    const [first, ...rest] = reserved
+    settings.options.ip = first
+    this.mockDeviceHosts = [
+      ...this.mockDeviceHosts.filter(h => !owned(h)),
+      settings,
+      ...rest.map(
+        (ip, i): DhcpHostSection => ({
+          type: 'host',
+          name: settings.name && `${settings.name}_${i + 2}`,
+          options: { mac: params.mac, ip, name: settings.options.name },
+          lists: {},
+        }),
+      ),
+    ]
     this.logActivity(
       'device',
       'updated',
@@ -1212,6 +1342,10 @@ export class MockApiService extends ApiService {
 
   /** MACs allowed to auto-create port forwards via PCP/UPnP. */
   private autoForwardAllowed = new Set<string>(['00:1A:2B:3C:4D:5E'])
+  /** Ports the router recently refused to open, by MAC. */
+  private readonly autoForwardRequested = new Map<string, string[]>([
+    ['00:1A:2B:3C:4D:5F', ['3074', '27015-27030']],
+  ])
 
   async devicesSetAutoForward(params: {
     mac: string
@@ -1221,6 +1355,7 @@ export class MockApiService extends ApiService {
     const macUpper = params.mac.toUpperCase()
     if (params.allow) {
       this.autoForwardAllowed.add(macUpper)
+      this.autoForwardRequested.delete(macUpper)
     } else {
       this.autoForwardAllowed.delete(macUpper)
     }
@@ -1233,7 +1368,11 @@ export class MockApiService extends ApiService {
   }
 
   /** MACs allowed to publish DNS records into the router's resolver. */
-  private dnsInjectionAllowed = new Set<string>()
+  private dnsInjectionAllowed = new Set<string>(['00:1A:2B:3C:4D:5E'])
+  /** MACs the router recently refused DNS records from. */
+  private readonly dnsInjectionRequested = new Set<string>([
+    'AA:BB:CC:DD:EE:02',
+  ])
 
   async devicesSetDnsInjection(
     params: RpcParamType<Api, 'devices.set-dns-injection'>,
@@ -1623,7 +1762,7 @@ export class MockApiService extends ApiService {
       id: 'ssh_access',
       enabled: false,
       label: 'SSH Access',
-      device_mac: 'DE:AD:BE:EF:CA:FF',
+      device_mac: 'AA:BB:CC:DD:EE:01',
       ports: '22',
       protocol: 'tcp',
       ipv4: true,
@@ -1634,8 +1773,8 @@ export class MockApiService extends ApiService {
       status: 'disabled',
       status_reason: null,
       device_name: null,
-      device_ipv4: '192.168.1.103',
-      device_ipv6: '2001:db8:abcd:1::103',
+      device_ipv4: '192.168.1.110',
+      device_ipv6: '2001:db8:abcd:1::110',
     },
   ]
 
@@ -1664,16 +1803,17 @@ export class MockApiService extends ApiService {
     )
     const def = this.mockDeviceDefs.find(d => d.mac.toUpperCase() === macUpper)
 
-    // Compute IPv4 from profile gateway + host octet
-    let ipv4: string | null = null
-    if (host?.options.ip) {
-      ipv4 = host.options.ip
-    } else if (def) {
+    // The reservation in the profile's subnet, else profile gateway + host octet
+    const reserved = this.mockReservations(macUpper)
+    let ipv4: string | null = reserved.length === 1 ? reserved[0] : null
+    if (def) {
       const gateway = this.mockProfiles.find(
         p => p.interface === def.profileInterface,
       )?.gateway_ip
       const subnet = gateway?.split('.').slice(0, 3).join('.') ?? '192.168.1'
-      ipv4 = `${subnet}.${def.hostOctet}`
+      ipv4 =
+        reserved.find(ip => ip.startsWith(`${subnet}.`)) ??
+        `${subnet}.${def.hostOctet}`
     }
 
     // Compute IPv6
@@ -1803,13 +1943,24 @@ export class MockApiService extends ApiService {
       {
         id: 'sni_443_nextcloud.example.com',
         kind: 'SNI',
-        device_mac: '',
-        device_name: null,
+        device_mac: mac,
+        device_name: device.name,
         internal_ip: device.ipv4,
         ports: '443',
         public_ports: '443',
         expires_secs: 2954,
         hostname: 'nextcloud.example.com',
+      },
+      {
+        id: 'sni_443_photos.example.com',
+        kind: 'SNI',
+        device_mac: mac,
+        device_name: device.name,
+        internal_ip: device.ipv4,
+        ports: '443',
+        public_ports: '443',
+        expires_secs: 2871,
+        hostname: 'photos.example.com',
       },
     ]
   }
@@ -1834,14 +1985,27 @@ export class MockApiService extends ApiService {
       id: 'wg_mullvad',
       label: 'Mullvad',
       target: 'Proton',
+      enabled: true,
+      used_by: [],
+      supports_ipv6: false,
+      mtu: 1280,
+      hostname_endpoint: false,
+      dns: ['10.64.0.1'],
+      status: 'connected',
+      last_handshake_secs: 17,
+    },
+    {
+      id: 'wg_ivpn',
+      label: 'IVPN',
+      target: 'Internet',
       // Disabled by default so the mock exercises the enabled-only filters on
       // the profile outbound picker and both chain-target pickers. Nothing
-      // targets Mullvad and no mock profile routes through it, so this is a
+      // targets IVPN and no mock profile routes through it, so this is a
       // consistent state.
       enabled: false,
       used_by: [],
       supports_ipv6: false,
-      mtu: 1280,
+      mtu: null,
       hostname_endpoint: false,
       dns: [],
       status: 'not-responding',
@@ -1984,6 +2148,14 @@ export class MockApiService extends ApiService {
       eth3: {
         profile: { fullname: 'Guest', interface: 'guest', vlan_tag: 100 },
       },
+      usb_eth0: {
+        profile: { fullname: 'Guest', interface: 'guest', vlan_tag: 100 },
+      },
+      usb_eth1: { profile: null },
+    },
+    usb_ports: {
+      usb_eth0: { present: true, active: true },
+      usb_eth1: { present: false, active: false },
     },
   }
 
@@ -1992,8 +2164,25 @@ export class MockApiService extends ApiService {
     return structuredClone(this.mockEthernet)
   }
 
+  async ethernetRemoveUsbPort(
+    params: RpcParamType<Api, 'ethernet.remove-usb-port'>,
+  ): Promise<null> {
+    await pauseFor(250)
+    const without = <T>(ports: Record<string, T>) =>
+      Object.fromEntries(
+        Object.entries(ports).filter(([name]) => name !== params.port),
+      )
+    this.mockEthernet = {
+      ...this.mockEthernet,
+      ports: without(this.mockEthernet.ports),
+      usb_ports: without(this.mockEthernet.usb_ports),
+    }
+    return null
+  }
+
   async ethernetSet(params: EthernetSetConfig): Promise<EthernetSetResult> {
     await pauseFor(250)
+    if (params.preview) return { leaving_profile: [] }
     this.mockEthernet = {
       wan_ipv6: params.wan_ipv6,
       wan_port: params.wan_port ?? null,
@@ -2015,6 +2204,7 @@ export class MockApiService extends ApiService {
           },
         ]),
       ),
+      usb_ports: this.mockEthernet.usb_ports,
     }
     const changedPorts = Object.keys(params.ports).join(', ')
     this.logActivity(
@@ -2022,7 +2212,7 @@ export class MockApiService extends ApiService {
       'updated',
       `Updated ethernet ports (${changedPorts})`,
     )
-    return { pending_published_port_deletions: [] }
+    return { leaving_profile: [] }
   }
 
   // --- SSH Keys smart endpoint mocks ---
@@ -2116,7 +2306,7 @@ export class MockApiService extends ApiService {
         "Updated WiFi settings (SSID: 'MyNetwork')",
         "Deleted outbound VPN 'Mullvad US'",
         "Failed to enable outbound VPN 'NordVPN'",
-        'Logged in',
+        'Logged in from 192.168.1.23 (Admin profile) using a browser',
       ][i % 5],
       error: i === 3 ? 'VpnChainCycle: would create a loop' : null,
     }),
@@ -2146,15 +2336,19 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async backupCreate(): Promise<BackupCreateRes> {
+  async backupCreate(
+    params: RpcParamType<Api, 'backup.create'>,
+  ): Promise<BackupCreateRes> {
     await pauseFor(500)
     return {
       guid: 'mock-backup-guid',
-      filename: 'backup-startwrt-2026-03-19.tar.gz',
+      filename: 'backup-startwrt-2026-03-19.swbk',
     }
   }
 
-  async backupRestore(): Promise<BackupRestoreRes> {
+  async backupRestore(
+    params: RpcParamType<Api, 'backup.restore'>,
+  ): Promise<BackupRestoreRes> {
     await pauseFor(250)
     return { upload: 'mock-restore-guid' }
   }

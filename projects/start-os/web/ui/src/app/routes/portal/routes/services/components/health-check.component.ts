@@ -1,5 +1,5 @@
 import { Component, computed, inject, input } from '@angular/core'
-import { i18nPipe } from '@start9labs/shared'
+import { i18nKey, i18nPipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiIcon, TuiLoader } from '@taiga-ui/core'
 
@@ -57,15 +57,18 @@ import { TuiIcon, TuiLoader } from '@taiga-ui/core'
 export class ServiceHealthCheckComponent {
   private readonly i18n = inject(i18nPipe)
 
-  readonly healthCheck = input.required<T.NamedHealthCheckResult>()
+  public readonly healthCheck = input.required<T.NamedHealthCheckResult>()
 
-  readonly loading = computed(
-    ({ result } = this.healthCheck()) =>
-      !result || ['starting', 'loading', 'waiting'].includes(result),
+  protected readonly loading = computed(
+    (health = this.healthCheck()) =>
+      (health.result === 'starting' || health.result === 'loading') &&
+      !health.waiting,
   )
 
-  readonly icon = computed(() => {
-    switch (this.healthCheck().result) {
+  protected readonly icon = computed((health = this.healthCheck()) => {
+    if ('waiting' in health && health.waiting) return '@tui.clock'
+
+    switch (health.result) {
       case 'success':
         return '@tui.check'
       case 'failure':
@@ -75,8 +78,11 @@ export class ServiceHealthCheckComponent {
     }
   })
 
-  readonly color = computed(() => {
-    switch (this.healthCheck().result) {
+  protected readonly color = computed((health = this.healthCheck()) => {
+    if ('waiting' in health && health.waiting)
+      return 'var(--tui-text-secondary)'
+
+    switch (health.result) {
       case 'success':
         return 'var(--tui-status-positive)'
       case 'failure':
@@ -84,30 +90,24 @@ export class ServiceHealthCheckComponent {
       case 'starting':
       case 'loading':
         return 'var(--tui-background-accent-1)'
-      // disabled and waiting
       default:
         return 'var(--tui-text-secondary)'
     }
   })
 
-  readonly message = computed(({ result, message } = this.healthCheck()) => {
-    if (!result) {
-      return this.i18n.transform('Awaiting result')!
-    }
-
-    switch (result) {
-      case 'starting':
-        return this.i18n.transform('Starting')!
-      case 'success':
-        return message || this.i18n.transform('Success')!
-      case 'waiting':
-        return message
-          ? `${this.i18n.transform('Waiting on')} ${message}...`
-          : `${this.i18n.transform('Waiting')}...`
-      case 'loading':
-      case 'failure':
-      case 'disabled':
-        return message || result
-    }
-  })
+  protected readonly message = computed(
+    ({ result, message } = this.healthCheck()) =>
+      message ||
+      this.i18n.transform(
+        (
+          {
+            starting: 'Starting',
+            success: 'Success',
+            loading: 'Loading',
+            failure: 'Failure',
+            disabled: 'Disabled',
+          } satisfies Record<T.HealthStatus, i18nKey>
+        )[result],
+      ),
+  )
 }

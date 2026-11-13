@@ -2,6 +2,15 @@
 
 RUST_BUILDER_IMAGE=$(RUST_BUILDER_IMAGE="${RUST_BUILDER_IMAGE:-}" "$(dirname "${BASH_SOURCE[0]}")/../../../build/rust-builder/image.sh")
 
+native_arch() {
+  local arch
+  arch=$(uname -m)
+  if [ "$arch" = arm64 ]; then
+    arch=aarch64
+  fi
+  printf '%s\n' "$arch"
+}
+
 USE_TTY=
 if tty -s; then
   USE_TTY="-it"
@@ -9,7 +18,8 @@ fi
 
 alias 'rust-zig-builder'='docker run '"$USE_TTY"' --rm \
   -e "RUSTFLAGS=$RUSTFLAGS" \
-  -e "CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS=$CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS" \
+  -e DISABLE_RVA23=1 \
+  -e CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS \
   -e "CC_riscv64gc_unknown_linux_musl=$CC_riscv64gc_unknown_linux_musl" \
   -e "CXX_riscv64gc_unknown_linux_musl=$CXX_riscv64gc_unknown_linux_musl" \
   -e "CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_LINKER=$CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_LINKER" \

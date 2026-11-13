@@ -14,6 +14,8 @@
 #   SUITE            - Apt suite name (default: stable). Each suite owns a
 #                      separate pool, so suites never evict each other.
 #   COMPONENT        - Apt component name (default: main)
+#   APT_KEYRING      - Public keyring that verifies the published suite
+#                      (default: the suite's keyring under apt/)
 
 set -e
 
@@ -28,6 +30,18 @@ GPG_KEY_ID="${GPG_KEY_ID:-5259ADFC2D63C217}"
 SUITE="${SUITE:-stable}"
 COMPONENT="${COMPONENT:-main}"
 REPO_DIR="$(mktemp -d)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+case "$SUITE" in
+    stable) DEFAULT_KEYRING="$REPO_ROOT/apt/start9.gpg" ;;
+    alpha) DEFAULT_KEYRING="$REPO_ROOT/apt/start9-alpha.gpg" ;;
+    *) DEFAULT_KEYRING="" ;;
+esac
+KEYRING="${APT_KEYRING:-$DEFAULT_KEYRING}"
+if [ -z "$KEYRING" ] || [ ! -f "$KEYRING" ]; then
+    echo "No keyring to verify the ${SUITE} suite: '${KEYRING}'. Set APT_KEYRING." >&2
+    exit 1
+fi
 
 # Every suite owns its own pool, so publishing to one can never index or evict
 # another's .deb — the eviction below, the Packages scan, and both syncs are all
@@ -124,16 +138,90 @@ if [ ${#DEB_FILES[@]} -eq 0 ]; then
     exit 1
 fi
 
-# Copy each deb to the pool, removing old versions of the same package+arch
+sha256_of() {
+    sha256sum "$1" | cut -d' ' -f1
+}
+
+# Print "<sha256>  <path>" for every file already in the pool.
+pool_contents() {
+    local file
+    while IFS= read -r -d '' file; do
+        printf '%s  %s\n' "$(sha256_of "$REPO_DIR/$file")" "$file"
+    done < <(cd "$REPO_DIR" && find "$POOL_ROOT" -type f -print0)
+}
+
+# Bucket contents are untrusted. Refuses any pool file the suite's signed index
+# does not commit to, and any index the signed Release does not commit to.
+verify_mirror() {
+    local dist="$REPO_DIR/dists/${SUITE}" work contents hash size rel_path unknown
+    work="$(mktemp -d)"
+    contents="$(pool_contents | LC_ALL=C sort)"
+
+    if [ ! -f "$dist/InRelease" ]; then
+        rm -rf "$work"
+        if [ -n "$contents" ]; then
+            echo "Refusing to publish: ${POOL_ROOT}/ holds files but ${SUITE} has no InRelease:" >&2
+            echo "$contents" >&2
+            exit 1
+        fi
+        return 0
+    fi
+
+    if ! "$REPO_ROOT/debian/verify-release.sh" "$KEYRING" "$dist/InRelease" "$work/Release" 2> "$work/gpg.err"; then
+        echo "Refusing to publish: the ${SUITE} InRelease is not signed by ${KEYRING}" >&2
+        sed 's/^/  /' "$work/gpg.err" >&2
+        rm -rf "$work"
+        exit 1
+    fi
+
+    : > "$work/indexed"
+    while read -r hash size rel_path; do
+        if [ "$(sha256_of "$dist/$rel_path" 2> /dev/null)" != "$hash" ]; then
+            echo "Refusing to publish: ${rel_path} does not match the signed Release" >&2
+            rm -rf "$work"
+            exit 1
+        fi
+        awk '
+            /^$/         { if (f != "") print s "  " f; f = ""; s = "" }
+            /^Filename:/ { f = $2 }
+            /^SHA256:/   { s = $2 }
+            END          { if (f != "") print s "  " f }
+        ' "$dist/$rel_path" >> "$work/indexed"
+    done < <(awk -v c="$COMPONENT" '
+        /^SHA256:/ { in_sha = 1; next }
+        /^[^ ]/    { in_sha = 0 }
+        in_sha && $3 ~ ("^" c "/binary-[^/]+/Packages$")
+    ' "$work/Release")
+
+    unknown="$(LC_ALL=C comm -23 <(echo "$contents" | sed '/^$/d') <(LC_ALL=C sort -u "$work/indexed"))"
+    rm -rf "$work"
+    if [ -n "$unknown" ]; then
+        echo "Refusing to publish: ${POOL_ROOT}/ holds files the signed ${SUITE} index does not list:" >&2
+        echo "$unknown" >&2
+        exit 1
+    fi
+    echo "Verified ${POOL_ROOT}/ against the signed ${SUITE} index"
+}
+
+# Replacing a package's own files first lets a retry finish an interrupted publish.
 for deb in "${DEB_FILES[@]}"; do
     PKG_NAME="$(dpkg-deb --field "$deb" Package)"
     PKG_ARCH="$(dpkg-deb --field "$deb" Architecture)"
     POOL_DIR="$REPO_DIR/${POOL_ROOT}/${COMPONENT}/${PKG_NAME:0:1}/${PKG_NAME}"
-    mkdir -p "$POOL_DIR"
-    # Remove old versions for the same architecture
     for old in "$POOL_DIR"/${PKG_NAME}_*_${PKG_ARCH}.deb; do
         [ -f "$old" ] && rm -v "$old"
     done
+done
+
+verify_mirror
+
+# Release hashes whatever this directory holds, so nothing downloaded may remain.
+rm -rf "${REPO_DIR:?}/dists/${SUITE}"
+
+for deb in "${DEB_FILES[@]}"; do
+    PKG_NAME="$(dpkg-deb --field "$deb" Package)"
+    POOL_DIR="$REPO_DIR/${POOL_ROOT}/${COMPONENT}/${PKG_NAME:0:1}/${PKG_NAME}"
+    mkdir -p "$POOL_DIR"
     cp "$deb" "$POOL_DIR/"
     dpkg-name -o "$POOL_DIR/$(basename "$deb")" 2>/dev/null || true
     echo "Added: $(basename "$deb") -> ${POOL_ROOT}/${COMPONENT}/${PKG_NAME:0:1}/${PKG_NAME}/"

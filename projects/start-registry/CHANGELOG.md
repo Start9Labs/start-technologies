@@ -2,6 +2,54 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.5.0]
+
+### Added
+
+- Accept named registry profiles in `--from` and `--to` for package and OS promotion.
+
+- Remove retained GPG exports from signers by primary-key fingerprint, preserving their signing keys and publishing permissions.
+
+- Opening a registry's root URL redirects to the public Marketplace with that registry selected.
+
+### Fixed
+
+- Registry admins can sign OS assets for any version without first being added as a signer for that version.
+
+- Preserve verified source signatures when OS versions are promoted into the registry, alongside existing destination signatures and the promoter's signature.
+
+## [1.4.0]
+
+### Added
+
+- Known signers can add their signature to a package version already in the index with `start-cli registry package sign`.
+
+- Accept verified package endorsements submitted by the CLI when adding packages, mirrors, and promoted packages, including when hosted files contain only the base archive. Signer registration and publishing authorization remain unchanged.
+- Reject submitted endorsements that do not match the indexed package's exact commitment.
+
+### Fixed
+
+- Re-adding an already indexed package with a different key now adds that key's signature instead of discarding it.
+
+- Registry trust proposals reference selected signer IDs and retain their complete GPG public-key information.
+
+## [1.3.0]
+
+### Added
+
+- Store and serve non-English OS release-note translations for clients to select locally, retaining English notes for older clients.
+
+- OS release metadata records the build's Git commit and whether it includes security updates, and preserves both when promoting between registries.
+- OS security-update announcements are disabled by default. Registry operators can opt in with `security-notifications: true` without changing release metadata.
+
+### Changed
+
+- Use compact key and signature encodings in the index, with PEM-compatible responses for older clients.
+
+### Fixed
+
+- StartOS servers older than 0.4.0.3 are no longer offered an OS release they cannot verify, so they update to the newest release they can install.
+
 ## [1.2.1]
 
 ### Fixed

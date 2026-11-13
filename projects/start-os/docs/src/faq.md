@@ -17,7 +17,9 @@ Ethernet is strongly recommended. Servers are always-on, critical devices and sh
 
 ## StartOS boots into "Diagnostic Mode"
 
-If you encounter Diagnostic Mode, your best bet is stop clicking and [contact support](https://start9.com/contact).
+If you encounter Diagnostic Mode, your best bet is to stop clicking and [get help](https://start9.com/help).
+
+In Diagnostic Mode your server always answers over `http://`, at its usual name or IP address: type `http://server-name.local/` in full, `http://` included. Its `https://` address may not connect, and a page you already had open does not switch to Diagnostic Mode by itself.
 
 ## My server boots into StartOS instead of the USB installer
 
@@ -29,7 +31,7 @@ A Start9 server boots from a USB installer on its own, with nothing to press and
 
 If a freshly flashed drive still does not boot, connect a monitor and keyboard and pick the drive from the boot menu:
 
-- **Server Pure** — Needs no boot menu: the firmware boots a USB drive whenever one is plugged in. If a freshly flashed drive still does not boot, [contact support](https://start9.com/contact).
+- **Server Pure** — Needs no boot menu: the firmware boots a USB drive whenever one is plugged in. If a freshly flashed drive still does not boot, [get help](https://start9.com/help).
 
 - **Server One (2023)** — Press `F10` repeatedly from the moment you power on, and select the USB drive from the boot menu that appears. If StartOS starts before the menu appears, use the power button instead: with the server off, hold the power button for three seconds and release it. A menu of keys appears; press `F10` there.
 
@@ -78,7 +80,7 @@ For other hardware, see the [install guide](installing-startos.md#install) and t
 
 1. Try connecting using a different device. If this works, it means you need to clear cache on your current browser and/or restart your current device.
 
-1. Try visiting start.local. Your server may be in diagnostic mode.
+1. Try visiting `http://server-name.local/`, typed in full with `http://` in front. A server in [Diagnostic Mode](#startos-boots-into-diagnostic-mode) always answers there, even when its `https://` address does not.
 
 1. Try restarting your router.
 
@@ -139,7 +141,7 @@ sudo systemctl restart systemd-timesyncd
 
 Within a minute or so, `timedatectl timesync-status` should report a successful sync. If the warning in the UI does not clear shortly after that, restart your server once. The override file survives reboots; after a StartOS update, check that it is still present and re-create it if needed.
 
-If time sync still fails, please [contact support](https://start9.com/contact).
+If time sync still fails, [get help](https://start9.com/help).
 
 ## "Gateway Timeout" in the StartOS UI
 
@@ -188,6 +190,16 @@ Yes, but it is not officially supported. StartOS identifies a service by its pac
 
 The fork is a separate service with its own settings, addresses, data and [backups](backup-create.md), and starts empty.
 
+## Can I give someone access to my server but not to some of its services?
+
+No. StartOS has one administrator, protected by the master password, and no other accounts, roles or per-service permissions. Anyone who signs in to the web interface or `start-cli`, or connects over [SSH](ssh.md) with the master password or a key added under **System > SSH**, has full control of the server and every service on it: they can start, stop, configure, update and uninstall any service, run its actions, read its logs and restore it from a backup. Over SSH they also have `sudo`, which reaches every service's data and code. Because they can change how a service runs, they could also alter it to capture what you enter into it. Give administrative access only to someone you would trust with every service on the server.
+
+To let someone use a service without administering the server, give them the service's [address](interfaces.md) and an account in that service, never the master password.
+
+To revoke known administrative credentials, [change the master password](change-password.md) and remove their SSH keys under **System > SSH**. List web-interface and `start-cli` sessions with `start-cli auth session list`, then revoke each unwanted entry with `start-cli auth session kill --pubkey <ID>` for a `pubkey` entry or `start-cli auth session kill --token <ID>` for a `token` entry, using its ID from the list.
+
+An SSH connection that is already open stays open until it ends; restarting the server closes it. Revoking credentials leaves in place any change they made to the server and any data they copied. If you no longer trust someone who had administrative access, [get help](https://start9.com/help) restoring trust in the server; changing credentials alone cannot establish that.
+
 ## My server restarted on its own
 
 On servers with a supported hardware watchdog, StartOS keeps a watchdog timer armed with a requested timeout of one minute. If a system hang prevents the operating system from refreshing that timer, the hardware resets the server. The effective timeout depends on the device. This is an abrupt reset: in-flight writes can be lost.
@@ -198,8 +210,8 @@ An unexpected restart can also follow a power interruption or a kernel crash. To
 sudo journalctl -b -1 -n 200 --no-pager
 ```
 
-Where the kernel and firmware provide persistent crash records, StartOS preserves the systemd-pstore archive under `/media/startos/data/main/pstore/`. A watchdog reset may leave no crash record. `sudo gather-debug-info` collects available records, kernel logs, the previous boot's journal, watchdog status and NVMe power-state information for [support](https://start9.com/contact).
+Where the kernel and firmware provide persistent crash records, StartOS preserves the systemd-pstore archive under `/media/startos/data/main/pstore/`. A watchdog reset may leave no crash record. `sudo gather-debug-info` collects available records, kernel logs, the previous boot's journal, watchdog status and NVMe power-state information for [support](https://start9.com/help).
 
 ## Issue with a particular service
 
-If a service is misbehaving or crashing, check the [logs](logs.md) for that service — open the service and select its **Logs** tab. Look for any errors that might explain the problem. Often, the solution is to restart the service by clicking "Restart". If the issue persist, [contact support](https://start9.com/contact).
+If a service is misbehaving or crashing, check the [logs](logs.md) for that service — open the service and select its **Logs** tab. Look for any errors that might explain the problem. Often, the solution is to restart the service by clicking "Restart". If the issue persists, [get help](https://start9.com/help).

@@ -2,9 +2,10 @@
 
 <!--
 TODO: Describe what "upstream" means for {{name}} (a Docker image pinned by tag, a git
-submodule, or a self-built image) and how to track its version. See UPDATING.md in other
-packages for the pattern, and start-technologies/projects/start-sdk/docs/src/versions.md for the version rules.
-Remove these comments.
+submodule, or a self-built image) and how to track its version, one subsection per pinned
+source. This file is the bump recipe and nothing else: no version, migration or release-note
+rules, no test plan, no design notes. See project-structure.md § UPDATING.md in the packaging
+guide. Remove these comments.
 -->
 
 ## Determining the upstream version

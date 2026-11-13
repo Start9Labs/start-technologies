@@ -24,6 +24,7 @@ import {
   TuiButton,
   TuiCell,
   tuiCellOptionsProvider,
+  TuiDropdown,
   TuiIcon,
   TuiInput,
   TuiTitle,
@@ -70,12 +71,13 @@ import { UPDATE } from './update.component'
           {{ 'Details' | i18n }}
         </button>
       </div>
+      @let update = os.showUpdate$ | async;
       <div tuiCell tuiAppearance="outline-grayscale">
         <tui-icon icon="@tui.zap" (click)="count = count + 1" />
         <span tuiTitle>
           <strong>
             {{ 'Software Update' | i18n }}
-            @if (os.showUpdate$ | async) {
+            @if (update) {
               <tui-badge-notification>
                 {{ 'Update available' | i18n }}
               </tui-badge-notification>
@@ -85,15 +87,11 @@ import { UPDATE } from './update.component'
         <button
           tuiButton
           appearance="accent"
-          iconStart="@tui.refresh-cw"
+          [iconStart]="update ? '@tui.eye' : '@tui.refresh-cw'"
           [disabled]="os.updatingOrBackingUp$ | async"
           (click)="onUpdate()"
         >
-          @if (os.showUpdate$ | async) {
-            {{ 'Update' | i18n }}
-          } @else {
-            {{ 'Check for updates' | i18n }}
-          }
+          {{ (update ? 'View' : 'Check for updates') | i18n }}
         </button>
       </div>
       <div tuiCell tuiAppearance="outline-grayscale">
@@ -259,6 +257,7 @@ import { UPDATE } from './update.component'
     TuiButtonLoading,
     TuiButtonSelect,
     TuiDataListWrapper,
+    TuiDropdown,
     TuiInput,
     FormsModule,
     SnakeDirective,

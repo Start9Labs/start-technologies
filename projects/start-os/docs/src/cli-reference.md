@@ -34,7 +34,7 @@ await rpcClient.rpc.package.start({ id: 'bitcoind' })
 
 ## Authentication
 
-Log in, log out, manage enrolled device keys, and reset the master password.
+Log in, log out, manage enrolled device keys and bearer tokens, and reset the master password.
 
 ### `start-cli auth login`
 
@@ -54,13 +54,19 @@ Retrieve the server's public key.
 
 ### `start-cli auth session list`
 
-List all enrolled device keys.
+List all enrolled device keys and bearer tokens.
 
 - `--format` — Output format
 
-### `start-cli auth session kill [IDS...]`
+### `start-cli auth session kill [--pubkey <KEY>]... [--token <ID>]...`
 
-Remove one or more enrolled device keys.
+End one or more sessions. `--pubkey` removes an enrolled device key; `--token` revokes a bearer token by the ID `auth session list` shows.
+
+### `start-cli auth token create --name <NAME>`
+
+Create a bearer token for an API client that cannot sign requests. The token is printed once and is not stored; the client sends it as `Authorization: Bearer <token>`. It appears in `auth session list` under its name and is revoked with `auth session kill --token` or after 30 days unused.
+
+An MCP client authenticates with the same token to use the server's API as tools at `https://<server-address>/mcp`, over the streamable HTTP transport.
 
 ## Server
 
@@ -76,7 +82,9 @@ Shut down the server.
 
 ### `start-cli server update`
 
-Check the configured registry for OS updates and apply if available.
+Check the supplied registry for OS updates and apply if available. See [Trusted Keys](trusted-keys.md) for signer requirements.
+
+- `--trust` — Explicitly accept an untrusted signer while retaining signature and integrity checks
 
 ### `start-cli server update-firmware`
 
@@ -92,13 +100,17 @@ Display StartOS system logs. These are also readable and downloadable in the web
 - `-B, --before` — Show logs before cursor
 - `-b, --boot <ID>` — Filter by boot ID
 
+### `start-cli server set-log-level <LEVEL>`
+
+Set the running daemon's verbosity for `start-core`/`start-os` code to `error`, `warn`, `info`, `debug`, or `trace`. Dependency logs keep their startup filter. Restarting the daemon restores the startup filter without changing saved configuration. Trace output may include sensitive details; see [Log Level](logs.md#log-level).
+
 ### `start-cli server kernel-logs`
 
 Display kernel logs. Same options as `server logs`.
 
 ### `start-cli server metrics`
 
-Display server metrics (CPU, RAM, disk, temperature).
+Display server metrics: CPU, RAM, disk, and temperature in °C.
 
 - `--format` — Output format
 
@@ -201,6 +213,51 @@ Enable or disable ZRAM compressed swap.
 
 - `--enable` — Enable zram
 
+### `start-cli server registries list`
+
+List the registries this server's Marketplace is connected to, with their names.
+
+- `--format` — Output format
+
+### `start-cli server registries add <URL>`
+
+Connect a registry. The keys it offers that the server doesn't already have become trusted for packages; prints their IDs. See [Trusted Keys](trusted-keys.md#keys-from-registries).
+
+- `--name <NAME>` — Name to show for the registry instead of its own
+
+### `start-cli server registries remove <URL>`
+
+Disconnect a registry, including the Start9 Registry and the Community Registry, which the web interface doesn't remove. The registry that provides StartOS updates can't be removed until another is chosen with `set-os`. Prints the IDs of keys the registry added that no connected registry still offers; remove them with `server trusted-keys remove`.
+
+### `start-cli server registries set-os <URL>`
+
+Use a connected registry for StartOS updates. The keys it offers become trusted for StartOS updates; prints their IDs.
+
+### `start-cli server trusted-keys list`
+
+List trusted keys by ID, with each key's name and whether it is trusted for packages and for StartOS updates. See [Trusted Keys](trusted-keys.md).
+
+- `--format` — Output format
+
+### `start-cli server trusted-keys add <PUBLIC_KEYS>...`
+
+Import Ed25519 public keys in PEM or armored GPG format. Put options before `--` and the quoted keys after it. Newly added keys are trusted for packages; `--trust-for os` additionally trusts them for StartOS updates.
+
+- `--name <NAME>` — Name for the keys; blank names each GPG key after its identity
+- `--trust-for <marketplace|os>` — Grant this trust to every imported key, including keys already present
+
+### `start-cli server trusted-keys update <ID>`
+
+Rename a key and set both trust selections at once.
+
+- `--name <NAME>` — New name (required)
+- `--marketplace <true|false>` — Trust for packages (required)
+- `--os <true|false>` — Trust for StartOS updates (required)
+
+### `start-cli server trusted-keys remove <ID>`
+
+Remove a key. Keys a connected registry offers can't be removed; distrust them with `update` instead.
+
 ### Server Host Management
 
 Manage network addresses and bindings for the server UI host.
@@ -257,6 +314,9 @@ List all installed packages.
 Install a package from the registry or sideload a local `.s9pk` file.
 
 - `-s, --sideload` — Install from local file
+- `--trust` — Explicitly accept an untrusted signer while retaining signature and integrity checks
+
+Registry installs and sideloads require a signer [trusted](trusted-keys.md) for packages by default.
 
 ### `start-cli package start <ID>`
 
@@ -274,7 +334,10 @@ the same startup coalesce into one additional restart.
 
 ### `start-cli package uninstall <ID>`
 
-Remove a package and its data.
+Remove a package and its data. See [Uninstalling](uninstalling.md).
+
+- `--soft` — Keep the package's data
+- `--force` — Remove the package even when its own uninstall step fails or can't run
 
 ### `start-cli package logs <ID>`
 
@@ -793,6 +856,10 @@ Build an s9pk package from source files.
 - `--no-assets` — Build without assets
 - `--arch <ARCH>` — Filter by CPU architecture
 
+### `start-cli s9pk sign <S9PK>`
+
+Add a supplemental signature to a v2 package using the configured identity key (including a GPG-agent identity). The base archive and its embedded signature remain unchanged. Existing valid supplemental metadata and unknown fields are preserved; malformed or unsupported trailer versions are refused. Content-changing edits discard supplemental metadata with a warning, requiring the resulting package to be signed again.
+
 ### `start-cli s9pk publish <S9PK>`
 
 Publish an s9pk to the configured S3 bucket and index it on the registry.
@@ -885,6 +952,10 @@ Set the registry's description (markdown), shown above its services in the marke
 
 Over RPC, pass `null` in the setter's `description` field to clear it; a value sets it.
 
+### `start-cli registry info set-trust-signers [SIGNER...]`
+
+Select which existing signers the registry offers to StartOS servers for package trust. Run it without signer IDs to clear the selection. See [Trusted Keys](trusted-keys.md#keys-from-registries) for how StartOS treats offered keys.
+
 ### Registry Admin Management
 
 Manage registry administrators and their signing keys.
@@ -920,6 +991,7 @@ Edit a signer's metadata.
 - `-k, --add-key <KEY>` — Add public key
 - `-C, --remove-contact <INFO>` — Remove contact
 - `-K, --remove-key <KEY>` — Remove public key
+- `--remove-gpg-export <PRIMARY_FINGERPRINT>` — Remove whole GPG exports containing this primary-key fingerprint, preserving signing keys (repeatable, case-insensitive)
 
 ### `start-cli registry admin signer list`
 
@@ -977,6 +1049,14 @@ Add a download mirror for a package.
 Remove a package mirror.
 
 - `--url <URL>` — Mirror URL to remove (required)
+
+### `start-cli registry package sign [FILE]`
+
+Add your signature to a package in the registry index.
+
+- `--no-verify` — Sign the commitments the registry lists instead of a local s9pk
+- `--id <ID>` — Package identifier (with `--no-verify`)
+- `--version <VERSION>` — Package version (with `--no-verify`)
 
 ### Registry Package Categories
 

@@ -1,6 +1,7 @@
 use std::ffi::{OsStr, OsString, c_int};
 use std::fs::File;
 use std::io::{BufRead, BufReader, IsTerminal, Read};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
@@ -16,6 +17,7 @@ use tokio::sync::oneshot;
 use crate::CAP_1_KiB;
 use crate::service::effects::ContainerCliContext;
 use crate::service::effects::prelude::*;
+use crate::util::env::{parse_assignment, parse_json_env};
 use crate::util::io::TermSize;
 
 const FWD_SIGNALS: &[c_int] = &[
@@ -95,6 +97,63 @@ impl procfs::FromBufRead for NSPid {
     }
 }
 
+fn open_pidfd(pid: Pid) -> std::io::Result<OwnedFd> {
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid.as_raw(), 0) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(unsafe { OwnedFd::from_raw_fd(fd as c_int) })
+}
+
+fn kill_on_parent_death() -> std::io::Result<()> {
+    nix::sys::prctl::set_pdeathsig(nix::sys::signal::SIGKILL)
+        .map_err(|e| std::io::Error::from_raw_os_error(e as i32))
+}
+
+// Namespace init dies with its launcher, even before signal handlers exist.
+fn kill_with_launcher(parent: BorrowedFd<'_>) -> std::io::Result<()> {
+    kill_on_parent_death()?;
+    let mut fd = libc::pollfd {
+        fd: parent.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let ready = unsafe { libc::poll(&mut fd, 1, 0) };
+    if ready < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if ready > 0 {
+        unsafe { libc::_exit(128 + SIGKILL) };
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod parent_death_tests {
+    use super::*;
+
+    #[test]
+    fn live_launcher_allows_exec() {
+        let parent = open_pidfd(nix::unistd::getpid()).unwrap();
+        let mut command = StdCommand::new("/bin/sh");
+        command.args(["-c", "exit 42"]);
+        unsafe { command.pre_exec(move || kill_with_launcher(parent.as_fd())) };
+        assert_eq!(command.status().unwrap().code(), Some(42));
+    }
+
+    #[test]
+    fn exited_launcher_prevents_exec() {
+        let mut launcher = StdCommand::new("/bin/sleep").arg("300").spawn().unwrap();
+        let parent = open_pidfd(Pid::from_raw(launcher.id() as i32)).unwrap();
+        launcher.kill().unwrap();
+        launcher.wait().unwrap();
+        let mut command = StdCommand::new("/bin/sh");
+        command.args(["-c", "exit 42"]);
+        unsafe { command.pre_exec(move || kill_with_launcher(parent.as_fd())) };
+        assert_eq!(command.status().unwrap().code(), Some(128 + SIGKILL));
+    }
+}
+
 fn open_file_read(path: impl AsRef<Path>) -> Result<File, Error> {
     File::open(&path).with_ctx(|_| {
         (
@@ -129,8 +188,6 @@ pub struct ExecParams {
 impl ExecParams {
     fn exec(&self) -> Result<(), Error> {
         let ExecParams {
-            env,
-            env_file,
             workdir,
             user,
             chroot,
@@ -145,46 +202,7 @@ impl ExecParams {
         };
 
         let mut cmd = StdCommand::new(command);
-        cmd.env_clear();
-        cmd.env(
-            "PATH",
-            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        );
-
-        let mut needs_home = true;
-
-        let mut update_env = |line: &str| {
-            if let Some((k, v)) = line.split_once("=") {
-                needs_home &= k != "HOME";
-                cmd.env(k, v);
-            } else if !line.is_empty() {
-                cmd.env_remove(line);
-            }
-        };
-        for line in std::fs::read_to_string("/etc/default/locale")
-            .unwrap_or_default()
-            .lines()
-            .filter(|l| {
-                l.split_once('=')
-                    .is_none_or(|(_, v)| locale_available(chroot, v))
-            })
-        {
-            update_env(line);
-        }
-
-        if let Some(f) = env_file {
-            let mut lines = BufReader::new(
-                File::open(&f).with_ctx(|_| (ErrorKind::Filesystem, format!("open r {f:?}")))?,
-            )
-            .lines();
-            while let Some(line) = lines.next().transpose()? {
-                update_env(&line);
-            }
-        }
-
-        for line in env {
-            update_env(&line);
-        }
+        let needs_home = self.configure_env(&mut cmd, std::env::vars_os())?;
 
         let ExecUser {
             uid,
@@ -250,10 +268,7 @@ impl ExecParams {
                 // setuid clears dumpability and changes /proc/self/fd ownership.
                 libc::prctl(libc::PR_SET_DUMPABLE, 1, 0, 0, 0);
                 // Credential changes clear the parent-death signal.
-                if libc::prctl(libc::PR_SET_PDEATHSIG, SIGKILL) < 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
+                kill_on_parent_death()
             });
         }
         cmd.args(args);
@@ -266,6 +281,140 @@ impl ExecParams {
                 lazy_format!("exec {command:?} in {workdir:?}"),
             )
         })
+    }
+
+    fn configure_env(
+        &self,
+        cmd: &mut StdCommand,
+        variables: impl IntoIterator<Item = (OsString, OsString)>,
+    ) -> Result<bool, Error> {
+        cmd.env_clear();
+        cmd.env(
+            "PATH",
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        );
+
+        let mut needs_home = true;
+
+        let mut update_env = |(key, value): (&str, Option<&str>)| {
+            needs_home &= key != "HOME";
+            if let Some(value) = value {
+                cmd.env(key, value);
+            } else if !key.is_empty() {
+                cmd.env_remove(key);
+            }
+        };
+        for line in std::fs::read_to_string("/etc/default/locale")
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| {
+                l.split_once('=')
+                    .is_none_or(|(_, v)| locale_available(&self.chroot, v))
+            })
+        {
+            update_env(parse_assignment(line));
+        }
+
+        if let Some(f) = &self.env_file {
+            let mut lines = BufReader::new(
+                File::open(&f).with_ctx(|_| (ErrorKind::Filesystem, format!("open r {f:?}")))?,
+            )
+            .lines();
+            while let Some(line) = lines.next().transpose()? {
+                update_env(parse_assignment(&line));
+            }
+        }
+
+        for (key, value) in parse_json_env(variables)? {
+            update_env((&key, value.as_deref()));
+        }
+
+        for line in &self.env {
+            update_env(parse_assignment(line));
+        }
+
+        Ok(needs_home)
+    }
+}
+
+#[cfg(test)]
+mod environment_tests {
+    use super::*;
+
+    #[test]
+    fn json_env_merges_between_file_and_cli_without_losing_multiline_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("image.env");
+        std::fs::write(
+            &file,
+            "KEPT=image\nOVERRIDE=image\nREMOVED=image\nCLI=image\n",
+        )
+        .unwrap();
+        let params = ExecParams::try_parse_from([
+            OsStr::new("exec"),
+            OsStr::new("--env-file"),
+            file.as_os_str(),
+            OsStr::new("--env=CLI=cli"),
+            OsStr::new("--env=UNSET"),
+            dir.path().as_os_str(),
+            OsStr::new("sh"),
+        ])
+        .unwrap();
+        let value = "first\nsecond=\"quoted\"\r\n";
+        let json = serde_json::json!({
+            "OVERRIDE": value,
+            "REMOVED": null,
+            "EMPTY": "",
+            "CLI": "json",
+            "UNSET": "json",
+        })
+        .to_string();
+        let (first, second) = json.split_at(json.len() / 2);
+        let mut cmd = StdCommand::new("/bin/sh");
+        assert!(
+            params
+                .configure_env(
+                    &mut cmd,
+                    [
+                        ("JSON_ENV_1".into(), second.into()),
+                        ("JSON_ENV_0".into(), first.into()),
+                    ]
+                )
+                .unwrap()
+        );
+        let env: std::collections::BTreeMap<_, _> = cmd.get_envs().collect();
+        assert_eq!(
+            env.get(OsStr::new("KEPT")),
+            Some(&Some(OsStr::new("image")))
+        );
+        assert_eq!(env.get(OsStr::new("CLI")), Some(&Some(OsStr::new("cli"))));
+        assert_eq!(env.get(OsStr::new("EMPTY")), Some(&Some(OsStr::new(""))));
+        assert!(!env.contains_key(OsStr::new("REMOVED")));
+        assert!(!env.contains_key(OsStr::new("UNSET")));
+        assert!(!env.contains_key(OsStr::new("JSON_ENV_0")));
+        assert!(!env.contains_key(OsStr::new("JSON_ENV_1")));
+        let output = cmd
+            .args(["-c", "printf '%s' \"$OVERRIDE\""])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, value.as_bytes());
+    }
+
+    #[test]
+    fn home_overrides_include_explicit_removal() {
+        let mut params = ExecParams::try_parse_from(["exec", "/unused", "sh"]).unwrap();
+        let mut cmd = StdCommand::new("sh");
+        assert!(params.configure_env(&mut cmd, []).unwrap());
+        for json in [r#"{"HOME":"/custom"}"#, r#"{"HOME":null}"#] {
+            assert!(
+                !params
+                    .configure_env(&mut cmd, [("JSON_ENV_0".into(), json.into())])
+                    .unwrap()
+            );
+        }
+        params.env.push("HOME".into());
+        assert!(!params.configure_env(&mut cmd, []).unwrap());
     }
 }
 
@@ -631,6 +780,7 @@ pub fn launch(
     } else {
         None
     };
+    let parent = open_pidfd(nix::unistd::getpid())?;
     nix::sched::unshare(CloneFlags::CLONE_NEWPID)
         .with_ctx(|_| (ErrorKind::Filesystem, "unshare pid ns"))?;
     nix::sched::unshare(CloneFlags::CLONE_NEWCGROUP)
@@ -643,6 +793,7 @@ pub fn launch(
         let (pty, pts) = pty_process::open().with_kind(ErrorKind::Filesystem)?;
         let mut cmd = pty_process::Command::new("/usr/bin/start-container");
         cmd = cmd.arg("subcontainer").arg("launch-init");
+        cmd = unsafe { cmd.pre_exec(move || kill_with_launcher(parent.as_fd())) };
         for env in env {
             cmd = cmd.arg("-e").arg(env)
         }
@@ -701,6 +852,7 @@ pub fn launch(
     } else {
         let mut cmd = StdCommand::new("/usr/bin/start-container");
         cmd.arg("subcontainer").arg("launch-init");
+        unsafe { cmd.pre_exec(move || kill_with_launcher(parent.as_fd())) };
         for env in env {
             cmd.arg("-e").arg(env);
         }
@@ -955,17 +1107,8 @@ pub fn exec(
             .with_ctx(|_| (ErrorKind::Filesystem, "waiting on child process"))?;
         stdout_thread.join().unwrap();
         stderr_thread.map(|t| t.join().unwrap());
-        if let Some(code) = exit.code() {
-            drop(raw);
-            std::process::exit(code);
-        } else if exit.success() {
-            Ok(())
-        } else {
-            Err(Error::new(
-                color_eyre::eyre::Report::msg(exit),
-                ErrorKind::Unknown,
-            ))
-        }
+        drop(raw);
+        std::process::exit(crate::service::exec::exit_code(exit));
     } else {
         let mut cmd = StdCommand::new("/usr/bin/start-container");
         cmd.arg("subcontainer").arg("exec-command");
@@ -991,16 +1134,7 @@ pub fn exec(
         let exit = child
             .wait()
             .with_ctx(|_| (ErrorKind::Filesystem, "waiting on child process"))?;
-        if let Some(code) = exit.code() {
-            std::process::exit(code);
-        } else if exit.success() || exit.signal() == Some(15) {
-            Ok(())
-        } else {
-            Err(Error::new(
-                color_eyre::eyre::Report::msg(exit),
-                ErrorKind::Unknown,
-            ))
-        }
+        std::process::exit(crate::service::exec::exit_code(exit));
     }
 }
 
@@ -1015,8 +1149,6 @@ pub fn pipe_wrap(
     _: ContainerCliContext,
     PipeWrapParams { command }: PipeWrapParams,
 ) -> Result<(), Error> {
-    use std::os::fd::AsRawFd;
-
     let Some(([program], args)) = command.split_at_checked(1) else {
         return Err(Error::new(
             eyre!("pipe-wrap: command cannot be empty"),

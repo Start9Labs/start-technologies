@@ -888,26 +888,9 @@ mod sat {
             }
         }
 
+        /// Goes through `and`, whose cross product puts both operands on a common flavor partition.
         fn or(a: Self, b: Self) -> Self {
-            match (a, b) {
-                (Tables::True, _) | (_, Tables::True) => Tables::True,
-                (Tables::False, x) | (x, Tables::False) => x,
-                (Tables::Map(am), Tables::Map(bm)) => {
-                    let mut out = am;
-                    for (flavor, table) in bm {
-                        match out.remove(&flavor) {
-                            Some(prev) => {
-                                let merged = Table::zip(&prev, &table, |x, y| x || y);
-                                out.insert(flavor, merged);
-                            }
-                            None => {
-                                out.insert(flavor, table);
-                            }
-                        }
-                    }
-                    Tables::Map(out)
-                }
-            }
+            Tables::and(a.not(), b.not()).not()
         }
 
         pub(super) fn satisfiable(&self) -> bool {

@@ -1,0 +1,1 @@
+- Zmiana profilu bezpieczeństwa portu Ethernet wymaga potwierdzenia i wyjaśnia, jak ponownie połączyć urządzenia, które utracą połączenie, na przykład podłączone przez przełącznik.

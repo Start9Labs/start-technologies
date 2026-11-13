@@ -4,7 +4,7 @@ import { Trigger } from '../trigger'
 import { TriggerInput } from '../trigger/TriggerInput'
 import { defaultTrigger } from '../trigger/defaultTrigger'
 import { Drop } from '@start9labs/start-core/util/Drop'
-import { isInGracePeriod } from './isInGracePeriod'
+import { isInGracePeriod, withGracePeriod } from './isInGracePeriod'
 
 /** Parameters for creating a health check */
 export type HealthCheckParams = {
@@ -67,19 +67,22 @@ export class HealthCheck extends Drop {
           race = [...race, trigger.next()]
           if (triggered === trigger) {
             try {
-              let { result, message } = await o.fn()
-              if (
-                result === 'failure' &&
-                isInGracePeriod(started, o.gracePeriod)
+              const health = await o.fn()
+              const displayedHealth = withGracePeriod(
+                health,
+                started,
+                o.gracePeriod,
               )
-                result = 'starting'
               await effects.setHealth({
+                ...displayedHealth,
                 name: o.name,
                 id: o.id,
-                result,
-                message: message || '',
               })
-              this.currentValue.lastResult = result
+              this.currentValue = {
+                lastResult: displayedHealth.result,
+                lastWaiting:
+                  'waiting' in displayedHealth && displayedHealth.waiting,
+              }
             } catch (e) {
               await effects.setHealth({
                 name: o.name,
@@ -89,7 +92,7 @@ export class HealthCheck extends Drop {
                   : 'failure',
                 message: asMessage(e) || '',
               })
-              this.currentValue.lastResult = 'failure'
+              this.currentValue = { lastResult: 'failure' }
             }
           }
         } else triggered = null
@@ -130,6 +133,5 @@ function asMessage(e: unknown) {
   if (typeof e === 'object' && e !== null && 'message' in e)
     return String((e as any).message)
   const value = String(e)
-  if (value.length == null) return null
   return value
 }

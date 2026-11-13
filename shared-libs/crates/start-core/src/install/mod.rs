@@ -1,5 +1,6 @@
 use std::ops::Deref;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws;
@@ -28,16 +29,20 @@ use crate::registry::package::get::GetPackageResponse;
 use crate::rpc_continuations::{Guid, RpcContinuation};
 use crate::s9pk::manifest::PackageId;
 use crate::s9pk::v2::SIG_CONTEXT;
+use crate::sign::SignatureMap;
+use crate::trusted_keys::{self, TrustContext};
 use crate::upload::upload;
 use crate::util::io::open_file;
 use crate::util::tui::choose;
 use crate::util::{FromStrParser, Never, VersionString};
 
+#[cfg(test)]
+mod trust_tests;
+
 pub const PKG_ARCHIVE_DIR: &str = "package-data/archive";
 pub const PKG_PUBLIC_DIR: &str = "package-data/public";
 pub const PKG_WASM_DIR: &str = "package-data/wasm";
 
-// #[command(display(display_serializable))]
 pub async fn list(ctx: RpcContext) -> Result<Vec<Value>, Error> {
     Ok(ctx
         .db
@@ -113,9 +118,13 @@ impl std::fmt::Display for MinMax {
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallParams {
+    pub accept_signers: Option<crate::registry::signer::AcceptSigners>,
     registry: Url,
     id: PackageId,
     version: VersionString,
+    /// Accepts an untrusted signer without skipping signature or integrity verification.
+    #[serde(default)]
+    pub trust: bool,
 }
 
 rpc_toolkit::reflect_ts!(InstallParams);
@@ -128,6 +137,8 @@ pub async fn install(
         registry,
         id,
         version,
+        trust,
+        accept_signers,
     }: InstallParams,
 ) -> Result<(), Error> {
     let package: GetPackageResponse = from_value(
@@ -159,7 +170,13 @@ pub async fn install(
             )
         })?;
 
-    asset.validate(SIG_CONTEXT, asset.all_signers())?;
+    let policy = trusted_keys::signer_policy(
+        trusted_keys::required(&ctx, TrustContext::Marketplace, trust).await?,
+    );
+    asset.validate_all(SIG_CONTEXT, policy)?;
+    if let Some(policy) = accept_signers {
+        asset.validate(SIG_CONTEXT, policy)?;
+    }
 
     let progress_tracker = FullProgressTracker::new();
     let download_progress = progress_tracker.add_phase("Downloading".into(), Some(100));
@@ -181,6 +198,13 @@ pub async fn install(
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SideloadParams {
+    pub accept_signers: Option<crate::registry::signer::AcceptSigners>,
+    /// DER64 supplemental signatures for the uploaded archive.
+    #[serde(default)]
+    pub signatures: SignatureMap,
+    /// Accepts an untrusted signer without skipping signature or integrity verification.
+    #[serde(default)]
+    trust: bool,
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
     signer: Option<InternedString>,
@@ -202,10 +226,15 @@ rpc_toolkit::ts_export!(SideloadResponse, namespaces = [""]);
 #[instrument(skip_all)]
 pub async fn sideload(
     ctx: RpcContext,
-    SideloadParams { signer }: SideloadParams,
+    SideloadParams {
+        signer,
+        trust,
+        accept_signers,
+        signatures,
+    }: SideloadParams,
 ) -> Result<SideloadResponse, Error> {
     let (err_send, err_recv) = oneshot::channel::<Error>();
-    // fused: the select! loop below re-polls this, which panics on a bare oneshot once resolved
+    // The progress loop can poll a resolved receiver again.
     let mut err_recv = err_recv.fuse();
     let progress = Guid::new();
     let progress_tracker = FullProgressTracker::new();
@@ -252,7 +281,7 @@ pub async fn sideload(
                                         ws.close_result(Err::<&str, _>(e.clone_output())).await?;
                                         return Err(e)
                                     }
-                                    // Err = sender dropped, install succeeded; keep streaming
+                                    // A dropped sender means installation succeeded.
                                 }
                             }
                         }
@@ -270,11 +299,30 @@ pub async fn sideload(
     tokio::spawn(async move {
         if let Err(e) = async {
             let key = ctx.db.peek().await.into_private().into_developer_key();
+            let server_policy = trusted_keys::signer_policy(
+                trusted_keys::required(&ctx, TrustContext::Marketplace, trust).await?,
+            );
+            let accepted = match (server_policy, accept_signers) {
+                (Some(server), Some(client)) => {
+                    Some(crate::registry::signer::AcceptSigners::All(vec![
+                        server, client,
+                    ]))
+                }
+                (server, client) => server.or(client),
+            };
 
             ctx.services
                 .install(
                     ctx.clone(),
-                    || crate::s9pk::load(file.clone(), || Ok(key.de()?.0), Some(&progress_tracker)),
+                    || {
+                        crate::s9pk::load_for_sideload(
+                            file.clone(),
+                            || Ok(key.de()?.0),
+                            Some(&progress_tracker),
+                            &signatures,
+                            accepted,
+                        )
+                    },
                     None,
                     None::<Never>,
                     Some(progress_tracker.clone()),
@@ -329,13 +377,25 @@ pub struct QueryPackageParams {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CliInstallParams {
-    Marketplace(QueryPackageParams),
-    Sideload(PathBuf),
+    Marketplace {
+        package: QueryPackageParams,
+        trust: bool,
+    },
+    Sideload {
+        path: PathBuf,
+        trust: bool,
+    },
 }
 impl CommandFactory for CliInstallParams {
     fn command() -> clap::Command {
         use clap::{Arg, Command};
         Command::new("install")
+            .arg(
+                Arg::new("trust")
+                    .long("trust")
+                    .action(clap::ArgAction::SetTrue)
+                    .help("help.arg.trust"),
+            )
             .arg(
                 Arg::new("sideload")
                     .long("sideload")
@@ -363,12 +423,17 @@ impl CommandFactory for CliInstallParams {
 }
 impl FromArgMatches for CliInstallParams {
     fn from_arg_matches(matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
+        let trust = matches.get_flag("trust");
         if let Some(sideload) = matches.get_one::<PathBuf>("sideload") {
-            Ok(Self::Sideload(sideload.clone()))
+            Ok(Self::Sideload {
+                path: sideload.clone(),
+                trust,
+            })
         } else {
-            Ok(Self::Marketplace(QueryPackageParams::from_arg_matches(
-                matches,
-            )?))
+            Ok(Self::Marketplace {
+                package: QueryPackageParams::from_arg_matches(matches)?,
+                trust,
+            })
         }
     }
     fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
@@ -422,17 +487,17 @@ pub async fn cli_install(
 ) -> Result<(), RpcError> {
     let method = parent_method.into_iter().chain(method).collect_vec();
     match params {
-        CliInstallParams::Sideload(path) => {
+        CliInstallParams::Sideload { path, trust } => {
+            let params = local_sideload_params(&path, trust).await?;
             let file = open_file(path).await?;
 
-            // rpc call remote sideload
             let SideloadResponse { upload, progress } = from_value::<SideloadResponse>(
                 ctx.call_remote::<RpcContext>(
                     &method[..method.len() - 1]
                         .into_iter()
                         .chain(std::iter::once(&"sideload"))
                         .join("."),
-                    imbl_value::json!({}),
+                    to_value(&params)?,
                 )
                 .await?,
             )?;
@@ -496,7 +561,10 @@ pub async fn cli_install(
             progress?;
             upload?;
         }
-        CliInstallParams::Marketplace(QueryPackageParams { id, version }) => {
+        CliInstallParams::Marketplace {
+            package: QueryPackageParams { id, version },
+            trust,
+        } => {
             let registry = ctx
                 .registry_url
                 .as_ref()
@@ -553,12 +621,41 @@ pub async fn cli_install(
                     id,
                     registry,
                     version,
+                    trust,
+                    accept_signers: None,
                 })?,
             )
             .await?;
         }
     }
     Ok(())
+}
+
+async fn local_sideload_params(path: &PathBuf, trust: bool) -> Result<SideloadParams, Error> {
+    use crate::registry::signer::AcceptSigners;
+    use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
+
+    let mut params = SideloadParams {
+        accept_signers: None,
+        signatures: SignatureMap::new(),
+        trust,
+        signer: None,
+    };
+    let source = Arc::new(MultiCursorFile::from(open_file(path).await?));
+    if crate::s9pk::is_v1(&source).await? {
+        return Ok(params);
+    }
+    let package = crate::s9pk::S9pk::deserialize_local(&source, None).await?;
+    let signatures = package.signatures().await?;
+    params.accept_signers = Some(AcceptSigners::Any(
+        signatures
+            .keys()
+            .cloned()
+            .map(AcceptSigners::Signer)
+            .collect(),
+    ));
+    params.signatures = signatures;
+    Ok(params)
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]

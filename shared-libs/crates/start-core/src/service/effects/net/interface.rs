@@ -170,19 +170,9 @@ fn remove_interface_records(
     Ok(())
 }
 
-/// Single-port service interface lookup, scanning every binding of every host
-/// for `service_interface_id`. Range interfaces are intentionally excluded —
-/// they have no addressable `AddressInfo` and are read off the host model.
-fn find_service_interface(hosts: &Hosts, id: &ServiceInterfaceId) -> Option<ServiceInterface> {
-    hosts
-        .0
-        .values()
-        .flat_map(|host| host.bindings.values())
-        .find_map(|bind| bind.interfaces.get(id).cloned())
-}
-
-/// Like [`find_service_interface`] but also returns the `(host, internal port)`
-/// the interface lives under, so the watch can be scoped to that one node.
+/// Single-port service interface lookup, with the `(host, internal port)` the
+/// interface lives under. Range interfaces are excluded; they have no
+/// addressable `AddressInfo` and are read off the host model.
 fn find_service_interface_location(
     hosts: &Hosts,
     id: &ServiceInterfaceId,

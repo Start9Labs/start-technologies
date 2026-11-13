@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use axum::Router;
+use axum::extract::Request;
+use axum::http::{StatusCode, Uri};
+use axum::response::Redirect;
 use futures::future::ready;
 use imbl_value::InternedString;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, Server, from_fn_async};
@@ -9,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::context::CliContext;
 use crate::middleware::auth::Auth;
 use crate::middleware::cors::Cors;
+use crate::net::http::request_authority;
 use crate::net::static_server::{bad_request, not_found, server_error};
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
@@ -66,6 +70,8 @@ pub struct FullIndex {
     pub package: PackageIndex,
     pub os: OsIndex,
     pub signers: BTreeMap<Guid, SignerInfo>,
+    #[serde(default)]
+    pub trust_signers: BTreeSet<Guid>,
 }
 
 rpc_toolkit::reflect_ts!(FullIndex);
@@ -88,7 +94,6 @@ pub fn registry_api<C: Context>() -> ParentHandler<C> {
             "info",
             info::info_api::<C>().with_about("about.commands-registry-info"),
         )
-        // set info and categories
         .subcommand(
             "os",
             os::os_api::<C>().with_about("about.commands-os-assets-versions"),
@@ -111,10 +116,46 @@ pub fn registry_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
+async fn marketplace_redirect(req: Request) -> Result<Redirect, StatusCode> {
+    let scheme = req
+        .headers()
+        .get("x-forwarded-proto")
+        .map(|value| value.to_str())
+        .transpose()
+        .map_err(|_| StatusCode::BAD_REQUEST)?
+        .or(req.uri().scheme_str())
+        .unwrap_or("http");
+    if !matches!(scheme, "http" | "https") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let authority = request_authority(&req).ok_or(StatusCode::BAD_REQUEST)?;
+    let registry = Uri::builder()
+        .scheme(scheme)
+        .authority(authority)
+        .path_and_query("/")
+        .build()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let mut marketplace = url::Url::parse("https://marketplace.start9.com/").unwrap();
+    marketplace
+        .query_pairs_mut()
+        .append_pair("registry", &registry.to_string());
+    Ok(Redirect::temporary(marketplace.as_str()))
+}
+
 pub fn registry_router(ctx: RegistryContext) -> Router {
     use axum::extract as x;
     use axum::routing::{any, get};
     Router::new()
+        .route("/", get(marketplace_redirect))
+        .route(
+            "/os/security",
+            get({
+                let db = ctx.security_feed.as_ref().map(|feed| feed.db.clone());
+                move |ws: axum::extract::ws::WebSocketUpgrade| async move {
+                    os::security::upgrade(ws, db.clone())
+                }
+            }),
+        )
         .route("/rpc/{*path}", {
             let ctx = ctx.clone();
             any(

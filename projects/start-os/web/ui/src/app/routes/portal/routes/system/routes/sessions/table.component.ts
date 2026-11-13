@@ -21,7 +21,7 @@ import { i18nPipe } from '@start9labs/shared'
     <table
       [appTable]="
         single()
-          ? ['User Agent', 'Platform', 'Last Active']
+          ? ['Name', 'Platform', 'Last Active']
           : ['Platform', 'Last Active']
       "
       [appTableSelected]="selected().length"
@@ -55,7 +55,7 @@ import { i18nPipe } from '@start9labs/shared'
               <span class="count">{{ count }} {{ 'selected' | i18n }}</span>
             </span>
           } @else {
-            {{ 'User Agent' | i18n }}
+            {{ 'Name' | i18n }}
           }
         </th>
       }
@@ -78,9 +78,11 @@ import { i18nPipe } from '@start9labs/shared'
                 (ngModelChange)="onToggle(session)"
               />
             }
-            <div tuiFade class="agent">{{ session.userAgent || '-' }}</div>
+            <div tuiFade class="agent">
+              {{ session.name || session.userAgent || '-' }}
+            </div>
           </td>
-          @if (session.userAgent | platformInfo; as platform) {
+          @if (session | platformInfo; as platform) {
             <td class="platform">
               <tui-icon [icon]="platform.icon" />
               {{ platform.name }}
@@ -186,12 +188,12 @@ import { i18nPipe } from '@start9labs/shared'
     i18nPipe,
   ],
 })
-export class SessionsTableComponent<S extends T.Session> implements OnChanges {
-  readonly sessions = input<readonly S[] | null>(null)
+export class SessionsTableComponent implements OnChanges {
+  readonly sessions = input<readonly SessionWithId[] | null>(null)
   readonly single = input(false)
   readonly terminateSelected = output()
 
-  readonly selected = signal<readonly S[]>([])
+  readonly selected = signal<readonly SessionWithId[]>([])
   readonly all = computed(
     () =>
       !!this.selected()?.length &&
@@ -202,11 +204,16 @@ export class SessionsTableComponent<S extends T.Session> implements OnChanges {
     this.selected.set([])
   }
 
-  onToggle(session: S) {
+  onToggle(session: SessionWithId) {
     if (this.selected().includes(session)) {
       this.selected.update(selected => selected.filter(s => s !== session))
     } else {
       this.selected.update(selected => [...selected, session])
     }
   }
+}
+
+export interface SessionWithId extends T.Session {
+  id: string
+  kind: 'pubkey' | 'token'
 }
