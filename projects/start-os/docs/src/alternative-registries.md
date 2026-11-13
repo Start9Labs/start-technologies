@@ -29,4 +29,4 @@ Do not add this registry unless you intend to run that chain and understand that
 
 ## Hosting an Alternative Registry
 
-Install the "StartOS Registry" service from the Marketplace and follow instructions.
+Install the "StartOS Registry" service from the Marketplace and follow instructions. Opening your registry's URL in a browser shows it on [marketplace.start9.com](marketplace.md#browsing-without-a-server), where visitors can browse it and save it to their browser.

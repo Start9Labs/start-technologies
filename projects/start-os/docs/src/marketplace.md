@@ -16,6 +16,10 @@ StartOS ships with two [default registries](default-registries.md): the **Start9
 - **Use for StartOS updates** makes the registry the source of StartOS updates and trusts its keys for StartOS updates. StartOS first checks that the registry publishes StartOS updates, and warns before using any registry other than the Start9 Registry.
 - **Remove** removes the registry. Afterward, StartOS offers to remove the keys it added that no connected registry still offers. The registry that provides StartOS updates cannot be removed until you choose another. **Remove** isn't offered for the Start9 Registry and the Community Registry; disconnect either with [`start-cli server registries remove`](cli-reference.md#start-cli-server-registries-remove-url).
 
+## Browsing Without a Server
+
+[marketplace.start9.com](https://marketplace.start9.com) shows the same Marketplace in any browser, with no server required. Opening a registry's own URL in a browser lands there with that registry selected. Its registry selector keeps its own list of saved registries, stored in that browser only. **Add** saves a registry by URL, and selecting a registry you opened by link saves that one. The trash icon beside a saved registry removes it from the list. Neither saving nor removing changes the registry itself or any server.
+
 ## Package Signers
 
 Package details include a **Signed by** section listing every key that signed the package: a green check for a key you trust for packages, a red X for a key you know but do not trust, and a gray dash with the key's fingerprint for a key your server does not know. Select a key to see its details and trust or distrust it for packages or StartOS updates; an unknown key needs a label first. Confirm a key's fingerprint through a source you already trust before trusting it. When no trusted signer matches, a warning appears, and installing asks you to confirm the risks first. Manage individual keys and their package and StartOS-update trust under **System → [Trusted Keys](trusted-keys.md)**.
