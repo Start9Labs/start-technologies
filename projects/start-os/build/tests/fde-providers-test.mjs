@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import test from 'node:test'
 
+import { inspectSourceElf } from '../lib/scripts/fde-initramfs-dependencies.mjs'
 import { prepareNativeHooks } from '../lib/scripts/fde-initramfs-hooks.mjs'
 import { requireNativeHookFunctions } from '../lib/scripts/fde-initramfs-producer.mjs'
 import { runSource } from '../lib/scripts/fde-reviewed-source.mjs'
@@ -255,6 +256,22 @@ for (const [name, mutate, pattern] of [
     assert.deepEqual(await references(), before)
   })
 }
+
+test('native source trace rejects a genuine runtime binary with unresolved dependencies', async () => {
+  const result = await runSource('/usr/bin/ldd', ['/node-runtime/usr/bin/node'])
+  assert.match(result.stdout, /libnode\.so\.115 => not found/)
+  await assert.rejects(
+    inspectSourceElf('/node-runtime/usr/bin/node'),
+    /Source ELF dependency is unresolved/,
+  )
+})
+
+test('source commands propagate native nonzero exit status', async () => {
+  await assert.rejects(
+    runSource('/usr/bin/false', []),
+    error => error.code === 1,
+  )
+})
 
 test('source commands exclude inherited loader and diagnostic overrides', async () => {
   const previous = process.env.TSS2_LOG

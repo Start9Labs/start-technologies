@@ -26,6 +26,29 @@ async function isElf(source) {
 }
 
 /**
+ * Returns interpreter metadata after checking declared source ELF dependencies with the native loader.
+ * The source is already authenticated; never supply a candidate.
+ */
+export async function inspectSourceElf(source) {
+  if (!(await isElf(source))) return
+  const { stdout } = await runSource('/usr/bin/readelf', [
+    '--program-headers',
+    '--dynamic',
+    '--wide',
+    source,
+  ])
+  if (/\(NEEDED\)/.test(stdout)) {
+    // Native copy_exec does not propagate ldd failures.
+    const trace = await runSource('/usr/bin/ldd', [source])
+    if (`${trace.stdout}\n${trace.stderr}`.includes('not found'))
+      throw Error(`Source ELF dependency is unresolved: ${source}`)
+  }
+  return [
+    ...stdout.matchAll(/\[Requesting program interpreter: ([^\]\n]+)\]/g),
+  ].map(match => match[1])
+}
+
+/**
  * Checks native copy_exec-selected ELF dependencies and interpreter paths after provider admission.
  * Source inputs and candidate remain stable. Firmware, loader configuration and runtime plugins retain separate obligations.
  */
@@ -35,18 +58,11 @@ export async function admitNativeDependencies(root, sources) {
   requireNativeHookFunctions(functions)
   const inputs = new Set()
   for (const source of sources) {
-    if (source.startsWith('/usr/lib/firmware/') || !(await isElf(source)))
-      continue
+    if (source.startsWith('/usr/lib/firmware/')) continue
+    const interpreters = await inspectSourceElf(source)
+    if (!interpreters) continue
     inputs.add(source)
-    const { stdout } = await runSource('/usr/bin/readelf', [
-      '--program-headers',
-      '--wide',
-      source,
-    ])
-    for (const match of stdout.matchAll(
-      /\[Requesting program interpreter: ([^\]\n]+)\]/g,
-    )) {
-      const interpreter = match[1]
+    for (const interpreter of interpreters) {
       const original = await publicSourcePath(interpreter)
       if ((await realpath(join(root, interpreter))) !== join(root, original))
         throw Error(`Copied ELF interpreter differs: ${source}`)
