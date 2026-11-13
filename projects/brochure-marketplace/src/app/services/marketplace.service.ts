@@ -65,6 +65,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
   // Emits the url of a registry that failed to load (unreachable / CORS).
   readonly registryError$ = new Subject<string>()
 
+  // The custom slot retains the last successfully loaded non-default registry.
   private readonly custom$ = new BehaviorSubject(
     this.read<StoreIdentity>(CUSTOM_KEY),
   )
@@ -81,7 +82,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   private readonly fetched = new Map<string, StoreDataWithUrl>()
 
-  // Fetches any url, so a deep link to a custom registry loads.
   readonly currentRegistry$: Observable<StoreDataWithUrl> =
     this.currentRegistryUrl$.pipe(
       distinctUntilChanged((a: string, b: string) => sameUrl(a, b)),

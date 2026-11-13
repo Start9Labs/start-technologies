@@ -1,5 +1,5 @@
 import { NgTemplateOutlet } from '@angular/common'
-import { Component, inject, input } from '@angular/core'
+import { Component, computed, inject, input } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { Router, RouterLink } from '@angular/router'
 import {
@@ -19,7 +19,7 @@ import {
   TuiTitle,
 } from '@taiga-ui/core'
 import { TuiAvatar, TuiFade } from '@taiga-ui/kit'
-import { combineLatest, defaultIfEmpty, firstValueFrom, map } from 'rxjs'
+import { combineLatest, defaultIfEmpty, firstValueFrom } from 'rxjs'
 
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreIconDirective } from './store-icon.directive'
@@ -171,41 +171,47 @@ export class MarketplaceRegistrySelectComponent {
 
   protected readonly fetched = toSignal(this.marketplace.currentRegistry$)
 
-  protected readonly data = toSignal(
+  private readonly selection = toSignal(
     combineLatest([
       this.marketplace.registries$,
       this.marketplace.currentRegistryUrl$,
-    ]).pipe(
-      map(([registries, currentUrl]) => {
-        const withSelected = registries.map(s => ({
-          ...s,
-          selected: sameUrl(s.url, currentUrl),
-        }))
-
-        const current = withSelected.find(s => s.selected)
-        const custom = withSelected.filter(s => !isDefaultRegistry(s.url))
-
-        return {
-          currentUrl,
-          current,
-          standard: withSelected.filter(s => isDefaultRegistry(s.url)),
-          custom: current
-            ? custom
-            : [
-                ...(this.manageRegistriesLink() ? custom : []),
-                { url: currentUrl, name: currentUrl, selected: true },
-              ],
-        }
-      }),
-    ),
+    ]),
   )
 
-  async connect(url: string): Promise<void> {
+  // StartOS keeps saved registries selectable alongside an unsaved selection.
+  protected readonly data = computed(() => {
+    const selection = this.selection()
+    if (!selection) return
+
+    const [registries, currentUrl] = selection
+    const withSelected = registries.map(s => ({
+      ...s,
+      selected: sameUrl(s.url, currentUrl),
+    }))
+
+    const current = withSelected.find(s => s.selected)
+    const custom = withSelected.filter(s => !isDefaultRegistry(s.url))
+
+    return {
+      currentUrl,
+      current,
+      standard: withSelected.filter(s => isDefaultRegistry(s.url)),
+      custom: current
+        ? custom
+        : [
+            ...(this.manageRegistriesLink() ? custom : []),
+            { url: currentUrl, name: currentUrl, selected: true },
+          ],
+    }
+  })
+
+  async connect(rawUrl: string): Promise<void> {
     this.open = false
 
-    if (sameUrl(url, this.data()?.currentUrl)) return
+    if (sameUrl(rawUrl, this.data()?.currentUrl)) return
 
     this.tasks.run(async () => {
+      const url = registryUrl(rawUrl)
       await this.marketplace.connect(url)
       this.router.navigate([], {
         queryParams: { registry: url },
@@ -232,6 +238,6 @@ export class MarketplaceRegistrySelectComponent {
         .pipe(defaultIfEmpty('')),
     )
 
-    if (rawUrl) this.connect(registryUrl(rawUrl))
+    if (rawUrl) this.connect(rawUrl)
   }
 }
