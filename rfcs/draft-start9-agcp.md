@@ -101,8 +101,8 @@ host. Commands are JSON-RPC 2.0 over encrypted WebSocket sessions. AGCP
 carries the self-provisioning model of the Port Control Protocol (PCP) to
 an authenticated transport, and a gateway
 that implements AGCP alongside PCP, UPnP IGD, or DNS UPDATE refuses those
-protocols from any host that has enrolled with AGCP. A host uses AGCP
-whenever its gateway supports it, regardless of whether enrollment succeeds.
+protocols from any host that has enrolled with AGCP. Once the gateway
+confirms AGCP support, the host uses AGCP regardless of enrollment success.
 
 --- middle
 
@@ -151,16 +151,20 @@ protocol {{START-RPC-SESSION}}.
    ({{ownership}}). Where a grant claims a resource hosts share (an
    external port, a server name, a DNS name), operator policy and quotas
    bound what one host can claim ({{policy}}).
-2. Cryptographic identity. A host's authority follows its key, not its
-   address; forging a host's address grants nothing.
+2. Cryptographic identity. An enrollment's authority follows its key,
+   not its address. Address attribution on shared links has separate
+   limitations ({{security}}).
 3. Implementability. Reuse the shared signed RPC session protocol and its
    WebSocket transport, identity proofs, encryption, and replay checks.
    No AAA infrastructure or client certificates are needed.
 4. PCP compatibility. The mapping model is a superset of PCP MAP's, so a
    gateway can serve both protocols from one set of mapping state, and a
    host can fall back to PCP on gateways that do not implement AGCP.
-5. No downgrade. A client uses AGCP whenever its gateway supports it;
-   refusal or failure never selects a weaker protocol ({{coexistence}}).
+5. No downgrade. Once AGCP support is confirmed, refusal or failure never
+   selects a weaker protocol ({{coexistence}}).
+6. Plug and play. Operators enable or disable network-control features;
+   normal enrollment and address attribution MUST NOT require manual key
+   comparison or address assignment. SLAAC hosts are supported.
 
 Administration of the gateway itself (configuring its interfaces, its
 users, or grants on behalf of other hosts) is out of scope.
@@ -213,14 +217,15 @@ state.
 
 This section is informative.
 
-1. The host discovers the gateway's AGCP endpoint ({{discovery}}), records
-   its support ({{gateway-records}}), and opens `/agcp/v1` over WebSocket.
-   The host and gateway complete signed-session admission, proving
-   possession of their signing keys and deriving fresh directional
-   encryption keys ({{transport}}).
-2. The gateway determines the connection's binding from its own view of
-   the network ({{bindings}}): the neighbor-table entry for the source
-   address on a link, or the tunnel peer that carried it.
+1. The host discovers a candidate endpoint ({{discovery}}) and opens
+   `/agcp/v1` over WebSocket to the selected gateway's address. The host
+   and gateway complete signed-session admission, proving possession of
+   their signing keys and deriving fresh directional encryption keys
+   ({{transport}}). An AGCP result or error then confirms support, which
+   the host records independently of enrollment ({{gateway-records}}).
+2. The gateway determines the connection's binding from its own verified
+   address-to-attachment attribution or the tunnel peer that carried it
+   ({{bindings}}).
 3. The host calls `enrollment.enroll`. If the binding is permitted to use
    AGCP and has no enrolled identity, the gateway enrolls the presented
    identity (trust on first use), records it, and removes any state the
@@ -341,9 +346,12 @@ never from anything the client asserts:
 
 Link binding:
 : for a connection from a directly attached link, the link-layer address
-the gateway's neighbor table holds for the connection's source address,
-on the interface the connection arrived on. A source address with no
-neighbor entry on the arrival interface has no link binding.
+the gateway attributes to the source address on the arrival interface.
+IPv6 attribution follows {{ipv6-attribution}}, including retained history
+and automatic verification when an entry is missing or changes. A raw
+neighbor-cache snapshot is not the binding's authority. If the gateway
+cannot attribute the address after automatic resolution, the connection
+has no link binding.
 
 Tunnel binding:
 : for a connection carried by a tunnel whose encapsulation authenticates
@@ -408,13 +416,18 @@ several interfaces); each is enrolled independently.
 
 ## Known AGCP Gateways {#gateway-records}
 
-When a client learns that a gateway supports AGCP, it MUST record that
-support durably, regardless of whether the client is permitted or enrolled.
-An advertised or configured AGCP endpoint, or an AGCP reply including an
-authorization error, establishes support. The record identifies the
-gateway's attachment: its link-layer address on the link the client reaches
-it through, or its authenticated tunnel peer identity. It does not pin the
-gateway's signing key.
+A client confirms AGCP support only after completing signed-session
+admission to the selected gateway's actual address and receiving a valid
+AGCP method result or an AGCP-defined error ({{errors}}), including an
+authorization refusal. A generic HTTP, WebSocket, or JSON-RPC failure is
+not confirmation. The client MUST then record support durably, regardless
+of whether it is permitted or enrolled. Advertisements, configured
+endpoint hints, and unanswered probes MUST NOT by themselves create this
+record ({{discovery}}).
+
+The record identifies the gateway's attachment: its link-layer address on
+the selected link, or its authenticated tunnel peer identity. It does not
+pin the gateway's signing key.
 
 A recorded gateway MUST be contacted through AGCP ({{coexistence-client}}).
 Key changes, refusals, connection failures, and NOT_ENROLLED replies MUST
@@ -433,16 +446,48 @@ The gateway attributes owned addresses to each binding from its own state:
 
 - for a link binding, the IPv4 addresses the gateway has leased or
   reserved for the binding's link-layer address, and the IPv6 addresses
-  within prefixes the gateway routes whose neighbor entries resolve to
-  that link-layer address;
+  attributed to that binding under {{ipv6-attribution}} within prefixes
+  the gateway routes;
 - for a tunnel binding, the addresses the gateway routes to that peer.
 
 Every grant targets one or more owned addresses. A request naming a target
 address that is not owned by the caller's binding MUST fail with
-NOT_OWNED. When an address ceases to be owned (a lease released or
-reassigned, a neighbor entry resolving elsewhere), the gateway MUST remove
-the grants that target it, as PCP requires for mappings whose internal
-address is released ({{Section 15 of RFC6887}}, {{Section 5.10 of RFC6970}}).
+NOT_OWNED, after any automatic verification required below. When an
+address is released, its routed prefix is withdrawn, or reassignment is
+confirmed, the gateway MUST remove grants that target it before assigning
+it to another binding, as PCP requires for released internal addresses
+({{Section 15 of RFC6887}}, {{Section 5.10 of RFC6970}}).
+
+### IPv6 Attribution {#ipv6-attribution}
+
+The gateway's address tracker owns IPv6 attribution. It MUST automatically
+learn and verify addresses, including SLAAC addresses, without requiring
+manual assignment or a separate address-registration action. Each address
+on an interface MUST be attributed to at most one binding.
+
+Neighbor observations supply candidates, not immediate ownership changes.
+Before admitting a newly observed address or reassigning an existing one,
+the gateway MUST corroborate the candidate's association with the binding
+through automatic active verification on the arrival link or a stronger
+network-attribution source. An unsolicited Neighbor Advertisement or a
+raw cache update alone MUST NOT establish, move, or withdraw attribution.
+Active reachability verification is not cryptographic proof of address
+ownership ({{security}}).
+
+The gateway MUST retain verified attribution for live grants across
+neighbor-cache aging, garbage collection, and gateway restart. Missing,
+STALE, or changed cache entries trigger automatic probing; they MUST NOT
+alone remove grants or transfer ownership. An inconclusive probe does not
+confirm reassignment; existing grants retain their leases. Verification
+MUST continue automatically while grants reference the address.
+
+When a request targets an address whose attribution is unknown, the
+gateway MUST attempt automatic resolution and verification before
+returning NOT_OWNED. It MUST NOT require the host to generate unrelated
+traffic to repopulate the neighbor cache. Confirmed reassignment withdraws
+the previous binding's grants before the new attribution takes effect.
+Gateways SHOULD reuse their existing persistent history and probe
+facilities, with the verification and exclusivity requirements above.
 
 ## Capabilities, Policy, and Quotas {#policy}
 
@@ -531,8 +576,10 @@ caller.
 : an object with `maxLifetime` (seconds), `maxBatch` (the connection's
 pending-call limit, {{jsonrpc}}), the per-kind quotas
 `maxMappings`, `maxSniRoutes`, `maxPinholes`, `maxFilters`, and
-`maxDnsRecords`, and `dnsDomains`, the domains the operator grants the
-enrollment for DNS records ({{dns-records}}).
+`maxDnsRecords`, and `dnsDomains`, any domain-scope grants the gateway
+advertises for DNS records ({{dns-records}}). An empty `dnsDomains` array
+does not rule out names authorized by other implementation-specific
+policy; the gateway decides authorization on each DNS request.
 
 ## enrollment.enroll {#m-enroll}
 
@@ -785,20 +832,17 @@ records and IPv6 addresses as AAAA records.
 
 Result: `id`, `name`, `lifetime`, and `epoch`.
 
-The gateway MUST refuse, with NOT_PERMITTED, a name its policy does not
-permit the enrollment to publish. That policy is the operator's, per
-enrollment, and is drawn from:
+The gateway implementation defines which names each enrollment may
+redirect in its resolver; AGCP prescribes neither an authorized domain
+set nor a default SNI-based policy. The `dns-record` capability permits
+requests but does not guarantee authorization for a particular name.
+SNI routes are not proof of DNS-name ownership ({{security}}).
 
-- names that one of the enrollment's SNI routes ({{sni-routes}})
-  matches;
-- names at or below domains the operator grants the enrollment; granting
-  the root permits any name.
-
-Gateways SHOULD by default permit only the first. A record whose name
-the policy no longer permits, for example because the SNI route that
-permitted it ended, is removed ({{policy}}). If another enrollment
-holds a DNS record grant for the same name, the call fails with
-NAME_TAKEN.
+A request to redirect an unauthorized name MUST fail with NOT_PERMITTED
+(code 1009, `data.kind` equal to `"NOT_PERMITTED"`), without creating or
+changing a record. A record whose name policy no longer permits is
+removed ({{policy}}). If another enrollment holds a DNS record grant for
+the same name, the call fails with NAME_TAKEN.
 
 While a grant exists, the gateway answers every query for its name from
 the grant, and answers queries for record types the grant does not carry
@@ -868,18 +912,18 @@ AGCP errors use the following JSON-RPC error codes. The error object's
 `data` member MUST be an object whose `kind` member carries the name
 below, and MAY carry further detail.
 
-| Code | Name                    | Meaning                                                                         |
-| ---- | ----------------------- | ------------------------------------------------------------------------------- |
-| 1001 | NOT_AUTHORIZED          | The connection has no binding, or the binding is not permitted to enroll.       |
-| 1002 | NOT_ENROLLED            | The identity is not enrolled for this binding.                                  |
-| 1003 | ENROLLMENT_PENDING      | The identity awaits operator approval.                                          |
-| 1004 | NOT_OWNED               | A target address is not owned by the binding.                                   |
-| 1005 | CANNOT_PROVIDE_EXTERNAL | The gateway cannot provide the requested external address or port.              |
-| 1006 | HOSTNAME_TAKEN          | A requested server name is held by another enrollment.                          |
-| 1007 | NAME_TAKEN              | A DNS name is held by another enrollment.                                       |
-| 1008 | UNSUPPORTED             | The request needs a capability the enrollment lacks.                            |
-| 1009 | NOT_PERMITTED           | The operator's policy forbids the request within the enrollment's capabilities. |
-| 1010 | QUOTA_EXCEEDED          | The request exceeds a limit reported in `gateway.info`.                         |
+| Code | Name                    | Meaning                                                                   |
+| ---- | ----------------------- | ------------------------------------------------------------------------- |
+| 1001 | NOT_AUTHORIZED          | The connection has no binding, or the binding is not permitted to enroll. |
+| 1002 | NOT_ENROLLED            | The identity is not enrolled for this binding.                            |
+| 1003 | ENROLLMENT_PENDING      | The identity awaits operator approval.                                    |
+| 1004 | NOT_OWNED               | A target address is not owned by the binding.                             |
+| 1005 | CANNOT_PROVIDE_EXTERNAL | The gateway cannot provide the requested external address or port.        |
+| 1006 | HOSTNAME_TAKEN          | A requested server name is held by another enrollment.                    |
+| 1007 | NAME_TAKEN              | A DNS name is held by another enrollment.                                 |
+| 1008 | UNSUPPORTED             | The request needs a capability the enrollment lacks.                      |
+| 1009 | NOT_PERMITTED           | Gateway policy forbids the request, including an unauthorized DNS name.   |
+| 1010 | QUOTA_EXCEEDED          | The request exceeds a limit reported in `gateway.info`.                   |
 
 Every AGCP method other than `gateway.info`, `enrollment.enroll`, and
 `enrollment.status` fails with NOT_ENROLLED or ENROLLMENT_PENDING for a
@@ -890,20 +934,26 @@ caller that is not enrolled.
 Gateways advertise AGCP by DNS-Based Service Discovery {{RFC6763}}, with
 service type `_agcp._tcp`, over Multicast DNS {{RFC6762}} on their
 attached links and MAY also answer it through their unicast DNS service.
-The SRV record gives the target hostname and port. The TXT record MUST
+The SRV record suggests a target hostname and port. The TXT record MUST
 carry `v=1` and MAY carry `fp=` with the gateway's fingerprint. The endpoint
 is `ws://` at path `/agcp/v1`; configured endpoints MAY include a deployment
-prefix. The selected target hostname is the signed-session signing
-context, and the gateway MUST accept that name under its ingress policy.
+prefix. The target hostname supplies the signed-session signing context,
+and the gateway MUST accept that name under its ingress policy.
 
-Discovery hints are unauthenticated. A client MUST NOT treat the TXT
-fingerprint as gateway authentication. Missing or changed advertisements
-MUST NOT erase recorded AGCP support ({{gateway-records}}).
+The client selects its gateway's actual address and outgoing interface
+from local routing state, or from the configuration of its authenticated
+tunnel peer. It MUST connect to that address, preserving the selected
+hostname as the signing context. An SRV/A/AAAA answer MUST NOT replace
+the selected gateway address with another host. Gateways MAY additionally
+provide endpoint hints by configuration, for example alongside a tunnel's
+peer configuration.
 
-A client selects the gateway that is its default router on the link, or
-the tunnel peer that routes its traffic. Gateways MAY additionally provide
-the endpoint by configuration, for example alongside a tunnel's peer
-configuration.
+Advertisements and endpoint hints are unauthenticated candidates, not
+confirmation of support or gateway identity. The client MUST receive an
+AGCP reply after completed admission to the selected gateway before
+recording support ({{gateway-records}}). A failed probe prompted by an
+unconfirmed hint creates no durable no-fallback record. Missing or changed
+advertisements MUST NOT erase previously confirmed support.
 
 A PCP server MAY also signal AGCP support in its responses by an
 implementation-specific option. Neither the presence nor the absence of
@@ -935,15 +985,17 @@ Mappings and records created by the operator are unaffected.
 
 ## Client Behavior {#coexistence-client}
 
-A client MUST use AGCP whenever its gateway supports it, whether or not
-the client has enrolled or is authorized. It MUST NOT use any protocol of
-{{coexistence-gateway}} toward a gateway known to support AGCP
+A client MUST use AGCP once its gateway's support is confirmed, whether
+or not the client has enrolled or is authorized. It MUST NOT use any
+protocol of {{coexistence-gateway}} toward a gateway known to support AGCP
 ({{gateway-records}}). Refusal, pending enrollment, NOT_ENROLLED, and
 transport failure MUST be reported rather than trigger fallback.
 
-A client MAY use those protocols only toward gateways that do not support
-AGCP. An AGCP refusal or failed connection is not evidence that the
-protocol is unsupported.
+Before AGCP support is confirmed, an unconfirmed hint or unanswered probe
+MUST NOT by itself prohibit legacy discovery or provisioning. Once
+support is confirmed, an AGCP refusal or failed connection never enables
+fallback. In particular, an AGCP authorization error confirms protocol
+support; it is not an indication to try PCP or UPnP.
 
 # Security Considerations {#security}
 
@@ -959,10 +1011,11 @@ pending identity for an already enrolled binding. The permission of
 and gateways MAY require operator approval of every enrollment.
 
 After enrollment:
-: A forged address gains nothing: AGCP requires the enrolled key, and the
-gateway refuses the other provisioning protocols for the binding
-({{coexistence}}). A transparent relay cannot read or alter encrypted RPCs
-or acquire the host's enrollment authority.
+: A request cannot exercise another enrollment's authority without its
+key, and the gateway refuses weaker provisioning protocols for enrolled
+bindings ({{coexistence}}). A transparent relay cannot read or alter
+encrypted RPCs or acquire the host's enrollment authority. These guarantees
+do not authenticate the shared link's address-attribution evidence.
 
 Gateway impersonation:
 : Clients accept any valid server proof, including after key replacement.
@@ -979,10 +1032,15 @@ Downgrade:
 : Once a client knows a gateway supports AGCP, blocking or refusing AGCP
 cannot make it use PCP, UPnP, or DNS UPDATE ({{coexistence-client}}).
 Support records are independent of enrollment and server signing keys;
-a forged NOT_ENROLLED reply cannot erase them. Before support is known,
-an attacker can suppress discovery; falsely advertising support can
-instead deny legacy fallback. An enrolled binding also retains the
-gateway-side refusal of weaker protocols ({{coexistence-gateway}}).
+a forged NOT_ENROLLED reply cannot erase them. Advertisements alone cannot
+create them. Before support is confirmed, an attacker can suppress AGCP
+discovery or admission and leave legacy protocols available. Creating a
+false support record requires control or interception of an admitted
+AGCP exchange at the selected gateway address, not one forged mDNS
+answer. Such a record persists until explicit local user action clears
+it, and can deny legacy fallback for that entire time.
+An enrolled binding also retains the gateway-side refusal of weaker
+protocols ({{coexistence-gateway}}).
 
 Replay and clocks:
 : Admission inherits the shared signed-request timestamp and nonce policy
@@ -1007,17 +1065,30 @@ DNS names:
 receives the enrolled host's addresses. A host permitted to publish
 arbitrary names can divert other clients' traffic for any name to itself;
 TLS certificate validation protects the clients that use it, and nothing
-protects those that do not. The default policy of {{dns-records}} limits a
-host to names its SNI routes already match.
+protects those that do not. Granting an SNI route does not prove control
+of a DNS name: SNI claims are first come, first served. An implementation
+that authorizes DNS solely from those claims permits arbitrary claimed
+names, including wildcard-derived names; this is not domain-ownership
+validation. DNS overrides also suppress other record types for the
+granted name as specified in {{dns-records}}.
 
-Link bindings on wired segments:
-: Link-layer addresses are forgeable. A binding is used only to locate
-enrollment and ownership; it never substitutes for the enrolled identity.
+Link bindings and IPv6 attribution:
+: Link-layer addresses and ordinary Neighbor Discovery messages are
+forgeable. Persistent attribution and automatic probing prevent raw cache
+churn or one unsolicited advertisement from immediately moving ownership
+or removing grants. They do not authenticate an IPv6 address against an
+active hostile LAN peer: an attacker that diverts traffic or answers
+verification probes can corrupt attribution and thereby redirect or
+expose traffic through grants under its own enrollment. An enrolled key
+protects enrollment authority, not the truth of neighbor evidence.
+Implementations may use stronger network protections, but normal SLAAC
+operation MUST NOT depend on manual key comparison or address assignment.
 
 Resource exhaustion:
 : Gateways bound per-enrollment state through the quotas of {{policy}},
-and SHOULD bound concurrent connections, pending enrollments, and
-concurrent `event.wait` calls per binding. Shared admission and record
+and SHOULD bound concurrent connections, pending enrollments, automatic
+address-verification work, and concurrent `event.wait` calls per binding.
+Shared admission and record
 limits apply before AGCP authorization; per-enrollment quotas do not bound
 unauthenticated proof-verification work. The resource considerations
 of {{PCP-HOSTNAME}} apply to SNI routes.
@@ -1151,6 +1222,19 @@ the shared encrypted record framing.
  {"jsonrpc": "2.0", "id": 4,
   "error": {"code": 1008, "message": "unsupported",
             "data": {"kind": "UNSUPPORTED", "capability": "filter-deny"}}}]
+```
+
+A host with the `dns-record` capability can still be refused a name by
+the gateway's implementation-defined domain policy:
+
+```json
+{"jsonrpc": "2.0", "id": 5, "method": "dns-record.set",
+ "params": {"id": "dns-1", "name": "not-allowed.example",
+            "addresses": ["192.168.1.20"], "lifetime": 3600}}
+
+{"jsonrpc": "2.0", "id": 5,
+ "error": {"code": 1009, "message": "DNS name not permitted",
+           "data": {"kind": "NOT_PERMITTED"}}}
 ```
 
 # Implementation Status {#impl-status}
