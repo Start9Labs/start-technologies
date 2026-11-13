@@ -214,7 +214,7 @@ state.
 This section is informative.
 
 1. The host discovers the gateway's AGCP endpoint ({{discovery}}) and
-   opens its `/rpc/v2` WebSocket endpoint. The host and gateway complete
+   opens its `/agcp/v1` WebSocket endpoint. The host and gateway complete
    signed-session admission, proving their signing identities and deriving
    fresh directional encryption keys ({{transport}}).
 2. The gateway determines the connection's binding from its own view of
@@ -236,13 +236,13 @@ This section is informative.
 
 ## WebSocket Endpoint {#websocket}
 
-AGCP uses the shared encrypted RPC endpoint `/rpc/v2`, with any configured
-deployment prefix, over WebSocket {{RFC6455}}. The client performs an
-HTTP/1.1 upgrade {{RFC9110}} and completes signed-session admission before
-sending any JSON-RPC request. AGCP version 1 is an application protocol on
-this endpoint; it does not change the shared transport's version or proof
-domain. The endpoint MAY also serve the gateway's other RPC methods,
-subject to their own authorization rules.
+AGCP messages use `/agcp/v1`, with any configured deployment prefix, over
+WebSocket {{RFC6455}}. This is AGCP's application endpoint, distinct from
+the gateway's product client-server RPC API. It carries AGCP methods and
+shared transport controls. The client performs an HTTP/1.1 upgrade
+{{RFC9110}} and completes signed-session admission before sending any
+JSON-RPC request. AGCP's application version is independent of the
+signed-session transport version.
 
 Clients MUST support `ws://` and `wss://`; gateways advertise the scheme
 and port they serve ({{discovery}}). Signed-session encryption is mandatory
@@ -257,21 +257,21 @@ connection over `ws://`.
 Clients and servers MUST implement version 1 of {{START-RPC-SESSION}},
 including its proof encoding, signing context, replay checks, key
 derivation, encrypted framing, limits, and failure behavior. That document
-is the authoritative wire contract; AGCP defines no separate handshake or
-cryptographic encoding. {{START-RPC-INTEGRATION}} describes its integration
-with the shared RPC transport and identity owners.
+owns the session handshake and encrypted framing; this document owns the
+AGCP endpoint path and application methods. {{START-RPC-INTEGRATION}}
+describes the shared transport and identity owners.
 
 The client uses its selected gateway hostname as the signing context,
 preserving that logical name when dialing a resolved IP address. The
-gateway verifies it against its permitted ingress names. AGCP uses the
-ordinary RPC target `"rpc"`, not a continuation target or an AGCP-specific
-target. Each physical connection uses fresh ephemeral keys and a fresh
-signed commitment and nonce. The server's signed response binds the
+gateway verifies it against its permitted ingress names. The session hello
+uses the shared non-continuation target `"rpc"`; this value does not select
+an HTTP endpoint. Each physical connection uses fresh ephemeral keys and
+a fresh signed commitment and nonce. The server's signed response binds the
 complete client hello; both peers verify the exchange before accepting
 encrypted application data. Implementations MUST support the shared
 protocol's Ed25519 signing identity. Ephemeral X25519 keys are not
-enrollment identities. The gateway reuses the persistent signing identity
-of its shared RPC endpoint. A host retains its signing key for the
+enrollment identities. The gateway uses its persistent signing identity
+from the shared RPC integration. A host retains its signing key for the
 lifetime of the enrollment.
 
 A valid proof from an unknown key completes admission without granting
@@ -893,7 +893,7 @@ service type `_agcp._tcp`, over Multicast DNS {{RFC6762}} on their
 attached links and MAY also answer it through their unicast DNS service.
 The SRV record gives the target hostname and port. The TXT record MUST
 carry `v=1` and `tls=0` for `ws://` or `tls=1` for `wss://`, and MAY carry
-`fp=` with the gateway's fingerprint. The endpoint path is `/rpc/v2`;
+`fp=` with the gateway's fingerprint. The endpoint path is `/agcp/v1`;
 configured endpoints MAY include a deployment prefix. The selected target
 hostname is the signed-session signing context, and the gateway MUST
 accept that name under its ingress policy.
