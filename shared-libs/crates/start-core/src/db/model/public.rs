@@ -17,10 +17,10 @@ use crate::db::DbAccessByKey;
 use crate::db::model::Database;
 use crate::db::model::package::AllPackageData;
 use crate::net::acme::AcmeProvider;
-use crate::net::host::Host;
 use crate::net::host::binding::{
     AddSslOptions, BindInfo, BindOptions, Bindings, DerivedAddressInfo, NetInfo,
 };
+use crate::net::host::{Host, SERVER_UI_SSL_PORT};
 use crate::net::ssl::x509_sha256_fingerprint;
 use crate::net::vhost::{AlpnInfo, PassthroughInfo};
 use crate::prelude::*;
@@ -43,6 +43,14 @@ pub static DB_UI_SEED_CELL: OnceLock<&'static str> = OnceLock::new();
 pub struct Public {
     pub server_info: ServerInfo,
     pub package_data: AllPackageData,
+    #[serde(default)]
+    pub disks: Vec<crate::disk::util::DiskInfo>,
+    #[serde(default)]
+    pub shared_volumes:
+        BTreeMap<crate::shared_volumes::SharedVolumeId, crate::shared_volumes::SharedVolume>,
+    #[serde(default)]
+    pub backup_targets:
+        BTreeMap<crate::backup::target::BackupTargetId, crate::backup::target::BackupTarget>,
     /// UI-owned state. Outside `version` migrations, the backend never reads or
     /// modifies its contents.
     pub ui: Value,
@@ -76,7 +84,7 @@ impl Public {
                                     options: BindOptions {
                                         preferred_external_port: 80,
                                         add_ssl: Some(AddSslOptions {
-                                            preferred_external_port: 443,
+                                            preferred_external_port: SERVER_UI_SSL_PORT,
                                             alpn: Some(AlpnInfo(vec![
                                                 MaybeUtf8String("h2".into()),
                                                 MaybeUtf8String("http/1.1".into()),
@@ -88,7 +96,7 @@ impl Public {
                                     },
                                     net: NetInfo {
                                         assigned_port: None,
-                                        assigned_ssl_port: Some(443),
+                                        assigned_ssl_port: Some(SERVER_UI_SSL_PORT),
                                     },
                                     addresses: DerivedAddressInfo::default(),
                                     interfaces: BTreeMap::new(),
@@ -158,6 +166,9 @@ impl Public {
                 keyboard,
             },
             package_data: AllPackageData::default(),
+            disks: Vec::new(),
+            shared_volumes: BTreeMap::new(),
+            backup_targets: BTreeMap::new(),
             ui: serde_json::from_str(*DB_UI_SEED_CELL.get().unwrap_or(&"null"))
                 .with_kind(ErrorKind::Deserialization)?,
         })
