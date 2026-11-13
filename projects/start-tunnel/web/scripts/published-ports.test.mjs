@@ -89,7 +89,9 @@ test('SNI rows report TCP and UDP mappings do not reserve the HTTP redirect', ()
     },
     fallback: null,
   }
-  assert.deepEqual(mapForwards({ '192.0.2.1:443': sni }, [])[0].transport, ['tcp'])
+  assert.deepEqual(mapForwards({ '192.0.2.1:443': sni }, [])[0].transport, [
+    'tcp',
+  ])
   assert.equal(
     portEightyForwarded({ 'udp@192.0.2.1:79': dnat }, '192.0.2.1'),
     false,
