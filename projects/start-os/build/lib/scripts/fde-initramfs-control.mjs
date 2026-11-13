@@ -14,6 +14,11 @@ import { spawnSync } from 'node:child_process'
 
 import { replaceOnce, requireReviewedContext } from './fde-reviewed-source.mjs'
 import { requireNativeHookFunctions } from './fde-initramfs-producer.mjs'
+import {
+  checkedDirectory,
+  filesUnder,
+  kernelDirectory,
+} from './fde-initramfs-paths.mjs'
 
 const inputs = {
   init: [
@@ -197,29 +202,6 @@ function replaceRange(text, first, last, replacement) {
   return text.slice(0, start) + replacement + text.slice(end)
 }
 
-async function checkedDirectory(root, relative) {
-  let parent = root
-  for (const part of relative.split('/')) {
-    parent = join(parent, part)
-    if (!(await lstat(parent)).isDirectory())
-      throw Error(`Unsupported generated directory: ${relative}`)
-  }
-  return parent
-}
-
-async function filesUnder(root, relative) {
-  const entries = []
-  for (const entry of await readdir(await checkedDirectory(root, relative), {
-    withFileTypes: true,
-  })) {
-    const path = `${relative}/${entry.name}`
-    if (entry.isDirectory()) entries.push(...(await filesUnder(root, path)))
-    else if (entry.isFile()) entries.push(path)
-    else throw Error(`Unsupported generated file type: ${path}`)
-  }
-  return entries
-}
-
 async function optionalFilesUnder(root, directory) {
   try {
     await lstat(join(root, directory))
@@ -364,14 +346,11 @@ async function admittedModuleProviders(root) {
 
 /** Native query providers and candidate files must stay stable through hardening. */
 async function auditModuleConfiguration(root) {
-  const moduleRoot = await checkedDirectory(root, 'usr/lib/modules')
-  const versions = await readdir(moduleRoot, { withFileTypes: true })
-  if (versions.length !== 1 || !versions[0].isDirectory())
-    throw Error('Expected one generated kernel module directory')
-  const version = versions[0].name
+  const { path: modulePath, version } = await kernelDirectory(root)
+  const moduleRoot = join(root, modulePath)
   for (const name of ['modules.softdep', 'modules.weakdep']) {
     try {
-      if (!(await lstat(join(moduleRoot, version, name))).isFile())
+      if (!(await lstat(join(moduleRoot, name))).isFile())
         throw Error(`Unsupported module configuration: ${name}`)
     } catch (error) {
       if (error.code !== 'ENOENT') throw error
@@ -402,7 +381,7 @@ async function auditModuleConfiguration(root) {
     '-I',
     fileURLToPath(new URL('./fde-module-config.py', import.meta.url)),
     library,
-    join(moduleRoot, version),
+    moduleRoot,
     ...paths,
   ])
   if (/^(install|remove) /m.test(`${configuration}\n${sharedConfiguration}`))

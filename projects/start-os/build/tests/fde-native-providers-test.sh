@@ -30,4 +30,5 @@ set -euo pipefail
 export PATH=/node-runtime/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export LD_LIBRARY_PATH=/node-runtime/usr/lib/x86_64-linux-gnu
 node /fde-repo/projects/start-os/build/tests/fde-providers-test.mjs /fde-hook-sources
+node /fde-repo/projects/start-os/build/tests/fde-modules-test.mjs
 SH

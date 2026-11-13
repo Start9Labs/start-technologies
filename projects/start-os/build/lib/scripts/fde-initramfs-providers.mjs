@@ -22,6 +22,26 @@ export async function publicSourcePath(path) {
   return source
 }
 
+export async function publicSourceFile(path) {
+  if (!(await lstat(path)).isFile() || (await publicSourcePath(path)) !== path)
+    throw Error(`Unsupported regular provider path: ${path}`)
+  return path
+}
+
+export async function requireSameFile(actual, expected) {
+  const copied = await lstat(actual)
+  const original = await lstat(expected)
+  if (!copied.isFile() || !original.isFile())
+    throw Error(`Unsupported regular provider file: ${actual}`)
+  if ((copied.mode & 0o7777) !== (original.mode & 0o7777))
+    throw Error(`Copied provider permissions differ: ${actual}`)
+  await requireSameBytes(actual, expected)
+}
+
+export async function requireSameBytes(actual, expected) {
+  await runSource('/usr/bin/cmp', ['--silent', '--', actual, expected])
+}
+
 /**
  * Returns canonical source paths after copied /usr byte/mode and native command/root alias admission.
  * The source namespace and private hooks must remain admitted and unchanged throughout the call.
@@ -43,22 +63,8 @@ export async function admitCopiedProviders(root, readNativeAliases) {
       if (entry.isDirectory()) await walk(child)
       else if (entry.isSymbolicLink()) links.push(child)
       else if (entry.isFile()) {
-        const source = join('/', child)
-        if (
-          !(await lstat(source)).isFile() ||
-          (await publicSourcePath(source)) !== source
-        )
-          throw Error(`Unsupported regular provider path: ${child}`)
-        const actual = await lstat(join(root, child))
-        const expected = await lstat(source)
-        if ((actual.mode & 0o7777) !== (expected.mode & 0o7777))
-          throw Error(`Copied provider permissions differ: ${child}`)
-        await runSource('/usr/bin/cmp', [
-          '--silent',
-          '--',
-          join(root, child),
-          source,
-        ])
+        const source = await publicSourceFile(join('/', child))
+        await requireSameFile(join(root, child), source)
         sources.push(source)
       } else throw Error(`Unsupported provider file type: ${child}`)
     }
