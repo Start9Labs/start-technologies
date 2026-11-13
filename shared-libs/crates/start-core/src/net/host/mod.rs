@@ -391,6 +391,9 @@ impl Model<Host> {
         // enabled/disabled + forward machinery applies unchanged.
         let mdns_host = mdns.local_domain_name();
         for (_, range) in this.binding_ranges.as_entries_mut()? {
+            let transport = range.de()?.transport;
+            // PatchDB clients must receive the serde-defaulted transport before service rebinding.
+            range.as_transport_mut().ser(&transport)?;
             let port = range.as_external_start_port().de()?;
 
             // Preserve any plugin-provided addresses across recomputation.
@@ -1053,6 +1056,39 @@ mod tests {
             add_ssl: None,
             secure: Some(crate::net::host::binding::Security { ssl: false }),
             proxy: None,
+        }
+    }
+
+    #[test]
+    fn address_updates_publish_legacy_range_transport_without_service_rebinding() {
+        use crate::net::transport::Transport;
+
+        for (transport, stored, expected) in [
+            (Transport::Both, false, "both"),
+            (Transport::Both, true, "both"),
+            (Transport::Tcp, true, "tcp"),
+            (Transport::Udp, true, "udp"),
+        ] {
+            let mut ports = AvailablePorts::new();
+            let mut host = host();
+            host.add_binding_range(&mut ports, 42000, 43000, 3, false, transport)
+                .unwrap();
+            let mut value = serde_json::to_value(&host).unwrap();
+            let range = value["bindingRanges"]["42000"].as_object_mut().unwrap();
+            range.insert("enabled".into(), false.into());
+            if !stored {
+                range.remove("transport");
+            }
+            let mut host = Model::<Host>::from(imbl_value::to_value(value).unwrap());
+            host.update_addresses(
+                &ServerHostname::new(InternedString::intern("server")).unwrap(),
+                &Default::default(),
+                &ports,
+            )
+            .unwrap();
+            let value = serde_json::to_value(&host).unwrap();
+            assert_eq!(value["bindingRanges"]["42000"]["transport"], expected);
+            assert_eq!(value["bindingRanges"]["42000"]["enabled"], false);
         }
     }
 
