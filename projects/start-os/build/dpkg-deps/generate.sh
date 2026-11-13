@@ -6,8 +6,9 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 IFS="-" read -ra FEATURES <<< "$ENVIRONMENT"
 FEATURES+=("${ARCH}")
-case "$ARCH" in
-    x86_64|aarch64) FEATURES+=("uefi") ;;
+# Raspberry Pi and Rockchip use board bootloaders, not UEFI.
+case "$PLATFORM" in
+    x86_64|x86_64-*|aarch64|aarch64-*) FEATURES+=("uefi") ;;
 esac
 if [ "$ARCH" != "$PLATFORM" ]; then
     FEATURES+=("${PLATFORM}")

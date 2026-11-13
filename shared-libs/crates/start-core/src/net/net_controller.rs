@@ -594,6 +594,7 @@ pub fn plan_host_exposure(
     let mut vhosts: BTreeMap<VHostKey, ProxyTarget> = BTreeMap::new();
     let mut http_ports = BTreeSet::new();
     let mut private_dns: BTreeMap<InternedString, BTreeSet<GatewayId>> = BTreeMap::new();
+    // The forward controller owns pinholes for non-TLS GUA DNAT.
     let mut gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>)> =
         BTreeMap::new();
     let host_addresses: Vec<_> = host.addresses().collect();
@@ -609,6 +610,7 @@ pub fn plan_host_exposure(
         let addr: SocketAddr = (ip, *port).into();
         let addr_v6 = ipv6.map(|ip| SocketAddrV6::new(ip, *port, 0, 0));
 
+        // Private DNS answers only through the name's enabled local gateways.
         add_private_dns(&mut private_dns, &enabled_addresses, net_ifaces);
 
         let connect_ssl: Option<Arc<TlsClientConfig>> = bind
@@ -617,10 +619,14 @@ pub fn plan_host_exposure(
             .map(|ssl| upstream_client_config(&ssl.upstream_cert_validation));
         let target = binding_proxy_target(&bind.options, addr, addr_v6, connect_ssl);
 
+        // Assigned SSL ports have a listener even when TLS passes through.
         if let Some(assigned_ssl_port) = bind.net.assigned_ssl_port {
+            // LAN+WAN GUAs use the public set.
             let server_private_ips = ssl_vhost_private_ips(enabled_addresses.iter().copied());
 
+            // IPv4 and IPv6 public exposure are independent; scope GUAs individually.
             let server_public_v4 = ssl_vhost_public_v4(enabled_addresses.iter().copied());
+            // This TLS listener excludes GUAs enabled only for non-TLS ports.
             let server_public_v6: BTreeSet<Ipv6Addr> = enabled_addresses
                 .iter()
                 .filter(|a| a.public && a.ssl)
@@ -644,6 +650,8 @@ pub fn plan_host_exposure(
                 );
             }
 
+            // Named exposure is independent of bare-IP exposure; private names request no port maps.
+            // Every registered name accepts bridge traffic, including plugin providers.
             let passthrough = bind.options.add_ssl.is_none();
             add_named_vhosts(
                 &mut vhosts,
@@ -655,6 +663,7 @@ pub fn plan_host_exposure(
                     public_v6: BTreeSet::new(),
                     public_v6_gateways: BTreeSet::new(),
                     private: BTreeSet::new(),
+                    // Passthrough owns its ACME; public ACME metadata leaves the private leg intact.
                     acme: if passthrough || !public {
                         None
                     } else {
@@ -713,6 +722,7 @@ pub fn plan_host_exposure(
                 );
                 continue;
             }
+            // Loopback DNAT is martian-dropped on ingress.
             if !ip.is_loopback() {
                 forwards.insert(
                     external,
@@ -720,15 +730,18 @@ pub fn plan_host_exposure(
                 );
             }
 
+            // LAN-only GUAs require a known on-link subnet; unknown subnets fail closed.
             if let Some(container_v6) = ipv6 {
                 for a in enabled_addresses.iter() {
                     let Some(gua) = a.gua().filter(|g| g.port() == external) else {
                         continue;
                     };
+                    // Public non-TLS exposure requires a protocol secure without TLS termination.
                     let secure_exposure = requirements.secure;
                     let src_filter = if a.public && secure_exposure {
                         None
                     } else {
+                        // Insecure protocols require an operator-marked secure LAN gateway.
                         if !secure_exposure
                             && !a
                                 .metadata
@@ -757,6 +770,8 @@ pub fn plan_host_exposure(
         }
     }
 
+    // Ranges have no Security option; `secure: true` bypasses the single-port protocol-security gate.
+    // Outbound-only gateways never receive synthesized range addresses.
     for (&internal_start, range) in host.binding_ranges.iter() {
         if !range.enabled {
             continue;
