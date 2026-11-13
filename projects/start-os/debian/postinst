@@ -272,6 +272,8 @@ ln -sf /usr/lib/startos/scripts/wireguard-vps-proxy-setup /usr/bin/wireguard-vps
 
 cat > /etc/sysctl.d/97-startos.conf <<EOF
 fs.inotify.max_user_watches=1048576
+# Every service container's inotify instances count against this one limit.
+fs.inotify.max_user_instances=8192
 # Headroom for nested user namespaces (rootless OCI engines inside service LXCs).
 user.max_user_namespaces=28633
 kernel.unprivileged_userns_clone=1
