@@ -24,7 +24,7 @@ use crate::net::forward::{
 };
 use crate::net::gateway::{NetworkInterfaceController, WildcardListener};
 use crate::net::host::binding::{AddSslOptions, BindId, BindOptions, UpstreamCertValidation};
-use crate::net::host::{Host, Hosts, host_for, host_for_existing};
+use crate::net::host::{Host, Hosts, SERVER_UI_SSL_PORT, host_for, host_for_existing};
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::service_interface::{
     AddressInfo, HostnameInfo, HostnameMetadata, ServiceInterface, ServiceInterfaceType,
@@ -254,7 +254,7 @@ impl NetController {
                     public_only: false,
                     preferred_external_port: 80,
                     add_ssl: Some(AddSslOptions {
-                        preferred_external_port: 443,
+                        preferred_external_port: SERVER_UI_SSL_PORT,
                         alpn: Some(AlpnInfo(vec![
                             MaybeUtf8String("h2".into()),
                             MaybeUtf8String("http/1.1".into()),

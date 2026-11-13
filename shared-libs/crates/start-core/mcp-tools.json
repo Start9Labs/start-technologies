@@ -361,7 +361,24 @@
     "name": "backup.history.list",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/HistoryParams" }
+      ],
       "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
         "HistoryParams": {
           "type": "object",
           "properties": {
@@ -380,21 +397,7 @@
           "additionalProperties": true
         }
       },
-      "type": "object",
-      "properties": {
-        "offset": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        }
-      },
-      "required": ["offset", "limit"],
-      "additionalProperties": true
+      "type": "object"
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4590,6 +4593,52 @@
       "type": "object",
       "propertyNames": { "type": "string" },
       "additionalProperties": { "$ref": "#/$defs/BindInfo" }
+    }
+  },
+  {
+    "name": "package.host.binding.reassign-port",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "$ref": "#/$defs/RequiresPackageId" },
+        { "$ref": "#/$defs/RequiresHostId" },
+        { "$ref": "#/$defs/ReassignPortParams" }
+      ],
+      "$defs": {
+        "RequiresPackageId": {
+          "type": "object",
+          "properties": { "package": { "$ref": "#/$defs/PackageId" } },
+          "required": ["package"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" },
+        "RequiresHostId": {
+          "type": "object",
+          "properties": { "host": { "$ref": "#/$defs/HostId" } },
+          "required": ["host"],
+          "additionalProperties": true
+        },
+        "HostId": { "type": "string" },
+        "ReassignPortParams": {
+          "type": "object",
+          "properties": {
+            "internalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "externalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "ssl": { "type": "boolean" }
+          },
+          "required": ["internalPort", "externalPort"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object"
     }
   },
   {
@@ -10974,6 +11023,48 @@
       "type": "object",
       "propertyNames": { "type": "string" },
       "additionalProperties": { "$ref": "#/$defs/BindInfo" }
+    }
+  },
+  {
+    "name": "server.host.binding.reassign-port",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "ReassignPortParams": {
+          "type": "object",
+          "properties": {
+            "internalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "externalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "ssl": { "type": "boolean" }
+          },
+          "required": ["internalPort", "externalPort"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "internalPort": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "externalPort": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "ssl": { "type": "boolean" }
+      },
+      "required": ["internalPort", "externalPort"],
+      "additionalProperties": true
     }
   },
   {
