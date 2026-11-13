@@ -56,6 +56,14 @@ export function requireNativeHookFunctions(bytes) {
   )
 }
 
+export function requireNativeProducer(bytes) {
+  requireReviewedContext(
+    bytes,
+    '16780cbe540fa1a9d7b1faad173b1fd74bdd4de3e56e773d10462d9ce77161bf',
+    'mkinitramfs',
+  )
+}
+
 /**
  * Adapts reviewed native ordering/packaging without installing a provider patch.
  * The caller owns stable providers, the generated tree and a private capture directory.
@@ -68,11 +76,7 @@ export function requireNativeHookFunctions(bytes) {
  * Captures establish byte provenance, not authorization to sign an image.
  */
 export function instrumentProducer(mkinitramfs, hookFunctions) {
-  requireReviewedContext(
-    mkinitramfs,
-    '16780cbe540fa1a9d7b1faad173b1fd74bdd4de3e56e773d10462d9ce77161bf',
-    'mkinitramfs',
-  )
+  requireNativeProducer(mkinitramfs)
   requireNativeHookFunctions(hookFunctions)
   let output = replaceOnce(
     mkinitramfs.toString(),

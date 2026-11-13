@@ -21,6 +21,7 @@ import test from 'node:test'
 import { inspectSourceElf } from '../lib/scripts/fde-initramfs-dependencies.mjs'
 import { prepareNativeHooks } from '../lib/scripts/fde-initramfs-hooks.mjs'
 import { kernelDirectory } from '../lib/scripts/fde-initramfs-paths.mjs'
+import { admitLinkerCache } from '../lib/scripts/fde-initramfs-linker.mjs'
 import { requireNativeHookFunctions } from '../lib/scripts/fde-initramfs-producer.mjs'
 import { runSource } from '../lib/scripts/fde-reviewed-source.mjs'
 
@@ -255,6 +256,129 @@ for (const [name, mutate, pattern] of [
     const before = await references()
     await assert.rejects(admitted.admitProviders(root), pattern)
     assert.deepEqual(await references(), before)
+  })
+}
+
+async function linkerContext(t) {
+  const state = await context(t)
+  const result = shell(
+    `cp -pPr /etc/ld.so.conf* "$DESTDIR"/etc/
+/usr/sbin/ldconfig -r "$DESTDIR"
+`,
+    { DESTDIR: state.root },
+  )
+  assert.equal(result.status, 0, result.stderr)
+  await state.admitted.admitProviders(state.root)
+  return state
+}
+
+async function linkerReferences() {
+  return (await readdir(tmpdir()))
+    .filter(name => name.startsWith('.fde-linker-'))
+    .sort()
+}
+
+test('native linker configuration and subset cache admit without candidate execution', async t => {
+  const { root } = await linkerContext(t)
+  const before = await linkerReferences()
+  const contents = async () =>
+    (
+      await runSource('/usr/bin/find', [
+        root,
+        '-type',
+        'f',
+        '-exec',
+        '/usr/bin/sha256sum',
+        '{}',
+        '+',
+      ])
+    ).stdout
+      .split('\n')
+      .sort()
+  const layout = async () =>
+    (await runSource('/usr/bin/find', [root, '-printf', '%P %m %l\\0'])).stdout
+      .split('\0')
+      .sort()
+  const originalContents = await contents()
+  const originalLayout = await layout()
+  await admitLinkerCache(root)
+  assert.deepEqual(await contents(), originalContents)
+  assert.deepEqual(await layout(), originalLayout)
+  assert.deepEqual(await linkerReferences(), before)
+})
+
+for (const [name, mutate, pattern] of [
+  [
+    'cache mutation',
+    async root => {
+      const path = join(root, 'etc/ld.so.cache')
+      const data = await readFile(path)
+      data[0] ^= 1
+      await writeFile(path, data)
+    },
+    /Command failed/,
+  ],
+  [
+    'full source cache substituted for subset',
+    root => copyFile('/etc/ld.so.cache', join(root, 'etc/ld.so.cache')),
+    /Command failed/,
+  ],
+  [
+    'linker main configuration changed',
+    root => writeFile(join(root, 'etc/ld.so.conf'), '/tmp\n'),
+    /Command failed/,
+  ],
+  [
+    'additional linker fragment',
+    root => writeFile(join(root, 'etc/ld.so.conf.d/extra.conf'), '/usr/lib\n'),
+    /configuration files differ/,
+  ],
+  [
+    'additional native-selected linker file',
+    root => writeFile(join(root, 'etc/ld.so.conf.extra'), '/usr/lib\n'),
+    /configuration files differ/,
+  ],
+  [
+    'linker preload',
+    root => writeFile(join(root, 'etc/ld.so.preload'), '/usr/lib/libc.so.6\n'),
+    /Unsupported initramfs linker preload/,
+  ],
+  [
+    'cache symlink',
+    async root => {
+      await rm(join(root, 'etc/ld.so.cache'))
+      await symlink('/etc/ld.so.cache', join(root, 'etc/ld.so.cache'))
+    },
+    /Unsupported linker cache file type/,
+  ],
+  [
+    'configuration symlink',
+    async root => {
+      await rm(join(root, 'etc/ld.so.conf'))
+      await symlink('/etc/ld.so.conf', join(root, 'etc/ld.so.conf'))
+    },
+    /Unsupported generated file type/,
+  ],
+  ['missing cache', root => rm(join(root, 'etc/ld.so.cache')), /ENOENT/],
+  [
+    'stale cache after another admitted library is copied',
+    async (root, admitted) => {
+      const result = shell(
+        '. /usr/share/initramfs-tools/hook-functions\ncopy_exec /usr/lib/x86_64-linux-gnu/libsqlite3.so.0\n',
+        { DESTDIR: root, verbose: 'n' },
+      )
+      assert.equal(result.status, 0, result.stderr)
+      await admitted.admitProviders(root)
+    },
+    /Command failed/,
+  ],
+]) {
+  test(`${name} rejects before linker admission`, async t => {
+    const { root, admitted } = await linkerContext(t)
+    await mutate(root, admitted)
+    const before = await linkerReferences()
+    await assert.rejects(admitLinkerCache(root), pattern)
+    assert.deepEqual(await linkerReferences(), before)
   })
 }
 
