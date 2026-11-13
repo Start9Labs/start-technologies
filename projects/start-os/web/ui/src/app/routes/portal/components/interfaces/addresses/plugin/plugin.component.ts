@@ -33,7 +33,7 @@ import { PluginItemComponent } from './item.component'
         </button>
       }
     </header>
-    <table [appTable]="['Protocol', 'Transport', 'URL', null]">
+    <table [appTable]="['Protocol', 'URL', null]">
       @for (address of pluginGroup().addresses; track $index) {
         <tr
           pluginAddress
@@ -44,7 +44,7 @@ import { PluginItemComponent } from './item.component'
         ></tr>
       } @empty {
         <tr>
-          <td colspan="4">
+          <td colspan="3">
             <app-placeholder icon="@tui.list-x">
               {{ 'No addresses' | i18n }}
             </app-placeholder>

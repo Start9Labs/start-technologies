@@ -1,6 +1,9 @@
 import type { BindOptions, HostnameInfo, Transport } from '../osBindings'
 
-/** TLS and HTTP proxy listeners expose TCP independently of raw forwarding. */
+/**
+ * Forwarding transports for a StartOS-managed address, not URL-plugin capabilities.
+ * TLS and HTTP proxy listeners expose TCP.
+ */
 export function addressTransport(
   options: Pick<BindOptions, 'transport' | 'proxy'>,
   address: Pick<HostnameInfo, 'ssl'>,

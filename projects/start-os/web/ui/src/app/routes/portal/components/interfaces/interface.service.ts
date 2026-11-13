@@ -349,7 +349,6 @@ export class InterfaceService {
       groupMap.get(pluginId)!.push({
         url,
         scheme: h.ssl ? sslScheme : scheme,
-        transport: utils.addressTransport(binding.options, h),
         hostnameInfo: h,
         masked,
       })
@@ -440,7 +439,6 @@ export type GatewayAddressGroup = {
 export type PluginAddress = {
   url: string
   scheme: string | null
-  transport: T.Transport
   hostnameInfo: T.HostnameInfo
   masked: boolean
 }
