@@ -5,7 +5,6 @@ use start_core::context::{DiagnosticContext, InitContext, RpcContext, SetupConte
 use start_core::registry::context::RegistryContext;
 use start_core::tunnel::context::TunnelContext;
 
-/// Writes `<name>.ts` (types only) beside `<name>.schemas.ts` (runtime zod).
 fn write_pair(
     directory: &Path,
     name: &str,
@@ -75,9 +74,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         directory.join("tunnel/index.ts"),
         "export * from './types'\n",
     )?;
+    let storage = serde_json::json!({
+        "sharedVolumes": start_core::shared_volumes::local_directory(start_core::PACKAGE_DATA),
+        "backupTargets": start_core::backup::target::local_directory(start_core::PACKAGE_DATA),
+    });
+    std::fs::write(
+        directory.join("storage.ts"),
+        format!(
+            "/** Host storage directories; each managed ID names a child directory. */\nexport const managedStorage = {storage} as const\n"
+        ),
+    )?;
     std::fs::write(
         directory.join("index.ts"),
-        "export * from './types'\nexport * as Tunnel from './tunnel'\n",
+        "export * from './types'\nexport { managedStorage } from './storage'\nexport * as Tunnel from './tunnel'\n",
     )?;
     std::fs::write(
         directory.join("schemas.ts"),

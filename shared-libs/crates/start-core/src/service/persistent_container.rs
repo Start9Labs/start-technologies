@@ -14,12 +14,12 @@ use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
-use crate::disk::mount::filesystem::idmapped::{IdMap, IdMapped};
+use crate::disk::mount::filesystem::idmapped::IdMapped;
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
 use crate::disk::mount::filesystem::overlayfs::AnchoredOverlayGuard;
 use crate::disk::mount::filesystem::{MountType, ReadOnly};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
-use crate::lxc::{HOST_RPC_SERVER_SOCKET, LxcConfig, LxcContainer};
+use crate::lxc::{BASE_IDMAP, HOST_RPC_SERVER_SOCKET, LxcConfig, LxcContainer};
 use crate::net::net_controller::NetService;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -74,9 +74,7 @@ async fn shutdown_rpc_server<ExitFuture, ExitError, Shutdown, ServerFuture>(
 
 #[derive(Debug)]
 pub struct ServiceState {
-    // indicates whether the service container runtime has been initialized yet
     pub(super) rt_initialized: bool,
-    // This tracks references to callbacks registered by the running service:
     pub(super) callbacks: BTreeSet<Arc<CallbackId>>,
 }
 
@@ -108,9 +106,7 @@ impl Subcontainer {
     }
 }
 
-/// This contains the LXC container running the javascript init system
-/// that can be used via a JSON RPC Client connected to a unix domain
-/// socket served by the container
+/// Service filesystem and JavaScript runtime resources.
 pub struct PersistentContainer {
     pub(super) s9pk: S9pk,
     pub(super) lxc_container: OnceCell<LxcContainer>,
@@ -122,14 +118,43 @@ pub struct PersistentContainer {
     proxy_mounts: Option<crate::net::http_proxy::HttpProxyMounts>,
     pub(super) images: BTreeMap<ImageId, Arc<MountGuard>>,
     pub(super) subcontainers: Arc<Mutex<BTreeMap<Guid, Subcontainer>>>,
+    pub(crate) shared_volumes: Arc<Mutex<crate::shared_volumes::mounts::SharedVolumeMounts>>,
     pub(super) state: Arc<watch::Sender<ServiceState>>,
-    pub(super) net_service: NetService,
+    net_service: Option<NetService>,
     destroyed: bool,
 }
 
 impl PersistentContainer {
     #[instrument(skip_all)]
     pub async fn new(ctx: &RpcContext, s9pk: S9pk) -> Result<Self, Error> {
+        let mut container = Self::new_filesystem(ctx, s9pk).await?;
+        let lxc_container = container
+            .lxc_container
+            .get()
+            .or_not_found("lxc container")?;
+        let ip = lxc_container.ip().await?;
+        let ipv6 = lxc_container.ipv6().await?;
+        container.net_service = Some(
+            ctx.net_controller
+                .create_service(container.s9pk.as_manifest().id.clone(), ip, ipv6)
+                .await?,
+        );
+        if let Some(callbacks) = ctx
+            .callbacks
+            .get_container_ip(&container.s9pk.as_manifest().id)
+        {
+            callbacks.call().await?;
+        }
+        Ok(container)
+    }
+
+    pub async fn new_backup(ctx: &RpcContext, s9pk: S9pk) -> Result<Self, Error> {
+        let container = Self::new_filesystem(ctx, s9pk).await?;
+        container.shared_volumes.lock().await.block();
+        Ok(container)
+    }
+
+    async fn new_filesystem(ctx: &RpcContext, s9pk: S9pk) -> Result<Self, Error> {
         let lxc_container = ctx
             .lxc_manager
             .create(
@@ -181,7 +206,6 @@ impl PersistentContainer {
 
         let mut volumes = BTreeMap::new();
 
-        // TODO: remove once packages are reconverted
         let added = if is_compat {
             ["embassy".parse().unwrap()].into_iter().collect()
         } else {
@@ -195,11 +219,7 @@ impl PersistentContainer {
             let mount = MountGuard::mount(
                 &IdMapped::new(
                     Bind::new(data_dir(DATA_DIR, &s9pk.as_manifest().id, volume)),
-                    vec![IdMap {
-                        from_id: 0,
-                        to_id: 100000,
-                        range: 65536,
-                    }],
+                    vec![BASE_IDMAP],
                 ),
                 mountpoint,
                 MountType::ReadWrite,
@@ -217,14 +237,7 @@ impl PersistentContainer {
         {
             vec![
                 MountGuard::mount(
-                    &IdMapped::new(
-                        LoopDev::from(&**sqfs),
-                        vec![IdMap {
-                            from_id: 0,
-                            to_id: 100000,
-                            range: 65536,
-                        }],
-                    ),
+                    &IdMapped::new(LoopDev::from(&**sqfs), vec![BASE_IDMAP]),
                     mountpoint,
                     MountType::ReadWrite,
                 )
@@ -236,7 +249,7 @@ impl PersistentContainer {
             .get_path("assets")
             .and_then(|e| e.as_directory())
         {
-            // backwards compatibility for alpha s9pks - remove eventually
+            // Per-asset squashfs archives use the legacy layout.
             let mut assets = Vec::new();
             for (asset, entry) in &**dir {
                 let mountpoint = lxc_container
@@ -248,14 +261,7 @@ impl PersistentContainer {
                 };
                 assets.push(
                     MountGuard::mount(
-                        &IdMapped::new(
-                            LoopDev::from(&**sqfs),
-                            vec![IdMap {
-                                from_id: 0,
-                                to_id: 100000,
-                                range: 65536,
-                            }],
-                        ),
+                        &IdMapped::new(LoopDev::from(&**sqfs), vec![BASE_IDMAP]),
                         mountpoint,
                         MountType::ReadWrite,
                     )
@@ -289,14 +295,7 @@ impl PersistentContainer {
                 image.clone(),
                 Arc::new(
                     MountGuard::mount(
-                        &IdMapped::new(
-                            LoopDev::from(&**sqfs),
-                            vec![IdMap {
-                                from_id: 0,
-                                to_id: 100000,
-                                range: 65536,
-                            }],
-                        ),
+                        &IdMapped::new(LoopDev::from(&**sqfs), vec![BASE_IDMAP]),
                         &mountpoint,
                         ReadOnly,
                     )
@@ -324,15 +323,6 @@ impl PersistentContainer {
                     .await?;
             }
         }
-        let ip = lxc_container.ip().await?;
-        let ipv6 = lxc_container.ipv6().await?;
-        let net_service = ctx
-            .net_controller
-            .create_service(s9pk.as_manifest().id.clone(), ip, ipv6)
-            .await?;
-        if let Some(callbacks) = ctx.callbacks.get_container_ip(&s9pk.as_manifest().id) {
-            callbacks.call().await?;
-        }
         Ok(Self {
             s9pk,
             lxc_container: OnceCell::new_with(Some(lxc_container)),
@@ -345,8 +335,9 @@ impl PersistentContainer {
             proxy_mounts,
             images,
             subcontainers: Arc::new(Mutex::new(BTreeMap::new())),
+            shared_volumes: Arc::new(Mutex::new(Default::default())),
             state: Arc::new(watch::channel(ServiceState::new()).0),
-            net_service,
+            net_service: None,
             destroyed: false,
         })
     }
@@ -371,28 +362,12 @@ impl PersistentContainer {
             .join("media/startos/backup");
         tokio::fs::create_dir_all(&mountpoint).await?;
         tokio::fs::create_dir_all(backup_path).await?;
-        // Idmap the container's backup bind like a volume (on-disk 0-based
-        // <-> container userns 100000+), so backup-fs stores container-space
-        // ids and the container-root owns its backup tree. Replaces the old
-        // chown-to-100000 + backup-fs's FUSE-internal idmapped-root.
-        let bind = IdMapped::new(
-            Bind::new(backup_path),
-            vec![IdMap {
-                from_id: 0,
-                to_id: 100000,
-                range: 65536,
-            }],
-        );
+        let bind = IdMapped::new(Bind::new(backup_path), vec![BASE_IDMAP]);
         MountGuard::mount(&bind, &mountpoint, mount_type).await
     }
 
     #[instrument(skip_all)]
-    pub async fn init(
-        &self,
-        seed: Weak<Service>,
-        event_id: Guid,
-        kind: Option<InitKind>,
-    ) -> Result<(), Error> {
+    async fn serve_effects(&self, seed: Weak<Service>) -> Result<(), Error> {
         let socket_server_context = EffectContext::new(seed);
         let server = Server::new(move || ready(Ok(socket_server_context.clone())), handler());
         let path = self
@@ -420,7 +395,7 @@ impl PersistentContainer {
                     )
                 })?;
                 Command::new("chown")
-                    .arg("100000:100000")
+                    .arg(format!("{0}:{0}", BASE_IDMAP.to_id))
                     .arg(&path)
                     .invoke(ErrorKind::Filesystem)
                     .await?;
@@ -457,12 +432,27 @@ impl PersistentContainer {
             ));
         }
 
+        Ok(())
+    }
+
+    pub async fn init(
+        &self,
+        seed: Weak<Service>,
+        event_id: Guid,
+        kind: Option<InitKind>,
+    ) -> Result<(), Error> {
+        self.serve_effects(seed).await?;
         self.rpc_client
             .request(rpc::Init, InitParams { id: event_id, kind })
             .await?;
+        Ok(())
+    }
 
-        self.state.send_modify(|s| s.rt_initialized = true);
-
+    pub async fn init_backup(&self, seed: Weak<Service>, event_id: Guid) -> Result<(), Error> {
+        self.serve_effects(seed).await?;
+        self.rpc_client
+            .request(rpc::InitBackup, rpc::BackupInitParams { id: event_id })
+            .await?;
         Ok(())
     }
 
@@ -484,8 +474,9 @@ impl PersistentContainer {
         let proxy_mounts = std::mem::take(&mut self.proxy_mounts);
         let images = std::mem::take(&mut self.images);
         let subcontainers = self.subcontainers.clone();
+        let shared_volumes = self.shared_volumes.clone();
         let lxc_container = self.lxc_container.take();
-        let net_service = std::mem::replace(&mut self.net_service, NetService::dummy());
+        let net_service = self.net_service.take();
         self.destroyed = true;
         Some(async move {
             let mut errs = ErrorCollection::new();
@@ -502,7 +493,10 @@ impl PersistentContainer {
                 )
                 .await;
             }
-            net_service.remove_all().await.log_err();
+            shared_volumes.lock().await.clear();
+            if let Some(net_service) = net_service {
+                net_service.remove_all().await.log_err();
+            }
             for (_, volume) in volumes {
                 errs.handle(volume.unmount(true).await);
             }
@@ -540,6 +534,10 @@ impl PersistentContainer {
         );
 
         Ok(())
+    }
+
+    pub(super) fn net_service(&self) -> Result<&NetService, Error> {
+        self.net_service.as_ref().or_not_found("network service")
     }
 
     #[instrument(skip_all)]

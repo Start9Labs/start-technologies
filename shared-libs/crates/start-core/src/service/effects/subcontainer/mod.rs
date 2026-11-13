@@ -18,8 +18,8 @@ use crate::util::io::write_file_owned_at;
 fn chown_directory(directory: &std::fs::File) -> Result<(), Error> {
     fchown(
         directory,
-        Some(Uid::from_raw(100000)),
-        Some(Gid::from_raw(100000)),
+        Some(Uid::from_raw(crate::lxc::BASE_IDMAP.to_id)),
+        Some(Gid::from_raw(crate::lxc::BASE_IDMAP.to_id)),
     )
     .with_kind(ErrorKind::Filesystem)
 }
@@ -55,14 +55,14 @@ pub async fn destroy_subcontainer_fs(
     DestroySubcontainerFsParams { guid }: DestroySubcontainerFsParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
-    if let Some(overlay) = context
+    let overlay = context
         .seed
         .persistent_container
         .subcontainers
         .lock()
         .await
-        .remove(&guid)
-    {
+        .remove(&guid);
+    if let Some(overlay) = overlay {
         #[cfg(target_os = "linux")]
         {
             let root = std::fs::File::open(overlay.overlay.path())?;
@@ -70,6 +70,13 @@ pub async fn destroy_subcontainer_fs(
                 .await
                 .with_kind(ErrorKind::Unknown)??;
         }
+        context
+            .seed
+            .persistent_container
+            .shared_volumes
+            .lock()
+            .await
+            .remove_subcontainer(&guid);
         overlay.unmount().await?;
     } else {
         tracing::warn!(
@@ -186,16 +193,16 @@ pub async fn create_subcontainer_fs(
             &etc,
             c"hostname",
             format!("{container_guid}\n"),
-            100000,
-            100000,
+            crate::lxc::BASE_IDMAP.to_id,
+            crate::lxc::BASE_IDMAP.to_id,
         )
         .await?;
         write_file_owned_at(
             &etc,
             c"hosts",
             format!("127.0.0.1\tlocalhost\n127.0.1.1\t{container_guid}\n::1\tlocalhost ip6-localhost ip6-loopback\n"),
-            100000,
-            100000,
+            crate::lxc::BASE_IDMAP.to_id,
+            crate::lxc::BASE_IDMAP.to_id,
         )
         .await?;
         tracing::info!("Mounted overlay {guid} for {image_id}");

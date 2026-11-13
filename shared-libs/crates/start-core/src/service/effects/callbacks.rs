@@ -26,12 +26,7 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::SyncMutex;
 use crate::{GatewayId, HostId, PackageId, ServiceInterfaceId};
 
-/// Abstraction for callbacks that are triggered by patchdb subscriptions.
-///
-/// Handles the subscribe-wait-fire-remove pattern: when a callback is first
-/// registered for a key, a patchdb subscription is spawned. When the subscription
-/// fires, all handlers are consumed and invoked, then the subscription stops.
-/// A new subscription is created if a handler is registered again.
+/// Invalidates getter subscriptions after their first relevant database change.
 pub struct DbWatchedCallbacks<K: Ord> {
     label: &'static str,
     inner: SyncMutex<BTreeMap<K, (NonDetachingJoinHandle<()>, Vec<CallbackHandler>)>>,
@@ -51,6 +46,17 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
         watch: TypedDbWatch<T>,
         handler: CallbackHandler,
     ) {
+        self.add_filtered(key, watch, |_| true, handler)
+    }
+
+    /// Fires on the first change the filter accepts.
+    pub fn add_filtered<T: Send + 'static>(
+        self: &Arc<Self>,
+        key: K,
+        watch: TypedDbWatch<T>,
+        mut relevant: impl FnMut(&Value) -> bool + Send + 'static,
+        handler: CallbackHandler,
+    ) {
         self.inner.mutate(|map| {
             map.entry(key.clone())
                 .or_insert_with(|| {
@@ -60,15 +66,20 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                     (
                         tokio::spawn(async move {
                             let mut watch = watch.untyped();
-                            if watch.changed().await.is_ok() {
-                                if let Some(cbs) = this.inner.mutate(|map| {
-                                    map.remove(&k).and_then(CallbackHandlers::detach_watcher)
-                                }) {
+                            while watch.changed().await.is_ok() {
+                                let value = watch.peek_and_mark_seen().unwrap_or_default();
+                                if !relevant(&value) {
+                                    continue;
+                                }
+                                if let Some(cbs) =
+                                    this.remove(&k).and_then(CallbackHandlers::detach_watcher)
+                                {
                                     if let Err(e) = cbs.call().await {
                                         tracing::error!("Error in {label} callback: {e}");
                                         tracing::debug!("{e:?}");
                                     }
                                 }
+                                break;
                             }
                         })
                         .into(),
@@ -78,6 +89,10 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                 .1
                 .push(handler);
         })
+    }
+
+    fn remove(&self, key: &K) -> Option<(NonDetachingJoinHandle<()>, Vec<CallbackHandler>)> {
+        self.inner.mutate(|map| map.remove(key))
     }
 
     pub fn gc(&self) {
@@ -99,6 +114,7 @@ pub struct ServiceCallbacks {
     get_system_smtp: Arc<DbWatchedCallbacks<()>>,
     get_service_manifest: Arc<DbWatchedCallbacks<PackageId>>,
     get_http_proxy_attachments: Arc<DbWatchedCallbacks<PackageId>>,
+    get_shared_volumes: Arc<DbWatchedCallbacks<PackageId>>,
 }
 
 impl Default for ServiceCallbacks {
@@ -114,6 +130,7 @@ impl Default for ServiceCallbacks {
             get_http_proxy_attachments: Arc::new(DbWatchedCallbacks::new(
                 "get_http_proxy_attachments",
             )),
+            get_shared_volumes: Arc::new(DbWatchedCallbacks::new("get_shared_volumes")),
         }
     }
 }
@@ -151,6 +168,7 @@ impl ServiceCallbacks {
         self.get_system_smtp.gc();
         self.get_service_manifest.gc();
         self.get_http_proxy_attachments.gc();
+        self.get_shared_volumes.gc();
     }
 
     pub(super) fn add_get_service_interface<T: Send + 'static>(
@@ -340,6 +358,25 @@ impl ServiceCallbacks {
     ) {
         self.get_http_proxy_attachments
             .add(package_id, watch, handler);
+    }
+
+    pub(super) fn add_get_shared_volumes<T: Send + 'static>(
+        &self,
+        package_id: PackageId,
+        watch: TypedDbWatch<T>,
+        relevant: impl FnMut(&Value) -> bool + Send + 'static,
+        handler: CallbackHandler,
+    ) {
+        self.get_shared_volumes
+            .add_filtered(package_id, watch, relevant, handler);
+    }
+
+    pub(crate) async fn invalidate_shared_volumes(&self, package: &PackageId) -> Result<(), Error> {
+        if let Some((watcher, handlers)) = self.get_shared_volumes.remove(package) {
+            drop(watcher);
+            CallbackHandlers(handlers).call().await?;
+        }
+        Ok(())
     }
 
     pub(super) fn add_get_service_manifest(

@@ -315,9 +315,9 @@ impl<G: GenericMountGuard> Drop for OverlayGuard<G> {
     fn drop(&mut self) {
         let backing = self.backing.take();
         let guard = self.inner_guard.take();
-        if backing.active() || guard.mounted {
+        if backing.active() || guard.is_mounted() {
             tokio::spawn(async move {
-                if guard.mounted {
+                if guard.is_mounted() {
                     sync_filesystem(guard.path()).await.log_err();
                 }
                 guard.unmount(false).await.log_err();

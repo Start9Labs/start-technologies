@@ -61,6 +61,7 @@ import {
   GetSystemSmtp,
   getRootCa,
   getServiceManifest,
+  getSharedVolumes,
   nullIfEmpty,
   splitCommand,
 } from './util'
@@ -161,6 +162,7 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       | 'getDataVersion'
       | 'setDataVersion'
       | 'getServiceManifest'
+      | 'getSharedVolumes'
       | 'prepareUpload'
       | 'prepareDownload'
       | 'resolveUpload'
@@ -176,6 +178,8 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       checkDependencies: (effects, ...args) =>
         effects.checkDependencies(...args),
       mount: (effects, ...args) => effects.mount(...args),
+      mountSharedVolume: (effects, ...args) =>
+        effects.mountSharedVolume(...args),
       getInstalledPackages: (effects, ...args) =>
         effects.getInstalledPackages(...args),
       getServicePortForward: (effects, ...args) =>
@@ -650,6 +654,10 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       getRootCa,
       /** Retrieve the manifest of any installed service package by its ID */
       getServiceManifest,
+      /** User-granted shared volumes, including names, access mode, and availability. */
+      getSharedVolumes: (
+        effects: Manifest extends { sharedVolumes: true } ? Effects : never,
+      ) => getSharedVolumes(effects),
       /**
        * Built-in health check functions for use in `ready.fn`.
        *

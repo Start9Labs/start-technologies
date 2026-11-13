@@ -362,10 +362,7 @@ pub struct ActionMetadata {
     ///   - "hidden" - the action cannot be seen or run
     ///   - { disabled: "example explanation" } means the action is visible but cannot be run. Replace "example explanation" with a reason why the action is disable to prevent user confusion.
     pub visibility: ActionVisibility,
-    /// One of: "only-stopped", "only-running", "all"
-    ///   - "only-stopped" - the action can only be run when the service is stopped
-    ///   - "only-running" - the action can only be run when the service is running
-    ///   - "any" - the action can only be run regardless of the service's status
+    /// Service run states that permit this action.
     pub allowed_statuses: AllowedStatuses,
     pub has_input: bool,
     /// If provided, this action will be nested under a header of this value, along with other actions of the same group

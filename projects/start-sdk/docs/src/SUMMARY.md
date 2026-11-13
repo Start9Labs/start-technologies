@@ -97,6 +97,7 @@
 - [Tasks](tasks.md)
 - [Notifications](notifications.md)
 - [File Models](file-models.md)
+- [Shared Volumes](shared-volumes.md)
 - [Dependencies](dependencies.md)
 - [Makefile](makefile.md)
 - [Writing READMEs](writing-readmes.md)
