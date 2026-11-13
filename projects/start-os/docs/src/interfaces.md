@@ -85,7 +85,7 @@ start-cli package host <PACKAGE> binding <HOST> set-address-enabled <INTERNAL_PO
   --address '<PRIVATE_ADDRESS>:<PORT>' --allow-insecure
 ```
 
-Choose the intended gateway when the same name has several address rows. A JSON `HostnameInfo` from the binding's `addresses.available` also works as `--address`. The server's own host uses `start-cli server host binding <HOST>` instead of `start-cli package host <PACKAGE> binding <HOST>`.
+Choose the intended gateway when the same name has several address rows. A JSON `HostnameInfo` from the binding's `addresses.available` also works as `--address`. The server's own host uses `start-cli server host binding` instead of `start-cli package host <PACKAGE> binding <HOST>`.
 
 The ordinary RPC and MCP `setAddressEnabled` calls accept the same acknowledgement as `allowInsecure: true`. Without it, enabling an insecure address fails with the warning. Disabling needs no acknowledgement: use its UI toggle or repeat the command with `--enabled false`. Enabled private plaintext addresses stay visible in the UI; disabled ones remain discoverable through the CLI/RPC binding list.
 
