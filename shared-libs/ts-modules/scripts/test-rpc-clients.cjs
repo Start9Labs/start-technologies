@@ -98,10 +98,10 @@ function harness(moduleOverrides = new Map()) {
         return load('shared-libs/ts-modules/marketplace/src/types.ts')
       if (request.endsWith('auth.service'))
         return { AuthService: tokens.AuthService }
-      if (request.endsWith('http.service'))
-        return { HttpService: tokens.HttpService }
       if (request.endsWith('config.service'))
         return { ConfigService: tokens.ConfigService }
+      if (request.endsWith('http.service'))
+        return { HttpService: tokens.HttpService }
       if (request.endsWith('stale-ui.service'))
         return { StaleUiService: tokens.StaleUiService }
       if (request.endsWith('patch-db-source'))
@@ -151,6 +151,7 @@ function harness(moduleOverrides = new Map()) {
     location: { origin: 'https://router.test' },
     defaultView: { location: { host: 'server.test', protocol: 'https:' } },
   })
+  dependencies.set(tokens.ConfigService, { gitHash: 'configured-mock-build' })
   dependencies.set(tokens.RELATIVE_URL, '/rpc/v1')
   dependencies.set(tokens.WA_CRYPTO, webcrypto)
   return { dependencies, tokens, load }
@@ -389,7 +390,7 @@ test('Brochure serves each registry root through its own client', async () => {
   assert.equal(calls[1].url, 'https://registry.test/base/rpc/v0')
 })
 
-test('StartOS mock registry calls reach list and single-package fixtures', async () => {
+test('StartOS mock routes preserve registry fixtures, configured build identity, and UPS discovery', async () => {
   const pkg = { categories: [], best: {}, otherVersions: {} }
   const version = { ...pkg, best: { '1.0.0': {} } }
   const fixtures = {
@@ -413,6 +414,12 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
   assert.equal(
     await client.rpc.gitInfo({}),
     dependencies.get(tokens.ConfigService).gitHash,
+  )
+  assert.equal((await client.rpc.server.nutScan({}))[0].driver, 'usbhid-ups')
+  assert.equal(
+    (await client.rpc.server.nutListUps({ host: 'ups.test', port: 3493 }))[0]
+      .name,
+    'ups',
   )
   const params = {
     registry: 'https://registry.test/',
@@ -474,6 +481,38 @@ test('StartOS mock power deferral and cancellation wait for patch consumption', 
     assert.equal(revisions.at(-1).patch[0].value, action)
     cache.next({ id: revisions.at(-1).id })
     assert.equal(await pending, null)
+  }
+})
+
+test('StartOS generated UPS contracts preserve the selected USB location', () => {
+  const { load } = harness()
+  const device = {
+    driver: 'usbhid-ups',
+    port: 'auto',
+    vendorId: '051D',
+    productId: '0002',
+    serial: null,
+    bus: '001',
+    busPort: '003',
+    vendor: null,
+    product: null,
+  }
+  for (const file of ['types.schemas.ts', 'rpc/start-os.schemas.ts']) {
+    const { NutDevice, NutSettings } = load(
+      `shared-libs/ts-modules/start-core/lib/osBindings/${file}`,
+    )
+    const parsed = NutDevice.parse(device)
+    assert.equal(parsed.bus, '001')
+    assert.equal(parsed.busPort, '003')
+    const settings = NutSettings.encode({
+      mode: 'server',
+      device: parsed,
+      listenAll: false,
+      remoteUsername: null,
+      remotePassword: null,
+    })
+    assert.equal(settings.device.bus, '001')
+    assert.equal(settings.device.busPort, '003')
   }
 })
 
@@ -1528,14 +1567,24 @@ test('WRT checks firmware hashes and preserves HTTP error details', async () => 
   )
 })
 
-test('WRT lazily invalidates authentication and preserves host errors and nullable results', async () => {
+test('WRT signs calls, lazily invalidates authentication and preserves host errors and nullable results', async () => {
   const { dependencies, tokens, load } = harness()
   let invalidated = 0
   let lookups = 0
   let response = { result: null }
-  dependencies.set(tokens.AuthKeyService, { signRpcHeaders: async () => ({}) })
+  const signed = []
+  const requests = []
+  dependencies.set(tokens.AuthKeyService, {
+    signRpcHeaders: async options => {
+      signed.push(options)
+      return { signature: 'signed' }
+    },
+  })
   dependencies.set(tokens.HttpService, {
-    request: async () => ({ body: response }),
+    request: async options => {
+      requests.push(options)
+      return { body: response }
+    },
   })
   dependencies.set(tokens.Injector, {
     get: token => {
@@ -1548,9 +1597,18 @@ test('WRT lazily invalidates authentication and preserves host errors and nullab
     'projects/start-wrt/web/src/app/services/rpc.service.ts',
   ).RpcService)()
   assert.equal(
-    await client.request({ method: 'auth.logout', params: {} }),
+    await client.request({
+      method: 'auth.logout',
+      params: {},
+      headers: { existing: 'preserved' },
+    }),
     null,
   )
+  assert.deepEqual(JSON.parse(JSON.stringify(signed)), [
+    { method: 'auth.logout', params: {} },
+  ])
+  assert.equal(requests[0].headers.existing, 'preserved')
+  assert.equal(requests[0].headers.signature, 'signed')
   assert.equal(lookups, 0)
   response = { error: { code: 34, message: 'unauthorized', data: 'expired' } }
   await assert.rejects(
