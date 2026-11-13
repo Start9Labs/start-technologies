@@ -14,6 +14,10 @@ mid-migration — _"matches existing repo patterns" is not a quality bar_; old c
 exactly what this skill exists to eliminate. Never guess a Taiga API: verify against the
 `taiga-ui-mcp` MCP server or `https://taiga-ui.dev/llms-full.txt`.
 
+**House style does not expand visual scope.** Transport, data and lifecycle refactors preserve
+existing presentation unless a visual change is requested or required for the feature. Keep
+unrelated redesigns in a separate PR; do not turn touching a component into a styling migration.
+
 ## Reference files (read on demand — don't preload)
 
 | File                         | Read when                                                                                                 |

@@ -9,12 +9,7 @@ import {
   TaskService,
 } from '@start9labs/shared'
 import { Version } from '@start9labs/start-core'
-import { TuiButton, TuiNotification, TuiTitle } from '@taiga-ui/core'
-import {
-  TuiCardLarge,
-  TuiHeader,
-  tuiCardOptionsProvider,
-} from '@taiga-ui/layout'
+import { TuiButton } from '@taiga-ui/core'
 import { TuiProgress } from '@taiga-ui/kit'
 import { filter } from 'rxjs'
 import { StartupApiService } from 'src/app/services/api/startup-api.service'
@@ -24,32 +19,28 @@ import { DiagnosticUpdate } from './update.service'
 @Component({
   template: `
     @if (!restarted()) {
-      <header tuiHeader>
-        <h1 tuiTitle>StartOS - {{ 'Diagnostic Mode' | i18n }}</h1>
-      </header>
+      <h1 class="title">StartOS - {{ 'Diagnostic Mode' | i18n }}</h1>
       @if (error(); as error) {
-        <header tuiHeader>
-          <h2 tuiTitle>StartOS {{ 'launch error' | i18n }}:</h2>
-        </header>
-        <div tuiNotification appearance="warning">
+        <h2 class="subtitle">StartOS {{ 'launch error' | i18n }}:</h2>
+        <code class="code warning">
           <p>{{ error.problem | i18n }}</p>
           @if (error.details) {
-            <pre>{{ error.details }}</pre>
+            <p>{{ error.details }}</p>
           }
-        </div>
+        </code>
         <a tuiButton routerLink="logs">{{ 'View logs' | i18n }}</a>
-        <header tuiHeader>
-          <h2 tuiTitle>{{ 'Possible solutions' | i18n }}:</h2>
-        </header>
-        <div tuiNotification appearance="info">
-          {{
-            (error.solution | i18n)
-              .replace('{restartAction}', actions.restart | i18n)
-              .replace('{setupAction}', actions.setup | i18n)
-              .replace('{recoveryAction}', actions.recovery | i18n)
-          }}
-        </div>
-        <div class="g-buttons">
+        <h2 class="subtitle">{{ 'Possible solutions' | i18n }}:</h2>
+        <code class="code">
+          <p>
+            {{
+              (error.solution | i18n)
+                .replace('{restartAction}', actions.restart | i18n)
+                .replace('{setupAction}', actions.setup | i18n)
+                .replace('{recoveryAction}', actions.recovery | i18n)
+            }}
+          </p>
+        </code>
+        <div class="buttons">
           <button tuiButton (click)="restart()">
             {{ actions.restart | i18n }}
           </button>
@@ -77,13 +68,11 @@ import { DiagnosticUpdate } from './update.service'
           </button>
         </div>
         @if (updateState.progress(); as progress) {
-          <header tuiHeader>
-            <h2 tuiTitle>
-              {{ (reinstall() ? 'Reinstalling' : 'Updating') | i18n }} StartOS
-              {{ updateState.target() }}:
-              {{ (progress.total * 100).toFixed(0) }}%
-            </h2>
-          </header>
+          <h2 class="subtitle">
+            {{ (reinstall() ? 'Reinstalling' : 'Updating') | i18n }}
+            StartOS {{ updateState.target() }}:
+            {{ (progress.total * 100).toFixed(0) }}%
+          </h2>
           <progress
             tuiProgressBar
             [max]="1"
@@ -91,48 +80,61 @@ import { DiagnosticUpdate } from './update.service'
           ></progress>
           <p [innerHTML]="progress.message"></p>
         } @else if (updateState.updated()) {
-          <div tuiNotification appearance="positive">
+          <h2 class="subtitle">
             StartOS {{ updateState.target() }}:
             {{ 'Download complete. Restart to apply.' | i18n }}
-          </div>
+          </h2>
         }
       }
     } @else {
-      <header tuiHeader>
-        <h1 tuiTitle>{{ 'Server is restarting' | i18n }}</h1>
-      </header>
-      <p>
+      <h1 class="title">{{ 'Server is restarting' | i18n }}</h1>
+      <h2 class="subtitle">
         {{ 'Wait for the server to restart, then refresh this page.' | i18n }}
-      </p>
+      </h2>
       <button tuiButton (click)="refreshPage()">{{ 'Refresh' | i18n }}</button>
     }
   `,
   styles: `
-    pre {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
+    :host {
+      display: block;
+      padding: 2rem;
+      overflow: auto;
+      background: var(--tui-background-base);
     }
-    .g-buttons {
+
+    .title {
+      text-align: center;
+      padding-bottom: 1.5rem;
+      font-size: calc(2vw + 1rem);
+    }
+
+    .subtitle {
+      padding-top: 1rem;
+      padding-bottom: 1rem;
+      font-size: calc(1vw + 0.75rem);
+      font-weight: bold;
+    }
+
+    .code {
+      display: block;
+      color: var(--tui-status-positive);
+      background: rgb(69, 69, 69);
+      padding: 1px 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .warning {
+      color: var(--tui-status-warning);
+    }
+
+    .buttons {
+      display: flex;
       flex-wrap: wrap;
+      gap: 1rem;
     }
   `,
-  hostDirectives: [TuiCardLarge],
-  providers: [
-    DiagnosticUpdate,
-    tuiCardOptionsProvider({
-      space: 'compact',
-      appearance: 'outline-grayscale',
-    }),
-  ],
-  imports: [
-    TuiButton,
-    TuiProgress,
-    TuiNotification,
-    TuiTitle,
-    TuiHeader,
-    i18nPipe,
-    RouterLink,
-  ],
+  providers: [DiagnosticUpdate],
+  imports: [TuiButton, TuiProgress, i18nPipe, RouterLink],
 })
 export default class HomePage {
   private readonly tasks = inject(TaskService)
