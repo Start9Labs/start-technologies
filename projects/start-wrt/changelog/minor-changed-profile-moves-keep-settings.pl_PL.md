@@ -1,5 +1,0 @@
-- Zmiana profilu bezpieczeństwa portu Ethernet lub hasła Wi-Fi albo usunięcie ostatniego hasła Wi-Fi profilu nie usuwa już rezerwacji ani opublikowanych portów jego urządzeń. Potwierdzenie wymienia urządzenia, które je zachowują.
-- Usunięcie profilu bezpieczeństwa usuwa też rezerwacje i opublikowane porty dla tego profilu. Potwierdzenie je wymienia.
-- Nowa rezerwacja musi należeć do podsieci profilu, w którym jest urządzenie, i nie może być zarezerwowana dla innego urządzenia. Rezerwacje dla profili, w których urządzenia nie ma, są wymienione na jego stronie szczegółów jako nieaktywne i można je tam usunąć.
-- Opublikowany port dla profilu, w którym nie ma jego urządzenia, jest oznaczony jako nieaktywny.
-- Automatyczne przekierowanie portu nie pozostaje już otwarte na zarezerwowanym adresie urządzenia, gdy otrzyma ono adres w innym profilu.

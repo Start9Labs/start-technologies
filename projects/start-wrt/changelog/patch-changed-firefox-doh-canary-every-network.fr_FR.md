@@ -1,1 +1,0 @@
-- Tous les réseaux répondent au domaine de détection DNS-over-HTTPS de Firefox. Le DoH activé par défaut s’efface ainsi sur chacun d’eux et les noms d’appareils s’y résolvent. Le DoH activé explicitement par l’utilisateur reste inchangé.
