@@ -92,6 +92,18 @@ impl RegistryConfig {
         self.load_path_rec(Some(CONFIG_PATH))?;
         Ok(self)
     }
+
+    fn initialize_database(
+        &self,
+        db: &mut Model<RegistryDatabase>,
+        datadir: &Path,
+    ) -> Result<(), Error> {
+        run_migrations(db, datadir)?;
+        if self.mirror_of.is_none() {
+            db.as_index_mut().retain_registered_package_signatures()?;
+        }
+        Ok(())
+    }
 }
 
 pub struct RegistryContextSeed {
@@ -157,7 +169,9 @@ impl RegistryContext {
         if db.dump(&ROOT).await.value.is_null() {
             db.put(&ROOT, &RegistryDatabase::init()).await?;
         }
-        db.mutate(|db| run_migrations(db, &datadir)).await.result?;
+        db.mutate(|db| config.initialize_database(db, &datadir))
+            .await
+            .result?;
         let server_identity = crate::sign::instance::load(&db).await?;
         sweep_icons(
             &icons_dir(&datadir),
@@ -578,11 +592,7 @@ impl SignatureAuthorizationContext for RegistryContext {
                 Ok(())
             })?;
         }
-        let signers = db.as_index().as_signers().de()?;
-        db.as_index_mut().as_package_mut().mutate(|index| {
-            index.retain_registered_signatures(&signers);
-            Ok(())
-        })
+        db.as_index_mut().retain_registered_package_signatures()
     }
     fn check_pubkey(
         &self,
@@ -633,6 +643,51 @@ impl SignatureAuthorizationContext for RegistryContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_preserves_mirror_signatures_and_normalizes_each_return_to_authority() {
+        use crate::registry::package::index::tests::{signers_with, version_info_signed_by};
+
+        let (publisher, mut info) = version_info_signed_by(1);
+        let (_, unregistered) = version_info_signed_by(2);
+        info.merge_with(unregistered, true).unwrap();
+        let version: crate::util::VersionString = "1.0.0:0".parse().unwrap();
+        let mut database = RegistryDatabase::init();
+        database.index.signers = signers_with([publisher.clone()]);
+        database
+            .index
+            .package
+            .packages
+            .entry("test".parse().unwrap())
+            .or_default()
+            .versions
+            .insert(version.clone(), info);
+        let original_index = to_value(&database.index).unwrap();
+        let mut db = Model::new(&database).unwrap();
+        let datadir = tempfile::tempdir().unwrap();
+        let mirror = RegistryConfig {
+            mirror_of: Some("https://upstream.example/".parse().unwrap()),
+            ..Default::default()
+        };
+        let authoritative = RegistryConfig::default();
+
+        for _ in 0..2 {
+            db.as_index_mut().ser(&database.index).unwrap();
+            mirror.initialize_database(&mut db, datadir.path()).unwrap();
+            let mirrored = db.as_index().de().unwrap();
+            assert_eq!(to_value(&mirrored).unwrap(), original_index);
+
+            authoritative
+                .initialize_database(&mut db, datadir.path())
+                .unwrap();
+            let index = db.as_index().de().unwrap();
+            let asset = &index.package.packages["test"].versions[&version].s9pks[0].1;
+            assert_eq!(
+                asset.signatures.keys().collect::<BTreeSet<_>>(),
+                [&publisher].into()
+            );
+        }
+    }
 
     #[test]
     fn legacy_security_notification_config_does_not_gate_registry_subscriptions() {
