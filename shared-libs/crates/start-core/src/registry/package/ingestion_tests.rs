@@ -467,7 +467,9 @@ async fn registry_validates_every_package_url_without_importing_remote_endorseme
 
 #[tokio::test]
 async fn removing_registry_signers_or_keys_prunes_stored_package_signatures() {
-    use crate::registry::admin::{EditSignerParams, RemoveSignerParams, edit_signer, remove_signer};
+    use crate::registry::admin::{
+        EditSignerParams, RemoveSignerParams, edit_signer, remove_signer,
+    };
     use crate::registry::package::index::tests::version_info_signed_by;
 
     let (publisher, mut info) = version_info_signed_by(1);
