@@ -37,7 +37,7 @@ const RESTRICTED_PORTS: &[u16] = &[5353, 5355, 5432, 6010];
 /// Only a privileged claimant — StartOS itself, which runs as root — may take a
 /// port below 1024. A host daemon already holds RESTRICTED_PORTS, whoever asks.
 fn may_claim(port: u16, privileged: bool) -> bool {
-    !RESTRICTED_PORTS.contains(&port) && (privileged || port > 1024)
+    port != 0 && !RESTRICTED_PORTS.contains(&port) && (privileged || port > 1024)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -90,6 +90,21 @@ impl AvailablePorts {
             ErrorKind::Network,
         ))
     }
+    /// First claimable preference, otherwise a dynamic port.
+    pub fn alloc_preferred(
+        &mut self,
+        preferences: impl IntoIterator<Item = u16>,
+        ssl: bool,
+        privileged: bool,
+    ) -> Result<u16, Error> {
+        for port in preferences {
+            if let Some(port) = self.try_alloc(port, ssl, privileged) {
+                return Ok(port);
+            }
+        }
+        self.alloc(ssl)
+    }
+
     /// Allocate a specific port; `None` if taken or not the caller's to claim.
     pub fn try_alloc(&mut self, port: u16, ssl: bool, privileged: bool) -> Option<u16> {
         if !may_claim(port, privileged) || self.0.contains_key(&port) {
@@ -1317,6 +1332,32 @@ mod tests {
         assert!(!is_forward_script_tag("base-established"));
         assert!(!is_forward_script_tag("pinhole:2001:db8::1:443"));
         assert!(!is_forward_script_tag("sni-divert"));
+    }
+
+    #[test]
+    fn zero_is_not_allocatable_even_for_the_os() {
+        let mut ports = AvailablePorts::new();
+        for privileged in [false, true] {
+            assert!(ports.try_alloc(0, false, privileged).is_none());
+            assert!(ports.try_alloc_range(0, 1, privileged).is_err());
+        }
+        assert!(ports.0.is_empty());
+        let assigned = ports.alloc_preferred([0], true, true).unwrap();
+        assert!((DYNAMIC_PORT_START..u16::MAX).contains(&assigned));
+        assert!(ports.is_ssl(assigned));
+        assert!(!ports.0.contains_key(&0));
+    }
+
+    #[test]
+    fn ordered_preferences_fall_back_to_the_first_claimable_port() {
+        let mut ports = AvailablePorts::new();
+        ports.try_alloc(6881, false, false).unwrap();
+        assert_eq!(
+            ports.alloc_preferred([6881, 45678], true, false).unwrap(),
+            45678
+        );
+        assert!(!ports.is_ssl(6881));
+        assert!(ports.is_ssl(45678));
     }
 
     #[test]

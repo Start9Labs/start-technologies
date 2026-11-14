@@ -116,12 +116,13 @@ pub(super) fn configure_in(
 
 fn binding_options(existing: Option<BindOptions>) -> BindOptions {
     let mut options = existing.unwrap_or(BindOptions {
-        preferred_external_port: INTERNAL_PORT,
+        preferred_external_port: 0,
         add_ssl: None,
         secure: None,
         proxy: None,
         default_off: true,
     });
+    options.preferred_external_port = 0;
     options.proxy = Some(ProxyOptions::Tcp);
     options.secure = Some(Security { ssl: false });
     options.default_off = true;
@@ -147,11 +148,29 @@ mod tests {
         previous.proxy = None;
         previous.secure = None;
         previous.default_off = false;
+        let mut ports = crate::net::forward::AvailablePorts::new();
+        let binding = BindInfo::new(&mut ports, previous.clone(), true).unwrap();
         let options = binding_options(Some(previous));
-        assert_eq!(options.preferred_external_port, 45678);
+        assert_eq!(options.preferred_external_port, 0);
         assert_eq!(options.proxy, Some(ProxyOptions::Tcp));
         assert!(options.secure.is_some_and(|security| !security.ssl));
         assert!(options.default_off);
+        let updated = binding.update(&mut ports, options, true).unwrap();
+        assert_eq!(updated.net.assigned_port, Some(45678));
+    }
+
+    #[test]
+    fn fresh_incoming_binding_leaves_service_port_6881_free() {
+        let mut ports = crate::net::forward::AvailablePorts::new();
+        let binding = BindInfo::new(&mut ports, binding_options(None), true).unwrap();
+        let external = binding.net.assigned_port.unwrap();
+        assert_ne!(external, 0);
+        assert_ne!(external, INTERNAL_PORT);
+        assert_eq!(
+            ports.try_alloc(INTERNAL_PORT, false, false),
+            Some(INTERNAL_PORT)
+        );
+        assert_eq!(listener(external).announce_port, Some(external));
     }
 
     #[test]

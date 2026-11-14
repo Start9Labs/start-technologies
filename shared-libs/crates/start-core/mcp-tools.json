@@ -4178,7 +4178,8 @@
             "preferredExternalPort": {
               "type": "integer",
               "minimum": -9007199254740991,
-              "maximum": 9007199254740991
+              "maximum": 9007199254740991,
+              "description": "Zero requests dynamic allocation; it never reserves port zero."
             },
             "addSsl": {
               "anyOf": [{ "$ref": "#/$defs/AddSslOptions" }, { "type": "null" }]
@@ -10651,7 +10652,8 @@
             "preferredExternalPort": {
               "type": "integer",
               "minimum": -9007199254740991,
-              "maximum": 9007199254740991
+              "maximum": 9007199254740991,
+              "description": "Zero requests dynamic allocation; it never reserves port zero."
             },
             "addSsl": {
               "anyOf": [{ "$ref": "#/$defs/AddSslOptions" }, { "type": "null" }]

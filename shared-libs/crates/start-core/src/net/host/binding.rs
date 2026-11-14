@@ -661,18 +661,20 @@ impl BindInfo {
         options: BindOptions,
         privileged: bool,
     ) -> Result<Self, Error> {
-        let mut assigned_port = None;
-        let mut assigned_ssl_port = None;
-        if let Some(preferred) = options.preferred_ssl_port() {
-            assigned_ssl_port = available_ports
-                .try_alloc(preferred, true, privileged)
-                .or_else(|| Some(available_ports.alloc(true).ok()?));
-        }
-        if options.wants_plain_port() {
-            assigned_port = available_ports
-                .try_alloc(options.preferred_external_port, false, privileged)
-                .or_else(|| Some(available_ports.alloc(false).ok()?));
-        }
+        let assigned_ssl_port = options
+            .preferred_ssl_port()
+            .map(|preferred| available_ports.alloc_preferred([preferred], true, privileged))
+            .transpose()?;
+        let assigned_port = options
+            .wants_plain_port()
+            .then(|| {
+                available_ports.alloc_preferred(
+                    [options.preferred_external_port],
+                    false,
+                    privileged,
+                )
+            })
+            .transpose()?;
 
         Ok(Self {
             enabled: true,
@@ -700,22 +702,27 @@ impl BindInfo {
         // Free both up front so each leg can reclaim the number it already holds —
         // it is in the user's address book and keys their per-address overrides.
         available_ports.free(held.assigned_port.into_iter().chain(held.assigned_ssl_port));
-        let preferred_ssl_port = options.preferred_ssl_port();
-        let wants_plain_port = options.wants_plain_port();
-        let mut reclaim = |held: Option<u16>, preferred: u16, ssl: bool| {
-            for port in held.into_iter().chain([preferred]) {
-                if let Some(port) = available_ports.try_alloc(port, ssl, privileged) {
-                    return Ok(port);
-                }
-            }
-            available_ports.alloc(ssl)
-        };
-
-        let assigned_ssl_port = preferred_ssl_port
-            .map(|preferred| reclaim(held.assigned_ssl_port, preferred, true))
+        let assigned_ssl_port = options
+            .preferred_ssl_port()
+            .map(|preferred| {
+                available_ports.alloc_preferred(
+                    held.assigned_ssl_port.into_iter().chain([preferred]),
+                    true,
+                    privileged,
+                )
+            })
             .transpose()?;
-        let assigned_port = wants_plain_port
-            .then(|| reclaim(held.assigned_port, options.preferred_external_port, false))
+        let assigned_port = options
+            .wants_plain_port()
+            .then(|| {
+                available_ports.alloc_preferred(
+                    held.assigned_port
+                        .into_iter()
+                        .chain([options.preferred_external_port]),
+                    false,
+                    privileged,
+                )
+            })
             .transpose()?;
 
         Ok(Self {
@@ -761,6 +768,7 @@ rpc_toolkit::ts_export!(Security, namespaces = [""]);
 #[serde(rename_all = "camelCase", try_from = "CompatibleBindOptions")]
 #[visit(type_attributes(serde::try_from))]
 pub struct BindOptions {
+    /// Zero requests dynamic allocation; it never reserves port zero.
     pub preferred_external_port: u16,
     pub add_ssl: Option<AddSslOptions>,
     pub secure: Option<Security>,
@@ -1851,6 +1859,16 @@ mod test {
             "alpn": alpn,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn binding_creation_reports_dynamic_port_exhaustion_for_either_leg() {
+        for options in [opts(0, None, Some(false)), opts(0, None, Some(true))] {
+            let mut ports = AvailablePorts::new();
+            ports.try_alloc_range(49152, 16384, true).unwrap();
+            let error = BindInfo::new(&mut ports, options, true).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::Network);
+        }
     }
 
     #[test]

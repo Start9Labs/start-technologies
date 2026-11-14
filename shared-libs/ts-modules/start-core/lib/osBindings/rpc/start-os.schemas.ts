@@ -5639,6 +5639,9 @@ export const PackageIndex: z.ZodObject<{
 export const BindOptions: z.ZodCodec<
   typeof CompatibleBindOptions,
   z.ZodObject<{
+    /**
+     * Zero requests dynamic allocation; it never reserves port zero.
+     */
     preferredExternalPort: z.ZodInt
     addSsl: z.ZodNullable<typeof AddSslOptions>
     secure: z.ZodNullable<typeof Security>
@@ -5656,7 +5659,13 @@ export const BindOptions: z.ZodCodec<
 > = /* @__PURE__ */ wire(
   CompatibleBindOptions,
   object({
-    preferredExternalPort: z.int(),
+    /**
+     * Zero requests dynamic allocation; it never reserves port zero.
+     */
+    preferredExternalPort: z.int().meta({
+      description:
+        'Zero requests dynamic allocation; it never reserves port zero.',
+    }),
     addSsl: AddSslOptions.nullable(),
     secure: Security.nullable(),
     /**

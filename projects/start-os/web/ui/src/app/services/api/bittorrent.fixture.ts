@@ -18,11 +18,11 @@ export const BITTORRENT_INTERFACE: T.ServiceInterface = {
 }
 
 export function mockBitTorrentBinding(): T.BindInfo {
-  const port = BITTORRENT_INTERFACE.addressInfo.internalPort
+  const port = 50000
   return {
     enabled: false,
     options: {
-      preferredExternalPort: port,
+      preferredExternalPort: 0,
       addSsl: null,
       secure: { ssl: false },
       proxy: { type: 'tcp' },
