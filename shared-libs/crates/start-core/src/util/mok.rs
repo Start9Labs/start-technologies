@@ -123,9 +123,23 @@ async fn password_hash_file(
     Ok((path, cleanup))
 }
 
+/// Appends certificates to the shared native enrollment request.
+/// Already-pending certificates do not refresh its authentication value.
+pub async fn request_enrollment(certificates: &[PathBuf], hash: &str) -> Result<(), Error> {
+    let (hash_file, _cleanup) = password_hash_file(Path::new("/run"), hash).await?;
+    Command::new("mokutil")
+        .arg("--import")
+        .args(certificates)
+        .arg("--hash-file")
+        .arg(&hash_file)
+        .invoke(ErrorKind::Bios)
+        .await?;
+    Ok(())
+}
+
 /// Stages DKMS enrollment using the start9 user's password.
-/// The root holds both the certificate and `etc/shadow`. Call after password changes
-/// to refresh pending authentication. Returns request submission, not enrollment.
+/// The root holds both the certificate and `etc/shadow`.
+/// FDE-owned authentication remains unchanged. Returns request submission, not enrollment.
 pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
     let mok_pub = &root.join(DKMS_MOK_PUB.trim_start_matches('/'));
     tracing::info!("enroll_mok: checking EFI and mok_pub={}", mok_pub.display());
@@ -143,6 +157,10 @@ pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
         return Ok(false);
     }
 
+    if crate::fde::enrollment::owns_enrollment_request().await? {
+        return Ok(false);
+    }
+
     let Some(hash) = start9_shadow_hash(root).await? else {
         tracing::info!("enroll_mok: start9 user password not set, skipping");
         return Ok(false);
@@ -154,16 +172,8 @@ pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
         .invoke(ErrorKind::Bios)
         .await;
 
-    let (hash_file, _cleanup) = password_hash_file(Path::new("/run"), &hash).await?;
-
     tracing::info!("Enrolling DKMS MOK certificate");
-    Command::new("mokutil")
-        .arg("--import")
-        .arg(mok_pub)
-        .arg("--hash-file")
-        .arg(&hash_file)
-        .invoke(ErrorKind::Bios)
-        .await?;
+    request_enrollment(&[mok_pub.to_owned()], &hash).await?;
     Ok(true)
 }
 

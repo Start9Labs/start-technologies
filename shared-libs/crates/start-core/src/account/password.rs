@@ -234,6 +234,10 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("luksCredentials");
+        initial["private"]
+            .as_object_mut()
+            .unwrap()
+            .remove("fdeEnrollment");
         let raw = PatchDb::open(directory.path().join("legacy.db"))
             .await
             .unwrap();
@@ -248,12 +252,27 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        assert!(
+            db.peek()
+                .await
+                .as_private()
+                .as_fde_enrollment()
+                .de()
+                .unwrap()
+                .is_none()
+        );
         let value = serde_json::to_value(db.peek().await).unwrap();
         assert!(
             value["private"]
                 .as_object()
                 .unwrap()
                 .contains_key("luksCredentials")
+        );
+        assert!(
+            value["private"]
+                .as_object()
+                .unwrap()
+                .contains_key("fdeEnrollment")
         );
     }
 }

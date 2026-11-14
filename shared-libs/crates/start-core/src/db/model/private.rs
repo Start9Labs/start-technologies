@@ -24,6 +24,8 @@ pub struct Private {
     #[serde(default)]
     pub luks_credentials: Option<crate::account::LuksCredentials>,
     #[serde(default)]
+    pub fde_enrollment: Option<crate::fde::enrollment::Enrollment>,
+    #[serde(default)]
     pub sessions: Sessions,
     #[serde(default = "generate_developer_key")]
     pub developer_key: Der64<ed25519_dalek::SigningKey>,

@@ -171,8 +171,7 @@ impl LoginContext for RpcContext {
 }
 
 pub async fn write_shadow(password: &str) -> Result<(), Error> {
-    let hash: String = sha_crypt::sha512_simple(password, &sha_crypt::Sha512Params::default())
-        .map_err(|e| Error::new(eyre!("{e:?}"), ErrorKind::Serialization))?;
+    let hash = crate::util::crypto::shadow_password_hash(password)?;
     let shadow_contents = tokio::fs::read_to_string("/etc/shadow").await?;
     let mut shadow_file =
         create_file_mod("/media/startos/config/overlay/etc/shadow", 0o640).await?;

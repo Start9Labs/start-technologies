@@ -16,7 +16,7 @@ for target in x86_64:x86_64:yes x86_64:x86_64-nonfree:yes \
     IFS=: read -r architecture platform uefi <<< "$target"
     ENVIRONMENT= ARCH="$architecture" PLATFORM="$platform" \
         bash "$work/dpkg-deps/generate.sh"
-    for package in sbsigntool systemd-boot-efi systemd-ukify tpm2-tools; do
+    for package in python3-cryptography sbsigntool systemd-boot-efi systemd-ukify tpm2-tools; do
         if [[ $uefi == yes ]]; then
             grep -Fxq "$package" "$work/lib/depends"
         elif grep -Fxq "$package" "$work/lib/depends"; then

@@ -29,6 +29,21 @@ lazy_static::lazy_static! {
     static ref EC_GROUP: EcGroup = EcGroup::from_curve_name(NIST_P256_CURVE).unwrap();
 }
 
+/// Produces the encoded hash accepted by shadow files and MOK requests.
+#[instrument(skip_all)]
+pub fn shadow_password_hash(password: &str) -> Result<String, Error> {
+    sha_crypt::sha512_simple(password, &sha_crypt::Sha512Params::default())
+        .map_err(|error| Error::new(eyre!("{error:?}"), ErrorKind::Serialization))
+}
+
+#[test]
+fn shadow_hash_preserves_password_and_crypt_encoding() {
+    let hash = shadow_password_hash("firmware-approval-credential").unwrap();
+    assert!(hash.starts_with("$6$"));
+    sha_crypt::sha512_check("firmware-approval-credential", &hash).unwrap();
+    assert!(sha_crypt::sha512_check("different-credential", &hash).is_err());
+}
+
 #[instrument(skip_all)]
 pub fn gen_nistp256() -> Result<PKey<Private>, Error> {
     Ok(PKey::from_ec_key(EcKey::generate(EC_GROUP.as_ref())?)?)
