@@ -181,9 +181,9 @@ struct HostName {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct HostNames {
     entries: Vec<HostName>,
-    /// Profile → lowercase names its own leases carry. That profile's
-    /// instance serves them itself and refuses a lease a name it already has
-    /// at another address.
+    /// Profile → lowercase names its own leases carry, counting only each
+    /// device's newest lease. That profile's instance serves them itself and
+    /// refuses a lease a name it already has at another address.
     leased: BTreeMap<String, BTreeSet<String>>,
 }
 
@@ -474,20 +474,23 @@ fn host_names(snapshot: &NetSnapshot, leases: &[crate::devices::DhcpLease]) -> H
         let Ok(ip) = lease.ip.parse::<Ipv4Addr>() else {
             continue;
         };
-        if let Some(p) = profile_for(&snapshot.profiles, ip) {
-            if lease.instance.as_deref() == Some(format!("dns_{}", p.interface).as_str())
-                && valid(&lease.hostname)
-            {
-                hosts
-                    .leased
-                    .entry(p.interface.clone())
-                    .or_default()
-                    .insert(lease.hostname.to_ascii_lowercase());
-            }
-        }
         let held = newest.entry(lease.mac.as_str()).or_insert((lease, ip));
         if expiry(lease) > expiry(held.0) {
             *held = (lease, ip);
+        }
+    }
+    for (lease, ip) in newest.values() {
+        let Some(p) = profile_for(&snapshot.profiles, *ip) else {
+            continue;
+        };
+        if lease.instance.as_deref() == Some(format!("dns_{}", p.interface).as_str())
+            && valid(&lease.hostname)
+        {
+            hosts
+                .leased
+                .entry(p.interface.clone())
+                .or_default()
+                .insert(lease.hostname.to_ascii_lowercase());
         }
     }
     let macs: BTreeSet<&str> = newest
@@ -2553,6 +2556,43 @@ mod tests {
 192.168.101.90 box.lan
 ",
             "an assigned name beats a sent one; then the later lease"
+        );
+    }
+
+    #[test]
+    fn a_moved_device_resolves_at_its_new_lease_from_its_old_profile() {
+        let (snapshot, _) = name_fixture();
+        let reach = BTreeSet::from([
+            ("lan".into(), "vlan_guest".into()),
+            ("vlan_guest".into(), "lan".into()),
+        ]);
+        let moved = |lan_expires, guest_expires| {
+            [
+                lease(
+                    "dns_lan",
+                    "EE:00:00:00:00:01",
+                    Ipv4Addr::new(192, 168, 1, 110),
+                    "debian",
+                    lan_expires,
+                ),
+                lease(
+                    "dns_guest",
+                    "EE:00:00:00:00:01",
+                    Ipv4Addr::new(192, 168, 101, 110),
+                    "debian",
+                    guest_expires,
+                ),
+            ]
+        };
+        assert_eq!(
+            rendered_names(&snapshot, &reach, &moved(1_000_000_000, 2_000_000_000))[..2],
+            ["192.168.101.110 debian.lan\n".to_string(), String::new()],
+            "lan's older lease of the device yields the name to its guest lease"
+        );
+        assert_eq!(
+            rendered_names(&snapshot, &reach, &moved(2_000_000_000, 1_000_000_000))[..2],
+            [String::new(), "192.168.1.110 debian.lan\n".to_string()],
+            "moved back: lan's lease is the newest again and serves the name itself"
         );
     }
 
