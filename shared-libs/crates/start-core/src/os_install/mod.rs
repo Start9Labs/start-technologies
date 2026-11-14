@@ -92,18 +92,36 @@ async fn fstab_source(partition: &Path) -> Result<String, Error> {
     Ok(format!("PARTUUID={partuuid}"))
 }
 
+fn partition_table_for(
+    disk_path: &Path,
+    existing: Option<PartitionTable>,
+    preserve: bool,
+    use_efi: bool,
+) -> Result<PartitionTable, Error> {
+    match (preserve, existing) {
+        (true, Some(PartitionTable::Mbr)) if use_efi => Err(Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "os-install.mbr-drive-needs-legacy-boot",
+                    disk = disk_path.display()
+                )
+            ),
+            ErrorKind::InvalidRequest,
+        )),
+        (true, Some(t)) => Ok(t),
+        _ => Ok(PartitionTable::Gpt),
+    }
+}
+
 async fn partition(
     disk_path: &Path,
     capacity: u64,
-    partition_table: Option<PartitionTable>,
+    partition_table: PartitionTable,
     protect: Option<&Path>,
     use_efi: bool,
 ) -> Result<OsPartitionInfo, Error> {
-    let partition_type = match (protect.is_none(), partition_table) {
-        (true, _) | (_, None) => PartitionTable::Gpt,
-        (_, Some(t)) => t,
-    };
-    match partition_type {
+    match partition_table {
         PartitionTable::Gpt => gpt::partition(disk_path, capacity, protect, use_efi).await,
         PartitionTable::Mbr => mbr::partition(disk_path, capacity, protect).await,
     }
@@ -403,6 +421,8 @@ pub async fn install_os_to(
     let squashfs_path = squashfs_path.as_ref();
     let disk_path = disk_path.as_ref();
     let protect = protect.as_ref().map(|p| p.as_ref());
+    let partition_table =
+        partition_table_for(disk_path, partition_table, protect.is_some(), use_efi)?;
 
     // Must precede `partition`, which rewrites the OS partitions: afterwards the
     // previous root is gone, so the backup finds nothing and a preserve install comes
@@ -1034,6 +1054,38 @@ mod tests {
             &[0xff][..],
         ] {
             assert!(parse_partuuid(output).is_none());
+        }
+    }
+
+    #[test]
+    fn preserve_on_mbr_refuses_uefi_boot() {
+        let err = partition_table_for(Path::new("/dev/sda"), Some(PartitionTable::Mbr), true, true)
+            .unwrap_err();
+        assert!(matches!(err.kind, ErrorKind::InvalidRequest));
+    }
+
+    #[test]
+    fn partition_table_keeps_existing_only_when_preserving() {
+        let disk = Path::new("/dev/sda");
+        let table = |existing, preserve, use_efi| {
+            partition_table_for(disk, existing, preserve, use_efi).unwrap()
+        };
+        assert!(matches!(
+            table(Some(PartitionTable::Mbr), true, false),
+            PartitionTable::Mbr
+        ));
+        for use_efi in [false, true] {
+            assert!(matches!(
+                table(Some(PartitionTable::Gpt), true, use_efi),
+                PartitionTable::Gpt
+            ));
+            assert!(matches!(table(None, true, use_efi), PartitionTable::Gpt));
+            for existing in [None, Some(PartitionTable::Mbr), Some(PartitionTable::Gpt)] {
+                assert!(matches!(
+                    table(existing, false, use_efi),
+                    PartitionTable::Gpt
+                ));
+            }
         }
     }
 
