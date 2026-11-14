@@ -22,6 +22,7 @@ pub struct SecureSession {
     address: InternedString,
     server_identity: Signer,
     replay_check: RequestReplayCheck,
+    origin: crate::net::request_origin::RequestOrigin,
 }
 
 impl SecureSession {
@@ -32,6 +33,10 @@ impl SecureSession {
     /// The ingress-validated server name bound into the exchange.
     pub fn address(&self) -> &InternedString {
         &self.address
+    }
+
+    pub(crate) fn origin(&self) -> &crate::net::request_origin::RequestOrigin {
+        &self.origin
     }
 
     /// Admits a fresh encrypted continuation only for the initiating identity.
@@ -164,6 +169,9 @@ impl<C: SignatureAuthContext + Clone> WebSocketUpgrader<C> for RpcSessionUpgrade
                 address,
                 server_identity,
                 replay_check,
+                origin: crate::net::request_origin::RequestOrigin::from_extensions(
+                    request.extensions(),
+                ),
             });
             Ok(UpgradedWebSocket {
                 context: Arc::new(scoped),

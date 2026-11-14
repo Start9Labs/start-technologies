@@ -456,7 +456,7 @@ impl Manifest {
     }
 }
 
-async fn regular_file(path: &Path) -> Result<tokio::fs::File, Error> {
+pub(crate) async fn regular_file(path: &Path) -> Result<tokio::fs::File, Error> {
     if !tokio::fs::symlink_metadata(path).await?.is_file() {
         return Err(invalid_signature());
     }

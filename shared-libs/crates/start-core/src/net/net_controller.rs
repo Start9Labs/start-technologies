@@ -127,20 +127,7 @@ impl NetController {
         // One PortMapController shared by the forward and vhost controllers so a
         // single query answers "is this port automatically forwarded?".
         let port_map = PortMapController::new(net_iface.watcher.subscribe());
-        let dns_update = DnsUpdateController::new(
-            net_iface.watcher.subscribe(),
-            Arc::new(
-                |gw: GatewayId| -> std::pin::Pin<
-                    Box<dyn std::future::Future<Output = Result<Option<[u8; 32]>, ()>> + Send>,
-                > {
-                    Box::pin(async move {
-                        crate::net::gateway::wireguard_psk(gw.as_str())
-                            .await
-                            .map_err(|_| ())
-                    })
-                },
-            ),
-        );
+        let dns_update = DnsUpdateController::from_network_manager(net_iface.watcher.subscribe());
         let mdns_injection = spawn_server_mdns_injection(
             db.clone(),
             net_iface.watcher.subscribe(),
@@ -531,7 +518,7 @@ enum ProxyHandle {
 }
 
 #[derive(Default, Debug)]
-struct HostBinds {
+pub(crate) struct HostBinds {
     /// `(internal-target, count, requirements, rc)` keyed by external start
     /// port. `count == 1` is the single-port case; `count > 1` represents a
     /// contiguous range forward.
@@ -835,16 +822,49 @@ impl NetServiceData {
 
     async fn update(&mut self, ctrl: &NetController, id: HostId, host: Host) -> Result<(), Error> {
         let net_ifaces = ctrl.net_iface.watcher.ip_info();
-        let HostExposurePlan {
+        let plan = plan_host_exposure(&host, &net_ifaces, self.ip, self.ipv6, |mode| {
+            ctrl.upstream_client_config(mode)
+        });
+        self.binds
+            .entry(id.clone())
+            .or_default()
+            .reconcile(
+                HostExposureResources {
+                    forward: &ctrl.forward,
+                    vhost: &ctrl.vhost,
+                    dns: &ctrl.dns,
+                    dns_update: &ctrl.dns_update,
+                },
+                (self.id.clone(), id),
+                &net_ifaces,
+                plan,
+            )
+            .await
+    }
+}
+
+pub(crate) struct HostExposureResources<'a> {
+    pub forward: &'a InterfacePortForwardController,
+    pub vhost: &'a VHostController,
+    pub dns: &'a DnsController,
+    pub dns_update: &'a DnsUpdateController,
+}
+
+impl HostBinds {
+    pub(crate) async fn reconcile(
+        &mut self,
+        ctrl: HostExposureResources<'_>,
+        owner: (Option<PackageId>, HostId),
+        net_ifaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+        HostExposurePlan {
             mut forwards,
             mut vhosts,
             http_ports,
             private_dns,
             gua_forwards,
-        } = plan_host_exposure(&host, &net_ifaces, self.ip, self.ipv6, |mode| {
-            ctrl.upstream_client_config(mode)
-        });
-        let binds = self.binds.entry(id.clone()).or_default();
+        }: HostExposurePlan,
+    ) -> Result<(), Error> {
+        let binds = self;
 
         // The vhost controller owns every upstream port map for its ports — the
         // IPv6 GUA pinholes (bare `*` and public-domain vhosts) and their v6 80->443
@@ -918,7 +938,6 @@ impl NetServiceData {
         }
         binds.gua_forwards = gua_forwards;
 
-        // ── Phase 3: Reconcile ──
         let all = binds
             .forwards
             .keys()
@@ -970,8 +989,7 @@ impl NetServiceData {
         // per-family `public_v4`). Called on the complete `vhosts` before the drain
         // loop below consumes it, and on every update (even with none) so a host
         // that dropped its exposure withdraws its prior mappings.
-        ctrl.vhost
-            .reconcile_port_maps((self.id.clone(), id.clone()), &vhosts);
+        ctrl.vhost.reconcile_port_maps(owner, &vhosts);
 
         let all = binds
             .vhosts
@@ -1039,7 +1057,9 @@ impl NetServiceData {
 
         Ok(())
     }
+}
 
+impl NetServiceData {
     /// Tear down everything the datapath holds for a host that is no longer in
     /// the database. Reconciling against an empty host is what reaps it: the v6
     /// forwards, the vhost port maps and the RFC 2136 records carry no

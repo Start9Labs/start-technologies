@@ -137,6 +137,7 @@ pub fn echo<C: Context>(_: C, EchoParams { message }: EchoParams) -> Result<Stri
 #[serde(rename_all = "camelCase")]
 pub enum ApiState {
     Error,
+    Locked,
     Initializing,
     Running,
 }

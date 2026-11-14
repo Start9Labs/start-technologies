@@ -9,7 +9,8 @@ Usage: fde-build-uki --linux PATH --initrd PATH --cmdline PATH --os-release PATH
 
 Builds a signed native-architecture UKI and PATH.pcr11 (64 lowercase hex digits
 plus LF), predicting SHA256 PCR11 before any systemd-pcrphase events.
-Cmdline is the complete effective command line; input files must remain stable.
+Cmdline uses unquoted tokens and includes the FDE BOOT parameter.
+Input files must remain stable.
 Key is an unencrypted PEM RSA Secure Boot key; cert is its PEM X.509 certificate.
 The caller keeps the key on encrypted data, distinct from the TPM policy key.
 
@@ -49,6 +50,21 @@ for option in --linux --initrd --cmdline --os-release --key --cert --output; do
         paths[$option]=$(realpath -e -- "${paths[$option]}")
     fi
 done
+
+read -r boot_mode < "$(dirname -- "${BASH_SOURCE[0]}")/fde-boot-mode"
+if LC_ALL=C tr -d '\t\n' < "${paths[--cmdline]}" | LC_ALL=C grep -a '[[:cntrl:]"]' >/dev/null; then
+    fail "command line requires unquoted tokens without control bytes"
+fi
+command_line_contents=$(< "${paths[--cmdline]}")
+read -r -a command_line <<< "${command_line_contents//$'\n'/ }"
+boot_parameters=0
+for parameter in "${command_line[@]}"; do
+    if [[ $parameter == BOOT=* ]]; then
+        [[ $parameter == "BOOT=$boot_mode" ]] || fail "incompatible BOOT parameter"
+        (( boot_parameters += 1 ))
+    fi
+done
+[[ $boot_parameters == 1 ]] || fail "command line requires one BOOT=$boot_mode parameter"
 
 output=${paths[--output]}
 parent=$(dirname -- "$output")

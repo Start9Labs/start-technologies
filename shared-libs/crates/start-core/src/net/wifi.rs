@@ -1071,16 +1071,16 @@ impl TypedValueParser for CountryCodeParser {
 
 #[instrument(skip_all)]
 pub async fn synchronize_network_manager<P: AsRef<Path>>(
-    main_datadir: P,
+    profiles: P,
     wifi: &WifiInfo,
     system_product_name: Option<&str>,
 ) -> Result<(), Error> {
-    let persistent = main_datadir.as_ref().join("system-connections");
+    let persistent = profiles.as_ref();
 
     if tokio::fs::metadata(&persistent).await.is_err() {
-        tokio::fs::create_dir_all(&persistent).await?;
+        tokio::fs::create_dir_all(persistent).await?;
     }
-    crate::disk::mount::util::bind(&persistent, SAVED_PROFILE_DIRECTORY, false).await?;
+    crate::disk::mount::util::bind(persistent, SAVED_PROFILE_DIRECTORY, false).await?;
 
     if !wifi.enabled {
         Command::new("rfkill")

@@ -1115,4 +1115,6 @@ export default {
   1314: 'Seleccione «Enroll MOK», revise las huellas de los certificados y seleccione «Continue» y «Yes».',
   1315: 'Cuando se le solicite, introduzca el código de aprobación del firmware',
   1316: 'Seleccione «Reboot» para completar la inscripción del firmware.',
+  1317: 'Desbloquear su servidor',
+  1318: 'Abra este servidor mediante su dirección HTTPS de confianza antes de introducir su contraseña.',
 } satisfies i18n

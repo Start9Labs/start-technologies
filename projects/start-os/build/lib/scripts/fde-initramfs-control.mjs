@@ -20,6 +20,10 @@ import {
   kernelDirectory,
 } from './fde-initramfs-paths.mjs'
 
+const bootMode = (
+  await readFile(new URL('./fde-boot-mode', import.meta.url), 'utf8')
+).trim()
+
 const inputs = {
   init: [
     '0a9bb34973c78987922b57f010e99c36ddf102e8a5a2fd198385566539f5d6d5',
@@ -432,7 +436,7 @@ export async function harden(root) {
     init,
     '# Default to BOOT=local',
     'if [ -n "${noresume}" ]',
-    'set +x\nBOOT=startos-fde\nIP=none\nnoresume=y\nresume=\ninit=/sbin/init\n\n',
+    `set +x\nBOOT=${bootMode}\nIP=none\nnoresume=y\nresume=\ninit=/sbin/init\n\n`,
   )
   init = replaceRange(
     init,
@@ -501,7 +505,7 @@ export async function harden(root) {
     await readFile(join(here, 'fde-initramfs-fail'), 'utf8'),
   )
   output.set(
-    'scripts/startos-fde',
+    `scripts/${bootMode}`,
     await readFile(join(here, 'startos-fde-initramfs-module'), 'utf8'),
   )
   for (const [path, text] of output) {

@@ -29,6 +29,7 @@ async fn inner_main(
     server: &mut WebServer<WildcardListener>,
     dns: &Arc<DnsController>,
     config: &ServerConfig,
+    boot: crate::fde::initramfs::BootMode,
 ) -> Result<Option<Shutdown>, Error> {
     let rpc_ctx = if !tokio::fs::metadata("/run/startos/initialized")
         .await
@@ -37,11 +38,22 @@ async fn inner_main(
         LOGGER.set_logfile(Some(
             append_file("/run/startos/init.log").await?.into_std().await,
         ));
-        let (ctx, handle) = match super::start_init::main(server, dns.clone(), &config).await? {
+        let initialized = match boot {
+            crate::fde::initramfs::BootMode::Ordinary => {
+                super::start_init::main(server, dns.clone(), config).await?
+            }
+            crate::fde::initramfs::BootMode::Protected => {
+                crate::fde::unlock::initialize(server, dns.clone(), config).await?
+            }
+        };
+        let (ctx, handle) = match initialized {
             Err(s) => return Ok(Some(s)),
             Ok(ctx) => ctx,
         };
         tokio::fs::write("/run/startos/initialized", "").await?;
+        if boot == crate::fde::initramfs::BootMode::Protected {
+            crate::fde::initramfs::finish_handoff().await?;
+        }
 
         server.serve_ui_for(ctx.clone());
         LOGGER.set_logfile(None);
@@ -49,6 +61,11 @@ async fn inner_main(
 
         ctx
     } else {
+        if boot == crate::fde::initramfs::BootMode::Protected {
+            let guid = tokio::fs::read_to_string("/media/startos/config/disk.guid").await?;
+            crate::fde::unlock::require_cached_unlock(guid.trim()).await?;
+            crate::fde::initramfs::finish_handoff().await?;
+        }
         let init_ctx = InitContext::init(config, dns.clone()).await?;
         let handle = init_ctx.progress.clone();
         let rpc_ctx_phases = InitRpcContextPhases::new(&handle);
@@ -168,13 +185,18 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
                 }
             });
 
+            let boot = crate::fde::initramfs::BootMode::current().await?;
             let listener = WildcardListener::new(80)?;
             let dns = Arc::new(DnsController::new(listener.subscribe()));
             let mut server = WebServer::new(Acceptor::new(listener), refresher());
-            match inner_main(&mut server, &dns, &config).await {
+            match inner_main(&mut server, &dns, &config, boot).await {
                 Ok(a) => {
                     server.shutdown().await;
                     Ok(a)
+                }
+                Err(e) if boot == crate::fde::initramfs::BootMode::Protected => {
+                    server.shutdown().await;
+                    Err(e)
                 }
                 Err(e) => {
                     async {

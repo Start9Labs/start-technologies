@@ -12,6 +12,8 @@ pub mod enrollment;
 pub mod initramfs;
 pub mod loader;
 pub mod memory;
+pub mod network;
 mod root;
 pub mod source;
 pub mod tpm;
+pub mod unlock;

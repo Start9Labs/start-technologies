@@ -122,12 +122,7 @@ where
             .and_then(|p| p.as_idx(JsonKey::new_ref(san_info)))
             .and_then(|cert| cert.de().log_err());
         if let Some(cert) = &cached {
-            if cert
-                .fullchain
-                .get(0)
-                .and_then(|c| should_use_cert(&c.0).log_err())
-                .unwrap_or(false)
-            {
+            if usable(cert) {
                 self.in_progress
                     .send_if_modified(|map| map.remove(san_info).is_some());
                 return certified_key(cert, &self.crypto_provider).log_err();
@@ -279,6 +274,13 @@ where
         }
         .or_else(renewing)
     }
+}
+
+fn usable(cert: &AcmeCert) -> bool {
+    cert.fullchain
+        .first()
+        .and_then(|certificate| should_use_cert(&certificate.0).log_err())
+        .unwrap_or(false)
 }
 
 fn unexpired(cert: &AcmeCert) -> bool {
@@ -448,6 +450,54 @@ impl BootstrapAcme {
             }
         }
         Ok(snapshot)
+    }
+
+    /// Retains authoritative settings, accounts and healthy cached identities.
+    pub(crate) fn merge_cache_into(&self, db: &mut DatabaseModel) -> Result<(), Error> {
+        for (sans, provider) in &self.providers {
+            let Some(expected) = self.settings.get(provider) else {
+                continue;
+            };
+            let Some(current) =
+                <Database as DbAccessByKey<AcmeSettings>>::access_by_key(db, provider)
+            else {
+                continue;
+            };
+            if serde_json::to_value(current.de()?).with_kind(ErrorKind::Serialization)?
+                != serde_json::to_value(expected).with_kind(ErrorKind::Serialization)?
+            {
+                continue;
+            }
+            let store = <Database as DbAccessMut<AcmeCertStore>>::access_mut(db);
+            let contacts = JsonKey::new(expected.contact.clone());
+            if store.as_accounts().as_idx(&contacts).is_none() {
+                if let Some(account) = self.cache.accounts.get(&contacts) {
+                    store.as_accounts_mut().insert(&contacts, account)?;
+                }
+            }
+            let current = store
+                .as_certs()
+                .as_idx(&provider.0)
+                .and_then(|certs| certs.as_idx(sans))
+                .map(|cert| cert.de())
+                .transpose()?;
+            if current.as_ref().is_some_and(usable) {
+                continue;
+            }
+            if let Some(cert) = self
+                .cache
+                .certs
+                .get(&provider.0)
+                .and_then(|certs| certs.get(sans))
+                .filter(|cert| usable(cert))
+            {
+                store
+                    .as_certs_mut()
+                    .upsert(&provider.0, || Ok(BTreeMap::new()))?
+                    .insert(sans, cert)?;
+            }
+        }
+        Ok(())
     }
 
     /// Materializes a mutable RAM cache; callers persist renewed records at handoff.
@@ -652,12 +702,7 @@ fn challenge_pending(
     else {
         return Ok(true);
     };
-    Ok(!cert
-        .de()?
-        .fullchain
-        .first()
-        .and_then(|c| should_use_cert(&c.0).log_err())
-        .unwrap_or(false))
+    Ok(!usable(&cert.de()?))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, VisitFields)]
@@ -1018,6 +1063,73 @@ mod bootstrap_tests {
             in_progress: Watch::new(BTreeMap::new()),
             report_failure: None,
         }
+    }
+
+    #[test]
+    fn bootstrap_handoff_preserves_healthy_cache_and_replaces_due_certificates() {
+        for (days_left, replace) in [(10, true), (100, false)] {
+            let account =
+                crate::account::AccountInfo::new("cache-test-password", SystemTime::now(), None)
+                    .unwrap();
+            let mut db = Model::new(&Database::init(&account, false, None, None).unwrap()).unwrap();
+            let renewed = snapshot(certificate(365));
+            db.as_public_mut()
+                .as_server_info_mut()
+                .as_network_mut()
+                .as_acme_mut()
+                .ser(&renewed.settings)
+                .unwrap();
+            let existing = snapshot(certificate(days_left));
+            let sans = JsonKey::new(names("unlock.example.com"));
+            let expected = if replace {
+                &renewed.cache.certs[&provider().0][&sans]
+            } else {
+                &existing.cache.certs[&provider().0][&sans]
+            }
+            .key
+            .0
+            .public_key_to_der()
+            .unwrap();
+            <Database as DbAccessMut<AcmeCertStore>>::access_mut(&mut db)
+                .ser(&existing.cache)
+                .unwrap();
+            renewed.merge_cache_into(&mut db).unwrap();
+            let stored = <Database as DbAccess<AcmeCertStore>>::access(&db)
+                .as_certs()
+                .as_idx(&provider().0)
+                .unwrap()
+                .as_idx(&sans)
+                .unwrap()
+                .de()
+                .unwrap();
+            assert_eq!(stored.key.0.public_key_to_der().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn bootstrap_handoff_cannot_override_changed_provider_settings() {
+        let account =
+            crate::account::AccountInfo::new("cache-test-password", SystemTime::now(), None)
+                .unwrap();
+        let mut db = Model::new(&Database::init(&account, false, None, None).unwrap()).unwrap();
+        let renewed = snapshot(certificate(365));
+        db.as_public_mut()
+            .as_server_info_mut()
+            .as_network_mut()
+            .as_acme_mut()
+            .ser(&BTreeMap::from([(
+                provider(),
+                AcmeSettings {
+                    contact: vec!["mailto:replacement@example.com".into()],
+                },
+            )]))
+            .unwrap();
+        renewed.merge_cache_into(&mut db).unwrap();
+        let stored = <Database as DbAccess<AcmeCertStore>>::access(&db)
+            .de()
+            .unwrap();
+        assert!(stored.accounts.is_empty());
+        assert!(stored.certs.is_empty());
     }
 
     #[tokio::test]

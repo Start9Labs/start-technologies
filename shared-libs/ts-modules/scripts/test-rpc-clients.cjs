@@ -3247,6 +3247,43 @@ function startupStateHarness() {
   }
 }
 
+test('locked StartOS uses its restricted surface and routes through unlock before normal startup', async () => {
+  const { ticks, routes, create } = startupStateHarness()
+  let state = 'locked'
+  let dnsCalls = 0
+  const service = create({
+    state: async () => state,
+    net: {
+      dns: {
+        status: async () => {
+          dnsCalls++
+          return { bootstrap: true, gateway: null }
+        },
+      },
+    },
+  })
+  const subscription = service.subscribe()
+  try {
+    ticks.next()
+    await new Promise(setImmediate)
+    assert.deepEqual(routes, ['unlock'])
+    assert.equal(dnsCalls, 0)
+    assert.equal(service.dnsStatus(), null)
+    state = 'initializing'
+    ticks.next()
+    await new Promise(setImmediate)
+    assert.deepEqual(routes, ['unlock', 'initializing'])
+    assert.equal(dnsCalls, 1)
+    state = 'running'
+    ticks.next()
+    await new Promise(setImmediate)
+    assert.deepEqual(routes, ['unlock', 'initializing', ''])
+    assert.equal(service.dnsStatus(), null)
+  } finally {
+    subscription.unsubscribe()
+  }
+})
+
 test('StartOS refreshes startup DNS without rerouting and stops polling at runtime', async () => {
   const { ticks, routes, create } = startupStateHarness()
   let state = 'initializing'

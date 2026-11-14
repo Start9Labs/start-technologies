@@ -12,7 +12,7 @@ use crate::net::ssl::{CertificateIdentity, LocalIssuer};
 use crate::prelude::*;
 use crate::util::io::{delete_file, write_file_private_atomic};
 
-const RUNTIME_PROFILES: &str = "/run/NetworkManager/system-connections";
+const RUNTIME_PROFILES: &str = "/run/startos-fde/system-connections";
 pub const SEALED_CREDENTIALS_FILE: &str = "etc/startos/fde-bootstrap.json";
 
 /// Encrypted bootstrap identities and their TPM-sealed encryption key.
@@ -56,6 +56,7 @@ pub struct Credentials {
     #[serde(default)]
     pub acme: BootstrapAcme,
     pub network_profiles: BTreeMap<String, String>,
+    pub network: Option<super::network::BootstrapNetwork>,
 }
 
 impl Credentials {
@@ -83,6 +84,11 @@ impl Credentials {
         serde_json::from_slice(&plaintext).with_kind(ErrorKind::Deserialization)
     }
 
+    pub fn capture_network(&mut self, db: &DatabaseModel) -> Result<(), Error> {
+        self.network = Some(super::network::BootstrapNetwork::capture(db)?);
+        Ok(())
+    }
+
     pub async fn capture_network_profiles(&mut self) -> Result<(), Error> {
         let profiles = crate::net::wifi::capture_network_profiles().await?;
         for contents in self.network_profiles.values_mut() {
@@ -93,8 +99,10 @@ impl Credentials {
     }
 
     /// Writes credentials beneath `/run`; the saved data-drive profiles remain authoritative.
-    pub async fn install_network_profiles(&self) -> Result<(), Error> {
-        self.install_profiles_at(Path::new(RUNTIME_PROFILES)).await
+    pub async fn install_network_profiles(&self) -> Result<PathBuf, Error> {
+        let directory = Path::new(RUNTIME_PROFILES);
+        self.install_profiles_at(directory).await?;
+        Ok(directory.to_owned())
     }
 
     pub async fn remove_network_profiles(&self) -> Result<(), Error> {
@@ -140,6 +148,7 @@ pub(super) fn test_credentials() -> Credentials {
         identities: BTreeMap::new(),
         local_issuer: None,
         acme: BootstrapAcme::default(),
+        network: None,
         network_profiles: [(
             "private.nmconnection".to_owned(),
             "[wireguard]\nprivate-key=test-secret\n".to_owned(),

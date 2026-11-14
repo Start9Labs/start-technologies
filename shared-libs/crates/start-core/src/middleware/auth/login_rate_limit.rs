@@ -69,7 +69,7 @@ impl LoginRateLimiter {
     }
 }
 
-pub(super) fn check(address: InternedString, origin: &RequestOrigin) -> Result<(), Error> {
+pub(crate) fn check(address: InternedString, origin: &RequestOrigin) -> Result<(), Error> {
     LIMITER.mutate(|limiter| limiter.check(address, origin, Instant::now()))
 }
 

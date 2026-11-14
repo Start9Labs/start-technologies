@@ -1115,4 +1115,6 @@ export default {
   1314: 'Wählen Sie „Enroll MOK“, prüfen Sie die Zertifikatsfingerabdrücke und wählen Sie dann „Continue“ und „Yes“.',
   1315: 'Geben Sie bei Aufforderung den Firmware-Bestätigungscode ein',
   1316: 'Wählen Sie „Reboot“, um die Firmware-Registrierung abzuschließen.',
+  1317: 'Server entsperren',
+  1318: 'Öffnen Sie diesen Server über seine vertrauenswürdige HTTPS-Adresse, bevor Sie Ihr Passwort eingeben.',
 } satisfies i18n

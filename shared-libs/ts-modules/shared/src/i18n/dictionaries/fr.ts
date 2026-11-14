@@ -1115,4 +1115,6 @@ export default {
   1314: 'Sélectionnez « Enroll MOK », vérifiez les empreintes des certificats, puis sélectionnez « Continue » et « Yes ».',
   1315: 'Lorsque vous y êtes invité, saisissez le code d’approbation du micrologiciel',
   1316: 'Sélectionnez « Reboot » pour terminer l’inscription du micrologiciel.',
+  1317: 'Déverrouiller votre serveur',
+  1318: 'Ouvrez ce serveur à son adresse HTTPS de confiance avant de saisir votre mot de passe.',
 } satisfies i18n

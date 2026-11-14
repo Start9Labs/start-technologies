@@ -990,6 +990,14 @@ impl DnsController {
         }
     }
 
+    pub(crate) fn set_bootstrap_interfaces(
+        &self,
+        interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    ) {
+        self.authority
+            .send_replace(DnsAuthority::Bootstrap(interfaces));
+    }
+
     pub(crate) fn activate(&self, network: Arc<NetworkInterfaceController>) {
         self.authority.send_replace(DnsAuthority::Runtime(network));
     }

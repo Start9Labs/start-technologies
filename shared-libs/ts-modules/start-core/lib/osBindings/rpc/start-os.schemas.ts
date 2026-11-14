@@ -113,11 +113,14 @@ export const AnyVerifyingKey: typeof literal_0 = /* @__PURE__ */ literal_0.meta(
 )
 export const ApiState: z.ZodEnum<{
   error: 'error'
+  locked: 'locked'
   initializing: 'initializing'
   running: 'running'
-}> = /* @__PURE__ */ z.enum(['error', 'initializing', 'running']).meta({
-  id: 'ApiState',
-})
+}> = /* @__PURE__ */ z
+  .enum(['error', 'locked', 'initializing', 'running'])
+  .meta({
+    id: 'ApiState',
+  })
 export const ApplyParams: z.ZodObject<{ expr: z.ZodString }> =
   /* @__PURE__ */ object({ expr: z.string() }).meta({
     id: 'ApplyParams',

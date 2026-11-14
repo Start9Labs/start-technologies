@@ -321,7 +321,7 @@ pub async fn init(
     load_wifi.start();
     let system_product_name = crate::firmware::system_product_name().await.log_err();
     crate::net::wifi::synchronize_network_manager(
-        MAIN_DATA,
+        Path::new(MAIN_DATA).join("system-connections"),
         &peek
             .as_public()
             .as_server_info()

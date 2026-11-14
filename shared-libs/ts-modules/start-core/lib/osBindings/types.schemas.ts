@@ -130,11 +130,14 @@ export const AnyVerifyingKey: typeof literal_0 = /* @__PURE__ */ literal_0.meta(
 )
 export const ApiState: z.ZodEnum<{
   error: 'error'
+  locked: 'locked'
   initializing: 'initializing'
   running: 'running'
-}> = /* @__PURE__ */ z.enum(['error', 'initializing', 'running']).meta({
-  id: 'ApiState',
-})
+}> = /* @__PURE__ */ z
+  .enum(['error', 'locked', 'initializing', 'running'])
+  .meta({
+    id: 'ApiState',
+  })
 
 /**
  * A registered-target identity; migrated CIFS targets retain their existing IDs.

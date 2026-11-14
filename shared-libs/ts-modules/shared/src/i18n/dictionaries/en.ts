@@ -1116,4 +1116,6 @@ export const ENGLISH: Record<string, number> = {
   'Select "Enroll MOK", review the certificate fingerprints, then select "Continue" and "Yes".': 1314,
   'When prompted, enter the firmware approval code': 1315,
   'Select "Reboot" to finish firmware enrollment.': 1316,
+  'Unlock your server': 1317,
+  'Open this server using its trusted HTTPS address before entering your password.': 1318,
 }

@@ -2963,14 +2963,20 @@ impl NetworkInterfaceWatcher {
         Self::spawn(seed, watch_activated, Some(db))
     }
 
-    /// Re-discovers live state while retaining seeded gateway intent.
+    /// Immediately retains configured gateway intent; rediscovers live observations.
     /// Starts NetworkManager and the existing policy-routing watcher; retain until handoff.
     pub fn from_seed(
         mut seed: OrdMap<GatewayId, NetworkInterfaceInfo>,
         watch_activated: impl IntoIterator<Item = GatewayId>,
     ) -> Self {
         reset_gateway_observations(&mut seed);
-        Self::spawn(async move { seed }, watch_activated, None)
+        let ip_info = Watch::new(seed);
+        let activated = Watch::new(watch_activated.into_iter().map(|id| (id, false)).collect());
+        Self {
+            ip_info: ip_info.clone(),
+            activated: activated.clone(),
+            _watcher: tokio::spawn(watcher(ip_info, activated, None)).into(),
+        }
     }
 
     fn spawn(
@@ -3674,6 +3680,28 @@ impl Accept for WildcardListener {
 mod seed_tests {
     use super::*;
     use crate::db::model::public::{DnsSettings, DnsSource, GatewayType, IpInfo};
+
+    #[tokio::test]
+    async fn seeded_gateway_intent_is_available_before_the_watcher_runs() {
+        let gateway: GatewayId = "wg0".parse().unwrap();
+        let watcher = NetworkInterfaceWatcher::from_seed(
+            OrdMap::from(vec![(
+                gateway.clone(),
+                NetworkInterfaceInfo {
+                    name: Some("Private tunnel".into()),
+                    secure: Some(true),
+                    ip_info: Some(Arc::new(crate::db::model::public::IpInfo::default())),
+                    ..NetworkInterfaceInfo::default()
+                },
+            )]),
+            [],
+        );
+        let interfaces = watcher.ip_info();
+        let interface = interfaces.get(&gateway).unwrap();
+        assert_eq!(interface.name.as_deref(), Some("Private tunnel"));
+        assert_eq!(interface.secure, Some(true));
+        assert!(interface.ip_info.is_none());
+    }
 
     #[test]
     fn resetting_observations_keeps_gateway_and_static_dns_intent() {

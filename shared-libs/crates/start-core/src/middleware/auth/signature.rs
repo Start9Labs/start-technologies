@@ -282,7 +282,7 @@ impl SignatureAuthorizationContext for RpcContext {
     }
 }
 
-fn startos_signing_identities(
+pub(crate) fn startos_signing_identities(
     binding: Option<&BindInfo>,
     origin: &RequestOrigin,
 ) -> BTreeSet<InternedString> {

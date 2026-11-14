@@ -1115,4 +1115,6 @@ export default {
   1314: 'Wybierz „Enroll MOK”, sprawdź odciski certyfikatów, a następnie wybierz „Continue” i „Yes”.',
   1315: 'Po wyświetleniu prośby wprowadź kod zatwierdzenia w oprogramowaniu układowym',
   1316: 'Wybierz „Reboot”, aby zakończyć rejestrację w oprogramowaniu układowym.',
+  1317: 'Odblokuj swój serwer',
+  1318: 'Otwórz zaufany adres HTTPS tego serwera przed wpisaniem hasła.',
 } satisfies i18n

@@ -20,6 +20,11 @@ use crate::{Error, ErrorKind, ResultExt};
 pub const PASSWORD_PATH: &'static str = "/run/startos/password";
 pub const DEFAULT_PASSWORD: &'static str = "password";
 pub const MAIN_FS_SIZE: FsSize = FsSize::Gigabytes(8);
+pub(crate) const POOL_FILESYSTEMS: [&str; 2] = ["main", "package-data"];
+
+fn legacy_credential(password: Option<&str>) -> super::fde::KeyCredential<'_> {
+    super::fde::KeyCredential::Password(password.unwrap_or(DEFAULT_PASSWORD))
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ImportMode {
@@ -185,28 +190,14 @@ pub async fn create_all_fs<P: AsRef<Path>>(
 }
 
 async fn open_luks(
-    blockdev_path: &Path,
+    guid: &str,
     mapper_name: &str,
-    password: &str,
+    credential: super::fde::KeyCredential<'_>,
     read_only: bool,
 ) -> Result<PathBuf, Error> {
-    let mut cryptsetup = Command::new("cryptsetup");
-    cryptsetup.arg("-q").arg("luksOpen");
-    if read_only {
-        cryptsetup.arg("--readonly");
-    } else {
-        cryptsetup.arg("--allow-discards");
-    }
-    let mut key = std::io::Cursor::new(password.as_bytes());
-    cryptsetup
-        .arg("--key-file=-")
-        .arg(format!("--keyfile-size={}", password.len()))
-        .arg(blockdev_path)
-        .arg(mapper_name)
-        .input(Some(&mut key))
-        .invoke(crate::ErrorKind::DiskManagement)
-        .await?;
-    Ok(Path::new("/dev/mapper").join(mapper_name))
+    super::fde::LuksPool::new(guid, super::fde::HEADER_BACKUP_DIR)?
+        .open_volume(mapper_name, credential, read_only)
+        .await
 }
 
 async fn close_luks(mapper_name: &str) -> Result<(), Error> {
@@ -244,12 +235,9 @@ pub async fn unmount_fs<P: AsRef<Path>>(guid: &str, datadir: P, name: &str) -> R
 
 #[instrument(skip_all)]
 pub async fn unmount_all_fs<P: AsRef<Path>>(guid: &str, datadir: P) -> Result<(), Error> {
-    unmount_fs(guid, &datadir, "main").await?;
-    unmount_fs(guid, &datadir, "package-data").await?;
-    Command::new("dmsetup")
-        .arg("remove_all")
-        .invoke(crate::ErrorKind::DiskManagement)
-        .await?;
+    for name in POOL_FILESYSTEMS {
+        unmount_fs(guid, &datadir, name).await?;
+    }
     Ok(())
 }
 
@@ -327,7 +315,7 @@ fn record_cleanup_error(first_error: &mut Option<Error>, result: Result<(), Erro
 #[instrument(skip_all)]
 pub(crate) async fn deactivate<P: AsRef<Path>>(guid: &str, datadir: P) -> Result<(), Error> {
     let mut first_error = None;
-    for name in ["package-data", "main"] {
+    for name in POOL_FILESYSTEMS.into_iter().rev() {
         record_cleanup_error(
             &mut first_error,
             unmount(datadir.as_ref().join(name), false).await,
@@ -371,6 +359,11 @@ pub(crate) async fn import<P: AsRef<Path>>(
     password: Option<&str>,
     progress: Option<&FullProgressTracker>,
 ) -> Result<RequiresReboot, Error> {
+    activate_pool(guid).await?;
+    mount_all_fs(guid, datadir, mode, password, progress).await
+}
+
+pub(crate) async fn activate_pool(guid: &str) -> Result<(), Error> {
     let scan = pvscan().await?;
     if scan
         .values()
@@ -394,10 +387,6 @@ pub(crate) async fn import<P: AsRef<Path>>(
             crate::ErrorKind::IncorrectDisk,
         ));
     }
-    Command::new("dmsetup")
-        .arg("remove_all")
-        .invoke(crate::ErrorKind::DiskManagement)
-        .await?;
     match Command::new("vgimport")
         .arg(guid)
         .invoke(crate::ErrorKind::DiskManagement)
@@ -418,27 +407,26 @@ pub(crate) async fn import<P: AsRef<Path>>(
         .arg(guid)
         .invoke(crate::ErrorKind::DiskManagement)
         .await?;
-    mount_all_fs(guid, datadir, mode, password, progress).await
+    Ok(())
 }
 
 #[instrument(skip_all)]
-pub(crate) async fn mount_fs<P: AsRef<Path>>(
+async fn mount_fs_with_credential<P: AsRef<Path>>(
     guid: &str,
     datadir: P,
     name: &str,
     mode: ImportMode,
-    password: Option<&str>,
+    credential: super::fde::KeyCredential<'_>,
     progress: Option<&FullProgressTracker>,
 ) -> Result<RequiresReboot, Error> {
     let orig_path = Path::new("/dev").join(guid).join(name);
     let mapper_name = format!("{guid}_{name}");
     let encrypted = !guid.ends_with("_UNENC");
-    let password = password.unwrap_or(DEFAULT_PASSWORD);
     if mode.is_read_only() {
         set_block_read_only(&orig_path, true).await?;
     }
     let mut blockdev_path = if encrypted {
-        open_luks(&orig_path, &mapper_name, password, mode.is_read_only()).await?
+        open_luks(guid, &mapper_name, credential, mode.is_read_only()).await?
     } else {
         orig_path.clone()
     };
@@ -531,7 +519,7 @@ pub(crate) async fn mount_fs<P: AsRef<Path>>(
             }
             set_block_read_only(&orig_path, false).await?;
             if encrypted {
-                blockdev_path = match open_luks(&orig_path, &mapper_name, password, false).await {
+                blockdev_path = match open_luks(guid, &mapper_name, credential, false).await {
                     Ok(blockdev_path) => blockdev_path,
                     Err(error) => {
                         set_block_read_only(&orig_path, true).await.log_err();
@@ -573,7 +561,7 @@ pub(crate) async fn mount_fs<P: AsRef<Path>>(
             reboot |= recovery_reboot;
 
             if encrypted {
-                blockdev_path = open_luks(&orig_path, &mapper_name, password, true).await?;
+                blockdev_path = open_luks(guid, &mapper_name, credential, true).await?;
             }
             BlockDev::new(&blockdev_path)
                 .mount(&mountpoint, ReadOnly)
@@ -597,10 +585,108 @@ pub(crate) async fn mount_all_fs<P: AsRef<Path>>(
     password: Option<&str>,
     progress: Option<&FullProgressTracker>,
 ) -> Result<RequiresReboot, Error> {
+    mount_all_with_credential(
+        guid,
+        datadir.as_ref(),
+        mode,
+        legacy_credential(password),
+        progress,
+    )
+    .await
+}
+
+async fn mount_all_with_credential(
+    guid: &str,
+    datadir: &Path,
+    mode: ImportMode,
+    credential: super::fde::KeyCredential<'_>,
+    progress: Option<&FullProgressTracker>,
+) -> Result<RequiresReboot, Error> {
     let mut reboot = RequiresReboot(false);
-    reboot |= mount_fs(guid, &datadir, "main", mode, password, progress).await?;
-    reboot |= mount_fs(guid, &datadir, "package-data", mode, password, progress).await?;
+    for name in POOL_FILESYSTEMS {
+        reboot |= mount_fs_with_credential(guid, datadir, name, mode, credential, progress).await?;
+    }
     Ok(reboot)
+}
+
+#[cfg(target_os = "linux")]
+fn mounted_pool_filesystems(guid: &str, datadir: &Path) -> Result<Vec<&'static str>, Error> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let mounts = procfs::process::Process::myself()
+        .and_then(|process| process.mountinfo())
+        .with_kind(ErrorKind::Filesystem)?;
+    let mut mounted = Vec::new();
+    for name in POOL_FILESYSTEMS {
+        let Some(mount) = mounts
+            .iter()
+            .find(|mount| mount.mount_point == datadir.join(name))
+        else {
+            continue;
+        };
+        let source = mount.mount_source.as_ref().ok_or_else(|| {
+            Error::new(eyre!(t!("error.incorrect-disk")), ErrorKind::IncorrectDisk)
+        })?;
+        let observed = std::fs::metadata(source)?;
+        let expected = std::fs::metadata(format!("/dev/mapper/{guid}_{name}"))?;
+        if mount.fs_type != "btrfs"
+            || !observed.file_type().is_block_device()
+            || observed.rdev() != expected.rdev()
+            || !mount.mount_options.contains_key("rw")
+        {
+            return Err(Error::new(
+                eyre!(t!("error.incorrect-disk")),
+                ErrorKind::IncorrectDisk,
+            ));
+        }
+        mounted.push(name);
+    }
+    Ok(mounted)
+}
+
+async fn close_pool_luks(guid: &str) -> Result<(), Error> {
+    for name in POOL_FILESYSTEMS {
+        let mapper = format!("{guid}_{name}");
+        if tokio::fs::try_exists(Path::new("/dev/mapper").join(&mapper)).await? {
+            close_luks(&mapper).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Uses retained keys without a default-password path; mounted targets must belong to this pool.
+#[cfg(target_os = "linux")]
+pub(crate) async fn import_with_keys(
+    guid: &str,
+    datadir: &Path,
+    keys: &super::fde::VolumeKeys,
+    repair: RepairStrategy,
+    progress: Option<&FullProgressTracker>,
+) -> Result<RequiresReboot, Error> {
+    super::fde::LuksPool::new(guid, super::fde::HEADER_BACKUP_DIR)?;
+    activate_pool(guid).await?;
+    let mounted = mounted_pool_filesystems(guid, datadir)?;
+    if mounted.len() == POOL_FILESYSTEMS.len() {
+        return Ok(RequiresReboot(false));
+    }
+    for name in mounted.into_iter().rev() {
+        unmount_fs(guid, datadir, name).await?;
+    }
+    close_pool_luks(guid).await?;
+    let result = mount_all_with_credential(
+        guid,
+        datadir,
+        ImportMode::ReadWrite(repair),
+        super::fde::KeyCredential::VolumeKeys(keys),
+        progress,
+    )
+    .await;
+    if result.is_err() {
+        for name in mounted_pool_filesystems(guid, datadir)?.into_iter().rev() {
+            unmount_fs(guid, datadir, name).await.log_err();
+        }
+        close_pool_luks(guid).await.log_err();
+    }
+    result
 }
 
 /// Probes `package-data` on an inactive or exported volume group.
@@ -674,7 +760,13 @@ pub async fn probe_package_data_fs(guid: &str) -> Result<Option<String>, Error> 
         }
 
         let blockdev_path = if !guid.ends_with("_UNENC") {
-            let blockdev_path = open_luks(&lv_path, &mapper_name, DEFAULT_PASSWORD, true).await?;
+            let blockdev_path = open_luks(
+                guid,
+                &mapper_name,
+                super::fde::KeyCredential::Password(DEFAULT_PASSWORD),
+                true,
+            )
+            .await?;
             opened_luks = true;
             blockdev_path
         } else {

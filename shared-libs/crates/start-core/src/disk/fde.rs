@@ -92,6 +92,7 @@ struct VolumeKey {
 }
 
 /// Authentication material for one key installation, independent of the caller's workflow.
+#[derive(Clone, Copy)]
 pub enum KeyCredential<'a> {
     Password(&'a str),
     VolumeKeys(&'a VolumeKeys),
@@ -148,7 +149,7 @@ impl LuksPool {
                 ErrorKind::IncorrectDisk,
             ));
         }
-        let names = ["main", "package-data"];
+        let names = super::main::POOL_FILESYSTEMS;
         Ok(Self {
             devices: names.map(|name| Path::new("/dev").join(guid).join(name)),
             mapper_names: names.map(|name| format!("{guid}_{name}")),
@@ -158,6 +159,48 @@ impl LuksPool {
             fstrim: "fstrim".into(),
             runtime_dir: "/run".into(),
         })
+    }
+
+    /// Opens a pool volume using password or mapper/UUID-bound retained keys.
+    pub(crate) async fn open_volume(
+        &self,
+        mapper_name: &str,
+        credential: KeyCredential<'_>,
+        read_only: bool,
+    ) -> Result<PathBuf, Error> {
+        let index = self
+            .mapper_names
+            .iter()
+            .position(|name| name == mapper_name)
+            .ok_or_else(metadata_error)?;
+        let metadata = self.metadata(&self.devices[index]).await?;
+        let id = self.volume_id(index, metadata.uuid);
+        let bytes = credential.bytes(index, &id)?;
+        let source = match credential {
+            KeyCredential::Password(_) => "-",
+            // --volume-key-file does not recognize `-` as stdin.
+            KeyCredential::VolumeKeys(_) => "/proc/self/fd/0",
+        };
+        let mut command = Command::new(&self.cryptsetup);
+        command
+            .args(["-q", "luksOpen"])
+            .arg(if read_only {
+                "--readonly"
+            } else {
+                "--allow-discards"
+            })
+            .arg(credential.option())
+            .arg(source);
+        if matches!(credential, KeyCredential::Password(_)) {
+            command.arg(format!("--keyfile-size={}", bytes.len()));
+        }
+        command
+            .arg(&self.devices[index])
+            .arg(mapper_name)
+            .input(Some(&mut std::io::Cursor::new(bytes)))
+            .invoke(ErrorKind::DiskManagement)
+            .await?;
+        Ok(Path::new("/dev/mapper").join(mapper_name))
     }
 
     /// Identifies matching administrator slots while the unlock password is available.
@@ -1503,6 +1546,118 @@ esac
                 .unwrap();
         }
         pool
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires root, cryptsetup and device mapper in an isolated managed guest; never run on the build host"]
+    async fn real_volume_key_open_and_pool_cleanup_preserve_unrelated_mappings() {
+        use std::io::{Read, Seek, SeekFrom, Write};
+        for format in ["luks1", "luks2"] {
+            let directory = tempfile::tempdir_in("/dev/shm").unwrap();
+            let mut pool = format_real_pool(directory.path(), format).await;
+            let guid = format!("STARTOS_{}", new_guid());
+            pool.mapper_names =
+                super::super::main::POOL_FILESYSTEMS.map(|name| format!("{guid}_{name}"));
+            let other_directory = tempfile::tempdir_in("/dev/shm").unwrap();
+            let mut other = format_real_pool(other_directory.path(), format).await;
+            other.mapper_names = super::super::main::POOL_FILESYSTEMS
+                .map(|name| format!("STARTOS_{}_{}", new_guid(), name));
+            let names: Vec<_> = pool
+                .mapper_names
+                .iter()
+                .chain(other.mapper_names.iter())
+                .cloned()
+                .collect();
+            let _cleanup = GeneralBoxedGuard::new(move || {
+                for name in names {
+                    let _ = std::process::Command::new("cryptsetup")
+                        .args(["luksClose", &name])
+                        .output();
+                }
+            });
+            let memory = pool.protect_secret_handling().unwrap();
+            let (admin, mut keys) = pool.capture_unlock_keys(OLD).await.unwrap();
+            let plan = pool.plan_password_change(&admin).await.unwrap();
+            pool.install_password(&plan, NEW, KeyCredential::VolumeKeys(&keys))
+                .await
+                .unwrap();
+            pool.retire_password_with_keys(&plan, &keys).await.unwrap();
+            assert!(pool.verify_password(OLD).await.is_err());
+            keys.volumes[0].bytes[0] ^= 1;
+            assert!(
+                pool.open_volume(
+                    &pool.mapper_names[0],
+                    KeyCredential::VolumeKeys(&keys),
+                    false
+                )
+                .await
+                .is_err()
+            );
+            keys.volumes[0].bytes[0] ^= 1;
+            pool.cache_unlock_keys(&keys).await.unwrap();
+            drop(keys);
+            let retained = pool.cached_unlock_keys().await.unwrap().unwrap();
+            for name in &pool.mapper_names {
+                pool.open_volume(name, KeyCredential::VolumeKeys(&retained), false)
+                    .await
+                    .unwrap();
+            }
+            let foreign = other
+                .open_volume(&other.mapper_names[0], KeyCredential::Password(OLD), false)
+                .await
+                .unwrap();
+            {
+                let mut file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&foreign)
+                    .unwrap();
+                file.seek(SeekFrom::Start(4096)).unwrap();
+                file.write_all(b"retained unrelated mapping").unwrap();
+                file.sync_all().unwrap();
+            }
+            super::super::main::unmount_all_fs(&guid, directory.path().join("mounted"))
+                .await
+                .unwrap();
+            Command::new("dmsetup")
+                .args([
+                    "info",
+                    "--columns",
+                    "--noheadings",
+                    "-o",
+                    "name",
+                    &other.mapper_names[0],
+                ])
+                .invoke(ErrorKind::DiskManagement)
+                .await
+                .unwrap();
+            let mut file = std::fs::File::open(&foreign).unwrap();
+            file.seek(SeekFrom::Start(4096)).unwrap();
+            let mut marker = [0; 26];
+            file.read_exact(&mut marker).unwrap();
+            assert_eq!(&marker, b"retained unrelated mapping");
+            drop(file);
+            Command::new("cryptsetup")
+                .args(["luksClose", &other.mapper_names[0]])
+                .invoke(ErrorKind::DiskManagement)
+                .await
+                .unwrap();
+            for name in &pool.mapper_names {
+                assert!(
+                    Command::new("dmsetup")
+                        .args(["info", "--columns", "--noheadings", "-o", "name", name])
+                        .invoke(ErrorKind::DiskManagement)
+                        .await
+                        .is_err()
+                );
+            }
+            let ring = keyring::RootKeyring::open().unwrap();
+            for key in &retained.volumes {
+                ring.remove(&key.id).unwrap();
+            }
+            memory.check().unwrap();
+        }
     }
 
     #[cfg(target_os = "linux")]

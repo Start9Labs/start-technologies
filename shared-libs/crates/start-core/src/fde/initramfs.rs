@@ -1,9 +1,10 @@
-//! Called by the authenticated FDE initramfs, never selected by public disk metadata.
+//! Authenticated initramfs preparation and its private boot-lifetime handoff.
 
-use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncReadExt;
 use zeroize::Zeroizing;
 
 use super::boot::Descriptor;
@@ -19,6 +20,69 @@ use crate::util::io::{TmpDir, read_file_to_string, write_file_private_atomic};
 pub const DESCRIPTOR_FILE: &str = "/etc/startos/fde-boot.json";
 pub const RUNTIME: &str = "/run/startos-fde";
 pub const HANDOFF_FILE: &str = "handoff.json";
+const BOOT_MODE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../projects/start-os/build/lib/scripts/fde-boot-mode"
+));
+
+/// Selects the workflow; protected execution still requires the attested handoff.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BootMode {
+    Ordinary,
+    Protected,
+}
+
+impl BootMode {
+    pub async fn current() -> Result<Self, Error> {
+        #[cfg(target_os = "linux")]
+        {
+            Self::from_command_line(&read_file_to_string("/proc/cmdline").await?)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Ok(Self::Ordinary)
+        }
+    }
+
+    fn from_command_line(line: &str) -> Result<Self, Error> {
+        let parameters: Vec<_> = line
+            .split_ascii_whitespace()
+            .filter_map(|part| part.strip_prefix("BOOT="))
+            .collect();
+        if !parameters.contains(&BOOT_MODE.trim()) {
+            return Ok(Self::Ordinary);
+        }
+        if parameters.len() != 1 {
+            return Err(invalid_handoff());
+        }
+        Ok(Self::Protected)
+    }
+}
+
+pub(crate) fn invalid_handoff() -> Error {
+    Error::new(
+        eyre!(t!("fde.boot.invalid-descriptor")),
+        ErrorKind::InvalidSignature,
+    )
+}
+
+pub(crate) async fn load_handoff() -> Result<BootHandoff, Error> {
+    let memory = InitramfsMemory::protect(Path::new(RUNTIME))?;
+    let mut file = crate::os_overlay::regular_file(&Path::new(RUNTIME).join(HANDOFF_FILE)).await?;
+    let metadata = file.metadata().await?;
+    if metadata.uid() != 0 || metadata.mode() & 0o077 != 0 {
+        return Err(invalid_handoff());
+    }
+    let mut bytes = Zeroizing::new(Vec::new());
+    file.read_to_end(&mut bytes).await?;
+    let handoff = serde_json::from_slice(&bytes).with_kind(ErrorKind::Deserialization)?;
+    memory.check(Path::new(RUNTIME))?;
+    Ok(handoff)
+}
+
+pub(crate) async fn finish_handoff() -> Result<(), Error> {
+    crate::util::io::delete_file(Path::new(RUNTIME).join(HANDOFF_FILE)).await
+}
 
 /// Private, unswappable boot-lifetime state, removed after authoritative data-drive handoff.
 #[derive(Serialize, Deserialize)]
@@ -111,4 +175,41 @@ pub async fn prepare(volume: &Path, root: &Path) -> Result<(), Error> {
     };
     ram.unmount(false).await.log_err();
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protected_mode_requires_the_authenticated_boot_parameter() {
+        for line in ["", "root=LABEL=startos ro", "BOOT=local root=LABEL=startos"] {
+            assert_eq!(
+                BootMode::from_command_line(line).unwrap(),
+                BootMode::Ordinary
+            );
+        }
+        assert_eq!(
+            BootMode::from_command_line(&format!(
+                "root=LABEL=startos BOOT={} ro",
+                BOOT_MODE.trim()
+            ))
+            .unwrap(),
+            BootMode::Protected
+        );
+    }
+
+    #[test]
+    fn conflicting_boot_parameters_cannot_fall_back_to_ordinary_boot() {
+        for line in [
+            format!("BOOT=local BOOT={}", BOOT_MODE.trim()),
+            format!("BOOT={} BOOT=local", BOOT_MODE.trim()),
+            format!("BOOT={0} BOOT={0}", BOOT_MODE.trim()),
+        ] {
+            assert_eq!(
+                BootMode::from_command_line(&line).unwrap_err().kind,
+                ErrorKind::InvalidSignature
+            );
+        }
+    }
 }

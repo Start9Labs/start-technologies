@@ -3,11 +3,16 @@ set -euo pipefail
 
 directory=$(cd "$(dirname "$0")" && pwd)
 if [[ ${1:-} != --inside ]]; then
-    image=startos-fde-uki-test
-    docker build --load -t "$image" -f "$directory/fde-uki.Dockerfile" "$directory"
+    staging=$(mktemp -d)
+    trap 'rm -rf -- "$staging"' EXIT
+    docker build --load --iidfile "$staging/image" -f "$directory/fde-uki.Dockerfile" "$directory"
+    image=$(< "$staging/image")
+    rm -rf -- "$staging"
+    trap - EXIT
     exec docker run --rm --network none \
         --mount "type=bind,source=$directory,target=/tests,readonly" \
         --mount "type=bind,source=$(realpath "$directory/../lib/scripts/fde-build-uki"),target=/fde-build-uki,readonly" \
+        --mount "type=bind,source=$(realpath "$directory/../lib/scripts/fde-boot-mode"),target=/fde-boot-mode,readonly" \
         "$image" bash /tests/fde-uki-test.sh --inside
 fi
 
@@ -22,7 +27,8 @@ measure=/usr/lib/systemd/systemd-measure
 # A valid PE stub exercises packaging, not executable Linux boot.
 cp /usr/lib/systemd/boot/efi/linux*.efi.stub inputs/linux
 printf 'initramfs fixture\000with binary data\n' > inputs/initrd
-printf 'root=LABEL=startos ro quiet\n' > inputs/cmdline
+read -r boot_mode < /fde-boot-mode
+printf 'root=LABEL=startos ro quiet BOOT=%s\n' "$boot_mode" > inputs/cmdline
 printf 'ID=startos\nNAME=StartOS\nVERSION_ID=0.4\n' > inputs/os-release
 openssl req -new -x509 -newkey rsa:2048 -nodes -subj /CN=uki-test \
     -keyout inputs/key -out inputs/cert -days 1 >/dev/null 2>&1
@@ -114,6 +120,19 @@ cmp companion.before outputs/companion.efi.pcr11
 ln -s missing-target outputs/symlink.efi
 expect_failure bash "$helper" "${args[@]}" --output outputs/symlink.efi
 [[ $(readlink outputs/symlink.efi) == missing-target ]] || fail 'replaced dangling symlink'
+
+cp inputs/cmdline inputs/good-cmdline
+for cmdline in 'root=LABEL=startos ro' 'BOOT=ordinary' "BOOT=$boot_mode BOOT=$boot_mode" "BOOT=$boot_mode BOOT=ordinary" "x=\" BOOT=$boot_mode y=\""; do
+    printf '%s\n' "$cmdline" > inputs/cmdline
+    expect_failure bash "$helper" "${args[@]}" --output outputs/wrong-boot.efi
+    expect_absent outputs/wrong-boot.efi
+done
+for control in '\0' '\r' '\v'; do
+    printf "root=LABEL=startos${control} BOOT=%s\n" "$boot_mode" > inputs/cmdline
+    expect_failure bash "$helper" "${args[@]}" --output outputs/control-boot.efi
+    expect_absent outputs/control-boot.efi
+done
+mv inputs/good-cmdline inputs/cmdline
 
 cp inputs/key inputs/good-key
 printf 'invalid private key\n' > inputs/key
