@@ -1,6 +1,6 @@
 # Ethernet
 
-Each physical Ethernet port on the StartWRT router, and each USB port you plug a USB Ethernet adapter into, maps to a [Security Profile](security-profiles.md). The port a device plugs into determines its profile — no manual configuration is needed on the device itself.
+Each physical Ethernet port on the StartWRT router, and each USB port you plug a USB Ethernet adapter into, maps to a [Security Profile](security-profiles.md). The port a device plugs into determines its profile — no manual configuration is needed on the device itself. An Ethernet port can instead feed a [managed switch](managed-switch.md), which then assigns a profile to each of its own ports.
 
 ## How It Works
 
@@ -16,7 +16,7 @@ One Ethernet port is designated as the WAN port, which connects to your ISP mode
 
 1. Navigate to `Points of Entry > Ethernet`.
 
-1. For each non-WAN port, select the desired Security Profile from the dropdown.
+1. For each non-WAN port, select the desired Security Profile from the dropdown. For an Ethernet port, the last entry, **Managed switch**, hands the choice of profile to a switch connected to that port; see [Connecting a Managed Switch](managed-switch.md).
 
 1. Confirm the change. The confirmation names any devices on the port that have a reserved address or [Published Ports](published-ports.md) rule for the port's old profile. Those are kept, and apply again if the devices return to that profile. Canceling leaves the port unchanged.
 
@@ -24,7 +24,7 @@ One Ethernet port is designated as the WAN port, which connects to your ISP mode
 > Changes take effect as soon as you confirm. The router briefly disconnects the port, and most devices plugged into it rejoin on the new profile's subnet within seconds. A device behind a switch, or one that ignores the brief disconnect, keeps its old address and usually loses Internet access and its connections to other devices until it reconnects. Unplug and replug its cable, or restart the device or the switch. Otherwise it reconnects on its own within 12 hours.
 
 > [!NOTE]
-> If you connect a network switch to an Ethernet port, all devices on that switch share the same Security Profile. StartWRT cannot differentiate between devices beyond its own ports. Those devices still appear individually in the [Devices](devices.md) list — including hosts with static IPs or only IPv6 addresses — because the router learns them from the bridge forwarding table even without a DHCP lease.
+> If you connect an ordinary (unmanaged) switch to a port, all devices on that switch share the port's Security Profile: StartWRT cannot differentiate between devices beyond its own ports. Those devices still appear individually in the [Devices](devices.md) list — including hosts with static IPs or only IPv6 addresses — because the router learns them from the bridge forwarding table even without a DHCP lease. To give devices behind a switch different profiles, use a [managed switch](managed-switch.md).
 
 ## USB Ethernet Adapters
 
@@ -39,7 +39,7 @@ The profile belongs to the router's USB port, not to the adapter:
 
 To remove a USB port from the list, unplug its adapter and click the trash icon in its row. The icon is greyed out while an adapter is plugged in. The network restarts briefly. The port appears again, in the Admin profile, the next time an adapter is plugged into it.
 
-Adapters with Realtek (RTL8152, RTL8153, RTL8156) or ASIX (AX88179, AX88772) chips work, as do adapters that use the standard USB Ethernet classes (CDC ECM, CDC NCM, RNDIS). The router's USB-C port supplies its power and does not take an adapter. An adapter with a USB-C plug needs a USB-C to USB-A adapter. The WAN port must be an Ethernet port.
+Adapters with Realtek (RTL8152, RTL8153, RTL8156) or ASIX (AX88179, AX88772) chips work, as do adapters that use the standard USB Ethernet classes (CDC ECM, CDC NCM, RNDIS). The router's USB-C port supplies its power and does not take an adapter. An adapter with a USB-C plug needs a USB-C to USB-A adapter. The WAN port and a managed switch's port must be Ethernet ports.
 
 ## Changing the WAN Port
 
@@ -62,3 +62,5 @@ If you need to use a different physical port for your ISP connection:
 | ---- | ------- | ------------------------------------------------------------------------------------------------------- |
 | eth1 | _(WAN)_ | Connected to ISP modem                                                                                  |
 | eth0 | Admin   | The included switch, with a desktop computer and a StartOS server that get full LAN and Internet access |
+
+To put devices behind the included switch on different profiles, set eth0 to **Managed switch** and connect a VLAN-capable switch instead; each of its ports then carries its own profile. See [Connecting a Managed Switch](managed-switch.md).

@@ -4,7 +4,7 @@ A point of entry is how a device connects to the StartWRT network and receives i
 
 ## Ethernet
 
-Each physical Ethernet port on the router, and each USB port with a USB Ethernet adapter, maps to a Security Profile. The port a device plugs into determines its profile. See [Ethernet](ethernet.md).
+Each physical Ethernet port on the router, and each USB port with a USB Ethernet adapter, maps to a Security Profile. The port a device plugs into determines its profile. See [Ethernet](ethernet.md). An Ethernet port can also feed a [managed switch](managed-switch.md) that assigns a profile per switch port.
 
 ## Wi-Fi
 

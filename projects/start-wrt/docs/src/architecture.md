@@ -43,7 +43,7 @@ The backend runs a PCP server and a UPnP Internet Gateway Device on the LAN side
 
 ## Network Isolation
 
-Device isolation uses bridge VLAN filtering at Layer 2. Each Security Profile is assigned a unique VLAN ID. Traffic is tagged at the entry point (Ethernet port, Wi-Fi password, or VPN server) and can only reach destinations within the same VLAN unless the firewall explicitly allows inter-zone traffic.
+Device isolation uses bridge VLAN filtering at Layer 2. Each Security Profile is assigned a unique VLAN ID. Traffic is tagged at the entry point (Ethernet port, Wi-Fi password, or VPN server) and can only reach destinations within the same VLAN unless the firewall explicitly allows inter-zone traffic. On a port set to **Managed switch**, the router accepts frames the switch has already tagged with a profile's VLAN, so each switch port behaves like a router port assigned to that profile; see [Connecting a Managed Switch](managed-switch.md).
 
 ## Multi-Password Wi-Fi
 
