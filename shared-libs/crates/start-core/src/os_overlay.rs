@@ -13,6 +13,7 @@
 //! stable through use, using the signed dm-verity roots or a RAM copy; a returned
 //! path is not protection against subsequent writes. Timestamps select among valid generations
 //! and provide no antirollback guarantee. Signatures do not encrypt secrets.
+//! Callers exclude private credentials from public configuration images.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;

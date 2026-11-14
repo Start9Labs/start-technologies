@@ -106,7 +106,7 @@ These helpers are not a complete image builder or executable-closure audit. Full
 
 ## Persistent overlay
 
-The persistent overlay is an independently signed squashfs. Boot uses immutable verified rootfs and overlay images with a temporary writable root layer. `/media/startos/config/overlay` exposes a separate editable view of the overlay squashfs with its own RAM-backed upper layer; editing that view must not mutate an active lower layer of the running root.
+The persistent overlay is an independently signed squashfs. Private signing keys, password verifiers and SSH host keys require encrypted-data placement before public configuration publication; activation must retire legacy boot-overlay copies. This migration is a prerequisite for the initial generation, not a property signatures provide. Boot uses immutable verified rootfs and overlay images with a temporary writable root layer. `/media/startos/config/overlay` exposes a separate editable view of the overlay squashfs with its own RAM-backed upper layer; editing that view must not mutate an active lower layer of the running root.
 
 The running root layers the immutable configuration over the immutable public image, with a separate RAM upper for runtime writes. The configuration-only working mount lives inside the running root's config bind. `BootHandoff::working_upper` records its raw upper path for snapshot preparation. All composed mounts end before verified lower mappings close.
 
