@@ -246,7 +246,6 @@ fn reserved_targets_never_enable_or_retain_incoming_sharing() {
 
 #[test]
 fn default_off_service_view_fixtures_preserve_native_selection_and_saved_intent() {
-    let mut fixtures = Vec::new();
     for (label, ssl, selected, expected_hosts) in [
         ("plain-off", false, None, vec![]),
         ("tls-off", true, None, vec![]),
@@ -292,19 +291,15 @@ fn default_off_service_view_fixtures_preserve_native_selection_and_saved_intent(
                 .iter()
                 .map(|row| &*row.hostname)
                 .collect::<BTreeSet<_>>(),
-            expected_hosts.into_iter().collect()
+            expected_hosts.into_iter().collect(),
+            "{label}"
         );
         let before = serde_json::to_value(&info).unwrap();
         let mut view = info.clone();
         view.project_service_selections();
         assert_eq!(view.effective, expected);
         assert_eq!(serde_json::to_value(&info).unwrap(), before);
-        fixtures.push(serde_json::json!({"label": label, "view": view, "expected": expected}));
     }
-    println!(
-        "legacy-service-views={}",
-        serde_json::to_string(&fixtures).unwrap()
-    );
 }
 
 #[test]
