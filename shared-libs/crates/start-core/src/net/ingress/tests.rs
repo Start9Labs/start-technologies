@@ -28,11 +28,37 @@ async fn direct_ingress_preserves_socket_endpoints() {
         let endpoint = listener.local_addr().unwrap();
         let (client, accepted) = tokio::join!(TcpStream::connect(endpoint), listener.accept());
         let client = client.unwrap();
-        let (server, _) = accepted.unwrap();
-        let metadata = tcp_metadata(&server).unwrap();
+        let (server, peer_addr) = accepted.unwrap();
+        let metadata = tcp_metadata(&server, peer_addr).unwrap();
         assert_eq!(metadata.local_addr, endpoint);
         assert_eq!(metadata.peer_addr, client.local_addr().unwrap());
     }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn reset_ingress_keeps_accepted_peer() {
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let endpoint = listener.local_addr().unwrap();
+    let client = std::net::TcpStream::connect(endpoint).unwrap();
+    let client_addr = client.local_addr().unwrap();
+    socket2::SockRef::from(&client)
+        .set_linger(Some(Duration::ZERO))
+        .unwrap();
+    drop(client);
+    let (server, peer_addr) = listener.accept().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while server.peer_addr().is_ok() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let metadata = tcp_metadata(&server, peer_addr).unwrap();
+    assert_eq!(metadata.local_addr, endpoint);
+    assert_eq!(metadata.peer_addr, client_addr);
 }
 
 #[test]
@@ -131,10 +157,10 @@ fn translated_ingress_keeps_original_destination_gateway_and_peer() {
             let mut client = client_command(original, Some(peer), "ok");
             tokio::time::timeout(Duration::from_secs(10), async {
                 let (accepted, result) = tokio::join!(async {
-                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let (mut stream, peer_addr) = listener.accept().await.unwrap();
                     assert_eq!(stream.local_addr().unwrap().ip().to_canonical(), target.ip());
                     assert_eq!(socket2::SockRef::from(&stream).mark().unwrap(), table);
-                    let metadata = NetworkInterfaceListenerAcceptMetadata::from_stream(&stream, &interfaces).unwrap();
+                    let metadata = NetworkInterfaceListenerAcceptMetadata::from_stream(&stream, peer_addr, &interfaces).unwrap();
                     assert_eq!(metadata.inner.local_addr, original);
                     assert_eq!(metadata.inner.peer_addr.ip().to_canonical(), peer);
                     assert_eq!(metadata.info.id.as_str(), "ingress0");
@@ -146,8 +172,8 @@ fn translated_ingress_keeps_original_destination_gateway_and_peer() {
             let mut direct = client_command(target, None, "");
             tokio::time::timeout(Duration::from_secs(10), async {
                 let (_, result) = tokio::join!(async {
-                    let (stream, _) = listener.accept().await.unwrap();
-                    assert!(tcp_metadata(&stream).is_err());
+                    let (stream, peer_addr) = listener.accept().await.unwrap();
+                    assert!(tcp_metadata(&stream, peer_addr).is_err());
                 }, direct.invoke(crate::ErrorKind::Network));
                 result.unwrap();
             }).await.unwrap();

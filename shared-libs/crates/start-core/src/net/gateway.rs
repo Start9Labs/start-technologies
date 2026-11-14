@@ -3606,9 +3606,10 @@ pub struct NetworkInterfaceListenerAcceptMetadata {
 impl NetworkInterfaceListenerAcceptMetadata {
     pub(crate) fn from_stream(
         stream: &tokio::net::TcpStream,
+        peer_addr: SocketAddr,
         interfaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     ) -> Result<Self, Error> {
-        let inner = crate::net::ingress::tcp_metadata(stream)?;
+        let inner = crate::net::ingress::tcp_metadata(stream, peer_addr)?;
         #[cfg(target_os = "linux")]
         let inner = {
             let mut inner = inner;
@@ -3643,6 +3644,26 @@ impl NetworkInterfaceListenerAcceptMetadata {
 impl<V: MetadataVisitor> Visit<V> for NetworkInterfaceListenerAcceptMetadata {
     fn visit(&self, visitor: &mut V) -> V::Result {
         self.visit_fields(visitor).collect()
+    }
+}
+
+/// Accepts the next connection with ingress metadata; connections without it are dropped.
+pub(crate) fn poll_accept_ingress(
+    listener: &TcpListener,
+    interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    cx: &mut std::task::Context<'_>,
+) -> Poll<Result<(NetworkInterfaceListenerAcceptMetadata, AcceptStream), Error>> {
+    loop {
+        let (stream, peer_addr) = std::task::ready!(listener.poll_accept(cx))?;
+        crate::net::utils::set_default_keepalive(&stream);
+        match interfaces.peek(|interfaces| {
+            NetworkInterfaceListenerAcceptMetadata::from_stream(&stream, peer_addr, interfaces)
+        }) {
+            Ok(metadata) => return Poll::Ready(Ok((metadata, Box::pin(stream)))),
+            Err(error) => {
+                tracing::trace!(%peer_addr, ?error, "Dropped connection without ingress metadata");
+            }
+        }
     }
 }
 
@@ -3689,14 +3710,7 @@ impl Accept for WildcardListener {
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(Self::Metadata, AcceptStream), Error>> {
-        if let Poll::Ready((stream, _)) = TcpListener::poll_accept(&self.listener, cx)? {
-            crate::net::utils::set_default_keepalive(&stream);
-            let metadata = self
-                .ip_info
-                .peek(|info| NetworkInterfaceListenerAcceptMetadata::from_stream(&stream, info))?;
-            return Poll::Ready(Ok((metadata, Box::pin(stream))));
-        }
-        Poll::Pending
+        poll_accept_ingress(&self.listener, &self.ip_info, cx)
     }
 }
 
