@@ -5,7 +5,7 @@ directory=$(cd "$(dirname "$0")/../dpkg-deps" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 mkdir "$work/dpkg-deps" "$work/lib"
-cp "$directory/generate.sh" "$directory/depends" "$directory/conflicts" \
+cp "$directory/generate.sh" "$directory/depends" "$directory/conflicts" "$directory/uefi.platforms" \
     "$directory/"*.depends "$work/dpkg-deps/"
 
 for target in x86_64:x86_64:yes x86_64:x86_64-nonfree:yes \

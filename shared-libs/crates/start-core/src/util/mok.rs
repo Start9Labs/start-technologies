@@ -64,12 +64,16 @@ async fn start9_shadow_hash(root: &Path) -> Result<Option<String>, Error> {
     Ok(None)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, visit_rs::VisitVariants,
+)]
+#[serde(rename_all = "camelCase")]
 pub enum MokEnrollment {
     NotEnrolled,
     Pending,
     Enrolled,
 }
+rpc_toolkit::reflect_ts!(MokEnrollment);
 
 fn parse_enrollment(certificate: &Path, output: Output) -> Result<MokEnrollment, Error> {
     let message = String::from_utf8_lossy(&output.stdout);

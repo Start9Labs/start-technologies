@@ -31,7 +31,7 @@ container-runtime-test: projects/start-os/container-runtime/node_modules/.packag
 	cd projects/start-os/container-runtime && npm test
 
 .PHONY: start-os-fde-deps-test start-os-fde-uki-test
-start-os-fde-deps-test: projects/start-os/build/tests/fde-deps-test.sh projects/start-os/build/dpkg-deps/generate.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/dpkg-deps/conflicts $(wildcard projects/start-os/build/dpkg-deps/*.depends)
+start-os-fde-deps-test: projects/start-os/build/tests/fde-deps-test.sh projects/start-os/build/dpkg-deps/uefi.platforms projects/start-os/build/dpkg-deps/generate.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/dpkg-deps/conflicts $(wildcard projects/start-os/build/dpkg-deps/*.depends)
 	./projects/start-os/build/tests/fde-deps-test.sh
 
 start-os-fde-uki-test: start-os-fde-deps-test projects/start-os/build/lib/scripts/fde-build-uki projects/start-os/build/tests/fde-uki-test.sh projects/start-os/build/tests/fde-uki.Dockerfile

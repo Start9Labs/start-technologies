@@ -492,6 +492,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         )
         .subcommand("set-nut", from_fn_async(nut::set_nut).no_cli())
         .subcommand("clear-nut", from_fn_async(nut::clear_nut).no_cli())
+        .subcommand("fde", fde::api::api::<C>())
         .subcommand("nut-status", from_fn_async(nut::get_nut_status).no_cli())
         .subcommand("nut-scan", from_fn_async(nut::scan_nut).no_cli())
         .subcommand("nut-list-ups", from_fn_async(nut::list_nut_ups).no_cli())

@@ -9,6 +9,7 @@ use openssl::pkey::{PKey, Private};
 use openssl::x509::X509;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
+use visit_rs::{VisitFields, VisitVariants};
 use zeroize::Zeroizing;
 
 use crate::context::RpcContext;
@@ -38,12 +39,35 @@ impl fmt::Debug for Enrollment {
     }
 }
 
-/// Enrollment observation, not proof of active disk protection.
-pub struct Progress {
-    pub enrolled: bool,
-    pub approval_code: Option<String>,
-    pub certificate_sha256: String,
+#[derive(Deserialize, Serialize, VisitVariants)]
+#[serde(rename_all = "camelCase")]
+pub enum CertificatePurpose {
+    Image,
+    Modules,
 }
+rpc_toolkit::reflect_ts!(CertificatePurpose);
+
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct CertificateProgress {
+    pub purpose: CertificatePurpose,
+    /// SHA-256 of the DER certificate.
+    pub sha256: String,
+    /// SHA-1 display fingerprint for comparison with MokManager, not trust authorization.
+    pub firmware_fingerprint: String,
+    pub enrollment: MokEnrollment,
+}
+rpc_toolkit::reflect_ts!(CertificateProgress);
+
+/// Firmware enrollment observation, not proof of active disk protection.
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct FdeEnrollmentProgress {
+    pub firmware_enrolled: bool,
+    pub approval_code: Option<String>,
+    pub certificates: Vec<CertificateProgress>,
+}
+rpc_toolkit::reflect_ts!(FdeEnrollmentProgress);
 
 pub(crate) async fn owns_enrollment_request() -> Result<bool, Error> {
     request_marker(Path::new(REQUEST_CERTIFICATE)).await
@@ -117,15 +141,21 @@ fn require_acknowledgment(acknowledged: bool) -> Result<(), Error> {
 }
 
 /// Begins firmware enrollment inside an acknowledged enable request.
-/// The caller confines FDE to supported generic UEFI targets; activation is separate.
+/// Restricts enrollment to generic UEFI targets; activation is separate.
 pub async fn begin(
     ctx: RpcContext,
     password: Zeroizing<String>,
     acknowledged_offline: bool,
-) -> Result<Progress, Error> {
+) -> Result<FdeEnrollmentProgress, Error> {
     complete_owned_operation(async move {
         let _exclusive = ctx.password_changes.lock().await;
         require_acknowledgment(acknowledged_offline)?;
+        if !super::api::supported_platform(&crate::PLATFORM) {
+            return Err(Error::new(
+                eyre!(t!("fde.enrollment.hardware-required")),
+                ErrorKind::Bios,
+            ));
+        }
         let snapshot = ctx.db.peek().await;
         crate::auth::check_password(&snapshot.as_private().as_password().de()?, &password)?;
         crate::disk::fde::LuksPool::new(&ctx.disk_guid, "/media/startos/config")?;
@@ -162,19 +192,22 @@ pub async fn begin(
             &enrollment.image_certificate.to_der()?,
         )
         .await?;
-        let mut certificates = vec![Path::new(REQUEST_CERTIFICATE).to_owned()];
+        let mut required = vec![(
+            CertificatePurpose::Image,
+            Path::new(REQUEST_CERTIFICATE).to_owned(),
+        )];
         if request_marker(Path::new(DKMS_MOK_PUB)).await? {
-            certificates.push(DKMS_MOK_PUB.into());
+            required.push((CertificatePurpose::Modules, DKMS_MOK_PUB.into()));
         }
         let mut pending = Vec::new();
         let mut needs_import = false;
-        for certificate in certificates {
-            match enrollment_status(&certificate).await? {
+        for (_, certificate) in &required {
+            match enrollment_status(certificate).await? {
                 MokEnrollment::Enrolled => {}
-                MokEnrollment::Pending => pending.push(certificate),
+                MokEnrollment::Pending => pending.push(certificate.clone()),
                 MokEnrollment::NotEnrolled => {
                     needs_import = true;
-                    pending.push(certificate);
+                    pending.push(certificate.clone());
                 }
             }
         }
@@ -188,20 +221,27 @@ pub async fn begin(
             let hash = crate::util::crypto::shadow_password_hash(code)?;
             request_enrollment(&pending, &hash).await?;
         }
-        let mut enrolled = true;
-        for certificate in &pending {
-            match enrollment_status(certificate).await? {
-                MokEnrollment::Enrolled => {}
-                MokEnrollment::Pending => enrolled = false,
-                MokEnrollment::NotEnrolled => {
-                    return Err(Error::new(
-                        eyre!(t!("fde.enrollment.request-not-recorded")),
-                        ErrorKind::Bios,
-                    ));
-                }
+        let mut certificates = Vec::new();
+        for (purpose, path) in required {
+            let enrollment = enrollment_status(&path).await?;
+            if enrollment == MokEnrollment::NotEnrolled {
+                return Err(Error::new(
+                    eyre!(t!("fde.enrollment.request-not-recorded")),
+                    ErrorKind::Bios,
+                ));
             }
+            let der = tokio::fs::read(path).await?;
+            certificates.push(CertificateProgress {
+                purpose,
+                sha256: hex::encode(openssl::sha::sha256(&der)),
+                firmware_fingerprint: hex::encode(openssl::sha::sha1(&der)),
+                enrollment,
+            });
         }
-        if enrolled {
+        let firmware_enrolled = certificates
+            .iter()
+            .all(|certificate| certificate.enrollment == MokEnrollment::Enrolled);
+        if firmware_enrolled {
             enrollment.approval_code = None;
             ctx.db
                 .mutate(|db| {
@@ -214,12 +254,10 @@ pub async fn begin(
             delete_file(REQUEST_CERTIFICATE).await?;
         }
         memory.check()?;
-        Ok(Progress {
-            enrolled,
+        Ok(FdeEnrollmentProgress {
+            firmware_enrolled,
             approval_code: enrollment.approval_code,
-            certificate_sha256: hex::encode(openssl::sha::sha256(
-                &enrollment.image_certificate.to_der()?,
-            )),
+            certificates,
         })
     })
     .await

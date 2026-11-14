@@ -735,6 +735,7 @@ export const Api = {
           _CHILDREN: {},
         },
         experimental: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        fde: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         host: {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {

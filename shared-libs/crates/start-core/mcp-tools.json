@@ -10065,6 +10065,130 @@
     }
   },
   {
+    "name": "server.fde.begin-enable",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "BeginEnableParams": {
+          "type": "object",
+          "properties": {
+            "password": { "$ref": "#/$defs/PasswordType" },
+            "acknowledgedOffline": { "type": "boolean" }
+          },
+          "required": ["password", "acknowledgedOffline"],
+          "additionalProperties": true
+        },
+        "PasswordType": {
+          "anyOf": [{ "$ref": "#/$defs/EncryptedWire" }, { "type": "string" }]
+        },
+        "EncryptedWire": {
+          "type": "object",
+          "properties": { "encrypted": {} },
+          "required": ["encrypted"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "password": { "$ref": "#/$defs/PasswordType" },
+        "acknowledgedOffline": { "type": "boolean" }
+      },
+      "required": ["password", "acknowledgedOffline"],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "FdeEnrollmentProgress": {
+          "type": "object",
+          "properties": {
+            "firmwareEnrolled": { "type": "boolean" },
+            "approvalCode": { "type": ["string", "null"] },
+            "certificates": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/CertificateProgress" }
+            }
+          },
+          "required": ["firmwareEnrolled", "approvalCode", "certificates"],
+          "additionalProperties": true,
+          "description": "Firmware enrollment observation, not proof of active disk protection."
+        },
+        "CertificateProgress": {
+          "type": "object",
+          "properties": {
+            "purpose": { "$ref": "#/$defs/CertificatePurpose" },
+            "sha256": {
+              "type": "string",
+              "description": "SHA-256 of the DER certificate."
+            },
+            "firmwareFingerprint": {
+              "type": "string",
+              "description": "SHA-1 display fingerprint for comparison with MokManager, not trust authorization."
+            },
+            "enrollment": { "$ref": "#/$defs/MokEnrollment" }
+          },
+          "required": [
+            "purpose",
+            "sha256",
+            "firmwareFingerprint",
+            "enrollment"
+          ],
+          "additionalProperties": true
+        },
+        "CertificatePurpose": {
+          "type": "string",
+          "enum": ["image", "modules"]
+        },
+        "MokEnrollment": {
+          "type": "string",
+          "enum": ["notEnrolled", "pending", "enrolled"]
+        }
+      },
+      "type": "object",
+      "properties": {
+        "firmwareEnrolled": { "type": "boolean" },
+        "approvalCode": { "type": ["string", "null"] },
+        "certificates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CertificateProgress" }
+        }
+      },
+      "required": ["firmwareEnrolled", "approvalCode", "certificates"],
+      "additionalProperties": true,
+      "description": "Firmware enrollment observation, not proof of active disk protection."
+    }
+  },
+  {
+    "name": "server.fde.status",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "EnableStatus": {
+          "type": "object",
+          "properties": {
+            "supportedPlatform": { "type": "boolean" },
+            "enableRequested": { "type": "boolean" }
+          },
+          "required": ["supportedPlatform", "enableRequested"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "supportedPlatform": { "type": "boolean" },
+        "enableRequested": { "type": "boolean" }
+      },
+      "required": ["supportedPlatform", "enableRequested"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "server.governor",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

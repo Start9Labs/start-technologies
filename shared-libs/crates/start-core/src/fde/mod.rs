@@ -4,6 +4,7 @@
 //! gates the TLS identity and network credentials used to request that password,
 //! never the data key. See `projects/start-os/FDE.md` for the boot contract.
 
+pub mod api;
 pub mod boot;
 pub mod bootstrap;
 pub mod credentials;

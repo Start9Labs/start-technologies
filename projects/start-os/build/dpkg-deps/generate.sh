@@ -6,10 +6,9 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 IFS="-" read -ra FEATURES <<< "$ENVIRONMENT"
 FEATURES+=("${ARCH}")
-# Raspberry Pi and Rockchip are aarch64 but are not FDE targets.
-case "$PLATFORM" in
-    x86_64|x86_64-*|aarch64|aarch64-*) FEATURES+=("uefi") ;;
-esac
+if grep -Fxq -- "$PLATFORM" uefi.platforms; then
+    FEATURES+=("uefi")
+fi
 if [ "$ARCH" != "$PLATFORM" ]; then
     FEATURES+=("${PLATFORM}")
 fi
@@ -33,7 +32,6 @@ for type in conflicts depends; do
     for feature in ${FEATURES[@]}; do
         file="$feature.$type"
         if [ -f $file ]; then
-            # TODO check for syntax errrors
             cat $file | awk "$feature_file_checker"
             for pkg in $(cat $file | awk '/^\+/ {print $2}'); do
                 pkgs+=($pkg)
