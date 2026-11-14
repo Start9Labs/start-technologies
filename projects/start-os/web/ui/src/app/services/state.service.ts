@@ -33,7 +33,7 @@ import {
   tap,
 } from 'rxjs/operators'
 import { ServerState } from 'src/app/services/api/api.types'
-import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { StartupApiService } from 'src/app/services/api/startup-api.service'
 import { NetworkService } from 'src/app/services/network.service'
 
 const OPTIONS: IsActiveMatchOptions = {
@@ -65,7 +65,7 @@ class DisconnectedToast {}
 export class StateService extends Observable<ServerState | null> {
   private readonly alerts = inject(TuiNotificationService)
   private readonly i18n = inject(i18nPipe)
-  private readonly api = inject(ApiService)
+  private readonly api = inject(StartupApiService)
   private readonly router = inject(Router)
   private readonly network$ = inject(NetworkService)
   private readonly trigger$ = new BehaviorSubject(true)

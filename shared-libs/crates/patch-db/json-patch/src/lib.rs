@@ -95,6 +95,7 @@ use serde::{Deserialize, Serialize};
 
 /// Representation of JSON Patch (list of patch operations)
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(visit_rs::VisitFields))]
 pub struct Patch(pub Vec<PatchOperation>);
 impl Patch {
     /// Prepend a path to a patch.
@@ -171,6 +172,7 @@ impl Patch {
 
 /// JSON Patch 'add' operation representation
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(visit_rs::VisitFields))]
 pub struct AddOperation {
     /// JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
     /// within the target document where the operation is performed.
@@ -181,6 +183,7 @@ pub struct AddOperation {
 
 /// JSON Patch 'remove' operation representation
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(visit_rs::VisitFields))]
 pub struct RemoveOperation {
     /// JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
     /// within the target document where the operation is performed.
@@ -189,6 +192,7 @@ pub struct RemoveOperation {
 
 /// JSON Patch 'replace' operation representation
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(visit_rs::VisitFields))]
 pub struct ReplaceOperation {
     /// JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
     /// within the target document where the operation is performed.
@@ -199,6 +203,7 @@ pub struct ReplaceOperation {
 
 /// JSON Patch 'move' operation representation
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(visit_rs::VisitFields))]
 pub struct MoveOperation {
     /// JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
     /// to move value from.
@@ -210,6 +215,7 @@ pub struct MoveOperation {
 
 /// JSON Patch 'copy' operation representation
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(visit_rs::VisitFields))]
 pub struct CopyOperation {
     /// JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
     /// to copy value from.
@@ -221,6 +227,7 @@ pub struct CopyOperation {
 
 /// JSON Patch 'test' operation representation
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(visit_rs::VisitFields))]
 pub struct TestOperation {
     /// JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
     /// within the target document where the operation is performed.
@@ -233,6 +240,7 @@ pub struct TestOperation {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(tag = "op")]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "reflect", derive(visit_rs::VisitVariants))]
 pub enum PatchOperation {
     /// 'add' operation
     Add(AddOperation),

@@ -44,6 +44,10 @@ loadTypeScript(
     ['src/app/services/action.service', 'export class ActionService {};'],
     ['src/app/services/api/embassy-api.service', 'export class ApiService {};'],
     [
+      './api/embassy-api.service',
+      'export {ApiService} from "src/app/services/api/embassy-api.service";',
+    ],
+    [
       'src/app/services/package-icon.service',
       'export class PackageIconService {};',
     ],

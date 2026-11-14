@@ -20,7 +20,7 @@ use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
 
 lazy_static::lazy_static! {
@@ -169,6 +169,16 @@ pub struct SubscribeRes {
 
 rpc_toolkit::reflect_ts!(SubscribeRes);
 
+/// Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
+#[derive(Deserialize, Serialize, VisitVariants)]
+#[serde(untagged)]
+pub enum SubscribeResult {
+    Continuation(SubscribeRes),
+    Stream(Dump),
+}
+
+rpc_toolkit::reflect_ts!(SubscribeResult);
+
 struct DbSubscriber {
     rev: u64,
     sub: UnboundedReceiver<Revision>,
@@ -184,7 +194,10 @@ impl DbSubscriber {
                     }
                     return rev
                 }
-                _ = self.sync_db.changed() => {
+                changed = self.sync_db.changed() => {
+                    if changed.is_err() {
+                        return self.sub.recv().await;
+                    }
                     let id = *self.sync_db.borrow();
                     if id > self.rev {
                         match self.sub.try_recv() {
@@ -207,9 +220,13 @@ impl DbSubscriber {
 }
 
 pub async fn subscribe(
-    ctx: RpcContext,
-    SubscribeParams { pointer, signer }: SubscribeParams,
-) -> Result<SubscribeRes, Error> {
+    HandlerArgs {
+        context: ctx,
+        params: SubscribeParams { pointer, signer },
+        rpc_stream,
+        ..
+    }: HandlerArgs<RpcContext, SubscribeParams, rpc_toolkit::Empty, Revision>,
+) -> Result<SubscribeResult, Error> {
     let (dump, sub) = ctx
         .db
         .dump_and_sub(pointer.unwrap_or_else(|| PUBLIC.clone()))
@@ -219,13 +236,25 @@ pub async fn subscribe(
         sub,
         sync_db: ctx.sync_db.subscribe(),
     };
+    if let Some(stream) = rpc_stream {
+        crate::auth::continuation_subscription(&ctx, signer)
+            .await?
+            .forward_stream(
+                stream,
+                futures::stream::unfold(sub, |mut sub| async move {
+                    sub.recv().await.map(|revision| (Ok(revision), sub))
+                }),
+            );
+        return Ok(SubscribeResult::Stream(dump));
+    }
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(
             guid.clone(),
             RpcContinuation::ws_authed(
-                &ctx,
-                signer,
+                crate::auth::continuation_subscription(&ctx, signer).await?,
+                WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
                 |mut ws| async move {
                     if let Err(e) = async {
                         loop {
@@ -264,7 +293,7 @@ pub async fn subscribe(
         )
         .await;
 
-    Ok(SubscribeRes { dump, guid })
+    Ok(SubscribeResult::Continuation(SubscribeRes { dump, guid }))
 }
 
 #[derive(Deserialize, Serialize, Parser)]
@@ -405,7 +434,9 @@ pub struct UiParams {
 
 rpc_toolkit::reflect_ts!(UiParams);
 
-// #[command(display(display_serializable))]
+#[cfg(test)]
+mod subscription_tests;
+
 #[instrument(skip_all)]
 pub async fn ui(ctx: RpcContext, UiParams { pointer, value, .. }: UiParams) -> Result<(), Error> {
     let mut ptr = "/public/ui"

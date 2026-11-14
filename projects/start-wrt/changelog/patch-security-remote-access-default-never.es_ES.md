@@ -1,1 +1,0 @@
-- **El acceso remoto es «Nunca» de forma predeterminada.** Los routers con la configuración predeterminada anterior, «Cuando está detrás de NAT», pasan a «Nunca» con esta actualización. Para seguir administrando el router desde su red superior, elige «Cuando está detrás de NAT» en Ajustes > General > Acceso remoto.

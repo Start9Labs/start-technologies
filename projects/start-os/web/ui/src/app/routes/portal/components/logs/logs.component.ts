@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common'
-import { Component, ElementRef, Input, ViewChild } from '@angular/core'
+import { Component, ElementRef, input, Input, ViewChild } from '@angular/core'
 import {
   WA_INTERSECTION_ROOT,
   WaIntersectionObserver,
@@ -11,7 +11,7 @@ import { tuiProvide } from '@taiga-ui/cdk'
 import { TuiButton, TuiLoader, TuiScrollbar } from '@taiga-ui/core'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { BehaviorSubject } from 'rxjs'
-import { FollowServerLogsReq } from 'src/app/services/api/api.types'
+import { FollowLogs } from 'src/app/services/api/api.types'
 import { LogsDownloadDirective } from './logs-download.directive'
 import { LogsFetchDirective } from './logs-fetch.directive'
 import { LogsPipe } from './logs.pipe'
@@ -37,7 +37,7 @@ import { LogsPipe } from './logs.pipe'
         }
       </section>
 
-      @if (followLogs | logs | async; as logs) {
+      @if (followLogs() | logs | async; as logs) {
         <section childList (waMutationObserver)="scrollToBottom()">
           @for (log of logs; track $index) {
             <pre [innerHTML]="log | dompurify"></pre>
@@ -163,9 +163,7 @@ export class LogsComponent {
   @ViewChild(TuiScrollbar, { read: ElementRef })
   private readonly scrollbar?: ElementRef<HTMLElement>
 
-  @Input({ required: true }) followLogs!: (
-    params: FollowServerLogsReq,
-  ) => Promise<T.LogFollowResponse>
+  public readonly followLogs = input.required<FollowLogs>()
 
   @Input({ required: true }) fetchLogs!: (
     params: T.LogsParamsInput,
