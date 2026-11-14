@@ -17,8 +17,13 @@ use crate::util::serde::{Der64, DerEncoding, deserialize_from_str};
 pub mod commitment;
 pub mod compat;
 pub mod ed25519;
+pub mod fingerprint;
 pub(crate) mod gpg;
 pub mod gpg_agent;
+pub mod instance;
+mod profile;
+pub mod session;
+pub use profile::browser_profile;
 
 /// Signatures serialized in signer order.
 pub type SignatureMap = std::collections::BTreeMap<AnyVerifyingKey, AnySignature>;
@@ -118,6 +123,13 @@ pub enum AnySigningKey {
 rpc_toolkit::reflect_ts!(AnySigningKey);
 rpc_toolkit::ts_export!(AnySigningKey, namespaces = [""]);
 impl AnySigningKey {
+    /// Generates an Ed25519 identity using OS randomness.
+    pub fn generate() -> Self {
+        Self::Ed25519(ed25519_dalek::SigningKey::generate(
+            &mut crate::util::crypto::os_rng(),
+        ))
+    }
+
     pub fn verifying_key(&self) -> AnyVerifyingKey {
         match self {
             Self::Ed25519(k) => AnyVerifyingKey::Ed25519(k.into()),

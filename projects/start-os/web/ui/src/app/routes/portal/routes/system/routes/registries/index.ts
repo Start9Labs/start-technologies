@@ -1,7 +1,11 @@
 import { Component, computed, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { Router } from '@angular/router'
-import { StoreIconDirective } from '@start9labs/marketplace'
+import {
+  RegistryConnectionStatus,
+  StoreIconDirective,
+} from '@start9labs/marketplace'
+import type { T } from '@start9labs/start-core'
 import {
   defaultRegistries,
   DialogService,
@@ -19,6 +23,10 @@ import { defaultIfEmpty, firstValueFrom } from 'rxjs'
 import { TRUSTED_KEYS_NOTICE } from 'src/app/components/trusted-keys/notice'
 import { BackDirective } from 'src/app/routes/portal/components/back'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
+import {
+  RegistryRefresh,
+  RegistryRetry,
+} from 'src/app/routes/portal/components/registry-retry'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { OSService } from 'src/app/services/os.service'
@@ -26,7 +34,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
 import { TRUSTED_KEYS_LINK } from '../../system.const'
 
-interface Row {
+interface Row extends Pick<T.RegistryCache, 'status' | 'error'> {
   url: string
   name: string
   os: boolean
@@ -61,7 +69,7 @@ interface Row {
         </button>
       </header>
       @if (rows(); as rows) {
-        <table [appTable]="[null, 'Name', 'URL', null]">
+        <table [appTable]="[null, 'Name', 'URL', 'Status', null]">
           @for (row of rows; track row.url) {
             <tr>
               <td [style.width.rem]="3">
@@ -76,6 +84,16 @@ interface Row {
                 }
               </td>
               <td class="url">{{ row.url }}</td>
+              <td class="status">
+                <marketplace-registry-status
+                  [status]="row.status"
+                  [url]="row.url"
+                  [error]="row.error"
+                />
+                @if (row.status === 'error') {
+                  <button [registryRetry]="row.url" size="xs"></button>
+                }
+              </td>
               <td>
                 <button
                   tuiIconButton
@@ -89,6 +107,9 @@ interface Row {
                 >
                   {{ 'More' | i18n }} {{ row.name }}
                   <tui-data-list *tuiDropdown="let close" (click)="close()">
+                    <button tuiOption [registryRefresh]="row.url">
+                      {{ 'Refresh registry' | i18n }}
+                    </button>
                     <button tuiOption (click)="manageKeys(row.url)">
                       {{ 'Manage keys' | i18n }}
                     </button>
@@ -112,7 +133,7 @@ interface Row {
             </tr>
           } @empty {
             <tr>
-              <td colspan="4">{{ 'No registries connected' | i18n }}</td>
+              <td colspan="5">{{ 'No registries connected' | i18n }}</td>
             </tr>
           }
         </table>
@@ -141,11 +162,20 @@ interface Row {
       }
 
       td:first-child {
-        grid-area: 1 / 1 / 3;
+        grid-area: 1 / 1 / 4;
         align-content: center;
       }
 
+      .url {
+        grid-area: 2 / 2;
+      }
+
+      .status {
+        grid-area: 3 / 2;
+      }
+
       .name {
+        grid-area: 1 / 2;
         display: flex;
         flex-wrap: wrap;
         align-items: center;
@@ -160,12 +190,15 @@ interface Row {
       }
 
       td:last-child {
-        grid-area: 1 / 3 / 3;
+        grid-area: 1 / 3 / 4;
         align-content: center;
       }
     }
   `,
   imports: [
+    RegistryConnectionStatus,
+    RegistryRefresh,
+    RegistryRetry,
     BackDirective,
     DocsLinkDirective,
     StoreIconDirective,
@@ -194,9 +227,11 @@ export default class Registries {
 
   protected readonly saving = signal(false)
   protected readonly rows = computed(() =>
-    this.registries()?.map<Row>(({ url, name }) => ({
+    this.registries()?.map<Row>(({ url, name, status, error }) => ({
       url,
       name,
+      status,
+      error,
       os: sameUrl(url, this.osRegistry()),
       builtin: Object.values(defaultRegistries).some(known =>
         sameUrl(url, known),

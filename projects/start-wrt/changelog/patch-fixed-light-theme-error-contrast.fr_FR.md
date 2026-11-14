@@ -1,1 +1,0 @@
-- **Les messages d’erreur et de réussite sont lisibles avec le thème clair.** Ils utilisaient les couleurs du thème sombre, trop pâles sur fond blanc.

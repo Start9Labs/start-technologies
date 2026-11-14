@@ -90,7 +90,7 @@ fn package(account: &AccountInfo, id: &str) -> PackageDataEntry {
         s9pk: format!("/tmp/{id}.s9pk").into(),
         status_info: Default::default(),
         registry: None,
-        developer_key: Der64(account.developer_key.verifying_key()),
+        developer_key: Der64(account.server_identity_key.verifying_key()),
         last_backup: None,
         current_dependencies: Default::default(),
         actions: Default::default(),

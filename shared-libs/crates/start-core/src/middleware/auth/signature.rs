@@ -1,24 +1,25 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::future::Future;
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::Request;
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::TimeDelta;
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use http::header::USER_AGENT;
 use http::{Extensions, HeaderMap, HeaderValue};
 use itertools::Itertools;
 use reqwest::Client;
 use rpc_toolkit::yajrc::RpcError;
-use rpc_toolkit::{Middleware, RpcRequest, RpcResponse};
+use rpc_toolkit::{Context, Middleware, RpcRequest, RpcResponse};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::auth::AuthKeys;
+use crate::auth::{AuthKeys, LoginContext};
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
 use crate::net::host::binding::BindInfo;
@@ -28,19 +29,14 @@ use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::request::RequestCommitment;
-use crate::sign::{AnySignature, AnyVerifyingKey, Signer};
-use crate::util::serde::{Base64, DerEncoding};
+use crate::sign::{AnySignature, AnySigningKey, AnyVerifyingKey, Signer};
 use crate::util::sync::SyncMutex;
 
 pub const AUTH_SIG_HEADER: &str = "X-Start-Auth-Sig";
 
-/// Maximum initial allocation from an untrusted commitment size.
-const MAX_BODY_PREALLOC: u64 = 16 * 1024 * 1024;
-
 /// RPC-metadata fields understood by [`SignatureAuth`] when layered over an
-/// [`RpcContext`]. `login` marks the enrollment endpoint: the request must
-/// still be signed (proving possession of the key being enrolled), but the
-/// key need not be registered yet.
+/// [`RpcContext`]. `login` marks enrollment: encrypted admission or a request
+/// signature proves possession of the key, independently of prior registration.
 #[derive(Deserialize)]
 pub struct LoginMetadata {
     #[serde(default)]
@@ -87,18 +83,34 @@ pub fn check_enrolled(
     }
 }
 
-pub trait SignatureAuthContext: DbContext {
+/// Admission capabilities independent of enrolled authorization or database availability.
+pub trait SignatureAuthContext: Context + SessionContext {
+    fn server_identity(&self) -> Result<Signer, Error>;
+    /// Acquires admission replay policy without retaining the authentication owner.
+    fn replay_check(&self) -> RequestReplayCheck;
+    fn with_secure_session(self, session: crate::middleware::auth::session::SecureSession) -> Self
+    where
+        Self: Sized;
+    fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T;
+    /// Whether the clock can be trusted; untrusted clocks use nonce LRU eviction.
+    fn clock_synced(&self) -> impl Future<Output = bool> + Send;
+    /// Signing identities allowed for the request's ingress.
+    /// JSON message checks supply the connection's `RequestOrigin` extension.
+    fn sig_context(
+        &self,
+        extensions: &Extensions,
+    ) -> impl Future<Output = impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send>
+    + Send;
+}
+
+/// Live enrolled-key policy and lifecycle over the authoritative database.
+pub trait SignatureAuthorizationContext: SignatureAuthContext + DbContext {
     type AdditionalMetadata: DeserializeOwned + SignatureAuthMetadata + Send;
     type CheckPubkeyRes: Send;
     /// How far a key's persisted `last_active` may lag its latest request.
     /// Zero persists every request.
     const LAST_ACTIVE_RESOLUTION: TimeDelta = TimeDelta::zero();
-    fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T;
-    /// Whether the clock can be trusted - otherwise nonces are LRU evicted
-    fn clock_synced(&self) -> impl Future<Output = bool> + Send + Sync;
-    /// Live continuations (REST/WS) registered under the signer that opened
-    /// them, so revoking a signer kills anything it left open. Keyed by the
-    /// signer's PEM (`None` for continuations opened without one).
+    /// Revocation-scoped continuations keyed by the signer's DER64 identity.
     fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>>;
     /// In-memory enrolled keys that are never persisted (kiosk mode), if the
     /// context supports them.
@@ -113,12 +125,6 @@ pub trait SignatureAuthContext: DbContext {
         db: &mut Model<Self::Database>,
         keys: &BTreeSet<InternedString>,
     ) -> Result<(), Error>;
-    /// Signing identities allowed for the request's ingress.
-    fn sig_context(
-        &self,
-        extensions: &Extensions,
-    ) -> impl Future<Output = impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send>
-    + Send;
     fn check_pubkey(
         &self,
         db: &Model<Self::Database>,
@@ -157,7 +163,7 @@ pub trait SignatureAuthContext: DbContext {
 
 /// Proof that a set of auth keys was unenrolled — removed from the persisted
 /// and ephemeral signer stores with any continuations they opened killed.
-/// Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
+/// Obtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]
 /// from inside a db transaction.
 #[derive(Serialize, Deserialize, VisitFields)]
 pub struct HasUnenrolledKeys(());
@@ -170,7 +176,7 @@ impl HasUnenrolledKeys {
     /// transactional: if the mutation is later discarded, the keys stay
     /// enrolled but their continuations are already dead — erring on the
     /// side of dropping a reconnectable session, never the reverse.
-    pub fn unenroll<C: SignatureAuthContext>(
+    pub fn unenroll<C: SignatureAuthorizationContext>(
         continuations: &OpenAuthedContinuations<Option<InternedString>>,
         ephemeral: Option<&SyncMutex<AuthKeys>>,
         db: &mut Model<C::Database>,
@@ -193,8 +199,15 @@ impl HasUnenrolledKeys {
 }
 
 impl SignatureAuthContext for RpcContext {
-    type AdditionalMetadata = LoginMetadata;
-    type CheckPubkeyRes = Option<InternedString>;
+    fn server_identity(&self) -> Result<Signer, Error> {
+        RpcContext::server_identity(self)
+    }
+    fn replay_check(&self) -> RequestReplayCheck {
+        RpcContext::replay_check(self)
+    }
+    fn with_secure_session(self, session: crate::middleware::auth::session::SecureSession) -> Self {
+        RpcContext::with_secure_session(self, session)
+    }
     fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {
         self.auth_sig_nonce_cache.mutate(f)
     }
@@ -207,22 +220,6 @@ impl SignatureAuthContext for RpcContext {
             .as_ntp_synced()
             .de()
             .unwrap_or(false)
-    }
-    fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
-        &self.open_authed_continuations
-    }
-    fn ephemeral_auth_keys(&self) -> Option<&SyncMutex<AuthKeys>> {
-        Some(&self.ephemeral_auth_keys)
-    }
-    fn remove_enrolled_keys(
-        db: &mut Model<Self::Database>,
-        keys: &BTreeSet<InternedString>,
-    ) -> Result<(), Error> {
-        let auth_keys = db.as_private_mut().as_sessions_mut().as_pubkeys_mut();
-        for key in keys {
-            auth_keys.remove(key)?;
-        }
-        Ok(())
     }
     async fn sig_context(
         &self,
@@ -246,6 +243,27 @@ impl SignatureAuthContext for RpcContext {
         )
         .flatten_ok()
     }
+}
+
+impl SignatureAuthorizationContext for RpcContext {
+    type AdditionalMetadata = LoginMetadata;
+    type CheckPubkeyRes = Option<InternedString>;
+    fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
+        &self.open_authed_continuations
+    }
+    fn ephemeral_auth_keys(&self) -> Option<&SyncMutex<AuthKeys>> {
+        Some(&self.ephemeral_auth_keys)
+    }
+    fn remove_enrolled_keys(
+        db: &mut Model<Self::Database>,
+        keys: &BTreeSet<InternedString>,
+    ) -> Result<(), Error> {
+        let auth_keys = db.as_private_mut().as_sessions_mut().as_pubkeys_mut();
+        for key in keys {
+            auth_keys.remove(key)?;
+        }
+        Ok(())
+    }
     fn check_pubkey(
         &self,
         db: &Model<Self::Database>,
@@ -253,15 +271,7 @@ impl SignatureAuthContext for RpcContext {
         metadata: Self::AdditionalMetadata,
     ) -> Result<Self::CheckPubkeyRes, Error> {
         check_enrolled(pubkey, metadata.login, |key| {
-            Ok(self
-                .ephemeral_auth_keys
-                .peek(|keys| keys.0.contains_key(&**key))
-                || db
-                    .as_private()
-                    .as_sessions()
-                    .as_pubkeys()
-                    .as_idx(key)
-                    .is_some())
+            self.auth_key_is_enrolled(db, key)
         })
     }
     async fn post_auth_hook(&self, key: Self::CheckPubkeyRes, _: &RpcRequest) -> Result<(), Error> {
@@ -336,27 +346,62 @@ pub(crate) fn request_identities<'a, C: SignatureAuthContext>(
     context: &'a C,
     request: &'a Request,
 ) -> impl Future<Output = Result<Vec<InternedString>, Error>> + Send + 'a {
-    let loopback = loopback_identity(request);
-    let extensions = request.extensions();
+    let identities = signing_identities(context, request.extensions(), loopback_identity(request));
+    let host = request_authority(request).map(|authority| authority.host().to_owned());
     async move {
-        let mut identities = context
-            .sig_context(extensions)
-            .await
-            .into_iter()
-            .map(|identity| identity.map(|identity| InternedString::intern(identity.as_ref())))
-            .collect::<Result<Vec<_>, _>>()?;
-        identities.extend(loopback);
+        let mut identities = identities.await?;
+        if let Some(host) = host {
+            if let Some(index) = identities.iter().position(|identity| &**identity == host) {
+                identities.swap(0, index);
+            }
+        }
         Ok(identities)
     }
 }
 
+async fn signing_identities<C: SignatureAuthContext>(
+    context: &C,
+    ingress: &Extensions,
+    loopback: Option<InternedString>,
+) -> Result<Vec<InternedString>, Error> {
+    let mut identities = context
+        .sig_context(ingress)
+        .await
+        .into_iter()
+        .map(|identity| identity.map(|identity| InternedString::intern(identity.as_ref())))
+        .collect::<Result<Vec<_>, _>>()?;
+    identities.extend(loopback);
+    Ok(identities)
+}
+
 pub trait SigningContext {
     fn signing_key(&self) -> Result<Signer, Error>;
+
+    /// Local credentials take precedence; uninitialized identities permit anonymous calls.
+    fn rpc_signer(&self, headers: &http::HeaderMap) -> Result<Option<Signer>, Error> {
+        if headers.contains_key(http::header::AUTHORIZATION) {
+            return Ok(None);
+        }
+        match self.signing_key() {
+            Ok(signer) => Ok(Some(signer)),
+            Err(error) if error.kind == ErrorKind::Uninitialized => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 impl SigningContext for CliContext {
     fn signing_key(&self) -> Result<Signer, Error> {
         Ok(self.id_key()?.clone())
+    }
+}
+
+impl SigningContext for RpcContext {
+    fn signing_key(&self) -> Result<Signer, Error> {
+        Ok(Signer::Key(AnySigningKey::Ed25519(
+            self.account
+                .peek(|account| account.server_identity_key.clone()),
+        )))
     }
 }
 
@@ -390,39 +435,42 @@ impl SignatureAuth {
 
 const SIG_TIME_GRACE_PERIOD_SECS: u64 = 60;
 
-/// Replay cache for the last 60s of nonces. `seen` gives O(1) membership;
-/// `order` drives eviction, keyed by `(seen_at, nonce)` so two nonces recorded
-/// at the same `Instant` can't collide and silently evict each other.
-///
-/// BEST EFFORT: security degrades when clock is not synced
+const MAX_UNTIMED_NONCES: usize = 1024 * 1024;
+
+/// Retains nonces for 60 seconds with a trusted clock.
+/// Otherwise bounds storage by evicting the oldest submitted timestamps.
 #[derive(Default)]
 pub struct NonceCache {
     seen: HashSet<u64>,
     order: BTreeSet<(i64, u64)>,
 }
 impl NonceCache {
+    fn evict_oldest(&mut self) {
+        let (_, nonce) = self.order.pop_first().unwrap();
+        self.seen.remove(&nonce);
+    }
+
     fn handle_nonce(&mut self, nonce: u64, timestamp: i64, now: Option<i64>) -> Result<(), Error> {
         if let Some(now) = now {
-            while let Some(&(timestamp, n)) = self.order.iter().next() {
+            while let Some(&(timestamp, _)) = self.order.iter().next() {
                 if now.saturating_sub(timestamp) > SIG_TIME_GRACE_PERIOD_SECS as i64 {
-                    self.order.remove(&(timestamp, n));
-                    self.seen.remove(&n);
+                    self.evict_oldest();
                 } else {
                     break;
                 }
             }
-        } else {
-            while self.order.len() > 1024 * 1024 {
-                self.order.pop_first();
-            }
         }
-        // Not `Authorization`: clients treat 34 as key revocation and log out,
-        // but a replay can be an innocent transport retransmit.
+        // Replay errors must not trigger key-revocation logout.
         if !self.seen.insert(nonce) {
             return Err(Error::new(
                 eyre!("{}", t!("middleware.auth.replay-attack-detected")),
                 ErrorKind::InvalidSignature,
             ));
+        }
+        if now.is_none() {
+            while self.order.len() >= MAX_UNTIMED_NONCES {
+                self.evict_oldest();
+            }
         }
         self.order.insert((timestamp, nonce));
         Ok(())
@@ -456,6 +504,18 @@ async fn verify_request_signature_with_address<C: SignatureAuthContext>(
             .with_kind(ErrorKind::InvalidRequest)?,
     )?;
 
+    let limit = request
+        .extensions()
+        .get::<rpc_toolkit::RequestBodyLimit>()
+        .copied()
+        .unwrap_or_default();
+    ensure_code!(
+        header.commitment.size <= limit.0.get() as u64,
+        ErrorKind::InvalidRequest,
+        "{}",
+        t!("middleware.auth.request-body-too-large")
+    );
+
     let address = {
         let identities = request_identities(context, request).await?;
         let address = verified_address(&header, identities.iter().map(|c| &**c));
@@ -476,6 +536,62 @@ async fn verify_request_signature_with_address<C: SignatureAuthContext>(
         commitment, signer, ..
     } = header;
 
+    accept_nonce(context, &commitment).await?;
+
+    let mut body = Vec::with_capacity(commitment.size as usize);
+    commitment.copy_to(request, &mut body).await?;
+    *request.body_mut() = Body::from(body);
+
+    Ok((signer, address))
+}
+
+/// Live replay and clock policy without retaining the authentication owner.
+#[derive(Clone)]
+pub struct RequestReplayCheck(
+    Arc<dyn Fn(RequestCommitment) -> BoxFuture<'static, Result<(), Error>> + Send + Sync>,
+);
+
+impl RequestReplayCheck {
+    /// Additional owners captured by the context factory must be weak.
+    pub fn new<S, C>(
+        owner: &Arc<S>,
+        context: impl Fn(Arc<S>) -> Option<C> + Clone + Send + Sync + 'static,
+    ) -> Self
+    where
+        S: Send + Sync + 'static,
+        C: SignatureAuthContext + 'static,
+    {
+        let owner = Arc::downgrade(owner);
+        Self(Arc::new(move |commitment| {
+            let owner = owner.clone();
+            let context = context.clone();
+            async move {
+                let context = owner.upgrade().and_then(context).ok_or_else(|| {
+                    Error::new(
+                        eyre!("{}", t!("middleware.auth.invalid-request-signature")),
+                        ErrorKind::InvalidSignature,
+                    )
+                })?;
+                accept_nonce(&context, &commitment).await
+            }
+            .boxed()
+        }))
+    }
+
+    /// The caller must verify identity and complete body before consuming the nonce.
+    pub fn check(&self, commitment: RequestCommitment) -> BoxFuture<'static, Result<(), Error>> {
+        (self.0)(commitment)
+    }
+}
+
+#[cfg(test)]
+#[path = "signature/replay_tests.rs"]
+mod replay_tests;
+
+async fn accept_nonce<C: SignatureAuthContext>(
+    context: &C,
+    commitment: &RequestCommitment,
+) -> Result<(), Error> {
     let now = if context.clock_synced().await {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -491,13 +607,7 @@ async fn verify_request_signature_with_address<C: SignatureAuthContext>(
     } else {
         None
     };
-    context.mutate_nonce_cache(|n| n.handle_nonce(commitment.nonce, commitment.timestamp, now))?;
-
-    let mut body = Vec::with_capacity(commitment.size.min(MAX_BODY_PREALLOC) as usize);
-    commitment.copy_to(request, &mut body).await?;
-    *request.body_mut() = Body::from(body);
-
-    Ok((signer, address))
+    context.mutate_nonce_cache(|n| n.handle_nonce(commitment.nonce, commitment.timestamp, now))
 }
 
 fn verified_address(
@@ -516,45 +626,11 @@ fn verified_address(
     })
 }
 
-pub struct SignatureHeader {
-    pub commitment: RequestCommitment,
-    pub signer: AnyVerifyingKey,
-    pub signature: AnySignature,
-}
+pub use crate::sign::commitment::request::RequestProof as SignatureHeader;
+
 impl SignatureHeader {
-    pub fn to_header(&self) -> HeaderValue {
-        let mut url: Url = "http://localhost".parse().unwrap();
-        self.commitment.append_query(&mut url);
-        url.query_pairs_mut().append_pair(
-            "signer",
-            &encode_header_der(&self.signer).expect("encode verifying key"),
-        );
-        url.query_pairs_mut().append_pair(
-            "signature",
-            &encode_header_der(&self.signature).expect("encode signature"),
-        );
-        HeaderValue::from_str(url.query().unwrap_or_default()).unwrap()
-    }
-    pub fn from_header(header: &HeaderValue) -> Result<Self, Error> {
-        let query: BTreeMap<_, _> = form_urlencoded::parse(header.as_bytes()).collect();
-        Ok(Self {
-            commitment: RequestCommitment::from_query(&header)?,
-            signer: decode_header_der(query.get("signer").or_not_found("signer")?)?,
-            signature: decode_header_der(query.get("signature").or_not_found("signature")?)?,
-        })
-    }
     pub async fn sign(signer: &Signer, body: &[u8], context: &str) -> Result<Self, Error> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1);
-        let nonce = rand::random();
-        let commitment = RequestCommitment {
-            timestamp,
-            nonce,
-            size: body.len() as u64,
-            blake3: Base64(*blake3::hash(body).as_bytes()),
-        };
+        let commitment = RequestCommitment::for_bytes(body);
         let signature = signer
             .sign_message(&request_signing_message(&commitment, context)?)
             .await?;
@@ -566,26 +642,14 @@ impl SignatureHeader {
     }
 }
 
-fn encode_header_der(value: &impl DerEncoding) -> Result<String, Error> {
-    Ok(URL_SAFE_NO_PAD.encode(
-        value
-            .to_der::<serde_json::Error>()
-            .with_kind(ErrorKind::Serialization)?,
-    ))
-}
-
-fn decode_header_der<T: DerEncoding>(value: &str) -> Result<T, Error> {
-    let der = URL_SAFE_NO_PAD
-        .decode(value)
-        .with_kind(ErrorKind::Deserialization)?;
-    T::from_der::<serde_json::Error>(&der).with_kind(ErrorKind::Deserialization)
-}
-
 const REQUEST_AUTH_TAG: &[u8] = b"Start-Auth-Sig v2\0";
 const REQUEST_AUTH_TAG_V1: &[u8] = b"Start-Auth-Sig v1\0";
 
-/// The message a request signature commits to, bound to the server identity
-/// (hostname/IP/domain). Signed with pure Ed25519, so any WebCrypto client can produce it.
+/// HTTP authentication wire constants projected for generated clients.
+pub fn wire_profile() -> serde_json::Value {
+    serde_json::json!({ "tag": REQUEST_AUTH_TAG, "header": AUTH_SIG_HEADER })
+}
+
 fn request_signing_message(
     commitment: &RequestCommitment,
     context: &str,
@@ -607,14 +671,26 @@ pub fn verify_request(
     context: &str,
     signature: &AnySignature,
 ) -> Result<(), Error> {
+    request_signing_message(commitment, context)
+        .and_then(|message| verify_auth_message(key, signature, &message))
+        .or_else(|_| {
+            verify_auth_message(
+                key,
+                signature,
+                &request_signing_message_v1(commitment, context),
+            )
+        })
+}
+
+fn verify_auth_message(
+    key: &AnyVerifyingKey,
+    signature: &AnySignature,
+    message: &[u8],
+) -> Result<(), Error> {
     match (key, signature) {
         (AnyVerifyingKey::Ed25519(key), AnySignature::Ed25519(signature)) => {
-            match request_signing_message(commitment, context) {
-                Ok(msg) if key.verify_strict(&msg, signature).is_ok() => Ok(()),
-                _ => Ok(
-                    key.verify_strict(&request_signing_message_v1(commitment, context), signature)?
-                ),
-            }
+            key.verify_strict(message, signature)?;
+            Ok(())
         }
         (_, AnySignature::Ed25519ph(_)) => Err(Error::new(
             eyre!("{}", t!("sign.unknown-signature-algorithm")),
@@ -623,7 +699,7 @@ pub fn verify_request(
     }
 }
 
-impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
+impl<C: SignatureAuthorizationContext> Middleware<C> for SignatureAuth {
     type Metadata = Metadata<C::AdditionalMetadata>;
     async fn process_http_request(
         &mut self,
@@ -631,14 +707,19 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
         request: &mut Request,
     ) -> Result<(), axum::response::Response> {
         self.user_agent = request.headers().get(USER_AGENT).cloned();
-        if request.headers().contains_key(AUTH_SIG_HEADER) {
+        self.origin = RequestOrigin::from_extensions(request.extensions());
+        if request
+            .extensions()
+            .get::<rpc_toolkit::WebSocketRequest>()
+            .is_none()
+            && request.headers().contains_key(AUTH_SIG_HEADER)
+        {
             self.signer = Some(
                 verify_request_signature_with_address(context, request)
                     .await
                     .map_err(RpcError::from),
             );
         }
-        self.origin = RequestOrigin::from_extensions(request.extensions());
         Ok(())
     }
     async fn process_rpc_request(
@@ -648,21 +729,24 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
         request: &mut RpcRequest,
     ) -> Result<(), RpcResponse> {
         async {
-            let verified = self.signer.take().transpose()?;
+            let verified = match context.secure_session() {
+                Some(session) => Some((session.peer().clone(), session.address().clone())),
+                None => self.signer.take().transpose()?,
+            };
             let signer = verified.as_ref().map(|(signer, _)| signer);
             let login = metadata.additional.is_login();
             let db = context.db().peek().await;
             let res = context.check_pubkey(&db, signer, metadata.additional)?;
-            // Injected only for an accepted signer: another method may still
-            // admit the request after a rejected one.
             if metadata.get_signer {
                 if let Some(signer) = signer {
-                    request.params["__Auth_signer"] = to_value(signer)?;
+                    crate::middleware::params_object(&mut request.params)?
+                        .insert("__Auth_signer".into(), to_value(signer)?);
                 }
             }
             if metadata.get_user_agent {
                 if let Some(user_agent) = self.user_agent.as_ref().and_then(|h| h.to_str().ok()) {
-                    request.params["__Auth_userAgent"] = to_value(&user_agent)?;
+                    crate::middleware::params_object(&mut request.params)?
+                        .insert("__Auth_userAgent".into(), to_value(&user_agent)?);
                 }
             }
             if metadata.get_peer {
@@ -683,53 +767,44 @@ impl<C: SignatureAuthContext> Middleware<C> for SignatureAuth {
     }
 }
 
-pub async fn call_remote<Ctx: SigningContext + AsRef<Client>>(
-    ctx: &Ctx,
-    url: Url,
-    headers: HeaderMap,
-    sig_context: Option<&str>,
-    method: &str,
-    params: Value,
-) -> Result<Value, RpcError> {
-    let signer = sig_context.and_then(|c| Some((ctx.signing_key().ok()?, c)));
-    call_remote_with_client(signer, ctx.as_ref().clone(), url, headers, method, params).await
+pub(crate) fn rpc_request_body(method: &str, params: Value) -> Result<String, RpcError> {
+    use rpc_toolkit::yajrc::{GenericRpcMethod, Id, RpcRequest};
+    serde_json::to_string(&RpcRequest {
+        id: Some(Id::Number(0.into())),
+        method: GenericRpcMethod::<_, _, Value>::new(method),
+        params,
+    })
+    .map_err(Into::into)
 }
 
-/// Signs the request when given a signer and the server identity to bind it to.
-pub(crate) async fn call_remote_with_client(
-    signer: Option<(Signer, &str)>,
+pub async fn call_http(
     client: Client,
     url: Url,
     headers: HeaderMap,
     method: &str,
     params: Value,
 ) -> Result<Value, RpcError> {
+    let body = rpc_request_body(method, params)?;
+    send_http(client, url, headers, body, usize::MAX).await
+}
+
+pub(crate) async fn send_http(
+    client: Client,
+    url: Url,
+    headers: HeaderMap,
+    body: String,
+    max_response_bytes: usize,
+) -> Result<Value, RpcError> {
     use reqwest::Method;
     use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
     use rpc_toolkit::RpcResponse;
-    use rpc_toolkit::yajrc::{GenericRpcMethod, Id, RpcRequest};
-
-    let rpc_req = RpcRequest {
-        id: Some(Id::Number(0.into())),
-        method: GenericRpcMethod::<_, _, Value>::new(method),
-        params,
-    };
-    let body = serde_json::to_vec(&rpc_req)?;
-    let mut req = client
+    let req = client
         .request(Method::POST, url)
         .header(CONTENT_TYPE, "application/json")
         .header(ACCEPT, "application/json")
         .header(CONTENT_LENGTH, body.len())
         .headers(headers);
-    if let Some((key, sig_ctx)) = signer {
-        req = req.header(
-            AUTH_SIG_HEADER,
-            SignatureHeader::sign(&key, &body, sig_ctx)
-                .await?
-                .to_header(),
-        );
-    }
-    let res = req.body(body).send().await?;
+    let mut res = req.body(body).send().await?;
 
     if !res.status().is_success() {
         let status = res.status();
@@ -750,7 +825,18 @@ pub(crate) async fn call_remote_with_client(
         .and_then(|v| v.to_str().ok())
     {
         Some("application/json") => {
-            serde_json::from_slice::<RpcResponse>(&*res.bytes().await?)
+            let mut bytes = Vec::new();
+            while let Some(chunk) = res.chunk().await? {
+                if chunk.len() > max_response_bytes - bytes.len() {
+                    return Err(Error::new(
+                        eyre!("{}", t!("util.net.secure.invalid-message")),
+                        ErrorKind::Network,
+                    )
+                    .into());
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            serde_json::from_slice::<RpcResponse>(&bytes)
                 .with_kind(ErrorKind::Deserialization)?
                 .result
         }
@@ -764,18 +850,44 @@ pub(crate) async fn call_remote_with_client(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use http::HeaderValue;
 
     use super::*;
     use crate::sign::AnySigningKey;
 
-    /// Produced by the TypeScript client (`lib/auth/signature.ts`) for secret
-    /// key 0102…1f20, context "start-9.local", and the JSON body below. Guards
-    /// the byte-level contract between the browser signer and this verifier.
+    /// TypeScript-generated proof for seed 0102…1f20 and `BODY`.
     const JS_PRODUCED_HEADER: &str = "commitment=request&timestamp=1792644825&nonce=18095015305127205807&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ&signature=MEkwBQYDK2VwBEBBctoB4q6Ez-Iuc8w7CBw6gz5ysJYD6F2fpz7Cb7A9mX96rUFD-IPWzjs3mt-Y6oBqDfYVVC-cVXbkU9UTGIsC";
-    /// The same inputs signed by the v1 client.
     const JS_PRODUCED_HEADER_V1: &str = "timestamp=1784746349&nonce=5184603501117103523&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ&signature=MEkwBQYDK2VwBEA0QgkL7GFycl72l-Bt076252XjpFG7aLngdxeIs-hNXpCkcJUtq9Xsfm_YV68U0JtK2qLMG2KPSfAVTcg8ntMH";
     const BODY: &[u8] = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server.echo\",\"params\":{}}";
+
+    #[test]
+    fn clockless_nonce_eviction_bounds_both_indexes_without_admitting_retained_replays() {
+        let mut cache = NonceCache {
+            seen: (0..MAX_UNTIMED_NONCES as u64).collect(),
+            order: (0..MAX_UNTIMED_NONCES as u64)
+                .map(|nonce| (0, nonce))
+                .collect(),
+        };
+        cache.handle_nonce(u64::MAX, 0, None).unwrap();
+        assert_eq!(cache.seen.len(), MAX_UNTIMED_NONCES);
+        assert_eq!(cache.order.len(), MAX_UNTIMED_NONCES);
+        assert!(!cache.seen.contains(&0));
+        assert!(cache.seen.contains(&u64::MAX));
+        assert!(cache.handle_nonce(1, 0, None).is_err());
+        assert!(cache.seen.contains(&1));
+        assert_eq!(cache.order.len(), MAX_UNTIMED_NONCES);
+    }
+
+    #[test]
+    fn timed_nonce_eviction_keeps_both_indexes_consistent() {
+        let mut cache = NonceCache::default();
+        cache.handle_nonce(1, 10, Some(10)).unwrap();
+        cache.handle_nonce(2, 71, Some(71)).unwrap();
+        assert_eq!(cache.seen, HashSet::from([2]));
+        assert_eq!(cache.order, BTreeSet::from([(71, 2)]));
+    }
 
     #[test]
     fn verifies_js_produced_signature_headers() {

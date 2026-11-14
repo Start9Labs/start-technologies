@@ -183,7 +183,7 @@ pub struct GetOsVersionParams {
     #[arg(long = "id", help = "help.arg.server-id")]
     server_id: Option<String>,
     #[arg(long, help = "help.arg.platform")]
-    platform: Option<InternedString>,
+    pub(crate) platform: Option<InternedString>,
     #[visit(ts(skip))]
     #[arg(skip)]
     #[serde(rename = "__DeviceInfo_device_info")]
@@ -228,25 +228,31 @@ pub async fn get_version(
             });
         }
     }
-    let target = target.unwrap_or(VersionRange::Any);
+    select_versions(
+        ctx.db.peek().await.as_index().as_os(),
+        source.as_ref(),
+        target.as_ref(),
+        platform.as_ref(),
+    )
+}
+
+pub(crate) fn select_versions(
+    index: &Model<crate::registry::os::index::OsIndex>,
+    source: Option<&Version>,
+    target: Option<&VersionRange>,
+    platform: Option<&InternedString>,
+) -> Result<Value, Error> {
     let res = to_value::<BTreeMap<Version, OsVersionInfo>>(
-        &ctx.db
-            .peek()
-            .await
-            .into_index()
-            .into_os()
+        &index
+            .clone()
             .into_versions()
             .into_entries()?
             .into_iter()
             .map(|(v, i)| i.de().map(|i| (v, i)))
             .filter_ok(|(version, info)| {
-                platform
-                    .as_ref()
-                    .map_or(true, |p| info.squashfs.contains_key(p))
-                    && version.satisfies(&target)
-                    && source
-                        .as_ref()
-                        .map_or(true, |s| s.satisfies(&info.source_version))
+                platform.map_or(true, |p| info.squashfs.contains_key(p))
+                    && target.map_or(true, |t| version.satisfies(t))
+                    && source.map_or(true, |s| s.satisfies(&info.source_version))
             })
             .collect::<Result<_, _>>()?,
     )?;

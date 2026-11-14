@@ -799,6 +799,8 @@ mod test {
         };
         DatabaseModel::from(imbl_value::json!({
             "public": {
+                "registryCache": {},
+                "osUpdateCache": null,
                 "ui": {},
                 "disks": [],
                 "sharedVolumes": {},
