@@ -345,6 +345,7 @@ jobs:
       # Actions use the runner's bundled Node, not the Node on GITHUB_PATH.
       # V8's background GC threads corrupt the heap on these runners during
       # large artifact transfers, so the action host runs `--single-threaded`.
+      # Its wrapper is bash; dash drops hyphenated `INPUT_*` variables.
       - name: Update RISC-V action runtime
         if: ${{ env.ARCH == 'riscv64' && github.event.inputs.runner != 'fast' }}
         run: |
@@ -364,7 +365,7 @@ jobs:
           "$node_dir/bin/node" --single-threaded -e 'require("node:crypto").createHash("sha256").update("action-runtime").digest(); console.log(process.versions)'
           install -m 755 "$node_dir/bin/node" "$runner_node.real.next"
           mv -f "$runner_node.real.next" "$runner_node.real"
-          printf '#!/bin/sh\nexec "%s" --single-threaded "$@"\n' "$runner_node.real" > "$runner_node.next"
+          printf '#!/bin/bash\nexec "%s" --single-threaded "$@"\n' "$runner_node.real" > "$runner_node.next"
           chmod 755 "$runner_node.next"
           mv -f "$runner_node.next" "$runner_node"
           echo "Updated action runtime: $("$runner_node" --version)"

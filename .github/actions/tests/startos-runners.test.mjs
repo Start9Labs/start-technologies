@@ -50,7 +50,7 @@ for (const [name, validChecksum, startsJavaScript] of [
     const f = fixture(t)
     const version = workflow.env.NODEJS_VERSION
     const nodeDir = `node-v${version}-linux-riscv64`
-    const nodeSource = `#!/bin/sh
+    const nodeSource = `#!/bin/bash
 for arg; do
   if [ "$arg" = --version ]; then
     printf 'v${version}\\n'
@@ -104,11 +104,19 @@ else process.stdout.write(readFileSync(source))`,
     assert.equal(result.status === 0, healthy, result.stdout + result.stderr)
     if (healthy) {
       assert.equal(readFileSync(`${runnerNode}.real`, 'utf8'), nodeSource)
-      const host = f.run(runnerNode, ['-p', 'process.execArgv[0]'], {
-        env: { ...f.env, PROBE_NODE: process.execPath },
-        encoding: 'utf8',
-      })
-      assert.equal(host.stdout.trim(), '--single-threaded', host.stderr)
+      const host = f.run(
+        runnerNode,
+        ['-p', 'process.execArgv[0] + " " + process.env["INPUT_CACHE-IMAGE"]'],
+        {
+          env: {
+            ...f.env,
+            PROBE_NODE: process.execPath,
+            'INPUT_CACHE-IMAGE': 'true',
+          },
+          encoding: 'utf8',
+        },
+      )
+      assert.equal(host.stdout.trim(), '--single-threaded true', host.stderr)
     } else {
       assert.equal(readFileSync(runnerNode, 'utf8'), oldNode)
     }
