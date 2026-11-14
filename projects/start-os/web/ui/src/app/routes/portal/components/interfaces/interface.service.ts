@@ -271,7 +271,7 @@ export class InterfaceService {
         list.push({
           enabled,
           allIpsDisabled: false,
-          gua: isGua(h) && (secure !== null || h.ssl),
+          gua: isGua(h) && (options.secure !== null || h.ssl),
           type: getAddressType(h),
           transport: utils.addressTransport(options, h),
           access: h.public ? 'public' : 'private',
