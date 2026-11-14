@@ -311,6 +311,101 @@ impl DerivedAddressInfo {
             self.lan_enabled.remove(&key);
         }
     }
+
+    /// Extends each public-IP opt-in to the address that replaced it on the
+    /// same gateway, port and family. A slot offering several public addresses
+    /// on either side carries nothing. The replaced address keeps its opt-in
+    /// while another row still offers it.
+    ///
+    /// `available` must hold the new set.
+    pub fn migrate_renumbered_ips(&mut self, previous: &BTreeSet<HostnameInfo>) {
+        let before = sole_public_ips(previous);
+        if before.is_empty() {
+            return;
+        }
+        let after = sole_public_ips(&self.available);
+        let renumbered: Vec<(SocketAddr, SocketAddr)> = before
+            .into_iter()
+            .filter_map(|(slot, old)| {
+                let new = *after.get(&slot)?;
+                (new != old).then_some((old, new))
+            })
+            .collect();
+        if renumbered.is_empty() {
+            return;
+        }
+        let still_offered: BTreeSet<SocketAddr> = self
+            .available
+            .iter()
+            .filter(|h| match &h.metadata {
+                HostnameMetadata::Ipv4 { .. } => h.public,
+                HostnameMetadata::Ipv6 { .. } => h.gua().is_some(),
+                _ => false,
+            })
+            .filter_map(|h| h.to_socket_addr())
+            .collect();
+
+        let was_enabled = self.enabled.clone();
+        let was_wan = self.gua_wan.clone();
+        for (old, new) in &renumbered {
+            if was_enabled.contains(old) {
+                self.enabled.insert(*new);
+            }
+            if let (SocketAddr::V6(old), SocketAddr::V6(new)) = (old, new) {
+                if was_wan.contains(old) {
+                    self.gua_wan.insert(*new);
+                }
+            }
+        }
+        for (old, _) in &renumbered {
+            if !still_offered.contains(old) {
+                self.enabled.remove(old);
+                if let SocketAddr::V6(old) = old {
+                    self.gua_wan.remove(old);
+                }
+            }
+        }
+        let gua_wan = &self.gua_wan;
+        self.available = std::mem::take(&mut self.available)
+            .into_iter()
+            .map(|mut h| {
+                if let Some(gua) = h.gua() {
+                    h.public = gua_wan.contains(&gua);
+                }
+                h
+            })
+            .collect();
+    }
+}
+
+/// The public IP per gateway, port and family, where there is exactly one.
+/// `public` marks an IPv4 WAN row; on a GUA it is the opt-in itself.
+fn sole_public_ips(
+    addresses: &BTreeSet<HostnameInfo>,
+) -> BTreeMap<(&GatewayId, u16, bool), SocketAddr> {
+    let mut slots: BTreeMap<(&GatewayId, u16, bool), Option<SocketAddr>> = BTreeMap::new();
+    for h in addresses {
+        let (gateway, v6) = match &h.metadata {
+            HostnameMetadata::Ipv4 { gateway } if h.public => (gateway, false),
+            HostnameMetadata::Ipv6 { gateway, .. } if h.gua().is_some() => (gateway, true),
+            _ => continue,
+        };
+        let Some(sa) = h.to_socket_addr() else {
+            continue;
+        };
+        slots
+            .entry((gateway, sa.port(), v6))
+            .and_modify(|slot| {
+                if *slot != Some(sa) {
+                    *slot = None;
+                }
+            })
+            .or_insert(Some(sa));
+    }
+    slots
+        .into_iter()
+        .filter_map(|(slot, sa)| Some((slot, sa?)))
+        .collect()
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
@@ -2926,6 +3021,185 @@ mod test {
         assert!(!info.enabled().contains(&public));
         info.enabled.insert(SocketAddr::V6(key));
         assert!(info.enabled().contains(&public));
+    }
+
+    fn wan_v4(ip: &str, port: u16, gateway: &str) -> HostnameInfo {
+        HostnameInfo {
+            ssl: false,
+            public: true,
+            hostname: InternedString::intern(ip),
+            port: Some(port),
+            metadata: HostnameMetadata::Ipv4 {
+                gateway: GatewayId::from(InternedString::intern(gateway)),
+            },
+        }
+    }
+
+    fn gua_row(ip: &str, port: u16, gateway: &str, public: bool) -> HostnameInfo {
+        HostnameInfo {
+            ssl: false,
+            public,
+            hostname: InternedString::intern(ip),
+            port: Some(port),
+            metadata: HostnameMetadata::Ipv6 {
+                gateway: GatewayId::from(InternedString::intern(gateway)),
+                scope_id: 0,
+            },
+        }
+    }
+
+    fn sa(s: &str) -> SocketAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn an_opt_in_follows_its_gateway_through_a_renumber() {
+        let previous: BTreeSet<HostnameInfo> =
+            [wan_v4("198.51.100.2", 443, "eth0")].into_iter().collect();
+        let mut info = DerivedAddressInfo {
+            available: [wan_v4("203.0.113.9", 443, "eth0")].into_iter().collect(),
+            enabled: [sa("198.51.100.2:443")].into_iter().collect(),
+            ..Default::default()
+        };
+
+        info.migrate_renumbered_ips(&previous);
+
+        assert_eq!(info.enabled, [sa("203.0.113.9:443")].into_iter().collect());
+    }
+
+    #[test]
+    fn a_renumber_on_another_gateway_or_port_leaves_the_opt_in_alone() {
+        let previous: BTreeSet<HostnameInfo> =
+            [wan_v4("198.51.100.2", 443, "eth0")].into_iter().collect();
+        let mut other_gateway = DerivedAddressInfo {
+            available: [wan_v4("203.0.113.9", 443, "wg0")].into_iter().collect(),
+            enabled: [sa("198.51.100.2:443")].into_iter().collect(),
+            ..Default::default()
+        };
+        other_gateway.migrate_renumbered_ips(&previous);
+        assert_eq!(
+            other_gateway.enabled,
+            [sa("198.51.100.2:443")].into_iter().collect(),
+            "an address on another gateway does not inherit the opt-in"
+        );
+
+        let mut other_port = DerivedAddressInfo {
+            available: [wan_v4("203.0.113.9", 8443, "eth0")].into_iter().collect(),
+            enabled: [sa("198.51.100.2:443")].into_iter().collect(),
+            ..Default::default()
+        };
+        other_port.migrate_renumbered_ips(&previous);
+        assert_eq!(
+            other_port.enabled,
+            [sa("198.51.100.2:443")].into_iter().collect(),
+            "an address on another port does not inherit the opt-in"
+        );
+    }
+
+    #[test]
+    fn an_address_the_gateway_still_offers_keeps_its_own_opt_in() {
+        let previous: BTreeSet<HostnameInfo> = [
+            wan_v4("198.51.100.2", 443, "eth0"),
+            wan_v4("192.0.2.7", 443, "wg0"),
+        ]
+        .into_iter()
+        .collect();
+        let mut info = DerivedAddressInfo {
+            available: [
+                wan_v4("203.0.113.9", 443, "eth0"),
+                wan_v4("192.0.2.7", 443, "wg0"),
+            ]
+            .into_iter()
+            .collect(),
+            enabled: [sa("198.51.100.2:443"), sa("192.0.2.7:443")]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+
+        info.migrate_renumbered_ips(&previous);
+
+        assert_eq!(
+            info.enabled,
+            [sa("203.0.113.9:443"), sa("192.0.2.7:443")]
+                .into_iter()
+                .collect()
+        );
+    }
+
+    #[test]
+    fn a_renumber_extends_an_opt_in_another_gateway_still_offers() {
+        let previous: BTreeSet<HostnameInfo> = [
+            wan_v4("198.51.100.2", 443, "eth0"),
+            wan_v4("198.51.100.2", 443, "wlan0"),
+        ]
+        .into_iter()
+        .collect();
+        let mut info = DerivedAddressInfo {
+            available: [
+                wan_v4("203.0.113.9", 443, "eth0"),
+                wan_v4("198.51.100.2", 443, "wlan0"),
+            ]
+            .into_iter()
+            .collect(),
+            enabled: [sa("198.51.100.2:443")].into_iter().collect(),
+            ..Default::default()
+        };
+
+        info.migrate_renumbered_ips(&previous);
+
+        assert_eq!(
+            info.enabled,
+            [sa("198.51.100.2:443"), sa("203.0.113.9:443")]
+                .into_iter()
+                .collect()
+        );
+    }
+
+    #[test]
+    fn a_gua_opt_in_moves_only_while_the_gateway_offers_one() {
+        let old_gua: SocketAddrV6 = "[2001:db8:1::5]:443".parse().unwrap();
+        let new_gua: SocketAddrV6 = "[2001:db8:2::5]:443".parse().unwrap();
+        let previous: BTreeSet<HostnameInfo> = [gua_row("2001:db8:1::5", 443, "eth0", true)]
+            .into_iter()
+            .collect();
+
+        let mut info = DerivedAddressInfo {
+            available: [gua_row("2001:db8:2::5", 443, "eth0", false)]
+                .into_iter()
+                .collect(),
+            enabled: [SocketAddr::V6(old_gua)].into_iter().collect(),
+            gua_wan: [old_gua].into_iter().collect(),
+            ..Default::default()
+        };
+        info.migrate_renumbered_ips(&previous);
+        assert_eq!(info.gua_wan, [new_gua].into_iter().collect());
+        assert_eq!(
+            info.enabled,
+            [SocketAddr::V6(new_gua)].into_iter().collect()
+        );
+        assert!(
+            info.available.iter().all(|h| h.public),
+            "the migrated GUA is public in the same pass"
+        );
+
+        let mut ambiguous = DerivedAddressInfo {
+            available: [
+                gua_row("2001:db8:2::5", 443, "eth0", false),
+                gua_row("2001:db8:3::5", 443, "eth0", false),
+            ]
+            .into_iter()
+            .collect(),
+            enabled: [SocketAddr::V6(old_gua)].into_iter().collect(),
+            gua_wan: [old_gua].into_iter().collect(),
+            ..Default::default()
+        };
+        ambiguous.migrate_renumbered_ips(&previous);
+        assert_eq!(ambiguous.gua_wan, [old_gua].into_iter().collect());
+        assert_eq!(
+            ambiguous.enabled,
+            [SocketAddr::V6(old_gua)].into_iter().collect()
+        );
     }
 
     fn lan_fixture(ssl: bool) -> (DerivedAddressInfo, HostnameInfo, [HostnameInfo; 2]) {
