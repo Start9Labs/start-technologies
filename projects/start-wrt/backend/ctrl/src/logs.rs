@@ -3,7 +3,9 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use axum::extract::ws::Message;
+use futures::{Stream, StreamExt};
 use imbl_value::InternedString;
+use rpc_toolkit::{Empty, HandlerArgs, RpcStream};
 use serde::{Deserialize, Serialize};
 use startos::middleware::auth::session::SessionContext;
 use startos::rpc_continuations::WebSocket;
@@ -59,20 +61,39 @@ rpc_toolkit::reflect_ts!(FollowLogsParams);
 #[derive(Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct FollowLogsRes {
     /// Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.
-    pub guid: Guid,
+    /// Null when the entries arrive on the request's response stream.
+    pub guid: Option<Guid>,
 }
 rpc_toolkit::reflect_ts!(FollowLogsRes);
 
 pub async fn follow_logs(
+    HandlerArgs {
+        context,
+        params,
+        rpc_stream,
+        ..
+    }: HandlerArgs<ServerContext, FollowLogsParams, Empty, LogEntry>,
+) -> Result<FollowLogsRes, Error> {
+    follow(context, params, rpc_stream).await
+}
+
+/// Revocation of the requesting session ends the follow.
+async fn follow(
     ctx: ServerContext,
     FollowLogsParams { signer }: FollowLogsParams,
+    rpc_stream: Option<RpcStream<LogEntry>>,
 ) -> Result<FollowLogsRes, Error> {
+    let subscription = startos::auth::continuation_subscription(&ctx, signer).await?;
+    if let Some(stream) = rpc_stream {
+        subscription.forward_stream(stream, follow_entries()?.map(Ok::<_, startos::Error>));
+        return Ok(FollowLogsRes { guid: None });
+    }
     let guid = Guid::new();
     ctx.continuations
         .add(
             guid.clone(),
             RpcContinuation::ws_authed(
-                startos::auth::continuation_subscription(&ctx, signer).await?,
+                subscription,
                 WebSocketPolicy::Authenticated,
                 ctx.secure_session().cloned(),
                 stream_logs,
@@ -80,44 +101,50 @@ pub async fn follow_logs(
             ),
         )
         .await;
-    Ok(FollowLogsRes { guid })
+    Ok(FollowLogsRes { guid: Some(guid) })
 }
 
-async fn stream_logs(mut ws: WebSocket) {
-    let mut child = match Command::new("logread")
+/// Ends when `logread` exits; dropping the stream kills it.
+fn follow_entries() -> Result<impl Stream<Item = LogEntry> + Send + 'static, Error> {
+    let mut child = Command::new("logread")
         .arg("-f")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()
-    {
-        Ok(child) => child,
+        .map_err(|e| Error::other(format!("spawning logread: {e}")))?;
+    let lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    Ok(futures::stream::unfold(
+        (child, lines),
+        |(child, mut lines)| async move {
+            loop {
+                let line = lines.next_line().await.ok()??;
+                if let Some(entry) = parse_logread_line(&line) {
+                    return Some((entry, (child, lines)));
+                }
+            }
+        },
+    ))
+}
+
+async fn stream_logs(mut ws: WebSocket) {
+    let entries = match follow_entries() {
+        Ok(entries) => entries,
         Err(e) => {
-            tracing::error!("failed to spawn logread: {e}");
+            tracing::error!("{e}");
             return;
         }
     };
-
-    let stdout = child.stdout.take().unwrap();
-    let mut reader = BufReader::new(stdout).lines();
-
+    tokio::pin!(entries);
     loop {
         tokio::select! {
-            line = reader.next_line() => {
-                match line {
-                    Ok(Some(line)) => {
-                        let Some(entry) = parse_logread_line(&line) else {
-                            continue;
-                        };
-                        let Ok(json) = serde_json::to_string(&entry) else {
-                            continue;
-                        };
-                        if ws.send(Message::Text(json.into())).await.is_err() {
-                            break;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(_) => break,
+            entry = entries.next() => {
+                let Some(entry) = entry else { break };
+                let Ok(json) = serde_json::to_string(&entry) else {
+                    continue;
+                };
+                if ws.send(Message::Text(json.into())).await.is_err() {
+                    break;
                 }
             }
             msg = ws.recv() => {
@@ -303,11 +330,12 @@ mod tests {
             .unwrap();
         context.unenroll([key.clone()]).await.unwrap();
         assert!(futures::FutureExt::now_or_never(registered).is_some());
-        let Err(error) = follow_logs(
+        let Err(error) = follow(
             context.clone(),
             FollowLogsParams {
                 signer: Some(key.clone()),
             },
+            None,
         )
         .await
         else {
@@ -315,9 +343,11 @@ mod tests {
         };
         assert_eq!(error.kind, crate::error::ErrorKind::Authorization);
         crate::rpc::tests::enroll(&context, &signer).await;
-        assert!(follow_logs(context, FollowLogsParams { signer: Some(key) })
-            .await
-            .is_ok());
+        assert!(
+            follow(context, FollowLogsParams { signer: Some(key) }, None)
+                .await
+                .is_ok()
+        );
     }
 
     #[test]
