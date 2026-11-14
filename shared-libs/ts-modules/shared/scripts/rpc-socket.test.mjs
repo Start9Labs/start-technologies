@@ -354,6 +354,36 @@ test('RPC console logging persists across page loads until disabled', async cont
   assert.deepEqual(lines, [])
 })
 
+test('RPC console logging expires after 30 minutes by default, including across page loads', async context => {
+  context.mock.timers.enable({ apis: ['Date'], now: 0 })
+  const storage = new MemoryStorage()
+  const first = await fixture(context, browserWindow(storage))
+  const lines = consoleLines(context)
+  first.window[RPC_CONSOLE_LOG_GLOBAL].enable()
+  const { service, lease, window } = await streamFixture(
+    context,
+    browserWindow(storage),
+  )
+  const rpcLog = window[RPC_CONSOLE_LOG_GLOBAL]
+  context.mock.timers.setTime(30 * 60_000 - 1)
+  assert.equal(rpcLog.enabled, true)
+  const pending = service.message(body, {}, lease)
+  await tick()
+  const socket = LogicalSocket.instances[0]
+  context.mock.timers.setTime(30 * 60_000)
+  assert.equal(rpcLog.enabled, false)
+  lines.length = 0
+  socket.receive({ jsonrpc: '2.0', id: socket.writes[0].id, result: null })
+  await pending
+  assert.deepEqual(lines, [])
+
+  rpcLog.enable(5)
+  context.mock.timers.setTime(35 * 60_000 - 1)
+  assert.equal(rpcLog.enabled, true)
+  context.mock.timers.setTime(35 * 60_000)
+  assert.equal(rpcLog.enabled, false)
+})
+
 test('verified peer observation belongs to each operation, including reuse and authorization rejection, not startup transport', async context => {
   const { service, lease, historyInjections } = await streamFixture(context)
   const startup = service.message(body, {}, lease)

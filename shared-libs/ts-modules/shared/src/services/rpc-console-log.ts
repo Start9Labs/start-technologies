@@ -4,7 +4,8 @@ import { WA_WINDOW } from '@ng-web-apis/common'
 import { isRpcError } from '../types/rpc.types'
 import type { RPCRequest } from '../types/rpc.types'
 
-const STORAGE_KEY = 'rpcConsoleLog'
+const STORAGE_KEY = 'rpcConsoleLogUntil'
+const DEFAULT_MINUTES = 30
 
 /** Window property through which a developer toggles logging from the browser console. */
 export const RPC_CONSOLE_LOG_GLOBAL = 'rpcLog'
@@ -16,31 +17,33 @@ export interface RpcConsoleExchange {
 
 /**
  * Prints decrypted session RPC traffic to the browser console while enabled.
- * Enablement persists in this browser's local storage until disabled.
+ * Enablement persists in this browser's local storage until it expires or is disabled.
  * The live toggle governs active calls and streams.
  */
 @Service()
 export class RpcConsoleLog {
   private readonly window = inject(WA_WINDOW)
   private readonly storage = this.window.localStorage
-  private on = this.storage.getItem(STORAGE_KEY) === 'true'
+  private expiry = Number(this.storage.getItem(STORAGE_KEY))
 
   constructor() {
     Object.assign(this.window, { [RPC_CONSOLE_LOG_GLOBAL]: this })
   }
 
   get enabled(): boolean {
-    return this.on
+    return Date.now() < this.expiry
   }
 
-  enable(): void {
-    this.on = true
-    this.storage.setItem(STORAGE_KEY, 'true')
-    console.log('RPC console logging enabled')
+  enable(minutes = DEFAULT_MINUTES): void {
+    this.expiry = Date.now() + minutes * 60_000
+    this.storage.setItem(STORAGE_KEY, String(this.expiry))
+    console.log(
+      `RPC console logging enabled until ${new Date(this.expiry).toLocaleString()}`,
+    )
   }
 
   disable(): void {
-    this.on = false
+    this.expiry = 0
     this.storage.removeItem(STORAGE_KEY)
     console.log('RPC console logging disabled')
   }
@@ -54,17 +57,17 @@ export class RpcConsoleLog {
       request ??= JSON.parse(serialized) as RPCRequest<unknown>
       return `RPC ${id.slice(0, 8)} ${request.method}`
     }
-    if (this.on) console.log(`${label()} →`, request!.params)
+    if (this.enabled) console.log(`${label()} →`, request!.params)
     return {
       reply: value => {
-        if (!this.on) return
+        if (!this.enabled) return
         console[isErrorReply(value) ? 'warn' : 'log'](
           `${label()} ← ${elapsed()}`,
           value,
         )
       },
       failure: error => {
-        if (!this.on) return
+        if (!this.enabled) return
         console.warn(`${label()} transport failed ${elapsed()}`, error)
       },
     }

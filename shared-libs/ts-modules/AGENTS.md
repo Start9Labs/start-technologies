@@ -70,7 +70,7 @@ npm run start:ui:proxy
 
 ### Inspecting RPC traffic
 
-Browser RPC is encrypted inside a WebSocket session, so the network tab shows only ciphertext. In the browser console, run `rpcLog.enable()` to print each decrypted request, reply and stream frame. The setting persists in local storage across reloads until `rpcLog.disable()`. Logged parameters include secrets such as passwords.
+Browser RPC is encrypted inside a WebSocket session, so the network tab shows only ciphertext. In the browser console, run `rpcLog.enable()` to print each decrypted request, reply and stream frame. The setting persists in local storage across reloads for 30 minutes (`rpcLog.enable(minutes)` sets another duration) or until `rpcLog.disable()`. Logged parameters include secrets such as passwords.
 
 ## Translations
 
