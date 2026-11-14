@@ -1,44 +1,71 @@
 import type { ApiClient, Params, WebsocketConfig } from './api.types'
-import { DOCUMENT, inject, Injectable } from '@angular/core'
+import { DOCUMENT, inject, Service } from '@angular/core'
 import { blake3 } from '@noble/hashes/blake3'
 import {
   AuthKeyService,
+  databaseSubscription,
+  authenticatedRpcTransport,
+  localRpcRequest,
+  rpcResponseResult,
   HttpOptions,
   HttpService,
-  isRpcError,
   RpcError,
-  RPCOptions,
+  RpcSocketService,
+  ServerIdentityService,
+  rpcRequestBody,
+  waitForPatchSequence,
 } from '@start9labs/shared'
-import { createRpcClient } from '@start9labs/start-core'
-import { Dump } from 'patch-db-client'
-import { filter, firstValueFrom, Observable } from 'rxjs'
-import { webSocket, WebSocketSubject } from 'rxjs/webSocket'
+import { createRpcClient, createRpcStreamClient } from '@start9labs/start-core'
+import type { RpcStreamOptions } from '@start9labs/start-core'
+import { Dump, Update } from 'patch-db-client'
+import { catchError } from 'rxjs'
+import type { Observable } from 'rxjs'
+import type { WebSocketSubject } from 'rxjs/webSocket'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { AuthService } from '../auth.service'
 import { DataModel } from '../patch-db/data-model'
 import { ApiService, FileUploadOptions } from './embassy-api.service'
 
-@Injectable()
+@Service()
 export class LiveApiService extends ApiService {
   private readonly document = inject(DOCUMENT)
   private readonly http = inject(HttpService)
+  private readonly sockets = inject(RpcSocketService)
+  private readonly identity = inject(ServerIdentityService)
   private readonly auth = inject(AuthService)
   private readonly authKeys = inject(AuthKeyService)
   private readonly cache$ = inject<Observable<Dump<DataModel>>>(PATCH_CACHE)
+  private readonly streamTransport = authenticatedRpcTransport(
+    this.sockets,
+    this.authKeys,
+    this.identity,
+  )
   readonly rpc = createRpcClient<ApiClient>({
     call: (method, params, options) =>
-      this.rpcRequest({
-        method,
-        params: params as Record<string, unknown>,
-        ...options,
-      }),
+      localRpcRequest(
+        this.http,
+        this.sockets,
+        this.authKeys,
+        this.identity,
+        this.cache$,
+        {
+          method,
+          params: params as Record<string, unknown>,
+          ...options,
+        },
+      ).catch(error => this.raiseError(error)),
+  })
+  readonly streams = createRpcStreamClient<ApiService['streams']>({
+    stream: (method, params, options) =>
+      this.rpcStream(method, params, options).catch(error =>
+        this.raiseError(error),
+      ),
   })
 
   constructor() {
     super()
 
-    // @ts-ignore
-    this.document.defaultView.rpcClient = this
+    Object.assign(this.document.defaultView!, { rpcClient: this })
   }
 
   async uploadFile(
@@ -101,158 +128,71 @@ export class LiveApiService extends ApiService {
     )
   }
 
-  // websocket
-
   openWebsocket$<T>(
     guid: string,
     config: WebsocketConfig<T> = {},
   ): WebSocketSubject<T> {
-    const { location } = this.document.defaultView!
-    const protocol = location.protocol === 'http:' ? 'ws' : 'wss'
-    const host = location.host
-
-    return webSocket({
-      url: `${protocol}://${host}/ws/rpc/${guid}`,
+    return this.sockets.open<T>(guid, {
       ...config,
+      openObserver: {
+        next: event => {
+          this.identity.openObserver.next(event)
+          config.openObserver?.next(event)
+        },
+      },
     })
   }
 
-  // state
+  override watchDb$(): Observable<Update<DataModel>> {
+    return databaseSubscription<DataModel>(
+      this.sockets,
+      this.authKeys,
+      this.identity,
+    ).pipe(catchError(error => this.raiseError(error)))
+  }
 
   async echo(params: Params<'echo'>, url: string): Promise<string> {
-    return this.rpcRequest<string>({ method: 'echo', params }, url)
+    const options = { method: 'echo', params }
+    const response = await this.http.rpcMessage<string>(
+      rpcRequestBody(options),
+      {},
+      url,
+    )
+    return rpcResponseResult(response.body)
   }
-
-  // db
-
-  // auth
-
-  // diagnostic
-
-  // init
-
-  // server
 
   async toggleKiosk(enable: boolean): Promise<null> {
-    return this.rpcRequest({
-      method: enable ? 'kiosk.enable' : 'kiosk.disable',
-      params: {},
-    })
+    return enable ? this.rpc.kiosk.enable({}) : this.rpc.kiosk.disable({})
   }
 
-  // marketplace URLs
-
-  // notification
-
-  // proxies
-
-  // wifi
-
-  // smtp
-
-  // ssh
-
-  // backup
-
-  // async addBackupTarget(
-  //   type: BackupTargetType,
-  //   params: RR.AddCifsBackupTargetReq | RR.AddCloudBackupTargetReq,
-  // ): Promise<RR.AddBackupTargetRes> {
-  //   params.path = params.path.replace('/\\/g', '/')
-  //   return this.rpcRequest({ method: `backup.target.${type}.add`, params })
-  // }
-
-  // async updateBackupTarget(
-  //   type: BackupTargetType,
-  //   params: RR.UpdateCifsBackupTargetReq | RR.UpdateCloudBackupTargetReq,
-  // ): Promise<RR.UpdateBackupTargetRes> {
-  //   return this.rpcRequest({ method: `backup.target.${type}.update`, params })
-  // }
-
-  // async removeBackupTarget(
-  //   params: RR.RemoveBackupTargetReq,
-  // ): Promise<RR.RemoveBackupTargetRes> {
-  //   return this.rpcRequest({ method: 'backup.target.remove', params })
-  // }
-
-  // async getBackupJobs(
-  //   params: RR.GetBackupJobsReq,
-  // ): Promise<RR.GetBackupJobsRes> {
-  //   return this.rpcRequest({ method: 'backup.job.list', params })
-  // }
-
-  // async createBackupJob(
-  //   params: RR.CreateBackupJobReq,
-  // ): Promise<RR.CreateBackupJobRes> {
-  //   return this.rpcRequest({ method: 'backup.job.create', params })
-  // }
-
-  // async updateBackupJob(
-  //   params: RR.UpdateBackupJobReq,
-  // ): Promise<RR.UpdateBackupJobRes> {
-  //   return this.rpcRequest({ method: 'backup.job.update', params })
-  // }
-
-  // async deleteBackupJob(
-  //   params: RR.DeleteBackupJobReq,
-  // ): Promise<RR.DeleteBackupJobRes> {
-  //   return this.rpcRequest({ method: 'backup.job.delete', params })
-  // }
-
-  // async getBackupRuns(
-  //   params: RR.GetBackupRunsReq,
-  // ): Promise<RR.GetBackupRunsRes> {
-  //   return this.rpcRequest({ method: 'backup.runs.list', params })
-  // }
-
-  // async deleteBackupRuns(
-  //   params: RR.DeleteBackupRunsReq,
-  // ): Promise<RR.DeleteBackupRunsRes> {
-  //   return this.rpcRequest({ method: 'backup.runs.delete', params })
-  // }
-
-  // package
-
-  // async setServiceOutboundProxy(
-  //   params: RR.SetServiceOutboundTunnelReq,
-  // ): Promise<RR.SetServiceOutboundTunnelRes> {
-  //   return this.rpcRequest({ method: 'package.proxy.set-outbound', params })
-  // }
-
-  private async rpcRequest<T>(
-    options: RPCOptions<Record<string, unknown>, string>,
-    urlOverride?: string,
-  ): Promise<T> {
-    // Foreign origins must never receive a signature valid at home.
-    const res = await this.http.rpcRequest<T>(
-      urlOverride
-        ? options
-        : {
-            ...options,
-            headers: {
-              ...options.headers,
-              ...(await this.authKeys.signRpcHeaders(options)),
-            },
-          },
-      urlOverride,
-    )
-    const body = res.body
-
-    if (isRpcError(body)) {
-      if (body.error.code === 34) {
-        console.error('Unauthenticated, logging out')
-        this.auth.setUnverified()
-      }
-      throw new RpcError(body.error)
+  private async rpcStream(
+    method: string,
+    params: unknown,
+    options?: RpcStreamOptions,
+  ) {
+    const response = await this.streamTransport.stream(method, params, options)
+    try {
+      await waitForPatchSequence(this.cache$, response.meta, response.signal)
+      response.signal.throwIfAborted()
+    } catch (error) {
+      await response.items.return(undefined)
+      throw error
     }
+    const next = response.items.next.bind(response.items)
+    response.items.next = (...args) =>
+      next(...args).catch(error => {
+        response.signal.throwIfAborted()
+        this.raiseError(error)
+      })
+    return response
+  }
 
-    const patchSequence = res.headers.get('x-patch-sequence')
-    if (patchSequence)
-      await firstValueFrom(
-        this.cache$.pipe(filter(({ id }) => id >= Number(patchSequence))),
-      )
-
-    return body.result
+  private raiseError(error: unknown): never {
+    if (error instanceof RpcError && error.code === 34) {
+      console.error('Unauthenticated, logging out')
+      this.auth.setUnverified()
+    }
+    throw error
   }
 
   private async httpRequest<T>(opts: HttpOptions): Promise<T> {
@@ -260,17 +200,16 @@ export class LiveApiService extends ApiService {
   }
 
   private async httpResponse<T>(opts: HttpOptions) {
-    // Static asset routes require a signature.
     if (
       opts.url.startsWith('/s9pk') ||
       opts.url.startsWith('/registry/icons/')
     ) {
       opts = {
         ...opts,
-        headers: {
-          ...opts.headers,
-          ...(await this.authKeys.signHeader(new Uint8Array(0))),
-        },
+        headers: await this.authKeys.signHeader(
+          new Uint8Array(0),
+          opts.headers,
+        ),
       }
     }
     const res = await this.http.httpRequest<T>(opts)

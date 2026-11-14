@@ -8,7 +8,7 @@ use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async
 use serde::{Deserialize, Serialize};
 
 use crate::context::CliContext;
-use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthContext};
+use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthorizationContext};
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
@@ -98,20 +98,24 @@ fn signers_api<C: Context>() -> ParentHandler<C> {
 }
 
 impl Model<BTreeMap<Guid, SignerInfo>> {
-    pub fn get_signer(&self, key: &AnyVerifyingKey) -> Result<Guid, Error> {
-        self.as_entries()?
+    pub fn find_signer(&self, key: &AnyVerifyingKey) -> Result<Option<Guid>, Error> {
+        Ok(self
+            .as_entries()?
             .into_iter()
             .map(|(guid, s)| Ok::<_, Error>((guid, s.as_keys().de()?)))
             .filter_ok(|(_, s)| s.contains(key))
             .next()
             .transpose()?
-            .map(|(a, _)| a)
-            .ok_or_else(|| {
-                Error::new(
-                    eyre!("{}", t!("registry.admin.unknown-signer")),
-                    ErrorKind::Authorization,
-                )
-            })
+            .map(|(a, _)| a))
+    }
+
+    pub fn get_signer(&self, key: &AnyVerifyingKey) -> Result<Guid, Error> {
+        self.find_signer(key)?.ok_or_else(|| {
+            Error::new(
+                eyre!("{}", t!("registry.admin.unknown-signer")),
+                ErrorKind::Authorization,
+            )
+        })
     }
 
     pub fn get_signer_info(&self, key: &AnyVerifyingKey) -> Result<(Guid, SignerInfo), Error> {

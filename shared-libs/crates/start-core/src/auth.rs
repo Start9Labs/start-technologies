@@ -21,9 +21,9 @@ use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
-use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthContext};
+use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthorizationContext};
 use crate::prelude::*;
-use crate::rpc_continuations::OpenAuthedContinuations;
+use crate::rpc_continuations::{OpenAuthedContinuations, RevocationSubscription};
 use crate::sign::{AnyVerifyingKey, Signer};
 use crate::util::crypto::EncryptedWire;
 use crate::util::io::create_file_mod;
@@ -87,10 +87,10 @@ rpc_toolkit::ts_export!(Sessions, namespaces = [""]);
 
 /// Contexts where a password can enroll an auth key (login), plus access to
 /// the enrolled-key store that login writes and the session list reads.
-pub trait LoginContext: SignatureAuthContext {
+pub trait LoginContext: SignatureAuthorizationContext {
     /// The persisted enrolled-key store. Enrollment happens via login; never
     /// remove a key directly — unenrollment goes through
-    /// [`SignatureAuthContext::unenroll`] so a revoked key's open
+    /// [`SignatureAuthorizationContext::unenroll`] so a revoked key's open
     /// continuations die with it.
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys>;
     /// The bearer-token store, keyed by token hash. `None` where tokens are unsupported.
@@ -98,6 +98,23 @@ pub trait LoginContext: SignatureAuthContext {
     #[allow(unused_variables)]
     fn access_tokens(db: &mut Model<Self::Database>) -> Option<&mut Model<TokenSessions>> {
         None
+    }
+    /// Current key membership under the context's enrollment and expiry policy.
+    fn auth_key_is_enrolled(
+        &self,
+        db: &Model<Self::Database>,
+        key: &InternedString,
+    ) -> Result<bool, Error> {
+        Ok(self
+            .ephemeral_auth_keys()
+            .is_some_and(|keys| keys.peek(|keys| keys.0.contains_key(&**key)))
+            || Self::access_auth_keys(&mut db.clone())
+                .as_idx(key)
+                .is_some())
+    }
+    /// Current bearer membership in the context's authoritative token store.
+    fn auth_token_is_enrolled(&self, db: &Model<Self::Database>, token: &InternedString) -> bool {
+        Self::access_tokens(&mut db.clone()).is_some_and(|tokens| tokens.as_idx(token).is_some())
     }
     fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error>;
     /// Whether a sign-in has ended, judged by a trusted clock. Defaults to
@@ -126,6 +143,29 @@ pub struct LoginAttempt {
     /// The client's address, through any relay that recorded it.
     pub peer: Option<IpAddr>,
     pub user_agent: Option<String>,
+}
+
+/// Registers revocation before rechecking live credential membership; retains no grants or snapshot.
+/// An absent subject retains the caller's independently authenticated local-credential scope.
+pub async fn continuation_subscription<C: LoginContext>(
+    context: &C,
+    subject: Option<InternedString>,
+) -> Result<RevocationSubscription, Error> {
+    let subscription = context
+        .open_authed_continuations()
+        .subscribe_to_kill(subject.clone());
+    if let Some(subject) = subject {
+        let db = context.db().peek().await;
+        if !context.auth_key_is_enrolled(&db, &subject)?
+            && !context.auth_token_is_enrolled(&db, &subject)
+        {
+            return Err(Error::new(
+                eyre!("{}", t!("middleware.auth.key-not-authorized")),
+                crate::ErrorKind::Authorization,
+            ));
+        }
+    }
+    Ok(subscription)
 }
 
 /// Removes bearer tokens and kills the continuations they opened. For call sites
@@ -212,6 +252,21 @@ pub enum PasswordType {
 rpc_toolkit::reflect_ts!(PasswordType);
 rpc_toolkit::ts_export!(PasswordType, namespaces = [""]);
 impl PasswordType {
+    /// Unwrapped startup secrets require encrypted admission; legacy JWE remains valid.
+    pub fn decrypt_in_session(
+        self,
+        context: &impl crate::middleware::auth::session::SessionContext,
+        current_secret: impl AsRef<Jwk>,
+    ) -> Result<String, Error> {
+        if matches!(self, Self::String(_)) && context.secure_session().is_none() {
+            return Err(Error::new(
+                eyre!(t!("auth.encrypted-session-required")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        self.decrypt(current_secret)
+    }
+
     pub fn decrypt(self, current_secret: impl AsRef<Jwk>) -> Result<String, Error> {
         match self {
             PasswordType::String(x) => Ok(x),
@@ -229,10 +284,16 @@ impl Default for PasswordType {
         PasswordType::String(String::default())
     }
 }
+pub(crate) struct RedactedPassword;
+
+impl std::fmt::Debug for RedactedPassword {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<REDACTED_PASSWORD>")
+    }
+}
 impl std::fmt::Debug for PasswordType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<REDACTED_PASSWORD>")?;
-        Ok(())
+        std::fmt::Debug::fmt(&RedactedPassword, f)
     }
 }
 
@@ -246,6 +307,9 @@ impl std::str::FromStr for PasswordType {
         })
     }
 }
+#[cfg(test)]
+mod password_tests;
+
 /// A CLI whose identity key `auth login` enrolls.
 pub trait IdKeyContext: Context {
     fn id_key(&self) -> Result<&Signer, Error>;
@@ -417,7 +481,7 @@ pub async fn reap_idle_keys<C: LoginContext>(ctx: &C) -> Result<(), Error> {
 }
 
 /// Records a request by an enrolled key, persisting the time at most once per
-/// [`SignatureAuthContext::LAST_ACTIVE_RESOLUTION`].
+/// [`SignatureAuthorizationContext::LAST_ACTIVE_RESOLUTION`].
 pub async fn touch_last_active<C: LoginContext>(
     ctx: &C,
     key: &InternedString,
@@ -438,7 +502,7 @@ pub async fn touch_last_active<C: LoginContext>(
 }
 
 /// Records a request by a bearer token, persisting the time at most once per
-/// [`SignatureAuthContext::LAST_ACTIVE_RESOLUTION`].
+/// [`SignatureAuthorizationContext::LAST_ACTIVE_RESOLUTION`].
 pub async fn touch_token<C: LoginContext>(ctx: &C, token: &InternedString) -> Result<(), Error> {
     persist_last_active(ctx, C::access_tokens, token, Utc::now()).await
 }

@@ -4,11 +4,15 @@ const fs = require('node:fs')
 const path = require('node:path')
 const test = require('node:test')
 const vm = require('node:vm')
+require('@angular/compiler')
+const httpAngular = require('@angular/common/http')
+const { HttpClient, HttpHeaders, HttpXhrBackend } = httpAngular
 const ts = require('typescript')
 const {
   BehaviorSubject,
   Observable,
   filter,
+  firstValueFrom,
   map,
   of,
   throwError,
@@ -26,17 +30,24 @@ const compilerOptions = ts.parseJsonConfigFileContent(
   root,
 ).options
 
-function harness(moduleOverrides = new Map()) {
+function harness(moduleOverrides = new Map(), globals = {}) {
   const dependencies = new Map()
   const tokens = Object.fromEntries(
     [
       'DOCUMENT',
+      'DestroyRef',
+      'DialogService',
+      'ErrorService',
+      'TaskService',
       'Injector',
       'HttpClient',
       'HttpService',
       'AuthKeyService',
       'AuthService',
       'ConfigService',
+      'RpcSocketService',
+      'ServerIdentityService',
+      'i18nPipe',
       'StaleUiService',
       'PATCH_CACHE',
       'RELATIVE_URL',
@@ -44,12 +55,30 @@ function harness(moduleOverrides = new Map()) {
       'WA_SESSION_STORAGE',
     ].map(name => [name, Symbol(name)]),
   )
-  dependencies.set(tokens.ConfigService, { gitHash: '' })
+  tokens.HttpClient = HttpClient
+  tokens.HttpXhrBackend = HttpXhrBackend
+  dependencies.set(tokens.HttpXhrBackend, {
+    handle() {
+      throw new Error('Unexpected XHR request')
+    },
+  })
+  dependencies.set(tokens.RpcSocketService, {})
+  dependencies.set(tokens.ServerIdentityService, {
+    openObserver: { next() {} },
+  })
+  dependencies.set(tokens.ConfigService, { gitHash: 'fixture-running-build' })
+  dependencies.set(tokens.StaleUiService, { checkHash() {} })
+  dependencies.set(tokens.i18nPipe, { transform: value => value })
+
   const modules = new Map()
   const angular = {
     DOCUMENT: tokens.DOCUMENT,
+    DestroyRef: tokens.DestroyRef,
     Injector: tokens.Injector,
+    ErrorHandler: class {},
     Injectable: () => value => value,
+    Service: () => value => value,
+    InjectionToken: class {},
     Component: () => value => value,
     signal: initial => {
       const stream$ = new BehaviorSubject(initial)
@@ -78,23 +107,38 @@ function harness(moduleOverrides = new Map()) {
     const shared = () => ({
       ...tokens,
       ...load('shared-libs/ts-modules/shared/src/util/misc.util.ts'),
-      pauseFor: async () => {},
+      ...load('shared-libs/ts-modules/shared/src/util/format-progress.ts'),
+      ...load('shared-libs/ts-modules/shared/src/util/with-abort.ts'),
+      pauseFor: async (_, signal) => signal?.throwIfAborted(),
+      getErrorMessage: load(
+        'shared-libs/ts-modules/shared/src/services/error.service.ts',
+      ).getErrorMessage,
+      isNetworkError: load(
+        'shared-libs/ts-modules/shared/src/services/error.service.ts',
+      ).isNetworkError,
       ...load('shared-libs/ts-modules/shared/src/types/rpc.types.ts'),
+      ...load('shared-libs/ts-modules/shared/src/services/rpc-request.ts'),
+      ...load('shared-libs/ts-modules/shared/src/services/rpc-response.ts'),
+      ...load('shared-libs/ts-modules/shared/src/services/local-rpc.ts'),
+      ...load(
+        'shared-libs/ts-modules/shared/src/services/database-subscription.ts',
+      ),
       ...load('shared-libs/ts-modules/shared/src/classes/rpc-error.ts'),
     })
     const requireSource = request => {
       if (moduleOverrides.has(request)) return moduleOverrides.get(request)
       if (request === '@angular/core') return angular
+      if (request === '@angular/common/http') return httpAngular
       if (request === '@ng-web-apis/common')
         return {
           WA_CRYPTO: tokens.WA_CRYPTO,
           WA_SESSION_STORAGE: tokens.WA_SESSION_STORAGE,
         }
-      if (request === '@angular/common/http')
-        return { HttpClient: tokens.HttpClient }
       if (request === '@start9labs/shared') return shared()
       if (request === '@start9labs/marketplace')
         return load('shared-libs/ts-modules/marketplace/src/types.ts')
+      if (request.endsWith('config.service'))
+        return { ConfigService: tokens.ConfigService }
       if (request.endsWith('auth.service'))
         return { AuthService: tokens.AuthService }
       if (request.endsWith('config.service'))
@@ -105,6 +149,8 @@ function harness(moduleOverrides = new Map()) {
         return { StaleUiService: tokens.StaleUiService }
       if (request.endsWith('patch-db-source'))
         return { PATCH_CACHE: tokens.PATCH_CACHE }
+      if (request.endsWith('tokens/relative-url'))
+        return { RELATIVE_URL: tokens.RELATIVE_URL }
       if (request.startsWith('src/')) {
         const app = filename.slice(
           0,
@@ -130,7 +176,10 @@ function harness(moduleOverrides = new Map()) {
         console: { ...console, error() {} },
         Buffer,
         URL,
+        TextEncoder,
+        AbortSignal,
         structuredClone,
+        ...globals,
       },
       { filename },
     )
@@ -146,6 +195,131 @@ function harness(moduleOverrides = new Map()) {
   return { dependencies, tokens, load }
 }
 
+function mockPatchFixture(data) {
+  return {
+    mockPatchData: data,
+    mockRegistryCache: () => ({
+      info: {
+        name: 'Fixture registry',
+        description: null,
+        icon: null,
+        categories: {},
+        trustSigners: {},
+      },
+      packages: {},
+      status: 'connected',
+    }),
+    mockOsUpdateCache: registry => ({
+      registry,
+      versions: {},
+      status: 'connected',
+    }),
+  }
+}
+
+function deviceSigner() {
+  const { load } = harness(new Map([['@ng-web-apis/common', {}]]))
+  const { AuthKeyService } = load(
+    'shared-libs/ts-modules/shared/src/services/auth-key.service.ts',
+  )
+  return AuthKeyService.prototype
+}
+
+test('RPC request capture serializes params once and preserves raw numeric tokens', () => {
+  const { load } = harness()
+  const { rpcRequestBody } = load(
+    'shared-libs/ts-modules/shared/src/services/rpc-request.ts',
+  )
+  let serialized = 0
+  const params = {
+    value: 'original',
+    toJSON() {
+      serialized++
+      return {
+        value: this.value,
+        integer: JSON.rawJSON('18446744073709551615'),
+        float: JSON.rawJSON('1.0'),
+        zero: JSON.rawJSON('-0'),
+      }
+    },
+  }
+  const body = rpcRequestBody({ method: 'test', params })
+  params.value = 'changed'
+  assert.equal(serialized, 1)
+  assert.equal(JSON.parse(body).params.value, 'original')
+  assert.ok(body.includes('18446744073709551615'))
+  assert.ok(body.includes('"float":1.0'))
+  assert.ok(body.includes('"zero":-0'))
+})
+
+test('resource headers retain legacy signing and caller headers without mutation', async () => {
+  const { auth } = require('@start9labs/start-core')
+  const key = await auth.generateAuthKey()
+  const original = new HttpHeaders({
+    'x-trace': ['one', 'two'],
+    'x-start-auth-sig': 'caller',
+  })
+  const headers = await deviceSigner().signHeader.call(
+    {
+      lease: async () => ({ key, signal: new AbortController().signal }),
+      host: 'server.test',
+    },
+    '',
+    original,
+  )
+  assert.deepEqual(headers.getAll('x-trace'), ['one', 'two'])
+  assert.equal(headers.getAll(auth.AUTH_SIG_HEADER).length, 1)
+  assert.notEqual(headers.get(auth.AUTH_SIG_HEADER), 'caller')
+  assert.equal(
+    new URLSearchParams(headers.get(auth.AUTH_SIG_HEADER)).get('size'),
+    '0',
+  )
+  assert.equal(original.get(auth.AUTH_SIG_HEADER), 'caller')
+  const withoutKey = await deviceSigner().signHeader.call(
+    { lease: async () => null },
+    '',
+    original,
+  )
+  assert.equal(withoutKey.get(auth.AUTH_SIG_HEADER), 'caller')
+})
+
+test('shared HTTP sends captured RPC bodies as JSON and preserves response compatibility', async () => {
+  const { HttpResponse } = require('@angular/common/http')
+  const { dependencies, tokens, load } = harness()
+  const calls = []
+  dependencies.set(tokens.HttpClient, {
+    request: (method, url, options) => {
+      assert.equal(method, 'POST')
+      calls.push({ url, body: options.body, options })
+      return of(
+        new HttpResponse({
+          body: { result: null },
+          headers: new HttpHeaders({ 'x-patch-sequence': '0' }),
+        }),
+      )
+    },
+  })
+  const client = new (load(
+    'shared-libs/ts-modules/shared/src/services/http.service.ts',
+  ).HttpService)()
+  const body = '{"method":"test","params":{"integer":18446744073709551615}}'
+  const response = await client.rpcMessage(body, {
+    headers: { 'content-type': 'text/plain', 'x-trace': 'keep' },
+  })
+  assert.equal(calls[0].url, 'https://router.test/rpc/v1')
+  assert.equal(calls[0].body, body)
+  assert.equal(calls[0].options.headers.get('Content-Type'), 'application/json')
+  assert.equal(calls[0].options.headers.get('x-trace'), 'keep')
+  assert.equal(calls[0].options.headers.has('X-Start-Auth-Sig'), false)
+  assert.equal(response.body.meta.patchSequence, 0)
+  await client.rpcRequest(
+    { method: 'public', params: { value: 1 } },
+    'https://registry.test/rpc',
+  )
+  assert.equal(calls[1].url, 'https://registry.test/rpc')
+  assert.equal(calls[1].body, '{"method":"public","params":{"value":1}}')
+})
+
 for (const [name, file, className, deauthMethod] of [
   [
     'StartOS',
@@ -153,33 +327,29 @@ for (const [name, file, className, deauthMethod] of [
     'LiveApiService',
     'setUnverified',
   ],
-  [
-    'Tunnel',
-    'projects/start-tunnel/web/src/app/services/api/live-api.service.ts',
-    'LiveApiService',
-    'deauthenticate',
-  ],
 ]) {
-  test(`${name} signs local calls, excludes foreign origins and waits for patches`, async () => {
+  test(`${name} encrypts local calls, excludes foreign origins and waits for patches`, async () => {
     const { dependencies, tokens, load } = harness()
     const cache = new BehaviorSubject({ id: 1 })
     const calls = []
-    const signed = []
-    let patchSequence = '3'
+    const lease = { key: {}, signal: new AbortController().signal }
+    let patchSequence = 3
     dependencies.set(tokens.PATCH_CACHE, cache)
     dependencies.set(tokens.AuthService, { deauthenticate() {} })
     dependencies.set(tokens.AuthKeyService, {
-      signRpcHeaders: async options => {
-        signed.push(options)
-        return { signature: 'signed' }
+      lease: async () => lease,
+    })
+    dependencies.set(tokens.RpcSocketService, {
+      message: async (request, options, identity) => {
+        calls.push({ request, options, lease: identity })
+        return { result: null, meta: { patchSequence } }
       },
     })
     dependencies.set(tokens.HttpService, {
-      rpcRequest: async (options, url) => {
-        calls.push({ options, url })
+      rpcMessage: async (request, options, url) => {
+        calls.push({ request, options, url })
         return {
-          body: { result: null },
-          headers: { get: () => patchSequence },
+          body: { result: null, meta: { patchSequence } },
         }
       },
     })
@@ -187,32 +357,29 @@ for (const [name, file, className, deauthMethod] of [
     assert.equal(typeof Client, 'function')
     const client = new Client()
     let settled = false
-    const options = {
-      method: 'auth.logout',
-      params: {},
-      headers: { existing: 'preserved' },
-    }
-    const pending = client.rpcRequest(options).then(value => {
+    const options = { timeout: 10000 }
+    const pending = client.rpc.auth.logout({}, options).then(value => {
       settled = true
       return value
     })
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(settled, false)
-    assert.equal(signed[0], options)
-    assert.equal(calls[0].options.headers.existing, 'preserved')
-    assert.equal(calls[0].options.headers.signature, 'signed')
+    assert.equal(calls[0].lease, lease)
+    assert.equal(calls[0].options.timeout, 10000)
+    assert.equal(JSON.parse(calls[0].request).signature, undefined)
     cache.next({ id: 2 })
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(settled, false)
     cache.next({ id: 3 })
     assert.equal(await pending, null)
-    patchSequence = null
+    patchSequence = 999
     assert.equal(
-      await client.rpcRequest(options, 'https://foreign.test/rpc'),
+      await client.echo({ message: 'foreign' }, 'https://foreign.test/rpc'),
       null,
     )
-    assert.equal(signed.length, 1)
-    assert.equal(calls[1].options, options)
+    assert.equal(calls[1].lease, undefined)
+    assert.equal(JSON.parse(calls[1].request).method, 'echo')
+    assert.equal(JSON.parse(calls[1].request).signature, undefined)
     assert.equal(calls[1].url, 'https://foreign.test/rpc')
     cache.complete()
   })
@@ -225,23 +392,21 @@ for (const [name, file, className, deauthMethod] of [
       [deauthMethod]: () => deauthenticated++,
     })
     dependencies.set(tokens.AuthKeyService, {
-      signRpcHeaders: async () => ({}),
+      lease: async () => ({ key: {}, signal: new AbortController().signal }),
     })
-    dependencies.set(tokens.HttpService, {
-      rpcRequest: async () => ({
-        body: {
-          error: {
-            code: 34,
-            message: 'unauthorized',
-            data: { details: 'session expired' },
-          },
+    dependencies.set(tokens.HttpService, {})
+    dependencies.set(tokens.RpcSocketService, {
+      message: async () => ({
+        error: {
+          code: 34,
+          message: 'unauthorized',
+          data: { details: 'session expired' },
         },
-        headers: { get: () => '999' },
       }),
     })
     const client = new (load(file)[className])()
     await assert.rejects(
-      client.rpcRequest({ method: 'auth.logout', params: {} }),
+      client.rpc.auth.logout({}),
       error =>
         error.code === 34 &&
         error.message === 'RPC ERROR: unauthorized\n\nsession expired',
@@ -250,28 +415,58 @@ for (const [name, file, className, deauthMethod] of [
   })
 }
 
-test('StartOS derives the method path and forwards results untouched', async () => {
-  const { load } = harness()
-  const client = Object.create(
-    load(
-      'projects/start-os/web/ui/src/app/services/api/embassy-live-api.service.ts',
-    ).LiveApiService.prototype,
+test('unsigned foreign echo rejection cannot invalidate local authentication', async () => {
+  const { dependencies, tokens, load } = harness()
+  let rejected = 0
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ id: 0 }))
+  dependencies.set(tokens.AuthService, {
+    setUnverified() {
+      rejected++
+    },
+  })
+  dependencies.set(tokens.AuthKeyService, {
+    lease() {
+      assert.fail('foreign calls do not acquire local keys')
+    },
+  })
+  dependencies.set(tokens.HttpService, {
+    rpcMessage: async () => ({
+      body: {
+        error: { code: 34, message: 'foreign rejection', data: null },
+        meta: { patchSequence: 999 },
+      },
+    }),
+  })
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-live-api.service.ts',
+  ).LiveApiService)()
+  await assert.rejects(
+    client.echo({ message: 'probe' }, 'http://foreign.test/rpc'),
+    error => error.code === 34,
   )
+  assert.equal(rejected, 0)
+  assert.equal(dependencies.get(tokens.PATCH_CACHE).observed, false)
+})
+
+test('StartOS derives the method path and forwards results untouched', async () => {
+  const { dependencies, tokens, load } = harness()
   const value = { serverInfo: { id: 'server' }, packageData: {} }
   const dump = { guid: 'subscription', dump: { id: 3, value } }
   const action = { version: '1', title: 'Done', message: null, result: null }
   const requests = []
   let response = dump
-  client.rpcRequest = async options => {
-    requests.push(options)
-    return response
-  }
-  const rpc = load(
-    'shared-libs/ts-modules/start-core/lib/rpcClient.ts',
-  ).createRpcClient({
-    call: (method, params, options) =>
-      client.rpcRequest({ method, params, ...options }),
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ id: 0 }))
+  dependencies.set(tokens.AuthService, { setUnverified() {} })
+  dependencies.set(tokens.AuthKeyService, { lease: async () => null })
+  dependencies.set(tokens.HttpService, {
+    rpcMessage: async (body, options) => {
+      requests.push({ ...JSON.parse(body), ...options })
+      return { body: { result: response } }
+    },
   })
+  const rpc = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-live-api.service.ts',
+  ).LiveApiService)().rpc
   assert.equal(await rpc.db.subscribe({}), dump)
   assert.equal(requests[0].method, 'db.subscribe')
   assert.equal(Object.keys(requests[0].params).length, 0)
@@ -291,37 +486,659 @@ test('StartOS derives the method path and forwards results untouched', async () 
   assert.equal(requests[3].timeout, 10000)
 })
 
-test('Setup converts the actual JWK response and forwards the installation timeout', async () => {
+function normalStreamFixture() {
+  const { dependencies, tokens, load } = harness(new Map(), {
+    ReadableStream,
+    DOMException,
+  })
+  const cache = new BehaviorSubject({ id: 0 }),
+    frames = new (require('rxjs').Subject)(),
+    lifetime = new AbortController()
+  const { rpcResponseStream } = load(
+    'shared-libs/ts-modules/shared/src/services/rpc-stream.ts',
+  )
+  const calls = [],
+    logout = []
+  dependencies.set(tokens.PATCH_CACHE, cache)
+  dependencies.set(tokens.AuthService, {
+    setUnverified() {
+      logout.push(true)
+      lifetime.abort()
+    },
+  })
+  dependencies.set(tokens.AuthKeyService, {
+    lease: async () => ({ key: {}, signal: lifetime.signal }),
+  })
+  dependencies.set(tokens.HttpService, {
+    rpcMessage() {
+      assert.fail('typed never downgrades')
+    },
+  })
+  dependencies.set(tokens.RpcSocketService, {
+    stream(body, lease, options) {
+      calls.push({ body, lease, options })
+      return rpcResponseStream(frames, options)
+    },
+  })
+  const api = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-live-api.service.ts',
+  ).LiveApiService)()
+  const send = value =>
+    frames.next({ value, bytes: JSON.stringify(value).length })
+  const version = load(
+    'shared-libs/ts-modules/start-core/lib/osBindings/session-profile.ts',
+  ).SESSION_PROFILE.transport.rpcStreamVersion
+  return { api, frames, cache, calls, lifetime, logout, send, version }
+}
+const streamFlush = () => new Promise(setImmediate)
+
+test('normal generated streams fence initial metadata and preserve pre-first-next disposal', async () => {
+  const f = normalStreamFixture()
+  let settled = false
+  const pending = f.api.streams.server.logs
+    .follow({ limit: 400 })
+    .then(value => {
+      settled = true
+      return value
+    })
+  await streamFlush()
+  f.send({
+    jsonrpc: '2.0',
+    id: 'a',
+    result: { startCursor: 'cursor', guid: null },
+    meta: { patchSequence: 3 },
+  })
+  await streamFlush()
+  assert.equal(settled, false)
+  assert.equal(f.cache.observed, true)
+  f.cache.next({ id: 3 })
+  const stream = await pending
+  assert.equal(stream.initial.startCursor, 'cursor')
+  assert.equal(stream.meta.patchSequence, 3)
+  assert.equal(JSON.parse(f.calls[0].body).method, 'server.logs.follow')
+  assert.equal(f.frames.observed, true)
+  await stream.items.return(null)
+  assert.equal(f.frames.observed, false)
+  assert.equal(f.cache.observed, false)
+})
+
+for (const reason of ['view disposal', 'logout'])
+  test(`normal stream ${reason} cancels blocked initial fences without late adoption`, async () => {
+    const f = normalStreamFixture(),
+      user = new AbortController()
+    const pending = f.api.streams.server.logs.follow(
+      {},
+      { signal: user.signal },
+    )
+    await streamFlush()
+    f.send({
+      jsonrpc: '2.0',
+      id: 'a',
+      result: { guid: null },
+      meta: { patchSequence: 999 },
+    })
+    await streamFlush()
+    if (reason === 'logout') f.lifetime.abort()
+    else user.abort()
+    await assert.rejects(pending, { name: 'AbortError' })
+    assert.equal(f.cache.observed, false)
+    assert.equal(f.frames.observed, false)
+  })
+
+for (const stage of ['initial', 'terminal'])
+  test(`normal stream ${stage} code34 uses the existing authentication owner`, async () => {
+    const f = normalStreamFixture(),
+      pending = f.api.streams.server.logs.follow({})
+    await streamFlush()
+    if (stage === 'initial') {
+      f.send({
+        jsonrpc: '2.0',
+        id: 'a',
+        error: { code: 34, message: 'revoked', data: null },
+      })
+      await assert.rejects(pending, error => error.code === 34)
+    } else {
+      f.send({ jsonrpc: '2.0', id: 'a', result: { guid: null } })
+      const stream = await pending
+      f.send({ rpcstream: f.version, id: 'a', end: false, result: 'accepted' })
+      f.send({
+        rpcstream: f.version,
+        id: 'a',
+        end: true,
+        error: { code: 34, message: 'revoked', data: null },
+      })
+      assert.equal((await stream.items.next()).value, 'accepted')
+      assert.equal(f.logout.length, 0)
+      await assert.rejects(stream.items.next(), error => error.code === 34)
+    }
+    assert.equal(f.logout.length, 1)
+    assert.equal(f.frames.observed, false)
+  })
+
+for (const stage of ['initial', 'terminal'])
+  test(`canceled normal stream ${stage} rejection cannot invalidate a replacement identity`, async () => {
+    const f = normalStreamFixture(),
+      pending = f.api.streams.server.logs.follow({})
+    await streamFlush()
+    let result = pending
+    if (stage === 'initial') {
+      f.send({
+        jsonrpc: '2.0',
+        id: 'a',
+        error: { code: 34, message: 'old identity', data: null },
+      })
+    } else {
+      f.send({ jsonrpc: '2.0', id: 'a', result: { guid: null } })
+      const response = await pending
+      result = response.items.next()
+      f.send({
+        rpcstream: f.version,
+        end: true,
+        error: { code: 34, message: 'old identity', data: null },
+      })
+    }
+    f.lifetime.abort()
+    await assert.rejects(result, { name: 'AbortError' })
+    assert.equal(f.logout.length, 0)
+  })
+
+test('normal stream cache failure releases an acquired iterator before exposing the error', async () => {
+  const f = normalStreamFixture(),
+    pending = f.api.streams.server.logs.follow({})
+  await streamFlush()
+  f.send({
+    jsonrpc: '2.0',
+    id: 'a',
+    result: { guid: null },
+    meta: { patchSequence: 999 },
+  })
+  await streamFlush()
+  f.cache.error(new Error('cache stopped'))
+  await assert.rejects(pending, /cache stopped/)
+  assert.equal(f.frames.observed, false)
+})
+
+test('shared transport classification accepts numeric zero, not RPC or cancellation codes', () => {
+  const { isNetworkError, getErrorMessage } = harness().load(
+    'shared-libs/ts-modules/shared/src/services/error.service.ts',
+  )
+  assert.equal(isNetworkError({ code: 0 }), true)
+  for (const value of [
+    null,
+    undefined,
+    0,
+    '0',
+    {},
+    { code: '0' },
+    { code: 34 },
+    { code: -32072 },
+  ])
+    assert.equal(isNetworkError(value), false)
+  assert.match(getErrorMessage({ code: 0 }), /couldn't reach your server/)
+})
+
+function setupObservationHarness(status) {
+  const router = Symbol('Router')
+  const overrides = new Map([['@angular/router', { Router: router }]])
+  const { dependencies, tokens, load } = harness(overrides, {
+    AbortController,
+    Error,
+    setTimeout,
+    clearTimeout,
+  })
+  overrides.set('@start9labs/shared', {
+    ...load('shared-libs/ts-modules/shared/src/util/format-progress.ts'),
+    ...load('shared-libs/ts-modules/shared/src/services/error.service.ts'),
+    pauseFor: load('shared-libs/ts-modules/shared/src/util/misc.util.ts')
+      .pauseFor,
+  })
+  const { ApiService } = load(
+    'projects/start-os/web/setup-wizard/src/app/services/api.service.ts',
+  )
+  const routes = [],
+    destroy = []
+  dependencies.set(ApiService, {
+    streams: { setup: { status } },
+    rpc: {
+      setup: new Proxy(
+        {},
+        {
+          get: () => assert.fail('observation cannot replay or finalize setup'),
+        },
+      ),
+    },
+  })
+  dependencies.set(router, { navigate: async route => routes.push(route) })
+  dependencies.set(tokens.DestroyRef, {
+    onDestroy: callback => destroy.push(callback),
+  })
+  const service = new (load(
+    'projects/start-os/web/setup-wizard/src/app/services/setup-observation.ts',
+  ).SetupObservation)()
+  return {
+    service,
+    routes,
+    destroy: () => destroy.forEach(callback => callback()),
+  }
+}
+
+for (const failed of [false, true]) {
+  test(`setup waits for its terminal after 100 percent: ${failed ? 'late failure' : 'success'}`, async () => {
+    const terminal = Promise.withResolvers(),
+      reached = Promise.withResolvers()
+    let calls = 0
+    const fixture = setupObservationHarness(async (_, options) => {
+      calls++
+      assert.equal(options.signal.aborted, false)
+      return {
+        initial: {
+          status: 'running',
+          guid: null,
+          progress: { overall: false, phases: [] },
+        },
+        items: (async function* () {
+          yield { overall: true, phases: [] }
+          reached.resolve()
+          await terminal.promise
+          if (failed)
+            throw Object.assign(new Error('Late setup failure'), { code: 3 })
+          return null
+        })(),
+      }
+    })
+    await reached.promise
+    assert.equal(fixture.service.progress().total, 1)
+    assert.equal(fixture.routes.length, 0)
+    assert.equal(fixture.service.error(), '')
+    terminal.resolve()
+    await new Promise(setImmediate)
+    assert.equal(calls, 1)
+    assert.equal(fixture.routes.length, failed ? 0 : 1)
+    if (failed) assert.equal(fixture.service.error(), 'Late setup failure')
+    else assert.equal(fixture.routes[0][0], '/success')
+    fixture.destroy()
+  })
+}
+
+for (const status of ['needs-install', 'incomplete', 'complete']) {
+  test(`setup ${status} routing also requires its terminal`, async () => {
+    const terminal = Promise.withResolvers(),
+      reached = Promise.withResolvers()
+    const initial =
+      status === 'complete'
+        ? {
+            status,
+            hostname: 'fixture',
+            rootCa: 'certificate',
+            needsRestart: false,
+          }
+        : status === 'incomplete'
+          ? {
+              status,
+              guid: null,
+              osDrive: null,
+              attach: false,
+              mokEnrolled: false,
+            }
+          : { status }
+    const fixture = setupObservationHarness(async () => ({
+      initial,
+      items: (async function* () {
+        reached.resolve()
+        await terminal.promise
+        return null
+      })(),
+    }))
+    await reached.promise
+    assert.equal(fixture.routes.length, 0)
+    terminal.resolve()
+    await new Promise(setImmediate)
+    assert.equal(
+      fixture.routes[0][0],
+      status === 'complete' ? '/success' : '/language',
+    )
+    fixture.destroy()
+  })
+}
+
+for (const acquisition of [false, true]) {
+  test(`setup disposal cancels ${acquisition ? 'acquisition' : 'iteration'} without late UI or replay`, async () => {
+    const blocked = Promise.withResolvers(),
+      reached = Promise.withResolvers()
+    let signal,
+      calls = 0
+    const fixture = setupObservationHarness(async (_, options) => {
+      calls++
+      signal = options.signal
+      if (acquisition) await blocked.promise
+      return {
+        initial: {
+          status: 'running',
+          guid: null,
+          progress: { overall: false, phases: [] },
+        },
+        items: (async function* () {
+          reached.resolve()
+          await blocked.promise
+          throw new Error('disposed setup')
+        })(),
+      }
+    })
+    if (!acquisition) await reached.promise
+    fixture.destroy()
+    blocked.resolve()
+    await new Promise(setImmediate)
+    assert.equal(signal.aborted, true)
+    assert.equal(calls, 1)
+    assert.equal(fixture.routes.length, 0)
+    assert.equal(fixture.service.error(), '')
+  })
+}
+
+test('setup reconnects an active lost stream rather than treating its last progress as success', async () => {
+  const lost = Promise.withResolvers(),
+    resumed = Promise.withResolvers()
+  let calls = 0
+  const fixture = setupObservationHarness(async () => {
+    if (++calls === 1)
+      return {
+        initial: {
+          status: 'running',
+          guid: null,
+          progress: { overall: false, phases: [] },
+        },
+        items: (async function* () {
+          yield { overall: true, phases: [] }
+          lost.resolve()
+          throw { code: 0, message: 'transport lost' }
+        })(),
+      }
+    resumed.resolve()
+    return {
+      initial: {
+        status: 'complete',
+        hostname: 'fixture',
+        rootCa: 'certificate',
+        needsRestart: false,
+      },
+      items: (async function* () {
+        return null
+      })(),
+    }
+  })
+  await lost.promise
+  assert.equal(fixture.routes.length, 0)
+  await resumed.promise
+  await new Promise(setImmediate)
+  assert.equal(calls, 2)
+  assert.equal(fixture.routes[0][0], '/success')
+  fixture.destroy()
+})
+
+test('setup initiating application errors stop once without retry or navigation', async () => {
+  let calls = 0
+  const fixture = setupObservationHarness(async () => {
+    calls++
+    throw { code: 3, message: 'cached setup failure' }
+  })
+  await new Promise(setImmediate)
+  assert.equal(calls, 1)
+  assert.equal(fixture.service.error(), 'cached setup failure')
+  assert.equal(fixture.routes.length, 0)
+  fixture.destroy()
+})
+
+test('setup reconnects read-only status and cancels retry waits on disposal', async () => {
+  const retried = Promise.withResolvers()
+  let calls = 0
+  const fixture = setupObservationHarness(async () => {
+    if (++calls === 1) throw { code: 0, message: 'transport lost' }
+    retried.resolve()
+    return {
+      initial: { status: 'needs-install' },
+      items: (async function* () {
+        return null
+      })(),
+    }
+  })
+  await retried.promise
+  await new Promise(setImmediate)
+  assert.equal(calls, 2)
+  assert.equal(fixture.routes[0][0], '/language')
+  fixture.destroy()
+  let attempts = 0
+  const canceled = setupObservationHarness(async () => {
+    attempts++
+    throw { code: 0 }
+  })
+  await new Promise(setImmediate)
+  canceled.destroy()
+  await new Promise(setImmediate)
+  assert.equal(attempts, 1)
+  assert.equal(canceled.routes.length, 0)
+})
+
+test('setup stream capture precedes key acquisition and cancellation prevents late dispatch', async () => {
+  const { dependencies, tokens, load } = harness(new Map(), { AbortController })
+  const acquired = Promise.withResolvers()
+  let captures = 0,
+    dispatched = 0
+  dependencies.set(tokens.AuthKeyService, {
+    admissionLease: () => acquired.promise,
+  })
+  dependencies.set(tokens.HttpService, {})
+  dependencies.set(tokens.RpcSocketService, {
+    stream: () => {
+      dispatched++
+      assert.fail('late dispatch')
+    },
+  })
+  const client = new (load(
+    'projects/start-os/web/setup-wizard/src/app/services/live-api.service.ts',
+  ).LiveApiService)()
+  const abort = new AbortController()
+  const pending = client.streams.setup.status(
+    {
+      toJSON: () => {
+        captures++
+        return {}
+      },
+    },
+    { signal: abort.signal },
+  )
+  assert.equal(captures, 1)
+  abort.abort()
+  acquired.resolve({ signer: {}, signal: new AbortController().signal })
+  await assert.rejects(pending, { name: 'AbortError' })
+  assert.equal(dispatched, 0)
+})
+
+test('setup mock ordinary and typed status share their progress and terminal owner', async () => {
+  const { load } = harness(new Map(), { AbortController })
+  const mock = Object.create(
+    load(
+      'projects/start-os/web/setup-wizard/src/app/services/mock-api.service.ts',
+    ).MockApiService.prototype,
+  )
+  mock.statusIndex = 0
+  mock.installCompleted = false
+  assert.equal((await mock.setupStatus()).status, 'needs-install')
+  const response = await mock.setupStatusStream()
+  assert.equal(response.initial.status, 'running')
+  assert.equal(response.initial.guid, null)
+  assert.equal((await response.items.next()).value.overall, true)
+  assert.equal((await response.items.next()).done, true)
+  assert.equal((await mock.setupStatus()).status, 'complete')
+  const abort = new AbortController()
+  abort.abort()
+  await assert.rejects(mock.setupStatusStream({ signal: abort.signal }), {
+    name: 'AbortError',
+  })
+})
+
+test('setup mock log interfaces share initiating data and cancel their producer', async () => {
+  const { load } = harness(new Map(), { AbortController })
+  const mock = Object.create(
+    load(
+      'projects/start-os/web/setup-wizard/src/app/services/mock-api.service.ts',
+    ).MockApiService.prototype,
+  )
+  const ordinary = await mock.logFollow()
+  const abort = new AbortController()
+  const typed = await mock.logFollowStream({ signal: abort.signal })
+  assert.equal(typed.initial.startCursor, ordinary.startCursor)
+  assert.equal(ordinary.guid, 'logs-guid')
+  assert.equal(typed.initial.guid, null)
+  assert.equal((await typed.items.next()).value.message, 'fake log entry')
+  assert.equal(
+    (await firstValueFrom(mock.openWebsocket$('logs-guid'))).message,
+    'fake log entry',
+  )
+  abort.abort()
+  await assert.rejects(typed.items.next(), { name: 'AbortError' })
+  await assert.rejects(mock.logFollowStream({ signal: abort.signal }), {
+    name: 'AbortError',
+  })
+})
+
+test('UI mock log interfaces share their bounded failure producer without duplicating entries', async () => {
+  const entry = {
+    timestamp: '2026-11-12T00:00:00Z',
+    message: 'entry',
+    bootId: 'boot',
+  }
+  const { load } = harness(
+    new Map([
+      ['./api.fixures', { Mock: { ServerLogs: [entry] } }],
+      ['./mock-patch', mockPatchFixture({})],
+      ['./md-sample.md', ''],
+    ]),
+    { AbortController, Event },
+  )
+  const mock = Object.create(
+    load(
+      'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+    ).MockApiService.prototype,
+  )
+  const ordinary = await mock.logFollow()
+  const abort = new AbortController()
+  const typed = await mock.logFollowStream({ signal: abort.signal })
+  assert.equal(typed.initial.startCursor, ordinary.startCursor)
+  assert.equal(ordinary.guid, 'logs-guid')
+  assert.equal(typed.initial.guid, null)
+  let opened = 0
+  assert.equal(
+    await firstValueFrom(
+      mock.openWebsocket$('logs-guid', {
+        openObserver: {
+          next() {
+            opened++
+          },
+        },
+      }),
+    ),
+    entry,
+  )
+  assert.equal(opened, 1)
+  for (let i = 0; i < 100; i++)
+    assert.equal((await typed.items.next()).value, entry)
+  await assert.rejects(typed.items.next(), /Mock log stream interrupted/)
+  const pending = await mock.logFollowStream({ signal: abort.signal })
+  abort.abort()
+  await assert.rejects(pending.items.next(), { name: 'AbortError' })
+  await assert.rejects(mock.logFollowStream({ signal: abort.signal }), {
+    name: 'AbortError',
+  })
+})
+
+test('UI ordinary and typed metrics reuse snapshot and item producers with cancellation', async () => {
+  const percent = { value: '0', unit: '%' },
+    mib = { value: '0', unit: 'MiB' },
+    gb = { value: '0', unit: 'GB' }
+  const metrics = {
+    general: { temperature: null },
+    memory: {
+      percentageUsed: percent,
+      total: mib,
+      available: mib,
+      used: mib,
+      zramTotal: mib,
+      zramAvailable: mib,
+      zramUsed: mib,
+    },
+    cpu: {
+      percentageUsed: percent,
+      idle: percent,
+      userSpace: percent,
+      kernelSpace: percent,
+      wait: percent,
+    },
+    disk: { percentageUsed: percent, used: gb, available: gb, capacity: gb },
+  }
+  let reads = 0
+  const { load } = harness(
+    new Map([
+      [
+        './api.fixures',
+        {
+          Mock: {
+            getMetrics() {
+              reads++
+              return metrics
+            },
+          },
+        },
+      ],
+      ['./mock-patch', mockPatchFixture({})],
+      ['./md-sample.md', ''],
+    ]),
+    { AbortController },
+  )
+  const mock = Object.create(
+    load(
+      'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+    ).MockApiService.prototype,
+  )
+  const ordinary = await mock.metricsFollow()
+  const abort = new AbortController(),
+    typed = await mock.metricsFollowStream({ signal: abort.signal })
+  assert.equal(ordinary.guid, 'metrics-guid')
+  assert.equal(typed.initial.guid, null)
+  assert.equal(typed.initial.metrics, metrics)
+  assert.equal(ordinary.metrics, metrics)
+  assert.equal(reads, 2)
+  assert.equal((await typed.items.next()).value, metrics)
+  assert.equal(
+    await firstValueFrom(mock.openWebsocket$('metrics-guid')),
+    metrics,
+  )
+  assert.equal(reads, 4)
+  abort.abort()
+  await assert.rejects(typed.items.next(), { name: 'AbortError' })
+  await assert.rejects(mock.metricsFollowStream({ signal: abort.signal }), {
+    name: 'AbortError',
+  })
+})
+
+test('Setup sends unwrapped secrets through encrypted admission and preserves the installation timeout', async () => {
   const { dependencies, tokens, load } = harness()
   const calls = []
-  const key = {
-    kty: 'EC',
-    crv: 'P-256',
-    x: 'yHTDYSfjU809fkSv9MmN4wuojf5c3cnD7ZDN13n-jz4',
-    y: '8Mpkn744A5KDag0DmX2YivB63srjbugYZzWc3JOpQXI',
-  }
-  dependencies.set(tokens.HttpService, {
-    rpcRequest: async options => {
-      calls.push(options)
+  const lease = { key: {}, signal: new AbortController().signal }
+  dependencies.set(tokens.AuthKeyService, { admissionLease: async () => lease })
+  dependencies.set(tokens.HttpService, {})
+  dependencies.set(tokens.RpcSocketService, {
+    message: async (body, options, identity) => {
+      assert.equal(identity, lease)
+      const request = JSON.parse(body)
+      calls.push({ ...request, ...options })
       return {
-        body: {
-          result:
-            options.method === 'setup.get-pubkey'
-              ? key
-              : { guid: null, osDrive: null, attach: false, mokEnrolled: true },
-        },
+        result: { guid: null, osDrive: null, attach: false, mokEnrolled: true },
       }
     },
   })
   const client = new (load(
     'projects/start-os/web/setup-wizard/src/app/services/live-api.service.ts',
   ).LiveApiService)()
-  await client.loadPubKey()
-  assert.equal(calls[0].method, 'setup.get-pubkey')
-  assert.equal(client.pubkey.kty, 'EC')
-  const encrypted = await client.encrypt('secret')
-  assert.equal(typeof encrypted.encrypted, 'object')
-  assert.ok(encrypted.encrypted.ciphertext)
   const params = {
     osDrive: null,
     dataDrive: { stablePath: '/dev/example', wipe: true },
@@ -330,9 +1147,106 @@ test('Setup converts the actual JWK response and forwards the installation timeo
     (await client.rpc.setup.installOs(params, { timeout: 5 * 60 * 1000 })).guid,
     null,
   )
-  assert.equal(calls[1].method, 'setup.install-os')
-  assert.equal(calls[1].params, params)
-  assert.equal(calls[1].timeout, 5 * 60 * 1000)
+  assert.equal(calls[0].method, 'setup.install-os')
+  assert.deepEqual(calls[0].params, params)
+  assert.equal(calls[0].timeout, 5 * 60 * 1000)
+  await client.rpc.setup.execute({
+    guid: 'drive',
+    password: '  secret  ',
+    kiosk: false,
+  })
+  assert.equal(calls[1].method, 'setup.execute')
+  assert.equal(calls[1].params.password, '  secret  ')
+  assert.equal(calls.length, 2)
+})
+
+test('Setup state preserves nullable and whitespace passwords without layering JWE on recovery', async () => {
+  const router = Symbol('Router')
+  const { dependencies, load } = harness(
+    new Map([['@angular/router', { Router: router }]]),
+  )
+  const { ApiService } = load(
+    'projects/start-os/web/setup-wizard/src/app/services/api.service.ts',
+  )
+  const calls = []
+  dependencies.set(ApiService, {
+    rpc: {
+      setup: {
+        attach: async params => calls.push(params),
+        execute: async params => calls.push(params),
+      },
+    },
+  })
+  dependencies.set(router, {})
+  const state = new (load(
+    'projects/start-os/web/setup-wizard/src/app/services/state.service.ts',
+  ).StateService)()
+  state.dataDriveGuid = 'drive'
+  await state.attachDrive('  secret  ')
+  await state.attachDrive('')
+  await state.attachDrive(null)
+  assert.equal(calls[0].password, '  secret  ')
+  assert.equal(calls[1].password, null)
+  assert.equal(calls[2].password, null)
+  state.recoverySource = {
+    type: 'backup',
+    serverId: 'server',
+    password: '',
+    target: {
+      type: 'cifs',
+      hostname: 'nas',
+      username: 'user',
+      path: String.raw`share\nested`,
+      password: 'cifs secret',
+    },
+  }
+  await state.executeSetup('new password', 'hostname')
+  assert.equal(calls[3].password, 'new password')
+  assert.equal(calls[3].recoverySource.password, '')
+  assert.equal(calls[3].recoverySource.target.password, 'cifs secret')
+  assert.equal(calls[3].recoverySource.target.path, 'share/nested')
+})
+
+test('Setup bootstrap starts from its encrypted status call without a legacy public-key preflight', async () => {
+  const api = Symbol('SetupApi'),
+    stateToken = Symbol('SetupState'),
+    router = Symbol('Router'),
+    errors = Symbol('Errors')
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['./services/api.service', { ApiService: api }],
+      ['./services/state.service', { StateService: stateToken }],
+      ['@angular/router', { Router: router, RouterOutlet: class {} }],
+      ['@start9labs/shared', { ErrorService: errors }],
+    ]),
+  )
+  const calls = [],
+    routes = [],
+    failed = []
+  const state = {}
+  dependencies.set(api, {
+    rpc: {
+      setup: {
+        status: async () => {
+          calls.push('status')
+          return { status: 'needs-install' }
+        },
+      },
+    },
+  })
+  dependencies.set(stateToken, state)
+  dependencies.set(router, { navigate: async route => routes.push(route) })
+  dependencies.set(errors, { handleError: error => failed.push(error) })
+  dependencies.set(tokens.DOCUMENT, { location: { hostname: 'localhost' } })
+  new (load(
+    'projects/start-os/web/setup-wizard/src/app/app.component.ts',
+  ).AppComponent)()
+  await new Promise(setImmediate)
+  assert.deepEqual(calls, ['status'])
+  assert.equal(state.kiosk, true)
+  assert.equal(routes.length, 1)
+  assert.equal(routes[0][0], '/language')
+  assert.deepEqual(failed, [])
 })
 
 test('Setup normalizes every CIFS path separator', () => {
@@ -390,7 +1304,7 @@ test('StartOS mock routes preserve registry fixtures, configured build identity,
     new Map([
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: fixtures }],
-      ['./mock-patch', { mockPatchData: {} }],
+      ['./mock-patch', mockPatchFixture({})],
       ['./md-sample.md', ''],
     ]),
   )
@@ -506,7 +1420,7 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
     new Map([
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: {} }],
-      ['./mock-patch', { mockPatchData: data }],
+      ['./mock-patch', mockPatchFixture(data)],
       ['./md-sample.md', ''],
     ]),
   )
@@ -559,17 +1473,15 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
       ['./api.fixures', { Mock: {} }],
       [
         './mock-patch',
-        {
-          mockPatchData: {
-            ui: {},
-            serverInfo: {
-              registries: {},
-              osRegistry: 'https://registry.test/',
-              trustedKeys: {},
-              registryKeys: {},
-            },
+        mockPatchFixture({
+          ui: {},
+          serverInfo: {
+            registries: {},
+            osRegistry: 'https://registry.test/',
+            trustedKeys: {},
+            registryKeys: {},
           },
-        },
+        }),
       ],
       ['./md-sample.md', ''],
     ]),
@@ -1467,78 +2379,26 @@ for (const method of ['lanIpv4Set', 'profileUpdate']) {
   })
 }
 
-test('WRT timeout unsubscribes from HTTP and retains code-zero reconnect errors', async () => {
-  const { dependencies, tokens, load } = harness()
-  let aborted = 0
-  let url
-  dependencies.set(tokens.StaleUiService, {
-    checkHash() {
-      assert.fail('Timed-out request must not check firmware hash')
-    },
-  })
-  dependencies.set(tokens.HttpClient, {
-    post: target => {
-      url = target
-      return new Observable(() => () => aborted++)
-    },
-  })
-  const client = new (load(
-    'projects/start-wrt/web/src/app/services/http.service.ts',
-  ).HttpService)()
-  await assert.rejects(
-    client.request({ body: { method: 'auth.login', params: {} }, timeout: 10 }),
-    error => error.code === 0 && error.message === 'Network timeout',
-  )
-  assert.equal(aborted, 1)
-  assert.equal(url, 'https://router.test/rpc/v1')
-})
-
-test('WRT checks firmware hashes and preserves HTTP error details', async () => {
-  const { dependencies, tokens, load } = harness()
-  const hashes = []
-  let fail = false
-  dependencies.set(tokens.StaleUiService, {
-    checkHash: hash => hashes.push(hash),
-  })
-  const response = {
-    body: { result: null },
-    headers: { get: () => 'firmware' },
-  }
-  dependencies.set(tokens.HttpClient, {
-    post: () =>
-      fail
-        ? throwError(() => ({ status: 503, statusText: 'Unavailable' }))
-        : of(response),
-  })
-  const client = new (load(
-    'projects/start-wrt/web/src/app/services/http.service.ts',
-  ).HttpService)()
-  assert.equal(await client.request({ body: {} }), response)
-  assert.deepEqual(hashes, ['firmware'])
-  fail = true
-  await assert.rejects(
-    client.request({ body: {} }),
-    error => error.code === 503 && error.message === 'Unavailable',
-  )
-})
-
-test('WRT signs calls, lazily invalidates authentication and preserves host errors and nullable results', async () => {
+test('WRT anonymous admission preserves deadlines and auth errors without recording startup history', async () => {
   const { dependencies, tokens, load } = harness()
   let invalidated = 0
   let lookups = 0
   let response = { result: null }
-  const signed = []
   const requests = []
+  const admission = {
+    signer: { sign() {} },
+    signal: new AbortController().signal,
+  }
   dependencies.set(tokens.AuthKeyService, {
-    signRpcHeaders: async options => {
-      signed.push(options)
-      return { signature: 'signed' }
-    },
+    admissionLease: async () => admission,
   })
   dependencies.set(tokens.HttpService, {
-    request: async options => {
-      requests.push(options)
-      return { body: response }
+    request: () => assert.fail('anonymous calls cannot use HTTP'),
+  })
+  dependencies.set(tokens.RpcSocketService, {
+    message: async (body, options, lease) => {
+      requests.push({ body, options, lease })
+      return response
     },
   })
   dependencies.set(tokens.Injector, {
@@ -1555,15 +2415,16 @@ test('WRT signs calls, lazily invalidates authentication and preserves host erro
     await client.request({
       method: 'auth.logout',
       params: {},
-      headers: { existing: 'preserved' },
+      headers: { trace: 'keep' },
+      timeout: 450,
     }),
     null,
   )
-  assert.deepEqual(JSON.parse(JSON.stringify(signed)), [
-    { method: 'auth.logout', params: {} },
-  ])
-  assert.equal(requests[0].headers.existing, 'preserved')
-  assert.equal(requests[0].headers.signature, 'signed')
+  assert.equal(requests[0].body, '{"method":"auth.logout","params":{}}')
+  assert.equal(requests[0].options.headers.trace, 'keep')
+  assert.equal(requests[0].options.timeout, 450)
+  assert.equal(requests[0].lease, admission)
+  assert.equal(requests[0].options.openObserver, undefined)
   assert.equal(lookups, 0)
   response = { error: { code: 34, message: 'unauthorized', data: 'expired' } }
   await assert.rejects(
@@ -1584,7 +2445,763 @@ test('WRT signs calls, lazily invalidates authentication and preserves host erro
     client.request({ method: 'auth.logout', params: {} }),
     /Empty RPC response/,
   )
+  dependencies.get(tokens.RpcSocketService).message = async () => {
+    throw Object.assign(new Error('Network timeout'), { code: 0 })
+  }
+  await assert.rejects(
+    client.request({ method: 'system.info', params: {}, timeout: 5 }),
+    error => error.code === 0,
+  )
 })
+
+test('WRT encrypted calls capture bytes, inspect firmware metadata and never downgrade', async () => {
+  const { dependencies, tokens, load } = harness()
+  const lease = { key: {}, signal: new AbortController().signal }
+  let resolveLease
+  dependencies.set(tokens.AuthKeyService, {
+    admissionLease: () =>
+      new Promise(resolve => {
+        resolveLease = resolve
+      }),
+  })
+  const hashes = []
+  const calls = []
+  let response = { result: null, meta: { gitHash: 'firmware' } }
+  dependencies.set(tokens.StaleUiService, {
+    checkHash: hash => hashes.push(hash),
+  })
+  dependencies.set(tokens.HttpService, {
+    request: () => assert.fail('encrypted calls cannot fall back'),
+  })
+  dependencies.set(tokens.RpcSocketService, {
+    message: async (body, options, key) => {
+      calls.push({ body, options, key })
+      return response
+    },
+  })
+  let revoked = 0
+  dependencies.set(tokens.Injector, {
+    get: () => ({ setUnverified: () => revoked++ }),
+  })
+  const rpc = new (load(
+    'projects/start-wrt/web/src/app/services/rpc.service.ts',
+  ).RpcService)()
+  const params = { password: 'original' }
+  const pending = rpc.request({ method: 'auth.verify-password', params })
+  params.password = 'changed'
+  resolveLease(lease)
+  await pending
+  assert.equal(JSON.parse(calls[0].body).params.password, 'original')
+  assert.equal(calls[0].key, lease)
+  assert.equal(
+    calls[0].options.openObserver,
+    dependencies.get(tokens.ServerIdentityService).openObserver,
+  )
+  assert.deepEqual(hashes, ['firmware'])
+  response = {
+    error: { code: 34, message: 'revoked' },
+    meta: { gitHash: 'replacement' },
+  }
+  const rejected = rpc.request({ method: 'auth.logout', params: {} })
+  resolveLease(lease)
+  await assert.rejects(rejected, error => error.code === 34)
+  assert.deepEqual(hashes, ['firmware', 'replacement'])
+  assert.equal(revoked, 1)
+  dependencies.get(tokens.RpcSocketService).message = async () => {
+    throw Object.assign(new Error('network'), { code: 0 })
+  }
+  const failed = rpc.request({ method: 'system.info', params: {} })
+  resolveLease(lease)
+  await assert.rejects(failed, error => error.code === 0)
+})
+
+test('WRT typed flash captures bytes, keeps metadata and cancellation, and never falls back', async () => {
+  const { dependencies, tokens, load } = harness()
+  const lease = { signer: {}, signal: new AbortController().signal }
+  let resolveLease
+  dependencies.set(tokens.AuthKeyService, {
+    admissionLease: () => new Promise(resolve => (resolveLease = resolve)),
+  })
+  dependencies.set(tokens.HttpService, {
+    request: () => assert.fail('no HTTP downgrade'),
+  })
+  const hashes = []
+  const calls = []
+  let revoked = 0
+  dependencies.set(tokens.StaleUiService, {
+    checkHash: hash => hashes.push(hash),
+  })
+  dependencies.set(tokens.Injector, {
+    get: () => ({ setUnverified: () => revoked++ }),
+  })
+  const items = (async function* () {
+    return null
+  })()
+  dependencies.set(tokens.RpcSocketService, {
+    stream: async (body, identity, options) => {
+      calls.push({ body, identity, options })
+      return { initial: null, meta: { gitHash: 'firmware' }, items }
+    },
+  })
+  const rpc = new (load(
+    'projects/start-wrt/web/src/app/services/rpc.service.ts',
+  ).RpcService)()
+  const params = { mode: 'fresh-start', password: 'original' }
+  const pending = rpc.streams.setup.flash(params, { timeout: 20 })
+  params.password = 'changed'
+  resolveLease(lease)
+  const result = await pending
+  assert.equal(result.items, items)
+  assert.equal(JSON.parse(calls[0].body).method, 'setup.flash')
+  assert.equal(JSON.parse(calls[0].body).params.password, 'original')
+  assert.equal(calls[0].identity, lease)
+  assert.equal(calls[0].options.timeout, 20)
+  assert.equal(calls[0].options.openObserver, undefined)
+  assert.deepEqual(hashes, ['firmware'])
+  const abort = new AbortController()
+  const canceled = rpc.streams.setup.flash(params, { signal: abort.signal })
+  abort.abort()
+  resolveLease(lease)
+  await assert.rejects(canceled, { name: 'AbortError' })
+  assert.equal(calls.length, 1)
+  const { RpcError } = load(
+    'shared-libs/ts-modules/shared/src/classes/rpc-error.ts',
+  )
+  dependencies.get(tokens.RpcSocketService).stream = async () => {
+    throw new RpcError(
+      { code: 34, message: 'denied' },
+      { gitHash: 'replacement' },
+    )
+  }
+  const denied = rpc.streams.setup.flash(params)
+  resolveLease(lease)
+  await assert.rejects(denied, error => error.code === 34)
+  assert.deepEqual(hashes, ['firmware', 'replacement'])
+  assert.equal(revoked, 1)
+})
+
+test('WRT mock flash uses local typed progress and its own terminal without networking', async () => {
+  const { load } = harness(wrtMockOverrides())
+  const mock = Object.create(
+    load('projects/start-wrt/web/src/app/services/api/mock-api.service.ts')
+      .MockApiService.prototype,
+  )
+  const response = await mock.setupFlash({
+    mode: 'fresh-start',
+    password: 'fixture password',
+  })
+  assert.equal(response.initial, null)
+  const steps = []
+  let result
+  do {
+    result = await response.items.next()
+    if (!result.done) steps.push(result.value.step)
+  } while (!result.done)
+  assert.deepEqual(steps, [1, 2, 3])
+  assert.equal(result.value, null)
+  const abort = new AbortController()
+  abort.abort()
+  await assert.rejects(
+    mock.setupFlash(
+      { mode: 'update', password: 'fixture password' },
+      { signal: abort.signal },
+    ),
+    { name: 'AbortError' },
+  )
+})
+
+test('WRT mock continuations emit local events and close asynchronously without networking', async () => {
+  const { load } = harness(new Map(), {
+    queueMicrotask,
+    Event,
+    MessageEvent,
+    CloseEvent: class extends Event {
+      constructor(type, init) {
+        super(type)
+        Object.assign(this, init)
+      }
+    },
+  })
+  const { MockContinuation } = load(
+    'projects/start-wrt/web/src/app/services/api/mock-continuation.ts',
+  )
+  const progress = { overall: true, phases: [] }
+  const socket = new MockContinuation(progress)
+  const events = []
+  const closed = Promise.withResolvers()
+  socket.onopen = () => events.push('open')
+  socket.onmessage = event => {
+    assert.deepEqual(JSON.parse(event.data), progress)
+    events.push('message')
+    socket.close()
+    events.push('after-close')
+  }
+  socket.onclose = () => {
+    events.push('close')
+    closed.resolve()
+  }
+  await closed.promise
+  assert.deepEqual(events, ['open', 'message', 'after-close', 'close'])
+  socket.close()
+})
+
+function wrtFlowHarness(globals = {}) {
+  const overrides = new Map([
+    [
+      '@taiga-ui/core',
+      {
+        TuiLoader: class {},
+        TuiTitle: class {},
+        TuiNotificationService: class {},
+      },
+    ],
+    ['@taiga-ui/polymorpheus', { PolymorpheusComponent: class {} }],
+    ['src/app/i18n/i18n.pipe', { i18nPipe: class {} }],
+    [
+      'src/app/i18n/validation-errors',
+      {
+        fill: () => assert.fail('an unconfirmed update cannot report success'),
+      },
+    ],
+    ['src/app/services/network.service', { NetworkService: class {} }],
+    [
+      'src/app/utils/workspace-config',
+      { IS_MOCK: Symbol(), GIT_HASH: Symbol() },
+    ],
+  ])
+  return { ...harness(overrides, globals), overrides }
+}
+
+function wrtFlashHarness(setupFlash) {
+  const { load, dependencies, tokens, overrides } = wrtFlowHarness({
+    AbortController,
+    Error,
+  })
+  const destroy = []
+  let disconnected = 0
+  dependencies.set(tokens.DestroyRef, {
+    onDestroy: callback => destroy.push(callback),
+  })
+  dependencies.set(overrides.get('src/app/i18n/i18n.pipe').i18nPipe, {
+    transform: value => value,
+  })
+  dependencies.set(
+    load('projects/start-wrt/web/src/app/services/api/api.service.ts')
+      .ApiService,
+    { setupFlash },
+  )
+  dependencies.set(
+    load('projects/start-wrt/web/src/app/services/connection.service.ts')
+      .ConnectionService,
+    { reportUnreachable: () => disconnected++ },
+  )
+  const service = new (load(
+    'projects/start-wrt/web/src/app/routes/setup-wizard/service.ts',
+  ).SetupFlash)()
+  return {
+    service,
+    destroy: () => destroy.forEach(callback => callback()),
+    disconnected: () => disconnected,
+  }
+}
+
+for (const failure of [false, true]) {
+  test(`WRT flash waits for the actual terminal after copied bytes reach total: ${failure ? 'failure' : 'success'}`, async () => {
+    const copied = Promise.withResolvers()
+    const terminal = Promise.withResolvers()
+    let request
+    const fixture = wrtFlashHarness(async (params, options) => {
+      request = { params, options }
+      return {
+        initial: null,
+        items: (async function* () {
+          yield {
+            phase: 'copying',
+            copied: 100,
+            total: 100,
+            step: 2,
+            totalSteps: 3,
+          }
+          copied.resolve()
+          await terminal.promise
+          return null
+        })(),
+      }
+    })
+    let finished = false
+    const operation = fixture.service
+      .run({
+        mode: 'fresh-start',
+        password: 'unwrapped secret',
+        timezone: 'UTC',
+      })
+      .then(result => {
+        finished = true
+        return result
+      })
+    await copied.promise
+    assert.equal(fixture.service.copied(), 100)
+    assert.equal(fixture.service.running(), true)
+    assert.equal(finished, false)
+    assert.equal(request.params.password, 'unwrapped secret')
+    assert.equal(request.options.signal.aborted, false)
+    if (failure) terminal.reject(new Error('late provisioning failure'))
+    else terminal.resolve()
+    assert.equal(await operation, !failure)
+    assert.equal(fixture.service.running(), false)
+    assert.equal(
+      fixture.service.error(),
+      failure ? 'late provisioning failure' : null,
+    )
+    assert.equal(fixture.disconnected(), 0)
+  })
+}
+
+test('WRT flash disposal cancels pending observation without retry or late success', async () => {
+  let calls = 0
+  let signal
+  const fixture = wrtFlashHarness((params, options) => {
+    calls++
+    signal = options.signal
+    return new Promise((resolve, reject) =>
+      signal.addEventListener('abort', () => reject(signal.reason), {
+        once: true,
+      }),
+    )
+  })
+  const running = fixture.service.run({
+    mode: 'fresh-start',
+    password: 'fixture password',
+  })
+  fixture.destroy()
+  assert.equal(await running, false)
+  assert.equal(calls, 1)
+  assert.equal(signal.aborted, true)
+  assert.equal(fixture.service.error(), null)
+  assert.equal(fixture.disconnected(), 0)
+})
+
+test('WRT flash transport loss reuses the existing reconnect owner without replay', async () => {
+  let calls = 0
+  const fixture = wrtFlashHarness(async () => {
+    calls++
+    throw Object.assign(new Error('lost transport'), { code: 0 })
+  })
+  assert.equal(
+    await fixture.service.run({ mode: 'update', password: 'fixture password' }),
+    false,
+  )
+  assert.equal(calls, 1)
+  assert.equal(fixture.disconnected(), 1)
+  assert.equal(fixture.service.error(), 'lost transport')
+})
+
+test('WRT outage ownership aborts a stalled RPC session only on the first declaration', () => {
+  const { load } = wrtFlowHarness({ setInterval: () => 1 })
+  const service = Object.create(
+    load('projects/start-wrt/web/src/app/services/connection.service.ts')
+      .ConnectionService.prototype,
+  )
+  let unreachable = false
+  let aborted = 0
+  Object.assign(service, {
+    unreachable: Object.assign(() => unreachable, {
+      set: value => {
+        unreachable = value
+      },
+    }),
+    message: { set() {} },
+    sockets: { disconnect: () => aborted++ },
+    i18n: { transform: value => value },
+    alerts: { open: () => of(null) },
+    poll() {},
+  })
+  service.reportUnreachable()
+  service.reportUnreachable()
+  assert.equal(aborted, 1)
+  assert.equal(unreachable, true)
+})
+
+test('WRT every failed recovery probe discards its stalled multiplexed session', async () => {
+  const { load } = wrtFlowHarness()
+  const service = Object.create(
+    load('projects/start-wrt/web/src/app/services/connection.service.ts')
+      .ConnectionService.prototype,
+  )
+  let aborted = 0
+  Object.assign(service, {
+    api: {
+      systemInfo: async timeout => {
+        assert.equal(timeout, 5000)
+        throw { code: 0 }
+      },
+    },
+    sockets: { disconnect: () => aborted++ },
+    staleUi: { check: () => assert.fail('no firmware response') },
+    recover: () => assert.fail('still offline'),
+  })
+  await service.poll()
+  await service.poll()
+  assert.equal(aborted, 2)
+})
+
+test('WRT interrupted-update recovery cannot claim the requested version from an old firmware reply', async () => {
+  const { load } = wrtFlowHarness({
+    setTimeout: callback => queueMicrotask(callback),
+    sessionStorage: { setItem: () => assert.fail('no success confirmation') },
+    window: {
+      location: { reload: () => assert.fail('no successful-update reload') },
+    },
+  })
+  const service = Object.create(
+    load('projects/start-wrt/web/src/app/services/system.service.ts')
+      .SystemService.prototype,
+  )
+  let attempts = 0
+  let rebooting = true
+  const messages = []
+  Object.assign(service, {
+    targetVersion: '1.5.0',
+    updating: { set() {} },
+    rebooting: {
+      set: value => {
+        rebooting = value
+      },
+    },
+    api: {
+      systemInfo: async () => {
+        if (++attempts === 1) throw { code: 0 }
+        return { version: '1.4.0' }
+      },
+    },
+    connection: { resume() {} },
+    sockets: { disconnect() {} },
+    i18n: { transform: value => value },
+    alerts: {
+      open: message => {
+        messages.push(message)
+        return of(null)
+      },
+    },
+    staleUi: { isStale: () => true },
+  })
+  await service.pollForReconnect()
+  assert.equal(attempts, 2)
+  assert.equal(rebooting, false)
+  assert.deepEqual(messages, ['Update failed — check device logs'])
+})
+
+test('diagnostic mock reuses its initiating result and progress producer for typed terminals', async () => {
+  const { load } = harness(
+    new Map([
+      ['./api.fixures', { Mock: {} }],
+      ['./mock-patch', mockPatchFixture({})],
+      ['./md-sample.md', ''],
+    ]),
+  )
+  const mock = Object.create(
+    load(
+      'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+    ).MockApiService.prototype,
+  )
+  const legacyInit = await mock.initSubscription()
+  assert.equal(legacyInit.guid, 'init-progress-guid')
+  const init = await mock.initSubscriptionStream()
+  assert.equal(init.initial.guid, null)
+  assert.equal((await init.items.next()).value.overall.done, 0)
+  const initProgress = (await init.items.next()).value
+  assert.equal(initProgress.overall.done, initProgress.overall.total)
+  assert.equal((await init.items.next()).done, true)
+  const canceledInit = new AbortController()
+  canceledInit.abort()
+  await assert.rejects(
+    mock.initSubscriptionStream({ signal: canceledInit.signal }),
+    { name: 'AbortError' },
+  )
+  const legacy = await mock.diagnosticUpdate()
+  assert.equal(legacy.progress, 'update-progress-guid')
+  const response = await mock.diagnosticUpdateStream()
+  assert.equal(response.initial.target, legacy.target)
+  assert.equal(response.initial.progress, null)
+  const initial = await response.items.next()
+  assert.equal(initial.done, false)
+  assert.equal(initial.value.overall.done, 0)
+  const progress = await response.items.next()
+  assert.equal(progress.done, false)
+  assert.equal(progress.value.overall.done, progress.value.overall.total)
+  const final = await response.items.next()
+  assert.equal(final.done, true)
+  assert.equal(final.value, null)
+  mock.diagnosticUpdate = async () => ({ target: null, progress: null })
+  mock.initProgress = () => assert.fail('no-target calls do no work')
+  const empty = await mock.diagnosticUpdateStream()
+  assert.equal((await empty.items.next()).done, true)
+  const abort = new AbortController()
+  abort.abort()
+  await assert.rejects(mock.diagnosticUpdateStream({ signal: abort.signal }), {
+    name: 'AbortError',
+  })
+})
+
+function initializingHarness(subscribe) {
+  const StateService = Symbol('state')
+  const { dependencies, tokens, load } = harness(
+    new Map([['src/app/services/state.service', { StateService }]]),
+    { AbortController, Error },
+  )
+  const probes = []
+  const destroy = []
+  const { StartupApiService } = load(
+    'projects/start-os/web/ui/src/app/services/api/startup-api.service.ts',
+  )
+  dependencies.set(StartupApiService, { streams: { init: { subscribe } } })
+  dependencies.set(StateService, { retrigger: (...args) => probes.push(args) })
+  dependencies.set(tokens.DestroyRef, {
+    onDestroy: callback => destroy.push(callback),
+  })
+  const service = new (load(
+    'projects/start-os/web/ui/src/app/routes/initializing/service.ts',
+  ).InitializingProgress)()
+  return {
+    service,
+    probes,
+    destroy: () => destroy.forEach(callback => callback()),
+  }
+}
+
+for (const failed of [false, true]) {
+  test(`initializing probes state after the actual terminal, not 100 percent: ${failed ? 'failure' : 'success'}`, async () => {
+    const reached = Promise.withResolvers()
+    const terminal = Promise.withResolvers()
+    const retried = Promise.withResolvers()
+    let calls = 0
+    let signal
+    const fixture = initializingHarness(async (_, options) => {
+      signal = options.signal
+      if (++calls > 1) {
+        retried.resolve()
+        return new Promise(() => {})
+      }
+      return {
+        initial: { progress: { overall: false, phases: [] }, guid: null },
+        items: (async function* () {
+          yield { overall: true, phases: [] }
+          reached.resolve()
+          await terminal.promise
+          if (failed) throw new Error('late init failure')
+          return null
+        })(),
+      }
+    })
+    await reached.promise
+    assert.equal(fixture.service.progress().total, 1)
+    assert.equal(fixture.probes.length, 0)
+    terminal.resolve()
+    if (failed) await retried.promise
+    else await new Promise(setImmediate)
+    assert.equal(fixture.probes.length, 1)
+    assert.equal(fixture.probes[0][0], true)
+    assert.equal(fixture.probes[0][1], 250)
+    assert.equal(calls, failed ? 2 : 1)
+    fixture.destroy()
+    assert.equal(signal.aborted, true)
+  })
+}
+
+for (const pendingInitial of [false, true]) {
+  test(`initializing disposal cancels ${pendingInitial ? 'acquisition' : 'iteration'} without a late state probe or retry`, async () => {
+    const blocked = Promise.withResolvers()
+    const reached = Promise.withResolvers()
+    let signal
+    let calls = 0
+    const fixture = initializingHarness(async (_, options) => {
+      calls++
+      signal = options.signal
+      if (pendingInitial) await blocked.promise
+      return {
+        initial: { progress: { overall: false, phases: [] }, guid: null },
+        items: (async function* () {
+          reached.resolve()
+          await blocked.promise
+          throw new Error('disposed init')
+        })(),
+      }
+    })
+    if (!pendingInitial) await reached.promise
+    fixture.destroy()
+    assert.equal(signal.aborted, true)
+    blocked.resolve()
+    await new Promise(setImmediate)
+    assert.equal(fixture.probes.length, 0)
+    assert.equal(calls, 1)
+    assert.equal(fixture.service.progress().total, 0)
+  })
+}
+
+function diagnosticUpdateHarness(update) {
+  const { dependencies, tokens, load } = harness(new Map(), {
+    AbortController,
+    Error,
+  })
+  const errors = []
+  const alerts = []
+  const checks = []
+  const destroy = []
+  const { StartupApiService } = load(
+    'projects/start-os/web/ui/src/app/services/api/startup-api.service.ts',
+  )
+  dependencies.set(StartupApiService, { streams: { diagnostic: { update } } })
+  dependencies.set(tokens.DestroyRef, {
+    onDestroy: callback => destroy.push(callback),
+  })
+  dependencies.set(tokens.ErrorService, {
+    handleError: error => errors.push(error),
+  })
+  dependencies.set(tokens.DialogService, {
+    openAlert: message => {
+      alerts.push(message)
+      return of(null)
+    },
+  })
+  dependencies.set(tokens.TaskService, {
+    run: async (task, label) => {
+      checks.push(label)
+      try {
+        await task()
+        return true
+      } catch (error) {
+        errors.push(error)
+        return false
+      }
+    },
+  })
+  const service = new (load(
+    'projects/start-os/web/ui/src/app/routes/diagnostic/home/update.service.ts',
+  ).DiagnosticUpdate)()
+  return {
+    service,
+    errors,
+    alerts,
+    checks,
+    destroy: () => destroy.forEach(callback => callback()),
+  }
+}
+
+for (const failure of [false, true]) {
+  test(`diagnostic update requires the terminal after 100 percent: ${failure ? 'late failure' : 'success'}`, async () => {
+    const reached = Promise.withResolvers()
+    const terminal = Promise.withResolvers()
+    let calls = 0
+    const fixture = diagnosticUpdateHarness(async (params, options) => {
+      calls++
+      assert.equal(params.progress, true)
+      assert.equal(options.signal.aborted, false)
+      return {
+        initial: { target: '0.4.2.1', progress: null },
+        items: (async function* () {
+          yield { overall: true, phases: [] }
+          reached.resolve()
+          await terminal.promise
+          return null
+        })(),
+      }
+    })
+    let done = false
+    const pending = fixture.service.update().then(() => (done = true))
+    await reached.promise
+    assert.equal(fixture.service.progress().total, 1)
+    assert.equal(fixture.service.updated(), false)
+    assert.equal(done, false)
+    assert.deepEqual(fixture.checks, ['Checking for updates'])
+    if (failure) terminal.reject(new Error('late finalization error'))
+    else terminal.resolve()
+    await pending
+    assert.equal(fixture.service.updated(), !failure)
+    assert.equal(fixture.service.progress(), null)
+    assert.equal(fixture.service.target(), '0.4.2.1')
+    assert.equal(fixture.errors.length, failure ? 1 : 0)
+    assert.equal(fixture.alerts.length, 0)
+    assert.equal(calls, 1)
+  })
+}
+
+for (const loss of [false, true]) {
+  test(`diagnostic no-target waits for its terminal: ${loss ? 'loss' : 'success'}`, async () => {
+    const started = Promise.withResolvers()
+    const terminal = Promise.withResolvers()
+    const fixture = diagnosticUpdateHarness(async () => ({
+      initial: { target: null, progress: null },
+      items: (async function* () {
+        started.resolve()
+        await terminal.promise
+        return null
+      })(),
+    }))
+    const pending = fixture.service.update()
+    await started.promise
+    assert.equal(fixture.alerts.length, 0)
+    if (loss)
+      terminal.reject(Object.assign(new Error('transport lost'), { code: 0 }))
+    else terminal.resolve()
+    await pending
+    assert.equal(fixture.alerts.length, loss ? 0 : 1)
+    assert.equal(fixture.errors.length, loss ? 1 : 0)
+    assert.equal(fixture.service.updated(), false)
+  })
+}
+
+test('diagnostic initial errors are reported once without a false empty result or replay', async () => {
+  let calls = 0
+  const error = new Error('initial error')
+  const fixture = diagnosticUpdateHarness(async () => {
+    calls++
+    throw error
+  })
+  await fixture.service.update()
+  assert.equal(fixture.errors.length, 1)
+  assert.equal(fixture.errors[0], error)
+  assert.equal(fixture.alerts.length, 0)
+  assert.equal(fixture.service.updated(), false)
+  assert.equal(calls, 1)
+})
+
+for (const stage of ['initial', 'items']) {
+  test(`diagnostic disposal cancels ${stage} without late success or error UI`, async () => {
+    const started = Promise.withResolvers()
+    let calls = 0
+    let signal
+    const fixture = diagnosticUpdateHarness(async (params, options) => {
+      calls++
+      signal = options.signal
+      const wait = () =>
+        new Promise((resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), {
+            once: true,
+          })
+          started.resolve()
+        })
+      if (stage === 'initial') return wait()
+      return {
+        initial: { target: '0.4.2.1', progress: null },
+        items: (async function* () {
+          yield { overall: true, phases: [] }
+          await wait()
+          return null
+        })(),
+      }
+    })
+    const pending = fixture.service.update()
+    await started.promise
+    fixture.destroy()
+    await pending
+    assert.equal(signal.aborted, true)
+    assert.equal(fixture.service.updated(), false)
+    assert.equal(fixture.service.progress(), null)
+    assert.equal(fixture.errors.length, 0)
+    assert.equal(fixture.alerts.length, 0)
+    assert.equal(calls, 1)
+  })
+}
 
 function startupStateHarness() {
   const rxjs = require('rxjs')
@@ -1603,7 +3220,10 @@ function startupStateHarness() {
       ['@taiga-ui/cdk', {}],
       ['@taiga-ui/core', { TuiNotificationService: keys.alerts }],
       ['@taiga-ui/polymorpheus', { PolymorpheusComponent: class {} }],
-      ['src/app/services/api/embassy-api.service', { ApiService: keys.api }],
+      [
+        'src/app/services/api/startup-api.service',
+        { StartupApiService: keys.api },
+      ],
       ['src/app/services/network.service', { NetworkService: keys.network }],
     ]),
   )

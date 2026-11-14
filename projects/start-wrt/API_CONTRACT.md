@@ -1,10 +1,10 @@
 # StartWRT API Contract
 
-Complete RPC API contract for the StartWRT backend. All endpoints use **JSON-RPC 2.0** over a single HTTP POST endpoint. Request and response types are defined in Rust.
+Complete RPC API contract for the StartWRT backend. RPC uses **JSON-RPC 2.0** over signed ephemeral-DH WebSocket sessions at `/rpc/v2`; HTTP POST `/rpc/v1` remains for compatibility clients. Browser bootstrap and native missing-key/local-token calls use encrypted admission without enrollment. Request and response types are defined in Rust.
 
 **Goal:** The frontend should never touch UCI files, run shell commands, or read raw files. Every operation goes through a purpose-built RPC method. The backend handles all UCI manipulation, service restarts, and system queries internally.
 
-Every `/rpc/v1` response carries an `x-startwrt-git-hash` header with the firmware's build stamp (full git hash, `-modified` suffix on dirty builds — same value as `system.info`'s `gitHash`, exposed through CORS). The UI compares it against its baked-in `config.json` gitHash on every response, so an open tab detects a firmware update from its next request (including the periodic background form polls) even when the daemon restart was too quick to drop a connection.
+RPC replies carry generated `FirmwareMetadata` as `meta.gitHash`, including authorization errors; encrypted replies authenticate that value. Every `/rpc/v1` response also retains an `x-startwrt-git-hash` header with the firmware's build stamp (full git hash, `-modified` suffix on dirty builds — same value as `system.info`'s `gitHash`, exposed through CORS). The UI compares authenticated RPC metadata against its baked-in `config.json` gitHash on every response, so an open tab detects a firmware update from its next request (including the periodic background form polls) even when the daemon restart was too quick to drop a connection.
 
 ---
 
@@ -50,16 +50,20 @@ enum Protocol {
 
 ## 1. Auth
 
-A request is authorized if either credential is valid:
+A request is authorized through a verified encrypted peer or a compatibility credential:
 
-- **Request signature** — an `X-Start-Auth-Sig` header carrying an Ed25519 signature, by a key enrolled through `auth.login`, over a timestamp, a nonce, the body's BLAKE3 hash, and the server identity the client addressed (`router.lan`, `router.local`, any non-loopback address on the router's interfaces, or the enabled DDNS hostname; a loopback address only from a loopback peer). The protocol is `start-core`'s `SignatureAuth`; the browser holds a non-extractable WebCrypto key in IndexedDB. Timestamps must fall within 30 seconds of the router's clock once ntpd reports valid time; a replayed nonce is rejected.
+- **Encrypted session** — `/rpc/v2` requires the shared two-message captured-CBOR signed ephemeral-DH exchange. Generic request-commitment proofs authenticate independent client/server signing schemes; X25519, HKDF-SHA256 and AES-256-GCM use maintained standard implementations. Client signing finishes before connection/response deadlines without exporting its private key. The selected name follows the existing hostname/ingress policy. Following messages carry no per-request proof; enrollment/expiry/revocation and login hooks remain live per call. Rejected admission never falls back to plaintext. Secure-origin GUIDs require a fresh exchange proving the same peer and signed intent for that GUID; RPC and GUID admission share the live nonce/clock owner; legacy-origin GUIDs retain their original contract. Application close results are encrypted; physical EOF is not an authenticated update result.
+
+- **HTTP signature** — `X-Start-Auth-Sig` from a key enrolled through `auth.login`. Compatibility clients use `@start9labs/start-core`'s `auth.signRequest` over captured raw body bytes. It binds the body, timestamp, nonce and addressed server identity (`router.lan`, `router.local`, any non-loopback address on the router's interfaces, or the enabled DDNS hostname; a loopback address only from a loopback peer). Timestamps must fall within 30 seconds of the router's clock once ntpd reports valid time; a replayed nonce is rejected.
 - **Local auth token** — `Authorization: Bearer <token>`, where the token is the contents of `/run/startwrt/rpc.authcookie` (regenerated at daemon start, mode `0640`, `root:root`). `startwrt-cli` sends it only to loopback hosts.
+
+Keyed CLI calls use the shared encrypted transport with `~/.startwrt/id.key.pem`; fresh hello signing precedes transport deadlines. Local-token calls and calls without an initialized key use a client-lifetime unpersisted proof identity on the same encrypted transport; local tokens remain loopback-only and grant their existing authority. A malformed key or rejected encrypted admission does not fall back to plaintext. CLI log/update commands return GUID responses for separate continuation consumers.
 
 Endpoints registered with `authenticated: false` metadata answer without either. Enrolled keys persist in `/etc/startwrt/auth.db`, which sysupgrade keeps, and stay valid until revoked by `auth.logout`, `auth.session.kill`, or a password change, or until 24 hours after their `loggedIn` time, however recently they were used. The microSD wizard's Keep settings reflash does not carry them over. An expired key is rejected as unauthorized (code 34) on its next request. Before ntpd reports valid time the check judges age alone; afterwards a `loggedIn` more than 5 minutes in the future also counts as expired. The sweep that unenrolls expired keys runs hourly and waits for ntpd to report valid time.
 
 ### `auth.login`
 
-The request must be signed by the key it enrolls. A valid local auth token rejects the call as unnecessary. Before first-time setup sets a password, every login fails with Uninitialized (code 40).
+The call must prove the key it enrolls through encrypted admission or a compatibility request signature. A valid local auth token rejects the call as unnecessary. Before first-time setup sets a password, every login fails with Uninitialized (code 40).
 
 ```rust
 #[derive(Deserialize)]
@@ -176,16 +180,14 @@ struct CheckInitializedRes {
 ### `auth.set-initial-password`
 
 First-time setup: no auth required. Rejected once a password is already set.
-Enrolls nothing — the setup page runs over plain HTTP, where a browser cannot
-sign, so the user logs in afterwards over HTTPS.
+Enrolls nothing. Bootstrap possession works on ordinary HTTP through the shared encrypted transport; device-key login remains over HTTPS.
 
 ```rust
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SetInitialPasswordParams {
-    /// Encrypted to the `setup.get-pubkey` key; minimum 12 characters
-    /// (same rule as auth.set-password)
-    password: EncryptedWire,
+    /// Minimum 12 characters, as for auth.set-password.
+    password: PasswordType, // string within admitted RPC, or legacy EncryptedWire
     /// IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
     timezone: Option<String>,
 }
@@ -260,11 +262,11 @@ struct UpdateSystemParams {
 #[serde(rename_all = "camelCase")]
 struct UpdateSystemRes {
     target: Option<String>,   // Version being installed
-    progress: Option<String>, // GUID for /ws/rpc/{guid}
+    progress: Option<String>, // GUID for /rpc/v2/{guid}
 }
 ```
 
-#### WebSocket progress: `/ws/rpc/{guid}`
+#### WebSocket progress: `/rpc/v2/{guid}`
 
 Connect via WebSocket to stream `FullProgress` JSON frames:
 
@@ -395,7 +397,7 @@ struct FollowLogsRes {
 // Response: FollowLogsRes
 ```
 
-1. Client opens a WebSocket to `/ws/rpc/{guid}` within 30 seconds; the GUID is single-use
+1. Client opens a WebSocket to `/rpc/v2/{guid}` within 30 seconds; the GUID is single-use
 2. Server spawns `logread -f` (dumps historical entries then follows new ones)
 3. Each line is parsed into `LogEntry` and sent as a JSON text frame
 4. Connection closes when either side disconnects, or when the key that requested it is revoked; child process is killed on drop
@@ -2205,18 +2207,22 @@ struct DiskState {
 }
 ```
 
+### `setup.flash`
+
+Public setup command requiring a typed response stream. `FlashParams` carries `mode`, `password: PasswordType` and optional `timezone`; unwrapped passwords require completed encrypted admission. Initial success is null, items are `SetupEvent` progress, and the final null confirms the actual provisioning result. Progress counters are not completion.
+
+The daemon's exclusion gate is shared with legacy `POST /api/setup/flash`. Accepted work retains that gate through worker completion; observation cancellation or transport loss never aborts firmware writes. No observer retries the command automatically. The non-Send operation reuses start-core's `make_send` runtime owner. Legacy NDJSON adapts the same operation result into Complete/Error events; typed RPC carries its outcome in the terminal instead. Legacy HTTP still requires JWE for passwords and retains the public-key endpoint. Unwrapped HTTP inputs return an NDJSON error before work starts.
+
 ### `setup.get-pubkey`
 
 No auth required. Returns the public half of an ephemeral P-256 key the daemon
-generates each time it starts. `auth.set-initial-password` and
-`/api/setup/flash` take the admin password encrypted to it, since both run over
-plain HTTP before the router's CA is trusted.
+generates each time it starts. `/api/setup/flash` and legacy HTTP first-password clients encrypt the admin password to it. New first-password and flash clients send a string inside admitted RPC; the shared password decoder rejects unwrapped input without a completed encrypted session.
 
 ```rust
 // Request: {}
 // Response: public JWK, e.g. { "kty": "EC", "crv": "P-256", "x": "…", "y": "…" }
 
-/// start-core's `EncryptedWire`, as StartOS setup sends it
+/// Legacy password envelope from start-core.
 struct EncryptedWire {
     /// JWE JSON serialization: alg ECDH-ES, enc A128CBC-HS256
     encrypted: Value,
@@ -2449,19 +2455,20 @@ struct ConfigCheck {
 
 ## HTTP Routes
 
-Every RPC method above is a JSON-RPC 2.0 call to a single endpoint: **`POST /rpc/v1`**.
+Every RPC method above uses JSON-RPC 2.0 through **`/rpc/v2`** for keyed browser/CLI sessions, or **`POST /rpc/v1`** for anonymous and compatibility callers.
 The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 
-| Route                                              | Method    | Auth                                       | Purpose                                                                                       |
-| -------------------------------------------------- | --------- | ------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `/rpc/v1`                                          | POST      | Request signature or local token (see § 1) | JSON-RPC 2.0 endpoint for all RPC methods                                                     |
-| `/rest/rpc/{guid}`                                 | GET/POST  | GUID capability (one-shot)                 | RPC continuation: binary download (backup, diagnostics) / upload (restore); 64 MiB body limit |
-| `/ws/rpc/{guid}`                                   | WebSocket | GUID capability (one-shot)                 | Streaming: update progress (`system.update`), live logs (`system.logs-follow`)                |
-| `/api/setup/flash`                                 | POST      | None (setup wizard)                        | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time             |
-| `/static/local-root-ca.crt`                        | GET       | None                                       | Root CA certificate download                                                                  |
-| `/static/local-root-ca.mobileconfig`               | GET       | None                                       | Root CA as an Apple configuration profile                                                     |
-| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any       | LuCI's own; HTTPS only                     | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`        |
-| everything else                                    | any       | None                                       | Embedded web UI                                                                               |
+| Route                                              | Method                                  | Auth                                                                                   | Purpose                                                                                       |
+| -------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `/rpc/v2`                                          | WebSocket GET / HTTP/2 extended CONNECT | Signed-DH admission + live authorization (see § 1)                                     | Encrypted JSON-RPC for keyed browser and CLI calls                                            |
+| `/rpc/v1`                                          | POST                                    | Request signature or local token (see § 1)                                             | JSON-RPC 2.0 compatibility/anonymous endpoint                                                 |
+| `/rest/rpc/{guid}`                                 | GET/POST                                | GUID capability (one-shot)                                                             | RPC continuation: binary download (backup, diagnostics) / upload (restore); 64 MiB body limit |
+| `/rpc/v2/{guid}` (legacy alias `/ws/rpc/{guid}`)   | WebSocket                               | GUID capability; secure origin requires fresh same-peer admission signed for that GUID | Streaming: update progress (`system.update`), live logs (`system.logs-follow`)                |
+| `/api/setup/flash`                                 | POST                                    | None (setup wizard)                                                                    | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time             |
+| `/static/local-root-ca.crt`                        | GET                                     | None                                                                                   | Root CA certificate download                                                                  |
+| `/static/local-root-ca.mobileconfig`               | GET                                     | None                                                                                   | Root CA as an Apple configuration profile                                                     |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any                                     | LuCI's own; HTTPS only                                                                 | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`        |
+| everything else                                    | any                                     | None                                                                                   | Embedded web UI                                                                               |
 
 ---
 
@@ -2489,6 +2496,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `system.logs`                       | System          |                             |
 | `system.logs-follow`                | System          |                             |
 | `setup.status`                      | Setup           | No auth                     |
+| `setup.flash`                       | Setup           | Public typed stream         |
 | `setup.get-pubkey`                  | Setup           | No auth                     |
 | `wan.ipv4-get`                      | WAN             |                             |
 | `wan.ipv4-set`                      | WAN             |                             |

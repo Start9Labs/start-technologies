@@ -35,6 +35,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let directory = Path::new(&directory);
     std::fs::create_dir_all(directory.join("rpc"))?;
     let rpc = directory.join("rpc");
+    std::fs::write(
+        directory.join("session-profile.ts"),
+        format!(
+            "export const SESSION_PROFILE = {} as const\n",
+            serde_json::to_string_pretty(&start_core::middleware::auth::session::browser_profile())?,
+        ),
+    )?;
+    let mut signature_profile = start_core::sign::browser_profile();
+    signature_profile["http"] = start_core::middleware::auth::signature::wire_profile();
+    std::fs::write(
+        directory.join("signature-profile.ts"),
+        format!(
+            "export const SIGNATURE_PROFILE = {} as const\n",
+            serde_json::to_string_pretty(&signature_profile)?,
+        ),
+    )?;
+    write_pair(
+        directory,
+        "session",
+        export_namespace("start_core", "session", "./session.schemas")?,
+    )?;
     write_api(&rpc, "start-os", start_core::main_api::<RpcContext>())?;
     write_api(&rpc, "setup", start_core::main_api::<SetupContext>())?;
     write_api(&rpc, "init", start_core::main_api::<InitContext>())?;
@@ -98,7 +119,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     std::fs::write(
         directory.join("rpc/index.ts"),
-        "export type { Api as StartOS } from './start-os'\nexport type { Api as Setup } from './setup'\nexport type { Api as Init } from './init'\nexport type { Api as Diagnostic } from './diagnostic'\nexport type { Api as Registry } from './registry'\nexport type { Api as Tunnel } from './tunnel'\nexport type { Api as Effects } from './effects'\nexport type { RpcMethod, RpcParamType, RpcReturnType } from './start-os'\n",
+        format!(
+            "{}export type {{ {} }} from './start-os'\n",
+            "export type { Api as StartOS } from './start-os'\nexport type { Api as Setup } from './setup'\nexport type { Api as Init } from './init'\nexport type { Api as Diagnostic } from './diagnostic'\nexport type { Api as Registry } from './registry'\nexport type { Api as Tunnel } from './tunnel'\nexport type { Api as Effects } from './effects'\n",
+            rpc_toolkit::ts::type_helper_names()
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
     )?;
     Ok(())
 }
