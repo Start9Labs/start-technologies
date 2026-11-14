@@ -73,6 +73,7 @@ get_variables() {
 }
 check_variables() { return 0; }
 sfdisk() {
+    cat > /dev/null
     printf '%s\n' "$*" >> "$SFDISK_LOG"
 }
 partx() { return 0; }
