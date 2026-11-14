@@ -25,7 +25,7 @@ use crate::net::service_interface::{
 use crate::net::vhost::AlpnInfo;
 use crate::prelude::*;
 use crate::util::FromStrParser;
-use crate::util::serde::{HandlerExtSerde, display_serializable};
+use crate::util::serde::{HandlerExtSerde, MaybeUtf8String, display_serializable};
 use crate::util::tui::choose_custom_display;
 use crate::{GatewayId, HostId, ServiceInterfaceId};
 
@@ -475,17 +475,15 @@ impl std::ops::DerefMut for Bindings {
     }
 }
 
-/// Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
-///
-/// Keyed by `internal_start_port` in [`BindingRanges`]. The range covers
-/// `internal_start_port..(internal_start_port + number_of_ports)` and is
-/// forwarded through a single iptables rule per protocol per gateway,
-/// preserving the destination port number.
+/// A contiguous binding keyed by its internal start port in [`BindingRanges`].
+/// External ports map to internal ports by offset.
 #[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct RangeBindInfo {
     pub enabled: bool,
+    #[serde(default)]
+    pub transport: crate::net::transport::Transport,
     pub external_start_port: u16,
     pub number_of_ports: u16,
     /// Reachable addresses for this range (LAN IPv4 / WAN IPv4 / mDNS /
@@ -770,6 +768,9 @@ rpc_toolkit::ts_export!(Security, namespaces = [""]);
 #[serde(rename_all = "camelCase", try_from = "CompatibleBindOptions")]
 #[visit(type_attributes(serde::try_from))]
 pub struct BindOptions {
+    /// Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+    #[serde(default)]
+    pub transport: crate::net::transport::Transport,
     pub preferred_external_port: u16,
     pub add_ssl: Option<AddSslOptions>,
     pub secure: Option<Security>,
@@ -801,6 +802,8 @@ rpc_toolkit::ts_export!(ProxyOptions, namespaces = [""]);
 #[derive(Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 struct CompatibleBindOptions {
+    #[serde(default)]
+    transport: crate::net::transport::Transport,
     preferred_external_port: u16,
     add_ssl: Option<LegacyProxySslOptions>,
     secure: Option<Security>,
@@ -837,11 +840,22 @@ impl TryFrom<CompatibleBindOptions> for BindOptions {
             legacy.ssl
         });
         let options = Self {
+            transport: options.transport,
             preferred_external_port: options.preferred_external_port,
             add_ssl,
             secure: options.secure,
             proxy,
         };
+        if !options
+            .transport
+            .protocols()
+            .contains(&crate::net::transport::TransportProtocol::Tcp)
+            && (options.proxy.is_some()
+                || options.add_ssl.is_some()
+                || options.secure.is_some_and(|s| s.ssl))
+        {
+            return Err("HTTP proxying and TLS require TCP transport");
+        }
         if options.serves_own_tls() && options.proxy.is_some() {
             return Err("HTTP proxying requires TLS termination for a TLS container");
         }
@@ -856,6 +870,23 @@ impl BindOptions {
     /// OS-terminated plaintext stays private, including IPv6 GUAs.
     pub fn allows_public_address(&self, ssl: bool) -> bool {
         ssl || self.secure.is_some()
+    }
+
+    pub(crate) fn server_ui() -> Self {
+        Self {
+            transport: crate::net::transport::Transport::tcp(),
+            preferred_external_port: 80,
+            add_ssl: Some(AddSslOptions {
+                preferred_external_port: super::SERVER_UI_SSL_PORT,
+                alpn: Some(AlpnInfo(vec![
+                    MaybeUtf8String("h2".into()),
+                    MaybeUtf8String("http/1.1".into()),
+                ])),
+                upstream_cert_validation: None,
+            }),
+            secure: None,
+            proxy: None,
+        }
     }
 
     /// The container terminates TLS itself; the OS fronts its port with an
@@ -1995,8 +2026,79 @@ mod test {
         }
     }
 
+    #[test]
+    fn server_ui_declares_tcp() {
+        assert_eq!(
+            BindOptions::server_ui().transport,
+            crate::net::transport::Transport::tcp(),
+        );
+    }
+
+    #[test]
+    fn binding_transport_defaults_both_and_round_trips_explicit_choices() {
+        use crate::net::transport::Transport;
+
+        let legacy = serde_json::json!({"preferredExternalPort": 5353});
+        let options: BindOptions = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(options.transport, Transport::default());
+        for (wire, transport, expected) in [
+            (
+                serde_json::json!("tcp"),
+                Transport::tcp(),
+                serde_json::json!(["tcp"]),
+            ),
+            (
+                serde_json::json!("udp"),
+                Transport::udp(),
+                serde_json::json!(["udp"]),
+            ),
+            (
+                serde_json::json!(["udp", "tcp"]),
+                Transport::default(),
+                serde_json::json!(["tcp", "udp"]),
+            ),
+        ] {
+            let mut input = legacy.clone();
+            input["transport"] = wire;
+            let options: BindOptions = serde_json::from_value(input).unwrap();
+            assert_eq!(options.transport, transport);
+            assert_eq!(
+                serde_json::to_value(options).unwrap()["transport"],
+                expected
+            );
+        }
+        let range: RangeBindInfo = serde_json::from_value(serde_json::json!({
+            "enabled": true, "externalStartPort": 42000, "numberOfPorts": 10,
+        }))
+        .unwrap();
+        assert_eq!(range.transport, Transport::default());
+        assert!(
+            serde_json::from_value::<BindOptions>(serde_json::json!({
+                "preferredExternalPort": 5353, "transport": "sctp",
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn udp_bindings_reject_stream_proxy_and_tls_options() {
+        for options in [
+            serde_json::json!({"proxy": {"type": "http"}}),
+            serde_json::json!({"addSsl": {"preferredExternalPort": 443}}),
+            serde_json::json!({"secure": {"ssl": true}}),
+        ] {
+            for transport in [serde_json::json!("udp"), serde_json::json!(["udp", "udp"])] {
+                let mut input = options.clone();
+                input["preferredExternalPort"] = 5353.into();
+                input["transport"] = transport;
+                assert!(serde_json::from_value::<BindOptions>(input).is_err());
+            }
+        }
+    }
+
     fn opts(preferred: u16, add_ssl: Option<u16>, ssl: Option<bool>) -> BindOptions {
         BindOptions {
+            transport: Default::default(),
             preferred_external_port: preferred,
             add_ssl: add_ssl.map(|preferred_external_port| AddSslOptions {
                 preferred_external_port,
@@ -2256,6 +2358,7 @@ mod test {
         ports.try_alloc_range(65534, 2, privileged).unwrap();
         let range = RangeBindInfo {
             enabled: true,
+            transport: Default::default(),
             external_start_port: 65534,
             number_of_ports: 2,
             addresses: Default::default(),
@@ -3657,6 +3760,7 @@ mod test {
     fn range_info(external_start_port: u16, number_of_ports: u16, enabled: bool) -> RangeBindInfo {
         RangeBindInfo {
             enabled,
+            transport: Default::default(),
             external_start_port,
             number_of_ports,
             addresses: Default::default(),

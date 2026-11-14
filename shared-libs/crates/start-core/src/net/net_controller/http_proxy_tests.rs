@@ -1,9 +1,10 @@
 use super::*;
 use crate::db::model::public::IpInfo;
-use crate::net::host::binding::{ProxyOptions, Security};
+use crate::net::host::binding::{AddSslOptions, ProxyOptions, Security};
 
 fn options() -> BindOptions {
     BindOptions {
+        transport: Default::default(),
         preferred_external_port: 8080,
         add_ssl: Some(AddSslOptions {
             preferred_external_port: 8443,
@@ -109,6 +110,7 @@ fn plaintext_http_exposure_keeps_internal_and_explicit_private_addresses() {
             "192.0.2.12".parse().unwrap(),
         ]),
         secure: false,
+        transport: Default::default(),
     };
     for trusted in [false, true] {
         let interfaces = [(
@@ -171,6 +173,7 @@ fn plaintext_http_public_scope_is_per_family_and_private_domains_keep_their_lan_
             "2001:db8::10".parse().unwrap(),
         ]),
         secure: true,
+        transport: Default::default(),
     };
     let gua = row(
         "2001:db8::10",

@@ -1094,4 +1094,5 @@ export const ENGLISH: Record<string, number> = {
   'Current fingerprint': 1292,
   'Error details are not available': 1293,
   'Unreachable': 1294,
+  'Transport': 1295,
 }

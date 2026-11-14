@@ -23,23 +23,21 @@ use crate::net::forward::{
     ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, nft_rule, nft_rule_v6,
 };
 use crate::net::gateway::{NetworkInterfaceController, WildcardListener};
-use crate::net::host::binding::{AddSslOptions, BindId, BindOptions, UpstreamCertValidation};
-use crate::net::host::{Host, Hosts, SERVER_UI_SSL_PORT, host_for, host_for_existing};
+use crate::net::host::binding::{BindId, BindOptions, UpstreamCertValidation};
+use crate::net::host::{Host, Hosts, host_for, host_for_existing};
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::service_interface::{
     AddressInfo, HostnameInfo, HostnameMetadata, ServiceInterface, ServiceInterfaceType,
 };
 use crate::net::socks::SocksController;
-use crate::net::vhost::{
-    AlpnInfo, DynVHostTarget, PlainHttpProxy, ProxyTarget, VHostController, VHostKey,
-};
+use crate::net::transport::Transport;
+use crate::net::vhost::{DynVHostTarget, PlainHttpProxy, ProxyTarget, VHostController, VHostKey};
 use crate::net::web_server::WebServerAcceptorSetter;
 use crate::net::{SERVICE_OUTBOUND_REJECT_RULE_PRIORITY, SERVICE_OUTBOUND_RULE_PRIORITY};
 use crate::prelude::*;
 use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
-use crate::util::serde::MaybeUtf8String;
 use crate::util::sync::{SyncMutex, Watch};
 use crate::{GatewayId, HOST_IP, HostId, Id, OptionExt, PackageId, ServiceInterfaceId};
 
@@ -247,23 +245,7 @@ impl NetController {
         })?;
         service.clear_bindings(Default::default()).await?;
         service
-            .bind(
-                HostId::admin(),
-                80,
-                BindOptions {
-                    preferred_external_port: 80,
-                    add_ssl: Some(AddSslOptions {
-                        preferred_external_port: SERVER_UI_SSL_PORT,
-                        alpn: Some(AlpnInfo(vec![
-                            MaybeUtf8String("h2".into()),
-                            MaybeUtf8String("http/1.1".into()),
-                        ])),
-                        upstream_cert_validation: Default::default(),
-                    }),
-                    secure: None,
-                    proxy: None,
-                },
-            )
+            .bind(HostId::admin(), 80, BindOptions::server_ui())
             .await?;
 
         // Sync the OS's own UI as a service interface (idempotent — the OS's
@@ -539,7 +521,7 @@ struct HostBinds {
     /// internal port, LAN source filter)`. A GUA on a port no listener of ours
     /// answers is DNAT'd to the container (see `forward6`); tracked so a stale
     /// forward is torn down when the GUA's exposure or target changes.
-    gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>)>,
+    gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>, Transport)>,
 }
 
 pub struct NetServiceData {
@@ -570,7 +552,7 @@ impl NetServiceData {
         // Non-SSL v6 DNAT forwards to the container — net_controller's concern (no
         // vhost owns them), but the forward controller opens their upstream pinhole
         // together with the DNAT (see the reconcile below).
-        let mut gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>)> =
+        let mut gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>, Transport)> =
             BTreeMap::new();
         let binds = self.binds.entry(id.clone()).or_default();
 
@@ -735,6 +717,7 @@ impl NetServiceData {
                     public_gateways: fwd_public,
                     private_ips: fwd_private,
                     secure: bind.options.secure.is_some(),
+                    transport: bind.options.transport.clone(),
                 };
                 if bind.options.proxy.is_some() {
                     http_ports.insert(external);
@@ -794,8 +777,15 @@ impl NetServiceData {
                         // container — no vhost owns a non-TLS port. The forward
                         // controller opens its upstream pinhole together with the
                         // DNAT (see the reconcile below).
-                        gua_forwards
-                            .insert((*gua.ip(), gua.port()), (container_v6, *port, src_filter));
+                        gua_forwards.insert(
+                            (*gua.ip(), gua.port()),
+                            (
+                                container_v6,
+                                *port,
+                                src_filter,
+                                bind.options.transport.clone(),
+                            ),
+                        );
                     }
                 }
             }
@@ -856,6 +846,7 @@ impl NetServiceData {
                         public_gateways,
                         private_ips,
                         secure: true,
+                        transport: range.transport.clone(),
                     },
                 ),
             );
@@ -875,7 +866,7 @@ impl NetServiceData {
         for (key, spec) in &binds.gua_forwards {
             if gua_forwards.get(key) != Some(spec) {
                 let &(gua, ext) = key;
-                let &(tgt, int, ref src) = spec;
+                let (tgt, int, src, transport) = spec.clone();
                 if let Err(e) = ctrl
                     .forward
                     .unforward6(
@@ -883,6 +874,7 @@ impl NetServiceData {
                         SocketAddrV6::new(tgt, int, 0, 0),
                         64,
                         src.clone(),
+                        transport,
                     )
                     .await
                 {
@@ -894,7 +886,7 @@ impl NetServiceData {
         for (key, spec) in &gua_forwards {
             if binds.gua_forwards.get(key) != Some(spec) {
                 let &(gua, ext) = key;
-                let &(tgt, int, ref src) = spec;
+                let (tgt, int, src, transport) = spec.clone();
                 // PCP candidates for the pinhole (only used for a WAN forward).
                 let gateways: Vec<(IpAddr, Option<u32>)> = if src.is_none() {
                     net_ifaces
@@ -923,6 +915,7 @@ impl NetServiceData {
                         64,
                         src.clone(),
                         gateways,
+                        transport,
                     )
                     .await
                 {
@@ -1438,6 +1431,7 @@ impl NetService {
         internal_start_port: u16,
         external_start_port: u16,
         number_of_ports: u16,
+        transport: Transport,
     ) -> Result<(), Error> {
         let (ctrl, pkg_id) = {
             let data = self.data.lock().await;
@@ -1468,6 +1462,7 @@ impl NetService {
                     external_start_port,
                     number_of_ports,
                     privileged,
+                    transport,
                 )?;
                 host.update_addresses(&hostname, &gateways, &ports)?;
                 // Isolate a newly-bound range from any pre-existing public domain
@@ -1723,7 +1718,9 @@ mod tests {
 
     use super::*;
     use crate::db::model::public::IpInfo;
-    use crate::net::host::binding::Security;
+    use crate::net::host::binding::{AddSslOptions, Security};
+    use crate::net::vhost::AlpnInfo;
+    use crate::util::serde::MaybeUtf8String;
 
     fn bind_options(
         add_ssl: bool,
@@ -1731,6 +1728,7 @@ mod tests {
         alpn: Option<AlpnInfo>,
     ) -> BindOptions {
         BindOptions {
+            transport: Default::default(),
             preferred_external_port: 443,
             add_ssl: add_ssl.then(|| AddSslOptions {
                 preferred_external_port: 443,
@@ -1767,6 +1765,7 @@ mod tests {
             public_gateways: BTreeSet::new(),
             private_ips: forwarded_lan_ips(selected.iter(), &interfaces),
             secure: false,
+            transport: Default::default(),
         };
         let target = || {
             binding_proxy_target(

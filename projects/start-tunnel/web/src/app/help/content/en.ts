@@ -141,7 +141,7 @@ Ports a server publishes for itself automatically (PCP/UPnP). Read-only here; ma
 
 ### Columns
 
-Label, the target **Server**, an optional TLS **Hostname** (SNI), the External and Internal ports, the protocol (always TCP/UDP), and the public **IP** it's reachable on.
+Label, the target **Server**, an optional TLS **Hostname** (SNI), the External and Internal ports, the protocol each row forwards (TCP, UDP, or TCP/UDP), and the public **IP** it's reachable on.
 
 <a href="https://docs.start9.com/start-tunnel/published-ports.html" target="_blank" rel="noreferrer">Learn more →</a>`,
 

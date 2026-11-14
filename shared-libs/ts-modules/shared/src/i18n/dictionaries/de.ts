@@ -1093,4 +1093,5 @@ export default {
   1292: 'Aktueller Fingerabdruck',
   1293: 'Fehlerdetails sind nicht verfügbar',
   1294: 'Nicht erreichbar',
+  1295: 'Transport',
 } satisfies i18n

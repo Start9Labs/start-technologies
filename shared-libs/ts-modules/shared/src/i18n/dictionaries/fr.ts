@@ -1093,4 +1093,5 @@ export default {
   1292: 'Empreinte actuelle',
   1293: 'Les détails de l’erreur ne sont pas disponibles',
   1294: 'Injoignable',
+  1295: 'Transport',
 } satisfies i18n

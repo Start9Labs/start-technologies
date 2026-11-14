@@ -178,10 +178,9 @@ export class InterfaceService {
               addressInfo,
               gatewayGroups: this.getRangeGatewayGroups(
                 addressInfo,
-                range.addresses,
+                range,
                 host,
                 gateways,
-                range.numberOfPorts,
               ),
               pluginGroups: [],
               anyAddSsl: Object.values(host.bindings).some(
@@ -215,33 +214,27 @@ export class InterfaceService {
       serviceInterface.addressInfo,
       serviceInterface.masked,
       serviceInterface.type === 'ui',
-      binding.options.addSsl,
-      binding.options.secure,
+      binding.options,
       host,
       gateways,
     )
   }
 
-  // Port ranges reuse the same per-gateway address grouping, but their
-  // addresses live on the range binding and are always non-SSL (no cert/CA).
-  // `numberOfPorts` drives the port-span shown in URLs and forwarding rules.
-  getRangeGatewayGroups(
+  private getRangeGatewayGroups(
     addressInfo: T.AddressInfo,
-    addresses: T.DerivedAddressInfo,
+    range: T.RangeBindInfo,
     host: T.Host,
     gateways: GatewayPlus[],
-    numberOfPorts: number,
   ): GatewayAddressGroup[] {
     return this.buildGatewayGroups(
-      addresses,
+      range.addresses,
       addressInfo,
       false,
       false,
-      null,
-      null,
+      { transport: range.transport, proxy: null, addSsl: null, secure: null },
       host,
       gateways,
-      numberOfPorts,
+      range.numberOfPorts,
     )
   }
 
@@ -250,8 +243,7 @@ export class InterfaceService {
     addressInfo: T.AddressInfo,
     masked: boolean,
     ui: boolean,
-    addSsl: T.AddSslOptions | null,
-    secure: T.Security | null,
+    options: Pick<T.BindOptions, 'transport' | 'proxy' | 'addSsl' | 'secure'>,
     host: T.Host,
     gateways: GatewayPlus[],
     count = 1,
@@ -281,6 +273,7 @@ export class InterfaceService {
           allIpsDisabled: false,
           gua: isGua(h) && (secure !== null || h.ssl),
           type: getAddressType(h),
+          transport: utils.addressTransport(options, h),
           access: h.public ? 'public' : 'private',
           // A port range exposes a span of ports, not one, so its URL is the
           // bare host (no port) — the span is shown once in the interface
@@ -295,8 +288,8 @@ export class InterfaceService {
           deletable:
             h.metadata.kind === 'private-domain' ||
             h.metadata.kind === 'public-domain',
-          certificate: getCertificate(h, host, addSsl, secure),
-          acme: getAcmeProvider(h, host, addSsl),
+          certificate: getCertificate(h, host, options.addSsl, options.secure),
+          acme: getAcmeProvider(h, host, options.addSsl),
           count,
         })
       }
@@ -423,6 +416,7 @@ export type GatewayAddress = {
   // opt-in, carried by `hostnameInfo.public`); other addresses are read-only.
   gua: boolean
   type: string
+  transport: T.Transport
   access: 'public' | 'private'
   url: string
   hostnameInfo: T.HostnameInfo

@@ -14,6 +14,7 @@ export type {
   FilledBindInfo,
   FilledServiceInterface,
 } from './filledAddress'
+export { addressTransport, transportLabel } from './addressTransport'
 export { getDefaultString } from './getDefaultString'
 export * from './ip'
 

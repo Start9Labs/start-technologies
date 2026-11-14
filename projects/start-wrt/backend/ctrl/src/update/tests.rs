@@ -39,7 +39,6 @@ async fn asset(urls: Vec<reqwest::Url>) -> RegistryAsset<Blake3Commitment> {
 async fn registry_metadata_accepts_current_and_legacy_signature_encodings() {
     let asset = asset(Vec::new()).await;
     let info = OsVersionInfo {
-        headline: "Firmware".into(),
         release_notes: serde_json::from_value::<LocaleString>(serde_json::json!({
             "en_US": "Release notes",
             "fr_FR": "Notes de version",

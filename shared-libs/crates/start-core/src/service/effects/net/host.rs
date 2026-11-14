@@ -80,6 +80,7 @@ mod tests {
         let mut bind = BindInfo::new(
             &mut ports,
             BindOptions {
+                transport: Default::default(),
                 preferred_external_port: 8080,
                 add_ssl: None,
                 secure: None,
