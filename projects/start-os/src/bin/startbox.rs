@@ -1,7 +1,6 @@
 use start_core::bins::MultiExecutable;
 
-// musl's malloc fragments under startd's large, varied responses and rarely returns
-// memory to the OS, so startd's RSS grows until it is OOM-killed. mimalloc does not.
+// Rust allocations use mimalloc; musl's allocator serializes them on one lock.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
