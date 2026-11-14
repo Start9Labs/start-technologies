@@ -15,6 +15,7 @@ use crate::net::port_map::pcp::hostname::{
     RESULT_UNSUPP_HOSTNAME, encode_hostname_option, parse_hostname_options,
 };
 use crate::net::port_map::pcp::portset::{PortSet, encode_port_set_option, parse_port_set_options};
+use crate::net::transport::TransportProtocol;
 use crate::tunnel::forward::sni::SniDemux;
 
 /// Standard PCP server port (RFC 6887).
@@ -35,12 +36,13 @@ const UNSUPP_VERSION: u8 = 1;
 const NOT_AUTHORIZED: u8 = 2;
 const MALFORMED_REQUEST: u8 = 3;
 const UNSUPP_OPCODE: u8 = 4;
+const UNSUPP_PROTOCOL: u8 = 9;
 const MALFORMED_OPTION: u8 = 6;
 use crate::net::port_map::pcp::RESULT_NO_RESOURCES as NO_RESOURCES;
 const CANNOT_PROVIDE_EXTERNAL: u8 = 11;
 
-/// PCP protocol field value for TCP (the only transport the SNI demux handles).
 const PROTO_TCP: u8 = 6;
+const PROTO_UDP: u8 = 17;
 /// Largest PORT_SET range we will grant in one MAP (RFC 7753 lets us grant
 /// fewer than requested; the client skips the range if it can't get them all).
 const MAX_PORT_SET: u16 = 1024;
@@ -59,6 +61,7 @@ pub struct MappingEntry {
 }
 
 /// Per-gateway I/O and forward backend for the shared PCP server.
+/// TCP and UDP mappings have independent ownership and lifetimes.
 pub trait GatewayBackend: Send + Sync {
     /// Create or refresh a forward of `count` contiguous ports from `source`
     /// (the external address) to `target`, on behalf of `peer`. `lifetime` is
@@ -76,12 +79,17 @@ pub trait GatewayBackend: Send + Sync {
         count: u16,
         peer: Ipv4Addr,
         lifetime: Option<u32>,
+        _transport: TransportProtocol,
     ) -> impl Future<Output = Result<(), u16>> + Send;
 
     /// Remove the peer's forward to `(peer, internal_port)`, if any (PCP
     /// identifies a mapping by its target).
-    fn remove_forward(&self, peer: Ipv4Addr, internal_port: u16)
-    -> impl Future<Output = ()> + Send;
+    fn remove_forward(
+        &self,
+        peer: Ipv4Addr,
+        internal_port: u16,
+        _transport: TransportProtocol,
+    ) -> impl Future<Output = ()> + Send;
 
     /// Remove the forward at external address `source` if owned by `peer` (UPnP
     /// IGD identifies a mapping by its external port). Returns whether a
@@ -91,6 +99,7 @@ pub trait GatewayBackend: Send + Sync {
         &self,
         source: SocketAddrV4,
         peer: Ipv4Addr,
+        _transport: TransportProtocol,
     ) -> impl Future<Output = bool> + Send;
 
     /// The external (WAN) IPv4 the gateway routes `peer`'s egress out of, or
@@ -131,6 +140,7 @@ pub trait GatewayBackend: Send + Sync {
         _internal_port: u16,
         _count: u16,
         _lifetime: Option<u32>,
+        _transport: TransportProtocol,
     ) -> impl Future<Output = Result<(), u16>> + Send {
         async { Err(0) }
     }
@@ -140,6 +150,7 @@ pub trait GatewayBackend: Send + Sync {
         &self,
         _gua: Ipv6Addr,
         _external_port: u16,
+        _transport: TransportProtocol,
     ) -> impl Future<Output = ()> + Send {
         async {}
     }
@@ -363,6 +374,14 @@ fn map_response_with_port_set(
     r
 }
 
+fn map_transport(protocol: u8) -> Option<TransportProtocol> {
+    match protocol {
+        PROTO_TCP => Some(TransportProtocol::Tcp),
+        PROTO_UDP => Some(TransportProtocol::Udp),
+        _ => None,
+    }
+}
+
 /// Handle one PCP datagram from `peer`, returning the response bytes to send
 /// back (or `None` to stay silent). `epoch` is the server's seconds-since-start.
 pub async fn handle<B: GatewayBackend + ?Sized>(
@@ -535,6 +554,21 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
         };
     }
 
+    let transport = match map_transport(req[36]) {
+        Some(transport) => transport,
+        None => {
+            return Some(map_response(
+                UNSUPP_PROTOCOL,
+                req,
+                internal_port,
+                external_port,
+                external_ip,
+                0,
+                epoch,
+            ));
+        }
+    };
+
     // PCP PORT_SET extension (RFC 7753): map a contiguous range in one request.
     let port_set = match parse_port_set_options(req.get(MAP_REQUEST_LEN..).unwrap_or(&[])) {
         Ok(ps) => ps,
@@ -567,7 +601,7 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
             let source = SocketAddrV4::new(external_ip, external_port);
             let target = SocketAddrV4::new(peer, internal_port);
             if lifetime == 0 {
-                backend.remove_forward(peer, internal_port).await;
+                backend.remove_forward(peer, internal_port, transport).await;
                 return Some(map_response_with_port_set(
                     SUCCESS,
                     req,
@@ -581,7 +615,14 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
             }
             let granted_lifetime = lifetime.min(MAX_LIFETIME_SECONDS);
             return match backend
-                .add_forward(source, target, granted, peer, Some(granted_lifetime))
+                .add_forward(
+                    source,
+                    target,
+                    granted,
+                    peer,
+                    Some(granted_lifetime),
+                    transport,
+                )
                 .await
             {
                 Ok(()) => Some(map_response_with_port_set(
@@ -609,7 +650,7 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
 
     // Lifetime 0 deletes the mapping (RFC 6887 §15).
     if lifetime == 0 {
-        backend.remove_forward(peer, internal_port).await;
+        backend.remove_forward(peer, internal_port, transport).await;
         return Some(map_response(
             SUCCESS,
             req,
@@ -626,7 +667,7 @@ pub async fn handle<B: GatewayBackend + ?Sized>(
     let target = SocketAddrV4::new(peer, internal_port);
     let granted = lifetime.min(MAX_LIFETIME_SECONDS);
     match backend
-        .add_forward(source, target, 1, peer, Some(granted))
+        .add_forward(source, target, 1, peer, Some(granted), transport)
         .await
     {
         Ok(()) => Some(map_response(
@@ -710,9 +751,24 @@ pub async fn handle6<B: GatewayBackend + ?Sized>(
         ));
     }
 
+    let transport = match map_transport(req[36]) {
+        Some(transport) => transport,
+        None => {
+            return Some(map_response6(
+                UNSUPP_PROTOCOL,
+                req,
+                internal_port,
+                external_port,
+                peer,
+                0,
+                epoch,
+            ));
+        }
+    };
+
     // Lifetime 0 deletes the pinhole (RFC 6887 §15).
     if lifetime == 0 {
-        backend.remove_pinhole(peer, external_port).await;
+        backend.remove_pinhole(peer, external_port, transport).await;
         return Some(map_response6(
             SUCCESS,
             req,
@@ -726,7 +782,14 @@ pub async fn handle6<B: GatewayBackend + ?Sized>(
 
     let granted = lifetime.min(MAX_LIFETIME_SECONDS);
     match backend
-        .add_pinhole(peer, external_port, internal_port, 1, Some(granted))
+        .add_pinhole(
+            peer,
+            external_port,
+            internal_port,
+            1,
+            Some(granted),
+            transport,
+        )
         .await
     {
         Ok(()) => Some(map_response6(
@@ -846,16 +909,23 @@ mod tests {
             _: u16,
             _: Ipv4Addr,
             _: Option<u32>,
+            _: TransportProtocol,
         ) -> impl Future<Output = Result<(), u16>> + Send {
             async { Ok(()) }
         }
-        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
+        fn remove_forward(
+            &self,
+            _: Ipv4Addr,
+            _: u16,
+            _: TransportProtocol,
+        ) -> impl Future<Output = ()> + Send {
             async {}
         }
         fn remove_forward_by_source(
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
+            _: TransportProtocol,
         ) -> impl Future<Output = bool> + Send {
             async { false }
         }
@@ -948,16 +1018,23 @@ mod tests {
             _: u16,
             _: Ipv4Addr,
             _: Option<u32>,
+            _: TransportProtocol,
         ) -> impl Future<Output = Result<(), u16>> + Send {
             async { Ok(()) }
         }
-        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
+        fn remove_forward(
+            &self,
+            _: Ipv4Addr,
+            _: u16,
+            _: TransportProtocol,
+        ) -> impl Future<Output = ()> + Send {
             async {}
         }
         fn remove_forward_by_source(
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
+            _: TransportProtocol,
         ) -> impl Future<Output = bool> + Send {
             async { false }
         }
@@ -1040,6 +1117,7 @@ mod tests {
     struct RecordingStub {
         sni: Arc<SniDemux>,
         forward_lifetime: std::sync::Mutex<Option<Option<u32>>>,
+        last_transport: std::sync::Mutex<Option<TransportProtocol>>,
     }
     impl GatewayBackend for RecordingStub {
         fn add_forward(
@@ -1049,17 +1127,25 @@ mod tests {
             _: u16,
             _: Ipv4Addr,
             lifetime: Option<u32>,
+            transport: TransportProtocol,
         ) -> impl Future<Output = Result<(), u16>> + Send {
             *self.forward_lifetime.lock().unwrap() = Some(lifetime);
+            *self.last_transport.lock().unwrap() = Some(transport);
             async { Ok(()) }
         }
-        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
+        fn remove_forward(
+            &self,
+            _: Ipv4Addr,
+            _: u16,
+            _: TransportProtocol,
+        ) -> impl Future<Output = ()> + Send {
             async {}
         }
         fn remove_forward_by_source(
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
+            _: TransportProtocol,
         ) -> impl Future<Output = bool> + Send {
             async { false }
         }
@@ -1082,6 +1168,7 @@ mod tests {
         let stub = RecordingStub {
             sni: SniDemux::new(),
             forward_lifetime: std::sync::Mutex::new(None),
+            last_transport: std::sync::Mutex::new(None),
         };
         let req = map_request([1u8; 12], 7200, 8443, 443); // 7200 > MAX 3600
         let resp = handle(&stub, Ipv4Addr::new(10, 59, 0, 2), &req, 5)
@@ -1105,6 +1192,7 @@ mod tests {
         let stub = RecordingStub {
             sni: SniDemux::new(),
             forward_lifetime: std::sync::Mutex::new(None),
+            last_transport: std::sync::Mutex::new(None),
         };
         let req = map_request([2u8; 12], 0, 8443, 443);
         let resp = handle(&stub, Ipv4Addr::new(10, 59, 0, 2), &req, 5)
@@ -1112,6 +1200,24 @@ mod tests {
             .expect("answered");
         assert_eq!(resp[3], SUCCESS);
         assert_eq!(*stub.forward_lifetime.lock().unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn pcp_passes_selected_transport_to_the_gateway() {
+        for (wire, transport) in [(6, TransportProtocol::Tcp), (17, TransportProtocol::Udp)] {
+            let stub = RecordingStub {
+                sni: SniDemux::new(),
+                forward_lifetime: std::sync::Mutex::new(None),
+                last_transport: std::sync::Mutex::new(None),
+            };
+            let mut req = map_request([3; 12], 3600, 5000, 5000);
+            req[36] = wire;
+            let response = handle(&stub, Ipv4Addr::new(10, 59, 0, 2), &req, 0)
+                .await
+                .unwrap();
+            assert_eq!(response[3], SUCCESS);
+            assert_eq!(*stub.last_transport.lock().unwrap(), Some(transport));
+        }
     }
 
     struct V6Stub {
@@ -1138,16 +1244,23 @@ mod tests {
             _: u16,
             _: Ipv4Addr,
             _: Option<u32>,
+            _: TransportProtocol,
         ) -> impl Future<Output = Result<(), u16>> + Send {
             async { Ok(()) }
         }
-        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
+        fn remove_forward(
+            &self,
+            _: Ipv4Addr,
+            _: u16,
+            _: TransportProtocol,
+        ) -> impl Future<Output = ()> + Send {
             async {}
         }
         fn remove_forward_by_source(
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
+            _: TransportProtocol,
         ) -> impl Future<Output = bool> + Send {
             async { false }
         }
@@ -1168,6 +1281,7 @@ mod tests {
             internal_port: u16,
             count: u16,
             _lifetime: Option<u32>,
+            _transport: TransportProtocol,
         ) -> impl Future<Output = Result<(), u16>> + Send {
             self.pinholes
                 .lock()
@@ -1179,6 +1293,7 @@ mod tests {
             &self,
             gua: Ipv6Addr,
             external_port: u16,
+            _transport: TransportProtocol,
         ) -> impl Future<Output = ()> + Send {
             self.removed.lock().unwrap().push((gua, external_port));
             async {}
@@ -1247,16 +1362,23 @@ mod tests {
             _: u16,
             _: Ipv4Addr,
             _: Option<u32>,
+            _: TransportProtocol,
         ) -> impl Future<Output = Result<(), u16>> + Send {
             async { Ok(()) }
         }
-        fn remove_forward(&self, _: Ipv4Addr, _: u16) -> impl Future<Output = ()> + Send {
+        fn remove_forward(
+            &self,
+            _: Ipv4Addr,
+            _: u16,
+            _: TransportProtocol,
+        ) -> impl Future<Output = ()> + Send {
             async {}
         }
         fn remove_forward_by_source(
             &self,
             _: SocketAddrV4,
             _: Ipv4Addr,
+            _: TransportProtocol,
         ) -> impl Future<Output = bool> + Send {
             async { false }
         }

@@ -497,6 +497,10 @@ export const TaskSeverity: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['optional', 'important', 'critical']).meta({
   id: 'TaskSeverity',
 })
+export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
+  /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
+    id: 'TransportProtocol',
+  })
 export const UploadLimits: z.ZodObject<{
   /**
    * Maximum uploaded bytes, inclusive; null leaves the size unbounded.
@@ -972,19 +976,6 @@ export const BindId: z.ZodObject<{
   internalPort: z.ZodInt
 }> = /* @__PURE__ */ object({ id: HostId, internalPort: z.int() }).meta({
   id: 'BindId',
-})
-export const BindRangeParams: z.ZodObject<{
-  id: typeof HostId
-  internalStartPort: z.ZodInt
-  externalStartPort: z.ZodInt
-  numberOfPorts: z.ZodInt
-}> = /* @__PURE__ */ object({
-  id: HostId,
-  internalStartPort: z.int(),
-  externalStartPort: z.int(),
-  numberOfPorts: z.int(),
-}).meta({
-  id: 'BindRangeParams',
 })
 export const CheckDependenciesParam: z.ZodObject<{
   packageIds: z.ZodCodec<
@@ -2204,6 +2195,13 @@ export const TaskTrigger: z.ZodObject<{
 }).meta({
   id: 'TaskTrigger',
 })
+export const TransportWire: z.ZodUnion<
+  readonly [typeof TransportProtocol, z.ZodArray<typeof TransportProtocol>]
+> = /* @__PURE__ */ z
+  .union([TransportProtocol, z.array(TransportProtocol)])
+  .meta({
+    id: 'TransportWire',
+  })
 export const UploadedFile: z.ZodObject<{
   /**
    * Untrusted original filename supplied by the uploader.
@@ -2752,6 +2750,19 @@ export const Task: z.ZodObject<{
 }).meta({
   id: 'Task',
 })
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export const Transport: z.ZodCodec<
+  typeof TransportWire,
+  z.ZodArray<typeof TransportProtocol>
+> = /* @__PURE__ */ wire(TransportWire, z.array(TransportProtocol)).meta({
+  id: 'Transport',
+  description:
+    'Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.',
+})
 export const UrlPluginClearUrlsParams: z.ZodObject<{
   except: z.ZodArray<typeof PluginHostnameInfo>
 }> = /* @__PURE__ */ object({ except: z.array(PluginHostnameInfo) }).meta({
@@ -2860,6 +2871,21 @@ export const AddSslOptions: z.ZodCodec<
   }),
 ).meta({
   id: 'AddSslOptions',
+})
+export const BindRangeParams: z.ZodObject<{
+  id: typeof HostId
+  internalStartPort: z.ZodInt
+  externalStartPort: z.ZodInt
+  numberOfPorts: z.ZodInt
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
+}> = /* @__PURE__ */ object({
+  id: HostId,
+  internalStartPort: z.int(),
+  externalStartPort: z.int(),
+  numberOfPorts: z.int(),
+  transport: wire(Transport.optional(), Transport),
+}).meta({
+  id: 'BindRangeParams',
 })
 export const CreateTaskParams: z.ZodIntersection<
   z.ZodObject<{ replayId: typeof ReplayId }>,
@@ -3092,15 +3118,12 @@ export const LegacyProxySslOptions: z.ZodIntersection<
   })
 
 /**
- * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
- *
- * Keyed by `internal_start_port` in [`BindingRanges`]. The range covers
- * `internal_start_port..(internal_start_port + number_of_ports)` and is
- * forwarded through a single iptables rule per protocol per gateway,
- * preserving the destination port number.
+ * A contiguous binding keyed by its internal start port in [`BindingRanges`].
+ * External ports map to internal ports by offset.
  */
 export const RangeBindInfo: z.ZodObject<{
   enabled: z.ZodBoolean
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
   externalStartPort: z.ZodInt
   numberOfPorts: z.ZodInt
   /**
@@ -3125,6 +3148,7 @@ export const RangeBindInfo: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   enabled: z.boolean(),
+  transport: wire(Transport.optional(), Transport),
   externalStartPort: z.int(),
   numberOfPorts: z.int(),
   /**
@@ -3153,13 +3177,14 @@ export const RangeBindInfo: z.ZodObject<{
 }).meta({
   id: 'RangeBindInfo',
   description:
-    'Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).\n\nKeyed by `internal_start_port` in [`BindingRanges`]. The range covers\n`internal_start_port..(internal_start_port + number_of_ports)` and is\nforwarded through a single iptables rule per protocol per gateway,\npreserving the destination port number.',
+    'A contiguous binding keyed by its internal start port in [`BindingRanges`].\nExternal ports map to internal ports by offset.',
 })
 export const BindingRanges: z.ZodRecord<z.ZodString, typeof RangeBindInfo> =
   /* @__PURE__ */ z.record(z.string(), RangeBindInfo).meta({
     id: 'BindingRanges',
   })
 export const CompatibleBindOptions: z.ZodObject<{
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
   preferredExternalPort: z.ZodInt
   addSsl: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>,
@@ -3174,6 +3199,7 @@ export const CompatibleBindOptions: z.ZodObject<{
     z.ZodNullable<typeof ProxyOptions>
   >
 }> = /* @__PURE__ */ object({
+  transport: wire(Transport.optional(), Transport),
   preferredExternalPort: z.int(),
   addSsl: wire(
     LegacyProxySslOptions.nullable().optional(),
@@ -3236,6 +3262,10 @@ export const Manifest: z.ZodIntersection<
 export const BindOptions: z.ZodCodec<
   typeof CompatibleBindOptions,
   z.ZodObject<{
+    /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: typeof Transport
     preferredExternalPort: z.ZodInt
     addSsl: z.ZodNullable<typeof AddSslOptions>
     secure: z.ZodNullable<typeof Security>
@@ -3247,6 +3277,13 @@ export const BindOptions: z.ZodCodec<
 > = /* @__PURE__ */ wire(
   CompatibleBindOptions,
   object({
+    /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: Transport.meta({
+      description:
+        'Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.',
+    }),
     preferredExternalPort: z.int(),
     addSsl: AddSslOptions.nullable(),
     secure: Security.nullable(),

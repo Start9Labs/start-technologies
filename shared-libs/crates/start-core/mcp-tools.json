@@ -4159,6 +4159,10 @@
         "BindOptions": {
           "type": "object",
           "properties": {
+            "transport": {
+              "description": "Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.",
+              "$ref": "#/$defs/Transport"
+            },
             "preferredExternalPort": {
               "type": "integer",
               "minimum": -9007199254740991,
@@ -4175,8 +4179,20 @@
               "description": "HTTP request policy shared by every exposed leg of this binding."
             }
           },
-          "required": ["preferredExternalPort", "addSsl", "secure", "proxy"],
+          "required": [
+            "transport",
+            "preferredExternalPort",
+            "addSsl",
+            "secure",
+            "proxy"
+          ],
           "additionalProperties": true
+        },
+        "TransportProtocol": { "type": "string", "enum": ["tcp", "udp"] },
+        "Transport": {
+          "description": "Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/TransportProtocol" }
         },
         "AddSslOptions": {
           "type": "object",
@@ -6871,7 +6887,6 @@
         "OsVersionInfo": {
           "type": "object",
           "properties": {
-            "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
             "gitHash": {
@@ -6945,7 +6960,6 @@
             }
           },
           "required": [
-            "headline",
             "releaseNotes",
             "sourceVersion",
             "gitHash",
@@ -8371,7 +8385,6 @@
         "OsVersionInfo": {
           "type": "object",
           "properties": {
-            "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
             "gitHash": {
@@ -8445,7 +8458,6 @@
             }
           },
           "required": [
-            "headline",
             "releaseNotes",
             "sourceVersion",
             "gitHash",
@@ -8510,7 +8522,6 @@
           "type": "object",
           "properties": {
             "version": { "type": "string" },
-            "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
             "gitHash": {
@@ -8521,7 +8532,7 @@
             },
             "security": { "type": "boolean" }
           },
-          "required": ["version", "headline", "releaseNotes", "sourceVersion"],
+          "required": ["version", "releaseNotes", "sourceVersion"],
           "additionalProperties": true
         },
         "LocaleString": {
@@ -8593,7 +8604,6 @@
         "OsVersionInfo": {
           "type": "object",
           "properties": {
-            "headline": { "type": "string" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "sourceVersion": { "type": "string" },
             "gitHash": {
@@ -8667,7 +8677,6 @@
             }
           },
           "required": [
-            "headline",
             "releaseNotes",
             "sourceVersion",
             "gitHash",
@@ -10868,6 +10877,10 @@
         "BindOptions": {
           "type": "object",
           "properties": {
+            "transport": {
+              "description": "Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.",
+              "$ref": "#/$defs/Transport"
+            },
             "preferredExternalPort": {
               "type": "integer",
               "minimum": -9007199254740991,
@@ -10884,8 +10897,20 @@
               "description": "HTTP request policy shared by every exposed leg of this binding."
             }
           },
-          "required": ["preferredExternalPort", "addSsl", "secure", "proxy"],
+          "required": [
+            "transport",
+            "preferredExternalPort",
+            "addSsl",
+            "secure",
+            "proxy"
+          ],
           "additionalProperties": true
+        },
+        "TransportProtocol": { "type": "string", "enum": ["tcp", "udp"] },
+        "Transport": {
+          "description": "Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/TransportProtocol" }
         },
         "AddSslOptions": {
           "type": "object",

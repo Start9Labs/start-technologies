@@ -21,6 +21,7 @@ fn host(ports: &mut AvailablePorts, port: u16) -> Host {
     let mut binding = BindInfo::new(
         ports,
         BindOptions {
+            transport: Default::default(),
             preferred_external_port: port,
             add_ssl: None,
             secure: None,
@@ -117,6 +118,7 @@ async fn removing_a_package_prunes_every_chain_in_the_same_database_transaction(
                 BindInfo::new(
                     &mut data.private.available_ports,
                     BindOptions {
+                        transport: Default::default(),
                         preferred_external_port: port + 10,
                         add_ssl: None,
                         secure: None,

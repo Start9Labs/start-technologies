@@ -91,7 +91,7 @@ the canonical index format. Public-only readers share the profile's public repli
 signers with private-package access use their verified request key. Every source revision rechecks
 enrollment, admin status and package permissions before applying the version-specific projection.
 `device_info::WireCompatibility` owns these projections for ordinary RPC responses and replicas,
-including legacy icons, notes and key/signature encodings. Canonical storage remains migrated to
+including legacy icons, notes, headlines and key/signature encodings. Canonical storage remains migrated to
 the current schema; PatchDB derives patches from the projected values. A projection failure ends
 its subscriptions and permits rebuilding the failed replica without closing unrelated streams.
 A public-mirror subscriber must resubscribe after receiving a private-access grant. StartOS's
@@ -101,6 +101,20 @@ registry's grouped watches without changing signing-key trust or discarding cach
 StartOS derives security notifications from the selected source's OS metadata, filtering by source
 version, platform, and installed build. Delivery history remains keyed by registry URL, version, and
 build hash across reconnects and restarts.
+
+## Mirroring (`registry/upstream.rs`)
+
+With `mirror-of` set, `RegistryContext::init` spawns one task that admits an encrypted session to the
+upstream under the registry's server identity and streams `db.subscribe` for `/index` in canonical
+format. It shares `SubscriptionFollower` (dump/revision application, heartbeat and initial deadline)
+with StartOS's registry caches. Each update copies missing stored icons from the upstream's `/icons/`,
+verifying their blake3 names, then replaces the local `index`. Signed icon requests refuse redirects and
+have a 30-second total deadline. An icon the upstream withholds is retried on the next update. Connection
+failures reconnect with the shared jittered 30–300 second backoff.
+
+Handlers that write the index carry the `WRITES_INDEX` metadata, inherited by subtrees. The
+`MirrorGuard` RPC middleware rejects them while mirroring. `admins`, metrics and `serverIdentityKey` live
+outside `index` and remain local.
 
 ## Data model
 
@@ -138,8 +152,9 @@ maps. Current clients receive the complete map and select locally with `Localize
 Existing English-only records deserialize unchanged without a migration.
 
 `os.version.add` replaces the entire `LocaleString`; promotion preserves it unchanged.
-The existing third positional CLI argument accepts prose or a JSON locale map. The
-`<RELEASE_NOTES_OR_JSON>` help marker lets publishers reject stale CLIs before writes.
+The second positional CLI argument accepts prose or a JSON locale map. Publishers
+require the `<RELEASE_NOTES_OR_JSON>` help marker and reject CLIs requiring `<HEADLINE>`
+before writes.
 Registries must be upgraded before publishing maps.
 
 `DeviceInfoMiddleware` projects English notes in responses for StartOS before 0.4.0.5
@@ -147,6 +162,14 @@ and string-only StartWRT clients. It uses the device version, or an explicit upd
 source version without a device header. Headerless queries without a source version
 retain the full map. Projection covers OS version queries, the OS index and the full
 index; stored notes remain unchanged.
+
+`WireCompatibility` preserves update discovery for StartOS through 0.4.3
+and StartWRT by synthesizing `headline: "v<version>"` in ordinary OS responses
+and versioned subscription snapshots/revisions. The StartOS bound includes the
+0.4.3 alpha builds published before the field's removal, which still require it.
+Ordinary calls select compatibility from the device header or explicit update
+source version; subscriptions use `osVersion`.
+Canonical projections omit persisted headlines without rewriting the database.
 
 ## Persistence
 

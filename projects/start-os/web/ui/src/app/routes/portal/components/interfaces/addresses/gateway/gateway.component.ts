@@ -74,6 +74,7 @@ import { GatewayItemComponent } from './item.component'
       @for (address of gatewayGroup().addresses; track $index) {
         <tr
           [address]="address"
+          [showCert]="showCert()"
           [packageId]="packageId()"
           [value]="value()"
           [gatewayId]="gatewayGroup().gatewayId"
@@ -123,8 +124,6 @@ export class GatewayComponent {
   readonly packageId = input('')
   readonly value = input<MappedServiceInterface | undefined>()
 
-  // The Certificate Authority column only makes sense when some address is
-  // actually SSL-terminated. Non-SSL bindings and port ranges have none.
   readonly showCert = computed(
     () =>
       this.value()?.gatewayGroups.some(g =>
@@ -132,13 +131,16 @@ export class GatewayComponent {
       ) ?? false,
   )
 
-  readonly header = computed<Array<i18nKey | null>>(() =>
-    this.showCert()
-      ? [null, 'Access', 'Type', 'Certificate Authority', 'URL', null]
-      : [null, 'Access', 'Type', 'URL', null],
-  )
+  readonly header = computed<Array<i18nKey | null>>(() => [
+    null,
+    'Access',
+    'Type',
+    ...(this.showCert() ? ['Certificate Authority' as const] : []),
+    'Transport',
+    'URL',
+    null,
+  ])
 
-  // Forwarded-port span, uniform across a range's addresses (1 for single-port).
   readonly count = computed(() => this.gatewayGroup().addresses[0]?.count ?? 1)
 
   openDomainTypePicker() {

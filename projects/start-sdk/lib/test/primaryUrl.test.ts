@@ -43,6 +43,7 @@ const host = (available: T.HostnameInfo[]): T.Host => ({
       enabled: true,
       proxyChains: [],
       options: {
+        transport: ['tcp', 'udp'],
         preferredExternalPort: 80,
         addSsl: null,
         secure: null,

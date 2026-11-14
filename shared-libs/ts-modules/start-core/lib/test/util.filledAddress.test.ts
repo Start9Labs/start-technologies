@@ -8,6 +8,7 @@ const host = (fingerprint: string): Host => ({
       proxyChains: [],
       enabled: true,
       options: {
+        transport: ['tcp', 'udp'],
         preferredExternalPort: 5223,
         addSsl: null,
         secure: null,
