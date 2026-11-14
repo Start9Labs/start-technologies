@@ -190,6 +190,7 @@ pub async fn init(
         postinit,
     }: InitPhases,
 ) -> Result<InitResult, Error> {
+    crate::fde::private_config::mount_runtime(Path::new(MAIN_DATA)).await?;
     if let Err(e) = persist_pstore_archive(
         Path::new("/var/lib/systemd/pstore"),
         &Path::new(MAIN_DATA).join("pstore"),

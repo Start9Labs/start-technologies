@@ -165,9 +165,10 @@ mod linux {
                 self.ctr.add(len);
                 offset += len;
             }
-            copy_xattrs(&src_f, &dst_f)?;
             fchown(&dst_f, Some(meta.uid()), Some(meta.gid()))?;
             dst_f.set_permissions(PermissionsExt::from_mode(meta.mode() & 0o7777))?;
+            // chown clears file capabilities.
+            copy_xattrs(&src_f, &dst_f)?;
             set_times(&dst_f, meta)
         }
     }
@@ -259,97 +260,18 @@ mod linux {
     }
 
     fn copy_xattrs(src: &File, dst: &File) -> std::io::Result<()> {
-        for name in list_xattrs(|buf, len| unsafe { libc::flistxattr(src.as_raw_fd(), buf, len) })?
-        {
-            let value = read_xattr(|buf, len| unsafe {
-                libc::fgetxattr(src.as_raw_fd(), name.as_ptr(), buf, len)
-            })?;
-            if unsafe {
-                libc::fsetxattr(
-                    dst.as_raw_fd(),
-                    name.as_ptr(),
-                    value.as_ptr() as *const libc::c_void,
-                    value.len(),
-                    0,
-                )
-            } != 0
-            {
-                return Err(std::io::Error::last_os_error());
-            }
-        }
-        Ok(())
+        use crate::util::xattrs::Target;
+        Target::File(src).copy_to(Target::File(dst))
     }
 
     fn copy_xattrs_nofollow(src: &Path, dst: &Path) -> std::io::Result<()> {
-        let src_c = cpath(src)?;
-        let dst_c = cpath(dst)?;
-        for name in list_xattrs(|buf, len| unsafe { libc::llistxattr(src_c.as_ptr(), buf, len) })? {
-            let value = read_xattr(|buf, len| unsafe {
-                libc::lgetxattr(src_c.as_ptr(), name.as_ptr(), buf, len)
-            })?;
-            if unsafe {
-                libc::lsetxattr(
-                    dst_c.as_ptr(),
-                    name.as_ptr(),
-                    value.as_ptr() as *const libc::c_void,
-                    value.len(),
-                    0,
-                )
-            } != 0
-            {
-                return Err(std::io::Error::last_os_error());
-            }
-        }
-        Ok(())
+        use crate::util::xattrs::Target;
+        Target::NoFollowPath(src).copy_to(Target::NoFollowPath(dst))
     }
 
     fn cpath(path: &Path) -> std::io::Result<std::ffi::CString> {
         std::ffi::CString::new(path.as_os_str().as_bytes())
             .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))
-    }
-
-    fn list_xattrs(
-        list: impl Fn(*mut libc::c_char, libc::size_t) -> libc::ssize_t,
-    ) -> std::io::Result<Vec<std::ffi::CString>> {
-        let len = match list(std::ptr::null_mut(), 0) {
-            n if n < 0 => {
-                let e = std::io::Error::last_os_error();
-                return if e.raw_os_error() == Some(libc::EOPNOTSUPP) {
-                    Ok(Vec::new())
-                } else {
-                    Err(e)
-                };
-            }
-            0 => return Ok(Vec::new()),
-            n => n as usize,
-        };
-        let mut buf = vec![0u8; len];
-        let n = list(buf.as_mut_ptr() as *mut libc::c_char, buf.len());
-        if n < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        buf.truncate(n as usize);
-        Ok(buf
-            .split(|b| *b == 0)
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| std::ffi::CString::new(s).ok())
-            .collect())
-    }
-
-    fn read_xattr(
-        get: impl Fn(*mut libc::c_void, libc::size_t) -> libc::ssize_t,
-    ) -> std::io::Result<Vec<u8>> {
-        let len = match get(std::ptr::null_mut(), 0) {
-            n if n < 0 => return Err(std::io::Error::last_os_error()),
-            n => n as usize,
-        };
-        let mut buf = vec![0u8; len];
-        let n = get(buf.as_mut_ptr() as *mut libc::c_void, buf.len());
-        if n < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        buf.truncate(n as usize);
-        Ok(buf)
     }
 
     #[cfg(test)]
@@ -376,6 +298,58 @@ mod linux {
 
         fn ctr() -> Arc<Counter> {
             Arc::new(Counter::new(0, std::sync::atomic::Ordering::Relaxed))
+        }
+
+        #[tokio::test]
+        #[ignore = "requires managed StartOS Btrfs config, root, setfacl and setcap"]
+        async fn real_clone_preserves_capabilities_without_inherited_access_acls() {
+            use crate::util::Invoke;
+            let root = tempfile::Builder::new()
+                .prefix("fde-metadata-")
+                .tempdir_in("/media/startos/config")
+                .unwrap();
+            let source = root.path().join("source");
+            let destination = root.path().join("destination");
+            std::fs::create_dir(&source).unwrap();
+            std::fs::create_dir(&destination).unwrap();
+            tokio::process::Command::new("setfacl")
+                .args(["-m", "d:u:65534:r-x"])
+                .arg(&source)
+                .invoke(crate::ErrorKind::Filesystem)
+                .await
+                .unwrap();
+            let file = source.join("credential");
+            std::fs::write(&file, b"credential-metadata").unwrap();
+            std::fs::set_permissions(&file, PermissionsExt::from_mode(0o640)).unwrap();
+            tokio::process::Command::new("setfacl")
+                .arg("-b")
+                .arg(&file)
+                .invoke(crate::ErrorKind::Filesystem)
+                .await
+                .unwrap();
+            tokio::process::Command::new("setcap")
+                .arg("cap_net_bind_service=ep")
+                .arg(&file)
+                .invoke(crate::ErrorKind::Filesystem)
+                .await
+                .unwrap();
+            let capability = xattr::get(&file, "security.capability").unwrap().unwrap();
+            assert_eq!(xattr::get(&file, "system.posix_acl_access").unwrap(), None);
+            clone_tree(&source, &destination, ctr()).await.unwrap();
+            assert_eq!(
+                xattr::get(destination.join("credential"), "security.capability")
+                    .unwrap()
+                    .unwrap(),
+                capability
+            );
+            assert_eq!(
+                xattr::get(destination.join("credential"), "system.posix_acl_access").unwrap(),
+                None
+            );
+            assert_eq!(
+                xattr::get(&source, "system.posix_acl_default").unwrap(),
+                xattr::get(&destination, "system.posix_acl_default").unwrap()
+            );
         }
 
         /// Trees without regular files make no FICLONERANGE calls; trees with

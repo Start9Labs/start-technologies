@@ -24,7 +24,9 @@ mod tests;
 pub const PASSWORD_PATH: &'static str = "/run/startos/password";
 pub const DEFAULT_PASSWORD: &'static str = "password";
 pub const MAIN_FS_SIZE: FsSize = FsSize::Gigabytes(8);
-pub(crate) const POOL_FILESYSTEMS: [&str; 2] = ["main", "package-data"];
+pub(crate) const MAIN_FILESYSTEM: &str = "main";
+pub(crate) const PACKAGE_FILESYSTEM: &str = "package-data";
+pub(crate) const POOL_FILESYSTEMS: [&str; 2] = [MAIN_FILESYSTEM, PACKAGE_FILESYSTEM];
 
 fn legacy_credential(password: Option<&str>) -> super::fde::KeyCredential<'_> {
     super::fde::KeyCredential::Password(password.unwrap_or(DEFAULT_PASSWORD))
@@ -178,11 +180,11 @@ pub async fn create_all_fs<P: AsRef<Path>>(
     datadir: P,
     password: Option<&str>,
 ) -> Result<(), Error> {
-    create_fs(guid, &datadir, "main", MAIN_FS_SIZE, password).await?;
+    create_fs(guid, &datadir, MAIN_FILESYSTEM, MAIN_FS_SIZE, password).await?;
     create_fs(
         guid,
         &datadir,
-        "package-data",
+        PACKAGE_FILESYSTEM,
         FsSize::FreePercentage(100),
         password,
     )
@@ -222,6 +224,9 @@ async fn set_block_read_only(blockdev_path: &Path, read_only: bool) -> Result<()
 
 #[instrument(skip_all)]
 pub async fn unmount_fs<P: AsRef<Path>>(guid: &str, datadir: P, name: &str) -> Result<(), Error> {
+    if name == MAIN_FILESYSTEM {
+        crate::fde::private_config::unmount_runtime(&datadir.as_ref().join(name)).await?;
+    }
     unmount(datadir.as_ref().join(name), false).await?;
     let mapper_name = format!("{guid}_{name}");
     if tokio::fs::metadata(Path::new("/dev/mapper").join(&mapper_name))
@@ -695,7 +700,7 @@ pub(crate) async fn import_with_keys(
 #[instrument(skip_all)]
 pub async fn probe_package_data_fs(guid: &str) -> Result<Option<String>, Error> {
     let mapper_name = format!("{guid}_package-data");
-    let lv_path = Path::new("/dev").join(guid).join("package-data");
+    let lv_path = Path::new("/dev").join(guid).join(PACKAGE_FILESYSTEM);
     let blockdev_path = if !guid.ends_with("_UNENC") {
         Path::new("/dev/mapper").join(&mapper_name)
     } else {

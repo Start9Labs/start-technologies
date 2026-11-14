@@ -214,17 +214,18 @@ impl LoginContext for RpcContext {
     }
 }
 
+pub(crate) const SHADOW_PATH: &str = "/etc/shadow";
+const SAVED_SHADOW_PATH: &str =
+    const_format::formatcp!("/media/startos/config/overlay{SHADOW_PATH}");
+
 async fn shadow_overlay_exists() -> bool {
-    tokio::fs::metadata("/media/startos/config/overlay/etc/shadow")
-        .await
-        .is_ok()
+    tokio::fs::metadata(SAVED_SHADOW_PATH).await.is_ok()
 }
 
 pub async fn write_shadow(password: &str) -> Result<(), Error> {
     let hash = crate::util::crypto::shadow_password_hash(password)?;
-    let shadow_contents = tokio::fs::read_to_string("/etc/shadow").await?;
-    let mut shadow_file =
-        create_file_mod("/media/startos/config/overlay/etc/shadow", 0o640).await?;
+    let shadow_contents = tokio::fs::read_to_string(SHADOW_PATH).await?;
+    let mut shadow_file = create_file_mod(SAVED_SHADOW_PATH, 0o640).await?;
     for line in shadow_contents.lines() {
         match line.split_once(":") {
             Some((user, rest)) if user == "start9" || user == "kiosk" => {
@@ -245,7 +246,7 @@ pub async fn write_shadow(password: &str) -> Result<(), Error> {
         }
     }
     shadow_file.sync_all().await?;
-    tokio::fs::copy("/media/startos/config/overlay/etc/shadow", "/etc/shadow").await?;
+    crate::util::io::copy_file(SAVED_SHADOW_PATH, SHADOW_PATH).await?;
 
     crate::util::mok::enroll_mok(std::path::Path::new("/"))
         .await

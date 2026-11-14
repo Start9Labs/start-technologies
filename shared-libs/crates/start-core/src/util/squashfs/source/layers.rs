@@ -280,7 +280,7 @@ fn overlay_names(suffix: &str) -> impl Iterator<Item = OsString> + '_ {
         .map(move |prefix| format!("{prefix}{suffix}").into())
 }
 
-fn overlay_whiteout(node: &Node<DynFileSource>) -> bool {
+pub(crate) fn overlay_whiteout(node: &Node<DynFileSource>) -> bool {
     matches!(
         node.contents,
         NodeContents::CharacterDevice(crate::util::squashfs::Device { major: 0, minor: 0 })
@@ -288,7 +288,9 @@ fn overlay_whiteout(node: &Node<DynFileSource>) -> bool {
         && overlay_names("whiteout").any(|name| node.metadata.xattrs.contains_key(&name)))
 }
 
-fn snapshot_entries(image: &Squashfs<DynFileSource>) -> Vec<(PathBuf, Entry<DynFileSource>)> {
+pub(crate) fn snapshot_entries(
+    image: &Squashfs<DynFileSource>,
+) -> Vec<(PathBuf, Entry<DynFileSource>)> {
     let mut entries = Vec::new();
     let mut pending = vec![(PathBuf::new(), image.root())];
     while let Some((path, node)) = pending.pop() {

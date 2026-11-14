@@ -14,6 +14,7 @@ pub mod initramfs;
 pub mod loader;
 pub mod memory;
 pub mod network;
+pub(crate) mod private_config;
 mod root;
 pub mod source;
 pub mod tpm;

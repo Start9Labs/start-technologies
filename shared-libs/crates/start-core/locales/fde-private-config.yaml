@@ -1,0 +1,7 @@
+_version: 2
+fde.private-config.invalid-layout:
+  en_US: 'Cannot safely project private configuration at %{path}'
+  de_DE: 'Private Konfiguration unter %{path} kann nicht sicher ausgelagert werden'
+  es_ES: 'No se puede trasladar de forma segura la configuración privada en %{path}'
+  fr_FR: 'Impossible de déplacer de manière sûre la configuration privée à %{path}'
+  pl_PL: 'Nie można bezpiecznie przenieść prywatnej konfiguracji w %{path}'

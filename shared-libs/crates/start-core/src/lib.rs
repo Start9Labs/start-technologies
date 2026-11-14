@@ -2,12 +2,13 @@
 extern crate rpc_toolkit;
 
 use const_format::formatcp;
+use disk::main::{MAIN_FILESYSTEM, PACKAGE_FILESYSTEM};
 
 rust_i18n::i18n!("locales", fallback = ["en_US"]);
 
 pub const DATA_DIR: &str = "/media/startos/data";
-pub const MAIN_DATA: &str = formatcp!("{DATA_DIR}/main");
-pub const PACKAGE_DATA: &str = formatcp!("{DATA_DIR}/package-data");
+pub const MAIN_DATA: &str = formatcp!("{DATA_DIR}/{MAIN_FILESYSTEM}");
+pub const PACKAGE_DATA: &str = formatcp!("{DATA_DIR}/{PACKAGE_FILESYSTEM}");
 pub const HOST_IP: [u8; 4] = [10, 0, 3, 1];
 pub use std::env::consts::ARCH;
 lazy_static::lazy_static! {

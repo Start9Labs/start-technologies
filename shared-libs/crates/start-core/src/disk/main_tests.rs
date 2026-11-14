@@ -173,7 +173,7 @@ async fn real_pool_creation_and_import_retry_preserve_unrelated_mappings() {
         }
         let data = directory.path().join("data");
         std::fs::create_dir(&data).unwrap();
-        import(&guid, &data, ImportMode::ReadOnly, Some(password), None)
+        let _ = import(&guid, &data, ImportMode::ReadOnly, Some(password), None)
             .await
             .unwrap();
         for name in POOL_FILESYSTEMS {

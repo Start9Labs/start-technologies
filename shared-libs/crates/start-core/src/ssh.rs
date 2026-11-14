@@ -18,6 +18,34 @@ use crate::util::serde::{HandlerExtSerde, Pem, WithIoFormat, display_serializabl
 use crate::util::{FromStrParser, Invoke};
 
 pub const SSH_DIR: &str = "/home/start9/.ssh";
+pub(crate) const HOST_KEY_DIRECTORY: &str = "/etc/ssh";
+
+pub(crate) fn is_installer_host_key(name: &std::ffi::OsStr) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let name = name.as_bytes();
+    name.starts_with(b"ssh_host_") && name.ends_with(b"_key")
+}
+
+/// Includes resolve in the caller's mount namespace, not beside the configuration file.
+pub(crate) async fn host_key_files(configuration: &Path) -> Result<Vec<std::path::PathBuf>, Error> {
+    let output = Command::new("sshd")
+        .args(["-G", "-f"])
+        .arg(configuration)
+        .current_dir("/")
+        .kill_on_drop(true)
+        .invoke(ErrorKind::Filesystem)
+        .await?;
+    Ok(parse_host_key_files(&output))
+}
+
+fn parse_host_key_files(output: &[u8]) -> Vec<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStringExt;
+    output
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| line.strip_prefix(b"hostkey "))
+        .map(|path| std::ffi::OsString::from_vec(path.to_vec()).into())
+        .collect()
+}
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct SshKeys(BTreeMap<InternedString, WithTimeData<SshPubKey>>);
@@ -334,4 +362,16 @@ pub async fn sync_pubkeys<P: AsRef<Path>>(pubkeys: &SshKeys, ssh_dir: P) -> Resu
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_key_output_retains_spaces_and_non_utf8_paths() {
+        use std::os::unix::ffi::OsStringExt;
+        assert_eq!(parse_host_key_files(b"port 22\nhostkey /keys/with space\nhostcertificate /public/cert\nhostkey /keys/\xff\n"),
+            vec![std::path::PathBuf::from("/keys/with space"), std::ffi::OsString::from_vec(b"/keys/\xff".to_vec()).into()]);
+    }
 }

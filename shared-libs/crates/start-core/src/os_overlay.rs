@@ -13,7 +13,8 @@
 //! stable through use, using the signed dm-verity roots or a RAM copy; a returned
 //! path is not protection against subsequent writes. Timestamps select among valid generations
 //! and provide no antirollback guarantee. Signatures do not encrypt secrets.
-//! Callers exclude private credentials from public configuration images.
+//! Callers exclude private credentials from public configuration images through
+//! `fde::private_config::ProjectedConfig` before signing.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -583,7 +584,7 @@ impl PreparedGeneration {
         .await
     }
 
-    async fn prepare_snapshot(
+    pub(crate) async fn prepare_snapshot(
         snapshot: Squashfs<DynFileSource>,
         rootfs: &Path,
         store: &Path,
@@ -681,7 +682,7 @@ impl PreparedGeneration {
     }
 }
 
-fn sync_tree(path: &Path) -> impl Future<Output = Result<(), Error>> + Send {
+pub(crate) fn sync_tree(path: &Path) -> impl Future<Output = Result<(), Error>> + Send {
     async move {
         let mut entries = read_generation_directory(path).await?;
         while let Some(entry) = entries.next_entry().await? {

@@ -63,6 +63,7 @@ pub mod sync;
 pub mod tui;
 pub mod version;
 pub mod writeback;
+pub(crate) mod xattrs;
 
 pub use clap::FromStrParser;
 pub use data_url::DataUrl;

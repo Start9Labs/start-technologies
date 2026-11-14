@@ -13,7 +13,7 @@ use crate::s9pk::merkle_archive::source::{DynFileSource, FileSource};
 mod layers;
 mod tar;
 
-pub(crate) use layers::LayerFilesystem;
+pub(crate) use layers::{LayerFilesystem, overlay_whiteout, snapshot_entries};
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

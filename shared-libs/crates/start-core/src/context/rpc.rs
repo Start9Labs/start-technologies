@@ -291,6 +291,7 @@ impl RpcContext {
             TypedPatchDb::<Database>::load_unchecked(config.db().await?)
         };
         let secret_memory = crate::fde::memory::protect_authorities(&db.peek().await)?;
+        crate::fde::private_config::mount_runtime(Path::new(crate::MAIN_DATA)).await?;
         let db = if init_result.is_none() {
             TypedPatchDb::<Database>::load((*db).clone()).await?
         } else {
