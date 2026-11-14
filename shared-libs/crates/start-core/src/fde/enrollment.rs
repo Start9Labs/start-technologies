@@ -160,10 +160,11 @@ pub async fn begin(
         crate::auth::check_password(&snapshot.as_private().as_password().de()?, &password)?;
         crate::disk::fde::LuksPool::new(&ctx.disk_guid, "/media/startos/config")?;
         if !crate::util::mok::is_secure_boot_enabled().await
-            || crate::util::io::read_file_to_string("/sys/class/tpm/tpm0/tpm_version_major")
+            || crate::util::io::maybe_read_file_to_string("/sys/class/tpm/tpm0/tpm_version_major")
                 .await?
-                .trim()
-                != "2"
+                .as_deref()
+                .map(str::trim)
+                != Some("2")
         {
             return Err(Error::new(
                 eyre!(t!("fde.enrollment.hardware-required")),
@@ -213,12 +214,13 @@ pub async fn begin(
             }
         }
         if needs_import {
-            let code = enrollment.approval_code.as_ref().ok_or_else(|| {
-                Error::new(
+            let Some(code) = enrollment.approval_code.as_ref() else {
+                delete_file(REQUEST_CERTIFICATE).await?;
+                return Err(Error::new(
                     eyre!(t!("fde.enrollment.trusted-reenrollment")),
                     ErrorKind::Bios,
-                )
-            })?;
+                ));
+            };
             let hash = crate::util::crypto::shadow_password_hash(code)?;
             request_enrollment(&pending, &hash).await?;
         }

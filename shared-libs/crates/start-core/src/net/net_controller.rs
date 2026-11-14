@@ -579,7 +579,7 @@ pub fn plan_host_exposure(
         let addr: SocketAddr = (ip, *port).into();
         let addr_v6 = ipv6.map(|ip| SocketAddrV6::new(ip, *port, 0, 0));
 
-        // Private DNS answers only through the name's enabled local gateways.
+        // Private DNS answers only through the name's live local gateways.
         add_private_dns(&mut private_dns, &enabled_addresses, net_ifaces);
 
         let connect_ssl: Option<Arc<TlsClientConfig>> = bind

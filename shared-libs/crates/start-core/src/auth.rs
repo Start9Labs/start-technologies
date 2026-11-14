@@ -196,18 +196,23 @@ impl LoginContext for RpcContext {
         check_password(&db.as_private().as_password().de()?, password)
     }
     async fn post_login_hook(&self, password: &str) -> Result<(), Error> {
-        let _exclusive = self.password_changes.lock().await;
-        if Self::check_password(&self.db.peek().await, password).is_err() {
+        if shadow_overlay_exists().await {
             return Ok(());
         }
-        if tokio::fs::metadata("/media/startos/config/overlay/etc/shadow")
-            .await
-            .is_err()
+        let _exclusive = self.password_changes.lock().await;
+        if shadow_overlay_exists().await
+            || Self::check_password(&self.db.peek().await, password).is_err()
         {
-            write_shadow(&password).await?;
+            return Ok(());
         }
-        Ok(())
+        write_shadow(&password).await
     }
+}
+
+async fn shadow_overlay_exists() -> bool {
+    tokio::fs::metadata("/media/startos/config/overlay/etc/shadow")
+        .await
+        .is_ok()
 }
 
 pub async fn write_shadow(password: &str) -> Result<(), Error> {

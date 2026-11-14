@@ -37,10 +37,18 @@ pub(crate) async fn reset_password(
 ) -> Result<(), Error> {
     complete_owned_operation(async move {
         let _exclusive = ctx.password_changes.lock().await;
-        change_password(&ctx, &password).await?;
-        crate::auth::write_shadow(&password).await
+        let result = change_password(&ctx, &password).await;
+        if result.is_ok() || matches!(password_committed(&ctx.db, &password).await, Ok(true)) {
+            crate::auth::write_shadow(&password).await?;
+        }
+        result
     })
     .await
+}
+
+async fn password_committed(db: &TypedPatchDb<Database>, password: &str) -> Result<bool, Error> {
+    let current = db.peek().await.as_private().as_password().de()?;
+    Ok(crate::auth::check_password(&current, password).is_ok())
 }
 
 async fn commit_password(

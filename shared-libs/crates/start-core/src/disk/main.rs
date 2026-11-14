@@ -360,6 +360,7 @@ pub(crate) async fn import<P: AsRef<Path>>(
     progress: Option<&FullProgressTracker>,
 ) -> Result<RequiresReboot, Error> {
     activate_pool(guid).await?;
+    close_pool_luks(guid).await?;
     mount_all_fs(guid, datadir, mode, password, progress).await
 }
 
