@@ -1089,7 +1089,8 @@ export default {
   1292: 'Aktueller Fingerabdruck',
   1293: 'Fehlerdetails sind nicht verfügbar',
   1294: 'Nicht erreichbar',
-  1295: 'Benutzerdefiniertes Register anzeigen',
-  1296: 'Benutzerdefiniert',
-  1297: 'Domain oder URL eingeben',
+  1295: 'Transport',
+  1296: 'Benutzerdefiniertes Register anzeigen',
+  1297: 'Benutzerdefiniert',
+  1298: 'Domain oder URL eingeben',
 } satisfies i18n

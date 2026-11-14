@@ -1089,7 +1089,8 @@ export default {
   1292: 'Obecny odcisk',
   1293: 'Szczegóły błędu nie są dostępne',
   1294: 'Nieosiągalny',
-  1295: 'Wyświetl niestandardowy katalog',
-  1296: 'Niestandardowy',
-  1297: 'Wpisz domenę lub adres URL',
+  1295: 'Transport',
+  1296: 'Wyświetl niestandardowy katalog',
+  1297: 'Niestandardowy',
+  1298: 'Wpisz domenę lub adres URL',
 } satisfies i18n

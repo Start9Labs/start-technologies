@@ -1089,7 +1089,8 @@ export default {
   1292: 'Huella actual',
   1293: 'Los detalles del error no están disponibles',
   1294: 'Inaccesible',
-  1295: 'Ver registro personalizado',
-  1296: 'Personalizado',
-  1297: 'Introduce un dominio o una URL',
+  1295: 'Transporte',
+  1296: 'Ver registro personalizado',
+  1297: 'Personalizado',
+  1298: 'Introduce un dominio o una URL',
 } satisfies i18n

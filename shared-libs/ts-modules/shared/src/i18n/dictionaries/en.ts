@@ -1090,7 +1090,8 @@ export const ENGLISH: Record<string, number> = {
   'Current fingerprint': 1292,
   'Error details are not available': 1293,
   'Unreachable': 1294,
-  'View custom registry': 1295,
-  'Custom': 1296, // as in, a custom registry
-  'Enter a domain or URL': 1297,
+  'Transport': 1295,
+  'View custom registry': 1296,
+  'Custom': 1297, // as in, a custom registry
+  'Enter a domain or URL': 1298,
 }

@@ -1089,7 +1089,8 @@ export default {
   1292: 'Empreinte actuelle',
   1293: 'Les détails de l’erreur ne sont pas disponibles',
   1294: 'Injoignable',
-  1295: 'Afficher une bibliothèque personnalisée',
-  1296: 'Personnalisée',
-  1297: 'Saisissez un domaine ou une URL',
+  1295: 'Transport',
+  1296: 'Afficher une bibliothèque personnalisée',
+  1297: 'Personnalisée',
+  1298: 'Saisissez un domaine ou une URL',
 } satisfies i18n
