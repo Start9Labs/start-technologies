@@ -7,12 +7,18 @@ heartbeat or reconnect task.
 
 ## Identity and trust
 
-`sign/instance.rs` loads registry, Tunnel and WRT `rpc-identity.pem` files. Atomic
-no-replace publication makes concurrent starts use the same completed winner. Invalid
-files fail startup without rotation. Files use mode `0600`; file and directory contents
-are synced. WRT preserves the file during sysupgrade. StartOS uses its existing account
-developer identity. This identity is separate from enrollment, authcookies, package and
-OS signing trust, and TLS keys.
+`sign/instance.rs` persists registry, Tunnel and WRT identities in their existing
+PatchDBs as `serverIdentityKey`. PatchDB's idempotent transaction commits a missing identity
+before admission starts; concurrent initializers retain the committed winner. Malformed
+stored keys fail startup without rotation. Identity persistence uses no separate file;
+PatchDB files use mode `0600`. WRT preserves its authentication database during sysupgrade. Registry public index feeds
+and WRT session APIs exclude this field. Tunnel's existing authenticated full-database
+feed includes it alongside its WireGuard and TLS secrets. Registry and Tunnel admin root
+`db.dump` results also include it. Copies can bypass advisory fingerprint-change detection;
+revoking a session does not revoke a copied server key. StartOS signs with its existing
+account `server_identity_key`; its persisted `developerKey` field and historical backup
+formats retain their names. Startup contexts retain temporary identities. Server identity is
+separate from enrollment, authcookies, package/OS trust and TLS keys.
 
 `sign/fingerprint.rs` owns identity fingerprints: SHA-256 of raw Ed25519 public bytes,
 formatted as `SHA256:` followed by lowercase hexadecimal. Extending key schemes also

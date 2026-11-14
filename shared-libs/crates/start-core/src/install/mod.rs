@@ -261,7 +261,12 @@ pub async fn sideload(
         let progress_tracker = progress_tracker.clone();
         async move {
             let result: Result<(), Error> = async {
-                let key = ctx.db.peek().await.into_private().into_developer_key();
+                let key = ctx
+                    .db
+                    .peek()
+                    .await
+                    .into_private()
+                    .into_server_identity_key();
                 let server_policy = trusted_keys::signer_policy(
                     trusted_keys::required(&ctx, TrustContext::Marketplace, trust).await?,
                 );

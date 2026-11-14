@@ -95,8 +95,8 @@ including legacy icons, notes, headlines and key/signature encodings. Canonical 
 the current schema; PatchDB derives patches from the projected values. A projection failure ends
 its subscriptions and permits rebuilding the failed replica without closing unrelated streams.
 A public-mirror subscriber must resubscribe after receiving a private-access grant. StartOS's
-marketplace refresh action restarts that registry's grouped watches without changing signing-key
-trust or discarding cached listings. Weak mirror entries share work across subscribers; dropping the last subscriber cancels that mirror's task.
+registry-management More menu offers refresh in every connection state, restarting that
+registry's grouped watches without changing signing-key trust or discarding cached listings. Weak mirror entries share work across subscribers; dropping the last subscriber cancels that mirror's task.
 
 StartOS derives security notifications from the selected source's OS metadata, filtering by source
 version, platform, and installed build. Delivery history remains keyed by registry URL, version, and

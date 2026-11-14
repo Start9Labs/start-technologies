@@ -291,6 +291,7 @@ mod tests {
         db.put(&ROOT, &imbl_value::json!({"index": {"name": "registry"}}))
             .await
             .unwrap();
+        crate::sign::instance::load(&db).await.unwrap();
         let (dump, mut sub) = subscription(&db, None).await.unwrap();
         assert_eq!(dump.value, imbl_value::json!({"name": "registry"}));
         db.put(&"/index/name".parse::<JsonPointer>().unwrap(), &"renamed")
@@ -356,7 +357,7 @@ mod tests {
 
     #[test]
     fn subscription_pointer_rejects_paths_outside_index() {
-        for pointer in ["", "/", "/admins", "/indexing"] {
+        for pointer in ["", "/", "/admins", "/serverIdentityKey", "/indexing"] {
             let err = subscription_pointer(Some(pointer.parse().unwrap())).unwrap_err();
             assert!(matches!(err.kind, ErrorKind::InvalidRequest));
         }

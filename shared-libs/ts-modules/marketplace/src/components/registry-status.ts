@@ -1,4 +1,4 @@
-import { Component, computed, inject, input } from '@angular/core'
+import { Component, computed, inject, input, Pipe } from '@angular/core'
 import { DialogService, i18nKey, i18nPipe } from '@start9labs/shared'
 import type { T } from '@start9labs/start-core'
 import {
@@ -12,13 +12,32 @@ import { TuiHeader } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 
 const registryStates = {
-  connecting: { label: 'Connecting', appearance: 'info' },
-  connected: { label: 'Connected', appearance: 'positive' },
-  error: { label: 'Error', appearance: 'negative' },
+  connecting: {
+    label: 'Connecting',
+    appearance: 'info',
+    color: 'var(--tui-status-info)',
+  },
+  connected: {
+    label: 'Connected',
+    appearance: 'positive',
+    color: 'var(--tui-status-positive)',
+  },
+  error: {
+    label: 'Unreachable',
+    appearance: 'negative',
+    color: 'var(--tui-status-negative)',
+  },
 } as const satisfies Record<
   T.RegistryStatus,
-  { label: i18nKey; appearance: string }
+  { label: i18nKey; appearance: string; color: string }
 >
+
+@Pipe({ name: 'registryState' })
+export class RegistryStatePipe {
+  transform(status: T.RegistryStatus) {
+    return registryStates[status]
+  }
+}
 
 @Component({
   selector: 'span[marketplaceRegistryStatus]',
@@ -79,7 +98,7 @@ export class RegistryConnectionStatus {
 @Component({
   template: `
     <header tuiHeader>
-      <h2 tuiTitle [id]="context.id">{{ 'Error' | i18n }}</h2>
+      <h2 tuiTitle [id]="context.id">{{ states.error.label | i18n }}</h2>
     </header>
     <p>{{ context.data.url }}</p>
     @if (context.data.error) {
@@ -102,6 +121,7 @@ export class RegistryConnectionStatus {
   imports: [TuiHeader, TuiTitle, TuiButton, i18nPipe],
 })
 class RegistryError {
+  protected readonly states = registryStates
   protected readonly context =
     injectContext<TuiDialogContext<void, { url: string; error: string }>>()
 }

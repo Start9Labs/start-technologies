@@ -74,10 +74,19 @@ function mockStart9Key(
   }
 }
 
+/** The community registry mocks an unreachable registry. */
 export function mockRegistryCache(
+  url: string,
   info: T.RegistryInfo,
 ): DataModel['registryCache'][string] {
-  return { info, packages: Mock.RegistryPackages, status: 'connected' }
+  return sameUrl(url, defaultRegistries.community)
+    ? {
+        info,
+        packages: {},
+        status: 'error',
+        error: `error sending request for url (${registryUrl(url)}): connection timed out`,
+      }
+    : { info, packages: Mock.RegistryPackages, status: 'connected' }
 }
 
 export function mockOsUpdateCache(
@@ -94,11 +103,14 @@ export function mockOsUpdateCache(
 
 export const mockPatchData: DataModel = {
   registryCache: {
-    'https://registry.start9.com/': mockRegistryCache(Mock.RegistryInfo),
-    'https://community-registry.start9.com/': mockRegistryCache({
-      ...Mock.RegistryInfo,
-      name: 'Community Registry',
-    }),
+    [defaultRegistries.start9]: mockRegistryCache(
+      defaultRegistries.start9,
+      Mock.RegistryInfo,
+    ),
+    [defaultRegistries.community]: mockRegistryCache(
+      defaultRegistries.community,
+      { ...Mock.RegistryInfo, name: 'Community Registry' },
+    ),
   },
   osUpdateCache: mockOsUpdateCache(defaultRegistries.start9),
   disks: structuredClone(Mock.Disks),
@@ -673,6 +685,7 @@ export const mockPatchData: DataModel = {
     caFingerprint: '63:2B:11:99:44:40:17:DF:37:FC:C3:DF:0F:3D:15',
     ntpSynced: false,
     smtp: null,
+    nut: { enabled: false, settings: null },
     echoipUrls: ['https://ipconfig.me', 'https://ifconfig.co'],
     zram: false,
     governor: 'performance',

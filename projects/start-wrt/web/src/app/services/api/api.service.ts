@@ -228,7 +228,7 @@ export type SetPasswordReq = RpcParamType<Api, 'auth.set-password'>
 
 export type Theme = 'dark' | 'light' | 'system'
 
-export type RemoteAccess = 'default' | 'never' | 'always'
+export type RemoteAccess = 'never' | 'behind-nat' | 'always'
 
 export type SetPreferencesReq = Partial<{
   language: string

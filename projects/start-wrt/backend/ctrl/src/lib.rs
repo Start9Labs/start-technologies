@@ -484,10 +484,7 @@ mod server_identity_tests {
 
     #[test]
     fn image_preserves_the_server_identity_during_sysupgrade() {
-        let path = PathBuf::from(auth::AUTH_DB_PATH)
-            .parent()
-            .unwrap()
-            .join(startos::sign::instance::IDENTITY_FILE);
+        let path = PathBuf::from(auth::AUTH_DB_PATH);
         let stage = include_str!("../../../build/stage-files.sh");
         let keep = stage
             .split("<< 'KEEPEOF'")

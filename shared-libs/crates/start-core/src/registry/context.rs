@@ -146,13 +146,13 @@ impl RegistryContext {
         if tokio::fs::metadata(&datadir).await.is_err() {
             tokio::fs::create_dir_all(&datadir).await?;
         }
-        let server_identity = crate::sign::instance::load(&datadir).await?;
         let db_path = datadir.join("registry.db");
         let db = TypedPatchDb::<RegistryDatabase>::load_unchecked(PatchDb::open(&db_path).await?);
         if db.dump(&ROOT).await.value.is_null() {
             db.put(&ROOT, &RegistryDatabase::init()).await?;
         }
         db.mutate(|db| run_migrations(db, &datadir)).await.result?;
+        let server_identity = crate::sign::instance::load(&db).await?;
         sweep_icons(
             &icons_dir(&datadir),
             &referenced_icons(db.peek().await.as_index().as_package())?,

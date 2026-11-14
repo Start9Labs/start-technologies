@@ -77,7 +77,7 @@ boundary(
     'TuiLink',
     'TuiExpand',
   ],
-  'export const TUI_BREAKPOINT = Symbol("breakpoint"); export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => []; export const tuiIconStart = value => value;',
+  'export const TUI_ICON_START = Symbol("iconStart"); export const tuiButtonOptionsProvider = () => []; export const TUI_BREAKPOINT = Symbol("breakpoint"); export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => []; export const tuiIconStart = value => value;',
 )
 boundary(
   '@taiga-ui/kit',
@@ -2866,6 +2866,13 @@ test('production mocks support inspection, independent failed backups and new-lo
     timestamp: '2026-01-01T00:00:00Z',
     generation: 'previous',
   }
+  await api.mockRevision([
+    {
+      op: 'replace',
+      path: `/backupTargets/${targetId}/legacyBackup`,
+      value: true,
+    },
+  ])
   await api.rpc.backup.create({
     targetId,
     packageIds: [],
@@ -2888,14 +2895,15 @@ test('production mocks support inspection, independent failed backups and new-lo
     Mock.BackupInfo.sharedVolumeBackups[remote].generation,
     'previous',
   )
-  const report = Mock.Notifications[0].data
-  assert.equal(report.sharedVolumes[local].error, null)
-  assert.ok(report.sharedVolumes[remote].error)
-  assert.deepEqual(report.packages, {})
   const history = await api.rpc.backup.history.list({ offset: 0, limit: 1 })
   assert.equal(history.runs[0].targetId, targetId)
   assert.equal(history.runs[0].targetName, 'Archive')
-  assert.deepEqual(history.runs[0].report, report)
+  const report = history.runs[0].report
+  assert.equal(report.sharedVolumes[local].error, null)
+  assert.ok(report.sharedVolumes[remote].error)
+  assert.deepEqual(report.packages, {})
+  assert.equal(cache.value.value.serverInfo.statusInfo.backupProgress, null)
+  assert.deepEqual(Mock.Notifications, originalNotifications)
   assert.equal(cache.value.value.backupTargets[targetId].name, 'Later name')
   const restored = await api.rpc.backup.volume.restore({
     targetId,
@@ -4146,6 +4154,8 @@ const { PackageIconService: ProductionPackageIconService } =
   await import('../src/app/services/package-icon.service.ts')
 const { default: MarketplacePage } =
   await import('../src/app/routes/portal/routes/marketplace/marketplace.component.ts')
+const { RegistryRefresh } =
+  await import('../src/app/routes/portal/components/registry-retry.ts')
 
 const registryEntry = (version = '1.0.0:0', status = 'connected') => ({
   status,
@@ -4271,6 +4281,14 @@ function marketplaceFixture(t, entries = {}) {
     routeParams,
     makePage: () =>
       runInInjectionContext(injector, () => new MarketplacePage()),
+    makeRefresh(url) {
+      const refresh = runInInjectionContext(
+        injector,
+        () => new RegistryRefresh(),
+      )
+      refresh.registryRefresh = () => url
+      return refresh
+    },
     watch(observable) {
       const values = []
       subscriptions.push(observable.subscribe(value => values.push(value)))
@@ -4395,12 +4413,24 @@ test('malformed saved registries do not terminate valid registry listings or cac
   assert.deepEqual(f.queries, [])
 })
 
+for (const status of ['connected', 'connecting', 'error']) {
+  test(`manual refresh queues synchronization while ${status} without connecting or querying`, async t => {
+    const url = 'https://registry.test/'
+    const f = marketplaceFixture(t, { [url]: registryEntry('1.0.0:0', status) })
+    await f.makeRefresh(url).refresh()
+    assert.deepEqual(f.refreshes, [{ url }])
+    assert.deepEqual(f.connections, [])
+    assert.deepEqual(f.queries, [])
+  })
+}
+
 test('the visible refresh action retries failed icons when the refreshed cache arrives and shares successful loads', async t => {
   const entry = registryEntry()
   const icon = 'blake3/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png'
   entry.packages.example.best['1.0.0:0'].icon = icon
   const f = marketplaceFixture(t, { 'https://registry.test/': entry })
-  const page = f.makePage()
+  f.makePage()
+  const refresh = f.makeRefresh('https://registry.test/')
   const visible = f.watch(
     f.service.currentRegistry$.pipe(
       switchMap(store =>
@@ -4412,7 +4442,7 @@ test('the visible refresh action retries failed icons when the refreshed cache a
   f.iconResponses[0].reject(new Error('Icon temporarily unavailable'))
   await tick()
   assert.equal(visible.at(-1), 'fallback.png')
-  await page.refreshRegistry()
+  await refresh.refresh()
   assert.deepEqual(f.refreshes, [{ url: 'https://registry.test/' }])
   assert.deepEqual(f.connections, [])
   assert.equal(f.iconRequests.length, 1)

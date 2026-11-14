@@ -59,6 +59,8 @@ fn sign_in_ended(logged_in: DateTime<Utc>, now: DateTime<Utc>, clock_trusted: bo
 #[serde(rename_all = "camelCase")]
 pub struct AuthDatabase {
     #[serde(default)]
+    pub server_identity_key: startos::sign::instance::StoredIdentityKey,
+    #[serde(default)]
     pub session_pubkeys: AuthKeys,
 }
 impl HasModel for AuthDatabase {
@@ -116,6 +118,10 @@ impl AuthState {
         Ok(Self::new(
             TypedPatchDb::load_or_init(db, || async { Ok(AuthDatabase::default()) }).await?,
         ))
+    }
+
+    pub(crate) async fn server_identity(&self) -> Result<startos::sign::Signer, Error> {
+        Ok(startos::sign::instance::load(&self.db).await?)
     }
 
     fn new(db: TypedPatchDb<AuthDatabase>) -> Self {
@@ -867,6 +873,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn auth_database_preserves_the_server_identity_key_across_normalization() {
+        let temp = tempfile::tempdir().unwrap();
+        let raw = PatchDb::open(temp.path().join("auth.db")).await.unwrap();
+        raw.put(&patch_db::json_ptr::ROOT, &json!({ "sessionPubkeys": {} }))
+            .await
+            .unwrap();
+        let db = TypedPatchDb::<AuthDatabase>::load(raw).await.unwrap();
+        let expected = startos::sign::instance::load(&db)
+            .await
+            .unwrap()
+            .verifying_key()
+            .await
+            .unwrap();
+        let db = TypedPatchDb::<AuthDatabase>::load((*db).clone())
+            .await
+            .unwrap();
+        let auth = AuthState::new(db);
+        assert_eq!(
+            auth.server_identity()
+                .await
+                .unwrap()
+                .verifying_key()
+                .await
+                .unwrap(),
+            expected
+        );
+        assert!(auth
+            .db
+            .peek()
+            .await
+            .as_session_pubkeys()
+            .de()
+            .unwrap()
+            .0
+            .is_empty());
+    }
+
+    #[tokio::test]
     async fn logout_requires_a_signing_key() {
         let ctx = ServerContext::default();
         let key = key_id("key");
@@ -880,6 +924,7 @@ mod tests {
                             .into_iter()
                             .collect(),
                     ),
+                    ..Default::default()
                 },
             )
             .await
@@ -925,6 +970,7 @@ mod tests {
                 &patch_db::json_ptr::ROOT,
                 &AuthDatabase {
                     session_pubkeys: AuthKeys(keys),
+                    ..Default::default()
                 },
             )
             .await

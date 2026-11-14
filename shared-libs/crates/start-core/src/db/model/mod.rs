@@ -52,7 +52,7 @@ impl Database {
                 backup_target_credentials: BTreeMap::new(),
                 shared_volume_credentials: BTreeMap::new(),
                 package_stores: BTreeMap::new(),
-                developer_key: Der64(account.developer_key.clone()),
+                server_identity_key: Der64(account.server_identity_key.clone()),
             },
         })
     }
