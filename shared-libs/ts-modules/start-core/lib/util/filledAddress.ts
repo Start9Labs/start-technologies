@@ -11,6 +11,7 @@ import {
 } from '../types'
 import { IpAddress, IPV6_LINK_LOCAL } from './ip'
 import { once } from './once'
+import { deepEqual } from './deepEqual'
 
 export type UrlString = string
 export type HostId = string
@@ -321,43 +322,84 @@ function filterRec(
   return hostnames
 }
 
-function isPublicIp(h: HostnameInfo): boolean {
-  return h.public && (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6')
+function gatewayIds(h: HostnameInfo): string[] {
+  switch (h.metadata.kind) {
+    case 'ipv4':
+    case 'ipv6':
+    case 'public-domain':
+      return [h.metadata.gateway]
+    case 'mdns':
+    case 'private-domain':
+      return h.metadata.gateways
+    default:
+      return []
+  }
 }
 
-function overridden(
-  overrides: DerivedAddressInfo['disabled'],
+function insecureOverride(
+  overrides: DerivedAddressInfo['insecure'],
   h: HostnameInfo,
 ): boolean {
   return overrides.some(
-    ([hostname, port]) => hostname === h.hostname && port === (h.port ?? 0),
+    ([hostname, port, gateway]) =>
+      hostname === h.hostname &&
+      port === h.port &&
+      gatewayIds(h).includes(gateway),
   )
 }
 
-function mdnsCovers(mdns: HostnameInfo, ip: HostnameInfo): boolean {
-  return (
-    mdns.metadata.kind === 'mdns' &&
-    (ip.metadata.kind === 'ipv4' || ip.metadata.kind === 'ipv6') &&
-    mdns.port === ip.port &&
-    mdns.metadata.gateways.includes(ip.metadata.gateway)
-  )
+export function isAddressInsecure(
+  addr: DerivedAddressInfo,
+  h: HostnameInfo,
+): boolean {
+  return insecureOverride(addr.insecure ?? [], h)
 }
 
-/**
- * Whether the user's overrides leave this address on. A LAN IP without an
- * override follows the mDNS address resolving to it.
- */
+type AddressSelections = Pick<
+  DerivedAddressInfo,
+  'enabled' | 'disabled' | 'lanEnabled' | 'available'
+> &
+  Partial<Pick<DerivedAddressInfo, 'effective'>>
+
+/** Uses server-owned selections, with compatibility for servers lacking `effective`. */
 export function isAddressEnabled(
   addr: DerivedAddressInfo,
   h: HostnameInfo,
 ): boolean {
-  if (isPublicIp(h)) {
+  return getEnabledAddresses(addr).some(a => deepEqual(a, h))
+}
+
+/** Server-owned selections, or the legacy protocol's local projection. */
+export function getEnabledAddresses(addr: AddressSelections): HostnameInfo[] {
+  return (
+    addr.effective ?? addr.available.filter(h => legacyAddressEnabled(addr, h))
+  )
+}
+
+function legacyAddressEnabled(
+  addr: AddressSelections,
+  h: HostnameInfo,
+): boolean {
+  const overridden = (
+    overrides: DerivedAddressInfo['disabled'],
+    row: HostnameInfo,
+  ) =>
+    overrides.some(
+      ([hostname, port]) =>
+        hostname === row.hostname && port === (row.port ?? 0),
+    )
+  const mdnsCovers = (mdns: HostnameInfo, ip: HostnameInfo) =>
+    mdns.metadata.kind === 'mdns' &&
+    (ip.metadata.kind === 'ipv4' || ip.metadata.kind === 'ipv6') &&
+    mdns.port === ip.port &&
+    mdns.metadata.gateways.includes(ip.metadata.gateway)
+  if (h.public && (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6')) {
     if (h.port === null) return true
-    const sa =
+    return addr.enabled.includes(
       h.metadata.kind === 'ipv6'
         ? `[${h.hostname}]:${h.port}`
-        : `${h.hostname}:${h.port}`
-    return addr.enabled.includes(sa)
+        : `${h.hostname}:${h.port}`,
+    )
   }
   if (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6') {
     if (overridden(addr.lanEnabled, h)) return true
@@ -367,18 +409,13 @@ export function isAddressEnabled(
       .every(mdns => !overridden(addr.disabled, mdns))
   }
   if (!overridden(addr.disabled, h)) return true
-  // An enabled public GUA serves the name too; the switch stays off beside one.
   return (
     h.metadata.kind === 'mdns' &&
     !h.ssl &&
     addr.available.some(
-      ip => !ip.public && mdnsCovers(h, ip) && isAddressEnabled(addr, ip),
+      ip => !ip.public && mdnsCovers(h, ip) && legacyAddressEnabled(addr, ip),
     )
   )
-}
-
-function enabledAddresses(addr: DerivedAddressInfo): HostnameInfo[] {
-  return addr.available.filter(h => isAddressEnabled(addr, h))
 }
 
 /**
@@ -405,7 +442,7 @@ export const filledAddress = (
 ): FilledAddressInfo => {
   const toUrl = addressHostToUrl.bind(null, addressInfo)
   const binding = host.bindings[addressInfo.internalPort]
-  const hostnames = binding ? enabledAddresses(binding.addresses) : []
+  const hostnames = binding ? getEnabledAddresses(binding.addresses) : []
 
   function filledAddressFromHostnames<F extends Filter>(
     hostnames: HostnameInfo[],

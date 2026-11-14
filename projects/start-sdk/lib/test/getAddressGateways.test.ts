@@ -23,13 +23,14 @@ const domain = pub('turn.example.com', {
 const addresses = (
   available: T.HostnameInfo[],
   enabled: string[],
-): T.DerivedAddressInfo => ({
-  enabled,
-  disabled: [],
-  guaWan: [],
-  lanEnabled: [],
-  available,
-})
+): T.DerivedAddressInfo =>
+  ({
+    enabled,
+    disabled: [],
+    guaWan: [],
+    lanEnabled: [],
+    available,
+  }) as unknown as T.DerivedAddressInfo
 
 const host = (
   binding: T.DerivedAddressInfo,
