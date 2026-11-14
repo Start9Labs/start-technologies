@@ -10,6 +10,7 @@ use crate::prelude::*;
 use crate::registry::admin::display_signers;
 use crate::registry::context::RegistryContext;
 use crate::registry::signer::SignerInfo;
+use crate::registry::upstream::WRITES_INDEX;
 use crate::rpc_continuations::Guid;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 
@@ -29,6 +30,7 @@ pub fn access_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-private",
             from_fn_async(set_package_private)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.set-package-private")
@@ -37,6 +39,7 @@ pub fn access_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add-reader",
             from_fn_async(add_package_reader)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.add-package-reader")
@@ -45,6 +48,7 @@ pub fn access_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove-reader",
             from_fn_async(remove_package_reader)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.remove-package-reader")

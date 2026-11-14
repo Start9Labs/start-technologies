@@ -37,6 +37,7 @@ use crate::registry::mirror::IndexMirrors;
 use crate::registry::package::icon::{icons_dir, referenced_icons, sweep_icons};
 use crate::registry::package::promote::registry_rpc_url;
 use crate::registry::signer::SignerInfo;
+use crate::registry::upstream::{Upstream, UpstreamClients};
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
 use crate::sign::AnyVerifyingKey;
 use crate::util::io::append_file;
@@ -67,6 +68,8 @@ pub struct RegistryConfig {
     #[arg(long, help = "help.arg.registry-startwrt")]
     #[serde(default)]
     pub startwrt: bool,
+    #[arg(long, help = "help.arg.registry-mirror-of")]
+    pub mirror_of: Option<Url>,
 }
 impl ContextConfig for RegistryConfig {
     fn next(&mut self) -> Option<PathBuf> {
@@ -78,6 +81,7 @@ impl ContextConfig for RegistryConfig {
         self.tor_proxy = self.tor_proxy.take().or(other.tor_proxy);
         self.datadir = self.datadir.take().or(other.datadir);
         self.startwrt |= other.startwrt;
+        self.mirror_of = self.mirror_of.take().or(other.mirror_of);
     }
 }
 
@@ -102,6 +106,8 @@ pub struct RegistryContextSeed {
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub client: Client,
     pub server_identity: crate::sign::Signer,
+    /// Present while this registry mirrors another.
+    pub upstream: Option<Upstream>,
     pub shutdown: Sender<()>,
     pub metrics_db: SyncMutex<Connection>,
 }
@@ -195,6 +201,19 @@ impl RegistryContext {
                 ErrorKind::NotFound,
             ));
         }
+        let upstream = config
+            .mirror_of
+            .clone()
+            .map(|url| {
+                Ok::<_, Error>(Upstream::spawn(
+                    db.clone(),
+                    icons_dir(&datadir),
+                    UpstreamClients::new(tor_proxy_url.clone())?,
+                    server_identity.clone(),
+                    url,
+                ))
+            })
+            .transpose()?;
         Ok(Self(
             Arc::new(RegistryContextSeed {
                 hostnames: config.registry_hostname.clone(),
@@ -206,17 +225,11 @@ impl RegistryContext {
                 rpc_continuations: RpcContinuations::new(),
                 open_authed_continuations: OpenAuthedContinuations::new(),
                 auth_sig_nonce_cache: SyncMutex::new(Default::default()),
-                client: Client::builder()
-                    .proxy(Proxy::custom(move |url| {
-                        if url.host_str().map_or(false, |h| h.ends_with(".onion")) {
-                            Some(tor_proxy_url.clone())
-                        } else {
-                            None
-                        }
-                    }))
+                client: client_builder(tor_proxy_url)
                     .build()
                     .with_kind(crate::ErrorKind::ParseUrl)?,
                 server_identity,
+                upstream,
                 shutdown,
                 metrics_db,
             }),
@@ -224,6 +237,17 @@ impl RegistryContext {
         ))
     }
 }
+/// Proxies `.onion` hosts through Tor and dials everything else directly.
+pub(super) fn client_builder(tor_proxy_url: Url) -> reqwest::ClientBuilder {
+    Client::builder().proxy(Proxy::custom(move |url| {
+        if url.host_str().map_or(false, |h| h.ends_with(".onion")) {
+            Some(tor_proxy_url.clone())
+        } else {
+            None
+        }
+    }))
+}
+
 impl AsRef<RpcContinuations> for RegistryContext {
     fn as_ref(&self) -> &RpcContinuations {
         &self.rpc_continuations
@@ -666,11 +690,20 @@ pub(crate) async fn test_context_for_hosts(
             auth_sig_nonce_cache: SyncMutex::new(Default::default()),
             client: Client::new(),
             server_identity: crate::sign::AnySigningKey::generate().into(),
+            upstream: None,
             shutdown: tokio::sync::broadcast::channel(1).0,
             metrics_db: SyncMutex::new(Connection::open_in_memory().unwrap()),
         }),
         None,
     )
+}
+
+#[cfg(test)]
+impl RegistryContext {
+    pub(crate) fn with_upstream(mut self, upstream: Upstream) -> Self {
+        Arc::get_mut(&mut self.0).unwrap().upstream = Some(upstream);
+        self
+    }
 }
 
 #[cfg(test)]
