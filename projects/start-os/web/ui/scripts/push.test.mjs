@@ -11,7 +11,8 @@ loadTypeScript(
   new Map([
     [
       '@start9labs/shared',
-      'export class ErrorService {}\nexport class i18nPipe {}',
+      'export class ErrorService {}\nexport class i18nPipe {}\n' +
+        `export { legacyDatabaseSubscription } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/services/database-subscription.ts', import.meta.url).href)};`,
     ],
     ['@ng-web-apis/common', 'export const WA_WINDOW = Symbol("window")'],
   ]),

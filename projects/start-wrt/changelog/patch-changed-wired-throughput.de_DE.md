@@ -1,1 +1,0 @@
-- Kabelgebundener Verkehr zwischen dem Internet und den Geräten erreicht volle Gigabit-Geschwindigkeit. Der Router verteilt die Arbeit jedes Ethernet-Ports auf seine Prozessorkerne; bestehende Verbindungen überspringen die bereits bestandenen Firewall-Prüfungen pro Paket.

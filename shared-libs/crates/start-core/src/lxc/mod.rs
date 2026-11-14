@@ -26,7 +26,7 @@ use crate::disk::mount::filesystem::{MountType, ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard, TmpMountGuard};
 use crate::disk::mount::util::unmount;
 use crate::prelude::*;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::service::ServiceStats;
 use crate::util::io::{open_file, write_file_owned_atomic};
 use crate::util::rpc_client::UnixRpcClient;
@@ -765,6 +765,8 @@ pub async fn connect(ctx: &RpcContext, container: &LxcContainer) -> Result<Guid,
         .add(
             guid.clone(),
             RpcContinuation::ws(
+                WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
                 |mut ws| async move {
                     if let Err(e) = async {
                         loop {
@@ -785,7 +787,7 @@ pub async fn connect(ctx: &RpcContext, container: &LxcContainer) -> Result<Guid,
                                     }
                                     .await;
                                     ws.send(Message::Text(
-                                        serde_json::to_string(&RpcResponse { id, result })
+                                        serde_json::to_string(&RpcResponse::new(id, result))
                                             .with_kind(ErrorKind::Serialization)?
                                             .into(),
                                     ))

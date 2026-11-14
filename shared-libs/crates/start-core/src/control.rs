@@ -128,7 +128,14 @@ mod tests {
 
     #[tokio::test]
     async fn cli_start_stderr() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use rpc_toolkit::{HandlerExt, ParentHandler, Server, from_fn_async};
+
+        use crate::middleware::auth::session::RpcSessionUpgrader;
+        use crate::registry::context::{RegistryContext, test_context};
+        use crate::util::future::NonDetachingJoinHandle;
 
         if let Ok(host) = std::env::var("START_CORE_TEST_START_HOST") {
             let ctx =
@@ -158,55 +165,57 @@ mod tests {
         for case in ["blocked", "clear", "inspection-failed", "start-failed"] {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let host = format!("http://{}", listener.local_addr().unwrap());
-            let server = tokio::spawn(async move {
-                let count = if case == "start-failed" { 1 } else { 2 };
-                for index in 0..count {
-                    let (mut stream, _) = listener.accept().await.unwrap();
-                    let mut request = Vec::new();
-                    loop {
-                        let byte = stream.read_u8().await.unwrap();
-                        request.push(byte);
-                        if request.ends_with(b"\r\n\r\n") {
-                            break;
+            let temp = tempfile::tempdir().unwrap();
+            let key = crate::sign::AnySigningKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(
+                &[7; 32],
+            ));
+            let context = test_context(temp.path().into(), key.verifying_key()).await;
+            let calls = Arc::new(AtomicUsize::new(0));
+            let starts = calls.clone();
+            let inspections = calls.clone();
+            let handler = ParentHandler::<RegistryContext>::new()
+                .subcommand("package", ParentHandler::<RegistryContext>::new().subcommand("start",
+                    from_fn_async(move |_: RegistryContext, params: Value| {
+                        let starts = starts.clone();
+                        async move {
+                            assert_eq!(starts.fetch_add(1, Ordering::SeqCst), 0);
+                            assert_eq!(params, imbl_value::json!({"id":"service"}));
+                            if case == "start-failed" {
+                                Err(rpc_toolkit::util::internal_error("test failure"))
+                            } else {
+                                Ok(Value::Null)
+                            }
                         }
-                    }
-                    let headers = String::from_utf8(request).unwrap();
-                    let length: usize = headers
-                        .lines()
-                        .find_map(|line| {
-                            let (key, value) = line.split_once(':')?;
-                            key.eq_ignore_ascii_case("content-length")
-                                .then(|| value.trim().parse().unwrap())
-                        })
-                        .unwrap();
-                    let mut body = vec![0; length];
-                    stream.read_exact(&mut body).await.unwrap();
-                    let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
-                    let expected_method = if index == 0 {
-                        "package.start"
-                    } else {
-                        "db.dump"
-                    };
-                    assert_eq!(request["method"], expected_method);
-                    assert_eq!(
-                        request["params"],
-                        if index == 0 {
-                            serde_json::json!({"id": "service"})
-                        } else {
-                            serde_json::json!({"pointer": "/public/packageData/service"})
+                    }).no_cli().no_ts(),
+                ))
+                .subcommand("db", ParentHandler::<RegistryContext>::new().subcommand("dump",
+                    from_fn_async(move |_: RegistryContext, params: Value| {
+                        let inspections = inspections.clone();
+                        async move {
+                            assert_eq!(inspections.fetch_add(1, Ordering::SeqCst), 1);
+                            assert_eq!(params, imbl_value::json!({"pointer":"/public/packageData/service"}));
+                            if case == "inspection-failed" {
+                                Err(rpc_toolkit::util::internal_error("test failure"))
+                            } else {
+                                Ok(imbl_value::json!({"id":1,"value":package_entry(case == "blocked")}))
+                            }
                         }
-                    );
-                    let response = if case == "start-failed" || (index == 1 && case == "inspection-failed") {
-                        serde_json::json!({"jsonrpc": "2.0", "id": request["id"], "error": {"code": -32603, "message": "test failure"}})
-                    } else {
-                        let result = if index == 0 { serde_json::Value::Null } else {
-                            serde_json::json!({"id": 1, "value": package_entry(case == "blocked")})
-                        };
-                        serde_json::json!({"jsonrpc": "2.0", "id": request["id"], "result": result})
-                    }.to_string();
-                    stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).as_bytes()).await.unwrap();
-                }
-            });
+                    }).no_cli().no_ts(),
+                ));
+            let server = Server::new(
+                move || {
+                    let context = context.clone();
+                    async move { Ok(context) }
+                },
+                handler,
+            )
+            .for_http();
+            let app = axum::Router::new()
+                .route(RpcSessionUpgrader::PATH, RpcSessionUpgrader::route(server));
+            let server: NonDetachingJoinHandle<_> = tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            })
+            .into();
             let output = tokio::time::timeout(
                 std::time::Duration::from_secs(30),
                 tokio::process::Command::new(std::env::current_exe().unwrap())
@@ -224,7 +233,11 @@ mod tests {
                 "{case}: {}",
                 String::from_utf8_lossy(&output.stdout)
             );
-            server.await.unwrap();
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                if case == "start-failed" { 1 } else { 2 }
+            );
+            drop(server);
             let stderr = String::from_utf8(output.stderr).unwrap();
             match case {
                 "blocked" => assert!(stderr.contains("Warning: startup requested for service service; unresolved critical tasks block runtime startup"), "{stderr}"),

@@ -1368,6 +1368,10 @@ export const WgServer: z.ZodObject<{
   id: 'WgServer',
 })
 export const TunnelDatabase: z.ZodObject<{
+  serverIdentityKey: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof literal_0>>,
+    z.ZodNullable<typeof literal_0>
+  >
   webserver: typeof WebserverInfo
   password: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1393,6 +1397,21 @@ export const TunnelDatabase: z.ZodObject<{
     typeof HttpRedirects
   >
 }> = /* @__PURE__ */ object({
+  serverIdentityKey: wire(
+    literal_0
+      .meta({
+        description:
+          'Standard Base64 DER with padding. Deserialization also accepts legacy PEM armor.',
+      })
+      .nullable()
+      .optional(),
+    literal_0
+      .meta({
+        description:
+          'Standard Base64 DER with padding. Deserialization also accepts legacy PEM armor.',
+      })
+      .nullable(),
+  ),
   webserver: WebserverInfo,
   password: wire(z.string().nullable().optional(), z.string().nullable()),
   /**
