@@ -6,6 +6,7 @@
 
 pub mod api;
 pub mod boot;
+pub(crate) mod boot_services;
 pub mod bootstrap;
 pub mod credentials;
 pub mod enrollment;

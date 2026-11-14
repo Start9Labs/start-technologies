@@ -123,6 +123,7 @@ impl RootComposition {
                 )
                 .await?,
             );
+            super::boot_services::prepare(root, runtime).await?;
             Ok::<_, Error>(())
         }
         .await;

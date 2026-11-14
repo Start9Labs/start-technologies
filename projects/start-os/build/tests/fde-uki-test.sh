@@ -132,6 +132,11 @@ for control in '\0' '\r' '\v'; do
     expect_failure bash "$helper" "${args[@]}" --output outputs/control-boot.efi
     expect_absent outputs/control-boot.efi
 done
+for selector in init=/bin/sh rdinit=/bin/sh systemd.unit=multi-user.target systemd.wants=ssh.service systemd.debug_shell rd.systemd.unit=emergency.target emergency rescue single s S 1 2 3 4 5 -b -s --; do
+    printf 'root=LABEL=startos BOOT=%s %s\n' "$boot_mode" "$selector" > inputs/cmdline
+    expect_failure bash "$helper" "${args[@]}" --output outputs/startup-override.efi
+    expect_absent outputs/startup-override.efi
+done
 mv inputs/good-cmdline inputs/cmdline
 
 cp inputs/key inputs/good-key

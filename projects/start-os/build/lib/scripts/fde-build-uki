@@ -10,7 +10,8 @@ Usage: fde-build-uki --linux PATH --initrd PATH --cmdline PATH --os-release PATH
 Builds a signed native-architecture UKI and PATH.pcr11 (64 lowercase hex digits
 plus LF), predicting SHA256 PCR11 before any systemd-pcrphase events.
 Cmdline uses unquoted tokens and includes the FDE BOOT parameter.
-Input files must remain stable.
+Input files must remain stable. Startup overrides are unsupported; the verified
+running root owns the systemd default target.
 Key is an unencrypted PEM RSA Secure Boot key; cert is its PEM X.509 certificate.
 The caller keeps the key on encrypted data, distinct from the TPM policy key.
 
@@ -59,6 +60,10 @@ command_line_contents=$(< "${paths[--cmdline]}")
 read -r -a command_line <<< "${command_line_contents//$'\n'/ }"
 boot_parameters=0
 for parameter in "${command_line[@]}"; do
+    case "$parameter" in
+        init=*|rdinit=*|systemd.*|rd.systemd.*|emergency|rescue|single|s|S|1|2|3|4|5|-*)
+            fail "unsupported startup selector: $parameter" ;;
+    esac
     if [[ $parameter == BOOT=* ]]; then
         [[ $parameter == "BOOT=$boot_mode" ]] || fail "incompatible BOOT parameter"
         (( boot_parameters += 1 ))

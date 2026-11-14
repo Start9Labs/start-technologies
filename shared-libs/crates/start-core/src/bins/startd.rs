@@ -51,10 +51,6 @@ async fn inner_main(
             Ok(ctx) => ctx,
         };
         tokio::fs::write("/run/startos/initialized", "").await?;
-        if boot == crate::fde::initramfs::BootMode::Protected {
-            crate::fde::initramfs::finish_handoff().await?;
-        }
-
         server.serve_ui_for(ctx.clone());
         LOGGER.set_logfile(None);
         handle.complete();
@@ -64,7 +60,6 @@ async fn inner_main(
         if boot == crate::fde::initramfs::BootMode::Protected {
             let guid = tokio::fs::read_to_string("/media/startos/config/disk.guid").await?;
             crate::fde::unlock::require_cached_unlock(guid.trim()).await?;
-            crate::fde::initramfs::finish_handoff().await?;
         }
         let init_ctx = InitContext::init(config, dns.clone()).await?;
         let handle = init_ctx.progress.clone();
@@ -96,6 +91,11 @@ async fn inner_main(
 
         ctx
     };
+
+    if boot == crate::fde::initramfs::BootMode::Protected {
+        crate::fde::boot_services::release().await?;
+        crate::fde::initramfs::finish_handoff().await?;
+    }
 
     let (rpc_ctx, shutdown) = async {
         crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.clone())).await?;
