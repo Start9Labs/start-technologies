@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use imbl::OrdMap;
 use patch_db::ModelExt;
 
 use super::*;
@@ -59,6 +60,13 @@ fn assert_unallocated(db: &DatabaseModel) {
             .as_host()
             .as_bindings()
             .contains_key(&6881)
+            .unwrap(),
+        "{:?}",
+        db.as_public()
+            .as_server_info()
+            .as_network()
+            .as_host()
+            .de()
             .unwrap()
     );
     assert_eq!(
@@ -162,6 +170,86 @@ fn first_opt_in_allocates_and_last_opt_out_releases_without_restoring_consent() 
             .enabled()
             .is_empty()
     );
+}
+
+#[test]
+fn consent_and_assignment_survive_discovery_loss_and_explicit_opt_out_still_retires() {
+    for hostname in ["peers.example.com", "192.168.1.2"] {
+        let mut db = database(enabled());
+        if hostname == "peers.example.com" {
+            db.as_public_mut()
+                .as_server_info_mut()
+                .as_network_mut()
+                .as_host_mut()
+                .as_public_domains_mut()
+                .insert(
+                    &hostname.into(),
+                    &crate::net::host::address::PublicDomainConfig {
+                        gateway: "eth0".parse().unwrap(),
+                        acme: None,
+                    },
+                )
+                .unwrap();
+        }
+        let selected = candidate(&db, hostname);
+        let selected = incoming::select_address_in(&mut db, true, selected, true).unwrap();
+        let gateways = db
+            .as_public()
+            .as_server_info()
+            .as_network()
+            .as_gateways()
+            .de()
+            .unwrap();
+        let server_hostname =
+            crate::hostname::ServerHostname::load(db.as_public().as_server_info()).unwrap();
+        let ports = db.as_private().as_available_ports().de().unwrap();
+        for discovered in [OrdMap::new(), gateways] {
+            let network = db.as_public_mut().as_server_info_mut().as_network_mut();
+            network.as_gateways_mut().ser(&discovered).unwrap();
+            network
+                .as_host_mut()
+                .update_addresses(&server_hostname, &discovered, &ports)
+                .unwrap();
+            if discovered.is_empty() && hostname == "192.168.1.2" {
+                let binding = db
+                    .as_public()
+                    .as_server_info()
+                    .as_network()
+                    .as_host()
+                    .as_bindings()
+                    .as_idx(&6881)
+                    .unwrap()
+                    .de()
+                    .unwrap();
+                assert!(binding.enabled_addresses().is_empty());
+            }
+            let before = db.as_value().clone();
+            assert_eq!(incoming::retained_bindings(&db, true).unwrap().len(), 1);
+            assert_eq!(
+                incoming::configure_in(&mut db, true)
+                    .unwrap()
+                    .unwrap()
+                    .announce_port,
+                selected.port
+            );
+            assert_eq!(db.as_value(), &before);
+        }
+        let rediscovered = candidate(&db, hostname);
+        assert_eq!(rediscovered.port, selected.port);
+        let binding = db
+            .as_public()
+            .as_server_info()
+            .as_network()
+            .as_host()
+            .as_bindings()
+            .as_idx(&6881)
+            .unwrap()
+            .de()
+            .unwrap();
+        assert!(binding.enabled_addresses().contains(&rediscovered));
+        incoming::select_address_in(&mut db, true, rediscovered, false).unwrap();
+        assert_unallocated(&db);
+    }
 }
 
 #[test]

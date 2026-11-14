@@ -1,6 +1,19 @@
 use super::*;
 use crate::PackageId;
 
+#[test]
+fn absent_named_consent_remains_subject_to_explicit_negatives() {
+    let key = (InternedString::intern("peers.example.com"), 50000);
+    let mut addresses = DerivedAddressInfo {
+        default_off: true,
+        enabled_names: [key.clone()].into(),
+        ..Default::default()
+    };
+    assert!(addresses.has_enabled_intent());
+    addresses.disabled.insert(key);
+    assert!(!addresses.has_enabled_intent());
+}
+
 fn candidates(ssl: bool) -> BTreeSet<HostnameInfo> {
     let gateway = GatewayId::from(InternedString::intern("eth0"));
     [

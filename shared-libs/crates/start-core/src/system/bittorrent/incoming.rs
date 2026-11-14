@@ -55,7 +55,7 @@ pub(crate) fn retained_bindings(
 ) -> Result<std::collections::BTreeSet<binding::BindId>, Error> {
     if !available
         || !stored_binding(db)?
-            .is_some_and(|binding| binding.enabled && !binding.enabled_addresses().is_empty())
+            .is_some_and(|binding| binding.enabled && binding.addresses.has_enabled_intent())
     {
         return Ok(Default::default());
     }
@@ -118,7 +118,7 @@ fn configured(binding: &BindInfo) -> bool {
 }
 
 fn active(db: &DatabaseModel, available: bool, binding: &BindInfo) -> Result<bool, Error> {
-    Ok(eligible(db, available)? && binding.enabled && !binding.enabled_addresses().is_empty())
+    Ok(eligible(db, available)? && binding.enabled && binding.addresses.has_enabled_intent())
 }
 
 pub(crate) async fn configure_incoming(ctx: &RpcContext) -> Result<Option<ListenerOptions>, Error> {
@@ -202,7 +202,7 @@ fn allocate_address(
 }
 
 fn release_if_unselected(db: &mut DatabaseModel) -> Result<(), Error> {
-    if stored_binding(db)?.is_some_and(|binding| binding.enabled_addresses().is_empty()) {
+    if stored_binding(db)?.is_some_and(|binding| !binding.addresses.has_enabled_intent()) {
         clear_selections(db)?;
     }
     Ok(())

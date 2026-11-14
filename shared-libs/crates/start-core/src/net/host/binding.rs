@@ -243,12 +243,12 @@ impl DerivedAddressInfo {
             .iter()
             .filter(|mdns| mdns_covers(mdns, address))
             .peekable();
-        (!self.default_off || names.peek().is_some()) && names.all(|mdns| self.name_on(mdns))
+        (!self.default_off || names.peek().is_some())
+            && names.all(|mdns| self.name_on(&override_key(mdns)))
     }
 
-    fn name_on(&self, address: &HostnameInfo) -> bool {
-        let key = override_key(address);
-        !self.disabled.contains(&key) && (!self.default_off || self.enabled_names.contains(&key))
+    fn name_on(&self, key: &(InternedString, u16)) -> bool {
+        !self.disabled.contains(key) && (!self.default_off || self.enabled_names.contains(key))
     }
 
     pub(super) fn set_name_enabled(&mut self, key: (InternedString, u16), enabled: bool) {
@@ -264,7 +264,7 @@ impl DerivedAddressInfo {
     /// On a non-SSL port an enabled LAN IP serves the name. An enabled public
     /// GUA serves it too, and the switch stays off beside one.
     fn mdns_on(&self, mdns: &HostnameInfo) -> bool {
-        self.name_on(mdns)
+        self.name_on(&override_key(mdns))
             || (!mdns.ssl
                 && self
                     .available
@@ -280,6 +280,14 @@ impl DerivedAddressInfo {
             self.lan_enabled.remove(&key);
             self.disabled.insert(key);
         }
+    }
+
+    /// Includes explicit consent for temporarily unavailable addresses.
+    pub(crate) fn has_enabled_intent(&self) -> bool {
+        !self.enabled.is_empty()
+            || self.enabled_names.iter().any(|key| self.name_on(key))
+            || !self.lan_enabled.is_empty()
+            || !self.enabled().is_empty()
     }
 
     /// Effective address selections, including native forwarding-group aliases.
@@ -300,7 +308,7 @@ impl DerivedAddressInfo {
                 } else if matches!(h.metadata, HostnameMetadata::Mdns { .. }) {
                     self.mdns_on(h)
                 } else {
-                    self.name_on(h)
+                    self.name_on(&override_key(h))
                 }
             })
             .collect()
@@ -1259,7 +1267,7 @@ fn nonssl_lan_on(addresses: &DerivedAddressInfo, gateway: &GatewayId, port: u16)
         }
         match &a.metadata {
             HostnameMetadata::PrivateDomain { gateways } if gateways.contains(gateway) => {
-                addresses.name_on(a)
+                addresses.name_on(&override_key(a))
             }
             HostnameMetadata::Ipv4 { gateway: gw } if !a.public && gw == gateway => {
                 addresses.lan_ip_on(a)
