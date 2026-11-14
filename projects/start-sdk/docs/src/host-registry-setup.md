@@ -63,20 +63,20 @@ To keep the key in gpg-agent instead, skip `init-key` and point `start-cli` at a
 
 ## 4. Point `start-cli` at the registry
 
-All registry operations go through `start-cli registry` (or `start-cli s9pk publish` for uploading packages). Pass the registry's URL with `--registry`:
+All registry operations go through `start-cli registry` (or `start-cli s9pk publish` for uploading packages). Pass the registry's URL with `--registry`. It is a top-level flag, so it goes before the subcommand:
 
 ```sh
-start-cli registry --registry https://my-registry.example.com index
+start-cli --registry https://my-registry.example.com registry index
 ```
 
-If you're working inside a packaging workspace, add the registry to its `.startos/config.yaml` under `registry:` as a named profile, then refer to it with `-r <name>`:
+If you're working inside a packaging workspace, add the registry to its `.startos/config.yaml` under `registry:` as a named profile, then refer to it with `-r <name>`, also placed before the subcommand:
 
 ```yaml
 registry:
   default: https://my-registry.example.com
 ```
 
-Because it's named `default`, `start-cli registry index` now uses it with no flag. Give any other registry its own name and select it with `-r <name>`. Don't pass `-r default`: the flag itself sets the `default` profile, so naming `default` refers back to itself and fails with a profile reference cycle. Outside a workspace, keep passing `--registry <url>` on each command.
+Because it's named `default`, `start-cli registry index` now uses it with no flag. Give any other registry its own name and select it with `start-cli -r <name> registry index`. Outside a workspace, keep passing `--registry <url>` on each command.
 
 ## 5. Smoke-test
 
