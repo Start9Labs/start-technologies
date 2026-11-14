@@ -51,11 +51,13 @@ for (const [name, validChecksum, startsJavaScript] of [
     const version = workflow.env.NODEJS_VERSION
     const nodeDir = `node-v${version}-linux-riscv64`
     const nodeSource = `#!/bin/sh
-if [ "$1" = --version ]; then
-  printf 'v${version}\\n'
-else
-  ${startsJavaScript ? 'exec "$PROBE_NODE" "$@"' : 'exit 132'}
-fi
+for arg; do
+  if [ "$arg" = --version ]; then
+    printf 'v${version}\\n'
+    exit
+  fi
+done
+${startsJavaScript ? 'exec "$PROBE_NODE" "$@"' : 'exit 132'}
 `
     chmodSync(f.write(`archive/${nodeDir}/bin/node`, nodeSource), 0o755)
     const tarball = `${nodeDir}.tar.xz`
@@ -100,10 +102,16 @@ else process.stdout.write(readFileSync(source))`,
     })
     const healthy = validChecksum && startsJavaScript
     assert.equal(result.status === 0, healthy, result.stdout + result.stderr)
-    assert.equal(
-      readFileSync(runnerNode, 'utf8'),
-      healthy ? nodeSource : oldNode,
-    )
+    if (healthy) {
+      assert.equal(readFileSync(`${runnerNode}.real`, 'utf8'), nodeSource)
+      const host = f.run(runnerNode, ['-p', 'process.execArgv[0]'], {
+        env: { ...f.env, PROBE_NODE: process.execPath },
+        encoding: 'utf8',
+      })
+      assert.equal(host.stdout.trim(), '--single-threaded', host.stderr)
+    } else {
+      assert.equal(readFileSync(runnerNode, 'utf8'), oldNode)
+    }
     assert.equal(
       readFileSync(pathFile, 'utf8'),
       `/existing/bin\n${healthy ? `${temp}/${nodeDir}/bin\n` : ''}`,
