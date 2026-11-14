@@ -62,4 +62,4 @@ package-ci-test:
 bash-completion-test: build/bash-completion build/tests/bash-completion-test.sh
 	bash build/tests/bash-completion-test.sh
 
-test: | start-core-test start-sdk-test backup-fs-test container-runtime-test start-os-scripts-test bash-completion-test start-wrt-test release-notes-test rpc-toolkit-test musl-libc-test
+test: | start-core-test start-sdk-test backup-fs-test container-runtime-test start-os-scripts-test bash-completion-test start-wrt-test release-notes-test rpc-toolkit-test

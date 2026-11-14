@@ -23,9 +23,6 @@ test('both generators share the generated profile and preserve explicit build se
     'build/rust-builder/image.sh',
     'build/rust-builder/repository',
     'build/rust-builder/reference',
-    ...['aarch64', 'riscv64', 'x86_64'].map(
-      arch => `build/musl-libc/${arch}.txt`,
-    ),
     `${core}/build/generator-env.sh`,
     ...scripts.map(script => `${core}/build/${script}`),
   ]) {

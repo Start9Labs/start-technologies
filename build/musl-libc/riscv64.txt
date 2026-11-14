@@ -1,6 +1,0 @@
-include_dir=/opt/sysroot/riscv64/usr/include
-sys_include_dir=/opt/sysroot/riscv64/usr/include
-crt_dir=/opt/sysroot/riscv64/usr/lib
-msvc_lib_dir=
-kernel32_lib_dir=
-gcc_dir=
