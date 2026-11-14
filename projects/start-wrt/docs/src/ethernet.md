@@ -21,7 +21,11 @@ One Ethernet port is designated as the WAN port, which connects to your ISP mode
 1. Confirm the change. The confirmation names any devices on the port that have a reserved address or [Published Ports](published-ports.md) rule for the port's old profile. Those are kept, and apply again if the devices return to that profile. Canceling leaves the port unchanged.
 
 > [!NOTE]
+<<<<<<< HEAD
 > Changes take effect as soon as you confirm. The router briefly disconnects the port, and most devices plugged into it rejoin on the new profile's subnet within seconds. A device behind a switch, or one that ignores the brief disconnect, keeps its old address and usually loses Internet access and its connections to other devices until it reconnects. Unplug and replug its cable, or restart the device or the switch. Otherwise it reconnects on its own within 12 hours.
+=======
+> Changes take effect immediately. The router briefly disconnects the port, and most devices plugged into it rejoin on the new profile's subnet within seconds. A device behind a switch, or one that ignores the brief disconnect, keeps its old address and usually loses Internet access and its connections to other devices until it reconnects. Unplug and replug its cable, or restart the device or the switch. Otherwise it reconnects on its own within 12 hours.
+>>>>>>> ed95feb77 (docs(start-wrt): say devices behind a switch keep their old address after a port profile change (#4650))
 
 > [!NOTE]
 > If you connect a network switch to an Ethernet port, all devices on that switch share the same Security Profile. StartWRT cannot differentiate between devices beyond its own ports. Those devices still appear individually in the [Devices](devices.md) list — including hosts with static IPs or only IPv6 addresses — because the router learns them from the bridge forwarding table even without a DHCP lease.
