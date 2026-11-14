@@ -17,12 +17,23 @@ import { FilterUpdatesPipe } from '../routes/portal/routes/updates/filter-update
 export class BadgeService {
   private readonly notifications = inject(NotificationService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-  private readonly system$ = inject(OSService).updateAvailable$.pipe(
+  private readonly general$ = inject(OSService).updateAvailable$.pipe(
     map(Number),
   )
   private readonly metrics$ = this.patch
     .watch$('serverInfo', 'ntpSynced')
     .pipe(map(synced => Number(!synced)))
+  private readonly backupActivities$ = this.patch
+    .watch$('scheduledBackups', 'activities')
+    .pipe(
+      map(
+        activities =>
+          Object.values(activities).filter(
+            activity => activity.state === 'running',
+          ).length,
+      ),
+    )
+  private readonly system$ = this.general$
   private readonly filterUpdatesPipe = inject(FilterUpdatesPipe)
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
   private readonly refinement = inject(UpdatesRefinementService)
@@ -81,8 +92,12 @@ export class BadgeService {
         )
       case 'system':
         return this.system$
+      case 'general':
+        return this.general$
       case 'metrics':
         return this.metrics$
+      case 'backups':
+        return this.backupActivities$
       case 'notifications':
         return this.notifications.unreadCount$
       default:

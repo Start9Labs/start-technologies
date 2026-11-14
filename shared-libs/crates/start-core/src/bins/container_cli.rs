@@ -49,11 +49,5 @@ fn no_shadowed_args_start_container() {
 
 #[test]
 fn export_manpage_start_container() {
-    // start-container is part of the start-os product; anchored to start-core's crate dir.
-    let dir = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../projects/start-os/man"
-    );
-    std::fs::create_dir_all(dir).unwrap();
-    clap_mangen::generate_to(app().into_command(), dir).unwrap();
+    super::export_manpages(app().into_command(), "start-os", super::startos_version());
 }

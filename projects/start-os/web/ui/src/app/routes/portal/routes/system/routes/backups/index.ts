@@ -65,6 +65,15 @@ import { RECOVER } from './recover.component'
       <section backupProgress></section>
     }
 
+    <section class="g-card automatic-backups">
+      <header>
+        {{ 'Automatic backups' | i18n }}
+        <a tuiButton size="s" class="end" routerLink="automatic">
+          {{ 'Manage schedules' | i18n }}
+        </a>
+      </header>
+    </section>
+
     <section class="g-card">
       <header>
         {{ 'Backups' | i18n }}
@@ -152,6 +161,20 @@ import { RECOVER } from './recover.component'
 
     .end {
       margin-inline-start: auto;
+    }
+
+    .automatic-backups {
+      padding: 0;
+    }
+
+    .automatic-backups > header {
+      position: static;
+      height: auto;
+      min-block-size: 3rem;
+      flex-wrap: wrap;
+      gap: 0.75rem 1rem;
+      padding: 0.75rem 1rem;
+      box-sizing: border-box;
     }
 
     header > button + button {

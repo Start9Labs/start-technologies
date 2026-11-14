@@ -74,6 +74,12 @@ impl BackupTargetId {
         })
     }
 
+    pub fn user_facing_name(&self, db: &DatabaseModel) -> String {
+        self.load(db)
+            .map(|target| target.name)
+            .unwrap_or_else(|_| self.to_string())
+    }
+
     pub fn new() -> Self {
         Self(crate::rpc_continuations::Guid::new().to_string())
     }

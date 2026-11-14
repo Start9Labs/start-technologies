@@ -127,7 +127,7 @@ tui-root:not(._mobile) tui-dialog[data-appearance~='wide'][data-size] {
   position: relative;
   display: flex;
   flex-direction: column;
-  padding: 3.25rem 1rem 0.375rem;
+  padding: 4rem 1rem 1rem;
   border-radius: 0.5rem;
   overflow: hidden;
   color: var(--tui-text-primary);
@@ -150,13 +150,7 @@ tui-root:not(._mobile) tui-dialog[data-appearance~='wide'][data-size] {
     inset 0 1px rgba(255, 255, 255, 0.15),
     inset 0 0 1rem rgba(0, 0, 0, 0.25);
 
-  &:is(form) {
-    padding-top: 4rem;
-  }
-
   tui-root:not(._mobile) &:has(.g-table) {
-    padding-block-end: 1rem;
-
     > header {
       background: none;
     }

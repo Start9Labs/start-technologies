@@ -1226,6 +1226,10 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           bitcoind: {
             error: 'An error occurred while backing up',
             duration_ms: 1000,
+            logical_size: null,
+            physical_size: null,
+            changed_bytes: null,
+            measured_at: null,
           },
         },
       },
@@ -1538,6 +1542,9 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
               timestamp: new Date().toISOString(),
               version: '0.4.0',
               formatStatus: 'legacy',
+              scheduled: false,
+              serverId: null,
+              hasSystemBackup: null,
             },
           },
           legacyBackup: false,
@@ -1622,14 +1629,32 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       report: {
         server: { attempted: true, error: null },
         packages: {
-          bitcoind: { error: null, duration_ms: 512000 },
-          lnd: { error: null, duration_ms: 64000 },
+          bitcoind: {
+            error: null,
+            duration_ms: 512000,
+            logical_size: null,
+            physical_size: null,
+            changed_bytes: null,
+            measured_at: null,
+          },
+          lnd: {
+            error: null,
+            duration_ms: 64000,
+            logical_size: null,
+            physical_size: null,
+            changed_bytes: null,
+            measured_at: null,
+          },
         },
         sharedVolumes: {
           MOCKLOCALVOLUME234567ABCDEFGHIJK: {
             name: 'Shared files',
             error: null,
             duration_ms: 171000,
+            logical_size: null,
+            physical_size: null,
+            changed_bytes: null,
+            measured_at: null,
           },
         },
       },
@@ -1643,10 +1668,21 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       report: {
         server: { attempted: true, error: null },
         packages: {
-          bitcoind: { error: null, duration_ms: 530000 },
+          bitcoind: {
+            error: null,
+            duration_ms: 530000,
+            logical_size: null,
+            physical_size: null,
+            changed_bytes: null,
+            measured_at: null,
+          },
           lnd: {
             error: 'Service is not responding to backup requests',
             duration_ms: 12000,
+            logical_size: null,
+            physical_size: null,
+            changed_bytes: null,
+            measured_at: null,
           },
         },
         sharedVolumes: {},
@@ -1677,7 +1713,16 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       completedAt: new Date(Date.now() - 86400000 * (38 + 7 * i)).toISOString(),
       report: {
         server: { attempted: true, error: null },
-        packages: { bitcoind: { error: null, duration_ms: 498000 } },
+        packages: {
+          bitcoind: {
+            error: null,
+            duration_ms: 498000,
+            logical_size: null,
+            physical_size: null,
+            changed_bytes: null,
+            measured_at: null,
+          },
+        },
         sharedVolumes: {},
       },
     })),

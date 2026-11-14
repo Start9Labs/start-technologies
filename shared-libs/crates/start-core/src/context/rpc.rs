@@ -16,7 +16,7 @@ use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{CallRemote, Context, Empty};
 use tokio::net::TcpStream;
 use tokio::process::Command;
-use tokio::sync::{RwLock, broadcast, mpsc, oneshot, watch};
+use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot, watch};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
@@ -89,6 +89,7 @@ pub struct RpcContextSeed {
     pub client: ReloadableHttpClient,
     pub start_time: Instant,
     pub crons: SyncMutex<BTreeMap<Guid, NonDetachingJoinHandle<()>>>,
+    pub backup_coordinator: Arc<Mutex<()>>,
 }
 impl Drop for RpcContextSeed {
     fn drop(&mut self) {
@@ -537,6 +538,7 @@ impl RpcContext {
             client: ReloadableHttpClient::new(socks_proxy_url)?,
             start_time: Instant::now(),
             crons,
+            backup_coordinator: Arc::new(Mutex::new(())),
         });
 
         let res = Self(seed.clone(), None);
@@ -560,6 +562,7 @@ impl RpcContext {
             move || weak.upgrade().map(|seed| Self(seed, None)),
         ));
         tracing::info!("{}", t!("context.rpc.completed-migrations"));
+        crate::backup::scheduled::start_scheduler(&res).await?;
         let weak = Arc::downgrade(&res.0);
         let db = res.db.clone();
         res.add_cron(async move {

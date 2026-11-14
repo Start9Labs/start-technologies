@@ -43,6 +43,7 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 - `src/registry/` — Package registry server and management. `SignerInfo` retains canonical keys and full OpenPGP exports. `FullIndex.trust_signers` selects signer IDs; `registry.info.trustSigners` projects those existing signer records into the public trust proposal.
 - `src/tunnel/` — StartTunnel server logic
 - `src/backup/`, `src/sign/` — Backup and signing. `sign/session.rs` authenticates two-message ephemeral-DH exchanges through the existing generic request-commitment proof owner and standard X25519/HKDF/AES-GCM implementations. Signed logical targets bind RPC and individual GUID intent; the existing signature nonce owner remains shared. `sign/fingerprint.rs` owns comparable identity fingerprints. `sign/instance.rs` persists registry, Tunnel and WRT `serverIdentityKey` fields in their existing PatchDBs before admission, using the database's idempotent transaction owner. Missing keys generate once; malformed stored keys fail startup without rotation. StartOS retains its existing account `server_identity_key`; its persisted `developerKey` name remains compatible with existing databases.
+- Automatic schedule-to-history ownership and archive state live in `src/backup/scheduled/association.rs`.
 - `src/os_install/`, `src/init.rs`, `src/setup.rs` — OS install, init, and first-run setup
 - `src/util/` — Shared utilities (process invocation, IO, guards — see `core-rust-patterns.md`). `util/net.rs::WebSocket` retains one generic message-transport lifecycle for keepalive, send deadlines and close handling. `util/net/secure.rs::EncryptedSocket` adds signed-DH admission, typed encrypted data/close-result framing and independent logical/wire limits without a second socket manager. Authenticated close results retain caller-visible status/reasons; physical controls carry no application close result. `MessageKind` owns the wire-kind mapping; see [Encrypted RPC integration](encrypted-rpc.md) and the [signed-session wire contract](signed-session.md).
 - `src/version/` — Migrations and version logic (see `VERSION_BUMP.md`, `exver.md`)
@@ -195,7 +196,7 @@ Until both steps run, a changed `ts_export!` type is out of sync with everything
 ## Further reading
 
 - [README.md](README.md) — what this crate is and how to use it
-- [AGENTS.md](AGENTS.md) — build, test, format, and operating rules (`CLAUDE.md` is a one-line `@AGENTS.md` import)
+- [AGENTS.md](AGENTS.md) — build, test, format, and contribution workflow (`CLAUDE.md` is a one-line `@AGENTS.md` import)
 - [rpc-toolkit.md](rpc-toolkit.md) — JSON-RPC handler patterns
 - [encrypted-rpc.md](encrypted-rpc.md) — Encrypted transport integration, ownership and compatibility
 - [signed-session.md](signed-session.md) — Signed ephemeral-DH admission and record wire contract

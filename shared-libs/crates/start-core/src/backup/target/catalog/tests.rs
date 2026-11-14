@@ -267,8 +267,8 @@ async fn target_initialization_and_content_recovery_require_validated_contents()
 
 fn database() -> DatabaseModel {
     DatabaseModel::from(to_value(&serde_json::json!({
-        "public": {"backupTargets": {}},
-        "private": {"backupTargetCredentials": {}, "cifs": {
+        "public": {"backupTargets": {}, "scheduledBackups": crate::backup::scheduled::ScheduledBackupState::default()},
+        "private": {"backupTargetCredentials": {}, "scheduledBackupCredentials": {}, "cifs": {
             "7": {"hostname": "nas.local", "path": "/backups", "username": "family", "password": "private-password"}
         }}
     })).unwrap())
@@ -633,4 +633,74 @@ fn stale_and_removed_target_observations_cannot_replace_current_state() {
     )
     .unwrap();
     assert!(db.as_public().as_backup_targets().de().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_schedule_prevents_target_removal_before_local_data_is_deleted() {
+    use crate::backup::scheduled::{
+        BackupJob, BackupJobId, BackupServiceScope, RetentionPolicy, Schedule,
+    };
+    let fixture = tempfile::tempdir().unwrap();
+    let id = BackupTargetId::new();
+    let mut model = database();
+    model
+        .as_public_mut()
+        .as_backup_targets_mut()
+        .insert(
+            &id,
+            &BackupTarget::new("Scheduled".into(), SharedVolumeSource::Local),
+        )
+        .unwrap();
+    let now = chrono::Utc::now();
+    let job = BackupJob {
+        id: BackupJobId::new(),
+        name: "Nightly".into(),
+        enabled: true,
+        pause: None,
+        target_id: id.clone(),
+        target_instance_id: "original".into(),
+        services: BackupServiceScope::AllExcept {
+            excluded_package_ids: Default::default(),
+        },
+        schedule: Schedule::new("0 3 * * *", "UTC").unwrap(),
+        default_retention: RetentionPolicy::latest_only(),
+        retention_overrides: Default::default(),
+        status: Default::default(),
+        created_at: now,
+        updated_at: now,
+    };
+    model
+        .as_public_mut()
+        .as_scheduled_backups_mut()
+        .as_jobs_mut()
+        .insert(&job.id, &job)
+        .unwrap();
+    let database = TypedPatchDb::<crate::db::model::Database>::load_unchecked(
+        patch_db::PatchDb::open(fixture.path().join("state.db"))
+            .await
+            .unwrap(),
+    );
+    database.put(&ROOT, &model).await.unwrap();
+    let path = local_path(fixture.path(), &id);
+    tokio::fs::create_dir_all(&path).await.unwrap();
+    tokio::fs::write(path.join("checkpoint"), b"retained")
+        .await
+        .unwrap();
+    let error = remove_target(&database, &id, fixture.path())
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InvalidRequest);
+    assert_eq!(
+        tokio::fs::read(path.join("checkpoint")).await.unwrap(),
+        b"retained"
+    );
+    assert!(
+        database
+            .peek()
+            .await
+            .as_public()
+            .as_backup_targets()
+            .as_idx(&id)
+            .is_some()
+    );
 }

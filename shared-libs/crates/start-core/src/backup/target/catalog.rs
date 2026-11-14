@@ -349,7 +349,33 @@ pub(super) fn ensure_cifs(db: &DatabaseModel, id: &BackupTargetId) -> Result<(),
     Ok(())
 }
 
+fn ensure_no_scheduled_jobs(db: &DatabaseModel, id: &BackupTargetId) -> Result<(), Error> {
+    let jobs: Vec<_> = db
+        .as_public()
+        .as_scheduled_backups()
+        .as_jobs()
+        .as_entries()?
+        .into_iter()
+        .map(|(_, job)| job.de())
+        .collect::<Result<Vec<crate::backup::scheduled::BackupJob>, Error>>()?
+        .into_iter()
+        .filter(|job| &job.target_id == id)
+        .map(|job| job.name)
+        .collect();
+    if jobs.is_empty() {
+        return Ok(());
+    }
+    Err(Error::new(
+        eyre!(t!(
+            "backup.target.cifs.target-in-use",
+            jobs = jobs.join(", ")
+        )),
+        ErrorKind::InvalidRequest,
+    ))
+}
+
 pub async fn remove(ctx: RpcContext, TargetParams { id }: TargetParams) -> Result<(), Error> {
+    let _coordinator = crate::backup::try_backup_coordinator(ctx.backup_coordinator.clone())?;
     remove_target(&ctx.db, &id, Path::new(crate::PACKAGE_DATA)).await
 }
 
@@ -359,6 +385,7 @@ async fn remove_target(
     package_data: &Path,
 ) -> Result<(), Error> {
     let db = database.peek().await;
+    ensure_no_scheduled_jobs(&db, id)?;
     let source = db
         .as_public()
         .as_backup_targets()
@@ -378,7 +405,11 @@ async fn remove_target(
     }
     database
         .mutate(|db| {
+            ensure_no_scheduled_jobs(db, id)?;
             db.as_public_mut().as_backup_targets_mut().remove(id)?;
+            db.as_private_mut()
+                .as_scheduled_backup_credentials_mut()
+                .remove(&id.to_string())?;
             db.as_private_mut()
                 .as_backup_target_credentials_mut()
                 .remove(id)?;

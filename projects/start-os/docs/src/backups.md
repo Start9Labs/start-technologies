@@ -461,6 +461,10 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 
 While a backup runs, its progress appears at the top of the page. Wait for the progress card to disappear and the backup to appear in **History** before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before recording a successful backup in history. The progress card reads `Complete` first, while StartOS is still finishing.
 
+## Automatic Backups
+
+Select **Manage schedules** on the **Backups** page to schedule System and service-owned data backups, manage retained checkpoints, or restore an automatic checkpoint. Shared volumes are backed up separately using **Create**. See [Automatic Backups](backup-automatic.md).
+
 ## History
 
 The **Backups** page lists past backups, newest first, with when each started, how long it took, its target and its result: **Succeeded**, **Completed with errors** or **Failed**. Select a backup's report button to see which services and volumes were backed up, and any errors.

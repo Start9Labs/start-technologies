@@ -9,6 +9,12 @@ const ROUTES: Routes = [
     path: '',
     component: PortalComponent,
     children: [
+      { path: 'backups/automatic', redirectTo: 'system/backups/automatic' },
+      { path: 'backups/history', redirectTo: 'system/backups/automatic' },
+      { path: 'backups/locations', redirectTo: 'system/backup-targets' },
+      { path: 'backups/manual', redirectTo: 'system/backups' },
+      { path: 'backups/restore', redirectTo: 'system/backups' },
+      { path: 'backups', redirectTo: 'system/backups' },
       {
         redirectTo: 'services',
         pathMatch: 'full',

@@ -8,6 +8,7 @@ export type DataModel = Pick<T.Public, 'registryCache' | 'osUpdateCache'> & {
     keyboard: FullKeyboard | null
   }
   packageData: AllPackageData
+  scheduledBackups: T.ScheduledBackupState
   sharedVolumes: T.Public['sharedVolumes']
   disks: T.Public['disks']
   backupTargets: T.Public['backupTargets']

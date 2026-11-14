@@ -44,6 +44,7 @@ boundary(
     'MarkdownPipe',
     'SafeLinksDirective',
     'RPCErrorDetails',
+    'RpcError',
     'Exver',
     'ExverComparesPipe',
     'LeafProgressPipe',

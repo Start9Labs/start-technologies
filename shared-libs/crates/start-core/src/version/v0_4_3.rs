@@ -24,7 +24,11 @@ impl VersionT for Version {
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
     }
-    fn up(self, _db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
+    fn migration_revision(self) -> usize {
+        1
+    }
+    fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
+        crate::backup::scheduled::register_legacy_disk_targets(db)?;
         Ok(Value::Null)
     }
     fn down(self, _db: &mut Value) -> Result<(), Error> {

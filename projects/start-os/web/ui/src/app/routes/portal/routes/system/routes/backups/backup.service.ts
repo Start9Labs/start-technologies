@@ -1,12 +1,15 @@
-import { inject, Injectable } from '@angular/core'
+import { computed, inject, Injectable } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import {
   DialogService,
   ErrorService,
   HttpError,
+  RpcError,
+  i18nPipe,
   TaskService,
 } from '@start9labs/shared'
 import { T, Version } from '@start9labs/start-core'
+import { TuiNotificationService } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
 import { firstValueFrom } from 'rxjs'
 
@@ -16,6 +19,20 @@ import { isStale } from 'src/app/routes/portal/routes/system/routes/volumes/type
 
 @Injectable({ providedIn: 'root' })
 export class BackupService {
+  private readonly i18n = inject(i18nPipe)
+  private readonly alerts = inject(TuiNotificationService)
+  readonly scheduleTargets = computed(() =>
+    Object.entries(this.targets()).map(([id, target]) => ({
+      id,
+      name: target.name,
+    })),
+  )
+  targetName(id: string): string {
+    return this.targets()[id]?.name || id
+  }
+  async getBackupTargets(): Promise<void> {
+    await this.recheckStale()
+  }
   private readonly api = inject(ApiService)
   private readonly dialogs = inject(DialogService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
@@ -115,5 +132,48 @@ export class BackupService {
         this.api.rpc.backup.target.convert({ targetId, serverId, password }),
       'Starting backup conversion',
     )
+  }
+  showQueuedNotification(job: T.BackupJob): void {
+    if (!job.status.runRequested) return
+
+    this.alerts
+      .open(
+        this.i18n.transform(
+          'The first backup is queued and will start automatically when no backup or restore is in progress.',
+        ),
+        {
+          appearance: 'info',
+          label: this.i18n.transform('Automatic backup'),
+        },
+      )
+      .subscribe()
+  }
+
+  async withOriginalPassword<Result>(
+    action: (oldPassword?: string) => Promise<Result>,
+  ): Promise<Result | null> {
+    let oldPassword: string | undefined
+    for (;;) {
+      try {
+        return await action(oldPassword)
+      } catch (error) {
+        if (!(error instanceof RpcError) || error.code !== 81) throw error
+      }
+      oldPassword = await firstValueFrom(
+        this.dialogs.openPrompt<string>({
+          label: 'Original password needed',
+          data: {
+            message:
+              'This backup was created with a different password. Enter the original password that was used to encrypt this backup.',
+            label: 'Password',
+            placeholder: 'Enter original password',
+            useMask: true,
+            buttonText: 'Retry',
+          },
+        }),
+        { defaultValue: '' },
+      )
+      if (!oldPassword) return null
+    }
   }
 }

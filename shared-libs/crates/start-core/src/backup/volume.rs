@@ -100,6 +100,7 @@ pub(super) async fn measure_backup(
             result: PackageBackupReport {
                 error,
                 duration_ms: started.elapsed().as_millis() as u64,
+                ..Default::default()
             },
         },
     )
@@ -257,6 +258,8 @@ pub async fn restore_volumes_rpc(
         server_id,
     }: RestoreVolumeParams,
 ) -> Result<RestoreVolumeResult, Error> {
+    let coordinator = crate::backup::try_backup_coordinator(ctx.backup_coordinator.clone())?;
+    crate::backup::scheduled::reconcile_interrupted_backup_state(&ctx).await?;
     let db = ctx.db.peek().await;
     let fs = target_id.load(&db)?;
     let server_id = match server_id {
@@ -265,6 +268,7 @@ pub async fn restore_volumes_rpc(
     };
     let backup = BackupMountGuard::mount(fs.mount(ReadWrite).await?, &server_id, &password).await?;
     tokio::spawn(async move {
+        let _coordinator = coordinator;
         let mut result = RestoreVolumeResult::default();
         for id in selected_ids(Some(ids), []) {
             match restore_volume(&ctx, &backup, &id).await {

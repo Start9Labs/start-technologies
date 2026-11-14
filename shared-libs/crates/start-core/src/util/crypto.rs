@@ -55,14 +55,10 @@ fn validate_backup_key(key: &[u8]) -> Result<&str, Error> {
     Ok(key)
 }
 
-fn backup_wrapping_key(password: &str, salt: &[u8]) -> Result<Zeroizing<Vec<u8>>, Error> {
-    argon2::hash_raw(
-        password.as_bytes(),
-        salt,
-        &argon2::Config::rfc9106_low_mem(),
-    )
-    .map(Zeroizing::new)
-    .with_kind(crate::ErrorKind::PasswordHashGeneration)
+fn backup_wrapping_key(password: &[u8], salt: &[u8]) -> Result<Zeroizing<Vec<u8>>, Error> {
+    argon2::hash_raw(password, salt, &argon2::Config::rfc9106_low_mem())
+        .map(Zeroizing::new)
+        .with_kind(crate::ErrorKind::PasswordHashGeneration)
 }
 
 fn backup_wrapping_aad(header: &[u8]) -> Vec<u8> {
@@ -70,10 +66,10 @@ fn backup_wrapping_aad(header: &[u8]) -> Vec<u8> {
 }
 
 /// Wraps a base32 backup key with Argon2id and AES-256-GCM.
-pub fn wrap_backup_key(key: &str, password: &str) -> Result<String, Error> {
+pub fn wrap_backup_key(key: &str, password: impl AsRef<[u8]>) -> Result<String, Error> {
     validate_backup_key(key.as_bytes())?;
     let header: [u8; WRAP_HEADER_LEN] = rand::random();
-    let aeskey = backup_wrapping_key(password, &header[..WRAP_SALT_LEN])?;
+    let aeskey = backup_wrapping_key(password.as_ref(), &header[..WRAP_SALT_LEN])?;
     let mut tag = [0; WRAP_TAG_LEN];
     let ciphertext = openssl::symm::encrypt_aead(
         openssl::symm::Cipher::aes_256_gcm(),
@@ -94,7 +90,10 @@ pub fn wrap_backup_key(key: &str, password: &str) -> Result<String, Error> {
 }
 
 /// Returns the backup key and whether its wrapping needs upgrading.
-pub fn unwrap_backup_key(wrapped: &str, password: &str) -> Result<(String, bool), Error> {
+pub fn unwrap_backup_key(
+    wrapped: &str,
+    password: impl AsRef<[u8]>,
+) -> Result<(String, bool), Error> {
     let (encoded, legacy) = match wrapped.strip_prefix(WRAP_VERSION) {
         Some(encoded) => (encoded, false),
         None if !wrapped.contains(':') => (wrapped, true),
@@ -110,7 +109,7 @@ pub fn unwrap_backup_key(wrapped: &str, password: &str) -> Result<(String, bool)
     let plaintext = Zeroizing::new(if legacy {
         let (prefix, ciphertext) = wrapped.split_at(32);
         let mut aeskey = aes::cipher::Key::<Aes256Ctr>::default();
-        pbkdf2::pbkdf2::<Hmac<Sha256>>(password.as_bytes(), &prefix[16..], 1000, &mut aeskey)
+        pbkdf2::pbkdf2::<Hmac<Sha256>>(password.as_ref(), &prefix[16..], 1000, &mut aeskey)
             .map_err(|_| invalid_backup_key())?;
         let mut aes =
             Aes256Ctr::new_from_slices(&aeskey, &prefix[..16]).map_err(|_| invalid_backup_key())?;
@@ -120,7 +119,7 @@ pub fn unwrap_backup_key(wrapped: &str, password: &str) -> Result<(String, bool)
     } else {
         let (header, body) = wrapped.split_at(WRAP_HEADER_LEN);
         let (ciphertext, tag) = body.split_at(BACKUP_KEY_LEN);
-        let aeskey = backup_wrapping_key(password, &header[..WRAP_SALT_LEN])?;
+        let aeskey = backup_wrapping_key(password.as_ref(), &header[..WRAP_SALT_LEN])?;
         openssl::symm::decrypt_aead(
             openssl::symm::Cipher::aes_256_gcm(),
             &aeskey,

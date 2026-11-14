@@ -418,6 +418,15 @@ Restore one or more packages from a backup.
 
 - `--server-id <ID>` — Server identifier
 
+### `start-cli package backup restore-checkpoint <TARGET_ID> <PACKAGE_ID=SNAPSHOT_ID>...`
+
+Restore one or more services from selected automatic checkpoints. Obtain the
+snapshot IDs from `start-cli backup checkpoint list` or `backup checkpoint discover`.
+
+- `--server-id <ID>` — Source StartOS server ID; defaults to this server
+- `--password <PASS>` — Master password; required when this server has no saved
+  credential for the target
+
 ### Service Host Management
 
 Manage network addresses and bindings for a service host.
@@ -481,6 +490,172 @@ Create a backup of all or selected packages. The backup continues in the backgro
 - `--old-password <PASS>` — Previous backup password (for re-encryption)
 - `--package-ids <IDS>` — Limit to specific packages
 - `--shared-volume-ids <IDS>` — Limit to specific shared volumes
+
+### `start-cli backup estimate-capacity <TARGET_ID>`
+
+Estimate per-service automatic-backup storage and next-run staging requirements
+before creating a schedule. With no service filters it includes every currently
+installed service; with no version-history rules it estimates latest-only
+retention. The command previews the supplied rules even when the location has a
+saved history policy. Adding a schedule preserves an established history policy;
+use `backup policy preview-change` and `backup policy apply` to change it.
+The result separates live data, retained and archived checkpoints, staging
+headroom, and the conservative projected peak. A schedule created without
+filters also includes services installed in the future, whose size cannot yet
+be estimated.
+
+- `--package-ids <IDS>` — Include only comma-separated package IDs
+- `--exclude-package-ids <IDS>` — Include current and future services except
+  these comma-separated IDs
+- `--system-data <include|exclude>` — Include or exclude StartOS System data
+  independently of the service filters
+- `--keep-rule <INTERVAL:COVERAGE>` — Estimate a version-history rule; accepts
+  the same repeatable duration syntax as `backup job add`
+- `--service-keep-rule <PACKAGE_ID=INTERVAL:COVERAGE>` — Estimate a retention
+  rule for one service; repeat the option to add more rules or services
+- `--service-latest-only <PACKAGE_ID>` — Estimate latest-checkpoint-only
+  retention for one or more comma-separated service IDs
+
+### Automatic backup schedules
+
+#### `start-cli backup job list`
+
+List automatic backup schedules, their IDs, timing, target state, and next-run
+status.
+
+#### `start-cli backup job add <NAME> <TARGET_ID> <PASSWORD>`
+
+Create an automatic backup schedule. It defaults to all current and future
+services, daily at 03:00 UTC, and latest-checkpoint-only retention.
+
+- `--cron <CRON>` — Five-field cron schedule. For example, `15 * * * *` runs at
+  15 minutes past every hour.
+- `--timezone <ZONE>` — IANA timezone; defaults to `UTC`
+- `--package-ids <IDS>` — Include only comma-separated package IDs
+- `--exclude-package-ids <IDS>` — Include current and future services except
+  these comma-separated IDs
+- `--system-data <include|exclude>` — Include or exclude StartOS System data
+  independently of the service filters
+- `--keep-rule <INTERVAL:COVERAGE>` — Retain versions at this interval for this
+  coverage. Repeat for multiple rules; suffixes are `s`, `m`, `h`, `d`, and `w`.
+  For example, `--keep-rule 1h:1d --keep-rule 1d:1w` retains hourly versions for
+  one day and daily versions for one week.
+- `--service-keep-rule <PACKAGE_ID=INTERVAL:COVERAGE>` — Override retention for
+  one service. Repeat it to build multiple rules or configure more services.
+- `--service-latest-only <PACKAGE_ID>` — Override one or more comma-separated
+  services to retain only their latest checkpoint.
+- `--disabled` — Create the schedule paused
+
+Run `start-cli backup job run-now <ID>` after creating the schedule when you
+want the first backup immediately.
+
+#### `start-cli backup job edit <ID>`
+
+Update only the supplied schedule settings. Timing flags, service-selection
+flags, and repeated `--keep-rule` values use the same forms as `job add`.
+Version-history flags change the schedule defaults used for histories created
+later. Existing service histories keep their policies because several schedules
+can share one history. Use `backup policy preview-change` and `backup policy
+apply` to change an existing history.
+
+- `--name <NAME>` — Change the display name
+- `--all-services` — Include every current and future service
+- `--system-data <include|exclude>` — Change System-data inclusion without
+  changing the current/future service-selection mode
+- `--latest-only` — Set the schedule default to the newest checkpoint only
+- `--service-keep-rule <PACKAGE_ID=INTERVAL:COVERAGE>` — Add or replace a
+  service-specific schedule default; repeat for multiple rules
+- `--service-latest-only <PACKAGE_ID>` — Set comma-separated services to
+  latest-checkpoint-only by default
+- `--use-default-retention <PACKAGE_ID>` — Remove service-specific overrides
+  from comma-separated services so they inherit the schedule default
+
+#### Schedule state and target recovery
+
+- `start-cli backup job enable <ID>` — Resume an automatic schedule
+- `start-cli backup job disable <ID>` — Pause an automatic schedule
+- `start-cli backup job delete <ID>` — Delete the schedule definition
+- `start-cli backup job run-now <ID>` — Run the schedule immediately
+- `start-cli backup job retry-target <TARGET_ID> <PASSWORD>` — Reconnect a
+  target and resume its paused schedules
+- `start-cli backup job reassign-target <ID> <TARGET_ID> <PASSWORD>` — Move a
+  schedule to another target. Pass `--wait-for-schedule` to avoid an immediate
+  run.
+
+### Activity and checkpoint history
+
+Use the current master password for `backup job add`, `retry-target`,
+`reassign-target`, and `backup checkpoint delete-archived`. If the location was
+encrypted with a different password, also pass `--old-password <PASS>` with
+that original backup password. `backup checkpoint discover` takes the backup
+password directly.
+
+- `start-cli backup activity list` — List manual backup, automatic backup, and
+  restore activity
+- `start-cli backup checkpoint list` — List automatic checkpoint history known to
+  this server
+- `start-cli backup checkpoint discover <TARGET_ID> <SERVER_ID> <PASSWORD>` — Read
+  automatic history directly from an encrypted target
+- `start-cli backup checkpoint delete-archived` — Delete selected archived
+  checkpoint IDs for a target and package. Active checkpoints are rejected; use
+  the command's `-h` output for positional argument details.
+
+### Retention policies
+
+Preview every retention change before applying it:
+
+```sh
+start-cli backup policy preview-change cifs-0 bitcoind --keep-rule 1h:1d --keep-rule 1d:1w
+```
+
+Then apply the identical policy and repeat `--confirm-removal` for every
+checkpoint ID listed in the preview:
+
+```sh
+start-cli backup policy apply cifs-0 bitcoind --keep-rule 1h:1d --keep-rule 1d:1w \
+  --confirm-removal <CHECKPOINT_ID>
+```
+
+Use `--latest-only` instead of `--keep-rule` to retain only the newest automatic
+checkpoint. Apply fails if the confirmation set differs from a fresh preview,
+which prevents stale or unintended deletion.
+
+### Using the CLI for UI workflows
+
+Most UI backup actions have a direct `start-cli` command:
+
+- backup locations use `backup target list`, `backup target cifs add|update|remove`,
+  and `backup target delete-legacy`;
+- one-time backups use `backup create`;
+- automatic schedules use `backup job list|add|edit|enable|disable|run-now|delete`,
+  with `retry-target` and `reassign-target` for repair. The UI's **Pause all**
+  and **Resume all** controls correspond to running `disable` or `enable` for
+  each job ID;
+- estimates, activity, history, version-history changes, and new-service
+  decisions use `backup estimate-capacity`, `backup activity`, `backup checkpoint`,
+  `backup policy`, and `backup review`;
+- manual restores use `package backup restore`, automatic restores use `package
+backup restore-checkpoint`, and a UI-style selection mixing manual and
+  automatic checkpoints uses `package backup restore-mixed` with repeatable
+  `--checkpoint PACKAGE_ID=SNAPSHOT_ID` values and `--manual-ids`.
+
+The UI can delete a schedule and its related backups in one confirmation. The
+CLI keeps those destructive operations separate: record the applicable target,
+package, and checkpoint IDs from `backup checkpoint list`, run `backup job delete
+<ID>`, then remove the archived checkpoints with `backup checkpoint
+delete-archived <TARGET_ID> <PACKAGE_ID> <SNAPSHOT_IDS>` for each affected
+package.
+
+### New-service reviews
+
+- `start-cli backup review list` — List newly installed services awaiting a
+  decision and the current automatic schedules available to each review
+- `start-cli backup review decide <PACKAGE_ID> --decision <JOB_ID=add|skip>` —
+  Include or exclude the service for a current schedule. Repeat `--decision`
+  for every schedule returned by a fresh `backup review list`; if schedules
+  change in between, StartOS asks you to list them again rather than applying a
+  partial decision. Omit `--decision` to dismiss a review when no schedules
+  currently exist.
 
 ### `start-cli backup history list`
 

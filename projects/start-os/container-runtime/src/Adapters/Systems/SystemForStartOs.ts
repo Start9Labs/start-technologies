@@ -38,11 +38,9 @@ export class SystemForStartOs implements System {
 
   async createBackup(
     effects: T.Effects,
-    timeoutMs: number | null,
-  ): Promise<void> {
-    return void (await this.abi.createBackup({
-      effects,
-    }))
+    _timeoutMs: number | null,
+  ): Promise<T.PackageBackupOutput | void> {
+    return this.abi.createBackup({ effects })
   }
   getActionInput(
     effects: Effects,

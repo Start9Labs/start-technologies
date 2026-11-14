@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::account::AccountInfo;
 use crate::auth::Sessions;
+use crate::backup::scheduled::generate_scheduled_backup_device_key;
 use crate::backup::target::cifs::CifsTargets;
 use crate::db::model::private::Private;
 use crate::db::model::public::Public;
@@ -52,6 +53,8 @@ impl Database {
                 backup_target_credentials: BTreeMap::new(),
                 shared_volume_credentials: BTreeMap::new(),
                 package_stores: BTreeMap::new(),
+                scheduled_backup_credentials: BTreeMap::new(),
+                scheduled_backup_device_key: generate_scheduled_backup_device_key(),
                 server_identity_key: Der64(account.server_identity_key.clone()),
             },
         })

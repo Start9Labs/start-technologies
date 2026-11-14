@@ -47,15 +47,6 @@ mod v0_4_0_4;
 mod v0_4_0_5;
 mod v0_4_0_alpha_0;
 mod v0_4_0_alpha_1;
-mod v0_4_0_alpha_2;
-mod v0_4_0_alpha_3;
-mod v0_4_0_alpha_4;
-mod v0_4_0_alpha_5;
-mod v0_4_0_alpha_6;
-mod v0_4_0_alpha_7;
-mod v0_4_0_alpha_8;
-mod v0_4_0_alpha_9;
-
 mod v0_4_0_alpha_10;
 mod v0_4_0_alpha_11;
 mod v0_4_0_alpha_12;
@@ -66,10 +57,18 @@ mod v0_4_0_alpha_16;
 mod v0_4_0_alpha_17;
 mod v0_4_0_alpha_18;
 mod v0_4_0_alpha_19;
+mod v0_4_0_alpha_2;
 mod v0_4_0_alpha_20;
 mod v0_4_0_alpha_21;
 mod v0_4_0_alpha_22;
 mod v0_4_0_alpha_23;
+mod v0_4_0_alpha_3;
+mod v0_4_0_alpha_4;
+mod v0_4_0_alpha_5;
+mod v0_4_0_alpha_6;
+mod v0_4_0_alpha_7;
+mod v0_4_0_alpha_8;
+mod v0_4_0_alpha_9;
 mod v0_4_0_beta_0;
 mod v0_4_0_beta_1;
 mod v0_4_0_beta_10;
@@ -903,7 +902,7 @@ mod tests {
             ("0.4.1.3", "0.4.2", 0),
             ("0.4.2", "0.4.2.1", 2),
             ("0.4.2.1", "0.4.2.2", 0),
-            ("0.4.2.2", "0.4.3", 0),
+            ("0.4.2.2", "0.4.3", 1),
         ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
@@ -1034,7 +1033,10 @@ mod tests {
                 db["public"]["serverInfo"]["version"],
                 to_value(&current.semver()).unwrap()
             );
-            assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+            assert_eq!(
+                applied_migration_revision(&mut db).unwrap(),
+                current.migration_revision()
+            );
         }
     }
 
@@ -1120,6 +1122,44 @@ mod tests {
             assert!(db["public"]["serverInfo"].get("trustedKeys").is_none());
             assert_eq!(db["public"]["packageData"], packages);
             assert_eq!(db["private"], expected_private);
+        }
+    }
+
+    #[tokio::test]
+    async fn automatic_backup_release_migrates_from_maintenance_revisions() {
+        let current = Version::from_exver_version(v0_4_3::Version.semver())
+            .as_version_t()
+            .unwrap();
+        assert_eq!(current.previous().semver(), v0_4_2_2::Version.semver());
+        for from in ["0.4.2", "0.4.2.1", "0.4.2.2"] {
+            let previous = Version::from_exver_version(from.parse().unwrap())
+                .as_version_t()
+                .unwrap();
+            let mut db = json!({ "public": { "serverInfo": {
+                "version": from,
+                "packageVersionCompat": ">=0.3.0 <0.5.0",
+                "postInitMigrationTodos": {},
+                "latestMigrationRevision": 0,
+            }, "packageData": { "service": { "setting": "preserved", "outboundDns": null } } } });
+            let packages = db["public"]["packageData"].clone();
+            let pre_ups = PreUps::load(&previous, &current).await.unwrap();
+            migrate_from_unchecked(&previous, &current, pre_ups, &mut db).unwrap();
+            assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.3"));
+            let expected = if from == "0.4.2" {
+                json!({ "0.4.2.1": null, "0.4.2.2": null, "0.4.3": null })
+            } else if from == "0.4.2.1" {
+                json!({ "0.4.2.2": null, "0.4.3": null })
+            } else {
+                json!({ "0.4.3": null })
+            };
+            assert_eq!(
+                db["public"]["serverInfo"]["postInitMigrationTodos"],
+                expected
+            );
+            assert_eq!(db["public"]["packageData"], packages);
+            rollback_to_unchecked(&current, &previous, &mut db).unwrap();
+            assert_eq!(db["public"]["serverInfo"]["version"], json!(from));
+            assert_eq!(db["public"]["packageData"], packages);
         }
     }
 

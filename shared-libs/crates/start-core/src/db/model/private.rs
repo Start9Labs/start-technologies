@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::PackageId;
 use crate::auth::Sessions;
+use crate::backup::scheduled::{ScheduledBackupCredential, generate_scheduled_backup_device_key};
 use crate::backup::target::cifs::CifsTargets;
 use crate::net::forward::AvailablePorts;
 use crate::net::keys::KeyStore;
@@ -50,6 +51,10 @@ pub struct Private {
     >,
     #[serde(default)]
     pub package_stores: BTreeMap<PackageId, Value>,
+    #[serde(default)]
+    pub scheduled_backup_credentials: BTreeMap<String, ScheduledBackupCredential>,
+    #[serde(default = "generate_scheduled_backup_device_key")]
+    pub scheduled_backup_device_key: Vec<u8>,
 }
 
 pub fn generate_server_identity_key() -> Der64<ed25519_dalek::SigningKey> {

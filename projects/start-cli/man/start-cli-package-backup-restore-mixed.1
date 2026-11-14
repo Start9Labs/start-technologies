@@ -1,0 +1,28 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-package-backup-restore-mixed 1  "restore-mixed "
+.SH NAME
+start\-cli\-package\-backup\-restore\-mixed \- Restore one selection of manual and automatic backup checkpoints
+.SH SYNOPSIS
+\fBstart\-cli package backup restore\-mixed\fR [\fB\-\-manual\-ids\fR] [\fB\-\-checkpoint\fR] [\fB\-\-server\-id\fR] [\fB\-\-password\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET_ID\fR>
+.SH DESCRIPTION
+Restore one selection of manual and automatic backup checkpoints
+.SH OPTIONS
+.TP
+\fB\-\-manual\-ids\fR \fI<MANUAL_IDS>\fR
+Package identifiers
+.TP
+\fB\-\-checkpoint\fR \fI<PACKAGE_ID=SNAPSHOT_ID>\fR
+Checkpoint as PACKAGE_ID=SNAPSHOT_ID; repeat for multiple services
+.TP
+\fB\-\-server\-id\fR \fI<SERVER_ID>\fR
+Unique server identifier
+.TP
+\fB\-\-password\fR \fI<PASSWORD>\fR
+Password for backup encryption
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fITARGET_ID\fR>
+Backup target identifier

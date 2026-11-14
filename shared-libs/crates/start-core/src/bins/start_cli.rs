@@ -163,11 +163,12 @@ fn backup_history_cli_defaults_and_pagination() {
 
 #[test]
 fn export_manpage_start_cli() {
-    let dir = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../projects/start-cli/man"
-    );
-    super::export_manpages(app().into_command(), dir);
+    super::export_manpages(app().into_command(), "start-cli", super::cli_version());
+}
+
+#[test]
+fn cli_version_matches_manifest() {
+    assert_eq!(super::cli_version(), super::manifest_version("start-cli"));
 }
 
 #[test]
