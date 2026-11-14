@@ -1,24 +1,28 @@
-import { DOCUMENT, inject, Injectable } from '@angular/core'
+import { inject, Service } from '@angular/core'
 import {
   AuthKeyService,
+  databaseSubscription,
   HttpService,
-  isRpcError,
   RpcError,
+  localRpcRequest,
   RPCOptions,
+  RpcSocketService,
+  ServerIdentityService,
 } from '@start9labs/shared'
 import { createRpcClient } from '@start9labs/start-core'
-import { filter, firstValueFrom, Observable } from 'rxjs'
-import { webSocket } from 'rxjs/webSocket'
+import { catchError } from 'rxjs'
+import type { Observable } from 'rxjs'
+import type { Update } from 'patch-db-client'
+import type { TunnelData } from '../patch-db/data-model'
 import { AuthService } from '../auth.service'
 import { PATCH_CACHE } from '../patch-db/patch-db-source'
 import { ApiClient, ApiService } from './api.service'
 
-@Injectable({
-  providedIn: 'root',
-})
+@Service()
 export class LiveApiService extends ApiService {
   private readonly http = inject(HttpService)
-  private readonly document = inject(DOCUMENT)
+  private readonly sockets = inject(RpcSocketService)
+  private readonly identity = inject(ServerIdentityService)
   private readonly auth = inject(AuthService)
   private readonly authKeys = inject(AuthKeyService)
   private readonly cache$ = inject(PATCH_CACHE)
@@ -31,52 +35,36 @@ export class LiveApiService extends ApiService {
       }),
   })
 
-  constructor() {
-    super()
-  }
-
   openWebsocket$<T>(guid: string): Observable<T> {
-    const { location } = this.document.defaultView!
-    const host = location.host
-
-    return webSocket({
-      url: `wss://${host}/ws/rpc/${guid}`,
+    return this.sockets.open<T>(guid, {
+      openObserver: this.identity.openObserver,
     })
   }
 
-  private async rpcRequest<T>(
-    options: RPCOptions<Record<string, unknown>, string>,
-    urlOverride?: string,
-  ): Promise<T> {
-    // Foreign origins must never receive a signature valid at home.
-    const res = await this.http.rpcRequest<T>(
-      urlOverride
-        ? options
-        : {
-            ...options,
-            headers: {
-              ...options.headers,
-              ...(await this.authKeys.signRpcHeaders(options)),
-            },
-          },
-      urlOverride,
-    )
-    const body = res.body
+  override watchDb$(): Observable<Update<TunnelData>> {
+    return databaseSubscription<TunnelData>(
+      this.sockets,
+      this.authKeys,
+      this.identity,
+    ).pipe(catchError(error => this.raiseError(error)))
+  }
 
-    if (isRpcError(body)) {
-      if (body.error.code === 34) {
-        console.error('Unauthenticated, logging out')
-        this.auth.deauthenticate()
-      }
-      throw new RpcError(body.error)
+  private rpcRequest<T>(options: RPCOptions): Promise<T> {
+    return localRpcRequest<T>(
+      this.http,
+      this.sockets,
+      this.authKeys,
+      this.identity,
+      this.cache$,
+      options,
+    ).catch(error => this.raiseError(error))
+  }
+
+  private raiseError(error: unknown): never {
+    if (error instanceof RpcError && error.code === 34) {
+      console.error('Unauthenticated, logging out')
+      this.auth.deauthenticate()
     }
-
-    const patchSequence = res.headers.get('x-patch-sequence')
-    if (patchSequence)
-      await firstValueFrom(
-        this.cache$.pipe(filter(({ id }) => id >= Number(patchSequence))),
-      )
-
-    return body.result
+    throw error
   }
 }

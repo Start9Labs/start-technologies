@@ -18,12 +18,13 @@ use crate::db::DbAccessByKey;
 use crate::db::model::Database;
 use crate::db::model::package::AllPackageData;
 use crate::net::acme::AcmeProvider;
-use crate::net::host::Host;
 use crate::net::host::binding::{
     AddSslOptions, BindInfo, BindOptions, Bindings, DerivedAddressInfo, NetInfo,
 };
+use crate::net::host::{Host, SERVER_UI_SSL_PORT};
 use crate::net::ssl::x509_sha256_fingerprint;
 use crate::net::vhost::{AlpnInfo, PassthroughInfo};
+use crate::nut::NutConfig;
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::system::{KeyboardOptions, SmtpValue};
@@ -47,6 +48,10 @@ pub struct Public {
     #[serde(default)]
     pub scheduled_backups: ScheduledBackupState,
     #[serde(default)]
+    pub registry_cache: BTreeMap<Url, crate::registry::sync::RegistryCache>,
+    #[serde(default)]
+    pub os_update_cache: Option<crate::registry::sync::OsUpdateCache>,
+    #[serde(default)]
     pub disks: Vec<crate::disk::util::DiskInfo>,
     #[serde(default)]
     pub shared_volumes:
@@ -54,8 +59,7 @@ pub struct Public {
     #[serde(default)]
     pub backup_targets:
         BTreeMap<crate::backup::target::BackupTargetId, crate::backup::target::BackupTarget>,
-    /// UI-owned state. Outside `version` migrations, the backend never reads or
-    /// modifies its contents.
+    /// UI-owned state; backend domain logic accesses its contents only during migrations.
     pub ui: Value,
 }
 
@@ -87,7 +91,7 @@ impl Public {
                                     options: BindOptions {
                                         preferred_external_port: 80,
                                         add_ssl: Some(AddSslOptions {
-                                            preferred_external_port: 443,
+                                            preferred_external_port: SERVER_UI_SSL_PORT,
                                             alpn: Some(AlpnInfo(vec![
                                                 MaybeUtf8String("h2".into()),
                                                 MaybeUtf8String("http/1.1".into()),
@@ -99,7 +103,7 @@ impl Public {
                                     },
                                     net: NetInfo {
                                         assigned_port: None,
-                                        assigned_ssl_port: Some(443),
+                                        assigned_ssl_port: Some(SERVER_UI_SSL_PORT),
                                     },
                                     addresses: DerivedAddressInfo::default(),
                                     interfaces: BTreeMap::new(),
@@ -161,6 +165,7 @@ impl Public {
                 governor: None,
                 epp: None,
                 smtp: None,
+                nut: NutConfig::default(),
                 echoip_urls: default_echoip_urls(),
                 ram: 0,
                 devices: Vec::new(),
@@ -170,6 +175,8 @@ impl Public {
             },
             package_data: AllPackageData::default(),
             scheduled_backups: ScheduledBackupState::default(),
+            registry_cache: BTreeMap::new(),
+            os_update_cache: None,
             disks: Vec::new(),
             shared_volumes: BTreeMap::new(),
             backup_targets: BTreeMap::new(),
@@ -224,6 +231,8 @@ pub struct ServerInfo {
     #[serde(default)]
     pub epp: Option<Epp>,
     pub smtp: Option<SmtpValue>,
+    #[serde(default)]
+    pub nut: NutConfig,
     #[serde(default = "default_echoip_urls")]
     pub echoip_urls: Vec<Url>,
     pub ram: u64,

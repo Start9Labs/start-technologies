@@ -47,10 +47,9 @@ src/app/
 │   ├── config-check.service.ts # Findings from `config.check` for the current page
 │   ├── connection.service.ts # Reconnect indicator + probing (expectDisruption / reportUnreachable)
 │   ├── form.service.ts       # Abstract FormService<T> — load/save/refresh cycle
-│   ├── http.service.ts       # Low-level HttpClient.post wrapper
 │   ├── network.service.ts    # Browser online/offline as an observable
 │   ├── published-port-deletion.ts # Confirm dialog: change would delete published ports
-│   ├── rpc.service.ts        # JSON-RPC 2.0 over HTTP (auto-logout on code 34)
+│   ├── rpc.service.ts        # Encrypted JSON-RPC (auto-logout on code 34)
 │   ├── stale-ui.service.ts   # Detects a UI bundle older than the firmware build
 │   ├── system.service.ts     # System info, version, update check
 │   ├── vpn-exposed-port.ts   # Confirm dialog: published port bypasses VPN routing
@@ -151,9 +150,10 @@ skill. `routes/published-ports/` is the project-local example of a table/dialog 
 
 ## API Layer
 
-- **Transport:** JSON-RPC 2.0 over a single HTTP POST endpoint (`/rpc/v1`)
-- **Contract:** the generated `bindings.ts` types every RPC method; `ApiService` (abstract) defines the methods the UI calls. `LiveApiService` calls `RpcService`; `MockApiService` returns static data for dev.
-- **Auth:** login enrolls a non-extractable WebCrypto key (`AuthKeyService` from `@start9labs/shared`) and `RpcService` signs every request with it. RPC error code 34 clears the key and logs out.
+- **Transport:** JSON-RPC uses the shared signed-DH WebSocket at `/rpc/v2`, including anonymous bootstrap with an unpersisted possession signer. Failed encrypted admission never retries as plaintext. GUID sockets use fresh same-peer admission signed for the exact GUID and keep their existing event/lifetime owners.
+- **Contract:** the generated `bindings.ts` types every RPC method; `ApiService` (abstract) defines the methods the UI calls. `LiveApiService` calls `RpcService`; `MockApiService` owns dev fixtures and local DOM-style continuation events without opening network sockets.
+- **Auth:** login enrolls a non-extractable WebCrypto key (`AuthKeyService` from `@start9labs/shared`) and `RpcService` binds it through the shared encrypted session. Authenticated firmware build metadata feeds the stale-UI detector; connection/update recovery aborts a stalled session before the next bounded probe. RPC error code 34 clears the key and logs out. Anonymous possession grants no roles and writes no normal-product identity history; enrolled-device calls attach the shared verified-peer observer.
+- **Flash:** `setup-wizard/service.ts` owns command-progress signals and observation cancellation. It uses the generated `setup.flash` stream through the existing socket owner. Successful typed termination confirms provisioning; progress counters and socket closure do not. Disposal cancels observation, never accepted server work. The mock supplies local typed events/terminal; network loss reuses `ConnectionService`, without replay.
 - **Mocks:** Toggle via `config.json` → `useMocks`. Dev server runs without a real router.
 
 ## i18n

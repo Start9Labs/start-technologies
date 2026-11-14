@@ -70,6 +70,7 @@ pub mod mcp;
 pub mod middleware;
 pub mod net;
 pub mod notifications;
+pub mod nut;
 pub mod os_install;
 pub mod prelude;
 pub mod progress;
@@ -146,6 +147,26 @@ impl std::fmt::Display for ApiState {
     }
 }
 
+async fn cli_state(
+    rpc_toolkit::HandlerArgs {
+        context,
+        parent_method,
+        method,
+        raw_params,
+        ..
+    }: rpc_toolkit::HandlerArgs<CliContext>,
+) -> Result<ApiState, Error> {
+    use itertools::Itertools;
+    let value = context
+        .call_startup_rpc(
+            &parent_method.into_iter().chain(method).join("."),
+            raw_params,
+            http::HeaderMap::new(),
+        )
+        .await?;
+    imbl_value::from_value(value).map_err(|error| Error::new(error, ErrorKind::Deserialization))
+}
+
 pub fn main_api<C: Context>() -> ParentHandler<C> {
     let mut api = ParentHandler::new()
         .subcommand(
@@ -164,21 +185,27 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
             from_fn(|_: RpcContext| Ok::<_, Error>(ApiState::Running))
                 .with_metadata("authenticated", Value::Bool(false))
                 .with_about("about.display-current-api")
-                .with_call_remote::<CliContext>(),
+                .no_cli(),
         )
         .subcommand(
             "state",
             from_fn(|_: InitContext| Ok::<_, Error>(ApiState::Initializing))
                 .with_metadata("authenticated", Value::Bool(false))
                 .with_about("about.display-current-api")
-                .with_call_remote::<CliContext>(),
+                .no_cli(),
         )
         .subcommand(
             "state",
             from_fn(|_: DiagnosticContext| Ok::<_, Error>(ApiState::Error))
                 .with_metadata("authenticated", Value::Bool(false))
                 .with_about("about.display-current-api")
-                .with_call_remote::<CliContext>(),
+                .no_cli(),
+        )
+        .subcommand(
+            "state",
+            from_fn_async(cli_state)
+                .no_ts()
+                .with_about("about.display-current-api"),
         )
         .subcommand("server", server::<C>().with_about("about.commands-server"))
         .subcommand(
@@ -355,7 +382,8 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "logs",
-            system::logs::<RpcContext>().with_about("about.display-os-logs"),
+            system::logs::<RpcContext>(rpc_continuations::WebSocketPolicy::Authenticated)
+                .with_about("about.display-os-logs"),
         )
         .subcommand(
             "logs",
@@ -373,7 +401,8 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "kernel-logs",
-            system::kernel_logs::<RpcContext>().with_about("about.display-kernel-logs"),
+            system::kernel_logs::<RpcContext>(rpc_continuations::WebSocketPolicy::Authenticated)
+                .with_about("about.display-kernel-logs"),
         )
         .subcommand(
             "kernel-logs",
@@ -424,6 +453,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
             "update",
             from_fn_async(update::update_system)
                 .with_metadata("sync_db", Value::Bool(true))
+                .with_metadata("get_signer", Value::Bool(true))
                 .no_cli(),
         )
         .subcommand(
@@ -487,6 +517,11 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_about("about.clear-smtp")
                 .with_call_remote::<CliContext>(),
         )
+        .subcommand("set-nut", from_fn_async(nut::set_nut).no_cli())
+        .subcommand("clear-nut", from_fn_async(nut::clear_nut).no_cli())
+        .subcommand("nut-status", from_fn_async(nut::get_nut_status).no_cli())
+        .subcommand("nut-scan", from_fn_async(nut::scan_nut).no_cli())
+        .subcommand("nut-list-ups", from_fn_async(nut::list_nut_ups).no_cli())
         .subcommand(
             "host",
             net::host::server_host_api::<C>().with_about("about.commands-host-system-ui"),

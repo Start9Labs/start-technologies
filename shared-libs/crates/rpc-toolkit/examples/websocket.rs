@@ -28,7 +28,15 @@ fn revisions() -> impl Iterator<Item = Revision> {
     })
 }
 
-async fn watch(args: HandlerArgs<ExampleContext>) -> Result<Dump, RpcError> {
+async fn watch(
+    args: HandlerArgs<
+        ExampleContext,
+        rpc_toolkit::Empty,
+        rpc_toolkit::Empty,
+        Revision,
+        &'static str,
+    >,
+) -> Result<Dump, RpcError> {
     if let Some(producer) = args.rpc_stream {
         tokio::spawn(async move {
             for revision in revisions() {
@@ -42,7 +50,15 @@ async fn watch(args: HandlerArgs<ExampleContext>) -> Result<Dump, RpcError> {
     Ok(Dump::default())
 }
 
-async fn watch_thread(args: HandlerArgs<ExampleContext>) -> Result<Dump, RpcError> {
+async fn watch_thread(
+    args: HandlerArgs<
+        ExampleContext,
+        rpc_toolkit::Empty,
+        rpc_toolkit::Empty,
+        Revision,
+        &'static str,
+    >,
+) -> Result<Dump, RpcError> {
     if let Some(producer) = args.rpc_stream {
         std::thread::spawn(move || {
             for revision in revisions() {

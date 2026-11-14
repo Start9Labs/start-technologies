@@ -272,20 +272,6 @@ export const SetupInfo: z.ZodObject<{
 }).meta({
   id: 'SetupInfo',
 })
-export const AttachParams: z.ZodObject<{
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof EncryptedWire>>,
-    z.ZodNullable<typeof EncryptedWire>
-  >
-  guid: z.ZodString
-  kiosk: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  password: wire(EncryptedWire.nullable().optional(), EncryptedWire.nullable()),
-  guid: z.string(),
-  kiosk: z.boolean(),
-}).meta({
-  id: 'AttachParams',
-})
 export const BackupTargetFS: z.ZodUnion<
   readonly [
     z.ZodIntersection<
@@ -453,10 +439,22 @@ export const LogFollowResponse: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
-  guid: typeof Guid
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
 }> = /* @__PURE__ */ object({
   startCursor: wire(z.string().nullable().optional(), z.string().nullable()),
-  guid: Guid,
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Present for ordinary replies; typed observations use same-ID events.',
+  }),
 }).meta({
   id: 'LogFollowResponse',
 })
@@ -477,6 +475,11 @@ export const LogResponse: z.ZodObject<{
 }).meta({
   id: 'LogResponse',
 })
+export const PasswordType: z.ZodUnion<
+  readonly [typeof EncryptedWire, z.ZodString]
+> = /* @__PURE__ */ z.union([EncryptedWire, z.string()]).meta({
+  id: 'PasswordType',
+})
 export const RequiresHostId: z.ZodObject<{ host: typeof HostId }> =
   /* @__PURE__ */ object({ host: HostId }).meta({
     id: 'RequiresHostId',
@@ -485,35 +488,6 @@ export const RequiresPackageId: z.ZodObject<{ package: typeof PackageId }> =
   /* @__PURE__ */ object({ package: PackageId }).meta({
     id: 'RequiresPackageId',
   })
-export const SetupExecuteParams: z.ZodObject<{
-  guid: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof EncryptedWire>>,
-    z.ZodNullable<typeof EncryptedWire>
-  >
-  recoverySource: z.ZodCodec<
-    z.ZodOptional<
-      z.ZodNullable<ReturnType<typeof RecoverySource<typeof EncryptedWire>>>
-    >,
-    z.ZodNullable<ReturnType<typeof RecoverySource<typeof EncryptedWire>>>
-  >
-  kiosk: z.ZodBoolean
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  guid: z.string(),
-  password: wire(EncryptedWire.nullable().optional(), EncryptedWire.nullable()),
-  recoverySource: wire(
-    RecoverySource(EncryptedWire).nullable().optional(),
-    RecoverySource(EncryptedWire).nullable(),
-  ),
-  kiosk: z.boolean(),
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'SetupExecuteParams',
-})
 export const SetupResult: z.ZodObject<{
   hostname: typeof ServerHostname
   rootCa: typeof literal_0
@@ -563,21 +537,19 @@ export const StartOsRecoveryInfo: z.ZodObject<{
   description:
     "The public view of a backup found on a target: enough to identify it, and none of\n[`BackupUnencryptedMetadata`]'s key material.",
 })
-export const VerifyCifsParams: z.ZodObject<{
-  hostname: z.ZodString
-  path: z.ZodString
-  username: z.ZodString
+export const AttachParams: z.ZodObject<{
   password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof EncryptedWire>>,
-    z.ZodNullable<typeof EncryptedWire>
+    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
+    z.ZodNullable<typeof PasswordType>
   >
+  guid: z.ZodString
+  kiosk: z.ZodBoolean
 }> = /* @__PURE__ */ object({
-  hostname: z.string(),
-  path: z.string(),
-  username: z.string(),
-  password: wire(EncryptedWire.nullable().optional(), EncryptedWire.nullable()),
+  password: wire(PasswordType.nullable().optional(), PasswordType.nullable()),
+  guid: z.string(),
+  kiosk: z.boolean(),
 }).meta({
-  id: 'VerifyCifsParams',
+  id: 'AttachParams',
 })
 export const NetworkInterfaceInfo: z.ZodCodec<
   z.ZodObject<{
@@ -749,11 +721,71 @@ export const Progress: z.ZodUnion<
   .meta({
     id: 'Progress',
   })
+export const SetupExecuteParams: z.ZodObject<{
+  guid: z.ZodString
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
+    z.ZodNullable<typeof PasswordType>
+  >
+  recoverySource: z.ZodCodec<
+    z.ZodOptional<
+      z.ZodNullable<ReturnType<typeof RecoverySource<typeof PasswordType>>>
+    >,
+    z.ZodNullable<ReturnType<typeof RecoverySource<typeof PasswordType>>>
+  >
+  kiosk: z.ZodBoolean
+  hostname: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  guid: z.string(),
+  password: wire(PasswordType.nullable().optional(), PasswordType.nullable()),
+  recoverySource: wire(
+    RecoverySource(PasswordType).nullable().optional(),
+    RecoverySource(PasswordType).nullable(),
+  ),
+  kiosk: z.boolean(),
+  hostname: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'SetupExecuteParams',
+})
 export const SetupProgress: z.ZodObject<{
   progress: typeof FullProgress
-  guid: typeof Guid
-}> = /* @__PURE__ */ object({ progress: FullProgress, guid: Guid }).meta({
+  /**
+   * Present for ordinary replies; typed streams use same-ID events.
+   */
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
+}> = /* @__PURE__ */ object({
+  progress: FullProgress,
+  /**
+   * Present for ordinary replies; typed streams use same-ID events.
+   */
+  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Present for ordinary replies; typed streams use same-ID events.',
+  }),
+}).meta({
   id: 'SetupProgress',
+})
+export const VerifyCifsParams: z.ZodObject<{
+  hostname: z.ZodString
+  path: z.ZodString
+  username: z.ZodString
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
+    z.ZodNullable<typeof PasswordType>
+  >
+}> = /* @__PURE__ */ object({
+  hostname: z.string(),
+  path: z.string(),
+  username: z.string(),
+  password: wire(PasswordType.nullable().optional(), PasswordType.nullable()),
+}).meta({
+  id: 'VerifyCifsParams',
 })
 export const DiskInfo: z.ZodObject<{
   logicalname: z.ZodString
@@ -907,10 +939,14 @@ export const Api = {
             forget: {
               _PARAMS: /* @__PURE__ */ empty,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             repair: {
               _PARAMS: /* @__PURE__ */ empty,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -922,12 +958,16 @@ export const Api = {
         repair: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
     'git-info': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     init: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
     kiosk: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
@@ -952,10 +992,14 @@ export const Api = {
                 QueryDnsParams,
               ),
               _RETURN: /* @__PURE__ */ QueryDnsRes,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             status: {
               _PARAMS: /* @__PURE__ */ empty,
               _RETURN: /* @__PURE__ */ DnsStatus,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -1069,6 +1113,8 @@ export const Api = {
         attach: {
           _PARAMS: /* @__PURE__ */ AttachParams,
           _RETURN: /* @__PURE__ */ SetupProgress,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         cifs: {
           _PARAMS: /* @__PURE__ */ empty,
@@ -1079,6 +1125,8 @@ export const Api = {
                 z.string(),
                 StartOsRecoveryInfo,
               ),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -1096,6 +1144,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ SetupResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         disk: {
           _PARAMS: /* @__PURE__ */ empty,
@@ -1114,16 +1164,22 @@ export const Api = {
                 empty,
               ),
               _RETURN: /* @__PURE__ */ z.array(DiskInfo),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
         execute: {
           _PARAMS: /* @__PURE__ */ SetupExecuteParams,
           _RETURN: /* @__PURE__ */ SetupProgress,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         exit: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'get-pubkey': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1139,10 +1195,14 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.record(z.string(), z.unknown()),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'install-os': {
           _PARAMS: /* @__PURE__ */ InstallOsParams,
           _RETURN: /* @__PURE__ */ SetupInfo,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         logs: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1153,14 +1213,27 @@ export const Api = {
                 z.string().nullable(),
               ),
               boot: wire(
-                z.union([z.number(), z.string()]).nullable().optional(),
-                z.union([z.number(), z.string()]).nullable(),
+                z
+                  .union([
+                    z.number().int().min(-2147483648).max(2147483647),
+                    z.string(),
+                  ])
+                  .nullable()
+                  .optional(),
+                z
+                  .union([
+                    z.number().int().min(-2147483648).max(2147483647),
+                    z.string(),
+                  ])
+                  .nullable(),
               ),
               before: wire(z.boolean().optional(), z.boolean()),
             }),
             empty,
           ),
           _RETURN: /* @__PURE__ */ LogResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
           _CHILDREN: {
             follow: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1174,32 +1247,53 @@ export const Api = {
                     z.string().nullable(),
                   ),
                   boot: wire(
-                    z.union([z.number(), z.string()]).nullable().optional(),
-                    z.union([z.number(), z.string()]).nullable(),
+                    z
+                      .union([
+                        z.number().int().min(-2147483648).max(2147483647),
+                        z.string(),
+                      ])
+                      .nullable()
+                      .optional(),
+                    z
+                      .union([
+                        z.number().int().min(-2147483648).max(2147483647),
+                        z.string(),
+                      ])
+                      .nullable(),
                   ),
                   before: wire(z.boolean().optional(), z.boolean()),
                 }),
                 empty,
               ),
               _RETURN: /* @__PURE__ */ LogFollowResponse,
+              _ITEM: /* @__PURE__ */ LogEntry,
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
         restart: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-keyboard': {
           _PARAMS: /* @__PURE__ */ KeyboardOptions,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-language': {
           _PARAMS: /* @__PURE__ */ SetLanguageParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         shutdown: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         status: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1215,6 +1309,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ SetupStatusRes,
+          _ITEM: /* @__PURE__ */ FullProgress,
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },

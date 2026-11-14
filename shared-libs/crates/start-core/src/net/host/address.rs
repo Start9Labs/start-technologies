@@ -799,6 +799,8 @@ mod test {
         };
         DatabaseModel::from(imbl_value::json!({
             "public": {
+                "registryCache": {},
+                "osUpdateCache": null,
                 "ui": {},
                 "scheduledBackups": imbl_value::to_value(&crate::backup::scheduled::ScheduledBackupState::default()).unwrap(),
                 "disks": [],

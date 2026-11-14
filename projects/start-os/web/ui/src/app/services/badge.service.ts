@@ -6,6 +6,7 @@ import { HiddenUpdatesService } from 'src/app/services/hidden-updates.service'
 import { LocalPackagesService } from 'src/app/services/local-packages.service'
 import { NotificationService } from 'src/app/services/notification.service'
 import { OSService } from 'src/app/services/os.service'
+import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { UpdatesRefinementService } from 'src/app/services/updates-refinement.service'
 import { FilterUpdatesPipe } from '../routes/portal/routes/updates/filter-updates.pipe'
@@ -37,11 +38,11 @@ export class BadgeService {
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
   private readonly refinement = inject(UpdatesRefinementService)
 
-  // Counts over the *refined* marketplace so the badge reflects the same
-  // reachable-updates set the Updates tab displays. Subscribing here also
-  // keeps the refinement pipeline warm for the lifetime of the navbar, which
-  // is what lets the Updates tab replay the already-resolved state on mount
-  // instead of running refinement again on each navigation.
+  private readonly registryErrors$ = inject(
+    MarketplaceService,
+  ).requestErrors$.pipe(map(errors => errors.length > 0))
+
+  // The navbar keeps refinement warm across Updates navigation.
   private readonly updates$ = combineLatest([
     this.refinement.refined$,
     inject(LocalPackagesService),
@@ -76,6 +77,7 @@ export class BadgeService {
   )
 
   getWarning(id: string): Observable<boolean> {
+    if (id === 'updates') return this.registryErrors$
     return id === 'system' || id === 'backup-targets'
       ? this.backups$
       : of(false)
@@ -84,7 +86,10 @@ export class BadgeService {
   getCount(id: string): Observable<number> {
     switch (id) {
       case 'updates':
-        return this.updates$
+        // Registry errors replace the navigation count, not cached update rows.
+        return combineLatest([this.updates$, this.registryErrors$]).pipe(
+          map(([count, error]) => (error ? 0 : count)),
+        )
       case 'system':
         return this.system$
       case 'general':

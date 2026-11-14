@@ -22,7 +22,7 @@ export type RecoverySource =
             password: string | null
           }
       serverId: string
-      password: string // Plaintext until `executeSetup` encrypts it.
+      password: string
       scheduled: boolean
     }
 
@@ -67,7 +67,7 @@ export class StateService {
   async attachDrive(password: string | null): Promise<void> {
     await this.api.rpc.setup.attach({
       guid: this.dataDriveGuid,
-      password: password ? await this.api.encrypt(password) : null,
+      password: password || null,
       kiosk: this.kiosk,
     })
   }
@@ -88,7 +88,7 @@ export class StateService {
               ? { ...target, path: normalizeCifsPath(target.path) }
               : target,
           serverId: this.recoverySource.serverId,
-          password: await this.api.encrypt(this.recoverySource.password),
+          password: this.recoverySource.password,
           scheduled: this.recoverySource.scheduled,
         }
       }
@@ -96,7 +96,7 @@ export class StateService {
 
     await this.api.rpc.setup.execute({
       guid: this.dataDriveGuid,
-      password: password ? await this.api.encrypt(password) : null,
+      password: password || null,
       hostname,
       recoverySource,
       kiosk: this.kiosk,

@@ -21,10 +21,10 @@ use crate::auth::AuthKeys;
 use crate::context::CliContext;
 use crate::db::model::public::NetworkInterfaceInfo;
 pub use crate::db::{
-    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes,
+    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes, SubscribeResult,
 };
 use crate::prelude::*;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::migrations;
 use crate::tunnel::web::WebserverInfo;
@@ -35,6 +35,8 @@ use crate::util::serde::{HandlerExtSerde, apply_expr};
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct TunnelDatabase {
+    #[serde(default)]
+    pub server_identity_key: crate::sign::instance::StoredIdentityKey,
     #[serde(default)]
     #[visit(ts(skip))]
     pub migrations: BTreeSet<InternedString>,
@@ -530,20 +532,36 @@ pub async fn apply(
 }
 
 pub async fn subscribe(
-    ctx: TunnelContext,
-    SubscribeParams { pointer, signer }: SubscribeParams,
-) -> Result<SubscribeRes, Error> {
+    HandlerArgs {
+        context: ctx,
+        params: SubscribeParams { pointer, signer },
+        rpc_stream,
+        ..
+    }: HandlerArgs<TunnelContext, SubscribeParams, rpc_toolkit::Empty, patch_db::Revision>,
+) -> Result<SubscribeResult, Error> {
     let (dump, mut sub) = ctx
         .db
         .dump_and_sub(pointer.unwrap_or_else(|| ROOT.to_owned()))
         .await;
+    if let Some(stream) = rpc_stream {
+        crate::auth::continuation_subscription(&ctx, signer)
+            .await?
+            .forward_stream(
+                stream,
+                futures::stream::unfold(sub, |mut sub| async move {
+                    sub.recv().await.map(|revision| (Ok(revision), sub))
+                }),
+            );
+        return Ok(SubscribeResult::Stream(dump));
+    }
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(
             guid.clone(),
             RpcContinuation::ws_authed(
-                &ctx,
-                signer,
+                crate::auth::continuation_subscription(&ctx, signer).await?,
+                WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
                 |mut ws| async move {
                     if let Err(e) = async {
                         loop {
@@ -582,7 +600,7 @@ pub async fn subscribe(
         )
         .await;
 
-    Ok(SubscribeRes { dump, guid })
+    Ok(SubscribeResult::Continuation(SubscribeRes { dump, guid }))
 }
 
 #[test]

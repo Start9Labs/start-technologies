@@ -25,13 +25,17 @@ use crate::context::config::{CONFIG_PATH, ContextConfig};
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::{LocalAuthContext, dial_addr, is_loopback, local_auth_header};
-use crate::middleware::auth::signature::{NonceCache, SignatureAuthContext, SignatureAuthMetadata};
+use crate::middleware::auth::signature::{
+    NonceCache, SignatureAuthContext, SignatureAuthMetadata, SignatureAuthorizationContext,
+    SigningContext,
+};
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
 use crate::registry::migrations::run_migrations;
-use crate::registry::os::security;
+use crate::registry::mirror::IndexMirrors;
 use crate::registry::package::icon::{icons_dir, referenced_icons, sweep_icons};
+use crate::registry::package::promote::registry_rpc_url;
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
 use crate::sign::AnyVerifyingKey;
@@ -63,9 +67,6 @@ pub struct RegistryConfig {
     #[arg(long, help = "help.arg.registry-startwrt")]
     #[serde(default)]
     pub startwrt: bool,
-    #[arg(long, help = "help.arg.registry-security-notifications")]
-    #[serde(default)]
-    pub security_notifications: bool,
 }
 impl ContextConfig for RegistryConfig {
     fn next(&mut self) -> Option<PathBuf> {
@@ -77,7 +78,6 @@ impl ContextConfig for RegistryConfig {
         self.tor_proxy = self.tor_proxy.take().or(other.tor_proxy);
         self.datadir = self.datadir.take().or(other.datadir);
         self.startwrt |= other.startwrt;
-        self.security_notifications |= other.security_notifications;
     }
 }
 
@@ -94,19 +94,46 @@ pub struct RegistryContextSeed {
     pub hostnames: Vec<InternedString>,
     pub listen: SocketAddr,
     pub db: TypedPatchDb<RegistryDatabase>,
+    pub index_mirrors: IndexMirrors,
     pub datadir: PathBuf,
     pub startwrt: bool,
     pub rpc_continuations: RpcContinuations,
     pub open_authed_continuations: OpenAuthedContinuations<Option<InternedString>>,
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub client: Client,
+    pub server_identity: crate::sign::Signer,
     pub shutdown: Sender<()>,
     pub metrics_db: SyncMutex<Connection>,
-    pub(crate) security_feed: Option<security::SecurityFeed>,
 }
 
 #[derive(Clone)]
-pub struct RegistryContext(Arc<RegistryContextSeed>);
+pub struct RegistryContext(
+    Arc<RegistryContextSeed>,
+    Option<Arc<crate::middleware::auth::session::SecureSession>>,
+);
+
+impl SessionContext for RegistryContext {
+    fn secure_session(&self) -> Option<&crate::middleware::auth::session::SecureSession> {
+        self.1.as_deref()
+    }
+}
+impl RegistryContext {
+    pub(crate) fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
+        crate::middleware::auth::signature::RequestReplayCheck::new(&self.0, |seed| {
+            Some(Self(seed, None))
+        })
+    }
+    pub(crate) fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+        Ok(self.server_identity.clone())
+    }
+    pub(crate) fn with_secure_session(
+        mut self,
+        session: crate::middleware::auth::session::SecureSession,
+    ) -> Self {
+        self.1 = Some(Arc::new(session));
+        self
+    }
+}
 impl RegistryContext {
     #[instrument(skip_all)]
     pub async fn init(config: &RegistryConfig) -> Result<Self, Error> {
@@ -125,9 +152,10 @@ impl RegistryContext {
             db.put(&ROOT, &RegistryDatabase::init()).await?;
         }
         db.mutate(|db| run_migrations(db, &datadir)).await.result?;
+        let server_identity = crate::sign::instance::load(&db).await?;
         sweep_icons(
             &icons_dir(&datadir),
-            &referenced_icons(&db.peek().await.into_index().into_package().de()?),
+            &referenced_icons(db.peek().await.as_index().as_package())?,
         )
         .await?;
 
@@ -167,34 +195,33 @@ impl RegistryContext {
                 ErrorKind::NotFound,
             ));
         }
-        let security_feed = if config.security_notifications {
-            Some(security::init(&db).await?)
-        } else {
-            None
-        };
-        Ok(Self(Arc::new(RegistryContextSeed {
-            hostnames: config.registry_hostname.clone(),
-            listen: config.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN),
-            db,
-            datadir,
-            startwrt: config.startwrt,
-            rpc_continuations: RpcContinuations::new(),
-            open_authed_continuations: OpenAuthedContinuations::new(),
-            auth_sig_nonce_cache: SyncMutex::new(Default::default()),
-            client: Client::builder()
-                .proxy(Proxy::custom(move |url| {
-                    if url.host_str().map_or(false, |h| h.ends_with(".onion")) {
-                        Some(tor_proxy_url.clone())
-                    } else {
-                        None
-                    }
-                }))
-                .build()
-                .with_kind(crate::ErrorKind::ParseUrl)?,
-            shutdown,
-            metrics_db,
-            security_feed,
-        })))
+        Ok(Self(
+            Arc::new(RegistryContextSeed {
+                hostnames: config.registry_hostname.clone(),
+                listen: config.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN),
+                db,
+                index_mirrors: IndexMirrors::default(),
+                datadir,
+                startwrt: config.startwrt,
+                rpc_continuations: RpcContinuations::new(),
+                open_authed_continuations: OpenAuthedContinuations::new(),
+                auth_sig_nonce_cache: SyncMutex::new(Default::default()),
+                client: Client::builder()
+                    .proxy(Proxy::custom(move |url| {
+                        if url.host_str().map_or(false, |h| h.ends_with(".onion")) {
+                            Some(tor_proxy_url.clone())
+                        } else {
+                            None
+                        }
+                    }))
+                    .build()
+                    .with_kind(crate::ErrorKind::ParseUrl)?,
+                server_identity,
+                shutdown,
+                metrics_db,
+            }),
+            None,
+        ))
     }
 }
 impl AsRef<RpcContinuations> for RegistryContext {
@@ -220,15 +247,58 @@ pub struct RegistryUrlParams {
 
 rpc_toolkit::reflect_ts!(RegistryUrlParams);
 
+pub(crate) async fn call_cli(
+    ctx: &CliContext,
+    url: Url,
+    headers: HeaderMap,
+    address: &str,
+    method: &str,
+    mut params: Value,
+) -> Result<Value, RpcError> {
+    use crate::middleware::auth::session::client;
+    super::compat::pem_wire(&mut params);
+    if let Some(signer) = ctx.rpc_signer(&headers)? {
+        let request = ctx.rpc_client.capture(method, params)?;
+        let connection = ctx
+            .rpc_client
+            .session(
+                &signer,
+                client::websocket_url(url.clone())?,
+                address,
+                headers,
+            )
+            .await?;
+        for warning in super::cli_identity::observe(
+            &ctx.id_key_path.with_file_name("registry-identities"),
+            &url,
+            address,
+            &connection.peer,
+        )
+        .await
+        {
+            rpc_toolkit::output::advisory(format_args!("{}", warning));
+        }
+        connection.request(request).await
+    } else {
+        crate::middleware::auth::signature::call_http(
+            ctx.client.clone(),
+            url,
+            headers,
+            method,
+            params,
+        )
+        .await
+    }
+}
+
 impl CallRemote<RegistryContext> for CliContext {
     async fn call_remote(
         &self,
         mut method: &str,
         _: OrdMap<&'static str, Value>,
-        mut params: Value,
+        params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
-        super::compat::pem_wire(&mut params);
         let local_auth = local_auth_header::<RegistryContext>().await;
 
         let (url, is_local) = if let Some(url) = &self.registry_url {
@@ -236,20 +306,14 @@ impl CallRemote<RegistryContext> for CliContext {
             let is_local = is_loopback(&url);
             (url, is_local)
         } else if local_auth.is_some() || !self.registry_hostname.is_empty() {
-            let mut url: Url = format!(
+            let url: Url = format!(
                 "http://{}",
                 dial_addr(self.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN))
             )
             .parse()
             .map_err(Error::from)?;
-            url.path_segments_mut()
-                .map_err(|_| eyre!("Url cannot be base"))
-                .with_kind(crate::ErrorKind::ParseUrl)?
-                .push("rpc")
-                .push("v0");
-            // Derived from the registry's own listen address, so it names this
-            // machine even when that address isn't loopback.
-            (url, true)
+            // The listen address identifies this machine, including non-loopback binds.
+            (registry_rpc_url(&url)?, true)
         } else {
             return Err(Error::new(
                 eyre!("{}", t!("registry.context.registry-required")),
@@ -270,18 +334,79 @@ impl CallRemote<RegistryContext> for CliContext {
             .registry_hostname
             .get(0)
             .cloned()
-            .or_else(|| url.host().as_ref().map(InternedString::from_display));
+            .or_else(|| {
+                self.registry_url
+                    .as_ref()
+                    .and_then(|url| url.selected_host())
+                    .map(InternedString::intern)
+            })
+            .or_else(|| url.host_str().map(InternedString::intern));
 
-        crate::middleware::auth::signature::call_remote(
+        call_cli(
             self,
             url,
             headers,
-            sig_context.as_deref(),
+            sig_context.as_deref().or_not_found("registry hostname")?,
             method,
             params,
         )
         .await
     }
+}
+
+/// Encrypted registry calls have no default reply deadline.
+pub(crate) async fn call(
+    client: &crate::context::rpc::ReloadableHttpClient,
+    signer: &crate::sign::Signer,
+    registry: &Url,
+    headers: HeaderMap,
+    method: &str,
+    params: Value,
+) -> Result<Value, RpcError> {
+    use crate::middleware::auth::session::client as session_client;
+    match super::sync::connection::connect(client, registry, signer, headers.clone()).await {
+        Ok(mut socket) => {
+            session_client::request(&mut socket, session_client::request_body(method, params)?)
+                .await
+        }
+        Err(error) if super::sync::connection::websocket_unsupported(&error) => {
+            call_legacy(client, signer, registry, headers, method, params).await
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub(super) async fn call_legacy(
+    client: &crate::context::rpc::ReloadableHttpClient,
+    signer: &crate::sign::Signer,
+    registry: &Url,
+    mut headers: HeaderMap,
+    method: &str,
+    params: Value,
+) -> Result<Value, RpcError> {
+    use crate::middleware::auth::signature::{
+        AUTH_SIG_HEADER, SignatureHeader, rpc_request_body, send_http,
+    };
+    let body = rpc_request_body(method, params)?;
+    let address = registry.host_str().or_not_found("registry hostname")?;
+    headers.insert(
+        AUTH_SIG_HEADER,
+        SignatureHeader::sign(signer, body.as_bytes(), address)
+            .await?
+            .to_header(),
+    );
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        send_http(
+            client.get_without_redirects(),
+            registry_rpc_url(registry)?,
+            headers,
+            body,
+            crate::util::net::secure::DEFAULT_RPC_RESPONSE_LIMIT,
+        ),
+    )
+    .await
+    .with_kind(ErrorKind::Network)?
 }
 
 impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
@@ -290,10 +415,9 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
         mut method: &str,
         metadata: OrdMap<&'static str, Value>,
         mut params: Value,
-        RegistryUrlParams { mut registry }: RegistryUrlParams,
+        RegistryUrlParams { registry }: RegistryUrlParams,
     ) -> Result<Value, RpcError> {
         super::compat::pem_wire(&mut params);
-        let base = registry.clone();
         let mut headers = HeaderMap::new();
         let mut device_info = None;
         if metadata
@@ -306,19 +430,18 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
             device_info = Some(di);
         }
 
-        registry
-            .path_segments_mut()
-            .map_err(|_| Error::new(eyre!("cannot extend URL path"), ErrorKind::ParseUrl))?
-            .push("rpc")
-            .push("v0");
-
         method = method.strip_prefix("registry.").unwrap_or(method);
-        let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
+        if let Some(result) =
+            super::sync::cached_call(self, &registry, method, &params, device_info.as_ref()).await?
+        {
+            return Ok(result);
+        }
 
-        let mut res = match crate::middleware::auth::signature::call_remote_with_client(
-            None,
-            self.client.get(),
-            registry,
+        let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
+        let mut res = match call(
+            &self.client,
+            &self.signing_key()?,
+            &registry,
             headers,
             method,
             params.clone(),
@@ -334,25 +457,11 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
             device_info.filter_for_hardware(method, params, &mut res)?;
         }
 
-        if matches!(method, "package.get" | "os.version.get") {
-            let ctx = self.clone();
-            tokio::spawn(async move {
-                if let Err(e) = crate::trusted_keys::check_registry(ctx, &base).await {
-                    tracing::warn!("{e}");
-                    tracing::debug!("{e:?}");
-                }
-            });
-        }
-
         Ok(res)
     }
 }
 
-/// Reaching a `.onion` registry requires the host to proxy through the Tor
-/// service's SOCKS proxy (`tor.startos:9050`). When that service is missing or
-/// stopped, the request fails with reqwest's opaque "error sending request" —
-/// replace it with actionable guidance. If Tor is up, the failure belongs to the
-/// onion service itself, so the original error is preserved.
+/// Onion registries require the Tor service's SOCKS proxy.
 async fn onion_tor_hint(ctx: &RpcContext, original: RpcError) -> RpcError {
     let running = async {
         let tor_id = "tor".parse::<crate::PackageId>().ok()?;
@@ -373,6 +482,8 @@ async fn onion_tor_hint(ctx: &RpcContext, original: RpcError) -> RpcError {
 pub struct RegistryAuthMetadata {
     #[serde(default)]
     admin: bool,
+    #[serde(default = "crate::util::serde::const_true")]
+    authenticated: bool,
 }
 
 impl SignatureAuthMetadata for RegistryAuthMetadata {}
@@ -401,14 +512,32 @@ impl LocalAuthContext for RegistryContext {
     const LOCAL_AUTH_COOKIE_OWNERSHIP: &str = "root:root";
 }
 impl SignatureAuthContext for RegistryContext {
-    type AdditionalMetadata = RegistryAuthMetadata;
-    type CheckPubkeyRes = Option<(AnyVerifyingKey, SignerInfo)>;
+    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+        RegistryContext::server_identity(self)
+    }
+    fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
+        RegistryContext::replay_check(self)
+    }
+    fn with_secure_session(self, session: crate::middleware::auth::session::SecureSession) -> Self {
+        RegistryContext::with_secure_session(self, session)
+    }
     fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {
         self.auth_sig_nonce_cache.mutate(f)
     }
+    /// Trusts the registry host clock.
     async fn clock_synced(&self) -> bool {
-        true // Assume. Validating registry clock sync out of scope for now,
+        true
     }
+    async fn sig_context(
+        &self,
+        _extensions: &http::Extensions,
+    ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {
+        self.hostnames.iter().map(Ok)
+    }
+}
+impl SignatureAuthorizationContext for RegistryContext {
+    type AdditionalMetadata = RegistryAuthMetadata;
+    type CheckPubkeyRes = Option<(AnyVerifyingKey, SignerInfo)>;
     fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
         &self.open_authed_continuations
     }
@@ -424,18 +553,15 @@ impl SignatureAuthContext for RegistryContext {
         }
         Ok(())
     }
-    async fn sig_context(
-        &self,
-        _extensions: &http::Extensions,
-    ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, Error>> + Send {
-        self.hostnames.iter().map(Ok)
-    }
     fn check_pubkey(
         &self,
         db: &Model<Self::Database>,
         pubkey: Option<&AnyVerifyingKey>,
         metadata: Self::AdditionalMetadata,
     ) -> Result<Self::CheckPubkeyRes, Error> {
+        if !metadata.authenticated {
+            return Ok(None);
+        }
         if let Some(pubkey) = pubkey {
             let (guid, admin) = db.as_index().as_signers().get_signer_info(pubkey)?;
             if !metadata.admin || db.as_admins().de()?.contains(&guid) {
@@ -478,31 +604,73 @@ mod tests {
     use super::*;
 
     #[test]
-    fn security_notifications_are_opt_in_from_cli_or_config() {
-        let default = RegistryConfig::try_parse_from(["registry"]).unwrap();
-        assert!(!default.security_notifications);
-        let legacy: RegistryConfig = serde_json::from_value(serde_json::json!({
+    fn legacy_security_notification_config_does_not_gate_registry_subscriptions() {
+        let config: RegistryConfig = serde_json::from_value(serde_json::json!({
             "registry-hostname": ["registry.test"],
+            "security-notifications": false,
         }))
         .unwrap();
-        assert!(!legacy.security_notifications);
-        let mut cli =
-            RegistryConfig::try_parse_from(["registry", "--security-notifications"]).unwrap();
-        cli.merge_with(legacy);
-        assert!(cli.security_notifications);
-        let file: RegistryConfig = serde_json::from_value(serde_json::json!({
-            "registry-hostname": ["registry.test"],
-            "security-notifications": true,
-        }))
-        .unwrap();
-        let mut merged = default;
-        merged.merge_with(file);
-        assert!(merged.security_notifications);
         assert_eq!(
-            serde_json::to_value(&merged).unwrap()["security-notifications"],
-            true
+            config.registry_hostname,
+            vec![InternedString::from("registry.test")]
         );
+        assert!(RegistryConfig::try_parse_from(["registry", "--security-notifications"]).is_err());
     }
+}
+
+#[cfg(test)]
+pub(crate) async fn test_context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext {
+    test_context_for_hosts(
+        datadir,
+        uploader,
+        vec!["localhost".into(), "127.0.0.1".into()],
+    )
+    .await
+}
+
+#[cfg(test)]
+pub(crate) async fn test_context_for_hosts(
+    datadir: PathBuf,
+    uploader: AnyVerifyingKey,
+    hostnames: Vec<InternedString>,
+) -> RegistryContext {
+    use crate::rpc_continuations::Guid;
+
+    tokio::fs::create_dir_all(&datadir).await.unwrap();
+    let db =
+        TypedPatchDb::load_unchecked(PatchDb::open(datadir.join("registry.db")).await.unwrap());
+    let mut database = RegistryDatabase::init();
+    let guid = Guid::new();
+    database.admins.insert(guid.clone());
+    database.index.trust_signers.insert(guid.clone());
+    database.index.signers.insert(
+        guid,
+        SignerInfo {
+            name: "Uploader".into(),
+            contact: vec![],
+            keys: [uploader].into(),
+            gpg_exports: Default::default(),
+        },
+    );
+    db.put(&ROOT, &database).await.unwrap();
+    RegistryContext(
+        Arc::new(RegistryContextSeed {
+            hostnames,
+            listen: "127.0.0.1:0".parse().unwrap(),
+            db,
+            index_mirrors: Default::default(),
+            datadir,
+            startwrt: false,
+            rpc_continuations: RpcContinuations::new(),
+            open_authed_continuations: OpenAuthedContinuations::new(),
+            auth_sig_nonce_cache: SyncMutex::new(Default::default()),
+            client: Client::new(),
+            server_identity: crate::sign::AnySigningKey::generate().into(),
+            shutdown: tokio::sync::broadcast::channel(1).0,
+            metrics_db: SyncMutex::new(Connection::open_in_memory().unwrap()),
+        }),
+        None,
+    )
 }
 
 #[cfg(test)]
@@ -520,4 +688,8 @@ mod os_asset_sign_tests;
 mod os_ingestion_tests;
 #[cfg(test)]
 #[path = "test_utils.rs"]
-mod test_utils;
+pub(crate) mod test_utils;
+
+#[cfg(test)]
+#[path = "query_tests.rs"]
+mod query_tests;

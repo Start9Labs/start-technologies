@@ -8,18 +8,21 @@ import {
   registrySigningKeys,
 } from '@start9labs/marketplace'
 import {
-  defaultRegistries,
   FullKeyboard,
+  i18nPipe,
   pauseFor,
   registryUrl,
   sameUrl,
+  withAbortSignal,
   RPCErrorDetails,
   SetLanguageParams,
 } from '@start9labs/shared'
 import {
   auth,
   createRpcClient,
+  createRpcStreamClient,
   RpcHandlers,
+  type RpcStreamOptions,
   T,
   tableTransport,
   utils,
@@ -41,6 +44,7 @@ import {
   from,
   interval,
   map,
+  Observable,
   shareReplay,
   startWith,
   Subject,
@@ -86,7 +90,12 @@ import {
   WebsocketConfig,
 } from './api.types'
 import { ApiService, FileUploadOptions } from './embassy-api.service'
-import { mockPatchData } from './mock-patch'
+import type { StartupApiService } from './startup-api.service'
+import {
+  mockOsUpdateCache,
+  mockPatchData,
+  mockRegistryCache,
+} from './mock-patch'
 
 import markdown from './md-sample.md'
 
@@ -137,8 +146,9 @@ const INIT_PROGRESS: T.FullProgress = {
 }
 
 @Injectable()
-export class MockApiService extends ApiService {
+export class MockApiService extends ApiService implements StartupApiService {
   readonly mockWsSource$ = new Subject<Revision>()
+  private readonly i18n = inject(i18nPipe)
   private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly cache = inject(PATCH_CACHE)
   private readonly gitHash = inject(ConfigService).gitHash
@@ -204,6 +214,30 @@ export class MockApiService extends ApiService {
       this.restoreScheduledBackup(params),
     'package.backup.restore-selection': params =>
       this.restoreBackupSelection(params),
+    'server.set-nut': params => this.setNut(params),
+    'server.nut-status': params => this.getNutStatus(params),
+    'server.nut-list-ups': async () => {
+      await pauseFor(1000)
+      return [{ name: 'ups', description: 'Synology UPS' }]
+    },
+    'server.nut-scan': async () => {
+      await pauseFor(2000)
+      return [
+        {
+          driver: 'usbhid-ups',
+          port: 'auto',
+          vendorId: '051D',
+          productId: '0002',
+          serial: '4B1234P56789',
+          bus: '001',
+          busPort: '002',
+          vendor: 'American Power Conversion',
+          product: 'Back-UPS ES 600M1',
+        },
+      ]
+    },
+    'server.clear-nut': () =>
+      this.setNut({ config: { enabled: false, settings: null } }),
 
     'git-info': async () => this.gitHash,
     state: async () => {
@@ -222,6 +256,15 @@ export class MockApiService extends ApiService {
         mockPatchData.ui = { ...mockPatchData.ui, ...JSON.parse(stored) }
       }
 
+      mockPatchData.registryCache = Object.fromEntries(
+        Object.keys(mockPatchData.serverInfo.registries).map(url => [
+          registryUrl(url),
+          mockRegistryCache(url, this.mockRegistryInfo(url)),
+        ]),
+      )
+      mockPatchData.osUpdateCache = mockOsUpdateCache(
+        mockPatchData.serverInfo.osRegistry,
+      )
       this.protectTrust()
       return {
         dump: { id: this.sequence, value: mockPatchData },
@@ -280,27 +323,12 @@ export class MockApiService extends ApiService {
       await pauseFor(1000)
       return null
     },
-    'diagnostic.update': async () => {
-      await pauseFor(1000)
-      return { target: '0.4.2', progress: 'update-progress-guid' }
-    },
+    'diagnostic.update': () => this.diagnosticUpdate(),
     'diagnostic.logs': async params => {
       return this.handlers['server.logs']!(params)
     },
-    'init.subscribe': async () => {
-      await pauseFor(250)
-      return {
-        progress: PROGRESS,
-        guid: 'init-progress-guid',
-      }
-    },
-    'init.logs.follow': async () => {
-      await pauseFor(2000)
-      return {
-        startCursor: 'start-cursor',
-        guid: 'logs-guid',
-      }
-    },
+    'init.subscribe': () => this.initSubscription(),
+    'init.logs.follow': () => this.logFollow(),
     'server.time': async params => {
       await pauseFor(2000)
       return {
@@ -328,27 +356,9 @@ export class MockApiService extends ApiService {
         endCursor: 'end-cursor',
       }
     },
-    'server.logs.follow': async params => {
-      await pauseFor(2000)
-      return {
-        startCursor: 'start-cursor',
-        guid: 'logs-guid',
-      }
-    },
-    'server.kernel-logs.follow': async params => {
-      await pauseFor(2000)
-      return {
-        startCursor: 'start-cursor',
-        guid: 'logs-guid',
-      }
-    },
-    'server.metrics.follow': async params => {
-      await pauseFor(2000)
-      return {
-        guid: 'metrics-guid',
-        metrics: Mock.getMetrics(),
-      }
-    },
+    'server.logs.follow': () => this.logFollow(),
+    'server.kernel-logs.follow': () => this.logFollow(),
+    'server.metrics.follow': () => this.metricsFollow(),
     'server.device-info': async () => ({
       os: {
         version: mockPatchData.serverInfo.version,
@@ -362,6 +372,10 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
       const normalized = registryUrl(url)
       const info = this.mockRegistryInfo(normalized)
+      mockPatchData.registryCache[normalized] = mockRegistryCache(
+        normalized,
+        info,
+      )
       const { added } = this.importRegistryKeys(normalized, info)
       for (const id of added)
         mockPatchData.serverInfo.trustedKeys[id]!.marketplace = true
@@ -373,6 +387,26 @@ export class MockApiService extends ApiService {
       await this.publishTrust()
       return added
     },
+    'server.registries.refresh': async ({ url }) => {
+      await pauseFor(2000)
+      const normalized = registryUrl(url)
+      if (
+        !Object.keys(mockPatchData.serverInfo.registries).some(saved =>
+          sameUrl(saved, normalized),
+        )
+      )
+        throw new Error(
+          this.i18n.transform('Connect this registry before refreshing it.'),
+        )
+      const info = this.mockRegistryInfo(normalized)
+      mockPatchData.registryCache[normalized] = mockRegistryCache(
+        normalized,
+        info,
+      )
+      this.importRegistryKeys(normalized, info)
+      await this.publishTrust()
+      return null
+    },
     'server.registries.remove': async ({ url }) => {
       await pauseFor(2000)
       if (sameUrl(url, mockPatchData.serverInfo.osRegistry))
@@ -380,6 +414,9 @@ export class MockApiService extends ApiService {
           'This registry provides StartOS updates. Choose another registry for StartOS updates before removing it.',
         )
       const offered = this.offeredKeys(url)
+      for (const saved of Object.keys(mockPatchData.registryCache)) {
+        if (sameUrl(saved, url)) delete mockPatchData.registryCache[saved]
+      }
       for (const saved of Object.keys(mockPatchData.serverInfo.registries)) {
         if (sameUrl(saved, url))
           delete mockPatchData.serverInfo.registries[saved]
@@ -408,6 +445,7 @@ export class MockApiService extends ApiService {
       for (const id of enabled)
         mockPatchData.serverInfo.trustedKeys[id]!.os = true
       mockPatchData.serverInfo.osRegistry = registryUrl(url)
+      mockPatchData.osUpdateCache = mockOsUpdateCache(url)
       await this.publishTrust()
       return enabled
     },
@@ -676,11 +714,7 @@ export class MockApiService extends ApiService {
     },
     'registry.os.version.get': async params => {
       await pauseFor(2000)
-      return (
-        sameUrl(params.registry, defaultRegistries.community)
-          ? {}
-          : Mock.RegistryOSUpdate
-      ) as Result<'registry.os.version.get'>
+      return mockOsUpdateCache(params.registry).versions
     },
     'registry.info': async params => {
       await pauseFor(2000)
@@ -1352,28 +1386,6 @@ export class MockApiService extends ApiService {
               },
             },
           ])
-
-        await this.notify({
-          packageId: null,
-          code: 1,
-          level: Object.values(report.sharedVolumes).some(item => item.error)
-            ? 'warning'
-            : 'success',
-          title: 'Backup complete',
-          message: 'Backup complete',
-          data: report,
-        })
-        if (this.backupTarget(params.targetId)?.legacyBackup) {
-          await this.notify({
-            packageId: null,
-            code: 0,
-            level: 'warning',
-            title: 'Old Backup Still Present',
-            message:
-              'This backup target still contains an old-format (V1) backup that is no longer needed. To free up space on the drive, open this target on the Backups page and delete it.',
-            data: null,
-          })
-        }
       }, 500)
 
       const originalPatch: ReplaceOperation<
@@ -1419,13 +1431,7 @@ export class MockApiService extends ApiService {
         endCursor: 'end-cursor',
       }
     },
-    'package.logs.follow': async params => {
-      await pauseFor(2000)
-      return {
-        startCursor: 'start-cursor',
-        guid: 'logs-guid',
-      }
-    },
+    'package.logs.follow': () => this.logFollow(),
     'package.install': async params => {
       await pauseFor(2000)
 
@@ -2090,6 +2096,75 @@ export class MockApiService extends ApiService {
     'kiosk.disable': () => this.toggleKiosk(false),
   }
   readonly rpc = createRpcClient<ApiClient>(tableTransport<Api>(this.handlers))
+  readonly streams = createRpcStreamClient<
+    ApiService['streams'] & StartupApiService['streams']
+  >({
+    stream: async (method, params, options) => {
+      switch (method) {
+        case 'init.logs.follow':
+        case 'server.logs.follow':
+        case 'server.kernel-logs.follow':
+        case 'package.logs.follow':
+          return this.logFollowStream(options)
+        case 'server.metrics.follow':
+          return this.metricsFollowStream(options)
+        case 'init.subscribe':
+          return this.initSubscriptionStream(options)
+        case 'diagnostic.update':
+          return this.diagnosticUpdateStream(options)
+        default:
+          throw new Error(`No mock stream for ${method}`)
+      }
+    },
+  })
+
+  private async metricsFollow(signal?: AbortSignal) {
+    await pauseFor(2000, signal)
+    return { guid: 'metrics-guid', metrics: Mock.getMetrics() }
+  }
+
+  private async metricsFollowStream(options?: RpcStreamOptions) {
+    const initial = await this.metricsFollow(options?.signal)
+    options?.signal?.throwIfAborted()
+    return {
+      initial: { ...initial, guid: null },
+      items: this.metricsEntries(options?.signal),
+    }
+  }
+
+  private async *metricsEntries(
+    signal?: AbortSignal,
+  ): AsyncGenerator<T.Metrics, null> {
+    while (true) {
+      await pauseFor(1000, signal)
+      yield Mock.getMetrics()
+    }
+  }
+
+  private async logFollow(signal?: AbortSignal) {
+    await pauseFor(2000, signal)
+    return { startCursor: 'start-cursor', guid: 'logs-guid' }
+  }
+
+  private async logFollowStream(options?: RpcStreamOptions) {
+    const initial = await this.logFollow(options?.signal)
+    options?.signal?.throwIfAborted()
+    return {
+      initial: { ...initial, guid: null },
+      items: this.logEntries(options?.signal),
+    }
+  }
+
+  private async *logEntries(
+    signal?: AbortSignal,
+  ): AsyncGenerator<T.LogEntry, null> {
+    for (let index = 0; index <= 100; index++) {
+      await pauseFor(50, signal)
+      if (index === 100) throw new Error('Mock log stream interrupted')
+      yield Mock.ServerLogs[0]!
+    }
+    return null
+  }
 
   async uploadFile(
     guid: string,
@@ -2131,25 +2206,21 @@ export class MockApiService extends ApiService {
     return icons[id] || FALLBACK_ICON
   }
 
-  // websocket
-
   openWebsocket$<T>(
     guid: string,
     config: WebsocketConfig<T> = {},
-  ): WebSocketSubject<T> {
+  ): Observable<T> {
     if (guid === 'db-guid') {
       return this.mockWsSource$.pipe<any>(
         shareReplay({ bufferSize: 1, refCount: true }),
       ) as WebSocketSubject<T>
     } else if (guid === 'logs-guid') {
-      return interval(50).pipe<any>(
-        map((_, index) => {
-          // mock fire open observer
+      return withAbortSignal(signal => this.logEntries(signal)).pipe(
+        map((entry, index) => {
           if (index === 0) config.openObserver?.next(new Event(''))
-          if (index === 100) throw new Error('HAAHHA')
-          return Mock.ServerLogs[0]
+          return entry
         }),
-      ) as WebSocketSubject<T>
+      ) as Observable<T>
     } else if (guid === 'init-progress-guid') {
       return from(this.initProgress()).pipe(
         startWith(PROGRESS),
@@ -2168,9 +2239,9 @@ export class MockApiService extends ApiService {
         ),
       ) as WebSocketSubject<T>
     } else if (guid === 'metrics-guid') {
-      return interval(1000).pipe(
-        map(() => Mock.getMetrics()),
-      ) as WebSocketSubject<T>
+      return withAbortSignal(signal =>
+        this.metricsEntries(signal),
+      ) as Observable<T>
     } else {
       throw new Error('invalid guid type')
     }
@@ -2366,9 +2437,60 @@ export class MockApiService extends ApiService {
       : `/packageData/${pkg}/hosts/${host}`
   }
 
-  private async initProgress(): Promise<T.FullProgress> {
-    // Cast to any: PhaseProgress now allows nested FullProgress, but the mock
-    // PROGRESS fixture only uses leaf shapes — we know it at the call site.
+  private async diagnosticUpdateStream(
+    options?: import('@start9labs/start-core').RpcStreamOptions,
+  ) {
+    options?.signal?.throwIfAborted()
+    const initial = await this.diagnosticUpdate(options?.signal)
+    options?.signal?.throwIfAborted()
+    const progress = () => this.initializationProgress(options?.signal)
+    return {
+      initial: { ...initial, progress: null },
+      items: (async function* () {
+        if (initial.target) {
+          yield* progress()
+        }
+        options?.signal?.throwIfAborted()
+        return null
+      })(),
+    }
+  }
+
+  private async initSubscription(
+    signal?: AbortSignal,
+  ): Promise<Result<'init.subscribe'>> {
+    await pauseFor(250, signal)
+    return { progress: PROGRESS, guid: 'init-progress-guid' }
+  }
+
+  private async initSubscriptionStream(
+    options?: import('@start9labs/start-core').RpcStreamOptions,
+  ) {
+    const initial = await this.initSubscription(options?.signal)
+    options?.signal?.throwIfAborted()
+    return {
+      initial: { ...initial, guid: null },
+      items: this.initializationProgress(options?.signal),
+    }
+  }
+
+  private async *initializationProgress(signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    yield PROGRESS
+    yield await this.initProgress(signal)
+    signal?.throwIfAborted()
+    return null
+  }
+
+  private async diagnosticUpdate(
+    signal?: AbortSignal,
+  ): Promise<Result<'diagnostic.update'>> {
+    await pauseFor(1000, signal)
+    return { target: '0.4.2', progress: 'update-progress-guid' }
+  }
+
+  private async initProgress(signal?: AbortSignal): Promise<T.FullProgress> {
+    // PROGRESS contains leaf phase shapes.
     const progress: any = JSON.parse(JSON.stringify(PROGRESS))
 
     for (let [i, phase] of progress.phases.entries() as [number, any][]) {
@@ -2377,7 +2499,7 @@ export class MockApiService extends ApiService {
         typeof phase.progress !== 'object' ||
         !phase.progress.total
       ) {
-        await pauseFor(2000)
+        await pauseFor(2000, signal)
 
         progress.phases[i]!.progress = true
 
@@ -2393,7 +2515,7 @@ export class MockApiService extends ApiService {
         const step = phase.progress.total / 4
 
         while (phase.progress.done < phase.progress.total) {
-          await pauseFor(200)
+          await pauseFor(200, signal)
 
           phase.progress.done += step
 
@@ -2408,7 +2530,7 @@ export class MockApiService extends ApiService {
           }
 
           if (phase.progress.done === phase.progress.total) {
-            await pauseFor(250)
+            await pauseFor(250, signal)
 
             progress.phases[i]!.progress = true
           }
@@ -2864,24 +2986,6 @@ export class MockApiService extends ApiService {
     }
   }
 
-  private async notify(
-    notification: Omit<T.NotificationWithId, 'id' | 'createdAt' | 'seen'>,
-  ) {
-    Mock.Notifications.unshift({
-      ...notification,
-      id: Math.max(0, ...Mock.Notifications.map(item => item.id)) + 1,
-      createdAt: new Date().toISOString(),
-      seen: false,
-    })
-    await this.mockRevision([
-      {
-        op: PatchOp.REPLACE,
-        path: '/serverInfo/unreadNotificationCount',
-        value: this.mockData('/serverInfo/unreadNotificationCount') + 1,
-      },
-    ])
-  }
-
   private offeredKeys(url: string): string[] {
     return Object.entries(mockPatchData.serverInfo.registryKeys)
       .filter(([saved]) => sameUrl(saved, url))
@@ -2975,6 +3079,16 @@ export class MockApiService extends ApiService {
   private async publishTrust(): Promise<void> {
     this.protectTrust()
     await this.mockRevision<unknown>([
+      {
+        op: PatchOp.REPLACE,
+        path: '/registryCache',
+        value: structuredClone(mockPatchData.registryCache),
+      },
+      {
+        op: PatchOp.REPLACE,
+        path: '/osUpdateCache',
+        value: structuredClone(mockPatchData.osUpdateCache),
+      },
       {
         op: PatchOp.REPLACE,
         path: '/serverInfo/trustedKeys',
@@ -3475,5 +3589,93 @@ export class MockApiService extends ApiService {
       { op: PatchOp.ADD, path: `/scheduledBackups/jobs/${job.id}`, value: job },
     ])
     return structuredClone(job)
+  }
+
+  private async setNut(params: Params<'server.set-nut'>): Promise<null> {
+    await pauseFor(2000)
+    const settings = params.config.settings ?? null
+    const config: T.NutConfig = {
+      enabled: params.config.enabled ?? false,
+      settings: !settings
+        ? null
+        : settings.mode === 'client'
+          ? { ...settings, port: settings.port ?? 3493 }
+          : {
+              ...settings,
+              device: {
+                ...settings.device,
+                vendorId: settings.device.vendorId ?? null,
+                productId: settings.device.productId ?? null,
+                serial: settings.device.serial ?? null,
+                bus: settings.device.bus ?? null,
+                busPort: settings.device.busPort ?? null,
+                vendor: settings.device.vendor ?? null,
+                product: settings.device.product ?? null,
+              },
+              listenAll: settings.listenAll ?? false,
+              remoteUsername: settings.remoteUsername ?? null,
+              remotePassword: settings.remotePassword ?? null,
+            },
+    }
+    mockPatchData.serverInfo.nut = config
+    this.mockRevision([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/nut',
+        value: config,
+      },
+    ])
+    return null
+  }
+
+  private async getNutStatus(params: {}): Promise<T.NutStatus> {
+    await pauseFor(1000)
+    const settings: T.NutSettings | null = this.mockData(
+      '/serverInfo/nut/settings',
+    )
+    const host = settings?.mode === 'client' ? settings.host : 'localhost'
+    const port = settings?.mode === 'client' ? settings.port : 3493
+    return {
+      target: `${settings?.mode === 'client' ? settings.upsName : 'startos'}@${host.includes(':') && !host.startsWith('[') ? `[${host}]` : host}:${port}`,
+      monitoringError: null,
+      variables: {
+        'battery.charge': '96',
+        'battery.charge.low': '10',
+        'battery.charge.warning': '20',
+        'battery.mfr.date': '2023/04/11',
+        'battery.runtime': '4280',
+        'battery.runtime.low': '300',
+        'battery.type': 'PbAc',
+        'battery.voltage': '13.5',
+        'battery.voltage.nominal': '12',
+        'device.mfr': 'Start9 Mock UPS',
+        'device.model': 'NUT Simulator',
+        'device.serial': 'MOCK-UPS-001',
+        'device.type': 'ups',
+        'driver.name': 'usbhid-ups',
+        'driver.parameter.pollinterval': '15',
+        'driver.parameter.port': 'auto',
+        'driver.version': '2.8.1',
+        'driver.version.data': 'CyberPower HID 0.8',
+        'input.transfer.high': '139',
+        'input.transfer.low': '88',
+        'input.voltage': '120.1',
+        'input.voltage.nominal': '120',
+        'output.voltage': '120.0',
+        'ups.beeper.status': 'enabled',
+        'ups.delay.shutdown': '20',
+        'ups.load': '18',
+        'ups.mfr': 'Start9 Mock UPS',
+        'ups.model': 'NUT Simulator',
+        'ups.productid': '0501',
+        'ups.realpower.nominal': '900',
+        'ups.serial': 'MOCK-UPS-001',
+        'ups.status': 'OL CHRG',
+        'ups.test.result': 'No test initiated',
+        'ups.timer.shutdown': '-1',
+        'ups.timer.start': '-1',
+        'ups.vendorid': '0764',
+      },
+    }
   }
 }

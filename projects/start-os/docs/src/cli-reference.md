@@ -292,6 +292,14 @@ List network bindings for the server host.
 
 - `--format` — Output format
 
+### `start-cli server host binding reassign-port <INTERNAL_PORT> <EXTERNAL_PORT>`
+
+Change the server binding's assigned external port, preserving its address enable/disable settings. The chosen port must be available and not reserved for a host daemon. The server UI's SSL port is fixed at 443; `--ssl` accepts 443 to retain or restore that assignment.
+
+- `--ssl` — Change the assigned SSL port instead of the non-SSL port
+
+Preferred ports stay unchanged. TLS domains continue to use the preferred port when a shared TLS listener serves it; otherwise they use the assigned SSL port. Update any router forwarding rules for addresses whose port changes.
+
 ### `start-cli server host binding set-address-enabled <INTERNAL_PORT>`
 
 Enable or disable a specific address binding.
@@ -452,6 +460,14 @@ List network bindings for a service host.
 
 - `--format` — Output format
 
+### `start-cli package host <PACKAGE> binding <HOST> reassign-port <INTERNAL_PORT> <EXTERNAL_PORT>`
+
+Change a service binding's assigned external port, preserving its address enable/disable settings. The chosen port must be available, above 1024, and not reserved for a host daemon. The assignment survives service restarts.
+
+- `--ssl` — Change the assigned SSL port instead of the non-SSL port
+
+Preferred ports stay unchanged, with the same shared-TLS behavior as [server bindings](#start-cli-server-host-binding-reassign-port-internal_port-external_port).
+
 ### `start-cli package host binding set-address-enabled <INTERNAL_PORT>`
 
 Enable or disable a specific address binding for a service.
@@ -467,7 +483,7 @@ Target info/mount and package restore read the backup password from `BACKUP_PASS
 
 ### `start-cli backup create <TARGET_ID> <PASSWORD>`
 
-Create a backup of all or selected packages.
+Create a backup of all or selected packages. The backup continues in the background; `start-cli backup history list` reports its result.
 
 - `--old-password <PASS>` — Previous backup password (for re-encryption)
 - `--package-ids <IDS>` — Limit to specific packages
@@ -638,6 +654,14 @@ package.
   change in between, StartOS asks you to list them again rather than applying a
   partial decision. Omit `--decision` to dismiss a review when no schedules
   currently exist.
+
+### `start-cli backup history list`
+
+List past backups and their reports, newest first.
+
+- `--offset <N>` — Number of most recent backups to skip (default `0`)
+- `--limit <N>` — Maximum number of backups to return (default `10`)
+- `--format` — Output format
 
 ### `start-cli backup target list`
 

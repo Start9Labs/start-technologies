@@ -26,6 +26,23 @@ start-registry info set-trust-signers <SIGNER_ID> [SIGNER_ID...]
 
 Run `start-registry info set-trust-signers` without IDs to clear the selection. Registries start with no proposed signers. `registry.info` exposes the selected signer IDs and their complete signer records as `trustSigners`, including public keys and preserved GPG exports. Connecting a registry in StartOS trusts the offered keys it does not already have for packages. Keys added later are imported untrusted when StartOS next fetches packages or OS updates from the registry, with a notification for each that offers to trust it. Choosing the registry for StartOS updates trusts its offered keys for StartOS updates.
 
+## Private packages
+
+Admins can restrict package metadata and icons to admins, authorized publishers, and selected
+registered signers:
+
+```bash
+start-registry package access set-private <PACKAGE_ID> true
+start-registry package access add-reader <PACKAGE_ID> <SIGNER_ID>
+start-registry package access get <PACKAGE_ID>
+start-registry package access remove-reader <PACKAGE_ID> <SIGNER_ID>
+```
+
+`set-private` creates a package entry when needed, allowing restriction before publication.
+Existing packages default to public. Readers authenticate through encrypted sessions or signed
+requests; revocations update active subscriptions. A subscriber using the public mirror must reconnect after receiving a private
+access grant. Archive URLs remain governed by their download host.
+
 ## Package endorsements
 
 Package add and add-mirror import the hosted archive's embedded signature and a submitted `signatures` map. The CLI reads verified endorsements from its local v2 S9PK and submits that map separately from the authenticated uploader's signature. Promotion forwards the existing indexed map. Every submitted endorsement must verify against the exact indexed Merkle root, signed bound, and `s9pk` context; an invalid entry rejects the request atomically. Hosted URLs can serve the base archive alone. Source URLs and bytes remain unchanged.
@@ -60,29 +77,23 @@ cargo build -p start-registry --bin registrybox
 
 Configuration is read from CLI flags and a config file (`-c <path>`; default search includes the standard StartOS config path). Key flags:
 
-| Flag                       | Purpose                                         |
-| -------------------------- | ----------------------------------------------- |
-| `-l, --listen <addr>`      | listen address (default `127.0.0.1:5959`)       |
-| `-H, --hostname <host>`    | public hostname(s) used in generated asset URLs |
-| `-p, --tor-proxy <url>`    | SOCKS proxy for outbound (e.g. Tor) requests    |
-| `-d, --datadir <path>`     | data directory (default `/var/lib/startos`)     |
-| `-c, --config <path>`      | config file                                     |
-| `--security-notifications` | enable the OS security feed (default: false)    |
+| Flag                    | Purpose                                                 |
+| ----------------------- | ------------------------------------------------------- |
+| `-l, --listen <addr>`   | listen address (default `127.0.0.1:5959`)               |
+| `-H, --hostname <host>` | public hostname(s) for asset URLs and authenticated RPC |
+| `-p, --tor-proxy <url>` | SOCKS proxy for outbound (e.g. Tor) requests            |
+| `-d, --datadir <path>`  | data directory (default `/var/lib/startos`)             |
+| `-c, --config <path>`   | config file                                             |
 
-Security notifications are disabled by default. To opt in, set this in that registry's config file and restart the daemon:
+Clients synchronize registry metadata through `db.subscribe`: `rpcstream` opt-in uses the shared `/rpc/v2` socket, while ordinary requests retain the GUID WebSocket continuation. StartOS authenticates and encrypts this shared connection through signed ephemeral DH. Streaming requires encrypted admission and `rpcstream`, with the client's selected URL host configured on the registry. A legacy HTTP 200 response without upgrading, or HTTP 404/405/501, selects signed HTTP polling every 15 minutes; each cycle retries upgrade support. Polls retrieve full package versions/revisions, registry info and the selected OS index through the same cache/trust owners. Authorization, transport and failed encrypted admission errors never downgrade. A subscription's optional `osVersion` selects a lazily shared backward-compatible index view; omitted versions retain the canonical format. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
 
-```yaml
-registry-hostname: [registry.example.com]
-security-notifications: true
-```
-
-Disabled registries refuse `/os/security` upgrades with HTTP 403 and create no security mirror or subscription task. Clients retry with backoff. Leave alpha at the default to suppress its announcements. Release metadata and promotion retain the security flag; previously issued OS notifications are not deleted.
+Ordinary RPC requests have a 1 MiB encoded-body limit, including JSON and base64 overhead. This also bounds inline registry icons sent by `registry info set-icon`; use a smaller image when its encoded request exceeds that budget. Large index responses and asset downloads retain their separate limits.
 
 Server state lives in `<datadir>/registry.db` (PatchDB) plus a SQLite metrics database and hosted asset files.
 
 > [!NOTE]
 > **Non-StartOS deployments only:** A separately managed reverse proxy must forward `/`, `/rpc/`,
-> `/ws/rpc/`, `/rest/rpc/`, `/icons/`, and `/os/security`. Preserve the public `Host` header and set
+> `/rpc/v2`, `/rpc/v2/`, `/ws/rpc/` (legacy continuations), `/rest/rpc/`, and `/icons/`. Preserve the public `Host` header and set
 > `X-Forwarded-Proto` to the public scheme (`http` or `https`) for the root redirect. The WebSocket routes also need HTTP/1.1 upgrade forwarding and a
 > long-lived idle timeout. StartOS-hosted registries expose these routes through their exported
 > `protocol: 'http'` interface automatically.

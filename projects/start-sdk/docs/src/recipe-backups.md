@@ -4,7 +4,7 @@ Every StartOS package must define a backup strategy. The SDK provides builders f
 
 ## Solution
 
-Use `sdk.setupBackups()` with the appropriate builder. `sdk.Backups.ofVolumes('main')` for simple volume snapshots. `sdk.Backups.withPgDump()` for PostgreSQL (handles dump and restore). `sdk.Backups.withMysqlDump()` for MySQL and `sdk.Backups.withMariadbDump()` for MariaDB. Chain `.addVolume('name')` for additional volumes. Use `.addSync({ dataPath, backupPath })` instead of `.addVolume()` for large, mostly-unchanged datasets (user uploads, media) — rsync is incremental and much faster than full volume copies.
+Use `sdk.setupBackups()` with the appropriate builder. `sdk.Backups.ofVolumes('main')` for simple volume snapshots. `sdk.Backups.withPgDump()` for PostgreSQL (handles dump and restore). `sdk.Backups.withMysqlDump()` and `sdk.Backups.withMariadbDump()` dump MySQL and MariaDB, though a copied volume is usually the better choice for those (see [Databases](#databases-copy-the-volume-or-dump-it)). Chain `.addVolume('name')` for additional volumes. Use `.addSync({ dataPath, backupPath })` to select paths within a volume rather than copying the whole volume. Both forms use incremental rsync and skip unchanged files.
 
 A restore installs the s9pk stored in the backup, so it runs that version's own backup and restore code; the current version's migrations run on the update after it. Changing the backup set never affects backups taken before the change.
 
@@ -15,6 +15,15 @@ A restore installs the s9pk stored in the backup, so it runs that version's own 
 > Progress is reported per phase, weighted so the rsync copy — the slow part — dominates the bar (`DEFAULT_SYNC_WEIGHT` = 80 per sync, `DEFAULT_HOOK_WEIGHT` = 10 per pre/post hook). A pre/post phase appears only when you set that hook. Override any phase's weight with the optional `weight` argument to `setPreBackup` / `setPostBackup` / `setPreRestore` / `setPostRestore`, or the `weight` field on a sync (`addSync` / `addVolume`).
 >
 > Custom backup functions may return no result. Standard volume and sync backups report the bytes transferred to StartOS as recent transfer metadata. Automatic-backup capacity remains based on full checkpoint size because each retained checkpoint is a full copy. Adding custom pre- or post-backup behavior makes the transfer measurement unknown because the SDK cannot measure storage written by custom code.
+
+## Databases: copy the volume or dump it
+
+Copy a database's volume with `ofVolumes`, unless one of the cases below applies or the engine cannot recover its data files after an abrupt shutdown (MyISAM tables, for example). The backup runs on a stopped service, so nothing writes to the volume during the copy, but the shutdown may not have been clean: stopping escalates to `SIGKILL` after the daemon's timeout, and a crashed service is already stopped. An engine with crash recovery (InnoDB, PostgreSQL) starts from such a copy as it would after a power loss. The restore reinstalls the s9pk that made the backup, so the same engine version reads the files back. A copied volume restores everything the engine keeps there: every database, its accounts and grants, roles, extensions, settings. The restore copies files rather than replaying SQL, though its time still grows with the data size.
+
+A dump captures one database's contents, and the restore rebuilds the engine around it. Whatever lives outside that database, accounts included, comes from the restore code rather than from the backup. Use one when:
+
+- **The data files are tied to the CPU architecture.** A backup can be restored onto a server of another architecture. PostgreSQL does not guarantee that its data files are portable across architectures, so keep `withPgDump` for PostgreSQL. InnoDB data files are documented as cross-platform, so MySQL and MariaDB volumes can be copied.
+- **The data directory is much larger than the data in it** (bloat, large indexes) and backup size matters more than restore time.
 
 **Reference:** [Main](main.md) · [File Models](file-models.md)
 

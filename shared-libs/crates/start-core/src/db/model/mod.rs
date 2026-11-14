@@ -46,6 +46,7 @@ impl Database {
                 available_ports: AvailablePorts::new(),
                 notifications: Notifications::new(),
                 os_security_notifications: BTreeMap::new(),
+                registry_indexes: BTreeMap::new(),
                 push: Default::default(),
                 cifs: CifsTargets::new(),
                 backup_history: BTreeMap::new(),
@@ -54,7 +55,7 @@ impl Database {
                 package_stores: BTreeMap::new(),
                 scheduled_backup_credentials: BTreeMap::new(),
                 scheduled_backup_device_key: generate_scheduled_backup_device_key(),
-                developer_key: Der64(account.developer_key.clone()),
+                server_identity_key: Der64(account.server_identity_key.clone()),
             },
         })
     }

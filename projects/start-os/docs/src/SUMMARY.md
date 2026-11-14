@@ -74,6 +74,7 @@
 - [Backups](backups.md)
 - [Automatic Backups](backup-automatic.md)
 - [WiFi](wifi.md)
+- [UPS Monitor](ups-monitor.md)
 - [Internationalization](internationalization.md)
 - [Kiosk Mode](kiosk-mode.md)
 - [Updating StartOS](updating-startos.md)
