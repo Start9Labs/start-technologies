@@ -1,0 +1,7 @@
+_version: 2
+fde.boot.invalid-descriptor:
+  en_US: 'Invalid authenticated boot descriptor or filesystem policy'
+  de_DE: 'Ungültiger authentifizierter Startdeskriptor oder ungültige Dateisystemrichtlinie'
+  es_ES: 'Descriptor de arranque autenticado o política de sistema de archivos no válidos'
+  fr_FR: 'Descripteur de démarrage authentifié ou politique de système de fichiers non valide'
+  pl_PL: 'Nieprawidłowy uwierzytelniony deskryptor rozruchu lub zasady systemu plików'

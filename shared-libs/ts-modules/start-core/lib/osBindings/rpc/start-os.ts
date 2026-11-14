@@ -139,6 +139,7 @@ export type Blake3Commitment = z.output<typeof schemas.Blake3Commitment>
 export type Blake3CommitmentInput = z.input<typeof schemas.Blake3Commitment>
 export type CapabilityVerdict = z.output<typeof schemas.CapabilityVerdict>
 export type Celsius = z.output<typeof schemas.Celsius>
+export type CertificatePurpose = z.output<typeof schemas.CertificatePurpose>
 export type CheckPortRes = z.output<typeof schemas.CheckPortRes>
 
 /**
@@ -170,6 +171,7 @@ export type DnsSource = z.output<typeof schemas.DnsSource>
 export type Dump = z.output<typeof schemas.Dump>
 export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type EchoParamsInput = z.input<typeof schemas.EchoParams>
+export type EnableStatus = z.output<typeof schemas.EnableStatus>
 export type EncryptedWireInput = z.input<typeof schemas.EncryptedWire>
 export type EndpointParamsInput = z.input<typeof schemas.EndpointParams>
 
@@ -277,6 +279,7 @@ export type ModifyNotificationBeforeParamsInput = z.input<
 export type ModifyNotificationParamsInput = z.input<
   typeof schemas.ModifyNotificationParams
 >
+export type MokEnrollment = z.output<typeof schemas.MokEnrollment>
 
 /**
  * JSON Patch 'move' operation representation
@@ -508,6 +511,7 @@ export type CancelInstallParamsInput = z.input<
   typeof schemas.CancelInstallParams
 >
 export type Category = z.output<typeof schemas.Category>
+export type CertificateProgress = z.output<typeof schemas.CertificateProgress>
 export type CheckChallengeParamsInput = z.input<
   typeof schemas.CheckChallengeParams
 >
@@ -761,6 +765,7 @@ export type BackupReport = z.output<typeof schemas.BackupReport>
  * A registered backup destination and its last source observation.
  */
 export type BackupTarget = z.output<typeof schemas.BackupTarget>
+export type BeginEnableParamsInput = z.input<typeof schemas.BeginEnableParams>
 export type CompatibleAlpnInfo = z.output<typeof schemas.CompatibleAlpnInfo>
 
 /**
@@ -771,6 +776,13 @@ export type CreateSharedVolumeParamsInput = z.input<
   typeof schemas.CreateSharedVolumeParams
 >
 export type DependencyMetadata = z.output<typeof schemas.DependencyMetadata>
+
+/**
+ * Firmware enrollment observation, not proof of active disk protection.
+ */
+export type FdeEnrollmentProgress = z.output<
+  typeof schemas.FdeEnrollmentProgress
+>
 export type HardwareInfo = z.output<typeof schemas.HardwareInfo>
 export type HostAddress = z.output<typeof schemas.HostAddress>
 export type HostnameInfo = z.output<typeof schemas.HostnameInfo>

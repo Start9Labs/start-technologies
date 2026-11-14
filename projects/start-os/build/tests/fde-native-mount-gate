@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+if [ -z "${FDE_SOURCE_MOUNT_GATE:-}" ]; then
+    exec /usr/bin/mount "$@"
+fi
+
+/usr/bin/mount "$@"
+for target do :; done
+if [ -f "$FDE_SOURCE_MOUNT_GATE/target" ]; then
+    IFS= read -r wanted < "$FDE_SOURCE_MOUNT_GATE/target" || [ -n "$wanted" ]
+    if [ "$target" = "$wanted" ]; then
+        : > "$FDE_SOURCE_MOUNT_GATE/entered"
+        IFS= read -r released < "$FDE_SOURCE_MOUNT_GATE/release"
+    fi
+fi

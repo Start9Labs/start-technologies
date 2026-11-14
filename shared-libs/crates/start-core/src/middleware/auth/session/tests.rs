@@ -26,6 +26,7 @@ async fn scope() -> (SecureSession, Signer, ScopeOwner) {
         address: "localhost".into(),
         server_identity: context.server_identity().unwrap(),
         replay_check: context.replay_check(),
+        origin: crate::net::request_origin::RequestOrigin::from_extensions(&http::Extensions::new()),
     };
     (
         scope,

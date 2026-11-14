@@ -2276,7 +2276,11 @@ test('Brochure reports malformed registry URLs and can load the next selection',
       .ApiService,
     api,
   )
-  dependencies.set(storage, { getItem: () => null })
+  const stored = new Map()
+  dependencies.set(storage, {
+    getItem: key => stored.get(key) ?? null,
+    setItem: (key, value) => stored.set(key, value),
+  })
   dependencies.set(shared.Exver, {})
   dependencies.set(shared.i18nPipe, { transform: value => value })
   dependencies.set(shared.i18nService, { localize: value => value })
@@ -2305,6 +2309,10 @@ test('Brochure reports malformed registry URLs and can load the next selection',
     assert.equal(registries[0].url, 'https://registry.test/')
     assert.equal(registries[0].info.name, info.name)
     assert.equal(registries[0].packages.length, 0)
+    assert.deepEqual(JSON.parse(stored.get('_startos/customRegistry')), {
+      url: 'https://registry.test/',
+      name: info.name,
+    })
   } finally {
     subscription.unsubscribe()
     errorSubscription.unsubscribe()
@@ -3436,6 +3444,43 @@ function startupStateHarness() {
     },
   }
 }
+
+test('locked StartOS uses its restricted surface and routes through unlock before normal startup', async () => {
+  const { ticks, routes, create } = startupStateHarness()
+  let state = 'locked'
+  let dnsCalls = 0
+  const service = create({
+    state: async () => state,
+    net: {
+      dns: {
+        status: async () => {
+          dnsCalls++
+          return { bootstrap: true, gateway: null }
+        },
+      },
+    },
+  })
+  const subscription = service.subscribe()
+  try {
+    ticks.next()
+    await new Promise(setImmediate)
+    assert.deepEqual(routes, ['unlock'])
+    assert.equal(dnsCalls, 0)
+    assert.equal(service.dnsStatus(), null)
+    state = 'initializing'
+    ticks.next()
+    await new Promise(setImmediate)
+    assert.deepEqual(routes, ['unlock', 'initializing'])
+    assert.equal(dnsCalls, 1)
+    state = 'running'
+    ticks.next()
+    await new Promise(setImmediate)
+    assert.deepEqual(routes, ['unlock', 'initializing', ''])
+    assert.equal(service.dnsStatus(), null)
+  } finally {
+    subscription.unsubscribe()
+  }
+})
 
 test('StartOS refreshes startup DNS without rerouting and stops polling at runtime', async () => {
   const { ticks, routes, create } = startupStateHarness()

@@ -49,48 +49,44 @@ async fn canonical(path: &Path) -> PathBuf {
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Direct holders of `dev` (`/sys/class/block/<dev>/holders/*`) as `/dev/<name>`.
-async fn holders_of(dev: &Path) -> Vec<PathBuf> {
-    let dev = canonical(dev).await;
-    let Some(name) = dev.file_name() else {
-        return Vec::new();
-    };
+async fn holders_of(dev: &Path) -> Result<Vec<PathBuf>, Error> {
+    let dev = tokio::fs::canonicalize(dev).await?;
+    let name = dev
+        .file_name()
+        .ok_or_else(|| Error::new(eyre!(t!("error.invalid-request")), ErrorKind::BlockDevice))?;
     let dir = Path::new("/sys/class/block").join(name).join("holders");
     let mut out = Vec::new();
-    let Ok(mut entries) = tokio::fs::read_dir(&dir).await else {
-        return out;
-    };
-    while let Ok(Some(entry)) = entries.next_entry().await {
+    let mut entries = tokio::fs::read_dir(&dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
         out.push(Path::new("/dev").join(entry.file_name()));
     }
-    out
+    Ok(out)
 }
 
-/// device-mapper name (`/sys/class/block/dm-N/dm/name`) for `dev`, or `None`
-/// when `dev` isn't a device-mapper device.
-async fn dm_name(dev: &Path) -> Option<String> {
-    let name = dev.file_name()?;
-    let s = tokio::fs::read_to_string(Path::new("/sys/class/block").join(name).join("dm/name"))
-        .await
-        .ok()?;
-    let s = s.trim().to_owned();
-    (!s.is_empty()).then_some(s)
+/// None after removal or for a non-device-mapper block device.
+async fn dm_name(dev: &Path) -> Result<Option<String>, Error> {
+    let Some(name) = dev.file_name() else {
+        return Ok(None);
+    };
+    let value = crate::util::io::maybe_read_file_to_string(
+        Path::new("/sys/class/block").join(name).join("dm/name"),
+    )
+    .await?;
+    Ok(value
+        .map(|value| value.trim().to_owned())
+        .filter(|name| !name.is_empty()))
 }
 
-/// Every device-mapper device stacked on `partitions`, ordered top-of-stack
-/// first (deepest holder first) so `dmsetup remove` never hits a still-held
-/// parent. Walks the holder graph in sysfs, so it only ever returns devices
-/// that actually build on the target disk — a live boot medium on another disk
-/// (e.g. a Ventoy `/dev/mapper` device) is never reached, and so never removed.
-async fn stacked_dm_devices(partitions: &[PathBuf]) -> Vec<PathBuf> {
+/// Target-backed holders, deepest first; unrelated block devices are excluded.
+async fn stacked_holders(partitions: &[PathBuf]) -> Result<Vec<PathBuf>, Error> {
     let mut depth: BTreeMap<PathBuf, usize> = BTreeMap::new();
     let mut frontier: Vec<PathBuf> = partitions.to_vec();
     let mut d = 0usize;
     while !frontier.is_empty() && d < 64 {
         let mut next = Vec::new();
         for dev in &frontier {
-            for holder in holders_of(dev).await {
-                let ch = canonical(&holder).await;
+            for holder in holders_of(dev).await? {
+                let ch = tokio::fs::canonicalize(&holder).await?;
                 let slot = depth.entry(ch.clone()).or_insert(0);
                 *slot = (*slot).max(d + 1);
                 next.push(ch);
@@ -101,7 +97,21 @@ async fn stacked_dm_devices(partitions: &[PathBuf]) -> Vec<PathBuf> {
     }
     let mut devs: Vec<(PathBuf, usize)> = depth.into_iter().collect();
     devs.sort_by(|a, b| b.1.cmp(&a.1));
-    devs.into_iter().map(|(dev, _)| dev).collect()
+    Ok(devs.into_iter().map(|(dev, _)| dev).collect())
+}
+
+/// Rejects busy device-mapper holders; leaves unrelated targets untouched.
+pub(crate) async fn release_block_holders(devices: &[PathBuf]) -> Result<(), Error> {
+    for device in stacked_holders(devices).await? {
+        if let Some(name) = dm_name(&device).await? {
+            Command::new("dmsetup")
+                .arg("remove")
+                .arg(name)
+                .invoke(ErrorKind::DiskManagement)
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 /// VG names whose PVs sit on one of `target_devs`.
@@ -135,7 +145,10 @@ async fn target_vgs(target_devs: &BTreeSet<PathBuf>) -> Vec<String> {
 pub async fn quiesce_disk(disk_path: &Path) -> Result<(), Error> {
     let partitions = list_partitions(disk_path).await?;
 
-    let dm_devices = stacked_dm_devices(&partitions).await;
+    let dm_devices = stacked_holders(&partitions).await.unwrap_or_else(|error| {
+        tracing::warn!(?error, "could not inspect target block holders");
+        Vec::new()
+    });
 
     // Canonical set of every block device that belongs to the target disk.
     let mut target_devs: BTreeSet<PathBuf> = BTreeSet::new();
@@ -190,8 +203,8 @@ pub async fn quiesce_disk(disk_path: &Path) -> Result<(), Error> {
 
     // Remove only the dm devices stacked on the target, top-of-stack first.
     for dev in &dm_devices {
-        let Some(name) = dm_name(dev).await else {
-            continue; // already gone (e.g. cleared by vgchange) or not a dm device
+        let Some(name) = dm_name(dev).await.log_err().flatten() else {
+            continue;
         };
         if let Err(e) = Command::new("dmsetup")
             .arg("remove")
@@ -230,10 +243,7 @@ pub async fn update_partition_table(disk_path: &Path) -> Result<(), Error> {
         .arg(disk_path)
         .invoke(ErrorKind::DiskManagement)
         .await?;
-    Command::new("udevadm")
-        .arg("settle")
-        .invoke(ErrorKind::DiskManagement)
-        .await?;
+    crate::disk::util::settle_udev().await?;
     // Forget any btrfs scan refs udev just re-installed for the target's
     // partitions only, for the same reason as in quiesce_disk.
     for part in list_partitions(disk_path).await.unwrap_or_default() {

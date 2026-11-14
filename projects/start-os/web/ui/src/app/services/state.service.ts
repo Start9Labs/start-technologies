@@ -132,7 +132,7 @@ export class StateService extends Observable<ServerState | null> {
   private async getState() {
     const state = await this.api.rpc.state({}, { timeout: 10000 })
     const dnsStatus =
-      state === 'running'
+      state === 'running' || state === 'locked'
         ? null
         : await this.api.rpc.net.dns
             .status({}, { timeout: 2000 })
@@ -142,6 +142,9 @@ export class StateService extends Observable<ServerState | null> {
 
   private handleState(state: ServerState): void {
     switch (state) {
+      case 'locked':
+        this.router.navigate(['unlock'], { replaceUrl: true })
+        break
       case 'initializing':
         this.router.navigate(['initializing'], { replaceUrl: true })
         break
@@ -151,7 +154,8 @@ export class StateService extends Observable<ServerState | null> {
       case 'running':
         if (
           this.router.isActive('initializing', OPTIONS) ||
-          this.router.isActive('diagnostic', OPTIONS)
+          this.router.isActive('diagnostic', OPTIONS) ||
+          this.router.isActive('unlock', OPTIONS)
         ) {
           this.router.navigate([''], { replaceUrl: true })
         }

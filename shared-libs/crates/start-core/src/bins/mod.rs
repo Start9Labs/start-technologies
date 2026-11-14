@@ -8,6 +8,7 @@ use rust_i18n::t;
 pub mod completions;
 pub mod container_cli;
 pub mod deprecated;
+pub mod fde_prepare;
 pub mod registry;
 pub mod start_cli;
 pub mod start_init;
@@ -173,6 +174,10 @@ impl MultiExecutable {
     }
     pub fn enable_start_tunnel(&mut self) -> &mut Self {
         self.bins.insert("start-tunnel", tunnel::cli);
+        self
+    }
+    pub fn enable_fde_prepare(&mut self) -> &mut Self {
+        self.bins.insert("start-fde-prepare", fde_prepare::main);
         self
     }
     pub fn enable_unshare_userns(&mut self) -> &mut Self {

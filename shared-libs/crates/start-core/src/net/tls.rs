@@ -15,7 +15,7 @@ use tokio_rustls::rustls::client::danger::{
 use tokio_rustls::rustls::crypto::{
     CryptoProvider, verify_tls12_signature, verify_tls13_signature,
 };
-use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use tokio_rustls::rustls::server::{Acceptor, ClientHello, ResolvesServerCert};
 use tokio_rustls::rustls::sign::CertifiedKey;
 use tokio_rustls::rustls::{
@@ -58,6 +58,20 @@ impl<V: MetadataVisitor> Visit<V> for TlsHandshakeInfo {
     fn visit(&self, visitor: &mut V) -> <V as visit_rs::Visitor>::Result {
         visitor.visit(self)
     }
+}
+
+/// Serves the supplied chain without requesting client certificates.
+pub fn server_config(
+    crypto_provider: Arc<CryptoProvider>,
+    chain: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
+) -> Result<ServerConfig, Error> {
+    ServerConfig::builder_with_provider(crypto_provider)
+        .with_safe_default_protocol_versions()
+        .with_kind(ErrorKind::OpenSsl)?
+        .with_no_client_auth()
+        .with_single_cert(chain, key)
+        .with_kind(ErrorKind::OpenSsl)
 }
 
 pub trait TlsHandler<'a, A: Accept> {

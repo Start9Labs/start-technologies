@@ -7,11 +7,14 @@ const empty: z.ZodType<{}, {}> = /* @__PURE__ */ object({})
 const literal_0 = /* @__PURE__ */ z.string()
 export const ApiState: z.ZodEnum<{
   error: 'error'
+  locked: 'locked'
   initializing: 'initializing'
   running: 'running'
-}> = /* @__PURE__ */ z.enum(['error', 'initializing', 'running']).meta({
-  id: 'ApiState',
-})
+}> = /* @__PURE__ */ z
+  .enum(['error', 'locked', 'initializing', 'running'])
+  .meta({
+    id: 'ApiState',
+  })
 export const CapabilityVerdict: z.ZodObject<{
   /**
    * `None` = never probed.
@@ -828,6 +831,7 @@ export const Api = {
           _CHILDREN: {},
         },
         experimental: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        fde: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         host: {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {

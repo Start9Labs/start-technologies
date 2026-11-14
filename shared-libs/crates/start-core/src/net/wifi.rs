@@ -1071,16 +1071,16 @@ impl TypedValueParser for CountryCodeParser {
 
 #[instrument(skip_all)]
 pub async fn synchronize_network_manager<P: AsRef<Path>>(
-    main_datadir: P,
+    profiles: P,
     wifi: &WifiInfo,
     system_product_name: Option<&str>,
 ) -> Result<(), Error> {
-    let persistent = main_datadir.as_ref().join("system-connections");
+    let persistent = profiles.as_ref();
 
     if tokio::fs::metadata(&persistent).await.is_err() {
-        tokio::fs::create_dir_all(&persistent).await?;
+        tokio::fs::create_dir_all(persistent).await?;
     }
-    crate::disk::mount::util::bind(&persistent, SAVED_PROFILE_DIRECTORY, false).await?;
+    crate::disk::mount::util::bind(persistent, SAVED_PROFILE_DIRECTORY, false).await?;
 
     if !wifi.enabled {
         Command::new("rfkill")
@@ -1196,7 +1196,7 @@ fn parse_wired_profile(contents: &str) -> Option<WiredProfile> {
     })
 }
 
-async fn read_wired_profile(entry: &tokio::fs::DirEntry) -> Result<Option<WiredProfile>, Error> {
+async fn read_network_profile(entry: &tokio::fs::DirEntry) -> Result<Option<String>, Error> {
     if entry
         .path()
         .extension()
@@ -1205,8 +1205,38 @@ async fn read_wired_profile(entry: &tokio::fs::DirEntry) -> Result<Option<WiredP
     {
         return Ok(None);
     }
-    let contents = crate::util::io::read_file_to_string(entry.path()).await?;
-    Ok(parse_wired_profile(&contents))
+    Ok(Some(
+        crate::util::io::read_file_to_string(entry.path()).await?,
+    ))
+}
+
+async fn read_wired_profile(entry: &tokio::fs::DirEntry) -> Result<Option<WiredProfile>, Error> {
+    Ok(read_network_profile(entry)
+        .await?
+        .and_then(|contents| parse_wired_profile(&contents)))
+}
+
+pub(crate) async fn capture_network_profiles() -> Result<BTreeMap<String, String>, Error> {
+    read_network_profiles(Path::new(SAVED_PROFILE_DIRECTORY)).await
+}
+
+pub(crate) async fn read_network_profiles(
+    directory: &Path,
+) -> Result<BTreeMap<String, String>, Error> {
+    let mut entries = tokio::fs::read_dir(directory).await?;
+    let mut profiles = BTreeMap::new();
+    while let Some(entry) = entries.next_entry().await? {
+        if let Some(contents) = read_network_profile(&entry).await? {
+            let name = entry.file_name().into_string().map_err(|_| {
+                Error::new(
+                    eyre!("{}", t!("fde.bootstrap.invalid-profile-name")),
+                    ErrorKind::Filesystem,
+                )
+            })?;
+            profiles.insert(name, contents);
+        }
+    }
+    Ok(profiles)
 }
 
 async fn remove_shadowing_wired_profiles(runtime: &Path, saved: &Path) -> Result<(), Error> {

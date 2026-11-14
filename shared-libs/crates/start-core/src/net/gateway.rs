@@ -2942,6 +2942,13 @@ async fn watch_activated(
     }
 }
 
+fn reset_gateway_observations(info: &mut OrdMap<GatewayId, NetworkInterfaceInfo>) {
+    for (_, info) in OrdMapIterMut::from(info) {
+        info.ip_info = None;
+        info.dns.refresh(None);
+    }
+}
+
 pub struct NetworkInterfaceWatcher {
     activated: Watch<BTreeMap<GatewayId, bool>>,
     ip_info: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
@@ -2953,6 +2960,30 @@ impl NetworkInterfaceWatcher {
         watch_activated: impl IntoIterator<Item = GatewayId>,
         db: TypedPatchDb<Database>,
     ) -> Self {
+        Self::spawn(seed, watch_activated, Some(db))
+    }
+
+    /// Immediately retains configured gateway intent; rediscovers live observations.
+    /// Starts NetworkManager and the existing policy-routing watcher; retain until handoff.
+    pub fn from_seed(
+        mut seed: OrdMap<GatewayId, NetworkInterfaceInfo>,
+        watch_activated: impl IntoIterator<Item = GatewayId>,
+    ) -> Self {
+        reset_gateway_observations(&mut seed);
+        let ip_info = Watch::new(seed);
+        let activated = Watch::new(watch_activated.into_iter().map(|id| (id, false)).collect());
+        Self {
+            ip_info: ip_info.clone(),
+            activated: activated.clone(),
+            _watcher: tokio::spawn(watcher(ip_info, activated, None)).into(),
+        }
+    }
+
+    fn spawn(
+        seed: impl Future<Output = OrdMap<GatewayId, NetworkInterfaceInfo>> + Send + Sync + 'static,
+        watch_activated: impl IntoIterator<Item = GatewayId>,
+        db: Option<TypedPatchDb<Database>>,
+    ) -> Self {
         let ip_info = Watch::new(OrdMap::new());
         let activated = Watch::new(watch_activated.into_iter().map(|k| (k, false)).collect());
         Self {
@@ -2963,7 +2994,7 @@ impl NetworkInterfaceWatcher {
                 if !seed.is_empty() {
                     ip_info.send_replace(seed);
                 }
-                watcher(ip_info, activated, Some(db)).await
+                watcher(ip_info, activated, db).await
             })
             .into(),
         }
@@ -3233,10 +3264,7 @@ impl NetworkInterfaceController {
                         .de()
                     {
                         Ok(mut info) => {
-                            for (_, info) in OrdMapIterMut::from(&mut info) {
-                                info.ip_info = None;
-                                info.dns.refresh(None);
-                            }
+                            reset_gateway_observations(&mut info);
                             info
                         }
                         Err(e) => {
@@ -3645,6 +3673,88 @@ impl Accept for WildcardListener {
             )));
         }
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod seed_tests {
+    use super::*;
+    use crate::db::model::public::{DnsSettings, DnsSource, GatewayType, IpInfo};
+
+    #[tokio::test]
+    async fn seeded_gateway_intent_is_available_before_the_watcher_runs() {
+        let gateway: GatewayId = "wg0".parse().unwrap();
+        let watcher = NetworkInterfaceWatcher::from_seed(
+            OrdMap::from(vec![(
+                gateway.clone(),
+                NetworkInterfaceInfo {
+                    name: Some("Private tunnel".into()),
+                    secure: Some(true),
+                    ip_info: Some(Arc::new(crate::db::model::public::IpInfo::default())),
+                    ..NetworkInterfaceInfo::default()
+                },
+            )]),
+            [],
+        );
+        let interfaces = watcher.ip_info();
+        let interface = interfaces.get(&gateway).unwrap();
+        assert_eq!(interface.name.as_deref(), Some("Private tunnel"));
+        assert_eq!(interface.secure, Some(true));
+        assert!(interface.ip_info.is_none());
+    }
+
+    #[test]
+    fn resetting_observations_keeps_gateway_and_static_dns_intent() {
+        let gateway: GatewayId = "wg0".parse().unwrap();
+        let configured = ["192.0.2.53:5353".parse().unwrap()].into();
+        let mut interfaces = OrdMap::from(vec![(
+            gateway.clone(),
+            NetworkInterfaceInfo {
+                name: Some("Private tunnel".into()),
+                secure: Some(true),
+                gateway_type: GatewayType::OutboundOnly,
+                wireguard_endpoint_domains: [InternedString::intern("tunnel.example")]
+                    .into_iter()
+                    .collect(),
+                ip_info: Some(Arc::new(IpInfo::default())),
+                dns: DnsSettings {
+                    static_servers: Some(configured),
+                    servers: ["198.51.100.53:53".parse().unwrap()].into(),
+                    source: DnsSource::Gateway,
+                },
+                ..Default::default()
+            },
+        )]);
+        reset_gateway_observations(&mut interfaces);
+        let info = &interfaces[&gateway];
+        assert!(info.ip_info.is_none());
+        assert_eq!(info.name.as_deref(), Some("Private tunnel"));
+        assert_eq!(info.secure, Some(true));
+        assert_eq!(info.gateway_type, GatewayType::OutboundOnly);
+        assert!(info.wireguard_endpoint_domains.contains("tunnel.example"));
+        assert_eq!(info.dns.source, DnsSource::Static);
+        assert_eq!(info.dns.servers, ["192.0.2.53:5353".parse().unwrap()]);
+        assert_eq!(info.dns.static_servers.as_ref(), Some(&info.dns.servers));
+    }
+
+    #[test]
+    fn resetting_observations_withdraws_discovered_resolvers() {
+        let gateway: GatewayId = "eth0".parse().unwrap();
+        let mut interfaces = OrdMap::from(vec![(
+            gateway.clone(),
+            NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(IpInfo::default())),
+                dns: DnsSettings {
+                    static_servers: None,
+                    servers: ["192.0.2.53:53".parse().unwrap()].into(),
+                    source: DnsSource::Gateway,
+                },
+                ..Default::default()
+            },
+        )]);
+        reset_gateway_observations(&mut interfaces);
+        assert!(interfaces[&gateway].ip_info.is_none());
+        assert_eq!(interfaces[&gateway].dns, DnsSettings::default());
     }
 }
 

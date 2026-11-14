@@ -871,12 +871,16 @@ fn dir_copy_inner<'a>(
     .boxed()
 }
 
+/// Leaves aliases untouched; callers retain both path identities during copying.
 pub async fn copy_file(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<(), Error> {
     let src = src.as_ref();
     tokio::fs::metadata(src)
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, src.display()))?;
     let dst = dst.as_ref();
+    if same_file(src, dst).await? {
+        return Ok(());
+    }
     if let Some(parent) = dst.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -985,8 +989,10 @@ pub struct TmpDir {
     path: PathBuf,
 }
 impl TmpDir {
+    pub const BASE: &'static str = "/var/tmp/startos";
+
     pub async fn new() -> Result<Self, Error> {
-        let path = Path::new("/var/tmp/startos").join(base32::encode(
+        let path = Path::new(Self::BASE).join(base32::encode(
             base32::Alphabet::Rfc4648 { padding: false },
             &rand::random::<[u8; 8]>(),
         ));
@@ -1194,6 +1200,7 @@ pub async fn write_file_atomic(
     Ok(())
 }
 
+/// The containing directory must not be writable by untrusted processes.
 #[instrument(skip_all)]
 pub async fn write_file_private_atomic(
     path: impl AsRef<Path>,
@@ -1849,6 +1856,56 @@ pub(crate) fn case_folded(path: &Path) -> PathBuf {
         .collect()
 }
 
+pub fn confined_relative(path: &Path) -> Result<PathBuf, Error> {
+    let mut relative = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::RootDir | Component::CurDir => {}
+            Component::Normal(name) => relative.push(name),
+            _ => {
+                return Err(Error::new(
+                    color_eyre::eyre::eyre!(t!("shared-volumes.invalid-path")),
+                    ErrorKind::InvalidRequest,
+                ));
+            }
+        }
+    }
+    Ok(relative)
+}
+
+pub(crate) fn create_directory_beneath(root: &Path, path: &Path) -> Result<(), Error> {
+    use nix::errno::Errno;
+    use nix::sys::stat::{Mode, mkdirat};
+
+    use crate::disk::mount::filesystem::syscall::open_beneath;
+
+    let relative = confined_relative(path)?;
+    let mut parent = PathBuf::new();
+    for name in relative.iter() {
+        let directory = open_beneath(root, &parent)?;
+        match mkdirat(&directory, name, Mode::from_bits_truncate(0o755)) {
+            Ok(()) | Err(Errno::EEXIST) => {}
+            Err(error) => return Err(Error::new(error, ErrorKind::Filesystem)),
+        }
+        parent.push(name);
+    }
+    open_beneath(root, &relative)?;
+    Ok(())
+}
+
+pub(crate) async fn same_file(left: &Path, right: &Path) -> Result<bool, Error> {
+    if !tokio::fs::try_exists(left)
+        .await
+        .with_kind(ErrorKind::Filesystem)?
+        || !tokio::fs::try_exists(right)
+            .await
+            .with_kind(ErrorKind::Filesystem)?
+    {
+        return Ok(false);
+    }
+    Ok(file_identity(left).await? == file_identity(right).await?)
+}
+
 pub(crate) async fn file_identity(path: impl AsRef<Path>) -> Result<(u64, u64), Error> {
     let path = path.as_ref();
     let metadata = tokio::fs::metadata(path)
@@ -2034,6 +2091,37 @@ impl Drop for AtomicFile {
 
 #[cfg(test)]
 mod test {
+    #[tokio::test]
+    async fn copying_file_aliases_preserves_contents_and_distinct_copies_still_work() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("credential");
+        let hardlink = root.path().join("hardlink");
+        let symlink = root.path().join("symlink");
+        tokio::fs::write(&source, b"private-credential")
+            .await
+            .unwrap();
+        tokio::fs::hard_link(&source, &hardlink).await.unwrap();
+        tokio::fs::symlink(&source, &symlink).await.unwrap();
+        for alias in [&source, &hardlink, &symlink] {
+            super::copy_file(&source, alias).await.unwrap();
+            assert_eq!(
+                tokio::fs::read(&source).await.unwrap(),
+                b"private-credential"
+            );
+        }
+        let destination = root.path().join("new/credential");
+        super::copy_file(&source, &destination).await.unwrap();
+        assert_eq!(
+            tokio::fs::read(destination).await.unwrap(),
+            b"private-credential"
+        );
+        assert!(
+            !super::same_file(&source, &root.path().join("missing"))
+                .await
+                .unwrap()
+        );
+    }
+
     #[tokio::test]
     async fn atomic_publication_does_not_replace_existing_contents() {
         let temp = tempfile::tempdir().unwrap();

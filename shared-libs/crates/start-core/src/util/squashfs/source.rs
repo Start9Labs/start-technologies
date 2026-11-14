@@ -8,11 +8,12 @@ use super::blocks::invalid;
 use super::format::xattr_kind;
 use super::tree::{normalize_path, *};
 use crate::prelude::*;
+use crate::s9pk::merkle_archive::source::{DynFileSource, FileSource};
 
 mod layers;
 mod tar;
 
-pub(crate) use layers::LayerFilesystem;
+pub(crate) use layers::{LayerFilesystem, overlay_whiteout, snapshot_entries};
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -50,6 +51,21 @@ fn unix_metadata(path: &Path, metadata: &std::fs::Metadata) -> std::io::Result<M
 }
 
 impl Squashfs<PathBuf> {
+    /// Snapshots a quiescent config-only OverlayFS lower and RAM upper.
+    ///
+    /// The working mount must use `index=off,metacopy=off,redirect_dir=off`.
+    /// Upper deletion markers remove configuration overrides, revealing public
+    /// rootfs defaults. Untouched lower whiteouts and opaque markers retain their
+    /// rootfs deletion semantics. Sources must remain stable through serialization.
+    pub async fn from_working_overlay(
+        lower: &Path,
+        upper: &Path,
+    ) -> Result<Squashfs<DynFileSource>, Error> {
+        Self::from_directory(lower)
+            .await?
+            .with_overlayfs_upper(Self::from_directory(upper).await?)
+    }
+
     /// Retains source inode attributes and reads regular file contents lazily.
     pub async fn from_directory(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
@@ -106,6 +122,19 @@ impl Squashfs<PathBuf> {
             }
         }
         Ok(image)
+    }
+}
+
+impl<S: FileSource> Squashfs<S> {
+    /// Applies RAM-upper changes to a raw configuration snapshot without mutating sources.
+    /// OverlayFS copy-up metadata is consumed rather than persisted as rootfs policy.
+    pub fn with_overlayfs_upper<T: FileSource>(
+        self,
+        upper: Squashfs<T>,
+    ) -> Result<Squashfs<DynFileSource>, Error> {
+        let mut filesystem = LayerFilesystem::from_squashfs(self.into_dyn())?;
+        filesystem.apply_overlayfs_upper(upper.into_dyn())?;
+        filesystem.into_squashfs()
     }
 }
 

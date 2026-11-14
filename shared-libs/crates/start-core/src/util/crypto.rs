@@ -11,6 +11,9 @@ pub fn ed25519_expand_key(key: &SecretKey) -> [u8; EXPANDED_SECRET_KEY_LENGTH] {
 use aes::cipher::{KeyIvInit, StreamCipher};
 use hmac::Hmac;
 use josekit::jwk::Jwk;
+use openssl::ec::{EcGroup, EcKey};
+use openssl::nid::Nid;
+use openssl::pkey::{PKey, Private};
 use rand::rand_core::UnwrapErr;
 use rand::rngs::ThreadRng;
 use serde::{Deserialize, Serialize};
@@ -19,6 +22,47 @@ use tracing::instrument;
 use zeroize::Zeroizing;
 
 use crate::prelude::*;
+
+pub const NIST_P256_CURVE: Nid = Nid::X9_62_PRIME256V1;
+
+lazy_static::lazy_static! {
+    static ref EC_GROUP: EcGroup = EcGroup::from_curve_name(NIST_P256_CURVE).unwrap();
+}
+
+/// Produces the encoded hash accepted by shadow files and MOK requests.
+#[instrument(skip_all)]
+pub fn shadow_password_hash(password: &str) -> Result<String, Error> {
+    sha_crypt::sha512_simple(password, &sha_crypt::Sha512Params::default())
+        .map_err(|error| Error::new(eyre!("{error:?}"), ErrorKind::Serialization))
+}
+
+#[test]
+fn shadow_hash_preserves_password_and_crypt_encoding() {
+    let hash = shadow_password_hash("firmware-approval-credential").unwrap();
+    assert!(hash.starts_with("$6$"));
+    sha_crypt::sha512_check("firmware-approval-credential", &hash).unwrap();
+    assert!(sha_crypt::sha512_check("different-credential", &hash).is_err());
+}
+
+#[instrument(skip_all)]
+pub fn gen_nistp256() -> Result<PKey<Private>, Error> {
+    Ok(PKey::from_ec_key(EcKey::generate(EC_GROUP.as_ref())?)?)
+}
+
+#[test]
+fn p256_generation_returns_distinct_valid_private_keys() {
+    let first = gen_nistp256().unwrap();
+    let second = gen_nistp256().unwrap();
+    for key in [&first, &second] {
+        let ec = key.ec_key().unwrap();
+        assert_eq!(ec.group().curve_name(), Some(Nid::X9_62_PRIME256V1));
+        ec.check_key().unwrap();
+    }
+    assert_ne!(
+        first.public_key_to_der().unwrap(),
+        second.public_key_to_der().unwrap()
+    );
+}
 
 /// Supplies infallible randomness required by ed25519-dalek and ssh-key.
 pub fn os_rng() -> UnwrapErr<ThreadRng> {

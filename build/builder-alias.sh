@@ -2,6 +2,20 @@
 
 RUST_BUILDER_IMAGE=$(RUST_BUILDER_IMAGE="${RUST_BUILDER_IMAGE:-}" "$(dirname "${BASH_SOURCE[0]}")/rust-builder/image.sh")
 
+# Build flags and output directories use the same normalized profile.
+set_build_profile() {
+  PROFILE=${PROFILE:-release}
+  BUILD_FLAGS=
+  case "$PROFILE" in
+    release) BUILD_FLAGS=--release ;;
+    debug) ;;
+    *)
+      >&2 echo "Unknown profile $PROFILE: falling back to debug..."
+      PROFILE=debug
+      ;;
+  esac
+}
+
 USE_TTY=
 if tty -s; then
   USE_TTY="-it"

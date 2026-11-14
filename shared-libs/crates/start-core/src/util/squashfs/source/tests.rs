@@ -149,14 +149,14 @@ pub(super) async fn file_bytes<S: FileSource>(
     image: &Squashfs<S>,
     path: impl AsRef<Path>,
 ) -> Vec<u8> {
-    let NodeContents::File(source) = &image
-        .contents()
-        .get_path(path)
-        .unwrap()
-        .as_node()
-        .unwrap()
-        .contents
-    else {
+    let node = resolve_hardlink(path.as_ref(), |target| {
+        image.contents().get_path(target).map(|entry| match entry {
+            Entry::Node(node) => Ok(node),
+            Entry::Hardlink(target) => Err(target.clone()),
+        })
+    })
+    .unwrap();
+    let NodeContents::File(source) = &node.contents else {
         panic!("not a file")
     };
     source.to_vec(None).await.unwrap()
@@ -743,4 +743,52 @@ async fn drains_large_transport_padding() {
         writer.shutdown().await.unwrap();
     });
     assert_eq!(file_bytes(&image.unwrap(), "file").await, b"data");
+}
+
+#[tokio::test]
+async fn working_overlay_import_retains_filesystem_metadata_without_mutating_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    let lower = temp.path().join("lower");
+    let upper = temp.path().join("upper");
+    std::fs::create_dir(&lower).unwrap();
+    std::fs::create_dir(&upper).unwrap();
+    std::fs::write(lower.join("owner"), b"inode data").unwrap();
+    std::fs::hard_link(lower.join("owner"), lower.join("alias")).unwrap();
+    std::fs::write(lower.join("override"), b"local override").unwrap();
+    std::fs::write(upper.join("override"), []).unwrap();
+    xattr::set(upper.join("override"), "user.overlay.whiteout", b"").unwrap();
+    std::fs::write(upper.join("new"), b"new data").unwrap();
+    std::fs::set_permissions(upper.join("new"), std::fs::Permissions::from_mode(0o600)).unwrap();
+    xattr::set(upper.join("new"), "user.config", b"configuration").unwrap();
+    let image = Squashfs::from_working_overlay(&lower, &upper)
+        .await
+        .unwrap();
+    assert!(image.contents().get("override").is_none());
+    assert_eq!(file_bytes(&image, "owner").await, b"inode data");
+    assert_eq!(file_bytes(&image, "alias").await, b"inode data");
+    assert_eq!(file_bytes(&image, "new").await, b"new data");
+    let metadata = &image
+        .contents()
+        .get("new")
+        .unwrap()
+        .as_node()
+        .unwrap()
+        .metadata;
+    assert_eq!(metadata.mode, 0o600);
+    assert_eq!(
+        metadata
+            .xattrs
+            .get(std::ffi::OsStr::new("user.config"))
+            .unwrap(),
+        b"configuration"
+    );
+    assert_eq!(
+        std::fs::read(lower.join("override")).unwrap(),
+        b"local override"
+    );
+    assert_eq!(
+        xattr::get(upper.join("override"), "user.overlay.whiteout").unwrap(),
+        Some(Vec::new())
+    );
+    assert_eq!(std::fs::read(upper.join("new")).unwrap(), b"new data");
 }

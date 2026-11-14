@@ -158,16 +158,31 @@ impl<S> DirectoryContents<S> {
     }
 
     pub fn get_path(&self, path: impl AsRef<Path>) -> Option<&Entry<S>> {
-        let path = normalize_path(path.as_ref()).ok()?;
+        self.get_path_checked(path).ok().flatten()
+    }
+
+    /// Rejects non-directory ancestors instead of reporting their children absent.
+    pub(crate) fn get_path_checked(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> std::io::Result<Option<&Entry<S>>> {
+        let path = normalize_path(path.as_ref())?;
         let mut components = path.iter().peekable();
         let mut directory = self;
         loop {
-            let name = components.next()?;
-            let entry = directory.get(name)?;
+            let Some(name) = components.next() else {
+                return Ok(None);
+            };
+            let Some(entry) = directory.get(name) else {
+                return Ok(None);
+            };
             if components.peek().is_none() {
-                return Some(entry);
+                return Ok(Some(entry));
             }
-            directory = entry.as_node()?.contents.as_directory()?;
+            directory = entry
+                .as_node()
+                .and_then(|node| node.contents.as_directory())
+                .ok_or_else(|| invalid("archive ancestor is not a directory"))?;
         }
     }
 
@@ -420,6 +435,24 @@ mod tests {
     use std::os::unix::ffi::OsStringExt;
 
     use super::*;
+
+    #[test]
+    fn checked_lookup_distinguishes_missing_entries_from_non_directory_ancestors() {
+        let mut directory = DirectoryContents::<()>::new();
+        directory
+            .insert(
+                "alias",
+                Entry::new(
+                    Metadata::new(0o777),
+                    NodeContents::Symlink("elsewhere".into()),
+                ),
+            )
+            .unwrap();
+        assert!(directory.get_path_checked("missing/key").unwrap().is_none());
+        assert!(directory.get_path_checked("alias/key").is_err());
+        assert!(directory.get_path("alias/key").is_none());
+        assert!(directory.get_path_checked("alias").unwrap().is_some());
+    }
 
     #[test]
     fn paths_are_raw_and_root_relative() {

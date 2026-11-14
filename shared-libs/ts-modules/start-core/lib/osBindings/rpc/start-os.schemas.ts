@@ -113,11 +113,14 @@ export const AnyVerifyingKey: typeof literal_0 = /* @__PURE__ */ literal_0.meta(
 )
 export const ApiState: z.ZodEnum<{
   error: 'error'
+  locked: 'locked'
   initializing: 'initializing'
   running: 'running'
-}> = /* @__PURE__ */ z.enum(['error', 'initializing', 'running']).meta({
-  id: 'ApiState',
-})
+}> = /* @__PURE__ */ z
+  .enum(['error', 'locked', 'initializing', 'running'])
+  .meta({
+    id: 'ApiState',
+  })
 export const ApplyParams: z.ZodObject<{ expr: z.ZodString }> =
   /* @__PURE__ */ object({ expr: z.string() }).meta({
     id: 'ApplyParams',
@@ -184,6 +187,12 @@ export const CapabilityVerdict: z.ZodObject<{
 })
 export const Celsius: typeof literal_6 = /* @__PURE__ */ literal_6.meta({
   id: 'Celsius',
+})
+export const CertificatePurpose: z.ZodEnum<{
+  image: 'image'
+  modules: 'modules'
+}> = /* @__PURE__ */ z.enum(['image', 'modules']).meta({
+  id: 'CertificatePurpose',
 })
 export const CheckPortRes: z.ZodObject<{
   ip: z.ZodString
@@ -412,6 +421,15 @@ export const EchoParams: z.ZodObject<{ message: z.ZodString }> =
   /* @__PURE__ */ object({ message: z.string() }).meta({
     id: 'EchoParams',
   })
+export const EnableStatus: z.ZodObject<{
+  supportedPlatform: z.ZodBoolean
+  enableRequested: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  supportedPlatform: z.boolean(),
+  enableRequested: z.boolean(),
+}).meta({
+  id: 'EnableStatus',
+})
 export const EncryptedWire: z.ZodObject<{ encrypted: z.ZodUnknown }> =
   /* @__PURE__ */ object({ encrypted: z.unknown() }).meta({
     id: 'EncryptedWire',
@@ -938,6 +956,13 @@ export const ModifyNotificationParams: z.ZodObject<{
   ids: z.ZodArray<z.ZodInt>
 }> = /* @__PURE__ */ object({ ids: z.array(z.int()) }).meta({
   id: 'ModifyNotificationParams',
+})
+export const MokEnrollment: z.ZodEnum<{
+  notEnrolled: 'notEnrolled'
+  pending: 'pending'
+  enrolled: 'enrolled'
+}> = /* @__PURE__ */ z.enum(['notEnrolled', 'pending', 'enrolled']).meta({
+  id: 'MokEnrollment',
 })
 
 /**
@@ -2417,6 +2442,36 @@ export const Category: z.ZodObject<{ name: typeof LocaleString }> =
   /* @__PURE__ */ object({ name: LocaleString }).meta({
     id: 'Category',
   })
+export const CertificateProgress: z.ZodObject<{
+  purpose: typeof CertificatePurpose
+  /**
+   * SHA-256 of the DER certificate.
+   */
+  sha256: z.ZodString
+  /**
+   * SHA-1 display fingerprint for comparison with MokManager, not trust authorization.
+   */
+  firmwareFingerprint: z.ZodString
+  enrollment: typeof MokEnrollment
+}> = /* @__PURE__ */ object({
+  purpose: CertificatePurpose,
+  /**
+   * SHA-256 of the DER certificate.
+   */
+  sha256: z.string().meta({
+    description: 'SHA-256 of the DER certificate.',
+  }),
+  /**
+   * SHA-1 display fingerprint for comparison with MokManager, not trust authorization.
+   */
+  firmwareFingerprint: z.string().meta({
+    description:
+      'SHA-1 display fingerprint for comparison with MokManager, not trust authorization.',
+  }),
+  enrollment: MokEnrollment,
+}).meta({
+  id: 'CertificateProgress',
+})
 export const CheckChallengeParams: z.ZodObject<{
   fqdn: z.ZodString
   gateway: typeof GatewayId
@@ -4836,6 +4891,15 @@ export const BackupTarget: z.ZodIntersection<
     description:
       'A registered backup destination and its last source observation.',
   })
+export const BeginEnableParams: z.ZodObject<{
+  password: typeof PasswordType
+  acknowledgedOffline: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  password: PasswordType,
+  acknowledgedOffline: z.boolean(),
+}).meta({
+  id: 'BeginEnableParams',
+})
 export const CompatibleAlpnInfo: z.ZodUnion<
   readonly [z.ZodArray<typeof MaybeUtf8String>, typeof LegacyAlpnInfo]
 > = /* @__PURE__ */ z.union([z.array(MaybeUtf8String), LegacyAlpnInfo]).meta({
@@ -4907,6 +4971,26 @@ export const DependencyMetadata: z.ZodIntersection<
   .meta({
     id: 'DependencyMetadata',
   })
+
+/**
+ * Firmware enrollment observation, not proof of active disk protection.
+ */
+export const FdeEnrollmentProgress: z.ZodObject<{
+  firmwareEnrolled: z.ZodBoolean
+  approvalCode: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  certificates: z.ZodArray<typeof CertificateProgress>
+}> = /* @__PURE__ */ object({
+  firmwareEnrolled: z.boolean(),
+  approvalCode: wire(z.string().nullable().optional(), z.string().nullable()),
+  certificates: z.array(CertificateProgress),
+}).meta({
+  id: 'FdeEnrollmentProgress',
+  description:
+    'Firmware enrollment observation, not proof of active disk protection.',
+})
 export const HardwareInfo: z.ZodObject<{
   arch: z.ZodString
   ram: z.ZodInt
@@ -8412,6 +8496,23 @@ export const Api = {
             zram: {
               _PARAMS: /* @__PURE__ */ ZramParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+          },
+        },
+        fde: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            'begin-enable': {
+              _PARAMS: /* @__PURE__ */ BeginEnableParams,
+              _RETURN: /* @__PURE__ */ FdeEnrollmentProgress,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            status: {
+              _PARAMS: /* @__PURE__ */ empty,
+              _RETURN: /* @__PURE__ */ EnableStatus,
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
             },

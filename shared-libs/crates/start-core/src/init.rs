@@ -190,6 +190,7 @@ pub async fn init(
         postinit,
     }: InitPhases,
 ) -> Result<InitResult, Error> {
+    crate::fde::private_config::mount_runtime(Path::new(MAIN_DATA)).await?;
     if let Err(e) = persist_pstore_archive(
         Path::new("/var/lib/systemd/pstore"),
         &Path::new(MAIN_DATA).join("pstore"),
@@ -208,15 +209,14 @@ pub async fn init(
     RpcContext::init_auth_cookie().await?;
     local_auth.complete();
 
-    // Re-enroll MOK on every boot if Secure Boot key exists but isn't enrolled yet
     if let Err(e) = crate::util::mok::enroll_mok(std::path::Path::new("/")).await {
         tracing::warn!("MOK enrollment failed: {e}");
     }
 
     load_database.start();
-    let db = cfg.db().await?;
+    let db = TypedPatchDb::<Database>::load_unchecked(cfg.db().await?);
+    let secret_memory = crate::fde::memory::protect_authorities(&db.peek().await)?;
     crate::version::Current::default().pre_init(&db).await?;
-    let db = TypedPatchDb::<Database>::load_unchecked(db);
     db.mutate(crate::net::ssl::repair_root_cert).await.result?;
     let peek = db.peek().await;
     load_database.complete();
@@ -309,7 +309,6 @@ pub async fn init(
     .await?;
 
     load_ca_cert.start();
-    // write to ca cert store
     tokio::fs::write(
         "/usr/local/share/ca-certificates/startos-root-ca.crt",
         account.root_ca_cert.to_pem()?,
@@ -321,7 +320,7 @@ pub async fn init(
     load_wifi.start();
     let system_product_name = crate::firmware::system_product_name().await.log_err();
     crate::net::wifi::synchronize_network_manager(
-        MAIN_DATA,
+        Path::new(MAIN_DATA).join("system-connections"),
         &peek
             .as_public()
             .as_server_info()
@@ -420,7 +419,7 @@ pub async fn init(
     sync_clock.complete();
 
     enable_zram.start();
-    if server_info.as_zram().de()? {
+    if server_info.as_zram().de()? && secret_memory.is_none() {
         crate::system::enable_zram().await?;
         tracing::info!("{}", t!("init.enabled-zram"));
     }
@@ -490,6 +489,9 @@ pub async fn init(
         run_script("/media/startos/config/postinit.sh", progress).await;
     }
 
+    if let Some(memory) = secret_memory {
+        memory.check()?;
+    }
     tracing::info!("{}", t!("init.system-initialized"));
 
     Ok(InitResult {

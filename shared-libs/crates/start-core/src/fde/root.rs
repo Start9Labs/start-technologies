@@ -1,0 +1,165 @@
+use std::path::{Path, PathBuf};
+
+use super::boot::MountedGeneration;
+use crate::disk::mount::filesystem::bind::Bind;
+use crate::disk::mount::filesystem::overlayfs::OverlayFs;
+use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
+use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
+use crate::prelude::*;
+
+/// Running-root writes and working configuration edits have disjoint RAM uppers.
+pub(super) struct RootComposition {
+    layers: VerifiedMounts<MountedGeneration>,
+    working_upper: PathBuf,
+}
+
+/// Verified lower mappings outlive every dependent mount.
+pub(super) struct VerifiedMounts<L: GenericMountGuard> {
+    mounts: Vec<MountGuard>,
+    lower: Option<L>,
+}
+
+impl<L: GenericMountGuard> VerifiedMounts<L> {
+    pub fn new(lower: L) -> Self {
+        Self {
+            mounts: Vec::new(),
+            lower: Some(lower),
+        }
+    }
+
+    pub fn lower(&self) -> &L {
+        self.lower.as_ref().unwrap()
+    }
+
+    pub fn push(&mut self, mount: MountGuard) {
+        self.mounts.push(mount.with_strict_unmount());
+    }
+
+    pub async fn unmount(mut self) -> Result<(), Error> {
+        teardown(std::mem::take(&mut self.mounts), self.lower.take().unwrap()).await
+    }
+}
+
+impl VerifiedMounts<MountedGeneration> {
+    pub fn persist(mut self) {
+        for mount in std::mem::take(&mut self.mounts) {
+            mount.persist();
+        }
+        self.lower.take().unwrap().persist();
+    }
+}
+
+async fn teardown(mut mounts: Vec<MountGuard>, lower: impl GenericMountGuard) -> Result<(), Error> {
+    let mut result = Ok(());
+    while let Some(mount) = mounts.pop() {
+        if let Err(error) = mount.unmount(false).await {
+            if result.is_ok() {
+                result = Err(error);
+            } else {
+                Err::<(), _>(error).log_err();
+            }
+        }
+    }
+    let lower_result = lower.unmount().await;
+    result?;
+    lower_result
+}
+
+impl RootComposition {
+    pub async fn mount(
+        lower: MountedGeneration,
+        volume: &Path,
+        images: &Path,
+        config: &Path,
+        root: &Path,
+        runtime: &Path,
+    ) -> Result<Self, Error> {
+        let mut composition = Self {
+            layers: VerifiedMounts::new(lower),
+            working_upper: runtime.join("working-upper"),
+        };
+        let result = async {
+            let rootfs = composition.layers.lower().rootfs().to_owned();
+            let overlay = composition.layers.lower().overlay().to_owned();
+            composition.layers.push(
+                MountGuard::mount(
+                    &OverlayFs::new(
+                        vec![&overlay, &rootfs],
+                        runtime.join("running-upper"),
+                        runtime.join("running-work"),
+                    ),
+                    root,
+                    ReadWrite,
+                )
+                .await?,
+            );
+            for (source, target, mode) in [
+                (
+                    config.to_owned(),
+                    root.join("media/startos/config"),
+                    ReadWrite,
+                ),
+                (
+                    images.to_owned(),
+                    root.join("media/startos/images"),
+                    ReadWrite,
+                ),
+                (volume.to_owned(), root.join("media/startos/root"), ReadOnly),
+                (rootfs.clone(), root.join("media/startos/current"), ReadOnly),
+            ] {
+                composition
+                    .layers
+                    .push(MountGuard::mount(&Bind::new(source), target, mode).await?);
+            }
+            composition.layers.push(
+                MountGuard::mount(
+                    &crate::os_overlay::working_filesystem(
+                        &overlay,
+                        &composition.working_upper,
+                        &runtime.join("working-work"),
+                    ),
+                    root.join("media/startos/config/overlay"),
+                    ReadWrite,
+                )
+                .await?,
+            );
+            super::boot_services::prepare(root, runtime).await?;
+            Ok::<_, Error>(())
+        }
+        .await;
+        match result {
+            Ok(()) => Ok(composition),
+            Err(error) => {
+                composition.unmount().await.log_err();
+                Err(error)
+            }
+        }
+    }
+
+    pub fn verified(&self) -> &MountedGeneration {
+        self.layers.lower()
+    }
+
+    pub fn working_upper(&self) -> &Path {
+        &self.working_upper
+    }
+
+    pub fn persist(self) {
+        self.layers.persist();
+    }
+
+    pub async fn unmount(self) -> Result<(), Error> {
+        self.layers.unmount().await
+    }
+}
+
+impl<L: GenericMountGuard> Drop for VerifiedMounts<L> {
+    fn drop(&mut self) {
+        if let Some(lower) = self.lower.take() {
+            let mounts = std::mem::take(&mut self.mounts);
+            tokio::spawn(async move {
+                teardown(mounts, lower).await.log_err();
+            });
+        }
+    }
+}

@@ -183,16 +183,12 @@ async fn setup_or_init(
                 }));
             }
 
-            let init_result =
-                crate::init::init(&server.acceptor_setter(), dns.clone(), config, init_phases)
-                    .await?;
-
-            let rpc_ctx = RpcContext::init(
-                &server.acceptor_setter(),
+            let rpc_ctx = initialize_data(
+                server,
                 dns.clone(),
                 config,
                 disk_guid,
-                Some(init_result),
+                init_phases,
                 rpc_ctx_phases,
             )
             .await?;
@@ -211,6 +207,27 @@ async fn setup_or_init(
         }
         result
     }
+}
+
+pub(crate) async fn initialize_data(
+    server: &WebServer<WildcardListener>,
+    dns: Arc<DnsController>,
+    config: &ServerConfig,
+    disk_guid: InternedString,
+    init_phases: InitPhases,
+    rpc_ctx_phases: InitRpcContextPhases,
+) -> Result<RpcContext, Error> {
+    let init_result =
+        crate::init::init(&server.acceptor_setter(), dns.clone(), config, init_phases).await?;
+    RpcContext::init(
+        &server.acceptor_setter(),
+        dns,
+        config,
+        disk_guid,
+        Some(init_result),
+        rpc_ctx_phases,
+    )
+    .await
 }
 
 #[instrument(skip_all)]

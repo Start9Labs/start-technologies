@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::disk::mount::filesystem::syscall::{
@@ -288,22 +288,7 @@ impl SharedVolumeMounts {
     }
 }
 
-pub fn confined_relative(path: &Path) -> Result<PathBuf, Error> {
-    let mut relative = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::RootDir | Component::CurDir => {}
-            Component::Normal(name) => relative.push(name),
-            _ => {
-                return Err(Error::new(
-                    eyre!(t!("shared-volumes.invalid-path")),
-                    ErrorKind::InvalidRequest,
-                ));
-            }
-        }
-    }
-    Ok(relative)
-}
+pub use crate::util::io::confined_relative;
 
 #[cfg(test)]
 mod tests {

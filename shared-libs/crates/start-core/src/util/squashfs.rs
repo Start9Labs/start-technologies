@@ -30,6 +30,6 @@ pub(crate) mod test_support;
 
 pub use blocks::{MetadataBlocksReader, MetadataBlocksWriter};
 pub use read::{SquashfsFileReader, SquashfsFileSource};
-pub(crate) use source::LayerFilesystem;
+pub(crate) use source::{LayerFilesystem, overlay_whiteout, snapshot_entries};
 pub(crate) use tree::resolve_hardlink;
 pub use tree::{Device, DirectoryContents, Entry, Metadata, Node, NodeContents, Options, Squashfs};

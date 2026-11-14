@@ -312,3 +312,192 @@ async fn rejects_duplicate_paths_nonempty_whiteouts_and_invalid_hardlinks() {
         );
     }
 }
+
+fn snapshot_file(data: &'static [u8]) -> Entry<Arc<[u8]>> {
+    Entry::file(crate::util::squashfs::Metadata::new(0o640), Arc::from(data))
+}
+
+fn whiteout() -> Entry<Arc<[u8]>> {
+    Entry::new(
+        crate::util::squashfs::Metadata::new(0o600),
+        NodeContents::CharacterDevice(crate::util::squashfs::Device { major: 0, minor: 0 }),
+    )
+}
+
+fn directory_marker(value: &[u8]) -> Entry<Arc<[u8]>> {
+    let mut metadata = crate::util::squashfs::Metadata::new(0o750);
+    metadata.uid = 123;
+    metadata.gid = 456;
+    metadata
+        .xattrs
+        .insert("trusted.overlay.opaque".into(), value.to_vec());
+    Entry::directory(metadata, crate::util::squashfs::DirectoryContents::new())
+}
+
+#[tokio::test]
+async fn overlayfs_snapshot_preserves_root_policy_and_applies_working_changes() {
+    let mut lower = Squashfs::<Arc<[u8]>>::default();
+    for (path, entry) in [
+        ("root-hidden", whiteout()),
+        ("opaque", directory_marker(b"y")),
+        ("opaque/retained", snapshot_file(b"retained")),
+        ("override", snapshot_file(b"override")),
+        ("owner", snapshot_file(b"old inode")),
+        ("alias", Entry::Hardlink("owner".into())),
+        ("modified", snapshot_file(b"old")),
+        ("recreated/old", snapshot_file(b"old child")),
+    ] {
+        lower.contents_mut().insert_path(path, entry).unwrap();
+    }
+    let mut upper = Squashfs::<Arc<[u8]>>::default();
+    let mut copied = directory_marker(b"x");
+    let metadata = &mut copied.as_node_mut().unwrap().metadata;
+    metadata.mode = 0o700;
+    metadata.xattrs.insert(
+        "trusted.overlay.origin".into(),
+        b"copyup internals".to_vec(),
+    );
+    metadata
+        .xattrs
+        .insert("user.config".into(), b"retained xattr".to_vec());
+    for (path, entry) in [
+        ("override", whiteout()),
+        ("owner", whiteout()),
+        ("opaque", copied),
+        ("opaque/added", snapshot_file(b"added")),
+        ("modified", snapshot_file(b"new")),
+        ("recreated", directory_marker(b"y")),
+        ("recreated/new", snapshot_file(b"new child")),
+        ("z-new", snapshot_file(b"new inode")),
+        ("a-new", Entry::Hardlink("z-new".into())),
+    ] {
+        upper.contents_mut().insert_path(path, entry).unwrap();
+    }
+    let mut lower_before = std::io::Cursor::new(Vec::new());
+    lower.serialize(&mut lower_before).await.unwrap();
+    let mut upper_before = std::io::Cursor::new(Vec::new());
+    upper.serialize(&mut upper_before).await.unwrap();
+    let image = lower.clone().with_overlayfs_upper(upper.clone()).unwrap();
+    assert!(matches!(
+        image
+            .contents()
+            .get("root-hidden")
+            .unwrap()
+            .as_node()
+            .unwrap()
+            .contents,
+        NodeContents::CharacterDevice(_)
+    ));
+    assert!(image.contents().get("override").is_none());
+    assert!(image.contents().get("owner").is_none());
+    assert_eq!(bytes(&image, "alias").await, b"old inode");
+    assert_eq!(bytes(&image, "opaque/retained").await, b"retained");
+    assert_eq!(bytes(&image, "opaque/added").await, b"added");
+    assert_eq!(bytes(&image, "modified").await, b"new");
+    assert!(image.contents().get_path("recreated/old").is_none());
+    assert_eq!(bytes(&image, "recreated/new").await, b"new child");
+    assert_eq!(bytes(&image, "a-new").await, b"new inode");
+    assert_eq!(bytes(&image, "z-new").await, b"new inode");
+    let metadata = &image
+        .contents()
+        .get("opaque")
+        .unwrap()
+        .as_node()
+        .unwrap()
+        .metadata;
+    assert_eq!(
+        (metadata.mode, metadata.uid, metadata.gid),
+        (0o700, 123, 456)
+    );
+    assert_eq!(
+        metadata
+            .xattrs
+            .get(std::ffi::OsStr::new("trusted.overlay.opaque"))
+            .unwrap(),
+        b"y"
+    );
+    assert_eq!(
+        metadata
+            .xattrs
+            .get(std::ffi::OsStr::new("user.config"))
+            .unwrap(),
+        b"retained xattr"
+    );
+    assert!(
+        !metadata
+            .xattrs
+            .contains_key(std::ffi::OsStr::new("trusted.overlay.origin"))
+    );
+    assert!(
+        image
+            .contents()
+            .get("recreated")
+            .unwrap()
+            .as_node()
+            .unwrap()
+            .metadata
+            .xattrs
+            .is_empty()
+    );
+    let mut output = std::io::Cursor::new(Vec::new());
+    image.serialize(&mut output).await.unwrap();
+    let decoded = Squashfs::deserialize(Arc::<[u8]>::from(output.into_inner()))
+        .await
+        .unwrap()
+        .into_dyn();
+    assert_eq!(bytes(&decoded, "alias").await, b"old inode");
+    assert_eq!(bytes(&decoded, "a-new").await, b"new inode");
+    let mut after = std::io::Cursor::new(Vec::new());
+    lower.serialize(&mut after).await.unwrap();
+    assert_eq!(after.into_inner(), lower_before.into_inner());
+    let mut after = std::io::Cursor::new(Vec::new());
+    upper.serialize(&mut after).await.unwrap();
+    assert_eq!(after.into_inner(), upper_before.into_inner());
+}
+
+#[tokio::test]
+async fn overlayfs_snapshot_decodes_shared_and_user_whiteouts_and_rejects_redirects() {
+    let mut lower = Squashfs::<Arc<[u8]>>::default();
+    for path in ["a", "b", "c"] {
+        lower
+            .contents_mut()
+            .insert(path, snapshot_file(b"removed"))
+            .unwrap();
+    }
+    let mut upper = Squashfs::<Arc<[u8]>>::default();
+    upper.contents_mut().insert("a", whiteout()).unwrap();
+    upper
+        .contents_mut()
+        .insert("b", Entry::Hardlink("a".into()))
+        .unwrap();
+    let mut regular = snapshot_file(b"");
+    regular
+        .as_node_mut()
+        .unwrap()
+        .metadata
+        .xattrs
+        .insert("user.overlay.whiteout".into(), Vec::new());
+    upper.contents_mut().insert("c", regular).unwrap();
+    assert!(
+        lower
+            .with_overlayfs_upper(upper)
+            .unwrap()
+            .contents()
+            .is_empty()
+    );
+    for name in ["trusted.overlay.redirect", "user.overlay.metacopy"] {
+        let mut upper = Squashfs::<Arc<[u8]>>::default();
+        let mut file = snapshot_file(b"");
+        file.as_node_mut()
+            .unwrap()
+            .metadata
+            .xattrs
+            .insert(name.into(), Vec::new());
+        upper.contents_mut().insert("file", file).unwrap();
+        assert!(
+            Squashfs::<Arc<[u8]>>::default()
+                .with_overlayfs_upper(upper)
+                .is_err()
+        );
+    }
+}
