@@ -1021,7 +1021,7 @@ export const ENGLISH: Record<string, number> = {
   'Create': 1219, // as in, create a backup
   'Restore': 1220, // as in, restore from a backup
   'Go to Backup Targets': 1221,
-  'A backup is currently running. Interrupting it now can corrupt the backup being written.': 1295,
+  'A backup is currently running. Interrupting it now can corrupt the backup being written.': 1300,
   'Wait for backup to complete': 1296,
   'Shut down now': 1297,
   'A backup is running. Your server will restart when it finishes.': 1298,
@@ -1099,4 +1099,5 @@ export const ENGLISH: Record<string, number> = {
   'Current fingerprint': 1292,
   'Error details are not available': 1293,
   'Unreachable': 1294,
+  'Transport': 1295,
 }

@@ -10,10 +10,12 @@ use crate::net::host::{ForPackage, ForServer, Host};
 use crate::net::service_interface::{
     AddressInfo, HostnameInfo, ServiceInterface, ServiceInterfaceType,
 };
+use crate::net::transport::Transport;
 use crate::{HostId, PackageId};
 
 fn options(port: u16, ssl: Option<u16>, own_tls: bool) -> BindOptions {
     BindOptions {
+        transport: Default::default(),
         preferred_external_port: port,
         add_ssl: ssl.map(|preferred_external_port| AddSslOptions {
             preferred_external_port,
@@ -413,6 +415,7 @@ fn unavailable_ports_and_missing_legs_leave_state_unchanged() {
     server.binding_ranges.insert(
         9000,
         RangeBindInfo {
+            transport: Default::default(),
             enabled: true,
             external_start_port: 9000,
             number_of_ports: 3,
@@ -535,7 +538,16 @@ fn service_rebinding_keeps_the_reassigned_port_for_every_tls_mode() {
         options(8080, Some(8443), false),
         options(8443, None, true),
         options(8443, Some(9443), true),
+        BindOptions {
+            transport: Transport::tcp(),
+            ..options(8080, None, false)
+        },
+        BindOptions {
+            transport: Transport::udp(),
+            ..options(8080, None, false)
+        },
     ] {
+        let transport = options.transport.clone();
         let ssl = !options.wants_plain_port();
         let mut ports = AvailablePorts::new();
         let mut bind = BindInfo::new(&mut ports, options.clone(), false).unwrap();
@@ -547,6 +559,7 @@ fn service_rebinding_keeps_the_reassigned_port_for_every_tls_mode() {
         move_assigned_port(&mut bind, &mut ports, 10443, ssl, false).unwrap();
         assert_eq!(ports.try_alloc(old, ssl, true), Some(old));
         let bind = bind.update(&mut ports, options, false).unwrap();
+        assert_eq!(bind.options.transport, transport);
         assert_eq!(
             if ssl {
                 bind.net.assigned_ssl_port

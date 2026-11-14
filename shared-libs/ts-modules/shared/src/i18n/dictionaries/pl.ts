@@ -1020,7 +1020,7 @@ export default {
   1219: 'Utwórz',
   1220: 'Przywróć',
   1221: 'Przejdź do miejsc docelowych kopii zapasowych',
-  1295: 'Trwa tworzenie kopii zapasowej. Przerwanie tego procesu może uszkodzić zapisywaną kopię zapasową.',
+  1300: 'Trwa tworzenie kopii zapasowej. Przerwanie tego procesu może uszkodzić zapisywaną kopię zapasową.',
   1296: 'Poczekaj na zakończenie kopii zapasowej',
   1297: 'Wyłącz teraz',
   1298: 'Trwa tworzenie kopii zapasowej. Serwer zostanie ponownie uruchomiony po jej zakończeniu.',
@@ -1098,4 +1098,5 @@ export default {
   1292: 'Obecny odcisk',
   1293: 'Szczegóły błędu nie są dostępne',
   1294: 'Nieosiągalny',
+  1295: 'Transport',
 } satisfies i18n

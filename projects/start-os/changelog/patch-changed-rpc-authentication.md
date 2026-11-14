@@ -19,3 +19,4 @@ release-notes: false
 - Prevent duplicate operations when a Unix RPC fails or loses its response.
 - Keep encrypted browser RPC available over HTTP/2 connections.
 - Cancel timed-out or disposed WebSocket requests without interrupting sibling calls, and release pending handlers when the socket closes.
+- Log decrypted browser RPC requests and replies to the developer console for 30 minutes after `rpcLog.enable()`, or a chosen number of minutes, until it expires or `rpcLog.disable()`.

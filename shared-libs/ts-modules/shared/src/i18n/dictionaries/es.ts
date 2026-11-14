@@ -1020,7 +1020,7 @@ export default {
   1219: 'Crear',
   1220: 'Restaurar',
   1221: 'Ir a destinos de copia de seguridad',
-  1295: 'Hay una copia de seguridad en curso. Interrumpirla ahora puede dañar la copia que se está escribiendo.',
+  1300: 'Hay una copia de seguridad en curso. Interrumpirla ahora puede dañar la copia que se está escribiendo.',
   1296: 'Esperar a que termine la copia de seguridad',
   1297: 'Apagar ahora',
   1298: 'Hay una copia de seguridad en curso. Su servidor se reiniciará cuando termine.',
@@ -1098,4 +1098,5 @@ export default {
   1292: 'Huella actual',
   1293: 'Los detalles del error no están disponibles',
   1294: 'Inaccesible',
+  1295: 'Transporte',
 } satisfies i18n

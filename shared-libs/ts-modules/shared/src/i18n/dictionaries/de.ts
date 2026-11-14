@@ -1020,7 +1020,7 @@ export default {
   1219: 'Erstellen',
   1220: 'Wiederherstellen',
   1221: 'Zu den Backup-Zielen',
-  1295: 'Derzeit läuft eine Sicherung. Eine Unterbrechung kann die gerade geschriebene Sicherung beschädigen.',
+  1300: 'Derzeit läuft eine Sicherung. Eine Unterbrechung kann die gerade geschriebene Sicherung beschädigen.',
   1296: 'Auf Abschluss der Sicherung warten',
   1297: 'Jetzt herunterfahren',
   1298: 'Eine Sicherung läuft. Ihr Server wird nach deren Abschluss neu gestartet.',
@@ -1098,4 +1098,5 @@ export default {
   1292: 'Aktueller Fingerabdruck',
   1293: 'Fehlerdetails sind nicht verfügbar',
   1294: 'Nicht erreichbar',
+  1295: 'Transport',
 } satisfies i18n

@@ -89,7 +89,6 @@ export namespace Mock {
     [`${version}.2`]: {
       gitHash: null,
       security: false,
-      headline: `v${version}.2`,
       releaseNotes:
         '## Highlights\n\n- Backups resume where they left off after an interruption.\n- The Updates tab shows release notes in place.\n\n## Fixes\n\n- Services no longer restart twice after a reboot.',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.17:0',
@@ -181,7 +180,6 @@ export namespace Mock {
     [`${version}.1`]: {
       gitHash: null,
       security: false,
-      headline: `v${version}.1`,
       releaseNotes:
         '## Fixes\n\n- Restored network profiles after upgrading from 0.3.5.1.\n- Long service names no longer overflow the sidebar.',
       sourceVersion: '*',
@@ -193,7 +191,6 @@ export namespace Mock {
     '0.4.1-alpha.5': {
       gitHash: null,
       security: false,
-      headline: 'v0.4.1-alpha.5',
       releaseNotes: 'Some more release notes',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.5:0',
       authorized: ['G24CSA5HNYEPIXJNMK7ZM4KD5SX5N6X4'],
@@ -2711,6 +2708,7 @@ PersistentKeepalive = 25`
               ],
             },
             options: {
+              transport: ['tcp', 'udp'],
               addSsl: null,
               preferredExternalPort: 443,
               secure: { ssl: true },
@@ -2758,6 +2756,7 @@ PersistentKeepalive = 25`
               available: [],
             },
             options: {
+              transport: ['tcp', 'udp'],
               addSsl: null,
               preferredExternalPort: 8332,
               secure: { ssl: false },
@@ -2805,6 +2804,7 @@ PersistentKeepalive = 25`
               available: [],
             },
             options: {
+              transport: ['tcp', 'udp'],
               addSsl: null,
               preferredExternalPort: 8333,
               secure: { ssl: false },

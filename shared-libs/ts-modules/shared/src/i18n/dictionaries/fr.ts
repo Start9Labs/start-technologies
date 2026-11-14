@@ -1020,7 +1020,7 @@ export default {
   1219: 'Créer',
   1220: 'Restaurer',
   1221: 'Aller aux cibles de sauvegarde',
-  1295: 'Une sauvegarde est en cours. L’interrompre maintenant peut corrompre la sauvegarde en cours d’écriture.',
+  1300: 'Une sauvegarde est en cours. L’interrompre maintenant peut corrompre la sauvegarde en cours d’écriture.',
   1296: 'Attendre la fin de la sauvegarde',
   1297: 'Éteindre maintenant',
   1298: 'Une sauvegarde est en cours. Votre serveur redémarrera une fois celle-ci terminée.',
@@ -1098,4 +1098,5 @@ export default {
   1292: 'Empreinte actuelle',
   1293: 'Les détails de l’erreur ne sont pas disponibles',
   1294: 'Injoignable',
+  1295: 'Transport',
 } satisfies i18n
