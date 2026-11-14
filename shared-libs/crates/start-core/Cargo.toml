@@ -276,7 +276,7 @@ serde_toml = { package = "toml", version = "0.9" }
 
 [dev-dependencies]
 clap_mangen = "0.2.33"
-librqbit-bencode = "=9.1.0"
+librqbit-bencode = { git = "https://github.com/Start9Labs/rqbit", rev = "233e1a180ed46861969a11e7852afdb1fd7595c4" }
 tempfile = "3.14.0"
 tokio = { version = "1.38.1", features = ["test-util"] }
 

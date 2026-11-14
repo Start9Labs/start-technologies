@@ -212,7 +212,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -223,7 +223,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2422,7 +2422,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.3",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2841,7 +2841,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4486,7 +4486,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4995,9 +4995,9 @@ dependencies = [
  "http",
  "intervaltree",
  "itertools 0.15.0",
- "librqbit-bencode 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
- "librqbit-buffers 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
- "librqbit-clone-to-owned 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
+ "librqbit-bencode",
+ "librqbit-buffers",
+ "librqbit-clone-to-owned",
  "librqbit-core",
  "librqbit-dht",
  "librqbit-dualstack-sockets",
@@ -5038,31 +5038,14 @@ dependencies = [
 [[package]]
 name = "librqbit-bencode"
 version = "9.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cf295fa65b3ad66bd363a5d3a278730352745b72ff0f5b6e6010612351924e5"
-dependencies = [
- "anyhow",
- "arrayvec 0.7.8",
- "atoi 3.1.1",
- "bytes",
- "librqbit-buffers 9.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "librqbit-clone-to-owned 9.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde",
- "serde_derive",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "librqbit-bencode"
-version = "9.1.0"
 source = "git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4#233e1a180ed46861969a11e7852afdb1fd7595c4"
 dependencies = [
  "anyhow",
  "arrayvec 0.7.8",
  "atoi 3.1.1",
  "bytes",
- "librqbit-buffers 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
- "librqbit-clone-to-owned 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
+ "librqbit-buffers",
+ "librqbit-clone-to-owned",
  "serde",
  "serde_derive",
  "thiserror 2.0.21",
@@ -5071,33 +5054,12 @@ dependencies = [
 [[package]]
 name = "librqbit-buffers"
 version = "9.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a11501f6b2d68169725cf9e030d5ad7a9ede4b3839a9e16a27c4faef7507c8c"
-dependencies = [
- "bytes",
- "librqbit-clone-to-owned 9.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde",
- "serde_derive",
-]
-
-[[package]]
-name = "librqbit-buffers"
-version = "9.1.0"
 source = "git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4#233e1a180ed46861969a11e7852afdb1fd7595c4"
 dependencies = [
  "bytes",
- "librqbit-clone-to-owned 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
+ "librqbit-clone-to-owned",
  "serde",
  "serde_derive",
-]
-
-[[package]]
-name = "librqbit-clone-to-owned"
-version = "9.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c611ae410046c2e2cc90b0f300d53fe368d5129f26d822cede8f605f33f7fa84"
-dependencies = [
- "bytes",
 ]
 
 [[package]]
@@ -5121,9 +5083,9 @@ dependencies = [
  "encoding_rs",
  "hex",
  "itertools 0.15.0",
- "librqbit-bencode 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
- "librqbit-buffers 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
- "librqbit-clone-to-owned 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
+ "librqbit-bencode",
+ "librqbit-buffers",
+ "librqbit-clone-to-owned",
  "librqbit-sha1-wrapper",
  "memchr",
  "parking_lot 0.12.5",
@@ -5150,9 +5112,9 @@ dependencies = [
  "futures",
  "indexmap 2.14.2",
  "leaky-bucket",
- "librqbit-bencode 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
- "librqbit-buffers 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
- "librqbit-clone-to-owned 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
+ "librqbit-bencode",
+ "librqbit-buffers",
+ "librqbit-clone-to-owned",
  "librqbit-core",
  "librqbit-dualstack-sockets",
  "parking_lot 0.12.5",
@@ -5213,9 +5175,9 @@ dependencies = [
  "byteorder",
  "bytes",
  "itertools 0.15.0",
- "librqbit-bencode 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
- "librqbit-buffers 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
- "librqbit-clone-to-owned 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
+ "librqbit-bencode",
+ "librqbit-buffers",
+ "librqbit-clone-to-owned",
  "librqbit-core",
  "serde",
  "serde_derive",
@@ -5243,8 +5205,8 @@ dependencies = [
  "byteorder",
  "futures",
  "itertools 0.15.0",
- "librqbit-bencode 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
- "librqbit-buffers 9.1.0 (git+https://github.com/Start9Labs/rqbit?rev=233e1a180ed46861969a11e7852afdb1fd7595c4)",
+ "librqbit-bencode",
+ "librqbit-buffers",
  "librqbit-core",
  "librqbit-dualstack-sockets",
  "parking_lot 0.12.5",
@@ -5862,7 +5824,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6579,7 +6541,7 @@ dependencies = [
  "aes-gcm 0.10.3",
  "aes-kw",
  "argon2",
- "base64 0.21.7",
+ "base64 0.22.1",
  "bitfields",
  "block-padding",
  "blowfish 0.9.1",
@@ -7209,7 +7171,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -7248,9 +7210,9 @@ dependencies = [
  "cfg_aliases 0.2.2",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8094,7 +8056,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8153,7 +8115,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8921,7 +8883,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9188,7 +9150,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9276,7 +9238,7 @@ dependencies = [
  "lettre",
  "libc",
  "librqbit",
- "librqbit-bencode 9.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "librqbit-bencode",
  "log",
  "mbrman",
  "miette",
@@ -9753,7 +9715,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9774,7 +9736,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix 1.1.5",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10485,7 +10447,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset 0.9.1",
  "tempfile",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -11053,7 +11015,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
