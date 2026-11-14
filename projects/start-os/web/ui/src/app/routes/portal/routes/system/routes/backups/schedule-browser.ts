@@ -108,19 +108,6 @@ import {
         }
       </div>
     </section>
-
-    <div class="jobs-toolbar">
-      <button
-        tuiButton
-        type="button"
-        size="s"
-        appearance="primary"
-        iconStart="@tui.plus"
-        (click)="createRequested.emit()"
-      >
-        {{ 'Add schedule' | i18n }}
-      </button>
-    </div>
   `,
   styles: `
     :host,
@@ -159,16 +146,12 @@ import {
       flex: 1;
     }
 
-    .job-list-actions,
-    .jobs-toolbar {
+    .job-list-actions {
       display: flex;
       align-items: center;
       justify-content: flex-end;
       gap: 0.5rem;
       min-inline-size: 0;
-    }
-
-    .job-list-actions {
       flex-wrap: wrap;
     }
 
@@ -178,11 +161,6 @@ import {
     }
 
     @container (max-inline-size: 30rem) {
-      .jobs-toolbar {
-        align-items: stretch;
-        flex-direction: column;
-      }
-
       .schedule-job {
         display: grid;
         grid-template-columns: auto minmax(0, 1fr) auto;
@@ -277,7 +255,6 @@ export class BackupScheduleBrowser {
   public readonly runRequested = output<T.BackupJob>()
   public readonly editRequested = output<T.BackupJob>()
   public readonly deleteRequested = output<T.BackupJob>()
-  public readonly createRequested = output<void>()
 
   protected jobSelectionSummary(job: T.BackupJob): {
     serviceCount: number

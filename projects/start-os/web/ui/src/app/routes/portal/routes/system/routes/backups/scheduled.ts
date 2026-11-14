@@ -320,6 +320,19 @@ class JobEditor
     @if (mode() === 'manage') {
       @if (loading()) {
         <tui-loader [textContent]="'Loading' | i18n" />
+      } @else {
+        <div class="jobs-toolbar">
+          <button
+            tuiButton
+            type="button"
+            size="s"
+            appearance="primary"
+            iconStart="@tui.plus"
+            (click)="create()"
+          >
+            {{ 'Add schedule' | i18n }}
+          </button>
+        </div>
       }
 
       @if (jobs().length > 1 && editor()) {
@@ -344,7 +357,6 @@ class JobEditor
           (runRequested)="runNow($event)"
           (editRequested)="edit($event)"
           (deleteRequested)="deleteJob($event)"
-          (createRequested)="create()"
         />
       }
 
@@ -746,21 +758,6 @@ class JobEditor
         </form>
       }
 
-      @if (jobs().length <= 1 && editor()) {
-        <div class="jobs-toolbar">
-          <button
-            tuiButton
-            type="button"
-            size="s"
-            appearance="primary"
-            iconStart="@tui.plus"
-            (click)="create()"
-          >
-            {{ 'Add schedule' | i18n }}
-          </button>
-        </div>
-      }
-
       @if (reassigning(); as job) {
         <form
           tuiCardLarge
@@ -942,6 +939,10 @@ class JobEditor
       padding: 1rem;
       border: 1px solid var(--tui-border-normal);
       border-radius: var(--tui-radius-m);
+    }
+
+    form > .editor-heading {
+      margin-block-end: 0;
     }
 
     .selected-job > [tuiTitle] {
