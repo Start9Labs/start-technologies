@@ -2,7 +2,7 @@
 
 The [Rust Builder workflow](../../.github/workflows/rust-builder.yaml) builds and verifies native amd64 and arm64 images. After both architectures pass, master builds publish a combined manifest to the GHCR repository named in `repository`, tagged `sha-<full-commit>` and `latest`. Pull requests build and verify without publishing. A manual dispatch on master runs the same publishing pipeline.
 
-The Dockerfile derives from the digest-pinned upstream `ghcr.io/rust-cross/cargo-zigbuild:0.24.0` image. It retains upstream's Zig 0.16.0, Clang and macOS SDK, installs Rust 1.97.1 with the supported targets, and adds CMake, lld and rsync. Three digest-pinned Alpine 3.24.1 stages supply FUSE development/static libraries and pkg-config metadata at the paths the build scripts consume. Bindgen 0.72.1 is built from its checksum-verified published crate.
+The Dockerfile derives from the digest-pinned upstream `ghcr.io/rust-cross/cargo-zigbuild:0.24.0` image. It retains upstream's Zig 0.16.0, Clang and macOS SDK, installs Rust 1.97.1 with the supported targets, and adds CMake, lld and rsync. Three digest-pinned Alpine 3.24.1 stages supply musl, FUSE development/static libraries and pkg-config metadata at the paths the build scripts consume. Bindgen 0.72.1 is built from its checksum-verified published crate.
 
 A build stage downloads checksum-verified upstream cargo-zigbuild 0.24.0 source, applies `rva23.patch`, runs its library tests, and compiles the replacement executable. The patch preserves Start9's RVA23 default for `riscv64gc` C/C++ compilation using Zig's named profile. The entrypoint supplies target-specific Rust features while retaining Rust's built-in `generic-rv64` CPU default. Leaving the CPU implicit lets cargo-zigbuild select its RVA23 C/C++ profile instead of replacing it with Zig's extension-free `generic_rv64` CPU. Explicit Rust flags and CPU overrides retain their precedence. CMake toolchain filenames reuse the CPU-specific compiler wrapper identity, keeping profiles isolated in shared caches. The upstream release supplies the Apple dylib deduplication and deployment-target handling.
 
@@ -18,7 +18,9 @@ The entrypoint executes the requested command directly. Replacing it with Docker
 
 ## Consumers
 
-`image.sh` resolves the published image from `repository` and `reference`, or returns a `RUST_BUILDER_IMAGE` override. Shared compiler commands, StartWRT's compiler/bindings/test/disassembly commands, and the formatter use that selection. StartWRT's shared builder alias disables the default RVA23 profile; native bindings generation uses the image's pinned Rust compiler, while router cross-compilation retains its scalar K1 flags and compiler wrappers. Rust binary Make prerequisites track the selection files, so a pin change invalidates existing binaries.
+`image.sh` resolves the published image from `repository` and `reference`, or returns a `RUST_BUILDER_IMAGE` override. Shared compiler commands, StartWRT's compiler/bindings/test/disassembly commands, and the formatter use that selection. StartWRT's shared builder alias disables the default RVA23 profile; native bindings generation uses the image's pinned Rust compiler, while router cross-compilation retains its scalar K1 flags and compiler wrappers. Rust binary Make prerequisites track the selection files, the shared builder alias and its musl libc files, so a change to any of them invalidates existing binaries.
+
+The shared builder alias sets `ZIG_LIBC` to `build/musl-libc/<arch>.txt`, so `*-linux-musl` binaries statically link the sysroot's musl and its mallocng allocator rather than Zig 0.16's bundled libc, whose malloc never returns freed small allocations to the operating system. Zig also compiles C sources for other targets against those musl headers, so commands building them remove the variable inside the container (`env -u ZIG_LIBC`), as `start-cli`'s Apple build does. Run `make musl-libc-test`, part of `make test`, to build a probe for each architecture through the alias and check that it links mallocng.
 
 The formatter and core-test Dockerfiles receive the base as a build argument. Docker's build cache refreshes derived images when their base or recipe changes. Core tests keep their separate `RUST_BUILDER_IMAGE` contract: a custom value selects a prebuilt test image; the default test image is built over the pinned builder with Node and SquashFS tools.
 
@@ -37,6 +39,6 @@ make rust-builder-check
 
 ## Updates
 
-Update the upstream image digest and source URL/checksum together, then re-evaluate the patch against that release. Rust, bindgen and the Alpine sysroot stages have separate explicit version pins.
+Update the upstream image digest and source URL/checksum together, then re-evaluate the patch against that release. Rust, bindgen and the Alpine sysroot stages have separate explicit version pins. The Alpine pins also select the musl release that musl binaries link.
 
 GHCR associates the package with this repository through its OCI source label. Its package visibility must be public before unauthenticated developer builds can pull it.

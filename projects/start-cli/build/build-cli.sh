@@ -70,9 +70,15 @@ if [[ "${ENVIRONMENT:-}" =~ (^|-)unstable($|-) ]]; then
   RUSTFLAGS="$RUSTFLAGS -C debuginfo=1"
 fi
 
+LIBC_ENV=()
+if [[ "$TARGET" != *-linux-musl* ]]; then
+  # Zig reads musl headers for every target ZIG_LIBC is set for.
+  LIBC_ENV=(env -u ZIG_LIBC)
+fi
+
 echo "FEATURES=\"$FEATURES\""
 echo "RUSTFLAGS=\"$RUSTFLAGS\""
-rust-zig-builder cargo zigbuild --manifest-path=./Cargo.toml $BUILD_FLAGS --features=$FEATURES --locked -p start-cli --bin start-cli --target=$TARGET
+rust-zig-builder "${LIBC_ENV[@]}" cargo zigbuild --manifest-path=./Cargo.toml $BUILD_FLAGS --features=$FEATURES --locked -p start-cli --bin start-cli --target=$TARGET
 if [ "$(ls -nd "target/$TARGET/$PROFILE/start-cli" | awk '{ print $3 }')" != "$UID" ]; then
   rust-zig-builder sh -c "chown -R $UID:$UID target && chown -R $UID:$UID  /usr/local/cargo"
 fi
