@@ -16,12 +16,12 @@ use crate::context::RpcContext;
 use crate::prelude::*;
 use crate::util::crypto::gen_nistp256;
 use crate::util::future::complete_owned_operation;
-use crate::util::io::{delete_file, read_file_to_string, write_file_private_atomic};
+use crate::util::io::{TmpDir, delete_file, read_file_to_string, write_file_private_atomic};
 use crate::util::mok::{DKMS_MOK_PUB, MokEnrollment, enrollment_status, request_enrollment};
 use crate::util::serde::Pem;
 use crate::util::{GeneralBoxedGuard, Invoke, new_guid};
 
-/// Reserves shared MOK authentication; presence does not attest enrollment.
+/// Reserves shared MOK authentication before import; presence does not attest enrollment.
 pub(crate) const REQUEST_CERTIFICATE: &str = "/media/startos/config/fde/enrollment.der";
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -140,6 +140,37 @@ fn require_acknowledgment(acknowledged: bool) -> Result<(), Error> {
     Ok(())
 }
 
+fn hardware_required() -> Error {
+    Error::new(
+        eyre!(t!("fde.enrollment.hardware-required")),
+        ErrorKind::Bios,
+    )
+}
+
+fn require_hardware(secure_boot: bool, tpm_version: Option<&str>) -> Result<(), Error> {
+    if secure_boot && tpm_version.map(str::trim) == Some("2") {
+        Ok(())
+    } else {
+        Err(hardware_required())
+    }
+}
+
+async fn reserve_request<'a>(
+    path: &Path,
+    certificate: &[u8],
+    approval_code: Option<&'a str>,
+) -> Result<&'a str, Error> {
+    let Some(code) = approval_code else {
+        delete_file(path).await?;
+        return Err(Error::new(
+            eyre!(t!("fde.enrollment.trusted-reenrollment")),
+            ErrorKind::Bios,
+        ));
+    };
+    write_file_private_atomic(path, certificate).await?;
+    Ok(code)
+}
+
 /// Begins firmware enrollment inside an acknowledged enable request.
 /// Restricts enrollment to generic UEFI targets; activation is separate.
 pub async fn begin(
@@ -151,99 +182,53 @@ pub async fn begin(
         let _exclusive = ctx.password_changes.lock().await;
         require_acknowledgment(acknowledged_offline)?;
         if !super::api::supported_platform(&crate::PLATFORM) {
-            return Err(Error::new(
-                eyre!(t!("fde.enrollment.hardware-required")),
-                ErrorKind::Bios,
-            ));
+            return Err(hardware_required());
         }
         let snapshot = ctx.db.peek().await;
         crate::auth::check_password(&snapshot.as_private().as_password().de()?, &password)?;
         crate::disk::fde::LuksPool::new(&ctx.disk_guid, "/media/startos/config")?;
-        if !crate::util::mok::is_secure_boot_enabled().await
-            || crate::util::io::read_file_to_string("/sys/class/tpm/tpm0/tpm_version_major")
+        require_hardware(
+            crate::util::mok::is_secure_boot_enabled().await,
+            crate::util::io::maybe_read_file_to_string("/sys/class/tpm/tpm0/tpm_version_major")
                 .await?
-                .trim()
-                != "2"
-        {
-            return Err(Error::new(
-                eyre!(t!("fde.enrollment.hardware-required")),
-                ErrorKind::Bios,
-            ));
+                .as_deref(),
+        )?;
+        let zram_was_active = crate::system::zram_active().await?;
+        let result = async {
+            crate::system::disable_zram().await?;
+            enroll(&ctx).await
         }
-        crate::system::disable_zram().await?;
-        super::memory::require_tmpfs(Path::new("/run"))?;
-        let memory = super::memory::ProcessSecretMemory::protect()?;
-        let mut enrollment = match snapshot.as_private().as_fde_enrollment().de()? {
-            Some(enrollment) => enrollment,
-            None => {
-                let enrollment = Enrollment::generate(Path::new("/run")).await?;
-                ctx.db
-                    .mutate(|db| {
-                        db.as_private_mut()
-                            .as_fde_enrollment_mut()
-                            .ser(&Some(enrollment.clone()))
-                    })
-                    .await
-                    .result?;
-                enrollment
-            }
-        };
-        write_file_private_atomic(
-            Path::new(REQUEST_CERTIFICATE),
-            &enrollment.image_certificate.to_der()?,
-        )
-        .await?;
-        let mut required = vec![(
-            CertificatePurpose::Image,
-            Path::new(REQUEST_CERTIFICATE).to_owned(),
-        )];
-        if request_marker(Path::new(DKMS_MOK_PUB)).await? {
-            required.push((CertificatePurpose::Modules, DKMS_MOK_PUB.into()));
+        .await;
+        if result.is_err() {
+            restore_uncommitted_zram(&ctx.db, zram_was_active)
+                .await
+                .log_err();
         }
-        let mut pending = Vec::new();
-        let mut needs_import = false;
-        for (_, certificate) in &required {
-            match enrollment_status(certificate).await? {
-                MokEnrollment::Enrolled => {}
-                MokEnrollment::Pending => pending.push(certificate.clone()),
-                MokEnrollment::NotEnrolled => {
-                    needs_import = true;
-                    pending.push(certificate.clone());
-                }
-            }
-        }
-        if needs_import {
-            let code = enrollment.approval_code.as_ref().ok_or_else(|| {
-                Error::new(
-                    eyre!(t!("fde.enrollment.trusted-reenrollment")),
-                    ErrorKind::Bios,
-                )
-            })?;
-            let hash = crate::util::crypto::shadow_password_hash(code)?;
-            request_enrollment(&pending, &hash).await?;
-        }
-        let mut certificates = Vec::new();
-        for (purpose, path) in required {
-            let enrollment = enrollment_status(&path).await?;
-            if enrollment == MokEnrollment::NotEnrolled {
-                return Err(Error::new(
-                    eyre!(t!("fde.enrollment.request-not-recorded")),
-                    ErrorKind::Bios,
-                ));
-            }
-            let der = tokio::fs::read(path).await?;
-            certificates.push(CertificateProgress {
-                purpose,
-                sha256: hex::encode(openssl::sha::sha256(&der)),
-                firmware_fingerprint: hex::encode(openssl::sha::sha1(&der)),
-                enrollment,
-            });
-        }
-        let firmware_enrolled = certificates
-            .iter()
-            .all(|certificate| certificate.enrollment == MokEnrollment::Enrolled);
-        if firmware_enrolled {
-            enrollment.approval_code = None;
+        result
+    })
+    .await
+}
+
+/// The caller owns `password_changes` through the authority check and swap change.
+pub(crate) async fn restore_uncommitted_zram(
+    db: &TypedPatchDb<crate::db::model::Database>,
+    was_active: bool,
+) -> Result<(), Error> {
+    if was_active && !super::memory::requires_protection(&db.peek().await) {
+        crate::system::enable_zram().await?;
+    }
+    Ok(())
+}
+
+/// The caller owns `password_changes` and disables managed swap.
+async fn enroll(ctx: &RpcContext) -> Result<FdeEnrollmentProgress, Error> {
+    super::memory::require_tmpfs(Path::new("/run"))?;
+    let memory = super::memory::ProcessSecretMemory::protect()?;
+    let snapshot = ctx.db.peek().await;
+    let mut enrollment = match snapshot.as_private().as_fde_enrollment().de()? {
+        Some(enrollment) => enrollment,
+        None => {
+            let enrollment = Enrollment::generate(Path::new("/run")).await?;
             ctx.db
                 .mutate(|db| {
                     db.as_private_mut()
@@ -252,16 +237,78 @@ pub async fn begin(
                 })
                 .await
                 .result?;
-            delete_file(REQUEST_CERTIFICATE).await?;
+            enrollment
         }
-        memory.check()?;
-        Ok(FdeEnrollmentProgress {
-            firmware_enrolled,
-            approval_code: enrollment.approval_code,
-            certificates,
-        })
+    };
+    let workspace = TmpDir::new().await?;
+    let image_certificate = workspace.join("image.der");
+    let certificate = enrollment.image_certificate.to_der()?;
+    write_file_private_atomic(&image_certificate, &certificate).await?;
+    let mut required = vec![(CertificatePurpose::Image, image_certificate)];
+    if request_marker(Path::new(DKMS_MOK_PUB)).await? {
+        required.push((CertificatePurpose::Modules, DKMS_MOK_PUB.into()));
+    }
+    let mut pending = Vec::new();
+    let mut needs_import = false;
+    for (_, certificate) in &required {
+        match enrollment_status(certificate).await? {
+            MokEnrollment::Enrolled => {}
+            MokEnrollment::Pending => pending.push(certificate.clone()),
+            MokEnrollment::NotEnrolled => {
+                needs_import = true;
+                pending.push(certificate.clone());
+            }
+        }
+    }
+    if needs_import {
+        let code = reserve_request(
+            Path::new(REQUEST_CERTIFICATE),
+            &certificate,
+            enrollment.approval_code.as_deref(),
+        )
+        .await?;
+        let hash = crate::util::crypto::shadow_password_hash(code)?;
+        request_enrollment(&pending, &hash).await?;
+    }
+    let mut certificates = Vec::new();
+    for (purpose, path) in required {
+        let enrollment = enrollment_status(&path).await?;
+        if enrollment == MokEnrollment::NotEnrolled {
+            return Err(Error::new(
+                eyre!(t!("fde.enrollment.request-not-recorded")),
+                ErrorKind::Bios,
+            ));
+        }
+        let der = tokio::fs::read(path).await?;
+        certificates.push(CertificateProgress {
+            purpose,
+            sha256: hex::encode(openssl::sha::sha256(&der)),
+            firmware_fingerprint: hex::encode(openssl::sha::sha1(&der)),
+            enrollment,
+        });
+    }
+    let firmware_enrolled = certificates
+        .iter()
+        .all(|certificate| certificate.enrollment == MokEnrollment::Enrolled);
+    if firmware_enrolled {
+        enrollment.approval_code = None;
+        ctx.db
+            .mutate(|db| {
+                db.as_private_mut()
+                    .as_fde_enrollment_mut()
+                    .ser(&Some(enrollment.clone()))
+            })
+            .await
+            .result?;
+        delete_file(REQUEST_CERTIFICATE).await?;
+    }
+    workspace.delete().await?;
+    memory.check()?;
+    Ok(FdeEnrollmentProgress {
+        firmware_enrolled,
+        approval_code: enrollment.approval_code,
+        certificates,
     })
-    .await
 }
 
 #[cfg(test)]
@@ -272,6 +319,36 @@ mod tests {
     fn offline_acknowledgment_precedes_enrollment() {
         assert!(require_acknowledgment(false).is_err());
         require_acknowledgment(true).unwrap();
+    }
+
+    #[test]
+    fn hardware_admission_rejects_absent_or_older_tpm_and_disabled_secure_boot() {
+        for version in [None, Some("1"), Some(""), Some("3")] {
+            let error = require_hardware(true, version).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                require_hardware(false, Some("2")).unwrap_err().to_string()
+            );
+        }
+        require_hardware(true, Some("2\n")).unwrap();
+    }
+
+    #[tokio::test]
+    async fn refused_import_never_keeps_a_shared_authentication_reservation() {
+        let directory = tempfile::tempdir().unwrap();
+        let marker = directory.path().join("request.der");
+        let certificate = b"public certificate";
+        assert!(reserve_request(&marker, certificate, None).await.is_err());
+        assert!(!marker.exists());
+        assert_eq!(
+            reserve_request(&marker, certificate, Some("approval"))
+                .await
+                .unwrap(),
+            "approval"
+        );
+        assert_eq!(std::fs::read(&marker).unwrap(), certificate);
+        assert!(reserve_request(&marker, certificate, None).await.is_err());
+        assert!(!marker.exists());
     }
 
     #[tokio::test]

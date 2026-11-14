@@ -37,10 +37,35 @@ pub(crate) async fn reset_password(
 ) -> Result<(), Error> {
     complete_owned_operation(async move {
         let _exclusive = ctx.password_changes.lock().await;
-        change_password(&ctx, &password).await?;
-        crate::auth::write_shadow(&password).await
+        let result = change_password(&ctx, &password).await;
+        finish_password_change(&ctx.db, &password, result).await
     })
     .await
+}
+
+async fn committed_password_matches(
+    db: &TypedPatchDb<Database>,
+    password: &str,
+) -> Result<bool, Error> {
+    let hash = db.peek().await.as_private().as_password().de()?;
+    Ok(crate::auth::check_password(&hash, password).is_ok())
+}
+
+/// Committed passwords own shadow credentials even when slot retirement fails.
+/// The original failure takes precedence over a failed shadow synchronization.
+pub(crate) async fn finish_password_change(
+    db: &TypedPatchDb<Database>,
+    password: &str,
+    result: Result<(), Error>,
+) -> Result<(), Error> {
+    if result.is_ok() || committed_password_matches(db, password).await.log_err() == Some(true) {
+        let shadow = crate::auth::write_shadow(password).await;
+        if result.is_ok() {
+            return shadow;
+        }
+        shadow.log_err();
+    }
+    result
 }
 
 async fn commit_password(
@@ -126,8 +151,7 @@ pub(crate) async fn change_encrypted_password(
     loop {
         match credentials {
             LuksCredentials::Stable { admin } => {
-                let current = db.peek().await.as_private().as_password().de()?;
-                if crate::auth::check_password(&current, password).is_ok()
+                if committed_password_matches(db, password).await?
                     && pool.accepts_admin_password(&admin, password).await?
                 {
                     return Ok(());
@@ -153,8 +177,7 @@ pub(crate) async fn change_encrypted_password(
                 commit_password(db, account, &target_hash, Some(credentials.clone())).await?;
             }
             LuksCredentials::Retiring { plan } => {
-                let current = db.peek().await.as_private().as_password().de()?;
-                let same_password = crate::auth::check_password(&current, password).is_ok();
+                let same_password = committed_password_matches(db, password).await?;
                 if same_password {
                     pool.retire_password(&plan, password).await?;
                 } else {

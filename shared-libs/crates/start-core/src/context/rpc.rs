@@ -288,7 +288,13 @@ impl RpcContext {
         let db = if let Some(InitResult { net_ctrl, .. }) = &init_result {
             net_ctrl.db.clone()
         } else {
-            TypedPatchDb::<Database>::load(config.db().await?).await?
+            TypedPatchDb::<Database>::load_unchecked(config.db().await?)
+        };
+        let secret_memory = crate::fde::memory::protect_authorities(&db.peek().await)?;
+        let db = if init_result.is_none() {
+            TypedPatchDb::<Database>::load((*db).clone()).await?
+        } else {
+            db
         };
         db.mutate(|db| {
             db.as_public_mut().as_disks_mut().ser(&Vec::new())?;
@@ -307,7 +313,6 @@ impl RpcContext {
         .await
         .result?;
         let peek = db.peek().await;
-        let secret_memory = crate::fde::memory::protect_authorities(&peek)?;
         let account = AccountInfo::load(&peek)?;
         load_db.complete();
         tracing::info!("{}", t!("context.rpc.opened-patchdb"));

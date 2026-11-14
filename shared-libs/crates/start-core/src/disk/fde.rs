@@ -1708,9 +1708,64 @@ esac
     }
 
     #[tokio::test]
+    #[ignore = "requires native cryptsetup and managed ZRAM in an exclusive guest; never run on build host"]
+    async fn real_failed_enrollment_restores_only_uncommitted_preexisting_zram() {
+        use futures::FutureExt;
+
+        use crate::account::{AccountInfo, LuksCredentials};
+        use crate::db::model::Database;
+        use crate::fde::enrollment::restore_uncommitted_zram;
+        use crate::prelude::{PatchDb, TypedPatchDb};
+
+        assert!(!crate::system::zram_active().await.unwrap());
+        let directory = tempfile::tempdir_in("/dev/shm").unwrap();
+        let pool = format_real_pool(directory.path(), "luks2").await;
+        let memory = pool.protect_secret_handling().unwrap();
+        let (admin, keys) = pool.capture_unlock_keys(OLD).await.unwrap();
+        drop(keys);
+        let account = AccountInfo::new(OLD, std::time::SystemTime::now(), None).unwrap();
+        let initial = Database::init(&account, false, None, None).unwrap();
+        let db = TypedPatchDb::<Database>::load_or_init(
+            PatchDb::open(directory.path().join("swap.db"))
+                .await
+                .unwrap(),
+            || async { Ok(initial) },
+        )
+        .await
+        .unwrap();
+        let result = std::panic::AssertUnwindSafe(async {
+            crate::system::enable_zram().await.unwrap();
+            assert!(crate::system::zram_active().await.unwrap());
+            crate::system::disable_zram().await.unwrap();
+            restore_uncommitted_zram(&db, true).await.unwrap();
+            assert!(crate::system::zram_active().await.unwrap());
+            crate::system::disable_zram().await.unwrap();
+            restore_uncommitted_zram(&db, false).await.unwrap();
+            assert!(!crate::system::zram_active().await.unwrap());
+            db.mutate(|db| {
+                db.as_private_mut()
+                    .as_luks_credentials_mut()
+                    .ser(&Some(LuksCredentials::Stable { admin }))
+            })
+            .await
+            .result
+            .unwrap();
+            restore_uncommitted_zram(&db, true).await.unwrap();
+            assert!(!crate::system::zram_active().await.unwrap());
+        })
+        .catch_unwind()
+        .await;
+        crate::system::disable_zram().await.unwrap();
+        memory.check().unwrap();
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    #[tokio::test]
     #[ignore = "requires native cryptsetup, RAM-backed fixtures and protected process memory"]
     async fn real_luks_account_changes_resume_install_and_committed_retirement() {
-        use crate::account::password::change_encrypted_password;
+        use crate::account::password::{change_encrypted_password, finish_password_change};
         use crate::account::{AccountInfo, LuksCredentials};
         use crate::db::model::Database;
         use crate::prelude::{PatchDb, TypedPatchDb};
@@ -1735,12 +1790,34 @@ esac
             std::fs::write(&wrapper, format!("#!/bin/sh\ncase \"$*\" in *package-data*) if [ \"$1\" = luksAddKey ] && [ -e '{0}/fail-add' ]; then exit 5; fi; if [ \"$1\" = luksKillSlot ] && [ -e '{0}/fail-kill' ]; then exit 5; fi;; esac\nexec /usr/sbin/cryptsetup \"$@\"\n", root.display())).unwrap();
             std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
             pool.cryptsetup = wrapper;
+            crate::auth::write_shadow(OLD).await.unwrap();
+            let assert_shadow = |password: &str, rejected: &str| {
+                for path in ["/etc/shadow", "/media/startos/config/overlay/etc/shadow"] {
+                    let shadow = std::fs::read_to_string(path).unwrap();
+                    for user in ["start9", "kiosk"] {
+                        let hash = shadow
+                            .lines()
+                            .find_map(|line| {
+                                let mut fields = line.split(':');
+                                (fields.next() == Some(user)).then(|| fields.next().unwrap())
+                            })
+                            .unwrap();
+                        sha_crypt::sha512_check(password, hash).unwrap();
+                        assert!(sha_crypt::sha512_check(rejected, hash).is_err());
+                    }
+                }
+            };
             std::fs::write(root.join("fail-add"), "").unwrap();
-            assert!(
-                change_encrypted_password(&db, &account, &pool, &keys, NEW)
+            let result = change_encrypted_password(&db, &account, &pool, &keys, NEW).await;
+            let error = result.as_ref().err().unwrap().to_string();
+            assert_eq!(
+                finish_password_change(&db, NEW, result)
                     .await
-                    .is_err()
+                    .unwrap_err()
+                    .to_string(),
+                error
             );
+            assert_shadow(OLD, NEW);
             let snapshot = db.peek().await;
             crate::auth::check_password(&snapshot.as_private().as_password().de().unwrap(), OLD)
                 .unwrap();
@@ -1757,11 +1834,16 @@ esac
             let account = SyncRwLock::new(AccountInfo::load(&db.peek().await).unwrap());
             std::fs::remove_file(root.join("fail-add")).unwrap();
             std::fs::write(root.join("fail-kill"), "").unwrap();
-            assert!(
-                change_encrypted_password(&db, &account, &pool, &keys, OTHER)
+            let result = change_encrypted_password(&db, &account, &pool, &keys, OTHER).await;
+            let error = result.as_ref().err().unwrap().to_string();
+            assert_eq!(
+                finish_password_change(&db, OTHER, result)
                     .await
-                    .is_err()
+                    .unwrap_err()
+                    .to_string(),
+                error
             );
+            assert_shadow(OTHER, OLD);
             let snapshot = db.peek().await;
             crate::auth::check_password(&snapshot.as_private().as_password().de().unwrap(), OTHER)
                 .unwrap();
@@ -1778,9 +1860,9 @@ esac
             .unwrap();
             let account = SyncRwLock::new(AccountInfo::load(&db.peek().await).unwrap());
             std::fs::remove_file(root.join("fail-kill")).unwrap();
-            change_encrypted_password(&db, &account, &pool, &keys, NEW)
-                .await
-                .unwrap();
+            let result = change_encrypted_password(&db, &account, &pool, &keys, NEW).await;
+            finish_password_change(&db, NEW, result).await.unwrap();
+            assert_shadow(NEW, OTHER);
             let snapshot = db.peek().await;
             crate::auth::check_password(&snapshot.as_private().as_password().de().unwrap(), NEW)
                 .unwrap();

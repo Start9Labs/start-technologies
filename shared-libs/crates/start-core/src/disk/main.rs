@@ -17,6 +17,10 @@ use crate::progress::FullProgressTracker;
 use crate::util::Invoke;
 use crate::{Error, ErrorKind, ResultExt};
 
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;
+
 pub const PASSWORD_PATH: &'static str = "/run/startos/password";
 pub const DEFAULT_PASSWORD: &'static str = "password";
 pub const MAIN_FS_SIZE: FsSize = FsSize::Gigabytes(8);
@@ -54,6 +58,7 @@ where
     Ok(guid)
 }
 
+/// The caller retains exclusive target-device ownership through filesystem creation and export.
 #[instrument(skip_all)]
 pub async fn create_pool<I, P>(
     disks: &I,
@@ -64,42 +69,38 @@ where
     for<'a> &'a I: IntoIterator<Item = &'a P>,
     P: AsRef<Path>,
 {
-    Command::new("dmsetup")
-        .arg("remove_all")
-        .invoke(crate::ErrorKind::DiskManagement)
-        .await?;
+    let mut devices = Vec::new();
     for disk in disks {
-        let device = tokio::fs::canonicalize(disk.as_ref())
-            .await
-            .with_ctx(|_| (ErrorKind::BlockDevice, disk.as_ref().display().to_string()))?;
-        if pvscan.contains_key(&device) {
+        devices.push(
+            tokio::fs::canonicalize(disk.as_ref())
+                .await
+                .with_ctx(|_| (ErrorKind::BlockDevice, disk.as_ref().display().to_string()))?,
+        );
+    }
+    crate::os_install::quiesce::release_block_holders(&devices).await?;
+    for device in &devices {
+        if pvscan.contains_key(device) {
             Command::new("pvremove")
                 .arg("-yff")
-                .arg(disk.as_ref())
+                .arg(device)
                 .invoke(crate::ErrorKind::DiskManagement)
                 .await?;
         }
-        tokio::fs::write(disk.as_ref(), &[0; 2048]).await?;
+        tokio::fs::write(device, &[0; 2048]).await?;
         Command::new("pvcreate")
             .arg("-yff")
-            .arg(disk.as_ref())
+            .arg(device)
             .invoke(crate::ErrorKind::DiskManagement)
             .await?;
     }
-    let mut guid = format!(
-        "STARTOS_{}",
-        base32::encode(
-            base32::Alphabet::Rfc4648 { padding: false },
-            &rand::random::<[u8; 20]>(),
-        )
-    );
+    let mut guid = format!("STARTOS_{}", crate::util::new_guid());
     if !encrypted {
         guid += "_UNENC";
     }
     let mut cmd = Command::new("vgcreate");
     cmd.arg("-y").arg(&guid);
-    for disk in disks {
-        cmd.arg(disk.as_ref());
+    for device in &devices {
+        cmd.arg(device);
     }
     cmd.invoke(crate::ErrorKind::DiskManagement).await?;
     Ok(guid.into())
@@ -360,6 +361,7 @@ pub(crate) async fn import<P: AsRef<Path>>(
     progress: Option<&FullProgressTracker>,
 ) -> Result<RequiresReboot, Error> {
     activate_pool(guid).await?;
+    close_pool_luks(guid).await?;
     mount_all_fs(guid, datadir, mode, password, progress).await
 }
 

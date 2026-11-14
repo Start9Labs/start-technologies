@@ -9,9 +9,11 @@ if [ "$#" = 0 ]; then
         disk::fde::tests::real_luks_account_changes_resume_install_and_committed_retirement
 fi
 directory=$(cd "$(dirname "$0")" && pwd)
-image=startos-fde-luks-test
-docker build --load -t "$image" -f "$directory/fde-luks.Dockerfile" "$directory"
-docker run --rm --network none --tmpfs /dev/shm:exec,nosuid,nodev,size=256m --tmpfs /tmp:exec,nosuid,nodev --tmpfs /run \
+workspace=$(mktemp -d)
+trap 'rm -rf "$workspace"' EXIT
+docker build --load --iidfile "$workspace/image-id" -f "$directory/fde-luks.Dockerfile" "$directory"
+image=$(<"$workspace/image-id")
+docker run --rm --network none --tmpfs /dev/shm:exec,nosuid,nodev,size=256m --tmpfs /tmp:exec,nosuid,nodev --tmpfs /run --tmpfs /media/startos/config \
     --mount "type=bind,source=$binary,target=/fde-tests,readonly" \
     "$image" sh -eu -c '
         for test do

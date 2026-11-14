@@ -62,7 +62,7 @@ pub(crate) fn swap_devices(swaps: &str) -> impl Iterator<Item = &str> {
         .filter_map(|line| line.split_whitespace().next())
 }
 
-async fn zram_active() -> Result<bool, Error> {
+pub(crate) async fn zram_active() -> Result<bool, Error> {
     let swaps = crate::util::io::read_file_to_string("/proc/swaps").await?;
     Ok(swap_devices(&swaps).any(|device| device == ZRAM_DEVICE))
 }
@@ -97,7 +97,6 @@ pub async fn enable_zram() -> Result<(), Error> {
         .arg("zram")
         .invoke(ErrorKind::Zram)
         .await?;
-    crate::disk::util::settle_udev().await?;
     disable_zram().await?;
     tokio::fs::write("/sys/block/zram0/comp_algorithm", "lz4")
         .await

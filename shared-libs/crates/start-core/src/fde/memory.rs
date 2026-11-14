@@ -23,6 +23,7 @@ pub(crate) fn requires_protection(db: &DatabaseModel) -> bool {
         || private.as_luks_credentials().transpose_ref().is_some()
 }
 
+/// Call before migrations or deserializing key-bearing records.
 pub(crate) fn protect_authorities(
     db: &DatabaseModel,
 ) -> Result<Option<ProcessSecretMemory>, Error> {
@@ -170,6 +171,31 @@ mod tests {
             assert!(!requires_protection(&db));
             assert!(protect_authorities(&db).unwrap().is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn untyped_authority_detection_does_not_decode_private_keys() {
+        use patch_db::json_ptr::ROOT;
+
+        use crate::db::model::Database;
+
+        let directory = tempfile::tempdir().unwrap();
+        let raw = PatchDb::open(directory.path().join("untyped.db"))
+            .await
+            .unwrap();
+        for field in ["fdeEnrollment", "luksCredentials"] {
+            let mut value = serde_json::json!({"private": {}});
+            value["private"][field] = serde_json::json!({"malformed": "key-bearing record"});
+            raw.put(&ROOT, &value).await.unwrap();
+            let db = TypedPatchDb::<Database>::load_unchecked(raw.clone());
+            assert!(requires_protection(&db.peek().await));
+            assert!(TypedPatchDb::<Database>::load(raw.clone()).await.is_err());
+        }
+        raw.put(&ROOT, &serde_json::json!({"private": {}}))
+            .await
+            .unwrap();
+        let db = TypedPatchDb::<Database>::load_unchecked(raw);
+        assert!(!requires_protection(&db.peek().await));
     }
 
     #[cfg(target_os = "linux")]

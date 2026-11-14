@@ -213,12 +213,11 @@ pub async fn init(
     }
 
     load_database.start();
-    let db = cfg.db().await?;
+    let db = TypedPatchDb::<Database>::load_unchecked(cfg.db().await?);
+    let secret_memory = crate::fde::memory::protect_authorities(&db.peek().await)?;
     crate::version::Current::default().pre_init(&db).await?;
-    let db = TypedPatchDb::<Database>::load_unchecked(db);
     db.mutate(crate::net::ssl::repair_root_cert).await.result?;
     let peek = db.peek().await;
-    let secret_memory = crate::fde::memory::protect_authorities(&peek)?;
     load_database.complete();
 
     load_ssh_keys.start();
@@ -309,7 +308,6 @@ pub async fn init(
     .await?;
 
     load_ca_cert.start();
-    // write to ca cert store
     tokio::fs::write(
         "/usr/local/share/ca-certificates/startos-root-ca.crt",
         account.root_ca_cert.to_pem()?,
