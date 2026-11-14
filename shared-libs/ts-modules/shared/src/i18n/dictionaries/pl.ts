@@ -1093,4 +1093,7 @@ export default {
   1296: 'Wyświetl niestandardowy katalog',
   1297: 'Niestandardowy',
   1298: 'Wpisz domenę lub adres URL',
+  1299: 'Wymuś zatrzymanie',
+  1300: 'Wymuszanie zatrzymania',
+  1301: 'Wymuszenie zatrzymania może spowodować utratę danych lub pozostawić serwis w nieprawidłowym stanie. Czy na pewno chcesz wymusić zatrzymanie?',
 } satisfies i18n

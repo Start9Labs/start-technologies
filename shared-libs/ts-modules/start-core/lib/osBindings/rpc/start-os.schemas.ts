@@ -2796,6 +2796,12 @@ export const ExecParams: z.ZodObject<{
 }).meta({
   id: 'ExecParams',
 })
+export const ForceStopParams: z.ZodObject<{
+  id: typeof PackageId
+  forceStopAt: z.ZodString
+}> = /* @__PURE__ */ object({ id: PackageId, forceStopAt: z.string() }).meta({
+  id: 'ForceStopParams',
+})
 export const ForgetGatewayParams: z.ZodObject<{ gateway: typeof GatewayId }> =
   /* @__PURE__ */ object({ gateway: GatewayId }).meta({
     id: 'ForgetGatewayParams',
@@ -7084,6 +7090,12 @@ export const Api = {
         exec: {
           _PARAMS: /* @__PURE__ */ ExecParams,
           _RETURN: /* @__PURE__ */ ExecResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'force-stop': {
+          _PARAMS: /* @__PURE__ */ ForceStopParams,
+          _RETURN: /* @__PURE__ */ z.null(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },

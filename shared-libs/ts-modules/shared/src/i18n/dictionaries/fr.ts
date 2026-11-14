@@ -1093,4 +1093,7 @@ export default {
   1296: 'Afficher une bibliothèque personnalisée',
   1297: 'Personnalisée',
   1298: 'Saisissez un domaine ou une URL',
+  1299: 'Forcer l’arrêt',
+  1300: 'Arrêt forcé en cours',
+  1301: 'Forcer l’arrêt peut entraîner une perte de données ou laisser le service dans un état défectueux. Voulez-vous vraiment forcer l’arrêt ?',
 } satisfies i18n

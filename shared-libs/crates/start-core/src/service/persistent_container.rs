@@ -76,6 +76,7 @@ async fn shutdown_rpc_server<ExitFuture, ExitError, Shutdown, ServerFuture>(
 #[derive(Debug)]
 pub struct ServiceState {
     pub(super) rt_initialized: bool,
+    pub(super) stop_rpc_completed: bool,
     pub(super) callbacks: BTreeSet<Arc<CallbackId>>,
 }
 
@@ -83,6 +84,7 @@ impl ServiceState {
     pub fn new() -> Self {
         Self {
             rt_initialized: false,
+            stop_rpc_completed: false,
             callbacks: Default::default(),
         }
     }
@@ -105,6 +107,9 @@ pub struct PersistentContainer {
     assets: Vec<MountGuard>,
     pub(super) images: BTreeMap<ImageId, Arc<MountGuard>>,
     pub(super) subcontainers: Arc<Mutex<BTreeMap<Guid, Subcontainer>>>,
+    pub(super) forcing_stop: std::sync::atomic::AtomicBool,
+    pub(super) subcontainer_cleanup: Arc<Mutex<()>>,
+    /// Acquire before `subcontainers` when both locks are needed.
     pub(crate) shared_volumes: Arc<Mutex<crate::shared_volumes::mounts::SharedVolumeMounts>>,
     pub(super) state: Arc<watch::Sender<ServiceState>>,
     net_service: Option<NetService>,
@@ -308,6 +313,8 @@ impl PersistentContainer {
             assets,
             images,
             subcontainers: Arc::new(Mutex::new(BTreeMap::new())),
+            forcing_stop: std::sync::atomic::AtomicBool::new(false),
+            subcontainer_cleanup: Arc::new(Mutex::new(())),
             shared_volumes: Arc::new(Mutex::new(Default::default())),
             state: Arc::new(watch::channel(ServiceState::new()).0),
             net_service: None,
@@ -446,6 +453,7 @@ impl PersistentContainer {
         let assets = std::mem::take(&mut self.assets);
         let images = std::mem::take(&mut self.images);
         let subcontainers = self.subcontainers.clone();
+        let subcontainer_cleanup = self.subcontainer_cleanup.clone();
         let shared_volumes = self.shared_volumes.clone();
         let lxc_container = self.lxc_container.take();
         let net_service = self.net_service.take();
@@ -475,7 +483,9 @@ impl PersistentContainer {
             for assets in assets {
                 errs.handle(assets.unmount(true).await);
             }
-            for (_, overlay) in std::mem::take(&mut *subcontainers.lock().await) {
+            let mut subcontainers = subcontainers.lock().await;
+            let _cleanup = subcontainer_cleanup.lock().await;
+            for (_, overlay) in std::mem::take(&mut *subcontainers) {
                 errs.handle(overlay.overlay.unmount(true).await);
             }
             for (_, images) in images {
@@ -505,12 +515,34 @@ impl PersistentContainer {
         Ok(())
     }
 
+    pub(super) async fn hard_exit(mut self) -> Result<(), Error> {
+        let lxc = self.lxc_container.take().or_not_found("lxc container")?;
+        let mut errors = ErrorCollection::new();
+        if let Some(destroy) = self.destroy(None, None) {
+            errors.handle(destroy.await);
+        }
+        errors.handle(lxc.finish_exit().await);
+        errors.into_result()
+    }
+
+    pub(super) async fn force_stop(&self) -> Result<(), Error> {
+        super::effects::subcontainer::kill_all(self).await
+    }
+
     pub(super) fn net_service(&self) -> Result<&NetService, Error> {
         self.net_service.as_ref().or_not_found("network service")
     }
 
     #[instrument(skip_all)]
     pub async fn start(&self) -> Result<(), Error> {
+        ensure_code!(
+            !self.forcing_stop.load(std::sync::atomic::Ordering::SeqCst),
+            ErrorKind::InvalidRequest,
+            "{}",
+            t!("control.force-stop-in-progress")
+        );
+        self.state
+            .send_modify(|state| state.stop_rpc_completed = false);
         self.rpc_client.request(rpc::Start, Empty {}).await?;
         Ok(())
     }
@@ -518,6 +550,8 @@ impl PersistentContainer {
     #[instrument(skip_all)]
     pub async fn stop(&self) -> Result<(), Error> {
         self.rpc_client.request(rpc::Stop, Empty {}).await?;
+        self.state
+            .send_modify(|state| state.stop_rpc_completed = true);
         Ok(())
     }
 

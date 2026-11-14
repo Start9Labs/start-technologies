@@ -1094,4 +1094,7 @@ export const ENGLISH: Record<string, number> = {
   'View custom registry': 1296,
   'Custom': 1297, // as in, a custom registry
   'Enter a domain or URL': 1298,
+  'Force stop': 1299,
+  'Force stopping': 1300,
+  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1301,
 }
