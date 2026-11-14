@@ -599,4 +599,9 @@ export const ENGLISH: Record<string, number> = {
   "To disable this VPN, first change {vpns} to connect via something else.": 642,
   'Never (Default)': 643,
   'When behind NAT': 644,
+  'Managed switch': 645,
+  'Connect a managed switch': 646,
+  'Every security profile is sent to this port as a tagged VLAN, and the switch decides which profile each of its own ports belongs to. Anyone who can log in to the switch can reach every profile, so protect its password and finish its VLAN setup before connecting it.': 647,
+  'Trust this switch': 648,
+  'VLAN IDs': 649,
 }

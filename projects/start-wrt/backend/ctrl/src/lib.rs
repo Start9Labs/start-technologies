@@ -47,6 +47,7 @@ pub mod ssh_sessions;
 pub mod ssl;
 pub mod system;
 pub mod tls;
+pub mod trunk;
 pub mod uci;
 pub mod update;
 pub mod usb_ports;

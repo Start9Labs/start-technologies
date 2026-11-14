@@ -64,6 +64,7 @@ export default class Ethernet {
           ...port,
           wan: port.name === name,
           profile: port.name === name ? null : port.profile,
+          trunk: port.name !== name && port.trunk,
         }))
 
         await this.service.save(items)

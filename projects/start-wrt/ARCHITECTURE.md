@@ -109,11 +109,11 @@ The core concept. Each profile creates:
 
 Devices receive a profile based on how they join the network:
 
-| Entry Point     | Mechanism                                                                                                                                                                                       |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **WiFi**        | One SSID, many passwords. Each password maps to a profile via `wpa_psk_file` with dynamic VLAN.                                                                                                 |
-| **Ethernet**    | Bridge VLAN port assignments — each physical port tagged to a profile's VLAN. OpenWrt maps UCI `bridge-vlan` config to DSA hardware tables or software bridge filtering depending on the board. |
-| **Inbound VPN** | Each WireGuard server interface bound to a profile.                                                                                                                                             |
+| Entry Point     | Mechanism                                                                                                                                                                                                                                                      |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **WiFi**        | One SSID, many passwords. Each password maps to a profile via `wpa_psk_file` with dynamic VLAN.                                                                                                                                                                |
+| **Ethernet**    | Bridge VLAN port assignments — each physical port tagged to a profile's VLAN, or a trunk carrying every profile tagged for a managed switch. OpenWrt maps UCI `bridge-vlan` config to DSA hardware tables or software bridge filtering depending on the board. |
+| **Inbound VPN** | Each WireGuard server interface bound to a profile.                                                                                                                                                                                                            |
 
 Profile orchestration spans five UCI configs: `startwrt`, `network`, `firewall`, `dhcp`, `wireless`.
 A profile save rewrites only the firewall sections named `profile_<interface>_*`; sections added in LuCI

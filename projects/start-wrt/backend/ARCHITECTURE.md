@@ -162,7 +162,11 @@ Creates `WifiStation` (password entries) and `WifiVlan` (VLAN mapping) sections 
 
 ### ethernet.rs — Ethernet Port Assignment
 
-Maps physical ports to profiles via bridge VLAN assignments on the LAN bridge (`br-lan`). Also manages WAN port designation (which port is the uplink). Reads/writes `NetworkBridgeVlan` and `NetworkVlanPort` in the `network` UCI config. USB ports reach the bridge through `usb_ports.rs`, and a request that omits a recorded USB port keeps its profile.
+Maps physical ports to profiles via bridge VLAN assignments on the LAN bridge (`br-lan`). Also manages WAN port designation (which port is the uplink). Reads/writes `NetworkBridgeVlan` and `NetworkVlanPort` in the `network` UCI config. USB ports reach the bridge through `usb_ports.rs`, and a request that omits a recorded USB port keeps its profile. An Ethernet port can instead be a trunk, tagged in every profile's VLAN for a managed switch downstream.
+
+### trunk.rs — Trunk Ports
+
+Recognises a trunk (a port whose every VLAN membership is tagged) and builds a port's membership in a profile's VLAN. Shared by `ethernet.rs`, which reads and writes trunks, and `profiles.rs`, which tags trunks into each new profile's VLAN.
 
 ### vpn_server.rs / vpn_client.rs — VPN Management
 
@@ -312,12 +316,12 @@ Shared, OpenWrt-native typed sections live in `uciedit/src/openwrt.rs`; feature-
 
 `ErrorKind` enum covers IO, UCI parse/write errors, and domain errors:
 
-- Config errors: `InterfaceNameConflict`, `DuplicateVlanTag`, `DuplicatePassword`, `DuplicatePasswordLabel`, `DuplicateFullname`
+- Config errors: `InterfaceNameConflict`, `DuplicateVlanTag`, `ReservedVlanTag`, `DuplicatePassword`, `DuplicatePasswordLabel`, `DuplicateFullname`
 - Profile errors: `MissingProfile`, `CorruptedProfile`, `LanOwnerExists`, `CannotDeleteLanOwner`
 - Infrastructure errors: `MissingLanBridge`, `MissingWanInterface`, `MissingLanInterface`, `MissingFirewallZone`
 - WiFi errors: `CorruptedWifi`, `UnnamedWirelessInterface`, `UnnamedWirelessDevice`
 - VPN errors: `VpnHasDependents`, `VpnChainCycle`, `VpnPeersWouldBreak`, `VpnDisabled`
-- Validation: `InvalidValue`, `WanPortWithProfile`, `DhcpStaticHostsInSubnet`, `SubnetCollision`, `MissingDeviceAddress`, `PublishedPortsUseIpv6`
+- Validation: `InvalidValue`, `WanPortWithProfile`, `InvalidTrunkPort`, `DhcpStaticHostsInSubnet`, `SubnetCollision`, `MissingDeviceAddress`, `PublishedPortsUseIpv6`
 - UCI errors: `UciEdit` (any `uciedit` parse, I/O, or write-conflict failure, and failed `uci` CLI calls)
 
 An RPC error carries its `ErrorKind` value as `code` and the kind's name as `message`. Code 34 (authorization) triggers frontend logout.

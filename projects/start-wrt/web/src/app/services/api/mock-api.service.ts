@@ -1010,6 +1010,7 @@ export class MockApiService extends ApiService {
           Object.entries(this.mockEthernet.ports).map(([name, port]) => [
             name,
             {
+              ...port,
               profile:
                 port.profile?.interface === params.interface
                   ? { ...port.profile, fullname: newFullname }
@@ -1081,6 +1082,7 @@ export class MockApiService extends ApiService {
           Object.entries(this.mockEthernet.ports).map(([name, port]) => [
             name,
             {
+              ...port,
               profile:
                 port.profile?.interface === deleted.interface
                   ? null
@@ -2166,20 +2168,24 @@ export class MockApiService extends ApiService {
     wan_ipv6: true,
     wan_port: 'eth0',
     ports: {
-      eth0: { profile: null },
+      eth0: { profile: null, trunk: false },
       eth1: {
         profile: { fullname: 'Admin', interface: 'lan', vlan_tag: 1 },
+        trunk: false,
       },
       eth2: {
         profile: { fullname: 'Admin', interface: 'lan', vlan_tag: 1 },
+        trunk: false,
       },
       eth3: {
         profile: { fullname: 'Guest', interface: 'guest', vlan_tag: 100 },
+        trunk: false,
       },
       usb_eth0: {
         profile: { fullname: 'Guest', interface: 'guest', vlan_tag: 100 },
+        trunk: false,
       },
-      usb_eth1: { profile: null },
+      usb_eth1: { profile: null, trunk: false },
     },
     usb_ports: {
       usb_eth0: { present: true, active: true },
@@ -2218,6 +2224,7 @@ export class MockApiService extends ApiService {
         Object.entries(params.ports).map(([name, port]) => [
           name,
           {
+            trunk: port.trunk ?? false,
             profile: port.profile
               ? (this.mockProfiles.find(
                   p =>

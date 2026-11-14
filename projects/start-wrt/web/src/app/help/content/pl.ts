@@ -65,6 +65,10 @@ Fizyczny port: port Ethernet (np. eth0, eth1) lub port USB z adapterem USB–Eth
 
 Domyślny profil bezpieczeństwa przypisany do urządzeń połączonych za pośrednictwem określonego portu Ethernet.
 
+### Przełącznik zarządzalny
+
+Zamiast profilu port może zasilać przełącznik zarządzalny. Port przenosi wtedy każdy profil bezpieczeństwa jako tagowany VLAN, a o tym, do którego profilu należy każdy z portów przełącznika, decyduje jego własna konfiguracja – przełącznik i osoby nim zarządzające są więc obdarzone zaufaniem. Identyfikator VLAN każdego profilu jest wyświetlany pod portem; Admin to zawsze VLAN 1. Ruch docierający do portu bez tagu VLAN nie uzyskuje dostępu.
+
 ### WAN
 
 Port sieci rozległej (WAN) łączy się z modemem ISP lub siecią nadrzędną. Tylko jeden port Ethernet może być w danym momencie wyznaczony jako WAN. Port WAN musi być portem Ethernet.

@@ -65,6 +65,10 @@ Der physische Port: ein Ethernet-Port (z. B. eth0, eth1) oder ein USB-Port mit e
 
 Das standardmäßige Sicherheitsprofil, das Geräten zugewiesen wird, die über den angegebenen Ethernet-Port verbunden sind.
 
+### Managed Switch
+
+Statt eines Profils kann ein Port einen Managed Switch versorgen. Der Port überträgt dann jedes Sicherheitsprofil als getaggtes VLAN, und die Konfiguration des Switches entscheidet, zu welchem Profil jeder seiner Ports gehört – dem Switch und seinen Administratoren wird also vertraut. Die VLAN-ID jedes Profils steht unter dem Port; Admin ist immer VLAN 1. Verkehr, der den Port ohne VLAN-Tag erreicht, erhält keinen Zugang.
+
 ### WAN
 
 Der WAN-Port (Wide Area Network) verbindet sich mit dem Modem Ihres ISP oder dem vorgelagerten Netzwerk. Es kann immer nur ein Ethernet-Port als WAN festgelegt werden. Der WAN-Port muss ein Ethernet-Port sein.

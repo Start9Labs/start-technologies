@@ -18,6 +18,14 @@ StartWRT uses WPA2's identity PSK feature. A single SSID (`StartWRT`) accepts mu
 
 Extending coverage with your own access points, mesh system, or range extender isn't a supported configuration. StartWRT gives each device a [Security Profile](security-profiles.md) based on how it connects: the password it used on the router's own Wi-Fi, or the [Ethernet port](ethernet.md) it is plugged into. Your own equipment handles its devices' passwords itself, so the router sees only how that equipment connects: the port an access point or mesh system is plugged into, or the password a range extender joined with. Every device connected through that equipment gets that one profile, whichever password it used, even when the equipment uses the router's network name and passwords.
 
+## Can devices plugged into the same switch be on different profiles?
+
+Yes, if the switch is a managed switch. Behind an ordinary switch, every device shares the profile of the router port the switch is plugged into. Set that router port to **Managed switch** instead, and the switch's own settings decide which profile each of its ports belongs to. See [Connecting a Managed Switch](managed-switch.md).
+
+## Which switches work with a Managed switch port?
+
+Any switch that supports 802.1Q VLANs, with tagged and untagged membership and a PVID for each port. Switches sold as "smart", "easy smart" or "web managed" usually do; unmanaged switches do not. See [Choosing a Switch](managed-switch.md#choosing-a-switch) for what else to look for and which models have been tested.
+
 ## Is VPN chaining really more private?
 
 Yes, with caveats. VPN chaining routes traffic through multiple providers so that no single provider sees both your identity (home IP) and your destination. However, if the providers collaborate or are compelled by law enforcement across jurisdictions, correlation is still theoretically possible. For most users, the practical benefit is significant — especially when chaining providers in different legal jurisdictions. See [Outbound VPNs](outbound-vpn.md) for setup instructions.

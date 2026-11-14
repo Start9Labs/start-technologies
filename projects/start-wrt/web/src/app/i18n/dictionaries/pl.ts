@@ -594,4 +594,9 @@ export default {
   642: 'Aby wyłączyć ten VPN, najpierw zmień {vpns} tak, aby łączyły się przez coś innego.',
   643: 'Nigdy (domyślnie)',
   644: 'Gdy za NAT',
+  645: 'Przełącznik zarządzalny',
+  646: 'Podłącz przełącznik zarządzalny',
+  647: 'Każdy profil bezpieczeństwa jest wysyłany na ten port jako tagowany VLAN, a przełącznik decyduje, do którego profilu należy każdy z jego własnych portów. Każdy, kto może zalogować się do przełącznika, ma dostęp do wszystkich profili, dlatego chroń jego hasło i dokończ konfigurację VLAN, zanim go podłączysz.',
+  648: 'Zaufaj temu przełącznikowi',
+  649: 'Identyfikatory VLAN',
 } satisfies i18n
