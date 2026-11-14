@@ -2555,6 +2555,16 @@ async fn reconcile_source_rules(
     }
 }
 
+fn interface_subnets(
+    addresses: impl IntoIterator<Item = AddressData>,
+) -> Result<OrdSet<IpNet>, Error> {
+    let subnets: OrdSet<IpNet> = addresses.into_iter().map(IpNet::try_from).try_collect()?;
+    Ok(subnets
+        .into_iter()
+        .filter(|subnet| !crate::net::bridge::is_os_target(subnet.addr()))
+        .collect())
+}
+
 async fn poll_ip_info(
     ip4_proxy: &Ip4ConfigProxy<'_>,
     ip6_proxy: &Ip6ConfigProxy<'_>,
@@ -2618,7 +2628,7 @@ async fn poll_ip_info(
             .map(|octets| IpAddr::V6(Ipv6Addr::from(octets))),
     );
     let scope_id = if_nametoindex(iface.as_str()).with_kind(ErrorKind::Network)?;
-    let subnets: OrdSet<IpNet> = addresses.into_iter().map(IpNet::try_from).try_collect()?;
+    let subnets = interface_subnets(addresses)?;
 
     // Policy routing: ensure replies exit the same interface they arrived on,
     // eliminating the need for MASQUERADE.
@@ -3716,6 +3726,45 @@ mod lookup_tests {
         )]
         .into_iter()
         .collect()
+    }
+
+    #[test]
+    fn interface_observation_excludes_os_targets_but_keeps_gateway_addresses() {
+        use crate::net::bridge::{OS_TARGET_IPV4, OS_TARGET_IPV6};
+        let addresses = [
+            AddressData {
+                address: OS_TARGET_IPV4.to_string(),
+                prefix: 32,
+            },
+            AddressData {
+                address: OS_TARGET_IPV6.to_string(),
+                prefix: 128,
+            },
+            AddressData {
+                address: "10.0.3.1".into(),
+                prefix: 24,
+            },
+            AddressData {
+                address: "fd00:3::1".into(),
+                prefix: 64,
+            },
+        ];
+        assert_eq!(
+            interface_subnets(addresses).unwrap(),
+            [
+                "10.0.3.1/24".parse::<IpNet>().unwrap(),
+                "fd00:3::1/64".parse::<IpNet>().unwrap()
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert!(
+            interface_subnets([AddressData {
+                address: "invalid".into(),
+                prefix: 24
+            }])
+            .is_err()
+        );
     }
 
     #[test]

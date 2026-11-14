@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::context::{CliContext, RpcContext};
 use crate::db::prelude::Map;
 use crate::hostname::ServerHostname;
+use crate::net::bridge::{is_os_target, is_os_target_name};
 use crate::net::forward::{AvailablePorts, START9_BRIDGE_IFACE};
 use crate::net::host::HostApiKind;
 use crate::net::service_interface::{
@@ -136,8 +137,10 @@ impl Model<DerivedAddressInfo> {
 }
 
 impl DerivedAddressInfo {
-    /// Override mutations must refresh selections before publication.
+    /// Candidate and override mutations must refresh selections before publication.
     pub(crate) fn refresh_effective(&mut self) {
+        self.available
+            .retain(|address| !is_os_target_name(&address.hostname));
         self.effective = self.enabled().into_iter().cloned().collect();
     }
 
@@ -153,7 +156,7 @@ impl DerivedAddressInfo {
         self.available.retain(|a| {
             let restricted = insecure_key(a).is_some_and(|k| self.insecure.contains(&k))
                 || opted_names.contains(&override_key(a));
-            !restricted || enabled.contains(a)
+            !is_os_target_name(&a.hostname) && (!restricted || enabled.contains(a))
         });
         self.disabled.retain(|key| !opted_names.contains(key));
         if self.default_off {
@@ -208,11 +211,10 @@ impl DerivedAddressInfo {
             .map(|a| a.hostname.clone())
             .collect();
         let mut all_public = BTreeMap::<(GatewayId, bool), bool>::new();
-        for address in previous
-            .available
-            .iter()
-            .filter(|a| (a.public && a.metadata.is_ip()) || a.gua().is_some() || is_domain(a))
-        {
+        for address in previous.available.iter().filter(|a| {
+            !is_os_target_name(&a.hostname)
+                && ((a.public && a.metadata.is_ip()) || a.gua().is_some() || is_domain(a))
+        }) {
             // `gua_wan` is current; a GUA's `public` flag waits for `set_available`.
             let public = address.gua().map_or_else(
                 || enabled.contains(address),
@@ -354,7 +356,7 @@ impl DerivedAddressInfo {
 
     /// An override decides; without one the mDNS address resolving to it does.
     pub(super) fn lan_ip_on(&self, address: &HostnameInfo) -> bool {
-        if !self.insecure_allowed(address) {
+        if is_os_target_name(&address.hostname) || !self.insecure_allowed(address) {
             return false;
         }
         let key = override_key(address);
@@ -415,12 +417,21 @@ impl DerivedAddressInfo {
         }
     }
 
-    /// Includes explicit consent for temporarily unavailable addresses.
+    /// Includes explicit consent for unavailable non-reserved addresses.
     pub(crate) fn has_enabled_intent(&self) -> bool {
-        !self.enabled.is_empty()
-            || self.enabled_names.iter().any(|key| self.name_on(key))
-            || !self.lan_enabled.is_empty()
-            || !self.insecure_enabled.is_empty()
+        self.enabled.iter().any(|socket| !is_os_target(socket.ip()))
+            || self
+                .enabled_names
+                .iter()
+                .any(|key| !is_os_target_name(&key.0) && self.name_on(key))
+            || self
+                .lan_enabled
+                .iter()
+                .any(|key| !is_os_target_name(&key.0))
+            || self
+                .insecure_enabled
+                .iter()
+                .any(|key| !is_os_target_name(&key.0))
             || !self.enabled().is_empty()
     }
 
@@ -430,6 +441,9 @@ impl DerivedAddressInfo {
         self.available
             .iter()
             .filter(|h| {
+                if is_os_target_name(&h.hostname) {
+                    return false;
+                }
                 if h.is_internal() {
                     // lo / lxcbr0 are always reachable and never operator-disablable.
                     true

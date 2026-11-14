@@ -194,6 +194,57 @@ fn rekeying_moves_named_consent_but_not_plugin_endpoints() {
 }
 
 #[test]
+fn reserved_targets_never_enable_or_retain_incoming_sharing() {
+    let mut info = DerivedAddressInfo::default();
+    info.default_off = true;
+    info.available.insert(
+        candidates(false)
+            .into_iter()
+            .find(|row| matches!(row.metadata, HostnameMetadata::Mdns { .. }))
+            .unwrap(),
+    );
+    for ip in [
+        std::net::IpAddr::V4(crate::net::bridge::OS_TARGET_IPV4),
+        std::net::IpAddr::V6(crate::net::bridge::OS_TARGET_IPV6),
+    ] {
+        let key = (InternedString::from_display(&ip), 4242);
+        let mut row = candidates(false)
+            .into_iter()
+            .find(|row| {
+                matches!(
+                    (ip, &row.metadata),
+                    (std::net::IpAddr::V4(_), HostnameMetadata::Ipv4 { .. })
+                        | (std::net::IpAddr::V6(_), HostnameMetadata::Ipv6 { .. })
+                )
+            })
+            .unwrap();
+        row.hostname = key.0.clone();
+        info.available.insert(row);
+        info.enabled.insert(std::net::SocketAddr::new(ip, 4242));
+        info.enabled_names.insert(key.clone());
+        info.lan_enabled.insert(key.clone());
+        info.insecure_enabled
+            .insert((key.0, key.1, "eth0".parse().unwrap()));
+    }
+    assert!(info.enabled().is_empty());
+    assert!(!info.has_enabled_intent());
+    let mut view = info.clone();
+    view.project_service_selections();
+    assert_eq!(
+        view.available
+            .iter()
+            .map(|row| &*row.hostname)
+            .collect::<BTreeSet<_>>(),
+        ["server.local"].into()
+    );
+    assert!(view.enabled().is_empty());
+    info.refresh_effective();
+    assert_eq!(info.available, view.available);
+    info.enabled.insert("192.168.1.2:4242".parse().unwrap());
+    assert!(info.has_enabled_intent());
+}
+
+#[test]
 fn default_off_service_view_fixtures_preserve_native_selection_and_saved_intent() {
     let mut fixtures = Vec::new();
     for (label, ssl, selected, expected_hosts) in [

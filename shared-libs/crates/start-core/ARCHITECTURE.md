@@ -32,7 +32,7 @@ how `startbox` dispatches to `startd`, `start-cli`, etc. The per-entrypoint logi
 - `src/context/` — Context types (RpcContext, CliContext, InitContext, DiagnosticContext)
 - `src/service/` — Service lifecycle management with actor pattern (`service_actor.rs`)
 - `src/db/model/` — Patch-DB models (`public.rs` synced to frontend, `private.rs` backend-only)
-- `src/net/` — Networking (DNS, ACME, WiFi, Tor, WireGuard, gateway/NAT)
+- `src/net/` — Networking (DNS, ACME, WiFi, Tor, WireGuard, gateway/NAT). `net/bridge.rs` owns reserved OS backend identities. Interface observation and cached address/listener derivation exclude them; persisted choices for those identities cannot retain incoming sharing.
 - `src/net/static_server.rs` — UI and authenticated archive/icon resources. Resource signatures reuse `SignatureAuthorizationContext::check_pubkey` for enrollment. The registry-icon proxy signs exact content-addressed icon URLs under saved registries with the server identity key, using the shared icon path validator and canonical registry enumeration. Signed upstream GETs refuse redirects; other images and archive download hosts retain their existing transport policy. Upstream status, content type and cache policy pass through; unrelated response headers do not.
 - `src/s9pk/` — S9PK package format (merkle archive)
 - `src/lxc/` — LXC container management for packages

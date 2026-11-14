@@ -15,6 +15,7 @@ use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
 use crate::db::model::public::{GatewayType, NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::hostname::ServerHostname;
+use crate::net::bridge::is_os_target;
 use crate::net::forward::AvailablePorts;
 use crate::net::host::address::{HostAddress, PublicDomainConfig, address_api};
 use crate::net::host::binding::{
@@ -233,7 +234,7 @@ impl Model<Host> {
                 let Some(ip_info) = &g.ip_info else {
                     continue;
                 };
-                for subnet in &ip_info.subnets {
+                for subnet in ip_info.subnets.iter().filter(|s| !is_os_target(s.addr())) {
                     let host = InternedString::from_display(&subnet.addr());
                     let metadata = if subnet.addr().is_ipv4() {
                         HostnameMetadata::Ipv4 {
@@ -463,7 +464,7 @@ impl Model<Host> {
                 let Some(ip_info) = &g.ip_info else {
                     continue;
                 };
-                for subnet in &ip_info.subnets {
+                for subnet in ip_info.subnets.iter().filter(|s| !is_os_target(s.addr())) {
                     // IPv4 only — ranges forward purely as IPv4 nft DNAT.
                     if !subnet.addr().is_ipv4() {
                         continue;
@@ -571,7 +572,7 @@ impl Model<Host> {
                     && public_domains
                         .get(&addr.hostname)
                         .map_or(false, |domain| domain.acme.is_some());
-                for subnet in &ip_info.subnets {
+                for subnet in ip_info.subnets.iter().filter(|s| !is_os_target(s.addr())) {
                     let IpAddr::V4(addr) = subnet.addr() else {
                         continue;
                     };
@@ -623,7 +624,7 @@ impl Model<Host> {
                 let Some(wan_ip) = ip_info.wan_ip else {
                     continue;
                 };
-                for subnet in &ip_info.subnets {
+                for subnet in ip_info.subnets.iter().filter(|s| !is_os_target(s.addr())) {
                     let IpAddr::V4(lan_ip) = subnet.addr() else {
                         continue;
                     };
@@ -1130,6 +1131,14 @@ mod tests {
         ]
         .into_iter()
         .map(|address| address.parse::<IpNet>().unwrap())
+        .chain([
+            format!("{}/32", crate::net::bridge::OS_TARGET_IPV4)
+                .parse()
+                .unwrap(),
+            format!("{}/128", crate::net::bridge::OS_TARGET_IPV6)
+                .parse()
+                .unwrap(),
+        ])
         .collect();
         let gateways = [(gw("eth0"), gateway)].into_iter().collect();
         let server = ServerHostname::new(InternedString::intern("server")).unwrap();

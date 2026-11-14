@@ -806,6 +806,9 @@ fn desired_listeners(
         .flat_map(|(id, iface, ip_info)| {
             ip_info.subnets.iter().filter_map(move |subnet| {
                 let ip = subnet.addr();
+                if crate::net::bridge::is_os_target(ip) {
+                    return None;
+                }
                 let wanted = reqs.public_gateways.contains(id) || reqs.private_ips.contains(&ip);
                 wanted.then(|| {
                     let addr = match ip {
@@ -2353,6 +2356,55 @@ async fn copy_bidirectional_hangs_without_keepalive_when_peer_idle() {
 }
 
 #[cfg(test)]
+mod reserved_target_tests {
+    use super::*;
+    use crate::db::model::public::IpInfo;
+    use crate::net::bridge::{OS_TARGET_IPV4, OS_TARGET_IPV6};
+
+    #[test]
+    fn derived_listeners_exclude_backend_targets_and_retain_localhost() {
+        let gateway: GatewayId = "eth0".parse().unwrap();
+        let interfaces = [(
+            gateway.clone(),
+            NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(IpInfo {
+                    subnets: [
+                        format!("{OS_TARGET_IPV4}/32"),
+                        format!("{OS_TARGET_IPV6}/128"),
+                        "127.0.0.1/8".into(),
+                        "::1/128".into(),
+                        "192.0.2.10/24".into(),
+                    ]
+                    .into_iter()
+                    .map(|ip| ip.parse::<ipnet::IpNet>().unwrap())
+                    .collect(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        )]
+        .into_iter()
+        .collect();
+        let requirements = VHostBindRequirements {
+            public_gateways: [gateway].into(),
+            private_ips: [OS_TARGET_IPV4.into(), OS_TARGET_IPV6.into()].into(),
+        };
+        for port in [80, 443, 49152] {
+            assert_eq!(
+                desired_listeners(port, &interfaces, &requirements)
+                    .keys()
+                    .map(|addr| addr.ip())
+                    .collect::<BTreeSet<_>>(),
+                ["127.0.0.1", "::1", "192.0.2.10"]
+                    .into_iter()
+                    .map(|ip| ip.parse::<IpAddr>().unwrap())
+                    .collect()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod host_key_tests {
     use super::*;
 
@@ -2934,6 +2986,7 @@ mod upstream_alpn_tests {
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio_rustls::TlsAcceptor;
+    use tracing::instrument::WithSubscriber;
 
     use super::*;
     use crate::net::tls::client_config_no_verify;
@@ -3131,11 +3184,14 @@ mod upstream_alpn_tests {
         let addr = listener.local_addr().unwrap();
         let mut vhost = TlsListener::new(listener, handler);
 
-        let accepted = tokio::spawn(async move {
-            futures::future::poll_fn(|cx| vhost.poll_accept(cx))
-                .await
-                .map(|(metadata, _stream)| metadata.tls_info.alpn)
-        });
+        let accepted = tokio::spawn(
+            async move {
+                futures::future::poll_fn(|cx| vhost.poll_accept(cx))
+                    .await
+                    .map(|(metadata, _stream)| metadata.tls_info.alpn)
+            }
+            .with_current_subscriber(),
+        );
 
         let mut client = client_config_no_verify(provider()).unwrap();
         client.alpn_protocols = client_alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
@@ -3163,7 +3219,7 @@ mod upstream_alpn_tests {
         Ok(alpn.map(|a| String::from_utf8(a.0).unwrap()))
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn malformed_backend_tls_is_trace_only() {
         for trace_enabled in [false, true] {
             let (logs, dispatch) = if trace_enabled {
@@ -3171,14 +3227,18 @@ mod upstream_alpn_tests {
             } else {
                 connection_error_tests::capture_logs()
             };
-            let _guard = tracing::dispatcher::set_default(&dispatch);
             let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
             let addr = listener.local_addr().unwrap();
             let backend = tokio::spawn(async move {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 stream.write_all(b"not TLS").await.unwrap();
             });
-            assert!(try_negotiate(rewrap(), None, &[], addr, &[]).await.is_err());
+            assert!(
+                try_negotiate(rewrap(), None, &[], addr, &[])
+                    .with_subscriber(dispatch)
+                    .await
+                    .is_err()
+            );
             backend.await.unwrap();
             let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
             if trace_enabled {

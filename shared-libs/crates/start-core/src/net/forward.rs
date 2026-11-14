@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, SocketAddrV6};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -17,6 +17,8 @@ use tokio::sync::mpsc;
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::NetworkInterfaceInfo;
+pub use crate::net::bridge::START9_BRIDGE_IFACE;
+pub(crate) use crate::net::bridge::START9_BRIDGE_V6_ADDR;
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::transport::{Transport, TransportProtocol};
 use crate::prelude::*;
@@ -24,8 +26,6 @@ use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::serde::{HandlerExtSerde, display_serializable};
 use crate::util::sync::Watch;
-
-pub const START9_BRIDGE_IFACE: &str = "lxcbr0";
 /// The host's `ip_local_port_range` ends below this; see `projects/start-os/debian/postinst`.
 const DYNAMIC_PORT_START: u16 = 49152;
 // Reserved by/for host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11
@@ -1254,13 +1254,8 @@ async fn unforward(
     Ok(())
 }
 
-/// The lxcbr0 IPv6 bridge subnet (a ULA), assigned by lxc-net (see
-/// `debian/postinst`). Containers get a SLAAC address in it.
+/// The IPv6 prefix lxc-net advertises to containers.
 pub(crate) const START9_BRIDGE_V6_SUBNET: &str = "fd00:3::/64";
-
-/// The host's own address on the lxcbr0 bridge, pinned in `debian/postinst`
-/// beside the subnet above. The IPv6 counterpart of [`crate::HOST_IP`].
-pub(crate) const START9_BRIDGE_V6_ADDR: Ipv6Addr = Ipv6Addr::new(0xfd00, 3, 0, 0, 0, 0, 0, 1);
 
 /// IPv6 counterpart of [`forward`]: DNAT `source` (a host GUA:port) to `target`
 /// (the container's ULA:port) via the `forward-port6` script. `src_filter`
