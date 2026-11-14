@@ -2,6 +2,7 @@ import { DatePipe } from '@angular/common'
 import { Component, computed, inject, input } from '@angular/core'
 import { DialogService, i18nPipe, TaskService } from '@start9labs/shared'
 import {
+  TUI_BREAKPOINT,
   TuiButton,
   TuiDialogContext,
   TuiNotification,
@@ -114,15 +115,27 @@ const LEGACY_DELETE = new PolymorpheusComponent(LegacyBackup)
 @Component({
   selector: 'backup-legacy-warning',
   template: `
-    <button
-      tuiButton
-      size="s"
-      appearance="warning"
-      iconStart="@tui.brush-cleaning"
-      (click)="open()"
-    >
-      {{ 'Delete old backup' | i18n }}
-    </button>
+    @if (breakpoint() === 'mobile') {
+      <button
+        tuiIconButton
+        size="s"
+        appearance="warning"
+        iconStart="@tui.brush-cleaning"
+        (click)="open()"
+      >
+        {{ 'Delete old backup' | i18n }}
+      </button>
+    } @else {
+      <button
+        tuiButton
+        size="s"
+        appearance="warning"
+        iconStart="@tui.brush-cleaning"
+        (click)="open()"
+      >
+        {{ 'Delete old backup' | i18n }}
+      </button>
+    }
   `,
   styles: `
     :host {
@@ -134,6 +147,8 @@ const LEGACY_DELETE = new PolymorpheusComponent(LegacyBackup)
 })
 export class BackupLegacyWarningComponent {
   private readonly dialogs = inject(DialogService)
+
+  protected readonly breakpoint = inject(TUI_BREAKPOINT)
 
   readonly id = input.required<string>()
 

@@ -1093,8 +1093,9 @@ export default {
   1292: 'Aktueller Fingerabdruck',
   1293: 'Fehlerdetails sind nicht verfügbar',
   1294: 'Nicht erreichbar',
-  1295: 'Bereitgestellt von',
-  1296: 'Abhängigkeitsanbieter auswählen',
-  1297: 'Anbieter fixieren',
-  1298: 'Fixierung aufheben',
+  1295: 'Transport',
+  1296: 'Bereitgestellt von',
+  1297: 'Abhängigkeitsanbieter auswählen',
+  1298: 'Anbieter fixieren',
+  1299: 'Fixierung aufheben',
 } satisfies i18n

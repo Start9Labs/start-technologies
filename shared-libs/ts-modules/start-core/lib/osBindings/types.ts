@@ -562,6 +562,8 @@ export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TimeInfoInput = z.input<typeof schemas.TimeInfo>
+export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
+export type TransportProtocolInput = z.input<typeof schemas.TransportProtocol>
 export type TrustContext = z.output<typeof schemas.TrustContext>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedOsUpdateSigner = z.output<
@@ -676,8 +678,6 @@ export type BackupTargetFS = z.output<typeof schemas.BackupTargetFS>
 export type BackupTargetFSInput = z.input<typeof schemas.BackupTargetFS>
 export type BindId = z.output<typeof schemas.BindId>
 export type BindIdInput = z.input<typeof schemas.BindId>
-export type BindRangeParams = z.output<typeof schemas.BindRangeParams>
-export type BindRangeParamsInput = z.input<typeof schemas.BindRangeParams>
 export type CancelInstallParams = z.output<typeof schemas.CancelInstallParams>
 export type CancelInstallParamsInput = z.input<
   typeof schemas.CancelInstallParams
@@ -1232,6 +1232,8 @@ export type TaskTrigger = z.output<typeof schemas.TaskTrigger>
 export type TaskTriggerInput = z.input<typeof schemas.TaskTrigger>
 export type TestSmtpParams = z.output<typeof schemas.TestSmtpParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
+export type TransportWire = z.output<typeof schemas.TransportWire>
+export type TransportWireInput = z.input<typeof schemas.TransportWire>
 export type UmountParams = z.output<typeof schemas.UmountParams>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
 export type UninstallParams = z.output<typeof schemas.UninstallParams>
@@ -1434,6 +1436,18 @@ export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>
 
 /**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export type Transport = z.output<typeof schemas.Transport>
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export type TransportInput = z.input<typeof schemas.Transport>
+
+/**
  * Signing-key material and independent package and OS-update trust.
  */
 export type TrustedKey = z.output<typeof schemas.TrustedKey>
@@ -1474,6 +1488,8 @@ export type BackupRun = z.output<typeof schemas.BackupRun>
  * A completed background backup with its original target name and final report.
  */
 export type BackupRunInput = z.input<typeof schemas.BackupRun>
+export type BindRangeParams = z.output<typeof schemas.BindRangeParams>
+export type BindRangeParamsInput = z.input<typeof schemas.BindRangeParams>
 export type BindingSetAddressEnabledParams = z.output<
   typeof schemas.BindingSetAddressEnabledParams
 >
@@ -1574,22 +1590,14 @@ export type PackageInfo = z.output<typeof schemas.PackageInfo>
 export type PackageInfoInput = z.input<typeof schemas.PackageInfo>
 
 /**
- * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
- *
- * Keyed by `internal_start_port` in [`BindingRanges`]. The range covers
- * `internal_start_port..(internal_start_port + number_of_ports)` and is
- * forwarded through a single iptables rule per protocol per gateway,
- * preserving the destination port number.
+ * A contiguous binding keyed by its internal start port in [`BindingRanges`].
+ * External ports map to internal ports by offset.
  */
 export type RangeBindInfo = z.output<typeof schemas.RangeBindInfo>
 
 /**
- * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
- *
- * Keyed by `internal_start_port` in [`BindingRanges`]. The range covers
- * `internal_start_port..(internal_start_port + number_of_ports)` and is
- * forwarded through a single iptables rule per protocol per gateway,
- * preserving the destination port number.
+ * A contiguous binding keyed by its internal start port in [`BindingRanges`].
+ * External ports map to internal ports by offset.
  */
 export type RangeBindInfoInput = z.input<typeof schemas.RangeBindInfo>
 export type BindingRanges = z.output<typeof schemas.BindingRanges>

@@ -1093,8 +1093,9 @@ export default {
   1292: 'Obecny odcisk',
   1293: 'Szczegóły błędu nie są dostępne',
   1294: 'Nieosiągalny',
-  1295: 'Dostarczane przez',
-  1296: 'Wybierz dostawcę zależności',
-  1297: 'Przypnij dostawcę',
-  1298: 'Odepnij dostawcę',
+  1295: 'Transport',
+  1296: 'Dostarczane przez',
+  1297: 'Wybierz dostawcę zależności',
+  1298: 'Przypnij dostawcę',
+  1299: 'Odepnij dostawcę',
 } satisfies i18n

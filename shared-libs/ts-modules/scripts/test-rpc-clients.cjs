@@ -2741,40 +2741,69 @@ test('WRT mock flash uses local typed progress and its own terminal without netw
   )
 })
 
-test('WRT mock continuations emit local events and close asynchronously without networking', async () => {
-  const { load } = harness(new Map(), {
-    queueMicrotask,
-    Event,
-    MessageEvent,
-    CloseEvent: class extends Event {
-      constructor(type, init) {
-        super(type)
-        Object.assign(this, init)
-      }
-    },
-  })
-  const { MockContinuation } = load(
-    'projects/start-wrt/web/src/app/services/api/mock-continuation.ts',
+test('WRT mock update and log streams use local typed items without networking', async () => {
+  const { load } = harness(wrtMockOverrides())
+  const mock = Object.create(
+    load('projects/start-wrt/web/src/app/services/api/mock-api.service.ts')
+      .MockApiService.prototype,
   )
-  const progress = { overall: true, phases: [] }
-  const socket = new MockContinuation(progress)
-  const events = []
-  const closed = Promise.withResolvers()
-  socket.onopen = () => events.push('open')
-  socket.onmessage = event => {
-    assert.deepEqual(JSON.parse(event.data), progress)
-    events.push('message')
-    socket.close()
-    events.push('after-close')
-  }
-  socket.onclose = () => {
-    events.push('close')
-    closed.resolve()
-  }
-  await closed.promise
-  assert.deepEqual(events, ['open', 'message', 'after-close', 'close'])
-  socket.close()
+  mock.mockSystemInfo = { version: '1.4.0' }
+  const update = await mock.systemUpdate({ targetVersion: '1.5.0' })
+  assert.equal(update.initial.target, '1.5.0')
+  assert.equal(update.initial.progress, null)
+  const progress = await update.items.next()
+  assert.equal(progress.done, false)
+  assert.equal(progress.value.overall, true)
+  const final = await update.items.next()
+  assert.equal(final.done, true)
+  assert.equal(final.value, null)
+
+  const following = new AbortController()
+  const logs = await mock.followLogs({ signal: following.signal })
+  assert.equal(logs.initial.guid, null)
+  const ended = assert.rejects(logs.items.next(), { name: 'AbortError' })
+  following.abort()
+  await ended
+
+  const aborted = new AbortController()
+  aborted.abort()
+  await assert.rejects(mock.followLogs({ signal: aborted.signal }), {
+    name: 'AbortError',
+  })
 })
+
+test(
+  'WRT mock streams honor cancellation after acquisition and before their next item',
+  { timeout: 1000 },
+  async () => {
+    const { load } = harness(wrtMockOverrides())
+    const mock = Object.create(
+      load('projects/start-wrt/web/src/app/services/api/mock-api.service.ts')
+        .MockApiService.prototype,
+    )
+    mock.mockSystemInfo = { version: '1.4.0' }
+
+    const updateAbort = new AbortController()
+    const update = await mock.systemUpdate(
+      { targetVersion: '1.5.0' },
+      { signal: updateAbort.signal },
+    )
+    updateAbort.abort()
+    await assert.rejects(update.items.next(), { name: 'AbortError' })
+    assert.equal(mock.mockSystemInfo.version, '1.5.0')
+
+    const finalAbort = new AbortController()
+    const finishing = await mock.systemUpdate({}, { signal: finalAbort.signal })
+    await finishing.items.next()
+    finalAbort.abort()
+    await assert.rejects(finishing.items.next(), { name: 'AbortError' })
+
+    const logsAbort = new AbortController()
+    const logs = await mock.followLogs({ signal: logsAbort.signal })
+    logsAbort.abort()
+    await assert.rejects(logs.items.next(), { name: 'AbortError' })
+  },
+)
 
 function wrtFlowHarness(globals = {}) {
   const overrides = new Map([
@@ -2974,6 +3003,86 @@ test('WRT every failed recovery probe discards its stalled multiplexed session',
   await service.poll()
   await service.poll()
   assert.equal(aborted, 2)
+})
+
+function wrtUpdateObserver(systemUpdate) {
+  const { load } = wrtFlowHarness()
+  const service = Object.create(
+    load('projects/start-wrt/web/src/app/services/system.service.ts')
+      .SystemService.prototype,
+  )
+  const outcomes = []
+  let updating = false
+  Object.assign(service, {
+    api: { systemUpdate },
+    updating: Object.assign(() => updating, {
+      set: value => {
+        updating = value
+      },
+    }),
+    connection: {
+      suppress() {},
+      resume: () => outcomes.push('resumed'),
+    },
+    awaitReboot: () => outcomes.push('reboot'),
+    onUpdateFailed: () => outcomes.push('failed'),
+  })
+  return { service, outcomes, updating: () => updating }
+}
+
+function updateItems(end) {
+  return (async function* () {
+    yield { overall: { done: 1, total: 2, units: null }, phases: [] }
+    return end()
+  })()
+}
+
+for (const [name, end, outcome] of [
+  ['a successful terminal awaits the reboot', () => null, 'reboot'],
+  [
+    'transport loss awaits the reboot',
+    () => {
+      throw Object.assign(new Error('lost transport'), { code: 0 })
+    },
+    'reboot',
+  ],
+  [
+    'an application terminal reports a failed update',
+    () => {
+      throw Object.assign(new Error('sysupgrade exited with code 1'), {
+        code: -1,
+      })
+    },
+    'failed',
+  ],
+]) {
+  test(`WRT update stream: ${name}`, async () => {
+    const fixture = wrtUpdateObserver(async params => {
+      assert.equal(params.targetVersion, '1.5.0')
+      return {
+        initial: { target: '1.5.0', progress: null },
+        items: updateItems(end),
+      }
+    })
+    await fixture.service.startUpdate('1.5.0')
+    assert.equal(fixture.updating(), true)
+    assert.equal(fixture.service.targetVersion, '1.5.0')
+    await new Promise(setImmediate)
+    assert.deepEqual(fixture.outcomes, [outcome])
+  })
+}
+
+test('WRT update without a target releases the update state without observing', async () => {
+  const fixture = wrtUpdateObserver(async () => ({
+    initial: { target: null, progress: null },
+    items: (async function* () {
+      assert.fail('no-target updates are not observed')
+    })(),
+  }))
+  await fixture.service.startUpdate('1.5.0')
+  await new Promise(setImmediate)
+  assert.equal(fixture.updating(), false)
+  assert.deepEqual(fixture.outcomes, ['resumed'])
 })
 
 test('WRT interrupted-update recovery cannot claim the requested version from an old firmware reply', async () => {

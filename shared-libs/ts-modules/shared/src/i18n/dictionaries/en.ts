@@ -1094,8 +1094,9 @@ export const ENGLISH: Record<string, number> = {
   'Current fingerprint': 1292,
   'Error details are not available': 1293,
   'Unreachable': 1294,
-  'Provided by': 1295,
-  'Select a dependency provider': 1296,
-  'Lock provider': 1297,
-  'Unlock provider': 1298,
+  'Transport': 1295,
+  'Provided by': 1296,
+  'Select a dependency provider': 1297,
+  'Lock provider': 1298,
+  'Unlock provider': 1299,
 }

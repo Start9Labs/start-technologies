@@ -1093,8 +1093,9 @@ export default {
   1292: 'Huella actual',
   1293: 'Los detalles del error no están disponibles',
   1294: 'Inaccesible',
-  1295: 'Proporcionado por',
-  1296: 'Selecciona un proveedor de dependencias',
-  1297: 'Fijar proveedor',
-  1298: 'Desfijar proveedor',
+  1295: 'Transporte',
+  1296: 'Proporcionado por',
+  1297: 'Selecciona un proveedor de dependencias',
+  1298: 'Fijar proveedor',
+  1299: 'Desfijar proveedor',
 } satisfies i18n
