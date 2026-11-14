@@ -2093,20 +2093,6 @@ net.host.private-domain-is-server-mdns:
   pl_PL: '„%{domain}” jest nazwą mDNS serwera i nie może zostać przypisana jako domena prywatna'
 
 # net/host/binding.rs
-net.host.binding.address-not-found:
-  en_US: "%{address} is not an address of binding %{port}. Its addresses are:"
-  de_DE: "%{address} ist keine Adresse der Bindung %{port}. Ihre Adressen sind:"
-  es_ES: "%{address} no es una dirección del vínculo %{port}. Sus direcciones son:"
-  fr_FR: "%{address} n'est pas une adresse de la liaison %{port}. Ses adresses sont :"
-  pl_PL: "%{address} nie jest adresem powiązania %{port}. Jego adresy to:"
-
-net.host.binding.choose-address:
-  en_US: "%{address} matches several addresses of binding %{port}; choose one:"
-  de_DE: "%{address} passt auf mehrere Adressen der Bindung %{port}; wählen Sie eine aus:"
-  es_ES: "%{address} coincide con varias direcciones del vínculo %{port}; elija una:"
-  fr_FR: "%{address} correspond à plusieurs adresses de la liaison %{port} ; choisissez-en une :"
-  pl_PL: "%{address} pasuje do kilku adresów powiązania %{port}; wybierz jeden:"
-
 net.host.binding.address-kind-ipv4:
   en_US: "IPv4"
   de_DE: "IPv4"
@@ -2128,6 +2114,13 @@ net.host.binding.address-kind-mdns:
   fr_FR: "mDNS"
   pl_PL: "mDNS"
 
+net.host.binding.address-kind-plugin:
+  en_US: "plugin"
+  de_DE: "Plugin"
+  es_ES: "plugin"
+  fr_FR: "plugin"
+  pl_PL: "wtyczka"
+
 net.host.binding.address-kind-private-domain:
   en_US: "private domain"
   de_DE: "private Domain"
@@ -2142,26 +2135,12 @@ net.host.binding.address-kind-public-domain:
   fr_FR: "domaine public"
   pl_PL: "domena publiczna"
 
-net.host.binding.address-kind-plugin:
-  en_US: "plugin"
-  de_DE: "Plugin"
-  es_ES: "plugin"
-  fr_FR: "plugin"
-  pl_PL: "wtyczka"
-
-net.host.binding.address-via:
-  en_US: "via %{gateways}"
-  de_DE: "über %{gateways}"
-  es_ES: "a través de %{gateways}"
-  fr_FR: "via %{gateways}"
-  pl_PL: "przez %{gateways}"
-
-net.host.binding.address-public:
-  en_US: "public"
-  de_DE: "öffentlich"
-  es_ES: "pública"
-  fr_FR: "publique"
-  pl_PL: "publiczny"
+net.host.binding.address-not-found:
+  en_US: "%{address} is not an address of binding %{port}. Its addresses are:"
+  de_DE: "%{address} ist keine Adresse der Bindung %{port}. Ihre Adressen sind:"
+  es_ES: "%{address} no es una dirección del vínculo %{port}. Sus direcciones son:"
+  fr_FR: "%{address} n'est pas une adresse de la liaison %{port}. Ses adresses sont :"
+  pl_PL: "%{address} nie jest adresem powiązania %{port}. Jego adresy to:"
 
 net.host.binding.address-private:
   en_US: "private"
@@ -2170,12 +2149,54 @@ net.host.binding.address-private:
   fr_FR: "privée"
   pl_PL: "prywatny"
 
+net.host.binding.address-public:
+  en_US: "public"
+  de_DE: "öffentlich"
+  es_ES: "pública"
+  fr_FR: "publique"
+  pl_PL: "publiczny"
+
 net.host.binding.address-ssl:
   en_US: "SSL"
   de_DE: "SSL"
   es_ES: "SSL"
   fr_FR: "SSL"
   pl_PL: "SSL"
+
+net.host.binding.address-unavailable:
+  en_US: "The address is no longer available. List the binding addresses again."
+  de_DE: "Die Adresse ist nicht mehr verfügbar. Listen Sie die Bindungsadressen erneut auf."
+  es_ES: "La dirección ya no está disponible. Vuelva a listar las direcciones del enlace."
+  fr_FR: "L’adresse n’est plus disponible. Affichez à nouveau les adresses de la liaison."
+  pl_PL: "Adres nie jest już dostępny. Wyświetl ponownie adresy powiązania."
+
+net.host.binding.address-via:
+  en_US: "via %{gateways}"
+  de_DE: "über %{gateways}"
+  es_ES: "a través de %{gateways}"
+  fr_FR: "via %{gateways}"
+  pl_PL: "przez %{gateways}"
+
+net.host.binding.choose-address:
+  en_US: "%{address} matches several addresses of binding %{port}; choose one:"
+  de_DE: "%{address} passt auf mehrere Adressen der Bindung %{port}; wählen Sie eine aus:"
+  es_ES: "%{address} coincide con varias direcciones del vínculo %{port}; elija una:"
+  fr_FR: "%{address} correspond à plusieurs adresses de la liaison %{port} ; choisissez-en une :"
+  pl_PL: "%{address} pasuje do kilku adresów powiązania %{port}; wybierz jeden:"
+
+net.host.binding.insecure-consent-required:
+  en_US: "Enabling this address requires --allow-insecure. Devices on this network, or private networks routed to it over IPv4, can read and alter the traffic, including passwords."
+  de_DE: "Das Aktivieren dieser Adresse erfordert --allow-insecure. Geräte in diesem Netzwerk oder über IPv4 dorthin gerouteten privaten Netzwerken können den Datenverkehr einschließlich Passwörtern lesen und verändern."
+  es_ES: "Activar esta dirección requiere --allow-insecure. Los dispositivos de esta red, o de redes privadas enrutadas hacia ella por IPv4, pueden leer y modificar el tráfico, incluidas las contraseñas."
+  fr_FR: "L’activation de cette adresse nécessite --allow-insecure. Les appareils de ce réseau, ou de réseaux privés acheminés vers celui-ci en IPv4, peuvent lire et modifier le trafic, y compris les mots de passe."
+  pl_PL: "Włączenie tego adresu wymaga --allow-insecure. Urządzenia w tej sieci lub w sieciach prywatnych kierowanych do niej przez IPv4 mogą odczytywać i zmieniać ruch, w tym hasła."
+
+net.host.binding.insecure-public:
+  en_US: "Plain HTTP whose TLS StartOS terminates cannot be exposed publicly."
+  de_DE: "Unverschlüsseltes HTTP, dessen TLS StartOS terminiert, kann nicht öffentlich freigegeben werden."
+  es_ES: "El HTTP sin cifrar cuyo TLS termina StartOS no puede exponerse públicamente."
+  fr_FR: "Le HTTP en clair dont StartOS termine TLS ne peut pas être exposé publiquement."
+  pl_PL: "Nieszyfrowany HTTP, dla którego StartOS kończy TLS, nie może być udostępniony publicznie."
 
 net.host.binding.reassign.no-assigned-port:
   en_US: "The binding has no assigned port of the selected type"
@@ -4453,6 +4474,13 @@ help.arg.all-revisions:
   es_ES: "Incluir revisiones reemplazadas de cada versión upstream"
   fr_FR: "Inclure les révisions remplacées de chaque version amont"
   pl_PL: "Uwzględnij zastąpione rewizje każdej wersji upstream"
+
+help.arg.allow-insecure-address:
+  en_US: "Accept plaintext traffic that devices on this network, or private networks routed to it over IPv4, can read and alter, including passwords"
+  de_DE: "Unverschlüsselten Datenverkehr akzeptieren, den Geräte in diesem Netzwerk oder über IPv4 dorthin gerouteten privaten Netzwerken einschließlich Passwörtern lesen und verändern können"
+  es_ES: "Aceptar tráfico sin cifrar que los dispositivos de esta red, o de redes privadas enrutadas hacia ella por IPv4, pueden leer y modificar, incluidas las contraseñas"
+  fr_FR: "Accepter le trafic en clair que les appareils de ce réseau, ou de réseaux privés acheminés vers celui-ci en IPv4, peuvent lire et modifier, y compris les mots de passe"
+  pl_PL: "Akceptuj nieszyfrowany ruch, w tym hasła, który urządzenia w tej sieci lub w sieciach prywatnych kierowanych do niej przez IPv4 mogą odczytywać i zmieniać"
 
 help.arg.allow-model-mismatch:
   en_US: "Allow database model mismatch"
