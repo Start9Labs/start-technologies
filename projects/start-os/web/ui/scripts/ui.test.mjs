@@ -50,7 +50,8 @@ boundary(
   ],
   'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const convertBytes = value => String(value); export const getErrorMessage = error => error.message; export const leafProgress = progress => progress; ' +
     `export { sameUrl, registryUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
-    `export { legacyDatabaseSubscription } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/services/database-subscription.ts', import.meta.url).href)};` +
+    `export { legacyDatabaseSubscription, databaseSource } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/services/database-subscription.ts', import.meta.url).href)};` +
+    `export { waitForPatchSequence } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/services/rpc-response.ts', import.meta.url).href)};` +
     `export { withAbortSignal } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/with-abort.ts', import.meta.url).href)};`,
 )
 boundary(
@@ -163,11 +164,9 @@ boundary('src/app/services/api/embassy-api.service', ['ApiService'])
 boundary('./embassy-api.service', ['ApiService'])
 boundary('src/app/routes/portal/components/pkg-icon', ['PkgIconDirective'])
 boundary('src/app/routes/portal/components/table.component', ['TableComponent'])
-boundary(
-  'src/app/services/patch-db/patch-db-source',
-  [],
-  'export const PATCH_CACHE = Symbol("patch cache");',
-)
+boundary('../api/embassy-api.service', ['ApiService'])
+boundary('../auth.service', ['AuthService'])
+boundary('./local-storage-bootstrap', ['LocalStorageBootstrap'])
 boundary('src/app/services/config.service', ['ConfigService'])
 boundary('src/app/services/state.service', ['StateService'])
 boundary('src/app/services/trusted-keys.service', ['TrustedKeysService'])
@@ -226,6 +225,7 @@ const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
 const { PatchDB } = await import('patch-db-client')
 const { OSService } = await import('src/app/services/os.service')
+const { PowerService } = await import('src/app/services/power.service')
 const { i18nService: ProductionI18nService } =
   await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.service.ts')
 const { LocalizePipe: ProductionLocalizePipe } =
@@ -417,6 +417,7 @@ function fixture(t, cachedVersion, providers = []) {
       },
     },
     { provide: OSService, useFactory: () => new OSService() },
+    { provide: PowerService, useFactory: () => new PowerService() },
     { provide: UiUpdateService, useFactory: () => new UiUpdateService() },
     ...providers,
   ])
@@ -2697,7 +2698,7 @@ test('grant capability reads the installed manifest throughout updates without c
   assert.equal(getCurrentManifest(pkg), installed)
 })
 
-test('production mocks support inspection, independent failed backups and new-local restore without a public password', async t => {
+test('production mocks finish volume-only backup reports before deferred power and restore without a public password', async t => {
   const { MockApiService } =
     await import('src/app/services/api/embassy-mock-api.service')
   const { Mock } = await import('src/app/services/api/api.fixures')
@@ -2882,6 +2883,23 @@ test('production mocks support inspection, independent failed backups and new-lo
     password: 'password',
     oldPassword: null,
   })
+  let committed
+  const subscription = cache.subscribe(({ value }) => {
+    if (value.serverInfo.statusInfo.restarting && !committed)
+      committed = structuredClone({
+        progress: value.serverInfo.statusInfo.backupProgress,
+        backup: value.backupTargets[targetId].startOs[Mock.ServerId],
+        report: api.backupHistory[0]?.report,
+      })
+  })
+  t.after(() => subscription.unsubscribe())
+  assert.ok(cache.value.value.serverInfo.statusInfo.backupProgress)
+  await api.rpc.server.restart({ force: false })
+  assert.equal(
+    cache.value.value.serverInfo.statusInfo.deferredPowerAction,
+    'restart',
+  )
+  assert.equal(cache.value.value.serverInfo.statusInfo.restarting, false)
   await api.rpc.backup.target.rename({ id: targetId, name: 'Later name' })
   t.mock.timers.tick(500)
   await tick()
@@ -2901,6 +2919,13 @@ test('production mocks support inspection, independent failed backups and new-lo
   assert.equal(history.runs[0].targetId, targetId)
   assert.equal(history.runs[0].targetName, 'Archive')
   const report = history.runs[0].report
+  assert.equal(committed.progress, null)
+  assert.ok(committed.backup.timestamp)
+  assert.deepEqual(committed.report, report)
+  assert.equal(
+    cache.value.value.serverInfo.statusInfo.deferredPowerAction,
+    null,
+  )
   assert.equal(report.sharedVolumes[local].error, null)
   assert.ok(report.sharedVolumes[remote].error)
   assert.deepEqual(report.packages, {})

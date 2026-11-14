@@ -36,6 +36,19 @@ describe('createRpcClient', () => {
     ])
   })
 
+  test('power actions accept omitted flags and route cancellation through the generated client', async () => {
+    const { calls, transport } = recording()
+    const api = createRpcClient<StartOS>(transport)
+    await api.server.restart({})
+    await api.server.shutdown({ force: true })
+    await api.server.cancelDeferredPower({})
+    expect(calls).toEqual([
+      ['server.restart', {}, undefined],
+      ['server.shutdown', { force: true }, undefined],
+      ['server.cancel-deferred-power', {}, undefined],
+    ])
+  })
+
   test('inspection methods remain callable and preserve HTTP options', async () => {
     const { calls, transport } = recording()
     const api = createRpcClient<StartOS>(transport)

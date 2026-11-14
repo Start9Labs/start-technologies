@@ -125,6 +125,7 @@ impl Drop for BackupStatusGuard {
     }
 }
 
+/// Power deferral covers service and shared-volume backups through status cleanup.
 #[instrument(skip(ctx, old_password, password))]
 pub async fn backup_all(
     ctx: RpcContext,
@@ -251,14 +252,14 @@ fn assure_backing_up(
     target: &BackupTargetId,
     server: &str,
 ) -> Result<(), Error> {
-    if db
-        .as_public()
-        .as_server_info()
-        .as_status_info()
-        .as_backup_progress()
-        .transpose_ref()
-        .is_some()
-    {
+    let status = db.as_public().as_server_info().as_status_info();
+    if status.as_shutting_down().de()? || status.as_restarting().de()? {
+        return Err(Error::new(
+            eyre!("{}", t!("backup.bulk.powering-down")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    if status.as_backup_progress().transpose_ref().is_some() {
         return Err(Error::new(
             eyre!("{}", t!("backup.bulk.already-backing-up")),
             ErrorKind::InvalidRequest,

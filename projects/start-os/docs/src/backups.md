@@ -17,6 +17,8 @@ Back up your server's services and shared volumes to a backup target, review pas
 
 1. Select [shared volumes](shared-volumes.md) independently of services. A service backup excludes its attached volume contents; an unavailable volume source fails that volume's item without preventing unrelated service backups.
 
+1. Restarting or shutting down mid-backup can corrupt the backup being written, so StartOS asks first. This applies whether the backup includes services, shared volumes, or both. Choosing `Restart` or `Shutdown` while a backup is running offers to wait for the backup to finish or proceed immediately. The prompt stays open until you choose or dismiss it. Pressing the server's physical power button during a backup waits without asking when StartOS can intercept the key; otherwise the button powers off through the operating system. When an action is waiting for a backup, a bar along the bottom of the screen shows the pending action and lets you cancel it. Once a restart or shutdown is under way, StartOS refuses to start a new backup.
+
 1. Each backup updates the current state on its target. Volume backups copy the entire backing folder and retain the previous successful copy until its replacement has been saved, requiring space for the replacement. Keep backups on multiple targets for protection against loss of a drive or network share.
 
 1. A backup keeps each service image for the server's architecture (x86, ARM, or RISC-V). On another architecture, StartOS restores that image under emulation. Reinstall or update the service from the marketplace after the restore so StartOS can select its package for the new server architecture, including a native image where available.

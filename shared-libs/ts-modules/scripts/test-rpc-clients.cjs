@@ -141,8 +141,6 @@ function harness(moduleOverrides = new Map(), globals = {}) {
         return { ConfigService: tokens.ConfigService }
       if (request.endsWith('auth.service'))
         return { AuthService: tokens.AuthService }
-      if (request.endsWith('config.service'))
-        return { ConfigService: tokens.ConfigService }
       if (request.endsWith('http.service'))
         return { HttpService: tokens.HttpService }
       if (request.endsWith('stale-ui.service'))
@@ -1315,17 +1313,13 @@ test('StartOS mock routes preserve registry fixtures, configured build identity,
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()
   assert.equal(
-    await client.rpc['git-info']({}),
+    await client.rpc.gitInfo({}),
     dependencies.get(tokens.ConfigService).gitHash,
   )
+  assert.equal((await client.rpc.server.nutScan({}))[0].driver, 'usbhid-ups')
   assert.equal(
-    (await client.rpc.server['nut-scan']({}))[0].driver,
-    'usbhid-ups',
-  )
-  assert.equal(
-    (
-      await client.rpc.server['nut-list-ups']({ host: 'ups.test', port: 3493 })
-    )[0].name,
+    (await client.rpc.server.nutListUps({ host: 'ups.test', port: 3493 }))[0]
+      .name,
     'ups',
   )
   const params = {
@@ -1351,6 +1345,44 @@ test('StartOS mock routes preserve registry fixtures, configured build identity,
     }),
     version,
   )
+})
+
+test('StartOS mock power deferral and cancellation wait for patch consumption', async () => {
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['src/app/utils/acme', {}],
+      ['./api.fixures', { Mock: {} }],
+      ['./mock-patch', { mockPatchData: {} }],
+      ['./md-sample.md', ''],
+    ]),
+  )
+  const cache = new BehaviorSubject({ id: 0 })
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
+  dependencies.set(tokens.PATCH_CACHE, cache)
+  dependencies.set(tokens.AuthService, { isVerified$: of(true) })
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+  ).MockApiService)()
+  client.backingUp = true
+  const revisions = []
+  client.mockWsSource$.subscribe(revision => revisions.push(revision))
+  for (const [request, action] of [
+    [() => client.rpc.server.restart({}), 'restart'],
+    [() => client.rpc.server.shutdown({}), 'shutdown'],
+    [() => client.rpc.server.cancelDeferredPower({}), null],
+  ]) {
+    let settled = false
+    const pending = request().then(value => {
+      settled = true
+      return value
+    })
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(settled, false)
+    assert.equal(client.deferredPowerAction, action)
+    assert.equal(revisions.at(-1).patch[0].value, action)
+    cache.next({ id: revisions.at(-1).id })
+    assert.equal(await pending, null)
+  }
 })
 
 test('StartOS generated UPS contracts preserve the selected USB location', () => {

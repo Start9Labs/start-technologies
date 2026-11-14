@@ -1113,22 +1113,23 @@ mod tests {
     async fn snapshot_reports_live_routes_with_remaining() {
         let demux = SniDemux::new();
         let ip = Ipv4Addr::LOCALHOST;
+        let port = free_port();
         let t1 = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
         let t2 = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 2), 443);
         demux
-            .register(ip, 44311, &["a.example.com".to_string()], t1, Some(3600))
+            .register(ip, port, &["a.example.com".to_string()], t1, Some(3600))
             .unwrap();
         demux
-            .register(ip, 44311, &["b.example.com".to_string()], t2, None)
+            .register(ip, port, &["b.example.com".to_string()], t2, None)
             .unwrap();
-        demux.register_fallback(ip, 44312, t1).unwrap();
+        demux.register_fallback(ip, free_port(), t1).unwrap();
 
         let mut snap = demux.snapshot();
         snap.sort_by(|a, b| a.hostname.cmp(&b.hostname));
         assert_eq!(snap.len(), 2);
         assert_eq!(snap[0].hostname, "a.example.com");
         assert_eq!(snap[0].target, t1);
-        assert_eq!((snap[0].ext_ip, snap[0].ext_port), (ip, 44311));
+        assert_eq!((snap[0].ext_ip, snap[0].ext_port), (ip, port));
         let remaining = snap[0].remaining_secs.unwrap();
         assert!(remaining > 3590 && remaining <= 3600, "got {remaining}");
         assert_eq!(snap[1].remaining_secs, None);
