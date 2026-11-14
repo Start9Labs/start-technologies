@@ -53,13 +53,7 @@ pub async fn format(
     refuse_protected(&ctx.os_partitions, &disk).await?;
     let capacity = get_capacity(&disk).await?;
     check_capacity(&disk, capacity)?;
-    let sector_size = get_logical_block_size(&disk).await?;
-    let block_size = LogicalBlockSize::try_from(sector_size).map_err(|_| {
-        refused(t!(
-            "disk.format.unsupported-sector-size",
-            size = sector_size
-        ))
-    })?;
+    let block_size = supported_block_size(&disk).await?;
 
     // Detached from the request: a dropped connection does not stop it mid-way.
     let disk_updates = ctx.disk_updates.clone();
@@ -149,6 +143,16 @@ pub(crate) fn write_single_partition(
     gpt.add_partition(name, size, LINUX_FS, 0, Some(PARTITION_ALIGNMENT_LBA))?;
     gpt.write()?;
     Ok(())
+}
+
+pub(crate) async fn supported_block_size(disk: &Path) -> Result<LogicalBlockSize, Error> {
+    let sector_size = get_logical_block_size(disk).await?;
+    LogicalBlockSize::try_from(sector_size).map_err(|_| {
+        refused(t!(
+            "disk.format.unsupported-sector-size",
+            size = sector_size
+        ))
+    })
 }
 
 fn validate_label(label: &str) -> Result<(), Error> {

@@ -4,6 +4,7 @@ use gpt::GptConfig;
 use gpt::disk::LogicalBlockSize;
 
 use crate::disk::OsPartitionInfo;
+use crate::disk::format::supported_block_size;
 use crate::os_install::quiesce::{quiesce_disk, update_partition_table};
 use crate::os_install::{partition_for, same_device};
 use crate::prelude::*;
@@ -61,11 +62,12 @@ pub(crate) fn largest_aligned_free_bytes(gpt: &gpt::GptDisk<Device>) -> Result<u
 fn build_gpt_layout(
     device: Device,
     capacity: u64,
+    block_size: LogicalBlockSize,
     disk_path: &Path,
     protected_partition_info: Option<(u64, u64, PathBuf)>,
     use_efi: bool,
 ) -> Result<(bool, Option<PathBuf>), Error> {
-    let mut gpt = fresh_gpt(device, capacity, LogicalBlockSize::Lb512)?;
+    let mut gpt = fresh_gpt(device, capacity, block_size)?;
 
     let efi = if use_efi {
         gpt.add_partition(
@@ -184,6 +186,22 @@ fn build_gpt_layout(
     Ok((efi, data_part))
 }
 
+fn existing_partition_lbas(
+    device: Device,
+    block_size: LogicalBlockSize,
+    is_wanted: impl Fn(u32) -> bool,
+) -> Result<Option<(u64, u64)>, Error> {
+    let existing_gpt = GptConfig::new()
+        .writable(false)
+        .logical_block_size(block_size)
+        .open_from_device(device)?;
+    Ok(existing_gpt
+        .partitions()
+        .iter()
+        .find(|(num, _)| is_wanted(**num))
+        .map(|(_, p)| (p.first_lba, p.last_lba)))
+}
+
 pub async fn partition(
     disk_path: &Path,
     capacity: u64,
@@ -203,6 +221,8 @@ pub async fn partition(
         }
     }
 
+    let block_size = supported_block_size(disk_path).await?;
+
     quiesce_disk(disk_path).await?;
 
     let disk_path = disk_path.to_owned();
@@ -213,17 +233,12 @@ pub async fn partition(
 
         let protected_partition_info: Option<(u64, u64, PathBuf)> =
             if let Some(ref protect_path) = protect {
-                let existing_gpt = GptConfig::new()
-                    .writable(false)
-                    .logical_block_size(LogicalBlockSize::Lb512)
-                    .open_from_device(Box::new(
-                        std::fs::File::options().read(true).open(&disk_path)?,
-                    ))?;
-                let info = existing_gpt
-                    .partitions()
-                    .iter()
-                    .find(|(num, _)| same_device(&partition_for(&disk_path, **num), protect_path))
-                    .map(|(_, p)| (p.first_lba, p.last_lba, protect_path.clone()));
+                let info = existing_partition_lbas(
+                    Box::new(std::fs::File::options().read(true).open(&disk_path)?),
+                    block_size,
+                    |num| same_device(&partition_for(&disk_path, num), protect_path),
+                )?
+                .map(|(first_lba, last_lba)| (first_lba, last_lba, protect_path.clone()));
                 if info.is_none() {
                     return Err(Error::new(
                         eyre!(
@@ -249,6 +264,7 @@ pub async fn partition(
         build_gpt_layout(
             device,
             capacity,
+            block_size,
             &disk_path,
             protected_partition_info,
             use_efi,
@@ -382,6 +398,7 @@ mod tests {
             let result = build_gpt_layout(
                 device,
                 capacity,
+                LogicalBlockSize::Lb512,
                 Path::new("/dev/sda"),
                 Some(protected),
                 true,
@@ -429,5 +446,112 @@ mod tests {
 
             std::fs::remove_file(&path).ok();
         }
+    }
+
+    #[test]
+    fn layout_is_written_at_4096_byte_sectors() {
+        let block_size = LogicalBlockSize::Lb4096;
+        let lb: u64 = block_size.into();
+        let path =
+            std::env::temp_dir().join(format!("startos-gpt-test-{}-4kn.img", std::process::id()));
+        let capacity = 64 * 1024 * 1024 * 1024;
+        make_sparse(&path, capacity);
+        let open = |writable| -> Device {
+            Box::new(
+                std::fs::File::options()
+                    .read(true)
+                    .write(writable)
+                    .open(&path)
+                    .unwrap(),
+            )
+        };
+        let read_back = || {
+            let gpt = GptConfig::new()
+                .writable(false)
+                .logical_block_size(block_size)
+                .open_from_device(open(false))
+                .expect("no GPT at 4096-byte LBAs");
+            gpt.partitions().clone()
+        };
+
+        build_gpt_layout(
+            open(true),
+            capacity,
+            block_size,
+            Path::new("/dev/sda"),
+            None,
+            true,
+        )
+        .unwrap();
+        let parts = read_back();
+        let sizes: Vec<u64> = parts
+            .values()
+            .map(|p| (p.last_lba - p.first_lba + 1) * lb)
+            .collect();
+        assert_eq!(
+            sizes[..3],
+            [100 * 1024 * 1024, 2 * 1024 * 1024 * 1024, ROOT_TARGET_BYTES]
+        );
+        assert_eq!(parts.len(), 4);
+        let data = &parts[&4];
+        assert_eq!(data.last_lba, capacity / lb - 6);
+        let (data_first, data_last) = (data.first_lba, data.last_lba);
+
+        build_gpt_layout(
+            open(true),
+            capacity,
+            block_size,
+            Path::new("/dev/sda"),
+            Some((data_first, data_last, PathBuf::from("/dev/sda4"))),
+            true,
+        )
+        .unwrap();
+        let parts = read_back();
+        assert_eq!(parts.len(), 4);
+        assert_eq!(
+            (parts[&4].first_lba, parts[&4].last_lba),
+            (data_first, data_last)
+        );
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn existing_partitions_are_read_at_4096_byte_sectors() {
+        let block_size = LogicalBlockSize::Lb4096;
+        let path = std::env::temp_dir().join(format!(
+            "startos-gpt-test-{}-4kn-existing.img",
+            std::process::id()
+        ));
+        let capacity = 8 * 1024 * 1024 * 1024;
+        make_sparse(&path, capacity);
+        let open = |writable| -> Device {
+            Box::new(
+                std::fs::File::options()
+                    .read(true)
+                    .write(writable)
+                    .open(&path)
+                    .unwrap(),
+            )
+        };
+
+        let mut gpt = fresh_gpt(open(true), capacity, block_size).unwrap();
+        gpt.add_partition(
+            "efi",
+            100 * 1024 * 1024,
+            gpt::partition_types::EFI,
+            0,
+            Some(PARTITION_ALIGNMENT_LBA),
+        )
+        .unwrap();
+        gpt.add_partition_at("data", 2, 65536, 131072, gpt::partition_types::LINUX_LVM, 0)
+            .unwrap();
+        gpt.write().unwrap();
+
+        let lbas = existing_partition_lbas(open(false), block_size, |num| num == 2)
+            .expect("no GPT read at 4096-byte LBAs");
+        assert_eq!(lbas, Some((65536, 196607)));
+
+        std::fs::remove_file(&path).ok();
     }
 }
