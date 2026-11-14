@@ -105,6 +105,7 @@ use startos::net::port_map::server::igd::{
     SCPD_PATH, SSDP_MULTICAST, SSDP_PORT,
 };
 use startos::net::port_map::server::{handle, GatewayBackend, MappingEntry, PCP_PORT};
+use startos::net::transport::{Transport, TransportProtocol};
 use startos::tunnel::forward::sni::{FallbackSource, SniDemux, SniRoute};
 use tokio::io::Interest;
 use tokio::net::UdpSocket;
@@ -489,6 +490,7 @@ impl PortControl {
         peer: Ipv4Addr,
         lifetime: Option<u32>,
         kind: &'static str,
+        transport: TransportProtocol,
     ) -> Result<(), u16> {
         if count == 0
             || source.port().checked_add(count - 1).is_none()
@@ -504,7 +506,7 @@ impl PortControl {
             return Err(IGD_ACTION_FAILED);
         };
         let _serial = self.write_serial.lock().await;
-        let section = section_name(&client.mac, source.port());
+        let section = section_name(&client.mac, source.port(), transport.into());
         let uci_root = self.uci_root.clone();
         let section_task = section.clone();
         let outcome = uci_task(move || async move {
@@ -517,6 +519,7 @@ impl PortControl {
                 source,
                 target,
                 count,
+                transport.into(),
             )
             .await
         })
@@ -546,11 +549,19 @@ impl PortControl {
 
     /// Remove the client's forwards to `internal_port` (PCP identifies a
     /// mapping by its target; several external ports may forward to it).
-    async fn remove_forward_for(&self, peer: Ipv4Addr, internal_port: u16) {
+    async fn remove_forward_for(
+        &self,
+        peer: Ipv4Addr,
+        internal_port: u16,
+        transport: TransportProtocol,
+    ) {
         let Some(client) = self.authorized_client(peer).await else {
             return;
         };
         self.remove_client_forwards(&client.mac, move |r| {
+            if !uci_protocols(&r.proto).contains(&transport) {
+                return false;
+            }
             r.dest_port
                 .as_deref()
                 .and_then(parse_port_range)
@@ -561,12 +572,20 @@ impl PortControl {
 
     /// Remove the client's forward at external port `source` (UPnP identifies
     /// a mapping by its external port). Returns whether one was removed.
-    async fn remove_by_source(&self, source: SocketAddrV4, peer: Ipv4Addr) -> bool {
+    async fn remove_by_source(
+        &self,
+        source: SocketAddrV4,
+        peer: Ipv4Addr,
+        transport: TransportProtocol,
+    ) -> bool {
         let Some(client) = self.authorized_client(peer).await else {
             return false;
         };
         let external_port = source.port();
         self.remove_client_forwards(&client.mac, move |r| {
+            if !uci_protocols(&r.proto).contains(&transport) {
+                return false;
+            }
             r.src_dport
                 .as_deref()
                 .and_then(parse_port_range)
@@ -640,51 +659,67 @@ impl PortControl {
     async fn forwards_for(&self, peer: Ipv4Addr) -> Vec<MappingEntry> {
         let uci_root = self.uci_root.clone();
         let target = peer.to_string();
-        let found: Vec<(String, u16, u16, String)> = uci_task(move || async move {
-            let arena = Arena::new();
-            let cfgs = parse_all(&uci_root, &arena, &["firewall"]).await?;
-            Ok(cfgs["firewall"]
-                .sections
-                .iter()
-                .filter_map(|sec| {
-                    let r = sec.get::<FirewallRedirect>().ok()?;
-                    let kind = r._apf_label?;
-                    if r.dest_ip.as_deref() != Some(target.as_str()) {
-                        return None;
-                    }
-                    let external = r.src_dport.as_deref().and_then(parse_port_range)?.0;
-                    let internal = r.dest_port.as_deref().and_then(parse_port_range)?.0;
-                    Some((sec.name()?.to_string(), external, internal, kind))
-                })
-                .collect())
-        })
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!("port-control: listing forwards failed: {e}");
-            Vec::new()
-        });
+        let found: Vec<(String, u16, u16, u16, String, Vec<TransportProtocol>)> =
+            uci_task(move || async move {
+                let arena = Arena::new();
+                let cfgs = parse_all(&uci_root, &arena, &["firewall"]).await?;
+                Ok(cfgs["firewall"]
+                    .sections
+                    .iter()
+                    .filter_map(|sec| {
+                        let r = sec.get::<FirewallRedirect>().ok()?;
+                        let kind = r._apf_label?;
+                        if r.dest_ip.as_deref() != Some(target.as_str()) {
+                            return None;
+                        }
+                        let (external, external_end) =
+                            r.src_dport.as_deref().and_then(parse_port_range)?;
+                        let internal = r.dest_port.as_deref().and_then(parse_port_range)?.0;
+                        Some((
+                            sec.name()?.to_string(),
+                            external,
+                            external_end,
+                            internal,
+                            kind,
+                            uci_protocols(&r.proto),
+                        ))
+                    })
+                    .collect())
+            })
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!("port-control: listing forwards failed: {e}");
+                Vec::new()
+            });
 
         let now = Instant::now();
         let leases = self.leases.lock().unwrap();
         found
             .into_iter()
-            .flat_map(|(section, external_port, internal_port, kind)| {
-                // An untracked section (fresh boot) reports 0 = permanent
-                // rather than "already expired".
-                let lease_seconds = leases
-                    .get(&section)
-                    .map(|t| t.saturating_duration_since(now).as_secs() as u32)
-                    .unwrap_or(0);
-                ["TCP", "UDP"]
-                    .into_iter()
-                    .map(move |protocol| MappingEntry {
-                        external_port,
-                        internal: SocketAddrV4::new(peer, internal_port),
-                        protocol,
-                        description: format!("Automatic port use ({kind})"),
-                        lease_seconds,
+            .flat_map(
+                |(section, external_port, external_end, internal_port, kind, protocols)| {
+                    // An untracked section (fresh boot) reports 0 = permanent
+                    // rather than "already expired".
+                    let lease_seconds = leases
+                        .get(&section)
+                        .map(|t| t.saturating_duration_since(now).as_secs() as u32)
+                        .unwrap_or(0);
+                    (external_port..=external_end).flat_map(move |port| {
+                        let protocols = protocols.clone();
+                        let kind = kind.clone();
+                        protocols.into_iter().map(move |protocol| MappingEntry {
+                            external_port: port,
+                            internal: SocketAddrV4::new(
+                                peer,
+                                internal_port + (port - external_port),
+                            ),
+                            protocol: protocol.igd_name(),
+                            description: format!("Automatic port use ({kind})"),
+                            lease_seconds,
+                        })
                     })
-            })
+                },
+            )
             .collect()
     }
 
@@ -962,8 +997,10 @@ impl PortControl {
     /// Assumes `write_serial` is held.
     async fn sync_sni_rules_inner(&self, reload: bool) -> Result<(), Error> {
         let routes = self.sni.snapshot();
-        let mut want: std::collections::BTreeSet<u16> =
-            routes.iter().map(|route| route.ext_port).collect();
+        let mut want = std::collections::BTreeMap::new();
+        for route in &routes {
+            want.entry(route.ext_port).or_insert(route.ext_ip);
+        }
         let uci_root = self.uci_root.clone();
         let redirect = uci_task(move || async move {
             let arena = Arena::new();
@@ -980,10 +1017,11 @@ impl PortControl {
         if redirect {
             crate::http_redirect::set_admitted(true);
         }
-        if scope.is_some() {
-            want.insert(crate::http_redirect::HTTP_PORT);
+        if let Some(wan) = scope {
+            want.insert(crate::http_redirect::HTTP_PORT, wan);
         }
-        self.sync_sni_rules_to(want, scope, reload).await?;
+        self.sync_sni_rules_to(want, scope.is_some(), reload)
+            .await?;
         // The gate shuts after the reload that removes the rule.
         if !redirect && reload {
             crate::http_redirect::set_admitted(false);
@@ -1001,8 +1039,8 @@ impl PortControl {
 
     async fn sync_sni_rules_to(
         &self,
-        want: std::collections::BTreeSet<u16>,
-        redirect: Option<Ipv4Addr>,
+        want: std::collections::BTreeMap<u16, Ipv4Addr>,
+        redirect: bool,
         reload: bool,
     ) -> Result<(), Error> {
         let uci_root = self.uci_root.clone();
@@ -1114,18 +1152,31 @@ impl GatewayBackend for Via {
         count: u16,
         peer: Ipv4Addr,
         lifetime: Option<u32>,
+        transport: TransportProtocol,
     ) -> Result<(), u16> {
         self.pc
-            .add_forward_for_kind(source, target, count, peer, lifetime, self.kind)
+            .add_forward_for_kind(source, target, count, peer, lifetime, self.kind, transport)
             .await
     }
 
-    async fn remove_forward(&self, peer: Ipv4Addr, internal_port: u16) {
-        self.pc.remove_forward_for(peer, internal_port).await
+    async fn remove_forward(
+        &self,
+        peer: Ipv4Addr,
+        internal_port: u16,
+        transport: TransportProtocol,
+    ) {
+        self.pc
+            .remove_forward_for(peer, internal_port, transport)
+            .await
     }
 
-    async fn remove_forward_by_source(&self, source: SocketAddrV4, peer: Ipv4Addr) -> bool {
-        self.pc.remove_by_source(source, peer).await
+    async fn remove_forward_by_source(
+        &self,
+        source: SocketAddrV4,
+        peer: Ipv4Addr,
+        transport: TransportProtocol,
+    ) -> bool {
+        self.pc.remove_by_source(source, peer, transport).await
     }
 
     async fn external_ipv4(&self, _peer: Ipv4Addr) -> Option<Ipv4Addr> {
@@ -1205,13 +1256,90 @@ where
     .map_err(|e| Error::new(eyre!("uci task panicked: {e}"), ErrorKind::Filesystem))?
 }
 
-/// Stable section key scoped by device and external port.
-fn section_name(mac: &str, external_port: u16) -> String {
-    format!(
+/// fw4 defaults an empty `proto` list to TCP and UDP.
+fn uci_protocols(protocols: &[String]) -> Vec<TransportProtocol> {
+    if protocols.is_empty()
+        || protocols
+            .iter()
+            .any(|p| p.eq_ignore_ascii_case("all") || p.eq_ignore_ascii_case("tcpudp"))
+    {
+        return Transport::default().protocols().iter().copied().collect();
+    }
+    Transport::default()
+        .protocols()
+        .iter()
+        .copied()
+        .filter(|p| {
+            protocols
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(p.as_str()))
+        })
+        .collect()
+}
+
+pub(crate) async fn split_legacy_forwards_uci(
+    root: &Path,
+) -> Result<Vec<(String, Vec<String>)>, Error> {
+    let mut retries = UCI_RETRIES;
+    loop {
+        let arena = Arena::new();
+        let mut cfgs = parse_all(root, &arena, &["firewall"]).await?;
+        let mut split = Vec::new();
+        let mut redirects = Vec::new();
+        for sec in &cfgs["firewall"].sections {
+            let Ok(r) = sec.get::<FirewallRedirect>() else {
+                continue;
+            };
+            if r._apf_label.is_none() || uci_protocols(&r.proto).len() != 2 {
+                continue;
+            }
+            let Some(name) = sec.name() else {
+                continue;
+            };
+            let mut names = Vec::new();
+            for protocol in Transport::default().protocols() {
+                let mut entry = sec.get::<FirewallRedirect>()?;
+                let protocol = protocol.as_str();
+                entry.proto = vec![protocol.to_string()];
+                let key = format!("{name}_{protocol}");
+                names.push(key.clone());
+                redirects.push((key, entry));
+            }
+            split.push((name.to_string(), names));
+        }
+        if split.is_empty() {
+            return Ok(split);
+        }
+        cfgs["firewall"].sections.retain(|s| {
+            !split
+                .iter()
+                .any(|(name, _)| s.name().as_deref() == Some(name.as_str()))
+        });
+        for (name, redirect) in redirects {
+            cfgs["firewall"].append(&redirect, Some(&name))?;
+        }
+        match dump_all(root, cfgs).await {
+            Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
+                retries -= 1;
+            }
+            Err(e) => return Err(e.into()),
+            Ok(()) => return Ok(split),
+        }
+    }
+}
+
+/// Stable section key scoped by device, external port, and transport.
+fn section_name(mac: &str, external_port: u16, transport: Transport) -> String {
+    let base = format!(
         "apf_{}_{}",
         mac.replace(':', "").to_lowercase(),
         external_port
-    )
+    );
+    if transport == Transport::default() {
+        base
+    } else {
+        format!("{base}_{transport}")
+    }
 }
 
 /// Clamps permanent and short requests to a sweepable finite lease.
@@ -1265,13 +1393,18 @@ fn desired_redirect(
     source: SocketAddrV4,
     target: SocketAddrV4,
     count: u16,
+    transport: &Transport,
 ) -> FirewallRedirect {
     FirewallRedirect {
         name: format!("Automatic port use ({kind})"),
         src: "wan".into(),
         dest: Some(zone),
         target: "DNAT".into(),
-        proto: vec!["tcp".into(), "udp".into()],
+        proto: transport
+            .protocols()
+            .iter()
+            .map(|p| p.as_str().to_string())
+            .collect(),
         src_dport: Some(range_string(source.port(), count)),
         src_ip: None,
         dest_ip: Some(target.ip().to_string()),
@@ -1285,11 +1418,6 @@ fn desired_redirect(
         _apf_mac: Some(mac.into()),
         _pp_wan_override: None,
     }
-}
-
-/// Whether the requested range overlaps a router-owned WAN port.
-fn reserves_wan_port(firewall: &uciedit::Config<'_>, want: (u16, u16)) -> bool {
-    !wan_reserved_overlaps(firewall, want, true, true).is_empty()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1316,20 +1444,10 @@ pub(crate) fn wan_reserved_overlaps(
         if rule.src != "wan" || rule.dest.is_some() || rule.family.as_deref() == Some("ipv6") {
             continue;
         }
-        // fw4 treats an empty protocol list as TCP and UDP.
-        let (rule_tcp, rule_udp) = if rule.proto.is_empty() {
-            (true, true)
-        } else {
-            let any = rule
-                .proto
-                .iter()
-                .any(|p| p.eq_ignore_ascii_case("all") || p.eq_ignore_ascii_case("tcpudp"));
-            (
-                any || rule.proto.iter().any(|p| p.eq_ignore_ascii_case("tcp")),
-                any || rule.proto.iter().any(|p| p.eq_ignore_ascii_case("udp")),
-            )
-        };
-        if !((tcp && rule_tcp) || (udp && rule_udp)) {
+        let protocols = uci_protocols(&rule.proto);
+        if !((tcp && protocols.contains(&TransportProtocol::Tcp))
+            || (udp && protocols.contains(&TransportProtocol::Udp)))
+        {
             continue;
         }
         let Some(spec) = rule.dest_port.as_deref() else {
@@ -1354,7 +1472,8 @@ pub(crate) fn wan_reserved_overlaps(
 
 /// Matches renewals across PCP and UPnP.
 fn redirect_matches(existing: &FirewallRedirect, desired: &FirewallRedirect) -> bool {
-    existing.src_dport == desired.src_dport
+    existing.proto == desired.proto
+        && existing.src_dport == desired.src_dport
         && existing.dest_port == desired.dest_port
         && existing.dest_ip == desired.dest_ip
         && existing.dest == desired.dest
@@ -1373,6 +1492,7 @@ async fn apply_forward_uci(
     source: SocketAddrV4,
     target: SocketAddrV4,
     count: u16,
+    transport: Transport,
 ) -> Result<ApplyOutcome, Error> {
     let want = (source.port(), source.port() + (count - 1));
     let mut retries = UCI_RETRIES;
@@ -1382,7 +1502,7 @@ async fn apply_forward_uci(
         let zone = arp_iface
             .and_then(|iface| crate::published_ports::zone_for_arp_iface(&cfgs, iface))
             .unwrap_or_else(|| "lan".into());
-        let desired = desired_redirect(kind, mac, zone, source, target, count);
+        let desired = desired_redirect(kind, mac, zone, source, target, count, &transport);
 
         // Any *other* enabled WAN-ingress DNAT redirect overlapping the
         // requested external range blocks the mapping — manual published ports
@@ -1406,7 +1526,11 @@ async fn apply_forward_uci(
             let Some(range) = r.src_dport.as_deref().and_then(parse_port_range) else {
                 continue;
             };
-            if ranges_overlap(want, range) {
+            if ranges_overlap(want, range)
+                && uci_protocols(&r.proto)
+                    .iter()
+                    .any(|p| transport.protocols().contains(p))
+            {
                 return Ok(ApplyOutcome::Conflict);
             }
         }
@@ -1420,7 +1544,14 @@ async fn apply_forward_uci(
         // override — see `published_ports::set`). A protocol client can't be
         // asked, so refuse, as StartTunnel reserves the port its HTTP→HTTPS
         // redirect owns.
-        if reserves_wan_port(&cfgs["firewall"], want) {
+        if !wan_reserved_overlaps(
+            &cfgs["firewall"],
+            want,
+            transport.protocols().contains(&TransportProtocol::Tcp),
+            transport.protocols().contains(&TransportProtocol::Udp),
+        )
+        .is_empty()
+        {
             return Ok(ApplyOutcome::Conflict);
         }
         if let Some(ours) = &ours {
@@ -1490,18 +1621,19 @@ fn sni_section_name(port: u16) -> String {
     format!("apf_sni_{port}")
 }
 
-/// The `SNI` label lets a build without the redirect purge its rule.
-fn desired_sni_rule(port: u16, redirect: Option<Ipv4Addr>) -> FirewallRule {
-    let redirect = redirect.filter(|_| port == crate::http_redirect::HTTP_PORT);
+/// Admits only the address the port's listener holds. The `SNI` label lets a build
+/// without the redirect purge its rule.
+fn desired_sni_rule(port: u16, dest: Ipv4Addr, redirect: bool) -> FirewallRule {
+    let redirect = redirect && port == crate::http_redirect::HTTP_PORT;
     FirewallRule {
-        name: if redirect.is_some() {
+        name: if redirect {
             crate::http_redirect::RULE_NAME.into()
         } else {
             "SNI demux (hostname routes)".into()
         },
         src: "wan".into(),
         proto: vec!["tcp".into()],
-        dest_ip: redirect.map(|wan| wan.to_string()),
+        dest_ip: Some(dest.to_string()),
         dest_port: Some(port.to_string()),
         target: FirewallTarget::ACCEPT,
         family: Some("ipv4".into()),
@@ -1515,7 +1647,7 @@ fn desired_sni_rule(port: u16, redirect: Option<Ipv4Addr>) -> FirewallRule {
 fn remote_access_fallback_source(mode: Result<&str, ()>, wan: Ipv4Addr) -> Option<FallbackSource> {
     match mode {
         Ok("always") => Some(FallbackSource::Any),
-        Ok("default") if wan.is_private() => Some(FallbackSource::PrivateOnly),
+        Ok("behind-nat") if wan.is_private() => Some(FallbackSource::PrivateOnly),
         _ => None,
     }
 }
@@ -1598,12 +1730,12 @@ fn sni_port_conflicts(firewall: &uciedit::Config<'_>, port: u16) -> bool {
     false
 }
 
-/// Replaces SNI admission rules with one per requested port.
+/// Replaces SNI admission rules with one per requested port and listening address.
 /// Returns whether UCI changed.
 async fn reconcile_sni_rules_uci(
     uci_root: &Path,
-    want: std::collections::BTreeSet<u16>,
-    redirect: Option<Ipv4Addr>,
+    want: std::collections::BTreeMap<u16, Ipv4Addr>,
+    redirect: bool,
 ) -> Result<bool, Error> {
     let mut retries = UCI_RETRIES;
     loop {
@@ -1624,21 +1756,20 @@ async fn reconcile_sni_rules_uci(
                 .and_then(parse_port_range)
                 .map(|r| r.0);
             let keep = port.is_some_and(|p| {
-                let desired = desired_sni_rule(p, redirect);
-                want.contains(&p)
-                    && rule.name == desired.name
-                    && rule.dest_ip == desired.dest_ip
-                    && seen.insert(p)
+                want.get(&p).is_some_and(|&dest| {
+                    let desired = desired_sni_rule(p, dest, redirect);
+                    rule.name == desired.name && rule.dest_ip == desired.dest_ip && seen.insert(p)
+                })
             });
             if !keep {
                 changed = true;
             }
             keep
         });
-        for port in want.iter().filter(|p| !seen.contains(p)) {
+        for (&port, &dest) in want.iter().filter(|(p, _)| !seen.contains(p)) {
             cfgs["firewall"].append(
-                &desired_sni_rule(*port, redirect),
-                Some(&sni_section_name(*port)),
+                &desired_sni_rule(port, dest, redirect),
+                Some(&sni_section_name(port)),
             )?;
             changed = true;
         }
@@ -2284,6 +2415,113 @@ pub(crate) async fn close_device_forwards(mac: &str, known_ips: &[String]) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn uci_protocol_lists_share_fw4_defaults_and_normalization() {
+        use TransportProtocol::{Tcp, Udp};
+        for (raw, expected) in [
+            (vec![], vec![Tcp, Udp]),
+            (vec!["tcp"], vec![Tcp]),
+            (vec!["udp"], vec![Udp]),
+            (vec!["uDp", "TcP"], vec![Tcp, Udp]),
+            (vec!["ALL"], vec![Tcp, Udp]),
+            (vec!["TcpUdp"], vec![Tcp, Udp]),
+            (vec!["tcp", "tcp"], vec![Tcp]),
+            (vec!["icmp"], vec![]),
+        ] {
+            let raw: Vec<_> = raw.into_iter().map(str::to_owned).collect();
+            assert_eq!(uci_protocols(&raw), expected, "{raw:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn protocol_mappings_coexist_and_remove_independently() {
+        let dir = temp_root("");
+        let mac = "AA:BB:CC:DD:EE:FF";
+        let source = "203.0.113.7:9100".parse().unwrap();
+        let target = "192.168.1.50:9200".parse().unwrap();
+        for transport in [Transport::tcp(), Transport::udp()] {
+            let outcome = apply_forward_uci(
+                dir.path(),
+                &section_name(mac, 9100, transport.clone()),
+                KIND_PCP,
+                mac,
+                Some("br-lan"),
+                source,
+                target,
+                2,
+                transport,
+            )
+            .await
+            .unwrap();
+            assert!(matches!(outcome, ApplyOutcome::Written));
+        }
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let tcp_key = section_name(mac, 9100, Transport::tcp());
+        let udp_key = section_name(mac, 9100, Transport::udp());
+        pc.bump_lease(tcp_key.clone(), MAX_LEASE);
+        pc.bump_lease(udp_key.clone(), MAX_LEASE);
+        let udp_expiry = pc.leases.lock().unwrap()[&udp_key];
+        pc.bump_lease(tcp_key.clone(), Duration::from_secs(60));
+        assert_eq!(pc.leases.lock().unwrap()[&udp_key], udp_expiry);
+        let removed = pc
+            .remove_client_forwards(mac, |r| {
+                uci_protocols(&r.proto).contains(&TransportProtocol::Tcp)
+            })
+            .await;
+        assert_eq!(removed, 1);
+        assert!(!pc.leases.lock().unwrap().contains_key(&tcp_key));
+        assert_eq!(pc.leases.lock().unwrap()[&udp_key], udp_expiry);
+        let entries = pc.forwards_for(*target.ip()).await;
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|entry| entry.protocol == "UDP"));
+        assert_eq!(entries[1].internal.port(), 9201);
+    }
+
+    #[tokio::test]
+    async fn legacy_dual_transport_sections_migrate_idempotently() {
+        let dir = temp_root("");
+        let mac = "AA:BB:CC:DD:EE:FF";
+        let source = "203.0.113.7:9100".parse().unwrap();
+        let target = "192.168.1.50:9200".parse().unwrap();
+        apply_forward_uci(
+            dir.path(),
+            &section_name(mac, 9100, Transport::default()),
+            KIND_PCP,
+            mac,
+            Some("br-lan"),
+            source,
+            target,
+            2,
+            Transport::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            split_legacy_forwards_uci(dir.path()).await.unwrap().len(),
+            1
+        );
+        assert!(split_legacy_forwards_uci(dir.path())
+            .await
+            .unwrap()
+            .is_empty());
+        let pc = PortControl::new(dir.path().to_path_buf());
+        let entries = pc.forwards_for(*target.ip()).await;
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.protocol == "TCP")
+                .count(),
+            2
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.protocol == "UDP")
+                .count(),
+            2
+        );
+    }
+
     const ADMISSION_80: &str = "option _apf_label 'SNI'";
 
     fn admitted(firewall: &str) -> bool {
@@ -2398,7 +2636,7 @@ mod tests {
 
         // What an older `sync_sni_rules` asks for: the demux's ports alone.
         let _serial = pc.write_serial.lock().await;
-        pc.sync_sni_rules_to(Default::default(), None, false)
+        pc.sync_sni_rules_to(Default::default(), false, false)
             .await
             .unwrap();
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
@@ -2426,8 +2664,10 @@ mod tests {
         let dir = temp_root("");
         reconcile_sni_rules_uci(
             dir.path(),
-            [crate::http_redirect::HTTP_PORT, 443].into_iter().collect(),
-            Some(WAN),
+            [(crate::http_redirect::HTTP_PORT, WAN), (443, WAN)]
+                .into_iter()
+                .collect(),
+            true,
         )
         .await
         .unwrap();
@@ -2450,8 +2690,10 @@ mod tests {
         let dir = temp_root("");
         reconcile_sni_rules_uci(
             dir.path(),
-            [crate::http_redirect::HTTP_PORT].into_iter().collect(),
-            None,
+            [(crate::http_redirect::HTTP_PORT, WAN)]
+                .into_iter()
+                .collect(),
+            false,
         )
         .await
         .unwrap();
@@ -2468,22 +2710,68 @@ mod tests {
     #[tokio::test]
     async fn port_80_changing_hands_rewrites_its_rule() {
         let dir = temp_root("");
-        let want: std::collections::BTreeSet<u16> =
-            [crate::http_redirect::HTTP_PORT].into_iter().collect();
+        let want: std::collections::BTreeMap<u16, Ipv4Addr> =
+            [(crate::http_redirect::HTTP_PORT, WAN)]
+                .into_iter()
+                .collect();
         let firewall = || std::fs::read_to_string(dir.path().join("firewall")).unwrap();
 
-        assert!(reconcile_sni_rules_uci(dir.path(), want.clone(), None)
+        assert!(reconcile_sni_rules_uci(dir.path(), want.clone(), false)
             .await
             .unwrap());
         assert!(!firewall().contains(crate::http_redirect::RULE_NAME));
-        assert!(reconcile_sni_rules_uci(dir.path(), want.clone(), Some(WAN))
+        assert!(reconcile_sni_rules_uci(dir.path(), want.clone(), true)
             .await
             .unwrap());
         assert!(firewall().contains(crate::http_redirect::RULE_NAME));
         assert_eq!(firewall().matches("apf_sni_80").count(), 1);
-        assert!(!reconcile_sni_rules_uci(dir.path(), want, Some(WAN))
+        assert!(!reconcile_sni_rules_uci(dir.path(), want, true)
             .await
             .unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_hostname_routes_rule_admits_only_its_listening_address() {
+        let dir = temp_root(
+            "config rule 'apf_sni_443'\n\
+             \toption name 'SNI demux (hostname routes)'\n\
+             \toption src 'wan'\n\
+             \tlist proto 'tcp'\n\
+             \toption dest_port '443'\n\
+             \toption target 'ACCEPT'\n\
+             \toption family 'ipv4'\n\
+             \toption enabled '1'\n\
+             \toption _apf_label 'SNI'\n",
+        );
+        let firewall = || std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        let want = |listening: Ipv4Addr| -> std::collections::BTreeMap<u16, Ipv4Addr> {
+            [(443, listening)].into_iter().collect()
+        };
+
+        assert!(reconcile_sni_rules_uci(dir.path(), want(WAN), false)
+            .await
+            .unwrap());
+        assert!(
+            firewall().contains("option dest_ip '203.0.113.7'"),
+            "{}",
+            firewall()
+        );
+        assert_eq!(firewall().matches("apf_sni_443").count(), 1);
+
+        let renumbered = Ipv4Addr::new(198, 51, 100, 9);
+        assert!(reconcile_sni_rules_uci(dir.path(), want(renumbered), false)
+            .await
+            .unwrap());
+        assert!(
+            firewall().contains("option dest_ip '198.51.100.9'"),
+            "{}",
+            firewall()
+        );
+        assert!(
+            !reconcile_sni_rules_uci(dir.path(), want(renumbered), false)
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
@@ -2502,6 +2790,7 @@ mod tests {
             source,
             target,
             1,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -2535,7 +2824,7 @@ config redirect 'pp_a'
     #[test]
     fn section_names_are_stable_and_uci_safe() {
         assert_eq!(
-            section_name("AA:BB:CC:DD:EE:FF", 8443),
+            section_name("AA:BB:CC:DD:EE:FF", 8443, Transport::default()),
             "apf_aabbccddeeff_8443"
         );
     }
@@ -2612,6 +2901,7 @@ config redirect 'pp_a'
             source,
             target,
             1,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -2633,6 +2923,7 @@ config redirect 'pp_a'
             source,
             target,
             1,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -2651,6 +2942,7 @@ config redirect 'pp_a'
             source,
             target2,
             1,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -2721,6 +3013,7 @@ config redirect 'pp_stale'
             source,
             target,
             1,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -2754,6 +3047,7 @@ config redirect 'pp_stale'
             source,
             target,
             1,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -2818,13 +3112,14 @@ config rule 'wan_to_lan'
         let dir = temp_root(ROUTER_FW);
         apply_forward_uci(
             dir.path(),
-            &section_name("11:22:33:44:55:66", port),
+            &section_name("11:22:33:44:55:66", port, Transport::default()),
             KIND_PCP,
             "11:22:33:44:55:66",
             Some("br-lan"),
             SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), port),
             SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 60), port),
             count,
+            Transport::default(),
         )
         .await
         .unwrap()
@@ -2914,6 +3209,7 @@ config rule 'wan_to_lan'
             source,
             target,
             10,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -2930,6 +3226,7 @@ config rule 'wan_to_lan'
             source,
             target,
             10,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -2950,13 +3247,14 @@ config rule 'wan_to_lan'
             let source = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), ext);
             let outcome = apply_forward_uci(
                 dir.path(),
-                &section_name("AA:BB:CC:DD:EE:FF", ext),
+                &section_name("AA:BB:CC:DD:EE:FF", ext, Transport::default()),
                 KIND_UPNP,
                 "AA:BB:CC:DD:EE:FF",
                 Some("br-lan"),
                 source,
                 target,
                 1,
+                Transport::default(),
             )
             .await
             .unwrap();
@@ -2988,13 +3286,14 @@ config redirect 'dns_override_lan'
         let target = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 53);
         let outcome = apply_forward_uci(
             dir.path(),
-            &section_name("AA:BB:CC:DD:EE:FF", 53),
+            &section_name("AA:BB:CC:DD:EE:FF", 53, Transport::default()),
             KIND_PCP,
             "AA:BB:CC:DD:EE:FF",
             Some("br-lan"),
             source,
             target,
             1,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3015,6 +3314,7 @@ config redirect 'dns_override_lan'
             source,
             target,
             1,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3060,6 +3360,7 @@ config redirect 'dns_override_lan'
             source,
             target,
             1,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3074,6 +3375,7 @@ config redirect 'dns_override_lan'
             other_source,
             other_target,
             1,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3461,11 +3763,11 @@ config host
         let private_wan = Ipv4Addr::new(192, 168, 10, 92);
         let public_wan = Ipv4Addr::new(203, 0, 113, 7);
         assert_eq!(
-            remote_access_fallback_source(Ok("default"), private_wan),
+            remote_access_fallback_source(Ok("behind-nat"), private_wan),
             Some(FallbackSource::PrivateOnly)
         );
         assert_eq!(
-            remote_access_fallback_source(Ok("default"), public_wan),
+            remote_access_fallback_source(Ok("behind-nat"), public_wan),
             None
         );
         assert_eq!(
@@ -3491,13 +3793,14 @@ config host
 
         let outcome = apply_forward_uci(
             dir.path(),
-            &section_name("11:22:33:44:55:66", 8443),
+            &section_name("11:22:33:44:55:66", 8443, Transport::default()),
             KIND_PCP,
             "11:22:33:44:55:66",
             Some("br-lan"),
             source,
             SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 60), 8443),
             1,
+            Transport::default(),
         )
         .await
         .unwrap();
@@ -3632,5 +3935,9 @@ config host
         pc.sni_maintain().await;
         let written = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
         assert!(written.contains("apf_sni_8443"), "rule healed");
+        assert!(
+            written.contains("option dest_ip '203.0.113.7'"),
+            "rule admits only the listening address: {written}"
+        );
     }
 }

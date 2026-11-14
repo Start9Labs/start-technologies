@@ -15,6 +15,7 @@ import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { StorageService } from 'src/app/services/storage.service'
 import { TitleDirective } from 'src/app/services/title.service'
+import { RegistryRetry } from 'src/app/routes/portal/components/registry-retry'
 
 import { MarketplaceControlsComponent } from './components/controls.component'
 
@@ -65,16 +66,7 @@ import { MarketplaceControlsComponent } from './components/controls.component'
             </ng-template>
           </button>
         </ng-template>
-        @if (isRegistrySaved()) {
-          <button
-            actions
-            tuiButton
-            iconStart="@tui.refresh-cw"
-            (click)="refreshRegistry()"
-          >
-            {{ 'Refresh registry' | i18n }}
-          </button>
-        }
+        <button [registryRetry]="selectedRegistry()!" size="xs"></button>
       </marketplace>
     }
   `,
@@ -98,6 +90,7 @@ import { MarketplaceControlsComponent } from './components/controls.component'
     MarketplacePackageLinkComponent,
     MarketplaceRegistrySelectComponent,
     MarketplaceTileComponent,
+    RegistryRetry,
   ],
 })
 export default class Marketplace {
@@ -160,14 +153,6 @@ export default class Marketplace {
   protected readonly registry = toSignal(
     this.marketplaceService.currentRegistry$,
   )
-
-  protected async refreshRegistry(): Promise<void> {
-    const url = this.selectedRegistry()!
-    await this.tasks.run(
-      () => this.marketplaceService.refreshRegistry(url),
-      'Checking registry',
-    )
-  }
 
   protected async connectRegistry(): Promise<void> {
     const url = this.selectedRegistry()!

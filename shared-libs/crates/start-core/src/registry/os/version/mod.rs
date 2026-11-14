@@ -15,6 +15,7 @@ use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::os::index::OsVersionInfo;
+use crate::registry::upstream::WRITES_INDEX;
 use crate::s9pk::git_hash::GitHash;
 use crate::s9pk::manifest::LocaleString;
 use crate::sign::AnyVerifyingKey;
@@ -27,6 +28,7 @@ pub fn version_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add_version)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .with_metadata("get_signer", Value::Bool(true))
                 .no_display()
@@ -44,6 +46,7 @@ pub fn version_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove_version)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.remove-os-version")

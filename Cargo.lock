@@ -8497,6 +8497,7 @@ dependencies = [
  "textwrap",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-native-tls",
  "tokio-rustls",
  "tokio-stream",
  "tokio-tungstenite 0.26.2",
@@ -8586,7 +8587,7 @@ dependencies = [
 
 [[package]]
 name = "startwrt-core"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "async_cell",
  "axum",

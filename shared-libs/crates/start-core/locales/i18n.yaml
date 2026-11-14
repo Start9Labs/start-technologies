@@ -1831,61 +1831,12 @@ init.initializing:
   pl_PL: "Inicjalizowanie..."
 
 # backup/backup_bulk.rs
-backup.bulk.complete-title:
-  en_US: "Backup Complete"
-  de_DE: "Sicherung abgeschlossen"
-  es_ES: "Copia de seguridad completada"
-  fr_FR: "Sauvegarde terminée"
-  pl_PL: "Kopia zapasowa zakończona"
-
-backup.bulk.complete-message:
-  en_US: "Your backup has completed"
-  de_DE: "Ihre Sicherung wurde abgeschlossen"
-  es_ES: "Su copia de seguridad se ha completado"
-  fr_FR: "Votre sauvegarde est terminée"
-  pl_PL: "Twoja kopia zapasowa została zakończona"
-
-backup.bulk.complete-with-failures:
-  en_US: "Your backup has completed, but some package(s) failed to backup"
-  de_DE: "Ihre Sicherung wurde abgeschlossen, aber einige Pakete konnten nicht gesichert werden"
-  es_ES: "Su copia de seguridad se completó, pero algunos paquetes fallaron"
-  fr_FR: "Votre sauvegarde est terminée, mais certains paquets n'ont pas pu être sauvegardés"
-  pl_PL: "Twoja kopia zapasowa została zakończona, ale niektóre pakiety nie zostały zapisane"
-
-backup.bulk.legacy-present-title:
-  en_US: "Old Backup Still Present"
-  de_DE: "Alte Sicherung noch vorhanden"
-  es_ES: "Copia de seguridad antigua aún presente"
-  fr_FR: "Ancienne sauvegarde toujours présente"
-  pl_PL: "Stara kopia zapasowa nadal obecna"
-
-backup.bulk.legacy-present-message:
-  en_US: "This backup target still contains an old-format (V1) backup that is no longer needed. To free up space on the drive, open this target on the Backups page and delete it."
-  de_DE: "Dieses Sicherungsziel enthält noch eine Sicherung im alten Format (V1), die nicht mehr benötigt wird. Um Speicherplatz auf dem Laufwerk freizugeben, öffnen Sie dieses Ziel auf der Seite Backups und löschen Sie sie."
-  es_ES: "Este destino de copia de seguridad todavía contiene una copia en formato antiguo (V1) que ya no es necesaria. Para liberar espacio en la unidad, abra este destino en la página Copias de seguridad y elimínela."
-  fr_FR: "Cette cible de sauvegarde contient encore une sauvegarde à l'ancien format (V1) qui n'est plus nécessaire. Pour libérer de l'espace sur le disque, ouvrez cette cible sur la page Sauvegardes et supprimez-la."
-  pl_PL: "Ten cel kopii zapasowej nadal zawiera kopię w starym formacie (V1), która nie jest już potrzebna. Aby zwolnić miejsce na dysku, otwórz to miejsce docelowe na stronie Kopie zapasowe i usuń ją."
-
 backup.bulk.failed-error:
   en_US: "Backup Failed: %{error}"
   de_DE: "Sicherung fehlgeschlagen: %{error}"
   es_ES: "Copia de seguridad fallida: %{error}"
   fr_FR: "Échec de la sauvegarde : %{error}"
   pl_PL: "Kopia zapasowa nie powiodła się: %{error}"
-
-backup.bulk.failed-title:
-  en_US: "Backup Failed"
-  de_DE: "Sicherung fehlgeschlagen"
-  es_ES: "Copia de seguridad fallida"
-  fr_FR: "Échec de la sauvegarde"
-  pl_PL: "Kopia zapasowa nie powiodła się"
-
-backup.bulk.failed-message:
-  en_US: "Your backup failed to complete."
-  de_DE: "Ihre Sicherung konnte nicht abgeschlossen werden."
-  es_ES: "Su copia de seguridad no se pudo completar."
-  fr_FR: "Votre sauvegarde n'a pas pu être terminée."
-  pl_PL: "Twoja kopia zapasowa nie została ukończona."
 
 backup.bulk.password-mismatch:
   en_US: "The existing backup on this target was encrypted with a different password. Provide the password that was used to create it."
@@ -2226,6 +2177,27 @@ net.host.binding.address-ssl:
   fr_FR: "SSL"
   pl_PL: "SSL"
 
+net.host.binding.reassign.no-assigned-port:
+  en_US: "The binding has no assigned port of the selected type"
+  de_DE: "Die Bindung hat keinen zugewiesenen Port des ausgewählten Typs"
+  es_ES: "La vinculación no tiene un puerto asignado del tipo seleccionado"
+  fr_FR: "La liaison n'a aucun port attribué du type sélectionné"
+  pl_PL: "Powiązanie nie ma przypisanego portu wybranego typu"
+
+net.host.binding.reassign.port-unavailable:
+  en_US: "Port %{port} is reserved or already allocated"
+  de_DE: "Port %{port} ist reserviert oder bereits zugewiesen"
+  es_ES: "El puerto %{port} está reservado o ya está asignado"
+  fr_FR: "Le port %{port} est réservé ou déjà attribué"
+  pl_PL: "Port %{port} jest zarezerwowany lub już przypisany"
+
+net.host.binding.reassign.server-ui-port:
+  en_US: "The server UI's SSL port must remain %{port}"
+  de_DE: "Der SSL-Port der Serveroberfläche muss %{port} bleiben"
+  es_ES: "El puerto SSL de la interfaz del servidor debe seguir siendo %{port}"
+  fr_FR: "Le port SSL de l'interface du serveur doit rester %{port}"
+  pl_PL: "Port SSL interfejsu serwera musi pozostać ustawiony na %{port}"
+
 # net/ssl.rs
 net.ssl.unreachable:
   en_US: "unreachable"
@@ -2355,6 +2327,196 @@ net.tunnel.timeout-waiting-for-remove:
   es_ES: "se agotó el tiempo esperando que la puerta de enlace %{gateway} sea eliminada de la base de datos"
   fr_FR: "délai d'attente dépassé pour la suppression de la passerelle %{gateway} de la base de données"
   pl_PL: "upłynął limit czasu oczekiwania na usunięcie bramy %{gateway} z bazy danych"
+
+# nut.rs
+nut.field-device-or-address:
+  en_US: "device or address"
+  de_DE: "Gerät oder Adresse"
+  es_ES: "dispositivo o dirección"
+  fr_FR: "périphérique ou adresse"
+  pl_PL: "urządzenie lub adres"
+
+nut.field-driver:
+  en_US: "driver"
+  de_DE: "Treiber"
+  es_ES: "controlador"
+  fr_FR: "pilote"
+  pl_PL: "sterownik"
+
+nut.field-monitor-password:
+  en_US: "monitor password"
+  de_DE: "Monitor-Passwort"
+  es_ES: "contraseña de monitorización"
+  fr_FR: "mot de passe de surveillance"
+  pl_PL: "hasło monitora"
+
+nut.field-monitor-username:
+  en_US: "monitor username"
+  de_DE: "Monitor-Benutzername"
+  es_ES: "nombre de usuario de monitorización"
+  fr_FR: "nom d’utilisateur de surveillance"
+  pl_PL: "nazwa użytkownika monitora"
+
+nut.field-network-client-password:
+  en_US: "client password"
+  de_DE: "Client-Passwort"
+  es_ES: "contraseña del cliente"
+  fr_FR: "mot de passe du client"
+  pl_PL: "hasło klienta"
+
+nut.field-network-client-username:
+  en_US: "client username"
+  de_DE: "Client-Benutzername"
+  es_ES: "nombre de usuario del cliente"
+  fr_FR: "nom d’utilisateur du client"
+  pl_PL: "nazwa użytkownika klienta"
+
+nut.field-product-id:
+  en_US: "product ID"
+  de_DE: "Produkt-ID"
+  es_ES: "ID de producto"
+  fr_FR: "identifiant de produit"
+  pl_PL: "identyfikator produktu"
+
+nut.field-serial:
+  en_US: "serial number"
+  de_DE: "Seriennummer"
+  es_ES: "número de serie"
+  fr_FR: "numéro de série"
+  pl_PL: "numer seryjny"
+
+nut.field-server-host:
+  en_US: "server host"
+  de_DE: "Server-Host"
+  es_ES: "host del servidor"
+  fr_FR: "hôte du serveur"
+  pl_PL: "host serwera"
+
+nut.field-ups-name:
+  en_US: "UPS name"
+  de_DE: "USV-Name"
+  es_ES: "nombre del SAI"
+  fr_FR: "nom de l’onduleur"
+  pl_PL: "nazwa UPS"
+
+nut.field-vendor-id:
+  en_US: "vendor ID"
+  de_DE: "Hersteller-ID"
+  es_ES: "ID de fabricante"
+  fr_FR: "identifiant de fabricant"
+  pl_PL: "identyfikator producenta"
+
+nut.invalid-identifier:
+  en_US: "Invalid NUT %{field}: use letters, numbers, dots, underscores, or hyphens"
+  de_DE: "Ungültiges NUT-Feld %{field}: Verwenden Sie Buchstaben, Zahlen, Punkte, Unterstriche oder Bindestriche"
+  es_ES: "Campo NUT %{field} no válido: use letras, números, puntos, guiones bajos o guiones"
+  fr_FR: "Champ NUT %{field} invalide : utilisez des lettres, des chiffres, des points, des traits de soulignement ou des traits d'union"
+  pl_PL: "Nieprawidłowe pole NUT %{field}: użyj liter, cyfr, kropek, podkreśleń lub myślników"
+
+nut.invalid-port:
+  en_US: "NUT port must be greater than 0"
+  de_DE: "Der NUT-Port muss größer als 0 sein"
+  es_ES: "El puerto NUT debe ser mayor que 0"
+  fr_FR: "Le port NUT doit être supérieur à 0"
+  pl_PL: "Port NUT musi być większy niż 0"
+
+nut.invalid-quoted:
+  en_US: "Invalid NUT %{field}: use printable ASCII except backslash or double quote"
+  de_DE: "Ungültiges NUT-Feld %{field}: Verwenden Sie druckbare ASCII-Zeichen außer Rückstrich oder doppeltem Anführungszeichen"
+  es_ES: "Campo NUT %{field} no válido: use caracteres ASCII imprimibles excepto barra inversa o comillas dobles"
+  fr_FR: "Champ NUT %{field} invalide : utilisez des caractères ASCII imprimables sauf barre oblique inverse ou guillemet double"
+  pl_PL: "Nieprawidłowe pole NUT %{field}: użyj drukowalnych znaków ASCII z wyjątkiem ukośnika odwrotnego i cudzysłowu"
+
+nut.invalid-token:
+  en_US: "Invalid NUT %{field}: use visible ASCII except #, backslash, or double quote"
+  de_DE: "Ungültiges NUT-Feld %{field}: Verwenden Sie sichtbare ASCII-Zeichen außer #, Rückstrich oder doppeltem Anführungszeichen"
+  es_ES: "Campo NUT %{field} no válido: use caracteres ASCII visibles excepto #, barra inversa o comillas dobles"
+  fr_FR: "Champ NUT %{field} invalide : utilisez des caractères ASCII visibles sauf #, barre oblique inverse ou guillemet double"
+  pl_PL: "Nieprawidłowe pole NUT %{field}: użyj widocznych znaków ASCII z wyjątkiem #, ukośnika odwrotnego i cudzysłowu"
+
+nut.disabled:
+  en_US: "Network UPS Tools is disabled"
+  de_DE: "Network UPS Tools ist deaktiviert"
+  es_ES: "Network UPS Tools está desactivado"
+  fr_FR: "Network UPS Tools est désactivé"
+  pl_PL: "Network UPS Tools jest wyłączony"
+
+nut.enabled-without-settings:
+  en_US: "Network UPS Tools cannot be enabled without configuration"
+  de_DE: "Network UPS Tools kann nicht ohne Konfiguration aktiviert werden"
+  es_ES: "Network UPS Tools no puede activarse sin configuración"
+  fr_FR: "Network UPS Tools ne peut pas être activé sans configuration"
+  pl_PL: "Nie można włączyć Network UPS Tools bez konfiguracji"
+
+nut.list-ups-failed:
+  en_US: "Could not list the UPS devices on the NUT server at %{target}: %{error}"
+  de_DE: "Die USV-Geräte auf dem NUT-Server unter %{target} konnten nicht aufgelistet werden: %{error}"
+  es_ES: "No se pudieron listar los dispositivos SAI del servidor NUT en %{target}: %{error}"
+  fr_FR: "Impossible de lister les onduleurs du serveur NUT à %{target} : %{error}"
+  pl_PL: "Nie udało się pobrać listy urządzeń UPS z serwera NUT pod adresem %{target}: %{error}"
+
+nut.list-ups-timeout:
+  en_US: "the NUT server did not respond"
+  de_DE: "der NUT-Server hat nicht geantwortet"
+  es_ES: "el servidor NUT no respondió"
+  fr_FR: "le serveur NUT n'a pas répondu"
+  pl_PL: "serwer NUT nie odpowiedział"
+
+nut.monitor-auth-failed:
+  en_US: "NUT rejected the monitoring login. Check the monitor username, password, and permissions on the UPS server."
+  de_DE: "NUT hat die Monitor-Anmeldung abgelehnt. Prüfen Sie Benutzername, Passwort und Berechtigungen auf dem USV-Server."
+  es_ES: "NUT rechazó el inicio de sesión de monitorización. Compruebe el usuario, la contraseña y los permisos en el servidor del SAI."
+  fr_FR: "NUT a refusé la connexion de surveillance. Vérifiez le nom d’utilisateur, le mot de passe et les autorisations sur le serveur de l’onduleur."
+  pl_PL: "NUT odrzucił logowanie monitora. Sprawdź nazwę użytkownika, hasło i uprawnienia na serwerze UPS."
+
+nut.monitor-check-timeout:
+  en_US: "NUT monitoring verification timed out. Check the UPS server and network connection."
+  de_DE: "Die Überprüfung der NUT-Überwachung hat das Zeitlimit überschritten. Prüfen Sie den USV-Server und die Netzwerkverbindung."
+  es_ES: "La verificación de monitorización de NUT agotó el tiempo de espera. Compruebe el servidor del SAI y la conexión de red."
+  fr_FR: "La vérification de la surveillance NUT a expiré. Vérifiez le serveur de l’onduleur et la connexion réseau."
+  pl_PL: "Przekroczono czas weryfikacji monitorowania NUT. Sprawdź serwer UPS i połączenie sieciowe."
+
+nut.monitor-not-running:
+  en_US: "The NUT shutdown monitor is not running. Check the NUT configuration and restart monitoring."
+  de_DE: "Der NUT-Abschaltmonitor läuft nicht. Prüfen Sie die NUT-Konfiguration und starten Sie die Überwachung neu."
+  es_ES: "El monitor de apagado de NUT no está en ejecución. Compruebe la configuración de NUT y reinicie la monitorización."
+  fr_FR: "Le moniteur d’arrêt NUT ne fonctionne pas. Vérifiez la configuration NUT et redémarrez la surveillance."
+  pl_PL: "Monitor wyłączania NUT nie działa. Sprawdź konfigurację NUT i uruchom ponownie monitorowanie."
+
+nut.scan-failed:
+  en_US: "Could not scan for UPS devices: %{error}"
+  de_DE: "USV-Geräte konnten nicht gesucht werden: %{error}"
+  es_ES: "No se pudieron buscar dispositivos SAI: %{error}"
+  fr_FR: "Impossible de rechercher des onduleurs : %{error}"
+  pl_PL: "Nie udało się wyszukać urządzeń UPS: %{error}"
+
+nut.scan-timeout:
+  en_US: "Scanning for UPS devices timed out"
+  de_DE: "Die Suche nach USV-Geräten hat das Zeitlimit überschritten"
+  es_ES: "La búsqueda de dispositivos SAI agotó el tiempo de espera"
+  fr_FR: "La recherche d'onduleurs a expiré"
+  pl_PL: "Przekroczono limit czasu wyszukiwania urządzeń UPS"
+
+nut.reserved-username:
+  en_US: "NUT username %{username} is reserved for local shutdown monitoring"
+  de_DE: "Der NUT-Benutzername %{username} ist für die lokale Abschaltüberwachung reserviert"
+  es_ES: "El nombre de usuario NUT %{username} está reservado para la monitorización local de apagado"
+  fr_FR: "Le nom d’utilisateur NUT %{username} est réservé à la surveillance locale de l’arrêt"
+  pl_PL: "Nazwa użytkownika NUT %{username} jest zarezerwowana do lokalnego monitorowania wyłączania"
+
+nut.status-command-failed:
+  en_US: "NUT status command failed for %{target}: %{error}"
+  de_DE: "NUT-Statusbefehl für %{target} fehlgeschlagen: %{error}"
+  es_ES: "El comando de estado de NUT falló para %{target}: %{error}"
+  fr_FR: "La commande d'état NUT a échoué pour %{target} : %{error}"
+  pl_PL: "Polecenie statusu NUT nie powiodło się dla %{target}: %{error}"
+
+nut.status-missing:
+  en_US: "NUT status for %{target} did not include ups.status"
+  de_DE: "Der NUT-Status für %{target} enthielt kein ups.status"
+  es_ES: "El estado de NUT para %{target} no incluyó ups.status"
+  fr_FR: "L'état NUT pour %{target} ne contenait pas ups.status"
+  pl_PL: "Status NUT dla %{target} nie zawierał ups.status"
 
 # net/wifi.rs
 net.wifi.password-no-special-characters:
@@ -3034,6 +3196,13 @@ registry.package.sign.commitment-not-found:
   pl_PL: "%{id}@%{version} nie zawiera s9pk o sighash %{sighash}"
 
 # registry/package/index.rs
+registry.package.icon.hash-mismatch:
+  en_US: "icon bytes do not match %{name}"
+  de_DE: "Symboldaten stimmen nicht mit %{name} überein"
+  es_ES: "los bytes del icono no coinciden con %{name}"
+  fr_FR: "les octets de l'icône ne correspondent pas à %{name}"
+  pl_PL: "dane ikony nie odpowiadają %{name}"
+
 registry.package.icon.invalid-name:
   en_US: "invalid package icon name: %{name}"
   de_DE: "Ungültiger Paketsymbolname: %{name}"
@@ -3086,6 +3255,13 @@ registry.package.signer.not-authorized:
   pl_PL: "Sygnatariusz %{signer} nie jest autoryzowany do podpisywania %{id}"
 
 # registry/sync.rs
+registry.mirror.read-only:
+  en_US: "This registry mirrors %{upstream}; make index changes there"
+  de_DE: "Dieses Registry spiegelt %{upstream}; nehmen Sie Indexänderungen dort vor"
+  es_ES: "Este registro refleja %{upstream}; realice los cambios del índice allí"
+  fr_FR: "Ce registre est un miroir de %{upstream} ; modifiez l'index sur celui-ci"
+  pl_PL: "Ten rejestr odzwierciedla %{upstream}; wprowadzaj zmiany indeksu tam"
+
 registry.sync.closed:
   en_US: "Registry connection closed"
   de_DE: "Registry-Verbindung geschlossen"
@@ -3100,6 +3276,14 @@ sign.commitment.request.unsupported-type:
   es_ES: "Tipo de compromiso de solicitud no admitido %{ty}"
   fr_FR: "Type d'engagement de requête non pris en charge %{ty}"
   pl_PL: "Nieobsługiwany typ zobowiązania żądania %{ty}"
+
+# sign/instance.rs
+sign.instance.invalid-database:
+  en_US: "Server identity database must be an object"
+  de_DE: "Die Datenbank der Serveridentität muss ein Objekt sein"
+  es_ES: "La base de datos de identidad del servidor debe ser un objeto"
+  fr_FR: "La base de données d'identité du serveur doit être un objet"
+  pl_PL: "Baza danych tożsamości serwera musi być obiektem"
 
 # sign/mod.rs
 sign.context-too-long:
@@ -4312,6 +4496,13 @@ help.arg.binding-enabled:
   fr_FR: "Activer ou désactiver cette liaison"
   pl_PL: "Włącz lub wyłącz to powiązanie"
 
+help.arg.binding-ssl-port:
+  en_US: "Reassign the SSL port instead of the non-SSL port"
+  de_DE: "Den SSL-Port statt des Nicht-SSL-Ports neu zuweisen"
+  es_ES: "Reasignar el puerto SSL en lugar del puerto no SSL"
+  fr_FR: "Réattribuer le port SSL au lieu du port non SSL"
+  pl_PL: "Przypisz ponownie port SSL zamiast portu bez SSL"
+
 help.arg.ca-certificate:
   en_US: "PEM-encoded CA certificate"
   de_DE: "PEM-codiertes CA-Zertifikat"
@@ -4943,6 +5134,13 @@ help.arg.registry-name:
   fr_FR: "Nom du registre"
   pl_PL: "Nazwa rejestru"
 
+help.arg.registry-mirror-of:
+  en_US: "Registry URL to mirror; this registry's index becomes read-only"
+  de_DE: "URL des zu spiegelnden Registrys; der Index dieses Registrys wird schreibgeschützt"
+  es_ES: "URL del registro que se reflejará; el índice de este registro pasa a ser de solo lectura"
+  fr_FR: "URL du registre à mettre en miroir ; l'index de ce registre passe en lecture seule"
+  pl_PL: "URL rejestru do odzwierciedlenia; indeks tego rejestru staje się tylko do odczytu"
+
 help.arg.registry-startwrt:
   en_US: "Serve StartWRT clients"
   de_DE: "StartWRT-Clients bedienen"
@@ -5341,6 +5539,20 @@ help.arg.asset-url:
   es_ES: "URL del recurso"
   fr_FR: "URL de la ressource"
   pl_PL: "URL zasobu"
+
+help.arg.backup-history-limit:
+  en_US: "Maximum number of backups to return"
+  de_DE: "Maximale Anzahl zurückzugebender Sicherungen"
+  es_ES: "Número máximo de copias de seguridad a devolver"
+  fr_FR: "Nombre maximum de sauvegardes à retourner"
+  pl_PL: "Maksymalna liczba kopii zapasowych do zwrócenia"
+
+help.arg.backup-history-offset:
+  en_US: "Number of most recent backups to skip"
+  de_DE: "Anzahl der neuesten Sicherungen, die übersprungen werden"
+  es_ES: "Número de copias de seguridad más recientes que se omiten"
+  fr_FR: "Nombre de sauvegardes les plus récentes à ignorer"
+  pl_PL: "Liczba najnowszych kopii zapasowych do pominięcia"
 
 help.arg.backup-password:
   en_US: "Password for backup encryption"
@@ -6248,6 +6460,13 @@ about.commands-backup:
   fr_FR: "Commandes liées à la création de sauvegardes et aux cibles de sauvegarde"
   pl_PL: "Polecenia związane z tworzeniem kopii zapasowych i celami kopii zapasowych"
 
+about.commands-backup-history:
+  en_US: "Commands related to backup history"
+  de_DE: "Befehle zum Sicherungsverlauf"
+  es_ES: "Comandos relacionados con el historial de copias de seguridad"
+  fr_FR: "Commandes liées à l'historique des sauvegardes"
+  pl_PL: "Polecenia związane z historią kopii zapasowych"
+
 about.commands-backup-target:
   en_US: "Commands related to a backup target"
   de_DE: "Befehle zu einem Backup-Ziel"
@@ -7082,6 +7301,13 @@ about.list-available-wifi-networks:
   fr_FR: "Lister les réseaux wifi disponibles"
   pl_PL: "Wyświetl dostępne sieci wifi"
 
+about.list-backup-history:
+  en_US: "List past backups and their reports, newest first"
+  de_DE: "Vergangene Sicherungen und ihre Berichte auflisten, neueste zuerst"
+  es_ES: "Listar las copias de seguridad anteriores y sus informes, de la más reciente a la más antigua"
+  fr_FR: "Lister les sauvegardes passées et leurs rapports, les plus récentes en premier"
+  pl_PL: "Wyświetl poprzednie kopie zapasowe i ich raporty, od najnowszych"
+
 about.list-bindings-for-host:
   en_US: "List bindings for a host"
   de_DE: "Bindungen für einen Host auflisten"
@@ -7396,6 +7622,13 @@ about.select-s9pk-for-device:
   es_ES: "Seleccionar el s9pk más compatible para un dispositivo destino"
   fr_FR: "Sélectionner le meilleur s9pk compatible pour un appareil cible"
   pl_PL: "Wybierz najlepiej kompatybilny s9pk dla urządzenia docelowego"
+
+about.reassign-binding-port:
+  en_US: "Change a binding's assigned external port"
+  de_DE: "Den zugewiesenen externen Port einer Bindung ändern"
+  es_ES: "Cambiar el puerto externo asignado de una vinculación"
+  fr_FR: "Modifier le port externe attribué à une liaison"
+  pl_PL: "Zmień przypisany port zewnętrzny powiązania"
 
 about.rebuild-service-container:
   en_US: "Rebuild service container"

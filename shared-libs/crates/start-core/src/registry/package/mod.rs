@@ -2,6 +2,7 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async, from_fn_asy
 
 use crate::context::CliContext;
 use crate::prelude::*;
+use crate::registry::upstream::WRITES_INDEX;
 use crate::util::serde::HandlerExtSerde;
 
 pub mod access;
@@ -28,6 +29,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add::add_package)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("get_signer", Value::Bool(true))
                 .no_cli(),
         )
@@ -41,6 +43,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add-mirror",
             from_fn_async(add::add_mirror)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("get_signer", Value::Bool(true))
                 .no_cli(),
         )
@@ -54,6 +57,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(add::remove_package)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("get_signer", Value::Bool(true))
                 .with_custom_display_fn(|args, changed| {
                     if !changed {
@@ -82,6 +86,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove-mirror",
             from_fn_async(add::remove_mirror)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("get_signer", Value::Bool(true))
                 .no_display()
                 .with_about("about.remove-mirror-package")
@@ -90,6 +95,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "sign",
             from_fn_async(sign::sign_package)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("get_signer", Value::Bool(true))
                 .no_cli(),
         )

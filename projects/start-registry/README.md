@@ -95,8 +95,17 @@ Configuration is read from CLI flags and a config file (`-c <path>`; default sea
 | `-p, --tor-proxy <url>` | SOCKS proxy for outbound (e.g. Tor) requests            |
 | `-d, --datadir <path>`  | data directory (default `/var/lib/startos`)             |
 | `-c, --config <path>`   | config file                                             |
+| `--mirror-of <url>`     | mirror another registry's index (read-only index)       |
 
 Clients synchronize registry metadata through `db.subscribe`: `rpcstream` opt-in uses the shared `/rpc/v2` socket, while ordinary requests retain the GUID WebSocket continuation. StartOS authenticates and encrypts this shared connection through signed ephemeral DH. Streaming requires encrypted admission and `rpcstream`, with the client's selected URL host configured on the registry. A legacy HTTP 200 response without upgrading, or HTTP 404/405/501, selects signed HTTP polling every 15 minutes; each cycle retries upgrade support. Polls retrieve full package versions/revisions, registry info and the selected OS index through the same cache/trust owners. Authorization, transport and failed encrypted admission errors never downgrade. A subscription's optional `osVersion` selects a lazily shared backward-compatible index view; omitted versions retain the canonical format. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
+
+## Mirroring another registry
+
+A registry started with `--mirror-of <url>` (or `mirror-of: <url>` in its config file) keeps a synchronized copy of the upstream index visible to its identity. It follows the upstream's `/index` subscription and copies the package icons that index refers to. Index changes appear on the mirror as the upstream publishes them. The upstream must support encrypted `db.subscribe` streaming. Package and OS files stay at the URLs the index lists.
+
+The mirror subscribes with its own server identity, logged as `key` when mirroring starts. It receives what the upstream shows that identity: public packages to an unknown identity, private packages it may read once the upstream adds it as a signer and reader, and reader lists only when that signer is an upstream admin. Restart a public-only mirror after granting its identity private-package access or upstream admin status. For failover with private-package reader lists intact, make the mirror an upstream admin.
+
+While mirroring, the registry rejects every call that writes the index: publishing, signers, categories, access, registry info and `db apply`. Its admins, metrics and identity stay its own. To promote a mirror, remove `mirror-of` and restart it. It keeps the last synchronized index and accepts writes again. Admins refer to signer IDs, so add the upstream's admins on the mirror with `start-registry admin add <signer-id>` before promotion.
 
 Ordinary RPC requests have a 1 MiB encoded-body limit, including JSON and base64 overhead. This also bounds inline registry icons sent by `registry info set-icon`; use a smaller image when its encoded request exceeds that budget. Large index responses and asset downloads retain their separate limits.
 

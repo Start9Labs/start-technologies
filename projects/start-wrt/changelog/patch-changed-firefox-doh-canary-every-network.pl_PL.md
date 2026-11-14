@@ -1,1 +1,0 @@
-- Każda sieć odpowiada na domenę kontrolną DNS-over-HTTPS Firefoksa, dzięki czemu domyślnie włączony DoH ustępuje lokalnemu rozwiązywaniu nazw urządzeń. DoH włączony jawnie przez użytkownika pozostaje bez zmian.

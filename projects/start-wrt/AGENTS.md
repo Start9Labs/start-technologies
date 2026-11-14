@@ -175,8 +175,16 @@ as what its upstream router offers.
      IdentitiesOnly yes
    ```
 
-   Then run `bench.sh mgmt install`, which reaches the router on port 22 while Remote Access
-   is on and adds the management port. Run it again after a fresh reflash, or when this
+   Then set Remote Access to When behind NAT. A fresh router defaults to Never and this
+   machine reaches only its WAN side, so set it in the UI from a LAN device or over the
+   console:
+
+   ```
+   bench.sh console run 'uci set startwrt.preferences.remote_access=behind-nat && uci commit startwrt && startwrt-cli system apply-remote-access'
+   ```
+
+   Then run `bench.sh mgmt install`, which reaches the router on port 22 and adds the
+   management port. Repeat both after a fresh reflash, and `mgmt install` alone when this
    machine's address changes.
 
 3. **Console access**, scoped to one adapter rather than the `dialout` group. Read the

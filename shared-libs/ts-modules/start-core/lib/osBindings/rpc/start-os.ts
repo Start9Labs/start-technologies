@@ -239,6 +239,11 @@ export type KeyboardOptionsInput = z.input<typeof schemas.KeyboardOptions>
 export type ListNotificationParamsInput = z.input<
   typeof schemas.ListNotificationParams
 >
+
+/**
+ * Address of the NUT server to list UPS devices from.
+ */
+export type ListNutUpsParamsInput = z.input<typeof schemas.ListNutUpsParams>
 export type ListParamsInput = z.input<typeof schemas.ListParams>
 export type ListVersionSignersParamsInput = z.input<
   typeof schemas.ListVersionSignersParams
@@ -284,6 +289,26 @@ export type NotificationLevel = z.output<typeof schemas.NotificationLevel>
 export type NotificationLevelInput = z.input<typeof schemas.NotificationLevel>
 
 /**
+ * A UPS detected on USB, with the driver settings that address it.
+ */
+export type NutDevice = z.output<typeof schemas.NutDevice>
+
+/**
+ * A UPS detected on USB, with the driver settings that address it.
+ */
+export type NutDeviceInput = z.input<typeof schemas.NutDevice>
+
+/**
+ * A UPS served by a NUT server, as `LIST UPS` reports it.
+ */
+export type NutRemoteUps = z.output<typeof schemas.NutRemoteUps>
+
+/**
+ * Current variables reported by the configured UPS.
+ */
+export type NutStatus = z.output<typeof schemas.NutStatus>
+
+/**
  * An absent update preserves DNS intent; null servers select gateway DNS.
  */
 export type OutboundDnsUpdateInput = z.input<typeof schemas.OutboundDnsUpdate>
@@ -307,6 +332,7 @@ export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
  */
 export type QueryDnsRes = z.output<typeof schemas.QueryDnsRes>
 export type ReaderParamsInput = z.input<typeof schemas.ReaderParams>
+export type ReassignPortParamsInput = z.input<typeof schemas.ReassignPortParams>
 
 /**
  * A registry asset with a caller-selected commitment representation.
@@ -403,6 +429,7 @@ export type TermSizeInput = z.input<typeof schemas.TermSize>
  */
 export type TestOperation = z.output<typeof schemas.TestOperation>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
+export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedCa = z.output<typeof schemas.TrustedCa>
@@ -573,6 +600,11 @@ export type MetricsMemory = z.output<typeof schemas.MetricsMemory>
 export type MetricsSummary = z.output<typeof schemas.MetricsSummary>
 export type MountParamsInput = z.input<typeof schemas.MountParams>
 export type Notification = z.output<typeof schemas.Notification>
+
+/**
+ * Directly connected UPS server settings or remote NUT client settings.
+ */
+export type NutSettingsInput = z.input<typeof schemas.NutSettings>
 export type OsInfo = z.output<typeof schemas.OsInfo>
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
 export type PackageAccessControl = z.output<typeof schemas.PackageAccessControl>
@@ -699,6 +731,7 @@ export type SubscribeIndexParamsInput = z.input<
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type TargetParamsInput = z.input<typeof schemas.TargetParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
+export type TransportWire = z.output<typeof schemas.TransportWire>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
 export type UninstallParamsInput = z.input<typeof schemas.UninstallParams>
 export type UnsetGatewaySecureParamsInput = z.input<
@@ -746,6 +779,11 @@ export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type Metrics = z.output<typeof schemas.Metrics>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
 export type NotificationWithId = z.output<typeof schemas.NotificationWithId>
+
+/**
+ * Stored NUT configuration and its independent enabled state.
+ */
+export type NutConfigInput = z.input<typeof schemas.NutConfig>
 export type OsVersionInfoMap = z.output<typeof schemas.OsVersionInfoMap>
 export type PackageAccess = z.output<typeof schemas.PackageAccess>
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
@@ -772,6 +810,12 @@ export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
  * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
  */
 export type SubscribeResult = z.output<typeof schemas.SubscribeResult>
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export type Transport = z.output<typeof schemas.Transport>
 
 /**
  * Signing-key material and independent package and OS-update trust.
@@ -806,6 +850,11 @@ export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type SessionList = z.output<typeof schemas.SessionList>
+
+/**
+ * Parameters for replacing the stored NUT configuration.
+ */
+export type SetNutParamsInput = z.input<typeof schemas.SetNutParams>
 export type BackupHistory = z.output<typeof schemas.BackupHistory>
 
 /**

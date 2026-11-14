@@ -40,6 +40,7 @@ import {
   TuiButtonSelect,
   TuiChevron,
   TuiSkeleton,
+  TuiStatus,
 } from '@taiga-ui/kit'
 import {
   TuiBlockStatus,
@@ -52,7 +53,7 @@ import { filterPackages } from '../pipes/filter-packages.pipe'
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreDataWithUrl } from '../types'
 import { isRegistryLoading } from '../registry-state'
-import { RegistryConnectionStatus } from './registry-status'
+import { RegistryConnectionStatus, RegistryStatePipe } from './registry-status'
 
 const ICONS: Record<string, string> = {
   all: '@tui.layout-grid',
@@ -74,6 +75,27 @@ const ICONS: Record<string, string> = {
   template: `
     <aside [tuiNavigationAside]="open()">
       <ng-content />
+      @if (current(); as registry) {
+        @if (registry.status === 'error') {
+          @let state = registry.status | registryState;
+          <div tuiCell class="registry-status" [class._collapsed]="!open()">
+            @if (open()) {
+              <marketplace-registry-status
+                [status]="registry.status"
+                [url]="registry.url"
+                [error]="registry.error"
+              />
+              <ng-content select="[registryRetry]" />
+            } @else {
+              <span
+                role="img"
+                [tuiStatus]="state.color"
+                [attr.aria-label]="state.label | i18n"
+              ></span>
+            }
+          </div>
+        }
+      }
       <tui-textfield tuiTextfieldSize="s" iconStart="@tui.search">
         <input
           tuiInput
@@ -133,15 +155,6 @@ const ICONS: Record<string, string> = {
               </h2>
             </hgroup>
             <aside tuiAccessories>
-              @if (current(); as registry) {
-                @if (registry.status; as status) {
-                  <marketplace-registry-status
-                    [status]="status"
-                    [url]="registry.url"
-                    [error]="registry.error"
-                  />
-                }
-              }
               <button
                 appearance="secondary-grayscale"
                 tuiButton
@@ -217,6 +230,14 @@ const ICONS: Record<string, string> = {
       }
     }
 
+    .registry-status {
+      padding-inline: 0;
+
+      &._collapsed {
+        justify-content: center;
+      }
+    }
+
     .actions {
       display: grid;
       gap: 0.5rem;
@@ -269,6 +290,8 @@ const ICONS: Record<string, string> = {
   ],
   imports: [
     RegistryConnectionStatus,
+    RegistryStatePipe,
+    TuiStatus,
     TuiBlockStatus,
     TuiNavigation,
     TuiInput,

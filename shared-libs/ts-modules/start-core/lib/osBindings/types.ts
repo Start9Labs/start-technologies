@@ -210,6 +210,16 @@ export type ListNotificationParams = z.output<
 export type ListNotificationParamsInput = z.input<
   typeof schemas.ListNotificationParams
 >
+
+/**
+ * Address of the NUT server to list UPS devices from.
+ */
+export type ListNutUpsParams = z.output<typeof schemas.ListNutUpsParams>
+
+/**
+ * Address of the NUT server to list UPS devices from.
+ */
+export type ListNutUpsParamsInput = z.input<typeof schemas.ListNutUpsParams>
 export type ListVersionSignersParams = z.output<
   typeof schemas.ListVersionSignersParams
 >
@@ -264,6 +274,36 @@ export type NetworkInterfaceTypeInput = z.input<
 >
 export type NotificationLevel = z.output<typeof schemas.NotificationLevel>
 export type NotificationLevelInput = z.input<typeof schemas.NotificationLevel>
+
+/**
+ * A UPS detected on USB, with the driver settings that address it.
+ */
+export type NutDevice = z.output<typeof schemas.NutDevice>
+
+/**
+ * A UPS detected on USB, with the driver settings that address it.
+ */
+export type NutDeviceInput = z.input<typeof schemas.NutDevice>
+
+/**
+ * A UPS served by a NUT server, as `LIST UPS` reports it.
+ */
+export type NutRemoteUps = z.output<typeof schemas.NutRemoteUps>
+
+/**
+ * A UPS served by a NUT server, as `LIST UPS` reports it.
+ */
+export type NutRemoteUpsInput = z.input<typeof schemas.NutRemoteUps>
+
+/**
+ * Current variables reported by the configured UPS.
+ */
+export type NutStatus = z.output<typeof schemas.NutStatus>
+
+/**
+ * Current variables reported by the configured UPS.
+ */
+export type NutStatusInput = z.input<typeof schemas.NutStatus>
 
 /**
  * An OS update available for review.
@@ -522,6 +562,8 @@ export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TimeInfoInput = z.input<typeof schemas.TimeInfo>
+export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
+export type TransportProtocolInput = z.input<typeof schemas.TransportProtocol>
 export type TrustContext = z.output<typeof schemas.TrustContext>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedOsUpdateSigner = z.output<
@@ -636,8 +678,6 @@ export type BackupTargetFS = z.output<typeof schemas.BackupTargetFS>
 export type BackupTargetFSInput = z.input<typeof schemas.BackupTargetFS>
 export type BindId = z.output<typeof schemas.BindId>
 export type BindIdInput = z.input<typeof schemas.BindId>
-export type BindRangeParams = z.output<typeof schemas.BindRangeParams>
-export type BindRangeParamsInput = z.input<typeof schemas.BindRangeParams>
 export type CancelInstallParams = z.output<typeof schemas.CancelInstallParams>
 export type CancelInstallParamsInput = z.input<
   typeof schemas.CancelInstallParams
@@ -934,6 +974,16 @@ export type MountTarget = z.output<typeof schemas.MountTarget>
 export type MountTargetInput = z.input<typeof schemas.MountTarget>
 export type Notification = z.output<typeof schemas.Notification>
 export type NotificationInput = z.input<typeof schemas.Notification>
+
+/**
+ * Directly connected UPS server settings or remote NUT client settings.
+ */
+export type NutSettings = z.output<typeof schemas.NutSettings>
+
+/**
+ * Directly connected UPS server settings or remote NUT client settings.
+ */
+export type NutSettingsInput = z.input<typeof schemas.NutSettings>
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
 export type OsVersionInfoInput = z.input<typeof schemas.OsVersionInfo>
 export type PackageAccessControl = z.output<typeof schemas.PackageAccessControl>
@@ -1172,6 +1222,8 @@ export type TaskTrigger = z.output<typeof schemas.TaskTrigger>
 export type TaskTriggerInput = z.input<typeof schemas.TaskTrigger>
 export type TestSmtpParams = z.output<typeof schemas.TestSmtpParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
+export type TransportWire = z.output<typeof schemas.TransportWire>
+export type TransportWireInput = z.input<typeof schemas.TransportWire>
 export type UmountParams = z.output<typeof schemas.UmountParams>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
 export type UninstallParams = z.output<typeof schemas.UninstallParams>
@@ -1294,6 +1346,16 @@ export type NotificationWithId = z.output<typeof schemas.NotificationWithId>
 export type NotificationWithIdInput = z.input<typeof schemas.NotificationWithId>
 
 /**
+ * Stored NUT configuration and its independent enabled state.
+ */
+export type NutConfig = z.output<typeof schemas.NutConfig>
+
+/**
+ * Stored NUT configuration and its independent enabled state.
+ */
+export type NutConfigInput = z.input<typeof schemas.NutConfig>
+
+/**
  * Compatible releases from the selected StartOS update source.
  */
 export type OsUpdateCache = z.output<typeof schemas.OsUpdateCache>
@@ -1352,6 +1414,18 @@ export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>
 
 /**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export type Transport = z.output<typeof schemas.Transport>
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export type TransportInput = z.input<typeof schemas.Transport>
+
+/**
  * Signing-key material and independent package and OS-update trust.
  */
 export type TrustedKey = z.output<typeof schemas.TrustedKey>
@@ -1392,6 +1466,8 @@ export type BackupRun = z.output<typeof schemas.BackupRun>
  * A completed background backup with its original target name and final report.
  */
 export type BackupRunInput = z.input<typeof schemas.BackupRun>
+export type BindRangeParams = z.output<typeof schemas.BindRangeParams>
+export type BindRangeParamsInput = z.input<typeof schemas.BindRangeParams>
 export type BindingSetAddressEnabledParams = z.output<
   typeof schemas.BindingSetAddressEnabledParams
 >
@@ -1440,6 +1516,16 @@ export type SetHealth = z.output<typeof schemas.SetHealth>
 export type SetHealthInput = z.input<typeof schemas.SetHealth>
 export type SetInitProgress = z.output<typeof schemas.SetInitProgress>
 export type SetInitProgressInput = z.input<typeof schemas.SetInitProgress>
+
+/**
+ * Parameters for replacing the stored NUT configuration.
+ */
+export type SetNutParams = z.output<typeof schemas.SetNutParams>
+
+/**
+ * Parameters for replacing the stored NUT configuration.
+ */
+export type SetNutParamsInput = z.input<typeof schemas.SetNutParams>
 export type SetupStatusRes = z.output<typeof schemas.SetupStatusRes>
 export type SetupStatusResInput = z.input<typeof schemas.SetupStatusRes>
 export type StatusInfo = z.output<typeof schemas.StatusInfo>
@@ -1482,22 +1568,14 @@ export type PackageInfo = z.output<typeof schemas.PackageInfo>
 export type PackageInfoInput = z.input<typeof schemas.PackageInfo>
 
 /**
- * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
- *
- * Keyed by `internal_start_port` in [`BindingRanges`]. The range covers
- * `internal_start_port..(internal_start_port + number_of_ports)` and is
- * forwarded through a single iptables rule per protocol per gateway,
- * preserving the destination port number.
+ * A contiguous binding keyed by its internal start port in [`BindingRanges`].
+ * External ports map to internal ports by offset.
  */
 export type RangeBindInfo = z.output<typeof schemas.RangeBindInfo>
 
 /**
- * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
- *
- * Keyed by `internal_start_port` in [`BindingRanges`]. The range covers
- * `internal_start_port..(internal_start_port + number_of_ports)` and is
- * forwarded through a single iptables rule per protocol per gateway,
- * preserving the destination port number.
+ * A contiguous binding keyed by its internal start port in [`BindingRanges`].
+ * External ports map to internal ports by offset.
  */
 export type RangeBindInfoInput = z.input<typeof schemas.RangeBindInfo>
 export type BindingRanges = z.output<typeof schemas.BindingRanges>

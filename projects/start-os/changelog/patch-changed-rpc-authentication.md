@@ -5,6 +5,8 @@ release-notes: false
 - Reject invalid encrypted-admission CBOR representations before native or browser field interpretation.
 
 - Encrypt normal browser and keyed CLI RPC, backend registry queries and WebSocket continuations after signed ephemeral-DH admission, without mode-based downgrade.
+- Name the server-owned signing key `server_identity_key`, preserving its value and existing database and backup formats.
+- Preserve explicit serialized field and variant names in PatchDB accessors, including combined serde attributes.
 - Encrypt browser setup, initialization, diagnostic RPC and continuations without enrolling or persisting a missing device key; preserve legacy HTTP callers and invalidate old RPC sessions when the active startup context changes.
 - Retain encrypted startup on ordinary LAN HTTP without a browser secure context.
 - Send setup and recovery secrets inside encrypted RPC without duplicate password encryption; retain legacy encrypted-password compatibility.

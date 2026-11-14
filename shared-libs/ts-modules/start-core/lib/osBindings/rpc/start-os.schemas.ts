@@ -804,6 +804,20 @@ export const ListNotificationParams: z.ZodObject<{
 }).meta({
   id: 'ListNotificationParams',
 })
+
+/**
+ * Address of the NUT server to list UPS devices from.
+ */
+export const ListNutUpsParams: z.ZodObject<{
+  host: z.ZodString
+  port: z.ZodCodec<z.ZodOptional<z.ZodInt>, z.ZodInt>
+}> = /* @__PURE__ */ object({
+  host: z.string(),
+  port: wire(z.int().optional(), z.int()),
+}).meta({
+  id: 'ListNutUpsParams',
+  description: 'Address of the NUT server to list UPS devices from.',
+})
 export const ListParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'ListParams',
 })
@@ -1008,6 +1022,100 @@ export const NotificationLevel: z.ZodEnum<{
 })
 
 /**
+ * A UPS detected on USB, with the driver settings that address it.
+ */
+export const NutDevice: z.ZodObject<{
+  driver: z.ZodString
+  port: z.ZodString
+  vendorId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  productId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  serial: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  bus: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Pins devices without a serial number to the selected USB port.
+   */
+  busPort: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  vendor: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  product: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  driver: z.string(),
+  port: z.string(),
+  vendorId: wire(z.string().nullable().optional(), z.string().nullable()),
+  productId: wire(z.string().nullable().optional(), z.string().nullable()),
+  serial: wire(z.string().nullable().optional(), z.string().nullable()),
+  bus: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * Pins devices without a serial number to the selected USB port.
+   */
+  busPort: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'Pins devices without a serial number to the selected USB port.',
+  }),
+  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
+  product: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'NutDevice',
+  description:
+    'A UPS detected on USB, with the driver settings that address it.',
+})
+
+/**
+ * A UPS served by a NUT server, as `LIST UPS` reports it.
+ */
+export const NutRemoteUps: z.ZodObject<{
+  name: z.ZodString
+  description: z.ZodString
+}> = /* @__PURE__ */ object({ name: z.string(), description: z.string() }).meta(
+  {
+    id: 'NutRemoteUps',
+    description: 'A UPS served by a NUT server, as `LIST UPS` reports it.',
+  },
+)
+
+/**
+ * Current variables reported by the configured UPS.
+ */
+export const NutStatus: z.ZodObject<{
+  target: z.ZodString
+  variables: z.ZodRecord<z.ZodString, z.ZodString>
+  monitoringError: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  target: z.string(),
+  variables: z.record(z.string(), z.string()),
+  monitoringError: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ),
+}).meta({
+  id: 'NutStatus',
+  description: 'Current variables reported by the configured UPS.',
+})
+
+/**
  * An absent update preserves DNS intent; null servers select gateway DNS.
  */
 export const OutboundDnsUpdate: z.ZodObject<{
@@ -1128,6 +1236,17 @@ export const QueryDnsRes: z.ZodObject<{
 })
 export const ReaderParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'ReaderParams',
+})
+export const ReassignPortParams: z.ZodObject<{
+  internalPort: z.ZodInt
+  externalPort: z.ZodInt
+  ssl: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  internalPort: z.int(),
+  externalPort: z.int(),
+  ssl: wire(z.boolean().optional(), z.boolean()),
+}).meta({
+  id: 'ReassignPortParams',
 })
 
 /**
@@ -1534,6 +1653,10 @@ export const TestOperation: z.ZodObject<{
 export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
   /* @__PURE__ */ object({ now: z.string(), uptime: z.int() }).meta({
     id: 'TimeInfo',
+  })
+export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
+  /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
+    id: 'TransportProtocol',
   })
 export const TrustCaParams: z.ZodObject<{ cert: typeof literal_0 }> =
   /* @__PURE__ */ object({ cert: literal_0 }).meta({
@@ -3263,6 +3386,96 @@ export const Notification: z.ZodObject<{
 }).meta({
   id: 'Notification',
 })
+
+/**
+ * Directly connected UPS server settings or remote NUT client settings.
+ */
+export const NutSettings: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * Serve and monitor a UPS connected directly to this StartOS host.
+         */
+        mode: z.ZodLiteral<'server'>
+      }>,
+      z.ZodObject<{
+        device: typeof NutDevice
+        listenAll: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+        remoteUsername: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodString>>,
+          z.ZodNullable<z.ZodString>
+        >
+        remotePassword: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<z.ZodString>>,
+          z.ZodNullable<z.ZodString>
+        >
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * Monitor a UPS exposed by another NUT server.
+         */
+        mode: z.ZodLiteral<'client'>
+      }>,
+      z.ZodObject<{
+        upsName: z.ZodString
+        host: z.ZodString
+        port: z.ZodCodec<z.ZodOptional<z.ZodInt>, z.ZodInt>
+        monitorUsername: z.ZodString
+        monitorPassword: z.ZodString
+      }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(
+      object({
+        /**
+         * Serve and monitor a UPS connected directly to this StartOS host.
+         */
+        mode: z.literal('server').meta({
+          description:
+            'Serve and monitor a UPS connected directly to this StartOS host.',
+        }),
+      }),
+      object({
+        device: NutDevice,
+        listenAll: wire(z.boolean().optional(), z.boolean()),
+        remoteUsername: wire(
+          z.string().nullable().optional(),
+          z.string().nullable(),
+        ),
+        remotePassword: wire(
+          z.string().nullable().optional(),
+          z.string().nullable(),
+        ),
+      }),
+    ),
+    z.intersection(
+      object({
+        /**
+         * Monitor a UPS exposed by another NUT server.
+         */
+        mode: z.literal('client').meta({
+          description: 'Monitor a UPS exposed by another NUT server.',
+        }),
+      }),
+      object({
+        upsName: z.string(),
+        host: z.string(),
+        port: wire(z.int().optional(), z.int()),
+        monitorUsername: z.string(),
+        monitorPassword: z.string(),
+      }),
+    ),
+  ])
+  .meta({
+    id: 'NutSettings',
+    description:
+      'Directly connected UPS server settings or remote NUT client settings.',
+  })
 export const OsInfo: z.ZodObject<{
   version: typeof Version
   compat: z.ZodString
@@ -4257,6 +4470,13 @@ export const TestSmtpParams: z.ZodObject<{
 }).meta({
   id: 'TestSmtpParams',
 })
+export const TransportWire: z.ZodUnion<
+  readonly [typeof TransportProtocol, z.ZodArray<typeof TransportProtocol>]
+> = /* @__PURE__ */ z
+  .union([TransportProtocol, z.array(TransportProtocol)])
+  .meta({
+    id: 'TransportWire',
+  })
 export const UmountParams: z.ZodObject<{
   targetId: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof BackupTargetId>>,
@@ -4887,6 +5107,43 @@ export const NotificationWithId: z.ZodIntersection<
 > = /* @__PURE__ */ z.intersection(object({ id: z.int() }), Notification).meta({
   id: 'NotificationWithId',
 })
+
+/**
+ * Stored NUT configuration and its independent enabled state.
+ */
+export const NutConfig: z.ZodObject<{
+  /**
+   * Whether StartOS should run NUT monitoring.
+   */
+  enabled: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  /**
+   * Retained server or client settings, including while monitoring is disabled.
+   */
+  settings: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof NutSettings>>,
+    z.ZodNullable<typeof NutSettings>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Whether StartOS should run NUT monitoring.
+   */
+  enabled: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Whether StartOS should run NUT monitoring.',
+  }),
+  /**
+   * Retained server or client settings, including while monitoring is disabled.
+   */
+  settings: wire(
+    NutSettings.nullable().optional(),
+    NutSettings.nullable(),
+  ).meta({
+    description:
+      'Retained server or client settings, including while monitoring is disabled.',
+  }),
+}).meta({
+  id: 'NutConfig',
+  description: 'Stored NUT configuration and its independent enabled state.',
+})
 export const OsVersionInfoMap: z.ZodRecord<z.ZodString, typeof OsVersionInfo> =
   /* @__PURE__ */ z.record(z.string(), OsVersionInfo).meta({
     id: 'OsVersionInfoMap',
@@ -5230,6 +5487,19 @@ export const SubscribeResult: z.ZodUnion<
   id: 'SubscribeResult',
   description:
     'Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.',
+})
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export const Transport: z.ZodCodec<
+  typeof TransportWire,
+  z.ZodArray<typeof TransportProtocol>
+> = /* @__PURE__ */ wire(TransportWire, z.array(TransportProtocol)).meta({
+  id: 'Transport',
+  description:
+    'Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.',
 })
 
 /**
@@ -5707,6 +5977,15 @@ export const SessionList: z.ZodObject<{
 }).meta({
   id: 'SessionList',
 })
+
+/**
+ * Parameters for replacing the stored NUT configuration.
+ */
+export const SetNutParams: z.ZodObject<{ config: typeof NutConfig }> =
+  /* @__PURE__ */ object({ config: NutConfig }).meta({
+    id: 'SetNutParams',
+    description: 'Parameters for replacing the stored NUT configuration.',
+  })
 export const BackupHistory: z.ZodObject<{
   runs: z.ZodArray<typeof BackupRun>
   total: z.ZodInt
@@ -5817,6 +6096,7 @@ export const Revision: z.ZodObject<{ id: z.ZodInt; patch: typeof DiffPatch }> =
     id: 'Revision',
   })
 export const CompatibleBindOptions: z.ZodObject<{
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
   preferredExternalPort: z.ZodInt
   addSsl: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>,
@@ -5831,6 +6111,7 @@ export const CompatibleBindOptions: z.ZodObject<{
     z.ZodNullable<typeof ProxyOptions>
   >
 }> = /* @__PURE__ */ object({
+  transport: wire(Transport.optional(), Transport),
   preferredExternalPort: z.int(),
   addSsl: wire(
     LegacyProxySslOptions.nullable().optional(),
@@ -5870,6 +6151,10 @@ export const PackageIndex: z.ZodObject<{
 export const BindOptions: z.ZodCodec<
   typeof CompatibleBindOptions,
   z.ZodObject<{
+    /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: typeof Transport
     preferredExternalPort: z.ZodInt
     addSsl: z.ZodNullable<typeof AddSslOptions>
     secure: z.ZodNullable<typeof Security>
@@ -5881,6 +6166,13 @@ export const BindOptions: z.ZodCodec<
 > = /* @__PURE__ */ wire(
   CompatibleBindOptions,
   object({
+    /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: Transport.meta({
+      description:
+        'Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.',
+    }),
     preferredExternalPort: z.int(),
     addSsl: AddSslOptions.nullable(),
     secure: Security.nullable(),
@@ -6062,7 +6354,18 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
             list: {
-              _PARAMS: /* @__PURE__ */ HistoryParams,
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                HistoryParams,
+              ),
               _RETURN: /* @__PURE__ */ BackupHistory,
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
@@ -6939,6 +7242,15 @@ export const Api = {
                     ),
                   ),
                   _RETURN: /* @__PURE__ */ Bindings,
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
+                },
+                'reassign-port': {
+                  _PARAMS: /* @__PURE__ */ z.intersection(
+                    z.intersection(RequiresPackageId, RequiresHostId),
+                    ReassignPortParams,
+                  ),
+                  _RETURN: /* @__PURE__ */ z.null(),
                   _ITEM: /* @__PURE__ */ z.never(),
                   _FINAL: /* @__PURE__ */ z.null(),
                 },
@@ -7986,6 +8298,12 @@ export const Api = {
     server: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        'clear-nut': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
         'clear-smtp': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
@@ -8130,6 +8448,12 @@ export const Api = {
                     empty,
                   ),
                   _RETURN: /* @__PURE__ */ Bindings,
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
+                },
+                'reassign-port': {
+                  _PARAMS: /* @__PURE__ */ ReassignPortParams,
+                  _RETURN: /* @__PURE__ */ z.null(),
                   _ITEM: /* @__PURE__ */ z.never(),
                   _FINAL: /* @__PURE__ */ z.null(),
                 },
@@ -8319,6 +8643,24 @@ export const Api = {
             },
           },
         },
+        'nut-list-ups': {
+          _PARAMS: /* @__PURE__ */ ListNutUpsParams,
+          _RETURN: /* @__PURE__ */ z.array(NutRemoteUps),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'nut-scan': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _RETURN: /* @__PURE__ */ z.array(NutDevice),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'nut-status': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _RETURN: /* @__PURE__ */ NutStatus,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
         rebuild: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
@@ -8439,6 +8781,12 @@ export const Api = {
         },
         'set-log-level': {
           _PARAMS: /* @__PURE__ */ SetLogLevelParams,
+          _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'set-nut': {
+          _PARAMS: /* @__PURE__ */ SetNutParams,
           _RETURN: /* @__PURE__ */ z.null(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),

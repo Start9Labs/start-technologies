@@ -223,7 +223,7 @@ pub async fn init(
 
     load_ssh_keys.start();
     crate::developer::write_signing_key(
-        &peek.as_private().as_developer_key().de()?.0,
+        &peek.as_private().as_server_identity_key().de()?.0,
         OS_ID_KEY_PATH,
     )
     .await?;
@@ -438,6 +438,10 @@ pub async fn init(
 
     update_server_info.start();
     sync_kiosk(server_info.as_kiosk().de()?.unwrap_or(false)).await?;
+    if let Err(e) = crate::nut::sync_nut(server_info.as_nut().de().unwrap_or_default()).await {
+        tracing::warn!("could not synchronize NUT configuration: {e}");
+        tracing::debug!("{e:?}");
+    }
     let ram = get_mem_info().await?.total.0 as u64 * 1024 * 1024;
     let devices = lshw().await?;
     let status_info = ServerStatus {

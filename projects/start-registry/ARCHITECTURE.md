@@ -95,12 +95,26 @@ including legacy icons, notes, headlines and key/signature encodings. Canonical 
 the current schema; PatchDB derives patches from the projected values. A projection failure ends
 its subscriptions and permits rebuilding the failed replica without closing unrelated streams.
 A public-mirror subscriber must resubscribe after receiving a private-access grant. StartOS's
-marketplace refresh action restarts that registry's grouped watches without changing signing-key
-trust or discarding cached listings. Weak mirror entries share work across subscribers; dropping the last subscriber cancels that mirror's task.
+registry-management More menu offers refresh in every connection state, restarting that
+registry's grouped watches without changing signing-key trust or discarding cached listings. Weak mirror entries share work across subscribers; dropping the last subscriber cancels that mirror's task.
 
 StartOS derives security notifications from the selected source's OS metadata, filtering by source
 version, platform, and installed build. Delivery history remains keyed by registry URL, version, and
 build hash across reconnects and restarts.
+
+## Mirroring (`registry/upstream.rs`)
+
+With `mirror-of` set, `RegistryContext::init` spawns one task that admits an encrypted session to the
+upstream under the registry's server identity and streams `db.subscribe` for `/index` in canonical
+format. It shares `SubscriptionFollower` (dump/revision application, heartbeat and initial deadline)
+with StartOS's registry caches. Each update copies missing stored icons from the upstream's `/icons/`,
+verifying their blake3 names, then replaces the local `index`. Signed icon requests refuse redirects and
+have a 30-second total deadline. An icon the upstream withholds is retried on the next update. Connection
+failures reconnect with the shared jittered 30–300 second backoff.
+
+Handlers that write the index carry the `WRITES_INDEX` metadata, inherited by subtrees. The
+`MirrorGuard` RPC middleware rejects them while mirroring. `admins`, metrics and `serverIdentityKey` live
+outside `index` and remain local.
 
 ## Data model
 
