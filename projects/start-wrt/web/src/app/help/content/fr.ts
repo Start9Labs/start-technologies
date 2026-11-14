@@ -65,6 +65,10 @@ Le port physique : un port Ethernet (par ex. eth0, eth1) ou un port USB équipé
 
 Le profil de sécurité par défaut attribué aux appareils connectés via le port Ethernet spécifié.
 
+### Switch administrable
+
+Au lieu d’un profil, un port peut alimenter un switch administrable. Le port transporte alors chaque profil de sécurité sous forme de VLAN étiqueté, et la configuration du switch décide à quel profil appartient chacun de ses ports : le switch et ceux qui l’administrent sont donc de confiance. L’ID de VLAN de chaque profil est indiqué sous le port ; Admin est toujours le VLAN 1. Le trafic qui atteint le port sans étiquette VLAN n’obtient aucun accès.
+
 ### WAN
 
 Le port WAN (Wide Area Network) se connecte au modem de votre ISP ou au réseau en amont. Un seul port Ethernet peut être désigné comme WAN à la fois. Le port WAN doit être un port Ethernet.

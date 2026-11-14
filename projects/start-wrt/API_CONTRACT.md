@@ -762,8 +762,12 @@ struct LanIpv6SetRequest {
 
 #[derive(Serialize, Deserialize)]
 struct Port<Id = ProfileId> {
-    /// Security profile assigned to this port, if any
+    /// Security profile assigned to this port, if any. Always `None` on a trunk.
     profile: Option<Id>,
+    /// Trunk: the port carries every profile as a tagged VLAN and no untagged
+    /// traffic, for a managed switch that assigns its own ports to profiles.
+    /// Defaults to `false` when omitted in a request.
+    trunk: bool,
 }
 
 #[derive(Serialize)]
@@ -837,6 +841,15 @@ struct EthernetSetResult {
 // applies the bridge-VLAN/WAN update, then reloads network + firewall.
 // A recorded USB port the request omits keeps its profile; a USB port as
 // `wan_port` fails with InvalidValue.
+//
+// Trunks: a port with `trunk: true` joins every profile's bridge VLAN tagged,
+// including Admin's, and a profile created later joins it too. A trunk turns
+// on bridge VLAN filtering even when Admin is the only profile. A port becoming
+// a trunk is not a profile change (its devices keep the VLAN the switch gives
+// them); a trunk returning to a profile is, and the preview places each device
+// behind it in the VLAN the switch tagged it with.
+// Errors: `InvalidTrunkPort` (1027) for a trunk with a profile, on the WAN
+// port, or on a USB port.
 ```
 
 Note: `ProfileId` and `ProfileIdOpt` are shared types defined at the top of the contract.
@@ -2016,6 +2029,8 @@ struct Profile<ProfileIdOpt> {
     dns_source: String,
 }
 // Response: ProfileId
+// Errors: `ReservedVlanTag` (1028) for a vlan_tag of 0 or 4095 and above,
+//   `DuplicateVlanTag` for one another profile holds, Admin's included.
 // Validation: gateway_ip must stay inside the LAN network block (see
 //   lan.ipv4-set). owns_lan profiles must be a valid RFC 1918 selection;
 //   others must share the admin LAN's first two octets, else InvalidRequest.

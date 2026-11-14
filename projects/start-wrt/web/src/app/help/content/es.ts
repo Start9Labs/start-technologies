@@ -65,6 +65,10 @@ El puerto físico: un puerto Ethernet (p. ej., eth0, eth1) o un puerto USB con u
 
 El perfil de seguridad por defecto asignado a los dispositivos conectados a través del puerto Ethernet especificado.
 
+### Switch gestionado
+
+En lugar de un perfil, un puerto puede alimentar un switch gestionado. El puerto transporta entonces cada perfil de seguridad como una VLAN etiquetada, y la configuración del propio switch decide a qué perfil pertenece cada uno de sus puertos, por lo que se confía en el switch y en quien lo administra. El ID de VLAN de cada perfil aparece debajo del puerto; Admin es siempre la VLAN 1. El tráfico que llega al puerto sin etiqueta VLAN no obtiene acceso.
+
 ### WAN
 
 El puerto WAN (Wide Area Network) se conecta al módem de tu ISP o a la red ascendente. Solo un puerto Ethernet puede designarse como WAN a la vez. El puerto WAN debe ser un puerto Ethernet.

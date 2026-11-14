@@ -15,6 +15,7 @@ export interface EthernetPortView {
   usb: UsbPortStatus | null
   profile: ProfileId | null
   profileName: string
+  trunk: boolean
   wan: boolean
 }
 
@@ -83,7 +84,10 @@ export class EthernetService extends FormService<EthernetPortView[]> {
       wan_ipv6: this.wanIpv6,
       wan_port: wanPort,
       ports: Object.fromEntries(
-        items.map(p => [p.name, { profile: p.wan ? null : p.profile }]),
+        items.map(p => [
+          p.name,
+          { profile: p.wan || p.trunk ? null : p.profile, trunk: p.trunk },
+        ]),
       ),
       preview,
     }
@@ -97,7 +101,10 @@ export class EthernetService extends FormService<EthernetPortView[]> {
           name,
           usb,
           profile: port.profile,
-          profileName: port.profile?.fullname ?? 'Admin',
+          profileName: port.trunk
+            ? this.i18n.transform('Managed switch')
+            : (port.profile?.fullname ?? 'Admin'),
+          trunk: port.trunk,
           wan: name === ethernet.wan_port,
         }
       })
