@@ -88,6 +88,16 @@ pub struct FullIndex {
 rpc_toolkit::reflect_ts!(FullIndex);
 rpc_toolkit::ts_export!(FullIndex, namespaces = [""]);
 
+impl Model<FullIndex> {
+    pub(crate) fn retain_registered_package_signatures(&mut self) -> Result<(), Error> {
+        let signers = self.as_signers().de()?;
+        self.as_package_mut().mutate(|packages| {
+            packages.retain_registered_signatures(&signers);
+            Ok(())
+        })
+    }
+}
+
 pub async fn get_full_index(
     ctx: RegistryContext,
     params: ReaderParams,

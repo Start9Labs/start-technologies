@@ -93,6 +93,7 @@ pub async fn add_package(
 
     ctx.db
         .mutate(|db| {
+            info.retain_registered_signatures(&db.as_index().as_signers().de()?);
             if can_publish(db, &uploader_guid, &manifest.id, &manifest.version)? {
                 let package = db
                     .as_index_mut()
@@ -428,6 +429,7 @@ pub async fn add_mirror(
 
     ctx.db
         .mutate(|db| {
+            info.retain_registered_signatures(&db.as_index().as_signers().de()?);
             if can_publish(db, &uploader_guid, &manifest.id, &manifest.version)? {
                 let package = db
                     .as_index_mut()

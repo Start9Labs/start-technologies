@@ -18,6 +18,7 @@ use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::package::icon::{PackageIcon, store_icon_async};
+use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::S9pk;
 use crate::s9pk::git_hash::GitHash;
@@ -40,6 +41,16 @@ pub struct PackageIndex {
 
 rpc_toolkit::reflect_ts!(PackageIndex);
 rpc_toolkit::ts_export!(PackageIndex, namespaces = [""]);
+
+impl PackageIndex {
+    pub fn retain_registered_signatures(&mut self, signers: &BTreeMap<Guid, SignerInfo>) {
+        for package in self.packages.values_mut() {
+            for version in package.versions.values_mut() {
+                version.retain_registered_signatures(signers);
+            }
+        }
+    }
+}
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -318,6 +329,13 @@ impl PackageVersionInfo {
             )],
         })
     }
+    /// Authoritative indexes retain signatures from keys in `FullIndex.signers`.
+    pub fn retain_registered_signatures(&mut self, signers: &BTreeMap<Guid, SignerInfo>) {
+        let keys: BTreeSet<&AnyVerifyingKey> = signers.values().flat_map(|s| &s.keys).collect();
+        for (_, asset) in &mut self.s9pks {
+            asset.signatures.retain(|key, _| keys.contains(key));
+        }
+    }
     pub fn merge_with(&mut self, other: Self, replace_urls: bool) -> Result<(), Error> {
         if self.metadata != other.metadata {
             return Err(Error::new(
@@ -464,7 +482,7 @@ pub async fn get_package_index(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -530,7 +548,7 @@ mod tests {
         assert!(public.access.readers.is_empty());
     }
 
-    fn version_info_signed_by(seed: u8) -> (AnyVerifyingKey, PackageVersionInfo) {
+    pub(crate) fn version_info_signed_by(seed: u8) -> (AnyVerifyingKey, PackageVersionInfo) {
         use ed25519_dalek::Signer;
 
         let key = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
@@ -577,6 +595,35 @@ mod tests {
         assert_eq!(
             info.s9pks[0].1.signatures.keys().collect::<BTreeSet<_>>(),
             [&developer, &cosigner].into()
+        );
+    }
+
+    pub(crate) fn signers_with(
+        keys: impl IntoIterator<Item = AnyVerifyingKey>,
+    ) -> BTreeMap<Guid, SignerInfo> {
+        [(
+            Guid::new(),
+            SignerInfo {
+                name: "Publisher".into(),
+                contact: vec![],
+                keys: keys.into_iter().collect(),
+                gpg_exports: BTreeSet::new(),
+            },
+        )]
+        .into()
+    }
+
+    #[test]
+    fn unregistered_signatures_are_dropped() {
+        let (publisher, mut info) = version_info_signed_by(1);
+        let (_, ci_signed) = version_info_signed_by(2);
+        info.merge_with(ci_signed, true).unwrap();
+
+        info.retain_registered_signatures(&signers_with([publisher.clone()]));
+
+        assert_eq!(
+            info.s9pks[0].1.signatures.keys().collect::<BTreeSet<_>>(),
+            [&publisher].into()
         );
     }
 
