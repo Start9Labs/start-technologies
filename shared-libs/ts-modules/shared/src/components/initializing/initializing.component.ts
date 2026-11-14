@@ -34,6 +34,8 @@ import { i18nPipe } from '../../i18n/i18n.pipe'
     }
 
     section {
+      /* Overrides the setup wizard's global [tuiCardLarge] width. */
+      inline-size: auto;
       margin: 1.5rem;
     }
 

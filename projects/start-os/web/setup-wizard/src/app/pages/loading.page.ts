@@ -36,6 +36,8 @@ import { SetupObservation } from '../services/setup-observation'
     }
 
     section {
+      /* Overrides the setup wizard's global [tuiCardLarge] width. */
+      inline-size: auto;
       margin: 1.5rem;
     }
   `,
