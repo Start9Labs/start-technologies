@@ -41,6 +41,7 @@ const host = (
     3478: {
       enabled: true,
       options: {
+        transport: ['tcp', 'udp'],
         preferredExternalPort: 3478,
         defaultOff: false,
         addSsl: null,
@@ -73,6 +74,7 @@ const host = (
     ? {
         42000: {
           enabled: true,
+          transport: ['tcp', 'udp'],
           externalStartPort: 42000,
           numberOfPorts: 500,
           addresses: range,

@@ -36,6 +36,7 @@ export function mockBitTorrentBinding(): T.BindInfo {
   return {
     enabled: true,
     options: {
+      transport: ['tcp'],
       preferredExternalPort: 0,
       addSsl: null,
       secure: { ssl: false },

@@ -1,7 +1,7 @@
 import { Component, computed, inject, input, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { i18nPipe } from '@start9labs/shared'
-import { T } from '@start9labs/start-core'
+import { T, utils } from '@start9labs/start-core'
 import { TuiButton, TuiDataList, TuiDropdown, TuiIcon } from '@taiga-ui/core'
 import { TuiBadge, TuiChevron, TuiSwitch, TuiTooltip } from '@taiga-ui/kit'
 import { GatewayAddress, MappedServiceInterface } from '../../interface.service'
@@ -12,7 +12,6 @@ import { DomainHealthService } from './domain-health.service'
   selector: 'tr[address]',
   host: {
     '[class._disabled]': '!address().enabled',
-    '[class._no-cert]': '!showCert()',
   },
   template: `
     @if (address(); as address) {
@@ -100,6 +99,7 @@ import { DomainHealthService } from './domain-health.service'
           </div>
         </td>
       }
+      <td class="transport">{{ transportLabel(address.transport) }}</td>
       <td class="url-cell">
         <div class="url">
           @if (address.masked && currentlyMasked()) {
@@ -238,25 +238,18 @@ import { DomainHealthService } from './domain-health.service'
         padding-inline: 0.5rem;
       }
 
-      .cert-cell {
-        grid-area: 2 / 1 / 2 / 3;
-
-        .cert-icon {
-          display: none;
-        }
-      }
-
+      .cert-cell,
+      .transport,
       .url-cell {
-        grid-area: 3 / 1 / 3 / 3;
+        grid-column: 1 / 3;
       }
 
-      // With no cert row, the URL takes its place directly under the header.
-      &._no-cert .url-cell {
-        grid-area: 2 / 1 / 2 / 3;
+      .cert-icon {
+        display: none;
       }
 
       td:last-child {
-        grid-area: 1 / 3 / 4 / 5;
+        grid-area: 1 / 3 / 5 / 5;
         align-self: center;
         justify-self: end;
       }
@@ -287,14 +280,8 @@ export class GatewayItemComponent {
   readonly toggling = signal(false)
   readonly currentlyMasked = signal(true)
   readonly guaOpen = signal(false)
-  // The Certificate Authority column only shows when some address is SSL; kept
-  // in sync with GatewayComponent's header (both derive from the same data).
-  readonly showCert = computed(
-    () =>
-      this.value()?.gatewayGroups.some(g =>
-        g.addresses.some(a => a.certificate !== '-'),
-      ) ?? false,
-  )
+  readonly showCert = input(false)
+  readonly transportLabel = utils.transportLabel
   readonly urlHtml = computed(() => {
     const { url, hostnameInfo } = this.address()
     const idx = url.indexOf(hostnameInfo.hostname)

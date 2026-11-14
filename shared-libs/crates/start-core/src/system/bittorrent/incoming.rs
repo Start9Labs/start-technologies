@@ -113,6 +113,7 @@ fn configured(binding: &BindInfo) -> bool {
     matches!(binding.options.proxy, Some(ProxyOptions::Tcp))
         && binding.options.secure.is_some_and(|security| !security.ssl)
         && binding.options.default_off
+        && binding.options.transport == crate::net::transport::Transport::tcp()
         && binding.options.preferred_external_port == 0
 }
 
@@ -261,18 +262,14 @@ pub(super) fn select_gua_in(
 }
 
 fn binding_options(existing: Option<BindOptions>) -> BindOptions {
-    let mut options = existing.unwrap_or(BindOptions {
+    BindOptions {
+        transport: crate::net::transport::Transport::tcp(),
         preferred_external_port: 0,
-        add_ssl: None,
-        secure: None,
-        proxy: None,
+        add_ssl: existing.and_then(|options| options.add_ssl),
+        secure: Some(Security { ssl: false }),
+        proxy: Some(ProxyOptions::Tcp),
         default_off: true,
-    });
-    options.preferred_external_port = 0;
-    options.proxy = Some(ProxyOptions::Tcp);
-    options.secure = Some(Security { ssl: false });
-    options.default_off = true;
-    options
+    }
 }
 
 fn listener_for(binding: &BindInfo) -> Result<ListenerOptions, Error> {
@@ -297,16 +294,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn broader_transport_requires_reconfiguration() {
+        let mut ports = crate::net::forward::AvailablePorts::new();
+        let mut binding = BindInfo::new(&mut ports, binding_options(None), true).unwrap();
+        assert!(configured(&binding));
+        binding.options.transport = Default::default();
+        assert!(!configured(&binding));
+    }
+
+    #[test]
     fn existing_binding_keeps_its_port_and_switches_to_default_off_tcp() {
         let mut previous = binding_options(None);
         previous.preferred_external_port = 45678;
         previous.proxy = None;
         previous.secure = None;
         previous.default_off = false;
+        previous.transport = Default::default();
         let mut ports = crate::net::forward::AvailablePorts::new();
         let binding = BindInfo::new(&mut ports, previous.clone(), true).unwrap();
         let options = binding_options(Some(previous));
         assert_eq!(options.preferred_external_port, 0);
+        assert_eq!(options.transport, crate::net::transport::Transport::tcp());
         assert_eq!(options.proxy, Some(ProxyOptions::Tcp));
         assert!(options.secure.is_some_and(|security| !security.ssl));
         assert!(options.default_off);

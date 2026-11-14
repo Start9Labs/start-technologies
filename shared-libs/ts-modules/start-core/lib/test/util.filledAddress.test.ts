@@ -8,6 +8,7 @@ const host = (fingerprint: string): Host => ({
       enabled: true,
       options: {
         defaultOff: false,
+        transport: ['tcp', 'udp'],
         preferredExternalPort: 5223,
         addSsl: null,
         secure: null,

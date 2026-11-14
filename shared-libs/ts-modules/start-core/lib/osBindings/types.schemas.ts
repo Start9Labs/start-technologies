@@ -1874,6 +1874,10 @@ export const TorrentPreferences: z.ZodObject<{
   description:
     'Peer downloads and stored-software sharing require explicit opt-in.',
 })
+export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
+  /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
+    id: 'TransportProtocol',
+  })
 export const TrustContext: z.ZodEnum<{ marketplace: 'marketplace'; os: 'os' }> =
   /* @__PURE__ */ z.enum(['marketplace', 'os']).meta({
     id: 'TrustContext',
@@ -2513,7 +2517,6 @@ export const AddTunnelParams: z.ZodObject<{
 })
 export const AddVersionParams: z.ZodObject<{
   version: z.ZodString
-  headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   gitHash: z.ZodCodec<
@@ -2527,7 +2530,6 @@ export const AddVersionParams: z.ZodObject<{
   security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   version: z.string(),
-  headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
   gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
@@ -2610,19 +2612,6 @@ export const BindId: z.ZodObject<{
   internalPort: z.ZodInt
 }> = /* @__PURE__ */ object({ id: HostId, internalPort: z.int() }).meta({
   id: 'BindId',
-})
-export const BindRangeParams: z.ZodObject<{
-  id: typeof HostId
-  internalStartPort: z.ZodInt
-  externalStartPort: z.ZodInt
-  numberOfPorts: z.ZodInt
-}> = /* @__PURE__ */ object({
-  id: HostId,
-  internalStartPort: z.int(),
-  externalStartPort: z.int(),
-  numberOfPorts: z.int(),
-}).meta({
-  id: 'BindRangeParams',
 })
 export const CancelInstallParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
@@ -3959,7 +3948,6 @@ export const NutSettings: z.ZodUnion<
       'Directly connected UPS server settings or remote NUT client settings.',
   })
 export const OsVersionInfo: z.ZodObject<{
-  headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   /**
@@ -3987,7 +3975,6 @@ export const OsVersionInfo: z.ZodObject<{
     ReturnType<typeof RegistryAsset<typeof Blake3Commitment>>
   >
 }> = /* @__PURE__ */ object({
-  headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
   /**
@@ -4867,6 +4854,13 @@ export const TestSmtpParams: z.ZodObject<{
 }).meta({
   id: 'TestSmtpParams',
 })
+export const TransportWire: z.ZodUnion<
+  readonly [typeof TransportProtocol, z.ZodArray<typeof TransportProtocol>]
+> = /* @__PURE__ */ z
+  .union([TransportProtocol, z.array(TransportProtocol)])
+  .meta({
+    id: 'TransportWire',
+  })
 export const UmountParams: z.ZodObject<{
   targetId: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof BackupTargetId>>,
@@ -6212,6 +6206,19 @@ export const Task: z.ZodObject<{
 })
 
 /**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export const Transport: z.ZodCodec<
+  typeof TransportWire,
+  z.ZodArray<typeof TransportProtocol>
+> = /* @__PURE__ */ wire(TransportWire, z.array(TransportProtocol)).meta({
+  id: 'Transport',
+  description:
+    'Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.',
+})
+
+/**
  * Signing-key material and independent package and OS-update trust.
  */
 export const TrustedKey: z.ZodObject<{
@@ -6517,6 +6524,21 @@ export const BackupRun: z.ZodObject<{
   id: 'BackupRun',
   description:
     'A completed background backup with its original target name and final report.',
+})
+export const BindRangeParams: z.ZodObject<{
+  id: typeof HostId
+  internalStartPort: z.ZodInt
+  externalStartPort: z.ZodInt
+  numberOfPorts: z.ZodInt
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
+}> = /* @__PURE__ */ object({
+  id: HostId,
+  internalStartPort: z.int(),
+  externalStartPort: z.int(),
+  numberOfPorts: z.int(),
+  transport: wire(Transport.optional(), Transport),
+}).meta({
+  id: 'BindRangeParams',
 })
 export const BindingSetAddressEnabledParams: z.ZodObject<{
   internalPort: z.ZodInt
@@ -7095,15 +7117,12 @@ export const PackageInfo: z.ZodIntersection<
   })
 
 /**
- * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
- *
- * Keyed by `internal_start_port` in [`BindingRanges`]. The range covers
- * `internal_start_port..(internal_start_port + number_of_ports)` and is
- * forwarded through a single iptables rule per protocol per gateway,
- * preserving the destination port number.
+ * A contiguous binding keyed by its internal start port in [`BindingRanges`].
+ * External ports map to internal ports by offset.
  */
 export const RangeBindInfo: z.ZodObject<{
   enabled: z.ZodBoolean
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
   externalStartPort: z.ZodInt
   numberOfPorts: z.ZodInt
   /**
@@ -7128,6 +7147,7 @@ export const RangeBindInfo: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   enabled: z.boolean(),
+  transport: wire(Transport.optional(), Transport),
   externalStartPort: z.int(),
   numberOfPorts: z.int(),
   /**
@@ -7156,7 +7176,7 @@ export const RangeBindInfo: z.ZodObject<{
 }).meta({
   id: 'RangeBindInfo',
   description:
-    'Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).\n\nKeyed by `internal_start_port` in [`BindingRanges`]. The range covers\n`internal_start_port..(internal_start_port + number_of_ports)` and is\nforwarded through a single iptables rule per protocol per gateway,\npreserving the destination port number.',
+    'A contiguous binding keyed by its internal start port in [`BindingRanges`].\nExternal ports map to internal ports by offset.',
 })
 export const BindingRanges: z.ZodRecord<z.ZodString, typeof RangeBindInfo> =
   /* @__PURE__ */ z.record(z.string(), RangeBindInfo).meta({
@@ -7164,6 +7184,7 @@ export const BindingRanges: z.ZodRecord<z.ZodString, typeof RangeBindInfo> =
   })
 export const CompatibleBindOptions: z.ZodCodec<
   z.ZodObject<{
+    transport: z.ZodOptional<typeof Transport>
     preferredExternalPort: z.ZodInt
     addSsl: z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>
     secure: z.ZodOptional<z.ZodNullable<typeof Security>>
@@ -7172,6 +7193,7 @@ export const CompatibleBindOptions: z.ZodCodec<
     publicOnly: z.ZodOptional<z.ZodBoolean>
   }>,
   z.ZodObject<{
+    transport: typeof Transport
     preferredExternalPort: z.ZodInt
     addSsl: z.ZodNullable<typeof LegacyProxySslOptions>
     secure: z.ZodNullable<typeof Security>
@@ -7180,6 +7202,7 @@ export const CompatibleBindOptions: z.ZodCodec<
   }>
 > = /* @__PURE__ */ wire(
   object({
+    transport: Transport.optional(),
     preferredExternalPort: z.int(),
     addSsl: LegacyProxySslOptions.nullable().optional(),
     secure: Security.nullable().optional(),
@@ -7188,6 +7211,7 @@ export const CompatibleBindOptions: z.ZodCodec<
     publicOnly: z.boolean().optional(),
   }),
   object({
+    transport: Transport,
     preferredExternalPort: z.int(),
     addSsl: LegacyProxySslOptions.nullable(),
     secure: Security.nullable(),
@@ -7290,6 +7314,10 @@ export const BindOptions: z.ZodCodec<
   typeof CompatibleBindOptions,
   z.ZodObject<{
     /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: typeof Transport
+    /**
      * Zero requests dynamic allocation; it never reserves port zero.
      */
     preferredExternalPort: z.ZodInt
@@ -7309,6 +7337,13 @@ export const BindOptions: z.ZodCodec<
 > = /* @__PURE__ */ wire(
   CompatibleBindOptions,
   object({
+    /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: Transport.meta({
+      description:
+        'Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.',
+    }),
     /**
      * Zero requests dynamic allocation; it never reserves port zero.
      */

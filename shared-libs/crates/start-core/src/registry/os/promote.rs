@@ -108,7 +108,6 @@ mod tests {
     #[test]
     fn promotion_carries_release_metadata() {
         let info = OsVersionInfo {
-            headline: "Security update".into(),
             release_notes: "Release notes".parse().unwrap(),
             source_version: ">=0.4.0".parse().unwrap(),
             git_hash: Some("0123456789abcdef".parse().unwrap()),
@@ -118,7 +117,6 @@ mod tests {
         let version: Version = "0.4.0.5".parse().unwrap();
         let params = AddVersionParams::from_info(version.clone(), &info);
         assert_eq!(params.version, version);
-        assert_eq!(params.headline, info.headline);
         assert_eq!(params.release_notes, info.release_notes);
         assert_eq!(params.source_version, info.source_version);
         assert_eq!(params.git_hash, info.git_hash);

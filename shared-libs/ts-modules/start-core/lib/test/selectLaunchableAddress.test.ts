@@ -51,6 +51,7 @@ function hostWith(
     enabled: true,
     options: {
       defaultOff: false,
+      transport: ['tcp', 'udp'],
       preferredExternalPort: 80,
       addSsl: null,
       secure: null,

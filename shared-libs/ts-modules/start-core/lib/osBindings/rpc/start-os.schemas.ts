@@ -1697,6 +1697,10 @@ export const TorrentPreferences: z.ZodObject<{
   description:
     'Peer downloads and stored-software sharing require explicit opt-in.',
 })
+export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
+  /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
+    id: 'TransportProtocol',
+  })
 export const TrustCaParams: z.ZodObject<{ cert: typeof literal_0 }> =
   /* @__PURE__ */ object({ cert: literal_0 }).meta({
     id: 'TrustCaParams',
@@ -2339,7 +2343,6 @@ export const AddTunnelParams: z.ZodObject<{
 })
 export const AddVersionParams: z.ZodObject<{
   version: z.ZodString
-  headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   gitHash: z.ZodCodec<
@@ -2353,7 +2356,6 @@ export const AddVersionParams: z.ZodObject<{
   security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   version: z.string(),
-  headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
   gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
@@ -3516,7 +3518,6 @@ export const OsInfo: z.ZodObject<{
   id: 'OsInfo',
 })
 export const OsVersionInfo: z.ZodObject<{
-  headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   /**
@@ -3544,7 +3545,6 @@ export const OsVersionInfo: z.ZodObject<{
     ReturnType<typeof RegistryAsset<typeof Blake3Commitment>>
   >
 }> = /* @__PURE__ */ object({
-  headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
   /**
@@ -4495,6 +4495,13 @@ export const TestSmtpParams: z.ZodObject<{
 }).meta({
   id: 'TestSmtpParams',
 })
+export const TransportWire: z.ZodUnion<
+  readonly [typeof TransportProtocol, z.ZodArray<typeof TransportProtocol>]
+> = /* @__PURE__ */ z
+  .union([TransportProtocol, z.array(TransportProtocol)])
+  .meta({
+    id: 'TransportWire',
+  })
 export const UmountParams: z.ZodObject<{
   targetId: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof BackupTargetId>>,
@@ -5532,6 +5539,19 @@ export const SubscribeResult: z.ZodUnion<
 })
 
 /**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export const Transport: z.ZodCodec<
+  typeof TransportWire,
+  z.ZodArray<typeof TransportProtocol>
+> = /* @__PURE__ */ wire(TransportWire, z.array(TransportProtocol)).meta({
+  id: 'Transport',
+  description:
+    'Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.',
+})
+
+/**
  * Signing-key material and independent package and OS-update trust.
  */
 export const TrustedKey: z.ZodObject<{
@@ -6169,6 +6189,7 @@ export const Revision: z.ZodObject<{ id: z.ZodInt; patch: typeof DiffPatch }> =
   })
 export const CompatibleBindOptions: z.ZodCodec<
   z.ZodObject<{
+    transport: z.ZodOptional<typeof Transport>
     preferredExternalPort: z.ZodInt
     addSsl: z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>
     secure: z.ZodOptional<z.ZodNullable<typeof Security>>
@@ -6177,6 +6198,7 @@ export const CompatibleBindOptions: z.ZodCodec<
     publicOnly: z.ZodOptional<z.ZodBoolean>
   }>,
   z.ZodObject<{
+    transport: typeof Transport
     preferredExternalPort: z.ZodInt
     addSsl: z.ZodNullable<typeof LegacyProxySslOptions>
     secure: z.ZodNullable<typeof Security>
@@ -6185,6 +6207,7 @@ export const CompatibleBindOptions: z.ZodCodec<
   }>
 > = /* @__PURE__ */ wire(
   object({
+    transport: Transport.optional(),
     preferredExternalPort: z.int(),
     addSsl: LegacyProxySslOptions.nullable().optional(),
     secure: Security.nullable().optional(),
@@ -6193,6 +6216,7 @@ export const CompatibleBindOptions: z.ZodCodec<
     publicOnly: z.boolean().optional(),
   }),
   object({
+    transport: Transport,
     preferredExternalPort: z.int(),
     addSsl: LegacyProxySslOptions.nullable(),
     secure: Security.nullable(),
@@ -6232,6 +6256,10 @@ export const BindOptions: z.ZodCodec<
   typeof CompatibleBindOptions,
   z.ZodObject<{
     /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: typeof Transport
+    /**
      * Zero requests dynamic allocation; it never reserves port zero.
      */
     preferredExternalPort: z.ZodInt
@@ -6251,6 +6279,13 @@ export const BindOptions: z.ZodCodec<
 > = /* @__PURE__ */ wire(
   CompatibleBindOptions,
   object({
+    /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: Transport.meta({
+      description:
+        'Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.',
+    }),
     /**
      * Zero requests dynamic allocation; it never reserves port zero.
      */
