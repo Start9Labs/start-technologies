@@ -1,6 +1,8 @@
 export {
   addressHostToUrl,
   isAddressEnabled,
+  isAddressInsecure,
+  getEnabledAddresses,
   filledAddress,
   filterNonLocal,
 } from './filledAddress'

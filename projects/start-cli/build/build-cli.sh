@@ -52,6 +52,10 @@ if [ -z "${TARGET:-}" ]; then
   fi
 fi
 
+# The builder alias selects its sysroot from ARCH.
+ARCH=${TARGET%%-*}
+ARCH=${ARCH/riscv64gc/riscv64}
+
 FEATURES="$(echo "${ENVIRONMENT:-}" | sed 's/-/,/g')"
 RUSTFLAGS=""
 if [[ "${ENVIRONMENT:-}" =~ (^|-)console($|-) ]]; then

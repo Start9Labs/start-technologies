@@ -435,10 +435,7 @@ fn plaintext_http_target(
             continue;
         }
         for gateway in address.metadata.gateways() {
-            let Some(info) = interfaces
-                .get(gateway)
-                .filter(|i| requirements.allows_gateway(i))
-            else {
+            let Some(info) = interfaces.get(gateway) else {
                 continue;
             };
             let public = address.public && requirements.public_on(gateway);
@@ -579,7 +576,7 @@ pub fn plan_host_exposure(
         let addr: SocketAddr = (ip, *port).into();
         let addr_v6 = ipv6.map(|ip| SocketAddrV6::new(ip, *port, 0, 0));
 
-        // Private DNS answers only through the name's enabled local gateways.
+        // Private DNS answers only through the name's live local gateways.
         add_private_dns(&mut private_dns, &enabled_addresses, net_ifaces);
 
         let connect_ssl: Option<Arc<TlsClientConfig>> = bind
@@ -711,16 +708,6 @@ pub fn plan_host_exposure(
                     let src_filter = if a.public && secure_exposure {
                         None
                     } else {
-                        // Insecure protocols require a `NetworkInterfaceInfo::secure` gateway.
-                        if !secure_exposure
-                            && !a
-                                .metadata
-                                .gateways()
-                                .filter_map(|gw| net_ifaces.get(gw))
-                                .any(|info| requirements.allows_gateway(info))
-                        {
-                            continue;
-                        }
                         match a
                             .metadata
                             .gateways()
@@ -748,7 +735,7 @@ pub fn plan_host_exposure(
         }
     }
 
-    // Ranges have no Security option; `secure: true` passes `ForwardRequirements::allows_gateway`.
+    // Ranges are eligible for public exposure through their address opt-ins.
     // Outbound-only gateways never receive synthesized range addresses.
     for (&internal_start, range) in host.binding_ranges.iter() {
         if !range.enabled {
@@ -1979,6 +1966,54 @@ mod tests {
         assert!(plan.gua_forwards.is_empty());
         assert!(plan.http_ports.is_empty());
         assert!(plan.private_dns.is_empty());
+    }
+
+    #[test]
+    fn plaintext_http_proxy_accepts_selected_insecure_private_addresses_only() {
+        let interfaces: OrdMap<GatewayId, NetworkInterfaceInfo> = OrdMap::from_iter([(
+            gw("eth0"),
+            NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(IpInfo {
+                    subnets: ["192.0.2.10/24", "192.0.2.11/24", "2001:db8::10/64"]
+                        .into_iter()
+                        .map(|s| s.parse::<IpNet>().unwrap())
+                        .collect(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        )]);
+        assert!(!interfaces[&gw("eth0")].secure());
+        let selected = [
+            lan_ip("192.0.2.10", false, 8080, "eth0"),
+            lan_ip("2001:db8::10", false, 8080, "eth0"),
+        ];
+        let addresses = selected.iter().collect();
+        let requirements = ForwardRequirements {
+            public_gateways: BTreeSet::new(),
+            private_ips: forwarded_lan_ips(selected.iter(), &interfaces),
+            secure: false,
+            transport: Default::default(),
+        };
+        let target = || {
+            binding_proxy_target(
+                &bind_options(true, None, None),
+                "127.0.0.1:8096".parse().unwrap(),
+                None,
+                None,
+            )
+        };
+        let selected_target =
+            plaintext_http_target(target(), 8080, &addresses, &interfaces, &requirements);
+        assert_eq!(
+            selected_target.private,
+            BTreeSet::from([ip("192.0.2.10"), ip("2001:db8::10")])
+        );
+        assert!(selected_target.public_v4.is_empty());
+        assert!(selected_target.public_v6.is_empty());
+        let disabled_target =
+            plaintext_http_target(target(), 8080, &BTreeSet::new(), &interfaces, &requirements);
+        assert!(disabled_target.private.is_empty());
     }
 
     #[test]
