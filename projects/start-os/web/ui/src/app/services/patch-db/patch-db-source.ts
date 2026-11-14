@@ -1,8 +1,8 @@
 import { inject, Injectable, InjectionToken } from '@angular/core'
-import { Dump, Revision, Update } from 'patch-db-client'
-import { BehaviorSubject, EMPTY, firstValueFrom, Observable } from 'rxjs'
+import { databaseSource } from '@start9labs/shared'
+import { Dump, Update } from 'patch-db-client'
+import { BehaviorSubject, EMPTY, Observable } from 'rxjs'
 import {
-  bufferTime,
   catchError,
   filter,
   skip,
@@ -24,13 +24,6 @@ export const PATCH_CACHE = new InjectionToken('', {
     }),
 })
 
-export async function waitForPatchSequence(
-  cache$: Observable<Dump<DataModel>>,
-  sequence: number,
-): Promise<void> {
-  await firstValueFrom(cache$.pipe(filter(({ id }) => id >= sequence)))
-}
-
 @Injectable({
   providedIn: 'root',
 })
@@ -39,25 +32,13 @@ export class PatchDbSource extends Observable<Update<DataModel>[]> {
   private readonly state = inject(StateService)
   private readonly stream$ = inject(AuthService).isVerified$.pipe(
     switchMap(verified =>
-      verified
-        ? this.api.rpc.db.subscribe({}).then(({ dump, guid }) => ({
-            guid,
-            dump: { ...dump, value: dump.value as DataModel },
-          }))
-        : EMPTY,
-    ),
-    switchMap(({ dump, guid }) =>
-      this.api.openWebsocket$<Revision>(guid).pipe(
-        bufferTime(250),
-        filter(revisions => !!revisions.length),
-        startWith([dump]),
-      ),
+      verified ? databaseSource(this.api.watchDb$()) : EMPTY,
     ),
     catchError((_, original$) => {
       this.state.retrigger(false, 2000)
 
       return this.state.pipe(
-        skip(1), // skipping previous value stored due to shareReplay
+        skip(1),
         filter(current => current === 'running'),
         take(1),
         switchMap(() => original$),

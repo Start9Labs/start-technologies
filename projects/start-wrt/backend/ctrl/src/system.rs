@@ -105,9 +105,7 @@ async fn info<C: CtrlContext>(ctx: C) -> Result<SystemInfoResponse, Error> {
 
     Ok(SystemInfoResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        // Same stamp the web build bakes into config.json (check-git-hash.sh
-        // format); the UI compares the two to detect a stale cached bundle.
-        git_hash: env!("STARTWRT_GIT_HASH").to_string(),
+        git_hash: crate::rpc::GIT_HASH.to_string(),
         language: prefs.language,
         date: Utc::now().to_rfc3339(),
         theme: prefs.theme,

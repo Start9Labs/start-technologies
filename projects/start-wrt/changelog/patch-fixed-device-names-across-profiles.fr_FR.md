@@ -1,1 +1,0 @@
-- Le nom d’un appareil se résout depuis tout réseau dont le profil de sécurité permet de l’atteindre, et plus seulement depuis le sien. Un nom attribué a priorité sur le nom d’hôte envoyé par l’appareil. L’appareil du réseau local conserve son nom si un appareil d’un autre réseau porte le même.

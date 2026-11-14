@@ -16,8 +16,9 @@ use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{CallRemote, Context, Empty};
 use tokio::net::TcpStream;
 use tokio::process::Command;
-use tokio::sync::{RwLock, broadcast, oneshot, watch};
+use tokio::sync::{RwLock, broadcast, mpsc, oneshot, watch};
 use tokio::time::Instant;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::instrument;
@@ -68,6 +69,7 @@ pub struct RpcContextSeed {
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub db: TypedPatchDb<Database>,
     pub sync_db: watch::Sender<u64>,
+    registry_refresh: mpsc::Sender<Url>,
     pub disk_updates: watch::Sender<()>,
     pub account: SyncRwLock<AccountInfo>,
     pub os_net_service: NetService,
@@ -75,8 +77,6 @@ pub struct RpcContextSeed {
     pub s9pk_arch: Option<&'static str>,
     pub services: ServiceMap,
     pub cancellable_installs: SyncMutex<BTreeMap<PackageId, oneshot::Sender<()>>>,
-    /// When each registry was last checked for newly offered keys.
-    pub registry_key_checks: SyncMutex<BTreeMap<String, Instant>>,
     pub installing_s9pks: SyncMutex<BTreeMap<PackageId, S9pk<DynFileSource>>>,
     pub metrics_cache: Watch<Option<crate::system::Metrics>>,
     pub shutdown: broadcast::Sender<Option<Shutdown>>,
@@ -136,38 +136,95 @@ impl CleanupInitPhases {
 }
 
 #[derive(Clone)]
-pub struct RpcContext(Arc<RpcContextSeed>);
+pub struct RpcContext(
+    Arc<RpcContextSeed>,
+    Option<Arc<crate::middleware::auth::session::SecureSession>>,
+);
+
+impl SessionContext for RpcContext {
+    fn secure_session(&self) -> Option<&crate::middleware::auth::session::SecureSession> {
+        self.1.as_deref()
+    }
+}
+impl RpcContext {
+    pub(crate) fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
+        crate::middleware::auth::signature::RequestReplayCheck::new(&self.0, |seed| {
+            Some(Self(seed, None))
+        })
+    }
+    pub(crate) fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+        crate::middleware::auth::signature::SigningContext::signing_key(self)
+    }
+    pub(crate) fn with_secure_session(
+        mut self,
+        session: crate::middleware::auth::session::SecureSession,
+    ) -> Self {
+        self.1 = Some(Arc::new(session));
+        self
+    }
+}
 
 /// Clients acquired before a reload retain their previous trust configuration.
 pub struct ReloadableHttpClient {
-    client: SyncRwLock<Client>,
+    clients: SyncRwLock<HttpClients>,
     socks_proxy_url: String,
 }
+
+#[derive(Clone)]
+struct HttpClients {
+    redirecting: Client,
+    without_redirects: Client,
+}
 impl ReloadableHttpClient {
-    fn new(socks_proxy_url: String) -> Result<Self, Error> {
-        let client = Self::build_for_proxy(&socks_proxy_url)?;
+    pub(crate) fn new(socks_proxy_url: String) -> Result<Self, Error> {
+        let clients = Self::build_clients(&socks_proxy_url)?;
         Ok(Self {
-            client: SyncRwLock::new(client),
+            clients: SyncRwLock::new(clients),
             socks_proxy_url,
         })
     }
 
-    fn build_for_proxy(socks_proxy_url: &str) -> Result<Client, Error> {
+    fn build_clients(socks_proxy_url: &str) -> Result<HttpClients, Error> {
+        Ok(HttpClients {
+            redirecting: Self::build_for_proxy(
+                socks_proxy_url,
+                reqwest::redirect::Policy::default(),
+            )?,
+            without_redirects: Self::build_for_proxy(
+                socks_proxy_url,
+                reqwest::redirect::Policy::none(),
+            )?,
+        })
+    }
+
+    fn build_for_proxy(
+        socks_proxy_url: &str,
+        redirects: reqwest::redirect::Policy,
+    ) -> Result<Client, Error> {
         Client::builder()
             .proxy(Proxy::all(socks_proxy_url)?)
+            .redirect(redirects)
             .build()
             .with_kind(ErrorKind::ParseUrl)
     }
 
     pub fn get(&self) -> Client {
-        self.client.read()
+        self.clients.read().redirecting
+    }
+
+    pub(crate) fn get_without_redirects(&self) -> Client {
+        self.clients.read().without_redirects
     }
 
     pub async fn websocket(
         &self,
-        url: Url,
+        request: impl IntoClientRequest + Send,
         config: WebSocketConfig,
     ) -> Result<WebSocketStream<MaybeTlsStream<Socks5Stream<TcpStream>>>, Error> {
+        let request = request
+            .into_client_request()
+            .with_kind(ErrorKind::Network)?;
+        let url: Url = request.uri().to_string().parse()?;
         let proxy: Url = self.socks_proxy_url.parse()?;
         let stream = Socks5Stream::connect(
             (
@@ -181,15 +238,15 @@ impl ReloadableHttpClient {
         .await
         .with_kind(ErrorKind::Network)?;
         let (socket, _) =
-            tokio_tungstenite::client_async_tls_with_config(url, stream, Some(config), None)
+            tokio_tungstenite::client_async_tls_with_config(request, stream, Some(config), None)
                 .await
                 .with_kind(ErrorKind::Network)?;
         Ok(socket)
     }
 
     pub fn reload(&self) -> Result<(), Error> {
-        let client = Self::build_for_proxy(&self.socks_proxy_url)?;
-        self.client.replace(client);
+        let clients = Self::build_clients(&self.socks_proxy_url)?;
+        self.clients.replace(clients);
         Ok(())
     }
 }
@@ -437,6 +494,7 @@ impl RpcContext {
             });
         }
 
+        let (registry_refresh, registry_refreshes) = mpsc::channel(8);
         let seed = Arc::new(RpcContextSeed {
             is_closed: AtomicBool::new(false),
             closed: watch::Sender::new(false),
@@ -445,6 +503,7 @@ impl RpcContext {
             ephemeral_auth_keys: SyncMutex::new(AuthKeys::new()),
             auth_sig_nonce_cache: SyncMutex::new(Default::default()),
             sync_db: watch::Sender::new(db.sequence().await),
+            registry_refresh,
             disk_updates: watch::Sender::new(()),
             db,
             account: SyncRwLock::new(account),
@@ -458,7 +517,6 @@ impl RpcContext {
             },
             services,
             cancellable_installs: SyncMutex::new(BTreeMap::new()),
-            registry_key_checks: SyncMutex::new(BTreeMap::new()),
             installing_s9pks: SyncMutex::new(BTreeMap::new()),
             metrics_cache,
             rpc_continuations: RpcContinuations::new(),
@@ -481,14 +539,14 @@ impl RpcContext {
             crons,
         });
 
-        let res = Self(seed.clone());
+        let res = Self(seed.clone(), None);
         crate::update::signer_files::initialize(&res.db).await?;
         res.cleanup_and_initialize(cleanup_init).await?;
         #[cfg(target_os = "linux")]
         {
             let weak = Arc::downgrade(&seed);
             res.add_cron(crate::shared_volumes::watch::run(move || {
-                weak.upgrade().map(Self)
+                weak.upgrade().map(|seed| Self(seed, None))
             }));
         }
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
@@ -496,9 +554,11 @@ impl RpcContext {
         crate::version::post_init(&res, run_migrations).await?;
         let weak = Arc::downgrade(&seed);
         let db = res.db.clone();
-        res.add_cron(crate::update::security::watch_updates(db, move || {
-            weak.upgrade().map(Self)
-        }));
+        res.add_cron(crate::registry::sync::watch_registries(
+            db,
+            registry_refreshes,
+            move || weak.upgrade().map(|seed| Self(seed, None)),
+        ));
         tracing::info!("{}", t!("context.rpc.completed-migrations"));
         let weak = Arc::downgrade(&res.0);
         let db = res.db.clone();
@@ -521,6 +581,15 @@ impl RpcContext {
             }
         });
         Ok(res)
+    }
+
+    pub(crate) async fn request_registry_refresh(&self, registry: Url) -> Result<(), Error> {
+        self.registry_refresh.send(registry).await.map_err(|_| {
+            Error::new(
+                eyre!("{}", t!("context.rpc.registry-sync-unavailable")),
+                ErrorKind::Network,
+            )
+        })
     }
 
     #[instrument(skip_all)]
@@ -592,6 +661,7 @@ impl RpcContext {
 
         // Conversion requires unmounted, quiescent roots before observers and services start.
         optimize_storage.start();
+        self.lxc_manager.gc().await?;
         let peek = self.db.peek().await;
         let mut installed = BTreeSet::new();
         let mut all = BTreeSet::new();
@@ -733,10 +803,20 @@ mod tests {
 
     use super::*;
 
-    fn client_with_generation(generation: &'static str) -> Client {
+    fn clients_with_generation(generation: &'static str) -> HttpClients {
         let mut headers = HeaderMap::new();
         headers.insert("x-client-generation", HeaderValue::from_static(generation));
-        Client::builder().default_headers(headers).build().unwrap()
+        HttpClients {
+            redirecting: Client::builder()
+                .default_headers(headers.clone())
+                .build()
+                .unwrap(),
+            without_redirects: Client::builder()
+                .default_headers(headers)
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap(),
+        }
     }
 
     #[tokio::test]
@@ -760,7 +840,7 @@ mod tests {
                 .unwrap();
         });
         let http = ReloadableHttpClient {
-            client: SyncRwLock::new(client_with_generation("old")),
+            clients: SyncRwLock::new(clients_with_generation("old")),
             socks_proxy_url: proxy_url,
         };
         let old = http.get();
@@ -810,7 +890,9 @@ mod tests {
         let mut socket = tokio::time::timeout(
             Duration::from_secs(5),
             client.websocket(
-                "ws://registry.invalid:5959/os/security".parse().unwrap(),
+                "ws://registry.invalid:5959/ws/rpc/test-continuation"
+                    .parse::<Url>()
+                    .unwrap(),
                 WebSocketConfig::default().read_buffer_size(4096),
             ),
         )
@@ -826,14 +908,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn scoped_http_clients_do_not_forward_redirect_credentials_after_reload() {
+        let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let http =
+            ReloadableHttpClient::new(format!("http://{}", proxy.local_addr().unwrap())).unwrap();
+        let server = tokio::spawn(async move {
+            let mut forwarded = 0;
+            for _ in 0..4 {
+                let (mut stream, _) = proxy.accept().await.unwrap();
+                let mut request = Vec::new();
+                loop {
+                    let mut bytes = [0; 1024];
+                    let count = stream.read(&mut bytes).await.unwrap();
+                    assert!(count > 0);
+                    request.extend_from_slice(&bytes[..count]);
+                    if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let request = String::from_utf8(request).unwrap();
+                let response = if request.contains("/source ") {
+                    "HTTP/1.1 307 Temporary Redirect\r\nLocation: http://another.invalid/forwarded\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else {
+                    assert!(request.contains("/forwarded "));
+                    assert!(!request.to_ascii_lowercase().contains("x-start-auth-sig"));
+                    forwarded += 1;
+                    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                };
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+            forwarded
+        });
+        let url = "http://registry.invalid/source";
+        for _ in 0..2 {
+            http.reload().unwrap();
+            let response = http
+                .get_without_redirects()
+                .get(url)
+                .header(
+                    crate::middleware::auth::signature::AUTH_SIG_HEADER,
+                    "private-proof",
+                )
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), http::StatusCode::TEMPORARY_REDIRECT);
+        }
+        assert!(
+            http.get()
+                .get(url)
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .is_success()
+        );
+        assert_eq!(server.await.unwrap(), 1);
+    }
+
+    #[tokio::test]
     async fn reloadable_http_client_keeps_client_when_rebuild_fails() {
         let http = ReloadableHttpClient {
-            client: SyncRwLock::new(client_with_generation("old")),
+            clients: SyncRwLock::new(clients_with_generation("old")),
             socks_proxy_url: "http://[::1".to_owned(),
         };
 
         assert!(http.reload().is_err());
         assert_client_generation(http.get(), "old").await;
+        assert_client_generation(http.get_without_redirects(), "old").await;
     }
 
     async fn assert_client_generation(client: Client, generation: &str) {

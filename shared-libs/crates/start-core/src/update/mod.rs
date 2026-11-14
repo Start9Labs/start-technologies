@@ -5,11 +5,9 @@ use std::time::Duration;
 use clap::{ArgAction, Parser};
 use color_eyre::eyre::{Result, eyre};
 use exver::{Version, VersionRange};
-use futures::TryStreamExt;
 use imbl::OrdMap;
 use imbl_value::json;
 use itertools::Itertools;
-use patch_db::json_ptr::JsonPointer;
 use reqwest::{Client, Url};
 use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
@@ -30,14 +28,15 @@ use crate::db::model::public::RestartReason;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{
-    FullProgressTracker, PhaseProgressTrackerHandle, PhasedProgressBar, ProgressUnits,
+    FullProgress, FullProgressTracker, PhaseProgressTrackerHandle, ProgressUnits, forward_progress,
+    progress_until_complete, with_cli_progress,
 };
 use crate::registry::asset::RegistryAsset;
 use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::registry::os::SIG_CONTEXT;
 use crate::registry::os::index::OsVersionInfo;
 use crate::registry::signer::AcceptSigners;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::blake3::Blake3Commitment;
@@ -70,9 +69,14 @@ pub struct UpdateSystemParams {
         help = "help.arg.update-target-version"
     )]
     target_version: Option<VersionRange>,
+    /// Requests a legacy progress GUID; rpcstream observes completion independently.
     #[arg(long = "no-progress", action = ArgAction::SetFalse, help = "help.arg.no-progress")]
     #[serde(default)]
     progress: bool,
+    #[arg(skip)]
+    #[visit(ts(skip))]
+    #[serde(rename = "__Auth_signer")]
+    signer: Option<InternedString>,
 }
 
 rpc_toolkit::reflect_ts!(UpdateSystemParams);
@@ -81,6 +85,7 @@ rpc_toolkit::ts_export!(UpdateSystemParams, namespaces = [""]);
 #[derive(Deserialize, Serialize, VisitFields)]
 pub struct UpdateSystemRes {
     target: Option<Version>,
+    /// Legacy progress continuation, absent for rpcstream observers.
     progress: Option<Guid>,
 }
 
@@ -88,15 +93,22 @@ rpc_toolkit::reflect_ts!(UpdateSystemRes);
 rpc_toolkit::ts_export!(UpdateSystemRes, namespaces = [""]);
 
 #[instrument(skip_all)]
+/// Canceling observation does not cancel an accepted update.
 pub async fn update_system(
-    ctx: RpcContext,
-    UpdateSystemParams {
-        target_version: target,
-        registry,
-        progress,
-        accept_signers,
-        trust,
-    }: UpdateSystemParams,
+    HandlerArgs {
+        context: ctx,
+        params:
+            UpdateSystemParams {
+                target_version: target,
+                registry,
+                progress,
+                accept_signers,
+                trust,
+                signer,
+            },
+        rpc_stream,
+        ..
+    }: HandlerArgs<RpcContext, UpdateSystemParams, rpc_toolkit::Empty, FullProgress>,
 ) -> Result<UpdateSystemRes, Error> {
     if ctx
         .db
@@ -114,7 +126,7 @@ pub async fn update_system(
             ErrorKind::InvalidRequest,
         ));
     }
-    let target = maybe_do_update(
+    let started = maybe_do_update(
         ctx.clone(),
         registry,
         target.unwrap_or(VersionRange::Any),
@@ -122,61 +134,46 @@ pub async fn update_system(
         trust,
     )
     .await?;
-    let progress = if progress && target.is_some() {
+    let Some(StartedUpdate {
+        target,
+        progress: tracker,
+        done,
+    }) = started
+    else {
+        if let Some(stream) = rpc_stream {
+            let _ = stream.close(Ok::<_, Error>(()));
+        }
+        return Ok(UpdateSystemRes {
+            target: None,
+            progress: None,
+        });
+    };
+    let source = progress_until_complete(tracker, async move {
+        done.await.with_kind(ErrorKind::Cancelled)?
+    });
+    let progress = if let Some(stream) = rpc_stream {
+        crate::auth::continuation_subscription(&ctx, signer)
+            .await?
+            .forward_stream(stream, source);
+        None
+    } else if progress {
         let guid = Guid::new();
-        ctx.clone()
-            .rpc_continuations
+        ctx.rpc_continuations
             .add(
                 guid.clone(),
-                RpcContinuation::ws(
-                    |mut ws| async move {
-                        if let Err(e) = async {
-                            let mut sub = ctx
-                                .db
-                                .subscribe(
-                                    "/public/serverInfo/statusInfo/updateProgress"
-                                        .parse::<JsonPointer>()
-                                        .with_kind(ErrorKind::Database)?,
-                                )
-                                .await;
-                            loop {
-                                let progress = ctx
-                                    .db
-                                    .peek()
-                                    .await
-                                    .into_public()
-                                    .into_server_info()
-                                    .into_status_info()
-                                    .into_update_progress()
-                                    .de()?;
-                                ws.send(axum::extract::ws::Message::Text(
-                                    serde_json::to_string(&progress)
-                                        .with_kind(ErrorKind::Serialization)?
-                                        .into(),
-                                ))
+                RpcContinuation::ws_authed(
+                    crate::auth::continuation_subscription(&ctx, signer).await?,
+                    WebSocketPolicy::Authenticated,
+                    ctx.secure_session().cloned(),
+                    move |socket| async move {
+                        if let Err(error) =
+                            forward_progress(socket, crate::progress::progress_with_null(source))
                                 .await
-                                .with_kind(ErrorKind::Network)?;
-                                if progress.is_none() {
-                                    return ws.normal_close("complete").await;
-                                }
-                                tokio::select! {
-                                    _ = sub.recv() => (),
-                                    res = async {
-                                        loop {
-                                            if ws.recv().await.transpose().with_kind(ErrorKind::Network)?.is_none() {
-                                                return Ok(())
-                                            }
-                                        }
-                                     } => {
-                                        return res
-                                    }
-                                }
-                            }
-                        }
-                        .await
                         {
-                            tracing::error!("{}", t!("update.error-returning-progress", error = e.to_string()));
-                            tracing::debug!("{e:?}")
+                            tracing::error!(
+                                "{}",
+                                t!("update.error-returning-progress", error = error.to_string())
+                            );
                         }
                     },
                     Duration::from_secs(30),
@@ -187,7 +184,10 @@ pub async fn update_system(
     } else {
         None
     };
-    Ok(UpdateSystemRes { target, progress })
+    Ok(UpdateSystemRes {
+        target: Some(target),
+        progress,
+    })
 }
 
 pub async fn cli_update_system(
@@ -195,58 +195,60 @@ pub async fn cli_update_system(
         context,
         parent_method,
         method,
+        params: UpdateSystemParams { progress, .. },
         raw_params,
         ..
     }: HandlerArgs<CliContext, UpdateSystemParams>,
 ) -> Result<(), Error> {
-    let res = from_value::<UpdateSystemRes>(
-        context
-            .call_remote::<RpcContext>(
-                &parent_method.into_iter().chain(method).join("."),
-                raw_params,
-            )
-            .await?,
-    )?;
-    match res.target {
+    let method = parent_method.into_iter().chain(method).join(".");
+    if !progress {
+        let result: UpdateSystemRes = from_value(
+            context
+                .call_remote::<RpcContext>(&method, raw_params)
+                .await?,
+        )?;
+        display_update_started(result);
+        return Ok(());
+    }
+    let response = context
+        .call_remote_stream::<FullProgress, ()>(&method, raw_params)
+        .await?;
+    render_update_progress(response).await
+}
+
+fn display_update_started(result: UpdateSystemRes) {
+    match result.target {
         None => println!("{}", t!("update.no-updates-available")),
-        Some(v) => {
-            if let Some(progress) = res.progress {
-                let mut ws = context.ws_continuation(progress).await?;
-                let mut progress = PhasedProgressBar::new(&t!(
-                    "update.updating-to-version",
-                    version = v.to_string()
-                ));
-                let mut prev = None;
-                while let Some(msg) = ws.try_next().await.with_kind(ErrorKind::Network)? {
-                    if let tokio_tungstenite::tungstenite::Message::Text(msg) = msg {
-                        if let Some(snap) =
-                            serde_json::from_str(&msg).with_kind(ErrorKind::Deserialization)?
-                        {
-                            progress.update(&snap);
-                            prev = Some(snap);
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                if let Some(mut prev) = prev {
-                    for phase in &mut prev.phases {
-                        phase.progress.set_complete();
-                    }
-                    prev.overall.set_complete();
-                    progress.update(&prev);
-                }
-                println!("{}", t!("update.complete-restart-to-apply"))
-            } else {
-                println!(
-                    "{}",
-                    t!("update.updating-to-version", version = v.to_string())
-                )
-            }
+        Some(version) => println!(
+            "{}",
+            t!("update.updating-to-version", version = version.to_string())
+        ),
+    }
+}
+
+async fn render_update_progress(
+    response: crate::util::rpc_client::RpcResponseStream<Value, FullProgress, ()>,
+) -> Result<(), Error> {
+    let result: UpdateSystemRes = from_value(response.initial)?;
+    match result.target {
+        None => {
+            response.items.finish().await?;
+            println!("{}", t!("update.no-updates-available"));
+        }
+        Some(version) => {
+            with_cli_progress(
+                response.items,
+                &t!("update.updating-to-version", version = version.to_string()),
+            )
+            .await?;
+            println!("{}", t!("update.complete-restart-to-apply"));
         }
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod continuation_tests;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -283,6 +285,12 @@ fn validate_update_signatures(
     asset.validate_all(SIG_CONTEXT, accept_signers)
 }
 
+struct StartedUpdate {
+    target: Version,
+    progress: FullProgressTracker,
+    done: tokio::task::JoinHandle<Result<(), Error>>,
+}
+
 #[instrument(skip_all)]
 async fn maybe_do_update(
     ctx: RpcContext,
@@ -290,7 +298,7 @@ async fn maybe_do_update(
     target: VersionRange,
     accept_signers: Option<AcceptSigners>,
     trust: bool,
-) -> Result<Option<Version>, Error> {
+) -> Result<Option<StartedUpdate>, Error> {
     let peeked = ctx.db.peek().await;
     let current_version = peeked.as_public().as_server_info().as_version().de()?;
     let mut available = from_value::<BTreeMap<Version, OsVersionInfo>>(
@@ -370,7 +378,8 @@ async fn maybe_do_update(
         Some(Duration::from_millis(300)),
     )));
 
-    tokio::spawn(async move {
+    let observer = progress.clone();
+    let done = tokio::spawn(async move {
         let res = do_update(
             ctx.client.get(),
             asset,
@@ -428,11 +437,16 @@ async fn maybe_do_update(
                 UPDATE_FAILED_2.play().await.log_err();
                 UPDATE_FAILED_3.play().await.log_err();
                 UPDATE_FAILED_4.play().await.log_err();
+                return Err(e);
             }
         }
         Ok::<(), Error>(())
     });
-    Ok(Some(target_version))
+    Ok(Some(StartedUpdate {
+        target: target_version,
+        progress: observer,
+        done,
+    }))
 }
 
 pub(crate) struct UpdateProgressHandles {
