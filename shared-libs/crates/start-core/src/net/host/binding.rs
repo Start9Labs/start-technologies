@@ -141,7 +141,7 @@ impl DerivedAddressInfo {
         self.effective = self.enabled().into_iter().cloned().collect();
     }
 
-    /// Keeps legacy SDK address readers aligned with the effective insecure selections.
+    /// Keeps legacy SDK address readers aligned with the effective selections.
     pub(super) fn project_service_selections(&mut self) {
         let enabled: BTreeSet<_> = self.enabled().into_iter().cloned().collect();
         self.effective = enabled.clone();
@@ -156,6 +156,21 @@ impl DerivedAddressInfo {
             !restricted || enabled.contains(a)
         });
         self.disabled.retain(|key| !opted_names.contains(key));
+        if self.default_off {
+            let named_on: BTreeSet<_> = enabled
+                .iter()
+                .filter(|a| !a.metadata.is_ip())
+                .map(override_key)
+                .collect();
+            let named_off: Vec<_> = self
+                .available
+                .iter()
+                .filter(|a| !a.metadata.is_ip() && !a.is_internal())
+                .map(override_key)
+                .filter(|key| !named_on.contains(key))
+                .collect();
+            self.disabled.extend(named_off);
+        }
         let lan_ips: Vec<_> = self
             .available
             .iter()
@@ -3669,6 +3684,33 @@ mod test {
         set_address_enabled_with_consent(&mut info, &renumbered, false, false).unwrap();
         assert!(!info.enabled().contains(&renumbered));
         assert!(info.enabled().contains(&name));
+    }
+
+    #[test]
+    fn service_view_disables_unconsented_default_off_names_for_legacy_readers() {
+        let (mut info, mdns, [eth, _]) = lan_fixture(false);
+        let domain = HostnameInfo {
+            hostname: InternedString::intern("media.lan"),
+            metadata: HostnameMetadata::PrivateDomain {
+                gateways: BTreeSet::from([GatewayId::from(InternedString::intern("eth0"))]),
+            },
+            ..eth.clone()
+        };
+        info.available.insert(domain.clone());
+        info.default_off = true;
+        assert!(info.enabled().is_empty());
+        let mut view = info.clone();
+        view.project_service_selections();
+        assert!(view.disabled.contains(&override_key(&mdns)));
+        assert!(view.disabled.contains(&override_key(&domain)));
+
+        info.set_name_enabled(override_key(&domain), true);
+        assert!(info.enabled().contains(&domain));
+        assert!(!info.enabled().contains(&mdns));
+        let mut view = info.clone();
+        view.project_service_selections();
+        assert!(!view.disabled.contains(&override_key(&domain)));
+        assert!(view.disabled.contains(&override_key(&mdns)));
     }
 
     #[test]

@@ -85,7 +85,7 @@ impl Host {
         Self::default()
     }
 
-    /// Hides disabled insecure candidates from legacy service SDK address readers.
+    /// Returns a legacy SDK view; projection overrides must not be persisted.
     pub fn into_service_view(mut self) -> Self {
         for binding in self.bindings.values_mut() {
             binding.addresses.project_service_selections();

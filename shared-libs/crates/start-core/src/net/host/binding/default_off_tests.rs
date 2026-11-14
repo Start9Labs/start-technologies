@@ -194,6 +194,69 @@ fn rekeying_moves_named_consent_but_not_plugin_endpoints() {
 }
 
 #[test]
+fn default_off_service_view_fixtures_preserve_native_selection_and_saved_intent() {
+    let mut fixtures = Vec::new();
+    for (label, ssl, selected, expected_hosts) in [
+        ("plain-off", false, None, vec![]),
+        ("tls-off", true, None, vec![]),
+        (
+            "private-name",
+            true,
+            Some("private.example"),
+            vec!["private.example"],
+        ),
+        (
+            "public-name",
+            true,
+            Some("public.example"),
+            vec!["public.example"],
+        ),
+        (
+            "plugin-name",
+            true,
+            Some("plugin.example"),
+            vec!["plugin.example"],
+        ),
+        (
+            "lan-group",
+            false,
+            Some("192.168.1.2"),
+            vec![
+                "192.168.1.2",
+                "2001:db8::2",
+                "private.example",
+                "server.local",
+            ],
+        ),
+    ] {
+        let mut info = DerivedAddressInfo::default();
+        info.set_available(candidates(ssl), true);
+        if let Some(hostname) = selected {
+            let row = named(&info, hostname);
+            set_address_enabled_on(&mut info, &row, true).unwrap();
+        }
+        let expected: BTreeSet<_> = info.enabled().into_iter().cloned().collect();
+        assert_eq!(
+            expected
+                .iter()
+                .map(|row| &*row.hostname)
+                .collect::<BTreeSet<_>>(),
+            expected_hosts.into_iter().collect()
+        );
+        let before = serde_json::to_value(&info).unwrap();
+        let mut view = info.clone();
+        view.project_service_selections();
+        assert_eq!(view.effective, expected);
+        assert_eq!(serde_json::to_value(&info).unwrap(), before);
+        fixtures.push(serde_json::json!({"label": label, "view": view, "expected": expected}));
+    }
+    println!(
+        "legacy-service-views={}",
+        serde_json::to_string(&fixtures).unwrap()
+    );
+}
+
+#[test]
 fn default_off_plaintext_selection_requires_and_preserves_gateway_consent() {
     let mut info = DerivedAddressInfo::default();
     let available = candidates(false);
