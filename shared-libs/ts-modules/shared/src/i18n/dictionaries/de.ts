@@ -1093,7 +1093,8 @@ export default {
   1292: 'Aktueller Fingerabdruck',
   1293: 'Fehlerdetails sind nicht verfügbar',
   1294: 'Nicht erreichbar',
-  1295: 'Stopp erzwingen',
-  1296: 'Stopp wird erzwungen',
-  1297: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
+  1295: 'Transport',
+  1296: 'Stopp erzwingen',
+  1297: 'Stopp wird erzwungen',
+  1298: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
 } satisfies i18n

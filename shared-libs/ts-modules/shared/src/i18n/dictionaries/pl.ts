@@ -1093,7 +1093,8 @@ export default {
   1292: 'Obecny odcisk',
   1293: 'Szczegóły błędu nie są dostępne',
   1294: 'Nieosiągalny',
-  1295: 'Wymuś zatrzymanie',
-  1296: 'Wymuszanie zatrzymania',
-  1297: 'Wymuszenie zatrzymania może spowodować utratę danych lub pozostawić serwis w nieprawidłowym stanie. Czy na pewno chcesz wymusić zatrzymanie?',
+  1295: 'Transport',
+  1296: 'Wymuś zatrzymanie',
+  1297: 'Wymuszanie zatrzymania',
+  1298: 'Wymuszenie zatrzymania może spowodować utratę danych lub pozostawić serwis w nieprawidłowym stanie. Czy na pewno chcesz wymusić zatrzymanie?',
 } satisfies i18n

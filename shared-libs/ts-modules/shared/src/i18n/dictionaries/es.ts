@@ -1093,7 +1093,8 @@ export default {
   1292: 'Huella actual',
   1293: 'Los detalles del error no están disponibles',
   1294: 'Inaccesible',
-  1295: 'Forzar detención',
-  1296: 'Forzando detención',
-  1297: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
+  1295: 'Transporte',
+  1296: 'Forzar detención',
+  1297: 'Forzando detención',
+  1298: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
 } satisfies i18n

@@ -1094,7 +1094,8 @@ export const ENGLISH: Record<string, number> = {
   'Current fingerprint': 1292,
   'Error details are not available': 1293,
   'Unreachable': 1294,
-  'Force stop': 1295,
-  'Force stopping': 1296,
-  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1297,
+  'Transport': 1295,
+  'Force stop': 1296,
+  'Force stopping': 1297,
+  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1298,
 }

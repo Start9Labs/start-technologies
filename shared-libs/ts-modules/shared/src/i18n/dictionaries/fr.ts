@@ -1093,7 +1093,8 @@ export default {
   1292: 'Empreinte actuelle',
   1293: 'Les détails de l’erreur ne sont pas disponibles',
   1294: 'Injoignable',
-  1295: 'Forcer l’arrêt',
-  1296: 'Arrêt forcé en cours',
-  1297: 'Forcer l’arrêt peut entraîner une perte de données ou laisser le service dans un état défectueux. Voulez-vous vraiment forcer l’arrêt ?',
+  1295: 'Transport',
+  1296: 'Forcer l’arrêt',
+  1297: 'Arrêt forcé en cours',
+  1298: 'Forcer l’arrêt peut entraîner une perte de données ou laisser le service dans un état défectueux. Voulez-vous vraiment forcer l’arrêt ?',
 } satisfies i18n

@@ -429,6 +429,7 @@ export type TermSizeInput = z.input<typeof schemas.TermSize>
  */
 export type TestOperation = z.output<typeof schemas.TestOperation>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
+export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedCa = z.output<typeof schemas.TrustedCa>
@@ -726,6 +727,7 @@ export type SubscribeIndexParamsInput = z.input<
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type TargetParamsInput = z.input<typeof schemas.TargetParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
+export type TransportWire = z.output<typeof schemas.TransportWire>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
 export type UninstallParamsInput = z.input<typeof schemas.UninstallParams>
 export type UnsetGatewaySecureParamsInput = z.input<
@@ -804,6 +806,12 @@ export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
  * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
  */
 export type SubscribeResult = z.output<typeof schemas.SubscribeResult>
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export type Transport = z.output<typeof schemas.Transport>
 
 /**
  * Signing-key material and independent package and OS-update trust.
