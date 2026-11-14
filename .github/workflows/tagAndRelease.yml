@@ -65,10 +65,7 @@ jobs:
 
           echo "Checking if ${PACKAGE_ID}@${VERSION} exists on ${REFERENCE_REGISTRY}..."
 
-          OUTPUT=$(start-cli --registry="${REFERENCE_REGISTRY}" registry package get "${PACKAGE_ID}" --target-version="${VERSION}" 2>&1)
-          EXIT_CODE=$?
-
-          if [ $EXIT_CODE -ne 0 ]; then
+          if ! OUTPUT=$(start-cli --registry="${REFERENCE_REGISTRY}" registry package get "${PACKAGE_ID}" --target-version="${VERSION}" 2>&1); then
             echo "::error::Failed to query production registry: ${OUTPUT}"
             exit 1
           fi

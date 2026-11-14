@@ -295,10 +295,7 @@ jobs:
           PACKAGE_ID="${{ steps.version.outputs.package_id }}"
           VERSION="${{ steps.version.outputs.version }}"
 
-          OUTPUT=$(start-cli --registry="${REGISTRY}" registry package get "${PACKAGE_ID}" --target-version="${VERSION}" 2>&1)
-          EXIT_CODE=$?
-
-          if [ $EXIT_CODE -ne 0 ]; then
+          if ! OUTPUT=$(start-cli --registry="${REGISTRY}" registry package get "${PACKAGE_ID}" --target-version="${VERSION}" 2>&1); then
             echo "::warning::Could not query registry: ${OUTPUT}"
           elif [ -n "$OUTPUT" ]; then
             echo "Version ${VERSION} already exists on ${REGISTRY}. Removing..."

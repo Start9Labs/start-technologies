@@ -6,11 +6,13 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 
-for (const [action, script, expected] of [
-  ['forgejo-release', 'main.mjs', /ENOENT/],
-  ['sync-next', 'main.mjs', /Command failed: git config user.name/],
+for (const [action, forge, expected] of [
+  ['forgejo-release', 'forgejo', /ENOENT/],
+  ['sync-next', 'forgejo', /git config user.name forgejo-actions\[bot\]/],
+  ['sync-next', 'gitea', /git config user.name gitea-actions\[bot\]/],
+  ['sync-next', 'github', /git config user.name github-actions\[bot\]/],
 ]) {
-  test(`${action} executes through a runner's symlinked action path`, t => {
+  test(`${action} executes through ${forge}'s symlinked action path`, t => {
     const dir = mkdtempSync(join(tmpdir(), 'action-entrypoint-'))
     t.after(() => rmSync(dir, { recursive: true, force: true }))
     const actionPath = join(dir, 'action')
@@ -18,12 +20,13 @@ for (const [action, script, expected] of [
       fileURLToPath(new URL(`../${action}`, import.meta.url)),
       actionPath,
     )
-    const result = spawnSync(process.execPath, [join(actionPath, script)], {
+    const result = spawnSync(process.execPath, [join(actionPath, 'main.mjs')], {
       cwd: dir,
       encoding: 'utf8',
       env: {
         ...process.env,
-        FORGEJO_ACTIONS: 'true',
+        FORGEJO_ACTIONS: String(forge === 'forgejo'),
+        GITEA_ACTIONS: String(forge === 'gitea'),
         GITHUB_SERVER_URL: 'https://forge.example',
         GITHUB_REPOSITORY: 'owner/repo',
         RELEASE_BODY_PATH: join(dir, 'missing-notes'),

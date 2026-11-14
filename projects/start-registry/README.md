@@ -69,7 +69,7 @@ Build and run from the monorepo root:
 cargo build -p start-registry --bin registrybox
 
 # run the server (defaults: listen 127.0.0.1:5959, datadir /var/lib/startos)
-./target/debug/registrybox start-registryd --listen 0.0.0.0:5959 --datadir ./registry-data
+./target/debug/registrybox start-registryd --listen 0.0.0.0:5959 --hostname localhost --datadir ./registry-data
 
 # talk to it with the CLI
 ./target/debug/registrybox start-registry --help
@@ -77,14 +77,14 @@ cargo build -p start-registry --bin registrybox
 
 Configuration is read from CLI flags and a config file (`-c <path>`; default search includes the standard StartOS config path). Key flags:
 
-| Flag                    | Purpose                                                 |
-| ----------------------- | ------------------------------------------------------- |
-| `-l, --listen <addr>`   | listen address (default `127.0.0.1:5959`)               |
-| `-H, --hostname <host>` | public hostname(s) for asset URLs and authenticated RPC |
-| `-p, --tor-proxy <url>` | SOCKS proxy for outbound (e.g. Tor) requests            |
-| `-d, --datadir <path>`  | data directory (default `/var/lib/startos`)             |
-| `-c, --config <path>`   | config file                                             |
-| `--mirror-of <url>`     | mirror another registry's index (read-only index)       |
+| Flag                    | Purpose                                                          |
+| ----------------------- | ---------------------------------------------------------------- |
+| `-l, --listen <addr>`   | listen address (default `127.0.0.1:5959`)                        |
+| `-H, --hostname <host>` | required public hostname(s) for asset URLs and authenticated RPC |
+| `-p, --tor-proxy <url>` | SOCKS proxy for outbound (e.g. Tor) requests                     |
+| `-d, --datadir <path>`  | data directory (default `/var/lib/startos`)                      |
+| `-c, --config <path>`   | config file                                                      |
+| `--mirror-of <url>`     | mirror another registry's index (read-only index)                |
 
 Clients synchronize registry metadata through `db.subscribe`: `rpcstream` opt-in uses the shared `/rpc/v2` socket, while ordinary requests retain the GUID WebSocket continuation. StartOS authenticates and encrypts this shared connection through signed ephemeral DH. Streaming requires encrypted admission and `rpcstream`, with the client's selected URL host configured on the registry. A legacy HTTP 200 response without upgrading, or HTTP 404/405/501, selects signed HTTP polling every 15 minutes; each cycle retries upgrade support. Polls retrieve full package versions/revisions, registry info and the selected OS index through the same cache/trust owners. Authorization, transport and failed encrypted admission errors never downgrade. A subscription's optional `osVersion` selects a lazily shared backward-compatible index view; omitted versions retain the canonical format. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
 
