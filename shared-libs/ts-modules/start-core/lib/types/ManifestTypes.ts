@@ -146,6 +146,9 @@ export type SDKManifest = {
    */
   readonly hardwareVirtualization?: boolean
 
+  /** Enables user grants of shared volumes; opting in grants no access automatically. */
+  readonly sharedVolumes?: T.Manifest['sharedVolumes']
+
   /**
    * @description Enable OS plugins
    */

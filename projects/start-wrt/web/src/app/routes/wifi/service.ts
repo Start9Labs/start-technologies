@@ -1,7 +1,7 @@
 import { inject, Injectable } from '@angular/core'
 import {
-  AffectedPublishedPort,
   ApiService,
+  DeviceLeavingProfile,
   WifiConfig,
   WifiPassword,
 } from 'src/app/services/api/api.service'
@@ -21,22 +21,13 @@ export class WifiService extends FormService<WifiConfig> {
   }
 
   async store(data: WifiConfig) {
-    // Real apply — confirm any published-port cleanup (the caller previews and
-    // confirms first where a reassignment can break published ports).
-    await this.api.wifiSet({ ...data, confirmPublishedPortDeletion: true })
+    await this.api.wifiSet(data)
   }
 
-  /**
-   * Dry-run: returns the published ports that would be deleted if this config
-   * were applied (i.e. devices whose WiFi profile is being vacated). Applies
-   * nothing.
-   */
-  async previewWifi(data: WifiConfig): Promise<AffectedPublishedPort[]> {
-    const result = await this.api.wifiSet({
-      ...data,
-      confirmPublishedPortDeletion: false,
-    })
-    return result.pendingPublishedPortDeletions
+  /** The Wi-Fi devices that keep settings for a profile losing its last password. */
+  async previewWifi(data: WifiConfig): Promise<DeviceLeavingProfile[]> {
+    const result = await this.api.wifiSet({ ...data, preview: true })
+    return result.leavingProfile
   }
 
   async addPassword(password: WifiPassword) {
@@ -46,7 +37,6 @@ export class WifiService extends FormService<WifiConfig> {
       await this.api.wifiSet({
         ...current,
         passwords: [...current.passwords, password],
-        confirmPublishedPortDeletion: true,
       })
       this.refresh()
     })
@@ -72,26 +62,23 @@ export class WifiService extends FormService<WifiConfig> {
     // NOT discard it, throw so the dialog can close and surface it instead of
     // spinning forever.
     this.connection.suppress()
-    return this.api
-      .wifiSet({ ...data, confirmPublishedPortDeletion: true })
-      .then(
-        () => true,
-        e => {
-          if (isNetworkError(e)) return false
-          throw e
-        },
-      )
+    return this.api.wifiSet(data).then(
+      () => true,
+      e => {
+        if (isNetworkError(e)) return false
+        throw e
+      },
+    )
   }
 
-  async deletePassword(index: number) {
+  async deletePassword(password: string) {
     await this.actions.run(async () => {
       const current = this.data()
       if (!current) return
-      const passwords = current.passwords.filter((_, i) => i !== index)
+      const passwords = current.passwords.filter(p => p.password !== password)
       await this.api.wifiSet({
         ...current,
         passwords,
-        confirmPublishedPortDeletion: true,
       })
       this.refresh()
     })

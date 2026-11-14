@@ -52,7 +52,7 @@ enum Protocol {
 
 A request is authorized if either credential is valid:
 
-- **Request signature** — an `X-Start-Auth-Sig` header carrying an Ed25519 signature, by a key enrolled through `auth.login`, over a timestamp, a nonce, the body's BLAKE3 hash, and the server identity the client addressed (`router.lan`, any non-loopback address on the router's interfaces, or the enabled DDNS hostname; a loopback address only from a loopback peer). The protocol is `start-core`'s `SignatureAuth`; the browser holds a non-extractable WebCrypto key in IndexedDB. Timestamps must fall within 30 seconds of the router's clock once ntpd reports valid time; a replayed nonce is rejected.
+- **Request signature** — an `X-Start-Auth-Sig` header carrying an Ed25519 signature, by a key enrolled through `auth.login`, over a timestamp, a nonce, the body's BLAKE3 hash, and the server identity the client addressed (`router.lan`, `router.local`, any non-loopback address on the router's interfaces, or the enabled DDNS hostname; a loopback address only from a loopback peer). The protocol is `start-core`'s `SignatureAuth`; the browser holds a non-extractable WebCrypto key in IndexedDB. Timestamps must fall within 30 seconds of the router's clock once ntpd reports valid time; a replayed nonce is rejected.
 - **Local auth token** — `Authorization: Bearer <token>`, where the token is the contents of `/run/startwrt/rpc.authcookie` (regenerated at daemon start, mode `0640`, `root:root`). `startwrt-cli` sends it only to loopback hosts.
 
 Endpoints registered with `authenticated: false` metadata answer without either. Enrolled keys persist in `/etc/startwrt/auth.db`, which sysupgrade keeps, and stay valid until revoked by `auth.logout`, `auth.session.kill`, or a password change, or until 24 hours after their `loggedIn` time, however recently they were used. The microSD wizard's Keep settings reflash does not carry them over. An expired key is rejected as unauthorized (code 34) on its next request. Before ntpd reports valid time the check judges age alone; afterwards a `loggedIn` more than 5 minutes in the future also counts as expired. The sweep that unenrolls expired keys runs hourly and waits for ntpd to report valid time.
@@ -66,7 +66,7 @@ The request must be signed by the key it enrolls. A valid local auth token rejec
 #[serde(rename_all = "camelCase")]
 struct LoginParams {
     password: String,
-    /// PEM-encoded Ed25519 public key to enroll
+    /// DER64 or PEM-encoded Ed25519 public key to enroll
     pubkey: AnyVerifyingKey,
     /// Enroll in memory only. Unsupported (InvalidRequest).
     #[serde(default)]
@@ -96,19 +96,31 @@ unsigned local-token request is rejected as unnecessary.
 struct SessionList {
     /// The key that signed this request
     current: Option<String>,
-    /// Enrolled keys by PEM: { name, loggedIn, lastActive, userAgent }.
+    sessions: Sessions,
+}
+
+struct Sessions {
+    /// Enrolled keys by DER64 SPKI: { name, loggedIn, lastActive, userAgent }.
     /// `lastActive` is persisted at most hourly.
-    sessions: BTreeMap<String, Session>,
+    pubkeys: BTreeMap<String, Session>,
+    /// Empty on StartWRT.
+    tokens: BTreeMap<String, Session>,
 }
 ```
 
 ### `auth.session.kill`
 
+StartWRT revokes enrolled keys through `pubkeys`. The shared request also accepts
+`tokens`, but StartWRT has no bearer-token sessions.
+
 ```rust
 #[derive(Deserialize)]
 struct KillParams {
-    /// PEM-encoded keys to revoke
-    ids: Vec<String>,
+    /// DER64 or PEM-encoded keys to revoke
+    #[serde(default)]
+    pubkeys: Vec<AnyVerifyingKey>,
+    #[serde(default)]
+    tokens: Vec<String>,
 }
 // Response: null
 ```
@@ -171,14 +183,15 @@ sign, so the user logs in afterwards over HTTPS.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SetInitialPasswordParams {
-    /// Minimum 12 characters (same rule as auth.set-password)
-    password: String,
+    /// Encrypted to the `setup.get-pubkey` key; minimum 12 characters
+    /// (same rule as auth.set-password)
+    password: EncryptedWire,
     /// IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
     timezone: Option<String>,
 }
 // Response: null
-// Backend: writes the root hash to /etc/shadow, revokes every enrolled key,
-// applies the timezone, disables the captive portal
+// Backend: decrypts the password, writes the root hash to /etc/shadow, revokes
+// every enrolled key, applies the timezone, disables the captive portal
 ```
 
 ---
@@ -202,7 +215,7 @@ struct SystemInfoResponse {
     language: String,
     date: String,  // ISO 8601
     theme: String,  // "dark" | "light" | "system"
-    remote_access: String,  // wire: `remoteAccess`; "default" | "never" | "always"
+    remote_access: String,  // wire: `remoteAccess`; "never" (default) | "behind-nat" | "always"
     timezone: String,  // IANA timezone name (e.g. "America/New_York")
 }
 ```
@@ -291,7 +304,7 @@ type Progress = null | boolean | { done: number; total: number | null; units: st
 struct SetPreferencesReq {
     language: Option<String>,  // "en_US" | "es_ES" | "de_DE" | "fr_FR" | "pl_PL"
     theme: Option<String>,  // "dark" | "light" | "system"
-    remote_access: Option<String>,  // wire: `remoteAccess`; "default" | "never" | "always"
+    remote_access: Option<String>,  // wire: `remoteAccess`; "never" (default) | "behind-nat" | "always"
 }
 // Response: null
 // A value outside its set is rejected with InvalidValue.
@@ -677,8 +690,7 @@ struct LanIpv4SetRequest {
 // Backend: updates UCI network.lan ipaddr (netmask /24) — and every profile's
 // addresses on a /16 block change — then clears DHCP leases, cycles only the LAN
 // interface (plus every profile interface on a block change) with ifdown/ifup,
-// reloads the firewall and dnsmasq, restarts Wi-Fi, and regenerates the HTTPS
-// certificate.
+// reloads the firewall and dnsmasq, and restarts Wi-Fi.
 // Inbound VPN peers the change would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
 // Validation: address must fall inside an RFC 1918 block at one of the
@@ -732,8 +744,7 @@ struct LanIpv6SetRequest {
 // With SLAAC enabled, `prefix` outside 48..=64, or shorter than the live
 // delegated prefix, is rejected (`InvalidRequest`), matching the UI validator.
 // Backend: updates UCI dhcp + network for the LAN and every profile, reloads
-// odhcpd to withdraw the old prefix, restarts network, and regenerates the HTTPS
-// certificate.
+// odhcpd to withdraw the old prefix, and restarts network.
 // Disabling SLAAC while any *enabled* IPv6 published-port rule exists is
 // rejected (`PublishedPortsUseIpv6`): it would strand every pp_*_v6 pinhole on
 // an address no device will hold. The UI locks the toggle for the same reason;
@@ -764,53 +775,91 @@ struct Ethernet {
     /// Map of physical port name → port config
     ports: BTreeMap<String, Port>,
 }
-// Response: Ethernet
+
+#[derive(Serialize)]
+struct UsbPortStatus {
+    /// A network device is plugged into the port
+    present: bool,
+    /// A network device in the port has link
+    active: bool,
+}
+
+#[derive(Serialize)]
+struct EthernetInfo {
+    #[serde(flatten)]
+    ethernet: Ethernet,
+    /// The USB ports among `ports`
+    usb_ports: BTreeMap<String, UsbPortStatus>,
+}
+// Response: EthernetInfo
+// Backend: a USB port is a `usb_eth<N>` veth on the LAN bridge, recorded in
+// `startwrt.usb_eth<N>` (`config usb_port`, `option path`) the first time an
+// Ethernet-type USB network device is plugged into that physical USB port. A
+// hub's ports are physical ports of their own. The daemon follows
+// `ip monitor link` and joins the device to the port's own `br-usb_eth<N>`
+// bridge, whose other member is the veth's peer. A new port takes the lowest
+// unused number.
 ```
 
 ### `ethernet.set`
 
 ```rust
-// Request: Ethernet fields are flattened in alongside the confirm flag.
+// Request: Ethernet fields are flattened in alongside the preview flag.
 #[derive(Deserialize)]
 struct EthernetSetRequest {
     #[serde(flatten)]
     ethernet: Ethernet,            // { wan_ipv6, wan_port, ports: BTreeMap<String, Port<ProfileIdOpt>> }
-    /// Authorize deleting the published ports returned by a prior unconfirmed call.
+    /// Apply nothing; report the devices leaving a profile they keep settings for.
     #[serde(default)]
-    confirm_published_port_deletion: bool,
+    preview: bool,
 }
 
-// A published port that will be deleted because its device is moving to a
-// different profile. Shared (snake_case) with wifi.set's result.
+// A device with a reservation or published port for the profile it leaves.
+// Shared (snake_case) with wifi.set's result.
 #[derive(Serialize)]
-struct AffectedPublishedPort {
-    id: String,
-    label: String,
-    device_mac: String,
-    device_name: Option<String>,
+struct DeviceLeavingProfile {
+    mac: String,
+    name: Option<String>,
+    /// The profile it leaves.
+    profile: String,
 }
 
 // Response:
 #[derive(Serialize)]
 struct EthernetSetResult {
-    /// Non-empty (and nothing applied) when a port being reassigned to a
-    /// different profile has devices with published ports and the caller hasn't
-    /// confirmed. Empty once the change is applied.
-    pending_published_port_deletions: Vec<AffectedPublishedPort>,
+    /// Filled by a preview only.
+    leaving_profile: Vec<DeviceLeavingProfile>,
 }
-// Backend: detects ports changing profile, finds their devices via bridge FDB,
-// and the published ports they'd break. Without confirmation it applies nothing
-// and returns them; with confirmation it deletes those published ports (firewall
-// rules + stale DHCP reservations) atomically with the bridge-VLAN/WAN update,
-// then reloads network + firewall.
+// Backend: detects ports changing profile and finds their devices via the
+// bridge FDB. A preview applies nothing and returns the devices that have a
+// reservation or published port for a port's old profile. A change keeps both:
+// they apply again when the device returns to that profile. Otherwise it
+// applies the bridge-VLAN/WAN update, then reloads network + firewall.
+// A recorded USB port the request omits keeps its profile; a USB port as
+// `wan_port` fails with InvalidValue.
 ```
 
 Note: `ProfileId` and `ProfileIdOpt` are shared types defined at the top of the contract.
 
+### `ethernet.remove-usb-port`
+
+```rust
+#[derive(Deserialize)]
+struct RemoveUsbPortRequest {
+    /// The port's name among `usb_ports`
+    port: String,
+}
+// Response: null
+// Backend: fails with InvalidValue while a network device is plugged into the
+// port, NotFound for an unrecorded port. Otherwise takes the port off the LAN
+// bridge and its VLAN, deletes `startwrt.usb_eth<N>` and the port's veth and
+// bridge, then reloads network + firewall.
+```
+
 ### `ethernet.edit`
 
 CLI editor flow — opens the current Ethernet config in `$EDITOR`, then calls
-`ethernet.set` with published-port deletion implicitly confirmed. Not called by
+`ethernet.set`. Not called by
 the web UI.
 
 ```rust
@@ -851,17 +900,32 @@ struct Device {
     status: DeviceStatus,
     /// "Ethernet", "Wi-Fi 2.4GHz", "Wi-Fi 5GHz", etc.
     connection: Option<String>,
+    /// The reservation DHCP applies, otherwise the live address.
     ipv4: Option<String>,
     ipv6: Option<String>,
+    /// `ipv4` is a reservation DHCP applies.
     ipv4_static: bool,
+    /// Every IPv4 reservation, at most one per profile. Empty for a VPN peer.
+    ipv4_reservations: Vec<Ipv4Reservation>,
+    /// The router's address on the device's profile, with its prefix length
+    /// (`192.168.2.1/24`). `None` for a VPN peer or an unplaced device.
+    profile_network: Option<String>,
     /// Whether this device may auto-create port forwards via PCP/UPnP
     /// (default off; toggled via `devices.set-auto-forward`). Always false for
     /// VPN peers (no MAC to authorize).
     allow_auto_port_forward: bool,
+    /// External ports or ranges (`443`, `5000-5009`) the router refused to
+    /// open for this device for lack of that permission in the last half hour.
+    /// A PCP request counts only when it arrived on the device's own LAN
+    /// segment. Empty while the permission is on, and for VPN peers.
+    auto_port_forward_requests: Vec<String>,
     /// Whether this device may publish DNS records into the router's resolver
     /// (`devices.set-dns-injection`; `vpn-server.peer-set-dns-injection` for a
     /// VPN peer).
     allow_dns_injection: bool,
+    /// Whether the router refused this device's DNS records for lack of that
+    /// permission in the last half hour.
+    dns_injection_requested: bool,
     /// Whether the router forwards this device's IPv6 router advertisements
     /// to the rest of the LAN (`devices.set-router-advertisements`). Always
     /// false for VPN peers.
@@ -874,6 +938,16 @@ struct Device {
     /// Total data used in the current nlbwmon period (GB, 1 decimal, rx+tx); for
     /// a VPN peer, its cumulative `wg show` rx+tx since the interface came up
     data_usage: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct Ipv4Reservation {
+    ipv4: String,
+    /// The profile whose subnet holds it; `None` when no profile's does.
+    profile: Option<String>,
+    /// DHCP gives it to the device on the profile it is on: the reservation in
+    /// that profile's subnet, or for a device on no known profile, its only one.
+    active: bool,
 }
 
 #[derive(Serialize)]
@@ -905,15 +979,33 @@ struct DeviceUpdateReq {
     /// trailing hyphen, at most 63 characters — since dnsmasq serves it.
     #[serde(default)]
     name: Option<String>,
+    /// On: `ipv4` becomes the reservation in the profile whose subnet holds
+    /// it, replacing the one there. Off: the reservation `ipv4` names is
+    /// deleted; with `ipv4` empty, the one in the profile the device is on.
     ipv4_static: bool,
-    /// Dotted-quad, or empty for no reservation.
+    /// Dotted-quad, or empty.
     ipv4: String,
+    /// Reservations to delete, by address.
+    #[serde(default)]
+    remove_ipv4_reservations: Vec<String>,
 }
 // Every field lands in the config dnsmasq reads, which it refuses to start on
 // if malformed, so each is validated: a bad one is rejected with
 // `InvalidValue` and nothing is written.
+// A changed reservation must be a host address, other than the router's, in
+// the subnet of the profile the device is on (from the neighbor table, the
+// bridge, and its lease); for a device on no known profile, in some profile's
+// subnet. It must not be another device's reservation, since dnsmasq does not
+// start with one address on two hosts. An unchanged reservation is accepted as
+// stored.
+// Deleting a reservation an enabled published port forwards to is refused with
+// `InvalidValue`; replacing it within its profile moves the port to the new
+// address.
 // Response: null
-// Backend: creates/updates DHCP host section, reloads dnsmasq.
+// Backend: the device's settings and first reservation live on its first DHCP
+// host section, each further reservation on its own section carrying the
+// device's name, so every section has an address while any reservation
+// remains. Reloads dnsmasq, and the firewall when a port moved.
 // No IPv6 fields: devices choose their own IPv6 addresses (SLAAC), so there is
 // no user-facing IPv6 reservation. A legacy `hostid` (written by older releases,
 // read by `published-ports.reconcile` as a fallback) is left untouched.
@@ -930,7 +1022,8 @@ struct SetAutoForwardRequest {
 // Response: null
 // Backend: stores the flag on the device's DHCP host section (`_allow_pcp`),
 // creating one if needed, and invalidates the port-control authorization cache
-// so the change applies immediately. Default is off: a device with no flag can
+// so the change applies immediately; allowing also clears the device's
+// `auto_port_forward_requests`. Default is off: a device with no flag can
 // never create forwards via PCP/UPnP. Setting `allow: false` also closes the
 // forwards the device already holds, rather than leaving them open until their
 // leases lapse (up to a week).
@@ -946,9 +1039,8 @@ struct SetDnsInjectionReq {
 }
 // Response: null
 // Backend: stores `_allow_dns_inject` on the device's DHCP host section,
-// creating one if needed, rewrites the per-profile dnsmasq instances, and
-// applies the change immediately. `allow: false` also drops the records the
-// device has published.
+// creating one if needed, and applies the change immediately. `allow: false`
+// also drops the records the device has published.
 ```
 
 ### `devices.set-router-advertisements`
@@ -1044,6 +1136,10 @@ enum PublishedPortStatus {
     Partial,
     /// Device offline, or not in the device list ("Device not found")
     Paused,
+    /// The port forwards into a profile the device is not on ("Applies when
+    /// the device is on the <profile> profile"). Its profile is that of its
+    /// IPv4 target's subnet, else of its rule's zone.
+    Inactive,
     /// No usable address ("No addresses available"), or (IPv6-only) the forward
     /// is stranded on an old delegated prefix ("IPv6 address out of date" — the
     /// device's current GUA is in a different /64; normally repaired by the
@@ -1074,6 +1170,7 @@ struct PublishedPort {
     status: PublishedPortStatus,
     status_reason: Option<String>,
     device_name: Option<String>,
+    /// The address the IPv4 forward targets, else the device's.
     device_ipv4: Option<String>,
     device_ipv6: Option<String>,
 }
@@ -1134,10 +1231,11 @@ struct PublishedPortsSetResult {
     pending_wan_port_collisions: Vec<WanPortCollision>,
 }
 // Backend: rebuilds firewall redirect+rule sections (dropping automatic forwards
-// that overlap an enabled manual port), resolves device IPs, adds a static DHCP
-// reservation for an enabled IPv4 port's device that has none, then reloads the
-// firewall (restarting it only if the reload fails) and, if a reservation was
-// added, dnsmasq
+// that overlap an enabled manual port), resolves device IPs, reserves an enabled
+// IPv4 port's target in its profile when the device has no reservation there
+// (a target another device has reserved is refused with `InvalidValue`, unless
+// the port already forwarded there), then reloads the firewall (restarting it
+// only if the reload fails) and, if a reservation was added, dnsmasq
 ```
 
 The request is applied **unless** an enabled IPv4 forward without
@@ -1157,7 +1255,7 @@ The split is informational only: the override works identically and removes
 the displaced hostname routes when the manual rule is saved.
 Detection is transport-aware (Remote Access is TCP, WireGuard is UDP — a
 UDP-only forward on 443 collides with nothing) and skipped in configs-only
-mode (the CLI editor confirms implicitly, like `ethernet.set` / `wifi.set`).
+mode (the CLI editor confirms implicitly).
 The automatic (PCP/UPnP) path refuses the same collision outright — a
 protocol client can't be asked.
 
@@ -1169,6 +1267,13 @@ Validation (errors with `MissingDeviceAddress`, rejecting the whole request):
   ULA or link-local address — unless the port already has an IPv6 rule for the
   same `id` and `device_mac`. A new IPv6 port, one newly switched to IPv6, or
   one moved to another device needs the device online with a GUA.
+
+An `ipv4` port keeps the profile of the address it forwards to: a stored port
+for the same `id` and `device_mac` targets the device's reservation in that
+profile, or its stored address when there is none, whichever profile the device
+is on. A new port, one newly switched to IPv4, or one moved to another device
+targets the device's reservation on the profile it is on, else its live
+address. The forward's zone follows its target.
 
 An `ipv6` port's rule pins the tracker-elected stable GUA the device holds
 within a currently-assigned prefix; with none (e.g. saved mid-prefix-rotation),
@@ -1206,7 +1311,7 @@ answers on itself refuse hostname routes — except 443, where Remote Access
 coexists with the demux: while routes share the port, connections naming no
 routed hostname (e.g. browsing the router by IP, which sends no SNI) are piped
 to the router's own UI, admitted from exactly the sources the Remote Access
-mode allows (any in "always"; RFC1918 in "default" behind NAT; none in
+mode allows (any in "always"; RFC1918 in "behind-nat" behind NAT; none in
 "never"). A route is granted only once its listener is actually bound
 (`NO_RESOURCES` / UPnP fault 501 otherwise), so a granted route can never
 leave the port open with nothing serving it.
@@ -1611,9 +1716,9 @@ struct PeerSetDnsInjectionArgs {
 }
 // Response: null
 // Backend: stores `_allow_dns_inject` on the peer's `wireguard_wg_<profile>`
-// section, rewrites the per-profile dnsmasq instances, and applies the change
-// immediately. A peer's signed updates are refused without it. `allow: false`
-// also drops the records the peer has published.
+// section and applies the change immediately. A peer's signed updates are
+// refused without it. `allow: false` also drops the records the peer has
+// published.
 ```
 
 ---
@@ -1662,32 +1767,30 @@ struct Wifi {
 ### `wifi.set`
 
 ```rust
-// Request: Wifi fields (camelCase) flattened in, plus a confirm flag.
+// Request: Wifi fields (camelCase) flattened in, plus a preview flag.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WifiSetRequest {
     #[serde(flatten)]
     wifi: Wifi<ProfileIdOpt>,               // wifi.get's response shape
-    /// Authorize deleting the published ports returned by a prior unconfirmed call.
+    /// Apply nothing; report the devices leaving a profile they keep settings for.
     #[serde(default)]
-    confirm_published_port_deletion: bool,  // serialized as `confirmPublishedPortDeletion`
+    preview: bool,
 }
 
 // Response:
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WifiSetResult {
-    /// Non-empty (and nothing applied) when reassigning a password to a different
-    /// profile would break published ports for devices on the vacated profile and
-    /// the caller hasn't confirmed. Empty once applied. Entries are the shared
-    /// snake_case `AffectedPublishedPort` (see ethernet.set).
-    pending_published_port_deletions: Vec<AffectedPublishedPort>,  // `pendingPublishedPortDeletions`
+    /// Filled by a preview only. Entries are the shared snake_case
+    /// `DeviceLeavingProfile` (see ethernet.set).
+    leaving_profile: Vec<DeviceLeavingProfile>,  // `leavingProfile`
 }
 // Backend: a profile losing its last WiFi password is "vacated"; its WiFi devices
 // (matched by current profile, since per-SSID mapping isn't available) move off
-// that subnet. Without confirmation it applies nothing and returns the published
-// ports that would break; with confirmation it deletes them (firewall rules +
-// stale DHCP reservations) atomically with the WiFi update, then reloads firewall.
+// that subnet. A preview applies nothing and returns those with a reservation or
+// published port for the vacated profile. A change keeps both: they apply again
+// when the device returns to that profile.
 // A `country` the regulatory database does not define is rejected with
 // `InvalidValue` before anything is written; codes are upper-case, as in the
 // database, so `us` is rejected. `null` clears it and returns the radios to the
@@ -1767,7 +1870,7 @@ blackout crontab runs it at every window boundary.
 ### `wifi.edit`
 
 CLI editor flow — opens the current WiFi config in `$EDITOR`, then calls
-`wifi.set` with published-port deletion implicitly confirmed. Not called by the
+`wifi.set`. Not called by the
 web UI.
 
 ```rust
@@ -1952,8 +2055,26 @@ struct ProfileSetRequest {
 ### `profiles.delete`
 
 ```rust
-// Request: ProfileIdOpt
-// Response: null
+// Request: ProfileIdOpt fields are flattened in alongside the preview flag.
+#[derive(Deserialize)]
+struct ProfileDeleteRequest {
+    #[serde(flatten)]
+    id: ProfileIdOpt,
+    /// Delete nothing; report what deleting the profile deletes.
+    #[serde(default)]
+    preview: bool,
+}
+
+// Response: the reservations and published ports deleted with the profile.
+#[derive(Serialize)]
+struct ProfileDeleteResult {
+    reservations: Vec<DeletedReservation>,       // { mac, name: Option<String>, ipv4 }
+    published_ports: Vec<DeletedPublishedPort>,  // { id, label, mac, name: Option<String> }
+}
+// Backend: deletes the reservations in the profile's subnet and the published
+// ports forwarding into it, IPv4 redirect and IPv6 rule, along with the
+// profile's zone, interface, DHCP server and points of entry. A device's
+// reservations in other profiles and its settings stay.
 ```
 
 ### `profiles.edit`
@@ -2084,6 +2205,24 @@ struct DiskState {
 }
 ```
 
+### `setup.get-pubkey`
+
+No auth required. Returns the public half of an ephemeral P-256 key the daemon
+generates each time it starts. `auth.set-initial-password` and
+`/api/setup/flash` take the admin password encrypted to it, since both run over
+plain HTTP before the router's CA is trusted.
+
+```rust
+// Request: {}
+// Response: public JWK, e.g. { "kty": "EC", "crv": "P-256", "x": "…", "y": "…" }
+
+/// start-core's `EncryptedWire`, as StartOS setup sends it
+struct EncryptedWire {
+    /// JWE JSON serialization: alg ECDH-ES, enc A128CBC-HS256
+    encrypted: Value,
+}
+```
+
 ---
 
 ## 14. Activity
@@ -2145,30 +2284,52 @@ struct ActivityDeleteParams {
 ### `backup.create`
 
 ```rust
-// Request: {}
+#[derive(Deserialize)]
+struct BackupCreateParams {
+    password: String,  // the current admin password; IncorrectPassword (7) otherwise
+}
 
 #[derive(Serialize)]
 struct BackupCreateRes {
-    /// Download the archive via GET /rest/rpc/{guid}
+    /// Download the backup via GET /rest/rpc/{guid}
     guid: String,
-    filename: String,  // "backup-<hostname>-<YYYY-MM-DD>.tar.gz"
+    filename: String,  // "backup-<hostname>-<YYYY-MM-DD>.swbk"
 }
-// Backend: runs `sysupgrade --create-backup -`, buffers the archive, and
-// registers a one-shot download continuation at /rest/rpc/{guid}
+// Backend: checks the password against /etc/shadow, runs
+// `sysupgrade --create-backup -`, encrypts the archive, and registers a
+// one-shot download continuation at /rest/rpc/{guid}
 ```
+
+An encrypted backup is one file:
+
+```
+"STARTWRT-BACKUP" | version (u8 = 1) | header length (u32 BE) | header JSON
+| nonce (12 bytes) | AES-256-GCM ciphertext of the .tar.gz | tag (16 bytes)
+```
+
+The header JSON holds StartOS's `unencrypted-metadata.json` fields:
+`passwordHash`, an Argon2id hash of the admin password, and `wrappedKey`, a
+random 32-byte key wrapped under that password by start-core's
+`wrap_backup_key`. That key encrypts the archive, authenticating every byte
+before the nonce.
 
 ### `backup.restore`
 
 ```rust
-// Request: {}
+#[derive(Deserialize)]
+struct BackupRestoreParams {
+    password: Option<String>,  // the admin password when the backup was created
+}
 
 #[derive(Serialize)]
 struct BackupRestoreRes {
-    /// POST the .tar.gz to /rest/rpc/{guid} (64 MiB body limit)
+    /// POST the backup to /rest/rpc/{guid} (64 MiB body limit)
     upload: String,
 }
-// Backend: the upload continuation validates the archive (`tar -tzf`), applies
-// it with `sysupgrade --restore-backup`, keeps the router's own system log
+// Backend: the upload continuation decrypts an encrypted backup, failing with
+// IncorrectPassword before anything changes, and takes a plain .tar.gz from an
+// earlier release as is. It validates the archive (`tar -tzf`), applies it
+// with `sysupgrade --restore-backup`, keeps the router's own system log
 // preceded by any older history the backup carried, then reboots after a
 // short delay
 ```
@@ -2231,6 +2392,59 @@ struct InjectedDnsRecord {
 // devices re-assert.
 ```
 
+## 18. Configuration Check
+
+### `config.check`
+
+Finds configuration, typically written by hand or in LuCI, that a page of the UI cannot
+represent. The UI shows a page with findings in place of its form, with a link to LuCI. A
+finding marked `notice` is shown above the form instead.
+
+```rust
+// Request: {}
+
+#[derive(Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ConfigView {
+    // Settings, which holds the recovery tools, is never one.
+    Wan, PublishedPorts, Outbound, Lan, Devices, Profiles, Ethernet, Wifi, Inbound,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ConfigProblem {
+    Syntax,       // the file does not parse
+    Value,        // a value that does not parse as the option's type
+    Missing,      // a required option is absent
+    Unsupported,  // a value that parses but that the page cannot show or keep
+    Unnamed,      // a section without a name where the page needs one
+    Absent,       // a section the page requires is absent
+    Extra,        // a section beyond the one the page shows in its place
+    Unmanaged,    // a value beyond the one the page manages, left as written
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigFinding {
+    views: Vec<ConfigView>,
+    config: String,                // file name under /etc/config
+    line: Option<u32>,             // one-based
+    section: Option<String>,
+    section_type: Option<String>,
+    option: Option<String>,
+    found: Option<String>,
+    problem: ConfigProblem,
+    notice: bool,                  // shown beside the page's settings rather than in their place
+    detail: Option<String>,        // the parser's explanation, in English
+}
+
+struct ConfigCheck {
+    findings: Vec<ConfigFinding>,
+}
+// Response: ConfigCheck
+// Backend: ctrl/src/config_check.rs; reads ddns, dhcp, firewall, network, startwrt, wireless.
+```
+
 ---
 
 ## HTTP Routes
@@ -2246,7 +2460,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `/api/setup/flash`                                 | POST      | None (setup wizard)                        | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time             |
 | `/static/local-root-ca.crt`                        | GET       | None                                       | Root CA certificate download                                                                  |
 | `/static/local-root-ca.mobileconfig`               | GET       | None                                       | Root CA as an Apple configuration profile                                                     |
-| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any       | LuCI's own                                 | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`        |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus`, `/ubus/*` | any       | LuCI's own; HTTPS only                     | Reverse proxy to uhttpd (LuCI) on localhost:8080; `/luci` redirects to `/cgi-bin/luci`        |
 | everything else                                    | any       | None                                       | Embedded web UI                                                                               |
 
 ---
@@ -2275,6 +2489,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `system.logs`                       | System          |                             |
 | `system.logs-follow`                | System          |                             |
 | `setup.status`                      | Setup           | No auth                     |
+| `setup.get-pubkey`                  | Setup           | No auth                     |
 | `wan.ipv4-get`                      | WAN             |                             |
 | `wan.ipv4-set`                      | WAN             |                             |
 | `wan.ipv6-get`                      | WAN             |                             |
@@ -2291,6 +2506,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `lan.ipv6-set`                      | LAN             |                             |
 | `ethernet.get`                      | Ethernet        |                             |
 | `ethernet.set`                      | Ethernet        |                             |
+| `ethernet.remove-usb-port`          | Ethernet        |                             |
 | `ethernet.edit`                     | Ethernet        | CLI editor                  |
 | `devices.list`                      | Devices         |                             |
 | `devices.update`                    | Devices         |                             |
@@ -2343,8 +2559,9 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `backup.restore`                    | Backup          |                             |
 | `diagnostics.create`                | Diagnostics     |                             |
 | `dns.injected-list`                 | DNS Injection   |                             |
+| `config.check`                      | Config Check    |                             |
 
-**Totals:** 84 RPC methods across 17 categories, plus the HTTP/WebSocket routes
+**Totals:** 85 RPC methods across 18 categories, plus the HTTP/WebSocket routes
 table above and the deprecated generic endpoints below.
 
 ---

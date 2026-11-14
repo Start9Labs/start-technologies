@@ -44,6 +44,14 @@ Asigna un nombre personalizado para identificar fácilmente este dispositivo. Si
 
 Reserva una dirección IP para asignar una dirección IPv4 fija que no cambiará entre reinicios. Útil para servidores, impresoras, dispositivos NAS o cualquier cosa a la que necesites acceder mediante una dirección IP constante. Las direcciones IPv6 no se pueden reservar: cada dispositivo elige su propia dirección IPv6, por lo que el router no interviene.
 
+### Permisos
+
+**Permitir el reenvío automático de puertos**: Permite a este dispositivo abrir y renovar sus propios reenvíos de puertos mediante UPnP/PCP (usado por servidores StartOS, consolas de juegos y similares). Desactivado por defecto; los reenvíos activos aparecen en la página de Puertos publicados.
+
+**Permitir publicación de registros DNS**: Permite a este dispositivo publicar nombres DNS para sí mismo en el router, de modo que todos los dispositivos de su red puedan resolverlos (lo usan los servidores StartOS para dominios privados). Desactivado por defecto; los nombres publicados aparecen debajo de la configuración.
+
+**Permitir anuncios de router IPv6**: Permite que este dispositivo anuncie rutas IPv6 a tus otros dispositivos (necesario para routers de borde Thread como un Apple TV, HomePod o Home Assistant). Desactivado de forma predeterminada.
+
 ### Olvidar
 
 Elimina un dispositivo sin conexión de tu lista de dispositivos. Se perderá cualquier nombre personalizado o ajuste de IP reservada. Si el dispositivo vuelve a conectarse, aparecerá como un dispositivo nuevo.`,
@@ -51,7 +59,7 @@ Elimina un dispositivo sin conexión de tu lista de dispositivos. Se perderá cu
 
 ### Puerto
 
-El identificador del puerto físico Ethernet (p. ej., eth0, eth1).
+El puerto físico: un puerto Ethernet (p. ej., eth0, eth1) o un puerto USB con un adaptador Ethernet USB (p. ej., usb_eth0). Un puerto USB aparece la primera vez que se conecta a él un dispositivo de red y conserva su perfil aunque no haya nada conectado. Cada puerto de un hub USB es un puerto USB propio. Un puerto USB sin adaptador conectado se puede quitar.
 
 ### Perfil de seguridad
 
@@ -59,7 +67,7 @@ El perfil de seguridad por defecto asignado a los dispositivos conectados a trav
 
 ### WAN
 
-El puerto WAN (Wide Area Network) se conecta al módem de tu ISP o a la red ascendente. Solo un puerto Ethernet puede designarse como WAN a la vez.
+El puerto WAN (Wide Area Network) se conecta al módem de tu ISP o a la red ascendente. Solo un puerto Ethernet puede designarse como WAN a la vez. El puerto WAN debe ser un puerto Ethernet.
 
 ### Cambiar puerto WAN
 
@@ -180,14 +188,14 @@ Las VPN salientes enrutan tu tráfico de internet a través de túneles cifrados
 
 ### Encadenamiento de VPN
 
-Enruta una VPN a través de otra para mayor privacidad. Tu tráfico sale a través de varios servidores, lo que dificulta rastrearlo hasta ti. Ten en cuenta que el encadenamiento aumenta la latencia.
+Enruta una VPN a través de otra para mayor privacidad. Tu tráfico pasa por varios servidores, lo que dificulta rastrearlo hasta ti. Ten en cuenta que el encadenamiento aumenta la latencia.
 
 ### Primeros pasos
 
 Sube un archivo de configuración de WireGuard de tu proveedor de VPN (Mullvad, ProtonVPN, IVPN, etc.) para crear un nuevo cliente VPN.`,
   '/outbound/vpn': `## VPN salientes
 
-<details><summary>Etiqueta</summary> Un nombre amigable para identificar esta conexión VPN. Usa algo descriptivo como «Mullvad Suecia» o «VPN del trabajo». </details> <details><summary>Se conecta a</summary> Hacia dónde debe enrutarse el tráfico de esta VPN:<ul><li><b>Internet:</b> El tráfico sale directamente a internet a través de esta VPN.</li><li><b>Otra VPN:</b> Encadena primero a través de otra VPN para mayor privacidad. Tu tráfico se cifrará varias veces y saldrá a través de varios servidores.</li></ul><b>Nota:</b> Encadenar VPN aumenta la latencia y puede reducir las velocidades. </details> <details><summary>Servidores DNS</summary> Resolutores a los que acceden a través del túnel los perfiles enrutados por esta VPN sin servidores DNS propios. Déjelo en blanco para usar los servidores DNS personalizados del sistema a través del túnel o, si el sistema usa el DNS de su proveedor de Internet, los servidores de este fuera del túnel. </details> <details><summary>Ruta de conexión</summary> Muestra la ruta completa que sigue tu tráfico desde esta VPN hasta internet. Por ejemplo: Mullvad → Proton → Internet significa que el tráfico es cifrado por Mullvad, enviado a través de Proton y luego sale a internet.</details>`,
+<details><summary>Etiqueta</summary> Un nombre amigable para identificar esta conexión VPN. Usa algo descriptivo como «Mullvad Suecia» o «VPN del trabajo». </details> <details><summary>Se conecta a través de</summary> Cómo llega esta VPN a su propio servidor VPN:<ul><li><b>Internet:</b> Directamente por internet.</li><li><b>Otra VPN:</b> A través del túnel de la otra VPN, para mayor privacidad. Tu tráfico se cifra varias veces y pasa por varios servidores; luego sale a internet desde el servidor de esta VPN.</li></ul><b>Nota:</b> Encadenar VPN aumenta la latencia y puede reducir las velocidades. </details> <details><summary>Servidores DNS</summary> Resolutores a los que acceden a través del túnel los perfiles enrutados por esta VPN sin servidores DNS propios. Déjelo en blanco para usar los servidores DNS personalizados del sistema a través del túnel o, si el sistema usa el DNS de su proveedor de Internet, los servidores de este fuera del túnel. </details> <details><summary>Ruta de conexión</summary> Muestra los túneles cifrados por los que viaja tu tráfico hasta internet. Cada túnel empieza en el router y termina en su servidor VPN. Cuando esta VPN se conecta a través de otra, su túnel va dentro del de la otra: el servidor de esa VPN abre el túnel exterior y pasa el interior al servidor de esta VPN, desde donde tu tráfico sale a internet.</details>`,
   '/outbound/dialog': `## VPN salientes
 
 Los clientes VPN crean una conexión saliente a un servidor VPN, permitiendo a los dispositivos enviar y recibir datos como si estuvieran conectados directamente a la red privada. Enmascara tu dirección IP, sortea restricciones geográficas y protege los datos sensibles en redes Wi-Fi públicas.
@@ -200,9 +208,9 @@ Un nombre claro y descriptivo para la conexión VPN, como «Mullvad Suecia» o �
 
 Sube un archivo **.conf** de WireGuard de tu proveedor de VPN. Este archivo contiene la dirección del servidor, las claves y los ajustes de conexión necesarios para establecer el túnel. La mayoría de los proveedores (Mullvad, ProtonVPN, IVPN, etc.) ofrecen descargas de archivos de configuración de WireGuard desde su sitio web o aplicación.
 
-### Destino
+### Se conecta a través de
 
-El siguiente salto en la ruta de una conexión VPN en capas.
+Cómo llega esta VPN a su propio servidor VPN: directamente por internet o a través del túnel de otra VPN.
 
 ### Servidores DNS
 
@@ -409,11 +417,11 @@ Opciones avanzadas para usuarios expertos. LuCI proporciona acceso directo a la 
 
 ### Crear copia de seguridad
 
-Descarga una copia de seguridad de todos los ajustes del router, incluidos los perfiles de seguridad, la configuración de WiFi, los certificados SSL y las preferencias del sistema. Guarda el archivo de copia de seguridad en un lugar seguro.
+Descarga una copia de seguridad de todos los ajustes del router, incluidos los perfiles de seguridad, la configuración de WiFi, los certificados SSL y las preferencias del sistema. La copia de seguridad se cifra con tu contraseña de administrador. Guarda el archivo de copia de seguridad en un lugar seguro.
 
 ### Restaurar copia de seguridad
 
-Sube un archivo de copia de seguridad creado previamente para restaurar todos los ajustes. El router se reiniciará tras la restauración y se sobrescribirán todos los ajustes actuales.`,
+Sube un archivo de copia de seguridad creado previamente para restaurar todos los ajustes. Introduce la contraseña de administrador vigente cuando se creó la copia de seguridad. El router se reiniciará tras la restauración y se sobrescribirán todos los ajustes actuales.`,
   '/settings/general': `## Ajustes – General
 
 <details><summary>Preferencias</summary> Preferencias generales para la interfaz de usuario y el comportamiento del router.<h3>Tema</h3>Elige entre tema oscuro o claro, o mantén la configuración de tu sistema aplicada a la interfaz.<h3>Idioma</h3>Configura el idioma preferido para la interfaz de usuario del router. Este ajuste afecta al idioma mostrado en todos los menús, opciones y demás elementos de texto dentro de la interfaz web del router.<h3>Zona horaria</h3>Establece la zona horaria local del router. Afecta a los eventos programados como los apagados de WAN y las programaciones de apagado de WiFi. </details> <details><summary>Acceso remoto</summary> Habilita el acceso remoto para gestionar los ajustes y configuraciones del router desde fuera de la red local.<ul><li><b>Cuando esté detrás de NAT</b> (Network Address Translation): Permite el acceso remoto solo cuando el router forma parte de una red privada que usa NAT. NAT se usa habitualmente en redes domésticas y de pequeñas empresas donde varios dispositivos comparten una única dirección IP pública.</li><li><b>Nunca:</b> Deshabilita por completo el acceso remoto. Adecuado para entornos donde la seguridad es primordial, como en redes muy sensibles o aisladas.</li><li><b>Siempre:</b> Habilita el acceso remoto en todo momento. Ideal para entornos donde es necesaria una gestión remota continua, como en una red empresarial donde los administradores de TI necesitan mantener acceso constante al router para supervisión y actualizaciones.</li></ul></details><details><summary>Seguridad</summary> Descarga tu certificado Root CA para confiar en las conexiones HTTPS desde dispositivos adicionales. Instalar este certificado permite a los navegadores y aplicaciones verificar la identidad del router sin advertencias de seguridad. </details> <details><summary>Actualizaciones</summary> Cuando haya una actualización disponible, aparecerá un aviso en la parte superior de esta página. Puedes consultar las notas de la versión antes de actualizar. El router experimentará una breve interrupción durante el proceso de actualización.</details>`,
@@ -453,22 +461,22 @@ Las horas de inicio y fin del periodo de apagado. El WiFi se deshabilitará entr
 Selecciona qué días de la semana debe estar activo el apagado.`,
   '/wifi/passwords': `## Wi-Fi – Contraseñas
 
-Gestiona las contraseñas de las redes inalámbricas. Cada entrada representa una red Wi-Fi con su propia contraseña y perfil de seguridad que controla los permisos de acceso.
+Gestiona las contraseñas de la red inalámbrica. Todas las contraseñas conectan a la misma red Wi-Fi, cuyo nombre se define en Wi-Fi › Ajustes. La contraseña con la que se conecta un dispositivo decide su perfil de seguridad.
 
 ### Perfil de seguridad
 
 Controla a qué puede acceder el dispositivo conectado en la red. Asigna un perfil de seguridad para limitar o conceder acceso a recursos específicos.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Contraseñas
 
-Cada entrada representa una red Wi-Fi con su propia contraseña y perfil de seguridad que controla los permisos de acceso.
+Todas las contraseñas conectan a la misma red Wi-Fi, cuyo nombre se define en Wi-Fi › Ajustes. La contraseña con la que se conecta un dispositivo decide su perfil de seguridad.
 
 ### Etiqueta
 
-Un nombre descriptivo para esta red Wi-Fi, como «Casa» o «Red de invitados». Es el nombre de red (SSID) que verán los dispositivos.
+Un nombre descriptivo para esta contraseña, como «Casa» o «Red de invitados». Solo aparece en esta interfaz; los dispositivos nunca lo ven.
 
 ### Contraseña
 
-La contraseña que usarán los dispositivos para conectarse. Debe tener al menos 8 caracteres. Usa el botón de generar para crear una contraseña aleatoria fuerte.
+La contraseña que usarán los dispositivos para conectarse. Debe tener al menos 8 caracteres. Usa el botón de generar para crear una contraseña aleatoria fuerte. Cambiar una contraseña puede desconectar brevemente todos los dispositivos Wi-Fi. Los dispositivos que usan la contraseña anterior deben volver a conectarse con la nueva.
 
 ### Perfil de seguridad
 

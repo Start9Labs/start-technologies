@@ -44,6 +44,14 @@ Przypisz niestandardową nazwę, aby łatwo zidentyfikować to urządzenie. Jeś
 
 Zarezerwuj adres IP, aby przypisać stały adres IPv4, który nie zmieni się między ponownymi uruchomieniami. Przydatne dla serwerów, drukarek, urządzeń NAS lub wszystkiego, do czego potrzebujesz dostępu pod spójnym adresem IP. Adresów IPv6 nie można rezerwować: każde urządzenie samo wybiera swój adres IPv6, więc router nie ma na to wpływu.
 
+### Uprawnienia
+
+**Zezwól na automatyczne przekierowanie portów**: Pozwala temu urządzeniu otwierać i odnawiać własne przekierowania portów przez UPnP/PCP (używane przez serwery StartOS, konsole do gier itp.). Domyślnie wyłączone; aktywne przekierowania pojawiają się na stronie Opublikowane porty.
+
+**Zezwól na publikowanie rekordów DNS**: Pozwala temu urządzeniu publikować w routerze nazwy DNS wskazujące na nie samo, dzięki czemu każde urządzenie w Twojej sieci może je rozwiązywać (używane przez serwery StartOS dla domen prywatnych). Domyślnie wyłączone; opublikowane nazwy pojawiają się pod ustawieniami.
+
+**Zezwalaj na ogłoszenia routera IPv6**: Pozwala temu urządzeniu ogłaszać trasy IPv6 innym Twoim urządzeniom (wymagane przez routery brzegowe Thread, takie jak Apple TV, HomePod lub Home Assistant). Domyślnie wyłączone.
+
 ### Zapomnij
 
 Usuwa urządzenie offline z listy urządzeń. Wszelkie niestandardowe nazwy lub ustawienia zarezerwowanego IP zostaną utracone. Jeśli urządzenie połączy się ponownie, pojawi się jako nowe urządzenie.`,
@@ -51,7 +59,7 @@ Usuwa urządzenie offline z listy urządzeń. Wszelkie niestandardowe nazwy lub 
 
 ### Port
 
-Fizyczny identyfikator portu Ethernet (np. eth0, eth1).
+Fizyczny port: port Ethernet (np. eth0, eth1) lub port USB z adapterem USB–Ethernet (np. usb_eth0). Port USB pojawia się, gdy po raz pierwszy zostanie do niego podłączone urządzenie sieciowe, i zachowuje swój profil, gdy nic nie jest podłączone. Każdy port koncentratora USB jest osobnym portem USB. Port USB bez podłączonego adaptera można usunąć.
 
 ### Profil bezpieczeństwa
 
@@ -59,7 +67,7 @@ Domyślny profil bezpieczeństwa przypisany do urządzeń połączonych za pośr
 
 ### WAN
 
-Port sieci rozległej (WAN) łączy się z modemem ISP lub siecią nadrzędną. Tylko jeden port Ethernet może być w danym momencie wyznaczony jako WAN.
+Port sieci rozległej (WAN) łączy się z modemem ISP lub siecią nadrzędną. Tylko jeden port Ethernet może być w danym momencie wyznaczony jako WAN. Port WAN musi być portem Ethernet.
 
 ### Zmień port WAN
 
@@ -180,14 +188,14 @@ Wychodzące VPN kierują Twój ruch internetowy przez szyfrowane tunele do zdaln
 
 ### Łańcuchowanie VPN
 
-Kieruj jeden VPN przez drugi w celu dodatkowej prywatności. Twój ruch wychodzi przez wiele serwerów, co utrudnia wyśledzenie go z powrotem do Ciebie. Pamiętaj, że łańcuchowanie zwiększa opóźnienia.
+Kieruj jeden VPN przez drugi w celu dodatkowej prywatności. Twój ruch przechodzi przez wiele serwerów, co utrudnia wyśledzenie go z powrotem do Ciebie. Pamiętaj, że łańcuchowanie zwiększa opóźnienia.
 
 ### Rozpoczęcie pracy
 
 Prześlij plik konfiguracyjny WireGuard od swojego dostawcy VPN (Mullvad, ProtonVPN, IVPN itp.), aby utworzyć nowego klienta VPN.`,
   '/outbound/vpn': `## Wychodzące VPN
 
-<details><summary>Etykieta</summary> Przyjazna nazwa identyfikująca to połączenie VPN. Użyj czegoś opisowego, jak „Mullvad Szwecja” lub „Praca VPN”. </details> <details><summary>Łączy się z</summary> Dokąd powinien być kierowany ruch z tego VPN:<ul><li><b>Internet:</b> Ruch wychodzi bezpośrednio do internetu przez ten VPN.</li><li><b>Inny VPN:</b> Najpierw połącz łańcuchowo przez inny VPN dla dodatkowej prywatności. Twój ruch zostanie zaszyfrowany wielokrotnie i wyjdzie przez wiele serwerów.</li></ul><b>Uwaga:</b> Łańcuchowanie VPN zwiększa opóźnienia i może zmniejszyć prędkości. </details> <details><summary>Serwery DNS</summary> Serwery, z którymi przez tunel łączą się profile kierowane przez tę sieć VPN, niemające własnych serwerów DNS. Pozostaw puste, aby używać własnych systemowych serwerów DNS przez tunel — lub, gdy system używa DNS dostawcy internetu, jego serwerów poza tunelem. </details> <details><summary>Ścieżka połączenia</summary> Pokazuje pełną trasę, jaką pokonuje Twój ruch od tego VPN do internetu. Na przykład: Mullvad → Proton → Internet oznacza, że ruch jest szyfrowany przez Mullvad, wysyłany przez Proton, a następnie wychodzi do internetu.</details>`,
+<details><summary>Etykieta</summary> Przyjazna nazwa identyfikująca to połączenie VPN. Użyj czegoś opisowego, jak „Mullvad Szwecja” lub „Praca VPN”. </details> <details><summary>Łączy się przez</summary> Jak ten VPN dociera do własnego serwera VPN:<ul><li><b>Internet:</b> Bezpośrednio przez internet.</li><li><b>Inny VPN:</b> Przez tunel innego VPN, dla dodatkowej prywatności. Twój ruch jest szyfrowany wielokrotnie i przechodzi przez wiele serwerów, a następnie wychodzi do internetu z serwera tego VPN.</li></ul><b>Uwaga:</b> Łańcuchowanie VPN zwiększa opóźnienia i może zmniejszyć prędkości. </details> <details><summary>Serwery DNS</summary> Serwery, z którymi przez tunel łączą się profile kierowane przez tę sieć VPN, niemające własnych serwerów DNS. Pozostaw puste, aby używać własnych systemowych serwerów DNS przez tunel — lub, gdy system używa DNS dostawcy internetu, jego serwerów poza tunelem. </details> <details><summary>Ścieżka połączenia</summary> Pokazuje szyfrowane tunele, przez które przechodzi Twój ruch w drodze do internetu. Każdy tunel zaczyna się na routerze i kończy na swoim serwerze VPN. Gdy ten VPN łączy się przez inny, jego tunel biegnie wewnątrz tamtego: serwer tamtego VPN otwiera tunel zewnętrzny i przekazuje wewnętrzny do serwera tego VPN, skąd Twój ruch wychodzi do internetu.</details>`,
   '/outbound/dialog': `## Wychodzące VPN
 
 Klienci VPN tworzą wychodzące połączenie z serwerem VPN, umożliwiając urządzeniom wysyłanie i odbieranie danych tak, jakby były bezpośrednio połączone z siecią prywatną. Maskuje Twój adres IP, omija ograniczenia geograficzne i chroni poufne dane w publicznych sieciach Wi-Fi.
@@ -200,9 +208,9 @@ Jasna i opisowa nazwa połączenia VPN, taka jak „Mullvad Szwecja” lub „Pr
 
 Prześlij plik **.conf** WireGuard od swojego dostawcy VPN. Plik ten zawiera adres serwera, klucze i ustawienia połączenia potrzebne do nawiązania tunelu. Większość dostawców (Mullvad, ProtonVPN, IVPN itp.) udostępnia pliki konfiguracyjne WireGuard do pobrania ze swojej witryny lub aplikacji.
 
-### Cel
+### Łączy się przez
 
-Następny przeskok na ścieżce warstwowego połączenia VPN.
+Jak ten VPN dociera do własnego serwera VPN: bezpośrednio przez internet albo przez tunel innego VPN.
 
 ### Serwery DNS
 
@@ -409,11 +417,11 @@ Zaawansowane opcje dla zaawansowanych użytkowników. LuCI zapewnia bezpośredni
 
 ### Utwórz kopię zapasową
 
-Pobierz kopię zapasową wszystkich ustawień routera, w tym profili bezpieczeństwa, konfiguracji WiFi, certyfikatów SSL i preferencji systemowych. Przechowuj plik kopii zapasowej w bezpiecznym miejscu.
+Pobierz kopię zapasową wszystkich ustawień routera, w tym profili bezpieczeństwa, konfiguracji WiFi, certyfikatów SSL i preferencji systemowych. Kopia zapasowa jest szyfrowana hasłem administratora. Przechowuj plik kopii zapasowej w bezpiecznym miejscu.
 
 ### Przywróć kopię zapasową
 
-Prześlij wcześniej utworzony plik kopii zapasowej, aby przywrócić wszystkie ustawienia. Router uruchomi się ponownie po przywróceniu, a wszystkie bieżące ustawienia zostaną nadpisane.`,
+Prześlij wcześniej utworzony plik kopii zapasowej, aby przywrócić wszystkie ustawienia. Wprowadź hasło administratora obowiązujące w chwili utworzenia kopii zapasowej. Router uruchomi się ponownie po przywróceniu, a wszystkie bieżące ustawienia zostaną nadpisane.`,
   '/settings/general': `## Ustawienia – Ogólne
 
 <details><summary>Preferencje</summary> Ogólne preferencje dotyczące interfejsu użytkownika i zachowania routera.<h3>Motyw</h3>Wybierz motyw ciemny lub jasny albo zachowaj ustawienia systemowe zastosowane do interfejsu.<h3>Język</h3>Skonfiguruj preferowany język interfejsu użytkownika routera. To ustawienie wpływa na język wyświetlany dla wszystkich menu, opcji i innych elementów tekstowych w interfejsie internetowym routera.<h3>Strefa czasowa</h3>Ustaw lokalną strefę czasową dla routera. Wpływa to na zaplanowane zdarzenia, takie jak okna wyłączenia WAN i harmonogramy wyłączeń WiFi. </details> <details><summary>Dostęp zdalny</summary> Umożliwia zdalny dostęp do zarządzania ustawieniami i konfiguracjami routera spoza sieci lokalnej.<ul><li><b>Gdy za NAT</b> (translacja adresów sieciowych): Zezwala na zdalny dostęp tylko wtedy, gdy router jest częścią sieci prywatnej korzystającej z NAT. NAT jest powszechnie używany w sieciach domowych i małych firm, gdzie wiele urządzeń współdzieli jeden publiczny adres IP.</li><li><b>Nigdy:</b> Całkowicie wyłącza zdalny dostęp. Odpowiednie dla środowisk, w których bezpieczeństwo jest najważniejsze, takich jak wysoce wrażliwe lub izolowane sieci.</li><li><b>Zawsze:</b> Włącza zdalny dostęp przez cały czas. Idealne dla środowisk, w których konieczne jest ciągłe zdalne zarządzanie, takich jak sieć firmowa, gdzie administratorzy IT muszą utrzymywać stały dostęp do routera w celu monitorowania i aktualizacji.</li></ul></details><details><summary>Bezpieczeństwo</summary> Pobierz certyfikat Root CA, aby zaufać połączeniom HTTPS z dodatkowych urządzeń. Zainstalowanie tego certyfikatu pozwala przeglądarkom i aplikacjom zweryfikować tożsamość routera bez ostrzeżeń bezpieczeństwa. </details> <details><summary>Aktualizacje</summary> Gdy dostępna jest aktualizacja, na górze tej strony pojawi się baner. Możesz wyświetlić informacje o wydaniu przed aktualizacją. Router będzie miał krótki przestój podczas procesu aktualizacji.</details>`,
@@ -453,22 +461,22 @@ Czas rozpoczęcia i zakończenia okresu wyłączenia. WiFi będzie wyłączone m
 Wybierz, w które dni tygodnia okno wyłączenia ma być aktywne.`,
   '/wifi/passwords': `## Wi-Fi – Hasła
 
-Zarządzaj hasłami sieci bezprzewodowych. Każdy wpis reprezentuje sieć Wi-Fi z własnym hasłem i profilem bezpieczeństwa kontrolującym uprawnienia dostępu.
+Zarządzaj hasłami sieci bezprzewodowej. Każde hasło łączy z tą samą siecią Wi-Fi, której nazwę ustawia się w Wi-Fi › Ustawienia. Hasło, którym łączy się urządzenie, decyduje o jego profilu bezpieczeństwa.
 
 ### Profil bezpieczeństwa
 
 Kontroluje, do czego podłączone urządzenie może mieć dostęp w sieci. Przypisz profil bezpieczeństwa, aby ograniczyć lub przyznać dostęp do określonych zasobów.`,
   '/wifi/passwords/dialog': `## Wi-Fi – Hasła
 
-Każdy wpis reprezentuje sieć Wi-Fi z własnym hasłem i profilem bezpieczeństwa kontrolującym uprawnienia dostępu.
+Każde hasło łączy z tą samą siecią Wi-Fi, której nazwę ustawia się w Wi-Fi › Ustawienia. Hasło, którym łączy się urządzenie, decyduje o jego profilu bezpieczeństwa.
 
 ### Etykieta
 
-Opisowa nazwa tej sieci Wi-Fi, taka jak „Dom” lub „Sieć dla gości”. Jest to nazwa sieci (SSID), którą zobaczą urządzenia.
+Opisowa nazwa tego hasła, taka jak „Dom” lub „Sieć dla gości”. Pojawia się tylko w tym interfejsie; urządzenia nigdy jej nie widzą.
 
 ### Hasło
 
-Hasło, którego urządzenia będą używać do łączenia się. Musi mieć co najmniej 8 znaków. Użyj przycisku generowania, aby utworzyć silne losowe hasło.
+Hasło, którego urządzenia będą używać do łączenia się. Musi mieć co najmniej 8 znaków. Użyj przycisku generowania, aby utworzyć silne losowe hasło. Zmiana hasła może na krótko rozłączyć wszystkie urządzenia Wi-Fi. Urządzenia używające starego hasła muszą połączyć się ponownie przy użyciu nowego.
 
 ### Profil bezpieczeństwa
 

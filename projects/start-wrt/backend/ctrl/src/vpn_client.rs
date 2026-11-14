@@ -1308,7 +1308,7 @@ fn reset_profiles_using_vpn(
         .filter_map(|s| {
             let name = s.name()?.to_string();
             let ni = s.get::<uciedit::openwrt::NetworkInterface>().ok()?;
-            let ip = ni.ipaddr?;
+            let ip = ni.ipv4()?;
             Some((name, ip))
         })
         .collect();
@@ -4108,28 +4108,19 @@ config dnsmasq 'dns_lan'
             crate::profiles::rewrite_dns_forwarding(&mut cfgs, &profile).unwrap();
         }
 
-        // dns_lan section should be removed
-        assert!(
-            !cfgs["dhcp"]
-                .sections
-                .iter()
-                .any(|s| s.name().as_deref() == Some("dns_lan")),
-            "dns_lan should be removed after delete"
+        let dns_lan = cfgs["dhcp"]
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some("dns_lan"))
+            .expect("the profile keeps its own instance")
+            .get::<uciedit::openwrt::ProfileDnsmasq>()
+            .unwrap();
+        assert_eq!(
+            dns_lan.server,
+            vec!["/use-application-dns.net/".to_string()],
+            "the deleted VPN's resolvers should be dropped"
         );
-
-        // notinterface 'lan' should be removed from main dnsmasq
-        let still_has_notinterface_lan = cfgs["dhcp"].sections.iter().any(|s| {
-            s.ty() == "dnsmasq"
-                && !s.name().map(|n| n.starts_with("dns_")).unwrap_or(false)
-                && s.lines.iter().any(|l| {
-                    matches!(l, Line::List { list, item, .. }
-                        if list.as_str() == "notinterface" && item.as_str() == "lan")
-                })
-        });
-        assert!(
-            !still_has_notinterface_lan,
-            "main dnsmasq should not have notinterface 'lan' after cleanup"
-        );
+        assert_eq!(dns_lan.noresolv, None);
     }
 
     // === VPN chain route tests ===

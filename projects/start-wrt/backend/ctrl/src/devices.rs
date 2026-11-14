@@ -1,16 +1,18 @@
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use rpc_toolkit::{from_fn_async, from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
-use uciedit::openwrt::DhcpHost;
+use uciedit::openwrt::{DhcpHost, FirewallRedirect};
 use uciedit::{dump_all, parse_all, Arena, Configs, Line, TypedSection};
 
 use crate::error::ErrorKind;
 use crate::invoke::Invoke;
 use crate::prelude::*;
 use crate::profiles::Lookup;
+use crate::reservations::{self, profile_networks, ProfileNetwork};
 use crate::utils::{DeserializeStdin, HandlerExtSerde};
 use crate::wg::{self, WgPeerStats};
 use crate::{CliContext, CtrlContext, Error, ServerContext};
@@ -68,16 +70,28 @@ pub struct Device {
     pub hostname: Option<String>,
     pub status: DeviceStatus,
     pub connection: Option<String>,
+    /// The reservation DHCP applies, otherwise the live address.
     pub ipv4: Option<String>,
     pub ipv6: Option<String>,
+    /// `ipv4` is a reservation DHCP applies.
     pub ipv4_static: bool,
+    /// Every IPv4 reservation, at most one per profile.
+    pub ipv4_reservations: Vec<Ipv4Reservation>,
+    /// The router's address on the device's profile, with its prefix length.
+    pub profile_network: Option<String>,
     /// Whether this device may auto-create port forwards via PCP/UPnP
     /// (default off; set via `devices set-auto-forward`).
     pub allow_auto_port_forward: bool,
+    /// External ports or ranges (`443`, `5000-5009`) the router refused to
+    /// open for this device for lack of that permission in the last half hour.
+    pub auto_port_forward_requests: Vec<String>,
     /// Whether this device may publish DNS records into the router's resolver
     /// (`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a
     /// VPN peer).
     pub allow_dns_injection: bool,
+    /// Whether the router refused this device's DNS records for lack of that
+    /// permission in the last half hour.
+    pub dns_injection_requested: bool,
     /// Whether the router forwards this device's IPv6 router advertisements
     /// to the rest of the LAN (`devices set-router-advertisements`). Always
     /// false for a VPN peer.
@@ -87,6 +101,16 @@ pub struct Device {
     pub data_usage: Option<f64>,
 }
 rpc_toolkit::reflect_ts!(Device);
+
+#[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
+pub struct Ipv4Reservation {
+    pub ipv4: String,
+    /// The profile whose subnet holds it; `None` when no profile's does.
+    pub profile: Option<String>,
+    /// DHCP gives it to the device on the profile it is on.
+    pub active: bool,
+}
+rpc_toolkit::reflect_ts!(Ipv4Reservation);
 
 #[derive(Debug, Serialize, Deserialize, Clone, visit_rs::VisitFields)]
 pub struct SpeedData {
@@ -102,8 +126,14 @@ pub struct DeviceUpdateReq {
     /// it must pass [`validate_device_name`].
     #[serde(default)]
     pub name: Option<String>,
+    /// On: `ipv4` becomes the reservation in the profile whose subnet holds it.
+    /// Off: the reservation `ipv4` names is deleted; with `ipv4` empty, the one
+    /// in the profile the device is on.
     pub ipv4_static: bool,
     pub ipv4: String,
+    /// Reservations to delete, by address.
+    #[serde(default)]
+    pub remove_ipv4_reservations: Vec<String>,
 }
 rpc_toolkit::reflect_ts!(DeviceUpdateReq);
 
@@ -201,13 +231,17 @@ pub(crate) struct ArpEntry {
     pub(crate) state: String,
 }
 
-struct DhcpLease {
-    mac: String,
-    ip: String,
-    hostname: String,
+pub(crate) struct DhcpLease {
+    pub(crate) mac: String,
+    pub(crate) ip: String,
+    /// `*` when the device sent none.
+    pub(crate) hostname: String,
     /// Unix expiry from the lease file; dnsmasq writes `0` for a lease that
     /// never expires.
-    expires: u64,
+    pub(crate) expires: u64,
+    /// dnsmasq instance whose lease file holds it; unset when no running
+    /// instance owns that file.
+    pub(crate) instance: Option<String>,
 }
 
 /// Placeholder name for a device no source could name at all — not even a
@@ -229,7 +263,7 @@ fn parse_proc_ipv6_addr(hex: &str) -> Option<String> {
     Some(std::net::Ipv6Addr::from(bytes).to_string())
 }
 
-/// Parse `ip neigh show` output (`IP dev IFACE lladdr MAC STATE`) into entries,
+/// Parse `ip neigh show` output (`IP dev IFACE lladdr MAC [FLAGS] STATE`) into entries,
 /// MAC uppercased, on every interface. Entries without an lladdr
 /// (FAILED/INCOMPLETE) are skipped. The single parser for the whole crate —
 /// callers apply their own interface filter.
@@ -240,7 +274,7 @@ pub(crate) fn parse_neigh_output(output: &str) -> Vec<ArpEntry> {
             if let Some((iface, rest)) = rest.split_once(" lladdr ") {
                 let mut rest_parts = rest.split_whitespace();
                 if let Some(mac) = rest_parts.next() {
-                    let state = rest_parts.next().unwrap_or("UNKNOWN");
+                    let state = rest_parts.last().unwrap_or("UNKNOWN");
                     entries.push(ArpEntry {
                         ip: ip.trim().to_string(),
                         mac: mac.to_uppercase(),
@@ -277,40 +311,90 @@ fn parse_dhcp_leases(output: &str) -> Vec<DhcpLease> {
                 ip: parts[2].to_string(),
                 hostname: parts[3].to_string(),
                 expires: parts[0].parse().unwrap_or(0),
+                instance: None,
             });
         }
     }
     leases
 }
 
-/// MAC (uppercase) → the IPv4 dnsmasq currently has leased to it, across every
-/// lease file. Expired entries are dropped; an expiry of `0` means the lease
-/// never expires and always counts as current.
+/// A lease that never expires (`0`) ranks above every other.
+pub(crate) fn lease_rank(lease: &DhcpLease) -> u64 {
+    match lease.expires {
+        0 => u64::MAX,
+        expires => expires,
+    }
+}
+
+/// MAC (uppercase) → the IPv4 of its newest unexpired lease across every lease
+/// file. A device that changed profile also holds its old profile's lease
+/// until that expires.
 ///
 /// `None` when no lease file exists at all: the caller cannot then tell "this
 /// device holds no lease" from "the leases are unreadable", and must not act on
 /// the difference. Used by port-control to bind a forward to the address
 /// assignment behind it.
 pub(crate) async fn current_lease_ips() -> Option<HashMap<String, String>> {
-    if dhcp_lease_files().await.is_empty() {
+    Some(newest_lease_ips(current_leases().await?))
+}
+
+fn newest_lease_ips(leases: Vec<DhcpLease>) -> HashMap<String, String> {
+    let mut newest: HashMap<String, DhcpLease> = HashMap::new();
+    for lease in leases {
+        if newest
+            .get(&lease.mac)
+            .is_none_or(|held| lease_rank(&lease) > lease_rank(held))
+        {
+            newest.insert(lease.mac.clone(), lease);
+        }
+    }
+    newest
+        .into_iter()
+        .map(|(mac, lease)| (mac, lease.ip))
+        .collect()
+}
+
+/// Every unexpired lease across every lease file; `None` as for
+/// [`current_lease_ips`].
+pub(crate) async fn current_leases() -> Option<Vec<DhcpLease>> {
+    let files = dhcp_lease_files().await;
+    if files.is_empty() {
         return None;
     }
+    let instances = dnsmasq_instance_option("dhcp-leasefile")
+        .into_iter()
+        .map(|(instance, file)| (std::path::PathBuf::from(file), instance))
+        .collect();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    Some(
-        parse_dhcp_leases(&read_all_dhcp_leases().await)
-            .into_iter()
-            .filter(|l| l.expires == 0 || l.expires > now)
-            .map(|l| (l.mac, l.ip))
-            .collect(),
-    )
+    Some(read_current_leases(&files, &instances, now).await)
+}
+
+async fn read_current_leases(
+    files: &[std::path::PathBuf],
+    instances: &HashMap<std::path::PathBuf, String>,
+    now: u64,
+) -> Vec<DhcpLease> {
+    let mut leases = Vec::new();
+    for file in files {
+        let Ok(content) = tokio::fs::read_to_string(file).await else {
+            continue;
+        };
+        for mut lease in parse_dhcp_leases(&content) {
+            if lease.expires == 0 || lease.expires > now {
+                lease.instance = instances.get(file).cloned();
+                leases.push(lease);
+            }
+        }
+    }
+    leases
 }
 
 /// Directory and filename prefix for dnsmasq lease files.
 ///
-/// StartWRT runs a separate dnsmasq instance per profile when the profile uses
-/// custom or VPN DNS (see `profiles.rs`), each writing its own lease file at
+/// StartWRT runs a separate dnsmasq instance per profile (see `profiles.rs`),
+/// each writing its own lease file at
 /// `/tmp/dhcp.leases.dns_<interface>`; the base `/tmp/dhcp.leases` only holds
 /// clients of the main dnsmasq instance. To see every lease we must read them
 /// all. (odhcpd's IPv6 lease file lives under `/tmp/hosts/` and is not matched.)
@@ -659,12 +743,22 @@ fn wifi_band_label(freq: Option<u64>) -> &'static str {
     }
 }
 
-/// Parse `bridge fdb show br br-lan` to map each MAC to its bridge port.
+pub struct FdbEntry {
+    pub port: String,
+    /// Unset when no entry carries a VLAN or the entries disagree.
+    pub vlan: Option<u16>,
+}
+
+/// Map each MAC the LAN bridge has learned to its bridge port and VLAN.
 /// Only dynamic (learned) entries are included — permanent/self-only entries
 /// (multicast groups, etc.) are skipped.
-pub async fn get_bridge_fdb() -> HashMap<String, String> {
-    let output = run_cmd("bridge", &["fdb", "show", "br", "br-lan"]).await;
-    let mut fdb: HashMap<String, String> = HashMap::new();
+pub async fn get_bridge_fdb() -> HashMap<String, FdbEntry> {
+    parse_bridge_fdb(&run_cmd("bridge", &["fdb", "show", "br", "br-lan"]).await)
+}
+
+fn parse_bridge_fdb(output: &str) -> HashMap<String, FdbEntry> {
+    let mut fdb: HashMap<String, FdbEntry> = HashMap::new();
+    let mut vlans: HashMap<String, std::collections::HashSet<u16>> = HashMap::new();
     for line in output.lines() {
         if line.contains("permanent") {
             continue;
@@ -677,9 +771,24 @@ pub async fn get_bridge_fdb() -> HashMap<String, String> {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() >= 4 && parts[1] == "dev" {
             let mac = parts[0].to_uppercase();
-            let port = parts[2].to_string();
-            fdb.entry(mac).or_insert(port);
+            if let Some(vlan) = parts
+                .windows(2)
+                .find(|w| w[0] == "vlan")
+                .and_then(|w| w[1].parse::<u16>().ok())
+            {
+                vlans.entry(mac.clone()).or_default().insert(vlan);
+            }
+            fdb.entry(mac).or_insert_with(|| FdbEntry {
+                port: parts[2].to_string(),
+                vlan: None,
+            });
         }
+    }
+    for (mac, entry) in fdb.iter_mut() {
+        entry.vlan = vlans
+            .get(mac)
+            .filter(|v| v.len() == 1)
+            .and_then(|v| v.iter().next().copied());
     }
     fdb
 }
@@ -867,8 +976,8 @@ async fn flush_device_from_network(mac: &str) {
 /// - `probe_targets`: IPv4 (ip, mac, interface) triples to ping-probe.
 ///   The interface is included so pings are bound to the correct LAN segment
 ///   and can't leak to WAN when subnets overlap.
-/// - `ipv6_only_macs`: MACs with only IPv6 neighbor entries (no IPv4 to probe)
-///    — these are treated as unreachable since we can't verify them
+/// - `ipv6_only_macs`: MACs with only IPv6 neighbor entries (no IPv4 to
+///   probe); the IPv6 verification pass decides whether they are present.
 ///
 /// Active WiFi clients are skipped entirely — hostapd is authoritative.
 fn non_wifi_probe_candidates(
@@ -932,8 +1041,6 @@ fn non_wifi_probe_candidates(
         }
     }
 
-    // MACs with only IPv6 neighbor entries can't be probed — treat as
-    // unreachable so lingering NDP entries don't resurrect offline devices.
     let ipv6_only = alive_non_wifi_macs.difference(&has_ipv4).cloned().collect();
 
     (targets, ipv6_only)
@@ -985,6 +1092,20 @@ async fn ping_unreachable_macs(
     (unreachable, live_ipv4s)
 }
 
+pub(crate) async fn verified_ipv4_neighbors(
+    entries: &[ArpEntry],
+) -> std::collections::HashSet<String> {
+    let (targets, _) = non_wifi_probe_candidates(entries, &HashMap::new());
+    ping_unreachable_macs(targets).await.1
+}
+
+/// Longest wait for solicited IPv6 neighbors to answer.
+const IPV6_PROBE_WAIT: Duration = Duration::from_secs(1);
+
+/// Most unknown addresses contacted per multicast ping. Bounds the processes a
+/// client can cause by spoofing echo replies.
+const MAX_ECHO_REPLIERS: usize = 64;
+
 /// GUA (`2000::/3`) or ULA (`fc00::/7`) — the two address classes [`pick_ipv6`]
 /// can return. Link-local and every other scope is filtered out downstream, so
 /// probing one would only cost a second for an address that is never displayed.
@@ -1001,89 +1122,75 @@ fn is_displayable_ipv6(ip: &str) -> bool {
 ///
 /// The kernel keeps a `STALE` entry indefinitely while it sits below the GC
 /// threshold, so "present in the neighbor table" is not evidence the device
-/// still holds the address — it may have been dropped hours ago when a prefix
-/// went away. Anything already `REACHABLE` needs no probe (the kernel verified
-/// it within the last ~30 s), and neither does any MAC that has a `REACHABLE`
-/// entry for the same address family, since it is demonstrably answering NDP.
+/// still holds the address. Each address is judged on its own entry: a device
+/// answering for one address says nothing about another it may have dropped.
 ///
 /// Unlike [`non_wifi_probe_candidates`] this does *not* skip WiFi clients:
 /// hostapd is authoritative for a station's presence, but says nothing about
 /// which IPv6 addresses it still owns.
 fn ipv6_probe_candidates(arp_entries: &[ArpEntry]) -> Vec<(String, String)> {
-    let reachable_macs: std::collections::HashSet<&str> = arp_entries
+    arp_entries
         .iter()
-        .filter(|e| e.state == "REACHABLE" && e.ip.contains(':'))
-        .map(|e| e.mac.as_str())
-        .collect();
-
-    let mut seen = std::collections::HashSet::new();
-    let mut targets = Vec::new();
-    for entry in arp_entries {
-        if !entry.ip.contains(':') || !is_displayable_ipv6(&entry.ip) {
-            continue;
-        }
-        if entry.state == "REACHABLE" || reachable_macs.contains(entry.mac.as_str()) {
-            continue;
-        }
-        if !matches!(entry.state.as_str(), "STALE" | "DELAY" | "PROBE") {
-            continue;
-        }
-        if seen.insert(entry.ip.clone()) {
-            targets.push((entry.ip.clone(), entry.interface.clone()));
-        }
-    }
-    targets
+        .filter(|e| is_displayable_ipv6(&e.ip))
+        .filter(|e| matches!(e.state.as_str(), "STALE" | "DELAY" | "PROBE"))
+        .map(|e| (e.ip.clone(), e.interface.clone()))
+        .collect()
 }
 
-/// Unicast-probe `targets`, then re-read the neighbor table and return every
-/// IPv6 address the kernel now reports as `REACHABLE`.
+/// Solicit `targets`, then return every IPv6 address the kernel reports as
+/// `REACHABLE` once they have all answered or the wait runs out.
 ///
-/// The verdict deliberately comes from the NUD state rather than the ping's
-/// exit code (the way [`ping_unreachable_macs`] judges IPv4). Sending to the
-/// address forces the kernel through neighbor discovery, and a device that
-/// still owns it answers the solicitation even when its firewall drops the
-/// echo request — which is the default on Windows for anything but a private
-/// network profile. Judging on echo replies would hide addresses devices
-/// genuinely hold. This is the same standard [`crate::ipv6_tracker`] applies.
+/// Forces each entry into `PROBE`, which solicits at once: traffic alone holds
+/// a `STALE` entry in `DELAY` for `delay_first_probe_time`, longer than this
+/// waits. The verdict comes from the NUD state, not an echo reply, because a
+/// device answers solicitations even when its firewall drops echo requests. This
+/// is the same standard [`crate::ipv6_tracker`] applies.
 ///
-/// Returns `None` when the neighbor table could not be re-read, which the
-/// caller treats as "no verification available" and fails open.
+/// Returns `None` when the neighbor table could not be read, which the caller
+/// treats as "no verification available" and fails open.
 async fn verify_ipv6_neighbors(
     targets: Vec<(String, String)>,
 ) -> Option<std::collections::HashSet<String>> {
-    use std::process::Stdio;
-
-    let mut children = Vec::new();
-    for (ip, iface) in &targets {
-        if let Ok(child) = tokio::process::Command::new("ping6")
-            .args(["-c", "1", "-W", "1", "-I", iface.as_str(), ip.as_str()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+    futures::future::join_all(targets.iter().map(|(ip, iface)| {
+        tokio::process::Command::new("ip")
+            .args([
+                "-6",
+                "neigh",
+                "change",
+                ip.as_str(),
+                "dev",
+                iface.as_str(),
+                "nud",
+                "probe",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .kill_on_drop(true)
-            .spawn()
-        {
-            children.push(child);
-        }
-    }
-    for mut child in children {
-        let _ = child.wait().await;
-    }
+            .status()
+    }))
+    .await;
 
-    let output = tokio::process::Command::new("ip")
-        .args(["-6", "neigh", "show"])
-        .output()
-        .await
-        .ok()?;
-    if !output.status.success() {
-        return None;
+    let deadline = Instant::now() + IPV6_PROBE_WAIT;
+    loop {
+        let output = tokio::process::Command::new("ip")
+            .args(["-6", "neigh", "show"])
+            .output()
+            .await
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let reachable: std::collections::HashSet<String> =
+            parse_arp_output(&String::from_utf8_lossy(&output.stdout))
+                .into_iter()
+                .filter(|e| e.state == "REACHABLE")
+                .map(|e| e.ip)
+                .collect();
+        if Instant::now() >= deadline || targets.iter().all(|(ip, _)| reachable.contains(ip)) {
+            return Some(reachable);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    Some(
-        parse_arp_output(&String::from_utf8_lossy(&output.stdout))
-            .into_iter()
-            .filter(|e| e.state == "REACHABLE")
-            .map(|e| e.ip)
-            .collect(),
-    )
 }
 
 /// The IPv6 addresses of a MAC that survive verification, in neighbor-table
@@ -1108,6 +1215,22 @@ fn live_ipv6_candidates<'a>(
         .collect()
 }
 
+/// MACs in `ipv6_only` with an IPv6 entry the kernel confirmed this poll, in
+/// the snapshot or after the probe. Without a verdict nothing is confirmed: a
+/// lingering entry must not bring an absent device back online.
+fn ipv6_confirmed_macs(
+    arp_entries: &[ArpEntry],
+    ipv6_only: &std::collections::HashSet<String>,
+    verified: Option<&std::collections::HashSet<String>>,
+) -> std::collections::HashSet<String> {
+    arp_entries
+        .iter()
+        .filter(|e| e.ip.contains(':') && ipv6_only.contains(&e.mac))
+        .filter(|e| e.state == "REACHABLE" || verified.is_some_and(|live| live.contains(&e.ip)))
+        .map(|e| e.mac.clone())
+        .collect()
+}
+
 /// Among a MAC's IPv4 neighbor entries, pick the one most likely to be the
 /// device's current address. A device that just roamed to another VLAN leaves a
 /// stale entry on its old bridge; both entries share the MAC, so the list must
@@ -1121,16 +1244,18 @@ fn live_ipv6_candidates<'a>(
 /// unconfirmed DELAY one (2): the live ping is ground truth, neighbor state is
 /// not — a roamed device's *old* entry is often DELAY while the live one is
 /// only STALE, so ranking on neighbor state alone would pick the wrong address.
-/// Ties keep kernel order (first-listed); a genuinely multi-homed device with
-/// two live IPs is served correctly by either.
+/// Ties go to an entry on `learned_on` (see [`learned_bridge`]), then keep
+/// kernel order (first-listed); a genuinely multi-homed device with two live
+/// IPs is served correctly by either.
 ///
 /// Residual window: if a just-roamed device still has a REACHABLE entry on its
 /// *old* bridge (not yet decayed), `non_wifi_probe_candidates` skips probing the
 /// new STALE entry, so the new IP is absent from `live_ipv4s` and the old
 /// REACHABLE entry wins (rank 0) until it ages to STALE — a few tens of seconds.
-fn choose_ipv4_entry<'a>(
+pub(crate) fn choose_ipv4_entry<'a>(
     arp_list: &[&'a ArpEntry],
     live_ipv4s: &std::collections::HashSet<String>,
+    learned_on: Option<&str>,
 ) -> Option<&'a ArpEntry> {
     fn rank(e: &ArpEntry, live: &std::collections::HashSet<String>) -> u8 {
         if e.state == "REACHABLE" {
@@ -1149,7 +1274,87 @@ fn choose_ipv4_entry<'a>(
         .iter()
         .filter(|e| !e.ip.contains(':'))
         .copied()
-        .min_by_key(|e| rank(e, live_ipv4s))
+        .min_by_key(|e| {
+            (
+                rank(e, live_ipv4s),
+                learned_on.is_some_and(|bridge| e.interface != bridge),
+            )
+        })
+}
+
+/// The bridge the device was last seen on: that of the VLAN the FDB learned
+/// the MAC on, or while the FDB holds it on several, that of the subnet of its
+/// newest lease.
+pub(crate) fn learned_bridge<'a>(
+    fdb: Option<&FdbEntry>,
+    newest_lease: Option<&str>,
+    networks: &'a [ProfileNetwork],
+) -> Option<&'a str> {
+    let by_vlan = fdb
+        .and_then(|e| e.vlan)
+        .and_then(|vlan| networks.iter().find(|p| p.vlan == vlan));
+    by_vlan
+        .or_else(|| reservations::profile_of(networks, newest_lease?.parse().ok()?))
+        .map(|p| p.device.as_str())
+}
+
+/// The VLAN of the profile the device is on, from the neighbor table, the
+/// bridge, and its lease, never its reservation.
+pub(crate) async fn live_device_vlan(mac: &str, networks: &[ProfileNetwork]) -> Option<u16> {
+    let (arp_output, fdb, leases) = tokio::join!(
+        run_cmd("ip", &["neigh", "show"]),
+        get_bridge_fdb(),
+        current_lease_ips(),
+    );
+    let arp: Vec<ArpEntry> = parse_arp_output(&arp_output)
+        .into_iter()
+        .filter(|e| e.mac == mac)
+        .collect();
+    let live_ipv4s = verified_ipv4_neighbors(&arp).await;
+    let arp_list: Vec<&ArpEntry> = arp.iter().collect();
+    let lease = leases.and_then(|mut l| l.remove(mac));
+    let chosen = choose_ipv4_entry(
+        &arp_list,
+        &live_ipv4s,
+        learned_bridge(fdb.get(mac), lease.as_deref(), networks),
+    );
+    let live_ipv4 = chosen.map(|e| e.ip.clone()).or(lease);
+    device_vlan(
+        chosen,
+        &arp_list,
+        fdb.get(mac),
+        live_ipv4.as_deref(),
+        networks,
+    )
+}
+
+fn device_vlan(
+    chosen_arp: Option<&ArpEntry>,
+    arp_list: &[&ArpEntry],
+    fdb: Option<&FdbEntry>,
+    ipv4: Option<&str>,
+    profile_networks: &[ProfileNetwork],
+) -> Option<u16> {
+    let bridge_vlan = |device: &str| {
+        profile_networks
+            .iter()
+            .find(|p| p.device == device)
+            .map(|p| p.vlan)
+    };
+    chosen_arp
+        .or_else(|| arp_list.first().copied())
+        .and_then(|e| bridge_vlan(&e.interface))
+        .or_else(|| {
+            let entry = fdb?;
+            entry.vlan.or_else(|| bridge_vlan("br-lan"))
+        })
+        .or_else(|| {
+            let ip = ipv4?.parse::<Ipv4Addr>().ok()?;
+            profile_networks
+                .iter()
+                .find(|p| p.address.is_some_and(|net| net.contains(&ip)))
+                .map(|p| p.vlan)
+        })
 }
 
 /// Recover a device's name via a reverse mDNS (Bonjour) query against its IPv4.
@@ -1206,81 +1411,149 @@ async fn resolve_mdns_names(targets: Vec<(String, String)>) -> HashMap<String, S
         .await
 }
 
+/// Displayable source addresses in `ping6` output, each once, in reply order.
+fn echo_reply_sources(output: &str) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    output
+        .lines()
+        .filter_map(|line| line.split_once(" bytes from ")?.1.split_once(": "))
+        .filter_map(|(addr, _)| addr.parse::<std::net::Ipv6Addr>().ok())
+        .map(|addr| addr.to_string())
+        .filter(|addr| is_displayable_ipv6(addr) && seen.insert(addr.clone()))
+        .collect()
+}
+
+/// `(address, interface)` pairs that answered a multicast ping and have no
+/// neighbor entry on that interface. `replies` pairs each ping's interface with
+/// its output.
+fn unknown_echo_repliers(
+    replies: &[(String, String)],
+    own_addrs: &std::collections::HashSet<String>,
+    known: &[ArpEntry],
+) -> Vec<(String, String)> {
+    let known: std::collections::HashSet<(&str, &str)> = known
+        .iter()
+        .map(|e| (e.ip.as_str(), e.interface.as_str()))
+        .collect();
+    replies
+        .iter()
+        .flat_map(|(iface, output)| {
+            echo_reply_sources(output)
+                .into_iter()
+                .filter(|addr| {
+                    !own_addrs.contains(addr) && !known.contains(&(addr.as_str(), iface.as_str()))
+                })
+                .take(MAX_ECHO_REPLIERS)
+                .map(|addr| (addr, iface.clone()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn spawn_ping6(args: &[&str], stdout: std::process::Stdio) -> Option<tokio::process::Child> {
+    tokio::process::Command::new("ping6")
+        .args(args)
+        .stdout(stdout)
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .ok()
+}
+
 /// Ping ff02::1 on every LAN interface to (re)populate the NDP neighbor table.
 /// SLAAC is stateless — the router never learns which addresses clients
-/// configured — so this multicast prod is how they become visible. All pings
-/// fire concurrently so wall-clock time is ~1s regardless of interface count.
+/// configured — so this multicast prod is how they become visible.
+///
+/// A client that already resolved the router's address answers without
+/// soliciting from its own, leaving the router no entry for it. Contacting each
+/// unknown address that replied creates one.
+///
 /// Shared by `list` (phase 1) and the `ipv6_tracker` periodic rescan.
 pub(crate) async fn prod_ipv6_neighbors() {
-    {
-        use std::process::Stdio;
+    use std::process::Stdio;
 
-        // When bridge VLAN filtering is active, br-lan.X interfaces exist for
-        // each profile VLAN — use those exclusively. Multicast on the bridge
-        // master (br-lan) leaks out ALL member ports including WAN, which
-        // causes upstream devices to appear as LAN clients.
-        // When no VLANs exist (single admin profile), fall back to br-lan.
-        let mut ifaces = Vec::new();
-        if let Ok(mut entries) = tokio::fs::read_dir("/sys/class/net").await {
-            while let Ok(Some(entry)) = entries.next_entry().await {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with("br-lan.") {
-                    ifaces.push(name);
-                }
+    // When bridge VLAN filtering is active, br-lan.X interfaces exist for
+    // each profile VLAN — use those exclusively. Multicast on the bridge
+    // master (br-lan) leaks out ALL member ports including WAN, which
+    // causes upstream devices to appear as LAN clients.
+    // When no VLANs exist (single admin profile), fall back to br-lan.
+    let mut ifaces = Vec::new();
+    if let Ok(mut entries) = tokio::fs::read_dir("/sys/class/net").await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("br-lan.") {
+                ifaces.push(name);
             }
         }
-        if ifaces.is_empty() {
-            ifaces.push("br-lan".to_string());
-        }
+    }
+    if ifaces.is_empty() {
+        ifaces.push("br-lan".to_string());
+    }
 
-        let mut children: Vec<tokio::process::Child> = Vec::new();
+    let link_local: Vec<_> = ifaces
+        .iter()
+        .filter_map(|iface| {
+            spawn_ping6(
+                &["-c", "1", "-W", "1", "-I", iface.as_str(), "ff02::1"],
+                Stdio::null(),
+            )
+        })
+        .collect();
 
-        // Link-local discovery on each LAN VLAN interface.
-        for iface in &ifaces {
-            if let Ok(child) = tokio::process::Command::new("ping6")
-                .args(["-c", "1", "-W", "1", "-I", iface.as_str(), "ff02::1"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .kill_on_drop(true)
-                .spawn()
-            {
-                children.push(child);
-            }
-        }
-
-        // ULA/global discovery — ping from each interface's global IPv6
-        // address so clients respond from their ULA addresses (RFC 6724).
-        if let Ok(content) = tokio::fs::read_to_string("/proc/net/if_inet6").await {
-            for line in content.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                // Format: addr_hex ifindex prefix_len scope flags ifname
-                // scope "00" = global
-                if parts.len() >= 6 && parts[3] == "00" && ifaces.iter().any(|i| i == parts[5]) {
-                    if let Some(addr) = parse_proc_ipv6_addr(parts[0]) {
-                        let dest = format!("ff02::1%{}", parts[5]);
-                        if let Ok(child) = tokio::process::Command::new("ping6")
-                            .args(["-c", "1", "-W", "1", "-I", &addr, &dest])
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null())
-                            .kill_on_drop(true)
-                            .spawn()
-                        {
-                            children.push(child);
-                        }
+    // Clients answer from the address matching each source (RFC 6724).
+    let mut own_addrs = std::collections::HashSet::new();
+    let mut global = Vec::new();
+    if let Ok(content) = tokio::fs::read_to_string("/proc/net/if_inet6").await {
+        for line in content.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            // Format: addr_hex ifindex prefix_len scope flags ifname
+            // scope "00" = global
+            if parts.len() >= 6 && parts[3] == "00" && ifaces.iter().any(|i| i == parts[5]) {
+                if let Some(addr) = parse_proc_ipv6_addr(parts[0]) {
+                    let dest = format!("ff02::1%{}", parts[5]);
+                    // A count would stop at the router's own looped-back reply.
+                    if let Some(child) =
+                        spawn_ping6(&["-w", "1", "-I", &addr, &dest], Stdio::piped())
+                    {
+                        global.push((parts[5].to_string(), child));
                     }
+                    own_addrs.insert(addr);
                 }
             }
         }
+    }
 
-        for mut child in children {
-            let _ = child.wait().await;
-        }
+    let replies: Vec<(String, String)> =
+        futures::future::join_all(global.into_iter().map(|(iface, child)| async move {
+            let output = child.wait_with_output().await.ok()?;
+            Some((iface, String::from_utf8_lossy(&output.stdout).into_owned()))
+        }))
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
+    for mut child in link_local {
+        let _ = child.wait().await;
+    }
+
+    let known = parse_arp_output(&run_cmd("ip", &["-6", "neigh", "show"]).await);
+    let contacts: Vec<_> = unknown_echo_repliers(&replies, &own_addrs, &known)
+        .iter()
+        .filter_map(|(addr, iface)| {
+            spawn_ping6(
+                &["-c", "1", "-W", "1", "-I", iface.as_str(), addr.as_str()],
+                Stdio::null(),
+            )
+        })
+        .collect();
+    for mut child in contacts {
+        let _ = child.wait().await;
     }
 }
 
 #[instrument(skip_all)]
 pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
-    // --- Phase 1: IPv6 multicast discovery (all pings concurrent, ~1s) ---
+    // --- Phase 1: IPv6 multicast discovery (~1s) ---
     prod_ipv6_neighbors().await;
 
     // --- Phase 2a: Initial data gather (parallel) ---
@@ -1295,10 +1568,12 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             let arena = Arena::new();
             let cfgs = parse_all("/etc/config", &arena, &["dhcp", "startwrt", "network"]).await?;
 
+            // A device's settings live on its first section.
             let mut hosts_by_mac: HashMap<String, DhcpHost> = HashMap::new();
             cfgs["dhcp"].each::<DhcpHost, Error>(|_, host| {
-                hosts_by_mac.insert(host.mac.to_uppercase(), host);
+                hosts_by_mac.entry(host.mac.to_uppercase()).or_insert(host);
             })?;
+            let reservations_by_mac = reservations::reservations_by_mac(&cfgs["dhcp"]);
 
             let lookup = Lookup::parse(ServerContext::default(), &cfgs)?;
             let profiles: HashMap<u16, String> = lookup
@@ -1306,6 +1581,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 .iter()
                 .map(|p| (p.vlan_tag, p.fullname.clone()))
                 .collect();
+            let profile_networks = profile_networks(&cfgs, &lookup);
 
             // VPN server info and peer configs from UCI
             let vpn_servers = get_vpn_server_info(&cfgs, &lookup);
@@ -1317,7 +1593,13 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 })
                 .collect();
 
-            Ok::<_, Error>((hosts_by_mac, profiles, vpn_peer_configs))
+            Ok::<_, Error>((
+                hosts_by_mac,
+                reservations_by_mac,
+                profiles,
+                profile_networks,
+                vpn_peer_configs,
+            ))
         },
         get_bridge_fdb(),
     );
@@ -1331,9 +1613,9 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     // For any non-WiFi device (STALE or REACHABLE), ping it to check if it's
     // actually present. This catches both aged-out entries AND recently
     // disconnected WiFi devices whose ARP is still REACHABLE but hostapd has
-    // already dropped them. MACs with only IPv6 neighbor entries (no IPv4 to
-    // probe) are treated as unreachable. Runs concurrently with nlbw,
-    // conntrack, and lease reads so it adds zero net latency.
+    // already dropped them. MACs with only IPv6 neighbor entries are offline
+    // unless the IPv6 pass confirms one of their addresses. Runs concurrently
+    // with nlbw, conntrack, and lease reads so it adds zero net latency.
     let (probe_targets, ipv6_only_macs) = non_wifi_probe_candidates(&initial_arp, &wifi_clients);
     // IPv6 addresses get their own verification pass: a STALE NDP entry can
     // outlive the address itself by hours, so the neighbor table alone is not
@@ -1346,7 +1628,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     let wg_interfaces: Vec<String> = uci_result
         .as_ref()
         .ok()
-        .map(|(_, _, vpn_peer_configs)| {
+        .map(|(_, _, _, _, vpn_peer_configs)| {
             vpn_peer_configs
                 .iter()
                 .map(|(server, _)| server.wg_interface.clone())
@@ -1373,7 +1655,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     );
 
     let mut unreachable_macs = unreachable_macs;
-    unreachable_macs.extend(ipv6_only_macs);
+    let ipv6_confirmed = ipv6_confirmed_macs(&initial_arp, &ipv6_only_macs, live_ipv6s.as_ref());
+    unreachable_macs.extend(ipv6_only_macs.difference(&ipv6_confirmed).cloned());
     let leases_output = leases_output;
 
     // Use the initial ARP snapshot — no need to re-read since we use ping
@@ -1438,7 +1721,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     }
 
     // Unpack UCI results
-    let (hosts_by_mac, profile_by_vlan, vpn_peer_configs) = uci_result?;
+    let (hosts_by_mac, reservations_by_mac, profile_by_vlan, profile_networks, vpn_peer_configs) =
+        uci_result?;
 
     // Build ARP index
     let mut arp_by_mac: HashMap<String, Vec<&ArpEntry>> = HashMap::new();
@@ -1446,10 +1730,14 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         arp_by_mac.entry(entry.mac.clone()).or_default().push(entry);
     }
 
-    // Lease index
     let mut lease_by_mac: HashMap<String, &DhcpLease> = HashMap::new();
     for lease in &dhcp_leases {
-        lease_by_mac.insert(lease.mac.clone(), lease);
+        if lease_by_mac
+            .get(&lease.mac)
+            .is_none_or(|held| lease_rank(lease) > lease_rank(held))
+        {
+            lease_by_mac.insert(lease.mac.clone(), lease);
+        }
     }
 
     // Collect all unique MACs
@@ -1531,7 +1819,14 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             // otherwise be queried and fail. Same chooser used for the displayed IP.
             let ipv4 = arp_by_mac
                 .get(mac)
-                .and_then(|l| choose_ipv4_entry(l, &live_ipv4s).map(|e| e.ip.clone()))
+                .and_then(|l| {
+                    let learned_on = learned_bridge(
+                        fdb_by_mac.get(mac),
+                        lease_by_mac.get(mac).map(|l| l.ip.as_str()),
+                        &profile_networks,
+                    );
+                    choose_ipv4_entry(l, &live_ipv4s, learned_on).map(|e| e.ip.clone())
+                })
                 .or_else(|| lease_by_mac.get(mac).map(|l| l.ip.clone()));
             if let Some(ip) = ipv4 {
                 let count = prior.map_or(0, |(c, _)| c) + 1;
@@ -1541,6 +1836,14 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         }
     }
     let mdns_by_mac = resolve_mdns_names(mdns_targets).await;
+    let asking_to_publish = crate::dns_inject::DNS_INJECT
+        .get()
+        .map(|di| di.asking_sources())
+        .unwrap_or_default();
+    let mut asking_to_forward = crate::port_control::PORT_CONTROL
+        .get()
+        .map(|pc| pc.requested_ports(Instant::now()))
+        .unwrap_or_default();
 
     let mut devices = Vec::new();
     for mac in &all_macs {
@@ -1554,7 +1857,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         // (the WiFi driver hasn't fully cleaned up yet).
         let on_wifi_port = fdb_by_mac
             .get(mac)
-            .map_or(false, |port| wifi_ports.contains(port));
+            .map_or(false, |e| wifi_ports.contains(&e.port));
         let status = if on_wifi_port && !wifi_clients.contains_key(mac) {
             DeviceStatus::Offline
         } else if unreachable_macs.contains(mac) {
@@ -1574,39 +1877,56 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             DeviceStatus::Offline
         };
 
-        // IPv4: the configured static reservation (UCI `host.ip`) is
-        // authoritative when set — it's the address the device is pinned to.
-        // Surfacing it first stops the edit form from snapping back to the live
-        // DHCP address after a reservation is saved (the client keeps its old
-        // lease until it renews, so ARP/lease still hold the previous IP for a
-        // while). Otherwise fall back to the best live ARP neighbour — the one
-        // chosen by choose_ipv4_entry, which picks the device's current address
-        // when a stale entry lingers on its old bridge after roaming VLANs —
-        // then the DHCP lease. The same chosen entry drives the profile below,
-        // so the displayed IP and profile can never disagree.
-        let chosen_arp = choose_ipv4_entry(&arp_list, &live_ipv4s);
-        let ipv4 = host
-            .and_then(|h| h.ip.clone())
-            .or_else(|| chosen_arp.map(|e| e.ip.clone()))
+        // A reservation in the profile's subnet outranks the live address the
+        // device holds until its lease renews.
+        let chosen_arp = choose_ipv4_entry(
+            &arp_list,
+            &live_ipv4s,
+            learned_bridge(
+                fdb_by_mac.get(mac),
+                lease.map(|l| l.ip.as_str()),
+                &profile_networks,
+            ),
+        );
+        let live_ipv4 = chosen_arp
+            .map(|e| e.ip.clone())
             .or_else(|| lease.map(|l| l.ip.clone()));
+        let reserved = reservations_by_mac
+            .get(mac)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         // Only addresses the device demonstrably still answers for — see
         // live_ipv6_candidates. Unlike the IPv4 field there is no reservation or
         // lease to fall back on, so an unverified address would be pure fiction.
         let ipv6 = pick_ipv6(live_ipv6_candidates(&arp_list, live_ipv6s.as_ref()).into_iter());
 
-        // Profile from VLAN tag, derived from the same chosen entry as the IPv4
-        // address. Fall back to the first entry (e.g. an IPv6-only device with no
-        // IPv4 neighbour) then VLAN 1.
-        let vlan_tag = chosen_arp
-            .or_else(|| arp_list.first().copied())
-            .and_then(|e| {
-                e.interface
-                    .split('.')
-                    .nth(1)
-                    .and_then(|s| s.parse::<u16>().ok())
+        let vlan = device_vlan(
+            chosen_arp,
+            &arp_list,
+            fdb_by_mac.get(mac),
+            live_ipv4.as_deref(),
+            &profile_networks,
+        );
+        let profile_address = vlan
+            .and_then(|vlan| profile_networks.iter().find(|p| p.vlan == vlan))
+            .and_then(|p| p.address);
+        let active_reservation = reservations::active_reservation(reserved, profile_address);
+        let security_profile = vlan
+            .or_else(|| {
+                active_reservation
+                    .and_then(|ip| reservations::profile_of(&profile_networks, ip))
+                    .map(|p| p.vlan)
             })
-            .unwrap_or(1);
-        let security_profile = profile_by_vlan.get(&vlan_tag).cloned();
+            .and_then(|vlan| profile_by_vlan.get(&vlan).cloned());
+        let ipv4_reservations = reserved
+            .iter()
+            .map(|&ip| Ipv4Reservation {
+                ipv4: ip.to_string(),
+                profile: reservations::profile_of(&profile_networks, ip).map(|p| p.name.clone()),
+                active: active_reservation == Some(ip),
+            })
+            .collect();
+        let ipv4 = active_reservation.map(|ip| ip.to_string()).or(live_ipv4);
 
         // Fully-resolved display name. UCI static host (user-assigned) wins,
         // then the live DHCP-lease hostname, then a live mDNS `.local` name,
@@ -1678,6 +1998,22 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             .get(mac)
             .map(|(rx, tx)| ((rx + tx) as f64 / 1_073_741_824.0 * 10.0).round() / 10.0);
 
+        let allow_dns_injection = host.is_some_and(|h| h._allow_dns_inject.as_deref() == Some("1"));
+        let dns_injection_requested = !allow_dns_injection
+            && arp_list
+                .iter()
+                .map(|e| e.ip.as_str())
+                .chain(lease.map(|l| l.ip.as_str()))
+                .chain(ipv4.as_deref())
+                .filter_map(|ip| ip.parse::<IpAddr>().ok())
+                .any(|ip| asking_to_publish.contains(&ip));
+        let allow_auto_port_forward = host.is_some_and(|h| h._allow_pcp.as_deref() == Some("1"));
+        let auto_port_forward_requests = if allow_auto_port_forward {
+            Vec::new()
+        } else {
+            asking_to_forward.remove(mac).unwrap_or_default()
+        };
+
         devices.push(Device {
             mac: Some(mac.clone()),
             name,
@@ -1689,9 +2025,13 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             connection,
             ipv4,
             ipv6,
-            ipv4_static: host.map(|h| h.ip.is_some()).unwrap_or(false),
-            allow_auto_port_forward: host.is_some_and(|h| h._allow_pcp.as_deref() == Some("1")),
-            allow_dns_injection: host.is_some_and(|h| h._allow_dns_inject.as_deref() == Some("1")),
+            ipv4_static: active_reservation.is_some(),
+            ipv4_reservations,
+            profile_network: profile_address.map(|net| net.to_string()),
+            allow_auto_port_forward,
+            auto_port_forward_requests,
+            allow_dns_injection,
+            dns_injection_requested,
             allow_router_advertisements: host.is_some_and(|h| h._allow_ra.as_deref() == Some("1")),
             security_profile,
             speed,
@@ -1797,9 +2137,18 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 ipv4: peer_cfg.ip.clone(),
                 ipv6: None,
                 ipv4_static: true,
+                ipv4_reservations: Vec::new(),
+                profile_network: None,
                 // No MAC to authorize, so a VPN peer can never be auto-forward capable.
                 allow_auto_port_forward: false,
+                auto_port_forward_requests: Vec::new(),
                 allow_dns_injection: peer_cfg.allow_dns_injection,
+                dns_injection_requested: !peer_cfg.allow_dns_injection
+                    && peer_cfg
+                        .ip
+                        .as_deref()
+                        .and_then(|ip| ip.parse::<IpAddr>().ok())
+                        .is_some_and(|ip| asking_to_publish.contains(&ip)),
                 allow_router_advertisements: false,
                 security_profile: Some(server.profile_fullname.clone()),
                 speed,
@@ -1811,13 +2160,11 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     Ok(devices)
 }
 
-/// Find-or-create the DHCP host section for `mac` and apply `mutate` to it,
-/// with the standard UCI conflict retries. `mutate(host, existed)` may return
-/// `false` to abort without writing (nothing to do); a created host starts
-/// from the crate's host-section defaults (`dns '1'`, `host_<mac>` section
-/// name). Returns whether a write happened. The single upsert for DHCP host
-/// entries — device updates and the auto-forward toggle both go through it so
-/// the section-name and default-field conventions can't drift apart.
+/// Find-or-create the device's settings section (its first DHCP host section)
+/// and apply `mutate` to it, with the standard UCI conflict retries.
+/// `mutate(host, existed)` may return `false` to abort without writing; a
+/// created host is named `host_<mac>`. Returns whether a write happened. The
+/// permission toggles go through it.
 pub(crate) async fn upsert_dhcp_host<F>(
     uci_root: &std::path::Path,
     mac: &str,
@@ -1849,7 +2196,6 @@ where
         if !found {
             let mut host = DhcpHost {
                 mac: mac.to_string(),
-                dns: Some("1".to_string()),
                 ..Default::default()
             };
             if !mutate(&mut host, false) {
@@ -1891,26 +2237,85 @@ pub(crate) fn validate_device_name(name: &str) -> Result<(), Error> {
     ))
 }
 
-/// `hostid` is deliberately left untouched: IPv6 addresses are chosen by the
-/// device (SLAAC), so there is no user-facing IPv6 reservation. The suffix is
-/// backend bookkeeping, pinned by published-ports for its prefix-rotation
-/// fallback.
-fn apply_update(host: &mut DhcpHost, req: &DeviceUpdateReq) {
-    match req.name.as_deref() {
-        None => {}
-        Some("") => host.name = None,
-        Some(name) => host.name = Some(name.to_string()),
+fn parse_reservation(ipv4: &str) -> Result<Ipv4Addr, Error> {
+    ipv4.parse().map_err(|_| {
+        Error::new(
+            eyre!("invalid static IPv4 address: {ipv4}"),
+            ErrorKind::InvalidValue,
+        )
+    })
+}
+
+/// Points the device's published ports at the reservation that replaced
+/// theirs in the same profile. Refuses deleting a reservation an enabled port
+/// forwards to. Returns whether a port changed.
+fn follow_replaced_reservations(
+    firewall: &mut uciedit::Config<'_>,
+    mac: &str,
+    networks: &[ProfileNetwork],
+    current: &[Ipv4Addr],
+    want: &[Ipv4Addr],
+) -> Result<bool, Error> {
+    let mut changed = false;
+    for &old in current.iter().filter(|r| !want.contains(r)) {
+        let replacement = want
+            .iter()
+            .copied()
+            .find(|w| !current.contains(w) && reservations::same_profile(networks, *w, old));
+        for section in &mut firewall.sections {
+            let Some(mut redirect) = section.get_typed::<FirewallRedirect>().ok().flatten() else {
+                continue;
+            };
+            let targets_old = redirect._pp_id.is_some()
+                && redirect
+                    ._pp_mac
+                    .as_deref()
+                    .is_some_and(|m| m.eq_ignore_ascii_case(mac))
+                && redirect
+                    .dest_ip
+                    .as_deref()
+                    .and_then(|ip| ip.parse::<Ipv4Addr>().ok())
+                    == Some(old);
+            if !targets_old {
+                continue;
+            }
+            match replacement {
+                Some(new) => {
+                    redirect.dest_ip = Some(new.to_string());
+                    section.set(&redirect)?;
+                    changed = true;
+                }
+                None if redirect.enabled.as_deref() != Some("0") => {
+                    return Err(Error::new(
+                        eyre!(
+                            "published port '{}' forwards to {old}; disable or delete it first",
+                            redirect.name
+                        ),
+                        ErrorKind::InvalidValue,
+                    ));
+                }
+                None => {}
+            }
+        }
     }
-    host.ip = if req.ipv4_static && !req.ipv4.is_empty() {
-        Some(req.ipv4.clone())
-    } else {
-        None
-    };
+    Ok(changed)
+}
+
+/// What a save did to the assigned name. An absent request leaves it alone.
+fn name_change(prior: Option<&str>, requested: Option<&str>) -> Option<String> {
+    match (prior, requested?) {
+        (Some(old), "") => Some(format!("cleared name '{old}'")),
+        (None, "") => None,
+        (Some(old), new) if old == new => None,
+        (Some(old), _) => Some(format!("renamed from '{old}'")),
+        (None, _) => Some("name assigned".into()),
+    }
 }
 
 /// Every field dnsmasq parses, checked before it reaches the config it reads:
 /// a malformed reservation is one it refuses to start on, taking the LAN's DHCP
-/// with it.
+/// with it. An unchanged reservation is not checked again, so a rename never
+/// fails on one a profile move left behind.
 #[instrument(skip_all)]
 pub async fn update<C: CtrlContext>(
     ctx: C,
@@ -1926,63 +2331,126 @@ pub async fn update<C: CtrlContext>(
     if let Some(name) = name {
         validate_device_name(name)?;
     }
-    let pinned = req.ipv4_static && !req.ipv4.is_empty();
-    if pinned && req.ipv4.parse::<std::net::Ipv4Addr>().is_err() {
-        return Err(Error::new(
-            eyre!("invalid static IPv4 address: {}", req.ipv4),
-            ErrorKind::InvalidValue,
-        ));
-    }
     let mac_upper = req.mac.to_uppercase();
-    let suffix = if pinned {
-        format!(" — static IPv4: {}", req.ipv4)
-    } else {
-        String::new()
-    };
+    let pinned = (req.ipv4_static && !req.ipv4.is_empty())
+        .then(|| parse_reservation(&req.ipv4))
+        .transpose()?;
+    let mut removals = req
+        .remove_ipv4_reservations
+        .iter()
+        .map(|ip| parse_reservation(ip))
+        .collect::<Result<Vec<_>, _>>()?;
+    if !req.ipv4_static && !req.ipv4.is_empty() {
+        removals.push(parse_reservation(&req.ipv4)?);
+    }
 
-    // The reservation's name before the write, so an update that leaves the
-    // name alone still names the device it touched.
-    let prior_name: Mutex<Option<String>> = Mutex::new(None);
-    let prior_ref = &prior_name;
-    let req_ref = &req;
-    let result = upsert_dhcp_host(&ctx.uci_root(), &req.mac, move |host, _existed| {
-        *prior_ref.lock().unwrap() = host.name.clone();
-        apply_update(host, req_ref);
-        true
-    })
-    .await;
-
-    let label = match req.name.as_deref() {
-        Some("") => None,
-        Some(name) => Some(name.to_string()),
-        None => prior_name
-            .into_inner()
-            .unwrap_or_default()
-            .filter(|name| !name.is_empty()),
-    };
-    let subject = match label {
-        Some(label) => format!("'{label}' ({mac_upper})"),
-        None => mac_upper,
-    };
-
-    match result {
-        Err(err) => {
-            let summary = format!("Failed to update device {subject}{suffix}");
-            crate::activity::log("device", "updated", false, &summary, Some(&err.to_string()));
-            Err(err)
-        }
-        Ok(_) => {
-            let summary = format!("Updated device {subject}{suffix}");
-            crate::activity::log("device", "updated", true, &summary, None);
+    let mut current_vlan = None;
+    let mut placed = false;
+    let mut retries = 4;
+    loop {
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["dhcp", "startwrt", "network", "firewall"],
+        )
+        .await?;
+        let networks = profile_networks(&cfgs, &Lookup::parse(ServerContext::default(), &cfgs)?);
+        if !placed {
             if ctx.effectful() {
-                reload_dnsmasq();
+                current_vlan = live_device_vlan(&mac_upper, &networks).await;
             }
-            // A refused UPDATE from the new address costs the client a
-            // five-minute back-off.
-            if let Some(di) = crate::dns_inject::DNS_INJECT.get() {
-                di.invalidate();
+            placed = true;
+        }
+        let current = reservations::reservations_of(&cfgs["dhcp"], &mac_upper);
+        let mut want = current.clone();
+        if !req.ipv4_static && req.ipv4.is_empty() {
+            let subnet = current_vlan
+                .and_then(|vlan| networks.iter().find(|p| p.vlan == vlan))
+                .and_then(|p| p.address);
+            let active = reservations::active_reservation(&current, subnet);
+            want.retain(|r| Some(*r) != active);
+        }
+        want.retain(|r| !removals.contains(r));
+        if let Some(ip) = pinned {
+            if !current.contains(&ip) {
+                reservations::validate_reservation(ip, &networks, current_vlan)?;
+                reservations::validate_unclaimed(&cfgs["dhcp"], &mac_upper, ip)?;
             }
-            Ok(())
+            want = reservations::with_reservation(&want, &networks, ip);
+        }
+        let retargeted = follow_replaced_reservations(
+            &mut cfgs["firewall"],
+            &mac_upper,
+            &networks,
+            &current,
+            &want,
+        )?;
+
+        let prior_name = cfgs["dhcp"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get_typed::<DhcpHost>().ok().flatten())
+            .find(|h| h.mac.eq_ignore_ascii_case(&mac_upper))
+            .and_then(|h| h.name)
+            .filter(|name| !name.is_empty());
+        reservations::write_reservations(&mut cfgs["dhcp"], &mac_upper, &want)?;
+        if let Some(name) = req.name.as_deref() {
+            reservations::write_name(&mut cfgs["dhcp"], &mac_upper, Some(name))?;
+        }
+
+        let label = match req.name.as_deref() {
+            Some(name) => Some(name.to_string()),
+            None => prior_name.clone(),
+        }
+        .filter(|name| !name.is_empty());
+        let subject = match label {
+            Some(label) => format!("'{label}' ({mac_upper})"),
+            None => mac_upper.clone(),
+        };
+        let deleted: Vec<String> = current
+            .iter()
+            .filter(|r| !want.contains(r))
+            .filter(|r| pinned.is_none_or(|ip| !reservations::same_profile(&networks, ip, **r)))
+            .map(|r| r.to_string())
+            .collect();
+        let mut suffix = String::new();
+        if let Some(ip) = pinned {
+            suffix.push_str(&format!(" — static IPv4: {ip}"));
+        }
+        if !deleted.is_empty() {
+            suffix.push_str(&format!(" — removed reservations: {}", deleted.join(", ")));
+        }
+
+        match dump_all(ctx.uci_root(), cfgs).await {
+            Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
+                retries -= 1;
+                continue;
+            }
+            Err(err) => {
+                let summary = format!("Failed to update device {subject}{suffix}");
+                crate::activity::log("device", "updated", false, &summary, Some(&err.to_string()));
+                return Err(err.into());
+            }
+            Ok(()) => {
+                let renamed = name_change(prior_name.as_deref(), req.name.as_deref())
+                    .map(|change| format!(" — {change}"))
+                    .unwrap_or_default();
+                let summary = format!("Updated device {subject}{renamed}{suffix}");
+                crate::activity::log("device", "updated", true, &summary, None);
+                if ctx.effectful() {
+                    reload_dnsmasq();
+                    if retargeted {
+                        crate::published_ports::reload_firewall();
+                    }
+                }
+                // A refused UPDATE from the new address costs the client a
+                // five-minute back-off.
+                if let Some(di) = crate::dns_inject::DNS_INJECT.get() {
+                    di.invalidate();
+                }
+                return Ok(());
+            }
         }
     }
 }
@@ -2347,6 +2815,37 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn current_leases_keep_the_serving_instance() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("dhcp.leases");
+        let lan = dir.path().join("dhcp.leases.dns_lan");
+        let retired = dir.path().join("dhcp.leases.dns_retired");
+        std::fs::write(&main, "0 aa:00:00:00:00:01 192.168.1.110 old *\n").unwrap();
+        std::fs::write(
+            &lan,
+            "200 aa:00:00:00:00:02 192.168.1.111 current *\n100 aa:00:00:00:00:03 192.168.1.112 expired *\n",
+        )
+        .unwrap();
+        std::fs::write(&retired, "200 aa:00:00:00:00:04 192.168.2.110 retired *\n").unwrap();
+        let instances = HashMap::from([
+            (main.clone(), "cfg_main".into()),
+            (lan.clone(), "dns_lan".into()),
+        ]);
+        let leases = read_current_leases(&[main, lan, retired], &instances, 100).await;
+        assert_eq!(
+            leases
+                .iter()
+                .map(|lease| (lease.hostname.as_str(), lease.instance.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("old", Some("cfg_main")),
+                ("current", Some("dns_lan")),
+                ("retired", None),
+            ]
+        );
+    }
+
     #[test]
     fn instance_options_come_from_each_running_generated_config() {
         let dir = tempfile::tempdir().unwrap();
@@ -2526,36 +3025,33 @@ mod tests {
         }
     }
 
-    #[test]
-    fn update_leaves_the_name_alone_unless_given() {
-        let mut host = DhcpHost {
-            mac: "AA:BB:CC:DD:EE:FF".into(),
-            name: Some("nas".into()),
-            ..Default::default()
-        };
-        let mut req = DeviceUpdateReq {
-            mac: host.mac.clone(),
-            name: None,
-            ipv4_static: true,
-            ipv4: "192.168.1.50".into(),
-        };
-        apply_update(&mut host, &req);
-        assert_eq!(
-            host.name.as_deref(),
-            Some("nas"),
-            "absent name is untouched"
+    #[tokio::test]
+    async fn update_leaves_the_name_alone_unless_given() {
+        let named = "config host 'host_aabbccddeeff'\n\toption mac 'AA:BB:CC:DD:EE:FF'\n\toption name 'nas'\n";
+        let (result, dhcp, _) = run_update(named, "", update_req(true, "192.168.1.50", &[])).await;
+        result.unwrap();
+        assert!(
+            dhcp.contains("option name 'nas'"),
+            "absent name is untouched: {dhcp}"
         );
-        assert_eq!(host.ip.as_deref(), Some("192.168.1.50"));
+        assert!(dhcp.contains("option ip '192.168.1.50'"), "{dhcp}");
 
-        req.name = Some(String::new());
-        apply_update(&mut host, &req);
-        assert_eq!(host.name, None, "empty name clears");
+        let cleared = DeviceUpdateReq {
+            name: Some(String::new()),
+            ..update_req(true, "192.168.1.50", &[])
+        };
+        let (result, dhcp, _) = run_update(&dhcp, "", cleared).await;
+        result.unwrap();
+        assert!(!dhcp.contains("option name"), "empty name clears: {dhcp}");
 
-        req.name = Some("media".into());
-        req.ipv4_static = false;
-        apply_update(&mut host, &req);
-        assert_eq!(host.name.as_deref(), Some("media"));
-        assert_eq!(host.ip, None);
+        let renamed = DeviceUpdateReq {
+            name: Some("media".into()),
+            ..update_req(false, "192.168.1.50", &[])
+        };
+        let (result, dhcp, _) = run_update(&dhcp, "", renamed).await;
+        result.unwrap();
+        assert!(dhcp.contains("option name 'media'"), "{dhcp}");
+        assert!(!dhcp.contains("option ip"), "{dhcp}");
     }
 
     #[test]
@@ -2728,42 +3224,150 @@ config host 'host_cccccccccccc'
     #[test]
     fn ipv6_probe_candidates_targets_only_unconfirmed_displayable_addresses() {
         let entries = vec![
-            // Probed: a stale GUA and a stale ULA are exactly the addresses that
-            // can outlive the device's ownership of them.
             arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE"),
             arp_mac("fd00::5", "AA:AA:AA:00:00:02", "STALE"),
-            // Not probed: the kernel confirmed this one within the last ~30 s.
+            arp_mac("2001:db8::9", "AA:AA:AA:00:00:08", "DELAY"),
+            arp_mac("2001:db8::a", "AA:AA:AA:00:00:09", "PROBE"),
+            // Confirmed within the last ~30 s.
             arp_mac("2001:db8::6", "AA:AA:AA:00:00:03", "REACHABLE"),
-            // Not probed: same MAC as the REACHABLE entry above, so the device is
-            // demonstrably answering NDP — a second probe would tell us nothing.
-            arp_mac("2001:db8::7", "AA:AA:AA:00:00:03", "STALE"),
-            // Not probed: never displayed, so verifying it would be wasted time.
+            // Never displayed.
             arp_mac("fe80::1", "AA:AA:AA:00:00:04", "STALE"),
             arp_mac("fec0::1", "AA:AA:AA:00:00:05", "STALE"),
-            // Not probed: IPv4 has its own probe path.
+            // IPv4 has its own probe path.
             arp_mac("192.168.10.5", "AA:AA:AA:00:00:06", "STALE"),
-            // Not probed: FAILED is not an "alive" state.
             arp_mac("2001:db8::8", "AA:AA:AA:00:00:07", "FAILED"),
         ];
 
-        let targets = ipv6_probe_candidates(&entries);
+        let targets: Vec<_> = ipv6_probe_candidates(&entries)
+            .into_iter()
+            .map(|(ip, _)| ip)
+            .collect();
         assert_eq!(
             targets,
-            vec![
+            ["2001:db8::5", "fd00::5", "2001:db8::9", "2001:db8::a"],
+        );
+    }
+
+    #[test]
+    fn ipv6_probe_candidates_probes_stale_address_beside_reachable_ones() {
+        let entries = vec![
+            arp_mac("fe80::5", "AA:AA:AA:00:00:01", "REACHABLE"),
+            arp_mac("2001:db8::6", "AA:AA:AA:00:00:01", "REACHABLE"),
+            arp_mac("fd00::5", "AA:AA:AA:00:00:01", "STALE"),
+        ];
+        assert_eq!(
+            ipv6_probe_candidates(&entries),
+            [("fd00::5".to_string(), "br-lan.101".to_string())],
+        );
+    }
+
+    #[test]
+    fn ipv6_probe_candidates_probes_each_bridge_holding_an_address() {
+        let a = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
+        let mut b = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
+        b.interface = "br-lan.102".to_string();
+        assert_eq!(
+            ipv6_probe_candidates(&[a, b]),
+            [
                 ("2001:db8::5".to_string(), "br-lan.101".to_string()),
-                ("fd00::5".to_string(), "br-lan.101".to_string()),
+                ("2001:db8::5".to_string(), "br-lan.102".to_string()),
             ],
         );
     }
 
     #[test]
-    fn ipv6_probe_candidates_deduplicates_repeated_addresses() {
-        // The same address can appear on two bridges after a device roams; one
-        // probe settles it.
-        let a = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
-        let mut b = arp_mac("2001:db8::5", "AA:AA:AA:00:00:01", "STALE");
-        b.interface = "br-lan.102".to_string();
-        assert_eq!(ipv6_probe_candidates(&[a, b]).len(), 1);
+    fn parse_neigh_output_reads_state_past_flags() {
+        let entries = parse_neigh_output(
+            "fd00::5 dev br-lan.1 lladdr aa:aa:aa:00:00:01 router STALE\n\
+             fd00::6 dev br-lan.1 lladdr aa:aa:aa:00:00:02 router proxy REACHABLE\n\
+             fd00::7 dev br-lan.1 lladdr aa:aa:aa:00:00:03 DELAY\n\
+             fd00::8 dev br-lan.1 lladdr aa:aa:aa:00:00:04\n",
+        );
+        let states: Vec<_> = entries.iter().map(|e| e.state.as_str()).collect();
+        assert_eq!(states, ["STALE", "REACHABLE", "DELAY", "UNKNOWN"]);
+    }
+
+    #[test]
+    fn echo_reply_sources_reads_every_displayable_replier_once() {
+        let output = "\
+PING ff02::1%br-lan.1 (ff02::1%6) from fd00::1: 56 data bytes
+64 bytes from fd00::1: seq=0 ttl=64 time=0.494 ms
+64 bytes from fd00::5: seq=0 ttl=64 time=1.075 ms (DUP!)
+64 bytes from 2001:db8::5: seq=0 ttl=64 time=1.100 ms (DUP!)
+64 bytes from fe80::5: seq=0 ttl=64 time=1.200 ms (DUP!)
+64 bytes from fd00::5: seq=1 ttl=64 time=0.611 ms (DUP!)
+64 bytes from nonsense: seq=1 ttl=64 time=0.700 ms (DUP!)
+
+--- ff02::1%br-lan.1 ping statistics ---
+1 packets transmitted, 1 packets received, 4 duplicates, 0% packet loss
+";
+        assert_eq!(
+            echo_reply_sources(output),
+            ["fd00::1", "fd00::5", "2001:db8::5"],
+        );
+    }
+
+    #[test]
+    fn unknown_echo_repliers_skips_own_and_known_addresses() {
+        let output = "64 bytes from fd00::1: seq=0\n\
+                      64 bytes from fd00::5: seq=0\n\
+                      64 bytes from fd00::6: seq=0\n";
+        let replies = vec![
+            ("br-lan.101".to_string(), output.to_string()),
+            ("br-lan.102".to_string(), output.to_string()),
+        ];
+        let own = ["fd00::1".to_string()].into_iter().collect();
+        let known = vec![arp_mac("fd00::5", "AA:AA:AA:00:00:01", "STALE")];
+        assert_eq!(
+            unknown_echo_repliers(&replies, &own, &known),
+            [
+                ("fd00::6".to_string(), "br-lan.101".to_string()),
+                ("fd00::5".to_string(), "br-lan.102".to_string()),
+                ("fd00::6".to_string(), "br-lan.102".to_string()),
+            ],
+        );
+    }
+
+    #[test]
+    fn unknown_echo_repliers_caps_each_ping_but_not_known_addresses() {
+        let output: String = (0..MAX_ECHO_REPLIERS + 10)
+            .map(|i| format!("64 bytes from fd00::{:x}: seq=0\n", i + 1))
+            .collect();
+        let replies = vec![("br-lan.101".to_string(), output)];
+        let known = vec![arp_mac("fd00::1", "AA:AA:AA:00:00:01", "STALE")];
+        let found = unknown_echo_repliers(&replies, &Default::default(), &known);
+        assert_eq!(found.len(), MAX_ECHO_REPLIERS);
+        assert_eq!(found[0].0, "fd00::2");
+    }
+
+    #[test]
+    fn ipv6_confirmed_macs_needs_a_reachable_or_verified_entry() {
+        let entries = [
+            arp_mac("fd00::5", "AA:AA:AA:00:00:01", "STALE"),
+            arp_mac("fe80::6", "AA:AA:AA:00:00:02", "REACHABLE"),
+            arp_mac("fd00::7", "AA:AA:AA:00:00:03", "STALE"),
+            arp_mac("192.168.10.9", "AA:AA:AA:00:00:03", "REACHABLE"),
+        ];
+        let ipv6_only: std::collections::HashSet<String> = [
+            "AA:AA:AA:00:00:01",
+            "AA:AA:AA:00:00:02",
+            "AA:AA:AA:00:00:03",
+        ]
+        .map(String::from)
+        .into();
+        let verified = ["fd00::5".to_string()].into();
+
+        let confirmed = ipv6_confirmed_macs(&entries, &ipv6_only, Some(&verified));
+        assert_eq!(
+            confirmed,
+            ["AA:AA:AA:00:00:01", "AA:AA:AA:00:00:02"]
+                .map(String::from)
+                .into(),
+        );
+
+        // No verdict: only an entry the snapshot already confirmed counts.
+        let confirmed = ipv6_confirmed_macs(&entries, &ipv6_only, None);
+        assert_eq!(confirmed, ["AA:AA:AA:00:00:02".to_string()].into());
     }
 
     #[test]
@@ -2913,7 +3517,7 @@ config wireguard_wg_lan 'wg_lan_0'
         let live: std::collections::HashSet<String> =
             ["192.168.10.187".to_string()].into_iter().collect();
 
-        let chosen = choose_ipv4_entry(&list, &live).expect("an entry");
+        let chosen = choose_ipv4_entry(&list, &live, None).expect("an entry");
         assert_eq!(chosen.ip, "192.168.10.187");
         assert_eq!(chosen.interface, "br-lan.101");
     }
@@ -2927,7 +3531,7 @@ config wireguard_wg_lan 'wg_lan_0'
         let list = vec![&stale, &reachable];
         let live = std::collections::HashSet::new();
 
-        let chosen = choose_ipv4_entry(&list, &live).expect("an entry");
+        let chosen = choose_ipv4_entry(&list, &live, None).expect("an entry");
         assert_eq!(chosen.ip, "192.168.10.187");
     }
 
@@ -2937,8 +3541,8 @@ config wireguard_wg_lan 'wg_lan_0'
         let v6 = arp("fe80::96a9:90ff:fe28:9aa4", "br-lan.101", "STALE");
         let only_v6 = vec![&v6];
         let live = std::collections::HashSet::new();
-        assert!(choose_ipv4_entry(&only_v6, &live).is_none());
-        assert!(choose_ipv4_entry(&[], &live).is_none());
+        assert!(choose_ipv4_entry(&only_v6, &live, None).is_none());
+        assert!(choose_ipv4_entry(&[], &live, None).is_none());
     }
 
     #[test]
@@ -2950,7 +3554,415 @@ config wireguard_wg_lan 'wg_lan_0'
         let list = vec![&first, &second];
         let live = std::collections::HashSet::new();
 
-        let chosen = choose_ipv4_entry(&list, &live).expect("an entry");
+        let chosen = choose_ipv4_entry(&list, &live, None).expect("an entry");
         assert_eq!(chosen.ip, "192.168.0.187");
+    }
+
+    #[test]
+    fn choose_ipv4_ties_go_to_the_bridge_the_fdb_learned() {
+        // A Wi-Fi client is never probed, so a profile move leaves its old
+        // entry STALE beside the new one.
+        let old = arp("192.168.1.151", "br-lan.1", "STALE");
+        let new = arp("192.168.20.150", "br-lan.20", "STALE");
+        let list = vec![&old, &new];
+        let live = std::collections::HashSet::new();
+        let fdb = FdbEntry {
+            port: "phy0-ap0-guest".into(),
+            vlan: Some(20),
+        };
+        let networks = profile_networks();
+        let learned_on = learned_bridge(Some(&fdb), None, &networks);
+        assert_eq!(learned_on, Some("br-lan.20"));
+        // The FDB holds the MAC on both VLANs until the old entry ages out.
+        let ambiguous = FdbEntry {
+            port: "phy0-ap0-guest".into(),
+            vlan: None,
+        };
+        assert_eq!(
+            learned_bridge(Some(&ambiguous), Some("192.168.20.150"), &networks),
+            Some("br-lan.20")
+        );
+        assert_eq!(
+            learned_bridge(None, Some("192.168.20.150"), &networks),
+            Some("br-lan.20")
+        );
+        assert_eq!(learned_bridge(Some(&ambiguous), None, &networks), None);
+
+        let chosen = choose_ipv4_entry(&list, &live, learned_on).expect("an entry");
+        assert_eq!(chosen.ip, "192.168.20.150");
+
+        // A REACHABLE entry still outranks the hint.
+        let reachable = arp("192.168.1.151", "br-lan.1", "REACHABLE");
+        let list = vec![&reachable, &new];
+        let chosen = choose_ipv4_entry(&list, &live, learned_on).expect("an entry");
+        assert_eq!(chosen.ip, "192.168.1.151");
+    }
+
+    fn profile_networks() -> Vec<ProfileNetwork> {
+        vec![
+            ProfileNetwork {
+                vlan: 1,
+                device: "br-lan.1".into(),
+                name: "Admin".into(),
+                address: Some("192.168.1.1/24".parse().unwrap()),
+            },
+            ProfileNetwork {
+                vlan: 20,
+                device: "br-lan.20".into(),
+                name: "Guest".into(),
+                address: Some("192.168.20.1/24".parse().unwrap()),
+            },
+        ]
+    }
+
+    #[derive(Clone)]
+    struct TestContext(std::path::PathBuf);
+
+    impl rpc_toolkit::Context for TestContext {
+        fn runtime(&self) -> Option<std::sync::Arc<tokio::runtime::Runtime>> {
+            None
+        }
+    }
+
+    impl CtrlContext for TestContext {
+        fn uci_root(&self) -> std::path::PathBuf {
+            self.0.clone()
+        }
+        fn effectful(&self) -> bool {
+            false
+        }
+    }
+
+    const UPDATE_STARTWRT: &str = "\
+config profile lan
+\toption fullname 'Admin'
+\toption interface 'lan'
+\toption vlan_tag '1'
+
+config profile guest
+\toption fullname 'Guest'
+\toption interface 'guest'
+\toption vlan_tag '101'
+";
+
+    const UPDATE_NETWORK: &str = "\
+config interface 'lan'
+\toption device 'br-lan.1'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+\toption netmask '255.255.255.0'
+
+config interface 'guest'
+\toption device 'br-lan.101'
+\toption proto 'static'
+\toption ipaddr '192.168.101.1'
+\toption netmask '255.255.255.0'
+";
+
+    fn update_req(ipv4_static: bool, ipv4: &str, remove: &[&str]) -> DeviceUpdateReq {
+        DeviceUpdateReq {
+            mac: "aa:bb:cc:dd:ee:ff".into(),
+            name: None,
+            ipv4_static,
+            ipv4: ipv4.into(),
+            remove_ipv4_reservations: remove.iter().map(|ip| ip.to_string()).collect(),
+        }
+    }
+
+    /// Returns the written dhcp and firewall configs.
+    async fn run_update(
+        dhcp: &str,
+        firewall: &str,
+        req: DeviceUpdateReq,
+    ) -> (Result<(), Error>, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("startwrt"), UPDATE_STARTWRT).unwrap();
+        std::fs::write(dir.path().join("network"), UPDATE_NETWORK).unwrap();
+        std::fs::write(dir.path().join("dhcp"), dhcp).unwrap();
+        std::fs::write(dir.path().join("firewall"), firewall).unwrap();
+        let result = update(TestContext(dir.path().to_path_buf()), DeserializeStdin(req)).await;
+        let read = |name: &str| std::fs::read_to_string(dir.path().join(name)).unwrap();
+        (result, read("dhcp"), read("firewall"))
+    }
+
+    async fn update_reservation(dhcp: &str, ipv4: &str) -> (Result<(), Error>, String) {
+        let (result, dhcp, _) = run_update(dhcp, "", update_req(true, ipv4, &[])).await;
+        (result, dhcp)
+    }
+
+    const ADMIN_AND_GUEST: &str = "\
+config host 'host_aabbccddeeff'
+\toption mac 'AA:BB:CC:DD:EE:FF'
+\toption name 'nas'
+\toption ip '192.168.1.50'
+
+config host 'host_aabbccddeeff_2'
+\toption mac 'AA:BB:CC:DD:EE:FF'
+\toption name 'nas'
+\toption ip '192.168.101.60'
+";
+
+    fn port_to(dest_ip: &str, enabled: bool) -> String {
+        format!(
+            "config redirect 'pp_web'\n\toption name 'web'\n\toption src 'wan'\n\toption dest 'lan'\n\toption target 'DNAT'\n\toption dest_ip '{dest_ip}'\n\toption dest_port '80'\n\toption enabled '{}'\n\toption _pp_id 'web'\n\toption _pp_mac 'AA:BB:CC:DD:EE:FF'\n",
+            if enabled { 1 } else { 0 }
+        )
+    }
+
+    #[tokio::test]
+    async fn update_adds_a_reservation_in_another_profile_beside_the_first() {
+        let dhcp = "config host 'host_aabbccddeeff'\n\toption mac 'AA:BB:CC:DD:EE:FF'\n\toption name 'nas'\n\toption ip '192.168.1.50'\n";
+        let (result, written) = update_reservation(dhcp, "192.168.101.60").await;
+        result.unwrap();
+        assert!(written.contains("option ip '192.168.1.50'"), "{written}");
+        assert!(written.contains("option ip '192.168.101.60'"), "{written}");
+        assert_eq!(written.matches("option name 'nas'").count(), 2, "{written}");
+    }
+
+    #[tokio::test]
+    async fn update_replaces_only_the_reservation_in_the_same_profile() {
+        let (result, written) = update_reservation(ADMIN_AND_GUEST, "192.168.101.70").await;
+        result.unwrap();
+        assert!(written.contains("option ip '192.168.1.50'"), "{written}");
+        assert!(written.contains("option ip '192.168.101.70'"), "{written}");
+        assert!(!written.contains("192.168.101.60"), "{written}");
+    }
+
+    #[tokio::test]
+    async fn update_with_reserve_off_deletes_the_named_reservation_only() {
+        let (result, written, _) = run_update(
+            ADMIN_AND_GUEST,
+            "",
+            update_req(false, "192.168.101.60", &[]),
+        )
+        .await;
+        result.unwrap();
+        assert!(written.contains("option ip '192.168.1.50'"), "{written}");
+        assert!(!written.contains("192.168.101.60"), "{written}");
+    }
+
+    #[tokio::test]
+    async fn update_deletes_listed_reservations_and_keeps_an_address_on_every_section() {
+        let (result, written, _) = run_update(
+            ADMIN_AND_GUEST,
+            "",
+            update_req(true, "192.168.101.60", &["192.168.1.50"]),
+        )
+        .await;
+        result.unwrap();
+        assert!(!written.contains("192.168.1.50"), "{written}");
+        assert_eq!(written.matches("config host").count(), 1, "{written}");
+        assert!(written.contains("option ip '192.168.101.60'"), "{written}");
+        assert!(written.contains("option name 'nas'"), "{written}");
+    }
+
+    #[tokio::test]
+    async fn update_refuses_an_address_another_device_holds() {
+        let dhcp = "config host\n\toption mac '11:22:33:44:55:66'\n\toption name 'tv'\n\toption ip '192.168.1.50'\n";
+        let (result, written) = update_reservation(dhcp, "192.168.1.50").await;
+        let err = result.expect_err("duplicate refused");
+        assert!(err.to_string().contains("tv"), "{err}");
+        assert_eq!(written.matches("192.168.1.50").count(), 1, "{written}");
+    }
+
+    #[tokio::test]
+    async fn update_moves_published_ports_with_their_replaced_reservation() {
+        let (result, _, firewall) = run_update(
+            ADMIN_AND_GUEST,
+            &port_to("192.168.1.50", true),
+            update_req(true, "192.168.1.51", &[]),
+        )
+        .await;
+        result.unwrap();
+        assert!(
+            firewall.contains("option dest_ip '192.168.1.51'"),
+            "{firewall}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_refuses_deleting_a_reservation_an_enabled_port_uses() {
+        let (result, dhcp, _) = run_update(
+            ADMIN_AND_GUEST,
+            &port_to("192.168.1.50", true),
+            update_req(false, "192.168.1.50", &[]),
+        )
+        .await;
+        let err = result.expect_err("in-use reservation kept");
+        assert!(err.to_string().contains("web"), "{err}");
+        assert!(dhcp.contains("192.168.1.50"), "{dhcp}");
+
+        let (result, dhcp, firewall) = run_update(
+            ADMIN_AND_GUEST,
+            &port_to("192.168.1.50", false),
+            update_req(false, "192.168.1.50", &[]),
+        )
+        .await;
+        result.unwrap();
+        assert!(!dhcp.contains("192.168.1.50"), "{dhcp}");
+        assert!(
+            firewall.contains("option dest_ip '192.168.1.50'"),
+            "{firewall}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_refuses_reservation_outside_every_profile() {
+        let (result, written) = update_reservation("", "10.0.0.5").await;
+        assert!(result.is_err());
+        assert!(!written.contains("10.0.0.5"), "{written}");
+    }
+
+    #[tokio::test]
+    async fn update_writes_reservation_in_a_profile() {
+        let (result, written) = update_reservation("", "192.168.101.50").await;
+        result.unwrap();
+        assert!(written.contains("option ip '192.168.101.50'"), "{written}");
+    }
+
+    #[tokio::test]
+    async fn update_keeps_an_unchanged_out_of_profile_reservation() {
+        let dhcp = "config host\n\toption mac 'AA:BB:CC:DD:EE:FF'\n\toption ip '10.0.0.5'\n";
+        let (result, written) = update_reservation(dhcp, "10.0.0.5").await;
+        result.unwrap();
+        assert!(written.contains("option ip '10.0.0.5'"), "{written}");
+    }
+
+    #[test]
+    fn newest_lease_wins_for_a_device_on_two_profiles() {
+        let lease = |ip: &str, expires| DhcpLease {
+            mac: "AA:BB:CC:DD:EE:FF".into(),
+            ip: ip.into(),
+            hostname: "*".into(),
+            expires,
+            instance: None,
+        };
+        let ips = newest_lease_ips(vec![lease("192.168.101.5", 200), lease("192.168.1.5", 100)]);
+        assert_eq!(ips["AA:BB:CC:DD:EE:FF"], "192.168.101.5");
+        let ips = newest_lease_ips(vec![lease("192.168.1.5", 0), lease("192.168.101.5", 200)]);
+        assert_eq!(ips["AA:BB:CC:DD:EE:FF"], "192.168.1.5");
+    }
+
+    fn fdb_entry(vlan: Option<u16>) -> FdbEntry {
+        FdbEntry {
+            port: "eth0".into(),
+            vlan,
+        }
+    }
+
+    #[test]
+    fn name_changes_describe_the_old_name() {
+        for (prior, requested, expected) in [
+            (Some("old"), Some("new"), Some("renamed from 'old'")),
+            (Some("old"), Some(""), Some("cleared name 'old'")),
+            (None, Some("new"), Some("name assigned")),
+            (Some("same"), Some("same"), None),
+            (Some("old"), None, None),
+            (None, Some(""), None),
+        ] {
+            assert_eq!(
+                name_change(prior, requested).as_deref(),
+                expected,
+                "{prior:?} → {requested:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn device_vlan_prefers_neighbour_bridge() {
+        let e = arp("192.168.20.5", "br-lan.20", "STALE");
+        let list = vec![&e];
+        assert_eq!(
+            device_vlan(
+                Some(&e),
+                &list,
+                Some(&fdb_entry(Some(1))),
+                Some("192.168.1.9"),
+                &profile_networks(),
+            ),
+            Some(20)
+        );
+        let v6 = arp("fe80::1", "br-lan.20", "STALE");
+        let list = vec![&v6];
+        assert_eq!(
+            device_vlan(None, &list, None, Some("192.168.1.9"), &profile_networks()),
+            Some(20)
+        );
+    }
+
+    #[test]
+    fn device_vlan_without_neighbour_uses_fdb_then_subnet() {
+        assert_eq!(
+            device_vlan(
+                None,
+                &[],
+                Some(&fdb_entry(Some(20))),
+                Some("192.168.1.9"),
+                &profile_networks(),
+            ),
+            Some(20)
+        );
+        assert_eq!(
+            device_vlan(None, &[], None, Some("192.168.20.175"), &profile_networks()),
+            Some(20)
+        );
+    }
+
+    #[test]
+    fn device_vlan_preserves_untagged_lan_neighbour() {
+        let mut networks = profile_networks();
+        networks.truncate(1);
+        networks[0].device = "br-lan".into();
+        let e = arp("fe80::1", "br-lan", "REACHABLE");
+        assert_eq!(device_vlan(None, &[&e], None, None, &networks), Some(1));
+    }
+
+    #[test]
+    fn device_vlan_untagged_fdb_requires_configured_bridge_owner() {
+        let mut networks = profile_networks();
+        networks.truncate(1);
+        networks[0].device = "br-lan".into();
+        let entry = fdb_entry(None);
+        assert_eq!(
+            device_vlan(None, &[], Some(&entry), None, &networks),
+            Some(1)
+        );
+        assert_eq!(device_vlan(None, &[], None, None, &networks), None);
+        assert_eq!(
+            device_vlan(None, &[], Some(&entry), None, &profile_networks()),
+            None
+        );
+    }
+
+    #[test]
+    fn device_vlan_unplaced_is_none_not_admin() {
+        assert_eq!(
+            device_vlan(None, &[], None, None, &profile_networks()),
+            None
+        );
+        assert_eq!(
+            device_vlan(None, &[], None, Some("10.0.0.4"), &profile_networks()),
+            None
+        );
+    }
+
+    #[test]
+    fn bridge_fdb_keeps_learned_vlan() {
+        let out = "\
+fe:fe:fe:64:5d:9a dev br-lan vlan 20 master br-lan permanent
+aa:bb:cc:dd:ee:01 dev eth0 vlan 20 master br-lan
+aa:bb:cc:dd:ee:01 dev eth0 self
+aa:bb:cc:dd:ee:02 dev phy0-ap0 master br-lan
+aa:bb:cc:dd:ee:03 dev eth0 vlan 20 master br-lan
+aa:bb:cc:dd:ee:03 dev phy0-ap0-x vlan 30 master br-lan
+";
+        let fdb = parse_bridge_fdb(out);
+        assert!(!fdb.contains_key("FE:FE:FE:64:5D:9A"));
+        let one = &fdb["AA:BB:CC:DD:EE:01"];
+        assert_eq!((one.port.as_str(), one.vlan), ("eth0", Some(20)));
+        let two = &fdb["AA:BB:CC:DD:EE:02"];
+        assert_eq!((two.port.as_str(), two.vlan), ("phy0-ap0", None));
+        let three = &fdb["AA:BB:CC:DD:EE:03"];
+        assert_eq!((three.port.as_str(), three.vlan), ("eth0", None));
     }
 }

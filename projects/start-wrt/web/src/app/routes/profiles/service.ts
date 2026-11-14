@@ -4,6 +4,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import {
   ApiService,
   ProfileCreateInput,
+  ProfileDeleteResult,
   ProfileIdOpt,
   ProfileUpdateInput,
   ScheduleWindow,
@@ -16,7 +17,7 @@ import { pauseFor } from '@start9labs/shared'
 
 const RESTART_TIMEOUT_MS = 60_000
 
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class ProfilesService extends FormService<SecurityProfile[]> {
   private readonly api = inject(ApiService)
   private readonly notifications = inject(TuiNotificationMiddleService)
@@ -130,6 +131,19 @@ export class ProfilesService extends FormService<SecurityProfile[]> {
     )
 
     return false
+  }
+
+  async previewDelete(
+    params: ProfileIdOpt,
+  ): Promise<ProfileDeleteResult | null> {
+    let deleted: ProfileDeleteResult | null = null
+    await this.actions.run(
+      async () => {
+        deleted = await this.api.profileDelete({ ...params, preview: true })
+      },
+      { loading: this.i18n.transform('Loading...') },
+    )
+    return deleted
   }
 
   async deleteProfile(params: ProfileIdOpt) {

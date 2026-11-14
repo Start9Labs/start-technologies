@@ -2,13 +2,19 @@ import { Component, computed, inject } from '@angular/core'
 import { RouterLink } from '@angular/router'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import { TuiTable } from '@taiga-ui/addon-table'
-import { TuiButton, TuiDataList, TuiDropdown, TuiLink } from '@taiga-ui/core'
+import {
+  TuiButton,
+  TuiDataList,
+  TuiDropdown,
+  TuiLink,
+  TuiNotificationService,
+} from '@taiga-ui/core'
 import { TuiSkeleton } from '@taiga-ui/kit'
 import { Masked } from 'src/app/components/masked'
 import { Placeholder } from 'src/app/components/placeholder'
 import { ApiService } from 'src/app/services/api/api.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
-import { confirmPublishedPortDeletion } from 'src/app/services/published-port-deletion'
+import { confirmLeavingProfile } from 'src/app/services/leaving-profile'
 import { WifiService } from '../../service'
 import {
   ADD_WIFI_PASSWORD,
@@ -36,7 +42,7 @@ import {
         </tr>
       </thead>
       <tbody>
-        @for (item of passwords() | tuiTableSort; track $index) {
+        @for (item of passwords() | tuiTableSort; track item.password) {
           <tr>
             <td tuiTd>{{ item.label }}</td>
             <td tuiTd>
@@ -64,7 +70,7 @@ import {
                   <button
                     tuiOption
                     iconStart="@tui.pencil"
-                    (click)="edit(item, $index)"
+                    (click)="edit(item)"
                   >
                     {{ 'Edit' | i18n }}
                   </button>
@@ -72,7 +78,7 @@ import {
                     tuiOption
                     class="g-negative"
                     iconStart="@tui.trash"
-                    (click)="delete($index)"
+                    (click)="delete(item.password)"
                   >
                     {{ 'Delete' | i18n }}
                   </button>
@@ -122,7 +128,7 @@ import {
 })
 export default class WifiPasswords {
   private readonly dialogs = inject(TuiResponsiveDialogService)
-  // @TODO matt review
+  private readonly alerts = inject(TuiNotificationService)
   private readonly api = inject(ApiService)
   private readonly i18n = inject(i18nPipe)
 
@@ -135,7 +141,6 @@ export default class WifiPasswords {
       })) || [],
   )
 
-  // @TODO matt review
   async add() {
     const profiles = (await this.api.profilesList()).filter(
       p => p.interface !== 'lan',
@@ -149,13 +154,12 @@ export default class WifiPasswords {
         this.service.addPassword({
           label: result.label,
           profile: result.profile,
-          password: result.password!,
+          password: result.password,
         })
       })
   }
 
-  // @TODO matt review
-  async edit(entry: WifiPasswordEntry, index: number) {
+  async edit(entry: WifiPasswordEntry) {
     const profiles = (await this.api.profilesList()).filter(
       p => p.interface !== 'lan',
     )
@@ -167,57 +171,56 @@ export default class WifiPasswords {
       .subscribe(async result => {
         const current = this.service.data()
         if (!current) return
+        const index = current.passwords.findIndex(
+          p => p.password === entry.password,
+        )
+        if (index < 0) {
+          this.alerts
+            .open(
+              this.i18n.transform(
+                'This Wi-Fi password was changed or deleted. Your changes were not saved.',
+              ),
+              { appearance: 'negative' },
+            )
+            .subscribe()
+          return
+        }
         const passwords = [...current.passwords]
         passwords[index] = {
           ...passwords[index],
           label: result.label,
           profile: result.profile,
+          password: result.password,
         }
         const newConfig = { ...current, passwords }
 
-        // Reassigning this password to a different profile moves its WiFi
-        // devices to a new subnet, breaking any published ports forwarding to
-        // them.
-        let pending
+        let leaving
         try {
-          pending = await this.service.previewWifi(newConfig)
+          leaving = await this.service.previewWifi(newConfig)
         } catch {
           return
         }
-        if (
-          !(await confirmPublishedPortDeletion(
-            this.dialogs,
-            this.i18n,
-            pending,
-          ))
-        )
+        if (!(await confirmLeavingProfile(this.dialogs, this.i18n, leaving)))
           return
 
-        await this.service.store(newConfig)
-        this.service.refresh()
+        this.service.save(newConfig)
       })
   }
 
-  async delete(index: number) {
+  async delete(password: string) {
     const current = this.service.data()
     if (!current) return
-    const passwords = current.passwords.filter((_, i) => i !== index)
+    const passwords = current.passwords.filter(p => p.password !== password)
     const newConfig = { ...current, passwords }
 
-    // Deleting the last password on a profile disconnects its WiFi clients (they
-    // hold no other credential), so any published ports forwarding to them — at an
-    // address those devices can no longer reach — are now broken. Surface them for
-    // confirmation first (Ethernet devices keep their IP, so the backend won't
-    // list them and no dialog appears).
-    let pending
+    let leaving
     try {
-      pending = await this.service.previewWifi(newConfig)
+      leaving = await this.service.previewWifi(newConfig)
     } catch {
       return
     }
-    if (!(await confirmPublishedPortDeletion(this.dialogs, this.i18n, pending)))
-      return
+    if (!(await confirmLeavingProfile(this.dialogs, this.i18n, leaving))) return
 
-    this.service.deletePassword(index)
+    this.service.deletePassword(password)
   }
 }

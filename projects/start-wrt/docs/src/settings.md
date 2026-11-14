@@ -24,8 +24,8 @@ Controls whether the web interface (and SSH) accepts connections arriving on the
 
 The options control direct WAN-side access only:
 
-- **When behind NAT** (default) — WAN-side connections are accepted only from private source addresses (RFC 1918 for IPv4, ULA for IPv6), and only while the router's own WAN address is itself private. This is for routers that sit behind another router (e.g. an ISP box): devices on that upstream network can reach the web interface. From the public Internet, the web interface is never reachable in this mode — even if a public, globally routable address later appears on the WAN.
-- **Never** — No WAN-side access at all, even from an upstream private network. The web interface is reachable only from the local network (including through an Inbound VPN).
+- **Never** (default) — No WAN-side access at all, even from an upstream private network. The web interface is reachable only from the local network (including through an Inbound VPN).
+- **When behind NAT** — WAN-side connections are accepted only from private source addresses (RFC 1918 for IPv4, ULA for IPv6), and only while the router's own WAN address is itself private. This is for routers that sit behind another router (e.g. an ISP box): devices on that upstream network can reach the web interface. From the public Internet, the web interface is never reachable in this mode — even if a public, globally routable address later appears on the WAN. Anyone on that upstream network can reach the router's sign-in, so choose it only if you trust every device there.
 - **Always** — WAN-side connections are accepted from any address. With a public IP, the web interface is reachable from anywhere on the Internet via the WAN IP or a [Dynamic DNS](ddns.md) domain.
 
 Changing the setting ends any open WAN-side SSH session from an address the new setting does not accept. Sessions from addresses it still accepts stay open.
@@ -67,7 +67,7 @@ Manage the public keys authorized to access your router's command line over SSH.
 
 ## Activity
 
-View a log of administrative actions taken through the web interface. Each entry shows:
+View a log of administrative actions taken through the web interface, along with sign-ins, SSH sessions, and each time the router starts. Each entry shows:
 
 - **Status icon** — Green check for successful actions, red X for failures.
 - **Timestamp** — When the action occurred.
@@ -90,8 +90,8 @@ Download a backup of your router's configuration, or restore from a previously d
 
 The Advanced tab contains power-user tools:
 
-- **Launch LuCI Interface** — Opens the underlying OpenWrt LuCI admin panel in a new tab for direct access to low-level configuration.
-- **Download Support Diagnostics** — Generates and downloads a diagnostic bundle for troubleshooting with Start9 support.
+- **Launch LuCI Interface** — Opens the underlying OpenWrt LuCI admin panel in a new tab for direct access to low-level configuration. If a change made in LuCI or by hand is one StartWRT cannot show or keep, each page it affects lists the change, with a link to LuCI, in place of its settings. A change StartWRT reads but does not manage, such as a second address on the LAN, is noted above the page's settings.
+- **Download Support Diagnostics** — Generates and downloads a diagnostic bundle for troubleshooting with Start9 support. Passwords and keys are removed, and MAC addresses, public IP addresses, names and domains are replaced with placeholders.
 - **Factory Reset** — Erases all settings (excluding the sticker Wi-Fi password) and reboots the router. See [Factory Reset](factory-reset.md) for details.
 
 > [!WARNING]

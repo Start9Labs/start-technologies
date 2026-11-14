@@ -1,4 +1,3 @@
-use inpt::split::SingleQuoted;
 use uciedit_macros::TypedSection;
 
 use super::*; // Access items from lib.rs // Import the derive macro
@@ -216,7 +215,6 @@ config retain
 config retain
     option foo bar
     # comment 4
-
 config retain
 ";
 
@@ -231,6 +229,109 @@ config retain
     assert_eq!(normalize(edited), normalize(expected.to_string()));
 }
 
+#[derive(TypedSection)]
+#[uci(ty = "replace")]
+struct ReplaceSection {
+    value: String,
+}
+
+#[test]
+fn test_remove_append_does_not_accumulate_separators() {
+    for count in [1, 2] {
+        let arena = Arena::new();
+        let mut config = Config::parse_str(
+            &arena,
+            "# retained header\nconfig retain\n\toption value 'original'\n\t# retained body\n",
+        )
+        .unwrap();
+        for _ in 0..count {
+            config
+                .append(
+                    &ReplaceSection {
+                        value: "test".into(),
+                    },
+                    None,
+                )
+                .unwrap();
+        }
+        let expected = config.dump_str();
+        for cycle in 0..16 {
+            let text = arena.alloc(config.dump_str());
+            config = Config::parse_str(&arena, text).unwrap();
+            config.sections.retain(|section| section.ty() != "replace");
+            for _ in 0..count {
+                config
+                    .append(
+                        &ReplaceSection {
+                            value: "test".into(),
+                        },
+                        None,
+                    )
+                    .unwrap();
+            }
+            assert_eq!(config.dump_str(), expected, "count {count}, cycle {cycle}");
+        }
+    }
+}
+
+#[test]
+fn test_insert_and_rename_sections() {
+    let arena = Arena::new();
+    let mut config = Config::parse_str(
+        &arena,
+        "config retain first\n\toption value 'first'\n\nconfig retain\n\toption value 'last'\n",
+    )
+    .unwrap();
+    config
+        .insert(
+            1,
+            &ReplaceSection {
+                value: "middle".into(),
+            },
+            Some("middle"),
+        )
+        .unwrap();
+    config.sections[2].set_name("last");
+    let expected = "config retain first\n\toption value 'first'\n\nconfig replace middle\n\toption value 'middle'\n\nconfig retain last\n\toption value 'last'\n";
+    assert_eq!(config.dump_str(), expected);
+    let reparsed = Config::parse_str(&arena, arena.alloc(config.dump_str())).unwrap();
+    assert_eq!(reparsed.sections[1].name().as_deref(), Some("middle"));
+    assert_eq!(reparsed.sections[2].name().as_deref(), Some("last"));
+}
+
+#[test]
+fn test_remove_section_keeps_retained_body_and_header_comments() {
+    let arena = Arena::new();
+    let original = "# first header\nconfig retain first\n\toption value 'first'\n\t# first body\n\n# removed header\n\nconfig remove\n\toption value 'removed'\n\t# removed body\n\n# last header\n\nconfig retain last\n\toption value 'last'\n\t# last body\n";
+    let expected = "# first header\nconfig retain first\n\toption value 'first'\n\t# first body\n\n# last header\n\nconfig retain last\n\toption value 'last'\n\t# last body\n";
+    let mut config = Config::parse_str(&arena, original).unwrap();
+    config.sections.retain(|section| section.ty() == "retain");
+    assert_eq!(config.dump_str(), expected);
+
+    let mut config =
+        Config::parse_str(&arena, "config retain\n\t# retained body\nconfig remove\n").unwrap();
+    config.sections.retain(|section| section.ty() == "retain");
+    assert_eq!(config.dump_str(), "config retain\n\t# retained body\n");
+}
+
+#[test]
+fn test_parse_dump_preserves_separators_and_comments() {
+    let arena = Arena::new();
+    for original in [
+        "",
+        "\n\n# file comment\n\n",
+        "\n# header\nconfig retain\n\toption value 'test'\n\n",
+        "# first\nconfig retain first\n\t# body\n\n\n# second\n\nconfig retain second\n\tlist values 'one' #inline\n\t# final body\n\n",
+        "config retain\n\t# body without separator\nconfig retain\n",
+    ] {
+        let config = Config::parse_str(&arena, original).unwrap();
+        assert_eq!(config.dump_str(), original);
+        let mut bytes = Vec::new();
+        config.dump_io(&mut bytes).unwrap();
+        assert_eq!(bytes, original.as_bytes());
+    }
+}
+
 #[test]
 fn test_line_parse_errors() {
     assert!(matches!(
@@ -242,16 +343,263 @@ fn test_line_parse_errors() {
         Err(Error::BadSection { .. })
     ));
     assert!(matches!(
-        Line::parse("\toption name_only", 0),
+        Line::parse("\toption", 0),
         Err(Error::BadOption { .. })
     ));
     assert!(matches!(
-        Line::parse("\tlist name_only", 0),
+        Line::parse("\toption a 'b' 'c'", 0),
+        Err(Error::BadOption { .. })
+    ));
+    assert!(matches!(
+        Line::parse("\tlist a \"unterminated", 0),
         Err(Error::BadList { .. })
+    ));
+    assert!(matches!(
+        Line::parse("package", 0),
+        Err(Error::BadPackage { .. })
     ));
     assert!(matches!(
         Line::parse("unknown_keyword foo bar", 0),
         Err(Error::UnknownKeyword { .. })
+    ));
+}
+
+#[test]
+fn test_missing_value_is_empty() {
+    for line in ["\toption name_only", "\tlist name_only"] {
+        match Line::parse(line, 0).unwrap() {
+            Line::Option { value: v, .. } | Line::List { item: v, .. } => {
+                assert_eq!(v.as_str(), "", "{line}");
+                assert_eq!(v.to_string(), "''", "{line}");
+            }
+            other => panic!("{line}: {other:?}"),
+        }
+    }
+}
+
+/// Each value as libuci's `parse_str` decodes it (`uci/file.c`).
+#[test]
+fn test_libuci_values() {
+    let cases = [
+        (r"'Rich'\''s Wi-Fi'", "Rich's Wi-Fi"),
+        (r#""Rich's Wi-Fi""#, "Rich's Wi-Fi"),
+        (r"'back\slash\ttab'", r"back\slash\ttab"),
+        (r#""a\"b\\c\nd""#, r#"a"b\cnd"#),
+        (r"a\ b", "a b"),
+        (r#"'a'"b"c"#, "abc"),
+        ("'line one\nline two'", "line one\nline two"),
+        ("\"line one\nline two\"", "line one\nline two"),
+        ("joined\\\nhere", "joinedhere"),
+        ("joined\\\r\nhere", "joinedhere"),
+        (r"a\#b", "a#b"),
+        ("'émoji 🚀'", "émoji 🚀"),
+        ("''", ""),
+    ];
+    for (raw, expected) in cases {
+        let arena = Arena::new();
+        let text: &str = arena.alloc(format!(
+            "config test 'x'\n\toption v {raw}\n\toption after 'ok'\n"
+        ));
+        let config = Config::parse_str(&arena, text).unwrap_or_else(|e| panic!("{raw}: {e}"));
+        let lines = &config.sections[0].lines;
+        let Line::Option { value, .. } = lines[1] else {
+            panic!("{raw}: {:?}", lines[1]);
+        };
+        assert_eq!(value.as_str(), expected, "{raw}");
+        let Line::Option { option, value, .. } = lines[2] else {
+            panic!("{raw}: {:?}", lines[2]);
+        };
+        assert_eq!(
+            (&*option.as_str(), &*value.as_str()),
+            ("after", "ok"),
+            "{raw}"
+        );
+        assert_eq!(config.dump_str(), text, "{raw}");
+    }
+}
+
+#[test]
+fn test_libuci_statements() {
+    let arena = Arena::new();
+    let text = "package network\n\
+                c interface lan # trailing\n\
+                \to proto static\n\
+                \tl dns 1.1.1.1; l dns 9.9.9.9\n\
+                \toption key abc#def\n\
+                \toption q 'x'#c\n\
+                \toption empty\n";
+    let config = Config::parse_str(&arena, text).unwrap();
+    assert!(matches!(
+        config.prefix[0],
+        Line::Package { name, .. } if name.as_str() == "network"
+    ));
+    let section = &config.sections[0];
+    assert_eq!(section.ty(), "interface");
+    assert_eq!(section.name().unwrap(), "lan");
+    let values: Vec<(String, String)> = section
+        .lines
+        .iter()
+        .filter_map(|line| match line {
+            Line::Option { option, value, .. } => {
+                Some((option.unquoted_string(), value.unquoted_string()))
+            }
+            Line::List { list, item, .. } => Some((list.unquoted_string(), item.unquoted_string())),
+            _ => None,
+        })
+        .collect();
+    let expected = [
+        ("proto", "static"),
+        ("dns", "1.1.1.1"),
+        ("dns", "9.9.9.9"),
+        ("key", "abc"),
+        ("q", "x"),
+        ("empty", ""),
+    ]
+    .map(|(k, v)| (k.to_string(), v.to_string()));
+    assert_eq!(values, expected);
+    assert_eq!(
+        config.dump_str(),
+        "package network\n\
+         config interface lan # trailing\n\
+         \toption proto static\n\
+         \tlist dns 1.1.1.1\n\
+         \tlist dns 9.9.9.9\n\
+         \toption key abc #def\n\
+         \toption q 'x' #c\n\
+         \toption empty ''\n"
+    );
+}
+
+#[test]
+fn test_libuci_error_lines() {
+    let arena = Arena::new();
+    let text = "config a\n\toption v 'one\ntwo'\n\toption bad 'x' 'y'\n";
+    match Config::parse_str(&arena, text) {
+        Err(Error::BadOption {
+            src: Source::UnknownLine(3),
+            ..
+        }) => {}
+        other => panic!("{:?}", other.err()),
+    }
+    for text in [
+        "config a\n\toption v 'open\n",
+        "config a\n\toption v \"open\n",
+    ] {
+        assert!(
+            matches!(
+                Config::parse_str(&arena, text),
+                Err(Error::BadOption { .. })
+            ),
+            "{text:?}"
+        );
+    }
+}
+
+#[test]
+fn test_written_values_round_trip() {
+    let values = [
+        "Rich's Wi-Fi",
+        "it's 'quoted'",
+        r"back\slash",
+        "two\nlines",
+        "tab\there",
+        r#"say "hi""#,
+        "hash # semi ;",
+        "",
+        "émoji 🚀",
+    ];
+    for value in values {
+        let arena = Arena::new();
+        let mut config = Config::new(&arena);
+        let mut section = Section::new(&arena, "test", Some("x"));
+        section
+            .lines
+            .push(Line::option_from_display("v", value, &arena));
+        config.sections.push(section);
+        let text: &str = arena.alloc(config.dump_str());
+        let parsed = Config::parse_str(&arena, text).unwrap_or_else(|e| panic!("{text}: {e}"));
+        let Some(Line::Option { value: read, .. }) = parsed.sections[0]
+            .lines
+            .iter()
+            .find(|line| matches!(line, Line::Option { .. }))
+        else {
+            panic!("{text}");
+        };
+        assert_eq!(read.as_str(), value, "{text}");
+    }
+    let arena = Arena::new();
+    assert_eq!(
+        Token::from_string("Rich's Wi-Fi".into(), &arena).to_string(),
+        r"'Rich'\''s Wi-Fi'"
+    );
+    assert_eq!(Token::from_str("a b", &arena).to_string(), "'a b'");
+}
+
+#[test]
+fn test_backslash_at_end_of_input() {
+    let arena = Arena::new();
+    let config = Config::parse_str(&arena, "config a\n\toption v abc\\").unwrap();
+    let Line::Option { value, .. } = config.sections[0].lines[1] else {
+        panic!("{:?}", config.sections[0].lines[1]);
+    };
+    assert_eq!(value.as_str(), "abc");
+    assert_eq!(Token::from_str("", &arena).to_string(), "''");
+}
+
+#[test]
+fn test_eof_escape_does_not_consume_an_appended_option() {
+    for (raw, expected, written) in [
+        (r"abc\", "abc", "'abc'"),
+        (r"'abc'\", "abc", "'abc'"),
+        (r"abc\\", r"abc\", r"abc\\"),
+        (r"\", "", "''"),
+        ("abc\\\r", "abc\r", "'abc\r'"),
+    ] {
+        let arena = Arena::new();
+        let original: &str = arena.alloc(format!("config a\n\toption v {raw}"));
+        let mut config = Config::parse_str(&arena, original).unwrap();
+        config.sections[0]
+            .lines
+            .push(Line::option_from_display("after", "ok", &arena));
+        let dumped: &str = arena.alloc(config.dump_str());
+        let mut bytes = Vec::new();
+        config.dump_io(&mut bytes).unwrap();
+        assert_eq!(bytes, dumped.as_bytes());
+        assert_eq!(
+            dumped,
+            format!("config a\n\toption v {written}\n\toption after 'ok'\n"),
+            "{raw:?}"
+        );
+        let parsed = Config::parse_str(&arena, dumped).unwrap();
+        let values: Vec<_> = parsed.sections[0]
+            .lines
+            .iter()
+            .filter_map(|line| match line {
+                Line::Option { option, value, .. } => {
+                    Some((option.unquoted_string(), value.unquoted_string()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            values,
+            vec![
+                ("v".to_string(), expected.to_string()),
+                ("after".to_string(), "ok".to_string()),
+            ],
+            "{raw:?}"
+        );
+    }
+}
+
+#[test]
+fn test_plain_quoted_value_borrows() {
+    let Line::Option { value, .. } = Line::parse("\toption v 'a \"b\" \\c'", 0).unwrap() else {
+        panic!("expected an option");
+    };
+    assert!(matches!(
+        value.as_str(),
+        std::borrow::Cow::Borrowed(r#"a "b" \c"#)
     ));
 }
 
@@ -266,30 +614,225 @@ fn test_token_functionality() {
     assert_eq!(token_sq_needed.as_str(), "hello world");
     assert_eq!(format!("{}", token_sq_needed), "'hello world'");
 
-    let token_sq_manual = Token::Sq(SingleQuoted { inner: "sq word" });
-    assert_eq!(token_sq_manual.as_str(), "sq word");
-    assert_eq!(format!("{}", token_sq_manual), "'sq word'");
+    let Line::Option {
+        value: token_sq_parsed,
+        ..
+    } = Line::parse("\toption a 'sq word'", 0).unwrap()
+    else {
+        panic!("expected an option");
+    };
+    assert_eq!(token_sq_parsed.as_str(), "sq word");
+    assert_eq!(format!("{}", token_sq_parsed), "'sq word'");
 
     assert_eq!(Token::from_bool(true).as_str(), "1");
     assert_eq!(Token::from_bool(false).as_str(), "0");
 
-    assert!(Token::from_str("true", &arena).parse_bool(0).unwrap());
-    assert!(!Token::from_str("0", &arena).parse_bool(0).unwrap());
+    assert!(Token::from_str("true", &arena).parse_bool("b").unwrap());
+    assert!(!Token::from_str("0", &arena).parse_bool("b").unwrap());
     assert!(matches!(
-        Token::from_str("maybe", &arena).parse_bool(0),
-        Err(Error::ValueBoolean { .. })
+        Token::from_str("maybe", &arena).parse_bool("b"),
+        Err(Error::InvalidValue { option, found, .. }) if option == "b" && found == "maybe"
     ));
 
     assert_eq!(
         Token::from_str("123", &arena)
-            .parse_fromstr::<i32>(0)
+            .parse_fromstr::<i32>("n")
             .unwrap(),
         123
     );
     assert!(matches!(
-        Token::from_str("abc", &arena).parse_fromstr::<i32>(0),
-        Err(Error::ValueMsg { .. })
+        Token::from_str("abc", &arena).parse_fromstr::<i32>("n"),
+        Err(Error::InvalidValue {
+            src: Source::Unknown,
+            ..
+        })
     ));
+}
+
+/// Typed-read failures name the file line, option, and value.
+#[test]
+fn test_typed_read_errors_are_located() {
+    let arena = Arena::new();
+    let text = "# header\n\nconfig bar 'x'\n\toption always 'zero'\n\nconfig requiredfield 'y'\n";
+    let config = Config::parse_str(&arena, text).unwrap();
+    match config.sections[0].get::<Bar>() {
+        Err(Error::InvalidValue {
+            src: Source::UnknownLine(3),
+            option,
+            found,
+            ..
+        }) => assert_eq!((option.as_str(), found.as_str()), ("always", "zero")),
+        other => panic!("{:?}", other.err()),
+    }
+    match config.sections[1].get::<RequiredField>() {
+        Err(Error::MissingOption {
+            src: Source::UnknownLine(5),
+            missing,
+        }) => assert_eq!(missing, "must_exist"),
+        other => panic!("{:?}", other.err()),
+    }
+    match config.sections[1].get::<Bar>() {
+        Err(Error::ExpectedSectionType {
+            src: Source::UnknownLine(5),
+            ..
+        }) => {}
+        other => panic!("{:?}", other.err()),
+    }
+    let bytes_err = Config::parse_str(&arena, "config a\n\toption b 'c' 'd'\n")
+        .err()
+        .unwrap()
+        .map_src(|src| match src {
+            Source::UnknownLine(n) => Source::Line("wireless".into(), n),
+            src => src,
+        });
+    assert_eq!(bytes_err.src().line(), Some(1));
+    assert!(bytes_err.to_string().contains("wireless:2"), "{bytes_err}");
+}
+
+#[derive(TypedSection, PartialEq, Eq, Debug, Default)]
+#[uci(ty = "host")]
+struct ListedHost {
+    #[uci(default, accept_list)]
+    mac: String,
+    #[uci(default)]
+    name: Option<String>,
+}
+
+#[test]
+fn test_accept_list_reads_and_rewrites_first_item() {
+    let arena = Arena::new();
+    let text = "config host\n\toption name 'nas'\n\tlist mac 'AA'\n\tlist mac 'BB'\n";
+    let mut config = Config::parse_str(&arena, text).unwrap();
+    let host: ListedHost = config.sections[0].get().unwrap();
+    assert_eq!(host.mac, "AA");
+    config.sections[0]
+        .set(&ListedHost {
+            mac: "CC".into(),
+            name: Some("nas".into()),
+        })
+        .unwrap();
+    assert_eq!(
+        config.dump_str(),
+        "config host\n\toption name 'nas'\n\toption mac 'CC'\n\tlist mac 'BB'\n"
+    );
+}
+
+#[derive(TypedSection, PartialEq, Eq, Debug, Default)]
+#[uci(ty = "rule")]
+struct ListedRule {
+    proto: Vec<String>,
+    #[uci(accept_list)]
+    ipaddr: Option<String>,
+}
+
+#[test]
+fn test_list_field_reads_an_option_as_words() {
+    let arena = Arena::new();
+    let text = "config rule
+	option proto 'tcp udp'
+	option x '1'
+";
+    let mut config = Config::parse_str(&arena, text).unwrap();
+    let rule: ListedRule = config.sections[0].get().unwrap();
+    assert_eq!(rule.proto, vec!["tcp", "udp"]);
+    config.sections[0]
+        .set(&ListedRule {
+            proto: vec!["udp".into(), "icmp".into()],
+            ipaddr: None,
+        })
+        .unwrap();
+    assert_eq!(
+        config.dump_str(),
+        "config rule
+	list proto 'udp'
+	option x '1'
+	list proto 'icmp'
+"
+    );
+    config.sections[0].set(&ListedRule::default()).unwrap();
+    assert_eq!(
+        config.dump_str(),
+        "config rule
+	option x '1'
+"
+    );
+}
+
+#[test]
+fn test_option_after_list_replaces_it() {
+    let arena = Arena::new();
+    let text = "config rule
+	list proto 'tcp'
+	option proto 'udp'
+	list proto 'icmp'
+";
+    let config = Config::parse_str(&arena, text).unwrap();
+    let rule: ListedRule = config.sections[0].get().unwrap();
+    assert_eq!(rule.proto, vec!["udp", "icmp"]);
+}
+
+#[test]
+fn test_accept_list_option_wins_over_list_items() {
+    let arena = Arena::new();
+    let text = "config rule\n\tlist ipaddr '10.0.1.1/24'\n\tlist ipaddr '10.0.4.1/24'\n\toption ipaddr '10.0.0.1'\n\tlist ipaddr '10.0.3.1/24'\n";
+    let mut config = Config::parse_str(&arena, text).unwrap();
+    let rule: ListedRule = config.sections[0].get().unwrap();
+    assert_eq!(rule.ipaddr.as_deref(), Some("10.0.0.1"));
+    config.sections[0]
+        .set(&ListedRule {
+            proto: vec![],
+            ipaddr: Some("10.0.2.1".into()),
+        })
+        .unwrap();
+    assert_eq!(
+        config.dump_str(),
+        "config rule\n\toption ipaddr '10.0.2.1'\n\tlist ipaddr '10.0.3.1/24'\n"
+    );
+}
+
+#[test]
+fn test_accept_list_optional_keeps_later_items() {
+    let arena = Arena::new();
+    let text = "config rule
+	list ipaddr '10.0.0.1/24'
+	list ipaddr '10.0.1.1/24'
+";
+    let mut config = Config::parse_str(&arena, text).unwrap();
+    let rule: ListedRule = config.sections[0].get().unwrap();
+    assert_eq!(rule.ipaddr.as_deref(), Some("10.0.0.1/24"));
+    config.sections[0]
+        .set(&ListedRule {
+            proto: vec![],
+            ipaddr: Some("10.0.2.1/24".into()),
+        })
+        .unwrap();
+    assert_eq!(
+        config.dump_str(),
+        "config rule
+	option ipaddr '10.0.2.1/24'
+	list ipaddr '10.0.1.1/24'
+"
+    );
+    config.sections[0].set(&ListedRule::default()).unwrap();
+    assert_eq!(
+        config.dump_str(),
+        "config rule
+	list ipaddr '10.0.1.1/24'
+"
+    );
+}
+
+#[test]
+fn test_ipv4_address_forms() {
+    use crate::openwrt::Ipv4Address;
+    let bare: Ipv4Address = "192.168.1.1".parse().unwrap();
+    assert_eq!(bare.prefix, None);
+    assert_eq!(bare.to_string(), "192.168.1.1");
+    let cidr: Ipv4Address = "192.168.1.1/24".parse().unwrap();
+    assert_eq!(cidr.prefix, Some(24));
+    assert_eq!(cidr.to_string(), "192.168.1.1/24");
+    assert!("192.168.1.1/33".parse::<Ipv4Address>().is_err());
+    assert!("192.168.1/24".parse::<Ipv4Address>().is_err());
 }
 
 #[derive(TypedSection, PartialEq, Eq, Debug)]
@@ -556,7 +1099,7 @@ fn test_round_trip_complex_config() {
     list items 'item2 with spaces'
     option enabled '1'
     option old_flag '0'
-    option with_quotes "'custom'"
+    option with_quotes ''\''custom'\'''
 
 config complexsection second
     option name 'Section Two'
