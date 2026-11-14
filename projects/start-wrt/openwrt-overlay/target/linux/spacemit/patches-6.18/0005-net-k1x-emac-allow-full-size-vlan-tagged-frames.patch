@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jesse Markowitz <JesseMarkowitz@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 12:00:00 -0400
+Subject: [PATCH] net: k1x-emac: allow full-size VLAN-tagged frames
+
+The vendor k1x-emac driver never programs MAC_MAXIMUM_FRAME_SIZE (0x10c),
+so it keeps its reset default of 1518 bytes: the untagged maximum. An
+802.1Q tag adds 4 bytes, so every full-size tagged frame (1522) is counted
+in rx_len_oversize_pkts / rx_1519_plus_pkts and dropped by the MAC before
+the driver sees it. rx_dropped never moves. Small packets pass, so the
+link looks healthy while TCP stalls on its first full-size segment.
+
+Measured on a K1 with eth0 as a VLAN trunk to a managed switch: pings
+carrying 1468 bytes of data (1518-byte tagged frame) pass; 1469 bytes and
+up fail, and each lost reply increments rx_len_oversize_pkts. ethtool -d
+reads 0x5ee at 0x10c.
+
+Set the limit from the MTU plus room for two VLAN tags, as the mainline
+k1_emac driver does. emac_init_hw() runs from emac_up(), so the limit
+follows an MTU change made while the interface is down. The TX/RX jabber
+sizes (reset default 0x600 = 1536) already cover a tagged frame at the
+1500-byte maximum MTU this driver allows.
+
+Signed-off-by: Jesse Markowitz <JesseMarkowitz@users.noreply.github.com>
+---
+ drivers/net/ethernet/spacemit/k1x-emac.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/drivers/net/ethernet/spacemit/k1x-emac.c b/drivers/net/ethernet/spacemit/k1x-emac.c
+--- a/drivers/net/ethernet/spacemit/k1x-emac.c
++++ b/drivers/net/ethernet/spacemit/k1x-emac.c
+@@ -12,6 +12,7 @@
+ #include <linux/delay.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/etherdevice.h>
++#include <linux/if_vlan.h>
+ #include <linux/ethtool.h>
+ #include <linux/dma-direct.h>
+ #include <linux/in.h>
+@@ -301,6 +302,15 @@
+ 
+ 	emac_wr(priv, MAC_RECEIVE_PACKET_START_THRESHOLD, priv->rx_threshold);
+ 
++	/*
++	 * The reset default MAC_MAXIMUM_FRAME_SIZE is 1518, the untagged
++	 * maximum, so the MAC drops every full-size 802.1Q-tagged frame (1522)
++	 * in hardware. Leave room for two VLAN tags, as the mainline k1_emac
++	 * driver does.
++	 */
++	emac_wr(priv, MAC_MAXIMUM_FRAME_SIZE,
++		priv->ndev->mtu + ETH_HLEN + 2 * VLAN_HLEN + ETH_FCS_LEN);
++
+ 	/* set emac rx mitigation frame count */
+ 	val = EMAC_RX_FRAMES & MREGBIT_RECEIVE_IRQ_FRAME_COUNTER_MSK;
+ 
