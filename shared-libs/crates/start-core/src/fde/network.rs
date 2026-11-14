@@ -236,6 +236,7 @@ mod tests {
                     BindInfo::new(
                         &mut ports,
                         BindOptions {
+                            transport: Default::default(),
                             preferred_external_port: port,
                             add_ssl: None,
                             secure: None,

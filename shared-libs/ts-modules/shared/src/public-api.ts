@@ -31,6 +31,7 @@ export * from './pipes/markdown.pipe'
 export * from './pipes/leaf-progress.pipe'
 
 export * from './services/auth-key.service'
+export * from './services/rpc-console-log'
 export * from './services/rpc-socket.service'
 export * from './services/server-identity.service'
 export * from './services/database-subscription'

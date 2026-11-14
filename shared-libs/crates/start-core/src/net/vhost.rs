@@ -44,6 +44,7 @@ use crate::net::http::ForwardedHeaders;
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::ssl::{CertBranding, RootCaTlsHandler};
 use crate::net::tls::{TlsHandler, TlsHandlerAction, TlsListener, TlsMetadata};
+use crate::net::transport::Transport;
 use crate::net::utils::{
     bind_mio_listener, gua_ips, ipv6_is_link_local, ipv6_is_local, is_private_client,
 };
@@ -556,7 +557,7 @@ impl VHostController {
             for (ip, port, hostname) in take_ownership(owners, owner, want) {
                 match hostname {
                     Some(h) => self.port_map.remove_hostname(ip, port, h.to_string()),
-                    None => self.port_map.remove(ip, port),
+                    None => self.port_map.remove(ip, port, Transport::tcp()),
                 }
             }
         });
@@ -570,9 +571,13 @@ impl VHostController {
                         gateways.clone(),
                         h.to_string(),
                     ),
-                    None => self
-                        .port_map
-                        .ensure(*ip, *port, *internal, gateways.clone()),
+                    None => self.port_map.ensure(
+                        *ip,
+                        *port,
+                        *internal,
+                        gateways.clone(),
+                        Transport::tcp(),
+                    ),
                 }
             }
         }

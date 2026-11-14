@@ -3196,6 +3196,13 @@ registry.package.sign.commitment-not-found:
   pl_PL: "%{id}@%{version} nie zawiera s9pk o sighash %{sighash}"
 
 # registry/package/index.rs
+registry.package.icon.hash-mismatch:
+  en_US: "icon bytes do not match %{name}"
+  de_DE: "Symboldaten stimmen nicht mit %{name} überein"
+  es_ES: "los bytes del icono no coinciden con %{name}"
+  fr_FR: "les octets de l'icône ne correspondent pas à %{name}"
+  pl_PL: "dane ikony nie odpowiadają %{name}"
+
 registry.package.icon.invalid-name:
   en_US: "invalid package icon name: %{name}"
   de_DE: "Ungültiger Paketsymbolname: %{name}"
@@ -3248,6 +3255,13 @@ registry.package.signer.not-authorized:
   pl_PL: "Sygnatariusz %{signer} nie jest autoryzowany do podpisywania %{id}"
 
 # registry/sync.rs
+registry.mirror.read-only:
+  en_US: "This registry mirrors %{upstream}; make index changes there"
+  de_DE: "Dieses Registry spiegelt %{upstream}; nehmen Sie Indexänderungen dort vor"
+  es_ES: "Este registro refleja %{upstream}; realice los cambios del índice allí"
+  fr_FR: "Ce registre est un miroir de %{upstream} ; modifiez l'index sur celui-ci"
+  pl_PL: "Ten rejestr odzwierciedla %{upstream}; wprowadzaj zmiany indeksu tam"
+
 registry.sync.closed:
   en_US: "Registry connection closed"
   de_DE: "Registry-Verbindung geschlossen"
@@ -5120,6 +5134,13 @@ help.arg.registry-name:
   fr_FR: "Nom du registre"
   pl_PL: "Nazwa rejestru"
 
+help.arg.registry-mirror-of:
+  en_US: "Registry URL to mirror; this registry's index becomes read-only"
+  de_DE: "URL des zu spiegelnden Registrys; der Index dieses Registrys wird schreibgeschützt"
+  es_ES: "URL del registro que se reflejará; el índice de este registro pasa a ser de solo lectura"
+  fr_FR: "URL du registre à mettre en miroir ; l'index de ce registre passe en lecture seule"
+  pl_PL: "URL rejestru do odzwierciedlenia; indeks tego rejestru staje się tylko do odczytu"
+
 help.arg.registry-startwrt:
   en_US: "Serve StartWRT clients"
   de_DE: "StartWRT-Clients bedienen"
@@ -5967,13 +5988,6 @@ help.arg.tunnel-name:
   es_ES: "Nombre del túnel"
   fr_FR: "Nom du tunnel"
   pl_PL: "Nazwa tunelu"
-
-help.arg.version-headline:
-  en_US: "Short headline for the version"
-  de_DE: "Kurze Überschrift für die Version"
-  es_ES: "Título corto para la versión"
-  fr_FR: "Titre court pour la version"
-  pl_PL: "Krótki nagłówek dla wersji"
 
 help.arg.wifi-enabled:
   en_US: "Enable or disable WiFi"

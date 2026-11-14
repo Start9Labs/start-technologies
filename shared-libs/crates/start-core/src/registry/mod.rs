@@ -41,6 +41,7 @@ pub mod os;
 pub mod package;
 pub mod signer;
 pub mod sync;
+pub mod upstream;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -136,6 +137,7 @@ pub fn registry_api<C: Context>() -> ParentHandler<C> {
 
 pub(crate) fn registry_server(ctx: RegistryContext) -> rpc_toolkit::HttpServer<RegistryContext> {
     Server::new(move || ready(Ok(ctx.clone())), registry_api())
+        .middleware(upstream::MirrorGuard)
         .middleware(Auth::new().with_local_auth().with_signature_auth())
         .middleware(DeviceInfoMiddleware::new())
 }
