@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import '@angular/compiler'
 import { DOCUMENT, Injector } from '@angular/core'
+import { WA_WINDOW } from '@ng-web-apis/common'
 import { auth } from '@start9labs/start-core'
 import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
 import { ReplaySubject } from 'rxjs'
@@ -12,6 +13,8 @@ const { RpcSocketService } =
 const { AuthKeyService, AUTH_SIGNING_HOST } =
   await import('../src/services/auth-key.service.ts')
 const { RELATIVE_URL } = await import('../src/tokens/relative-url.ts')
+const { RPC_CONSOLE_LOG_GLOBAL, RpcConsoleLog } =
+  await import('../src/services/rpc-console-log.ts')
 const { ServerIdentityService } =
   await import('../src/services/server-identity.service.ts')
 
@@ -42,7 +45,32 @@ class Socket extends EventTarget {
   send() {}
 }
 
-async function fixture(context) {
+class MemoryStorage extends Map {
+  getItem(key) {
+    return this.get(key) ?? null
+  }
+  setItem(key, value) {
+    this.set(key, String(value))
+  }
+  removeItem(key) {
+    this.delete(key)
+  }
+}
+
+function browserWindow(storage = new MemoryStorage()) {
+  return { crypto, localStorage: storage }
+}
+
+function consoleLines(context) {
+  const lines = []
+  for (const level of ['log', 'warn'])
+    context.mock.method(console, level, (message, value) =>
+      lines.push({ level, message, value }),
+    )
+  return lines
+}
+
+async function fixture(context, window = browserWindow()) {
   const original = globalThis.WebSocket
   globalThis.WebSocket = Socket
   context.after(() => {
@@ -58,14 +86,16 @@ async function fixture(context) {
   let historyInjections = 0
   const injector = Injector.create({
     providers: [
+      RpcConsoleLog,
       RpcSocketService,
       {
         provide: DOCUMENT,
         useValue: {
           location: { origin: 'https://server.test' },
-          defaultView: { crypto },
+          defaultView: window,
         },
       },
+      { provide: WA_WINDOW, useValue: window },
       { provide: RELATIVE_URL, useValue: '/rpc/v1' },
       { provide: AUTH_SIGNING_HOST, useValue: 'server.test' },
       {
@@ -89,7 +119,12 @@ async function fixture(context) {
     service.disconnect()
     injector.destroy()
   })
-  return { service, lease, historyInjections: () => historyInjections }
+  return {
+    service,
+    lease,
+    window,
+    historyInjections: () => historyInjections,
+  }
 }
 const body = '{"method":"echo","params":{}}'
 const network = error => assert.equal(error.code, 0)
@@ -127,8 +162,8 @@ class LogicalSocket {
   }
 }
 
-async function streamFixture(context) {
-  const result = await fixture(context)
+async function streamFixture(context, window) {
+  const result = await fixture(context, window)
   LogicalSocket.instances = []
   const opened = new ReplaySubject(1)
   const subject = webSocket({
@@ -154,6 +189,100 @@ async function streamFixture(context) {
 
 const version = SESSION_PROFILE.transport.rpcStreamVersion
 const tick = () => new Promise(setImmediate)
+
+test('RPC console logging is off until enabled from the console global', async context => {
+  const { service, lease, window } = await streamFixture(context)
+  const lines = consoleLines(context)
+  const pending = service.message(body, {}, lease)
+  await tick()
+  const socket = LogicalSocket.instances[0]
+  socket.receive({ jsonrpc: '2.0', id: socket.writes[0].id, result: 'quiet' })
+  await pending
+  assert.deepEqual(lines, [])
+  assert.equal(typeof window[RPC_CONSOLE_LOG_GLOBAL].enable, 'function')
+})
+
+test('enabled RPC console logging prints decrypted requests, replies and stream frames', async context => {
+  const { service, lease, window } = await streamFixture(context)
+  const lines = consoleLines(context)
+  window[RPC_CONSOLE_LOG_GLOBAL].enable()
+  lines.length = 0
+  const call = service.message(
+    '{"method":"server.echo","params":{"message":"hi"}}',
+    {},
+    lease,
+  )
+  const failed = service.message(
+    '{"method":"auth.reset","params":{}}',
+    {},
+    lease,
+  )
+  const stream = service.stream('{"method":"db.subscribe","params":{}}', lease)
+  await tick()
+  const socket = LogicalSocket.instances[0]
+  const [echo, reset, subscribe] = socket.writes
+  socket.receive({ jsonrpc: '2.0', id: echo.id, result: 'hi' })
+  const error = { code: 34, message: 'denied' }
+  socket.receive({ jsonrpc: '2.0', id: reset.id, error })
+  socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: 'initial' })
+  const item = { rpcstream: version, id: subscribe.id, result: 1, end: false }
+  socket.receive(item)
+  await call
+  await failed
+  await stream
+
+  const forId = id =>
+    lines.filter(line => line.message.includes(id.slice(0, 8)))
+  const echoed = forId(echo.id)
+  assert.deepEqual(
+    echoed.map(({ level, value }) => [level, value]),
+    [
+      ['log', { message: 'hi' }],
+      ['log', { jsonrpc: '2.0', id: echo.id, result: 'hi' }],
+    ],
+  )
+  assert.match(echoed[0].message, /server\.echo →$/)
+  assert.match(echoed[1].message, /server\.echo ← \d+ ms$/)
+  assert.deepEqual(
+    forId(reset.id).map(({ level, value }) => [level, value]),
+    [
+      ['log', {}],
+      ['warn', { jsonrpc: '2.0', id: reset.id, error }],
+    ],
+  )
+  assert.deepEqual(
+    forId(subscribe.id).map(({ value }) => value),
+    [{}, { jsonrpc: '2.0', id: subscribe.id, result: 'initial' }, item],
+  )
+})
+
+test('RPC console logging persists across page loads until disabled', async context => {
+  const storage = new MemoryStorage()
+  const first = await fixture(context, browserWindow(storage))
+  const lines = consoleLines(context)
+  first.window[RPC_CONSOLE_LOG_GLOBAL].enable()
+
+  const { service, lease, window } = await streamFixture(
+    context,
+    browserWindow(storage),
+  )
+  lines.length = 0
+  const logged = service.message(body, {}, lease)
+  await tick()
+  const socket = LogicalSocket.instances[0]
+  socket.receive({ jsonrpc: '2.0', id: socket.writes[0].id, result: null })
+  await logged
+  assert.equal(lines.length, 2)
+
+  window[RPC_CONSOLE_LOG_GLOBAL].disable()
+  lines.length = 0
+  const quiet = service.message(body, {}, lease)
+  await tick()
+  const next = LogicalSocket.instances.at(-1)
+  next.receive({ jsonrpc: '2.0', id: next.writes.at(-1).id, result: null })
+  await quiet
+  assert.deepEqual(lines, [])
+})
 
 test('verified peer observation belongs to each operation, including reuse and authorization rejection, not startup transport', async context => {
   const { service, lease, historyInjections } = await streamFixture(context)
