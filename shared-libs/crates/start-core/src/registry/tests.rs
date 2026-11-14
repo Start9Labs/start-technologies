@@ -59,18 +59,22 @@ pub(crate) async fn fixture() -> (tempfile::TempDir, RegistryContext, Signer, Si
 }
 
 pub(crate) async fn server(ctx: RegistryContext) -> (Url, NonDetachingJoinHandle<()>) {
+    serve(registry_router(ctx)).await
+}
+
+pub(crate) async fn serve(router: Router) -> (Url, NonDetachingJoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/", listener.local_addr().unwrap())
         .parse()
         .unwrap();
     let task = tokio::spawn(async move {
-        axum::serve(listener, registry_router(ctx)).await.unwrap();
+        axum::serve(listener, router).await.unwrap();
     })
     .into();
     (url, task)
 }
 
-async fn rpc(url: &Url, method: &str, params: Value, signer: Option<&Signer>) -> Value {
+pub(crate) async fn rpc(url: &Url, method: &str, params: Value, signer: Option<&Signer>) -> Value {
     let body =
         serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}))
             .unwrap();

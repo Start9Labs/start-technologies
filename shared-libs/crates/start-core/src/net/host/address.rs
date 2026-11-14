@@ -753,6 +753,7 @@ mod test {
     fn range(external_start_port: u16) -> RangeBindInfo {
         RangeBindInfo {
             enabled: true,
+            transport: Default::default(),
             external_start_port,
             number_of_ports: 3,
             addresses: DerivedAddressInfo::default(),
@@ -769,6 +770,7 @@ mod test {
         BindInfo::new(
             &mut AvailablePorts::new(),
             BindOptions {
+                transport: Default::default(),
                 preferred_external_port: port,
                 add_ssl: ssl_port.map(|preferred_external_port| AddSslOptions {
                     preferred_external_port,
@@ -926,6 +928,9 @@ mod test {
                 sibling
                     .disabled
                     .remove(&(InternedString::intern(FQDN), 43000));
+                for range in ranges.values_mut() {
+                    range.addresses.refresh_effective();
+                }
                 Ok(())
             })
             .unwrap();

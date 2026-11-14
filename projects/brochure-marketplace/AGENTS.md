@@ -32,7 +32,7 @@ Run `npm run check:brochure` and `make web-format-check` before pushing changes 
 
 - **Dev vs prod data source.** `app.config.ts` picks the API impl from `environment.production`: dev → `MockApiService` (fixtures in `src/app/services/api.fixures.ts`), prod → `LiveApiService` (real RPC). When testing data-shape changes, update the fixtures or you'll see stale/empty results in dev.
 - **`build:deps` is a prerequisite.** The app resolves `@start9labs/start-core` from `shared-libs/ts-modules/start-core/dist` and transitively needs the patch-db client. A fresh checkout that skips `build:deps` fails the brochure build/type-check.
-- **Registry state lives in `MarketplaceService`** (`src/app/services/marketplace.service.ts`), which extends `AbstractMarketplaceService` from the shared lib. Custom registries persist in `localStorage` under the `_startos/` prefix. Don't add a parallel state store.
+- **Registry state lives in `MarketplaceService`** (`src/app/services/marketplace.service.ts`), which extends `AbstractMarketplaceService` from the shared lib. The `?registry=` query param is the browsed registry; `localStorage` (under the `_startos/` prefix) holds the last selection and the picker's one custom slot. Don't add a parallel state store.
 - **The `start9-frontend` skill** at the repo root (`.claude/skills/start9-frontend/`) carries all Angular/Taiga house style, including mandatory i18n — read it before UI work; the skill wins over older docs and existing code.
 - **Public deploy.** A merge to `master` touching `projects/brochure-marketplace/**` (or its shared deps) ships to production immediately. Test the production build locally before merging.
 

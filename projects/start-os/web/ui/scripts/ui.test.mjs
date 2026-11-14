@@ -241,6 +241,7 @@ const {
   i18nPipe,
   i18nService,
 } = await import('@start9labs/shared')
+const { TUI_BREAKPOINT } = await import('@taiga-ui/core')
 const { CONTEXT } = await import('@taiga-ui/polymorpheus')
 const { WA_WINDOW } = await import('@ng-web-apis/common')
 const { UiUpdateService } = await import('src/app/services/ui-update.service')
@@ -1820,6 +1821,7 @@ function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
   const injector = createEnvironmentInjector([
     AddSourceService,
     BackupService,
+    { provide: TUI_BREAKPOINT, useValue: () => 'desktopLarge' },
     { provide: OSService, useValue: { backingUp$: of(false) } },
     {
       provide: ActivatedRoute,
@@ -3985,7 +3987,7 @@ test('a late registry cache update cannot restore a removed registry', async t =
   )
   const subscription = service.marketplace$.subscribe()
   t.after(() => subscription.unsubscribe())
-  await service.delete('https://registry.test')
+  await service.removeRegistry('https://registry.test')
   metadata.next({
     'https://registry.test/': {
       status: 'connected',
