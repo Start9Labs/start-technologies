@@ -1522,7 +1522,27 @@ disk.mount.binding:
   fr_FR: "Liaison de %{src} à %{dst}"
   pl_PL: "Wiązanie %{src} do %{dst}"
 
-# install/mod.rs
+install.invalid-min-max:
+  en_US: 'Must be one of "min", "max".'
+  de_DE: 'Muss entweder "min" oder "max" sein.'
+  es_ES: 'Debe ser "min" o "max".'
+  fr_FR: 'Doit être "min" ou "max".'
+  pl_PL: 'Musi to być "min" lub "max".'
+
+install.select-version:
+  en_US: "Multiple flavors of %{id} found. Please select one of the following versions to install:"
+  de_DE: "Mehrere Varianten von %{id} gefunden. Bitte eine der folgenden Versionen zur Installation auswählen:"
+  es_ES: "Se encontraron varias variantes de %{id}. Seleccione una de las siguientes versiones para instalar:"
+  fr_FR: "Plusieurs variantes de %{id} ont été trouvées. Sélectionnez une des versions suivantes à installer :"
+  pl_PL: "Znaleziono kilka wariantów %{id}. Wybierz jedną z następujących wersji do zainstalowania:"
+
+install.sideloading:
+  en_US: "Sideloading"
+  de_DE: "Lokales Paket wird geladen"
+  es_ES: "Cargando paquete local"
+  fr_FR: "Chargement du paquet local"
+  pl_PL: "Wczytywanie pakietu lokalnego"
+
 install.version-not-found-on-registry:
   en_US: "No version of %{id} that satisfies %{version} is available from %{registry}"
   de_DE: "Keine Version von %{id}, die %{version} erfüllt, ist bei %{registry} verfügbar"
@@ -2973,6 +2993,27 @@ registry.db.pointer-outside-index:
   fr_FR: "Le pointeur d'abonnement doit être situé au niveau ou en dessous de /index"
   pl_PL: "Wskaźnik subskrypcji musi znajdować się w /index lub poniżej"
 
+registry.identity.changed:
+  en_US: "Warning: registry identity changed for %{target}.\nPrevious: %{previous}\nCurrent: %{current}\nThe connection continues. If this change was unexpected, verify the new fingerprint with the registry administrator through a trusted channel; it may indicate server replacement or interception."
+  de_DE: "Warnung: Die Registry-Identität für %{target} hat sich geändert.\nVorher: %{previous}\nJetzt: %{current}\nDie Verbindung wird fortgesetzt. Falls diese Änderung unerwartet war, bestätigen Sie den neuen Fingerabdruck beim Registry-Administrator über einen vertrauenswürdigen Kanal; sie kann auf einen Serveraustausch oder einen Abfangversuch hindeuten."
+  es_ES: "Advertencia: la identidad del registro ha cambiado para %{target}.\nAnterior: %{previous}\nActual: %{current}\nLa conexión continúa. Si no esperabas este cambio, verifica la nueva huella con el administrador del registro por un canal de confianza; puede indicar un reemplazo del servidor o una interceptación."
+  fr_FR: "Avertissement : l’identité du registre a changé pour %{target}.\nPrécédente : %{previous}\nActuelle : %{current}\nLa connexion continue. Si ce changement était inattendu, vérifiez la nouvelle empreinte auprès de l’administrateur du registre par un canal de confiance ; il peut signaler un remplacement du serveur ou une interception."
+  pl_PL: "Ostrzeżenie: zmieniła się tożsamość rejestru %{target}.\nPoprzednia: %{previous}\nObecna: %{current}\nPołączenie jest kontynuowane. Jeśli zmiana jest nieoczekiwana, zweryfikuj nowy odcisk z administratorem rejestru zaufanym kanałem; może oznaczać wymianę serwera lub przechwycenie połączenia."
+
+registry.identity.read-failed:
+  en_US: "Warning: could not read the remembered registry identity for %{target}: %{details}. The connection continues."
+  de_DE: "Warnung: Die gespeicherte Registry-Identität für %{target} konnte nicht gelesen werden: %{details}. Die Verbindung wird fortgesetzt."
+  es_ES: "Advertencia: no se pudo leer la identidad guardada del registro para %{target}: %{details}. La conexión continúa."
+  fr_FR: "Avertissement : impossible de lire l’identité mémorisée du registre pour %{target} : %{details}. La connexion continue."
+  pl_PL: "Ostrzeżenie: nie można odczytać zapamiętanej tożsamości rejestru %{target}: %{details}. Połączenie jest kontynuowane."
+
+registry.identity.write-failed:
+  en_US: "Warning: could not remember the verified registry identity for %{target}: %{details}. The connection continues."
+  de_DE: "Warnung: Die bestätigte Registry-Identität für %{target} konnte nicht gespeichert werden: %{details}. Die Verbindung wird fortgesetzt."
+  es_ES: "Advertencia: no se pudo guardar la identidad verificada del registro para %{target}: %{details}. La conexión continúa."
+  fr_FR: "Avertissement : impossible de mémoriser l’identité vérifiée du registre pour %{target} : %{details}. La connexion continue."
+  pl_PL: "Ostrzeżenie: nie można zapamiętać zweryfikowanej tożsamości rejestru %{target}: %{details}. Połączenie jest kontynuowane."
+
 # registry/os/asset/add.rs
 registry.os.asset.commitment-mismatch:
   en_US: "Commitment does not match"
@@ -3060,6 +3101,21 @@ registry.package.remove-not-exist:
   es_ES: "%{id}%{version}%{sighash} no existe, por lo que no se eliminó"
   fr_FR: "%{id}%{version}%{sighash} n'existe pas, donc non supprimé"
   pl_PL: "%{id}%{version}%{sighash} nie istnieje, więc nie usunięto"
+
+# registry/package/access.rs
+registry.package.access.not-reader:
+  en_US: "Signer %{signer} is not a reader of %{id}"
+  de_DE: "Unterzeichner %{signer} ist kein Leser von %{id}"
+  es_ES: "El firmante %{signer} no es lector de %{id}"
+  fr_FR: "Le signataire %{signer} n'est pas un lecteur de %{id}"
+  pl_PL: "Sygnatariusz %{signer} nie jest czytelnikiem %{id}"
+
+registry.package.access.private:
+  en_US: "Private"
+  de_DE: "Privat"
+  es_ES: "Privado"
+  fr_FR: "Privé"
+  pl_PL: "Prywatny"
 
 # registry/package/add.rs
 registry.package.add.must-specify-url:
@@ -3191,6 +3247,14 @@ registry.package.signer.not-authorized:
   fr_FR: "Le signataire %{signer} n'est pas autorisé à signer pour %{id}"
   pl_PL: "Sygnatariusz %{signer} nie jest autoryzowany do podpisywania %{id}"
 
+# registry/sync.rs
+registry.sync.closed:
+  en_US: "Registry connection closed"
+  de_DE: "Registry-Verbindung geschlossen"
+  es_ES: "Conexión con el registro cerrada"
+  fr_FR: "Connexion au registre fermée"
+  pl_PL: "Połączenie z rejestrem zostało zamknięte"
+
 # sign/commitment/request.rs
 sign.commitment.request.unsupported-type:
   en_US: "Unsupported request commitment type %{ty}"
@@ -3198,6 +3262,14 @@ sign.commitment.request.unsupported-type:
   es_ES: "Tipo de compromiso de solicitud no admitido %{ty}"
   fr_FR: "Type d'engagement de requête non pris en charge %{ty}"
   pl_PL: "Nieobsługiwany typ zobowiązania żądania %{ty}"
+
+# sign/instance.rs
+sign.instance.invalid-database:
+  en_US: "Server identity database must be an object"
+  de_DE: "Die Datenbank der Serveridentität muss ein Objekt sein"
+  es_ES: "La base de datos de identidad del servidor debe ser un objeto"
+  fr_FR: "La base de données d'identité du serveur doit être un objet"
+  pl_PL: "Baza danych tożsamości serwera musi być obiektem"
 
 # sign/mod.rs
 sign.context-too-long:
@@ -3658,6 +3730,13 @@ context.cli.not-logged-in:
   pl_PL: "Nie zalogowano do %{host}; wprowadź hasło serwera, aby się zalogować."
 
 # context/rpc.rs
+context.rpc.registry-sync-unavailable:
+  en_US: "Registry synchronization is unavailable"
+  de_DE: "Die Synchronisierung der Registry ist nicht verfügbar"
+  es_ES: "La sincronización del registro no está disponible"
+  fr_FR: "La synchronisation du registre est indisponible"
+  pl_PL: "Synchronizacja rejestru jest niedostępna"
+
 context.rpc.rpc-context-dropped:
   en_US: "RpcContext is dropped"
   de_DE: "RpcContext wurde verworfen"
@@ -3800,6 +3879,13 @@ middleware.auth.invalid-request-signature:
   es_ES: "firma de solicitud no válida: no es válida para ninguna identidad que este servidor reconozca (nombre de host, dominio o dirección IP); probablemente la solicitud se firmó para una identidad de servidor diferente o con un cliente incompatible"
   fr_FR: "signature de requête invalide : invalide pour toute identité reconnue par ce serveur (nom d'hôte, domaine ou adresse IP) ; la requête a probablement été signée pour une identité de serveur différente ou par un client incompatible"
   pl_PL: "nieprawidłowy podpis żądania: nieważny dla żadnej tożsamości rozpoznawanej przez ten serwer (nazwa hosta, domena lub adres IP); żądanie zostało prawdopodobnie podpisane dla innej tożsamości serwera lub przez niezgodnego klienta"
+
+middleware.auth.request-body-too-large:
+  en_US: "Request body exceeds the configured size limit"
+  de_DE: "Der Anfragekörper überschreitet die konfigurierte Größenbegrenzung"
+  es_ES: "El cuerpo de la solicitud supera el límite de tamaño configurado"
+  fr_FR: "Le corps de la requête dépasse la taille maximale configurée"
+  pl_PL: "Treść żądania przekracza skonfigurowany limit rozmiaru"
 
 middleware.auth.timestamp-not-within-30s:
   en_US: "timestamp not within 30s of now; check this device's clock and the server's clock"
@@ -4088,6 +4174,13 @@ auth.couldnt-decode-password:
   fr_FR: "Impossible de décoder le mot de passe"
   pl_PL: "Nie można zdekodować hasła"
 
+auth.encrypted-session-required:
+  en_US: "An encrypted session is required for this password"
+  de_DE: "Für dieses Passwort ist eine verschlüsselte Sitzung erforderlich"
+  es_ES: "Se requiere una sesión cifrada para esta contraseña"
+  fr_FR: "Une session chiffrée est requise pour ce mot de passe"
+  pl_PL: "To hasło wymaga szyfrowanej sesji"
+
 auth.password-incorrect:
   en_US: "Password Incorrect"
   de_DE: "Passwort falsch"
@@ -4275,6 +4368,20 @@ util.rpc.unknown-scheme:
   pl_PL: "nieznany schemat: %{scheme}"
 
 # util/net.rs
+util.net.secure.invalid-message:
+  en_US: "Invalid encrypted WebSocket message"
+  de_DE: "Ungültige verschlüsselte WebSocket-Nachricht"
+  es_ES: "Mensaje WebSocket cifrado no válido"
+  fr_FR: "Message WebSocket chiffré invalide"
+  pl_PL: "Nieprawidłowa zaszyfrowana wiadomość WebSocket"
+
+util.net.secure.unexpected-peer:
+  en_US: "Encrypted connection authenticated an unexpected identity"
+  de_DE: "Die verschlüsselte Verbindung hat eine unerwartete Identität authentifiziert"
+  es_ES: "La conexión cifrada autenticó una identidad inesperada"
+  fr_FR: "La connexion chiffrée a authentifié une identité inattendue"
+  pl_PL: "Szyfrowane połączenie uwierzytelniło nieoczekiwaną tożsamość"
+
 util.net.websocket-ping-timeout:
   en_US: "Timeout: WebSocket did not respond to ping within %{timeout}"
   de_DE: "Zeitüberschreitung: WebSocket hat nicht innerhalb von %{timeout} auf Ping geantwortet"
@@ -4942,6 +5049,13 @@ help.arg.package-ids-to-backup:
   fr_FR: "IDs de paquets à inclure dans la sauvegarde"
   pl_PL: "Identyfikatory pakietów do uwzględnienia w kopii zapasowej"
 
+help.arg.package-private:
+  en_US: "Whether only admins, the package's signers, and its readers can see it"
+  de_DE: "Ob nur Administratoren, die Unterzeichner des Pakets und seine Leser es sehen können"
+  es_ES: "Si solo los administradores, los firmantes del paquete y sus lectores pueden verlo"
+  fr_FR: "Si seuls les administrateurs, les signataires du paquet et ses lecteurs peuvent le voir"
+  pl_PL: "Czy tylko administratorzy, sygnatariusze pakietu i jego czytelnicy mogą go widzieć"
+
 help.arg.package-url:
   en_US: "URL of the package"
   de_DE: "URL des Pakets"
@@ -5005,13 +5119,6 @@ help.arg.registry-name:
   es_ES: "Nombre del registro"
   fr_FR: "Nom du registre"
   pl_PL: "Nazwa rejestru"
-
-help.arg.registry-security-notifications:
-  en_US: "Enable OS security-update announcements from this registry"
-  de_DE: "Ankündigungen von OS-Sicherheitsupdates dieser Registry aktivieren"
-  es_ES: "Activar los avisos de actualizaciones de seguridad del SO de este registro"
-  fr_FR: "Activer les annonces de mises à jour de sécurité du système provenant de ce registre"
-  pl_PL: "Włącz powiadomienia o aktualizacjach bezpieczeństwa systemu z tego rejestru"
 
 help.arg.registry-startwrt:
   en_US: "Serve StartWRT clients"
@@ -6030,6 +6137,13 @@ about.add-package-category:
   fr_FR: "Ajouter un paquet à une catégorie"
   pl_PL: "Dodaj pakiet do kategorii"
 
+about.add-package-reader:
+  en_US: "Allow a signer to see a private package"
+  de_DE: "Einem Unterzeichner erlauben, ein privates Paket zu sehen"
+  es_ES: "Permitir que un firmante vea un paquete privado"
+  fr_FR: "Autoriser un signataire à voir un paquet privé"
+  pl_PL: "Zezwól sygnatariuszowi na widzenie prywatnego pakietu"
+
 about.add-package-registry:
   en_US: "Add package to registry index"
   de_DE: "Paket zum Registry-Index hinzufügen"
@@ -6478,6 +6592,13 @@ about.commands-os-assets-versions:
   es_ES: "Comandos relacionados con activos y versiones del SO"
   fr_FR: "Commandes liées aux actifs et versions du système d'exploitation"
   pl_PL: "Polecenia związane z zasobami i wersjami systemu operacyjnego"
+
+about.commands-package-access:
+  en_US: "Commands to manage private package access"
+  de_DE: "Befehle zur Verwaltung des Zugriffs auf private Pakete"
+  es_ES: "Comandos para gestionar el acceso a paquetes privados"
+  fr_FR: "Commandes pour gérer l'accès aux paquets privés"
+  pl_PL: "Polecenia do zarządzania dostępem do prywatnych pakietów"
 
 about.commands-packages:
   en_US: "Commands related to packages"
@@ -7088,6 +7209,13 @@ about.get-os-versions-info:
   fr_FR: "Obtenir les informations sur les versions du système d'exploitation"
   pl_PL: "Pobierz informacje o wersjach systemu operacyjnego"
 
+about.get-package-access:
+  en_US: "Show whether a package is private and which signers can see it"
+  de_DE: "Anzeigen, ob ein Paket privat ist und welche Unterzeichner es sehen können"
+  es_ES: "Mostrar si un paquete es privado y qué firmantes pueden verlo"
+  fr_FR: "Indiquer si un paquet est privé et quels signataires peuvent le voir"
+  pl_PL: "Pokaż, czy pakiet jest prywatny i którzy sygnatariusze mogą go widzieć"
+
 about.get-pubkey-from-server:
   en_US: "Get the public key from the server"
   de_DE: "Öffentlichen Schlüssel vom Server abrufen"
@@ -7600,6 +7728,13 @@ about.remove-package-category:
   fr_FR: "Supprimer le package de la catégorie"
   pl_PL: "Usuń pakiet z kategorii"
 
+about.remove-package-reader:
+  en_US: "Revoke a signer's access to a private package"
+  de_DE: "Den Zugriff eines Unterzeichners auf ein privates Paket widerrufen"
+  es_ES: "Revocar el acceso de un firmante a un paquete privado"
+  fr_FR: "Révoquer l'accès d'un signataire à un paquet privé"
+  pl_PL: "Odbierz sygnatariuszowi dostęp do prywatnego pakietu"
+
 about.remove-package-registry:
   en_US: "Remove package from registry"
   de_DE: "Paket aus der Registry entfernen"
@@ -7894,6 +8029,13 @@ about.set-outbound-gateway-package:
   fr_FR: "Définir la passerelle sortante pour un package"
   pl_PL: "Ustaw bramę wychodzącą dla pakietu"
 
+
+about.set-package-private:
+  en_US: "Set whether a package is private"
+  de_DE: "Festlegen, ob ein Paket privat ist"
+  es_ES: "Establecer si un paquete es privado"
+  fr_FR: "Définir si un paquet est privé"
+  pl_PL: "Ustaw, czy pakiet jest prywatny"
 
 about.set-registry-icon:
   en_US: "Set the registry icon"
@@ -8379,11 +8521,11 @@ trusted-keys.protected:
   pl_PL: "Kluczy oferowanych przez połączone rejestry nie można usunąć; zamiast tego cofnij zaufanie do nich"
 
 trusted-keys.registry-not-connected:
-  en_US: "Add this registry before using it for StartOS updates"
-  de_DE: "Fügen Sie diese Registry hinzu, bevor Sie sie für StartOS-Updates verwenden"
-  es_ES: "Añada este registro antes de usarlo para las actualizaciones de StartOS"
-  fr_FR: "Ajoutez ce registre avant de l’utiliser pour les mises à jour de StartOS"
-  pl_PL: "Dodaj ten rejestr, zanim użyjesz go dla aktualizacji StartOS"
+  en_US: "Connect this registry before using it."
+  de_DE: "Verbinden Sie diese Registry, bevor Sie sie verwenden."
+  es_ES: "Conecte este registro antes de utilizarlo."
+  fr_FR: "Connectez ce registre avant de l’utiliser."
+  pl_PL: "Połącz ten rejestr, zanim go użyjesz."
 
 version.http-auth-downgrade-requires-tls:
   en_US: "Cannot downgrade: an HTTP authentication policy has no TLS wrapper. Add TLS to this binding before downgrading."

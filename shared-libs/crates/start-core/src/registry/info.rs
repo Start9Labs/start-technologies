@@ -85,7 +85,11 @@ rpc_toolkit::reflect_ts!(RegistryInfo);
 rpc_toolkit::ts_export!(RegistryInfo, namespaces = [""]);
 
 pub async fn get_info(ctx: RegistryContext) -> Result<RegistryInfo, Error> {
-    let index: FullIndex = ctx.db.peek().await.into_index().de()?;
+    from_index(&ctx.db.peek().await.into_index())
+}
+
+pub(crate) fn from_index(index: &Model<FullIndex>) -> Result<RegistryInfo, Error> {
+    let index = index.de()?;
     let trust_signers = proposed_signers(&index);
     Ok(RegistryInfo {
         name: index.name,

@@ -1,3 +1,4 @@
+import { defaultRegistries, registryUrl, sameUrl } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import {
   DataModel,
@@ -73,7 +74,45 @@ function mockStart9Key(
   }
 }
 
+/** The community registry mocks an unreachable registry. */
+export function mockRegistryCache(
+  url: string,
+  info: T.RegistryInfo,
+): DataModel['registryCache'][string] {
+  return sameUrl(url, defaultRegistries.community)
+    ? {
+        info,
+        packages: {},
+        status: 'error',
+        error: `error sending request for url (${registryUrl(url)}): connection timed out`,
+      }
+    : { info, packages: Mock.RegistryPackages, status: 'connected' }
+}
+
+export function mockOsUpdateCache(
+  registry: string,
+): NonNullable<DataModel['osUpdateCache']> {
+  return {
+    registry: registryUrl(registry),
+    versions: sameUrl(registry, defaultRegistries.community)
+      ? {}
+      : Mock.RegistryOSUpdate,
+    status: 'connected',
+  }
+}
+
 export const mockPatchData: DataModel = {
+  registryCache: {
+    [defaultRegistries.start9]: mockRegistryCache(
+      defaultRegistries.start9,
+      Mock.RegistryInfo,
+    ),
+    [defaultRegistries.community]: mockRegistryCache(
+      defaultRegistries.community,
+      { ...Mock.RegistryInfo, name: 'Community Registry' },
+    ),
+  },
+  osUpdateCache: mockOsUpdateCache(defaultRegistries.start9),
   disks: structuredClone(Mock.Disks),
   sharedVolumes: {
     MOCKLOCALVOLUME234567ABCDEFGHIJK: {

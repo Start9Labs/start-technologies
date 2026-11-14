@@ -138,6 +138,8 @@ where
     type InheritedParams = InheritedParams;
     type Ok = Value;
     type Err = RpcError;
+    type Item = crate::Never;
+    type Final = ();
 }
 
 impl<Context, Params, InheritedParams> HandlerFor<Context>
@@ -148,6 +150,8 @@ where
         InheritedParams = InheritedParams,
         Ok = Value,
         Err = RpcError,
+        Item = crate::Never,
+        Final = (),
     >,
     Context: crate::Context,
     Params: Send + Sync + 'static,

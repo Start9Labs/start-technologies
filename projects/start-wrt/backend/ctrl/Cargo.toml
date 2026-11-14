@@ -108,3 +108,4 @@ zeroize = "1"
 
 [dev-dependencies]
 ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
+tokio-tungstenite = { version = "0.26.2", features = ["url"] }

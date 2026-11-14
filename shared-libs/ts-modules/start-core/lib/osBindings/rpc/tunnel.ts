@@ -3,6 +3,8 @@ import type * as schemas from './tunnel.schemas'
 export type RpcHandler = {
   _PARAMS: unknown
   _RETURN?: unknown
+  _ITEM?: unknown
+  _FINAL?: unknown
   _CHILDREN?: { [name: string]: RpcHandler }
 }
 
@@ -20,47 +22,71 @@ export type RpcMethod<Root extends RpcHandler> =
         }[keyof Children & string]
       : never)
 
-export type RpcParamType<
+export type RpcEndpointType<
   Root extends RpcHandler,
   Method extends string,
 > = Method extends ''
   ? Root extends { _RETURN: unknown }
-    ? Root['_PARAMS']
+    ? Root
     : never
   : Root extends { _CHILDREN: infer Children }
     ? Method extends `${infer Head}.${infer Tail}`
       ? Head extends keyof Children
         ? Children[Head] extends RpcHandler
-          ? RpcParamType<Children[Head], Tail>
+          ? RpcEndpointType<Children[Head], Tail>
           : never
         : never
       : Method extends keyof Children
         ? Children[Method] extends RpcHandler
-          ? RpcParamType<Children[Method], ''>
+          ? RpcEndpointType<Children[Method], ''>
           : never
         : never
     : never
 
+export type RpcEndpointField<
+  Endpoint,
+  Field extends PropertyKey,
+> = Endpoint extends { _RETURN: unknown }
+  ? Field extends keyof Endpoint
+    ? Endpoint[Field]
+    : unknown
+  : never
+
+export type RpcParamType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_PARAMS'>
+
 export type RpcReturnType<
   Root extends RpcHandler,
   Method extends string,
-> = Method extends ''
-  ? Root extends { _RETURN: infer Return }
-    ? Return
-    : never
-  : Root extends { _CHILDREN: infer Children }
-    ? Method extends `${infer Head}.${infer Tail}`
-      ? Head extends keyof Children
-        ? Children[Head] extends RpcHandler
-          ? RpcReturnType<Children[Head], Tail>
-          : never
-        : never
-      : Method extends keyof Children
-        ? Children[Method] extends RpcHandler
-          ? RpcReturnType<Children[Method], ''>
-          : never
-        : never
-    : never
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_RETURN'>
+
+export type RpcStreamItemType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_ITEM'>
+
+export type RpcStreamFinalType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_FINAL'>
+
+export type RpcIsStreaming<Root extends RpcHandler, Method extends string> = [
+  RpcEndpointType<Root, Method>,
+] extends [never]
+  ? never
+  : unknown extends RpcStreamItemType<Root, Method>
+    ? boolean
+    : [RpcStreamItemType<Root, Method>] extends [never]
+      ? false
+      : true
+
+export type RpcStreamingMethod<Root extends RpcHandler> = {
+  [Method in RpcMethod<Root>]: RpcIsStreaming<Root, Method> extends false
+    ? never
+    : Method
+}[RpcMethod<Root>]
 
 export type RpcSchemaTree<Schema> = {
   [Key in keyof Schema as Key extends '_OPAQUE'
@@ -69,7 +95,7 @@ export type RpcSchemaTree<Schema> = {
     ? Schema[Key] extends z.ZodType
       ? z.input<Schema[Key]>
       : never
-    : Key extends '_RETURN'
+    : Key extends '_RETURN' | '_ITEM' | '_FINAL'
       ? Schema[Key] extends z.ZodType
         ? z.output<Schema[Key]>
         : never
@@ -78,6 +104,11 @@ export type RpcSchemaTree<Schema> = {
         : never
 }
 export type AddDnsRecordParamsInput = z.input<typeof schemas.AddDnsRecordParams>
+
+/**
+ * JSON Patch 'add' operation representation
+ */
+export type AddOperation = z.output<typeof schemas.AddOperation>
 export type AddPinholeParamsInput = z.input<typeof schemas.AddPinholeParams>
 export type AddPortForwardParamsInput = z.input<
   typeof schemas.AddPortForwardParams
@@ -85,6 +116,11 @@ export type AddPortForwardParamsInput = z.input<
 export type AddSubnetParamsInput = z.input<typeof schemas.AddSubnetParams>
 export type AnyVerifyingKeyInput = z.input<typeof schemas.AnyVerifyingKey>
 export type ApplyParamsInput = z.input<typeof schemas.ApplyParams>
+
+/**
+ * JSON Patch 'copy' operation representation
+ */
+export type CopyOperation = z.output<typeof schemas.CopyOperation>
 
 /**
  * Per-subnet DNS proxy configuration. WireGuard clients on a subnet are pointed
@@ -117,7 +153,7 @@ export type Guid = z.output<typeof schemas.Guid>
 /**
  * Proof that a set of auth keys was unenrolled — removed from the persisted
  * and ephemeral signer stores with any continuations they opened killed.
- * Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
+ * Obtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]
  * from inside a db transaction.
  */
 export type HasUnenrolledKeys = z.output<typeof schemas.HasUnenrolledKeys>
@@ -126,10 +162,25 @@ export type IoFormatInput = z.input<typeof schemas.IoFormat>
 export type ListDevicesParamsInput = z.input<typeof schemas.ListDevicesParams>
 export type ListParamsInput = z.input<typeof schemas.ListParams>
 export type LogoutParamsInput = z.input<typeof schemas.LogoutParams>
+
+/**
+ * JSON Patch 'move' operation representation
+ */
+export type MoveOperation = z.output<typeof schemas.MoveOperation>
 export type RemoveDeviceParamsInput = z.input<typeof schemas.RemoveDeviceParams>
 export type RemoveDnsRecordParamsInput = z.input<
   typeof schemas.RemoveDnsRecordParams
 >
+
+/**
+ * JSON Patch 'remove' operation representation
+ */
+export type RemoveOperation = z.output<typeof schemas.RemoveOperation>
+
+/**
+ * JSON Patch 'replace' operation representation
+ */
+export type ReplaceOperation = z.output<typeof schemas.ReplaceOperation>
 export type Session = z.output<typeof schemas.Session>
 export type SetAutoPortForwardParamsInput = z.input<
   typeof schemas.SetAutoPortForwardParams
@@ -150,6 +201,11 @@ export type SetSubnetWanParamsInput = z.input<typeof schemas.SetSubnetWanParams>
 export type ShowConfigParamsInput = z.input<typeof schemas.ShowConfigParams>
 export type SubnetParamsInput = z.input<typeof schemas.SubnetParams>
 export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
+
+/**
+ * JSON Patch 'test' operation representation
+ */
+export type TestOperation = z.output<typeof schemas.TestOperation>
 export type TransportProtocolInput = z.input<typeof schemas.TransportProtocol>
 export type TunnelCertDataInput = z.input<typeof schemas.TunnelCertData>
 export type TunnelUpdateResult = z.output<typeof schemas.TunnelUpdateResult>
@@ -181,6 +237,11 @@ export type ApplyWithPathParamsInput = z.input<
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
 export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
+
+/**
+ * JSON Patch single patch operation
+ */
+export type PatchOperation = z.output<typeof schemas.PatchOperation>
 export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
 export type RemovePortForwardParamsInput = z.input<
   typeof schemas.RemovePortForwardParams
@@ -200,9 +261,19 @@ export type UpdatePortForwardLabelParamsInput = z.input<
 export type WgConfig = z.output<typeof schemas.WgConfig>
 
 /**
+ * Representation of JSON Patch (list of patch operations)
+ */
+export type Patch = z.output<typeof schemas.Patch>
+
+/**
  * The server's sessions, by credential type.
  */
 export type Sessions = z.output<typeof schemas.Sessions>
+
+/**
+ * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
+ */
+export type SubscribeResult = z.output<typeof schemas.SubscribeResult>
 
 /**
  * Non-empty selected transports, serialized as a sorted, deduplicated array.
@@ -210,6 +281,11 @@ export type Sessions = z.output<typeof schemas.Sessions>
  */
 export type TransportInput = z.input<typeof schemas.Transport>
 export type WgSubnetClients = z.output<typeof schemas.WgSubnetClients>
+
+/**
+ * Database-generated patches contain only add, remove and replace operations.
+ */
+export type DiffPatch = z.output<typeof schemas.DiffPatch>
 export type RemovePinholeParamsInput = z.input<
   typeof schemas.RemovePinholeParams
 >
@@ -221,4 +297,5 @@ export type UpdatePinholeLabelParamsInput = z.input<
   typeof schemas.UpdatePinholeLabelParams
 >
 export type WgSubnetConfig = z.output<typeof schemas.WgSubnetConfig>
+export type Revision = z.output<typeof schemas.Revision>
 export type Api = RpcSchemaTree<typeof schemas.Api>
