@@ -1547,6 +1547,120 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
   assert.equal(data.serverInfo.trustedKeys[ids[2]].os, true)
 })
 
+test('StartOS BitTorrent mock uses address opt-ins and clears them when either parent is off', async () => {
+  const { applyPatch } = require('fast-json-patch')
+  const data = {
+    ui: { registries: {} },
+    serverInfo: {
+      bittorrent: { downloads: false, seeding: false },
+      network: { host: { bindings: {} } },
+      trustedKeys: {},
+      registryKeys: {},
+    },
+  }
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['src/app/utils/acme', {}],
+      ['./api.fixures', { Mock: {} }],
+      ['./mock-patch', { mockPatchData: data }],
+      ['./md-sample.md', ''],
+    ]),
+  )
+  const fixtures = load(
+    'projects/start-os/web/ui/src/app/services/api/bittorrent.fixture.ts',
+  )
+  // Core compares plain records in its own JavaScript realm.
+  for (const name of ['mockBitTorrentBinding', 'mockBitTorrentPreview']) {
+    const make = fixtures[name]
+    fixtures[name] = () => structuredClone(make())
+  }
+  const port = fixtures.BITTORRENT_INTERFACE.addressInfo.internalPort
+  const binding = () => data.serverInfo.network.host.bindings[port]
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
+  dependencies.set(tokens.AuthService, { isVerified$: of(true) })
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+  ).MockApiService)()
+  const revisions = []
+  const subscription = client.mockWsSource$.subscribe(revision => {
+    revisions.push(structuredClone(revision))
+    applyPatch(data, revision.patch)
+  })
+  const config = await client.rpc.server.bittorrent.config({})
+  assert.equal(config.available, true)
+  assert.equal(config.interface.type, 'p2p')
+  assert.deepEqual(data.serverInfo.bittorrent, {
+    downloads: false,
+    seeding: false,
+  })
+  assert.deepEqual(
+    {
+      ...(await client.rpc.server.bittorrent.setPreferences({ seeding: true })),
+    },
+    { downloads: false, seeding: false },
+  )
+  assert.equal(binding(), undefined)
+  assert.ok(config.preview.addresses.available.some(address => !address.public))
+  assert.ok(
+    config.preview.addresses.available.every(address => address.port === null),
+  )
+  assert.equal(config.preview.addresses.effective.length, 0)
+  for (const [off, hostname] of [
+    [{ seeding: false }, '203.0.113.45'],
+    [{ downloads: false }, '203.0.113.45'],
+    [{ seeding: false }, '192.168.1.2'],
+    [{ downloads: false }, '192.168.1.2'],
+  ]) {
+    assert.deepEqual(
+      {
+        ...(await client.rpc.server.bittorrent.setPreferences({
+          downloads: true,
+          seeding: true,
+        })),
+      },
+      { downloads: true, seeding: true },
+    )
+    assert.equal(binding(), undefined)
+    const preview = await client.rpc.server.bittorrent.config({})
+    const selected = await client.rpc.server.bittorrent.setAddressEnabled({
+      address: preview.preview.addresses.available.find(
+        address => address.hostname === hostname,
+      ),
+      enabled: true,
+    })
+    assert.equal(selected.port, binding().net.assignedPort)
+    const publication = revisions.at(-1).patch
+    assert.equal(publication.length, 1)
+    assert.equal(
+      publication[0].path,
+      `/serverInfo/network/host/bindings/${port}`,
+    )
+    assert.ok(publication[0].value.addresses.effective.length > 0)
+    assert.equal(binding().enabled, true)
+    assert.equal((await client.rpc.server.bittorrent.config({})).preview, null)
+    assert.ok(binding().addresses.effective.length > 0)
+    assert.ok(
+      binding().addresses.effective.every(
+        address => address.hostname === hostname,
+      ),
+    )
+    await client.rpc.server.bittorrent.setPreferences(off)
+    assert.equal(binding(), undefined)
+    await client.rpc.server.bittorrent.setPreferences({
+      downloads: true,
+      seeding: true,
+    })
+    assert.equal(binding(), undefined)
+    assert.equal(
+      (await client.rpc.server.bittorrent.config({})).preview.addresses
+        .effective.length,
+      0,
+    )
+  }
+  subscription.unsubscribe()
+})
+
 test('StartOS DNS mock updates the selected gateway using live gateway state', async () => {
   const { dependencies, tokens, load } = harness(
     new Map([
@@ -2276,7 +2390,13 @@ test('Brochure reports malformed registry URLs and can load the next selection',
       .ApiService,
     api,
   )
-  dependencies.set(storage, { getItem: () => null })
+  const stored = new Map()
+  dependencies.set(storage, {
+    getItem: key => stored.get(key) ?? null,
+    setItem: (key, value) => {
+      stored.set(key, value)
+    },
+  })
   dependencies.set(shared.Exver, {})
   dependencies.set(shared.i18nPipe, { transform: value => value })
   dependencies.set(shared.i18nService, { localize: value => value })
@@ -2305,6 +2425,11 @@ test('Brochure reports malformed registry URLs and can load the next selection',
     assert.equal(registries[0].url, 'https://registry.test/')
     assert.equal(registries[0].info.name, info.name)
     assert.equal(registries[0].packages.length, 0)
+    assert.deepEqual(errors, [])
+    assert.deepEqual(JSON.parse(stored.get('_startos/customRegistry')), {
+      url: 'https://registry.test/',
+      name: info.name,
+    })
   } finally {
     subscription.unsubscribe()
     errorSubscription.unsubscribe()

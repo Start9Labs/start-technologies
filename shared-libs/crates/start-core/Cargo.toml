@@ -44,6 +44,7 @@ unstable = ["backtrace-on-stack-overflow"]
 
 [dependencies]
 aes = "0.9.1"
+anyhow = "1.0.104"
 async-compression = { version = "0.4.32", features = [
   "brotli",
   "gzip",
@@ -150,6 +151,10 @@ lettre = { version = "0.11.18", default-features = false, features = [
   "tokio1-rustls",
 ] }
 libc = "0.2.149"
+librqbit = { git = "https://github.com/Start9Labs/rqbit", rev = "233e1a180ed46861969a11e7852afdb1fd7595c4", default-features = false, features = [
+  "rust-tls",
+  "disable-upload",
+] }
 log = "0.4.20"
 mbrman = "0.6.0"
 miette = { version = "7.6.0", features = ["fancy"] }
@@ -271,6 +276,7 @@ serde_toml = { package = "toml", version = "0.9" }
 
 [dev-dependencies]
 clap_mangen = "0.2.33"
+librqbit-bencode = { git = "https://github.com/Start9Labs/rqbit", rev = "233e1a180ed46861969a11e7852afdb1fd7595c4" }
 tempfile = "3.14.0"
 tokio = { version = "1.38.1", features = ["test-util"] }
 

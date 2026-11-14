@@ -40,6 +40,7 @@ use crate::net::acme::{
 use crate::net::forward::START9_BRIDGE_V6_SUBNET;
 use crate::net::gateway::{
     GatewayInfo, NetworkInterfaceController, NetworkInterfaceListenerAcceptMetadata,
+    poll_accept_ingress,
 };
 use crate::net::host::binding::ProxyOptions;
 use crate::net::http::ForwardedHeaders;
@@ -377,8 +378,8 @@ impl VHostController {
         )
     }
 
-    pub fn plaintext_proxy(&self, port: u16, target: ProxyTarget) -> PlainHttpProxy {
-        PlainHttpProxy::new(
+    pub fn plaintext_proxy(&self, port: u16, target: ProxyTarget) -> PlaintextProxy {
+        PlaintextProxy::new(
             &self.interfaces,
             port,
             target,
@@ -772,7 +773,7 @@ pub struct VHostBindListener {
     ip_info: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     port: u16,
     bind_reqs: Watch<VHostBindRequirements>,
-    listeners: BTreeMap<SocketAddr, (TcpListener, GatewayInfo)>,
+    listeners: BTreeMap<SocketAddr, TcpListener>,
     /// Backoff timer armed after a failed bind; fires a retry reconcile.
     retry: Option<Pin<Box<tokio::time::Sleep>>>,
 }
@@ -799,13 +800,16 @@ fn desired_listeners(
     port: u16,
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     reqs: &VHostBindRequirements,
-) -> BTreeMap<SocketAddr, GatewayInfo> {
+) -> BTreeSet<SocketAddr> {
     ip_info
         .iter()
-        .filter_map(|(id, iface)| Some((id, iface, iface.ip_info.as_ref()?)))
-        .flat_map(|(id, iface, ip_info)| {
+        .filter_map(|(id, iface)| Some((id, iface.ip_info.as_ref()?)))
+        .flat_map(|(id, ip_info)| {
             ip_info.subnets.iter().filter_map(move |subnet| {
                 let ip = subnet.addr();
+                if crate::net::bridge::is_os_target(ip) {
+                    return None;
+                }
                 let wanted = reqs.public_gateways.contains(id) || reqs.private_ips.contains(&ip);
                 wanted.then(|| {
                     let addr = match ip {
@@ -814,11 +818,7 @@ fn desired_listeners(
                         }
                         ip => SocketAddr::new(ip, port),
                     };
-                    let gateway = GatewayInfo {
-                        id: id.clone(),
-                        info: iface.clone(),
-                    };
-                    (addr, gateway)
+                    addr
                 })
             })
         })
@@ -830,27 +830,27 @@ fn desired_listeners(
 /// caller can retry — rather than aborting the pass and latching the hole until
 /// the next network change.
 fn update_vhost_listeners(
-    listeners: &mut BTreeMap<SocketAddr, (TcpListener, GatewayInfo)>,
+    listeners: &mut BTreeMap<SocketAddr, TcpListener>,
     port: u16,
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     reqs: &VHostBindRequirements,
 ) -> bool {
     let desired = desired_listeners(port, ip_info, reqs);
-    listeners.retain(|addr, _| desired.contains_key(addr));
+    listeners.retain(|addr, _| desired.contains(addr));
 
     let mut failed = false;
-    for (addr, gateway) in desired {
-        match listeners.get_mut(&addr) {
-            Some((_, current)) => *current = gateway,
-            None => match bind_mio_listener(addr).and_then(|l| TcpListener::from_std(l.into())) {
-                Ok(listener) => {
-                    listeners.insert(addr, (listener, gateway));
-                }
-                Err(e) => {
-                    tracing::warn!("failed to bind vhost listener on {addr}: {e}");
-                    failed = true;
-                }
-            },
+    for addr in desired {
+        if listeners.contains_key(&addr) {
+            continue;
+        }
+        match bind_mio_listener(addr).and_then(|l| TcpListener::from_std(l.into())) {
+            Ok(listener) => {
+                listeners.insert(addr, listener);
+            }
+            Err(e) => {
+                tracing::warn!("failed to bind vhost listener on {addr}: {e}");
+                failed = true;
+            }
         }
     }
     failed
@@ -892,26 +892,9 @@ impl Accept for VHostBindListener {
         }
 
         // Poll each listener for incoming connections
-        for (&addr, (listener, gw_info)) in &self.listeners {
-            match listener.poll_accept(cx) {
-                Poll::Ready(Ok((stream, peer_addr))) => {
-                    if let Err(e) = socket2::SockRef::from(&stream)
-                        .set_tcp_keepalive(&crate::net::utils::default_keepalive())
-                    {
-                        tracing::error!("Failed to set tcp keepalive: {e}");
-                        tracing::debug!("{e:?}");
-                    }
-                    return Poll::Ready(Ok((
-                        NetworkInterfaceListenerAcceptMetadata {
-                            inner: TcpMetadata {
-                                local_addr: addr,
-                                peer_addr,
-                            },
-                            info: gw_info.clone(),
-                        },
-                        Box::pin(stream),
-                    )));
-                }
+        for (&addr, listener) in &self.listeners {
+            match poll_accept_ingress(listener, &self.ip_info, cx) {
+                Poll::Ready(Ok(accepted)) => return Poll::Ready(Ok(accepted)),
                 Poll::Ready(Err(error)) => {
                     tracing::trace!(%addr, ?error, "Vhost listener failed to accept connection");
                 }
@@ -1342,7 +1325,7 @@ impl ProxyTarget {
                     tracing::trace!(backend = %self.addr, ?error, "HTTP proxy connection failed");
                 }
             }
-            None => {
+            None | Some(ProxyOptions::Tcp) => {
                 tokio::io::copy_bidirectional(&mut stream, &mut backend)
                     .await
                     .ok();
@@ -1705,37 +1688,44 @@ impl ProxyContext {
     }
 }
 
-pub struct PlainHttpProxy {
+pub struct PlaintextProxy {
     cancel: CancellationToken,
     _thread: NonDetachingJoinHandle<()>,
 }
 
-impl fmt::Debug for PlainHttpProxy {
+impl fmt::Debug for PlaintextProxy {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("PlainHttpProxy")
+            .debug_struct("PlaintextProxy")
             .finish_non_exhaustive()
     }
 }
 
-impl PlainHttpProxy {
+impl PlaintextProxy {
     pub fn new(
         interfaces: &NetworkInterfaceController,
         port: u16,
         target: ProxyTarget,
         max_connections: usize,
     ) -> Self {
-        let (public_gateways, private_ips) =
-            VHostTarget::<VHostBindListener>::bind_requirements(&target);
-        let requirements = Watch::new(VHostBindRequirements {
-            public_gateways,
-            private_ips,
-        });
+        let requirements = Watch::new(Self::requirements(port, &target));
         Self::serve(
             VHostBindListener::new(interfaces, port, requirements),
             target,
             max_connections,
         )
+    }
+
+    fn requirements(port: u16, target: &ProxyTarget) -> VHostBindRequirements {
+        let (public_gateways, mut private_ips) =
+            VHostTarget::<VHostBindListener>::bind_requirements(target);
+        if target.addr.port() == port {
+            private_ips.remove(&target.addr.ip());
+        }
+        VHostBindRequirements {
+            public_gateways,
+            private_ips,
+        }
     }
 
     fn serve(mut listener: VHostBindListener, target: ProxyTarget, max_connections: usize) -> Self {
@@ -1747,7 +1737,7 @@ impl PlainHttpProxy {
                 let (metadata, stream) = match accepted {
                     Ok(accepted) => accepted,
                     Err(error) => {
-                        tracing::trace!(?error, "HTTP proxy failed to accept connection");
+                        tracing::trace!(?error, "Plaintext proxy failed to accept connection");
                         continue;
                     }
                 };
@@ -1787,7 +1777,7 @@ impl PlainHttpProxy {
     }
 }
 
-impl Drop for PlainHttpProxy {
+impl Drop for PlaintextProxy {
     fn drop(&mut self) {
         self.cancel.cancel();
     }
@@ -2343,6 +2333,55 @@ async fn copy_bidirectional_hangs_without_keepalive_when_peer_idle() {
     );
 
     proxy.abort();
+}
+
+#[cfg(test)]
+mod reserved_target_tests {
+    use super::*;
+    use crate::db::model::public::IpInfo;
+    use crate::net::bridge::{OS_TARGET_IPV4, OS_TARGET_IPV6};
+
+    #[test]
+    fn derived_listeners_exclude_backend_targets_and_retain_localhost() {
+        let gateway: GatewayId = "eth0".parse().unwrap();
+        let interfaces = [(
+            gateway.clone(),
+            NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(IpInfo {
+                    subnets: [
+                        format!("{OS_TARGET_IPV4}/32"),
+                        format!("{OS_TARGET_IPV6}/128"),
+                        "127.0.0.1/8".into(),
+                        "::1/128".into(),
+                        "192.0.2.10/24".into(),
+                    ]
+                    .into_iter()
+                    .map(|ip| ip.parse::<ipnet::IpNet>().unwrap())
+                    .collect(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        )]
+        .into_iter()
+        .collect();
+        let requirements = VHostBindRequirements {
+            public_gateways: [gateway].into(),
+            private_ips: [OS_TARGET_IPV4.into(), OS_TARGET_IPV6.into()].into(),
+        };
+        for port in [80, 443, 49152] {
+            assert_eq!(
+                desired_listeners(port, &interfaces, &requirements)
+                    .iter()
+                    .map(|addr| addr.ip())
+                    .collect::<BTreeSet<_>>(),
+                ["127.0.0.1", "::1", "192.0.2.10"]
+                    .into_iter()
+                    .map(|ip| ip.parse::<IpAddr>().unwrap())
+                    .collect()
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2927,6 +2966,7 @@ mod upstream_alpn_tests {
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio_rustls::TlsAcceptor;
+    use tracing::instrument::WithSubscriber;
 
     use super::*;
     use crate::net::tls::client_config_no_verify;
@@ -3124,11 +3164,14 @@ mod upstream_alpn_tests {
         let addr = listener.local_addr().unwrap();
         let mut vhost = TlsListener::new(listener, handler);
 
-        let accepted = tokio::spawn(async move {
-            futures::future::poll_fn(|cx| vhost.poll_accept(cx))
-                .await
-                .map(|(metadata, _stream)| metadata.tls_info.alpn)
-        });
+        let accepted = tokio::spawn(
+            async move {
+                futures::future::poll_fn(|cx| vhost.poll_accept(cx))
+                    .await
+                    .map(|(metadata, _stream)| metadata.tls_info.alpn)
+            }
+            .with_current_subscriber(),
+        );
 
         let mut client = client_config_no_verify(provider()).unwrap();
         client.alpn_protocols = client_alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
@@ -3156,22 +3199,47 @@ mod upstream_alpn_tests {
         Ok(alpn.map(|a| String::from_utf8(a.0).unwrap()))
     }
 
-    #[tokio::test]
-    async fn malformed_backend_tls_is_trace_only() {
+    #[test]
+    fn malformed_backend_tls_is_trace_only() {
+        // Tracing callsite interest is process-global.
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "net::vhost::upstream_alpn_tests::malformed_backend_tls_log_probe",
+                "--ignored",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "invoked with isolated tracing callsites"]
+    async fn malformed_backend_tls_log_probe() {
         for trace_enabled in [false, true] {
             let (logs, dispatch) = if trace_enabled {
                 connection_error_tests::capture_trace_logs()
             } else {
                 connection_error_tests::capture_logs()
             };
-            let _guard = tracing::dispatcher::set_default(&dispatch);
             let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
             let addr = listener.local_addr().unwrap();
             let backend = tokio::spawn(async move {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 stream.write_all(b"not TLS").await.unwrap();
             });
-            assert!(try_negotiate(rewrap(), None, &[], addr, &[]).await.is_err());
+            assert!(
+                try_negotiate(rewrap(), None, &[], addr, &[])
+                    .with_subscriber(dispatch)
+                    .await
+                    .is_err()
+            );
             backend.await.unwrap();
             let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
             if trace_enabled {
@@ -3208,18 +3276,7 @@ mod upstream_alpn_tests {
                         private_ips: [frontend_addr.ip()].into_iter().collect(),
                         ..Default::default()
                     }),
-                    listeners: [(
-                        frontend_addr,
-                        (
-                            frontend,
-                            GatewayInfo {
-                                id: gateway_id.clone(),
-                                info,
-                            },
-                        ),
-                    )]
-                    .into_iter()
-                    .collect(),
+                    listeners: [(frontend_addr, frontend)].into_iter().collect(),
                     retry: None,
                 };
                 let mut target = target(backend.local_addr().unwrap(), None, None);
@@ -3300,19 +3357,12 @@ mod upstream_alpn_tests {
                 })),
                 ..Default::default()
             };
-            let gateway = GatewayInfo {
-                id: gateway_id.clone(),
-                info: info.clone(),
-            };
             let bind_reqs = Watch::new(VHostBindRequirements::default());
             let listener = VHostBindListener {
                 ip_info: Watch::new([(gateway_id, info)].into_iter().collect()),
                 port: old_addr.port(),
                 bind_reqs: bind_reqs.clone_unseen(),
-                listeners: BTreeMap::from([
-                    (old_addr, (old_listener, gateway.clone())),
-                    (new_addr, (new_listener, gateway)),
-                ]),
+                listeners: BTreeMap::from([(old_addr, old_listener), (new_addr, new_listener)]),
                 retry: None,
             };
             let temp = tempfile::tempdir().unwrap();

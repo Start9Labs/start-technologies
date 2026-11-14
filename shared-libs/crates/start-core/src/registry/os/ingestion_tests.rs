@@ -41,7 +41,9 @@ fn params(uploader: &SigningKey, signatures: SignatureMap) -> AddAssetParams {
     AddAssetParams {
         version: "0.4.0.5".parse().unwrap(),
         platform: "x86_64".into(),
-        url: "https://example.com/os.iso".parse().unwrap(),
+        url: Some("https://example.com/os.iso".parse().unwrap()),
+        urls: Vec::new(),
+        torrent: None,
         signer: AnyVerifyingKey::Ed25519(uploader.verifying_key()),
         signature: signature(uploader, &commitment),
         signatures,
@@ -50,7 +52,7 @@ fn params(uploader: &SigningKey, signatures: SignatureMap) -> AddAssetParams {
 }
 
 #[tokio::test]
-async fn os_promotion_preserves_all_asset_signatures_and_destination_endorsements() {
+async fn os_promotion_preserves_endorsements_mirrors_and_torrent_metadata() {
     let uploader = SigningKey::from_bytes(&[12; 32]);
     let uploader_key = AnyVerifyingKey::Ed25519(uploader.verifying_key());
     let temp = tempfile::tempdir().unwrap();
@@ -67,6 +69,11 @@ async fn os_promotion_preserves_all_asset_signatures_and_destination_endorsement
                 "https://example.com/os.iso".parse().unwrap(),
                 "https://mirror.example.com/os.iso".parse().unwrap(),
             ],
+            torrent: Some(
+                "magnet:?xt=urn:btih:0123456789012345678901234567890123456789"
+                    .parse()
+                    .unwrap(),
+            ),
             commitment: commitment.clone(),
             signatures: SignatureMap::from([
                 (
@@ -175,6 +182,7 @@ async fn os_promotion_preserves_all_asset_signatures_and_destination_endorsement
             assert_eq!(promoted_asset.signatures, expected);
             assert_eq!(promoted_asset.commitment, commitment);
             assert_eq!(promoted_asset.urls, expected_urls);
+            assert_eq!(promoted_asset.torrent, asset.torrent);
         }
         assert_eq!(promoted.signers, target_before.signers);
         assert_eq!(promoted.trust_signers, target_before.trust_signers);
@@ -210,7 +218,9 @@ async fn os_asset_ingestion_defaults_old_requests_and_verifies_signatures_atomic
     .await
     .unwrap();
     let mut old_request = to_value(&params(&uploader, SignatureMap::new())).unwrap();
-    old_request.as_object_mut().unwrap().remove("signatures");
+    for field in ["signatures", "urls", "torrent"] {
+        old_request.as_object_mut().unwrap().remove(field);
+    }
     let old_params: AddAssetParams = from_value(old_request).unwrap();
     assert!(old_params.signatures.is_empty());
     add_iso(ctx.clone(), old_params).await.unwrap();
@@ -485,6 +495,7 @@ async fn legacy_devices_can_discover_headline_free_releases() {
                 RegistryAsset {
                     published_at: chrono::Utc::now(),
                     urls: vec!["https://example.com/os.squashfs".parse().unwrap()],
+                    torrent: None,
                     commitment: commitment(),
                     signatures: [(key.clone(), signature(&uploader, &commitment()))].into(),
                 },

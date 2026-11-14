@@ -948,6 +948,133 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn software_sharing_preserves_the_released_migration_chain() {
+        for (from, expected_todos) in [
+            ("0.4.1.2", vec!["0.4.1.3", "0.4.2", "0.4.2.1", "0.4.3"]),
+            ("0.4.1.3", vec!["0.4.2", "0.4.2.1", "0.4.3"]),
+            ("0.4.2", vec!["0.4.2.1", "0.4.3"]),
+            ("0.4.2.1", vec!["0.4.3"]),
+        ] {
+            let previous = from_value::<Version>(json!(from))
+                .unwrap()
+                .as_version_t()
+                .unwrap();
+            let current = Current::default();
+            let mut db = json!({ "public": { "serverInfo": {
+                "version": from,
+                "packageVersionCompat": ">=0.3.0 <0.5.0",
+                "postInitMigrationTodos": {},
+                "latestMigrationRevision": previous.migration_revision(),
+            }, "packageData": { "service": { "setting": "preserved" } } } });
+            let packages = db["public"]["packageData"].clone();
+            let upgrade = Upgrade::load(&previous, &current, previous.migration_revision())
+                .await
+                .unwrap();
+            upgrade.apply(&previous, &current, &mut db).unwrap();
+            let info = &db["public"]["serverInfo"];
+            assert_eq!(info["version"], json!("0.4.3"));
+            assert_eq!(info["latestMigrationRevision"], json!(0));
+            assert_eq!(
+                info["bittorrent"],
+                json!({"downloads": false, "seeding": false})
+            );
+            assert_eq!(
+                info["postInitMigrationTodos"]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .collect::<Vec<_>>(),
+                expected_todos
+            );
+            assert_eq!(db["public"]["packageData"], packages);
+        }
+        let mut released_db = json!({"public": {"serverInfo": {}}});
+        v0_4_2::Version.up(&mut released_db, ()).unwrap();
+        assert!(
+            released_db["public"]["serverInfo"]
+                .get("bittorrent")
+                .is_none()
+        );
+        assert_eq!(v0_4_2::Version.migration_revision(), 0);
+    }
+
+    #[tokio::test]
+    async fn old_alpha_registry_repair_precedes_software_sharing() {
+        let previous = v0_4_2_1::Version;
+        let current = Current::default();
+        for (revision, registries) in [
+            (
+                0,
+                json!({
+                    "https://registry.start9.com": "Mine",
+                    "https://community-registry.start9.com/": "Community Registry",
+                }),
+            ),
+            (1, json!({ "https://registry.start9.com": "Mine" })),
+        ] {
+            let mut db = json!({ "public": {
+                "serverInfo": {
+                    "version": "0.4.2.1",
+                    "packageVersionCompat": ">=0.3.0 <0.5.0",
+                    "postInitMigrationTodos": {},
+                    "latestMigrationRevision": revision,
+                },
+                "ui": {
+                    "registries": {"https://registry.start9.com": "Mine"},
+                    "startosRegistry": "https://registry.start9.com/",
+                    "snakeHighScore": 42,
+                },
+            } });
+            let upgrade = Upgrade::load(&previous, &current, revision).await.unwrap();
+            upgrade.apply(&previous, &current, &mut db).unwrap();
+            let info = &db["public"]["serverInfo"];
+            assert_eq!(info["version"], json!("0.4.3"));
+            assert_eq!(info["latestMigrationRevision"], json!(0));
+            assert_eq!(
+                info["postInitMigrationTodos"],
+                json!({"0.4.2.1": null, "0.4.3": null})
+            );
+            assert_eq!(
+                info["bittorrent"],
+                json!({"downloads": false, "seeding": false})
+            );
+            assert_eq!(info["registries"], registries);
+            assert_eq!(info["osRegistry"], json!("https://registry.start9.com/"));
+            assert_eq!(db["public"]["ui"], json!({"snakeHighScore": 42}));
+        }
+    }
+
+    #[tokio::test]
+    async fn software_sharing_preserves_server_owned_registries_and_saved_opt_ins() {
+        let previous = v0_4_2_1::Version;
+        let current = Current::default();
+        let registries = json!({"https://registry.example/": "Custom"});
+        let os_registry = json!("https://registry.example/");
+        let preferences = json!({"downloads": true, "seeding": true});
+        let ui = json!({"snakeHighScore": 42});
+        let mut db = json!({"public": {
+            "serverInfo": {
+                "version": "0.4.2.1",
+                "packageVersionCompat": ">=0.3.0 <0.5.0",
+                "postInitMigrationTodos": {},
+                "latestMigrationRevision": 2,
+                "registries": registries,
+                "osRegistry": os_registry,
+                "bittorrent": preferences,
+            },
+            "ui": ui,
+        }});
+        let upgrade = Upgrade::load(&previous, &current, 2).await.unwrap();
+        upgrade.apply(&previous, &current, &mut db).unwrap();
+        let info = &db["public"]["serverInfo"];
+        assert_eq!(info["registries"], registries);
+        assert_eq!(info["osRegistry"], os_registry);
+        assert_eq!(info["bittorrent"], preferences);
+        assert_eq!(info["postInitMigrationTodos"], json!({"0.4.3": null}));
+        assert_eq!(db["public"]["ui"], ui);
+    }
+
+    #[tokio::test]
     async fn registry_repair_runs_on_an_existing_alpha_version_once() {
         let version = Version::from_exver_version(v0_4_2_1::Version.semver())
             .as_version_t()

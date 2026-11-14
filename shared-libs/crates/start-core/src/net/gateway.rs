@@ -1566,7 +1566,7 @@ async fn watcher(
                         reconcile_mangle_rules(&policy_ifaces).await.log_err();
                         if !policy_ifaces.is_empty() {
                             for v6 in [false, true] {
-                                ensure_main_suppress_rule(v6).await.log_err();
+                                ensure_base_rules(v6).await.log_err();
                             }
                         }
                         let mut jobs = jobs
@@ -1741,11 +1741,7 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
             let Some(rest) = reply.or(source) else {
                 continue;
             };
-            let Some(pos) = rest.find("lookup ") else {
-                continue;
-            };
-            let token = rest[pos + 7..].split_whitespace().next().unwrap_or("");
-            let Ok(table_id) = token.parse::<u32>() else {
+            let Some(table_id) = rule_lookup_table(rest) else {
                 continue;
             };
             if table_id < GATEWAY_TABLE_BASE || active_tables.contains(&table_id) {
@@ -1998,8 +1994,15 @@ fn policy_table_for(device_type: Option<NetworkInterfaceType>, iface: &GatewayId
 
 /// Rebuilds the mangle chains in one transaction. The gateway coordinator is
 /// their only writer.
-async fn reconcile_mangle_rules(policy_ifaces: &BTreeMap<GatewayId, u32>) -> Result<(), Error> {
+pub(super) async fn reconcile_mangle_rules(
+    policy_ifaces: &BTreeMap<GatewayId, u32>,
+) -> Result<(), Error> {
     nft_ensure_base().await?;
+    // Accepted TCP sockets retain ingress-gateway identity across DNAT.
+    Command::new("sysctl")
+        .args(["-qw", "net.ipv4.tcp_fwmark_accept=1"])
+        .invoke(ErrorKind::Network)
+        .await?;
     let mut script = String::new();
     script.push_str("flush chain ip startos mangle_prerouting\n");
     script.push_str("flush chain ip startos mangle_output\n");
@@ -2227,11 +2230,23 @@ async fn watch_ip(
     }
 }
 
+fn rule_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let mut tokens = line.split_whitespace();
+    tokens.find(|token| *token == key)?;
+    tokens.next()
+}
+
 fn rule_has(line: &str, key: &str, value: &str) -> bool {
-    line.split_whitespace()
-        .collect::<Vec<_>>()
-        .windows(2)
-        .any(|w| w[0] == key && w[1] == value)
+    rule_value(line, key) == Some(value)
+}
+
+const MAIN_TABLE_ID: u32 = 254;
+
+fn rule_lookup_table(line: &str) -> Option<u32> {
+    match rule_value(line, "lookup")? {
+        "main" => Some(MAIN_TABLE_ID),
+        table => table.parse().ok(),
+    }
 }
 
 fn main_suppress_rule(line: &str) -> bool {
@@ -2247,8 +2262,8 @@ fn main_suppress_rule(line: &str) -> bool {
     })
 }
 
-/// Specific routes are `main`'s; per-interface tables hold only defaults.
-async fn ensure_main_suppress_rule(v6: bool) -> Result<(), Error> {
+/// Installs shared destination and mark-zero backend source lookups.
+async fn ensure_base_rules(v6: bool) -> Result<(), Error> {
     // Reject-type defaults terminate before suppression; `throw` routes fall through.
     let mut ip = Command::new("ip");
     if v6 {
@@ -2276,6 +2291,12 @@ async fn ensure_main_suppress_rule(v6: bool) -> Result<(), Error> {
             .invoke(ErrorKind::Network)
             .await?;
     }
+    let source = if v6 {
+        crate::net::bridge::OS_TARGET_IPV6.to_string()
+    } else {
+        crate::net::bridge::OS_TARGET_IPV4.to_string()
+    };
+    reconcile_source_rules(v6, MAIN_TABLE_ID, &[source].into(), &rules).await;
     Ok(())
 }
 
@@ -2508,7 +2529,20 @@ async fn apply_policy_routing_v6(
     Ok(())
 }
 
-/// A reply is first routed unmarked, by its source address alone.
+fn source_rule_addresses(table_id: u32, rules: &str) -> BTreeSet<String> {
+    rules
+        .lines()
+        .filter_map(|line| {
+            let rule = rule_at_priority(line, SOURCE_RULE_PRIORITY)?;
+            (rule_lookup_table(rule) == Some(table_id))
+                .then(|| rule_value(rule, "from"))
+                .flatten()
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+/// Local-origin source lookups cannot route forwarded traffic.
 async fn reconcile_source_rules(
     v6: bool,
     table_id: u32,
@@ -2516,19 +2550,7 @@ async fn reconcile_source_rules(
     rules_output: &str,
 ) {
     let table_str = table_id.to_string();
-    let existing: BTreeSet<String> = rules_output
-        .lines()
-        .filter_map(|l| {
-            let toks: Vec<&str> = rule_at_priority(l, SOURCE_RULE_PRIORITY)?
-                .split_whitespace()
-                .collect();
-            toks.windows(2)
-                .any(|w| w[0] == "lookup" && w[1].parse::<u32>().ok() == Some(table_id))
-                .then(|| toks.windows(2).find(|w| w[0] == "from").map(|w| w[1]))
-                .flatten()
-                .map(|addr| addr.to_owned())
-        })
-        .collect();
+    let existing = source_rule_addresses(table_id, rules_output);
     for (action, addrs) in [
         ("add", addrs.difference(&existing)),
         ("del", existing.difference(addrs)),
@@ -2542,6 +2564,8 @@ async fn reconcile_source_rules(
                 .arg(action)
                 .arg("from")
                 .arg(addr)
+                .arg("iif")
+                .arg("lo")
                 .arg("fwmark")
                 .arg("0/0xffffffff")
                 .arg("lookup")
@@ -2553,6 +2577,16 @@ async fn reconcile_source_rules(
                 .log_err();
         }
     }
+}
+
+fn interface_subnets(
+    addresses: impl IntoIterator<Item = AddressData>,
+) -> Result<OrdSet<IpNet>, Error> {
+    let subnets: OrdSet<IpNet> = addresses.into_iter().map(IpNet::try_from).try_collect()?;
+    Ok(subnets
+        .into_iter()
+        .filter(|subnet| !crate::net::bridge::is_os_target(subnet.addr()))
+        .collect())
 }
 
 async fn poll_ip_info(
@@ -2618,7 +2652,7 @@ async fn poll_ip_info(
             .map(|octets| IpAddr::V6(Ipv6Addr::from(octets))),
     );
     let scope_id = if_nametoindex(iface.as_str()).with_kind(ErrorKind::Network)?;
-    let subnets: OrdSet<IpNet> = addresses.into_iter().map(IpNet::try_from).try_collect()?;
+    let subnets = interface_subnets(addresses)?;
 
     // Policy routing: ensure replies exit the same interface they arrived on,
     // eliminating the need for MASQUERADE.
@@ -3530,16 +3564,21 @@ impl NetworkInterfaceController {
     }
 }
 
+/// Finds the interface owning the destination, including its IPv6 zone.
 pub fn lookup_info_by_addr(
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     addr: SocketAddr,
 ) -> Option<(&GatewayId, &NetworkInterfaceInfo)> {
-    // IPv4 clients arrive mapped through the dual-stack listener.
     let ip = addr.ip().to_canonical();
-    ip_info.iter().find(|(_, i)| {
-        i.ip_info
-            .as_ref()
-            .map_or(false, |i| i.subnets.iter().any(|i| i.addr() == ip))
+    let scope = match addr {
+        SocketAddr::V6(addr) if ipv6_is_link_local(*addr.ip()) => Some(addr.scope_id()),
+        _ => None,
+    };
+    ip_info.iter().find(|(_, interface)| {
+        interface.ip_info.as_ref().is_some_and(|info| {
+            scope.is_none_or(|scope| scope != 0 && scope == info.scope_id)
+                && info.subnets.iter().any(|subnet| subnet.addr() == ip)
+        })
     })
 }
 
@@ -3564,9 +3603,67 @@ pub struct NetworkInterfaceListenerAcceptMetadata {
     pub inner: TcpMetadata,
     pub info: GatewayInfo,
 }
+impl NetworkInterfaceListenerAcceptMetadata {
+    pub(crate) fn from_stream(
+        stream: &tokio::net::TcpStream,
+        peer_addr: SocketAddr,
+        interfaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    ) -> Result<Self, Error> {
+        let inner = crate::net::ingress::tcp_metadata(stream, peer_addr)?;
+        #[cfg(target_os = "linux")]
+        let inner = {
+            let mut inner = inner;
+            if let SocketAddr::V6(destination) = &mut inner.local_addr
+                && ipv6_is_link_local(*destination.ip())
+                && destination.scope_id() == 0
+            {
+                let mark = socket2::SockRef::from(stream).mark()?;
+                let scope = interfaces
+                    .values()
+                    .filter_map(|interface| interface.ip_info.as_ref())
+                    .find(|info| info.scope_id != 0 && gateway_table_id(info.scope_id) == mark)
+                    .map(|info| info.scope_id)
+                    .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::PermissionDenied))?;
+                destination.set_scope_id(scope);
+            }
+            inner
+        };
+        let info = lookup_info_by_addr(interfaces, inner.local_addr)
+            .map(|(id, info)| GatewayInfo {
+                id: id.clone(),
+                info: info.clone(),
+            })
+            .unwrap_or_else(|| GatewayInfo {
+                id: InternedString::from_static("").into(),
+                info: NetworkInterfaceInfo::default(),
+            });
+        Ok(Self { inner, info })
+    }
+}
+
 impl<V: MetadataVisitor> Visit<V> for NetworkInterfaceListenerAcceptMetadata {
     fn visit(&self, visitor: &mut V) -> V::Result {
         self.visit_fields(visitor).collect()
+    }
+}
+
+/// Surfaces listener errors; drops connections whose metadata cannot be recovered.
+pub(crate) fn poll_accept_ingress(
+    listener: &TcpListener,
+    interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    cx: &mut std::task::Context<'_>,
+) -> Poll<Result<(NetworkInterfaceListenerAcceptMetadata, AcceptStream), Error>> {
+    loop {
+        let (stream, peer_addr) = std::task::ready!(listener.poll_accept(cx))?;
+        crate::net::utils::set_default_keepalive(&stream);
+        match interfaces.peek(|interfaces| {
+            NetworkInterfaceListenerAcceptMetadata::from_stream(&stream, peer_addr, interfaces)
+        }) {
+            Ok(metadata) => return Poll::Ready(Ok((metadata, Box::pin(stream)))),
+            Err(error) => {
+                tracing::trace!(%peer_addr, ?error, "Dropped connection without ingress metadata");
+            }
+        }
     }
 }
 
@@ -3613,44 +3710,28 @@ impl Accept for WildcardListener {
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(Self::Metadata, AcceptStream), Error>> {
-        if let Poll::Ready((stream, peer_addr)) = TcpListener::poll_accept(&self.listener, cx)? {
-            if let Err(e) = socket2::SockRef::from(&stream)
-                .set_tcp_keepalive(&crate::net::utils::default_keepalive())
-            {
-                tracing::error!("Failed to set tcp keepalive: {e}");
-                tracing::debug!("{e:?}");
-            }
-            let local_addr = stream.local_addr()?;
-            let info = self
-                .ip_info
-                .peek(|ip_info| {
-                    lookup_info_by_addr(ip_info, local_addr).map(|(id, info)| GatewayInfo {
-                        id: id.clone(),
-                        info: info.clone(),
-                    })
-                })
-                .unwrap_or_else(|| GatewayInfo {
-                    id: InternedString::from_static("").into(),
-                    info: NetworkInterfaceInfo::default(),
-                });
-            return Poll::Ready(Ok((
-                NetworkInterfaceListenerAcceptMetadata {
-                    inner: TcpMetadata {
-                        local_addr,
-                        peer_addr,
-                    },
-                    info,
-                },
-                Box::pin(stream),
-            )));
-        }
-        Poll::Pending
+        poll_accept_ingress(&self.listener, &self.ip_info, cx)
     }
 }
 
 #[cfg(test)]
 mod policy_rule_tests {
     use super::*;
+
+    #[test]
+    fn main_source_rules_match_named_and_numeric_table_output() {
+        let rules = "60: from 10.0.3.254 fwmark 0 lookup main\n60: from 10.0.3.253 fwmark 0 lookup 254\n60: from 192.0.2.10 fwmark 0 lookup 1004\n600: from 192.0.2.11 fwmark 0 lookup main\n";
+        assert_eq!(
+            source_rule_addresses(MAIN_TABLE_ID, rules),
+            ["10.0.3.254".to_owned(), "10.0.3.253".to_owned()].into()
+        );
+        assert_eq!(
+            source_rule_addresses(1004, rules),
+            ["192.0.2.10".to_owned()].into()
+        );
+        assert_eq!(rule_lookup_table("from all lookup main"), Some(254));
+        assert_eq!(rule_lookup_table("from all lookup missing"), None);
+    }
 
     #[test]
     fn main_suppress_rule_requires_the_unrestricted_rule() {
@@ -3716,6 +3797,45 @@ mod lookup_tests {
         )]
         .into_iter()
         .collect()
+    }
+
+    #[test]
+    fn interface_observation_excludes_os_targets_but_keeps_gateway_addresses() {
+        use crate::net::bridge::{OS_TARGET_IPV4, OS_TARGET_IPV6};
+        let addresses = [
+            AddressData {
+                address: OS_TARGET_IPV4.to_string(),
+                prefix: 32,
+            },
+            AddressData {
+                address: OS_TARGET_IPV6.to_string(),
+                prefix: 128,
+            },
+            AddressData {
+                address: "10.0.3.1".into(),
+                prefix: 24,
+            },
+            AddressData {
+                address: "fd00:3::1".into(),
+                prefix: 64,
+            },
+        ];
+        assert_eq!(
+            interface_subnets(addresses).unwrap(),
+            [
+                "10.0.3.1/24".parse::<IpNet>().unwrap(),
+                "fd00:3::1/64".parse::<IpNet>().unwrap()
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert!(
+            interface_subnets([AddressData {
+                address: "invalid".into(),
+                prefix: 24
+            }])
+            .is_err()
+        );
     }
 
     #[test]

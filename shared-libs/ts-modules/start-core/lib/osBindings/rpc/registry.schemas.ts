@@ -491,16 +491,13 @@ export const PreDownloadAlertWhen: z.ZodObject<{ sourceVersion: z.ZodString }> =
 export const ReaderParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'ReaderParams',
 })
-
-/**
- * A registry asset with a caller-selected commitment representation.
- */
 export const RegistryAsset = <Commitment extends z.ZodType>(
   Commitment: Commitment,
 ) => {
   const self = object({
     publishedAt: z.string(),
     urls: z.array(z.string()),
+    torrent: z.string().nullable().optional(),
     commitment: Commitment,
     signatures: z.record(z.string(), AnySignature),
   })
@@ -634,7 +631,18 @@ export const AddAdminParams: z.ZodObject<{ signer: typeof Guid }> =
 export const AddAssetParams: z.ZodObject<{
   version: z.ZodString
   platform: z.ZodString
-  url: z.ZodString
+  /**
+   * @deprecated Use `urls`.
+   */
+  url: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  urls: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
+  torrent: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   signature: typeof AnySignature
   signatures: z.ZodCodec<
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
@@ -644,7 +652,14 @@ export const AddAssetParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   version: z.string(),
   platform: z.string(),
-  url: z.string(),
+  /**
+   * @deprecated Use `urls`.
+   */
+  url: z.string().nullable().optional().meta({
+    description: '@deprecated Use `urls`.',
+  }),
+  urls: wire(z.array(z.string()).optional(), z.array(z.string())),
+  torrent: wire(z.string().nullable().optional(), z.string().nullable()),
   signature: AnySignature,
   signatures: wire(
     z.record(z.string(), AnySignature).optional(),
@@ -681,6 +696,10 @@ export const AddMirrorParams: z.ZodObject<{
 })
 export const AddPackageParams: z.ZodObject<{
   urls: z.ZodArray<z.ZodString>
+  torrent: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
   signatures: z.ZodCodec<
@@ -689,6 +708,7 @@ export const AddPackageParams: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   urls: z.array(z.string()),
+  torrent: wire(z.string().nullable().optional(), z.string().nullable()),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
   signatures: wire(

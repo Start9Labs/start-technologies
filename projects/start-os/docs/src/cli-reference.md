@@ -16,6 +16,7 @@ These apply to all subcommands.
 - `--s9pk-s3bucket <BUCKET>` — S3 bucket for publishing
 - `-t, --tunnel <URL>` — Tunnel server address
 - `-p, --proxy <URL>` — HTTP/SOCKS proxy
+- `--bittorrent <true|false>` — Opt into BitTorrent for local registry downloads with `--bittorrent true` (default: false). When enabled, advertised torrents are preferred, with HTTP fallback. CLI downloads upload no asset data. Explicit or environment HTTP/SOCKS proxies and onion registries use HTTP instead. This setting does not override a remote server's download configuration.
 - `--id-key-path <PATH>` — Identity signing key path (`--developer-key-path` is accepted as an alias)
 - `--id-key-gpg <KEY>` — Sign through gpg-agent with this GnuPG key (fingerprint, key ID, or user ID) instead of the identity key file
 
@@ -71,6 +72,19 @@ An MCP client authenticates with the same token to use the server's API as tools
 ## Server
 
 Restart, shut down, update, and configure the server.
+
+### `start-cli server bittorrent config`
+
+Show whether the administrator’s configuration permits BitTorrent and describe the native incoming peer interface. Saved preferences are available at `/public/serverInfo/bittorrent` in the server database.
+
+### `start-cli server bittorrent set-preferences`
+
+Update the server’s persisted preferences without restarting. Omitted flags keep their current values:
+
+- `--downloads <true|false>` — Opt into BitTorrent with HTTP fallback; disabled by default. Disabling it stops active peer transfers, disables seeding and clears incoming address selections.
+- `--seeding <true|false>` — Share compatible installed S9PKs and OS images already stored by StartOS; disabled by default. Requires downloads and clears incoming address selections when disabled.
+
+Configure incoming peer connections through the initially-off public-address rows on **System → Software sharing** and inspect **Address Requirements** there. Re-enabling downloads/sharing requires a fresh address opt-in. Sharing creates no extra payload copies or extended retention. These flags control the server, not local CLI transfers; active server downloads can upload while sharing stored software is off. See [Software Sharing](marketplace.md#software-sharing) for compatibility, forwarding, storage and peer visibility.
 
 ### `start-cli server restart`
 
@@ -1037,8 +1051,9 @@ List all packages and categories.
 
 Add a package to the registry from a local s9pk file.
 
-- `--url <URL>` — URL of the package
-- `--no-verify` — Skip signature verification
+- `--url <URL>` — HTTP mirror of the package (repeatable)
+- `--torrent <URL>` — Externally seeded magnet link or HTTP(S) torrent metadata URL
+- `--no-verify` — Skip the local check of each HTTP mirror's complete contents; signature checks still apply
 
 ### `start-cli registry package remove <ID> <VERSION>`
 
@@ -1173,14 +1188,15 @@ List signers for an OS version.
 
 ### Registry OS Assets
 
-Upload and manage OS installation images (IMG, ISO, squashfs).
+Index and manage externally hosted OS installation images (IMG, ISO, squashfs).
 
 ### `start-cli registry os asset add <FILE> <URL>`
 
-Upload an OS asset to the registry.
+Register an externally hosted OS asset, signing its content commitment from the local file.
 
 - `-p, --platform <PLATFORM>` — Target platform (required)
 - `-v, --version <VERSION>` — OS version (required)
+- `--torrent <URL>` — Externally seeded magnet link or HTTP(S) torrent metadata URL
 
 ### `start-cli registry os asset sign <FILE>`
 

@@ -8,7 +8,7 @@ shopt -s expand_aliases
 PROFILE=${PROFILE:-generated}
 case "$PROFILE" in
   debug) PROFILE=dev ;;
-  dev|release|generated) ;;
+  dev|release|generated|bindings) ;;
   *)
     >&2 echo "Unknown profile $PROFILE: falling back to debug..."
     PROFILE=dev

@@ -1,0 +1,42 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-bittorrent-set-preferences 1  "set-preferences "
+.SH NAME
+start\-cli\-server\-bittorrent\-set\-preferences \- Set downloads, seeding and incoming connections; disabling a parent clears its children
+.SH SYNOPSIS
+\fBstart\-cli server bittorrent set\-preferences\fR [\fB\-\-downloads\fR] [\fB\-\-seeding\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR]
+.SH DESCRIPTION
+Set downloads, seeding and incoming connections; disabling a parent clears its children
+.SH OPTIONS
+.TP
+\fB\-\-downloads\fR \fI<DOWNLOADS>\fR
+Enable BitTorrent downloads (default: false); disabling also disables seeding and incoming connections
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+true
+.IP \(bu 2
+false
+.RE
+.TP
+\fB\-\-seeding\fR \fI<SEEDING>\fR
+Share compatible installed S9PKs and stored OS images
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+true
+.IP \(bu 2
+false
+.RE
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

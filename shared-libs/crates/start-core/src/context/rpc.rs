@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use fast_socks5::client::{Config as SocksConfig, Socks5Stream};
+use futures::FutureExt;
 use imbl::OrdMap;
 use imbl_value::InternedString;
 use josekit::jwk::Jwk;
@@ -87,6 +88,7 @@ pub struct RpcContextSeed {
     pub wifi_manager: RwLock<Option<WpaCli>>,
     pub current_secret: Arc<Jwk>,
     pub client: ReloadableHttpClient,
+    pub torrents: Arc<crate::registry::bittorrent::TorrentClient>,
     pub start_time: Instant,
     pub crons: SyncMutex<BTreeMap<Guid, NonDetachingJoinHandle<()>>>,
 }
@@ -329,7 +331,11 @@ impl RpcContext {
                 )
                 .await?,
             );
-            let os_net_service = net_ctrl.os_bindings().await?;
+            let retained = crate::system::bittorrent::retained_bindings(
+                &db.peek().await,
+                config.torrent_downloads.server_available(),
+            )?;
+            let os_net_service = net_ctrl.os_bindings(retained).await?;
             (net_ctrl, os_net_service)
         };
         init_net_ctrl.complete();
@@ -494,6 +500,19 @@ impl RpcContext {
             });
         }
 
+        let torrents = crate::registry::bittorrent::TorrentClient::for_server(
+            config.torrent_downloads.clone(),
+            config.bittorrent_seed.clone(),
+        );
+        let preferences: crate::registry::bittorrent::TorrentPreferences = db
+            .peek()
+            .await
+            .as_public()
+            .as_server_info()
+            .as_bittorrent()
+            .de()?;
+        torrents.set_downloads_enabled(preferences.downloads);
+
         let (registry_refresh, registry_refreshes) = mpsc::channel(8);
         let seed = Arc::new(RpcContextSeed {
             is_closed: AtomicBool::new(false),
@@ -535,6 +554,7 @@ impl RpcContext {
                 })?,
             ),
             client: ReloadableHttpClient::new(socks_proxy_url)?,
+            torrents: Arc::new(torrents),
             start_time: Instant::now(),
             crons,
         });
@@ -552,6 +572,57 @@ impl RpcContext {
         tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
 
         crate::version::post_init(&res, run_migrations).await?;
+        let preferences = res
+            .db
+            .watch("/public/serverInfo/bittorrent".parse().unwrap())
+            .await
+            .typed::<crate::registry::bittorrent::TorrentPreferences>();
+        let bindings = res
+            .db
+            .watch("/public/serverInfo/network/host/bindings".parse().unwrap())
+            .await;
+        let torrents = res.torrents.clone();
+        let weak = Arc::downgrade(&seed);
+        let incoming_context = weak.clone();
+        let watcher_db = res.db.clone();
+        res.add_cron(async move {
+            if let Err(error) = torrents
+                .maintain_preferences(
+                    preferences,
+                    bindings,
+                    || {
+                        let context = incoming_context.upgrade().map(|seed| Self(seed, None));
+                        async move {
+                            match context {
+                                Some(context) => {
+                                    crate::system::bittorrent::configure_incoming(&context).await
+                                }
+                                None => Ok(None),
+                            }
+                        }
+                    },
+                    || {
+                        let context = weak.upgrade().map(|seed| Self(seed, None));
+                        async move {
+                            if let Some(context) = context {
+                                crate::registry::bittorrent::discovery::register_existing(&context)
+                                    .await?;
+                            }
+                            Ok(())
+                        }
+                    },
+                )
+                .boxed()
+                .await
+            {
+                tracing::warn!(%error, "Registry seeding watcher stopped");
+                if let Err(error) =
+                    crate::system::bittorrent::watcher_failed(&watcher_db, &torrents).await
+                {
+                    tracing::warn!(%error, "Cannot publish BitTorrent watcher failure");
+                }
+            }
+        });
         let weak = Arc::downgrade(&seed);
         let db = res.db.clone();
         res.add_cron(crate::registry::sync::watch_registries(
@@ -594,7 +665,8 @@ impl RpcContext {
 
     #[instrument(skip_all)]
     pub async fn shutdown(self) -> Result<(), Error> {
-        self.crons.mutate(|c| std::mem::take(c));
+        self.torrents.shutdown();
+        self.crons.mutate(BTreeMap::clear);
         self.services.shutdown_all().await?;
         self.is_closed.store(true, Ordering::SeqCst);
         self.closed.send_replace(true);

@@ -322,6 +322,7 @@ impl PackageVersionInfo {
                 RegistryAsset {
                     published_at: Utc::now(),
                     urls,
+                    torrent: None,
                     commitment: s9pk.as_archive().commitment().await?,
                     signatures: s9pk.signatures().await?,
                 },
@@ -364,6 +365,7 @@ impl PackageVersionInfo {
                 .find(|(h, s)| s.commitment == asset.commitment && *h == hw_req)
             {
                 matching.merge_signatures(&asset.commitment, asset.signatures);
+                matching.merge_torrent(asset.torrent);
                 if replace_urls {
                     matching.urls = asset.urls;
                 } else {
@@ -623,6 +625,22 @@ pub(crate) mod tests {
             info.s9pks[0].1.signatures.keys().collect::<BTreeSet<_>>(),
             [&publisher].into()
         );
+    }
+
+    #[test]
+    fn matching_assets_preserve_or_replace_torrent_metadata_deliberately() {
+        let (_, mut info) = version_info_signed_by(1);
+        let first: Url = "magnet:?xt=urn:btih:0123456789012345678901234567890123456789"
+            .parse()
+            .unwrap();
+        info.s9pks[0].1.torrent = Some(first.clone());
+        info.merge_with(version_info_signed_by(2).1, true).unwrap();
+        assert_eq!(info.s9pks[0].1.torrent, Some(first));
+        let mut update = version_info_signed_by(2).1;
+        let replacement: Url = "https://example.test/metadata.torrent".parse().unwrap();
+        update.s9pks[0].1.torrent = Some(replacement.clone());
+        info.merge_with(update, false).unwrap();
+        assert_eq!(info.s9pks[0].1.torrent, Some(replacement));
     }
 
     #[test]

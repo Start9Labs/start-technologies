@@ -12,6 +12,10 @@ import {
 import { IpAddress, IPV6_LINK_LOCAL } from './ip'
 import { once } from './once'
 import { deepEqual } from './deepEqual'
+import {
+  legacyAddressEnabled,
+  LegacyAddressSelections,
+} from './legacyAddressEnabled'
 
 export type UrlString = string
 export type HostId = string
@@ -355,10 +359,7 @@ export function isAddressInsecure(
   return insecureOverride(addr.insecure ?? [], h)
 }
 
-type AddressSelections = Pick<
-  DerivedAddressInfo,
-  'enabled' | 'disabled' | 'lanEnabled' | 'available'
-> &
+type AddressSelections = LegacyAddressSelections &
   Partial<Pick<DerivedAddressInfo, 'effective'>>
 
 /** Uses server-owned selections, with compatibility for servers lacking `effective`. */
@@ -373,48 +374,6 @@ export function isAddressEnabled(
 export function getEnabledAddresses(addr: AddressSelections): HostnameInfo[] {
   return (
     addr.effective ?? addr.available.filter(h => legacyAddressEnabled(addr, h))
-  )
-}
-
-function legacyAddressEnabled(
-  addr: AddressSelections,
-  h: HostnameInfo,
-): boolean {
-  const overridden = (
-    overrides: DerivedAddressInfo['disabled'],
-    row: HostnameInfo,
-  ) =>
-    overrides.some(
-      ([hostname, port]) =>
-        hostname === row.hostname && port === (row.port ?? 0),
-    )
-  const mdnsCovers = (mdns: HostnameInfo, ip: HostnameInfo) =>
-    mdns.metadata.kind === 'mdns' &&
-    (ip.metadata.kind === 'ipv4' || ip.metadata.kind === 'ipv6') &&
-    mdns.port === ip.port &&
-    mdns.metadata.gateways.includes(ip.metadata.gateway)
-  if (h.public && (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6')) {
-    if (h.port === null) return true
-    return addr.enabled.includes(
-      h.metadata.kind === 'ipv6'
-        ? `[${h.hostname}]:${h.port}`
-        : `${h.hostname}:${h.port}`,
-    )
-  }
-  if (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6') {
-    if (overridden(addr.lanEnabled, h)) return true
-    if (overridden(addr.disabled, h)) return false
-    return addr.available
-      .filter(mdns => mdnsCovers(mdns, h))
-      .every(mdns => !overridden(addr.disabled, mdns))
-  }
-  if (!overridden(addr.disabled, h)) return true
-  return (
-    h.metadata.kind === 'mdns' &&
-    !h.ssl &&
-    addr.available.some(
-      ip => !ip.public && mdnsCovers(h, ip) && legacyAddressEnabled(addr, ip),
-    )
   )
 }
 

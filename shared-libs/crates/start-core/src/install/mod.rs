@@ -1,4 +1,3 @@
-use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,7 +21,7 @@ use crate::prelude::*;
 use crate::progress::{
     FullProgress, FullProgressTracker, forward_progress, progress_until_complete, with_cli_progress,
 };
-use crate::registry::context::{RegistryContext, RegistryUrlParams};
+use crate::registry::context::RegistryContext;
 use crate::registry::package::get::GetPackageResponse;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::s9pk::manifest::PackageId;
@@ -141,28 +140,8 @@ pub async fn install(
         accept_signers,
     }: InstallParams,
 ) -> Result<(), Error> {
-    let package: GetPackageResponse = from_value(
-        ctx.call_remote_with::<RegistryContext, _>(
-            "package.get",
-            [("get_device_info", Value::Bool(true))]
-                .into_iter()
-                .collect(),
-            json!({
-                "id": id,
-                "targetVersion": VersionRange::exactly(version.deref().clone()),
-                "otherVersions": "none",
-            }),
-            RegistryUrlParams {
-                registry: registry.clone(),
-            },
-        )
-        .await?,
-    )?;
-
-    let (_, asset) = package
-        .best
-        .get(&version)
-        .and_then(|i| i.s9pks.first())
+    let asset = crate::registry::package::get::remote_asset(&ctx, &registry, &id, &version)
+        .await?
         .ok_or_else(|| {
             Error::new(
                 eyre!(
@@ -188,17 +167,45 @@ pub async fn install(
 
     let progress_tracker = FullProgressTracker::new();
     let download_progress = progress_tracker.add_phase("Downloading".into(), Some(100));
+    let torrents = ctx
+        .torrents
+        .for_source(&registry)
+        .map(|_| ctx.torrents.clone());
+    let prepared = asset
+        .prepare_install(ctx.client.get(), torrents, download_progress)
+        .await?;
+    let payload = prepared.download.clone();
     let download = ctx
         .services
-        .install(
+        .install_prepared(
             ctx.clone(),
-            || asset.deserialize_s9pk_buffered(ctx.client.get(), download_progress),
+            prepared.metadata,
+            asset.commitment,
+            async move {
+                Ok(payload
+                    .await
+                    .map_err(|error| error.clone_output())?
+                    .package
+                    .clone())
+            },
             Some(registry),
             None::<Never>,
             Some(progress_tracker),
         )
         .await?;
-    tokio::spawn(async move { download.await?.await });
+    tokio::spawn(async move {
+        let installed = download.await?.await?;
+        let loaded = prepared
+            .download
+            .await
+            .map_err(|error| error.clone_output())?;
+        if let Some(metadata) = &loaded.source.sharing {
+            if let Err(error) = ctx.torrents.register_stored(&installed, metadata).await {
+                tracing::warn!(%error, "Cannot register installed S9PK for sharing");
+            }
+        }
+        Ok::<_, Error>(())
+    });
 
     Ok(())
 }

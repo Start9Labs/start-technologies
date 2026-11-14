@@ -986,7 +986,12 @@ pub struct TmpDir {
 }
 impl TmpDir {
     pub async fn new() -> Result<Self, Error> {
-        let path = Path::new("/var/tmp/startos").join(base32::encode(
+        Self::new_in("/var/tmp/startos").await
+    }
+
+    /// Creates temporary storage on the requested filesystem.
+    pub async fn new_in(parent: impl AsRef<Path>) -> Result<Self, Error> {
+        let path = parent.as_ref().join(base32::encode(
             base32::Alphabet::Rfc4648 { padding: false },
             &rand::random::<[u8; 8]>(),
         ));

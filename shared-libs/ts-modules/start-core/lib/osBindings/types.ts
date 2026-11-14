@@ -384,17 +384,9 @@ export type RecoverySource<Password> = z.output<
 export type RecoverySourceInput<Password> = z.input<
   ReturnType<typeof schemas.RecoverySource<z.ZodType<Password, Password>>>
 >
-
-/**
- * A registry asset with a caller-selected commitment representation.
- */
 export type RegistryAsset<Commitment> = z.output<
   ReturnType<typeof schemas.RegistryAsset<z.ZodType<Commitment, Commitment>>>
 >
-
-/**
- * A registry asset with a caller-selected commitment representation.
- */
 export type RegistryAssetInput<Commitment> = z.input<
   ReturnType<typeof schemas.RegistryAsset<z.ZodType<Commitment, Commitment>>>
 >
@@ -438,7 +430,15 @@ export type RequestCommitment = z.output<typeof schemas.RequestCommitment>
 export type RequestCommitmentInput = z.input<typeof schemas.RequestCommitment>
 export type RestartReason = z.output<typeof schemas.RestartReason>
 export type RestartReasonInput = z.input<typeof schemas.RestartReason>
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
 export type Security = z.output<typeof schemas.Security>
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
 export type SecurityInput = z.input<typeof schemas.Security>
 export type ServerBackupReport = z.output<typeof schemas.ServerBackupReport>
 export type ServerBackupReportInput = z.input<typeof schemas.ServerBackupReport>
@@ -562,6 +562,16 @@ export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
 export type TimeInfoInput = z.input<typeof schemas.TimeInfo>
+
+/**
+ * Peer downloads and stored-software sharing require explicit opt-in.
+ */
+export type TorrentPreferences = z.output<typeof schemas.TorrentPreferences>
+
+/**
+ * Peer downloads and stored-software sharing require explicit opt-in.
+ */
+export type TorrentPreferencesInput = z.input<typeof schemas.TorrentPreferences>
 export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
 export type TransportProtocolInput = z.input<typeof schemas.TransportProtocol>
 export type TrustContext = z.output<typeof schemas.TrustContext>
@@ -1612,12 +1622,32 @@ export type BindInfo = z.output<typeof schemas.BindInfo>
 export type BindInfoInput = z.input<typeof schemas.BindInfo>
 export type BindParams = z.output<typeof schemas.BindParams>
 export type BindParamsInput = z.input<typeof schemas.BindParams>
+
+/**
+ * Unallocated candidates; absent ports are pending rather than protocol defaults.
+ */
+export type BindingPreview = z.output<typeof schemas.BindingPreview>
+
+/**
+ * Unallocated candidates; absent ports are pending rather than protocol defaults.
+ */
+export type BindingPreviewInput = z.input<typeof schemas.BindingPreview>
 export type InstallingState = z.output<typeof schemas.InstallingState>
 export type InstallingStateInput = z.input<typeof schemas.InstallingState>
 export type UpdatingState = z.output<typeof schemas.UpdatingState>
 export type UpdatingStateInput = z.input<typeof schemas.UpdatingState>
 export type Bindings = z.output<typeof schemas.Bindings>
 export type BindingsInput = z.input<typeof schemas.Bindings>
+
+/**
+ * Effective transport availability and incoming candidates without reserved resources.
+ */
+export type BitTorrentConfig = z.output<typeof schemas.BitTorrentConfig>
+
+/**
+ * Effective transport availability and incoming candidates without reserved resources.
+ */
+export type BitTorrentConfigInput = z.input<typeof schemas.BitTorrentConfig>
 export type PackageState = z.output<typeof schemas.PackageState>
 export type PackageStateInput = z.input<typeof schemas.PackageState>
 export type Host = z.output<typeof schemas.Host>

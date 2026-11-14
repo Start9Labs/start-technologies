@@ -377,8 +377,10 @@ describe('MultiHost.bindPort HTTP proxy configuration', () => {
 
   test('public proxy options accept only HTTP proxy types', () => {
     const accept = (options: BindOptionsByProtocol) => options
-    // @ts-expect-error Only the HTTP proxy type is implemented.
+    // @ts-expect-error Unsupported proxy protocol.
     accept({ protocol: 'http', proxy: { type: 'socks' } })
+    // @ts-expect-error Host helpers expose HTTP proxy policy.
+    accept({ protocol: 'http', proxy: { type: 'tcp' } })
   })
 
   test('public SSL options reject legacy HTTP fields', () => {

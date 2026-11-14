@@ -8,7 +8,7 @@ import {
 } from '@angular/router'
 import { titleResolver } from 'src/app/utils/title-resolver'
 import { SystemComponent } from './system.component'
-import { TRUSTED_KEYS_MENU_ITEM } from './system.const'
+import { DOWNLOADS_MENU_ITEM, TRUSTED_KEYS_MENU_ITEM } from './system.const'
 
 export default [
   {
@@ -80,6 +80,12 @@ export default [
         title: titleResolver,
         data: { title: 'Registries' },
         loadComponent: () => import('./routes/registries'),
+      },
+      {
+        path: DOWNLOADS_MENU_ITEM.link,
+        title: titleResolver,
+        data: { title: DOWNLOADS_MENU_ITEM.item },
+        loadComponent: () => import('./routes/downloads'),
       },
       {
         path: TRUSTED_KEYS_MENU_ITEM.link,

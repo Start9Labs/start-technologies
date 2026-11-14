@@ -133,7 +133,9 @@ keys for packages when connecting; keys discovered by index synchronization star
 with notifications for newly offered or dropped keys. StartOS trusts a registry's keys for OS updates automatically only when a user
 chooses it for StartOS updates.
 
-Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. Package assets carry Merkle archive commitments; OS assets carry Blake3 commitments.
+Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. OS assets carry Blake3 commitments; packages carry Merkle archive commitments. Registered signers sign these commitments independently of the transport.
+
+Each asset retains its HTTP `urls` and an optional `torrent` magnet link or HTTP(S) metadata URL. Publication validates the torrent URL format; consumers verify downloaded bytes against the existing commitment. Promotion carries the source metadata through unchanged. The registry stores these locations; external hosts own the asset files and BitTorrent seeding.
 
 Package and OS asset ingestion accept a default-empty `signatures` map alongside the authenticated uploader's `signature`. Each submitted signature is verified against the asset commitment and signature context before merging with existing signatures. The fresh uploader signature takes precedence over a submitted signature for the same key; merging preserves existing signatures for a matching commitment. Authoritative registries retain package signatures from keys registered in `index.signers`; ingestion, signer/key removal, and each authoritative startup enforce that rule. A `mirror-of` registry preserves its upstream's signatures, including its cached index on restart. Promotion forwards every source mirror URL and the source signature map, and adds the promoter's signature. Endorsements do not register signers, change trust proposals, or grant publishing authorization; the authenticated uploader must retain permission to publish. Deploy the updated registry before the promoting CLI: older registries ignore the additional map.
 
@@ -178,7 +180,7 @@ Canonical projections omit persisted headlines without rewriting the database.
 - Opens `<datadir>/registry.db` as a `TypedPatchDb<RegistryDatabase>`; initializes it on first run and runs pending migrations.
 - Stores package and dependency icons once each under `<datadir>/icons/blake3/`, named by the blake3 of their bytes, and deletes those the index no longer refers to.
 - Opens a SQLite connection for metrics.
-- Hosts asset files under the data directory.
+- Stores asset locations and commitments in the registry index; external hosts retain the asset files.
 
 ## Frontend
 

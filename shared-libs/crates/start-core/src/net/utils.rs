@@ -95,6 +95,13 @@ pub fn default_keepalive() -> socket2::TcpKeepalive {
         .with_retries(6)
 }
 
+pub(crate) fn set_default_keepalive(stream: &TcpStream) {
+    if let Err(error) = socket2::SockRef::from(stream).set_tcp_keepalive(&default_keepalive()) {
+        tracing::error!("Failed to set tcp keepalive: {error}");
+        tracing::debug!("{error:?}");
+    }
+}
+
 pub async fn load_ip_info() -> Result<BTreeMap<GatewayId, IpInfo>, Error> {
     let output = String::from_utf8(
         Command::new("ip")

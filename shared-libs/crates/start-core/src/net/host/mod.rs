@@ -15,6 +15,7 @@ use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
 use crate::db::model::public::{GatewayType, NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::hostname::ServerHostname;
+use crate::net::bridge::is_os_target;
 use crate::net::forward::AvailablePorts;
 use crate::net::host::address::{HostAddress, PublicDomainConfig, address_api};
 use crate::net::host::binding::{
@@ -85,7 +86,7 @@ impl Host {
         Self::default()
     }
 
-    /// Hides disabled insecure candidates from legacy service SDK address readers.
+    /// Returns a legacy SDK view; projection overrides must not be persisted.
     pub fn into_service_view(mut self) -> Self {
         for binding in self.bindings.values_mut() {
             binding.addresses.project_service_selections();
@@ -173,6 +174,40 @@ impl Model<Host> {
         self.derive_addresses(mdns, gateways, available_ports)
     }
 
+    /// Returns unselected candidates without changing the host or reserving ports.
+    pub(crate) fn preview_binding(
+        &self,
+        internal_port: u16,
+        options: BindOptions,
+        mdns: &ServerHostname,
+        gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+        available_ports: &AvailablePorts,
+    ) -> Result<binding::BindingPreview, Error> {
+        let mut preview = self.clone();
+        let mut binding = BindInfo::unallocated(options);
+        // Port zero is a derivation placeholder, never a reservation.
+        binding.net.assigned_port = binding.options.wants_plain_port().then_some(0);
+        binding.net.assigned_ssl_port = binding.options.preferred_ssl_port().map(|_| 0);
+        preview.as_bindings_mut().insert(&internal_port, &binding)?;
+        preview.derive_addresses(mdns, gateways, available_ports)?;
+        let binding: BindInfo = preview.as_bindings().as_idx(&internal_port).unwrap().de()?;
+        let available = binding
+            .addresses
+            .available
+            .into_iter()
+            .map(|mut address| {
+                address.port = None;
+                address
+            })
+            .collect();
+        let mut addresses = binding::DerivedAddressInfo::default();
+        addresses.set_available(available, true);
+        Ok(binding::BindingPreview {
+            options: binding.options,
+            addresses,
+        })
+    }
+
     /// Rebuilds the address rows and port forwards from the stored selections.
     fn derive_addresses(
         &mut self,
@@ -199,7 +234,7 @@ impl Model<Host> {
                 let Some(ip_info) = &g.ip_info else {
                     continue;
                 };
-                for subnet in &ip_info.subnets {
+                for subnet in ip_info.subnets.iter().filter(|s| !is_os_target(s.addr())) {
                     let host = InternedString::from_display(&subnet.addr());
                     let metadata = if subnet.addr().is_ipv4() {
                         HostnameMetadata::Ipv4 {
@@ -386,7 +421,7 @@ impl Model<Host> {
                 }
                 split.insert(address);
             }
-            addresses.set_available(split);
+            addresses.set_available(split, opt.default_off);
             addresses.insecure = addresses
                 .available
                 .iter()
@@ -398,6 +433,9 @@ impl Model<Host> {
                 })
                 .filter_map(crate::net::host::binding::insecure_key)
                 .collect();
+            if opt.default_off && !bind.as_enabled().de()? {
+                addresses.disable_all();
+            }
             addresses.refresh_effective();
             bind.as_addresses_mut().ser(&addresses)?;
         }
@@ -426,7 +464,7 @@ impl Model<Host> {
                 let Some(ip_info) = &g.ip_info else {
                     continue;
                 };
-                for subnet in &ip_info.subnets {
+                for subnet in ip_info.subnets.iter().filter(|s| !is_os_target(s.addr())) {
                     // IPv4 only — ranges forward purely as IPv4 nft DNAT.
                     if !subnet.addr().is_ipv4() {
                         continue;
@@ -490,10 +528,10 @@ impl Model<Host> {
                 });
             }
 
-            let mut addresses = range.as_addresses().de()?;
-            addresses.available = available;
-            addresses.refresh_effective();
-            range.as_addresses_mut().ser(&addresses)?;
+            range.as_addresses_mut().mutate(|addresses| {
+                addresses.set_available(available, false);
+                Ok(())
+            })?;
         }
 
         // compute port forwards from enabled public addresses. A non-exported
@@ -534,7 +572,7 @@ impl Model<Host> {
                     && public_domains
                         .get(&addr.hostname)
                         .map_or(false, |domain| domain.acme.is_some());
-                for subnet in &ip_info.subnets {
+                for subnet in ip_info.subnets.iter().filter(|s| !is_os_target(s.addr())) {
                     let IpAddr::V4(addr) = subnet.addr() else {
                         continue;
                     };
@@ -586,7 +624,7 @@ impl Model<Host> {
                 let Some(wan_ip) = ip_info.wan_ip else {
                     continue;
                 };
-                for subnet in &ip_info.subnets {
+                for subnet in ip_info.subnets.iter().filter(|s| !is_os_target(s.addr())) {
                     let IpAddr::V4(lan_ip) = subnet.addr() else {
                         continue;
                     };
@@ -1069,12 +1107,216 @@ mod tests {
 
     fn plain(preferred_external_port: u16) -> BindOptions {
         BindOptions {
+            default_off: false,
             transport: Default::default(),
             preferred_external_port,
             add_ssl: None,
             secure: Some(crate::net::host::binding::Security { ssl: false }),
             proxy: None,
         }
+    }
+
+    fn default_off_host() -> (
+        Model<Host>,
+        AvailablePorts,
+        OrdMap<GatewayId, NetworkInterfaceInfo>,
+        ServerHostname,
+    ) {
+        let mut gateway = wireguard(GatewayType::InboundOutbound);
+        Arc::make_mut(gateway.ip_info.as_mut().unwrap()).subnets = [
+            "192.168.1.2/24",
+            "2001:db8::2/64",
+            "fd00::2/64",
+            "fe80::2/64",
+        ]
+        .into_iter()
+        .map(|address| address.parse::<IpNet>().unwrap())
+        .chain([
+            format!("{}/32", crate::net::bridge::OS_TARGET_IPV4)
+                .parse()
+                .unwrap(),
+            format!("{}/128", crate::net::bridge::OS_TARGET_IPV6)
+                .parse()
+                .unwrap(),
+        ])
+        .collect();
+        let gateways = [(gw("eth0"), gateway)].into_iter().collect();
+        let server = ServerHostname::new(InternedString::intern("server")).unwrap();
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding(
+            &mut ports,
+            6881,
+            BindOptions {
+                default_off: true,
+                ..plain(6881)
+            },
+            true,
+        )
+        .unwrap();
+        host.as_public_domains_mut()
+            .insert(
+                &InternedString::intern("peers.example.com"),
+                &PublicDomainConfig {
+                    gateway: gw("eth0"),
+                    acme: None,
+                },
+            )
+            .unwrap();
+        host.update_addresses(&server, &gateways, &ports).unwrap();
+        (host, ports, gateways, server)
+    }
+
+    #[test]
+    fn default_off_addresses_offer_private_and_public_candidates_without_consent() {
+        let (host, _, _, _) = default_off_host();
+        let binding = &host.de().unwrap().bindings[&6881];
+        assert_eq!(
+            binding
+                .addresses
+                .available
+                .iter()
+                .map(|address| address.hostname.as_ref())
+                .collect::<BTreeSet<_>>(),
+            [
+                "192.168.1.2",
+                "198.51.100.2",
+                "2001:db8::2",
+                "fd00::2",
+                "fe80::2",
+                "peers.example.com"
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert!(
+            binding
+                .addresses
+                .available
+                .iter()
+                .any(|address| !address.public)
+        );
+        assert!(binding.addresses.enabled().is_empty());
+    }
+
+    #[test]
+    fn default_off_rows_opt_in_through_native_dual_stack_domain_grouping() -> Result<(), Error> {
+        let (mut host, ports, gateways, server) = default_off_host();
+        let address = host.de()?.bindings[&6881]
+            .addresses
+            .available
+            .iter()
+            .find(|address| address.hostname == InternedString::intern("peers.example.com"))
+            .unwrap()
+            .clone();
+        host.as_bindings_mut().mutate(|bindings| {
+            bindings
+                .get_mut(&6881)
+                .unwrap()
+                .set_address_enabled(&address, true)
+        })?;
+        host.update_addresses(&server, &gateways, &ports)?;
+        let binding = &host.de()?.bindings[&6881];
+        assert_eq!(binding.addresses.enabled().len(), 3);
+        let selected = &binding.addresses.effective;
+        assert_eq!(selected.len(), 3);
+        assert!(selected.iter().all(|address| address.public));
+        assert!(
+            binding
+                .addresses
+                .enabled()
+                .iter()
+                .all(|address| address.public)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn default_off_local_ipv6_opt_in_does_not_publish_a_new_domain() -> Result<(), Error> {
+        let (mut host, ports, mut gateways, server) = default_off_host();
+        host.as_public_domains_mut()
+            .remove(&InternedString::intern("peers.example.com"))?;
+        Arc::make_mut(
+            gateways
+                .get_mut(&gw("eth0"))
+                .unwrap()
+                .ip_info
+                .as_mut()
+                .unwrap(),
+        )
+        .wan_ip = None;
+        host.update_addresses(&server, &gateways, &ports)?;
+        let address = host.de()?.bindings[&6881]
+            .addresses
+            .available
+            .iter()
+            .find(|address| address.hostname == InternedString::intern("2001:db8::2"))
+            .unwrap()
+            .clone();
+        assert!(!address.public);
+        host.as_bindings_mut().mutate(|bindings| {
+            bindings
+                .get_mut(&6881)
+                .unwrap()
+                .set_address_enabled(&address, true)
+        })?;
+        host.update_addresses(&server, &gateways, &ports)?;
+        assert_eq!(host.de()?.bindings[&6881].addresses.enabled().len(), 1);
+        host.as_public_domains_mut().insert(
+            &InternedString::intern("new-peers.example.com"),
+            &PublicDomainConfig {
+                gateway: gw("eth0"),
+                acme: None,
+            },
+        )?;
+        host.update_addresses(&server, &gateways, &ports)?;
+        let binding = &host.de()?.bindings[&6881];
+        assert_eq!(binding.addresses.enabled().len(), 1);
+        assert!(
+            binding
+                .addresses
+                .enabled()
+                .iter()
+                .all(|address| !address.public)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn cleared_default_off_rows_stay_off_after_reenabling_binding() -> Result<(), Error> {
+        let (mut host, ports, gateways, server) = default_off_host();
+        let address = host.de()?.bindings[&6881]
+            .addresses
+            .available
+            .iter()
+            .find(|address| address.hostname == InternedString::intern("198.51.100.2"))
+            .unwrap()
+            .clone();
+        host.as_bindings_mut().mutate(|bindings| {
+            let binding = bindings.get_mut(&6881).unwrap();
+            binding.set_address_enabled(&address, true)?;
+            binding.disable();
+            Ok(())
+        })?;
+        host.update_addresses(&server, &gateways, &ports)?;
+        host.as_bindings_mut().mutate(|bindings| {
+            let binding = bindings.get_mut(&6881).unwrap();
+            assert!(binding.addresses.enabled().is_empty());
+            assert!(binding.set_address_enabled(&address, true).is_err());
+            binding.enabled = true;
+            Ok(())
+        })?;
+        host.update_addresses(&server, &gateways, &ports)?;
+        assert!(host.de()?.bindings[&6881].addresses.enabled().is_empty());
+        host.as_bindings_mut().mutate(|bindings| {
+            bindings
+                .get_mut(&6881)
+                .unwrap()
+                .set_address_enabled(&address, true)
+        })?;
+        host.update_addresses(&server, &gateways, &ports)?;
+        assert_eq!(host.de()?.bindings[&6881].addresses.enabled().len(), 3);
+        Ok(())
     }
 
     #[test]

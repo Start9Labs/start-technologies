@@ -333,10 +333,6 @@ export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
 export type QueryDnsRes = z.output<typeof schemas.QueryDnsRes>
 export type ReaderParamsInput = z.input<typeof schemas.ReaderParams>
 export type ReassignPortParamsInput = z.input<typeof schemas.ReassignPortParams>
-
-/**
- * A registry asset with a caller-selected commitment representation.
- */
 export type RegistryAsset<Commitment> = z.output<
   ReturnType<typeof schemas.RegistryAsset<z.ZodType<Commitment, Commitment>>>
 >
@@ -370,6 +366,10 @@ export type RemoveVersionParamsInput = z.input<
 export type ReplaceOperation = z.output<typeof schemas.ReplaceOperation>
 export type ReplayIdInput = z.input<typeof schemas.ReplayId>
 export type RequiresReboot = z.output<typeof schemas.RequiresReboot>
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
 export type Security = z.output<typeof schemas.Security>
 export type ServerBackupReport = z.output<typeof schemas.ServerBackupReport>
 export type ServerHostname = z.output<typeof schemas.ServerHostname>
@@ -382,6 +382,9 @@ export type SetEchoipUrlsParamsInput = z.input<
 >
 export type SetLanguageParamsInput = z.input<typeof schemas.SetLanguageParams>
 export type SetNameParamsInput = z.input<typeof schemas.SetNameParams>
+export type SetPreferencesParamsInput = z.input<
+  typeof schemas.SetPreferencesParams
+>
 export type SetServerHostnameParamsInput = z.input<
   typeof schemas.SetServerHostnameParams
 >
@@ -429,6 +432,11 @@ export type TermSizeInput = z.input<typeof schemas.TermSize>
  */
 export type TestOperation = z.output<typeof schemas.TestOperation>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
+
+/**
+ * Peer downloads and stored-software sharing require explicit opt-in.
+ */
+export type TorrentPreferences = z.output<typeof schemas.TorrentPreferences>
 export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
@@ -849,6 +857,10 @@ export type MetricsFollowResponse = z.output<
 export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
+export type SelectAddressParamsInput = z.input<
+  typeof schemas.SelectAddressParams
+>
+export type SelectGuaParamsInput = z.input<typeof schemas.SelectGuaParams>
 export type SessionList = z.output<typeof schemas.SessionList>
 
 /**
@@ -878,5 +890,15 @@ export type PackageIndex = z.output<typeof schemas.PackageIndex>
 export type BindOptions = z.output<typeof schemas.BindOptions>
 export type FullIndex = z.output<typeof schemas.FullIndex>
 export type BindInfo = z.output<typeof schemas.BindInfo>
+
+/**
+ * Unallocated candidates; absent ports are pending rather than protocol defaults.
+ */
+export type BindingPreview = z.output<typeof schemas.BindingPreview>
 export type Bindings = z.output<typeof schemas.Bindings>
+
+/**
+ * Effective transport availability and incoming candidates without reserved resources.
+ */
+export type BitTorrentConfig = z.output<typeof schemas.BitTorrentConfig>
 export type Api = RpcSchemaTree<typeof schemas.Api>

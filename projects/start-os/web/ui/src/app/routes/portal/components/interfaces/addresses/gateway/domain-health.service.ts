@@ -95,6 +95,51 @@ export class DomainHealthService {
     packageId: string,
     gatewayId: string,
   ): Promise<void> {
+    await this.tasks.run(async () => {
+      const watch = this.watchServiceStatus(packageId)
+      try {
+        const address = await this.sendAddressSelection(
+          enabled,
+          addr,
+          iface,
+          packageId,
+        )
+        if (!enabled) return
+
+        const kind = address.metadata.kind
+        const ctx = { packageId, addSsl: iface.addSsl, acme: addr.acme, watch }
+        if (kind === 'public-domain' && address.port !== null) {
+          await this.checkPublicDomain(
+            address.hostname,
+            gatewayId,
+            address.port,
+            addr.count,
+            ctx,
+          )
+        } else if (kind === 'private-domain') {
+          await this.checkPrivateDomain(gatewayId, address.hostname)
+        } else if (
+          kind === 'ipv4' &&
+          addr.access === 'public' &&
+          address.port !== null &&
+          // A port range spans many ports; a single-port reachability check
+          // would be misleading, so don't auto-test it on enable.
+          addr.count === 1
+        ) {
+          await this.checkPortForward(gatewayId, address.port, ctx)
+        }
+      } finally {
+        watch.stop()
+      }
+    }, 'Saving')
+  }
+
+  protected async sendAddressSelection(
+    enabled: boolean,
+    addr: GatewayAddress,
+    iface: MappedServiceInterface,
+    packageId: string,
+  ): Promise<T.HostnameInfo> {
     const params = {
       internalPort: iface.addressInfo.internalPort,
       address: addr.hostnameInfo,
@@ -102,56 +147,56 @@ export class DomainHealthService {
       package: packageId,
       host: iface.addressInfo.hostId,
     }
-
-    await this.tasks.run(async () => {
-      const watch = this.watchServiceStatus(packageId)
-      try {
-        if (packageId) {
-          // A range spans >1 port and lives in a separate subtree, so it has its
-          // own endpoint; a single-port binding is exactly 1.
-          if (addr.count > 1) {
-            await this.api.rpc.package.host.binding.setRangeAddressEnabled(
-              params,
-            )
-          } else {
-            await this.api.rpc.package.host.binding.setAddressEnabled(params)
-          }
-        } else {
-          await this.api.rpc.server.host.binding.setAddressEnabled({
-            internalPort: 80,
-            address: addr.hostnameInfo,
-            enabled,
-          })
-        }
-
-        if (!enabled) return
-
-        const kind = addr.hostnameInfo.metadata.kind
-        const ctx = { packageId, addSsl: iface.addSsl, acme: addr.acme, watch }
-        if (kind === 'public-domain' && addr.hostnameInfo.port !== null) {
-          await this.checkPublicDomain(
-            addr.hostnameInfo.hostname,
-            gatewayId,
-            addr.hostnameInfo.port,
-            addr.count,
-            ctx,
-          )
-        } else if (kind === 'private-domain') {
-          await this.checkPrivateDomain(gatewayId, addr.hostnameInfo.hostname)
-        } else if (
-          kind === 'ipv4' &&
-          addr.access === 'public' &&
-          addr.hostnameInfo.port !== null &&
-          // A port range spans many ports; a single-port reachability check
-          // would be misleading, so don't auto-test it on enable.
-          addr.count === 1
-        ) {
-          await this.checkPortForward(gatewayId, addr.hostnameInfo.port, ctx)
-        }
-      } finally {
-        watch.stop()
+    if (packageId) {
+      if (addr.count > 1) {
+        await this.api.rpc.package.host.binding.setRangeAddressEnabled(params)
+      } else {
+        await this.api.rpc.package.host.binding.setAddressEnabled(params)
       }
-    }, 'Saving')
+    } else {
+      await this.api.rpc.server.host.binding.setAddressEnabled({
+        internalPort: 80,
+        address: addr.hostnameInfo,
+        enabled,
+      })
+    }
+    return addr.hostnameInfo
+  }
+
+  async setGuaWan(
+    wan: boolean,
+    addr: GatewayAddress,
+    iface: MappedServiceInterface,
+    packageId: string,
+  ) {
+    await this.tasks.run(
+      () => this.sendGuaSelection(wan, addr, iface, packageId),
+      'Saving',
+    )
+  }
+
+  protected async sendGuaSelection(
+    wan: boolean,
+    addr: GatewayAddress,
+    iface: MappedServiceInterface,
+    packageId: string,
+  ): Promise<void> {
+    const params = {
+      internalPort: iface.addressInfo.internalPort,
+      address: addr.hostnameInfo,
+      wan,
+      package: packageId,
+      host: iface.addressInfo.hostId,
+    }
+    if (packageId) {
+      await this.api.rpc.package.host.binding.setGuaWan(params)
+    } else {
+      await this.api.rpc.server.host.binding.setGuaWan({
+        internalPort: 80,
+        address: addr.hostnameInfo,
+        wan,
+      })
+    }
   }
 
   async checkPublicDomain(

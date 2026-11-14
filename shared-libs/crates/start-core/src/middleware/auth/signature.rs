@@ -1036,6 +1036,7 @@ mod tests {
         BindInfo {
             enabled: true,
             options: BindOptions {
+                default_off: false,
                 transport: Default::default(),
                 preferred_external_port: 80,
                 secure: None,

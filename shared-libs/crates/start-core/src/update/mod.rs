@@ -309,7 +309,9 @@ async fn maybe_do_update(
                 "sourceVersion": current_version,
                 "targetVersion": target,
             }),
-            RegistryUrlParams { registry },
+            RegistryUrlParams {
+                registry: registry.clone(),
+            },
         )
         .await?,
     )?;
@@ -382,6 +384,7 @@ async fn maybe_do_update(
     let done = tokio::spawn(async move {
         let res = do_update(
             ctx.client.get(),
+            ctx.torrents.for_source(&registry),
             asset,
             notes,
             UpdateProgressHandles {
@@ -449,6 +452,23 @@ async fn maybe_do_update(
     }))
 }
 
+pub(crate) const IMAGES_DIRECTORY: &str = "/media/startos/images";
+pub(crate) const CURRENT_IMAGE_POINTER: &str = "/media/startos/config/current.rootfs";
+
+pub(crate) fn image_checksum(commitment: &Blake3Commitment) -> String {
+    hex::encode(&commitment.hash[..16])
+}
+
+async fn remember_image(
+    torrents: &crate::registry::bittorrent::TorrentClient,
+    metadata: &crate::registry::bittorrent::SharingMetadata,
+    path: &Path,
+) {
+    if let Err(error) = torrents.register_stored(path, metadata).await {
+        tracing::warn!(%error, "Cannot register stored OS image for sharing");
+    }
+}
+
 pub(crate) struct UpdateProgressHandles {
     pub progress: FullProgressTracker,
     pub prune_phase: PhaseProgressTrackerHandle,
@@ -471,6 +491,7 @@ pub(crate) fn target_asset(
 #[instrument(skip_all)]
 pub(crate) async fn do_update(
     client: Client,
+    torrents: Option<&crate::registry::bittorrent::TorrentClient>,
     asset: RegistryAsset<Blake3Commitment>,
     notes: UpdateNotes,
     UpdateProgressHandles {
@@ -492,11 +513,12 @@ pub(crate) async fn do_update(
     prune_phase.complete();
 
     download_phase.start();
-    let path = Path::new("/media/startos/images/next.squashfs");
+    let path = Path::new(IMAGES_DIRECTORY).join("next.squashfs");
     let mut dst = AtomicFile::new(&path, None::<&Path>).await?;
-    let mut download_writer = download_phase.writer(&mut *dst);
-    asset.download(client, &mut download_writer).await?;
-    let (_, mut download_phase) = download_writer.into_inner();
+    let download = asset
+        .download(client, torrents, &mut *dst, download_phase)
+        .await?;
+    let mut download_phase = download.progress;
     dst.sync_all().await?;
     download_phase.complete();
 
@@ -506,6 +528,9 @@ pub(crate) async fn do_update(
         .check(&MultiCursorFile::open(&*dst).await?)
         .await?;
     dst.save().await?;
+    if let (Some(torrents), Some(metadata)) = (torrents, download.sharing.as_ref()) {
+        remember_image(torrents, metadata, &path).await;
+    }
     reverify_phase.complete();
 
     finalize_phase.start();
@@ -519,7 +544,7 @@ pub(crate) async fn do_update(
         .invoke(crate::ErrorKind::Filesystem)
         .await?;
 
-    let checksum = hex::encode(&asset.commitment.hash[..16]);
+    let checksum = image_checksum(&asset.commitment);
 
     Command::new("/usr/lib/startos/scripts/upgrade")
         .env("CHECKSUM", &checksum)
@@ -529,6 +554,14 @@ pub(crate) async fn do_update(
     save_update_notes(&notes).await.log_err();
     finalize_phase.complete();
 
+    if let (Some(torrents), Some(metadata)) = (torrents, download.sharing) {
+        match tokio::fs::canonicalize(CURRENT_IMAGE_POINTER).await {
+            Ok(stored) => remember_image(torrents, &metadata, &stored).await,
+            Err(error) => {
+                tracing::warn!(%error, "Cannot resolve native OS image pointer for sharing")
+            }
+        }
+    }
     progress.complete();
 
     Ok(())

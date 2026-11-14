@@ -90,6 +90,11 @@ import {
   WebsocketConfig,
 } from './api.types'
 import { ApiService, FileUploadOptions } from './embassy-api.service'
+import {
+  BITTORRENT_INTERFACE,
+  mockBitTorrentBinding,
+  mockBitTorrentPreview,
+} from './bittorrent.fixture'
 import type { StartupApiService } from './startup-api.service'
 import {
   mockOsUpdateCache,
@@ -292,6 +297,60 @@ export class MockApiService extends ApiService implements StartupApiService {
     },
     'init.subscribe': () => this.initSubscription(),
     'init.logs.follow': () => this.logFollow(),
+    'server.bittorrent.config': async () => ({
+      available: true,
+      interface: BITTORRENT_INTERFACE,
+      preview: this.mockData('/serverInfo/network/host/bindings/6881')
+        ? null
+        : mockBitTorrentPreview(),
+    }),
+    'server.bittorrent.set-preferences': async params => {
+      await pauseFor(500)
+      const current = this.mockData(
+        '/serverInfo/bittorrent',
+      ) as T.TorrentPreferences
+      const downloads = params.downloads ?? current.downloads
+      const seeding = downloads && (params.seeding ?? current.seeding)
+      const preferences = { downloads, seeding }
+      const patches: Operation<unknown>[] = [
+        {
+          op: PatchOp.REPLACE,
+          path: '/serverInfo/bittorrent',
+          value: preferences,
+        },
+      ]
+      const port = BITTORRENT_INTERFACE.addressInfo.internalPort
+      const bindingPath = '/serverInfo/network/host/bindings/' + port
+      if (!seeding && this.mockData(bindingPath)) {
+        patches.push({ op: PatchOp.REMOVE, path: bindingPath })
+      }
+      await this.mockRevision(patches)
+      return preferences
+    },
+    'server.bittorrent.set-address-enabled': async params => {
+      await pauseFor(500)
+      const path = '/serverInfo/network/host/bindings/6881'
+      if (!params.enabled && !this.mockData(path)) {
+        return mockBitTorrentPreview().addresses.available.find(
+          address =>
+            address.hostname === params.address.hostname &&
+            utils.deepEqual(address.metadata, params.address.metadata),
+        )!
+      }
+      const { binding, address } = this.mockIncomingAddress(params.address)
+      this.mockApplyAddressSelection(binding.addresses, address, params.enabled)
+      await this.mockPublishIncoming(binding)
+      return address
+    },
+    'server.bittorrent.set-gua-wan': async params => {
+      await pauseFor(500)
+      const path = '/serverInfo/network/host/bindings/6881'
+      if (!params.wan && !this.mockData(path)) return null
+      const { binding, address } = this.mockIncomingAddress(params.address)
+      this.mockApplyGuaSelection(binding.addresses, address, params.wan)
+      await this.mockPublishIncoming(binding)
+      return null
+    },
     'server.time': async params => {
       await pauseFor(2000)
       return {
@@ -2767,7 +2826,6 @@ export class MockApiService extends ApiService implements StartupApiService {
         },
       ]
       this.mockRevision(patch3)
-      // quickly revert server to "running" for continued testing
       await pauseFor(100)
       const patch4 = [
         {
@@ -2777,17 +2835,41 @@ export class MockApiService extends ApiService implements StartupApiService {
         },
       ]
       this.mockRevision(patch4)
-      // set patch indicating update is complete
       await pauseFor(100)
       const patch6 = [
         {
           op: PatchOp.REPLACE,
           path: '/serverInfo/statusInfo',
-          value: Mock.ServerUpdated,
+          value: structuredClone(Mock.ServerStatus),
         },
       ]
       this.mockRevision(patch6)
     }, 1000)
+  }
+
+  private mockIncomingAddress(requested: T.HostnameInfoInput) {
+    const current = this.mockData('/serverInfo/network/host/bindings/6881') as
+      | T.BindInfo
+      | undefined
+    const binding = current ? structuredClone(current) : mockBitTorrentBinding()
+    const address = binding.addresses.available.find(
+      address =>
+        address.hostname === requested.hostname &&
+        utils.deepEqual(address.metadata, requested.metadata),
+    )!
+    return { binding, address }
+  }
+
+  private async mockPublishIncoming(binding: T.BindInfo) {
+    const path = '/serverInfo/network/host/bindings/6881'
+    const exists = !!this.mockData(path)
+    if (binding.addresses.effective.length) {
+      await this.mockRevision([
+        { op: exists ? PatchOp.REPLACE : PatchOp.ADD, path, value: binding },
+      ])
+    } else if (exists) {
+      await this.mockRevision([{ op: PatchOp.REMOVE, path }])
+    }
   }
 
   private mockSetAddressEnabled(
@@ -2795,10 +2877,28 @@ export class MockApiService extends ApiService implements StartupApiService {
     h: T.HostnameInfoInput,
     enabled: Params<'server.host.binding.set-address-enabled'>['enabled'],
   ): void {
+    const current = structuredClone(
+      this.mockData(basePath),
+    ) as T.DerivedAddressInfo
+    this.mockApplyAddressSelection(current, h, enabled)
+    this.mockRevision([{ op: PatchOp.REPLACE, path: basePath, value: current }])
+  }
+
+  private mockApplyAddressSelection(
+    current: T.DerivedAddressInfo,
+    h: T.HostnameInfoInput,
+    enabled: Params<'server.host.binding.set-address-enabled'>['enabled'],
+  ) {
     const isPublicIp =
       h.public && (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6')
-
-    const current = this.mockData(basePath) as T.DerivedAddressInfo
+    const matches = (address: T.HostnameInfo) =>
+      address.hostname === h.hostname &&
+      address.port === h.port &&
+      address.ssl === h.ssl &&
+      utils.deepEqual(address.metadata, h.metadata)
+    const selected = current.effective.filter(address => !matches(address))
+    if (enabled) selected.push(...current.available.filter(matches))
+    current.effective = selected
 
     if (isPublicIp) {
       if (h.port === null) return
@@ -2817,9 +2917,6 @@ export class MockApiService extends ApiService implements StartupApiService {
       }
 
       current.enabled = arr
-      this.mockRevision([
-        { op: PatchOp.REPLACE, path: `${basePath}/enabled`, value: arr },
-      ])
     } else {
       const port = h.port ?? 0
       const without = (overrides: [string, number][]) =>
@@ -2827,6 +2924,7 @@ export class MockApiService extends ApiService implements StartupApiService {
           ([dHost, dPort]) => !(dHost === h.hostname && dPort === port),
         )
       const disabled = without(current.disabled)
+      const enabledNames = without(current.enabledNames)
       let lanEnabled = without(current.lanEnabled)
 
       if (!enabled) {
@@ -2849,49 +2947,36 @@ export class MockApiService extends ApiService implements StartupApiService {
         }
       } else if (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6') {
         lanEnabled.push([h.hostname, port])
+      } else {
+        enabledNames.push([h.hostname, port])
       }
 
+      current.enabledNames = enabledNames
       current.disabled = disabled
       current.lanEnabled = lanEnabled
-      this.mockRevision([
-        { op: PatchOp.REPLACE, path: `${basePath}/disabled`, value: disabled },
-        {
-          op: PatchOp.REPLACE,
-          path: `${basePath}/lanEnabled`,
-          value: lanEnabled,
-        },
-      ])
     }
-    this.refreshMockAddresses(basePath, current)
   }
 
-  private refreshMockAddresses(
-    basePath: string,
-    current: T.DerivedAddressInfo,
-  ): void {
-    const { effective: _, ...legacy } = current
-    current.effective = utils.getEnabledAddresses(legacy)
-    this.mockRevision([
-      {
-        op: PatchOp.ADD,
-        path: `${basePath}/effective`,
-        value: current.effective,
-      },
-    ])
-  }
-
-  // Mirrors the backend set_gua_wan: update the gua_wan set, carry the row's
-  // on/off state into `enabled`, and re-project `public` onto the available
-  // entry (what update_addresses does server-side).
   private mockSetGuaWan(
     basePath: string,
     h: T.HostnameInfoInput,
     wan: boolean,
   ): void {
-    if (h.metadata.kind !== 'ipv6' || h.port === null) return
+    const current = structuredClone(
+      this.mockData(basePath),
+    ) as T.DerivedAddressInfo
+    this.mockApplyGuaSelection(current, h, wan)
+    this.mockRevision([{ op: PatchOp.REPLACE, path: basePath, value: current }])
+  }
 
+  private mockApplyGuaSelection(
+    current: T.DerivedAddressInfo,
+    h: T.HostnameInfoInput,
+    wan: boolean,
+  ) {
+    if (h.metadata.kind !== 'ipv6' || h.port === null) return
+    const gateway = h.metadata.gateway
     const key = `[${h.hostname}]:${h.port}`
-    const current = this.mockData(basePath) as T.DerivedAddressInfo
     const guaWan = current.guaWan.filter(k => k !== key)
     let enabled = current.enabled.filter(k => k !== key)
     if (wan) {
@@ -2910,13 +2995,27 @@ export class MockApiService extends ApiService implements StartupApiService {
     current.guaWan = guaWan
     current.enabled = enabled
     current.available = available
-    const patch: Operation<any>[] = [
-      { op: PatchOp.ADD, path: `${basePath}/guaWan`, value: guaWan },
-      { op: PatchOp.ADD, path: `${basePath}/enabled`, value: enabled },
-      { op: PatchOp.ADD, path: `${basePath}/available`, value: available },
-    ]
-    this.mockRevision(patch)
-    this.refreshMockAddresses(basePath, current)
+    const selected = current.effective.filter(
+      address => address.hostname !== h.hostname || address.port !== h.port,
+    )
+    const lanOn =
+      current.lanEnabled.some(
+        ([hostname, port]) => hostname === h.hostname && port === h.port,
+      ) ||
+      selected.some(
+        address =>
+          address.metadata.kind === 'ipv4' &&
+          !address.public &&
+          address.metadata.gateway === gateway &&
+          address.port === h.port,
+      )
+    if (wan || lanOn)
+      selected.push(
+        ...available.filter(
+          address => address.hostname === h.hostname && address.port === h.port,
+        ),
+      )
+    current.effective = selected
   }
 
   private mockDnsServers(servers: string[] | null): string[] | null {

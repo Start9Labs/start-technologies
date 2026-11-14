@@ -410,6 +410,8 @@ export const mockPatchData: DataModel = {
               disabled: [],
               guaWan: [],
               lanEnabled: [],
+              enabledNames: [],
+              defaultOff: false,
               available: [
                 {
                   ssl: true,
@@ -490,6 +492,7 @@ export const mockPatchData: DataModel = {
               ],
             }),
             options: {
+              defaultOff: false,
               transport: ['tcp'],
               preferredExternalPort: 80,
               addSsl: {
@@ -673,14 +676,7 @@ export const mockPatchData: DataModel = {
     packageVersionCompat: '>=0.3.0 <=0.3.6',
     postInitMigrationTodos: {},
     latestMigrationRevision: 0,
-    statusInfo: {
-      updateProgress: null,
-      backupConversions: {},
-      restarting: false,
-      shuttingDown: false,
-      backupProgress: null,
-      restart: null,
-    },
+    statusInfo: structuredClone(Mock.ServerStatus),
     hostname: 'random-words',
     pubkey: 'npub1sg6plzptd64u62a878hep2kev88swjh3tw00gjsfl8f237lmu63q0uf63m',
     caFingerprint: '63:2B:11:99:44:40:17:DF:37:FC:C3:DF:0F:3D:15',
@@ -689,6 +685,7 @@ export const mockPatchData: DataModel = {
     nut: { enabled: false, settings: null },
     echoipUrls: ['https://ipconfig.me', 'https://ifconfig.co'],
     zram: false,
+    bittorrent: { downloads: false, seeding: false },
     governor: 'performance',
     epp: 'balance_power',
     ram: 8 * 1024 * 1024 * 1024,
@@ -993,6 +990,8 @@ export const mockPatchData: DataModel = {
                 disabled: [],
                 guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
                 lanEnabled: [],
+                enabledNames: [],
+                defaultOff: false,
                 available: [
                   {
                     ssl: true,
@@ -1094,6 +1093,7 @@ export const mockPatchData: DataModel = {
                 ],
               }),
               options: {
+                defaultOff: false,
                 transport: ['tcp', 'udp'],
                 preferredExternalPort: 42443,
                 addSsl: {
@@ -1171,6 +1171,8 @@ export const mockPatchData: DataModel = {
               addresses: mockAddresses({
                 enabled: ['203.0.113.45:49152'],
                 disabled: [],
+                enabledNames: [],
+                defaultOff: false,
                 guaWan: [],
                 lanEnabled: [],
                 available: [
@@ -1272,6 +1274,8 @@ export const mockPatchData: DataModel = {
                 disabled: [],
                 guaWan: [],
                 lanEnabled: [],
+                enabledNames: [],
+                defaultOff: false,
                 available: [
                   {
                     ssl: false,
@@ -1310,6 +1314,7 @@ export const mockPatchData: DataModel = {
                 transport: ['tcp', 'udp'],
                 addSsl: null,
                 preferredExternalPort: 48332,
+                defaultOff: false,
                 secure: { ssl: false },
                 proxy: { type: 'http', addXForwardedHeaders: true, auth: null },
               },
@@ -1352,12 +1357,15 @@ export const mockPatchData: DataModel = {
                 disabled: [],
                 guaWan: [],
                 lanEnabled: [],
+                enabledNames: [],
+                defaultOff: false,
                 available: [],
               }),
               options: {
                 transport: ['tcp', 'udp'],
                 addSsl: null,
                 preferredExternalPort: 48333,
+                defaultOff: false,
                 secure: { ssl: false },
                 proxy: null,
               },

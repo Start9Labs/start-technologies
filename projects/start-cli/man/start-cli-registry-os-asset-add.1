@@ -4,7 +4,7 @@
 .SH NAME
 start\-cli\-registry\-os\-asset\-add \- Add asset to registry
 .SH SYNOPSIS
-\fBstart\-cli registry os asset add\fR <\fB\-p\fR|\fB\-\-platform\fR> <\fB\-v\fR|\fB\-\-version\fR> [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE\fR> <\fIURL\fR>
+\fBstart\-cli registry os asset add\fR <\fB\-p\fR|\fB\-\-platform\fR> <\fB\-v\fR|\fB\-\-version\fR> [\fB\-\-torrent\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE\fR> <\fIURL\fR>
 .SH DESCRIPTION
 Add asset to registry
 .SH OPTIONS
@@ -14,6 +14,9 @@ Target platform identifier
 .TP
 \fB\-v\fR, \fB\-\-version\fR \fI<VERSION>\fR
 StartOS version number
+.TP
+\fB\-\-torrent\fR \fI<TORRENT>\fR
+Magnet link or HTTP(S) torrent metadata URL; seed the asset separately
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

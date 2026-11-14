@@ -274,10 +274,8 @@ mod tests {
         fixture["public"]["serverInfo"]["latestMigrationRevision"] = imbl_value::json!(1);
         let db = patch_db::PatchDb::in_memory();
         db.put(&patch_db::json_ptr::ROOT, &fixture).await.unwrap();
-        super::super::Current::default()
-            .pre_init(&db)
-            .await
-            .unwrap();
+        let current = super::super::Current::default();
+        current.pre_init(&db).await.unwrap();
         let migrated = db.dump(&patch_db::json_ptr::ROOT).await.value;
         let keys: TrustedKeys =
             from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
@@ -287,7 +285,7 @@ mod tests {
         }
         assert_eq!(
             migrated["public"]["serverInfo"]["latestMigrationRevision"],
-            imbl_value::json!(super::super::Current::default().migration_revision())
+            imbl_value::json!(current.migration_revision())
         );
     }
 

@@ -453,6 +453,63 @@ fn cached_package_queries_keep_target_and_source_selection_while_offline() {
 }
 
 #[test]
+fn cached_assets_keep_ordered_mirrors_and_peer_metadata() {
+    let mut db = database();
+    let mut index = index();
+    let asset = crate::registry::asset::RegistryAsset {
+        published_at: chrono::Utc::now(),
+        urls: vec![
+            "https://first.test/package.s9pk".parse().unwrap(),
+            "https://second.test/package.s9pk".parse().unwrap(),
+        ],
+        torrent: Some("https://first.test/package.torrent".parse().unwrap()),
+        commitment: crate::sign::commitment::merkle_archive::MerkleArchiveCommitment {
+            root_sighash: crate::util::serde::Base64([7; 32]),
+            root_maxsize: 1024,
+        },
+        signatures: Default::default(),
+    };
+    index
+        .package
+        .packages
+        .get_mut("test")
+        .unwrap()
+        .versions
+        .get_mut(&"1.0.0:0".parse().unwrap())
+        .unwrap()
+        .s9pks
+        .push((Default::default(), asset));
+    publish_snapshot(
+        &mut db,
+        &Subscription::Index(url()),
+        &to_value(&index).unwrap(),
+        &device(),
+    )
+    .unwrap();
+    let result = cached_response(
+        &db,
+        &url(),
+        "package.get",
+        &json!({"id":"test", "targetVersion":"=1.0.0:0"}),
+        Some(&device()),
+    )
+    .unwrap()
+    .unwrap();
+    let asset = &result["best"]["1.0.0:0"]["s9pks"][0][1];
+    assert_eq!(
+        asset["urls"],
+        json!([
+            "https://first.test/package.s9pk",
+            "https://second.test/package.s9pk"
+        ])
+    );
+    assert_eq!(
+        asset["torrent"].as_str(),
+        Some("https://first.test/package.torrent")
+    );
+}
+
+#[test]
 fn first_connection_failure_publishes_availability_and_does_not_fetch_on_cache_queries() {
     let mut db = database();
     set_status(

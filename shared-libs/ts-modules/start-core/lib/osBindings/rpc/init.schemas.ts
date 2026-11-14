@@ -818,6 +818,7 @@ export const Api = {
     server: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        bittorrent: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         'device-info': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             object({

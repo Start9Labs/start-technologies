@@ -335,6 +335,10 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
 pub fn server<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
+            "bittorrent",
+            system::bittorrent::api::<C>().with_about("about.system.bittorrent"),
+        )
+        .subcommand(
             "time",
             from_fn_async(system::time)
                 .with_display_serializable()

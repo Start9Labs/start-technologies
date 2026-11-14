@@ -368,10 +368,26 @@ export const ProgressUnits: z.ZodEnum<{ bytes: 'bytes'; steps: 'steps' }> =
 export const ReplayId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'ReplayId',
 })
-export const Security: z.ZodObject<{ ssl: z.ZodBoolean }> =
-  /* @__PURE__ */ object({ ssl: z.boolean() }).meta({
-    id: 'Security',
-  })
+
+/**
+ * A protocol safe to expose on enabled public addresses.
+ */
+export const Security: z.ZodObject<{
+  /**
+   * Whether TLS precedes application bytes.
+   */
+  ssl: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  /**
+   * Whether TLS precedes application bytes.
+   */
+  ssl: z.boolean().meta({
+    description: 'Whether TLS precedes application bytes.',
+  }),
+}).meta({
+  id: 'Security',
+  description: 'A protocol safe to expose on enabled public addresses.',
+})
 export const ServiceInterfaceId: typeof literal_0 =
   /* @__PURE__ */ literal_0.meta({
     id: 'ServiceInterfaceId',
@@ -2469,43 +2485,67 @@ export const Progress: z.ZodUnion<
   .meta({
     id: 'Progress',
   })
-export const ProxyOptions: z.ZodIntersection<
-  z.ZodObject<{ type: z.ZodLiteral<'http'> }>,
-  z.ZodObject<{
-    /**
-     * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
-     * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
-     */
-    addXForwardedHeaders: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-    /**
-     * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
-     */
-    auth: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
-      z.ZodNullable<typeof ProxyAuth>
-    >
-  }>
+export const ProxyOptions: z.ZodUnion<
+  readonly [
+    z.ZodObject<{
+      /**
+       * Relays raw TCP streams without parsing application messages.
+       */
+      type: z.ZodLiteral<'tcp'>
+    }>,
+    z.ZodIntersection<
+      z.ZodObject<{ type: z.ZodLiteral<'http'> }>,
+      z.ZodObject<{
+        /**
+         * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+         * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+         */
+        addXForwardedHeaders: z.ZodCodec<
+          z.ZodOptional<z.ZodBoolean>,
+          z.ZodBoolean
+        >
+        /**
+         * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+         */
+        auth: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
+          z.ZodNullable<typeof ProxyAuth>
+        >
+      }>
+    >,
+  ]
 > = /* @__PURE__ */ z
-  .intersection(
-    object({ type: z.literal('http') }),
+  .union([
     object({
       /**
-       * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
-       * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+       * Relays raw TCP streams without parsing application messages.
        */
-      addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()).meta({
+      type: z.literal('tcp').meta({
         description:
-          'Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.',
-      }),
-      /**
-       * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
-       */
-      auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()).meta({
-        description:
-          'Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.',
+          'Relays raw TCP streams without parsing application messages.',
       }),
     }),
-  )
+    z.intersection(
+      object({ type: z.literal('http') }),
+      object({
+        /**
+         * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
+         * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
+         */
+        addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()).meta({
+          description:
+            'Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.',
+        }),
+        /**
+         * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
+         */
+        auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()).meta({
+          description:
+            'Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.',
+        }),
+      }),
+    ),
+  ])
   .meta({
     id: 'ProxyOptions',
   })
@@ -2759,18 +2799,26 @@ export const DepInfo: z.ZodIntersection<
   })
 export const DerivedAddressInfo: z.ZodObject<{
   /**
-   * User override: enable these addresses (only for public IP & port)
+   * Public IP opt-ins.
    */
   enabled: z.ZodArray<z.ZodString>
   /**
-   * User override: disable these addresses (only for domains and private IP & port)
+   * Named-address and private-IP opt-outs.
    */
   disabled: z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt], null>>
   /**
-   * User override: IPv6 global-unicast addresses opted into WAN exposure.
-   * Projected into `HostnameInfo.public` by `update_addresses`, so `public`
-   * stays the single source of truth for WAN reachability (P2P address
-   * selection, upstream pinholes). A GUA not in this set is LAN-only.
+   * Named-address opt-ins retained across discovery changes.
+   */
+  enabledNames: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt], null>>>,
+    z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt], null>>
+  >
+  /**
+   * Binding policy projected for standalone address consumers.
+   */
+  defaultOff: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  /**
+   * IPv6 global-unicast WAN opt-ins, projected into `HostnameInfo.public`.
    */
   guaWan: z.ZodCodec<
     z.ZodOptional<z.ZodArray<z.ZodString>>,
@@ -2803,7 +2851,7 @@ export const DerivedAddressInfo: z.ZodObject<{
     z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
   >
   /**
-   * COMPUTED: NetServiceData::update — all possible addresses for this binding
+   * Discovered address candidates.
    */
   available: z.ZodArray<typeof HostnameInfo>
   /**
@@ -2815,28 +2863,38 @@ export const DerivedAddressInfo: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   /**
-   * User override: enable these addresses (only for public IP & port)
+   * Public IP opt-ins.
    */
   enabled: z.array(z.string()).meta({
-    description:
-      'User override: enable these addresses (only for public IP & port)',
+    description: 'Public IP opt-ins.',
   }),
   /**
-   * User override: disable these addresses (only for domains and private IP & port)
+   * Named-address and private-IP opt-outs.
    */
   disabled: z.array(z.tuple([z.string(), z.int()])).meta({
-    description:
-      'User override: disable these addresses (only for domains and private IP & port)',
+    description: 'Named-address and private-IP opt-outs.',
   }),
   /**
-   * User override: IPv6 global-unicast addresses opted into WAN exposure.
-   * Projected into `HostnameInfo.public` by `update_addresses`, so `public`
-   * stays the single source of truth for WAN reachability (P2P address
-   * selection, upstream pinholes). A GUA not in this set is LAN-only.
+   * Named-address opt-ins retained across discovery changes.
+   */
+  enabledNames: wire(
+    z.array(z.tuple([z.string(), z.int()])).optional(),
+    z.array(z.tuple([z.string(), z.int()])),
+  ).meta({
+    description: 'Named-address opt-ins retained across discovery changes.',
+  }),
+  /**
+   * Binding policy projected for standalone address consumers.
+   */
+  defaultOff: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Binding policy projected for standalone address consumers.',
+  }),
+  /**
+   * IPv6 global-unicast WAN opt-ins, projected into `HostnameInfo.public`.
    */
   guaWan: wire(z.array(z.string()).optional(), z.array(z.string())).meta({
     description:
-      'User override: IPv6 global-unicast addresses opted into WAN exposure.\nProjected into `HostnameInfo.public` by `update_addresses`, so `public`\nstays the single source of truth for WAN reachability (P2P address\nselection, upstream pinholes). A GUA not in this set is LAN-only.',
+      'IPv6 global-unicast WAN opt-ins, projected into `HostnameInfo.public`.',
   }),
   /**
    * User override: enable these private IPs regardless of their mDNS address.
@@ -2870,11 +2928,10 @@ export const DerivedAddressInfo: z.ZodObject<{
       'Persisted consent; ordinary address changes must not grant insecure access.\nAddress removal retains consent; explicit disabling or gateway removal revokes it.',
   }),
   /**
-   * COMPUTED: NetServiceData::update — all possible addresses for this binding
+   * Discovered address candidates.
    */
   available: z.array(HostnameInfo).meta({
-    description:
-      'COMPUTED: NetServiceData::update — all possible addresses for this binding',
+    description: 'Discovered address candidates.',
   }),
   /**
    * Effective address selections shared by network enforcement and clients.
@@ -3064,31 +3121,43 @@ export const BindingRanges: z.ZodRecord<z.ZodString, typeof RangeBindInfo> =
   /* @__PURE__ */ z.record(z.string(), RangeBindInfo).meta({
     id: 'BindingRanges',
   })
-export const CompatibleBindOptions: z.ZodObject<{
-  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
-  preferredExternalPort: z.ZodInt
-  addSsl: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>,
-    z.ZodNullable<typeof LegacyProxySslOptions>
-  >
-  secure: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Security>>,
-    z.ZodNullable<typeof Security>
-  >
-  proxy: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof ProxyOptions>>,
-    z.ZodNullable<typeof ProxyOptions>
-  >
-}> = /* @__PURE__ */ object({
-  transport: wire(Transport.optional(), Transport),
-  preferredExternalPort: z.int(),
-  addSsl: wire(
-    LegacyProxySslOptions.nullable().optional(),
-    LegacyProxySslOptions.nullable(),
-  ),
-  secure: wire(Security.nullable().optional(), Security.nullable()),
-  proxy: wire(ProxyOptions.nullable().optional(), ProxyOptions.nullable()),
-}).meta({
+export const CompatibleBindOptions: z.ZodCodec<
+  z.ZodObject<{
+    transport: z.ZodOptional<typeof Transport>
+    preferredExternalPort: z.ZodInt
+    addSsl: z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>
+    secure: z.ZodOptional<z.ZodNullable<typeof Security>>
+    proxy: z.ZodOptional<z.ZodNullable<typeof ProxyOptions>>
+    defaultOff: z.ZodOptional<z.ZodBoolean>
+    publicOnly: z.ZodOptional<z.ZodBoolean>
+  }>,
+  z.ZodObject<{
+    transport: typeof Transport
+    preferredExternalPort: z.ZodInt
+    addSsl: z.ZodNullable<typeof LegacyProxySslOptions>
+    secure: z.ZodNullable<typeof Security>
+    proxy: z.ZodNullable<typeof ProxyOptions>
+    defaultOff: z.ZodBoolean
+  }>
+> = /* @__PURE__ */ wire(
+  object({
+    transport: Transport.optional(),
+    preferredExternalPort: z.int(),
+    addSsl: LegacyProxySslOptions.nullable().optional(),
+    secure: Security.nullable().optional(),
+    proxy: ProxyOptions.nullable().optional(),
+    defaultOff: z.boolean().optional(),
+    publicOnly: z.boolean().optional(),
+  }),
+  object({
+    transport: Transport,
+    preferredExternalPort: z.int(),
+    addSsl: LegacyProxySslOptions.nullable(),
+    secure: Security.nullable(),
+    proxy: ProxyOptions.nullable(),
+    defaultOff: z.boolean(),
+  }),
+).meta({
   id: 'CompatibleBindOptions',
 })
 export const Manifest: z.ZodIntersection<
@@ -3147,13 +3216,22 @@ export const BindOptions: z.ZodCodec<
      * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
      */
     transport: typeof Transport
+    /**
+     * Zero requests dynamic allocation; it never reserves port zero.
+     */
     preferredExternalPort: z.ZodInt
     addSsl: z.ZodNullable<typeof AddSslOptions>
     secure: z.ZodNullable<typeof Security>
     /**
-     * HTTP request policy shared by every exposed leg of this binding.
+     * Proxy protocol shared by every exposed leg of this binding.
      */
     proxy: z.ZodNullable<typeof ProxyOptions>
+    /**
+     * New address groups require opt-in; existing selections persist.
+     * Inactive bindings clear selections and reject opt-ins.
+     * Internal endpoints remain local and are omitted from opt-in candidates.
+     */
+    defaultOff: z.ZodBoolean
   }>
 > = /* @__PURE__ */ wire(
   CompatibleBindOptions,
@@ -3165,15 +3243,30 @@ export const BindOptions: z.ZodCodec<
       description:
         'Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.',
     }),
-    preferredExternalPort: z.int(),
+    /**
+     * Zero requests dynamic allocation; it never reserves port zero.
+     */
+    preferredExternalPort: z.int().meta({
+      description:
+        'Zero requests dynamic allocation; it never reserves port zero.',
+    }),
     addSsl: AddSslOptions.nullable(),
     secure: Security.nullable(),
     /**
-     * HTTP request policy shared by every exposed leg of this binding.
+     * Proxy protocol shared by every exposed leg of this binding.
      */
     proxy: ProxyOptions.nullable().meta({
       description:
-        'HTTP request policy shared by every exposed leg of this binding.',
+        'Proxy protocol shared by every exposed leg of this binding.',
+    }),
+    /**
+     * New address groups require opt-in; existing selections persist.
+     * Inactive bindings clear selections and reject opt-ins.
+     * Internal endpoints remain local and are omitted from opt-in candidates.
+     */
+    defaultOff: z.boolean().meta({
+      description:
+        'New address groups require opt-in; existing selections persist.\nInactive bindings clear selections and reject opt-ins.\nInternal endpoints remain local and are omitted from opt-in candidates.',
     }),
   }),
 ).meta({
