@@ -336,7 +336,9 @@ export class MockApiService extends ApiService {
     return {
       initial: { target, progress: null },
       items: (async function* () {
+        options?.signal?.throwIfAborted()
         yield { overall: true, phases: [] }
+        options?.signal?.throwIfAborted()
         return null
       })(),
     }
@@ -1225,9 +1227,11 @@ export class MockApiService extends ApiService {
     return {
       initial: { guid: null },
       items: (async function* () {
+        signal?.throwIfAborted()
         await new Promise(resolve =>
           signal?.addEventListener('abort', resolve, { once: true }),
         )
+        signal?.throwIfAborted()
         return null
       })(),
     }

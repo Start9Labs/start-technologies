@@ -2630,11 +2630,9 @@ test('WRT mock update and log streams use local typed items without networking',
   const following = new AbortController()
   const logs = await mock.followLogs({ signal: following.signal })
   assert.equal(logs.initial.guid, null)
-  const ended = logs.items.next()
+  const ended = assert.rejects(logs.items.next(), { name: 'AbortError' })
   following.abort()
-  const end = await ended
-  assert.equal(end.done, true)
-  assert.equal(end.value, null)
+  await ended
 
   const aborted = new AbortController()
   aborted.abort()
@@ -2642,6 +2640,39 @@ test('WRT mock update and log streams use local typed items without networking',
     name: 'AbortError',
   })
 })
+
+test(
+  'WRT mock streams honor cancellation after acquisition and before their next item',
+  { timeout: 1000 },
+  async () => {
+    const { load } = harness(wrtMockOverrides())
+    const mock = Object.create(
+      load('projects/start-wrt/web/src/app/services/api/mock-api.service.ts')
+        .MockApiService.prototype,
+    )
+    mock.mockSystemInfo = { version: '1.4.0' }
+
+    const updateAbort = new AbortController()
+    const update = await mock.systemUpdate(
+      { targetVersion: '1.5.0' },
+      { signal: updateAbort.signal },
+    )
+    updateAbort.abort()
+    await assert.rejects(update.items.next(), { name: 'AbortError' })
+    assert.equal(mock.mockSystemInfo.version, '1.5.0')
+
+    const finalAbort = new AbortController()
+    const finishing = await mock.systemUpdate({}, { signal: finalAbort.signal })
+    await finishing.items.next()
+    finalAbort.abort()
+    await assert.rejects(finishing.items.next(), { name: 'AbortError' })
+
+    const logsAbort = new AbortController()
+    const logs = await mock.followLogs({ signal: logsAbort.signal })
+    logsAbort.abort()
+    await assert.rejects(logs.items.next(), { name: 'AbortError' })
+  },
+)
 
 function wrtFlowHarness(globals = {}) {
   const overrides = new Map([
