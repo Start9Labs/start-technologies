@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core'
+import { Component, computed, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import {
@@ -6,16 +6,27 @@ import {
   MarketplacePkg,
   StoreIconDirective,
   StoreIdentity,
+  RegistryConnectionStatus,
+  RegistryStatePipe,
+  isRegistryLoading,
 } from '@start9labs/marketplace'
 import { i18nPipe } from '@start9labs/shared'
-import { TuiButton, TuiCell, TuiNotification, TuiTitle } from '@taiga-ui/core'
+import {
+  TuiButton,
+  TuiCell,
+  TuiIcon,
+  TuiNotification,
+  TuiTitle,
+} from '@taiga-ui/core'
 import {
   TuiAvatar,
   TuiBadgeNotification,
   TuiFade,
   TuiSkeleton,
 } from '@taiga-ui/kit'
-import { combineLatest, map, tap } from 'rxjs'
+import { combineLatest, map } from 'rxjs'
+import { UpdatesCount } from 'src/app/routes/portal/components/updates-count'
+import { RegistryRetry } from 'src/app/routes/portal/components/registry-retry'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { HiddenUpdatesService } from 'src/app/services/hidden-updates.service'
@@ -51,7 +62,7 @@ interface UpdatesData {
         <button
           tuiIconButton
           iconStart="@tui.arrow-left"
-          (click)="current.set(null)"
+          (click)="selectedRegistry.set('')"
         >
           {{ 'Back' | i18n }}
         </button>
@@ -62,14 +73,14 @@ interface UpdatesData {
       @if ((data()?.hosts || []).length > 2) {
         <h4 tuiTitle>{{ 'Default Registries' | i18n }}</h4>
       }
-      @for (registry of data()?.hosts; track $index) {
+      @for (registry of data()?.hosts; track registry.url) {
         @if ($index === 2 && (data()?.hosts || []).length > 2) {
           <h4 tuiTitle>{{ 'Custom Registries' | i18n }}</h4>
         }
         <button
           tuiCell
           [class.g-secondary]="current()?.url !== registry.url"
-          (click)="current.set(registry)"
+          (click)="selectedRegistry.set(registry.url)"
         >
           <span tuiAvatar appearance="action-grayscale">
             <img [storeIcon]="registry.url" />
@@ -85,9 +96,18 @@ interface UpdatesData {
             ).length;
             as length
           ) {
-            <tui-badge-notification>
+            <tui-badge-notification appUpdatesCount>
               {{ length }}
             </tui-badge-notification>
+          }
+          @if (registry.status === 'error') {
+            <tui-icon
+              icon="@tui.triangle-alert"
+              class="g-warning"
+              role="img"
+              [attr.aria-label]="(registry.status | registryState).label | i18n"
+              [attr.aria-hidden]="false"
+            />
           }
         </button>
       }
@@ -103,13 +123,25 @@ interface UpdatesData {
         </div>
       }
       <section class="g-card">
-        <header>{{ current()?.name }}</header>
+        <header>
+          @if (current(); as registry) {
+            {{ registry.name }}
+            @if (registry.status === 'error') {
+              <marketplace-registry-status
+                [status]="registry.status"
+                [url]="registry.url"
+                [error]="registry.error"
+              />
+              <button [registryRetry]="registry.url" size="xs"></button>
+            }
+          }
+        </header>
         <table
           [appTable]="['Name', 'Version', 'Package Hash', 'Published', null]"
         >
+          @let packages = data()?.marketplace?.[current()?.url || '']?.packages;
           @if (
-            data()?.marketplace?.[current()?.url || '']?.packages;
-            as packages
+            packages && !isRegistryLoading(current()?.status, packages.length)
           ) {
             @if (
               packages | filterUpdates: data()?.localPkgs : data()?.hidden;
@@ -234,6 +266,11 @@ interface UpdatesData {
     TuiNotification,
     TuiSkeleton,
     TuiBadgeNotification,
+    UpdatesCount,
+    RegistryConnectionStatus,
+    RegistryStatePipe,
+    RegistryRetry,
+    TuiIcon,
     TuiFade,
     TuiButton,
     StoreIconDirective,
@@ -251,7 +288,15 @@ export default class UpdatesComponent {
   private readonly hiddenUpdatesService = inject(HiddenUpdatesService)
   private readonly refinementService = inject(UpdatesRefinementService)
 
-  readonly current = signal<StoreIdentity | null>(null)
+  protected readonly isRegistryLoading = isRegistryLoading
+  protected readonly selectedRegistry = signal('')
+  readonly current = computed(() => {
+    const hosts = this.data()?.hosts || []
+    return (
+      hosts.find(registry => registry.url === this.selectedRegistry()) ||
+      (!this.isMobile ? hosts[0] : null)
+    )
+  })
 
   // The registry's "best" version can be unreachable from the user's installed
   // version — e.g. NextCloud major updates must be sequential, so v30 users
@@ -262,12 +307,7 @@ export default class UpdatesComponent {
   // flash on each navigation.
   readonly data = toSignal<UpdatesData>(
     combineLatest({
-      hosts: this.marketplaceService.registries$.pipe(
-        tap(
-          ([registry]) =>
-            !this.isMobile && registry && this.current.set(registry),
-        ),
-      ),
+      hosts: this.marketplaceService.registries$,
       refined: this.refinementService.refined$,
       localPkgs: inject(LocalPackagesService),
       errors: this.marketplaceService.requestErrors$,

@@ -9,8 +9,8 @@ import {
 } from 'rxjs/operators'
 import { PatchDB } from 'patch-db-client'
 import { DataModel } from 'src/app/services/patch-db/data-model'
-import { OSService } from 'src/app/services/os.service'
 import { ConnectionService } from 'src/app/services/connection.service'
+import { OSService } from 'src/app/services/os.service'
 import { LocalStorageBootstrap } from './patch-db/local-storage-bootstrap'
 
 @Injectable({
@@ -28,7 +28,7 @@ export class PatchDataService extends Observable<void> {
         this.patch.watch$('serverInfo', 'osRegistry').pipe(
           distinctUntilChanged(),
           map(registry => {
-            this.os.loadOS(registry)
+            this.os.loadOS(registry).catch(console.error)
           }),
         ),
       ),
