@@ -1093,4 +1093,8 @@ export default {
   1296: 'Ver registro personalizado',
   1297: 'Personalizado',
   1298: 'Introduce un dominio o una URL',
+  1299: 'Proporcionado por',
+  1300: 'Selecciona un proveedor de dependencias',
+  1301: 'Fijar proveedor',
+  1302: 'Desfijar proveedor',
 } satisfies i18n

@@ -102,7 +102,9 @@ fn uninit_target(data_ver: &str, prev: &Manifest, next: &Manifest) -> Result<Exi
     }
 }
 
-/// This is the structure to contain all the services
+#[cfg(test)]
+mod tests;
+
 #[derive(Default)]
 pub struct ServiceMap(SyncMutex<OrdMap<PackageId, Arc<RwLock<Option<ServiceRef>>>>>);
 impl ServiceMap {
@@ -129,6 +131,10 @@ impl ServiceMap {
         self.entry(id).write_owned().await
     }
 
+    fn try_get_mut(&self, id: &PackageId) -> Option<OwnedRwLockWriteGuard<Option<ServiceRef>>> {
+        self.entry(id).try_write_owned().ok()
+    }
+
     #[instrument(skip_all)]
     pub async fn init(&self, ctx: &RpcContext) -> Result<(), Error> {
         let ids = ctx.db.peek().await.as_public().as_package_data().keys()?;
@@ -150,11 +156,76 @@ impl ServiceMap {
         id: &PackageId,
         disposition: LoadDisposition,
     ) -> Result<(), Error> {
-        let mut shutdown_err = Ok(());
         let mut service = self.get_mut(id).await;
+        let result = self.load_locked(ctx, id, disposition, &mut service).await;
+        drop(service);
+        result.and(self.recheck_dependency_tasks(ctx, id).await)
+    }
+
+    /// Returns false when a busy service must be retried.
+    pub(crate) async fn try_reconcile_dependencies(
+        &self,
+        ctx: &RpcContext,
+        id: &PackageId,
+    ) -> Result<bool, Error> {
+        let Some(mut service) = self.try_get_mut(id) else {
+            return Ok(false);
+        };
+        let reload = ctx
+            .db
+            .mutate(|db| crate::dependencies::providers::refresh_bindings(db, id))
+            .await
+            .result?;
+        let result = if reload {
+            self.load_locked(ctx, id, LoadDisposition::Retry, &mut service)
+                .await
+        } else {
+            Ok(())
+        };
+        drop(service);
+        if reload {
+            result.and(self.recheck_dependency_tasks(ctx, id).await)?;
+        } else {
+            result?;
+        }
+        Ok(true)
+    }
+
+    pub(crate) async fn recheck_dependency_tasks(
+        &self,
+        ctx: &RpcContext,
+        owner: &PackageId,
+    ) -> Result<(), Error> {
+        let targets = super::action::conditional_task_targets(&ctx.db.peek().await, owner)?
+            .into_values()
+            .flatten()
+            .filter(|id| id != owner)
+            .collect::<std::collections::BTreeSet<_>>();
+        for target in targets {
+            let guard = self.get(&target).await;
+            if let Some(service) = guard.as_ref().filter(|service| service.is_initialized()) {
+                service.recheck_tasks().await.log_err();
+            }
+        }
+        Ok(())
+    }
+
+    /// Exit-RPC errors are reported after replacement finishes.
+    async fn load_locked(
+        &self,
+        ctx: &RpcContext,
+        id: &PackageId,
+        disposition: LoadDisposition,
+        service: &mut Option<ServiceRef>,
+    ) -> Result<(), Error> {
+        let mut shutdown_err = Ok(());
         if let Some(service) = service.take() {
             shutdown_err = service.shutdown(None).await;
         }
+        ctx.db
+            .mutate(|db| crate::dependencies::providers::initialize_bindings(db, id))
+            .await
+            .result?;
         match Service::load(ctx, id, disposition).await {
             Ok(s) => {
                 ctx.db
@@ -183,8 +254,7 @@ impl ServiceMap {
                     .result?;
             }
         }
-        shutdown_err?;
-        Ok(())
+        shutdown_err
     }
 
     #[instrument(skip_all)]
@@ -317,6 +387,8 @@ impl ServiceMap {
                                         developer_key: Der64::new(developer_key),
                                         last_backup: None,
                                         current_dependencies: Default::default(),
+                                        dependency_selections: Default::default(),
+                                        dependency_bindings: Default::default(),
                                         actions: Default::default(),
                                         tasks: Default::default(),
                                         hosts: Default::default(),
@@ -420,7 +492,7 @@ impl ServiceMap {
                         None
                     };
                     let new_service = Service::install(
-                        ctx,
+                        ctx.clone(),
                         s9pk,
                         &installed_path,
                         &registry,
@@ -451,6 +523,7 @@ impl ServiceMap {
                         .log_err();
 
                     drop(service);
+                    ctx.services.recheck_dependency_tasks(&ctx, &id).await?;
 
                     sync_progress_task.await.map_err(|_| {
                         Error::new(eyre!("progress sync task panicked"), ErrorKind::Unknown)
@@ -462,7 +535,6 @@ impl ServiceMap {
         .boxed())
     }
 
-    /// This is ran during the cleanup, so when we are uninstalling the service
     #[instrument(skip_all)]
     pub async fn uninstall(
         &self,
@@ -472,6 +544,9 @@ impl ServiceMap {
         force: bool,
     ) -> Result<impl Future<Output = Result<(), Error>> + Send + 'static, Error> {
         let mut guard = self.get_mut(&id).await;
+        crate::dependencies::providers::refresh_pins(&ctx, &id)
+            .await
+            .log_err();
         ctx.db
             .mutate(|db| {
                 let entry = db

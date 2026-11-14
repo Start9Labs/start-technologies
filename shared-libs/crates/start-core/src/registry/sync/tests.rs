@@ -453,6 +453,57 @@ fn cached_package_queries_keep_target_and_source_selection_while_offline() {
 }
 
 #[test]
+fn cached_provider_queries_select_claimed_versions_even_when_a_newer_release_drops_the_claim() {
+    let mut db = database();
+    let mut catalog = index();
+    catalog
+        .package
+        .packages
+        .get_mut("test")
+        .unwrap()
+        .versions
+        .get_mut(&"1.0.0:0".parse().unwrap())
+        .unwrap()
+        .metadata
+        .satisfies_packages
+        .insert(
+            "logical".parse().unwrap(),
+            BTreeSet::from(["26.0.0:0".parse().unwrap()]),
+        );
+    publish_snapshot(
+        &mut db,
+        &Subscription::Index(url()),
+        &to_value(&catalog).unwrap(),
+        &device(),
+    )
+    .unwrap();
+    set_status(
+        &mut db,
+        &Subscription::Index(url()),
+        RegistryStatus::Error,
+        None,
+    )
+    .unwrap();
+    let result = cached_response(
+        &db,
+        &url(),
+        "package.get",
+        &json!({"provides":"logical", "targetVersion":">=26.0.0:0", "otherVersions":"short"}),
+        Some(&device()),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(result["test"]["best"]["1.0.0:0"].is_object());
+    assert!(
+        result["test"]["best"]
+            .as_object()
+            .unwrap()
+            .get("2.0.0:0")
+            .is_none()
+    );
+}
+
+#[test]
 fn first_connection_failure_publishes_availability_and_does_not_fetch_on_cache_queries() {
     let mut db = database();
     set_status(

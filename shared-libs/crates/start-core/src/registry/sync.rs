@@ -452,6 +452,7 @@ fn publish_snapshot(
                 &GetPackageParams {
                     id: None,
                     target_version: None,
+                    provides: None,
                     source_version: None,
                     device_info: Some(package_device),
                     other_versions: Some(crate::registry::package::get::PackageDetailLevel::Short),

@@ -6,8 +6,10 @@ import {
   GetPackageRes,
   GetPackagesRes,
   registrySigningKeys,
+  satisfiesWithAliases,
 } from '@start9labs/marketplace'
 import {
+  Exver,
   FullKeyboard,
   i18nPipe,
   pauseFor,
@@ -148,6 +150,7 @@ const INIT_PROGRESS: T.FullProgress = {
 @Injectable()
 export class MockApiService extends ApiService implements StartupApiService {
   readonly mockWsSource$ = new Subject<Revision>()
+  private readonly exver = inject(Exver)
   private readonly i18n = inject(i18nPipe)
   private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly cache = inject(PATCH_CACHE)
@@ -1756,6 +1759,87 @@ export class MockApiService extends ApiService implements StartupApiService {
 
       return null
     },
+    'package.select-dependency-provider': async ({
+      id,
+      dependencyId,
+      providerId,
+      locked = false,
+    }) => {
+      const owner = mockPatchData.packageData[id]
+      const binding = owner?.dependencyBindings?.[dependencyId]
+      if (!owner || !binding) throw new Error('Unknown dependency')
+      const previous = owner.dependencySelections[dependencyId]
+      const unlocking =
+        !locked && !!previous?.pin && previous.providerId === providerId
+      if (providerId && !binding.candidates[providerId] && !unlocking)
+        throw new Error('Incompatible provider')
+      const candidates = Object.keys(binding.candidates)
+      const selected =
+        providerId && binding.candidates[providerId]
+          ? providerId
+          : binding.providerId ||
+            (candidates.length === 1 ? candidates[0]! : null)
+      const selections = { ...owner.dependencySelections }
+      if (providerId) {
+        const provider = mockPatchData.packageData[providerId]
+        const pin =
+          locked && provider
+            ? {
+                title: getManifest(provider).title,
+                icon: await this.getStaticObjectUrl(
+                  `/s9pk/installed/${providerId}.s9pk/icon`,
+                ),
+              }
+            : null
+        selections[dependencyId] = { providerId, pin }
+      } else delete selections[dependencyId]
+      const nextBinding: T.DependencyBinding = {
+        ...binding,
+        providerId: selected,
+        versions: selected ? binding.candidates[selected] || [] : [],
+      }
+      owner.dependencySelections = selections
+      owner.dependencyBindings = {
+        ...owner.dependencyBindings,
+        [dependencyId]: nextBinding,
+      }
+      await this.mockRevision<
+        T.PackageDataEntry['dependencySelections'] | T.DependencyBinding
+      >([
+        {
+          op: PatchOp.REPLACE,
+          path: `/packageData/${id}/dependencySelections`,
+          value: selections,
+        },
+        {
+          op: PatchOp.REPLACE,
+          path: `/packageData/${id}/dependencyBindings/${dependencyId}`,
+          value: nextBinding,
+        },
+      ])
+      return null
+    },
+    'package.preview-provider-change': async ({
+      id,
+      version,
+      satisfiesPackages,
+    }) => {
+      if (
+        version === null ||
+        (id === 'bitcoin-alternative' &&
+          !satisfiesPackages?.['bitcoind']?.length)
+      ) {
+        return Object.entries(mockPatchData.packageData).flatMap(
+          ([consumer, owner]) =>
+            Object.values(owner.dependencyBindings || {}).some(
+              binding => binding.providerId === id,
+            )
+              ? [consumer]
+              : [],
+        )
+      }
+      return []
+    },
     'package.rebuild': async params => {
       return this.handlers['package.restart']!(params)
     },
@@ -1763,24 +1847,56 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
 
       setTimeout(async () => {
-        const patch2: RemoveOperation[] = [
-          {
-            op: PatchOp.REMOVE,
-            path: `/packageData/${params.id}`,
-          },
-        ]
-        this.mockRevision(patch2)
+        delete mockPatchData.packageData[params.id]
+        this.mockRevision([
+          { op: PatchOp.REMOVE, path: `/packageData/${params.id}` },
+        ])
       }, this.revertTime)
 
-      const patch: ReplaceOperation<T.PackageState['state']>[] = [
+      const provider = mockPatchData.packageData[params.id]
+      if (!provider) throw new Error('Unknown package')
+      provider.stateInfo = {
+        state: 'removing',
+        manifest: getManifest(provider),
+      }
+      const patch: Operation<T.PackageDataEntry>[] = [
         {
           op: PatchOp.REPLACE,
-          path: `/packageData/${params.id}/stateInfo/state`,
-          value: 'removing',
+          path: `/packageData/${params.id}`,
+          value: provider,
         },
       ]
-
-      this.mockRevision(patch)
+      for (const [id, owner] of Object.entries(mockPatchData.packageData)) {
+        for (const [dependencyId, binding] of Object.entries(
+          owner.dependencyBindings || {},
+        )) {
+          if (!(params.id in binding.candidates)) continue
+          const candidates = { ...binding.candidates }
+          delete candidates[params.id]
+          const remaining = Object.keys(candidates)
+          const selected =
+            binding.providerId !== params.id
+              ? binding.providerId
+              : owner.dependencySelections[dependencyId]?.pin
+                ? null
+                : remaining.length === 1
+                  ? remaining[0]!
+                  : null
+          const next = {
+            ...binding,
+            candidates,
+            providerId: selected,
+            versions: selected ? candidates[selected] || [] : [],
+          }
+          owner.dependencyBindings[dependencyId] = next
+        }
+        patch.push({
+          op: PatchOp.REPLACE,
+          path: `/packageData/${id}`,
+          value: owner,
+        })
+      }
+      await this.mockRevision(patch)
 
       return null
     },
@@ -3293,6 +3409,12 @@ export class MockApiService extends ApiService implements StartupApiService {
       return Mock.RegistryPackages[id]!
     }
 
+    if (
+      targetVersion &&
+      Mock.RegistryPackages[id]?.best[targetVersion.replace(/^=/, '')]
+    ) {
+      return Mock.RegistryPackages[id]!
+    }
     if (!targetVersion || targetVersion === '=*') {
       return Mock.RegistryPackages[id]!
     } else {
@@ -3301,7 +3423,22 @@ export class MockApiService extends ApiService implements StartupApiService {
   }
   private async getRegistryPackages(params: GetRegistryPackagesReq) {
     await pauseFor(2000)
-    return Mock.RegistryPackages
+    if (!params.provides) return Mock.RegistryPackages
+    return Object.fromEntries(
+      Object.entries(Mock.RegistryPackages).flatMap(([id, info]) => {
+        const best = Object.fromEntries(
+          Object.entries(info.best).filter(([version, metadata]) =>
+            satisfiesWithAliases(
+              this.exver,
+              { id, version, ...metadata },
+              params.targetVersion || '*',
+              params.provides,
+            ),
+          ),
+        )
+        return Object.keys(best).length ? [[id, { ...info, best }]] : []
+      }),
+    )
   }
 
   private async setNut(params: Params<'server.set-nut'>): Promise<null> {

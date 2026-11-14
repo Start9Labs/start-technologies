@@ -1093,4 +1093,8 @@ export default {
   1296: 'Afficher une bibliothèque personnalisée',
   1297: 'Personnalisée',
   1298: 'Saisissez un domaine ou une URL',
+  1299: 'Fourni par',
+  1300: 'Sélectionner un fournisseur de dépendance',
+  1301: 'Verrouiller le fournisseur',
+  1302: 'Déverrouiller le fournisseur',
 } satisfies i18n

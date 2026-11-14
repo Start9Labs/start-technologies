@@ -28,7 +28,7 @@ registerHooks({
   },
 })
 const { Exver } = await import('../../shared/src/services/exver.service.ts')
-const { compatibleVersions } =
+const { compatibleVersions, satisfiesWithAliases } =
   await import('../src/util/compatible-versions.ts')
 
 const exver = new Exver()
@@ -81,4 +81,58 @@ test('no flavor offers a version when no release satisfies the range', () => {
       undefined,
     )
   }
+})
+
+const provider = {
+  id: 'alternate',
+  version: '1.0.0:0',
+  satisfies: ['99.0.0:0'],
+  satisfiesPackages: {
+    bitcoin: ['26.0.0:0', '27.0.0:0'],
+    unrelated: ['88.0.0:0'],
+  },
+  flavor: null,
+  otherVersions: { '0.9.0:0': {} },
+}
+
+test('provider discovery matches only aliases for the requested logical package', () => {
+  assert.equal(
+    satisfiesWithAliases(exver, provider, '>=26.0.0', 'bitcoin'),
+    true,
+  )
+  assert.equal(
+    satisfiesWithAliases(exver, provider, '=1.0.0', 'bitcoin'),
+    false,
+  )
+  assert.equal(
+    satisfiesWithAliases(exver, provider, '=99.0.0', 'bitcoin'),
+    false,
+  )
+  assert.equal(
+    satisfiesWithAliases(exver, provider, '=88.0.0', 'bitcoin'),
+    false,
+  )
+  assert.equal(satisfiesWithAliases(exver, provider, '*', 'unknown'), false)
+  assert.equal(
+    satisfiesWithAliases(exver, provider, '=1.0.0', 'alternate'),
+    true,
+  )
+})
+
+test('negative requirements examine the whole package-specific release', () => {
+  assert.equal(
+    satisfiesWithAliases(exver, provider, '!27.0.0', 'bitcoin'),
+    false,
+  )
+  assert.equal(
+    satisfiesWithAliases(exver, provider, '!99.0.0', 'bitcoin'),
+    true,
+  )
+})
+
+test('version picker keeps physical version identity and does not infer aliases from short metadata', () => {
+  assert.deepEqual(compatibleVersions(exver, provider, '>=26.0.0', 'bitcoin'), [
+    '1.0.0:0',
+  ])
+  assert.deepEqual(compatibleVersions(exver, provider, '=0.9.0', 'bitcoin'), [])
 })

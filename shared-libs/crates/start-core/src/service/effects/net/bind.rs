@@ -1,3 +1,4 @@
+use crate::dependencies::providers::find_package;
 use crate::net::host::binding::{BindId, BindOptions, NetInfo};
 use crate::net::host::host_for_existing;
 use crate::service::effects::prelude::*;
@@ -218,6 +219,9 @@ pub async fn get_service_port_forward(
     let package_id = package_id.unwrap_or_else(|| context.seed.id.clone());
 
     let mut db = context.seed.ctx.db.peek().await;
+    let Some(package_id) = find_package(&db, &context.seed.id, &package_id)? else {
+        return Ok(None);
+    };
     Ok(host_for_existing(&mut db, &package_id, &host_id)?
         .map(|host| host.as_bindings().de())
         .transpose()?

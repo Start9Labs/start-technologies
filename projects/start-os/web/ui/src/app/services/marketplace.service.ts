@@ -2,6 +2,7 @@ import { inject, Injectable } from '@angular/core'
 import {
   AbstractMarketplaceService,
   GetPackageRes,
+  GetPackagesRes,
   Marketplace,
   MarketplacePkg,
   StoreDataWithUrl,
@@ -9,6 +10,7 @@ import {
   packageResponse,
   packagesResponse,
   packageSignerPolicy,
+  satisfiesWithAliases,
   registryStatus,
   isRegistryLoading,
 } from '@start9labs/marketplace'
@@ -31,6 +33,7 @@ import {
   switchMap,
 } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { Params } from 'src/app/services/api/api.types'
 import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { StorageService } from 'src/app/services/storage.service'
@@ -189,28 +192,69 @@ export class MarketplaceService extends AbstractMarketplaceService {
     )
   }
 
+  fetchProviders$(
+    url: string,
+    provides: string,
+    range: string,
+    providerId: string | null = null,
+  ): Observable<MarketplacePkg[]> {
+    return this.queryPackages$(url, {
+      id: null,
+      targetVersion: range,
+      provides,
+      sourceVersion: null,
+      otherVersions: 'short',
+    }).pipe(
+      map(packagesResponse),
+      map(packages =>
+        this.toPackages(packages).filter(
+          pkg =>
+            (!providerId || pkg.id === providerId) &&
+            satisfiesWithAliases(this.exver, pkg, range, provides),
+        ),
+      ),
+    )
+  }
+
   private toStore(
     url: string,
     entry: T.Public['registryCache'][string],
   ): StoreDataWithUrl {
-    const packages = packagesResponse(entry.packages)
     return {
       url,
       info: this.registryInfo(entry.info),
       status: registryStatus(entry),
       error: entry.error,
-      packages: Object.entries(packages).flatMap(([id, pkgInfo]) =>
-        Object.keys(pkgInfo.best).flatMap(version => {
-          const pkg = this.convertRegistryPkgToMarketplacePkg(
-            id,
-            version,
-            this.exver.getFlavor(version),
-            pkgInfo,
-          )
-          return pkg ? [pkg] : []
-        }),
-      ),
+      packages: this.toPackages(packagesResponse(entry.packages)),
     }
+  }
+
+  private toPackages(packages: GetPackagesRes): MarketplacePkg[] {
+    return Object.entries(packages).flatMap(([id, pkgInfo]) =>
+      Object.keys(pkgInfo.best).flatMap(version => {
+        const pkg = this.convertRegistryPkgToMarketplacePkg(
+          id,
+          version,
+          this.exver.getFlavor(version),
+          pkgInfo,
+        )
+        return pkg ? [pkg] : []
+      }),
+    )
+  }
+
+  private queryPackages$(
+    url: string,
+    params: Omit<Params<'registry.package.get'>, 'registry'>,
+  ) {
+    return this.watchRegistry$(url).pipe(
+      filter(registryReady),
+      switchMap(() =>
+        defer(() =>
+          this.api.rpc.registry.package.get({ registry: url, ...params }),
+        ),
+      ),
+    )
   }
 
   fetchPackage$(
@@ -220,21 +264,13 @@ export class MarketplaceService extends AbstractMarketplaceService {
     flavor: string | null,
     sourceVersion: string | null = null,
   ): Observable<MarketplacePkg | null> {
-    return this.watchRegistry$(url).pipe(
-      filter(registryReady),
-      switchMap(() =>
-        defer(() =>
-          this.api.rpc.registry.package
-            .get({
-              registry: url,
-              id,
-              targetVersion: version ? `=${version}` : null,
-              sourceVersion,
-              otherVersions: 'short',
-            })
-            .then(packageResponse),
-        ),
-      ),
+    return this.queryPackages$(url, {
+      id,
+      targetVersion: version ? `=${version}` : null,
+      sourceVersion,
+      otherVersions: 'short',
+    }).pipe(
+      map(packageResponse),
       map(pkgInfo =>
         this.convertRegistryPkgToMarketplacePkg(id, version, flavor, pkgInfo),
       ),

@@ -1093,4 +1093,8 @@ export default {
   1296: 'Benutzerdefiniertes Register anzeigen',
   1297: 'Benutzerdefiniert',
   1298: 'Domain oder URL eingeben',
+  1299: 'Bereitgestellt von',
+  1300: 'Abhängigkeitsanbieter auswählen',
+  1301: 'Anbieter fixieren',
+  1302: 'Fixierung aufheben',
 } satisfies i18n

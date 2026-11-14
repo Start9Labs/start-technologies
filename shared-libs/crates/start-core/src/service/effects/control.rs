@@ -4,6 +4,7 @@ use chrono::Utc;
 use clap::builder::ValueParserFactory;
 
 use crate::PackageId;
+use crate::dependencies::providers::find_package;
 use crate::service::RebuildParams;
 use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
@@ -85,6 +86,9 @@ pub async fn get_status(
 ) -> Result<Option<StatusInfo>, Error> {
     let context = context.deref()?;
     let id = package_id.unwrap_or_else(|| context.seed.id.clone());
+    let Some(id) = find_package(&context.seed.ctx.db.peek().await, &context.seed.id, &id)? else {
+        return Ok(None);
+    };
 
     let ptr = format!("/public/packageData/{}/statusInfo", id)
         .parse()

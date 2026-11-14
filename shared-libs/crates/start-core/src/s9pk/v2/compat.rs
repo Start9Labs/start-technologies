@@ -275,6 +275,7 @@ impl TryFrom<ManifestV1> for Manifest {
                 hardware_virtualization: false,
                 plugins: BTreeSet::new(),
                 satisfies: BTreeSet::new(),
+                satisfies_packages: BTreeMap::new(),
             },
             images: BTreeMap::new(),
             volumes: value

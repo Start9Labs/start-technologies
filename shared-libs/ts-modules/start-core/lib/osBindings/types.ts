@@ -758,6 +758,16 @@ export type CurrentDependencyKindInput = z.input<
 >
 export type DeleteLegacyParams = z.output<typeof schemas.DeleteLegacyParams>
 export type DeleteLegacyParamsInput = z.input<typeof schemas.DeleteLegacyParams>
+
+/**
+ * Observed providers use active manifests; staged updates do not change the dependency contract.
+ */
+export type DependencyBinding = z.output<typeof schemas.DependencyBinding>
+
+/**
+ * Observed providers use active manifests; staged updates do not change the dependency contract.
+ */
+export type DependencyBindingInput = z.input<typeof schemas.DependencyBinding>
 export type DependencyRequirement = z.output<
   typeof schemas.DependencyRequirement
 >
@@ -1018,6 +1028,16 @@ export type PortForward = z.output<typeof schemas.PortForward>
 export type PortForwardInput = z.input<typeof schemas.PortForward>
 export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
 export type PreDownloadAlertInput = z.input<typeof schemas.PreDownloadAlert>
+
+/**
+ * Presentation retained while the pinned provider is absent.
+ */
+export type ProviderPin = z.output<typeof schemas.ProviderPin>
+
+/**
+ * Presentation retained while the pinned provider is absent.
+ */
+export type ProviderPinInput = z.input<typeof schemas.ProviderPin>
 
 /**
  * Auth gate enforced by the OS reverse proxy on incoming requests.
@@ -1310,6 +1330,18 @@ export type CurrentDependencyInfoInput = z.input<
 >
 export type DependencyMetadata = z.output<typeof schemas.DependencyMetadata>
 export type DependencyMetadataInput = z.input<typeof schemas.DependencyMetadata>
+
+/**
+ * A pin forbids fallback and retains presentation after the provider is removed.
+ */
+export type DependencySelection = z.output<typeof schemas.DependencySelection>
+
+/**
+ * A pin forbids fallback and retains presentation after the provider is removed.
+ */
+export type DependencySelectionInput = z.input<
+  typeof schemas.DependencySelection
+>
 export type ExportActionParams = z.output<typeof schemas.ExportActionParams>
 export type ExportActionParamsInput = z.input<typeof schemas.ExportActionParams>
 export type ExportServiceInterfaceParams = z.output<

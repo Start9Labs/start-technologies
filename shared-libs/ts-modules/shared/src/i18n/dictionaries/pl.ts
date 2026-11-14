@@ -1093,4 +1093,8 @@ export default {
   1296: 'Wyświetl niestandardowy katalog',
   1297: 'Niestandardowy',
   1298: 'Wpisz domenę lub adres URL',
+  1299: 'Dostarczane przez',
+  1300: 'Wybierz dostawcę zależności',
+  1301: 'Przypnij dostawcę',
+  1302: 'Odepnij dostawcę',
 } satisfies i18n

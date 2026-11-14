@@ -36,7 +36,11 @@ import { MarketplacePreviewComponent } from './preview.component'
       [overlay]="true"
       (click.self)="toggle(false)"
     >
-      <marketplace-preview [pkgId]="pkg().id" [controls]="controls()">
+      <marketplace-preview
+        [pkgId]="pkg().id"
+        [pkg]="pkg()"
+        [controls]="controls()"
+      >
         <button tuiButtonX [tuiAppearanceFocus]="false" (click)="toggle(false)">
           {{ 'Close' | i18n }}
         </button>

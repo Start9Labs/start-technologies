@@ -1,4 +1,4 @@
-import { Version as StartOsVersion } from '@start9labs/start-core/exver'
+import { Version as ExverVersion } from '@start9labs/start-core/exver'
 import * as T from '@start9labs/start-core/types'
 import { ImageConfig, ImageId, VolumeId } from '@start9labs/start-core/types'
 import {
@@ -10,17 +10,7 @@ import { Dependencies } from '../dependencies'
 import { VersionGraph } from '../version/VersionGraph'
 import sdkPackage from '@start9labs/start-sdk/package.json'
 
-/**
- * Retypes every key the SDK does not define, so declaring one is a compile
- * error at that key rather than a field that silently does nothing. The
- * replacement is a string literal rather than `never` purely so the error names
- * what went wrong.
- *
- * TypeScript applies its excess-property check only when a fresh object literal
- * meets a non-generic target, and `Manifest` is inferred from the argument — so
- * without this an unknown field joins the inferred type, typechecks, and is
- * then dropped on the way to the built manifest.
- */
+/** Rejects unknown fields that generic excess-property checks would otherwise accept. */
 type NoExtraKeys<Manifest> = {
   [K in keyof Manifest]: K extends keyof SDKManifest
     ? Manifest[K]
@@ -50,7 +40,7 @@ function manifestOsVersion(manifest: SDKManifest): string {
   const requested = manifest.osVersion ?? required
   if (
     manifest.sharedVolumes &&
-    StartOsVersion.parse(requested).compare(StartOsVersion.parse(required)) ===
+    ExverVersion.parse(requested).compare(ExverVersion.parse(required)) ===
       'less'
   ) {
     throw new Error(`Shared volumes require StartOS ${required} or later`)
@@ -83,6 +73,14 @@ export function buildManifest<
   manifest: SDKManifest & Manifest,
   dependencies: Dependencies<DependencyIds>,
 ): Manifest & T.Manifest {
+  const claimedPackages = Object.keys(
+    versions.current.options.satisfiesPackages,
+  )
+  if (claimedPackages.includes(manifest.id)) {
+    throw new Error(
+      `Use .satisfies(version) for ${manifest.id}'s same-package aliases`,
+    )
+  }
   const images = Object.entries(manifest.images).reduce(
     (images, [k, v]) => {
       v.arch = v.arch ?? ['aarch64', 'x86_64', 'riscv64']
@@ -93,15 +91,24 @@ export function buildManifest<
     },
     {} as { [k: string]: ImageConfig },
   )
+  let osVersion = manifestOsVersion(manifest)
+  if (
+    claimedPackages.length &&
+    ExverVersion.parse(osVersion).compare(ExverVersion.parse('0.4.3')) ===
+      'less'
+  ) {
+    osVersion = '0.4.3'
+  }
   return {
     ...manifest,
     dependencies: dependencies.manifestDependencies(),
     gitHash: null,
-    osVersion: manifestOsVersion(manifest),
+    osVersion,
     sdkVersion: sdkPackage.version,
     version: versions.current.options.version,
     releaseNotes: versions.current.options.releaseNotes,
     satisfies: versions.current.options.satisfies || [],
+    satisfiesPackages: versions.current.options.satisfiesPackages,
     canMigrateTo: versions.canMigrateTo().toString(),
     canMigrateFrom: versions.canMigrateFrom().toString(),
     images,

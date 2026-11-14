@@ -345,7 +345,9 @@ export class MarketplaceComponent {
 
   protected readonly loading = computed(
     (current = this.current()) =>
-      !current || isRegistryLoading(current.status, current.packages.length),
+      !current ||
+      (current.loading ??
+        isRegistryLoading(current.status, current.packages.length)),
   )
 
   protected readonly warning = computed(() => {

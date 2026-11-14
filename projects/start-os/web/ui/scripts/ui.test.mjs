@@ -208,6 +208,7 @@ boundaries.set(
     'key-identity.ts',
     'types.ts',
     'registry-state.ts',
+    'util/compatible-versions.ts',
     'services/abstract-marketplace.service.ts',
     'util/icon.ts',
   ]
@@ -222,6 +223,8 @@ loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
 const { ActivatedRoute, convertToParamMap, Router } =
   await import('@angular/router')
+const { Exver: ProductionExver } =
+  await import('../../../../../shared-libs/ts-modules/shared/src/services/exver.service.ts')
 const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
 const { PatchDB } = await import('patch-db-client')
@@ -2698,6 +2701,7 @@ test('grant capability reads the installed manifest throughout updates without c
 })
 
 test('production mocks support inspection, independent failed backups and new-local restore without a public password', async t => {
+  const { Exver } = await import('@start9labs/shared')
   const { MockApiService } =
     await import('src/app/services/api/embassy-mock-api.service')
   const { Mock } = await import('src/app/services/api/api.fixures')
@@ -2723,6 +2727,7 @@ test('production mocks support inspection, independent failed backups and new-lo
     { provide: PATCH_CACHE, useValue: cache },
     { provide: ConfigService, useValue: { gitHash: runningGitHash } },
     { provide: i18nPipe, useValue: { transform: value => value } },
+    { provide: Exver, useValue: new ProductionExver() },
   ])
   const api = runInInjectionContext(injector, () => new MockApiService())
   const patch = new PatchDB(
@@ -3234,7 +3239,7 @@ function controlsFixture({
       },
     },
     marketplace: { currentRegistryUrl$: of('https://registry.test') },
-    installOrUpload: async (...params) => {
+    dryInstall: async (...params) => {
       calls.push(params)
     },
   }
@@ -4199,7 +4204,11 @@ function marketplaceFixture(t, entries = {}) {
   )
   const injector = createEnvironmentInjector([
     { provide: PatchDB, useValue: patch },
-    { provide: Exver, useValue: { getFlavor: () => null } },
+    { provide: Exver, useValue: new ProductionExver() },
+    {
+      provide: ErrorService,
+      useValue: { handleError: error => assert.fail(String(error)) },
+    },
     {
       provide: StorageService,
       useValue: {
@@ -4608,4 +4617,434 @@ test('browser bootstrap accepts snapshots saved before registry caches existed',
     osUpdateCache: null,
   })
   assert.equal('registryCache' in stored, false)
+})
+
+test('provider-change preview completes before install and uses affected consumer names', async () => {
+  const events = []
+  const pending = deferred()
+  const metadata = {
+    ...pkg,
+    satisfies: [],
+    satisfiesPackages: { bitcoin: ['26.0.0:0'] },
+  }
+  const instance = {
+    pkg: () => metadata,
+    patch: {
+      watch$: () =>
+        of({
+          consumer: {
+            stateInfo: {
+              state: 'installed',
+              manifest: { title: 'Bitcoin consumer' },
+            },
+          },
+        }),
+    },
+    tasks: { runInline: runTask },
+    api: {
+      rpc: {
+        package: {
+          previewProviderChange: async request => {
+            events.push(['preview', request])
+            return pending.promise
+          },
+        },
+      },
+    },
+    alerts: {
+      alertBreakages: async titles => {
+        events.push(['warning', titles])
+        return true
+      },
+    },
+    installOrUpload: async (...args) => events.push(['install', ...args]),
+  }
+  const installing = Controls.prototype.dryInstall.call(
+    instance,
+    'registry',
+    false,
+  )
+  await tick()
+  assert.deepEqual(events, [
+    [
+      'preview',
+      {
+        id: metadata.id,
+        version: metadata.version,
+        satisfies: [],
+        satisfiesPackages: metadata.satisfiesPackages,
+      },
+    ],
+  ])
+  pending.resolve(['consumer'])
+  await installing
+  assert.deepEqual(events.slice(1), [
+    ['warning', ['Bitcoin consumer']],
+    ['install', 'registry', false],
+  ])
+})
+
+test('failed provider preview prevents installation', async () => {
+  let installed = false
+  const instance = {
+    pkg: () => pkg,
+    patch: { watch$: () => of({}) },
+    tasks: {
+      runInline: async work => {
+        try {
+          await work()
+          return true
+        } catch {
+          return false
+        }
+      },
+    },
+    api: {
+      rpc: {
+        package: {
+          previewProviderChange: async () => {
+            throw Error('offline')
+          },
+        },
+      },
+    },
+    installOrUpload: async () => {
+      installed = true
+    },
+  }
+  await Controls.prototype.dryInstall.call(instance, 'registry', false)
+  assert.equal(installed, false)
+})
+
+test('provider discovery queries every registry package using the logical alias range', async () => {
+  const requests = []
+  const service = Object.create(MarketplaceService.prototype)
+  service.watchRegistry$ = () => of(registryEntry())
+  service.api = {
+    rpc: {
+      registry: {
+        package: {
+          get: async request => {
+            requests.push(request)
+            return {
+              alternate: {
+                categories: [],
+                otherVersions: {},
+                best: {
+                  '1.0.0:0': {
+                    title: 'Alternate',
+                    satisfies: [],
+                    satisfiesPackages: { bitcoin: ['26.0.0:0'] },
+                  },
+                },
+              },
+            }
+          },
+        },
+      },
+    },
+  }
+  service.exver = new ProductionExver()
+  const packages = await firstValueFrom(
+    service.fetchProviders$('registry', 'bitcoin', '>=26.0.0'),
+  )
+  assert.deepEqual(requests, [
+    {
+      registry: 'registry',
+      id: null,
+      targetVersion: '>=26.0.0',
+      provides: 'bitcoin',
+      sourceVersion: null,
+      otherVersions: 'short',
+    },
+  ])
+  assert.equal(packages[0].id, 'alternate')
+  assert.equal(packages[0].version, '1.0.0:0')
+  assert.deepEqual(packages[0].satisfiesPackages, { bitcoin: ['26.0.0:0'] })
+})
+
+test('provider discovery rejects unrelated releases returned by legacy registries', async () => {
+  const service = Object.create(MarketplaceService.prototype)
+  service.watchRegistry$ = () => of(registryEntry())
+  const record = (version, metadata = {}) => ({
+    categories: [],
+    otherVersions: {},
+    best: { [version]: { title: 'Package', satisfies: [], ...metadata } },
+  })
+  service.api = {
+    rpc: {
+      registry: {
+        package: {
+          get: async () => ({
+            alternate: record('1.0.0:0', {
+              satisfiesPackages: { bitcoin: ['26.0.0:0'] },
+            }),
+            unrelated: record('99.0.0:0', { satisfies: ['26.0.0:0'] }),
+            bitcoin: record('27.0.0:0'),
+            wrongClaim: record('99.0.0:0', {
+              satisfiesPackages: { other: ['26.0.0:0'] },
+            }),
+          }),
+        },
+      },
+    },
+  }
+  service.exver = new ProductionExver()
+  const packages = await firstValueFrom(
+    service.fetchProviders$('registry', 'bitcoin', '>=26.0.0'),
+  )
+  assert.deepEqual(
+    packages.map(pkg => pkg.id),
+    ['alternate', 'bitcoin'],
+  )
+  const pinned = await firstValueFrom(
+    service.fetchProviders$('registry', 'bitcoin', '>=26.0.0', 'alternate'),
+  )
+  assert.deepEqual(
+    pinned.map(pkg => pkg.id),
+    ['alternate'],
+  )
+  assert.deepEqual(
+    await firstValueFrom(
+      service.fetchProviders$('registry', 'bitcoin', '>=26.0.0', 'missing'),
+    ),
+    [],
+  )
+})
+
+test('provider marketplace preserves its request across tiles and distinguishes filtered emptiness from cache loading', t => {
+  const url = 'https://registry.test/'
+  const f = marketplaceFixture(t, { [url]: registryEntry() })
+  const calls = [],
+    replies = []
+  f.service.fetchProviders$ = (...args) => {
+    calls.push(args)
+    const reply = new Subject()
+    replies.push(reply)
+    return reply
+  }
+  const params = {
+    registry: url,
+    provides: 'bitcoin',
+    requireRange: '>=26.0.0',
+  }
+  f.routeParams.next(convertToParamMap(params))
+  const page = f.makePage()
+  assert.equal(page.registry().loading, true)
+  replies[0].next([{ id: 'alternate' }])
+  const loaded = page.registry()
+  for (const tile of [{ id: 'alternate', flavor: 'default' }, {}]) {
+    f.routeParams.next(convertToParamMap({ ...params, ...tile }))
+    assert.equal(calls.length, 1)
+    assert.equal(page.registry(), loaded)
+  }
+  f.routeParams.next(convertToParamMap({ ...params, requireRange: '>=27.0.0' }))
+  assert.equal(calls.length, 2)
+  assert.equal(page.registry().loading, true)
+  f.replace('/registryCache', { [url]: registryEntry('1.0.0:0', 'connecting') })
+  assert.equal(calls.length, 2)
+  assert.equal(page.registry().status, 'connecting')
+  replies[1].next([])
+  assert.equal(page.registry().loading, false)
+  f.routeParams.next(
+    convertToParamMap({
+      ...params,
+      requireRange: '>=27.0.0',
+      providerId: 'pinned',
+    }),
+  )
+  replies[2].next([{ id: 'pinned' }])
+  assert.deepEqual(calls, [
+    [url, 'bitcoin', '>=26.0.0', null],
+    [url, 'bitcoin', '>=27.0.0', null],
+    [url, 'bitcoin', '>=27.0.0', 'pinned'],
+  ])
+  f.replace('/registryCache', { [url]: registryEntry('1.0.0:0', 'error') })
+  assert.equal(calls.length, 3)
+  assert.equal(page.registry().status, 'error')
+  assert.equal(page.registry().loading, false)
+  assert.deepEqual(page.registry().packages, [{ id: 'pinned' }])
+})
+
+test('provider RPC failures show an empty result and retry on cache updates without restoring the loading placeholder', async t => {
+  const url = 'https://registry.test/'
+  const f = marketplaceFixture(t, { [url]: registryEntry() })
+  const calls = []
+  const discover = f.service.fetchProviders$.bind(f.service)
+  f.service.fetchProviders$ = (...args) => {
+    calls.push(args)
+    return discover(...args)
+  }
+  f.routeParams.next(
+    convertToParamMap({
+      registry: url,
+      provides: 'bitcoin',
+      requireRange: '>=26.0.0',
+    }),
+  )
+  const page = f.makePage()
+  const errors = []
+  page.error.handleError = error => errors.push(error)
+  const failure = new Error('Transient local RPC failure')
+  f.responses[0].reject(failure)
+  await tick()
+  assert.deepEqual(errors, [failure])
+  assert.equal(page.registry().loading, false)
+  assert.deepEqual(page.registry().packages, [])
+  f.replace('/registryCache', { [url]: registryEntry('1.0.0:0', 'connecting') })
+  assert.equal(calls.length, 1)
+  assert.equal(f.queries.length, 2)
+  assert.equal(page.registry().loading, false)
+  assert.equal(page.registry().status, 'connecting')
+  f.responses[1].resolve({
+    alternate: {
+      categories: [],
+      otherVersions: {},
+      best: {
+        '1.0.0:0': {
+          title: 'Alternate',
+          satisfies: [],
+          satisfiesPackages: { bitcoin: ['26.0.0:0'] },
+        },
+      },
+    },
+  })
+  await tick()
+  assert.equal(page.registry().packages[0].id, 'alternate')
+  assert.equal(page.registry().loading, false)
+})
+
+test('changing provider query cancels cache-update recovery for the failed query', async t => {
+  const url = 'https://registry.test/'
+  const f = marketplaceFixture(t, { [url]: registryEntry() })
+  const params = {
+    registry: url,
+    provides: 'bitcoin',
+    requireRange: '>=26.0.0',
+  }
+  f.routeParams.next(convertToParamMap(params))
+  const page = f.makePage()
+  page.error.handleError = () => {}
+  f.responses[0].reject(new Error('Transient RPC failure'))
+  await tick()
+  f.routeParams.next(convertToParamMap({ ...params, requireRange: '>=27.0.0' }))
+  assert.equal(page.registry().loading, true)
+  f.replace('/registryCache', { [url]: registryEntry('2.0.0:0') })
+  assert.equal(f.queries.length, 3)
+  assert.deepEqual(
+    f.queries.map(query => query.targetVersion),
+    ['>=26.0.0', '>=27.0.0', '>=27.0.0'],
+  )
+  f.responses[2].resolve({})
+  await tick()
+  assert.equal(page.registry().loading, false)
+  assert.deepEqual(page.registry().packages, [])
+})
+
+test('provider discovery waits for the selected cache and refreshes its backend-cache query offline', async t => {
+  const url = 'https://registry.test/'
+  const f = marketplaceFixture(t)
+  const values = f.watch(f.service.fetchProviders$(url, 'bitcoin', '>=26.0.0'))
+  assert.deepEqual(f.queries, [])
+  f.replace('/registryCache', {
+    [url]: { ...registryEntry(), packages: {}, status: 'connecting' },
+  })
+  assert.deepEqual(f.queries, [])
+  f.replace('/registryCache', { [url]: registryEntry() })
+  assert.equal(f.queries[0].provides, 'bitcoin')
+  f.replace('/registryCache', { [url]: registryEntry('2.0.0:0', 'error') })
+  f.responses[1].resolve({})
+  await tick()
+  assert.deepEqual(values.at(-1), [])
+  f.responses[0].resolve({ stale: registryEntry().packages.example })
+  await tick()
+  assert.deepEqual(values.at(-1), [])
+})
+
+test('an initial provider-catalog failure retains registry status for retry without querying an empty cache', t => {
+  const url = 'https://registry.test/'
+  const f = marketplaceFixture(t, {
+    [url]: { ...registryEntry(), packages: {}, status: 'error' },
+  })
+  f.routeParams.next(
+    convertToParamMap({
+      registry: url,
+      provides: 'bitcoin',
+      requireRange: '>=26.0.0',
+    }),
+  )
+  const page = f.makePage()
+  assert.equal(page.registry().status, 'error')
+  assert.equal(page.registry().loading, true)
+  assert.deepEqual(f.queries, [])
+})
+
+test('automatic registry resolution replaces history in both marketplaces', async t => {
+  const { default: StartOSMarketplace } =
+    await import('../src/app/routes/portal/routes/marketplace/marketplace.component.ts')
+  const { MainComponent: BrochureMarketplace } =
+    await import('../../../../../projects/brochure-marketplace/src/app/components/main.component.ts')
+  const { StorageService } = await import('src/app/services/storage.service')
+  const { defaultRegistries } = await import('@start9labs/shared')
+  for (const Component of [StartOSMarketplace, BrochureMarketplace]) {
+    const navigations = [],
+      failures = new Subject()
+    const route = {
+      queryParamMap: new BehaviorSubject(
+        convertToParamMap({ search: 'bitcoin', providerId: 'pinned' }),
+      ),
+      snapshot: { queryParamMap: convertToParamMap({}) },
+    }
+    const injector = createEnvironmentInjector([
+      {
+        provide: MarketplaceService,
+        useValue: {
+          currentRegistry$: of({ url: 'registry', info: {}, packages: [] }),
+          currentRegistryUrl$: new Subject(),
+          registries$: of([]),
+          lastSelectedRegistry: 'https://saved.registry',
+          registryError$: failures,
+        },
+      },
+      { provide: ActivatedRoute, useValue: route },
+      {
+        provide: Router,
+        useValue: { navigate: async (...args) => navigations.push(args) },
+      },
+      {
+        provide: ConfigService,
+        useValue: { defaultRegistry: 'https://default.registry' },
+      },
+      {
+        provide: StorageService,
+        useValue: { get: () => 'https://saved.registry' },
+      },
+      {
+        provide: ErrorService,
+        useValue: { handleError: error => assert.fail(String(error)) },
+      },
+      { provide: DialogService, useValue: { openAlert: () => of(undefined) } },
+      { provide: i18nPipe, useValue: { transform: value => value } },
+      { provide: TaskService, useValue: {} },
+    ])
+    t.after(() => injector.destroy())
+    runInInjectionContext(injector, () => new Component())
+    assert.equal(navigations[0][1].replaceUrl, true)
+    assert.equal(navigations[0][1].queryParamsHandling, 'merge')
+    assert.equal(
+      navigations[0][1].queryParams.registry,
+      'https://saved.registry',
+    )
+    if (Component === BrochureMarketplace) {
+      route.snapshot.queryParamMap = convertToParamMap({
+        registry: 'https://unreachable.registry',
+      })
+      failures.next('https://unreachable.registry')
+      assert.equal(navigations.at(-1)[1].replaceUrl, true)
+      assert.equal(
+        navigations.at(-1)[1].queryParams.registry,
+        defaultRegistries.start9,
+      )
+    }
+  }
 })

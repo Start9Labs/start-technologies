@@ -8,6 +8,8 @@ A service is a piece of software, usually an open-source project developed elsew
 
 You install packages from the [Marketplace](marketplace.md), a network of registries. StartOS comes with two: the Start9 Registry, which carries the packages Start9 publishes, and the Community Registry, which carries packages other developers maintain. Anyone can run another registry, and you can also [sideload](sideloading.md) a package from a file. **System → Registries** manages the registries you browse and which one provides StartOS updates; [Trusted Keys](trusted-keys.md) independently controls which signing keys you accept for packages and StartOS updates. A registry's keys are trusted for packages when you add it; keys it offers later start untrusted, each with a notification that offers to trust it.
 
+A [dependency](dependencies.md) can be provided by another compatible package. Each dependent service chooses its provider; StartOS uses a sole compatible provider automatically and offers a choice when several are available. Locking a choice makes that exact package required.
+
 Each service runs in its own isolated container. StartOS doesn't use Docker or Podman, so instructions written for them don't apply. A service's package sets its software's configuration, and can reset a setting that was changed by hand inside the container. Where a package gives you a way to change something, use it: instructions for installing and configuring the software elsewhere may not apply on StartOS.
 
 On a service's page, its package gives you:

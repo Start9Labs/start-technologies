@@ -405,6 +405,11 @@ pub struct PackageDataEntry {
     pub developer_key: Der64<ed25519_dalek::VerifyingKey>,
     pub last_backup: Option<DateTime<Utc>>,
     pub current_dependencies: CurrentDependencies,
+    #[serde(default)]
+    pub dependency_selections:
+        BTreeMap<PackageId, crate::dependencies::providers::DependencySelection>,
+    #[serde(default)]
+    pub dependency_bindings: BTreeMap<PackageId, crate::dependencies::providers::DependencyBinding>,
     pub actions: BTreeMap<ActionId, ActionMetadata>,
     pub tasks: BTreeMap<ReplayId, TaskEntry>,
     pub hosts: Hosts,

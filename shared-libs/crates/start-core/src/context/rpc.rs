@@ -563,6 +563,23 @@ impl RpcContext {
         let weak = Arc::downgrade(&res.0);
         let db = res.db.clone();
         res.add_cron(async move {
+            let mut watch = db.watch("/public/packageData".parse().unwrap()).await;
+            loop {
+                watch.peek_and_mark_seen().ok();
+                let Some(seed) = weak.upgrade() else { break };
+                let retry = crate::dependencies::providers::reconcile(&Self(seed, None))
+                    .await
+                    .log_err()
+                    .unwrap_or(false);
+                tokio::select! {
+                    result = watch.changed() => if result.is_err() { break },
+                    _ = tokio::time::sleep(Duration::from_secs(1)), if retry => {}
+                }
+            }
+        });
+        let weak = Arc::downgrade(&res.0);
+        let db = res.db.clone();
+        res.add_cron(async move {
             let mut watch = db.watch("/private/push".parse().unwrap()).await;
             loop {
                 let Some(seed) = weak.upgrade() else { break };
@@ -689,6 +706,7 @@ impl RpcContext {
 
         init_services.start();
         self.net_controller.net_iface.settle().await;
+        crate::dependencies::providers::initialize(self).await?;
         self.services.init(&self).await?;
         init_services.complete();
 

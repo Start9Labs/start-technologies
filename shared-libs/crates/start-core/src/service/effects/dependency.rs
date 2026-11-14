@@ -7,11 +7,13 @@ use exver::VersionRange;
 use patch_db::ModelExt;
 use rust_i18n::t;
 
+use crate::db::model::DatabaseModel;
 use crate::db::model::package::{
     CurrentDependencies, CurrentDependencyInfo, CurrentDependencyKind, ManifestPreference,
     TaskEntry,
 };
 use crate::dependencies::DepInfo;
+use crate::dependencies::providers::{find_package, resolve_package};
 use crate::disk::mount::filesystem::bind::{Bind, FileType};
 use crate::disk::mount::filesystem::idmapped::{IdMap, IdMapped};
 use crate::disk::mount::filesystem::{FileSystem, MountType};
@@ -174,6 +176,11 @@ pub async fn mount(
     }: MountParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
+    let package_id = resolve_package(
+        &context.seed.ctx.db.peek().await,
+        &context.seed.id,
+        &package_id,
+    )?;
     let volume = data_dir(DATA_DIR, &package_id, &volume_id);
     if tokio::fs::metadata(&volume).await.is_err() {
         return Err(Error::new(
@@ -395,6 +402,7 @@ pub async fn set_dependencies(
     let context = context.deref()?;
     let id = &context.seed.id;
     let s9pk = &context.seed.persistent_container.s9pk;
+    let initialized = context.is_initialized();
     let mut deps = required_base_dependencies(s9pk).await?.0;
     for dependency in dependencies {
         let (dep_id, kind, version_range) = match dependency {
@@ -427,11 +435,12 @@ pub async fn set_dependencies(
             );
         }
     }
-    context
+    let recheck = context
         .seed
         .ctx
         .db
         .mutate(|db| {
+            let previous = crate::service::action::conditional_task_targets(db, id)?;
             let pde = db
                 .as_public_mut()
                 .as_package_data_mut()
@@ -439,10 +448,24 @@ pub async fn set_dependencies(
                 .or_not_found(id)?;
             let deps = CurrentDependencies(deps);
             pde.as_current_dependencies_mut().ser(&deps)?;
-            Ok(())
+            if initialized {
+                crate::dependencies::providers::initialize_new_bindings(db, id)?;
+            } else {
+                crate::dependencies::providers::initialize_bindings(db, id)?;
+            }
+            crate::service::action::reset_task_conditions(db, id, previous)
         })
         .await
-        .result
+        .result?;
+    if initialized && recheck {
+        context
+            .seed
+            .ctx
+            .services
+            .recheck_dependency_tasks(&context.seed.ctx, id)
+            .await?;
+    }
+    Ok(())
 }
 
 pub async fn get_dependencies(context: EffectContext) -> Result<Vec<DependencyRequirement>, Error> {
@@ -495,6 +518,7 @@ rpc_toolkit::ts_export!(CheckDependenciesParam, namespaces = [""]);
 #[serde(rename_all = "camelCase")]
 pub struct CheckDependenciesResult {
     package_id: PackageId,
+    provider_id: Option<PackageId>,
     title: Option<String>,
     installed_version: Option<VersionString>,
     satisfies: BTreeSet<VersionString>,
@@ -510,13 +534,26 @@ pub async fn check_dependencies(
     CheckDependenciesParam { package_ids }: CheckDependenciesParam,
 ) -> Result<Vec<CheckDependenciesResult>, Error> {
     let context = context.deref()?;
-    let db = context.seed.ctx.db.peek().await;
+    check_dependency_results(
+        &context.seed.ctx.db.peek().await,
+        &context.seed.id,
+        package_ids,
+    )
+}
+
+/// Includes incompatible same-ID versions for diagnostics, never resource resolution.
+fn check_dependency_results(
+    db: &DatabaseModel,
+    owner: &PackageId,
+    package_ids: Option<Vec<PackageId>>,
+) -> Result<Vec<CheckDependenciesResult>, Error> {
     let pde = db
         .as_public()
         .as_package_data()
-        .as_idx(&context.seed.id)
-        .or_not_found(&context.seed.id)?;
+        .as_idx(owner)
+        .or_not_found(owner)?;
     let current_dependencies = pde.as_current_dependencies().de()?;
+    let selections = pde.as_dependency_selections().de()?;
     let tasks = pde.as_tasks().de()?;
     let package_dependency_info: Vec<_> = package_ids
         .unwrap_or_else(|| current_dependencies.0.keys().cloned().collect())
@@ -529,16 +566,34 @@ pub async fn check_dependencies(
     let mut results = Vec::with_capacity(package_dependency_info.len());
 
     for (package_id, dependency_info) in package_dependency_info {
-        let title = dependency_info.title.clone();
-        let Some(package) = db.as_public().as_package_data().as_idx(&package_id) else {
-            let tasks = tasks
-                .iter()
-                .filter(|(_, v)| v.task.package_id == package_id)
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
+        let title = dependency_info.title.clone().map(|t| t.localized());
+        let tasks = tasks
+            .iter()
+            .filter(|(_, v)| v.task.package_id == package_id)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let provider_id = find_package(db, owner, &package_id)?;
+        let pinned = selections
+            .get(&package_id)
+            .filter(|selection| selection.pin.is_some());
+        let incompatible = provider_id.is_none()
+            && pinned.is_none()
+            && pde
+                .as_dependency_bindings()
+                .as_idx(&package_id)
+                .map(|binding| binding.as_candidates().de())
+                .transpose()?
+                .map_or(true, |candidates| candidates.is_empty());
+        let package = provider_id
+            .as_ref()
+            .or(pinned.map(|selection| &selection.provider_id))
+            .or(incompatible.then_some(&package_id))
+            .and_then(|id| db.as_public().as_package_data().as_idx(id));
+        let Some(package) = package else {
             results.push(CheckDependenciesResult {
                 package_id,
-                title: title.map(|t| t.localized()),
+                provider_id: None,
+                title,
                 installed_version: None,
                 satisfies: BTreeSet::new(),
                 is_running: false,
@@ -547,24 +602,42 @@ pub async fn check_dependencies(
             });
             continue;
         };
-        let manifest = package.as_state_info().as_manifest(ManifestPreference::New);
-        let installed_version = manifest.as_version().de()?.into_version();
-        let satisfies = manifest.as_metadata().as_satisfies().de()?;
-        let installed_version = Some(installed_version.clone().into());
+        let manifest = package.as_state_info().as_manifest(ManifestPreference::Old);
+        let (installed_version, satisfies) = match (&provider_id, pinned) {
+            (Some(provider), _) if provider != &package_id => {
+                let binding = pde
+                    .as_dependency_bindings()
+                    .as_idx(&package_id)
+                    .or_not_found(&package_id)?
+                    .de()?;
+                dependency_release_versions(binding.versions)
+            }
+            (None, Some(selection)) if selection.provider_id != package_id => {
+                dependency_release_versions(
+                    manifest
+                        .as_metadata()
+                        .as_satisfies_packages()
+                        .as_idx(&package_id)
+                        .map(|claims| claims.de())
+                        .transpose()?
+                        .unwrap_or_default(),
+                )
+            }
+            _ => (
+                Some(manifest.as_version().de()?.into_version().into()),
+                manifest.as_metadata().as_satisfies().de()?,
+            ),
+        };
         let is_running = package
             .as_status_info()
             .as_started()
             .transpose_ref()
             .is_some();
         let health_checks = package.as_status_info().as_health().de()?;
-        let tasks = tasks
-            .iter()
-            .filter(|(_, v)| v.task.package_id == package_id)
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
         results.push(CheckDependenciesResult {
             package_id,
-            title: title.map(|t| t.localized()),
+            provider_id,
+            title,
             installed_version,
             satisfies,
             is_running,
@@ -573,6 +646,12 @@ pub async fn check_dependencies(
         });
     }
     Ok(results)
+}
+
+fn dependency_release_versions(
+    mut versions: BTreeSet<VersionString>,
+) -> (Option<VersionString>, BTreeSet<VersionString>) {
+    (versions.pop_first(), versions)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
@@ -599,6 +678,14 @@ pub async fn get_service_manifest(
 
     let context = context.deref()?;
 
+    let Some(package_id) = find_package(
+        &context.seed.ctx.db.peek().await,
+        &context.seed.id,
+        &package_id,
+    )?
+    else {
+        return Ok(None);
+    };
     let ptr = format!("/public/packageData/{}/stateInfo", package_id)
         .parse()
         .expect("valid json pointer");
@@ -626,6 +713,145 @@ pub async fn get_service_manifest(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn checks_distinguish_incompatible_absent_ambiguous_and_selected_releases() {
+        use crate::dependencies::providers::DependencyBinding;
+        let owner = "consumer".parse().unwrap();
+        let target = "target".parse().unwrap();
+        let mut db = DatabaseModel::from(imbl_value::json!({"public":{"packageData":{
+            "consumer":{"currentDependencies":{"target":{"kind":"exists","versionRange":">=2.0.0:0"}},"tasks":{},"dependencySelections":{},
+                "dependencyBindings":{"target":{"providerId":null,"versions":[],"candidates":{}}}},
+            "target":{"stateInfo":{"state":"installed","manifest":{"id":"target","version":"1.0.0:0","satisfies":[]}},"statusInfo":{"started":null,"health":{}}},
+            "alternate":{"stateInfo":{"state":"installed","manifest":{"id":"alternate","version":"99.0.0:0","satisfies":[],"satisfiesPackages":{"target":["2.0.0:0"]}}},"statusInfo":{"started":null,"health":{}}},
+            "other":{"stateInfo":{"state":"installed","manifest":{"id":"other","version":"99.0.0:0","satisfies":[],"satisfiesPackages":{"target":["2.0.0:0"]}}},"statusInfo":{"started":null,"health":{}}}
+        }}}));
+        let result = check_dependency_results(&db, &owner, None)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(result.installed_version, Some("1.0.0:0".parse().unwrap()));
+        assert!(result.provider_id.is_none());
+        assert_eq!(
+            resolve_package(&db, &owner, &target).unwrap_err().kind,
+            ErrorKind::NotFound
+        );
+        let mut binding = DependencyBinding {
+            candidates: ["alternate", "other"]
+                .into_iter()
+                .map(|id| (id.parse().unwrap(), ["2.0.0:0".parse().unwrap()].into()))
+                .collect(),
+            ..Default::default()
+        };
+        db.as_public_mut()
+            .as_package_data_mut()
+            .as_idx_mut(&owner)
+            .unwrap()
+            .as_dependency_bindings_mut()
+            .as_idx_mut(&target)
+            .unwrap()
+            .ser(&binding)
+            .unwrap();
+        assert!(
+            check_dependency_results(&db, &owner, None).unwrap()[0]
+                .installed_version
+                .is_none()
+        );
+        binding.provider_id = Some("alternate".parse().unwrap());
+        binding.versions = ["2.0.0:0".parse().unwrap()].into();
+        db.as_public_mut()
+            .as_package_data_mut()
+            .as_idx_mut(&owner)
+            .unwrap()
+            .as_dependency_bindings_mut()
+            .as_idx_mut(&target)
+            .unwrap()
+            .ser(&binding)
+            .unwrap();
+        let result = check_dependency_results(&db, &owner, None)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(result.installed_version, Some("2.0.0:0".parse().unwrap()));
+        assert_eq!(result.provider_id, Some("alternate".parse().unwrap()));
+        db.as_public_mut()
+            .as_package_data_mut()
+            .as_idx_mut(&owner)
+            .unwrap()
+            .as_dependency_bindings_mut()
+            .as_idx_mut(&target)
+            .unwrap()
+            .ser(&DependencyBinding::default())
+            .unwrap();
+        let mut dependencies = db
+            .as_public()
+            .as_package_data()
+            .as_idx(&owner)
+            .unwrap()
+            .as_current_dependencies()
+            .de()
+            .unwrap();
+        dependencies.0.get_mut(&target).unwrap().version_range = ">=3.0.0:0".parse().unwrap();
+        db.as_public_mut()
+            .as_package_data_mut()
+            .as_idx_mut(&owner)
+            .unwrap()
+            .as_current_dependencies_mut()
+            .ser(&dependencies)
+            .unwrap();
+        db.as_public_mut()
+            .as_package_data_mut()
+            .as_idx_mut(&owner)
+            .unwrap()
+            .as_dependency_selections_mut()
+            .insert(
+                &target,
+                &crate::dependencies::providers::DependencySelection {
+                    provider_id: "alternate".parse().unwrap(),
+                    pin: Some(crate::dependencies::providers::ProviderPin {
+                        title: "Pinned".into(),
+                        icon: crate::util::data_url::DataUrl::from_vec("image/png", vec![1, 2, 3]),
+                    }),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            check_dependency_results(&db, &owner, None).unwrap()[0].installed_version,
+            Some("2.0.0:0".parse().unwrap())
+        );
+        db.as_public_mut()
+            .as_package_data_mut()
+            .remove(&"alternate".parse().unwrap())
+            .unwrap();
+        assert!(
+            check_dependency_results(&db, &owner, None).unwrap()[0]
+                .installed_version
+                .is_none()
+        );
+        db.as_public_mut()
+            .as_package_data_mut()
+            .remove(&target)
+            .unwrap();
+        assert!(
+            check_dependency_results(&db, &owner, None).unwrap()[0]
+                .installed_version
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn dependency_release_reports_the_logical_versions_without_a_provider_primary() {
+        let logical: VersionString = "2.0.0:0".parse().unwrap();
+        let alias: VersionString = "2.1.0:0".parse().unwrap();
+        let (installed, satisfies) =
+            dependency_release_versions([logical.clone(), alias.clone()].into());
+        assert_eq!(installed, Some(logical));
+        assert_eq!(satisfies, [alias].into());
+        assert_eq!(
+            dependency_release_versions(BTreeSet::new()),
+            (None, BTreeSet::new())
+        );
+    }
 
     #[test]
     fn required_manifest_requirement_is_the_static_fallback() {

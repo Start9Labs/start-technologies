@@ -256,6 +256,9 @@ pub struct PackageMetadata {
     pub plugins: BTreeSet<PluginId>,
     #[serde(default)]
     pub satisfies: BTreeSet<VersionString>,
+    /// Promises the named package's dependency contract, including resource IDs and action schemas.
+    #[serde(default)]
+    pub satisfies_packages: BTreeMap<PackageId, BTreeSet<VersionString>>,
 }
 
 rpc_toolkit::reflect_ts!(PackageMetadata);
@@ -629,6 +632,7 @@ mod tests {
             hardware_virtualization: true,
             plugins: BTreeSet::new(),
             satisfies: BTreeSet::new(),
+            satisfies_packages: BTreeMap::new(),
         };
         let mut old_manifest = serde_json::to_value(metadata).unwrap();
         assert_eq!(
