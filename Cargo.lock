@@ -504,6 +504,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-tungstenite"
+version = "0.29.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef0f7efedeac57d9b26170f72965ecfd31473ca52ca7a64e925b0b6f5f079886"
+dependencies = [
+ "atomic-waker",
+ "futures-core",
+ "futures-io",
+ "futures-task",
+ "futures-util",
+ "log",
+ "pin-project-lite",
+ "tungstenite 0.26.2",
+]
+
+[[package]]
 name = "async_cell"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4496,6 +4512,7 @@ dependencies = [
  "rand 0.9.5",
  "serde",
  "serde_json",
+ "visit-rs",
 ]
 
 [[package]]
@@ -6998,6 +7015,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "reqwest-websocket"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f91a811daaa8b54faeaec9d507a336897a3d243834a4965254a17d39da8b5c9"
+dependencies = [
+ "async-tungstenite",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tungstenite 0.26.2",
+ "web-sys",
+]
+
+[[package]]
 name = "resolv-conf"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8438,6 +8473,7 @@ dependencies = [
  "rcgen",
  "regex",
  "reqwest",
+ "reqwest-websocket",
  "rpassword",
  "rpc-toolkit",
  "rusqlite",
@@ -8446,6 +8482,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sha-crypt",
  "sha2 0.11.1",
  "sha3 0.12.0",
@@ -8466,6 +8503,7 @@ dependencies = [
  "tokio-tungstenite 0.26.2",
  "tokio-util",
  "toml 0.9.12+spec-1.1.0",
+ "tower-http",
  "tower-service",
  "tracing",
  "tracing-appender",
@@ -8496,7 +8534,7 @@ dependencies = [
 
 [[package]]
 name = "start-registry"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "start-core",
 ]
@@ -8604,6 +8642,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-rustls",
+ "tokio-tungstenite 0.26.2",
  "tokio-util",
  "tower-http",
  "tracing",
@@ -9155,6 +9194,7 @@ checksum = "e464cf451ba96ebfc6f9b6542f17ee8b8956e33f1e40d9690624e59d7a7f8a4b"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "futures-util",
  "libc",

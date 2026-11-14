@@ -45,6 +45,10 @@ pub struct Public {
     pub server_info: ServerInfo,
     pub package_data: AllPackageData,
     #[serde(default)]
+    pub registry_cache: BTreeMap<Url, crate::registry::sync::RegistryCache>,
+    #[serde(default)]
+    pub os_update_cache: Option<crate::registry::sync::OsUpdateCache>,
+    #[serde(default)]
     pub disks: Vec<crate::disk::util::DiskInfo>,
     #[serde(default)]
     pub shared_volumes:
@@ -52,8 +56,7 @@ pub struct Public {
     #[serde(default)]
     pub backup_targets:
         BTreeMap<crate::backup::target::BackupTargetId, crate::backup::target::BackupTarget>,
-    /// UI-owned state. Outside `version` migrations, the backend never reads or
-    /// modifies its contents.
+    /// UI-owned state; backend domain logic accesses its contents only during migrations.
     pub ui: Value,
 }
 
@@ -168,6 +171,8 @@ impl Public {
                 keyboard,
             },
             package_data: AllPackageData::default(),
+            registry_cache: BTreeMap::new(),
+            os_update_cache: None,
             disks: Vec::new(),
             shared_volumes: BTreeMap::new(),
             backup_targets: BTreeMap::new(),

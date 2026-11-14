@@ -2,7 +2,9 @@
   "/rpc/**": {
     "target": "https://<CHANGE_ME>",
     "secure": false,
-    "changeOrigin": true
+    "changeOrigin": true,
+    "headers": { "Origin": "https://<CHANGE_ME>" },
+    "ws": true
   },
   "/s9pk/**": {
     "target": "https://<CHANGE_ME>",
@@ -33,6 +35,7 @@
     "target": "https://<CHANGE_ME>",
     "secure": false,
     "changeOrigin": true,
+    "headers": { "Origin": "https://<CHANGE_ME>" },
     "ws": true
   }
 }
