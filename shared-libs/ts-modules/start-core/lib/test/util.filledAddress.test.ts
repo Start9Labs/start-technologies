@@ -1,75 +1,77 @@
 import { Host, HostnameInfo } from '../osBindings'
 import { deepEqual } from '../util'
-import { fillHost, isAddressEnabled } from '../util/filledAddress'
+import {
+  fillHost,
+  isAddressEnabled,
+  isAddressInsecure,
+} from '../util/filledAddress'
 
-const host = (fingerprint: string): Host => ({
-  bindings: {
-    5223: {
-      enabled: true,
-      options: {
-        defaultOff: false,
-        transport: ['tcp', 'udp'],
-        preferredExternalPort: 5223,
-        addSsl: null,
-        secure: null,
-        proxy: null,
-      },
-      net: { assignedPort: null, assignedSslPort: 5223 },
-      addresses: {
-        enabled: [],
-        disabled: [],
-        enabledNames: [],
-        defaultOff: false,
-        guaWan: [],
-        lanEnabled: [],
-        available: [
-          {
-            ssl: true,
-            public: false,
-            hostname: 'relay.onion',
-            port: 5223,
-            metadata: {
-              kind: 'plugin',
-              packageId: 'tor',
-              removeAction: null,
-              overflowActions: [],
-              info: null,
+const host = (fingerprint: string): Host =>
+  ({
+    bindings: {
+      5223: {
+        enabled: true,
+        options: {
+          transport: ['tcp', 'udp'],
+          preferredExternalPort: 5223,
+          addSsl: null,
+          secure: null,
+          proxy: null,
+        },
+        net: { assignedPort: null, assignedSslPort: 5223 },
+        addresses: {
+          enabled: [],
+          disabled: [],
+          guaWan: [],
+          lanEnabled: [],
+          available: [
+            {
+              ssl: true,
+              public: false,
+              hostname: 'relay.onion',
+              port: 5223,
+              metadata: {
+                kind: 'plugin',
+                packageId: 'tor',
+                removeAction: null,
+                overflowActions: [],
+                info: null,
+              },
             },
-          },
-          {
-            ssl: true,
-            public: false,
-            hostname: 'relay.local',
-            port: 5223,
-            metadata: { kind: 'mdns', gateways: ['eth0', 'wlan0'] },
-          },
-        ],
-      },
-      interfaces: {
-        smp: {
-          id: 'smp',
-          name: 'SMP',
-          description: '',
-          masked: true,
-          type: 'api',
-          preferredLauncherAddress: null,
-          addressInfo: {
-            username: fingerprint,
-            hostId: 'main',
-            internalPort: 5223,
-            scheme: 'smp',
-            sslScheme: 'smp',
-            suffix: '',
+            {
+              ssl: true,
+              public: false,
+              hostname: 'relay.local',
+              port: 5223,
+              metadata: { kind: 'mdns', gateways: ['eth0', 'wlan0'] },
+            },
+          ],
+        },
+        interfaces: {
+          smp: {
+            id: 'smp',
+            name: 'SMP',
+            description: '',
+            masked: true,
+            type: 'api',
+            preferredLauncherAddress: null,
+            addressInfo: {
+              username: fingerprint,
+              hostId: 'main',
+              internalPort: 5223,
+              scheme: 'smp',
+              sslScheme: 'smp',
+              suffix: '',
+            },
           },
         },
       },
     },
-  },
-  bindingRanges: {},
-  publicDomains: {},
-  privateDomains: {},
-  portForwards: [],
-})
+    bindingRanges: {},
+    publicDomains: {},
+    privateDomains: {},
+    portForwards: [],
+  }) as unknown as Host
 
 const addressOf = (h: Host) =>
   fillHost(h).bindings[5223].interfaces['smp'].addressInfo
@@ -116,7 +118,7 @@ describe('fillHost', () => {
   })
 })
 
-describe('LAN address overrides', () => {
+describe('legacy server LAN address overrides', () => {
   const lanIp = (hostname: string, gateway: string): HostnameInfo => ({
     ssl: true,
     public: false,
@@ -141,45 +143,6 @@ describe('LAN address overrides', () => {
     return { h, addresses }
   }
   const hostnames = (h: Host) => addressOf(h).hostnames.map(a => a.hostname)
-
-  test('an empty server projection keeps default-off candidates disabled', () => {
-    const { h, addresses } = lan(eth, wifi)
-    addresses.defaultOff = true
-    addresses.selected = []
-    expect(hostnames(h)).toEqual([])
-  })
-
-  test('server selections carry named consent without reinterpreting overrides', () => {
-    const { h, addresses } = lan(eth)
-    const mdns = addresses.available.find(a => a.metadata.kind === 'mdns')!
-    addresses.defaultOff = true
-    addresses.enabledNames = [[mdns.hostname, 5223]]
-    addresses.disabled = [[eth.hostname, 5223]]
-    addresses.selected = [mdns]
-    expect(
-      isAddressEnabled(addresses, { ...mdns, metadata: { ...mdns.metadata } }),
-    ).toBe(true)
-    expect(isAddressEnabled(addresses, eth)).toBe(false)
-    expect(hostnames(h)).toEqual(['relay.local'])
-  })
-
-  test('projected selections distinguish identical IPs on different gateways', () => {
-    const { addresses } = lan()
-    const mdns: HostnameInfo = {
-      ...addresses.available.find(a => a.metadata.kind === 'mdns')!,
-      metadata: { kind: 'mdns', gateways: ['eth0'] },
-    }
-    const other: HostnameInfo = {
-      ...eth,
-      metadata: { kind: 'ipv4', gateway: 'wlan0' },
-    }
-    addresses.defaultOff = true
-    addresses.enabledNames = [[mdns.hostname, 5223]]
-    addresses.available = [mdns, eth, other]
-    addresses.selected = [mdns, eth]
-    expect(isAddressEnabled(addresses, eth)).toBe(true)
-    expect(isAddressEnabled(addresses, other)).toBe(false)
-  })
 
   test('an mDNS address stays while its gateways hold no LAN IP', () => {
     expect(hostnames(lan().h)).toContain('relay.local')
@@ -257,5 +220,40 @@ describe('LAN address overrides', () => {
 
     expect(isAddressEnabled(addresses, gua)).toBe(true)
     expect(isAddressEnabled(addresses, mdns)).toBe(false)
+  })
+})
+
+describe('server-owned effective addresses', () => {
+  test('an empty effective selection never falls back to legacy defaults', () => {
+    const h = host('AAAA=')
+    const addresses = h.bindings[5223].addresses
+    addresses.effective = []
+    expect(addressOf(h).hostnames).toEqual([])
+    expect(isAddressEnabled(addresses, addresses.available[0])).toBe(false)
+  })
+
+  test('consumed selections distinguish the same name on different gateways', () => {
+    const h = host('AAAA=')
+    const addresses = h.bindings[5223].addresses
+    const name = (gateway: string): HostnameInfo => ({
+      ssl: false,
+      public: false,
+      hostname: 'relay.local',
+      port: 5223,
+      metadata: { kind: 'mdns', gateways: [gateway] },
+    })
+    const trusted = name('eth0')
+    const insecure = name('wlan0')
+    addresses.available = [trusted, insecure]
+    addresses.insecure = [['relay.local', 5223, 'wlan0']]
+    addresses.effective = [name('eth0')]
+    expect(isAddressEnabled(addresses, trusted)).toBe(true)
+    expect(isAddressEnabled(addresses, insecure)).toBe(false)
+    expect(isAddressInsecure(addresses, trusted)).toBe(false)
+    expect(isAddressInsecure(addresses, insecure)).toBe(true)
+    addresses.effective.push(name('wlan0'))
+    expect(isAddressEnabled(addresses, insecure)).toBe(true)
+    addresses.effective = [trusted]
+    expect(isAddressEnabled(addresses, insecure)).toBe(false)
   })
 })

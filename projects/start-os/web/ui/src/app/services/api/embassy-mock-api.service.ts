@@ -2863,7 +2863,7 @@ export class MockApiService extends ApiService implements StartupApiService {
   private async mockPublishIncoming(binding: T.BindInfo) {
     const path = '/serverInfo/network/host/bindings/6881'
     const exists = !!this.mockData(path)
-    if (binding.addresses.selected?.length) {
+    if (binding.addresses.effective.length) {
       await this.mockRevision([
         { op: exists ? PatchOp.REPLACE : PatchOp.ADD, path, value: binding },
       ])
@@ -2891,15 +2891,14 @@ export class MockApiService extends ApiService implements StartupApiService {
   ) {
     const isPublicIp =
       h.public && (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6')
-    if (current.selected != null) {
-      const matches = (address: T.HostnameInfo) =>
-        address.hostname === h.hostname &&
-        address.port === h.port &&
-        address.ssl === h.ssl
-      const selected = current.selected.filter(address => !matches(address))
-      if (enabled) selected.push(...current.available.filter(matches))
-      current.selected = selected
-    }
+    const matches = (address: T.HostnameInfo) =>
+      address.hostname === h.hostname &&
+      address.port === h.port &&
+      address.ssl === h.ssl &&
+      utils.deepEqual(address.metadata, h.metadata)
+    const selected = current.effective.filter(address => !matches(address))
+    if (enabled) selected.push(...current.available.filter(matches))
+    current.effective = selected
 
     if (isPublicIp) {
       if (h.port === null) return
@@ -2996,30 +2995,27 @@ export class MockApiService extends ApiService implements StartupApiService {
     current.guaWan = guaWan
     current.enabled = enabled
     current.available = available
-    if (current.selected != null) {
-      const selected = current.selected.filter(
-        address => address.hostname !== h.hostname || address.port !== h.port,
+    const selected = current.effective.filter(
+      address => address.hostname !== h.hostname || address.port !== h.port,
+    )
+    const lanOn =
+      current.lanEnabled.some(
+        ([hostname, port]) => hostname === h.hostname && port === h.port,
+      ) ||
+      selected.some(
+        address =>
+          address.metadata.kind === 'ipv4' &&
+          !address.public &&
+          address.metadata.gateway === gateway &&
+          address.port === h.port,
       )
-      const lanOn =
-        current.lanEnabled.some(
-          ([hostname, port]) => hostname === h.hostname && port === h.port,
-        ) ||
-        selected.some(
-          address =>
-            address.metadata.kind === 'ipv4' &&
-            !address.public &&
-            address.metadata.gateway === gateway &&
-            address.port === h.port,
-        )
-      if (wan || lanOn)
-        selected.push(
-          ...available.filter(
-            address =>
-              address.hostname === h.hostname && address.port === h.port,
-          ),
-        )
-      current.selected = selected
-    }
+    if (wan || lanOn)
+      selected.push(
+        ...available.filter(
+          address => address.hostname === h.hostname && address.port === h.port,
+        ),
+      )
+    current.effective = selected
   }
 
   private mockDnsServers(servers: string[] | null): string[] | null {

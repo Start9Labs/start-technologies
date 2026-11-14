@@ -924,10 +924,10 @@ mod test {
             .mutate(|ranges| {
                 let target = &mut ranges.get_mut(&21115).unwrap().addresses;
                 set_nonssl_wan_group(target, &gw("wg1"), 42000, false);
-                target.refresh_selected();
+                target.refresh_effective();
                 let sibling = &mut ranges.get_mut(&21118).unwrap().addresses;
                 set_nonssl_wan_group(sibling, &gw("wg1"), 43000, true);
-                sibling.refresh_selected();
+                sibling.refresh_effective();
                 Ok(())
             })
             .unwrap();

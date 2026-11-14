@@ -50,7 +50,9 @@ export function mockBitTorrentBinding(): T.BindInfo {
       disabled: [],
       enabledNames: [],
       defaultOff: true,
-      selected: [],
+      effective: [],
+      insecure: [],
+      insecureEnabled: [],
       guaWan: [],
       lanEnabled: [],
       available: [

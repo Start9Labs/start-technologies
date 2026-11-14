@@ -6,7 +6,7 @@ import {
   PackageDataEntry,
 } from 'src/app/services/patch-db/data-model'
 import { knownAuthorities } from 'src/app/utils/acme'
-import { Mock } from './api.fixures'
+import { Mock, mockAddresses } from './api.fixures'
 const version = require('../../../../../../../../package.json').version
 
 function mockService(
@@ -405,7 +405,7 @@ export const mockPatchData: DataModel = {
               assignedPort: null,
               assignedSslPort: 443,
             },
-            addresses: {
+            addresses: mockAddresses({
               enabled: [],
               disabled: [],
               guaWan: [],
@@ -490,7 +490,7 @@ export const mockPatchData: DataModel = {
                   },
                 },
               ],
-            },
+            }),
             options: {
               defaultOff: false,
               transport: ['tcp'],
@@ -985,7 +985,7 @@ export const mockPatchData: DataModel = {
                 assignedPort: 42080,
                 assignedSslPort: 42443,
               },
-              addresses: {
+              addresses: mockAddresses({
                 enabled: ['203.0.113.45:42443', '[2001:db8:abcd::a3b:2]:1234'],
                 disabled: [],
                 guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
@@ -1091,7 +1091,7 @@ export const mockPatchData: DataModel = {
                     metadata: { kind: 'ipv6', gateway: 'eth0', scopeId: 0 },
                   },
                 ],
-              },
+              }),
               options: {
                 defaultOff: false,
                 transport: ['tcp', 'udp'],
@@ -1168,7 +1168,7 @@ export const mockPatchData: DataModel = {
               // non-SSL, every entry on the external start port (49152). The
               // public WAN IP is seeded into `enabled` (WAN is opt-in); LAN /
               // mDNS / domains are enabled by default.
-              addresses: {
+              addresses: mockAddresses({
                 enabled: ['203.0.113.45:49152'],
                 disabled: [],
                 enabledNames: [],
@@ -1219,7 +1219,7 @@ export const mockPatchData: DataModel = {
                     metadata: { kind: 'private-domain', gateways: ['wlan0'] },
                   },
                 ],
-              },
+              }),
               interface: {
                 id: 'udp-relay',
                 name: 'UDP Relay',
@@ -1269,7 +1269,7 @@ export const mockPatchData: DataModel = {
                 assignedPort: 48332,
                 assignedSslPort: null,
               },
-              addresses: {
+              addresses: mockAddresses({
                 enabled: [],
                 disabled: [],
                 guaWan: [],
@@ -1309,7 +1309,7 @@ export const mockPatchData: DataModel = {
                     },
                   },
                 ],
-              },
+              }),
               options: {
                 transport: ['tcp', 'udp'],
                 addSsl: null,
@@ -1352,7 +1352,7 @@ export const mockPatchData: DataModel = {
                 assignedPort: 48333,
                 assignedSslPort: null,
               },
-              addresses: {
+              addresses: mockAddresses({
                 enabled: [],
                 disabled: [],
                 guaWan: [],
@@ -1360,7 +1360,7 @@ export const mockPatchData: DataModel = {
                 enabledNames: [],
                 defaultOff: false,
                 available: [],
-              },
+              }),
               options: {
                 transport: ['tcp', 'udp'],
                 addSsl: null,

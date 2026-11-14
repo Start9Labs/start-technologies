@@ -225,6 +225,7 @@ pub(super) fn select_address_in(
             internal_port: INTERNAL_PORT,
             address: address.clone(),
             enabled: Some(enabled),
+            allow_insecure: false,
         },
         &Empty {},
     )?;

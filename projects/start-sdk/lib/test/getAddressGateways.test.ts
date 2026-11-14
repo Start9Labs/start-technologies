@@ -23,15 +23,14 @@ const domain = pub('turn.example.com', {
 const addresses = (
   available: T.HostnameInfo[],
   enabled: string[],
-): T.DerivedAddressInfo => ({
-  enabled,
-  disabled: [],
-  guaWan: [],
-  lanEnabled: [],
-  enabledNames: [],
-  defaultOff: false,
-  available,
-})
+): T.DerivedAddressInfo =>
+  ({
+    enabled,
+    disabled: [],
+    guaWan: [],
+    lanEnabled: [],
+    available,
+  }) as unknown as T.DerivedAddressInfo
 
 const host = (
   binding: T.DerivedAddressInfo,
@@ -125,7 +124,7 @@ describe('getAddressGateways', () => {
   it('consumes server-projected public selections', async () => {
     const projected = addresses([tunnelV4, routerV4], ['134.199.220.102:3478'])
     projected.defaultOff = true
-    projected.selected = [tunnelV4]
+    projected.effective = [tunnelV4]
     expect(
       (
         await getAddressGateways(effects('wg1', host(projected)), 'turn', [

@@ -306,7 +306,7 @@ fn moving_a_shared_listener_preserves_sibling_domain_consent_and_projection() {
             assert_eq!(row.port, Some(8443));
             let on = domain == "private.example" && consent;
             assert_eq!(addresses.enabled().contains(row), on);
-            assert_eq!(addresses.selected.as_ref().unwrap().contains(row), on);
+            assert_eq!(addresses.effective.contains(row), on);
         }
         assert!(
             !host
@@ -362,6 +362,7 @@ fn assigning_a_shared_preferred_port_does_not_move_a_siblings_ip_overrides() {
         .unwrap();
     assert_eq!(domain.port, Some(8444));
     assert!(!addresses.enabled().contains(domain));
+    assert!(!addresses.effective.contains(domain));
 }
 
 #[test]

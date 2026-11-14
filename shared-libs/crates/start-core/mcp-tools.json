@@ -4425,20 +4425,53 @@
                 "maxItems": 2
               }
             },
+            "insecure": {
+              "description": "Plaintext private addresses requiring consent, keyed by hostname, port and gateway.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  { "$ref": "#/$defs/GatewayId" }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
+            "insecureEnabled": {
+              "description": "Persisted consent; ordinary address changes must not grant insecure access.\nAddress removal retains consent; explicit disabling or gateway removal revokes it.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  { "$ref": "#/$defs/GatewayId" }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
             "available": {
               "type": "array",
               "items": { "$ref": "#/$defs/HostnameInfo" },
               "description": "Discovered address candidates."
             },
-            "selected": {
-              "description": "Computed consent projection; absent on pre-projection servers.",
-              "anyOf": [
-                {
-                  "type": "array",
-                  "items": { "$ref": "#/$defs/HostnameInfo" }
-                },
-                { "type": "null" }
-              ]
+            "effective": {
+              "description": "Effective address selections shared by network enforcement and clients.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/HostnameInfo" }
             }
           },
           "required": [
@@ -4448,10 +4481,14 @@
             "defaultOff",
             "guaWan",
             "lanEnabled",
-            "available"
+            "insecure",
+            "insecureEnabled",
+            "available",
+            "effective"
           ],
           "additionalProperties": true
         },
+        "GatewayId": { "type": "string" },
         "HostnameInfo": {
           "type": "object",
           "properties": {
@@ -4550,7 +4587,6 @@
             }
           ]
         },
-        "GatewayId": { "type": "string" },
         "PackageId": { "type": "string" },
         "ActionId": { "type": "string" },
         "ServiceInterface": {
@@ -4693,7 +4729,11 @@
               "maximum": 9007199254740991
             },
             "address": { "$ref": "#/$defs/HostnameInfo" },
-            "enabled": { "type": ["boolean", "null"] }
+            "enabled": { "type": ["boolean", "null"] },
+            "allowInsecure": {
+              "description": "Accepts readable and alterable plaintext traffic, including passwords.",
+              "type": "boolean"
+            }
           },
           "required": ["internalPort", "address"],
           "additionalProperties": true
@@ -4965,7 +5005,11 @@
               "maximum": 9007199254740991
             },
             "address": { "$ref": "#/$defs/HostnameInfo" },
-            "enabled": { "type": ["boolean", "null"] }
+            "enabled": { "type": ["boolean", "null"] },
+            "allowInsecure": {
+              "description": "Accepts readable and alterable plaintext traffic, including passwords.",
+              "type": "boolean"
+            }
           },
           "required": ["internalPort", "address"],
           "additionalProperties": true
@@ -8488,6 +8532,57 @@
     }
   },
   {
+    "name": "registry.os.version.edit",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RegistryUrlParams" },
+        { "$ref": "#/$defs/EditVersionParams" }
+      ],
+      "$defs": {
+        "RegistryUrlParams": {
+          "type": "object",
+          "properties": { "registry": { "type": "string" } },
+          "required": ["registry"],
+          "additionalProperties": true
+        },
+        "EditVersionParams": {
+          "type": "object",
+          "properties": {
+            "version": { "type": "string" },
+            "releaseNotes": {
+              "anyOf": [{ "$ref": "#/$defs/LocaleString" }, { "type": "null" }]
+            },
+            "sourceVersion": { "type": ["string", "null"] },
+            "gitHash": {
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "expectedGitHash": {
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "security": { "type": ["boolean", "null"] }
+          },
+          "required": ["version"],
+          "additionalProperties": true,
+          "description": "Edits an existing release; omitted fields, assets and authorized signers remain unchanged."
+        },
+        "LocaleString": {
+          "anyOf": [
+            { "type": "string" },
+            {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "type": "string" }
+            }
+          ]
+        },
+        "GitHash": { "type": "string" }
+      },
+      "type": "object"
+    }
+  },
+  {
     "name": "registry.os.version.get",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -10602,20 +10697,53 @@
                 "maxItems": 2
               }
             },
+            "insecure": {
+              "description": "Plaintext private addresses requiring consent, keyed by hostname, port and gateway.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  { "$ref": "#/$defs/GatewayId" }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
+            "insecureEnabled": {
+              "description": "Persisted consent; ordinary address changes must not grant insecure access.\nAddress removal retains consent; explicit disabling or gateway removal revokes it.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  { "$ref": "#/$defs/GatewayId" }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
             "available": {
               "type": "array",
               "items": { "$ref": "#/$defs/HostnameInfo" },
               "description": "Discovered address candidates."
             },
-            "selected": {
-              "description": "Computed consent projection; absent on pre-projection servers.",
-              "anyOf": [
-                {
-                  "type": "array",
-                  "items": { "$ref": "#/$defs/HostnameInfo" }
-                },
-                { "type": "null" }
-              ]
+            "effective": {
+              "description": "Effective address selections shared by network enforcement and clients.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/HostnameInfo" }
             }
           },
           "required": [
@@ -10625,10 +10753,14 @@
             "defaultOff",
             "guaWan",
             "lanEnabled",
-            "available"
+            "insecure",
+            "insecureEnabled",
+            "available",
+            "effective"
           ],
           "additionalProperties": true
         },
+        "GatewayId": { "type": "string" },
         "HostnameInfo": {
           "type": "object",
           "properties": {
@@ -10727,7 +10859,6 @@
             }
           ]
         },
-        "GatewayId": { "type": "string" },
         "PackageId": { "type": "string" },
         "ActionId": { "type": "string" }
       },
@@ -12001,20 +12132,53 @@
                 "maxItems": 2
               }
             },
+            "insecure": {
+              "description": "Plaintext private addresses requiring consent, keyed by hostname, port and gateway.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  { "$ref": "#/$defs/GatewayId" }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
+            "insecureEnabled": {
+              "description": "Persisted consent; ordinary address changes must not grant insecure access.\nAddress removal retains consent; explicit disabling or gateway removal revokes it.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  { "$ref": "#/$defs/GatewayId" }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
             "available": {
               "type": "array",
               "items": { "$ref": "#/$defs/HostnameInfo" },
               "description": "Discovered address candidates."
             },
-            "selected": {
-              "description": "Computed consent projection; absent on pre-projection servers.",
-              "anyOf": [
-                {
-                  "type": "array",
-                  "items": { "$ref": "#/$defs/HostnameInfo" }
-                },
-                { "type": "null" }
-              ]
+            "effective": {
+              "description": "Effective address selections shared by network enforcement and clients.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/HostnameInfo" }
             }
           },
           "required": [
@@ -12024,10 +12188,14 @@
             "defaultOff",
             "guaWan",
             "lanEnabled",
-            "available"
+            "insecure",
+            "insecureEnabled",
+            "available",
+            "effective"
           ],
           "additionalProperties": true
         },
+        "GatewayId": { "type": "string" },
         "HostnameInfo": {
           "type": "object",
           "properties": {
@@ -12126,7 +12294,6 @@
             }
           ]
         },
-        "GatewayId": { "type": "string" },
         "PackageId": { "type": "string" },
         "ActionId": { "type": "string" },
         "ServiceInterface": {
@@ -12246,7 +12413,11 @@
               "maximum": 9007199254740991
             },
             "address": { "$ref": "#/$defs/HostnameInfo" },
-            "enabled": { "type": ["boolean", "null"] }
+            "enabled": { "type": ["boolean", "null"] },
+            "allowInsecure": {
+              "description": "Accepts readable and alterable plaintext traffic, including passwords.",
+              "type": "boolean"
+            }
           },
           "required": ["internalPort", "address"],
           "additionalProperties": true
@@ -12355,7 +12526,11 @@
           "maximum": 9007199254740991
         },
         "address": { "$ref": "#/$defs/HostnameInfo" },
-        "enabled": { "type": ["boolean", "null"] }
+        "enabled": { "type": ["boolean", "null"] },
+        "allowInsecure": {
+          "description": "Accepts readable and alterable plaintext traffic, including passwords.",
+          "type": "boolean"
+        }
       },
       "required": ["internalPort", "address"],
       "additionalProperties": true
@@ -12504,7 +12679,11 @@
               "maximum": 9007199254740991
             },
             "address": { "$ref": "#/$defs/HostnameInfo" },
-            "enabled": { "type": ["boolean", "null"] }
+            "enabled": { "type": ["boolean", "null"] },
+            "allowInsecure": {
+              "description": "Accepts readable and alterable plaintext traffic, including passwords.",
+              "type": "boolean"
+            }
           },
           "required": ["internalPort", "address"],
           "additionalProperties": true
@@ -12613,7 +12792,11 @@
           "maximum": 9007199254740991
         },
         "address": { "$ref": "#/$defs/HostnameInfo" },
-        "enabled": { "type": ["boolean", "null"] }
+        "enabled": { "type": ["boolean", "null"] },
+        "allowInsecure": {
+          "description": "Accepts readable and alterable plaintext traffic, including passwords.",
+          "type": "boolean"
+        }
       },
       "required": ["internalPort", "address"],
       "additionalProperties": true

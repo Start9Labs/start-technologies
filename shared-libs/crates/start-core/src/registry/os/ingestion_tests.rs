@@ -9,7 +9,10 @@ use crate::registry::os::SIG_CONTEXT;
 use crate::registry::os::asset::add::{AddAssetParams, add_iso};
 use crate::registry::os::index::OsVersionInfo;
 use crate::registry::os::promote::{CliOsPromoteParams, cli_os_promote};
-use crate::registry::os::version::{AddVersionParams, add_version};
+use crate::registry::os::version::{
+    AddVersionParams, EditVersionParams, add_version, edit_version,
+};
+use crate::registry::package::promote::{call_registry, registry_rpc_url};
 use crate::rpc_continuations::Guid;
 use crate::sign::commitment::blake3::Blake3Commitment;
 use crate::sign::ed25519::Ed25519ph;
@@ -321,6 +324,153 @@ async fn os_asset_ingestion_defaults_old_requests_and_verifies_signatures_atomic
         .is_err()
     );
     assert_eq!(snapshot(&ctx).await, before);
+}
+
+#[tokio::test]
+async fn os_version_edits_preserve_omitted_metadata_assets_and_signers() {
+    let uploader = SigningKey::from_bytes(&[12; 32]);
+    let uploader_key = AnyVerifyingKey::Ed25519(uploader.verifying_key());
+    let temp = tempfile::tempdir().unwrap();
+    let ctx = context(temp.path().join("registry"), uploader_key.clone()).await;
+    add_version(
+        ctx.clone(),
+        AddVersionParams {
+            version: "0.4.0.5".parse().unwrap(),
+            release_notes: "Notes".parse().unwrap(),
+            source_version: ">=0.4.0".parse().unwrap(),
+            git_hash: Some("old-build".parse().unwrap()),
+            expected_git_hash: None,
+            security: true,
+            signer: Some(uploader_key),
+        },
+    )
+    .await
+    .unwrap();
+    add_iso(ctx.clone(), params(&uploader, SignatureMap::new()))
+        .await
+        .unwrap();
+    let version = "0.4.0.5".parse().unwrap();
+    ctx.db
+        .mutate(|db| {
+            db.as_index_mut()
+                .as_os_mut()
+                .as_versions_mut()
+                .as_idx_mut(&version)
+                .unwrap()
+                .mutate(|info| {
+                    let asset = info.iso["x86_64"].clone();
+                    info.img.insert("aarch64".into(), asset.clone());
+                    info.squashfs.insert("x86_64".into(), asset);
+                    Ok(())
+                })
+        })
+        .await
+        .result
+        .unwrap();
+    let mut expected = snapshot(&ctx).await;
+    for changes in [
+        imbl_value::json!({}),
+        imbl_value::json!({ "releaseNotes": { "en_US": "Revised", "pl_PL": "Informacje" } }),
+        imbl_value::json!({ "sourceVersion": ">=0.4.0.1:0" }),
+        imbl_value::json!({ "security": false }),
+        imbl_value::json!({ "security": true }),
+        imbl_value::json!({ "gitHash": "new-build" }),
+    ] {
+        let mut request = changes.clone();
+        request["version"] = "0.4.0.5".into();
+        request["expectedGitHash"] =
+            expected["index"]["os"]["versions"]["0.4.0.5"]["gitHash"].clone();
+        for (field, value) in changes.as_object().unwrap() {
+            expected["index"]["os"]["versions"]["0.4.0.5"][&**field] = value.clone();
+        }
+        edit_version(ctx.clone(), from_value(request).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(snapshot(&ctx).await, expected);
+    }
+
+    for (target, hash, kind) in [
+        ("0.4.0.6", "new-build", ErrorKind::NotFound),
+        ("0.4.0.5", "old-build", ErrorKind::InvalidRequest),
+    ] {
+        let request: EditVersionParams = from_value(imbl_value::json!({
+            "version": target,
+            "expectedGitHash": hash,
+            "releaseNotes": "Must not persist",
+            "security": false,
+        }))
+        .unwrap();
+        let err = edit_version(ctx.clone(), request).await.unwrap_err();
+        assert_eq!(err.kind, kind);
+        assert_eq!(snapshot(&ctx).await, expected);
+    }
+
+    let (url, server_task) = registry_server(ctx.clone()).await;
+    let url = registry_rpc_url(&url).unwrap();
+    let key_path = temp.path().join("identity.pem");
+    write_signing_key(&uploader, &key_path).await.unwrap();
+    let cli = CliContext::init(ClientConfig {
+        id_key_path: Some(key_path),
+        ..Default::default()
+    })
+    .unwrap();
+    let mut replicas = Vec::new();
+    for os_version in ["0.4.3.1", "0.4.0.4"] {
+        let wire = crate::registry::device_info::WireCompatibility::for_startos(
+            &os_version.parse().unwrap(),
+        )
+        .unwrap();
+        let mirror = crate::registry::mirror::index_mirror(
+            &ctx.index_mirrors,
+            &ctx.db,
+            None,
+            wire,
+            &ctx.datadir,
+        )
+        .await
+        .unwrap();
+        let (dump, revisions) = mirror
+            .db
+            .dump_and_sub("/index/os/versions".parse().unwrap())
+            .await;
+        replicas.push((mirror, dump.value, revisions));
+    }
+    let revised_notes = imbl_value::json!({ "en_US": "RPC edit", "pl_PL": "Zmiana RPC" });
+    let request =
+        imbl_value::json!({ "version": "0.4.0.5", "releaseNotes": revised_notes.clone() });
+    call_registry(&cli, url.clone(), "os.version.edit", request.clone())
+        .await
+        .unwrap();
+    expected["index"]["os"]["versions"]["0.4.0.5"]["releaseNotes"] = revised_notes.clone();
+    assert_eq!(snapshot(&ctx).await, expected);
+    for (index, (_mirror, mut view, mut revisions)) in replicas.into_iter().enumerate() {
+        let revision = tokio::time::timeout(std::time::Duration::from_secs(5), revisions.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        patch_db::json_patch::patch(&mut view, &revision.patch).unwrap();
+        if index == 0 {
+            assert_eq!(view["0.4.0.5"]["releaseNotes"], revised_notes);
+            assert!(view["0.4.0.5"].get("headline").is_none());
+        } else {
+            assert_eq!(view["0.4.0.5"]["releaseNotes"].as_str(), Some("RPC edit"));
+            assert_eq!(view["0.4.0.5"]["headline"].as_str(), Some("v0.4.0.5"));
+        }
+    }
+
+    ctx.db
+        .mutate(|db| db.as_admins_mut().ser(&BTreeSet::<Guid>::new()))
+        .await
+        .result
+        .unwrap();
+    let before = snapshot(&ctx).await;
+    assert!(
+        call_registry(&cli, url, "os.version.edit", request)
+            .await
+            .is_err()
+    );
+    assert_eq!(snapshot(&ctx).await, before);
+    server_task.abort();
 }
 
 #[tokio::test]

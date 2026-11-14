@@ -12,7 +12,10 @@ import {
 import { IpAddress, IPV6_LINK_LOCAL } from './ip'
 import { once } from './once'
 import { deepEqual } from './deepEqual'
-import { legacyAddressEnabled } from './legacyAddressEnabled'
+import {
+  legacyAddressEnabled,
+  LegacyAddressSelections,
+} from './legacyAddressEnabled'
 
 export type UrlString = string
 export type HostId = string
@@ -323,18 +326,55 @@ function filterRec(
   return hostnames
 }
 
-/** Whether the server selected this discovered address. */
+function gatewayIds(h: HostnameInfo): string[] {
+  switch (h.metadata.kind) {
+    case 'ipv4':
+    case 'ipv6':
+    case 'public-domain':
+      return [h.metadata.gateway]
+    case 'mdns':
+    case 'private-domain':
+      return h.metadata.gateways
+    default:
+      return []
+  }
+}
+
+function insecureOverride(
+  overrides: DerivedAddressInfo['insecure'],
+  h: HostnameInfo,
+): boolean {
+  return overrides.some(
+    ([hostname, port, gateway]) =>
+      hostname === h.hostname &&
+      port === h.port &&
+      gatewayIds(h).includes(gateway),
+  )
+}
+
+export function isAddressInsecure(
+  addr: DerivedAddressInfo,
+  h: HostnameInfo,
+): boolean {
+  return insecureOverride(addr.insecure ?? [], h)
+}
+
+type AddressSelections = LegacyAddressSelections &
+  Partial<Pick<DerivedAddressInfo, 'effective'>>
+
+/** Uses server-owned selections, with compatibility for servers lacking `effective`. */
 export function isAddressEnabled(
   addr: DerivedAddressInfo,
   h: HostnameInfo,
 ): boolean {
-  return addr.selected == null
-    ? legacyAddressEnabled(addr, h)
-    : addr.selected.some(selected => deepEqual(selected, h))
+  return getEnabledAddresses(addr).some(a => deepEqual(a, h))
 }
 
-function enabledAddresses(addr: DerivedAddressInfo): HostnameInfo[] {
-  return addr.available.filter(h => isAddressEnabled(addr, h))
+/** Server-owned selections, or the legacy protocol's local projection. */
+export function getEnabledAddresses(addr: AddressSelections): HostnameInfo[] {
+  return (
+    addr.effective ?? addr.available.filter(h => legacyAddressEnabled(addr, h))
+  )
 }
 
 /**
@@ -361,7 +401,7 @@ export const filledAddress = (
 ): FilledAddressInfo => {
   const toUrl = addressHostToUrl.bind(null, addressInfo)
   const binding = host.bindings[addressInfo.internalPort]
-  const hostnames = binding ? enabledAddresses(binding.addresses) : []
+  const hostnames = binding ? getEnabledAddresses(binding.addresses) : []
 
   function filledAddressFromHostnames<F extends Filter>(
     hostnames: HostnameInfo[],

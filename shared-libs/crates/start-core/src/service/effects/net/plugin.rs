@@ -111,12 +111,9 @@ pub async fn export_url(
                     )
                 ))?
                 .as_addresses_mut()
-                .mutate(|addresses| {
-                    addresses
-                        .available
-                        .retain(|h| !hostname_info.matches_hostname_info(h, &plugin_id));
-                    addresses.available.insert(entry);
-                    addresses.refresh_selected();
+                .mutate_available(|available: &mut BTreeSet<_>| {
+                    available.retain(|h| !hostname_info.matches_hostname_info(h, &plugin_id));
+                    available.insert(entry);
                     Ok(())
                 })?;
             Ok(())
@@ -152,20 +149,20 @@ pub async fn clear_urls(
             for host in all_hosts(db) {
                 let host = host?;
                 for (_, bind) in host.as_bindings_mut().as_entries_mut()? {
-                    bind.as_addresses_mut().mutate(|addresses| {
-                        addresses.available.retain(|h| match &h.metadata {
-                            HostnameMetadata::Plugin { package_id, .. }
-                                if package_id == &plugin_id =>
-                            {
-                                except
-                                    .iter()
-                                    .any(|e| e.matches_hostname_info(h, &plugin_id))
-                            }
-                            _ => true,
-                        });
-                        addresses.refresh_selected();
-                        Ok(())
-                    })?;
+                    bind.as_addresses_mut()
+                        .mutate_available(|available: &mut BTreeSet<_>| {
+                            available.retain(|h| match &h.metadata {
+                                HostnameMetadata::Plugin { package_id, .. }
+                                    if package_id == &plugin_id =>
+                                {
+                                    except
+                                        .iter()
+                                        .any(|e| e.matches_hostname_info(h, &plugin_id))
+                                }
+                                _ => true,
+                            });
+                            Ok(())
+                        })?;
                 }
             }
             Ok(())

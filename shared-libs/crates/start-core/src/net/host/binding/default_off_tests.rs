@@ -139,20 +139,20 @@ fn plugin_projection_tracks_metadata_replacement_and_removal() {
     info.set_available(candidates(true), true);
     let plugin = named(&info, "plugin.example");
     set_address_enabled_on(&mut info, &plugin, true).unwrap();
-    info.refresh_selected();
-    assert!(info.selected.as_ref().unwrap().contains(&plugin));
+    info.refresh_effective();
+    assert!(info.effective.contains(&plugin));
     let mut replacement = plugin.clone();
     if let HostnameMetadata::Plugin { info, .. } = &mut replacement.metadata {
         *info = serde_json::json!({ "revision": 2 }).into();
     }
     info.available.remove(&plugin);
     info.available.insert(replacement.clone());
-    info.refresh_selected();
-    assert!(info.selected.as_ref().unwrap().contains(&replacement));
-    assert!(!info.selected.as_ref().unwrap().contains(&plugin));
+    info.refresh_effective();
+    assert!(info.effective.contains(&replacement));
+    assert!(!info.effective.contains(&plugin));
     info.available.remove(&replacement);
-    info.refresh_selected();
-    assert!(info.selected.as_ref().unwrap().is_empty());
+    info.refresh_effective();
+    assert!(info.effective.is_empty());
 }
 
 #[test]
@@ -191,6 +191,52 @@ fn rekeying_moves_named_consent_but_not_plugin_endpoints() {
     assert!(info.enabled().contains(&named(&info, "private.example")));
     assert!(info.enabled().contains(&plugin));
     assert!(!info.enabled_names.contains(&(plugin.hostname, 4545)));
+}
+
+#[test]
+fn default_off_plaintext_selection_requires_and_preserves_gateway_consent() {
+    let mut info = DerivedAddressInfo::default();
+    let available = candidates(false);
+    info.set_available(available.clone(), true);
+    let gateway: GatewayId = "eth0".parse().unwrap();
+    info.insecure = ["private.example", "192.168.1.2", "2001:db8::2"]
+        .into_iter()
+        .map(|hostname| (hostname.into(), 4242, gateway.clone()))
+        .collect();
+    let domain = named(&info, "private.example");
+    assert!(set_address_enabled_with_consent(&mut info, &domain, true, false).is_err());
+    assert!(info.enabled().is_empty());
+    set_address_enabled_with_consent(&mut info, &domain, true, true).unwrap();
+    for hostname in ["private.example", "192.168.1.2", "2001:db8::2"] {
+        assert!(info.enabled().contains(&named(&info, hostname)));
+    }
+    info.set_available(BTreeSet::new(), true);
+    assert!(info.has_enabled_intent());
+    assert!(info.effective.is_empty());
+    info.set_available(available, true);
+    assert!(info.effective.contains(&domain));
+    set_address_enabled_with_consent(&mut info, &domain, false, false).unwrap();
+    info.refresh_effective();
+    assert!(info.effective.is_empty());
+    assert!(!info.has_enabled_intent());
+}
+
+#[test]
+fn named_reassignment_carries_plaintext_consent_and_gateway_scope() {
+    let mut info = DerivedAddressInfo::default();
+    let old = (InternedString::intern("private.example"), 4242);
+    let new = (InternedString::intern("moved.example"), 4545);
+    let gateway: GatewayId = "eth0".parse().unwrap();
+    let consent = (old.0.clone(), old.1, gateway.clone());
+    info.insecure.insert(consent.clone());
+    info.insecure_enabled.insert(consent);
+    assert!(info.rekey_name(old.clone(), new.clone()));
+    assert_eq!(
+        info.insecure,
+        [(new.0.clone(), new.1, gateway.clone())].into()
+    );
+    assert_eq!(info.insecure_enabled, [(new.0, new.1, gateway)].into());
+    assert!(!info.rekey_name(old, ("unrelated.example".into(), 50000)));
 }
 
 #[test]

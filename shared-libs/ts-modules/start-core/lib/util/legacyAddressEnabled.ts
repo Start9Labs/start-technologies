@@ -18,9 +18,14 @@ function mdnsCovers(mdns: HostnameInfo, ip: HostnameInfo): boolean {
   )
 }
 
+export type LegacyAddressSelections = Pick<
+  DerivedAddressInfo,
+  'enabled' | 'disabled' | 'lanEnabled' | 'available'
+>
+
 // Pre-projection servers supply overrides, without the default-off policy.
 export function legacyAddressEnabled(
-  addr: DerivedAddressInfo,
+  addr: LegacyAddressSelections,
   h: HostnameInfo,
 ): boolean {
   if (h.public && (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6')) {

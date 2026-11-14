@@ -66,7 +66,6 @@ function harness(moduleOverrides = new Map(), globals = {}) {
   dependencies.set(tokens.ServerIdentityService, {
     openObserver: { next() {} },
   })
-  dependencies.set(tokens.ConfigService, { gitHash: 'fixture-running-build' })
   dependencies.set(tokens.StaleUiService, { checkHash() {} })
   dependencies.set(tokens.i18nPipe, { transform: value => value })
 
@@ -141,8 +140,6 @@ function harness(moduleOverrides = new Map(), globals = {}) {
         return { ConfigService: tokens.ConfigService }
       if (request.endsWith('auth.service'))
         return { AuthService: tokens.AuthService }
-      if (request.endsWith('config.service'))
-        return { ConfigService: tokens.ConfigService }
       if (request.endsWith('http.service'))
         return { HttpService: tokens.HttpService }
       if (request.endsWith('stale-ui.service'))
@@ -189,7 +186,10 @@ function harness(moduleOverrides = new Map(), globals = {}) {
     location: { origin: 'https://router.test' },
     defaultView: { location: { host: 'server.test', protocol: 'https:' } },
   })
-  dependencies.set(tokens.ConfigService, { gitHash: 'configured-mock-build' })
+  dependencies.set(tokens.ConfigService, {
+    gitHash: 'configured-mock-build',
+    accessType: 'local',
+  })
   dependencies.set(tokens.RELATIVE_URL, '/rpc/v1')
   dependencies.set(tokens.WA_CRYPTO, webcrypto)
   return { dependencies, tokens, load }
@@ -1293,6 +1293,87 @@ test('Brochure serves each registry root through its own client', async () => {
   assert.equal(calls[1].url, 'https://registry.test/base/rpc/v0')
 })
 
+test('StartOS interface rows hide disabled insecure HTTP and keep private GUA access private', () => {
+  const { load } = harness(
+    new Map([
+      ['@taiga-ui/cdk', {}],
+      ['src/app/services/pkg-status-rendering.service', {}],
+      ['src/app/utils/acme', { toAuthorityName: () => '-' }],
+      ['src/app/utils/get-package-data', {}],
+    ]),
+  )
+  const service = new (load(
+    'projects/start-os/web/ui/src/app/routes/portal/components/interfaces/interface.service.ts',
+  ).InterfaceService)()
+  const row = (ssl, hostname, gateway, kind = 'ipv4') => ({
+    ssl,
+    public: false,
+    hostname,
+    port: ssl ? 8443 : 8080,
+    metadata:
+      kind === 'mdns'
+        ? { kind, gateways: [gateway] }
+        : { kind, gateway, ...(kind === 'ipv6' ? { scopeId: 0 } : {}) },
+  })
+  const ssl = row(true, '192.0.2.10', 'eth0')
+  const plain = row(false, '192.0.2.10', 'eth0')
+  const gua = row(false, '2001:db8::10', 'eth0', 'ipv6')
+  const insecureName = row(false, 'server.local', 'eth0', 'mdns')
+  const trustedName = row(false, 'server.local', 'wlan0', 'mdns')
+  const addresses = {
+    enabled: [],
+    disabled: [],
+    lanEnabled: [],
+    guaWan: [],
+    insecure: [plain, gua, insecureName].map(h => [h.hostname, h.port, 'eth0']),
+    insecureEnabled: [],
+    available: [ssl, plain, gua, insecureName, trustedName],
+    effective: [ssl, trustedName],
+  }
+  const host = {
+    bindings: {
+      80: {
+        addresses,
+        options: { addSsl: { preferredExternalPort: 8443 }, secure: null },
+      },
+    },
+    publicDomains: {},
+  }
+  const iface = {
+    addressInfo: {
+      internalPort: 80,
+      hostId: 'main',
+      username: null,
+      scheme: 'http',
+      sslScheme: 'https',
+      suffix: '',
+    },
+    masked: false,
+    type: 'ui',
+  }
+  const gateways = ['eth0', 'wlan0'].map(id => ({ id, name: id }))
+  const groups = () => service.getGatewayGroups(iface, host, gateways)
+  assert.deepEqual(
+    Array.from(groups(), g => g.addresses.length),
+    [1, 1],
+  )
+  addresses.effective.push(plain, gua, insecureName)
+  const enabled = groups()
+  assert.deepEqual(
+    Array.from(enabled, g => g.addresses.length),
+    [4, 1],
+  )
+  assert.equal(
+    enabled[0].addresses.find(a => a.hostnameInfo === gua).gua,
+    false,
+  )
+  addresses.effective = [ssl, trustedName]
+  assert.deepEqual(
+    Array.from(groups(), g => g.addresses.length),
+    [1, 1],
+  )
+})
+
 test('StartOS mock routes preserve registry fixtures, configured build identity, and UPS discovery', async () => {
   const pkg = { categories: [], best: {}, otherVersions: {} }
   const version = { ...pkg, best: { '1.0.0': {} } }
@@ -1524,7 +1605,7 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
   assert.ok(
     config.preview.addresses.available.every(address => address.port === null),
   )
-  assert.equal(config.preview.addresses.selected.length, 0)
+  assert.equal(config.preview.addresses.effective.length, 0)
   for (const [off, hostname] of [
     [{ seeding: false }, '203.0.113.45'],
     [{ downloads: false }, '203.0.113.45'],
@@ -1555,12 +1636,12 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
       publication[0].path,
       `/serverInfo/network/host/bindings/${port}`,
     )
-    assert.ok(publication[0].value.addresses.selected.length > 0)
+    assert.ok(publication[0].value.addresses.effective.length > 0)
     assert.equal(binding().enabled, true)
     assert.equal((await client.rpc.server.bittorrent.config({})).preview, null)
-    assert.ok(binding().addresses.selected.length > 0)
+    assert.ok(binding().addresses.effective.length > 0)
     assert.ok(
-      binding().addresses.selected.every(
+      binding().addresses.effective.every(
         address => address.hostname === hostname,
       ),
     )
@@ -1572,8 +1653,8 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
     })
     assert.equal(binding(), undefined)
     assert.equal(
-      (await client.rpc.server.bittorrent.config({})).preview.addresses.selected
-        .length,
+      (await client.rpc.server.bittorrent.config({})).preview.addresses
+        .effective.length,
       0,
     )
   }
@@ -2309,7 +2390,13 @@ test('Brochure reports malformed registry URLs and can load the next selection',
       .ApiService,
     api,
   )
-  dependencies.set(storage, { getItem: () => null })
+  const stored = new Map()
+  dependencies.set(storage, {
+    getItem: key => stored.get(key) ?? null,
+    setItem: (key, value) => {
+      stored.set(key, value)
+    },
+  })
   dependencies.set(shared.Exver, {})
   dependencies.set(shared.i18nPipe, { transform: value => value })
   dependencies.set(shared.i18nService, { localize: value => value })
@@ -2338,6 +2425,11 @@ test('Brochure reports malformed registry URLs and can load the next selection',
     assert.equal(registries[0].url, 'https://registry.test/')
     assert.equal(registries[0].info.name, info.name)
     assert.equal(registries[0].packages.length, 0)
+    assert.deepEqual(errors, [])
+    assert.deepEqual(JSON.parse(stored.get('_startos/customRegistry')), {
+      url: 'https://registry.test/',
+      name: info.name,
+    })
   } finally {
     subscription.unsubscribe()
     errorSubscription.unsubscribe()
