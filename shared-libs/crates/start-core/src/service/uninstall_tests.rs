@@ -75,6 +75,7 @@ fn host(ports: &mut AvailablePorts, port: u16) -> Host {
             },
         });
     }
+    binding.addresses.effective = binding.addresses.available.clone();
     host.bindings.0.insert(port, binding);
     host
 }
@@ -184,6 +185,7 @@ async fn removing_a_package_prunes_every_chain_in_the_same_database_transaction(
             assert!(binding.proxy_chains[2].chain.is_empty());
             assert!(binding.proxy_chains[2].public_only);
             assert_eq!(binding.addresses.available.len(), 1);
+            assert_eq!(binding.addresses.effective, binding.addresses.available);
             assert_eq!(
                 &*binding.addresses.available.first().unwrap().hostname,
                 "keeper.example"
@@ -235,6 +237,7 @@ async fn removing_a_package_prunes_every_chain_in_the_same_database_transaction(
                 assert!(binding.proxy_chains[0].public_only);
                 assert!(binding.proxy_chains[2].public_only);
                 assert!(binding.addresses.available.is_empty());
+                assert!(binding.addresses.effective.is_empty());
             }
         }
     }

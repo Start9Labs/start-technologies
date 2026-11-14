@@ -37,51 +37,52 @@ const domain = (ssl: boolean): T.HostnameInfo => ({
   public: true,
 })
 
-const host = (available: T.HostnameInfo[]): T.Host => ({
-  bindings: {
-    80: {
-      enabled: true,
-      proxyChains: [],
-      options: {
-        transport: ['tcp', 'udp'],
-        preferredExternalPort: 80,
-        addSsl: null,
-        secure: null,
-        proxy: null,
-      },
-      net: { assignedPort: 8080, assignedSslPort: 443 },
-      addresses: {
-        enabled: [],
-        disabled: [],
-        guaWan: [],
-        lanEnabled: [],
-        available,
-      },
-      interfaces: {
-        ui: {
-          id: 'ui',
-          name: 'UI',
-          description: '',
-          masked: false,
-          type: 'ui',
-          preferredLauncherAddress: null,
-          addressInfo: {
-            username: null,
-            hostId: 'ui-multi',
-            internalPort: 80,
-            scheme: 'http',
-            sslScheme: 'https',
-            suffix: '',
+const host = (available: T.HostnameInfo[]): T.Host =>
+  ({
+    bindings: {
+      80: {
+        enabled: true,
+        proxyChains: [],
+        options: {
+          transport: ['tcp', 'udp'],
+          preferredExternalPort: 80,
+          addSsl: null,
+          secure: null,
+          proxy: null,
+        },
+        net: { assignedPort: 8080, assignedSslPort: 443 },
+        addresses: {
+          enabled: [],
+          disabled: [],
+          guaWan: [],
+          lanEnabled: [],
+          available,
+        },
+        interfaces: {
+          ui: {
+            id: 'ui',
+            name: 'UI',
+            description: '',
+            masked: false,
+            type: 'ui',
+            preferredLauncherAddress: null,
+            addressInfo: {
+              username: null,
+              hostId: 'ui-multi',
+              internalPort: 80,
+              scheme: 'http',
+              sslScheme: 'https',
+              suffix: '',
+            },
           },
         },
       },
     },
-  },
-  bindingRanges: {},
-  publicDomains: {},
-  privateDomains: {},
-  portForwards: [],
-})
+    bindingRanges: {},
+    publicDomains: {},
+    privateDomains: {},
+    portForwards: [],
+  }) as unknown as T.Host
 
 /** The container runtime's `CallbackHolder`: a same-named child replaces its predecessor, and a holder that left context has its callbacks dropped. */
 class Holder {

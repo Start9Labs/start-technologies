@@ -39,7 +39,7 @@ fn remove_package_data(
     for host in all_hosts(db) {
         let host = host?;
         for (_, bind) in host.as_bindings_mut().as_entries_mut()? {
-            bind.as_addresses_mut().as_available_mut().mutate(
+            bind.as_addresses_mut().mutate_available(
                 |available: &mut BTreeSet<HostnameInfo>| {
                     available.retain(|h| {
                         !matches!(

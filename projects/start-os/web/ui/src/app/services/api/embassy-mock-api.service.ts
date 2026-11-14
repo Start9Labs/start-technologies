@@ -1763,7 +1763,7 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
 
       setTimeout(async () => {
-        const patch2: Operation<T.HttpProxyChain[] | T.HostnameInfo[]>[] = [
+        const patch2: Operation<T.HttpProxyChain[] | T.DerivedAddressInfo>[] = [
           {
             op: PatchOp.REMOVE,
             path: `/packageData/${params.id}`,
@@ -1787,6 +1787,14 @@ export class MockApiService extends ApiService implements StartupApiService {
         ]
         for (const [path, host] of hosts) {
           for (const [port, binding] of Object.entries(host.bindings)) {
+            const addresses = {
+              ...binding.addresses,
+              available: binding.addresses.available.filter(
+                address =>
+                  address.metadata.kind !== 'plugin' ||
+                  address.metadata.packageId !== params.id,
+              ),
+            }
             patch2.push(
               {
                 op: PatchOp.REPLACE,
@@ -1800,12 +1808,11 @@ export class MockApiService extends ApiService implements StartupApiService {
               },
               {
                 op: PatchOp.REPLACE,
-                path: `${path}/bindings/${port}/addresses/available`,
-                value: binding.addresses.available.filter(
-                  address =>
-                    address.metadata.kind !== 'plugin' ||
-                    address.metadata.packageId !== params.id,
-                ),
+                path: `${path}/bindings/${port}/addresses`,
+                value: {
+                  ...addresses,
+                  effective: this.getMockEffectiveAddresses(addresses),
+                },
               },
             )
           }
@@ -2910,6 +2917,26 @@ export class MockApiService extends ApiService implements StartupApiService {
         },
       ])
     }
+    this.refreshMockAddresses(basePath, current)
+  }
+
+  private getMockEffectiveAddresses(current: T.DerivedAddressInfo) {
+    const { effective: _, ...legacy } = current
+    return utils.getEnabledAddresses(legacy)
+  }
+
+  private refreshMockAddresses(
+    basePath: string,
+    current: T.DerivedAddressInfo,
+  ): void {
+    current.effective = this.getMockEffectiveAddresses(current)
+    this.mockRevision([
+      {
+        op: PatchOp.ADD,
+        path: `${basePath}/effective`,
+        value: current.effective,
+      },
+    ])
   }
 
   // Mirrors the backend set_gua_wan: update the gua_wan set, carry the row's
@@ -2948,6 +2975,7 @@ export class MockApiService extends ApiService implements StartupApiService {
       { op: PatchOp.ADD, path: `${basePath}/available`, value: available },
     ]
     this.mockRevision(patch)
+    this.refreshMockAddresses(basePath, current)
   }
 
   private mockDnsServers(servers: string[] | null): string[] | null {

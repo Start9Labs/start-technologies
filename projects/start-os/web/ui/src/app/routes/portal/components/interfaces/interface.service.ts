@@ -271,14 +271,16 @@ export class InterfaceService {
         : utils.filterNonLocal(addr.available)
 
     for (const h of available) {
+      const enabled = utils.isAddressEnabled(addr, h)
+      if (utils.isAddressInsecure(addr, h) && !enabled) continue
       const gatewayIds = getGatewayIds(h)
       for (const gid of gatewayIds) {
         const list = groupMap.get(gid)
         if (!list) continue
         list.push({
-          enabled: utils.isAddressEnabled(addr, h),
+          enabled,
           allIpsDisabled: false,
-          gua: isGua(h),
+          gua: isGua(h) && (options.secure !== null || h.ssl),
           type: getAddressType(h),
           transport: utils.addressTransport(options, h),
           access: h.public ? 'public' : 'private',

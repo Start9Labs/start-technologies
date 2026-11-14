@@ -58,7 +58,7 @@ function hostWith(
     addresses: binding,
     interfaces: {},
     proxyChains: [],
-  } as BindInfo
+  } as unknown as BindInfo
   const host = {
     bindings: { 80: bindInfo },
     bindingRanges: {},

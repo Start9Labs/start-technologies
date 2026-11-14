@@ -151,7 +151,7 @@ a plain string or a locale-to-Markdown map. The compiler includes `en_US` in tra
 maps. Current clients receive the complete map and select locally with `LocalizePipe`.
 Existing English-only records deserialize unchanged without a migration.
 
-`os.version.add` replaces the entire `LocaleString`; promotion preserves it unchanged.
+`os.version.add` and an explicit `os.version.edit` release-notes value replace the entire `LocaleString`; promotion preserves it unchanged. `os.version.edit` requires an existing version and changes only supplied metadata fields, preserving assets and authorized signers. Its optional `expectedGitHash` check and metadata changes share one database mutation.
 The second positional CLI argument accepts prose or a JSON locale map. Publishers
 require the `<RELEASE_NOTES_OR_JSON>` help marker and reject CLIs requiring `<HEADLINE>`
 before writes.

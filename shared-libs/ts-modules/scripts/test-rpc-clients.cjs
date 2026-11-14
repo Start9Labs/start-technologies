@@ -66,7 +66,6 @@ function harness(moduleOverrides = new Map(), globals = {}) {
   dependencies.set(tokens.ServerIdentityService, {
     openObserver: { next() {} },
   })
-  dependencies.set(tokens.ConfigService, { gitHash: 'fixture-running-build' })
   dependencies.set(tokens.StaleUiService, { checkHash() {} })
   dependencies.set(tokens.i18nPipe, { transform: value => value })
 
@@ -141,8 +140,6 @@ function harness(moduleOverrides = new Map(), globals = {}) {
         return { ConfigService: tokens.ConfigService }
       if (request.endsWith('auth.service'))
         return { AuthService: tokens.AuthService }
-      if (request.endsWith('config.service'))
-        return { ConfigService: tokens.ConfigService }
       if (request.endsWith('http.service'))
         return { HttpService: tokens.HttpService }
       if (request.endsWith('stale-ui.service'))
@@ -189,7 +186,10 @@ function harness(moduleOverrides = new Map(), globals = {}) {
     location: { origin: 'https://router.test' },
     defaultView: { location: { host: 'server.test', protocol: 'https:' } },
   })
-  dependencies.set(tokens.ConfigService, { gitHash: 'configured-mock-build' })
+  dependencies.set(tokens.ConfigService, {
+    gitHash: 'configured-mock-build',
+    accessType: 'local',
+  })
   dependencies.set(tokens.RELATIVE_URL, '/rpc/v1')
   dependencies.set(tokens.WA_CRYPTO, webcrypto)
   return { dependencies, tokens, load }
@@ -1293,6 +1293,88 @@ test('Brochure serves each registry root through its own client', async () => {
   assert.equal(calls[1].url, 'https://registry.test/base/rpc/v0')
 })
 
+test('StartOS interface rows hide disabled insecure HTTP and keep private GUA access private', () => {
+  const { load } = harness(
+    new Map([
+      ['@taiga-ui/cdk', {}],
+      ['src/app/services/pkg-status-rendering.service', {}],
+      ['src/app/utils/acme', { toAuthorityName: () => '-' }],
+      ['src/app/utils/get-package-data', {}],
+    ]),
+  )
+  const service = new (load(
+    'projects/start-os/web/ui/src/app/routes/portal/components/interfaces/interface.service.ts',
+  ).InterfaceService)()
+  const row = (ssl, hostname, gateway, kind = 'ipv4') => ({
+    ssl,
+    public: false,
+    hostname,
+    port: ssl ? 8443 : 8080,
+    metadata:
+      kind === 'mdns'
+        ? { kind, gateways: [gateway] }
+        : { kind, gateway, ...(kind === 'ipv6' ? { scopeId: 0 } : {}) },
+  })
+  const ssl = row(true, '192.0.2.10', 'eth0')
+  const plain = row(false, '192.0.2.10', 'eth0')
+  const gua = row(false, '2001:db8::10', 'eth0', 'ipv6')
+  const insecureName = row(false, 'server.local', 'eth0', 'mdns')
+  const trustedName = row(false, 'server.local', 'wlan0', 'mdns')
+  const addresses = {
+    enabled: [],
+    disabled: [],
+    lanEnabled: [],
+    guaWan: [],
+    insecure: [plain, gua, insecureName].map(h => [h.hostname, h.port, 'eth0']),
+    insecureEnabled: [],
+    available: [ssl, plain, gua, insecureName, trustedName],
+    effective: [ssl, trustedName],
+  }
+  const host = {
+    bindings: {
+      80: {
+        addresses,
+        proxyChains: [],
+        options: { addSsl: { preferredExternalPort: 8443 }, secure: null },
+      },
+    },
+    publicDomains: {},
+  }
+  const iface = {
+    addressInfo: {
+      internalPort: 80,
+      hostId: 'main',
+      username: null,
+      scheme: 'http',
+      sslScheme: 'https',
+      suffix: '',
+    },
+    masked: false,
+    type: 'ui',
+  }
+  const gateways = ['eth0', 'wlan0'].map(id => ({ id, name: id }))
+  const groups = () => service.getGatewayGroups(iface, host, gateways)
+  assert.deepEqual(
+    Array.from(groups(), g => g.addresses.length),
+    [1, 1],
+  )
+  addresses.effective.push(plain, gua, insecureName)
+  const enabled = groups()
+  assert.deepEqual(
+    Array.from(enabled, g => g.addresses.length),
+    [4, 1],
+  )
+  assert.equal(
+    enabled[0].addresses.find(a => a.hostnameInfo === gua).gua,
+    false,
+  )
+  addresses.effective = [ssl, trustedName]
+  assert.deepEqual(
+    Array.from(groups(), g => g.addresses.length),
+    [1, 1],
+  )
+})
+
 test('StartOS mock routes preserve registry fixtures, configured build identity, and UPS discovery', async () => {
   const pkg = { categories: [], best: {}, otherVersions: {} }
   const version = { ...pkg, best: { '1.0.0': {} } }
@@ -1350,6 +1432,105 @@ test('StartOS mock routes preserve registry fixtures, configured build identity,
       targetVersion: '=1.0.0',
     }),
     version,
+  )
+})
+
+test('StartOS mock uninstall retires stages and effective plugin addresses in one revision', async () => {
+  const address = packageId => ({
+    hostname: `${packageId}.test`,
+    port: 443,
+    ssl: true,
+    public: false,
+    metadata: {
+      kind: 'plugin',
+      packageId,
+      removeAction: null,
+      overflowActions: [],
+      info: null,
+    },
+  })
+  const available = [address('waf'), address('keeper')]
+  const host = () => ({
+    bindings: {
+      80: {
+        proxyChains: [
+          {
+            gateway: { kind: 'network', gatewayId: 'eth0' },
+            publicOnly: true,
+            chain: ['waf', 'keeper'].map(packageId => ({
+              packageId,
+              profileId: 'default',
+            })),
+          },
+        ],
+        addresses: {
+          available,
+          effective: available,
+          enabled: [],
+          disabled: [],
+          guaWan: [],
+          lanEnabled: [],
+          insecure: [],
+          insecureEnabled: [],
+        },
+      },
+    },
+  })
+  const data = {
+    serverInfo: { network: { host: host() } },
+    packageData: { waf: { hosts: {} }, app: { hosts: { ui: host() } } },
+  }
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['src/app/utils/acme', {}],
+      ['./api.fixures', { Mock: {} }],
+      ['./mock-patch', mockPatchFixture(data)],
+      ['./md-sample.md', ''],
+    ]),
+    { setTimeout: callback => queueMicrotask(callback) },
+  )
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
+  dependencies.set(tokens.AuthService, { isVerified$: of(true) })
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+  ).MockApiService)()
+  const revisions = []
+  const subscription = client.mockWsSource$.subscribe(r => revisions.push(r))
+  await client.rpc.package.uninstall({ id: 'waf' })
+  subscription.unsubscribe()
+  const cleanup = revisions.find(r =>
+    r.patch.some(p => p.op === 'remove' && p.path === '/packageData/waf'),
+  )
+  assert.ok(cleanup)
+  assert.equal(cleanup.patch.length, 5)
+  for (const path of [
+    '/serverInfo/network/host',
+    '/packageData/app/hosts/ui',
+  ]) {
+    const chains = cleanup.patch.find(
+      p => p.path === `${path}/bindings/80/proxyChains`,
+    ).value
+    assert.equal(chains[0].publicOnly, true)
+    assert.deepEqual(
+      Array.from(chains[0].chain, s => s.packageId),
+      ['keeper'],
+    )
+    const addresses = cleanup.patch.find(
+      p => p.path === `${path}/bindings/80/addresses`,
+    ).value
+    assert.deepEqual(
+      Array.from(addresses.available, a => a.hostname),
+      ['keeper.test'],
+    )
+    assert.deepEqual(
+      Array.from(addresses.effective, a => a.hostname),
+      ['keeper.test'],
+    )
+  }
+  assert.equal(
+    data.serverInfo.network.host.bindings[80].addresses.effective.length,
+    2,
   )
 })
 
