@@ -48,10 +48,15 @@ const hooks = {
   ],
 }
 
+/** Data-volume activation and desktop initialization follow password admission. */
 const excluded = new Set([
   'keymap',
   'resume',
   'fuse',
+  'kms',
+  'live',
+  'lvm2',
+  'thin-provisioning-tools',
   'cryptgnupg',
   'cryptgnupg-sc',
   'cryptkeyctl',
@@ -158,7 +163,7 @@ function reviewedHook(name, bytes) {
 /**
  * Copies admitted native hooks into a fresh private directory; source providers remain unchanged.
  * The caller keeps source helpers/configuration and candidate files stable through generation.
- * Unknown hooks reject; credential/resume/keymap/FUSE hooks do not enter the FDE profile.
+ * Unknown hooks reject; non-bootstrap storage, live-media and graphics hooks stay outside this profile.
  * Hooks execute in their admitted source namespace; ordering/firmware/archives remain native.
  * BusyBox/klibc command aliases are symlinks; regular providers retain their source paths.
  * Invoke returned provider admission and metadata queries in that same admitted source namespace.
