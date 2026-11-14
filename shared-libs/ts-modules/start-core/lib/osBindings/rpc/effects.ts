@@ -3,6 +3,8 @@ import type * as schemas from './effects.schemas'
 export type RpcHandler = {
   _PARAMS: unknown
   _RETURN?: unknown
+  _ITEM?: unknown
+  _FINAL?: unknown
   _CHILDREN?: { [name: string]: RpcHandler }
 }
 
@@ -20,47 +22,71 @@ export type RpcMethod<Root extends RpcHandler> =
         }[keyof Children & string]
       : never)
 
-export type RpcParamType<
+export type RpcEndpointType<
   Root extends RpcHandler,
   Method extends string,
 > = Method extends ''
   ? Root extends { _RETURN: unknown }
-    ? Root['_PARAMS']
+    ? Root
     : never
   : Root extends { _CHILDREN: infer Children }
     ? Method extends `${infer Head}.${infer Tail}`
       ? Head extends keyof Children
         ? Children[Head] extends RpcHandler
-          ? RpcParamType<Children[Head], Tail>
+          ? RpcEndpointType<Children[Head], Tail>
           : never
         : never
       : Method extends keyof Children
         ? Children[Method] extends RpcHandler
-          ? RpcParamType<Children[Method], ''>
+          ? RpcEndpointType<Children[Method], ''>
           : never
         : never
     : never
 
+export type RpcEndpointField<
+  Endpoint,
+  Field extends PropertyKey,
+> = Endpoint extends { _RETURN: unknown }
+  ? Field extends keyof Endpoint
+    ? Endpoint[Field]
+    : unknown
+  : never
+
+export type RpcParamType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_PARAMS'>
+
 export type RpcReturnType<
   Root extends RpcHandler,
   Method extends string,
-> = Method extends ''
-  ? Root extends { _RETURN: infer Return }
-    ? Return
-    : never
-  : Root extends { _CHILDREN: infer Children }
-    ? Method extends `${infer Head}.${infer Tail}`
-      ? Head extends keyof Children
-        ? Children[Head] extends RpcHandler
-          ? RpcReturnType<Children[Head], Tail>
-          : never
-        : never
-      : Method extends keyof Children
-        ? Children[Method] extends RpcHandler
-          ? RpcReturnType<Children[Method], ''>
-          : never
-        : never
-    : never
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_RETURN'>
+
+export type RpcStreamItemType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_ITEM'>
+
+export type RpcStreamFinalType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_FINAL'>
+
+export type RpcIsStreaming<Root extends RpcHandler, Method extends string> = [
+  RpcEndpointType<Root, Method>,
+] extends [never]
+  ? never
+  : unknown extends RpcStreamItemType<Root, Method>
+    ? boolean
+    : [RpcStreamItemType<Root, Method>] extends [never]
+      ? false
+      : true
+
+export type RpcStreamingMethod<Root extends RpcHandler> = {
+  [Method in RpcMethod<Root>]: RpcIsStreaming<Root, Method> extends false
+    ? never
+    : Method
+}[RpcMethod<Root>]
 
 export type RpcSchemaTree<Schema> = {
   [Key in keyof Schema as Key extends '_OPAQUE'
@@ -69,7 +95,7 @@ export type RpcSchemaTree<Schema> = {
     ? Schema[Key] extends z.ZodType
       ? z.input<Schema[Key]>
       : never
-    : Key extends '_RETURN'
+    : Key extends '_RETURN' | '_ITEM' | '_FINAL'
       ? Schema[Key] extends z.ZodType
         ? z.output<Schema[Key]>
         : never
@@ -146,6 +172,22 @@ export type SetDataVersionParamsInput = z.input<
 >
 export type SetMainStatusStatusInput = z.input<
   typeof schemas.SetMainStatusStatus
+>
+export type SharedVolumeAvailability = z.output<
+  typeof schemas.SharedVolumeAvailability
+>
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export type SharedVolumeId = z.output<typeof schemas.SharedVolumeId>
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export type SharedVolumeIdInput = z.input<typeof schemas.SharedVolumeId>
+export type SharedVolumeUnavailableReason = z.output<
+  typeof schemas.SharedVolumeUnavailableReason
 >
 export type SmtpSecurity = z.output<typeof schemas.SmtpSecurity>
 export type StartStop = z.output<typeof schemas.StartStop>
@@ -256,6 +298,9 @@ export type GetServiceManifestParamsInput = z.input<
 export type GetServicePortForwardParamsInput = z.input<
   typeof schemas.GetServicePortForwardParams
 >
+export type GetSharedVolumesParamsInput = z.input<
+  typeof schemas.GetSharedVolumesParams
+>
 export type GetSslCertificateParamsInput = z.input<
   typeof schemas.GetSslCertificateParams
 >
@@ -264,6 +309,7 @@ export type GetStatusParamsInput = z.input<typeof schemas.GetStatusParams>
 export type GetSystemSmtpParamsInput = z.input<
   typeof schemas.GetSystemSmtpParams
 >
+export type GrantedSharedVolume = z.output<typeof schemas.GrantedSharedVolume>
 export type HardwareRequirements = z.output<typeof schemas.HardwareRequirements>
 export type HostnameMetadata = z.output<typeof schemas.HostnameMetadata>
 export type ImageSource = z.output<typeof schemas.ImageSource>
@@ -273,6 +319,9 @@ export type ListServiceInterfacesParamsInput = z.input<
   typeof schemas.ListServiceInterfacesParams
 >
 export type Metadata = z.output<typeof schemas.Metadata>
+export type MountSharedVolumeParamsInput = z.input<
+  typeof schemas.MountSharedVolumeParams
+>
 export type MountTargetInput = z.input<typeof schemas.MountTarget>
 export type PluginHostnameInfoInput = z.input<typeof schemas.PluginHostnameInfo>
 export type PortForward = z.output<typeof schemas.PortForward>
@@ -338,6 +387,9 @@ export type RetireBindingParamsInput = z.input<
 >
 export type RetireHostParamsInput = z.input<typeof schemas.RetireHostParams>
 export type SetMainStatusInput = z.input<typeof schemas.SetMainStatus>
+export type SharedVolumeMountResult = z.output<
+  typeof schemas.SharedVolumeMountResult
+>
 export type SmtpValue = z.output<typeof schemas.SmtpValue>
 export type TaskInput = z.output<typeof schemas.TaskInput>
 export type TaskInputInput = z.input<typeof schemas.TaskInput>

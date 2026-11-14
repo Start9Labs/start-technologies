@@ -1,0 +1,236 @@
+import {
+  Component,
+  computed,
+  input,
+  linkedSignal,
+  signal,
+  Signal,
+} from '@angular/core'
+import { FormsModule } from '@angular/forms'
+import { ConvertBytesPipe, i18nPipe } from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
+import { TuiIcon, TuiInput } from '@taiga-ui/core'
+import { TuiPassword, TuiTextarea, TuiTooltip } from '@taiga-ui/kit'
+
+import { ApiClient } from 'src/app/services/api/api.types'
+import { VOLUME_STATUSES, VOLUME_TYPES, volumeName } from './types'
+
+export type SourceEntry = Pick<
+  T.SharedVolume,
+  'name' | 'source' | 'availability' | 'available' | 'error'
+>
+export type SourceClient = Pick<ApiClient['volumes'], 'rename' | 'updateCifs'>
+
+export function sourceEdit(entry: Signal<SourceEntry | undefined>) {
+  const cifs = computed(() => {
+    const source = entry()?.source
+    return source?.kind === 'cifs' ? source : null
+  })
+  const storedName = computed((value = entry()) =>
+    value ? volumeName(value) : '',
+  )
+  const name = linkedSignal(storedName)
+  const hostname = linkedSignal(() => cifs()?.hostname ?? '')
+  const path = linkedSignal(() => cifs()?.path ?? '')
+  const username = linkedSignal(() => cifs()?.username ?? '')
+  const password = signal('')
+  const newName = computed(() => (cifs() ? hostname().trim() : name().trim()))
+  const renamed = computed(() => newName() !== storedName())
+  const cifsChanged = computed(
+    () =>
+      !!cifs() &&
+      (hostname().trim() !== cifs()?.hostname ||
+        path().trim() !== cifs()?.path ||
+        username().trim() !== (cifs()?.username ?? '') ||
+        !!password()),
+  )
+
+  return {
+    entry,
+    name,
+    hostname,
+    path,
+    username,
+    password,
+    changed: computed(() => renamed() || cifsChanged()),
+    invalid: computed(() => !newName() || (!!cifs() && !path().trim())),
+    async save(id: string, client: SourceClient) {
+      if (renamed()) await client.rename({ id, name: newName() })
+      if (cifsChanged())
+        await client.updateCifs({
+          id,
+          hostname: hostname().trim(),
+          path: path().trim(),
+          username: username().trim(),
+          password: password() || undefined,
+        })
+    },
+  }
+}
+
+export type SourceEdit = ReturnType<typeof sourceEdit>
+
+@Component({
+  selector: 'source-fields',
+  template: `
+    @let state = edit();
+    @if (state.entry(); as entry) {
+      @if (entry.source.kind !== 'cifs') {
+        <tui-textfield>
+          <label tuiLabel>{{ 'Name' | i18n }}</label>
+          <input
+            tuiInput
+            [ngModel]="state.name()"
+            (ngModelChange)="state.name.set($event)"
+          />
+        </tui-textfield>
+      }
+      <tui-textfield [iconStart]="types[entry.source.kind].icon">
+        <label tuiLabel>{{ 'Type' | i18n }}</label>
+        <input
+          tuiInput
+          [readonly]="true"
+          [ngModel]="types[entry.source.kind].label | i18n"
+        />
+      </tui-textfield>
+      @switch (entry.source.kind) {
+        @case ('disk') {
+          @let drive = entry.source.drive;
+          @let unknown = 'Unknown' | i18n;
+          <tui-textfield>
+            <label tuiLabel>{{ 'Model' | i18n }}</label>
+            <input
+              tuiInput
+              [readonly]="true"
+              [ngModel]="
+                [drive?.vendor, drive?.model].join(' ').trim() || unknown
+              "
+            />
+          </tui-textfield>
+          <tui-textfield>
+            <label tuiLabel>{{ 'Drive label' | i18n }}</label>
+            <input
+              tuiInput
+              [readonly]="true"
+              [ngModel]="drive?.label || unknown"
+            />
+          </tui-textfield>
+          <tui-textfield>
+            <label tuiLabel>{{ 'Capacity' | i18n }}</label>
+            <input
+              tuiInput
+              [readonly]="true"
+              [ngModel]="drive ? (drive.capacity | convertBytes) : unknown"
+            />
+          </tui-textfield>
+          <tui-textfield>
+            <label tuiLabel>{{ 'Path' | i18n }}</label>
+            <input
+              tuiInput
+              [readonly]="true"
+              [ngModel]="'/' + entry.source.path"
+            />
+          </tui-textfield>
+        }
+        @case ('cifs') {
+          <tui-textfield>
+            <label tuiLabel>{{ 'Hostname' | i18n }}</label>
+            <input
+              tuiInput
+              autocapitalize="off"
+              [ngModel]="state.hostname()"
+              (ngModelChange)="state.hostname.set($event)"
+            />
+          </tui-textfield>
+          <tui-textfield>
+            <label tuiLabel>{{ 'Path' | i18n }}</label>
+            <input
+              tuiInput
+              autocapitalize="off"
+              [ngModel]="state.path()"
+              (ngModelChange)="state.path.set($event)"
+            />
+          </tui-textfield>
+          <tui-textfield>
+            <label tuiLabel>{{ 'Username' | i18n }}</label>
+            <input
+              tuiInput
+              autocomplete="off"
+              autocapitalize="off"
+              [ngModel]="state.username()"
+              (ngModelChange)="state.username.set($event)"
+            />
+          </tui-textfield>
+          <tui-textfield>
+            <label tuiLabel>{{ 'Password' | i18n }}</label>
+            <input
+              tuiInput
+              type="password"
+              autocomplete="new-password"
+              [ngModel]="state.password()"
+              (ngModelChange)="state.password.set($event)"
+            />
+            <tui-icon tuiPassword />
+            <tui-icon
+              [tuiTooltip]="'Leave blank to keep the current value.' | i18n"
+            />
+          </tui-textfield>
+        }
+      }
+      <tui-textfield>
+        <label tuiLabel>{{ 'Status' | i18n }}</label>
+        <input
+          tuiInput
+          [readonly]="true"
+          [class.g-positive]="entry.availability === 'available'"
+          [class.g-negative]="entry.availability === 'unavailable'"
+          [ngModel]="statuses[entry.availability] | i18n"
+        />
+      </tui-textfield>
+      @if (entry.error; as error) {
+        <tui-textfield>
+          <label tuiLabel>{{ 'Error' | i18n }}</label>
+          <textarea
+            tuiTextarea
+            class="g-negative"
+            [readonly]="true"
+            [min]="1"
+            [max]="6"
+            [ngModel]="error"
+          ></textarea>
+        </tui-textfield>
+      }
+      @if (entry.available !== null) {
+        <tui-textfield>
+          <label tuiLabel>{{ 'Free' | i18n }}</label>
+          <input
+            tuiInput
+            [readonly]="true"
+            [ngModel]="entry.available | convertBytes"
+          />
+        </tui-textfield>
+      }
+    }
+  `,
+  styles: `
+    :host {
+      display: contents;
+    }
+  `,
+  imports: [
+    ConvertBytesPipe,
+    FormsModule,
+    TuiIcon,
+    TuiInput,
+    TuiPassword,
+    TuiTextarea,
+    TuiTooltip,
+    i18nPipe,
+  ],
+})
+export class SourceFields {
+  protected readonly types = VOLUME_TYPES
+  protected readonly statuses = VOLUME_STATUSES
+
+  public readonly edit = input.required<SourceEdit>()
+}

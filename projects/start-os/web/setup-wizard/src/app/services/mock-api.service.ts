@@ -1,14 +1,21 @@
 import { Injectable } from '@angular/core'
-import { DiskInfo, pauseFor, StartOSDiskInfo } from '@start9labs/shared'
+import {
+  DiskInfo,
+  pauseFor,
+  StartOSDiskInfo,
+  withAbortSignal,
+} from '@start9labs/shared'
 import {
   createRpcClient,
+  createRpcStreamClient,
+  RpcStreamOptions,
   RpcHandlers,
   T,
   tableTransport,
 } from '@start9labs/start-core'
-import { interval, map, Observable } from 'rxjs'
+import { from, Observable } from 'rxjs'
 import { InstallOsParams, InstallOsRes } from '../types'
-import { Api, ApiClient, ApiService, Params } from './api.service'
+import { Api, ApiClient, ApiService, Params, Result } from './api.service'
 
 @Injectable({
   providedIn: 'root',
@@ -56,30 +63,7 @@ export class MockApiService extends ApiService {
         },
       }
     },
-    'setup.status': async () => {
-      await pauseFor(500)
-
-      this.statusIndex++
-
-      if (this.statusIndex === 1) {
-        return { status: 'needs-install' }
-      }
-
-      if (this.statusIndex > 3) {
-        return {
-          status: 'complete',
-          hostname: 'server-name',
-          rootCa: ROOT_CA,
-          needsRestart: this.installCompleted,
-        }
-      }
-
-      return {
-        status: 'running',
-        progress: PROGRESS,
-        guid: 'progress-guid',
-      }
-    },
+    'setup.status': () => this.setupStatus(),
     'setup.get-pubkey': async () => {
       await pauseFor(300)
       return {
@@ -144,13 +128,7 @@ export class MockApiService extends ApiService {
         guid: 'progress-guid',
       }
     },
-    'setup.logs.follow': async () => {
-      await pauseFor(500)
-      return {
-        startCursor: 'fakestartcursor',
-        guid: 'logs-guid',
-      }
-    },
+    'setup.logs.follow': () => this.logFollow(),
     'setup.complete': async () => {
       await pauseFor(500)
       return {
@@ -173,27 +151,102 @@ export class MockApiService extends ApiService {
     },
   }
   readonly rpc = createRpcClient<ApiClient>(tableTransport<Api>(this.handlers))
+  readonly streams: ApiService['streams'] = createRpcStreamClient<
+    ApiService['streams']
+  >({
+    stream: async (method, _, options) => {
+      switch (method) {
+        case 'setup.status':
+          return this.setupStatusStream(options)
+        case 'setup.logs.follow':
+          return this.logFollowStream(options)
+        default:
+          throw new Error(`No mock stream for ${method}`)
+      }
+    },
+  })
+
+  private async logFollow(signal?: AbortSignal) {
+    await pauseFor(500, signal)
+    return { startCursor: 'fakestartcursor', guid: 'logs-guid' }
+  }
+
+  private async logFollowStream(options?: RpcStreamOptions) {
+    const initial = await this.logFollow(options?.signal)
+    options?.signal?.throwIfAborted()
+    return {
+      initial: { ...initial, guid: null },
+      items: this.logEntries(options?.signal),
+    }
+  }
+
+  private async *logEntries(
+    signal?: AbortSignal,
+  ): AsyncGenerator<T.LogEntry, null> {
+    while (true) {
+      await pauseFor(500, signal)
+      yield {
+        timestamp: new Date().toISOString(),
+        message: 'fake log entry',
+        bootId: 'boot-id',
+      }
+    }
+  }
+
+  private async setupStatus(
+    signal?: AbortSignal,
+  ): Promise<Result<'setup.status'>> {
+    await pauseFor(500, signal)
+    this.statusIndex++
+    if (this.statusIndex === 1) return { status: 'needs-install' }
+    if (this.statusIndex > 3) {
+      return {
+        status: 'complete',
+        hostname: 'server-name',
+        rootCa: ROOT_CA,
+        needsRestart: this.installCompleted,
+      }
+    }
+    return { status: 'running', progress: PROGRESS, guid: 'progress-guid' }
+  }
+
+  private async setupStatusStream(options?: RpcStreamOptions) {
+    const initial = await this.setupStatus(options?.signal)
+    options?.signal?.throwIfAborted()
+    return {
+      initial:
+        initial.status === 'running' ? { ...initial, guid: null } : initial,
+      items:
+        initial.status === 'running'
+          ? this.setupProgress(options?.signal)
+          : (async function* () {
+              return null
+            })(),
+    }
+  }
+
+  private async *setupProgress(
+    signal?: AbortSignal,
+  ): AsyncGenerator<T.FullProgress, null> {
+    await pauseFor(1000, signal)
+    yield {
+      overall: true,
+      phases: [
+        { name: 'Preparing Data', progress: true },
+        { name: 'Transferring Data', progress: true },
+        { name: 'Finalizing Setup', progress: true },
+      ],
+    }
+    signal?.throwIfAborted()
+    this.statusIndex = 4
+    return null
+  }
 
   openWebsocket$<T>(guid: string): Observable<T> {
     if (guid === 'logs-guid') {
-      return interval(500).pipe(
-        map(() => ({
-          timestamp: new Date().toISOString(),
-          message: 'fake log entry',
-          bootId: 'boot-id',
-        })),
-      ) as Observable<T>
+      return withAbortSignal(signal => this.logEntries(signal)) as Observable<T>
     } else if (guid === 'progress-guid') {
-      return interval(1000).pipe(
-        map(() => ({
-          overall: true,
-          phases: [
-            { name: 'Preparing Data', progress: true },
-            { name: 'Transferring Data', progress: true },
-            { name: 'Finalizing Setup', progress: true },
-          ],
-        })),
-      ) as Observable<T>
+      return from(this.setupProgress()) as Observable<T>
     } else {
       throw new Error('invalid guid type')
     }

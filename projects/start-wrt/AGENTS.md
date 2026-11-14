@@ -50,15 +50,18 @@ have tested and stop.
 - **Serial console** — `/dev/wrt-console` on this machine: boot output, panics, and hangs, and
   a root shell once `bench.sh console login` answers its `login` prompt. It is the recovery
   path whenever SSH is gone.
-- **Web UI and RPC** — `bench.sh ui rpc <method>` signs each call with a key it enrolled through
-  the daemon's login, exactly as the web UI does, against the router's LAN address. `bench.sh ui tunnel`
+- **Web UI and RPC** — `bench.sh ui rpc <method>` exercises legacy signed HTTP with a key
+  enrolled through the daemon's login. It sends the request through SSH for local execution
+  against the router's LAN address. `bench.sh ui tunnel`
   puts the UI at `https://127.0.0.1:8443/` for a headless browser. Both work whatever Remote
   Access is set to.
 
 [`bench/bench.sh`](bench/bench.sh) drives all of it; `bench.sh --help` lists the commands.
 Run `bash projects/start-wrt/bench/bench.test.sh` from the repo root for the harness's
 host-mocked regression tests; they need Bash, Node.js, and the root npm dependencies, not a
-physical bench, and `bench.sh ui` needs the same dependencies.
+physical bench. Build the shared SDK core first with
+`make -C shared-libs/ts-modules/start-core dist`; the tests and `bench.sh ui` use its
+CommonJS `auth.signRequest` for HTTP compatibility signing.
 Its state — the console log, config snapshots, and the UI signing key — lives in
 `~/.local/state/startwrt-bench/`, outside the repo. A snapshot is a `sysupgrade` backup:
 it holds the router's password hash and private keys, so it never leaves that directory.
@@ -172,8 +175,16 @@ as what its upstream router offers.
      IdentitiesOnly yes
    ```
 
-   Then run `bench.sh mgmt install`, which reaches the router on port 22 while Remote Access
-   is on and adds the management port. Run it again after a fresh reflash, or when this
+   Then set Remote Access to When behind NAT. A fresh router defaults to Never and this
+   machine reaches only its WAN side, so set it in the UI from a LAN device or over the
+   console:
+
+   ```
+   bench.sh console run 'uci set startwrt.preferences.remote_access=behind-nat && uci commit startwrt && startwrt-cli system apply-remote-access'
+   ```
+
+   Then run `bench.sh mgmt install`, which reaches the router on port 22 and adds the
+   management port. Repeat both after a fresh reflash, and `mgmt install` alone when this
    machine's address changes.
 
 3. **Console access**, scoped to one adapter rather than the `dialout` group. Read the
@@ -320,8 +331,10 @@ uci set startwrt.system.registry=<beta url>; uci commit startwrt`) — now soak 
    ./scripts/manage-release.sh release start-wrt
    ```
 
-   This runs pre-check → pull the images from the beta registry (signature-verified) → tag →
-   create the GitHub release → promote beta → production → sign. See `manage-release.sh --help`
+   This runs pre-check → pull the images from the beta registry (signature-verified) → draft the
+   GitHub release with the picked, edited, and translated notes (needs the `claude` CLI unless
+   `NO_TRANSLATE=1`) → tag → publish the GitHub release → set those notes and promote beta →
+   production → sign. See `manage-release.sh --help`
    for the individual subcommands (`pull-gha`, `register`, `index`, `sign`, `cosign`, …) and env
    vars (`STARTWRT_SOURCE_REGISTRY`, `STARTWRT_TARGET_REGISTRY`, `STARTWRT_COMPAT_FLOOR`,
    `FORCE=1` to re-run an idempotent release).

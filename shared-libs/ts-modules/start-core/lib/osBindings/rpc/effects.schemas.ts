@@ -399,6 +399,27 @@ export const SetMainStatusStatus: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['running', 'stopped']).meta({
   id: 'SetMainStatusStatus',
 })
+export const SharedVolumeAvailability: z.ZodEnum<{
+  unknown: 'unknown'
+  available: 'available'
+  unavailable: 'unavailable'
+}> = /* @__PURE__ */ z.enum(['unknown', 'available', 'unavailable']).meta({
+  id: 'SharedVolumeAvailability',
+})
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export const SharedVolumeId: z.ZodString = /* @__PURE__ */ z.string().meta({
+  id: 'SharedVolumeId',
+  description: 'A 32-character uppercase base32 volume identity.',
+})
+export const SharedVolumeUnavailableReason: z.ZodEnum<{
+  sourceUnavailable: 'sourceUnavailable'
+  timeout: 'timeout'
+}> = /* @__PURE__ */ z.enum(['sourceUnavailable', 'timeout']).meta({
+  id: 'SharedVolumeUnavailableReason',
+})
 export const SmtpSecurity: z.ZodEnum<{ starttls: 'starttls'; tls: 'tls' }> =
   /* @__PURE__ */ z.enum(['starttls', 'tls']).meta({
     id: 'SmtpSecurity',
@@ -556,10 +577,7 @@ export const ActionMetadata: z.ZodObject<{
     typeof ActionVisibility
   >
   /**
-   * One of: "only-stopped", "only-running", "all"
-   *   - "only-stopped" - the action can only be run when the service is stopped
-   *   - "only-running" - the action can only be run when the service is running
-   *   - "any" - the action can only be run regardless of the service's status
+   * Service run states that permit this action.
    */
   allowedStatuses: typeof AllowedStatuses
   hasInput: z.ZodBoolean
@@ -612,14 +630,10 @@ export const ActionMetadata: z.ZodObject<{
       'One of: "enabled", "hidden", or { disabled: "" }\n  - "enabled" - the action is available be run\n  - "hidden" - the action cannot be seen or run\n  - { disabled: "example explanation" } means the action is visible but cannot be run. Replace "example explanation" with a reason why the action is disable to prevent user confusion.',
   }),
   /**
-   * One of: "only-stopped", "only-running", "all"
-   *   - "only-stopped" - the action can only be run when the service is stopped
-   *   - "only-running" - the action can only be run when the service is running
-   *   - "any" - the action can only be run regardless of the service's status
+   * Service run states that permit this action.
    */
   allowedStatuses: AllowedStatuses.meta({
-    description:
-      'One of: "only-stopped", "only-running", "all"\n  - "only-stopped" - the action can only be run when the service is stopped\n  - "only-running" - the action can only be run when the service is running\n  - "any" - the action can only be run regardless of the service\'s status',
+    description: 'Service run states that permit this action.',
   }),
   hasInput: z.boolean(),
   /**
@@ -1277,6 +1291,16 @@ export const GetServicePortForwardParams: z.ZodObject<{
 }).meta({
   id: 'GetServicePortForwardParams',
 })
+export const GetSharedVolumesParams: z.ZodObject<{
+  callback: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof CallbackId>>,
+    z.ZodNullable<typeof CallbackId>
+  >
+}> = /* @__PURE__ */ object({
+  callback: wire(CallbackId.nullable().optional(), CallbackId.nullable()),
+}).meta({
+  id: 'GetSharedVolumesParams',
+})
 export const GetSslCertificateParams: z.ZodObject<{
   hostnames: z.ZodArray<z.ZodString>
   algorithm: z.ZodCodec<
@@ -1330,6 +1354,19 @@ export const GetSystemSmtpParams: z.ZodObject<{
   callback: wire(CallbackId.nullable().optional(), CallbackId.nullable()),
 }).meta({
   id: 'GetSystemSmtpParams',
+})
+export const GrantedSharedVolume: z.ZodObject<{
+  id: typeof SharedVolumeId
+  name: z.ZodString
+  readonly: z.ZodBoolean
+  availability: typeof SharedVolumeAvailability
+}> = /* @__PURE__ */ object({
+  id: SharedVolumeId,
+  name: z.string(),
+  readonly: z.boolean(),
+  availability: SharedVolumeAvailability,
+}).meta({
+  id: 'GrantedSharedVolume',
 })
 export const HardwareRequirements: z.ZodObject<{
   device: z.ZodCodec<
@@ -1528,6 +1565,24 @@ export const Metadata: z.ZodObject<{
   icon: typeof PathOrUrl
 }> = /* @__PURE__ */ object({ title: LocaleString, icon: PathOrUrl }).meta({
   id: 'Metadata',
+})
+export const MountSharedVolumeParams: z.ZodObject<{
+  id: typeof SharedVolumeId
+  subcontainer: typeof Guid
+  mountpoint: z.ZodString
+  subpath: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  readonly: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  id: SharedVolumeId,
+  subcontainer: Guid,
+  mountpoint: z.string(),
+  subpath: wire(z.string().nullable().optional(), z.string().nullable()),
+  readonly: z.boolean(),
+}).meta({
+  id: 'MountSharedVolumeParams',
 })
 export const MountTarget: z.ZodCodec<
   z.ZodObject<{
@@ -1921,6 +1976,25 @@ export const SetMainStatus: z.ZodObject<{
 }> = /* @__PURE__ */ object({ status: SetMainStatusStatus }).meta({
   id: 'SetMainStatus',
 })
+export const SharedVolumeMountResult: z.ZodUnion<
+  readonly [
+    z.ZodObject<{ kind: z.ZodLiteral<'mounted'> }>,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'unavailable'> }>,
+      z.ZodObject<{ reason: typeof SharedVolumeUnavailableReason }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    object({ kind: z.literal('mounted') }),
+    z.intersection(
+      object({ kind: z.literal('unavailable') }),
+      object({ reason: SharedVolumeUnavailableReason }),
+    ),
+  ])
+  .meta({
+    id: 'SharedVolumeMountResult',
+  })
 export const SmtpValue: z.ZodCodec<
   z.ZodIntersection<
     z.ZodIntersection<
@@ -2943,6 +3017,10 @@ export const Manifest: z.ZodIntersection<
     canMigrateFrom: z.ZodString
     images: z.ZodRecord<z.ZodString, typeof ImageConfig>
     volumes: z.ZodArray<typeof VolumeId>
+    /**
+     * Enables user-managed grants to shared volumes; grants default to none.
+     */
+    sharedVolumes: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
     dependencies: z.ZodCodec<
       z.ZodOptional<typeof Dependencies>,
       typeof Dependencies
@@ -2962,6 +3040,13 @@ export const Manifest: z.ZodIntersection<
       canMigrateFrom: z.string(),
       images: z.record(z.string(), ImageConfig),
       volumes: z.array(VolumeId),
+      /**
+       * Enables user-managed grants to shared volumes; grants default to none.
+       */
+      sharedVolumes: wire(z.boolean().optional(), z.boolean()).meta({
+        description:
+          'Enables user-managed grants to shared volumes; grants default to none.',
+      }),
       dependencies: wire(Dependencies.optional(), Dependencies),
       hardwareRequirements: wire(
         HardwareRequirements.optional(),
@@ -3089,18 +3174,26 @@ export const Api = {
         clear: {
           _PARAMS: /* @__PURE__ */ ClearActionsParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'clear-tasks': {
           _PARAMS: /* @__PURE__ */ ClearTasksParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'create-task': {
           _PARAMS: /* @__PURE__ */ CreateTaskParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         export: {
           _PARAMS: /* @__PURE__ */ ExportActionParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'get-input': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3116,6 +3209,8 @@ export const Api = {
             GetActionInputParams,
           ),
           _RETURN: /* @__PURE__ */ ActionInput.nullable(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         run: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3131,116 +3226,184 @@ export const Api = {
             EffectsRunActionParams,
           ),
           _RETURN: /* @__PURE__ */ ActionResult.nullable(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
     bind: {
       _PARAMS: /* @__PURE__ */ BindParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'bind-range': {
       _PARAMS: /* @__PURE__ */ BindRangeParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'check-dependencies': {
       _PARAMS: /* @__PURE__ */ CheckDependenciesParam,
       _RETURN: /* @__PURE__ */ z.array(CheckDependenciesResult),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'clear-bindings': {
       _PARAMS: /* @__PURE__ */ ClearBindingsParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'clear-callbacks': {
       _PARAMS: /* @__PURE__ */ ClearCallbacksParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'clear-service-interfaces': {
       _PARAMS: /* @__PURE__ */ ClearServiceInterfacesParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     echo: {
       _PARAMS: /* @__PURE__ */ EchoParams,
       _RETURN: /* @__PURE__ */ z.string(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'export-range-service-interface': {
       _PARAMS: /* @__PURE__ */ ExportRangeServiceInterfaceParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'export-service-interface': {
       _PARAMS: /* @__PURE__ */ ExportServiceInterfaceParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-container-ip': {
       _PARAMS: /* @__PURE__ */ GetContainerIpParams,
       _RETURN: /* @__PURE__ */ z.string().nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-data-version': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string().nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-dependencies': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.array(DependencyRequirement),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-host-info': {
       _PARAMS: /* @__PURE__ */ GetHostInfoParams,
       _RETURN: /* @__PURE__ */ Host.nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-installed-packages': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.array(PackageId),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-os-ip': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-outbound-gateway': {
       _PARAMS: /* @__PURE__ */ GetOutboundGatewayParams,
       _RETURN: /* @__PURE__ */ GatewayId,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-service-interface': {
       _PARAMS: /* @__PURE__ */ GetServiceInterfaceParams,
       _RETURN: /* @__PURE__ */ ServiceInterface.nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-service-manifest': {
       _PARAMS: /* @__PURE__ */ GetServiceManifestParams,
       _RETURN: /* @__PURE__ */ Manifest.nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-service-port-forward': {
       _PARAMS: /* @__PURE__ */ GetServicePortForwardParams,
       _RETURN: /* @__PURE__ */ NetInfo.nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
+    },
+    'get-shared-volumes': {
+      _PARAMS: /* @__PURE__ */ GetSharedVolumesParams,
+      _RETURN: /* @__PURE__ */ z.array(GrantedSharedVolume),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-ssl-certificate': {
       _PARAMS: /* @__PURE__ */ GetSslCertificateParams,
       _RETURN: /* @__PURE__ */ z.array(z.string()),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-ssl-key': {
       _PARAMS: /* @__PURE__ */ GetSslKeyParams,
       _RETURN: /* @__PURE__ */ literal_0,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-status': {
       _PARAMS: /* @__PURE__ */ GetStatusParams,
       _RETURN: /* @__PURE__ */ StatusInfo.nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-system-smtp': {
       _PARAMS: /* @__PURE__ */ GetSystemSmtpParams,
       _RETURN: /* @__PURE__ */ SmtpValue.nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-upload-limits': {
       _PARAMS: /* @__PURE__ */ ResolveUploadParams,
       _RETURN: /* @__PURE__ */ UploadLimits,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'git-info': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'list-service-interfaces': {
       _PARAMS: /* @__PURE__ */ ListServiceInterfacesParams,
       _RETURN: /* @__PURE__ */ z.record(z.string(), ServiceInterface),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     mount: {
       _PARAMS: /* @__PURE__ */ MountParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
+    },
+    'mount-shared-volume': {
+      _PARAMS: /* @__PURE__ */ MountSharedVolumeParams,
+      _RETURN: /* @__PURE__ */ SharedVolumeMountResult,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     notification: {
       _PARAMS: /* @__PURE__ */ empty,
@@ -3248,6 +3411,8 @@ export const Api = {
         create: {
           _PARAMS: /* @__PURE__ */ CreateNotificationParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3260,14 +3425,20 @@ export const Api = {
             'clear-urls': {
               _PARAMS: /* @__PURE__ */ UrlPluginClearUrlsParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             'export-url': {
               _PARAMS: /* @__PURE__ */ UrlPluginExportUrlParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             register: {
               _PARAMS: /* @__PURE__ */ UrlPluginRegisterParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -3276,58 +3447,86 @@ export const Api = {
     'prepare-download': {
       _PARAMS: /* @__PURE__ */ PrepareDownloadParams,
       _RETURN: /* @__PURE__ */ Guid,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'prepare-upload': {
       _PARAMS: /* @__PURE__ */ PrepareUploadParams,
       _RETURN: /* @__PURE__ */ Guid,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     rebuild: {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'resolve-upload': {
       _PARAMS: /* @__PURE__ */ ResolveUploadParams,
       _RETURN: /* @__PURE__ */ UploadedFile,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     restart: {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'retire-binding': {
       _PARAMS: /* @__PURE__ */ RetireBindingParams,
       _RETURN: /* @__PURE__ */ z.boolean(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'retire-host': {
       _PARAMS: /* @__PURE__ */ RetireHostParams,
       _RETURN: /* @__PURE__ */ z.boolean(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'set-backup-progress': {
       _PARAMS: /* @__PURE__ */ SetBackupProgress,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'set-data-version': {
       _PARAMS: /* @__PURE__ */ SetDataVersionParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'set-dependencies': {
       _PARAMS: /* @__PURE__ */ SetDependenciesParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'set-health': {
       _PARAMS: /* @__PURE__ */ SetHealth,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'set-init-progress': {
       _PARAMS: /* @__PURE__ */ SetInitProgress,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'set-main-status': {
       _PARAMS: /* @__PURE__ */ SetMainStatus,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     shutdown: {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     subcontainer: {
       _PARAMS: /* @__PURE__ */ empty,
@@ -3335,10 +3534,14 @@ export const Api = {
         'create-fs': {
           _PARAMS: /* @__PURE__ */ CreateSubcontainerFsParams,
           _RETURN: /* @__PURE__ */ z.tuple([z.string(), Guid]),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'destroy-fs': {
           _PARAMS: /* @__PURE__ */ DestroySubcontainerFsParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },

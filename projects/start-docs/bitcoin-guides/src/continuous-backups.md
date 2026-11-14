@@ -4,7 +4,7 @@ A continuous backup keeps a copy of a service's most volatile data current on st
 
 ## Why a StartOS Backup Is Not Enough
 
-A [StartOS backup](/start-os/backup-create.html) is taken by hand and holds each service as it was at that moment. That is fine for most services, and not for these two:
+A [StartOS backup](/start-os/backups.html) is taken by hand and holds each service as it was at that moment. That is fine for most services, and not for these two:
 
 - **LND.** Your seed recovers on-chain funds only. Funds in channels come back through the **static channel backup**, `channel.backup`, which LND rewrites whenever a channel opens or closes, and which a restore uses to ask your peers to close your channels and return the funds. A StartOS backup holds that file as it was when you took it, so a channel opened since is missing from it, and its funds are not recovered.
 - **Bark Wallet.** Every Ark or Lightning payment advances the wallet state, and restoring an older copy of the wallet database rolls it back past payments it has already made, which loses funds. The database is therefore left out of the StartOS backup entirely. A local copy on the server always runs, but it survives only inside a StartOS backup, so it is likely stale exactly when you need it.

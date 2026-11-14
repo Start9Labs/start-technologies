@@ -39,6 +39,8 @@ import {
   CheckInitializedRes,
   SetInitialPasswordReq,
   SetupStatusRes,
+  SetupFlashReq,
+  SetupFlashStream,
   LogsResponse,
   DeviceFromApi,
   DeviceUpdateReq,
@@ -83,7 +85,9 @@ import {
   BackupRestoreRes,
   DiagnosticsCreateRes,
 } from './api.service'
+import type { RpcStreamOptions } from '@start9labs/start-core'
 import { RpcService } from '../rpc.service'
+import { RpcSocketService, ServerIdentityService } from '@start9labs/shared'
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
 
 @Injectable({
@@ -91,6 +95,16 @@ import type { Api, RpcParamType, RpcReturnType } from './bindings'
 })
 export class LiveApiService extends ApiService {
   private readonly rpc = inject(RpcService)
+  private readonly sockets = inject(RpcSocketService)
+  private readonly identity = inject(ServerIdentityService)
+
+  openWebsocket(guid: string) {
+    const socket = this.sockets.openSocket(guid)
+    socket.addEventListener('open', this.identity.openObserver.next, {
+      once: true,
+    })
+    return socket
+  }
 
   async login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>> {
     return this.rpc.request({ method: 'auth.login', params })
@@ -277,8 +291,11 @@ export class LiveApiService extends ApiService {
     })
   }
 
-  async getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>> {
-    return this.rpc.request({ method: 'setup.get-pubkey', params: {} })
+  async setupFlash(
+    params: SetupFlashReq,
+    options?: RpcStreamOptions,
+  ): Promise<SetupFlashStream> {
+    return this.rpc.streams.setup.flash(params, options)
   }
 
   async systemFactoryReset(): Promise<null> {

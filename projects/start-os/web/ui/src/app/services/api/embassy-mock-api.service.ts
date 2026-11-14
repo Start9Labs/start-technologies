@@ -1,6 +1,6 @@
 import type { Api, ApiClient, Params, Result } from './api.types'
 import { inject, Injectable } from '@angular/core'
-import { WA_SESSION_STORAGE } from '@ng-web-apis/common'
+import { WA_CRYPTO, WA_SESSION_STORAGE } from '@ng-web-apis/common'
 import {
   FALLBACK_ICON,
   GetPackageRes,
@@ -8,18 +8,21 @@ import {
   registrySigningKeys,
 } from '@start9labs/marketplace'
 import {
-  defaultRegistries,
   FullKeyboard,
+  i18nPipe,
   pauseFor,
   registryUrl,
   sameUrl,
+  withAbortSignal,
   RPCErrorDetails,
   SetLanguageParams,
 } from '@start9labs/shared'
 import {
   auth,
   createRpcClient,
+  createRpcStreamClient,
   RpcHandlers,
+  type RpcStreamOptions,
   T,
   tableTransport,
   utils,
@@ -41,12 +44,14 @@ import {
   from,
   interval,
   map,
+  Observable,
   shareReplay,
   startWith,
   Subject,
 } from 'rxjs'
 import { WebSocketSubject } from 'rxjs/webSocket'
 import {
+  BackupTargetEntry,
   DataModel,
   InstallingState,
   PackageDataEntry,
@@ -57,13 +62,15 @@ import {
 import { ConfigService } from 'src/app/services/config.service'
 import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
+import { getCurrentManifest, getManifest } from 'src/app/utils/get-package-data'
+import { getDriveName } from 'src/app/utils/get-drive-name'
 import { parsePemPublicKey, parsePublicKeys } from 'src/app/utils/public-keys'
+import { BackupRun } from 'src/app/routes/portal/routes/system/routes/backups/backup.types'
 import { Mock } from './api.fixures'
 import { BTC_ICON, LND_ICON, PROXY_ICON } from './api-icons'
 import {
   ActionRes,
   CheckDnsRes,
-  CifsBackupTarget,
   DiagnosticErrorRes,
   FollowPackageLogsReq,
   FollowServerLogsReq,
@@ -83,11 +90,25 @@ import {
   WebsocketConfig,
 } from './api.types'
 import { ApiService, FileUploadOptions } from './embassy-api.service'
-import { mockPatchData } from './mock-patch'
+import type { StartupApiService } from './startup-api.service'
+import {
+  mockOsUpdateCache,
+  mockPatchData,
+  mockRegistryCache,
+} from './mock-patch'
 
 import markdown from './md-sample.md'
 
 const UI_KEY = '_startos/mock-ui'
+
+type SourceCollection = 'sharedVolumes' | 'backupTargets'
+
+const UNKNOWN_SOURCE: Result<'volumes.inspect'> = {
+  availability: 'unknown',
+  available: null,
+  error: null,
+  checkedAt: null,
+}
 
 const PROGRESS: T.FullProgress = {
   overall: {
@@ -125,19 +146,62 @@ const INIT_PROGRESS: T.FullProgress = {
 }
 
 @Injectable()
-export class MockApiService extends ApiService {
+export class MockApiService extends ApiService implements StartupApiService {
   readonly mockWsSource$ = new Subject<Revision>()
+  private readonly i18n = inject(i18nPipe)
   private readonly storage = inject(WA_SESSION_STORAGE)
   private readonly cache = inject(PATCH_CACHE)
   private readonly gitHash = inject(ConfigService).gitHash
   private readonly revertTime = 1800
+  private readonly crypto = inject(WA_CRYPTO)
+  private drives?: Map<string, number>
+  private history?: BackupRun[]
   private readonly conversionJobs: T.ServerStatus['backupConversions'] = {}
+
+  private get attachedDrives() {
+    return (this.drives ??= new Map(
+      Mock.Disks.flatMap(disk => disk.partitions).map(partition => [
+        Mock.driveLink(partition.logicalname),
+        partition.available ?? partition.capacity,
+      ]),
+    ))
+  }
+
+  private get backupHistory() {
+    return (this.history ??= structuredClone(Mock.BackupHistory))
+  }
+
   private readonly pushSubscriptions = new Map<
     string,
     Params<'notification.push.subscribe'>
   >()
   sequence = 1
   private readonly handlers: RpcHandlers<Api> = {
+    'server.set-nut': params => this.setNut(params),
+    'server.nut-status': params => this.getNutStatus(params),
+    'server.nut-list-ups': async () => {
+      await pauseFor(1000)
+      return [{ name: 'ups', description: 'Synology UPS' }]
+    },
+    'server.nut-scan': async () => {
+      await pauseFor(2000)
+      return [
+        {
+          driver: 'usbhid-ups',
+          port: 'auto',
+          vendorId: '051D',
+          productId: '0002',
+          serial: '4B1234P56789',
+          bus: '001',
+          busPort: '002',
+          vendor: 'American Power Conversion',
+          product: 'Back-UPS ES 600M1',
+        },
+      ]
+    },
+    'server.clear-nut': () =>
+      this.setNut({ config: { enabled: false, settings: null } }),
+
     'git-info': async () => this.gitHash,
     state: async () => {
       await pauseFor(1000)
@@ -155,6 +219,15 @@ export class MockApiService extends ApiService {
         mockPatchData.ui = { ...mockPatchData.ui, ...JSON.parse(stored) }
       }
 
+      mockPatchData.registryCache = Object.fromEntries(
+        Object.keys(mockPatchData.serverInfo.registries).map(url => [
+          registryUrl(url),
+          mockRegistryCache(url, this.mockRegistryInfo(url)),
+        ]),
+      )
+      mockPatchData.osUpdateCache = mockOsUpdateCache(
+        mockPatchData.serverInfo.osRegistry,
+      )
       this.protectTrust()
       return {
         dump: { id: this.sequence, value: mockPatchData },
@@ -213,27 +286,12 @@ export class MockApiService extends ApiService {
       await pauseFor(1000)
       return null
     },
-    'diagnostic.update': async () => {
-      await pauseFor(1000)
-      return { target: '0.4.2', progress: 'update-progress-guid' }
-    },
+    'diagnostic.update': () => this.diagnosticUpdate(),
     'diagnostic.logs': async params => {
       return this.handlers['server.logs']!(params)
     },
-    'init.subscribe': async () => {
-      await pauseFor(250)
-      return {
-        progress: PROGRESS,
-        guid: 'init-progress-guid',
-      }
-    },
-    'init.logs.follow': async () => {
-      await pauseFor(2000)
-      return {
-        startCursor: 'start-cursor',
-        guid: 'logs-guid',
-      }
-    },
+    'init.subscribe': () => this.initSubscription(),
+    'init.logs.follow': () => this.logFollow(),
     'server.time': async params => {
       await pauseFor(2000)
       return {
@@ -261,27 +319,9 @@ export class MockApiService extends ApiService {
         endCursor: 'end-cursor',
       }
     },
-    'server.logs.follow': async params => {
-      await pauseFor(2000)
-      return {
-        startCursor: 'start-cursor',
-        guid: 'logs-guid',
-      }
-    },
-    'server.kernel-logs.follow': async params => {
-      await pauseFor(2000)
-      return {
-        startCursor: 'start-cursor',
-        guid: 'logs-guid',
-      }
-    },
-    'server.metrics.follow': async params => {
-      await pauseFor(2000)
-      return {
-        guid: 'metrics-guid',
-        metrics: Mock.getMetrics(),
-      }
-    },
+    'server.logs.follow': () => this.logFollow(),
+    'server.kernel-logs.follow': () => this.logFollow(),
+    'server.metrics.follow': () => this.metricsFollow(),
     'server.device-info': async () => ({
       os: {
         version: mockPatchData.serverInfo.version,
@@ -295,6 +335,10 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
       const normalized = registryUrl(url)
       const info = this.mockRegistryInfo(normalized)
+      mockPatchData.registryCache[normalized] = mockRegistryCache(
+        normalized,
+        info,
+      )
       const { added } = this.importRegistryKeys(normalized, info)
       for (const id of added)
         mockPatchData.serverInfo.trustedKeys[id]!.marketplace = true
@@ -306,6 +350,26 @@ export class MockApiService extends ApiService {
       await this.publishTrust()
       return added
     },
+    'server.registries.refresh': async ({ url }) => {
+      await pauseFor(2000)
+      const normalized = registryUrl(url)
+      if (
+        !Object.keys(mockPatchData.serverInfo.registries).some(saved =>
+          sameUrl(saved, normalized),
+        )
+      )
+        throw new Error(
+          this.i18n.transform('Connect this registry before refreshing it.'),
+        )
+      const info = this.mockRegistryInfo(normalized)
+      mockPatchData.registryCache[normalized] = mockRegistryCache(
+        normalized,
+        info,
+      )
+      this.importRegistryKeys(normalized, info)
+      await this.publishTrust()
+      return null
+    },
     'server.registries.remove': async ({ url }) => {
       await pauseFor(2000)
       if (sameUrl(url, mockPatchData.serverInfo.osRegistry))
@@ -313,6 +377,9 @@ export class MockApiService extends ApiService {
           'This registry provides StartOS updates. Choose another registry for StartOS updates before removing it.',
         )
       const offered = this.offeredKeys(url)
+      for (const saved of Object.keys(mockPatchData.registryCache)) {
+        if (sameUrl(saved, url)) delete mockPatchData.registryCache[saved]
+      }
       for (const saved of Object.keys(mockPatchData.serverInfo.registries)) {
         if (sameUrl(saved, url))
           delete mockPatchData.serverInfo.registries[saved]
@@ -341,6 +408,7 @@ export class MockApiService extends ApiService {
       for (const id of enabled)
         mockPatchData.serverInfo.trustedKeys[id]!.os = true
       mockPatchData.serverInfo.osRegistry = registryUrl(url)
+      mockPatchData.osUpdateCache = mockOsUpdateCache(url)
       await this.publishTrust()
       return enabled
     },
@@ -471,13 +539,27 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
       return null
     },
-    'disk.list': async () => {
-      await pauseFor(1000)
-      return Mock.Disks
-    },
-    'disk.format': async ({ disk }) => {
+    'disk.format': async ({ disk, label }) => {
       await pauseFor(3000)
-      return `${disk}1`
+      const partition = `${disk}1`
+      const drive = Mock.Disks.find(d => d.logicalname === disk)!
+      this.attachedDrives.set(Mock.driveLink(partition), drive.capacity)
+      drive.partitions = [
+        {
+          logicalname: partition,
+          stablePath: `${drive.stablePath}-part1`,
+          label: label ?? 'StartOS Backups',
+          capacity: drive.capacity,
+          used: 0,
+          available: drive.capacity,
+          startOs: {},
+          legacyBackup: false,
+          guid: null,
+          filesystem: 'btrfs',
+        },
+      ]
+      await this.publishDisks()
+      return partition
     },
     'server.set-hostname': async params => {
       await pauseFor(1000)
@@ -595,11 +677,7 @@ export class MockApiService extends ApiService {
     },
     'registry.os.version.get': async params => {
       await pauseFor(2000)
-      return (
-        sameUrl(params.registry, defaultRegistries.community)
-          ? {}
-          : Mock.RegistryOSUpdate
-      ) as Result<'registry.os.version.get'>
+      return mockOsUpdateCache(params.registry).versions
     },
     'registry.info': async params => {
       await pauseFor(2000)
@@ -854,13 +932,120 @@ export class MockApiService extends ApiService {
       await pauseFor(2000)
       return null
     },
+    'volumes.create': async ({ name, source }) => {
+      await pauseFor(1000)
+      const id = this.guid()
+      const volume: T.SharedVolume = {
+        name,
+        source: this.mockSource(source),
+        grants: {},
+        ...UNKNOWN_SOURCE,
+      }
+      await this.mockRevision<unknown>([
+        {
+          op: PatchOp.ADD,
+          path: `/sharedVolumes/${id}`,
+          value: volume,
+        },
+      ])
+      this.queueSourceCheck('sharedVolumes', id)
+      return id
+    },
+    'volumes.update-cifs': async ({ id, hostname, path, username }) => {
+      await pauseFor(1000)
+      const volume: T.SharedVolume | undefined = this.mockData(
+        `/sharedVolumes/${id}`,
+      )
+      if (!volume || volume.source.kind !== 'cifs')
+        throw new Error('CIFS volume not found')
+      await this.mockRevision<unknown>([
+        {
+          op: PatchOp.REPLACE,
+          path: `/sharedVolumes/${id}`,
+          value: {
+            ...volume,
+            source: this.mockSource({ kind: 'cifs', hostname, path, username }),
+            ...UNKNOWN_SOURCE,
+          },
+        },
+      ])
+      this.queueSourceCheck('sharedVolumes', id)
+      return null
+    },
+    'volumes.rename': async ({ id, name }) => {
+      const volume: T.SharedVolume | undefined = this.mockData(
+        `/sharedVolumes/${id}`,
+      )
+      if (!volume) throw new Error('Volume not found')
+      await this.mockRevision([
+        { op: PatchOp.REPLACE, path: `/sharedVolumes/${id}/name`, value: name },
+      ])
+      return null
+    },
+    'volumes.set-grant': async ({ id, packageId, grant }) => {
+      const volume: T.SharedVolume | undefined = this.mockData(
+        `/sharedVolumes/${id}`,
+      )
+      if (!volume) throw new Error('Volume not found')
+      if (grant) {
+        const pkg = this.mockData(`/packageData/${packageId}`) as
+          | PackageDataEntry
+          | undefined
+        if (!pkg || !getCurrentManifest(pkg).sharedVolumes)
+          throw new Error('This service cannot use shared volumes')
+      }
+      const grants = { ...volume.grants }
+      if (grant) grants[packageId] = grant
+      else delete grants[packageId]
+      await this.mockRevision([
+        {
+          op: PatchOp.REPLACE,
+          path: `/sharedVolumes/${id}/grants`,
+          value: grants,
+        },
+      ])
+      return null
+    },
+    'volumes.remove': async ({ id }) => {
+      const volume: T.SharedVolume | undefined = this.mockData(
+        `/sharedVolumes/${id}`,
+      )
+      if (!volume) return null
+      if (volume.source.kind === 'local') {
+        await this.mockRevision([
+          {
+            op: PatchOp.REPLACE,
+            path: `/sharedVolumes/${id}/grants`,
+            value: {},
+          },
+        ])
+      }
+      await this.mockRevision([
+        { op: PatchOp.REMOVE, path: `/sharedVolumes/${id}` },
+      ])
+      return null
+    },
+    'volumes.inspect': async ({ id }) => {
+      await pauseFor(1000)
+      return this.checkSource('sharedVolumes', id)
+    },
     'backup.target.list': async params => {
       await pauseFor(2000)
-      return structuredClone(Mock.BackupTargets)
+      return structuredClone(
+        this.mockData('/backupTargets'),
+      ) as DataModel['backupTargets']
+    },
+    'backup.history.list': async ({ offset, limit }) => {
+      await pauseFor(500)
+      return {
+        runs: structuredClone(this.backupHistory.slice(offset, offset + limit)),
+        total: this.backupHistory.length,
+      }
     },
     'backup.target.convert': async params => {
-      const backup =
-        Mock.BackupTargets[params.targetId]?.startOs[params.serverId]
+      const backup: T.StartOsRecoveryInfo | undefined = structuredClone(
+        this.backupTarget(params.targetId)?.startOs[params.serverId],
+      )
       if (!backup) throw new Error('Backup not found')
       const jobs = (this.conversionJobs[params.targetId] ??= {})
       if (jobs[params.serverId]?.state === 'running')
@@ -871,45 +1056,123 @@ export class MockApiService extends ApiService {
         error: null,
       }
       backup.formatStatus = 'interrupted'
+      await this.publishBackup(params, backup)
       void this.simulateConversion(params, backup)
       return null
     },
-    'backup.target.cifs.add': async params => {
-      await pauseFor(2000)
-      const { hostname, path, username } = params
-      return {
-        latfgvwdbhjsndmk: {
-          type: 'cifs',
-          hostname,
-          path,
-          username,
-          mountable: true,
-          available: 50000000000,
-          startOs: {},
-          legacyBackup: false,
+    'backup.target.create': async ({ name, source }) => {
+      await pauseFor(1000)
+      const id = this.guid()
+      await this.mockRevision<unknown>([
+        {
+          op: PatchOp.ADD,
+          path: `/backupTargets/${id}`,
+          value: {
+            name,
+            source: this.mockSource(source),
+            ...UNKNOWN_SOURCE,
+            startOs: {},
+            legacyBackup: false,
+          },
         },
+      ])
+      this.queueSourceCheck('backupTargets', id)
+      return id
+    },
+    'backup.target.find': async () => {
+      await this.publishDisks()
+      const added: string[] = []
+      for (const partition of Mock.Disks.flatMap(disk => disk.partitions)) {
+        if (!Object.keys(partition.startOs).length) continue
+        const storedSource = Mock.diskSource(partition.logicalname)
+        const logicalname = storedSource.logicalname
+        const targets: Record<string, T.BackupTarget> =
+          this.mockData('/backupTargets')
+        if (
+          Object.values(targets).some(
+            ({ source }) =>
+              source.kind === 'disk' &&
+              source.logicalname === logicalname &&
+              !source.path,
+          )
+        )
+          continue
+        added.push(
+          await this.rpc.backup.target.create({
+            name: partition.label?.trim()
+              ? partition.label
+              : getDriveName(storedSource.drive) || partition.logicalname,
+            source: {
+              kind: 'disk',
+              logicalname: partition.logicalname,
+              path: '',
+            },
+          }),
+        )
       }
+      return added
+    },
+    'backup.target.rename': async ({ id, name }) => {
+      await this.mockRevision<unknown>([
+        { op: PatchOp.REPLACE, path: `/backupTargets/${id}/name`, value: name },
+      ])
+      return null
+    },
+    'backup.target.update-cifs': async ({ id, hostname, path, username }) => {
+      await pauseFor(1000)
+      const target = this.cifsTarget(id)
+      await this.mockRevision<unknown>([
+        {
+          op: PatchOp.REPLACE,
+          path: `/backupTargets/${id}`,
+          value: {
+            ...target,
+            source: this.mockSource({ kind: 'cifs', hostname, path, username }),
+            ...UNKNOWN_SOURCE,
+            startOs: {},
+            legacyBackup: false,
+          },
+        },
+      ])
+      this.queueSourceCheck('backupTargets', id)
+      return null
+    },
+    'backup.target.remove': async ({ id }) => {
+      await pauseFor(1000)
+      if (this.backupTarget(id))
+        await this.mockRevision([
+          { op: PatchOp.REMOVE, path: `/backupTargets/${id}` },
+        ])
+      return null
+    },
+    'backup.target.inspect': async ({ id }) => {
+      await pauseFor(1000)
+      return this.checkSource('backupTargets', id)
+    },
+    'backup.target.cifs.add': async params => {
+      const id = await this.rpc.backup.target.create({
+        name: `${params.hostname}:${params.path}`,
+        source: { kind: 'cifs', ...params },
+      })
+      return { [id]: this.backupTarget(id)! }
     },
     'backup.target.cifs.update': async params => {
-      await pauseFor(2000)
-      const { id, hostname, path, username } = params
-      return {
-        [id]: {
-          ...(Mock.BackupTargets[id] as CifsBackupTarget),
-          hostname,
-          path,
-          username,
-        },
-      }
+      await this.rpc.backup.target.updateCifs(params)
+      return { [params.id]: this.backupTarget(params.id)! }
     },
     'backup.target.cifs.remove': async params => {
-      await pauseFor(2000)
-      return null
+      this.cifsTarget(params.id)
+      return this.rpc.backup.target.remove(params)
     },
     'backup.target.delete-legacy': async params => {
       await pauseFor(2000)
-      const target = Mock.BackupTargets[params.targetId]
-      if (target) target.legacyBackup = false
+      await this.mockRevision<unknown>([
+        {
+          op: PatchOp.REPLACE,
+          path: `/backupTargets/${params.targetId}/legacyBackup`,
+          value: false,
+        },
+      ])
       return null
     },
     'backup.target.info': async params => {
@@ -917,17 +1180,29 @@ export class MockApiService extends ApiService {
       return Mock.BackupInfo
     },
     'backup.create': async params => {
+      const startedAt = new Date().toISOString()
       await pauseFor(2000)
+      const target = this.backupTarget(params.targetId)
+      if (!target) throw new Error('Backup target not found')
+      const targetName = target.name
+      const source = structuredClone(target.source)
       const serverPath = '/serverInfo/statusInfo/backupProgress'
-      const ids = params.packageIds || []
-      // One phase per package plus a trailing "OS Data" phase (the host
-      // writes os-backup.json + LUKS folder after the per-package loop).
-      const phaseCount = ids.length + 1
+      const ids =
+        params.packageIds ?? Object.keys(this.mockData('/packageData'))
+      const volumes =
+        params.sharedVolumeIds ?? Object.keys(this.mockData('/sharedVolumes'))
+      const report: T.BackupReport = {
+        server: { attempted: true, error: null },
+        packages: {},
+        sharedVolumes: {},
+      }
+      const phaseCount = ids.length + volumes.length + 1
 
       setTimeout(async () => {
         for (let i = 0; i < ids.length; i++) {
           const id = ids[i]!
           const appPath = `/packageData/${id}/statusInfo/desired/main`
+          const previous = this.mockData(appPath) as T.DesiredStatus['main']
           const appPatch: ReplaceOperation<T.DesiredStatus['main']>[] = [
             {
               op: PatchOp.REPLACE,
@@ -953,7 +1228,7 @@ export class MockApiService extends ApiService {
           this.mockRevision([
             {
               ...appPatch[0]!,
-              value: 'stopped',
+              value: previous,
             },
           ])
 
@@ -968,10 +1243,55 @@ export class MockApiService extends ApiService {
             value: { done: i + 1, total: phaseCount, units: null },
           }
           this.mockRevision([completePhase, advanceOverall])
+          const manifest = getManifest(this.mockData(`/packageData/${id}`))
+          Mock.BackupInfo.packageBackups[id] = {
+            title: manifest.title,
+            version: manifest.version,
+            osVersion: this.mockData('/serverInfo/version'),
+            timestamp: new Date().toISOString(),
+          }
+          report.packages[id] = { error: null, duration_ms: 8000 }
+        }
+        for (const [offset, id] of volumes.entries()) {
+          const volume = this.mockData(`/sharedVolumes/${id}`) as
+            | T.SharedVolume
+            | undefined
+          const inspection = volume
+            ? await this.rpc.volumes.inspect({ id })
+            : null
+          const error =
+            inspection?.error ?? (volume ? null : 'Volume not found')
+          report.sharedVolumes[id] = {
+            name: volume?.name ?? id,
+            error,
+            duration_ms: 1000,
+          }
+          if (!error && volume)
+            Mock.BackupInfo.sharedVolumeBackups[id] = {
+              name: volume.name,
+              timestamp: new Date().toISOString(),
+              generation: this.guid(),
+            }
+          await pauseFor(1000)
+          await this.mockRevision<T.Progress>([
+            {
+              op: PatchOp.REPLACE,
+              path: `${serverPath}/phases/${ids.length + offset}/progress`,
+              value: true,
+            },
+            {
+              op: PatchOp.REPLACE,
+              path: `${serverPath}/overall`,
+              value: {
+                done: ids.length + offset + 1,
+                total: phaseCount,
+                units: null,
+              },
+            },
+          ])
         }
 
-        // OS Data phase
-        const osIdx = ids.length
+        const osIdx = ids.length + volumes.length
         await pauseFor(1500)
         const completeOsPhase: ReplaceOperation<T.Progress> = {
           op: PatchOp.REPLACE,
@@ -987,6 +1307,15 @@ export class MockApiService extends ApiService {
 
         await pauseFor(800)
 
+        this.backupHistory.unshift({
+          id: this.guid(),
+          targetId: params.targetId,
+          targetName,
+          startedAt,
+          completedAt: new Date().toISOString(),
+          report,
+        })
+
         const lastPatch: ReplaceOperation<T.ServerStatus['backupProgress']>[] =
           [
             {
@@ -996,33 +1325,19 @@ export class MockApiService extends ApiService {
             },
           ]
         this.mockRevision(lastPatch)
-
-        // Feature 1: a completed backup whose target still holds a legacy (V1)
-        // folder raises a warning notification — bumps the unread badge and
-        // lands in the notifications list, pointing the user at the create page.
-        if (Mock.BackupTargets[params.targetId]?.legacyBackup) {
-          const count = mockPatchData.serverInfo.unreadNotificationCount + 1
-          mockPatchData.serverInfo.unreadNotificationCount = count
-          Mock.Notifications.unshift({
-            id: Math.max(0, ...Mock.Notifications.map(n => n.id)) + 1,
-            packageId: null,
-            createdAt: new Date().toISOString(),
-            code: 0,
-            level: 'warning',
-            title: 'Old Backup Still Present',
-            message:
-              'This backup target still contains an old-format (V1) backup that is no longer needed. To free up space on the drive, go to the backup creation page and delete it.',
-            data: null,
-            seen: false,
-          })
-          this.mockRevision([
+        if (utils.deepEqual(this.backupTarget(params.targetId)?.source, source))
+          await this.mockRevision<unknown>([
             {
-              op: PatchOp.REPLACE,
-              path: '/serverInfo/unreadNotificationCount',
-              value: count,
+              op: PatchOp.ADD,
+              path: `/backupTargets/${params.targetId}/startOs/${Mock.ServerId}`,
+              value: {
+                hostname: this.mockData('/serverInfo/hostname'),
+                timestamp: new Date().toISOString(),
+                version: this.mockData('/serverInfo/version'),
+                formatStatus: 'current',
+              },
             },
           ])
-        }
       }, 500)
 
       const originalPatch: ReplaceOperation<
@@ -1035,6 +1350,10 @@ export class MockApiService extends ApiService {
             overall: { done: 0, total: phaseCount, units: null },
             phases: [
               ...ids.map(id => ({ name: id, progress: null })),
+              ...volumes.map(id => ({
+                name: this.mockData(`/sharedVolumes/${id}`)?.name ?? id,
+                progress: null,
+              })),
               { name: 'OS Data', progress: null },
             ],
           },
@@ -1064,13 +1383,7 @@ export class MockApiService extends ApiService {
         endCursor: 'end-cursor',
       }
     },
-    'package.logs.follow': async params => {
-      await pauseFor(2000)
-      return {
-        startCursor: 'start-cursor',
-        guid: 'logs-guid',
-      }
-    },
+    'package.logs.follow': () => this.logFollow(),
     'package.install': async params => {
       await pauseFor(2000)
 
@@ -1220,6 +1533,33 @@ export class MockApiService extends ApiService {
       this.mockRevision(patch)
 
       return null
+    },
+    'backup.volume.restore': async ({ ids }) => {
+      const result: Result<'backup.volume.restore'> = {
+        restored: {},
+        errors: {},
+      }
+      for (const id of ids ??
+        Object.keys(Mock.BackupInfo.sharedVolumeBackups)) {
+        const info = Mock.BackupInfo.sharedVolumeBackups[id]
+        if (!info) {
+          result.errors[id] = 'Volume not found in backup'
+          continue
+        }
+        const restored = await this.rpc.volumes.create({
+          name: info.name,
+          source: { kind: 'local' },
+        })
+        await this.mockRevision([
+          {
+            op: PatchOp.REPLACE,
+            path: `/sharedVolumes/${restored}/availability`,
+            value: 'available',
+          },
+        ])
+        result.restored[id] = restored
+      }
+      return result
     },
     'package.backup.restore': async params => {
       await pauseFor(2000)
@@ -1708,6 +2048,75 @@ export class MockApiService extends ApiService {
     'kiosk.disable': () => this.toggleKiosk(false),
   }
   readonly rpc = createRpcClient<ApiClient>(tableTransport<Api>(this.handlers))
+  readonly streams = createRpcStreamClient<
+    ApiService['streams'] & StartupApiService['streams']
+  >({
+    stream: async (method, params, options) => {
+      switch (method) {
+        case 'init.logs.follow':
+        case 'server.logs.follow':
+        case 'server.kernel-logs.follow':
+        case 'package.logs.follow':
+          return this.logFollowStream(options)
+        case 'server.metrics.follow':
+          return this.metricsFollowStream(options)
+        case 'init.subscribe':
+          return this.initSubscriptionStream(options)
+        case 'diagnostic.update':
+          return this.diagnosticUpdateStream(options)
+        default:
+          throw new Error(`No mock stream for ${method}`)
+      }
+    },
+  })
+
+  private async metricsFollow(signal?: AbortSignal) {
+    await pauseFor(2000, signal)
+    return { guid: 'metrics-guid', metrics: Mock.getMetrics() }
+  }
+
+  private async metricsFollowStream(options?: RpcStreamOptions) {
+    const initial = await this.metricsFollow(options?.signal)
+    options?.signal?.throwIfAborted()
+    return {
+      initial: { ...initial, guid: null },
+      items: this.metricsEntries(options?.signal),
+    }
+  }
+
+  private async *metricsEntries(
+    signal?: AbortSignal,
+  ): AsyncGenerator<T.Metrics, null> {
+    while (true) {
+      await pauseFor(1000, signal)
+      yield Mock.getMetrics()
+    }
+  }
+
+  private async logFollow(signal?: AbortSignal) {
+    await pauseFor(2000, signal)
+    return { startCursor: 'start-cursor', guid: 'logs-guid' }
+  }
+
+  private async logFollowStream(options?: RpcStreamOptions) {
+    const initial = await this.logFollow(options?.signal)
+    options?.signal?.throwIfAborted()
+    return {
+      initial: { ...initial, guid: null },
+      items: this.logEntries(options?.signal),
+    }
+  }
+
+  private async *logEntries(
+    signal?: AbortSignal,
+  ): AsyncGenerator<T.LogEntry, null> {
+    for (let index = 0; index <= 100; index++) {
+      await pauseFor(50, signal)
+      if (index === 100) throw new Error('Mock log stream interrupted')
+      yield Mock.ServerLogs[0]!
+    }
+    return null
+  }
 
   async uploadFile(
     guid: string,
@@ -1749,25 +2158,21 @@ export class MockApiService extends ApiService {
     return icons[id] || FALLBACK_ICON
   }
 
-  // websocket
-
   openWebsocket$<T>(
     guid: string,
     config: WebsocketConfig<T> = {},
-  ): WebSocketSubject<T> {
+  ): Observable<T> {
     if (guid === 'db-guid') {
       return this.mockWsSource$.pipe<any>(
         shareReplay({ bufferSize: 1, refCount: true }),
       ) as WebSocketSubject<T>
     } else if (guid === 'logs-guid') {
-      return interval(50).pipe<any>(
-        map((_, index) => {
-          // mock fire open observer
+      return withAbortSignal(signal => this.logEntries(signal)).pipe(
+        map((entry, index) => {
           if (index === 0) config.openObserver?.next(new Event(''))
-          if (index === 100) throw new Error('HAAHHA')
-          return Mock.ServerLogs[0]
+          return entry
         }),
-      ) as WebSocketSubject<T>
+      ) as Observable<T>
     } else if (guid === 'init-progress-guid') {
       return from(this.initProgress()).pipe(
         startWith(PROGRESS),
@@ -1786,9 +2191,9 @@ export class MockApiService extends ApiService {
         ),
       ) as WebSocketSubject<T>
     } else if (guid === 'metrics-guid') {
-      return interval(1000).pipe(
-        map(() => Mock.getMetrics()),
-      ) as WebSocketSubject<T>
+      return withAbortSignal(signal =>
+        this.metricsEntries(signal),
+      ) as Observable<T>
     } else {
       throw new Error('invalid guid type')
     }
@@ -1984,9 +2389,60 @@ export class MockApiService extends ApiService {
       : `/packageData/${pkg}/hosts/${host}`
   }
 
-  private async initProgress(): Promise<T.FullProgress> {
-    // Cast to any: PhaseProgress now allows nested FullProgress, but the mock
-    // PROGRESS fixture only uses leaf shapes — we know it at the call site.
+  private async diagnosticUpdateStream(
+    options?: import('@start9labs/start-core').RpcStreamOptions,
+  ) {
+    options?.signal?.throwIfAborted()
+    const initial = await this.diagnosticUpdate(options?.signal)
+    options?.signal?.throwIfAborted()
+    const progress = () => this.initializationProgress(options?.signal)
+    return {
+      initial: { ...initial, progress: null },
+      items: (async function* () {
+        if (initial.target) {
+          yield* progress()
+        }
+        options?.signal?.throwIfAborted()
+        return null
+      })(),
+    }
+  }
+
+  private async initSubscription(
+    signal?: AbortSignal,
+  ): Promise<Result<'init.subscribe'>> {
+    await pauseFor(250, signal)
+    return { progress: PROGRESS, guid: 'init-progress-guid' }
+  }
+
+  private async initSubscriptionStream(
+    options?: import('@start9labs/start-core').RpcStreamOptions,
+  ) {
+    const initial = await this.initSubscription(options?.signal)
+    options?.signal?.throwIfAborted()
+    return {
+      initial: { ...initial, guid: null },
+      items: this.initializationProgress(options?.signal),
+    }
+  }
+
+  private async *initializationProgress(signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    yield PROGRESS
+    yield await this.initProgress(signal)
+    signal?.throwIfAborted()
+    return null
+  }
+
+  private async diagnosticUpdate(
+    signal?: AbortSignal,
+  ): Promise<Result<'diagnostic.update'>> {
+    await pauseFor(1000, signal)
+    return { target: '0.4.2', progress: 'update-progress-guid' }
+  }
+
+  private async initProgress(signal?: AbortSignal): Promise<T.FullProgress> {
+    // PROGRESS contains leaf phase shapes.
     const progress: any = JSON.parse(JSON.stringify(PROGRESS))
 
     for (let [i, phase] of progress.phases.entries() as [number, any][]) {
@@ -1995,7 +2451,7 @@ export class MockApiService extends ApiService {
         typeof phase.progress !== 'object' ||
         !phase.progress.total
       ) {
-        await pauseFor(2000)
+        await pauseFor(2000, signal)
 
         progress.phases[i]!.progress = true
 
@@ -2011,7 +2467,7 @@ export class MockApiService extends ApiService {
         const step = phase.progress.total / 4
 
         while (phase.progress.done < phase.progress.total) {
-          await pauseFor(200)
+          await pauseFor(200, signal)
 
           phase.progress.done += step
 
@@ -2026,7 +2482,7 @@ export class MockApiService extends ApiService {
           }
 
           if (phase.progress.done === phase.progress.total) {
-            await pauseFor(250)
+            await pauseFor(250, signal)
 
             progress.phases[i]!.progress = true
           }
@@ -2577,6 +3033,16 @@ export class MockApiService extends ApiService {
     await this.mockRevision<unknown>([
       {
         op: PatchOp.REPLACE,
+        path: '/registryCache',
+        value: structuredClone(mockPatchData.registryCache),
+      },
+      {
+        op: PatchOp.REPLACE,
+        path: '/osUpdateCache',
+        value: structuredClone(mockPatchData.osUpdateCache),
+      },
+      {
+        op: PatchOp.REPLACE,
         path: '/serverInfo/trustedKeys',
         value: structuredClone(mockPatchData.serverInfo.trustedKeys),
       },
@@ -2606,6 +3072,131 @@ export class MockApiService extends ApiService {
         value: structuredClone(this.conversionJobs),
       },
     ])
+  }
+
+  private backupTarget(id: string): BackupTargetEntry | undefined {
+    return this.mockData('/backupTargets')[id]
+  }
+
+  private cifsTarget(id: string) {
+    const target = this.backupTarget(id)
+    if (target?.source.kind !== 'cifs') throw new Error('CIFS target not found')
+    return target
+  }
+
+  private mockSource(
+    source: Params<'volumes.create'>['source'],
+  ): T.SharedVolumeSource {
+    switch (source.kind) {
+      case 'cifs':
+        return {
+          kind: 'cifs',
+          hostname: source.hostname,
+          path: `/${source.path.replace(/^\/+/, '')}`,
+          username: source.username ?? '',
+        }
+      case 'disk':
+        return Mock.diskSource(source.logicalname, source.path)
+      default:
+        return source
+    }
+  }
+
+  private async publishBackup(
+    { targetId, serverId }: { targetId: string; serverId: string },
+    backup: T.StartOsRecoveryInfo,
+  ): Promise<void> {
+    await this.mockRevision<unknown>([
+      {
+        op: PatchOp.REPLACE,
+        path: `/backupTargets/${targetId}/startOs/${serverId}`,
+        value: structuredClone(backup),
+      },
+    ])
+  }
+
+  private queueSourceCheck(collection: SourceCollection, id: string) {
+    void pauseFor(1000).then(() => {
+      if (this.mockData(`/${collection}`)[id])
+        return this.checkSource(collection, id)
+    })
+  }
+
+  private async checkSource(
+    collection: SourceCollection,
+    id: string,
+  ): Promise<Result<'volumes.inspect'>> {
+    const volume: { source: T.SharedVolumeSource } | undefined = this.mockData(
+      `/${collection}`,
+    )[id]
+    if (!volume) throw new Error('Not found')
+    const prefix =
+      'The volume source is unavailable. Check the source, network and credentials.: '
+    const { source } = volume
+    const result: Omit<Result<'volumes.inspect'>, 'checkedAt'> = source.kind ===
+    'local'
+      ? { availability: 'available', available: 812400000000, error: null }
+      : source.kind === 'disk'
+        ? this.attachedDrives.has(source.logicalname)
+          ? {
+              availability: 'available',
+              available: this.attachedDrives.get(source.logicalname)!,
+              error: null,
+            }
+          : {
+              availability: 'unavailable',
+              available: null,
+              error: `${prefix}mount: special device ${source.logicalname} does not exist`,
+            }
+        : source.hostname.endsWith('.invalid')
+          ? {
+              availability: 'unavailable',
+              available: null,
+              error: `${prefix}mount error(113): could not connect to ${source.hostname}`,
+            }
+          : {
+              availability: 'available',
+              available: 3215000000000,
+              error: null,
+            }
+    const inspection = { ...result, checkedAt: new Date().toISOString() }
+    const partition =
+      collection === 'backupTargets' && source.kind === 'disk' && !source.path
+        ? Mock.Disks.flatMap(disk => disk.partitions).find(
+            partition =>
+              Mock.driveLink(partition.logicalname) === source.logicalname,
+          )
+        : undefined
+    await this.mockRevision<unknown>(
+      Object.entries({
+        ...inspection,
+        ...(partition && result.availability === 'available'
+          ? { startOs: partition.startOs, legacyBackup: partition.legacyBackup }
+          : {}),
+      }).map(([key, value]) => ({
+        op: PatchOp.REPLACE,
+        path: `/${collection}/${id}/${key}`,
+        value,
+      })),
+    )
+    return inspection
+  }
+
+  private async publishDisks(): Promise<void> {
+    await this.mockRevision<unknown>([
+      {
+        op: PatchOp.REPLACE,
+        path: '/disks',
+        value: structuredClone(Mock.Disks),
+      },
+    ])
+  }
+
+  private guid(): string {
+    return Array.from(
+      this.crypto.getRandomValues(new Uint8Array(32)),
+      value => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[value & 31],
+    ).join('')
   }
 
   private async simulateConversion(
@@ -2648,6 +3239,7 @@ export class MockApiService extends ApiService {
       phase.complete()
     }
     backup.formatStatus = 'current'
+    await this.publishBackup(params, backup)
     job.state = 'complete'
     progress.complete()
     job.progress = progress.snapshot()
@@ -2693,5 +3285,93 @@ export class MockApiService extends ApiService {
   private async getRegistryPackages(params: GetRegistryPackagesReq) {
     await pauseFor(2000)
     return Mock.RegistryPackages
+  }
+
+  private async setNut(params: Params<'server.set-nut'>): Promise<null> {
+    await pauseFor(2000)
+    const settings = params.config.settings ?? null
+    const config: T.NutConfig = {
+      enabled: params.config.enabled ?? false,
+      settings: !settings
+        ? null
+        : settings.mode === 'client'
+          ? { ...settings, port: settings.port ?? 3493 }
+          : {
+              ...settings,
+              device: {
+                ...settings.device,
+                vendorId: settings.device.vendorId ?? null,
+                productId: settings.device.productId ?? null,
+                serial: settings.device.serial ?? null,
+                bus: settings.device.bus ?? null,
+                busPort: settings.device.busPort ?? null,
+                vendor: settings.device.vendor ?? null,
+                product: settings.device.product ?? null,
+              },
+              listenAll: settings.listenAll ?? false,
+              remoteUsername: settings.remoteUsername ?? null,
+              remotePassword: settings.remotePassword ?? null,
+            },
+    }
+    mockPatchData.serverInfo.nut = config
+    this.mockRevision([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/nut',
+        value: config,
+      },
+    ])
+    return null
+  }
+
+  private async getNutStatus(params: {}): Promise<T.NutStatus> {
+    await pauseFor(1000)
+    const settings: T.NutSettings | null = this.mockData(
+      '/serverInfo/nut/settings',
+    )
+    const host = settings?.mode === 'client' ? settings.host : 'localhost'
+    const port = settings?.mode === 'client' ? settings.port : 3493
+    return {
+      target: `${settings?.mode === 'client' ? settings.upsName : 'startos'}@${host.includes(':') && !host.startsWith('[') ? `[${host}]` : host}:${port}`,
+      monitoringError: null,
+      variables: {
+        'battery.charge': '96',
+        'battery.charge.low': '10',
+        'battery.charge.warning': '20',
+        'battery.mfr.date': '2023/04/11',
+        'battery.runtime': '4280',
+        'battery.runtime.low': '300',
+        'battery.type': 'PbAc',
+        'battery.voltage': '13.5',
+        'battery.voltage.nominal': '12',
+        'device.mfr': 'Start9 Mock UPS',
+        'device.model': 'NUT Simulator',
+        'device.serial': 'MOCK-UPS-001',
+        'device.type': 'ups',
+        'driver.name': 'usbhid-ups',
+        'driver.parameter.pollinterval': '15',
+        'driver.parameter.port': 'auto',
+        'driver.version': '2.8.1',
+        'driver.version.data': 'CyberPower HID 0.8',
+        'input.transfer.high': '139',
+        'input.transfer.low': '88',
+        'input.voltage': '120.1',
+        'input.voltage.nominal': '120',
+        'output.voltage': '120.0',
+        'ups.beeper.status': 'enabled',
+        'ups.delay.shutdown': '20',
+        'ups.load': '18',
+        'ups.mfr': 'Start9 Mock UPS',
+        'ups.model': 'NUT Simulator',
+        'ups.productid': '0501',
+        'ups.realpower.nominal': '900',
+        'ups.serial': 'MOCK-UPS-001',
+        'ups.status': 'OL CHRG',
+        'ups.test.result': 'No test initiated',
+        'ups.timer.shutdown': '-1',
+        'ups.timer.start': '-1',
+        'ups.vendorid': '0764',
+      },
+    }
   }
 }

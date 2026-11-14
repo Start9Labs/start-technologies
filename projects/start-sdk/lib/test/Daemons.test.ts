@@ -23,6 +23,7 @@ const fakeEffects = (): T.Effects =>
     child: () => fakeEffects(),
     isInContext: true,
     onLeaveContext: () => {},
+    getSharedVolumes: async () => [],
     subcontainer: {
       // never invoked in these tests — laziness means createFs is deferred
       createFs: async () => ['', ''] as any,

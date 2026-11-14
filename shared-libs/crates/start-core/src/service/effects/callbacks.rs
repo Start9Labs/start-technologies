@@ -34,13 +34,23 @@ use crate::{GatewayId, HostId, PackageId, ServiceInterfaceId};
 /// A new subscription is created if a handler is registered again.
 pub struct DbWatchedCallbacks<K: Ord> {
     label: &'static str,
+    arguments: fn(Value) -> Vector<Value>,
     inner: SyncMutex<BTreeMap<K, (NonDetachingJoinHandle<()>, Vec<CallbackHandler>)>>,
 }
 
 impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
     pub fn new(label: &'static str) -> Self {
+        Self::with_arguments(label, |value| vector![value])
+    }
+
+    pub fn invalidation(label: &'static str) -> Self {
+        Self::with_arguments(label, |_| vector![])
+    }
+
+    fn with_arguments(label: &'static str, arguments: fn(Value) -> Vector<Value>) -> Self {
         Self {
             label,
+            arguments,
             inner: SyncMutex::new(BTreeMap::new()),
         }
     }
@@ -49,6 +59,17 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
         self: &Arc<Self>,
         key: K,
         watch: TypedDbWatch<T>,
+        handler: CallbackHandler,
+    ) {
+        self.add_filtered(key, watch, |_| true, handler)
+    }
+
+    /// Fires on the first change the filter accepts.
+    pub fn add_filtered<T: Send + 'static>(
+        self: &Arc<Self>,
+        key: K,
+        watch: TypedDbWatch<T>,
+        mut relevant: impl FnMut(&Value) -> bool + Send + 'static,
         handler: CallbackHandler,
     ) {
         self.inner.mutate(|map| {
@@ -60,16 +81,20 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                     (
                         tokio::spawn(async move {
                             let mut watch = watch.untyped();
-                            if watch.changed().await.is_ok() {
-                                if let Some(cbs) = this.inner.mutate(|map| {
-                                    map.remove(&k).and_then(CallbackHandlers::detach_watcher)
-                                }) {
-                                    let value = watch.peek_and_mark_seen().unwrap_or_default();
-                                    if let Err(e) = cbs.call(vector![value]).await {
+                            while watch.changed().await.is_ok() {
+                                let value = watch.peek_and_mark_seen().unwrap_or_default();
+                                if !relevant(&value) {
+                                    continue;
+                                }
+                                if let Some(cbs) =
+                                    this.remove(&k).and_then(CallbackHandlers::detach_watcher)
+                                {
+                                    if let Err(e) = cbs.call((this.arguments)(value)).await {
                                         tracing::error!("Error in {label} callback: {e}");
                                         tracing::debug!("{e:?}");
                                     }
                                 }
+                                break;
                             }
                         })
                         .into(),
@@ -79,6 +104,10 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                 .1
                 .push(handler);
         })
+    }
+
+    fn remove(&self, key: &K) -> Option<(NonDetachingJoinHandle<()>, Vec<CallbackHandler>)> {
+        self.inner.mutate(|map| map.remove(key))
     }
 
     pub fn gc(&self) {
@@ -91,6 +120,22 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalidation_callbacks_do_not_disclose_the_watched_value() {
+        let callbacks = DbWatchedCallbacks::<()>::invalidation("volumes");
+        assert!((callbacks.arguments)(Value::from("private catalog")).is_empty());
+        let callbacks = DbWatchedCallbacks::<()>::new("existing reader");
+        assert_eq!(
+            (callbacks.arguments)(Value::from("value")),
+            vector![Value::from("value")]
+        );
+    }
+}
+
 pub struct ServiceCallbacks {
     inner: SyncMutex<ServiceCallbackMap>,
     get_host_info: Arc<DbWatchedCallbacks<(PackageId, HostId)>>,
@@ -99,6 +144,7 @@ pub struct ServiceCallbacks {
     list_service_interfaces: Arc<DbWatchedCallbacks<PackageId>>,
     get_system_smtp: Arc<DbWatchedCallbacks<()>>,
     get_service_manifest: Arc<DbWatchedCallbacks<PackageId>>,
+    get_shared_volumes: Arc<DbWatchedCallbacks<PackageId>>,
 }
 
 impl Default for ServiceCallbacks {
@@ -111,6 +157,7 @@ impl Default for ServiceCallbacks {
             list_service_interfaces: Arc::new(DbWatchedCallbacks::new("list_service_interfaces")),
             get_system_smtp: Arc::new(DbWatchedCallbacks::new("get_system_smtp")),
             get_service_manifest: Arc::new(DbWatchedCallbacks::new("get_service_manifest")),
+            get_shared_volumes: Arc::new(DbWatchedCallbacks::invalidation("get_shared_volumes")),
         }
     }
 }
@@ -147,6 +194,7 @@ impl ServiceCallbacks {
         self.list_service_interfaces.gc();
         self.get_system_smtp.gc();
         self.get_service_manifest.gc();
+        self.get_shared_volumes.gc();
     }
 
     pub(super) fn add_get_service_interface<T: Send + 'static>(
@@ -326,6 +374,25 @@ impl ServiceCallbacks {
                 .1
                 .push(handler);
         })
+    }
+
+    pub(super) fn add_get_shared_volumes<T: Send + 'static>(
+        &self,
+        package_id: PackageId,
+        watch: TypedDbWatch<T>,
+        relevant: impl FnMut(&Value) -> bool + Send + 'static,
+        handler: CallbackHandler,
+    ) {
+        self.get_shared_volumes
+            .add_filtered(package_id, watch, relevant, handler);
+    }
+
+    pub(crate) async fn invalidate_shared_volumes(&self, package: &PackageId) -> Result<(), Error> {
+        if let Some((watcher, handlers)) = self.get_shared_volumes.remove(package) {
+            drop(watcher);
+            CallbackHandlers(handlers).call(vector![]).await?;
+        }
+        Ok(())
     }
 
     pub(super) fn add_get_service_manifest(

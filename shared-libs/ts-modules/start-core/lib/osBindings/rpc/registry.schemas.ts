@@ -10,6 +10,39 @@ const literal_1 = /* @__PURE__ */ z.union([
   z.record(z.string(), z.string()),
 ])
 const literal_2 = /* @__PURE__ */ z.enum(['processor', 'display'])
+
+/**
+ * JSON Patch 'add' operation representation
+ */
+export const AddOperation: z.ZodObject<{
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.ZodString
+  /**
+   * Value to add to the target location.
+   */
+  value: z.ZodUnknown
+}> = /* @__PURE__ */ object({
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nwithin the target document where the operation is performed.',
+  }),
+  /**
+   * Value to add to the target location.
+   */
+  value: z.unknown().meta({
+    description: 'Value to add to the target location.',
+  }),
+}).meta({
+  id: 'AddOperation',
+  description: "JSON Patch 'add' operation representation",
+})
 export const AnySignature: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'AnySignature',
 })
@@ -53,6 +86,42 @@ export const ContactInfo: z.ZodUnion<
   .meta({
     id: 'ContactInfo',
   })
+
+/**
+ * JSON Patch 'copy' operation representation
+ */
+export const CopyOperation: z.ZodObject<{
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * to copy value from.
+   */
+  from: z.ZodString
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * to copy value from.
+   */
+  from: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nto copy value from.',
+  }),
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nwithin the target document where the operation is performed.',
+  }),
+}).meta({
+  id: 'CopyOperation',
+  description: "JSON Patch 'copy' operation representation",
+})
 export const CountEntry: z.ZodObject<{ label: z.ZodString; count: z.ZodInt }> =
   /* @__PURE__ */ object({ label: z.string(), count: z.int() }).meta({
     id: 'CountEntry',
@@ -353,6 +422,42 @@ export const MerkleArchiveCommitment: z.ZodIntersection<
   .meta({
     id: 'MerkleArchiveCommitment',
   })
+
+/**
+ * JSON Patch 'move' operation representation
+ */
+export const MoveOperation: z.ZodObject<{
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * to move value from.
+   */
+  from: z.ZodString
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * to move value from.
+   */
+  from: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nto move value from.',
+  }),
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nwithin the target document where the operation is performed.',
+  }),
+}).meta({
+  id: 'MoveOperation',
+  description: "JSON Patch 'move' operation representation",
+})
 export const PackageDetailLevel: z.ZodEnum<{
   none: 'none'
   short: 'short'
@@ -383,6 +488,9 @@ export const PreDownloadAlertWhen: z.ZodObject<{ sourceVersion: z.ZodString }> =
   /* @__PURE__ */ object({ sourceVersion: z.string() }).meta({
     id: 'PreDownloadAlertWhen',
   })
+export const ReaderParams: typeof empty = /* @__PURE__ */ empty.meta({
+  id: 'ReaderParams',
+})
 
 /**
  * A registry asset with a caller-selected commitment representation.
@@ -410,14 +518,103 @@ export const RemoveCategoryParams: z.ZodObject<{ id: z.ZodString }> =
   /* @__PURE__ */ object({ id: z.string() }).meta({
     id: 'RemoveCategoryParams',
   })
+
+/**
+ * JSON Patch 'remove' operation representation
+ */
+export const RemoveOperation: z.ZodObject<{
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nwithin the target document where the operation is performed.',
+  }),
+}).meta({
+  id: 'RemoveOperation',
+  description: "JSON Patch 'remove' operation representation",
+})
 export const RemoveVersionParams: z.ZodObject<{ version: z.ZodString }> =
   /* @__PURE__ */ object({ version: z.string() }).meta({
     id: 'RemoveVersionParams',
   })
+
+/**
+ * JSON Patch 'replace' operation representation
+ */
+export const ReplaceOperation: z.ZodObject<{
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.ZodString
+  /**
+   * Value to replace with.
+   */
+  value: z.ZodUnknown
+}> = /* @__PURE__ */ object({
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nwithin the target document where the operation is performed.',
+  }),
+  /**
+   * Value to replace with.
+   */
+  value: z.unknown().meta({
+    description: 'Value to replace with.',
+  }),
+}).meta({
+  id: 'ReplaceOperation',
+  description: "JSON Patch 'replace' operation representation",
+})
 export const SetNameParams: z.ZodObject<{ name: z.ZodString }> =
   /* @__PURE__ */ object({ name: z.string() }).meta({
     id: 'SetNameParams',
   })
+
+/**
+ * JSON Patch 'test' operation representation
+ */
+export const TestOperation: z.ZodObject<{
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.ZodString
+  /**
+   * Value to test against.
+   */
+  value: z.ZodUnknown
+}> = /* @__PURE__ */ object({
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nwithin the target document where the operation is performed.',
+  }),
+  /**
+   * Value to test against.
+   */
+  value: z.unknown().meta({
+    description: 'Value to test against.',
+  }),
+}).meta({
+  id: 'TestOperation',
+  description: "JSON Patch 'test' operation representation",
+})
 export const UsersResponse: z.ZodObject<{
   uniqueServers: z.ZodInt
   totalCheckins: z.ZodInt
@@ -690,36 +887,51 @@ export const EditSignerParams: z.ZodObject<{
 }).meta({
   id: 'EditSignerParams',
 })
-export const GetPackageParams: z.ZodObject<{
-  id: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PackageId>>,
-    z.ZodNullable<typeof PackageId>
-  >
-  targetVersion: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sourceVersion: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Version>>,
-    z.ZodNullable<typeof Version>
-  >
-  otherVersions: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PackageDetailLevel>>,
-    z.ZodNullable<typeof PackageDetailLevel>
-  >
-  allRevisions: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-}> = /* @__PURE__ */ object({
-  id: wire(PackageId.nullable().optional(), PackageId.nullable()),
-  targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
-  sourceVersion: wire(Version.nullable().optional(), Version.nullable()),
-  otherVersions: wire(
-    PackageDetailLevel.nullable().optional(),
-    PackageDetailLevel.nullable(),
-  ),
-  allRevisions: wire(z.boolean().optional(), z.boolean()),
-}).meta({
-  id: 'GetPackageParams',
-})
+export const GetPackageAccessParams: z.ZodObject<{ id: typeof PackageId }> =
+  /* @__PURE__ */ object({ id: PackageId }).meta({
+    id: 'GetPackageAccessParams',
+  })
+export const GetPackageParams: z.ZodIntersection<
+  z.ZodObject<{
+    id: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof PackageId>>,
+      z.ZodNullable<typeof PackageId>
+    >
+    targetVersion: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+    sourceVersion: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof Version>>,
+      z.ZodNullable<typeof Version>
+    >
+    otherVersions: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof PackageDetailLevel>>,
+      z.ZodNullable<typeof PackageDetailLevel>
+    >
+    allRevisions: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  }>,
+  typeof ReaderParams
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      id: wire(PackageId.nullable().optional(), PackageId.nullable()),
+      targetVersion: wire(
+        z.string().nullable().optional(),
+        z.string().nullable(),
+      ),
+      sourceVersion: wire(Version.nullable().optional(), Version.nullable()),
+      otherVersions: wire(
+        PackageDetailLevel.nullable().optional(),
+        PackageDetailLevel.nullable(),
+      ),
+      allRevisions: wire(z.boolean().optional(), z.boolean()),
+    }),
+    ReaderParams,
+  )
+  .meta({
+    id: 'GetPackageParams',
+  })
 export const HardwareRequirements: z.ZodObject<{
   device: z.ZodCodec<
     z.ZodOptional<z.ZodArray<typeof DeviceFilter>>,
@@ -743,8 +955,12 @@ export const HardwareRequirements: z.ZodObject<{
 }).meta({
   id: 'HardwareRequirements',
 })
-export const ListPackageSignersParams: z.ZodObject<{ id: typeof PackageId }> =
-  /* @__PURE__ */ object({ id: PackageId }).meta({
+export const ListPackageSignersParams: z.ZodIntersection<
+  z.ZodObject<{ id: typeof PackageId }>,
+  typeof ReaderParams
+> = /* @__PURE__ */ z
+  .intersection(object({ id: PackageId }), ReaderParams)
+  .meta({
     id: 'ListPackageSignersParams',
   })
 export const MetricsSummary: z.ZodObject<{
@@ -814,6 +1030,18 @@ export const OsVersionInfo: z.ZodObject<{
 }).meta({
   id: 'OsVersionInfo',
 })
+export const PackageAccessControl: z.ZodObject<{
+  private: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  readers: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof Guid>>,
+    z.ZodArray<typeof Guid>
+  >
+}> = /* @__PURE__ */ object({
+  private: wire(z.boolean().optional(), z.boolean()),
+  readers: wire(z.array(Guid).optional(), z.array(Guid)),
+}).meta({
+  id: 'PackageAccessControl',
+})
 
 /**
  * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
@@ -837,6 +1065,146 @@ export const PackageInfoShort: z.ZodObject<{
 }> = /* @__PURE__ */ object({ releaseNotes: LocaleString }).meta({
   id: 'PackageInfoShort',
 })
+export const PackageReaderParams: z.ZodObject<{
+  id: typeof PackageId
+  signer: typeof Guid
+}> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
+  id: 'PackageReaderParams',
+})
+
+/**
+ * JSON Patch single patch operation
+ */
+export const PatchOperation: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * 'add' operation
+         */
+        op: z.ZodLiteral<'add'>
+      }>,
+      typeof AddOperation
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * 'remove' operation
+         */
+        op: z.ZodLiteral<'remove'>
+      }>,
+      typeof RemoveOperation
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * 'replace' operation
+         */
+        op: z.ZodLiteral<'replace'>
+      }>,
+      typeof ReplaceOperation
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * 'move' operation
+         */
+        op: z.ZodLiteral<'move'>
+      }>,
+      typeof MoveOperation
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * 'copy' operation
+         */
+        op: z.ZodLiteral<'copy'>
+      }>,
+      typeof CopyOperation
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * 'test' operation
+         */
+        op: z.ZodLiteral<'test'>
+      }>,
+      typeof TestOperation
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(
+      object({
+        /**
+         * 'add' operation
+         */
+        op: z.literal('add').meta({
+          description: "'add' operation",
+        }),
+      }),
+      AddOperation,
+    ),
+    z.intersection(
+      object({
+        /**
+         * 'remove' operation
+         */
+        op: z.literal('remove').meta({
+          description: "'remove' operation",
+        }),
+      }),
+      RemoveOperation,
+    ),
+    z.intersection(
+      object({
+        /**
+         * 'replace' operation
+         */
+        op: z.literal('replace').meta({
+          description: "'replace' operation",
+        }),
+      }),
+      ReplaceOperation,
+    ),
+    z.intersection(
+      object({
+        /**
+         * 'move' operation
+         */
+        op: z.literal('move').meta({
+          description: "'move' operation",
+        }),
+      }),
+      MoveOperation,
+    ),
+    z.intersection(
+      object({
+        /**
+         * 'copy' operation
+         */
+        op: z.literal('copy').meta({
+          description: "'copy' operation",
+        }),
+      }),
+      CopyOperation,
+    ),
+    z.intersection(
+      object({
+        /**
+         * 'test' operation
+         */
+        op: z.literal('test').meta({
+          description: "'test' operation",
+        }),
+      }),
+      TestOperation,
+    ),
+  ])
+  .meta({
+    id: 'PatchOperation',
+    description: 'JSON Patch single patch operation',
+  })
 export const PreDownloadAlert: z.ZodObject<{
   message: typeof LocaleString
   when: typeof PreDownloadAlertWhen
@@ -906,6 +1274,12 @@ export const SetIconParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ icon: DataUrl.nullable() }).meta({
   id: 'SetIconParams',
 })
+export const SetPackagePrivateParams: z.ZodObject<{
+  id: typeof PackageId
+  private: z.ZodBoolean
+}> = /* @__PURE__ */ object({ id: PackageId, private: z.boolean() }).meta({
+  id: 'SetPackagePrivateParams',
+})
 export const SetTrustSignersParams: z.ZodObject<{
   signers: z.ZodArray<typeof Guid>
 }> = /* @__PURE__ */ object({ signers: z.array(Guid) }).meta({
@@ -954,6 +1328,41 @@ export const SignerInfo: z.ZodObject<{
 }).meta({
   id: 'SignerInfo',
 })
+export const SubscribeIndexParams: z.ZodIntersection<
+  z.ZodObject<{
+    pointer: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+    /**
+     * Client StartOS version. Omission preserves the canonical index format.
+     */
+    osVersion: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+  }>,
+  typeof ReaderParams
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+      /**
+       * Client StartOS version. Omission preserves the canonical index format.
+       */
+      osVersion: wire(
+        z.string().nullable().optional(),
+        z.string().nullable(),
+      ).meta({
+        description:
+          'Client StartOS version. Omission preserves the canonical index format.',
+      }),
+    }),
+    ReaderParams,
+  )
+  .meta({
+    id: 'SubscribeIndexParams',
+  })
 export const SubscribeRes: z.ZodObject<{
   dump: typeof Dump
   guid: typeof Guid
@@ -1010,6 +1419,15 @@ export const OsVersionInfoMap: z.ZodRecord<z.ZodString, typeof OsVersionInfo> =
   /* @__PURE__ */ z.record(z.string(), OsVersionInfo).meta({
     id: 'OsVersionInfoMap',
   })
+export const PackageAccess: z.ZodObject<{
+  private: z.ZodBoolean
+  readers: z.ZodRecord<z.ZodString, typeof SignerInfo>
+}> = /* @__PURE__ */ object({
+  private: z.boolean(),
+  readers: z.record(z.string(), SignerInfo),
+}).meta({
+  id: 'PackageAccess',
+})
 export const PackageMetadata: z.ZodObject<{
   title: z.ZodString
   description: typeof Description
@@ -1094,6 +1512,16 @@ export const PackageMetadata: z.ZodObject<{
 }).meta({
   id: 'PackageMetadata',
 })
+
+/**
+ * Representation of JSON Patch (list of patch operations)
+ */
+export const Patch: z.ZodArray<typeof PatchOperation> = /* @__PURE__ */ z
+  .array(PatchOperation)
+  .meta({
+    id: 'Patch',
+    description: 'Representation of JSON Patch (list of patch operations)',
+  })
 export const RegistryInfo: z.ZodObject<{
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1142,6 +1570,26 @@ export const RegistryInfo: z.ZodObject<{
   }),
 }).meta({
   id: 'RegistryInfo',
+})
+
+/**
+ * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
+ */
+export const SubscribeResult: z.ZodUnion<
+  readonly [typeof SubscribeRes, typeof Dump]
+> = /* @__PURE__ */ z.union([SubscribeRes, Dump]).meta({
+  id: 'SubscribeResult',
+  description:
+    'Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.',
+})
+
+/**
+ * Database-generated patches contain only add, remove and replace operations.
+ */
+export const DiffPatch: typeof Patch = /* @__PURE__ */ Patch.meta({
+  id: 'DiffPatch',
+  description:
+    'Database-generated patches contain only add, remove and replace operations.',
 })
 export const OsIndex: z.ZodObject<{ versions: typeof OsVersionInfoMap }> =
   /* @__PURE__ */ object({ versions: OsVersionInfoMap }).meta({
@@ -1208,17 +1656,29 @@ export const GetPackageResponseFull: z.ZodObject<{
 }).meta({
   id: 'GetPackageResponseFull',
 })
-export const PackageInfo: z.ZodObject<{
-  authorized: z.ZodRecord<z.ZodString, z.ZodString>
-  versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
-  categories: z.ZodArray<z.ZodString>
-}> = /* @__PURE__ */ object({
-  authorized: z.record(z.string(), z.string()),
-  versions: z.record(z.string(), PackageVersionInfo),
-  categories: z.array(z.string()),
-}).meta({
-  id: 'PackageInfo',
-})
+export const PackageInfo: z.ZodIntersection<
+  z.ZodObject<{
+    authorized: z.ZodRecord<z.ZodString, z.ZodString>
+    versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
+    categories: z.ZodArray<z.ZodString>
+  }>,
+  typeof PackageAccessControl
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      authorized: z.record(z.string(), z.string()),
+      versions: z.record(z.string(), PackageVersionInfo),
+      categories: z.array(z.string()),
+    }),
+    PackageAccessControl,
+  )
+  .meta({
+    id: 'PackageInfo',
+  })
+export const Revision: z.ZodObject<{ id: z.ZodInt; patch: typeof DiffPatch }> =
+  /* @__PURE__ */ object({ id: z.int(), patch: DiffPatch }).meta({
+    id: 'Revision',
+  })
 export const GetPackageResult: z.ZodUnion<
   readonly [
     typeof GetPackageResponseFull,
@@ -1288,6 +1748,8 @@ export const Api = {
         add: {
           _PARAMS: /* @__PURE__ */ AddAdminParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1303,10 +1765,14 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.record(z.string(), SignerInfo),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         remove: {
           _PARAMS: /* @__PURE__ */ RemoveAdminParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         signer: {
           _PARAMS: /* @__PURE__ */ empty,
@@ -1314,10 +1780,14 @@ export const Api = {
             add: {
               _PARAMS: /* @__PURE__ */ AddSignerParams,
               _RETURN: /* @__PURE__ */ Guid,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             edit: {
               _PARAMS: /* @__PURE__ */ EditSignerParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1333,10 +1803,14 @@ export const Api = {
                 empty,
               ),
               _RETURN: /* @__PURE__ */ z.record(z.string(), SignerInfo),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             remove: {
               _PARAMS: /* @__PURE__ */ RemoveSignerParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -1348,14 +1822,20 @@ export const Api = {
         apply: {
           _PARAMS: /* @__PURE__ */ ApplyWithPathParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         dump: {
           _PARAMS: /* @__PURE__ */ DumpParams,
           _RETURN: /* @__PURE__ */ Dump,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         subscribe: {
-          _PARAMS: /* @__PURE__ */ DumpParams,
-          _RETURN: /* @__PURE__ */ SubscribeRes,
+          _PARAMS: /* @__PURE__ */ SubscribeIndexParams,
+          _RETURN: /* @__PURE__ */ SubscribeResult,
+          _ITEM: /* @__PURE__ */ Revision,
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -1367,9 +1847,11 @@ export const Api = {
           }),
           empty,
         ),
-        empty,
+        ReaderParams,
       ),
       _RETURN: /* @__PURE__ */ FullIndex,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     info: {
       _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1379,6 +1861,8 @@ export const Api = {
         empty,
       ),
       _RETURN: /* @__PURE__ */ RegistryInfo,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
       _CHILDREN: {
         'set-description': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1394,6 +1878,8 @@ export const Api = {
             SetDescriptionParams,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-icon': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1409,6 +1895,8 @@ export const Api = {
             SetIconParams,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-name': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1424,6 +1912,8 @@ export const Api = {
             SetNameParams,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-trust-signers': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1439,6 +1929,8 @@ export const Api = {
             SetTrustSignersParams,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -1459,6 +1951,8 @@ export const Api = {
             GetDownloadsParams,
           ),
           _RETURN: /* @__PURE__ */ DownloadsResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         summary: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1474,6 +1968,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ MetricsSummary,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         users: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1489,6 +1985,8 @@ export const Api = {
             GetUsersParams,
           ),
           _RETURN: /* @__PURE__ */ UsersResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -1504,14 +2002,20 @@ export const Api = {
                 img: {
                   _PARAMS: /* @__PURE__ */ AddAssetParams,
                   _RETURN: /* @__PURE__ */ z.null(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
                 iso: {
                   _PARAMS: /* @__PURE__ */ AddAssetParams,
                   _RETURN: /* @__PURE__ */ z.null(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
                 squashfs: {
                   _PARAMS: /* @__PURE__ */ AddAssetParams,
                   _RETURN: /* @__PURE__ */ z.null(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
               },
             },
@@ -1521,14 +2025,20 @@ export const Api = {
                 img: {
                   _PARAMS: /* @__PURE__ */ GetOsAssetParams,
                   _RETURN: /* @__PURE__ */ RegistryAsset(Blake3Commitment),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
                 iso: {
                   _PARAMS: /* @__PURE__ */ GetOsAssetParams,
                   _RETURN: /* @__PURE__ */ RegistryAsset(Blake3Commitment),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
                 squashfs: {
                   _PARAMS: /* @__PURE__ */ GetOsAssetParams,
                   _RETURN: /* @__PURE__ */ RegistryAsset(Blake3Commitment),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
               },
             },
@@ -1538,14 +2048,20 @@ export const Api = {
                 img: {
                   _PARAMS: /* @__PURE__ */ RemoveAssetParams,
                   _RETURN: /* @__PURE__ */ z.boolean(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
                 iso: {
                   _PARAMS: /* @__PURE__ */ RemoveAssetParams,
                   _RETURN: /* @__PURE__ */ z.boolean(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
                 squashfs: {
                   _PARAMS: /* @__PURE__ */ RemoveAssetParams,
                   _RETURN: /* @__PURE__ */ z.boolean(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
               },
             },
@@ -1555,14 +2071,20 @@ export const Api = {
                 img: {
                   _PARAMS: /* @__PURE__ */ SignAssetParams,
                   _RETURN: /* @__PURE__ */ z.null(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
                 iso: {
                   _PARAMS: /* @__PURE__ */ SignAssetParams,
                   _RETURN: /* @__PURE__ */ z.null(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
                 squashfs: {
                   _PARAMS: /* @__PURE__ */ SignAssetParams,
                   _RETURN: /* @__PURE__ */ z.null(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
               },
             },
@@ -1582,6 +2104,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ OsIndex,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         version: {
           _PARAMS: /* @__PURE__ */ empty,
@@ -1589,6 +2113,8 @@ export const Api = {
             add: {
               _PARAMS: /* @__PURE__ */ AddVersionParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             get: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1604,10 +2130,14 @@ export const Api = {
                 GetOsVersionParams,
               ),
               _RETURN: /* @__PURE__ */ OsVersionInfoMap,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             remove: {
               _PARAMS: /* @__PURE__ */ RemoveVersionParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             signer: {
               _PARAMS: /* @__PURE__ */ empty,
@@ -1615,6 +2145,8 @@ export const Api = {
                 add: {
                   _PARAMS: /* @__PURE__ */ VersionSignerParams,
                   _RETURN: /* @__PURE__ */ z.null(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
                 list: {
                   _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1630,10 +2162,14 @@ export const Api = {
                     ListVersionSignersParams,
                   ),
                   _RETURN: /* @__PURE__ */ z.record(z.string(), SignerInfo),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
                 remove: {
                   _PARAMS: /* @__PURE__ */ VersionSignerParams,
                   _RETURN: /* @__PURE__ */ z.null(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
                 },
               },
             },
@@ -1644,13 +2180,57 @@ export const Api = {
     package: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        access: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            'add-reader': {
+              _PARAMS: /* @__PURE__ */ PackageReaderParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            get: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                GetPackageAccessParams,
+              ),
+              _RETURN: /* @__PURE__ */ PackageAccess,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            'remove-reader': {
+              _PARAMS: /* @__PURE__ */ PackageReaderParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            'set-private': {
+              _PARAMS: /* @__PURE__ */ SetPackagePrivateParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+          },
+        },
         add: {
           _PARAMS: /* @__PURE__ */ AddPackageParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'add-mirror': {
           _PARAMS: /* @__PURE__ */ AddMirrorParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         category: {
           _PARAMS: /* @__PURE__ */ empty,
@@ -1658,10 +2238,14 @@ export const Api = {
             add: {
               _PARAMS: /* @__PURE__ */ AddCategoryParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             'add-package': {
               _PARAMS: /* @__PURE__ */ AddPackageToCategoryParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1677,14 +2261,20 @@ export const Api = {
                 empty,
               ),
               _RETURN: /* @__PURE__ */ z.record(z.string(), Category),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             remove: {
               _PARAMS: /* @__PURE__ */ RemoveCategoryParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             'remove-package': {
               _PARAMS: /* @__PURE__ */ RemovePackageFromCategoryParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -1702,6 +2292,8 @@ export const Api = {
             GetPackageParams,
           ),
           _RETURN: /* @__PURE__ */ GetPackageResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         index: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1714,21 +2306,29 @@ export const Api = {
               }),
               empty,
             ),
-            empty,
+            ReaderParams,
           ),
           _RETURN: /* @__PURE__ */ PackageIndex,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         remove: {
           _PARAMS: /* @__PURE__ */ RemovePackageParams,
           _RETURN: /* @__PURE__ */ z.boolean(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'remove-mirror': {
           _PARAMS: /* @__PURE__ */ RemoveMirrorParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         sign: {
           _PARAMS: /* @__PURE__ */ SignPackageParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         signer: {
           _PARAMS: /* @__PURE__ */ empty,
@@ -1736,6 +2336,8 @@ export const Api = {
             add: {
               _PARAMS: /* @__PURE__ */ AddPackageSignerParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1754,10 +2356,14 @@ export const Api = {
                 z.string(),
                 z.tuple([SignerInfo, z.string()]),
               ),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             remove: {
               _PARAMS: /* @__PURE__ */ RemovePackageSignerParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
