@@ -118,19 +118,15 @@ export class GatewayComponent {
       ) ?? false,
   )
 
-  readonly header = computed<Array<i18nKey | null>>(() =>
-    this.showCert()
-      ? [
-          null,
-          'Access',
-          'Type',
-          'Transport',
-          'Certificate Authority',
-          'URL',
-          null,
-        ]
-      : [null, 'Access', 'Type', 'Transport', 'URL', null],
-  )
+  readonly header = computed<Array<i18nKey | null>>(() => [
+    null,
+    'Access',
+    'Type',
+    ...(this.showCert() ? ['Certificate Authority' as const] : []),
+    'Transport',
+    'URL',
+    null,
+  ])
 
   readonly count = computed(() => this.gatewayGroup().addresses[0]?.count ?? 1)
 

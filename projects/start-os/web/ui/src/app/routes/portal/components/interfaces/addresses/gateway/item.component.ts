@@ -13,7 +13,6 @@ import { DomainHealthService } from './domain-health.service'
   selector: 'tr[address]',
   host: {
     '[class._disabled]': '!address().enabled',
-    '[class._no-cert]': '!showCert()',
   },
   template: `
     @if (address(); as address) {
@@ -82,7 +81,6 @@ import { DomainHealthService } from './domain-health.service'
           {{ address.type }}
         </span>
       </td>
-      <td class="transport">{{ transportLabel(address.transport) }}</td>
       @if (showCert()) {
         <td class="cert-cell">
           <div class="cert">
@@ -104,6 +102,7 @@ import { DomainHealthService } from './domain-health.service'
           </div>
         </td>
       }
+      <td class="transport">{{ transportLabel(address.transport) }}</td>
       <td class="url-cell">
         <div class="url">
           @if (address.masked && currentlyMasked()) {
@@ -242,24 +241,14 @@ import { DomainHealthService } from './domain-health.service'
         padding-inline: 0.5rem;
       }
 
-      .transport {
-        grid-area: 2 / 1 / 2 / 3;
-      }
-
-      .cert-cell {
-        grid-area: 3 / 1 / 3 / 3;
-
-        .cert-icon {
-          display: none;
-        }
-      }
-
+      .cert-cell,
+      .transport,
       .url-cell {
-        grid-area: 4 / 1 / 4 / 3;
+        grid-column: 1 / 3;
       }
 
-      &._no-cert .url-cell {
-        grid-area: 3 / 1 / 3 / 3;
+      .cert-icon {
+        display: none;
       }
 
       td:last-child {
