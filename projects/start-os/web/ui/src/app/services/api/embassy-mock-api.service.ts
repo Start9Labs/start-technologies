@@ -328,6 +328,8 @@ export class MockApiService extends ApiService {
                 ]),
                 guaWan: [],
                 lanEnabled: [],
+                enabledNames: [],
+                selected: [],
               },
         },
       })
@@ -2723,6 +2725,18 @@ export class MockApiService extends ApiService {
       h.public && (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6')
 
     const current = this.mockData(basePath) as T.DerivedAddressInfo
+    if (current.selected != null) {
+      const matches = (address: T.HostnameInfo) =>
+        address.hostname === h.hostname &&
+        address.port === h.port &&
+        address.ssl === h.ssl
+      const selected = current.selected.filter(address => !matches(address))
+      if (enabled) selected.push(...current.available.filter(matches))
+      current.selected = selected
+      this.mockRevision([
+        { op: PatchOp.ADD, path: `${basePath}/selected`, value: selected },
+      ])
+    }
 
     if (isPublicIp) {
       if (h.port === null) return
@@ -2751,6 +2765,7 @@ export class MockApiService extends ApiService {
           ([dHost, dPort]) => !(dHost === h.hostname && dPort === port),
         )
       const disabled = without(current.disabled)
+      const enabledNames = without(current.enabledNames)
       let lanEnabled = without(current.lanEnabled)
 
       if (!enabled) {
@@ -2773,12 +2788,20 @@ export class MockApiService extends ApiService {
         }
       } else if (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6') {
         lanEnabled.push([h.hostname, port])
+      } else {
+        enabledNames.push([h.hostname, port])
       }
 
+      current.enabledNames = enabledNames
       current.disabled = disabled
       current.lanEnabled = lanEnabled
       this.mockRevision([
         { op: PatchOp.REPLACE, path: `${basePath}/disabled`, value: disabled },
+        {
+          op: PatchOp.ADD,
+          path: `${basePath}/enabledNames`,
+          value: enabledNames,
+        },
         {
           op: PatchOp.REPLACE,
           path: `${basePath}/lanEnabled`,
@@ -2788,9 +2811,6 @@ export class MockApiService extends ApiService {
     }
   }
 
-  // Mirrors the backend set_gua_wan: update the gua_wan set, carry the row's
-  // on/off state into `enabled`, and re-project `public` onto the available
-  // entry (what update_addresses does server-side).
   private mockSetGuaWan(
     basePath: string,
     h: T.HostnameInfoInput,
@@ -2798,6 +2818,7 @@ export class MockApiService extends ApiService {
   ): void {
     if (h.metadata.kind !== 'ipv6' || h.port === null) return
 
+    const gateway = h.metadata.gateway
     const key = `[${h.hostname}]:${h.port}`
     const current = this.mockData(basePath) as T.DerivedAddressInfo
     const guaWan = current.guaWan.filter(k => k !== key)
@@ -2823,6 +2844,35 @@ export class MockApiService extends ApiService {
       { op: PatchOp.ADD, path: `${basePath}/enabled`, value: enabled },
       { op: PatchOp.ADD, path: `${basePath}/available`, value: available },
     ]
+    if (current.selected != null) {
+      const selected = current.selected.filter(
+        address => address.hostname !== h.hostname || address.port !== h.port,
+      )
+      const lanOn =
+        current.lanEnabled.some(
+          ([hostname, port]) => hostname === h.hostname && port === h.port,
+        ) ||
+        selected.some(
+          address =>
+            address.metadata.kind === 'ipv4' &&
+            !address.public &&
+            address.metadata.gateway === gateway &&
+            address.port === h.port,
+        )
+      if (wan || lanOn)
+        selected.push(
+          ...available.filter(
+            address =>
+              address.hostname === h.hostname && address.port === h.port,
+          ),
+        )
+      current.selected = selected
+      patch.push({
+        op: PatchOp.ADD,
+        path: `${basePath}/selected`,
+        value: selected,
+      })
+    }
     this.mockRevision(patch)
   }
 

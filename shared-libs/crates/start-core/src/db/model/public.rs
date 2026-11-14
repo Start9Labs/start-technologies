@@ -83,7 +83,7 @@ impl Public {
                                 BindInfo {
                                     enabled: false,
                                     options: BindOptions {
-                                        public_only: false,
+                                        default_off: false,
                                         preferred_external_port: 80,
                                         add_ssl: Some(AddSslOptions {
                                             preferred_external_port: SERVER_UI_SSL_PORT,

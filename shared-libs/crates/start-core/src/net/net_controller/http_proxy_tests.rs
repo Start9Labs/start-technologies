@@ -4,7 +4,7 @@ use crate::net::host::binding::{ProxyOptions, Security};
 
 fn options() -> BindOptions {
     BindOptions {
-        public_only: false,
+        default_off: false,
         preferred_external_port: 8080,
         add_ssl: Some(AddSslOptions {
             preferred_external_port: 8443,

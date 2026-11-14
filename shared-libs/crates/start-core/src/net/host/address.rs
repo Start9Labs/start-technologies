@@ -267,7 +267,7 @@ fn reconcile_public_domain_on_sibling(
         }
     }
     for port in ssl_ports {
-        addresses.disabled.insert((fqdn.clone(), port));
+        addresses.set_name_enabled((fqdn.clone(), port), false);
     }
     for port in nonssl_ports {
         let wan_enabled = addresses.available.iter().any(|b| {
@@ -310,13 +310,18 @@ fn reconcile_private_domain_on_sibling(
         }
     }
     for port in nonssl_ports {
-        let lan_disabled = addresses.available.iter().any(|b| {
-            !b.ssl
-                && b.port == Some(port)
-                && matches!(&b.metadata, HostnameMetadata::Ipv4 { gateway: gw2 } if !b.public && gw2 == gateway)
-                && addresses.disabled.contains(&(b.hostname.clone(), port))
-        });
-        set_nonssl_lan_group(addresses, gateway, port, !lan_disabled);
+        let mut ips = addresses.available.iter().filter(|address| {
+            !address.ssl && address.port == Some(port)
+                && matches!(&address.metadata, HostnameMetadata::Ipv4 { gateway: gw } if !address.public && gw == gateway)
+        }).peekable();
+        let enabled = (!addresses.default_off || ips.peek().is_some())
+            && ips.all(|address| {
+                !addresses
+                    .disabled
+                    .contains(&(address.hostname.clone(), port))
+                    && addresses.lan_ip_on(address)
+            });
+        set_nonssl_lan_group(addresses, gateway, port, enabled);
     }
 }
 
@@ -769,7 +774,7 @@ mod test {
         BindInfo::new(
             &mut AvailablePorts::new(),
             BindOptions {
-                public_only: false,
+                default_off: false,
                 preferred_external_port: port,
                 add_ssl: ssl_port.map(|preferred_external_port| AddSslOptions {
                     preferred_external_port,
@@ -914,17 +919,11 @@ mod test {
             .as_binding_ranges_mut()
             .mutate(|ranges| {
                 let target = &mut ranges.get_mut(&21115).unwrap().addresses;
-                target.enabled.clear();
-                target
-                    .disabled
-                    .insert((InternedString::intern(FQDN), 42000));
+                set_nonssl_wan_group(target, &gw("wg1"), 42000, false);
+                target.refresh_selected();
                 let sibling = &mut ranges.get_mut(&21118).unwrap().addresses;
-                sibling
-                    .enabled
-                    .insert("64.23.194.12:43000".parse().unwrap());
-                sibling
-                    .disabled
-                    .remove(&(InternedString::intern(FQDN), 43000));
+                set_nonssl_wan_group(sibling, &gw("wg1"), 43000, true);
+                sibling.refresh_selected();
                 Ok(())
             })
             .unwrap();

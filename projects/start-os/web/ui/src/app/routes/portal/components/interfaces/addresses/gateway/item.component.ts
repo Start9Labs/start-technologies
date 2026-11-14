@@ -29,7 +29,7 @@ import { DomainHealthService } from './domain-health.service'
         />
       </td>
       <td class="access">
-        @if (address.gua && !value()?.publicOnly) {
+        @if (address.gua) {
           <button
             tuiButton
             tuiDropdown

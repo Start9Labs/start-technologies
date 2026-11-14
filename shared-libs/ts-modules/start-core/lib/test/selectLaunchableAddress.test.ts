@@ -43,12 +43,14 @@ function hostWith(
     disabled: options.disabled ?? [],
     guaWan: [],
     lanEnabled: [],
+    enabledNames: [],
+    defaultOff: false,
     available,
   }
   const bindInfo = {
     enabled: true,
     options: {
-      publicOnly: false,
+      defaultOff: false,
       preferredExternalPort: 80,
       addSsl: null,
       secure: null,

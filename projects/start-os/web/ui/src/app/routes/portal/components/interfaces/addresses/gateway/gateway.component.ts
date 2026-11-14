@@ -129,10 +129,6 @@ export class GatewayComponent {
   readonly count = computed(() => this.gatewayGroup().addresses[0]?.count ?? 1)
 
   openDomainTypePicker() {
-    if (this.value()?.publicOnly) {
-      void this.addPublicDomain()
-      return
-    }
     this.dialog
       .openComponent<DomainType>(DOMAIN_TYPE_PICKER, {
         label: 'Add Domain',

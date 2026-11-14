@@ -195,7 +195,12 @@ mod tests {
         use crate::net::forward::AvailablePorts;
         use crate::net::host::Host;
 
-        for disable_downloads in [false, true] {
+        for (disable_downloads, hostname, public) in [
+            (false, "203.0.113.45", true),
+            (true, "203.0.113.45", true),
+            (false, "192.168.1.2", false),
+            (true, "192.168.1.2", false),
+        ] {
             let gateway = NetworkInterfaceInfo {
                 gateway_type: GatewayType::InboundOutbound,
                 ip_info: Some(Arc::new(IpInfo {
@@ -235,10 +240,15 @@ mod tests {
                 .de()?;
             assert!(!binding.enabled);
             assert!(binding.addresses.enabled().is_empty());
-            assert_eq!(binding.addresses.available.len(), 1);
-            let address = binding.addresses.available.first().unwrap().clone();
-            assert_eq!(address.hostname, InternedString::intern("203.0.113.45"));
-            assert!(address.public);
+            assert_eq!(binding.addresses.available.len(), 2);
+            let address = binding
+                .addresses
+                .available
+                .iter()
+                .find(|address| address.hostname == InternedString::intern(hostname))
+                .unwrap()
+                .clone();
+            assert_eq!(address.public, public);
             update_preferences(
                 &db,
                 SetPreferencesParams {

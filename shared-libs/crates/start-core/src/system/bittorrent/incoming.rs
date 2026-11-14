@@ -71,7 +71,7 @@ pub(super) fn configure_in(
     let configured = binding.as_ref().is_some_and(|binding| {
         matches!(binding.options.proxy, Some(ProxyOptions::Tcp))
             && binding.options.secure.is_some_and(|security| !security.ssl)
-            && binding.options.public_only
+            && binding.options.default_off
     });
     if !configured {
         clear_selections(db)?;
@@ -120,11 +120,11 @@ fn binding_options(existing: Option<BindOptions>) -> BindOptions {
         add_ssl: None,
         secure: None,
         proxy: None,
-        public_only: true,
+        default_off: true,
     });
     options.proxy = Some(ProxyOptions::Tcp);
     options.secure = Some(Security { ssl: false });
-    options.public_only = true;
+    options.default_off = true;
     options
 }
 
@@ -141,17 +141,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn existing_binding_keeps_its_port_and_switches_to_public_only_tcp() {
+    fn existing_binding_keeps_its_port_and_switches_to_default_off_tcp() {
         let mut previous = binding_options(None);
         previous.preferred_external_port = 45678;
         previous.proxy = None;
         previous.secure = None;
-        previous.public_only = false;
+        previous.default_off = false;
         let options = binding_options(Some(previous));
         assert_eq!(options.preferred_external_port, 45678);
         assert_eq!(options.proxy, Some(ProxyOptions::Tcp));
         assert!(options.secure.is_some_and(|security| !security.ssl));
-        assert!(options.public_only);
+        assert!(options.default_off);
     }
 
     #[test]

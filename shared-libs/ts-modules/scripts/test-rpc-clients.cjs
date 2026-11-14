@@ -601,8 +601,14 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
   )
   assert.equal(binding().enabled, false)
   assert.equal(binding().addresses.enabled.length, 0)
-  assert.ok(binding().addresses.available.every(address => address.public))
-  for (const off of [{ seeding: false }, { downloads: false }]) {
+  assert.ok(binding().addresses.available.some(address => !address.public))
+  assert.equal(binding().addresses.selected.length, 0)
+  for (const [off, hostname] of [
+    [{ seeding: false }, '203.0.113.45'],
+    [{ downloads: false }, '203.0.113.45'],
+    [{ seeding: false }, '192.168.1.2'],
+    [{ downloads: false }, '192.168.1.2'],
+  ]) {
     assert.deepEqual(
       {
         ...(await client.rpc.server.bittorrent.setPreferences({
@@ -618,18 +624,28 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
       package: 'start-os',
       host: 'admin',
       internalPort: port,
-      address: binding().addresses.available[0],
+      address: binding().addresses.available.find(
+        address => address.hostname === hostname,
+      ),
       enabled: true,
     })
-    assert.equal(binding().addresses.enabled.length, 1)
+    assert.ok(binding().addresses.selected.length > 0)
+    assert.ok(
+      binding().addresses.selected.every(
+        address => address.hostname === hostname,
+      ),
+    )
     await client.rpc.server.bittorrent.setPreferences(off)
     assert.equal(binding().enabled, false)
     assert.equal(binding().addresses.enabled.length, 0)
+    assert.equal(binding().addresses.selected.length, 0)
+    assert.equal(binding().addresses.enabledNames.length, 0)
     await client.rpc.server.bittorrent.setPreferences({
       downloads: true,
       seeding: true,
     })
     assert.equal(binding().addresses.enabled.length, 0)
+    assert.equal(binding().addresses.selected.length, 0)
   }
   subscription.unsubscribe()
 })

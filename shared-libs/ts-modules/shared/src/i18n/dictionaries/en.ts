@@ -1084,7 +1084,7 @@ export const ENGLISH: Record<string, number> = {
   'BitTorrent is disabled in the server configuration.': 1282,
   'Sharing settings could not be loaded.': 1283,
   'Active BitTorrent downloads can upload even when sharing stored software is off.': 1284,
-  'Enable the public addresses peers should use. Address Requirements checks reachability; port forwarding uses PCP/UPnP when supported by the gateway.': 1285,
+  'Enable the addresses peers should use. Address Requirements checks reachability; port forwarding uses PCP/UPnP when supported by the gateway.': 1285,
   'Download using BitTorrent': 1286,
   'Prefer peers for software downloads, with HTTP fallback.': 1287,
   'Seeding can use outgoing connections without a forwarded port.': 1288,

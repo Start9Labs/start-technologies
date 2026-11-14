@@ -1083,7 +1083,7 @@ export default {
   1282: 'BitTorrent está deshabilitado en la configuración del servidor.',
   1283: 'No se pudieron cargar los ajustes para compartir.',
   1284: 'Las descargas BitTorrent activas pueden subir datos aunque no se comparta software almacenado.',
-  1285: 'Habilita las direcciones públicas que deben usar los pares. Requisitos de dirección comprueba la accesibilidad; el reenvío de puertos usa PCP/UPnP si la puerta de enlace lo admite.',
+  1285: 'Habilita las direcciones que deben usar los pares. Requisitos de dirección comprueba la accesibilidad; el reenvío de puertos usa PCP/UPnP si la puerta de enlace lo admite.',
   1286: 'Descargar mediante BitTorrent',
   1287: 'Preferir pares para descargar software, con HTTP como alternativa.',
   1288: 'La siembra puede usar conexiones salientes sin reenviar un puerto.',

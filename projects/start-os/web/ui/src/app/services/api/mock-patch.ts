@@ -373,6 +373,8 @@ export const mockPatchData: DataModel = {
               disabled: [],
               guaWan: [],
               lanEnabled: [],
+              enabledNames: [],
+              defaultOff: false,
               available: [
                 {
                   ssl: true,
@@ -453,7 +455,7 @@ export const mockPatchData: DataModel = {
               ],
             },
             options: {
-              publicOnly: false,
+              defaultOff: false,
               preferredExternalPort: 80,
               addSsl: {
                 upstreamCertValidation: null,
@@ -950,6 +952,8 @@ export const mockPatchData: DataModel = {
                 disabled: [],
                 guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
                 lanEnabled: [],
+                enabledNames: [],
+                defaultOff: false,
                 available: [
                   {
                     ssl: true,
@@ -1051,7 +1055,7 @@ export const mockPatchData: DataModel = {
                 ],
               },
               options: {
-                publicOnly: false,
+                defaultOff: false,
                 preferredExternalPort: 42443,
                 addSsl: {
                   upstreamCertValidation: null,
@@ -1127,6 +1131,8 @@ export const mockPatchData: DataModel = {
               addresses: {
                 enabled: ['203.0.113.45:49152'],
                 disabled: [],
+                enabledNames: [],
+                defaultOff: false,
                 guaWan: [],
                 lanEnabled: [],
                 available: [
@@ -1228,6 +1234,8 @@ export const mockPatchData: DataModel = {
                 disabled: [],
                 guaWan: [],
                 lanEnabled: [],
+                enabledNames: [],
+                defaultOff: false,
                 available: [
                   {
                     ssl: false,
@@ -1265,7 +1273,7 @@ export const mockPatchData: DataModel = {
               options: {
                 addSsl: null,
                 preferredExternalPort: 48332,
-                publicOnly: false,
+                defaultOff: false,
                 secure: { ssl: false },
                 proxy: null,
               },
@@ -1308,12 +1316,14 @@ export const mockPatchData: DataModel = {
                 disabled: [],
                 guaWan: [],
                 lanEnabled: [],
+                enabledNames: [],
+                defaultOff: false,
                 available: [],
               },
               options: {
                 addSsl: null,
                 preferredExternalPort: 48333,
-                publicOnly: false,
+                defaultOff: false,
                 secure: { ssl: false },
                 proxy: null,
               },

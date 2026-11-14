@@ -84,7 +84,8 @@ fn reassign<Kind: HostApiKind>(
         let host = host?;
         let previous = host.as_bindings().de()?;
         host.update_addresses(&hostname, &gateways, &ports)?;
-        host.as_bindings_mut().mutate(|bindings| {
+        let preferences_changed = host.as_bindings_mut().mutate(|bindings| {
+            let mut changed = false;
             for (port, binding) in bindings.iter_mut() {
                 let Some(previous) = previous.get(port) else {
                     continue;
@@ -100,19 +101,18 @@ fn reassign<Kind: HostApiKind>(
                         continue;
                     };
                     if let (Some(old_port), Some(new_port)) = (old.port, new.port) {
-                        let old_key = (old.hostname.clone(), old_port);
-                        if previous.addresses.disabled.contains(&old_key) {
-                            binding.addresses.disabled.remove(&old_key);
-                            binding
-                                .addresses
-                                .disabled
-                                .insert((new.hostname.clone(), new_port));
-                        }
+                        changed |= binding.addresses.rekey_name(
+                            (old.hostname.clone(), old_port),
+                            (new.hostname.clone(), new_port),
+                        );
                     }
                 }
             }
-            Ok(())
+            Ok(changed)
         })?;
+        if preferences_changed {
+            host.update_addresses(&hostname, &gateways, &ports)?;
+        }
     }
     db.as_private_mut().as_available_ports_mut().ser(&ports)
 }
@@ -152,16 +152,7 @@ fn move_assigned_port(
     }
     ports.free([old]);
     *assigned = Some(external_port);
-    let disabled_plugins = binding
-        .addresses
-        .available
-        .iter()
-        .filter(|address| matches!(address.metadata, HostnameMetadata::Plugin { .. }))
-        .map(super::override_key)
-        .filter(|key| binding.addresses.disabled.contains(key))
-        .collect::<Vec<_>>();
     binding.addresses.rekey_port(old, external_port);
-    binding.addresses.disabled.extend(disabled_plugins);
     binding.addresses.available = std::mem::take(&mut binding.addresses.available)
         .into_iter()
         .map(|mut address| {

@@ -1083,7 +1083,7 @@ export default {
   1282: 'BitTorrent est désactivé dans la configuration du serveur.',
   1283: 'Impossible de charger les paramètres de partage.',
   1284: 'Les téléchargements BitTorrent en cours peuvent envoyer des données même si le partage des logiciels stockés est désactivé.',
-  1285: 'Activez les adresses publiques à utiliser par les pairs. Conditions d’adresse vérifie l’accessibilité ; la redirection de ports utilise PCP/UPnP si la passerelle le permet.',
+  1285: 'Activez les adresses à utiliser par les pairs. Conditions d’adresse vérifie l’accessibilité ; la redirection de ports utilise PCP/UPnP si la passerelle le permet.',
   1286: 'Télécharger avec BitTorrent',
   1287: 'Privilégier les pairs pour les téléchargements, avec repli HTTP.',
   1288: 'Le partage peut utiliser des connexions sortantes sans port redirigé.',

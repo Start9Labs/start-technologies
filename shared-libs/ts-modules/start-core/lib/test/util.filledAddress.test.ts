@@ -7,7 +7,7 @@ const host = (fingerprint: string): Host => ({
     5223: {
       enabled: true,
       options: {
-        publicOnly: false,
+        defaultOff: false,
         preferredExternalPort: 5223,
         addSsl: null,
         secure: null,
@@ -17,6 +17,8 @@ const host = (fingerprint: string): Host => ({
       addresses: {
         enabled: [],
         disabled: [],
+        enabledNames: [],
+        defaultOff: false,
         guaWan: [],
         lanEnabled: [],
         available: [
@@ -138,6 +140,45 @@ describe('LAN address overrides', () => {
     return { h, addresses }
   }
   const hostnames = (h: Host) => addressOf(h).hostnames.map(a => a.hostname)
+
+  test('an empty server projection keeps default-off candidates disabled', () => {
+    const { h, addresses } = lan(eth, wifi)
+    addresses.defaultOff = true
+    addresses.selected = []
+    expect(hostnames(h)).toEqual([])
+  })
+
+  test('server selections carry named consent without reinterpreting overrides', () => {
+    const { h, addresses } = lan(eth)
+    const mdns = addresses.available.find(a => a.metadata.kind === 'mdns')!
+    addresses.defaultOff = true
+    addresses.enabledNames = [[mdns.hostname, 5223]]
+    addresses.disabled = [[eth.hostname, 5223]]
+    addresses.selected = [mdns]
+    expect(
+      isAddressEnabled(addresses, { ...mdns, metadata: { ...mdns.metadata } }),
+    ).toBe(true)
+    expect(isAddressEnabled(addresses, eth)).toBe(false)
+    expect(hostnames(h)).toEqual(['relay.local'])
+  })
+
+  test('projected selections distinguish identical IPs on different gateways', () => {
+    const { addresses } = lan()
+    const mdns: HostnameInfo = {
+      ...addresses.available.find(a => a.metadata.kind === 'mdns')!,
+      metadata: { kind: 'mdns', gateways: ['eth0'] },
+    }
+    const other: HostnameInfo = {
+      ...eth,
+      metadata: { kind: 'ipv4', gateway: 'wlan0' },
+    }
+    addresses.defaultOff = true
+    addresses.enabledNames = [[mdns.hostname, 5223]]
+    addresses.available = [mdns, eth, other]
+    addresses.selected = [mdns, eth]
+    expect(isAddressEnabled(addresses, eth)).toBe(true)
+    expect(isAddressEnabled(addresses, other)).toBe(false)
+  })
 
   test('an mDNS address stays while its gateways hold no LAN IP', () => {
     expect(hostnames(lan().h)).toContain('relay.local')

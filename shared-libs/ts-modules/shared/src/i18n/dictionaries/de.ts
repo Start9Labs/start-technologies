@@ -1083,7 +1083,7 @@ export default {
   1282: 'BitTorrent ist in der Serverkonfiguration deaktiviert.',
   1283: 'Die Freigabeeinstellungen konnten nicht geladen werden.',
   1284: 'Aktive BitTorrent-Downloads können auch dann Daten hochladen, wenn die Freigabe gespeicherter Software ausgeschaltet ist.',
-  1285: 'Aktivieren Sie die öffentlichen Adressen für Peers. Adressanforderungen prüfen die Erreichbarkeit; Portweiterleitung nutzt PCP/UPnP, sofern das Gateway dies unterstützt.',
+  1285: 'Aktivieren Sie die Adressen für Peers. Adressanforderungen prüfen die Erreichbarkeit; Portweiterleitung nutzt PCP/UPnP, sofern das Gateway dies unterstützt.',
   1286: 'Mit BitTorrent herunterladen',
   1287: 'Software bevorzugt von Peers herunterladen, mit HTTP als Rückfalloption.',
   1288: 'Seeding kann ausgehende Verbindungen ohne weitergeleiteten Port nutzen.',

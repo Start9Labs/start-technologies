@@ -380,8 +380,8 @@ impl Model<Host> {
                 }
             }
             let mut addresses = bind.as_addresses().de()?;
-            addresses.set_available(available, opt.public_only);
-            if opt.public_only && !bind.as_enabled().de()? {
+            addresses.set_available(available, opt.default_off);
+            if opt.default_off && !bind.as_enabled().de()? {
                 addresses.disable_all();
             }
             bind.as_addresses_mut().ser(&addresses)?;
@@ -472,10 +472,10 @@ impl Model<Host> {
                 });
             }
 
-            range
-                .as_addresses_mut()
-                .as_available_mut()
-                .ser(&available)?;
+            range.as_addresses_mut().mutate(|addresses| {
+                addresses.set_available(available, false);
+                Ok(())
+            })?;
         }
 
         // compute port forwards from enabled public addresses. A non-exported
@@ -1049,7 +1049,7 @@ mod tests {
 
     fn plain(preferred_external_port: u16) -> BindOptions {
         BindOptions {
-            public_only: false,
+            default_off: false,
             preferred_external_port,
             add_ssl: None,
             secure: Some(crate::net::host::binding::Security { ssl: false }),
@@ -1057,7 +1057,7 @@ mod tests {
         }
     }
 
-    fn public_only_host() -> (
+    fn default_off_host() -> (
         Model<Host>,
         AvailablePorts,
         OrdMap<GatewayId, NetworkInterfaceInfo>,
@@ -1081,7 +1081,7 @@ mod tests {
             &mut ports,
             6881,
             BindOptions {
-                public_only: true,
+                default_off: true,
                 ..plain(6881)
             },
             true,
@@ -1101,8 +1101,8 @@ mod tests {
     }
 
     #[test]
-    fn public_only_addresses_start_off_without_lan_or_mdns_rows() {
-        let (host, _, _, _) = public_only_host();
+    fn default_off_addresses_offer_private_and_public_candidates_without_consent() {
+        let (host, _, _, _) = default_off_host();
         let binding = &host.de().unwrap().bindings[&6881];
         assert_eq!(
             binding
@@ -1111,28 +1111,35 @@ mod tests {
                 .iter()
                 .map(|address| address.hostname.as_ref())
                 .collect::<BTreeSet<_>>(),
-            ["198.51.100.2", "2001:db8::2", "peers.example.com"]
-                .into_iter()
-                .collect()
+            [
+                "192.168.1.2",
+                "198.51.100.2",
+                "2001:db8::2",
+                "fd00::2",
+                "fe80::2",
+                "peers.example.com"
+            ]
+            .into_iter()
+            .collect()
         );
         assert!(
             binding
                 .addresses
                 .available
                 .iter()
-                .all(|address| address.public)
+                .any(|address| !address.public)
         );
         assert!(binding.addresses.enabled().is_empty());
     }
 
     #[test]
-    fn public_only_rows_opt_in_through_native_dual_stack_domain_grouping() -> Result<(), Error> {
-        let (mut host, ports, gateways, server) = public_only_host();
+    fn default_off_rows_opt_in_through_native_dual_stack_domain_grouping() -> Result<(), Error> {
+        let (mut host, ports, gateways, server) = default_off_host();
         let address = host.de()?.bindings[&6881]
             .addresses
             .available
             .iter()
-            .find(|address| address.hostname == InternedString::intern("2001:db8::2"))
+            .find(|address| address.hostname == InternedString::intern("peers.example.com"))
             .unwrap()
             .clone();
         host.as_bindings_mut().mutate(|bindings| {
@@ -1144,6 +1151,9 @@ mod tests {
         host.update_addresses(&server, &gateways, &ports)?;
         let binding = &host.de()?.bindings[&6881];
         assert_eq!(binding.addresses.enabled().len(), 3);
+        let selected = binding.addresses.selected.as_ref().unwrap();
+        assert_eq!(selected.len(), 3);
+        assert!(selected.iter().all(|address| address.public));
         assert!(
             binding
                 .addresses
@@ -1155,8 +1165,8 @@ mod tests {
     }
 
     #[test]
-    fn public_only_ipv6_opt_in_remains_public_when_a_domain_is_added() -> Result<(), Error> {
-        let (mut host, ports, mut gateways, server) = public_only_host();
+    fn default_off_local_ipv6_opt_in_does_not_publish_a_new_domain() -> Result<(), Error> {
+        let (mut host, ports, mut gateways, server) = default_off_host();
         host.as_public_domains_mut()
             .remove(&InternedString::intern("peers.example.com"))?;
         Arc::make_mut(
@@ -1172,10 +1182,11 @@ mod tests {
         let address = host.de()?.bindings[&6881]
             .addresses
             .available
-            .first()
+            .iter()
+            .find(|address| address.hostname == InternedString::intern("2001:db8::2"))
             .unwrap()
             .clone();
-        assert_eq!(address.hostname, InternedString::intern("2001:db8::2"));
+        assert!(!address.public);
         host.as_bindings_mut().mutate(|bindings| {
             bindings
                 .get_mut(&6881)
@@ -1193,20 +1204,20 @@ mod tests {
         )?;
         host.update_addresses(&server, &gateways, &ports)?;
         let binding = &host.de()?.bindings[&6881];
-        assert_eq!(binding.addresses.enabled().len(), 2);
+        assert_eq!(binding.addresses.enabled().len(), 1);
         assert!(
             binding
                 .addresses
                 .enabled()
                 .iter()
-                .all(|address| address.public)
+                .all(|address| !address.public)
         );
         Ok(())
     }
 
     #[test]
-    fn cleared_public_only_rows_stay_off_after_reenabling_binding() -> Result<(), Error> {
-        let (mut host, ports, gateways, server) = public_only_host();
+    fn cleared_default_off_rows_stay_off_after_reenabling_binding() -> Result<(), Error> {
+        let (mut host, ports, gateways, server) = default_off_host();
         let address = host.de()?.bindings[&6881]
             .addresses
             .available

@@ -924,7 +924,7 @@ mod tests {
         BindInfo {
             enabled: true,
             options: BindOptions {
-                public_only: false,
+                default_off: false,
                 preferred_external_port: 80,
                 secure: None,
                 proxy: None,

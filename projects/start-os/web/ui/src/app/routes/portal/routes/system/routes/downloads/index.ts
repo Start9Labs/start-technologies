@@ -178,7 +178,7 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
         }
         <p class="g-secondary">
           {{
-            'Enable the public addresses peers should use. Address Requirements checks reachability; port forwarding uses PCP/UPnP when supported by the gateway.'
+            'Enable the addresses peers should use. Address Requirements checks reachability; port forwarding uses PCP/UPnP when supported by the gateway.'
               | i18n
           }}
         </p>

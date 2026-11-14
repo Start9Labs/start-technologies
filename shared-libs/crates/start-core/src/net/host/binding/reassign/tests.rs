@@ -14,7 +14,7 @@ use crate::{HostId, PackageId};
 
 fn options(port: u16, ssl: Option<u16>, own_tls: bool) -> BindOptions {
     BindOptions {
-        public_only: false,
+        default_off: false,
         preferred_external_port: port,
         add_ssl: ssl.map(|preferred_external_port| AddSslOptions {
             preferred_external_port,
@@ -259,53 +259,58 @@ fn ssl_reassignment_keeps_shared_domain_ports_and_preferences() {
 }
 
 #[test]
-fn moving_a_shared_listener_refreshes_sibling_domains_without_enabling_them() {
-    let mut ports = AvailablePorts::new();
-    let listener = binding(&mut ports, 8081, Some(8444));
-    let mut bind = binding(&mut ports, 8080, Some(8443));
-    bind.options
-        .add_ssl
-        .as_mut()
-        .unwrap()
-        .preferred_external_port = 8444;
-    bind.addresses.disabled.extend([
-        ("private.example".into(), 8444),
-        ("public.example".into(), 8444),
-    ]);
-    let mut host = host_with(bind);
-    host.bindings.insert(8001, listener);
-    host.private_domains.insert(
-        "private.example".into(),
-        ["eth0".parse().unwrap()].into_iter().collect(),
-    );
-    host.public_domains.insert(
-        "public.example".into(),
-        PublicDomainConfig {
-            gateway: "eth0".parse().unwrap(),
-            acme: None,
-        },
-    );
-    let mut db = database(host, Host::default(), ports);
+fn moving_a_shared_listener_preserves_sibling_domain_consent_and_projection() {
+    for consent in [false, true] {
+        let mut ports = AvailablePorts::new();
+        let listener = binding(&mut ports, 8081, Some(8444));
+        let mut bind = binding(&mut ports, 8080, Some(8443));
+        bind.options
+            .add_ssl
+            .as_mut()
+            .unwrap()
+            .preferred_external_port = 8444;
+        bind.options.default_off = true;
+        bind.addresses
+            .set_name_enabled(("private.example".into(), 8444), consent);
+        bind.addresses
+            .set_name_enabled(("public.example".into(), 8444), false);
+        let mut host = host_with(bind);
+        host.bindings.insert(8001, listener);
+        host.private_domains.insert(
+            "private.example".into(),
+            ["eth0".parse().unwrap()].into_iter().collect(),
+        );
+        host.public_domains.insert(
+            "public.example".into(),
+            PublicDomainConfig {
+                gateway: "eth0".parse().unwrap(),
+                acme: None,
+            },
+        );
+        let mut db = database(host, Host::default(), ports);
 
-    reassign::<ForPackage>(&mut db, &params(8001, 9443, true), &inheritance()).unwrap();
+        reassign::<ForPackage>(&mut db, &params(8001, 9443, true), &inheritance()).unwrap();
 
-    let host = package_host(&mut db).de().unwrap();
-    let addresses = &host.bindings[&8000].addresses;
-    for domain in ["private.example", "public.example"] {
-        let row = addresses
-            .available
-            .iter()
-            .find(|row| row.hostname == domain && row.ssl)
-            .unwrap();
-        assert_eq!(row.port, Some(8443));
-        assert!(!addresses.enabled().contains(row));
+        let host = package_host(&mut db).de().unwrap();
+        let addresses = &host.bindings[&8000].addresses;
+        for domain in ["private.example", "public.example"] {
+            let row = addresses
+                .available
+                .iter()
+                .find(|row| row.hostname == domain && row.ssl)
+                .unwrap();
+            assert_eq!(row.port, Some(8443));
+            let on = domain == "private.example" && consent;
+            assert_eq!(addresses.enabled().contains(row), on);
+            assert_eq!(addresses.selected.as_ref().unwrap().contains(row), on);
+        }
+        assert!(
+            !host
+                .port_forwards
+                .iter()
+                .any(|forward| forward.src.port() == 8444)
+        );
     }
-    assert!(
-        !host
-            .port_forwards
-            .iter()
-            .any(|forward| forward.src.port() == 8444)
-    );
 }
 
 #[test]

@@ -2178,6 +2178,13 @@ net.host.binding.address-ssl:
   fr_FR: "SSL"
   pl_PL: "SSL"
 
+net.host.binding.not-global-unicast:
+  en_US: "This address is not an IPv6 global-unicast address."
+  de_DE: "Diese Adresse ist keine globale IPv6-Unicast-Adresse."
+  es_ES: "Esta dirección no es una dirección IPv6 unicast global."
+  fr_FR: "Cette adresse n'est pas une adresse IPv6 unicast globale."
+  pl_PL: "Ten adres nie jest globalnym adresem IPv6 unicast."
+
 net.host.binding.reassign.no-assigned-port:
   en_US: "The binding has no assigned port of the selected type"
   de_DE: "Die Bindung hat keinen zugewiesenen Port des ausgewählten Typs"

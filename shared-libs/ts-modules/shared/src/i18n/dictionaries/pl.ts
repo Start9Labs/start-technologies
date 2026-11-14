@@ -1083,7 +1083,7 @@ export default {
   1282: 'BitTorrent jest wyłączony w konfiguracji serwera.',
   1283: 'Nie udało się wczytać ustawień udostępniania.',
   1284: 'Aktywne pobieranie BitTorrent może wysyłać dane również wtedy, gdy udostępnianie zapisanego oprogramowania jest wyłączone.',
-  1285: 'Włącz publiczne adresy używane przez peerów. Wymagania adresu sprawdzają osiągalność; przekierowanie portów używa PCP/UPnP, jeśli brama je obsługuje.',
+  1285: 'Włącz adresy używane przez peerów. Wymagania adresu sprawdzają osiągalność; przekierowanie portów używa PCP/UPnP, jeśli brama je obsługuje.',
   1286: 'Pobieraj przez BitTorrent',
   1287: 'Preferuj pobieranie oprogramowania od peerów, z HTTP jako alternatywą.',
   1288: 'Wysyłanie może używać połączeń wychodzących bez przekierowanego portu.',

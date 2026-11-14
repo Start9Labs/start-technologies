@@ -47,7 +47,7 @@ Sharing requires an exact byte match with the advertised torrent. Installation c
 
 Sharing adds only source-path, commitment and torrent-metadata records under `/media/startos/data/package-data/registry-torrents`. It creates no extra payload copies or extended retention: installation, uninstall and native image cleanup still control the software files. Disabling sharing keeps this ordinary file management unchanged.
 
-Uploads can use outgoing peer connections without an incoming port forward. To accept incoming peers, enable public addresses in the **Incoming peer addresses** table on the same page. These rows start off and require both downloads and sharing to be enabled. Disabling either switch clears and disables the rows; re-enabling the switches requires a fresh address opt-in. LAN/private addresses are excluded.
+Uploads can use outgoing peer connections without an incoming port forward. To accept incoming peers, select LAN/private or public addresses in the **Incoming peer addresses** table on the same page. These address groups start off and require both downloads and sharing to be enabled. Disabling either switch clears and disables the rows; re-enabling the switches requires a fresh address opt-in. Internal listen endpoints are not offered.
 
 StartOS manages the TCP listener, external port allocation and forwarding through its existing interface system. Open an address’s standard **Address Requirements** dialog to check reachability. Native forwarding uses PCP/UPnP where supported; a configured listener or mapping alone does not establish public reachability.
 

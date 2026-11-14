@@ -43,7 +43,7 @@ const host = (available: T.HostnameInfo[]): T.Host => ({
       enabled: true,
       options: {
         preferredExternalPort: 80,
-        publicOnly: false,
+        defaultOff: false,
         addSsl: null,
         secure: null,
         proxy: null,
@@ -54,6 +54,8 @@ const host = (available: T.HostnameInfo[]): T.Host => ({
         disabled: [],
         guaWan: [],
         lanEnabled: [],
+        enabledNames: [],
+        defaultOff: false,
         available,
       },
       interfaces: {

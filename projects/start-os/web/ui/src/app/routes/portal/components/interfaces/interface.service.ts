@@ -143,7 +143,7 @@ export class InterfaceService {
 
             return {
               id: iface.id,
-              publicOnly: false,
+              defaultOff: false,
               name: iface.name,
               description: iface.description,
               masked: false,
@@ -184,14 +184,14 @@ export class InterfaceService {
   ): MappedServiceInterface {
     const bindings = Object.values(host?.bindings ?? {})
     const binding = host?.bindings[iface.addressInfo.internalPort]
-    const publicOnly = binding?.options.publicOnly ?? false
+    const defaultOff = binding?.options.defaultOff ?? false
     return {
       ...iface,
-      publicOnly,
+      defaultOff,
       gatewayGroups: host ? this.getGatewayGroups(iface, host, gateways) : [],
       pluginGroups: host
         ? this.getPluginGroups(iface, host, allPackageData).filter(
-            group => !publicOnly || group.addresses.length > 0,
+            group => !defaultOff || group.addresses.length > 0,
           )
         : [],
       anyAddSsl: bindings.some(binding => !!binding.options.addSsl),
@@ -466,7 +466,7 @@ export type PluginAddressGroup = {
 }
 
 export type MappedServiceInterface = T.ServiceInterface & {
-  publicOnly: boolean
+  defaultOff: boolean
   gatewayGroups: GatewayAddressGroup[]
   pluginGroups: PluginAddressGroup[]
   // True when any binding on this interface's host adds SSL, not just this

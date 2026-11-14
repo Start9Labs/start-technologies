@@ -4190,9 +4190,9 @@
               "anyOf": [{ "$ref": "#/$defs/ProxyOptions" }, { "type": "null" }],
               "description": "Proxy protocol shared by every exposed leg of this binding."
             },
-            "publicOnly": {
+            "defaultOff": {
               "type": "boolean",
-              "description": "Offers public-address opt-ins; omits LAN/private address rows.\nInactive bindings clear their selections and reject address opt-ins."
+              "description": "New address groups require opt-in; existing selections persist.\nInactive bindings clear selections and reject opt-ins.\nInternal endpoints remain local and are omitted from opt-in candidates."
             }
           },
           "required": [
@@ -4200,7 +4200,7 @@
             "addSsl",
             "secure",
             "proxy",
-            "publicOnly"
+            "defaultOff"
           ],
           "additionalProperties": true
         },
@@ -4375,7 +4375,7 @@
             "enabled": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "User override: enable these addresses (only for public IP & port)"
+              "description": "Public IP opt-ins."
             },
             "disabled": {
               "type": "array",
@@ -4393,10 +4393,32 @@
                 "minItems": 2,
                 "maxItems": 2
               },
-              "description": "User override: disable these addresses (only for domains and private IP & port)"
+              "description": "Named-address and private-IP opt-outs."
+            },
+            "enabledNames": {
+              "description": "Named-address opt-ins retained across discovery changes.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                ],
+                "items": false,
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            "defaultOff": {
+              "description": "Binding policy projected for standalone address consumers.",
+              "type": "boolean"
             },
             "guaWan": {
-              "description": "User override: IPv6 global-unicast addresses opted into WAN exposure.\nProjected into `HostnameInfo.public` by `update_addresses`, so `public`\nstays the single source of truth for WAN classification.\nPublic-only bindings offer GUAs as public\ncandidates independently of this set; `enabled` still owns their opt-in.",
+              "description": "IPv6 global-unicast WAN opt-ins, projected into `HostnameInfo.public`.",
               "type": "array",
               "items": { "type": "string" }
             },
@@ -4421,12 +4443,24 @@
             "available": {
               "type": "array",
               "items": { "$ref": "#/$defs/HostnameInfo" },
-              "description": "COMPUTED: NetServiceData::update — all possible addresses for this binding"
+              "description": "Discovered address candidates."
+            },
+            "selected": {
+              "description": "Computed consent projection; absent on pre-projection servers.",
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/HostnameInfo" }
+                },
+                { "type": "null" }
+              ]
             }
           },
           "required": [
             "enabled",
             "disabled",
+            "enabledNames",
+            "defaultOff",
             "guaWan",
             "lanEnabled",
             "available"
@@ -10629,9 +10663,9 @@
               "anyOf": [{ "$ref": "#/$defs/ProxyOptions" }, { "type": "null" }],
               "description": "Proxy protocol shared by every exposed leg of this binding."
             },
-            "publicOnly": {
+            "defaultOff": {
               "type": "boolean",
-              "description": "Offers public-address opt-ins; omits LAN/private address rows.\nInactive bindings clear their selections and reject address opt-ins."
+              "description": "New address groups require opt-in; existing selections persist.\nInactive bindings clear selections and reject opt-ins.\nInternal endpoints remain local and are omitted from opt-in candidates."
             }
           },
           "required": [
@@ -10639,7 +10673,7 @@
             "addSsl",
             "secure",
             "proxy",
-            "publicOnly"
+            "defaultOff"
           ],
           "additionalProperties": true
         },
@@ -10814,7 +10848,7 @@
             "enabled": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "User override: enable these addresses (only for public IP & port)"
+              "description": "Public IP opt-ins."
             },
             "disabled": {
               "type": "array",
@@ -10832,10 +10866,32 @@
                 "minItems": 2,
                 "maxItems": 2
               },
-              "description": "User override: disable these addresses (only for domains and private IP & port)"
+              "description": "Named-address and private-IP opt-outs."
+            },
+            "enabledNames": {
+              "description": "Named-address opt-ins retained across discovery changes.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                ],
+                "items": false,
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            "defaultOff": {
+              "description": "Binding policy projected for standalone address consumers.",
+              "type": "boolean"
             },
             "guaWan": {
-              "description": "User override: IPv6 global-unicast addresses opted into WAN exposure.\nProjected into `HostnameInfo.public` by `update_addresses`, so `public`\nstays the single source of truth for WAN classification.\nPublic-only bindings offer GUAs as public\ncandidates independently of this set; `enabled` still owns their opt-in.",
+              "description": "IPv6 global-unicast WAN opt-ins, projected into `HostnameInfo.public`.",
               "type": "array",
               "items": { "type": "string" }
             },
@@ -10860,12 +10916,24 @@
             "available": {
               "type": "array",
               "items": { "$ref": "#/$defs/HostnameInfo" },
-              "description": "COMPUTED: NetServiceData::update — all possible addresses for this binding"
+              "description": "Discovered address candidates."
+            },
+            "selected": {
+              "description": "Computed consent projection; absent on pre-projection servers.",
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/HostnameInfo" }
+                },
+                { "type": "null" }
+              ]
             }
           },
           "required": [
             "enabled",
             "disabled",
+            "enabledNames",
+            "defaultOff",
             "guaWan",
             "lanEnabled",
             "available"

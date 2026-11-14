@@ -5289,19 +5289,26 @@ export const BitTorrentConfig: z.ZodObject<{
 })
 export const DerivedAddressInfo: z.ZodObject<{
   /**
-   * User override: enable these addresses (only for public IP & port)
+   * Public IP opt-ins.
    */
   enabled: z.ZodArray<z.ZodString>
   /**
-   * User override: disable these addresses (only for domains and private IP & port)
+   * Named-address and private-IP opt-outs.
    */
   disabled: z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt], null>>
   /**
-   * User override: IPv6 global-unicast addresses opted into WAN exposure.
-   * Projected into `HostnameInfo.public` by `update_addresses`, so `public`
-   * stays the single source of truth for WAN classification.
-   * Public-only bindings offer GUAs as public
-   * candidates independently of this set; `enabled` still owns their opt-in.
+   * Named-address opt-ins retained across discovery changes.
+   */
+  enabledNames: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt], null>>>,
+    z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt], null>>
+  >
+  /**
+   * Binding policy projected for standalone address consumers.
+   */
+  defaultOff: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  /**
+   * IPv6 global-unicast WAN opt-ins, projected into `HostnameInfo.public`.
    */
   guaWan: z.ZodCodec<
     z.ZodOptional<z.ZodArray<z.ZodString>>,
@@ -5315,34 +5322,47 @@ export const DerivedAddressInfo: z.ZodObject<{
     z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt], null>>
   >
   /**
-   * COMPUTED: NetServiceData::update — all possible addresses for this binding
+   * Discovered address candidates.
    */
   available: z.ZodArray<typeof HostnameInfo>
+  /**
+   * Computed consent projection; absent on pre-projection servers.
+   */
+  selected: z.ZodOptional<z.ZodNullable<z.ZodArray<typeof HostnameInfo>>>
 }> = /* @__PURE__ */ object({
   /**
-   * User override: enable these addresses (only for public IP & port)
+   * Public IP opt-ins.
    */
   enabled: z.array(z.string()).meta({
-    description:
-      'User override: enable these addresses (only for public IP & port)',
+    description: 'Public IP opt-ins.',
   }),
   /**
-   * User override: disable these addresses (only for domains and private IP & port)
+   * Named-address and private-IP opt-outs.
    */
   disabled: z.array(z.tuple([z.string(), z.int()])).meta({
-    description:
-      'User override: disable these addresses (only for domains and private IP & port)',
+    description: 'Named-address and private-IP opt-outs.',
   }),
   /**
-   * User override: IPv6 global-unicast addresses opted into WAN exposure.
-   * Projected into `HostnameInfo.public` by `update_addresses`, so `public`
-   * stays the single source of truth for WAN classification.
-   * Public-only bindings offer GUAs as public
-   * candidates independently of this set; `enabled` still owns their opt-in.
+   * Named-address opt-ins retained across discovery changes.
+   */
+  enabledNames: wire(
+    z.array(z.tuple([z.string(), z.int()])).optional(),
+    z.array(z.tuple([z.string(), z.int()])),
+  ).meta({
+    description: 'Named-address opt-ins retained across discovery changes.',
+  }),
+  /**
+   * Binding policy projected for standalone address consumers.
+   */
+  defaultOff: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Binding policy projected for standalone address consumers.',
+  }),
+  /**
+   * IPv6 global-unicast WAN opt-ins, projected into `HostnameInfo.public`.
    */
   guaWan: wire(z.array(z.string()).optional(), z.array(z.string())).meta({
     description:
-      'User override: IPv6 global-unicast addresses opted into WAN exposure.\nProjected into `HostnameInfo.public` by `update_addresses`, so `public`\nstays the single source of truth for WAN classification.\nPublic-only bindings offer GUAs as public\ncandidates independently of this set; `enabled` still owns their opt-in.',
+      'IPv6 global-unicast WAN opt-ins, projected into `HostnameInfo.public`.',
   }),
   /**
    * User override: enable these private IPs regardless of their mDNS address.
@@ -5355,11 +5375,17 @@ export const DerivedAddressInfo: z.ZodObject<{
       'User override: enable these private IPs regardless of their mDNS address.',
   }),
   /**
-   * COMPUTED: NetServiceData::update — all possible addresses for this binding
+   * Discovered address candidates.
    */
   available: z.array(HostnameInfo).meta({
+    description: 'Discovered address candidates.',
+  }),
+  /**
+   * Computed consent projection; absent on pre-projection servers.
+   */
+  selected: z.array(HostnameInfo).nullable().optional().meta({
     description:
-      'COMPUTED: NetServiceData::update — all possible addresses for this binding',
+      'Computed consent projection; absent on pre-projection servers.',
   }),
 }).meta({
   id: 'DerivedAddressInfo',
@@ -5549,31 +5575,39 @@ export const PackageInfo: z.ZodObject<{
 }).meta({
   id: 'PackageInfo',
 })
-export const CompatibleBindOptions: z.ZodObject<{
-  preferredExternalPort: z.ZodInt
-  addSsl: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>,
-    z.ZodNullable<typeof LegacyProxySslOptions>
-  >
-  secure: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Security>>,
-    z.ZodNullable<typeof Security>
-  >
-  proxy: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof ProxyOptions>>,
-    z.ZodNullable<typeof ProxyOptions>
-  >
-  publicOnly: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-}> = /* @__PURE__ */ object({
-  preferredExternalPort: z.int(),
-  addSsl: wire(
-    LegacyProxySslOptions.nullable().optional(),
-    LegacyProxySslOptions.nullable(),
-  ),
-  secure: wire(Security.nullable().optional(), Security.nullable()),
-  proxy: wire(ProxyOptions.nullable().optional(), ProxyOptions.nullable()),
-  publicOnly: wire(z.boolean().optional(), z.boolean()),
-}).meta({
+export const CompatibleBindOptions: z.ZodCodec<
+  z.ZodObject<{
+    preferredExternalPort: z.ZodInt
+    addSsl: z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>
+    secure: z.ZodOptional<z.ZodNullable<typeof Security>>
+    proxy: z.ZodOptional<z.ZodNullable<typeof ProxyOptions>>
+    defaultOff: z.ZodOptional<z.ZodBoolean>
+    publicOnly: z.ZodOptional<z.ZodBoolean>
+  }>,
+  z.ZodObject<{
+    preferredExternalPort: z.ZodInt
+    addSsl: z.ZodNullable<typeof LegacyProxySslOptions>
+    secure: z.ZodNullable<typeof Security>
+    proxy: z.ZodNullable<typeof ProxyOptions>
+    defaultOff: z.ZodBoolean
+  }>
+> = /* @__PURE__ */ wire(
+  object({
+    preferredExternalPort: z.int(),
+    addSsl: LegacyProxySslOptions.nullable().optional(),
+    secure: Security.nullable().optional(),
+    proxy: ProxyOptions.nullable().optional(),
+    defaultOff: z.boolean().optional(),
+    publicOnly: z.boolean().optional(),
+  }),
+  object({
+    preferredExternalPort: z.int(),
+    addSsl: LegacyProxySslOptions.nullable(),
+    secure: Security.nullable(),
+    proxy: ProxyOptions.nullable(),
+    defaultOff: z.boolean(),
+  }),
+).meta({
   id: 'CompatibleBindOptions',
 })
 export const GetPackageResult: z.ZodUnion<
@@ -5613,10 +5647,11 @@ export const BindOptions: z.ZodCodec<
      */
     proxy: z.ZodNullable<typeof ProxyOptions>
     /**
-     * Offers public-address opt-ins; omits LAN/private address rows.
-     * Inactive bindings clear their selections and reject address opt-ins.
+     * New address groups require opt-in; existing selections persist.
+     * Inactive bindings clear selections and reject opt-ins.
+     * Internal endpoints remain local and are omitted from opt-in candidates.
      */
-    publicOnly: z.ZodBoolean
+    defaultOff: z.ZodBoolean
   }>
 > = /* @__PURE__ */ wire(
   CompatibleBindOptions,
@@ -5632,12 +5667,13 @@ export const BindOptions: z.ZodCodec<
         'Proxy protocol shared by every exposed leg of this binding.',
     }),
     /**
-     * Offers public-address opt-ins; omits LAN/private address rows.
-     * Inactive bindings clear their selections and reject address opt-ins.
+     * New address groups require opt-in; existing selections persist.
+     * Inactive bindings clear selections and reject opt-ins.
+     * Internal endpoints remain local and are omitted from opt-in candidates.
      */
-    publicOnly: z.boolean().meta({
+    defaultOff: z.boolean().meta({
       description:
-        'Offers public-address opt-ins; omits LAN/private address rows.\nInactive bindings clear their selections and reject address opt-ins.',
+        'New address groups require opt-in; existing selections persist.\nInactive bindings clear selections and reject opt-ins.\nInternal endpoints remain local and are omitted from opt-in candidates.',
     }),
   }),
 ).meta({
