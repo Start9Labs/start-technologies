@@ -711,6 +711,11 @@ pub struct SetSubnetDnsParams {
     /// Up to 3 upstream servers (bare IP or `ip:port`); used when `mode` is `custom`.
     #[arg(long = "server", action = clap::ArgAction::Append, help = "help.arg.dns-server")]
     servers: Vec<String>,
+    /// Relay lookups from the asking device's address when every upstream is a
+    /// device on the subnet.
+    #[arg(long, help = "help.arg.dns-preserve-source")]
+    #[serde(default)]
+    preserve_source: bool,
 }
 
 rpc_toolkit::reflect_ts!(SetSubnetDnsParams);
@@ -735,6 +740,7 @@ pub async fn set_subnet_dns(
         mode,
         device_ip,
         servers,
+        preserve_source,
     }: SetSubnetDnsParams,
     SubnetParams { subnet }: SubnetParams,
 ) -> Result<(), Error> {
@@ -781,6 +787,9 @@ pub async fn set_subnet_dns(
                 }
             }
             subnet_model.as_dns_mut().ser(&dns)?;
+            subnet_model
+                .as_dns_preserve_source_mut()
+                .ser(&preserve_source)?;
             db.as_wg().de()
         })
         .await

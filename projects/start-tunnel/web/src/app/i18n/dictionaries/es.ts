@@ -132,6 +132,7 @@ const es: Record<number, string> = {
   127: 'Endpoint de WireGuard',
   128: 'Se usa por defecto el host de esta página. Usa una dirección IP o un nombre DNS accesible desde el dispositivo; el puerto de WireGuard no cambia.',
   129: 'Generar configuración',
+  130: 'Pasar las direcciones de los dispositivos al servidor DNS',
 }
 
 export default es

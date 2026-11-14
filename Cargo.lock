@@ -8543,7 +8543,7 @@ dependencies = [
 
 [[package]]
 name = "start-tunnel"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "include_dir",
  "mimalloc",
