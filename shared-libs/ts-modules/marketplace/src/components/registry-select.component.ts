@@ -27,6 +27,7 @@ import {
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreIconDirective } from './store-icon.directive'
 
+// Connection status stays outside the registry selector.
 @Component({
   selector: 'marketplace-registry-select',
   template: `
@@ -129,7 +130,6 @@ import { StoreIconDirective } from './store-icon.directive'
   styles: `
     :host {
       display: grid;
-      margin-block-end: 0.75rem;
 
       [tuiAvatar] {
         margin-inline-start: -0.375rem;

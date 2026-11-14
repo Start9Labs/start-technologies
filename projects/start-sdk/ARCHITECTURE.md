@@ -199,7 +199,7 @@ Utility modules including:
 
 ## SDK Layer (`projects/start-sdk/lib/`)
 
-The SDK layer provides the developer-facing API. It re-exports everything from `@start9labs/start-core` and adds higher-level abstractions.
+The SDK layer provides the developer-facing API. Its `lib/index.ts` re-exports selected `@start9labs/start-core` types and builders alongside higher-level abstractions.
 
 ### StartSdk Facade (`lib/StartSdk.ts`)
 
