@@ -38,6 +38,7 @@ pub fn version_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "edit",
             from_fn_async(edit_version)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.edit-os-version")
