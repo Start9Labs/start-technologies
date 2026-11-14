@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::{Ipv4Addr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -21,11 +21,13 @@ use crate::auth::AuthKeys;
 use crate::context::CliContext;
 use crate::db::model::public::NetworkInterfaceInfo;
 pub use crate::db::{
-    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes,
+    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes, SubscribeResult,
 };
+use crate::net::transport::Transport;
 use crate::prelude::*;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::tunnel::context::TunnelContext;
+use crate::tunnel::forward::address::{ForwardAddress, PinholeAddress};
 use crate::tunnel::migrations;
 use crate::tunnel::web::WebserverInfo;
 use crate::tunnel::wg::{WgServer, WgSubnetConfig};
@@ -35,6 +37,8 @@ use crate::util::serde::{HandlerExtSerde, apply_expr};
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct TunnelDatabase {
+    #[serde(default)]
+    pub server_identity_key: crate::sign::instance::StoredIdentityKey,
     #[serde(default)]
     #[visit(ts(skip))]
     pub migrations: BTreeSet<InternedString>,
@@ -100,13 +104,13 @@ impl Model<TunnelDatabase> {
                     PortForward::Sni { routes, fallback } => {
                         for (h, r) in routes.iter() {
                             if !keep_targets.contains(r.target.ip()) {
-                                dropped_sni.push((*k, h.clone(), r.target));
+                                dropped_sni.push((k.address, h.clone(), r.target));
                             }
                         }
                         routes.retain(|_, r| keep_targets.contains(r.target.ip()));
                         if let Some(f) = fallback {
                             if !keep_targets.contains(f.target.ip()) {
-                                dropped_fallbacks.push((*k, f.target));
+                                dropped_fallbacks.push((k.address, f.target));
                                 *fallback = None;
                             }
                         }
@@ -114,7 +118,7 @@ impl Model<TunnelDatabase> {
                     }
                 };
                 if keep {
-                    keep_sources.insert(*k);
+                    keep_sources.insert(k.clone());
                 }
                 keep
             }))
@@ -131,7 +135,7 @@ impl Model<TunnelDatabase> {
 /// the dataplane demux entries (SNI routes and hostname-less fallbacks) whose
 /// target is no longer a known client and so must be unregistered.
 pub struct GcForwards {
-    pub keep_sources: BTreeSet<SocketAddrV4>,
+    pub keep_sources: BTreeSet<ForwardAddress>,
     pub dropped_sni: Vec<(SocketAddrV4, String, SocketAddrV4)>,
     pub dropped_fallbacks: Vec<(SocketAddrV4, SocketAddrV4)>,
 }
@@ -215,6 +219,13 @@ pub struct DnsRecords(pub Vec<DnsRecordEntry>);
 rpc_toolkit::reflect_ts!(DnsRecords);
 
 impl PortForward {
+    pub fn transport(&self, key: ForwardAddress) -> Transport {
+        match self {
+            Self::Dnat { .. } => key.transport,
+            Self::Sni { .. } => Transport::tcp(),
+        }
+    }
+
     /// Number of contiguous external ports this forward occupies: a DNAT spans
     /// its `count`; an SNI-demuxed forward holds the single shared port.
     pub fn port_span(&self) -> u16 {
@@ -240,11 +251,11 @@ rpc_toolkit::reflect_ts!(HttpRedirects);
 rpc_toolkit::ts_export!(HttpRedirects, namespaces = ["tunnel"]);
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, VisitFields)]
-pub struct PortForwards(pub BTreeMap<SocketAddrV4, PortForward>);
+pub struct PortForwards(pub BTreeMap<ForwardAddress, PortForward>);
 
 rpc_toolkit::reflect_ts!(PortForwards);
 impl Map for PortForwards {
-    type Key = SocketAddrV4;
+    type Key = ForwardAddress;
     type Value = PortForward;
     fn key_str(key: &Self::Key) -> Result<impl AsRef<str>, Error> {
         Self::key_string(key)
@@ -292,11 +303,11 @@ impl Pinhole {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, VisitFields)]
-pub struct Pinholes6(pub BTreeMap<SocketAddrV6, Pinhole>);
+pub struct Pinholes6(pub BTreeMap<PinholeAddress, Pinhole>);
 
 rpc_toolkit::reflect_ts!(Pinholes6);
 impl Map for Pinholes6 {
-    type Key = SocketAddrV6;
+    type Key = PinholeAddress;
     type Value = Pinhole;
     fn key_str(key: &Self::Key) -> Result<impl AsRef<str>, Error> {
         Self::key_string(key)
@@ -306,60 +317,116 @@ impl Map for Pinholes6 {
     }
 }
 impl Pinholes6 {
-    /// The key of an existing pinhole on the same GUA whose port span overlaps
-    /// `[gua.port(), gua.port() + count - 1]`, if any. An exact key match is
-    /// excluded (idempotent re-assert / same-port collision, handled by callers).
-    pub fn overlapping(&self, gua: SocketAddrV6, count: u16) -> Option<SocketAddrV6> {
-        let ip = *gua.ip();
-        let new_lo = gua.port();
-        let new_hi = new_lo.saturating_add(count.saturating_sub(1));
-        // Pinholes on one GUA never overlap, so only the nearest entry starting
-        // at or before new_hi (skipping an exact re-assert of `gua`) can reach
-        // into [new_lo, new_hi].
+    pub fn split_auto_transports(&mut self) -> Vec<(PinholeAddress, Pinhole)> {
+        let legacy: Vec<_> = self
+            .0
+            .iter()
+            .filter(|(key, entry)| key.transport == Transport::default() && entry.auto)
+            .map(|(key, entry)| (key.clone(), entry.clone()))
+            .collect();
+        for (key, entry) in &legacy {
+            self.0.remove(key);
+            for protocol in key.transport.protocols() {
+                self.0.insert(
+                    PinholeAddress::new(key.address, (*protocol).into()),
+                    entry.clone(),
+                );
+            }
+        }
+        legacy
+    }
+
+    pub fn overlapping(
+        &self,
+        key: impl Into<PinholeAddress>,
+        count: u16,
+    ) -> Option<PinholeAddress> {
+        let key = key.into();
         self.0
-            .range(..=SocketAddrV6::new(ip, new_hi, 0, 0))
-            .rev()
-            .take_while(|(key, _)| key.ip() == &ip)
-            .find(|(key, _)| **key != gua)
-            .and_then(|(key, ph)| {
-                let hi = key.port().saturating_add(ph.count.max(1).saturating_sub(1));
-                (hi >= new_lo).then_some(*key)
+            .iter()
+            .find(|(other, entry)| {
+                **other != key
+                    && other.ip() == key.ip()
+                    && other.transport.overlaps(&key.transport)
+                    && other.port() <= key.port().saturating_add(count.saturating_sub(1))
+                    && key.port()
+                        <= other
+                            .port()
+                            .saturating_add(entry.count.max(1).saturating_sub(1))
             })
+            .map(|(key, _)| key.clone())
     }
 }
 impl PortForwards {
-    /// The source of an existing forward on the same external IP whose port span
-    /// overlaps `[source.port(), source.port() + count - 1]`, if any. An exact
-    /// `source` match is excluded — callers treat that as an idempotent
-    /// re-assert (auto) or a same-port collision (manual); this catches the case
-    /// ranges introduce, where two *different* start ports cover shared ports.
-    pub fn overlapping(&self, source: SocketAddrV4, count: u16) -> Option<SocketAddrV4> {
-        let ip = *source.ip();
-        let new_lo = source.port();
-        let new_hi = new_lo.saturating_add(count.saturating_sub(1));
-        // Forwards on one external IP never overlap, so only the nearest entry
-        // starting at or before new_hi (skipping an exact re-assert of `source`)
-        // can reach into [new_lo, new_hi].
-        self.0
-            .range(..=SocketAddrV4::new(ip, new_hi))
-            .rev()
-            .take_while(|(src, _)| src.ip() == &ip)
-            .find(|(src, _)| **src != source)
-            .and_then(|(src, pf)| {
-                let hi = src.port().saturating_add(pf.port_span().saturating_sub(1));
-                (hi >= new_lo).then_some(*src)
-            })
+    /// Socket-only operations select both transport rows unless an exact entry exists.
+    pub fn operation_keys(&self, source: ForwardAddress) -> Vec<ForwardAddress> {
+        if self.0.contains_key(&source) || source.transport != Transport::default() {
+            return vec![source];
+        }
+        let keys: Vec<_> = self
+            .0
+            .keys()
+            .filter(|key| key.address == source.address)
+            .cloned()
+            .collect();
+        if keys.is_empty() { vec![source] } else { keys }
     }
 
-    /// Whether any forward on `addr`'s IP has a port span covering `addr.port()`.
-    /// Used to keep the port-80 HTTP redirect mutually exclusive with forwards:
-    /// the redirect yields when a forward already occupies the port.
-    pub fn occupied(&self, addr: SocketAddrV4) -> bool {
-        // Only the nearest forward starting at or before `addr` can cover it
-        // (forwards on one IP never overlap).
-        self.0.range(..=addr).next_back().is_some_and(|(src, pf)| {
-            src.ip() == addr.ip()
-                && src.port().saturating_add(pf.port_span().saturating_sub(1)) >= addr.port()
+    pub fn split_auto_transports(&mut self) -> Vec<(ForwardAddress, PortForward)> {
+        let legacy: Vec<_> = self
+            .0
+            .iter()
+            .filter(|(key, entry)| {
+                key.transport == Transport::default()
+                    && matches!(entry, PortForward::Dnat { auto: true, .. })
+            })
+            .map(|(key, entry)| (key.clone(), entry.clone()))
+            .collect();
+        for (key, entry) in &legacy {
+            self.0.remove(key);
+            for protocol in key.transport.protocols() {
+                self.0.insert(
+                    ForwardAddress::new(key.address, (*protocol).into()),
+                    entry.clone(),
+                );
+            }
+        }
+        legacy
+    }
+
+    pub fn overlapping(
+        &self,
+        key: impl Into<ForwardAddress>,
+        count: u16,
+    ) -> Option<ForwardAddress> {
+        let key = key.into();
+        self.0
+            .iter()
+            .find(|(other, entry)| {
+                **other != key
+                    && other.ip() == key.ip()
+                    && entry.transport((**other).clone()).overlaps(&key.transport)
+                    && other.port() <= key.port().saturating_add(count.saturating_sub(1))
+                    && key.port()
+                        <= other
+                            .port()
+                            .saturating_add(entry.port_span().saturating_sub(1))
+            })
+            .map(|(key, _)| key.clone())
+    }
+    pub fn occupied(&self, address: impl Into<ForwardAddress>) -> bool {
+        let address = address.into();
+        self.0.iter().any(|(key, entry)| {
+            key.ip() == address.ip()
+                && entry
+                    .transport(key.clone())
+                    .protocols()
+                    .contains(&crate::net::transport::TransportProtocol::Tcp)
+                && key.port() <= address.port()
+                && address.port()
+                    <= key
+                        .port()
+                        .saturating_add(entry.port_span().saturating_sub(1))
         })
     }
 }
@@ -530,20 +597,36 @@ pub async fn apply(
 }
 
 pub async fn subscribe(
-    ctx: TunnelContext,
-    SubscribeParams { pointer, signer }: SubscribeParams,
-) -> Result<SubscribeRes, Error> {
+    HandlerArgs {
+        context: ctx,
+        params: SubscribeParams { pointer, signer },
+        rpc_stream,
+        ..
+    }: HandlerArgs<TunnelContext, SubscribeParams, rpc_toolkit::Empty, patch_db::Revision>,
+) -> Result<SubscribeResult, Error> {
     let (dump, mut sub) = ctx
         .db
         .dump_and_sub(pointer.unwrap_or_else(|| ROOT.to_owned()))
         .await;
+    if let Some(stream) = rpc_stream {
+        crate::auth::continuation_subscription(&ctx, signer)
+            .await?
+            .forward_stream(
+                stream,
+                futures::stream::unfold(sub, |mut sub| async move {
+                    sub.recv().await.map(|revision| (Ok(revision), sub))
+                }),
+            );
+        return Ok(SubscribeResult::Stream(dump));
+    }
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(
             guid.clone(),
             RpcContinuation::ws_authed(
-                &ctx,
-                signer,
+                crate::auth::continuation_subscription(&ctx, signer).await?,
+                WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
                 |mut ws| async move {
                     if let Err(e) = async {
                         loop {
@@ -582,7 +665,7 @@ pub async fn subscribe(
         )
         .await;
 
-    Ok(SubscribeRes { dump, guid })
+    Ok(SubscribeResult::Continuation(SubscribeRes { dump, guid }))
 }
 
 #[test]
@@ -723,6 +806,46 @@ fn sni_fallback_serde_backward_compat() {
 }
 
 #[test]
+fn socket_only_controls_keep_addressing_both_split_protocol_rows() {
+    let address: SocketAddrV4 = "192.0.2.1:5000".parse().unwrap();
+    let tcp = ForwardAddress::new(address, Transport::tcp());
+    let udp = ForwardAddress::new(address, Transport::udp());
+    let entry = PortForward::Dnat {
+        target: "10.59.0.2:6000".parse().unwrap(),
+        label: None,
+        enabled: true,
+        count: 1,
+        auto: true,
+    };
+    let mut forwards = PortForwards(BTreeMap::from([
+        (tcp.clone(), entry.clone()),
+        (udp.clone(), entry.clone()),
+    ]));
+    assert_eq!(
+        forwards.operation_keys(address.into()),
+        vec![tcp.clone(), udp.clone()]
+    );
+    assert_eq!(forwards.operation_keys(tcp.clone()), vec![tcp.clone()]);
+    forwards.0.remove(&tcp);
+    forwards.0.insert(
+        address.into(),
+        PortForward::Sni {
+            routes: BTreeMap::new(),
+            fallback: Some(SniRoute {
+                target: "10.59.0.2:6000".parse().unwrap(),
+                enabled: true,
+                label: None,
+                auto: true,
+            }),
+        },
+    );
+    assert_eq!(
+        forwards.operation_keys(address.into()),
+        vec![address.into()]
+    );
+}
+
+#[test]
 fn port_forward_overlap_detection() {
     let dnat = |target: &str, count: u16| PortForward::Dnat {
         target: target.parse().unwrap(),
@@ -731,7 +854,7 @@ fn port_forward_overlap_detection() {
         count,
         auto: false,
     };
-    let src = |s: &str| s.parse::<SocketAddrV4>().unwrap();
+    let src = |s: &str| s.parse::<ForwardAddress>().unwrap();
 
     let mut map = BTreeMap::new();
     // An existing 10-port range 8000..=8009 on WAN IP 1.2.3.4.
@@ -778,7 +901,7 @@ fn port_forward_occupied_gates_http_redirect() {
         count,
         auto: false,
     };
-    let src = |s: &str| s.parse::<SocketAddrV4>().unwrap();
+    let src = |s: &str| s.parse::<ForwardAddress>().unwrap();
 
     let mut map = BTreeMap::new();
     map.insert(src("1.2.3.4:80"), dnat("10.0.0.2:80", 1));
@@ -807,7 +930,7 @@ fn port_forward_occupied_gates_http_redirect() {
 
 #[test]
 fn pinhole_persistence_round_trip() {
-    let gua = |s: &str| s.parse::<SocketAddrV6>().unwrap();
+    let gua = |s: &str| s.parse::<PinholeAddress>().unwrap();
     let ph = Pinhole {
         label: Some("Home Assistant".into()),
         enabled: true,
@@ -851,7 +974,7 @@ fn pinhole_persistence_round_trip() {
 
 #[test]
 fn pinhole_overlap_detection() {
-    let gua = |s: &str| s.parse::<SocketAddrV6>().unwrap();
+    let gua = |s: &str| s.parse::<PinholeAddress>().unwrap();
     let ph = |count: u16| Pinhole {
         label: None,
         enabled: true,

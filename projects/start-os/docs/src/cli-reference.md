@@ -292,6 +292,14 @@ List network bindings for the server host.
 
 - `--format` — Output format
 
+### `start-cli server host binding reassign-port <INTERNAL_PORT> <EXTERNAL_PORT>`
+
+Change the server binding's assigned external port, preserving its address enable/disable settings. The chosen port must be available and not reserved for a host daemon. The server UI's SSL port is fixed at 443; `--ssl` accepts 443 to retain or restore that assignment.
+
+- `--ssl` — Change the assigned SSL port instead of the non-SSL port
+
+Preferred ports stay unchanged. TLS domains continue to use the preferred port when a shared TLS listener serves it; otherwise they use the assigned SSL port. Update any router forwarding rules for addresses whose port changes.
+
 ### `start-cli server host binding set-address-enabled <INTERNAL_PORT>`
 
 Enable or disable a specific address binding.
@@ -442,6 +450,14 @@ Remove a public domain from a service host.
 List network bindings for a service host.
 
 - `--format` — Output format
+
+### `start-cli package host <PACKAGE> binding <HOST> reassign-port <INTERNAL_PORT> <EXTERNAL_PORT>`
+
+Change a service binding's assigned external port, preserving its address enable/disable settings. The chosen port must be available, above 1024, and not reserved for a host daemon. The assignment survives service restarts.
+
+- `--ssl` — Change the assigned SSL port instead of the non-SSL port
+
+Preferred ports stay unchanged, with the same shared-TLS behavior as [server bindings](#start-cli-server-host-binding-reassign-port-internal_port-external_port).
 
 ### `start-cli package host binding set-address-enabled <INTERNAL_PORT>`
 
@@ -1121,7 +1137,7 @@ List all OS versions.
 
 - `--format` — Output format
 
-### `start-cli registry os version add <VERSION> <HEADLINE> <RELEASE_NOTES> <SOURCE_VERSION>`
+### `start-cli registry os version add <VERSION> <RELEASE_NOTES> <SOURCE_VERSION>`
 
 Register a new OS version.
 

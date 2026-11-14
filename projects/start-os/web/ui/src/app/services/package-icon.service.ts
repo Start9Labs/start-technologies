@@ -60,7 +60,10 @@ export class PackageIconService {
     }
 
     const icon$ = defer(() => this.api.getStaticObjectUrl(url)).pipe(
-      catchError(() => of(FALLBACK_ICON)),
+      catchError(() => {
+        this.cache.delete(key)
+        return of(FALLBACK_ICON)
+      }),
       shareReplay(1),
     )
     this.cache.set(key, icon$)

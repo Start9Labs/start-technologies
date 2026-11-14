@@ -1,4 +1,4 @@
-import { Component, computed, inject, input } from '@angular/core'
+import { Component, input } from '@angular/core'
 import { TuiProgress } from '@taiga-ui/kit'
 import { LogsWindowComponent } from './logs-window.component'
 import { i18nPipe } from '../../i18n/i18n.pipe'
@@ -21,9 +21,10 @@ import { i18nPipe } from '../../i18n/i18n.pipe'
         tuiProgressBar
         [style.max-width.rem]="40"
         [style.margin]="'1rem auto'"
-        [attr.value]="progress().total"
+        [value]="progress().total"
+        max="1"
       ></progress>
-      <p [innerHTML]="message()"></p>
+      <p [innerHTML]="progress().message || '...'"></p>
     </section>
     <logs-window />
   `,
@@ -39,7 +40,6 @@ import { i18nPipe } from '../../i18n/i18n.pipe'
       padding: 1rem;
       margin: 1.5rem;
       text-align: center;
-      // @TODO Theme
       background: #e0e0e0;
       color: #333;
       --tui-background-neutral-1: rgba(0, 0, 0, 0.1);
@@ -54,27 +54,16 @@ import { i18nPipe } from '../../i18n/i18n.pipe'
       text-align: left;
       overflow: hidden;
       border-radius: 2rem;
-      // @TODO Theme
       background: #181818;
     }
   `,
   imports: [LogsWindowComponent, TuiProgress, i18nPipe],
 })
 export class InitializingComponent {
-  private readonly i18nPipe = inject(i18nPipe)
-
+  /** Progress is observational; the owning operation establishes completion. */
   readonly progress = input<{ total: number; message: string }>({
     total: 0,
     message: '',
   })
   readonly initialSetup = input(false)
-
-  readonly message = computed(() => {
-    return (
-      this.progress().message ||
-      (this.progress().total === 1
-        ? this.i18nPipe.transform('Finished')
-        : '...')
-    )
-  })
 }

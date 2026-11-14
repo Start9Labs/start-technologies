@@ -45,13 +45,14 @@ impl Database {
                 available_ports: AvailablePorts::new(),
                 notifications: Notifications::new(),
                 os_security_notifications: BTreeMap::new(),
+                registry_indexes: BTreeMap::new(),
                 push: Default::default(),
                 cifs: CifsTargets::new(),
                 backup_history: BTreeMap::new(),
                 backup_target_credentials: BTreeMap::new(),
                 shared_volume_credentials: BTreeMap::new(),
                 package_stores: BTreeMap::new(),
-                developer_key: Der64(account.developer_key.clone()),
+                server_identity_key: Der64(account.server_identity_key.clone()),
             },
         })
     }

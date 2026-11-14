@@ -1,1 +1,0 @@
-- Le nom d’un appareil disposant d’une adresse réservée ne se résout plus depuis les réseaux dont le profil de sécurité ne permet pas de l’atteindre.

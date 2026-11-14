@@ -111,7 +111,6 @@ export const ENGLISH: Record<string, number> = {
   'Subnet default': 98,
   'Success': 99,
   'System default': 100,
-  'TCP/UDP': 101,
   'The device can add/update the DNS records the tunnel serves for every peer to resolve. Only enable for devices you trust.': 102,
   'The device can publish its own ports on the gateway automatically (via PCP). Only enable for devices you trust.': 103,
   'The VPS is rebooting. Please wait 1\u20132 minutes, then refresh the page.': 104,

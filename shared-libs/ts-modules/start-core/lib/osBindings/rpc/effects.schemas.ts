@@ -471,6 +471,10 @@ export const TaskSeverity: z.ZodEnum<{
 }> = /* @__PURE__ */ z.enum(['optional', 'important', 'critical']).meta({
   id: 'TaskSeverity',
 })
+export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
+  /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
+    id: 'TransportProtocol',
+  })
 export const UploadLimits: z.ZodObject<{
   /**
    * Maximum uploaded bytes, inclusive; null leaves the size unbounded.
@@ -946,19 +950,6 @@ export const BindId: z.ZodObject<{
   internalPort: z.ZodInt
 }> = /* @__PURE__ */ object({ id: HostId, internalPort: z.int() }).meta({
   id: 'BindId',
-})
-export const BindRangeParams: z.ZodObject<{
-  id: typeof HostId
-  internalStartPort: z.ZodInt
-  externalStartPort: z.ZodInt
-  numberOfPorts: z.ZodInt
-}> = /* @__PURE__ */ object({
-  id: HostId,
-  internalStartPort: z.int(),
-  externalStartPort: z.int(),
-  numberOfPorts: z.int(),
-}).meta({
-  id: 'BindRangeParams',
 })
 export const CheckDependenciesParam: z.ZodObject<{
   packageIds: z.ZodCodec<
@@ -2082,6 +2073,13 @@ export const TaskTrigger: z.ZodObject<{
 }).meta({
   id: 'TaskTrigger',
 })
+export const TransportWire: z.ZodUnion<
+  readonly [typeof TransportProtocol, z.ZodArray<typeof TransportProtocol>]
+> = /* @__PURE__ */ z
+  .union([TransportProtocol, z.array(TransportProtocol)])
+  .meta({
+    id: 'TransportWire',
+  })
 export const UploadedFile: z.ZodObject<{
   /**
    * Untrusted original filename supplied by the uploader.
@@ -2577,6 +2575,19 @@ export const Task: z.ZodObject<{
 }).meta({
   id: 'Task',
 })
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export const Transport: z.ZodCodec<
+  typeof TransportWire,
+  z.ZodArray<typeof TransportProtocol>
+> = /* @__PURE__ */ wire(TransportWire, z.array(TransportProtocol)).meta({
+  id: 'Transport',
+  description:
+    'Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.',
+})
 export const UrlPluginClearUrlsParams: z.ZodObject<{
   except: z.ZodArray<typeof PluginHostnameInfo>
 }> = /* @__PURE__ */ object({ except: z.array(PluginHostnameInfo) }).meta({
@@ -2685,6 +2696,21 @@ export const AddSslOptions: z.ZodCodec<
   }),
 ).meta({
   id: 'AddSslOptions',
+})
+export const BindRangeParams: z.ZodObject<{
+  id: typeof HostId
+  internalStartPort: z.ZodInt
+  externalStartPort: z.ZodInt
+  numberOfPorts: z.ZodInt
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
+}> = /* @__PURE__ */ object({
+  id: HostId,
+  internalStartPort: z.int(),
+  externalStartPort: z.int(),
+  numberOfPorts: z.int(),
+  transport: wire(Transport.optional(), Transport),
+}).meta({
+  id: 'BindRangeParams',
 })
 export const CreateTaskParams: z.ZodIntersection<
   z.ZodObject<{ replayId: typeof ReplayId }>,
@@ -2917,15 +2943,12 @@ export const LegacyProxySslOptions: z.ZodIntersection<
   })
 
 /**
- * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
- *
- * Keyed by `internal_start_port` in [`BindingRanges`]. The range covers
- * `internal_start_port..(internal_start_port + number_of_ports)` and is
- * forwarded through a single iptables rule per protocol per gateway,
- * preserving the destination port number.
+ * A contiguous binding keyed by its internal start port in [`BindingRanges`].
+ * External ports map to internal ports by offset.
  */
 export const RangeBindInfo: z.ZodObject<{
   enabled: z.ZodBoolean
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
   externalStartPort: z.ZodInt
   numberOfPorts: z.ZodInt
   /**
@@ -2950,6 +2973,7 @@ export const RangeBindInfo: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   enabled: z.boolean(),
+  transport: wire(Transport.optional(), Transport),
   externalStartPort: z.int(),
   numberOfPorts: z.int(),
   /**
@@ -2978,13 +3002,14 @@ export const RangeBindInfo: z.ZodObject<{
 }).meta({
   id: 'RangeBindInfo',
   description:
-    'Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).\n\nKeyed by `internal_start_port` in [`BindingRanges`]. The range covers\n`internal_start_port..(internal_start_port + number_of_ports)` and is\nforwarded through a single iptables rule per protocol per gateway,\npreserving the destination port number.',
+    'A contiguous binding keyed by its internal start port in [`BindingRanges`].\nExternal ports map to internal ports by offset.',
 })
 export const BindingRanges: z.ZodRecord<z.ZodString, typeof RangeBindInfo> =
   /* @__PURE__ */ z.record(z.string(), RangeBindInfo).meta({
     id: 'BindingRanges',
   })
 export const CompatibleBindOptions: z.ZodObject<{
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
   preferredExternalPort: z.ZodInt
   addSsl: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>,
@@ -2999,6 +3024,7 @@ export const CompatibleBindOptions: z.ZodObject<{
     z.ZodNullable<typeof ProxyOptions>
   >
 }> = /* @__PURE__ */ object({
+  transport: wire(Transport.optional(), Transport),
   preferredExternalPort: z.int(),
   addSsl: wire(
     LegacyProxySslOptions.nullable().optional(),
@@ -3061,6 +3087,10 @@ export const Manifest: z.ZodIntersection<
 export const BindOptions: z.ZodCodec<
   typeof CompatibleBindOptions,
   z.ZodObject<{
+    /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: typeof Transport
     preferredExternalPort: z.ZodInt
     addSsl: z.ZodNullable<typeof AddSslOptions>
     secure: z.ZodNullable<typeof Security>
@@ -3072,6 +3102,13 @@ export const BindOptions: z.ZodCodec<
 > = /* @__PURE__ */ wire(
   CompatibleBindOptions,
   object({
+    /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: Transport.meta({
+      description:
+        'Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.',
+    }),
     preferredExternalPort: z.int(),
     addSsl: AddSslOptions.nullable(),
     secure: Security.nullable(),
@@ -3174,18 +3211,26 @@ export const Api = {
         clear: {
           _PARAMS: /* @__PURE__ */ ClearActionsParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'clear-tasks': {
           _PARAMS: /* @__PURE__ */ ClearTasksParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'create-task': {
           _PARAMS: /* @__PURE__ */ CreateTaskParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         export: {
           _PARAMS: /* @__PURE__ */ ExportActionParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'get-input': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3201,6 +3246,8 @@ export const Api = {
             GetActionInputParams,
           ),
           _RETURN: /* @__PURE__ */ ActionInput.nullable(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         run: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3216,124 +3263,184 @@ export const Api = {
             EffectsRunActionParams,
           ),
           _RETURN: /* @__PURE__ */ ActionResult.nullable(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
     bind: {
       _PARAMS: /* @__PURE__ */ BindParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'bind-range': {
       _PARAMS: /* @__PURE__ */ BindRangeParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'check-dependencies': {
       _PARAMS: /* @__PURE__ */ CheckDependenciesParam,
       _RETURN: /* @__PURE__ */ z.array(CheckDependenciesResult),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'clear-bindings': {
       _PARAMS: /* @__PURE__ */ ClearBindingsParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'clear-callbacks': {
       _PARAMS: /* @__PURE__ */ ClearCallbacksParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'clear-service-interfaces': {
       _PARAMS: /* @__PURE__ */ ClearServiceInterfacesParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     echo: {
       _PARAMS: /* @__PURE__ */ EchoParams,
       _RETURN: /* @__PURE__ */ z.string(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'export-range-service-interface': {
       _PARAMS: /* @__PURE__ */ ExportRangeServiceInterfaceParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'export-service-interface': {
       _PARAMS: /* @__PURE__ */ ExportServiceInterfaceParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-container-ip': {
       _PARAMS: /* @__PURE__ */ GetContainerIpParams,
       _RETURN: /* @__PURE__ */ z.string().nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-data-version': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string().nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-dependencies': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.array(DependencyRequirement),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-host-info': {
       _PARAMS: /* @__PURE__ */ GetHostInfoParams,
       _RETURN: /* @__PURE__ */ Host.nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-installed-packages': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.array(PackageId),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-os-ip': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-outbound-gateway': {
       _PARAMS: /* @__PURE__ */ GetOutboundGatewayParams,
       _RETURN: /* @__PURE__ */ GatewayId,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-service-interface': {
       _PARAMS: /* @__PURE__ */ GetServiceInterfaceParams,
       _RETURN: /* @__PURE__ */ ServiceInterface.nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-service-manifest': {
       _PARAMS: /* @__PURE__ */ GetServiceManifestParams,
       _RETURN: /* @__PURE__ */ Manifest.nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-service-port-forward': {
       _PARAMS: /* @__PURE__ */ GetServicePortForwardParams,
       _RETURN: /* @__PURE__ */ NetInfo.nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-shared-volumes': {
       _PARAMS: /* @__PURE__ */ GetSharedVolumesParams,
       _RETURN: /* @__PURE__ */ z.array(GrantedSharedVolume),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-ssl-certificate': {
       _PARAMS: /* @__PURE__ */ GetSslCertificateParams,
       _RETURN: /* @__PURE__ */ z.array(z.string()),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-ssl-key': {
       _PARAMS: /* @__PURE__ */ GetSslKeyParams,
       _RETURN: /* @__PURE__ */ literal_0,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-status': {
       _PARAMS: /* @__PURE__ */ GetStatusParams,
       _RETURN: /* @__PURE__ */ StatusInfo.nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-system-smtp': {
       _PARAMS: /* @__PURE__ */ GetSystemSmtpParams,
       _RETURN: /* @__PURE__ */ SmtpValue.nullable(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-upload-limits': {
       _PARAMS: /* @__PURE__ */ ResolveUploadParams,
       _RETURN: /* @__PURE__ */ UploadLimits,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'git-info': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'list-service-interfaces': {
       _PARAMS: /* @__PURE__ */ ListServiceInterfacesParams,
       _RETURN: /* @__PURE__ */ z.record(z.string(), ServiceInterface),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     mount: {
       _PARAMS: /* @__PURE__ */ MountParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'mount-shared-volume': {
       _PARAMS: /* @__PURE__ */ MountSharedVolumeParams,
       _RETURN: /* @__PURE__ */ SharedVolumeMountResult,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     notification: {
       _PARAMS: /* @__PURE__ */ empty,
@@ -3341,6 +3448,8 @@ export const Api = {
         create: {
           _PARAMS: /* @__PURE__ */ CreateNotificationParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3353,14 +3462,20 @@ export const Api = {
             'clear-urls': {
               _PARAMS: /* @__PURE__ */ UrlPluginClearUrlsParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             'export-url': {
               _PARAMS: /* @__PURE__ */ UrlPluginExportUrlParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             register: {
               _PARAMS: /* @__PURE__ */ UrlPluginRegisterParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -3369,58 +3484,86 @@ export const Api = {
     'prepare-download': {
       _PARAMS: /* @__PURE__ */ PrepareDownloadParams,
       _RETURN: /* @__PURE__ */ Guid,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'prepare-upload': {
       _PARAMS: /* @__PURE__ */ PrepareUploadParams,
       _RETURN: /* @__PURE__ */ Guid,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     rebuild: {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'resolve-upload': {
       _PARAMS: /* @__PURE__ */ ResolveUploadParams,
       _RETURN: /* @__PURE__ */ UploadedFile,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     restart: {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'retire-binding': {
       _PARAMS: /* @__PURE__ */ RetireBindingParams,
       _RETURN: /* @__PURE__ */ z.boolean(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'retire-host': {
       _PARAMS: /* @__PURE__ */ RetireHostParams,
       _RETURN: /* @__PURE__ */ z.boolean(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'set-backup-progress': {
       _PARAMS: /* @__PURE__ */ SetBackupProgress,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'set-data-version': {
       _PARAMS: /* @__PURE__ */ SetDataVersionParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'set-dependencies': {
       _PARAMS: /* @__PURE__ */ SetDependenciesParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'set-health': {
       _PARAMS: /* @__PURE__ */ SetHealth,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'set-init-progress': {
       _PARAMS: /* @__PURE__ */ SetInitProgress,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     'set-main-status': {
       _PARAMS: /* @__PURE__ */ SetMainStatus,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     shutdown: {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     subcontainer: {
       _PARAMS: /* @__PURE__ */ empty,
@@ -3428,10 +3571,14 @@ export const Api = {
         'create-fs': {
           _PARAMS: /* @__PURE__ */ CreateSubcontainerFsParams,
           _RETURN: /* @__PURE__ */ z.tuple([z.string(), Guid]),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'destroy-fs': {
           _PARAMS: /* @__PURE__ */ DestroySubcontainerFsParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
