@@ -77,7 +77,7 @@ fi
 LIBC_ENV=()
 if [[ "$TARGET" != *-linux-musl* ]]; then
   # Zig reads musl headers for every target ZIG_LIBC is set for.
-  LIBC_ENV=(env -u ZIG_LIBC)
+  LIBC_ENV=(env -u ZIG_LIBC -u CARGO_ZIGBUILD_CACHE_DIR)
 fi
 
 echo "FEATURES=\"$FEATURES\""

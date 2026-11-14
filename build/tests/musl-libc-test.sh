@@ -1,6 +1,4 @@
 #!/bin/bash
-# Builds a probe through the shared builder alias for each musl architecture and
-# checks which allocator it links. Requires Docker and the pinned builder image.
 set -euo pipefail
 shopt -s expand_aliases
 
@@ -26,9 +24,20 @@ strip = "none"
 EOF
 printf 'fn main() {\n    println!("{}", std::hint::black_box(vec![0u8; 64]).len());\n}\n' > "$probe/src/main.rs"
 
+build_probe() {
+  rust-zig-builder "$@" cargo zigbuild --manifest-path="$probe/Cargo.toml" --release --target="$target" --target-dir="$probe/target"
+}
+
 for ARCH in x86_64 aarch64 riscv64; do
   target="${ARCH/riscv64/riscv64gc}-unknown-linux-musl"
-  rust-zig-builder cargo zigbuild --manifest-path="$probe/Cargo.toml" --release --target="$target" --target-dir="$probe/target"
+  build_probe env -u ZIG_LIBC -u CARGO_ZIGBUILD_CACHE_DIR
+  symbols=$(readelf --wide --symbols "$probe/target/$target/release/musl-libc-probe")
+  if ! grep -q 'SmpAllocator' <<< "$symbols"; then
+    printf '%s baseline does not link Zig SmpAllocator\n' "$target" >&2
+    exit 1
+  fi
+
+  build_probe
   symbols=$(readelf --wide --symbols "$probe/target/$target/release/musl-libc-probe")
   for symbol in __libc_malloc_impl alloc_slot; do
     if ! grep -q " $symbol\$" <<< "$symbols"; then
@@ -40,5 +49,5 @@ for ARCH in x86_64 aarch64 riscv64; do
     printf '%s links Zig SmpAllocator\n' "$target" >&2
     exit 1
   fi
-  printf '%s links musl mallocng\n' "$target"
+  printf '%s replaces cached Zig SmpAllocator with musl mallocng\n' "$target"
 done

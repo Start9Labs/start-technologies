@@ -83,6 +83,34 @@ for alias_file in build/builder-alias.sh projects/start-wrt/build/builder-alias.
     assert_log_contains "$custom"
 done
 
+mkdir -p "$scratch/build/rust-builder" "$scratch/build/musl-libc"
+cp build/builder-alias.sh "$scratch/build/"
+cp build/rust-builder/{image.sh,repository,reference} "$scratch/build/rust-builder/"
+cp build/musl-libc/*.txt "$scratch/build/musl-libc/"
+
+run_shared_builder() {
+    bash -ec 'shopt -s expand_aliases; source "$1"; eval "rust-zig-builder cargo --version"' -- "$1"
+}
+
+cache_dir_argument() {
+    grep '^CARGO_ZIGBUILD_CACHE_DIR=' "$DOCKER_LOG"
+}
+
+: > "$DOCKER_LOG"
+run_shared_builder "$repo_root/build/builder-alias.sh"
+cache_dir=$(cache_dir_argument)
+: > "$DOCKER_LOG"
+(cd "$scratch" && run_shared_builder "$scratch/build/builder-alias.sh")
+test "$(cache_dir_argument)" = "$cache_dir"
+: > "$DOCKER_LOG"
+RUST_BUILDER_IMAGE="$custom" run_shared_builder "$scratch/build/builder-alias.sh"
+custom_cache_dir=$(cache_dir_argument)
+test "$custom_cache_dir" != "$cache_dir"
+printf '\n' >> "$scratch/build/musl-libc/aarch64.txt"
+: > "$DOCKER_LOG"
+RUST_BUILDER_IMAGE="$custom" run_shared_builder "$scratch/build/builder-alias.sh"
+test "$(cache_dir_argument)" != "$custom_cache_dir"
+
 for arch in x86_64 aarch64 arm64; do
     : > "$DOCKER_LOG"
     ARCH=riscv64 MOCK_UNAME_ARCH="$arch" DISABLE_RVA23=0 bash -ec 'shopt -s expand_aliases; source projects/start-wrt/build/builder-alias.sh; ARCH=$(native_arch); eval "rust-zig-builder cargo --version"'
@@ -183,4 +211,4 @@ RISCV_OBJDUMP="$scratch/bin/objdump" bash projects/start-wrt/build/verify-isa.sh
 test ! -s "$DOCKER_LOG"
 grep -Fxq -- "$scratch/probe.o" "$OBJDUMP_LOG"
 
-printf 'Builder selection, RVA23 opt-out, containerized bindings, overrides, derived images, and K1 disassembly checks passed.\n'
+printf 'Builder selection, libc cache isolation, RVA23 opt-out, containerized bindings, overrides, derived images, and K1 disassembly checks passed.\n'
