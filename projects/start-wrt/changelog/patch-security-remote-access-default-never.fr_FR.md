@@ -1,1 +1,0 @@
-- **L’accès à distance est désormais « Jamais » par défaut.** Les routeurs réglés sur l’ancienne valeur par défaut, « Lorsque derrière un NAT », passent à « Jamais » avec cette mise à jour. Pour continuer à administrer le routeur depuis son réseau en amont, choisissez « Lorsque derrière un NAT » dans Paramètres > Général > Accès à distance.

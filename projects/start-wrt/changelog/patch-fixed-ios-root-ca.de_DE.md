@@ -1,1 +1,0 @@
-- iPhones und iPads können die Root-CA eines Routers installieren, der vor StartWRT 1.2.0 eingerichtet wurde. Ihr Fingerabdruck ändert sich beim Update, und Geräte, die ihr bereits vertrauen, vertrauen dem Router weiterhin.

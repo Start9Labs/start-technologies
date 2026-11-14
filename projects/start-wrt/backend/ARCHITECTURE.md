@@ -4,20 +4,20 @@ Rust crates powering the StartWRT router daemon and CLI. Three crates: `ctrl` (R
 
 ## Transport
 
-HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 at `POST /rpc/v1` via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). Request-signature and local-token authentication from `start-core` (see [auth.rs](#authrs--authentication)).
+HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 requires signed-DH admission at `/rpc/v2`, with `POST /rpc/v1` compatibility, via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). `rpc.rs` composes one dispatch/middleware stack, adds typed firmware metadata to replies and retains the CORS-exposed HTTP firmware header. Live authorization uses the verified connection peer; request-signature/local-token compatibility stays in `start-core` (see [auth.rs](#authrs--authentication)).
 
 Additional routes:
 
-| Route                                     | Purpose                                                           |
-| ----------------------------------------- | ----------------------------------------------------------------- |
-| `POST /api/setup/flash`                   | NDJSON streaming for setup wizard                                 |
-| `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (10MB limit) |
-| `GET /ws/rpc/{guid}`                      | WebSocket continuation endpoint (update progress, live logs)      |
-| `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                           |
-| `GET /static/local-root-ca.crt`           | Root CA certificate download (no auth)                            |
-| `GET /static/local-root-ca.mobileconfig`  | Root CA as an Apple configuration profile (no auth)               |
-| `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080), HTTPS only                   |
-| Fallback                                  | Serves embedded web UI via `include_dir`                          |
+| Route                                     | Purpose                                                                                                 |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `POST /api/setup/flash`                   | Legacy NDJSON flash observation                                                                         |
+| `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (64 MiB limit)                                     |
+| `GET /rpc/v2/{guid}`                      | WebSocket continuation endpoint (update progress, live logs); `/ws/rpc/{guid}` is a compatibility alias |
+| `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                                                                 |
+| `GET /static/local-root-ca.crt`           | Root CA certificate download (no auth)                                                                  |
+| `GET /static/local-root-ca.mobileconfig`  | Root CA as an Apple configuration profile (no auth)                                                     |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080), HTTPS only                                                         |
+| Fallback                                  | Serves embedded web UI via `include_dir`                                                                |
 
 Beside the wildcard listeners, port control binds the SNI demux to the WAN IPv4 on 443 while hostname routes hold it (SO_REUSEPORT; the kernel delivers a connection to the most specific bound socket).
 
@@ -35,8 +35,8 @@ pub trait CtrlContext: Context + Clone {
 }
 ```
 
-- **`ServerContext`**: always reads `/etc/config/`, always reloads services. Holds `start-core`'s `RpcContinuations` for long-running operations and the auth state (enrolled keys, nonce cache). `ServerContext::default()` carries an in-memory auth state that enrolls nothing; only the daemon opens `/etc/startwrt/auth.db`.
-- **`CliContext`**: configurable root (`--config-root`), calls server via HTTP when needed. Signs each request with the identity key at `~/.startwrt/id.key.pem` once one exists, and sends the local auth token from `/run/startwrt/rpc.authcookie` as `Authorization: Bearer` to loopback hosts only.
+- **`ServerContext`**: always reads `/etc/config/`, always reloads services. Holds `start-core`'s `RpcContinuations` for long-running operations and the auth state (enrolled keys, nonce cache). `ServerContext::default()` carries an in-memory auth state that enrolls nothing; only the daemon opens `/etc/startwrt/auth.db`. The daemon loads its separate server identity from `serverIdentityKey` in `/etc/startwrt/auth.db` through `start-core`'s instance-key loader; sysupgrade keeps that database. In-memory contexts generate an ephemeral server identity. The daemon-local setup flash gate is shared by typed RPC and legacy NDJSON. Its owned mutex guard stays with accepted work on start-core's `make_send` runtime; observer cancellation cannot release it or abort provisioning. Actual worker results supply typed terminals or legacy Complete/Error events. Shared blocking work participates in the daemon's existing 60-second runtime shutdown grace; forced termination or reboot can still interrupt writes. Optional immutable `SecureSession` provenance belongs to each context clone rather than the shared auth state; WebSocket continuation creators capture it independently of revocation and resource policy.
+- **`CliContext`**: configurable root (`--config-root`), calls the daemon when needed. The identity at `~/.startwrt/id.key.pem` signs a fresh ephemeral-DH hello through the shared opaque signer before transport deadlines. Local tokens take precedence, restricted to loopback hosts; token and missing-key calls use the existing SessionClient's unpersisted proof identity without enrollment. Malformed keys fail closed. The ordinary HTTP client retains its network policy; an HTTP/1-only, nonredirecting upgrade client uses the shared encrypted transport. Login retry and command output stay in the CLI owner. Log/update commands return their existing GUID values rather than consuming the streams; browser continuation owners redeem secure-origin GUIDs through fresh same-peer exchanges.
 
 The single binary `startwrt` uses `MultiExecutable` to dispatch based on the symlink name (`startwrt-ctrld` or `startwrt-cli`) or the first argument.
 
@@ -97,6 +97,7 @@ vpn-client              # Outbound WireGuard VPN
 
 setup
   ├─ status             # Setup mode detection, disk state
+  ├─ flash              # Typed progress and actual provisioning terminal
   └─ get-pubkey         # Ephemeral key the setup password is encrypted to
 
 system                  # System settings, remote access, restart, factory reset,
@@ -186,7 +187,7 @@ Handler metadata:
 - `login: true` — enroll the signing key by password; reject enrollment when a valid local auth token is supplied
 - `get_signer: true` — inject the signing key as `__Auth_signer`
 
-Every other call needs a valid signature or the local token; the peer address grants nothing.
+Every other call needs an enrolled encrypted peer, a valid compatibility signature or the local token; the peer address grants nothing. A secure-origin GUID requires fresh same-peer encrypted admission signed for that GUID, independently of live revocation and resource budgets.
 
 Returns RPC error code 34 on auth failure (frontend auto-logs out).
 

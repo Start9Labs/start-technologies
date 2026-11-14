@@ -8,8 +8,8 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 - **Frontend:** Angular + TypeScript + Taiga UI
 - **Router OS:** OpenWrt (SpacemiT K1 / BananaPi F3 target)
 - **Config storage:** UCI files (`/etc/config/`) — no separate database
-- **API:** JSON-RPC 2.0 over HTTP POST at `/rpc/v1`
-- **Auth:** Password login enrolls a browser-held Ed25519 key that signs every request (`start-core` signature auth); the CLI on the router uses a local token
+- **API:** JSON-RPC 2.0 over encrypted WebSocket sessions at `/rpc/v2`, with HTTP compatibility at `/rpc/v1`
+- **Auth:** Password login enrolls an Ed25519 key used for signed ephemeral-DH admission and live per-call authorization; CLI calls use the same encrypted transport, with unpersisted proof identities for local-token and absent-key callers
 
 ## Project Structure
 
@@ -47,7 +47,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 
 - **`backend/`** — Rust daemon and CLI. Produces a single binary `startwrt` that is symlinked as `startwrt-ctrld` (daemon) and `startwrt-cli` (CLI). Handles all backend logic: RPC API, security profiles, WiFi, Ethernet, VPN, authentication, and UCI config management. See [backend/ARCHITECTURE.md](backend/ARCHITECTURE.md).
 
-- **`web/`** — Angular SPA using Taiga UI. Signal-based state, zoneless change detection, standalone components. Communicates with the backend over JSON-RPC 2.0 at `/rpc/v1`, plus the streaming and continuation routes listed under Data Flow. Embeds contextual help on every page. See [web/ARCHITECTURE.md](web/ARCHITECTURE.md).
+- **`web/`** — Angular SPA using Taiga UI. Signal-based state, zoneless change detection, standalone components. Communicates with the backend over encrypted JSON-RPC 2.0 at `/rpc/v2`, plus the streaming and continuation routes listed under Data Flow. Embeds contextual help on every page. See [web/ARCHITECTURE.md](web/ARCHITECTURE.md).
 
 - **`openwrt/`** — Disposable build workspace (plain directory, no git repo) rebuilt by `build/openwrt-setup.sh` from the sha256-pinned upstream OpenWrt release tarball (`build/openwrt-version`) plus the Start9 delta: `openwrt-patches/` modifies a handful of upstream files (build infrastructure and a few runtime scripts), `openwrt-overlay/` adds the SpacemiT K1 target (`target/linux/spacemit/`) and boot packages (`opensbi-spacemit`, `uboot-spacemit`). The build system compiles the Rust backend + Angular frontend, stages them into `openwrt/files/`, and produces a flashable image.
 
@@ -55,9 +55,9 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 
 ```
 Browser (Angular SPA)
-  → HTTP POST /rpc/v1  (JSON-RPC 2.0, X-Start-Auth-Sig request signature)
+  → encrypted WebSocket /rpc/v2 (device-key or anonymous possession)
   → Axum router on port 80/443
-  → start-core Auth middleware (verifies signature or local token, rate-limits login)
+  → start-core Auth middleware (checks verified peer or compatibility credentials, rate-limits login)
   → rpc-toolkit handler dispatch
   → Handler reads/writes UCI files via uciedit (arena-based, atomic writes)
   → Handler calls /etc/init.d/<service> reload to apply changes
@@ -66,9 +66,9 @@ Browser (Angular SPA)
 
 Additional HTTP routes:
 
-- `POST /api/setup/flash` — NDJSON streaming for setup wizard
+- `POST /api/setup/flash` — legacy NDJSON flash observation; the wizard uses typed `setup.flash` over encrypted RPC
 - `GET|POST /rest/rpc/{guid}` — Continuation endpoint for backup/restore/diagnostics
-- `GET /ws/rpc/{guid}` — WebSocket continuation for update progress and live logs
+- `GET /rpc/v2/{guid}` — WebSocket continuation for update progress and live logs; `/ws/rpc/{guid}` remains a compatibility alias
 - `GET /static/local-root-ca.crt`, `GET /static/local-root-ca.mobileconfig` — Root CA download, as a certificate or an Apple configuration profile (no auth)
 - `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` — LuCI reverse proxy (localhost:8080), HTTPS only (plain HTTP redirects); `/luci` redirects to `/cgi-bin/luci`
 - Fallback — Serves embedded web UI
