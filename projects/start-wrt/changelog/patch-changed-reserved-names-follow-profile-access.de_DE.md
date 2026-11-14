@@ -1,1 +1,0 @@
-- Der Name eines Geräts mit reservierter Adresse wird nicht mehr für Netzwerke aufgelöst, deren Sicherheitsprofil keinen Zugriff auf das Gerät erlaubt.

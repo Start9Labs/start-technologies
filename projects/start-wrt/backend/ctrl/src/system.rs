@@ -21,15 +21,25 @@ use crate::prelude::*;
 use crate::utils::{DeserializeStdin, HandlerExtSerde as _};
 use crate::{CliContext, CtrlContext, ServerContext};
 
-#[derive(Debug, TypedSection, Default)]
+#[derive(Debug, TypedSection)]
 #[uci(ty = "preferences")]
 pub(crate) struct UciPreferences {
-    #[uci(default_value = "\"en_US\".to_string()")]
+    #[uci(default_value = "UciPreferences::default().language")]
     pub language: String,
-    #[uci(default_value = "\"system\".to_string()")]
+    #[uci(default_value = "UciPreferences::default().theme")]
     pub theme: String,
-    #[uci(default_value = "\"default\".to_string()")]
+    #[uci(default_value = "UciPreferences::default().remote_access")]
     pub remote_access: String,
+}
+
+impl Default for UciPreferences {
+    fn default() -> Self {
+        Self {
+            language: "en_US".to_string(),
+            theme: "system".to_string(),
+            remote_access: "never".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
@@ -188,7 +198,7 @@ pub(crate) fn read_registry_url() -> Option<String> {
 
 const VALID_LANGUAGES: &[&str] = &["en_US", "es_ES", "de_DE", "fr_FR", "pl_PL"];
 const VALID_THEMES: &[&str] = &["dark", "light", "system"];
-const VALID_REMOTE_ACCESS: &[&str] = &["default", "never", "always"];
+const VALID_REMOTE_ACCESS: &[&str] = &["never", "behind-nat", "always"];
 
 pub(crate) const REMOTE_RULE_PREFIX: &str = "startwrt_remote_";
 const REMOTE_ACCESS_PORTS: &[&str] = &["80", "443", "22"];
@@ -366,7 +376,7 @@ fn remote_access_rule_specs(
             family: None,
             src_ip: None,
         }],
-        "default" => {
+        "behind-nat" => {
             let mut specs = Vec::new();
             if wan_ipv4.is_some_and(|ip| is_private_ipv4(&ip)) {
                 for &(suffix, block) in RFC1918_BLOCKS {
@@ -390,7 +400,7 @@ fn remote_access_rule_specs(
     }
 }
 
-fn apply_remote_access_config(
+pub(crate) fn apply_remote_access_config(
     cfgs: &mut Configs,
     mode: &str,
     wan_ipv4: Option<Ipv4Addr>,
@@ -674,18 +684,17 @@ async fn set_preferences<C: CtrlContext>(
         }
 
         if !found {
-            let ra = req
-                .remote_access
-                .clone()
-                .unwrap_or_else(|| "default".to_string());
-            if req.remote_access.is_some() {
-                new_mode = Some(ra.clone());
+            let mut prefs = UciPreferences::default();
+            if let Some(lang) = &req.language {
+                prefs.language = lang.clone();
             }
-            let prefs = UciPreferences {
-                language: req.language.clone().unwrap_or_else(|| "en_US".to_string()),
-                theme: req.theme.clone().unwrap_or_else(|| "system".to_string()),
-                remote_access: ra,
-            };
+            if let Some(theme) = &req.theme {
+                prefs.theme = theme.clone();
+            }
+            if let Some(ra) = &req.remote_access {
+                new_mode = Some(ra.clone());
+                prefs.remote_access = ra.clone();
+            }
             cfgs["startwrt"].append(&prefs, Some("preferences"))?;
         }
 
@@ -1018,7 +1027,61 @@ pub fn system<C: CtrlContext>() -> ParentHandler<C> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use rpc_toolkit::Context;
+    use tokio::runtime::Runtime;
+
     use super::*;
+
+    #[derive(Clone)]
+    struct TestContext(PathBuf);
+
+    impl Context for TestContext {
+        fn runtime(&self) -> Option<Arc<Runtime>> {
+            None
+        }
+    }
+
+    impl CtrlContext for TestContext {
+        fn uci_root(&self) -> PathBuf {
+            self.0.clone()
+        }
+        fn effectful(&self) -> bool {
+            false
+        }
+    }
+
+    #[tokio::test]
+    async fn set_preferences_takes_only_the_listed_remote_access_modes() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall_config(dir.path(), "");
+        let set = |mode: &str| {
+            set_preferences(
+                TestContext(dir.path().to_path_buf()),
+                DeserializeStdin(SetPreferencesReq {
+                    language: None,
+                    theme: None,
+                    remote_access: Some(mode.to_string()),
+                }),
+            )
+        };
+        let stored = || std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
+
+        for mode in ["never", "behind-nat", "always"] {
+            set(mode).await.unwrap();
+            assert!(
+                stored().contains(&format!("option remote_access '{mode}'")),
+                "{}",
+                stored()
+            );
+        }
+        for mode in ["default", "Always", ""] {
+            assert_eq!(set(mode).await.unwrap_err().kind, ErrorKind::InvalidValue);
+            assert!(stored().contains("option remote_access 'always'"), "{mode}");
+        }
+    }
 
     #[test]
     fn test_cmp_versions_prerelease() {
@@ -1135,17 +1198,17 @@ mod tests {
         let wan_ip: Ipv4Addr = "10.20.0.2".parse().unwrap();
         assert_eq!(
             rejected_wan_ssh_inodes(&dual_stack, &[IpAddr::V4(wan_ip)], |src| {
-                remote_access_admits("default", src, Some(wan_ip), &[])
+                remote_access_admits("behind-nat", src, Some(wan_ip), &[])
             }),
             HashSet::from([8])
         );
-        assert_eq!(rejected("default", "10.20.0.2"), vec![2]);
+        assert_eq!(rejected("behind-nat", "10.20.0.2"), vec![2]);
         assert_eq!(rejected("always", "10.20.0.2"), Vec::<u64>::new());
         let public_wan = proc_table(&[("203.0.113.5", 22, "10.20.0.50", "01", 6)]);
         let wan_ip: Ipv4Addr = "203.0.113.5".parse().unwrap();
         assert_eq!(
             rejected_wan_ssh_inodes(&public_wan, &[IpAddr::V4(wan_ip)], |src| {
-                remote_access_admits("default", src, Some(wan_ip), &[])
+                remote_access_admits("behind-nat", src, Some(wan_ip), &[])
             }),
             HashSet::from([6])
         );
@@ -1160,7 +1223,7 @@ mod tests {
         let rejected = |wan_ipv6s: &[Ipv6Addr]| {
             let wan: Vec<IpAddr> = vec!["fd00::1".parse().unwrap()];
             let mut inodes: Vec<u64> = rejected_wan_ssh_inodes(&table, &wan, |src| {
-                remote_access_admits("default", src, None, wan_ipv6s)
+                remote_access_admits("behind-nat", src, None, wan_ipv6s)
             })
             .into_iter()
             .collect();
@@ -1187,7 +1250,7 @@ mod tests {
             "fdff::1",
         ] {
             assert!(
-                remote_access_admits("default", source.parse().unwrap(), wan_ipv4, &wan_ipv6s),
+                remote_access_admits("behind-nat", source.parse().unwrap(), wan_ipv4, &wan_ipv6s),
                 "{source}"
             );
         }
@@ -1200,7 +1263,7 @@ mod tests {
             "2001:db8::1",
         ] {
             assert!(
-                !remote_access_admits("default", source.parse().unwrap(), wan_ipv4, &wan_ipv6s),
+                !remote_access_admits("behind-nat", source.parse().unwrap(), wan_ipv4, &wan_ipv6s),
                 "{source}"
             );
         }
@@ -1342,11 +1405,11 @@ config zone wan
     }
 
     #[tokio::test]
-    async fn test_apply_default_ipv4_private_ipv6_public() {
+    async fn test_apply_behind_nat_ipv4_private_ipv6_public() {
         let dir = tempfile::tempdir().unwrap();
         setup_firewall_config(
             dir.path(),
-            "config preferences preferences\n\toption remote_access 'default'\n",
+            "config preferences preferences\n\toption remote_access 'behind-nat'\n",
         );
 
         let wan_ipv4: Ipv4Addr = "192.168.1.1".parse().unwrap();
@@ -1356,7 +1419,7 @@ config zone wan
         let mut cfgs = parse_all(dir.path(), &arena, &["startwrt", "firewall"])
             .await
             .unwrap();
-        apply_remote_access_config(&mut cfgs, "default", Some(wan_ipv4), &[wan_ipv6]);
+        apply_remote_access_config(&mut cfgs, "behind-nat", Some(wan_ipv4), &[wan_ipv6]);
         dump_all(dir.path(), cfgs).await.unwrap();
 
         // Public IPv6 → no IPv6 rule. IPv4 behind NAT → one rule per RFC1918
@@ -1377,11 +1440,11 @@ config zone wan
     }
 
     #[tokio::test]
-    async fn test_apply_default_both_private() {
+    async fn test_apply_behind_nat_both_private() {
         let dir = tempfile::tempdir().unwrap();
         setup_firewall_config(
             dir.path(),
-            "config preferences preferences\n\toption remote_access 'default'\n",
+            "config preferences preferences\n\toption remote_access 'behind-nat'\n",
         );
 
         let wan_ipv4: Ipv4Addr = "10.0.0.1".parse().unwrap();
@@ -1391,7 +1454,7 @@ config zone wan
         let mut cfgs = parse_all(dir.path(), &arena, &["startwrt", "firewall"])
             .await
             .unwrap();
-        apply_remote_access_config(&mut cfgs, "default", Some(wan_ipv4), &[wan_ipv6]);
+        apply_remote_access_config(&mut cfgs, "behind-nat", Some(wan_ipv4), &[wan_ipv6]);
         dump_all(dir.path(), cfgs).await.unwrap();
 
         // Both private — IPv4 gets one rule per RFC1918 range, IPv6 one for the
@@ -1428,11 +1491,11 @@ config zone wan
     }
 
     #[tokio::test]
-    async fn test_apply_default_both_public() {
+    async fn test_apply_behind_nat_both_public() {
         let dir = tempfile::tempdir().unwrap();
         setup_firewall_config(
             dir.path(),
-            "config preferences preferences\n\toption remote_access 'default'\n",
+            "config preferences preferences\n\toption remote_access 'behind-nat'\n",
         );
 
         let wan_ipv4: Ipv4Addr = "8.8.8.8".parse().unwrap();
@@ -1442,7 +1505,7 @@ config zone wan
         let mut cfgs = parse_all(dir.path(), &arena, &["startwrt", "firewall"])
             .await
             .unwrap();
-        apply_remote_access_config(&mut cfgs, "default", Some(wan_ipv4), &[wan_ipv6]);
+        apply_remote_access_config(&mut cfgs, "behind-nat", Some(wan_ipv4), &[wan_ipv6]);
         dump_all(dir.path(), cfgs).await.unwrap();
 
         // Both public — no rules should be created
@@ -1450,18 +1513,18 @@ config zone wan
     }
 
     #[tokio::test]
-    async fn test_apply_default_no_wan() {
+    async fn test_apply_behind_nat_no_wan() {
         let dir = tempfile::tempdir().unwrap();
         setup_firewall_config(
             dir.path(),
-            "config preferences preferences\n\toption remote_access 'default'\n",
+            "config preferences preferences\n\toption remote_access 'behind-nat'\n",
         );
 
         let arena = Arena::new();
         let mut cfgs = parse_all(dir.path(), &arena, &["startwrt", "firewall"])
             .await
             .unwrap();
-        apply_remote_access_config(&mut cfgs, "default", None, &[]);
+        apply_remote_access_config(&mut cfgs, "behind-nat", None, &[]);
         dump_all(dir.path(), cfgs).await.unwrap();
 
         // No WAN at all — no rules should be created
@@ -1469,11 +1532,11 @@ config zone wan
     }
 
     #[tokio::test]
-    async fn test_apply_default_ipv4_only() {
+    async fn test_apply_behind_nat_ipv4_only() {
         let dir = tempfile::tempdir().unwrap();
         setup_firewall_config(
             dir.path(),
-            "config preferences preferences\n\toption remote_access 'default'\n",
+            "config preferences preferences\n\toption remote_access 'behind-nat'\n",
         );
 
         let wan_ipv4: Ipv4Addr = "192.168.1.1".parse().unwrap();
@@ -1482,7 +1545,7 @@ config zone wan
         let mut cfgs = parse_all(dir.path(), &arena, &["startwrt", "firewall"])
             .await
             .unwrap();
-        apply_remote_access_config(&mut cfgs, "default", Some(wan_ipv4), &[]);
+        apply_remote_access_config(&mut cfgs, "behind-nat", Some(wan_ipv4), &[]);
         dump_all(dir.path(), cfgs).await.unwrap();
 
         // Private IPv4, no IPv6 — one IPv4 rule per RFC1918 range × 3 ports.
@@ -1501,11 +1564,11 @@ config zone wan
     }
 
     #[tokio::test]
-    async fn test_apply_default_ipv6_ula_only() {
+    async fn test_apply_behind_nat_ipv6_ula_only() {
         let dir = tempfile::tempdir().unwrap();
         setup_firewall_config(
             dir.path(),
-            "config preferences preferences\n\toption remote_access 'default'\n",
+            "config preferences preferences\n\toption remote_access 'behind-nat'\n",
         );
 
         let wan_ipv6: Ipv6Addr = "fd00::1".parse().unwrap();
@@ -1514,7 +1577,7 @@ config zone wan
         let mut cfgs = parse_all(dir.path(), &arena, &["startwrt", "firewall"])
             .await
             .unwrap();
-        apply_remote_access_config(&mut cfgs, "default", None, &[wan_ipv6]);
+        apply_remote_access_config(&mut cfgs, "behind-nat", None, &[wan_ipv6]);
         dump_all(dir.path(), cfgs).await.unwrap();
 
         // No IPv4, ULA-only IPv6 — IPv6-only rules

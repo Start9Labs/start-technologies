@@ -1,1 +1,0 @@
-- **Les sauvegardes sont chiffrées avec votre mot de passe administrateur.** Le téléchargement d’une sauvegarde demande le mot de passe administrateur, et sa restauration le mot de passe administrateur en vigueur lors de sa création. Les sauvegardes des versions précédentes se restaurent toujours sans mot de passe.

@@ -18,6 +18,7 @@ REGISTRY_BASENAME := $(shell PROJECT=start-registry PLATFORM=$(ARCH) ./build/env
 TUNNEL_BASENAME := $(shell PROJECT=start-tunnel PLATFORM=$(ARCH) ./build/env/basename.sh)
 CLI_BASENAME := $(shell PROJECT=start-cli PLATFORM=$(ARCH) ./build/env/basename.sh)
 RUST_BUILDER_INPUTS := build/rust-builder/image.sh build/rust-builder/repository build/rust-builder/reference
+RUST_ZIG_BUILDER_INPUTS := build/builder-alias.sh $(call ls-files, build/musl-libc) $(RUST_BUILDER_INPUTS)
 
 # Every Rust binary tracks its transitive path dependencies.
 BACKUP_PROTOCOL_SRC := $(call ls-files, shared-libs/crates/backup-fs-protocol)
@@ -29,7 +30,7 @@ CORE_SRC := $(call ls-files, shared-libs/crates/start-core) $(BACKUP_PROTOCOL_SR
 	$(call ls-files, shared-libs/crates/visit-rs) \
 	$(call ls-files, shared-libs/crates/visit-rs-derive) \
 	$(call ls-files, shared-libs/crates/yasi) \
-	$(call ls-files, shared-libs/crates/patch-db) build/builder-alias.sh $(RUST_BUILDER_INPUTS) $(GIT_HASH_FILE)
+	$(call ls-files, shared-libs/crates/patch-db) $(RUST_ZIG_BUILDER_INPUTS) $(GIT_HASH_FILE)
 PATCH_DB_CLIENT_SRC := $(call ls-files, shared-libs/crates/patch-db/client)
 GZIP_BIN := $(shell which pigz || which gzip)
 TAR_BIN := $(shell which gtar || which tar)
