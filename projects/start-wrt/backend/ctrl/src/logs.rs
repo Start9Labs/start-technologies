@@ -3,13 +3,16 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use axum::extract::ws::Message;
+use futures::{Stream, StreamExt};
 use imbl_value::InternedString;
+use rpc_toolkit::{Empty, HandlerArgs, RpcStream};
 use serde::{Deserialize, Serialize};
-use startos::util::net::WebSocket;
+use startos::middleware::auth::session::SessionContext;
+use startos::rpc_continuations::WebSocket;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use crate::continuations::{Guid, RpcContinuation};
+use crate::continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::invoke::Invoke;
 use crate::prelude::*;
 use crate::ServerContext;
@@ -57,60 +60,91 @@ rpc_toolkit::reflect_ts!(FollowLogsParams);
 
 #[derive(Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct FollowLogsRes {
-    /// Streams each new [`LogEntry`] as JSON from `/ws/rpc/{guid}`.
-    pub guid: Guid,
+    /// Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.
+    /// Null when the entries arrive on the request's response stream.
+    pub guid: Option<Guid>,
 }
 rpc_toolkit::reflect_ts!(FollowLogsRes);
 
 pub async fn follow_logs(
+    HandlerArgs {
+        context,
+        params,
+        rpc_stream,
+        ..
+    }: HandlerArgs<ServerContext, FollowLogsParams, Empty, LogEntry>,
+) -> Result<FollowLogsRes, Error> {
+    follow(context, params, rpc_stream).await
+}
+
+/// Revocation of the requesting session ends the follow.
+async fn follow(
     ctx: ServerContext,
     FollowLogsParams { signer }: FollowLogsParams,
+    rpc_stream: Option<RpcStream<LogEntry>>,
 ) -> Result<FollowLogsRes, Error> {
+    let subscription = startos::auth::continuation_subscription(&ctx, signer).await?;
+    if let Some(stream) = rpc_stream {
+        subscription.forward_stream(stream, follow_entries()?.map(Ok::<_, startos::Error>));
+        return Ok(FollowLogsRes { guid: None });
+    }
     let guid = Guid::new();
     ctx.continuations
         .add(
             guid.clone(),
-            RpcContinuation::ws_authed(ctx.clone(), signer, stream_logs, Duration::from_secs(30)),
+            RpcContinuation::ws_authed(
+                subscription,
+                WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
+                stream_logs,
+                Duration::from_secs(30),
+            ),
         )
         .await;
-    Ok(FollowLogsRes { guid })
+    Ok(FollowLogsRes { guid: Some(guid) })
 }
 
-async fn stream_logs(mut ws: WebSocket) {
-    let mut child = match Command::new("logread")
+/// Ends when `logread` exits; dropping the stream kills it.
+fn follow_entries() -> Result<impl Stream<Item = LogEntry> + Send + 'static, Error> {
+    let mut child = Command::new("logread")
         .arg("-f")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()
-    {
-        Ok(child) => child,
+        .map_err(|e| Error::other(format!("spawning logread: {e}")))?;
+    let lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    Ok(futures::stream::unfold(
+        (child, lines),
+        |(child, mut lines)| async move {
+            loop {
+                let line = lines.next_line().await.ok()??;
+                if let Some(entry) = parse_logread_line(&line) {
+                    return Some((entry, (child, lines)));
+                }
+            }
+        },
+    ))
+}
+
+async fn stream_logs(mut ws: WebSocket) {
+    let entries = match follow_entries() {
+        Ok(entries) => entries,
         Err(e) => {
-            tracing::error!("failed to spawn logread: {e}");
+            tracing::error!("{e}");
             return;
         }
     };
-
-    let stdout = child.stdout.take().unwrap();
-    let mut reader = BufReader::new(stdout).lines();
-
+    tokio::pin!(entries);
     loop {
         tokio::select! {
-            line = reader.next_line() => {
-                match line {
-                    Ok(Some(line)) => {
-                        let Some(entry) = parse_logread_line(&line) else {
-                            continue;
-                        };
-                        let Ok(json) = serde_json::to_string(&entry) else {
-                            continue;
-                        };
-                        if ws.send(Message::Text(json.into())).await.is_err() {
-                            break;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(_) => break,
+            entry = entries.next() => {
+                let Some(entry) = entry else { break };
+                let Ok(json) = serde_json::to_string(&entry) else {
+                    continue;
+                };
+                if ws.send(Message::Text(json.into())).await.is_err() {
+                    break;
                 }
             }
             msg = ws.recv() => {
@@ -273,6 +307,48 @@ pub async fn get_logs(_ctx: ServerContext) -> Result<LogsResponse, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_revoked_key_cannot_bind_logs_after_its_request_was_authorized() {
+        use startos::middleware::auth::signature::{LoginMetadata, SignatureAuthorizationContext};
+        use startos::middleware::auth::DbContext;
+        use startos::sign::{AnySigningKey, Signer};
+
+        let (_, context, _server, _, _) = crate::rpc::tests::server().await;
+        let signer: Signer = AnySigningKey::generate().into();
+        let key = crate::rpc::tests::enroll(&context, &signer).await;
+        let public = signer.verifying_key().await.unwrap();
+        context
+            .check_pubkey(
+                &context.db().peek().await,
+                Some(&public),
+                LoginMetadata { login: false },
+            )
+            .unwrap();
+        let registered = startos::auth::continuation_subscription(&context, Some(key.clone()))
+            .await
+            .unwrap();
+        context.unenroll([key.clone()]).await.unwrap();
+        assert!(futures::FutureExt::now_or_never(registered).is_some());
+        let Err(error) = follow(
+            context.clone(),
+            FollowLogsParams {
+                signer: Some(key.clone()),
+            },
+            None,
+        )
+        .await
+        else {
+            panic!("revoked request created a new log continuation")
+        };
+        assert_eq!(error.kind, crate::error::ErrorKind::Authorization);
+        crate::rpc::tests::enroll(&context, &signer).await;
+        assert!(
+            follow(context, FollowLogsParams { signer: Some(key) }, None)
+                .await
+                .is_ok()
+        );
+    }
 
     #[test]
     fn test_parse_typical_line() {

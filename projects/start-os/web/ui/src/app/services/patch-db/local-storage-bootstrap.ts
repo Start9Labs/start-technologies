@@ -14,7 +14,16 @@ export class LocalStorageBootstrap {
   init(): Dump<DataModel> {
     const cache = this.storage.get<DataModel>(LocalStorageBootstrap.CONTENT_KEY)
 
-    return cache ? { id: 1, value: cache } : { id: 0, value: {} as DataModel }
+    return cache
+      ? {
+          id: 1,
+          value: {
+            ...cache,
+            registryCache: cache.registryCache ?? {},
+            osUpdateCache: cache.osUpdateCache ?? null,
+          },
+        }
+      : { id: 0, value: {} as DataModel }
   }
 
   update(cache: DataModel): void {

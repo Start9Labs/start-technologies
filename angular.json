@@ -349,7 +349,7 @@
             "outputPath": "projects/start-wrt/web/dist/startwrt",
             "index": "projects/start-wrt/web/src/index.html",
             "browser": "projects/start-wrt/web/src/main.ts",
-            "polyfills": ["projects/start-wrt/web/src/polyfills.ts"],
+            "polyfills": [],
             "tsConfig": "projects/start-wrt/web/tsconfig.json",
             "inlineStyleLanguage": "scss",
             "assets": [

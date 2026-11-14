@@ -3,6 +3,7 @@ use std::path::Path;
 use std::u32;
 
 use chrono::Utc;
+use clap::Parser;
 use exver::{Version, VersionRange};
 use imbl_value::InternedString;
 use patch_db::ModelExt;
@@ -12,6 +13,7 @@ use url::Url;
 use crate::PackageId;
 use crate::db::model::package::CurrentDependencyKind;
 use crate::prelude::*;
+use crate::registry::RegistryDatabase;
 use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
@@ -22,9 +24,10 @@ use crate::s9pk::git_hash::GitHash;
 use crate::s9pk::manifest::{Description, HardwareRequirements, LocaleString, current_version};
 use crate::s9pk::merkle_archive::source::FileSource;
 use crate::service::effects::plugin::PluginId;
-use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 #[cfg(test)]
-use crate::sign::{AnySignature, AnyVerifyingKey};
+use crate::sign::AnySignature;
+use crate::sign::AnyVerifyingKey;
+use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::util::VersionString;
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
@@ -45,10 +48,121 @@ pub struct PackageInfo {
     pub authorized: BTreeMap<Guid, VersionRange>,
     pub versions: BTreeMap<VersionString, PackageVersionInfo>,
     pub categories: BTreeSet<InternedString>,
+    #[serde(flatten)]
+    pub access: PackageAccessControl,
 }
 
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
+#[serde(rename_all = "camelCase")]
+#[model = "Model<Self>"]
+pub struct PackageAccessControl {
+    #[serde(default)]
+    pub private: bool,
+    #[serde(default)]
+    pub readers: BTreeSet<Guid>,
+}
+
+rpc_toolkit::reflect_ts!(PackageAccessControl);
 rpc_toolkit::reflect_ts!(PackageInfo);
 rpc_toolkit::ts_export!(PackageInfo, namespaces = [""]);
+
+#[derive(Clone, Debug)]
+pub struct Reader {
+    pub signer: Guid,
+    pub admin: bool,
+}
+
+impl Reader {
+    pub fn resolve(
+        db: &Model<RegistryDatabase>,
+        key: Option<&AnyVerifyingKey>,
+    ) -> Result<Option<Self>, Error> {
+        let Some(key) = key else {
+            return Ok(None);
+        };
+        let Some(signer) = db.as_index().as_signers().find_signer(key)? else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
+            admin: db.as_admins().de()?.contains(&signer),
+            signer,
+        }))
+    }
+}
+
+impl Model<PackageInfo> {
+    pub fn is_visible_to(&self, reader: Option<&Reader>) -> Result<bool, Error> {
+        let access = self.as_access().de()?;
+        if !access.private {
+            return Ok(true);
+        }
+        let Some(reader) = reader else {
+            return Ok(false);
+        };
+        Ok(reader.admin
+            || access.readers.contains(&reader.signer)
+            || self.as_authorized().contains_key(&reader.signer)?)
+    }
+}
+
+impl Model<PackageIndex> {
+    pub fn visible_package(
+        &self,
+        id: &PackageId,
+        reader: Option<&Reader>,
+    ) -> Result<Option<&Model<PackageInfo>>, Error> {
+        match self.as_packages().as_idx(id) {
+            Some(info) if info.is_visible_to(reader)? => Ok(Some(info)),
+            _ => Ok(None),
+        }
+    }
+
+    pub fn grants_private_access(&self, reader: &Reader) -> Result<bool, Error> {
+        for (_, info) in self.as_packages().as_entries()? {
+            if info.as_access().de()?.private && info.is_visible_to(Some(reader))? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Filters package visibility and redacts reader lists for non-admins.
+    pub fn retain_visible(&mut self, reader: Option<&Reader>) -> Result<(), Error> {
+        self.as_packages_mut()
+            .retain(|_, info| info.is_visible_to(reader))?;
+        if !reader.is_some_and(|reader| reader.admin) {
+            for (_, info) in self.as_packages_mut().as_entries_mut()? {
+                info.as_access_mut()
+                    .as_readers_mut()
+                    .ser(&BTreeSet::new())?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn de_visible_to(&self, reader: Option<&Reader>) -> Result<PackageIndex, Error> {
+        let mut index = self.clone();
+        index.retain_visible(reader)?;
+        index.de()
+    }
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, VisitFields, Parser)]
+#[group(skip)]
+pub struct ReaderParams {
+    #[arg(skip)]
+    #[visit(ts(skip))]
+    #[serde(rename = "__Auth_signer")]
+    pub signer: Option<AnyVerifyingKey>,
+}
+
+rpc_toolkit::reflect_ts!(ReaderParams);
+
+impl ReaderParams {
+    pub fn reader(&self, db: &Model<RegistryDatabase>) -> Result<Option<Reader>, Error> {
+        Reader::resolve(db, self.signer.as_ref())
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -338,13 +452,81 @@ impl Model<PackageVersionInfo> {
     }
 }
 
-pub async fn get_package_index(ctx: RegistryContext) -> Result<PackageIndex, Error> {
-    ctx.db.peek().await.into_index().into_package().de()
+pub async fn get_package_index(
+    ctx: RegistryContext,
+    params: ReaderParams,
+) -> Result<PackageIndex, Error> {
+    let db = ctx.db.peek().await;
+    let reader = params.reader(&db)?;
+    db.as_index().as_package().de_visible_to(reader.as_ref())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_packages_admit_admins_publishers_and_readers() {
+        let reader = Guid::new();
+        let publisher = Guid::new();
+        let index: Model<PackageIndex> = imbl_value::json!({
+            "categories": {}, "packages": {
+                "public": {"authorized": {}, "categories": [], "versions": {}, "readers": [reader]},
+                "secret": {"authorized": {publisher.as_ref(): "*"}, "categories": [],
+                    "versions": {}, "private": true, "readers": [reader]}
+            }
+        })
+        .into();
+        let visible =
+            |reader: Option<Reader>| index.de_visible_to(reader.as_ref()).unwrap().packages;
+        assert_eq!(visible(None).len(), 1);
+        let listed = |admin| {
+            visible(Some(Reader {
+                signer: reader.clone(),
+                admin,
+            }))["secret"]
+                .access
+                .readers
+                .len()
+        };
+        assert_eq!(listed(false), 0);
+        assert_eq!(listed(true), 1);
+        assert_eq!(
+            visible(Some(Reader {
+                signer: Guid::new(),
+                admin: false
+            }))
+            .len(),
+            1
+        );
+        for reader in [
+            Reader {
+                signer: reader,
+                admin: false,
+            },
+            Reader {
+                signer: publisher,
+                admin: false,
+            },
+            Reader {
+                signer: Guid::new(),
+                admin: true,
+            },
+        ] {
+            let packages = visible(Some(reader.clone()));
+            assert_eq!(packages.len(), 2);
+            for package in packages.values() {
+                assert_eq!(package.access.readers.len(), usize::from(reader.admin));
+            }
+        }
+        assert_eq!(
+            index.de().unwrap().packages["public"].access.readers.len(),
+            1
+        );
+        let public = &visible(None)["public"];
+        assert!(!public.access.private);
+        assert!(public.access.readers.is_empty());
+    }
 
     fn version_info_signed_by(seed: u8) -> (AnyVerifyingKey, PackageVersionInfo) {
         use ed25519_dalek::Signer;

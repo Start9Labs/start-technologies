@@ -13,9 +13,11 @@ use crate::db::model::public::NetworkInterfaceType;
 use crate::net::dns_update::rfc2136::InjectedRecord;
 use crate::net::forward::nft_rule;
 use crate::net::port_map::server::GatewayBackend;
+use crate::net::transport::Transport;
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::{DnsRecordEntry, PortForward, TunnelDatabase};
+use crate::tunnel::forward::address::ForwardAddress;
 use crate::tunnel::forward::pinhole;
 use crate::tunnel::wg::{
     DnsConfig, WIREGUARD_INTERFACE_NAME, WgClientKind, WgConfig, WgSubnetClients, WgSubnetConfig,
@@ -1313,7 +1315,7 @@ pub async fn add_forward(
             ErrorKind::Network,
         )
     })?;
-    let source = SocketAddrV4::new(external_ip, external_port);
+    let source = ForwardAddress::from(SocketAddrV4::new(external_ip, external_port));
 
     let covers_80 =
         external_port <= 80 && 80 <= external_port.saturating_add(count.saturating_sub(1));
@@ -1338,7 +1340,7 @@ pub async fn add_forward(
                 ErrorKind::InvalidRequest,
             ));
         }
-        ctx.persist_sni_forward(source, target, &sni, None, false, label)
+        ctx.persist_sni_forward(source.address, target, &sni, None, false, label)
             .await
             .map_err(|code| {
                 Error::new(
@@ -1363,9 +1365,9 @@ pub async fn add_forward(
 
     ctx.db
         .mutate(|db| {
-            db.as_webserver().de()?.check_plain_forward(source, count)?;
+            db.as_webserver().de()?.check_plain_forward(source.address, count)?;
             db.as_port_forwards_mut().mutate(|pf| {
-                if let Some(conflict) = pf.overlapping(source, count) {
+                if let Some(conflict) = pf.overlapping(source.clone(), count) {
                     return Err(Error::new(
                         eyre!(
                             "external ports {external_port}-{} overlap an existing forward at {conflict}",
@@ -1377,7 +1379,7 @@ pub async fn add_forward(
                 if pf
                     .0
                     .insert(
-                        source,
+                        source.clone(),
                         PortForward::Dnat {
                             target,
                             label: label.clone(),
@@ -1403,7 +1405,14 @@ pub async fn add_forward(
     let prefix = crate::tunnel::forward::igd::prefix_for(&ctx, target.ip()).await;
     let rc = match ctx
         .forward
-        .add_forward_range(source, target, count, prefix, None)
+        .add_forward_range(
+            source.address,
+            target,
+            count,
+            prefix,
+            None,
+            source.transport.clone(),
+        )
         .await
     {
         Ok(rc) => rc,
@@ -1432,7 +1441,7 @@ pub async fn add_forward(
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct RemovePortForwardParams {
-    source: SocketAddrV4,
+    source: ForwardAddress,
     /// Remove a single SNI route on `source`; omit to remove the whole forward.
     #[arg(long)]
     #[serde(default)]
@@ -1445,6 +1454,24 @@ rpc_toolkit::ts_export!(RemovePortForwardParams, namespaces = ["tunnel"]);
 pub async fn remove_forward(
     ctx: TunnelContext,
     RemovePortForwardParams { source, hostname }: RemovePortForwardParams,
+) -> Result<(), Error> {
+    let sources = ctx
+        .db
+        .peek()
+        .await
+        .as_port_forwards()
+        .de()?
+        .operation_keys(source);
+    for source in sources {
+        remove_forward_at(&ctx, source, hostname.clone()).await?;
+    }
+    Ok(())
+}
+
+async fn remove_forward_at(
+    ctx: &TunnelContext,
+    source: ForwardAddress,
+    hostname: Option<String>,
 ) -> Result<(), Error> {
     let entry = ctx
         .db
@@ -1465,13 +1492,13 @@ pub async fn remove_forward(
                 None => routes.iter().map(|(h, r)| (h.clone(), r.target)).collect(),
             };
             for (h, route_target) in to_remove {
-                ctx.remove_sni_routes(source, route_target, &[h], false)
+                ctx.remove_sni_routes(source.address, route_target, &[h], false)
                     .await;
             }
             // Removing the whole forward (no hostname) also drops its fallback.
             if hostname.is_none() {
                 if let Some(f) = fallback {
-                    ctx.remove_sni_fallback(source, f.target).await;
+                    ctx.remove_sni_fallback(source.address, f.target).await;
                 }
             }
             Ok(())
@@ -1495,7 +1522,7 @@ pub async fn remove_forward(
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePortForwardLabelParams {
-    source: SocketAddrV4,
+    source: ForwardAddress,
     label: Option<String>,
     /// Label a single SNI route on `source`; omit to label the DNAT forward.
     #[arg(long)]
@@ -1513,6 +1540,25 @@ pub async fn update_forward_label(
         label,
         hostname,
     }: UpdatePortForwardLabelParams,
+) -> Result<(), Error> {
+    let sources = ctx
+        .db
+        .peek()
+        .await
+        .as_port_forwards()
+        .de()?
+        .operation_keys(source);
+    for source in sources {
+        update_forward_label_at(&ctx, source, label.clone(), hostname.clone()).await?;
+    }
+    Ok(())
+}
+
+async fn update_forward_label_at(
+    ctx: &TunnelContext,
+    source: ForwardAddress,
+    label: Option<String>,
+    hostname: Option<String>,
 ) -> Result<(), Error> {
     ctx.db
         .mutate(|db| {
@@ -1555,7 +1601,7 @@ pub async fn update_forward_label(
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetPortForwardEnabledParams {
-    source: SocketAddrV4,
+    source: ForwardAddress,
     #[arg(long)]
     enabled: bool,
     /// Toggle a single SNI route on `source`; omit for a DNAT forward.
@@ -1580,7 +1626,7 @@ enum ForwardToggle {
 
 fn update_forward_enabled(
     db: &mut Model<TunnelDatabase>,
-    source: SocketAddrV4,
+    source: ForwardAddress,
     enabled: bool,
     hostname: Option<&str>,
 ) -> Result<ForwardToggle, Error> {
@@ -1599,8 +1645,8 @@ fn update_forward_enabled(
                 count,
                 ..
             } => {
-                if enabled {
-                    web.check_plain_forward(source, *count)?;
+                if enabled && source.transport != Transport::udp() {
+                    web.check_plain_forward(source.address, *count)?;
                 }
                 *e = enabled;
                 Ok(ForwardToggle::Dnat {
@@ -1639,10 +1685,29 @@ pub async fn set_forward_enabled(
         hostname,
     }: SetPortForwardEnabledParams,
 ) -> Result<(), Error> {
+    let sources = ctx
+        .db
+        .peek()
+        .await
+        .as_port_forwards()
+        .de()?
+        .operation_keys(source);
+    for source in sources {
+        set_forward_enabled_at(&ctx, source, enabled, hostname.clone()).await?;
+    }
+    Ok(())
+}
+
+async fn set_forward_enabled_at(
+    ctx: &TunnelContext,
+    source: ForwardAddress,
+    enabled: bool,
+    hostname: Option<String>,
+) -> Result<(), Error> {
     let _guard = ctx.forward_write_lock.lock().await;
     let toggle = ctx
         .db
-        .mutate(|db| update_forward_enabled(db, source, enabled, hostname.as_deref()))
+        .mutate(|db| update_forward_enabled(db, source.clone(), enabled, hostname.as_deref()))
         .await
         .result?;
 
@@ -1652,7 +1717,14 @@ pub async fn set_forward_enabled(
                 let prefix = crate::tunnel::forward::igd::prefix_for(&ctx, target.ip()).await;
                 let rc = ctx
                     .forward
-                    .add_forward_range(source, target, count, prefix, None)
+                    .add_forward_range(
+                        source.address,
+                        target,
+                        count,
+                        prefix,
+                        None,
+                        source.transport.clone(),
+                    )
                     .await?;
                 ctx.active_forwards.mutate(|m| {
                     m.insert(source, rc);
@@ -1749,7 +1821,17 @@ pub async fn add_pinhole(
             ErrorKind::InvalidRequest,
         ));
     }
-    pinhole::add_pinhole(&ctx, gua, external_port, internal, count, label, false).await
+    pinhole::add_pinhole(
+        &ctx,
+        gua,
+        external_port,
+        internal,
+        count,
+        label,
+        false,
+        Transport::default(),
+    )
+    .await
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
@@ -1758,6 +1840,9 @@ pub async fn add_pinhole(
 pub struct RemovePinholeParams {
     gua: Ipv6Addr,
     external_port: u16,
+    #[arg(skip)]
+    #[serde(default)]
+    transport: Transport,
 }
 
 rpc_toolkit::reflect_ts!(RemovePinholeParams);
@@ -1765,9 +1850,13 @@ rpc_toolkit::ts_export!(RemovePinholeParams, namespaces = ["tunnel"]);
 
 pub async fn remove_pinhole(
     ctx: TunnelContext,
-    RemovePinholeParams { gua, external_port }: RemovePinholeParams,
+    RemovePinholeParams {
+        gua,
+        external_port,
+        transport,
+    }: RemovePinholeParams,
 ) -> Result<(), Error> {
-    pinhole::remove_pinhole(&ctx, gua, external_port, false).await;
+    pinhole::remove_pinhole(&ctx, gua, external_port, false, transport).await;
     Ok(())
 }
 
@@ -1778,6 +1867,9 @@ pub struct UpdatePinholeLabelParams {
     gua: Ipv6Addr,
     external_port: u16,
     label: Option<String>,
+    #[arg(skip)]
+    #[serde(default)]
+    transport: Transport,
 }
 
 rpc_toolkit::reflect_ts!(UpdatePinholeLabelParams);
@@ -1789,9 +1881,10 @@ pub async fn update_pinhole_label(
         gua,
         external_port,
         label,
+        transport,
     }: UpdatePinholeLabelParams,
 ) -> Result<(), Error> {
-    pinhole::set_pinhole_label(&ctx, gua, external_port, label).await
+    pinhole::set_pinhole_label(&ctx, gua, external_port, label, transport).await
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
@@ -1802,6 +1895,9 @@ pub struct SetPinholeEnabledParams {
     external_port: u16,
     #[arg(long)]
     enabled: bool,
+    #[arg(skip)]
+    #[serde(default)]
+    transport: Transport,
 }
 
 rpc_toolkit::reflect_ts!(SetPinholeEnabledParams);
@@ -1813,9 +1909,10 @@ pub async fn set_pinhole_enabled(
         gua,
         external_port,
         enabled,
+        transport,
     }: SetPinholeEnabledParams,
 ) -> Result<(), Error> {
-    pinhole::set_pinhole_enabled(&ctx, gua, external_port, enabled).await
+    pinhole::set_pinhole_enabled(&ctx, gua, external_port, enabled, transport).await
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
@@ -2131,7 +2228,7 @@ mod tests {
         use crate::tunnel::db::PortForwards;
         use crate::tunnel::web::WebserverInfo;
 
-        let source = "203.0.113.4:442".parse().unwrap();
+        let source: ForwardAddress = "203.0.113.4:442".parse().unwrap();
         let target = "10.0.0.2:8442".parse().unwrap();
         let mut db = Model::new(&TunnelDatabase::default()).unwrap();
         db.as_webserver_mut()
@@ -2143,7 +2240,7 @@ mod tests {
             .unwrap();
         db.as_port_forwards_mut()
             .ser(&PortForwards(BTreeMap::from([(
-                source,
+                source.clone(),
                 PortForward::Dnat {
                     target,
                     label: None,
@@ -2153,7 +2250,7 @@ mod tests {
                 },
             )])))
             .unwrap();
-        let error = update_forward_enabled(&mut db, source, true, None)
+        let error = update_forward_enabled(&mut db, source.clone(), true, None)
             .err()
             .unwrap();
         assert_eq!(error.kind, ErrorKind::InvalidRequest);
@@ -2161,9 +2258,9 @@ mod tests {
             db.as_port_forwards().de().unwrap().0[&source],
             PortForward::Dnat { enabled: false, .. }
         ));
-        update_forward_enabled(&mut db, source, false, None).unwrap();
+        update_forward_enabled(&mut db, source.clone(), false, None).unwrap();
         db.as_webserver_mut().as_enabled_mut().ser(&false).unwrap();
-        let toggle = update_forward_enabled(&mut db, source, true, None).unwrap();
+        let toggle = update_forward_enabled(&mut db, source.clone(), true, None).unwrap();
         assert!(matches!(toggle, ForwardToggle::Dnat { target: t, count: 3 } if t == target));
         assert!(matches!(
             db.as_port_forwards().de().unwrap().0[&source],
@@ -2182,7 +2279,7 @@ mod tests {
         use crate::tunnel::db::{PortForwards, SniRoute};
         use crate::tunnel::web::WebserverInfo;
 
-        let source = "203.0.113.4:443".parse().unwrap();
+        let source: ForwardAddress = "203.0.113.4:443".parse().unwrap();
         let target = "10.0.0.2:443".parse().unwrap();
         let mut db = Model::new(&TunnelDatabase::default()).unwrap();
         db.as_webserver_mut()
@@ -2194,7 +2291,7 @@ mod tests {
             .unwrap();
         db.as_port_forwards_mut()
             .ser(&PortForwards(BTreeMap::from([(
-                source,
+                source.clone(),
                 PortForward::Sni {
                     routes: BTreeMap::from([(
                         "service.example.com".to_owned(),
@@ -2210,7 +2307,7 @@ mod tests {
             )])))
             .unwrap();
         assert!(matches!(
-            update_forward_enabled(&mut db, source, true, Some("service.example.com")).unwrap(),
+            update_forward_enabled(&mut db, source.clone(), true, Some("service.example.com")).unwrap(),
             ForwardToggle::Sni { target: t, .. } if t == target
         ));
     }

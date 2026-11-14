@@ -1,1 +1,0 @@
-- Alle Netzwerke beantworten Firefox’ Prüfdomäne für DNS-over-HTTPS. Dadurch tritt das standardmäßig aktivierte DoH in allen Netzwerken zurück und Gerätenamen werden dort aufgelöst. Vom Benutzer ausdrücklich aktiviertes DoH bleibt unverändert.

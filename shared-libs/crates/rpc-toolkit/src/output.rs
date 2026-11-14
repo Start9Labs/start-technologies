@@ -32,6 +32,15 @@ pub fn stderr() -> impl Write {
     Output(io::stderr().lock())
 }
 
+fn advisory_to(mut output: impl Write, args: fmt::Arguments<'_>) {
+    let _ = writeln!(output, "{}", args).and_then(|()| output.flush());
+}
+
+/// Writes a best-effort stderr advisory without changing process status on output failure.
+pub fn advisory(args: fmt::Arguments<'_>) {
+    advisory_to(io::stderr(), args);
+}
+
 fn print_to(mut output: impl Write, args: fmt::Arguments<'_>) {
     output
         .write_fmt(args)
@@ -133,6 +142,28 @@ mod tests {
         let value = 42;
         print_to(&mut bytes, format_args!("{value:04}\n"));
         assert_eq!(bytes, b"0042\n");
+    }
+
+    #[test]
+    fn advisory_preserves_bytes_without_propagating_output_failures() {
+        let mut bytes = Vec::new();
+        advisory_to(&mut bytes, format_args!("{}", "warning"));
+        assert_eq!(bytes, b"warning\n");
+        advisory_to(Denied, format_args!("warning"));
+    }
+
+    #[test]
+    fn advisory_ignores_broken_pipe() {
+        struct Closed;
+        impl Write for Closed {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        advisory_to(Closed, format_args!("warning"));
     }
 
     #[test]

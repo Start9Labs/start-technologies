@@ -1,5 +1,0 @@
-- Das Ändern des Sicherheitsprofils eines Ethernet-Ports oder WLAN-Passworts oder das Entfernen des letzten WLAN-Passworts eines Profils löscht nicht mehr die Reservierungen und veröffentlichten Ports der betroffenen Geräte. Die Bestätigung nennt die Geräte, die sie behalten.
-- Beim Löschen eines Sicherheitsprofils werden auch die Reservierungen und veröffentlichten Ports für dieses Profil gelöscht. Die Bestätigung listet sie auf.
-- Eine neue Reservierung muss im Subnetz des Profils liegen, in dem sich das Gerät befindet, und darf nicht für ein anderes Gerät reserviert sein. Reservierungen für Profile, in denen das Gerät nicht ist, stehen auf seiner Detailseite als inaktiv und lassen sich dort entfernen.
-- Ein veröffentlichter Port für ein Profil, in dem sich sein Gerät nicht befindet, wird als inaktiv angezeigt.
-- Eine automatische Portweiterleitung bleibt nicht mehr auf der reservierten Adresse eines Geräts offen, sobald es eine Adresse in einem anderen Profil erhält.

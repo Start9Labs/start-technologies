@@ -9,25 +9,23 @@ import {
   packageResponse,
   packagesResponse,
   packageSignerPolicy,
+  registryStatus,
+  isRegistryLoading,
 } from '@start9labs/marketplace'
 import { Exver, registryUrl, sameUrl } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
-  BehaviorSubject,
-  catchError,
   combineLatest,
+  defer,
   distinctUntilChanged,
   filter,
   from,
   firstValueFrom,
   map,
-  mergeMap,
   Observable,
   of,
-  pairwise,
   ReplaySubject,
-  scan,
   shareReplay,
   startWith,
   switchMap,
@@ -47,69 +45,75 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
 
-  readonly registries$: Observable<StoreIdentity[]> = this.patch
-    .watch$('serverInfo', 'registries')
-    .pipe(
-      map(registries =>
-        Object.entries(registries).map(([url, name]) =>
-          toStoreIdentity(url, name),
-        ),
-      ),
-    )
+  private readonly registryCache$ = this.patch.watch$('registryCache')
 
-  readonly newRegistry$ = this.registries$.pipe(
-    map(registries => registries.map(registry => registry.url)),
-    startWith<string[]>([]),
-    pairwise(),
-    mergeMap(([previous, current]) =>
-      current.filter(url => !previous.some(saved => sameUrl(url, saved))),
+  readonly registries$: Observable<
+    (StoreIdentity & { status: T.RegistryStatus })[]
+  > = combineLatest([
+    this.patch.watch$('serverInfo', 'registries'),
+    this.registryCache$,
+  ]).pipe(
+    map(([registries, cache]) =>
+      Object.entries(registries).flatMap(([url, name]) => {
+        try {
+          const entry = findRegistryCache(cache, url)
+          return [
+            {
+              ...toStoreIdentity(url, name),
+              status: registryStatus(entry),
+              error: entry?.error,
+            },
+          ]
+        } catch {
+          return []
+        }
+      }),
     ),
   )
+
+  private watchRegistry$(url: string) {
+    return this.registryCache$.pipe(
+      map(cache => findRegistryCache(cache, url)),
+      distinctUntilChanged(),
+    )
+  }
 
   readonly currentRegistryUrl$ = new ReplaySubject<string>(1)
 
-  readonly requestErrors$ = new BehaviorSubject<string[]>([])
+  readonly requestErrors$ = this.registries$.pipe(
+    map(registries =>
+      registries
+        .filter(registry => registry.status === 'error')
+        .map(({ url }) => url),
+    ),
+  )
 
   readonly marketplace$: Observable<Marketplace> = combineLatest([
-    this.newRegistry$.pipe(
-      mergeMap(url =>
-        this.fetchRegistry$(url).pipe(
-          map(data => [url, data] satisfies [string, StoreDataWithUrl | null]),
-          startWith<[string, StoreDataWithUrl | null]>([url, null]),
-        ),
-      ),
-      scan<[string, StoreDataWithUrl | null], Marketplace>(
-        (requests, [url, store]) => ({
-          ...requests,
-          [url]: store,
-        }),
-        {},
-      ),
-    ),
     this.registries$,
+    this.registryCache$,
   ]).pipe(
-    map(([marketplace, registries]) =>
+    map(([registries, cache]) =>
       Object.fromEntries(
-        Object.entries(marketplace).filter(([url]) =>
-          registries.find(store => sameUrl(store.url, url)),
-        ),
+        registries.map(({ url }) => {
+          const entry = findRegistryCache(cache, url)
+          return [url, entry ? this.toStore(url, entry) : null]
+        }),
       ),
     ),
     shareReplay(1),
   )
 
-  readonly currentRegistry$: Observable<StoreDataWithUrl> = combineLatest([
-    this.marketplace$,
-    this.currentRegistryUrl$,
+  readonly currentRegistry$: Observable<StoreDataWithUrl> =
     this.currentRegistryUrl$.pipe(
       distinctUntilChanged(),
-      switchMap(url => this.fetchRegistry$(url).pipe(startWith(null))),
-    ),
-  ]).pipe(
-    map(([all, url, current]) => current || all[url]),
-    filter(Boolean),
-    shareReplay(1),
-  )
+      switchMap(url =>
+        this.watchRegistry$(url).pipe(
+          filter(entry => !!entry),
+          map(entry => this.toStore(url, entry)),
+        ),
+      ),
+      shareReplay(1),
+    )
 
   readonly registryIcons$ = combineLatest([
     this.currentRegistry$.pipe(startWith(null)),
@@ -129,17 +133,21 @@ export class MarketplaceService extends AbstractMarketplaceService {
     flavor: string | null,
     registryUrl?: string,
   ): Observable<MarketplacePkg | null> {
-    return this.currentRegistry$.pipe(
-      switchMap(registry => {
-        const url = registryUrl || registry.url
-        const pkg = registry.packages.find(
-          p =>
-            p.id === id &&
-            p.flavor === flavor &&
-            (!version || this.exver.compareExver(p.version, version) === 0),
-        )
-        return pkg ? of(pkg) : this.fetchPackage$(url, id, version, flavor)
-      }),
+    return (registryUrl ? of(registryUrl) : this.currentRegistryUrl$).pipe(
+      distinctUntilChanged(),
+      switchMap(url =>
+        version
+          ? this.fetchPackage$(url, id, version, flavor)
+          : this.watchRegistry$(url).pipe(
+              filter(registryReady),
+              map(
+                entry =>
+                  this.toStore(url, entry).packages.find(
+                    pkg => pkg.id === id && pkg.flavor === flavor,
+                  ) ?? null,
+              ),
+            ),
+      ),
     )
   }
 
@@ -148,15 +156,14 @@ export class MarketplaceService extends AbstractMarketplaceService {
   }
 
   fetchInfo$(registry: string): Observable<T.RegistryInfo> {
-    return from(this.api.rpc.registry.info({ registry })).pipe(
-      map(info => ({
-        ...info,
-        categories: {
-          all: { name: 'All' },
-          ...info.categories,
-        },
-      })),
+    return this.watchRegistry$(registry).pipe(
+      filter(registryReady),
+      map(entry => this.registryInfo(entry.info)),
     )
+  }
+
+  private registryInfo(info: T.RegistryInfo): T.RegistryInfo {
+    return { ...info, categories: { all: { name: 'All' }, ...info.categories } }
   }
 
   fetchStatic$(
@@ -182,43 +189,28 @@ export class MarketplaceService extends AbstractMarketplaceService {
     )
   }
 
-  private fetchRegistry$(url: string): Observable<StoreDataWithUrl | null> {
-    return combineLatest([this.fetchInfo$(url), this.fetchPackages$(url)]).pipe(
-      map(([info, packages]) => ({ info, packages, url })),
-      catchError(e => {
-        console.error(e)
-        this.requestErrors$.next(this.requestErrors$.value.concat(url))
-        return of(null)
-      }),
-    )
-  }
-
-  private fetchPackages$(url: string): Observable<MarketplacePkg[]> {
-    return from(
-      this.api.rpc.registry.package
-        .get({
-          registry: url,
-          id: null,
-          targetVersion: null,
-          sourceVersion: null,
-          otherVersions: 'short',
-        })
-        .then(packagesResponse),
-    ).pipe(
-      map(packages =>
-        Object.entries(packages).flatMap(([id, pkgInfo]) =>
-          Object.keys(pkgInfo.best).flatMap(version => {
-            const pkg = this.convertRegistryPkgToMarketplacePkg(
-              id,
-              version,
-              this.exver.getFlavor(version),
-              pkgInfo,
-            )
-            return pkg ? [pkg] : []
-          }),
-        ),
+  private toStore(
+    url: string,
+    entry: T.Public['registryCache'][string],
+  ): StoreDataWithUrl {
+    const packages = packagesResponse(entry.packages)
+    return {
+      url,
+      info: this.registryInfo(entry.info),
+      status: registryStatus(entry),
+      error: entry.error,
+      packages: Object.entries(packages).flatMap(([id, pkgInfo]) =>
+        Object.keys(pkgInfo.best).flatMap(version => {
+          const pkg = this.convertRegistryPkgToMarketplacePkg(
+            id,
+            version,
+            this.exver.getFlavor(version),
+            pkgInfo,
+          )
+          return pkg ? [pkg] : []
+        }),
       ),
-    )
+    }
   }
 
   fetchPackage$(
@@ -228,17 +220,21 @@ export class MarketplaceService extends AbstractMarketplaceService {
     flavor: string | null,
     sourceVersion: string | null = null,
   ): Observable<MarketplacePkg | null> {
-    return from(
-      this.api.rpc.registry.package
-        .get({
-          registry: url,
-          id,
-          targetVersion: version ? `=${version}` : null,
-          sourceVersion,
-          otherVersions: 'short',
-        })
-        .then(packageResponse),
-    ).pipe(
+    return this.watchRegistry$(url).pipe(
+      filter(registryReady),
+      switchMap(() =>
+        defer(() =>
+          this.api.rpc.registry.package
+            .get({
+              registry: url,
+              id,
+              targetVersion: version ? `=${version}` : null,
+              sourceVersion,
+              otherVersions: 'short',
+            })
+            .then(packageResponse),
+        ),
+      ),
       map(pkgInfo =>
         this.convertRegistryPkgToMarketplacePkg(id, version, flavor, pkgInfo),
       ),
@@ -298,6 +294,10 @@ export class MarketplaceService extends AbstractMarketplaceService {
     return this.api.rpc.server.registries.add({ url, name: null })
   }
 
+  async refreshRegistry(url: string): Promise<void> {
+    await this.api.rpc.server.registries.refresh({ url })
+  }
+
   async add(rawUrl: string): Promise<string> {
     const url = registryUrl(rawUrl)
     await this.connectRegistry(url)
@@ -333,4 +333,20 @@ function toStoreIdentity(url: string, name?: string | null): StoreIdentity {
     url: registryUrl(url),
     name: name || url,
   }
+}
+
+function registryReady(
+  entry: T.RegistryCache | undefined,
+): entry is T.RegistryCache {
+  return (
+    !!entry &&
+    !isRegistryLoading(
+      registryStatus(entry),
+      Object.keys(entry.packages).length,
+    )
+  )
+}
+
+function findRegistryCache(cache: DataModel['registryCache'], url: string) {
+  return Object.entries(cache).find(([saved]) => sameUrl(saved, url))?.[1]
 }

@@ -1,3 +1,4 @@
+import { defaultRegistries, registryUrl, sameUrl } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import {
   DataModel,
@@ -73,7 +74,45 @@ function mockStart9Key(
   }
 }
 
+/** The community registry mocks an unreachable registry. */
+export function mockRegistryCache(
+  url: string,
+  info: T.RegistryInfo,
+): DataModel['registryCache'][string] {
+  return sameUrl(url, defaultRegistries.community)
+    ? {
+        info,
+        packages: {},
+        status: 'error',
+        error: `error sending request for url (${registryUrl(url)}): connection timed out`,
+      }
+    : { info, packages: Mock.RegistryPackages, status: 'connected' }
+}
+
+export function mockOsUpdateCache(
+  registry: string,
+): NonNullable<DataModel['osUpdateCache']> {
+  return {
+    registry: registryUrl(registry),
+    versions: sameUrl(registry, defaultRegistries.community)
+      ? {}
+      : Mock.RegistryOSUpdate,
+    status: 'connected',
+  }
+}
+
 export const mockPatchData: DataModel = {
+  registryCache: {
+    [defaultRegistries.start9]: mockRegistryCache(
+      defaultRegistries.start9,
+      Mock.RegistryInfo,
+    ),
+    [defaultRegistries.community]: mockRegistryCache(
+      defaultRegistries.community,
+      { ...Mock.RegistryInfo, name: 'Community Registry' },
+    ),
+  },
+  osUpdateCache: mockOsUpdateCache(defaultRegistries.start9),
   disks: structuredClone(Mock.Disks),
   sharedVolumes: {
     MOCKLOCALVOLUME234567ABCDEFGHIJK: {
@@ -451,6 +490,7 @@ export const mockPatchData: DataModel = {
               ],
             },
             options: {
+              transport: ['tcp'],
               preferredExternalPort: 80,
               addSsl: {
                 upstreamCertValidation: null,
@@ -646,6 +686,7 @@ export const mockPatchData: DataModel = {
     caFingerprint: '63:2B:11:99:44:40:17:DF:37:FC:C3:DF:0F:3D:15',
     ntpSynced: false,
     smtp: null,
+    nut: { enabled: false, settings: null },
     echoipUrls: ['https://ipconfig.me', 'https://ifconfig.co'],
     zram: false,
     governor: 'performance',
@@ -1053,6 +1094,7 @@ export const mockPatchData: DataModel = {
                 ],
               },
               options: {
+                transport: ['tcp', 'udp'],
                 preferredExternalPort: 42443,
                 addSsl: {
                   upstreamCertValidation: null,
@@ -1119,6 +1161,7 @@ export const mockPatchData: DataModel = {
           bindingRanges: {
             49152: {
               enabled: true,
+              transport: ['udp'],
               externalStartPort: 49152,
               numberOfPorts: 100,
               // Same per-address model as a single-port binding, IPv4-only and
@@ -1176,10 +1219,10 @@ export const mockPatchData: DataModel = {
                 ],
               },
               interface: {
-                id: 'zmq',
-                name: 'ZMQ',
-                description: 'Bitcoin ZMQ notification endpoints',
-                scheme: 'tcp',
+                id: 'udp-relay',
+                name: 'UDP Relay',
+                description: 'UDP-only relay ports',
+                scheme: 'udp',
               },
             },
           },
@@ -1264,10 +1307,11 @@ export const mockPatchData: DataModel = {
                 ],
               },
               options: {
+                transport: ['tcp', 'udp'],
                 addSsl: null,
                 preferredExternalPort: 48332,
                 secure: { ssl: false },
-                proxy: null,
+                proxy: { type: 'http', addXForwardedHeaders: true, auth: null },
               },
               interfaces: {
                 rpc: {
@@ -1311,6 +1355,7 @@ export const mockPatchData: DataModel = {
                 available: [],
               },
               options: {
+                transport: ['tcp', 'udp'],
                 addSsl: null,
                 preferredExternalPort: 48333,
                 secure: { ssl: false },

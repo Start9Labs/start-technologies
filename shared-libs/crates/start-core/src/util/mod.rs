@@ -309,7 +309,7 @@ async fn wait_command(
     Ok(output)
 }
 
-fn check_command_output(
+pub(crate) fn check_command_output(
     res: std::process::Output,
     error_kind: ErrorKind,
     cmd_str: &str,
