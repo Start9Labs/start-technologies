@@ -7,7 +7,6 @@ import {
 } from 'src/app/services/patch-db/data-model'
 import { knownAuthorities } from 'src/app/utils/acme'
 import { Mock } from './api.fixures'
-import { mockBitTorrentBinding } from './bittorrent.fixture'
 const version = require('../../../../../../../../package.json').version
 
 function mockService(
@@ -400,7 +399,6 @@ export const mockPatchData: DataModel = {
       },
       host: {
         bindings: {
-          6881: mockBitTorrentBinding(),
           80: {
             enabled: true,
             net: {

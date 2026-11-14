@@ -144,6 +144,7 @@ export class InterfaceService {
             return {
               id: iface.id,
               defaultOff: false,
+              pendingPort: false,
               name: iface.name,
               description: iface.description,
               masked: false,
@@ -188,6 +189,7 @@ export class InterfaceService {
     return {
       ...iface,
       defaultOff,
+      pendingPort: false,
       gatewayGroups: host ? this.getGatewayGroups(iface, host, gateways) : [],
       pluginGroups: host
         ? this.getPluginGroups(iface, host, allPackageData).filter(
@@ -200,6 +202,31 @@ export class InterfaceService {
         .flatMap(binding => Object.values(binding.interfaces))
         .filter(other => other.id !== iface.id)
         .map(other => other.name),
+    }
+  }
+
+  mapPreviewServiceInterface(
+    iface: T.ServiceInterface,
+    host: T.Host,
+    preview: T.BindingPreview,
+    gateways: GatewayPlus[],
+    allPackageData?: Record<string, PackageDataEntry>,
+  ): MappedServiceInterface {
+    return {
+      ...this.mapServiceInterface(iface, host, gateways, allPackageData),
+      defaultOff: preview.options.defaultOff,
+      pendingPort: true,
+      gatewayGroups: this.buildGatewayGroups(
+        preview.addresses,
+        iface.addressInfo,
+        iface.masked,
+        iface.type === 'ui',
+        preview.options.addSsl,
+        preview.options.secure,
+        host,
+        gateways,
+      ),
+      pluginGroups: [],
     }
   }
 
@@ -467,6 +494,7 @@ export type PluginAddressGroup = {
 
 export type MappedServiceInterface = T.ServiceInterface & {
   defaultOff: boolean
+  pendingPort: boolean
   gatewayGroups: GatewayAddressGroup[]
   pluginGroups: PluginAddressGroup[]
   // True when any binding on this interface's host adds SSL, not just this

@@ -1111,4 +1111,5 @@ export default {
   1310: 'Las conexiones entrantes exponen las direcciones habilitadas abajo.',
   1311: 'Compartir S9PK e imágenes del sistema',
   1312: 'El supervisor de la configuración de BitTorrent se ha detenido. Reinicia StartOS para restablecer las descargas y el uso compartido.',
+  1313: 'Habilita una dirección para asignar un puerto entrante y usar las acciones de dominio y URL. Al deshabilitar todas las direcciones, se libera el puerto.',
 } satisfies i18n

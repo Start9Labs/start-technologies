@@ -1112,4 +1112,5 @@ export const ENGLISH: Record<string, number> = {
   'Incoming connections expose the enabled addresses below.': 1310,
   'Share S9PKs and OS images': 1311,
   'The BitTorrent settings watcher stopped. Restart StartOS to restore downloads and sharing.': 1312,
+  'Enable an address to allocate an incoming port and use domain and URL actions. Disabling every address releases the port.': 1313,
 }

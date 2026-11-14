@@ -263,7 +263,11 @@ pub async fn init(
         )
         .await?,
     );
-    let os_net_service = net_ctrl.os_bindings().await?;
+    let retained = crate::system::bittorrent::retained_bindings(
+        &db.peek().await,
+        cfg.torrent_downloads.server_available(),
+    )?;
+    let os_net_service = net_ctrl.os_bindings(retained).await?;
     start_net.complete();
 
     mount_logs.start();

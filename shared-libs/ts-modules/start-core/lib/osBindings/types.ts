@@ -1464,16 +1464,6 @@ export type BindingSetGuaWanParams = z.output<
 export type BindingSetGuaWanParamsInput = z.input<
   typeof schemas.BindingSetGuaWanParams
 >
-
-/**
- * Effective transport availability and the native incoming peer interface.
- */
-export type BitTorrentConfig = z.output<typeof schemas.BitTorrentConfig>
-
-/**
- * Effective transport availability and the native incoming peer interface.
- */
-export type BitTorrentConfigInput = z.input<typeof schemas.BitTorrentConfig>
 export type CreateTaskParams = z.output<typeof schemas.CreateTaskParams>
 export type CreateTaskParamsInput = z.input<typeof schemas.CreateTaskParams>
 export type CurrentDependencies = z.output<typeof schemas.CurrentDependencies>
@@ -1614,12 +1604,32 @@ export type BindInfo = z.output<typeof schemas.BindInfo>
 export type BindInfoInput = z.input<typeof schemas.BindInfo>
 export type BindParams = z.output<typeof schemas.BindParams>
 export type BindParamsInput = z.input<typeof schemas.BindParams>
+
+/**
+ * Unallocated candidates; absent ports are pending rather than protocol defaults.
+ */
+export type BindingPreview = z.output<typeof schemas.BindingPreview>
+
+/**
+ * Unallocated candidates; absent ports are pending rather than protocol defaults.
+ */
+export type BindingPreviewInput = z.input<typeof schemas.BindingPreview>
 export type InstallingState = z.output<typeof schemas.InstallingState>
 export type InstallingStateInput = z.input<typeof schemas.InstallingState>
 export type UpdatingState = z.output<typeof schemas.UpdatingState>
 export type UpdatingStateInput = z.input<typeof schemas.UpdatingState>
 export type Bindings = z.output<typeof schemas.Bindings>
 export type BindingsInput = z.input<typeof schemas.Bindings>
+
+/**
+ * Effective transport availability and incoming candidates without reserved resources.
+ */
+export type BitTorrentConfig = z.output<typeof schemas.BitTorrentConfig>
+
+/**
+ * Effective transport availability and incoming candidates without reserved resources.
+ */
+export type BitTorrentConfigInput = z.input<typeof schemas.BitTorrentConfig>
 export type PackageState = z.output<typeof schemas.PackageState>
 export type PackageStateInput = z.input<typeof schemas.PackageState>
 export type Host = z.output<typeof schemas.Host>

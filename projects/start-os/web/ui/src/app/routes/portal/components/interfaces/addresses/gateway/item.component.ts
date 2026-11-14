@@ -1,10 +1,9 @@
 import { Component, computed, inject, input, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { i18nPipe, TaskService } from '@start9labs/shared'
+import { i18nPipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiButton, TuiDataList, TuiDropdown, TuiIcon } from '@taiga-ui/core'
 import { TuiBadge, TuiChevron, TuiSwitch, TuiTooltip } from '@taiga-ui/kit'
-import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { GatewayAddress, MappedServiceInterface } from '../../interface.service'
 import { GatewayActionsComponent } from './actions.component'
 import { DomainHealthService } from './domain-health.service'
@@ -278,8 +277,6 @@ import { DomainHealthService } from './domain-health.service'
   ],
 })
 export class GatewayItemComponent {
-  private readonly api = inject(ApiService)
-  private readonly tasks = inject(TaskService)
   private readonly domainHealth = inject(DomainHealthService)
 
   readonly address = input.required<GatewayAddress>()
@@ -343,27 +340,10 @@ export class GatewayItemComponent {
   async onSetGuaWan(wan: boolean) {
     const addr = this.address()
     const iface = this.value()
-    // Selecting the already-active option shouldn't re-save.
     if (!iface || wan === (addr.access === 'public')) return
 
     this.toggling.set(true)
-    await this.tasks.run(async () => {
-      if (this.packageId()) {
-        await this.api.rpc.package.host.binding.setGuaWan({
-          internalPort: iface.addressInfo.internalPort,
-          address: addr.hostnameInfo,
-          wan,
-          package: this.packageId(),
-          host: iface.addressInfo.hostId,
-        })
-      } else {
-        await this.api.rpc.server.host.binding.setGuaWan({
-          internalPort: 80,
-          address: addr.hostnameInfo,
-          wan,
-        })
-      }
-    }, 'Saving')
+    await this.domainHealth.setGuaWan(wan, addr, iface, this.packageId())
     this.toggling.set(false)
   }
 }

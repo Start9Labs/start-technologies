@@ -56,6 +56,10 @@ pub struct TorrentDownloadConfig {
 }
 
 impl TorrentDownloadConfig {
+    pub(crate) fn server_available(&self) -> bool {
+        self.bittorrent.unwrap_or(true)
+    }
+
     /// Keeps explicit settings ahead of lower-priority configuration.
     pub fn merge_with(&mut self, other: Self) {
         self.bittorrent = self.bittorrent.or(other.bittorrent);
@@ -329,7 +333,7 @@ impl TorrentClient {
 
     /// Keeps preference controls available unless administratively disabled; peer transfers require opt-in.
     pub fn for_server(config: TorrentDownloadConfig, seed: Option<TorrentSeedConfig>) -> Self {
-        let available = config.bittorrent.unwrap_or(true);
+        let available = config.server_available();
         let closed = CancellationToken::new();
         Self {
             available,

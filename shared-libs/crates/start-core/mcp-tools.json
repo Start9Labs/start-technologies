@@ -10268,11 +10268,17 @@
           "type": "object",
           "properties": {
             "available": { "type": "boolean" },
-            "interface": { "$ref": "#/$defs/ServiceInterface" }
+            "interface": { "$ref": "#/$defs/ServiceInterface" },
+            "preview": {
+              "anyOf": [
+                { "$ref": "#/$defs/BindingPreview" },
+                { "type": "null" }
+              ]
+            }
           },
-          "required": ["available", "interface"],
+          "required": ["available", "interface", "preview"],
           "additionalProperties": true,
-          "description": "Effective transport availability and the native incoming peer interface."
+          "description": "Effective transport availability and incoming candidates without reserved resources."
         },
         "ServiceInterface": {
           "type": "object",
@@ -10328,16 +10334,762 @@
         "ServiceInterfaceType": {
           "type": "string",
           "enum": ["ui", "p2p", "api"]
-        }
+        },
+        "BindingPreview": {
+          "type": "object",
+          "properties": {
+            "options": { "$ref": "#/$defs/BindOptions" },
+            "addresses": { "$ref": "#/$defs/DerivedAddressInfo" }
+          },
+          "required": ["options", "addresses"],
+          "additionalProperties": true,
+          "description": "Unallocated candidates; absent ports are pending rather than protocol defaults."
+        },
+        "BindOptions": {
+          "type": "object",
+          "properties": {
+            "preferredExternalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Zero requests dynamic allocation; it never reserves port zero."
+            },
+            "addSsl": {
+              "anyOf": [{ "$ref": "#/$defs/AddSslOptions" }, { "type": "null" }]
+            },
+            "secure": {
+              "anyOf": [{ "$ref": "#/$defs/Security" }, { "type": "null" }]
+            },
+            "proxy": {
+              "anyOf": [{ "$ref": "#/$defs/ProxyOptions" }, { "type": "null" }],
+              "description": "Proxy protocol shared by every exposed leg of this binding."
+            },
+            "defaultOff": {
+              "type": "boolean",
+              "description": "New address groups require opt-in; existing selections persist.\nInactive bindings clear selections and reject opt-ins.\nInternal endpoints remain local and are omitted from opt-in candidates."
+            }
+          },
+          "required": [
+            "preferredExternalPort",
+            "addSsl",
+            "secure",
+            "proxy",
+            "defaultOff"
+          ],
+          "additionalProperties": true
+        },
+        "AddSslOptions": {
+          "type": "object",
+          "properties": {
+            "preferredExternalPort": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "alpn": {
+              "anyOf": [{ "$ref": "#/$defs/AlpnInfo" }, { "type": "null" }],
+              "description": "The application protocols StartOS answers a client with, from those it\nasked for. Unset answers with whatever it asked for."
+            },
+            "upstreamCertValidation": {
+              "anyOf": [
+                { "$ref": "#/$defs/UpstreamCertValidation" },
+                { "type": "null" }
+              ],
+              "description": "Certificate validation for the OS→container TLS leg when rewrapping.\n`None` (the default) validates against the StartOS root CA."
+            }
+          },
+          "required": [
+            "preferredExternalPort",
+            "alpn",
+            "upstreamCertValidation"
+          ],
+          "additionalProperties": true
+        },
+        "AlpnInfo": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/MaybeUtf8String" },
+          "description": "The protocols a binding answers with, carried on the wire as the list itself."
+        },
+        "MaybeUtf8String": {
+          "anyOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "number" } }
+          ]
+        },
+        "UpstreamCertValidation": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "disable",
+              "description": "Do not validate the container's certificate at all. Use when the\ncontainer serves a self-signed cert on the trusted internal bridge."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "certificate": {
+                  "type": "string",
+                  "description": "Validate against this PEM-encoded certificate (or chain) instead of the\nStartOS root CA."
+                }
+              },
+              "required": ["certificate"],
+              "additionalProperties": true,
+              "description": "Validate against this PEM-encoded certificate (or chain) instead of the\nStartOS root CA."
+            }
+          ],
+          "description": "How the OS reverse proxy validates the container's TLS certificate when it\nrewraps SSL (`add_ssl` set AND `secure.ssl == true`, so the OS terminates\nthe client's TLS and initiates a fresh TLS connection to the container).\nAbsent (`None`) means validate against the StartOS root CA — the default."
+        },
+        "Security": {
+          "type": "object",
+          "properties": {
+            "ssl": {
+              "type": "boolean",
+              "description": "Whether TLS precedes application bytes."
+            }
+          },
+          "required": ["ssl"],
+          "additionalProperties": true,
+          "description": "A protocol safe to expose on enabled public addresses."
+        },
+        "ProxyOptions": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tcp",
+                  "description": "Relays raw TCP streams without parsing application messages."
+                }
+              },
+              "required": ["type"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "http" },
+                "addXForwardedHeaders": {
+                  "description": "Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.",
+                  "type": "boolean"
+                },
+                "auth": {
+                  "description": "Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.",
+                  "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }]
+                }
+              },
+              "required": ["type", "addXForwardedHeaders", "auth"]
+            }
+          ]
+        },
+        "ProxyAuth": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "bearer" },
+                "tokens": { "type": "array", "items": { "type": "string" } },
+                "realm": { "type": ["string", "null"] }
+              },
+              "required": ["type", "tokens", "realm"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "const": "basic" },
+                "credentials": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/BasicCredential" }
+                },
+                "realm": { "type": ["string", "null"] }
+              },
+              "required": ["type", "credentials", "realm"]
+            }
+          ],
+          "description": "Auth gate enforced by the OS reverse proxy on incoming requests.\n\n- `Bearer { tokens }`: any of `tokens` is accepted as `Authorization: Bearer <token>`.\n- `Basic  { credentials }`: any `(username, password)` pair in `credentials` is\n  accepted as `Authorization: Basic <base64(username:password)>`. The matched\n  `username` is forwarded upstream as `X-Forwarded-User`.\n\n`realm` is the authentication realm advertised in the\n`WWW-Authenticate` challenge sent on 401 responses (RFC 7235\n§2.2). Defaults to `\"StartOS\"` when unset. Packages that share\ncredentials across multiple bindings should pick a stable realm\nso that browsers reuse cached credentials across them."
+        },
+        "BasicCredential": {
+          "type": "object",
+          "properties": {
+            "username": { "type": "string" },
+            "password": { "type": "string" }
+          },
+          "required": ["username", "password"],
+          "additionalProperties": true
+        },
+        "DerivedAddressInfo": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Public IP opt-ins."
+            },
+            "disabled": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                ],
+                "items": false,
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "description": "Named-address and private-IP opt-outs."
+            },
+            "enabledNames": {
+              "description": "Named-address opt-ins retained across discovery changes.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                ],
+                "items": false,
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            "defaultOff": {
+              "description": "Binding policy projected for standalone address consumers.",
+              "type": "boolean"
+            },
+            "guaWan": {
+              "description": "IPv6 global-unicast WAN opt-ins, projected into `HostnameInfo.public`.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "lanEnabled": {
+              "description": "User override: enable these private IPs regardless of their mDNS address.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "string" },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                ],
+                "items": false,
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            "available": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/HostnameInfo" },
+              "description": "Discovered address candidates."
+            },
+            "selected": {
+              "description": "Computed consent projection; absent on pre-projection servers.",
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/HostnameInfo" }
+                },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": [
+            "enabled",
+            "disabled",
+            "enabledNames",
+            "defaultOff",
+            "guaWan",
+            "lanEnabled",
+            "available"
+          ],
+          "additionalProperties": true
+        },
+        "HostnameInfo": {
+          "type": "object",
+          "properties": {
+            "ssl": { "type": "boolean" },
+            "public": { "type": "boolean" },
+            "hostname": { "type": "string" },
+            "port": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "metadata": { "$ref": "#/$defs/HostnameMetadata" }
+          },
+          "required": ["ssl", "public", "hostname", "port", "metadata"],
+          "additionalProperties": true
+        },
+        "HostnameMetadata": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "ipv4" },
+                "gateway": { "$ref": "#/$defs/GatewayId" }
+              },
+              "required": ["kind", "gateway"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "ipv6" },
+                "gateway": { "$ref": "#/$defs/GatewayId" },
+                "scopeId": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["kind", "gateway", "scopeId"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "mdns" },
+                "gateways": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/GatewayId" }
+                }
+              },
+              "required": ["kind", "gateways"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "private-domain" },
+                "gateways": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/GatewayId" }
+                }
+              },
+              "required": ["kind", "gateways"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "public-domain" },
+                "gateway": { "$ref": "#/$defs/GatewayId" }
+              },
+              "required": ["kind", "gateway"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "plugin" },
+                "packageId": { "$ref": "#/$defs/PackageId" },
+                "removeAction": {
+                  "anyOf": [{ "$ref": "#/$defs/ActionId" }, { "type": "null" }]
+                },
+                "overflowActions": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/ActionId" }
+                },
+                "info": {}
+              },
+              "required": [
+                "kind",
+                "packageId",
+                "removeAction",
+                "overflowActions",
+                "info"
+              ]
+            }
+          ]
+        },
+        "GatewayId": { "type": "string" },
+        "PackageId": { "type": "string" },
+        "ActionId": { "type": "string" }
       },
       "type": "object",
       "properties": {
         "available": { "type": "boolean" },
-        "interface": { "$ref": "#/$defs/ServiceInterface" }
+        "interface": { "$ref": "#/$defs/ServiceInterface" },
+        "preview": {
+          "anyOf": [{ "$ref": "#/$defs/BindingPreview" }, { "type": "null" }]
+        }
       },
-      "required": ["available", "interface"],
+      "required": ["available", "interface", "preview"],
       "additionalProperties": true,
-      "description": "Effective transport availability and the native incoming peer interface."
+      "description": "Effective transport availability and incoming candidates without reserved resources."
+    }
+  },
+  {
+    "name": "server.bittorrent.set-address-enabled",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SelectAddressParams": {
+          "type": "object",
+          "properties": {
+            "address": { "$ref": "#/$defs/HostnameInfo" },
+            "enabled": { "type": "boolean" }
+          },
+          "required": ["address", "enabled"],
+          "additionalProperties": true
+        },
+        "HostnameInfo": {
+          "type": "object",
+          "properties": {
+            "ssl": { "type": "boolean" },
+            "public": { "type": "boolean" },
+            "hostname": { "type": "string" },
+            "port": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "metadata": { "$ref": "#/$defs/HostnameMetadata" }
+          },
+          "required": ["ssl", "public", "hostname", "metadata"],
+          "additionalProperties": true
+        },
+        "HostnameMetadata": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "ipv4" },
+                "gateway": { "$ref": "#/$defs/GatewayId" }
+              },
+              "required": ["kind", "gateway"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "ipv6" },
+                "gateway": { "$ref": "#/$defs/GatewayId" },
+                "scopeId": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["kind", "gateway", "scopeId"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "mdns" },
+                "gateways": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/GatewayId" }
+                }
+              },
+              "required": ["kind", "gateways"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "private-domain" },
+                "gateways": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/GatewayId" }
+                }
+              },
+              "required": ["kind", "gateways"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "public-domain" },
+                "gateway": { "$ref": "#/$defs/GatewayId" }
+              },
+              "required": ["kind", "gateway"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "plugin" },
+                "packageId": { "$ref": "#/$defs/PackageId" },
+                "removeAction": {
+                  "anyOf": [{ "$ref": "#/$defs/ActionId" }, { "type": "null" }]
+                },
+                "overflowActions": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/ActionId" }
+                },
+                "info": {}
+              },
+              "required": ["kind", "packageId", "overflowActions"]
+            }
+          ]
+        },
+        "GatewayId": { "type": "string" },
+        "PackageId": { "type": "string" },
+        "ActionId": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "address": { "$ref": "#/$defs/HostnameInfo" },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["address", "enabled"],
+      "additionalProperties": true
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "HostnameInfo": {
+          "type": "object",
+          "properties": {
+            "ssl": { "type": "boolean" },
+            "public": { "type": "boolean" },
+            "hostname": { "type": "string" },
+            "port": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "metadata": { "$ref": "#/$defs/HostnameMetadata" }
+          },
+          "required": ["ssl", "public", "hostname", "port", "metadata"],
+          "additionalProperties": true
+        },
+        "HostnameMetadata": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "ipv4" },
+                "gateway": { "$ref": "#/$defs/GatewayId" }
+              },
+              "required": ["kind", "gateway"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "ipv6" },
+                "gateway": { "$ref": "#/$defs/GatewayId" },
+                "scopeId": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["kind", "gateway", "scopeId"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "mdns" },
+                "gateways": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/GatewayId" }
+                }
+              },
+              "required": ["kind", "gateways"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "private-domain" },
+                "gateways": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/GatewayId" }
+                }
+              },
+              "required": ["kind", "gateways"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "public-domain" },
+                "gateway": { "$ref": "#/$defs/GatewayId" }
+              },
+              "required": ["kind", "gateway"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "plugin" },
+                "packageId": { "$ref": "#/$defs/PackageId" },
+                "removeAction": {
+                  "anyOf": [{ "$ref": "#/$defs/ActionId" }, { "type": "null" }]
+                },
+                "overflowActions": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/ActionId" }
+                },
+                "info": {}
+              },
+              "required": [
+                "kind",
+                "packageId",
+                "removeAction",
+                "overflowActions",
+                "info"
+              ]
+            }
+          ]
+        },
+        "GatewayId": { "type": "string" },
+        "PackageId": { "type": "string" },
+        "ActionId": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "ssl": { "type": "boolean" },
+        "public": { "type": "boolean" },
+        "hostname": { "type": "string" },
+        "port": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            { "type": "null" }
+          ]
+        },
+        "metadata": { "$ref": "#/$defs/HostnameMetadata" }
+      },
+      "required": ["ssl", "public", "hostname", "port", "metadata"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "server.bittorrent.set-gua-wan",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SelectGuaParams": {
+          "type": "object",
+          "properties": {
+            "address": { "$ref": "#/$defs/HostnameInfo" },
+            "wan": { "type": "boolean" }
+          },
+          "required": ["address", "wan"],
+          "additionalProperties": true
+        },
+        "HostnameInfo": {
+          "type": "object",
+          "properties": {
+            "ssl": { "type": "boolean" },
+            "public": { "type": "boolean" },
+            "hostname": { "type": "string" },
+            "port": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "metadata": { "$ref": "#/$defs/HostnameMetadata" }
+          },
+          "required": ["ssl", "public", "hostname", "metadata"],
+          "additionalProperties": true
+        },
+        "HostnameMetadata": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "ipv4" },
+                "gateway": { "$ref": "#/$defs/GatewayId" }
+              },
+              "required": ["kind", "gateway"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "ipv6" },
+                "gateway": { "$ref": "#/$defs/GatewayId" },
+                "scopeId": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["kind", "gateway", "scopeId"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "mdns" },
+                "gateways": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/GatewayId" }
+                }
+              },
+              "required": ["kind", "gateways"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "private-domain" },
+                "gateways": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/GatewayId" }
+                }
+              },
+              "required": ["kind", "gateways"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "public-domain" },
+                "gateway": { "$ref": "#/$defs/GatewayId" }
+              },
+              "required": ["kind", "gateway"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "plugin" },
+                "packageId": { "$ref": "#/$defs/PackageId" },
+                "removeAction": {
+                  "anyOf": [{ "$ref": "#/$defs/ActionId" }, { "type": "null" }]
+                },
+                "overflowActions": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/ActionId" }
+                },
+                "info": {}
+              },
+              "required": ["kind", "packageId", "overflowActions"]
+            }
+          ]
+        },
+        "GatewayId": { "type": "string" },
+        "PackageId": { "type": "string" },
+        "ActionId": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "address": { "$ref": "#/$defs/HostnameInfo" },
+        "wan": { "type": "boolean" }
+      },
+      "required": ["address", "wan"],
+      "additionalProperties": true
     }
   },
   {

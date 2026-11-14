@@ -1,22 +1,25 @@
 use clap::Parser;
-use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn, from_fn_async};
+use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
-use crate::net::service_interface::ServiceInterface;
+use crate::net::host::binding::BindingPreview;
+use crate::net::service_interface::{HostnameInfo, ServiceInterface};
 use crate::prelude::*;
 use crate::registry::bittorrent::{TorrentClient, TorrentPreferences};
 use crate::util::serde::HandlerExtSerde;
 
 mod incoming;
-pub(crate) use incoming::configure_incoming;
+pub(crate) use incoming::{configure_incoming, retained_bindings};
+#[cfg(test)]
+mod tests;
 
 pub(crate) fn api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
             "config",
-            from_fn(config)
+            from_fn_async(config)
                 .with_display_serializable()
                 .with_about("about.system.bittorrent-config")
                 .with_call_remote::<CliContext>(),
@@ -29,24 +32,73 @@ pub(crate) fn api<C: Context>() -> ParentHandler<C> {
                 .with_about("about.system.set-bittorrent-preferences")
                 .with_call_remote::<CliContext>(),
         )
+        .subcommand(
+            "set-address-enabled",
+            from_fn_async(set_address_enabled)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
+        )
+        .subcommand(
+            "set-gua-wan",
+            from_fn_async(set_gua_wan)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
+        )
 }
 
-/// Effective transport availability and the native incoming peer interface.
+/// Effective transport availability and incoming candidates without reserved resources.
 #[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 struct BitTorrentConfig {
     available: bool,
     interface: ServiceInterface,
+    preview: Option<BindingPreview>,
 }
 
 rpc_toolkit::reflect_ts!(BitTorrentConfig);
 rpc_toolkit::ts_export!(BitTorrentConfig, namespaces = [""]);
 
-fn config(ctx: RpcContext) -> Result<BitTorrentConfig, Error> {
+async fn config(ctx: RpcContext) -> Result<BitTorrentConfig, Error> {
     Ok(BitTorrentConfig {
         available: ctx.torrents.available(),
         interface: incoming::interface(),
+        preview: incoming::preview(&ctx.db.peek().await)?,
     })
+}
+
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+struct SelectAddressParams {
+    address: HostnameInfo,
+    enabled: bool,
+}
+rpc_toolkit::reflect_ts!(SelectAddressParams);
+
+async fn set_address_enabled(
+    ctx: RpcContext,
+    params: SelectAddressParams,
+) -> Result<HostnameInfo, Error> {
+    let available = ctx.torrents.available();
+    ctx.db
+        .mutate(|db| incoming::select_address_in(db, available, params.address, params.enabled))
+        .await
+        .result
+}
+
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+struct SelectGuaParams {
+    address: HostnameInfo,
+    wan: bool,
+}
+rpc_toolkit::reflect_ts!(SelectGuaParams);
+
+async fn set_gua_wan(ctx: RpcContext, params: SelectGuaParams) -> Result<(), Error> {
+    let available = ctx.torrents.available();
+    ctx.db
+        .mutate(|db| incoming::select_gua_in(db, available, params.address, params.wan))
+        .await
+        .result
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Parser, VisitFields)]
@@ -102,324 +154,4 @@ async fn update_preferences(
     })
     .await
     .result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn preferences_cascade_atomically_in_the_authoritative_database() -> Result<(), Error> {
-        let db = TypedPatchDb::<Database>::load_unchecked(PatchDb::in_memory());
-        db.put(
-            &patch_db::json_ptr::ROOT,
-            &imbl_value::json!({"public": {"serverInfo": {
-                "bittorrent": to_value(&TorrentPreferences::default())?,
-                "network": {"host": {"bindings": {}}}
-            }}}),
-        )
-        .await?;
-        assert_eq!(
-            update_preferences(
-                &db,
-                SetPreferencesParams {
-                    seeding: Some(true),
-                    ..Default::default()
-                }
-            )
-            .await?,
-            TorrentPreferences::default()
-        );
-        let enabled = update_preferences(
-            &db,
-            SetPreferencesParams {
-                downloads: Some(true),
-                seeding: Some(true),
-            },
-        )
-        .await?;
-        assert_eq!(
-            enabled,
-            TorrentPreferences {
-                downloads: true,
-                seeding: true
-            }
-        );
-        let disabled = update_preferences(
-            &db,
-            SetPreferencesParams {
-                downloads: Some(false),
-                ..Default::default()
-            },
-        )
-        .await?;
-        assert_eq!(
-            disabled,
-            TorrentPreferences {
-                downloads: false,
-                seeding: false
-            }
-        );
-        assert_eq!(
-            db.peek()
-                .await
-                .as_public()
-                .as_server_info()
-                .as_bittorrent()
-                .de()?,
-            disabled
-        );
-        assert_eq!(
-            update_preferences(
-                &db,
-                SetPreferencesParams {
-                    downloads: Some(true),
-                    ..Default::default()
-                },
-            )
-            .await?,
-            TorrentPreferences {
-                downloads: true,
-                seeding: false
-            }
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn address_rows_are_the_ingress_opt_in_and_either_parent_clears_them() -> Result<(), Error>
-    {
-        use std::sync::Arc;
-
-        use crate::db::model::public::{GatewayType, IpInfo, NetworkInterfaceInfo};
-        use crate::net::forward::AvailablePorts;
-        use crate::net::host::Host;
-
-        for (disable_downloads, hostname, public) in [
-            (false, "203.0.113.45", true),
-            (true, "203.0.113.45", true),
-            (false, "192.168.1.2", false),
-            (true, "192.168.1.2", false),
-        ] {
-            let gateway = NetworkInterfaceInfo {
-                gateway_type: GatewayType::InboundOutbound,
-                ip_info: Some(Arc::new(IpInfo {
-                    subnets: ["192.168.1.2/24".parse::<ipnet::IpNet>().unwrap()]
-                        .into_iter()
-                        .collect(),
-                    wan_ip: Some("203.0.113.45".parse().unwrap()),
-                    ..Default::default()
-                })),
-                ..Default::default()
-            };
-            let db = TypedPatchDb::<Database>::load_unchecked(PatchDb::in_memory());
-            db.put(&patch_db::json_ptr::ROOT, &imbl_value::json!({
-                "public": {"serverInfo": {
-                    "hostname": "server",
-                    "bittorrent": to_value(&TorrentPreferences::default())?,
-                    "network": {"host": to_value(&Host::default())?, "gateways": {"eth0": to_value(&gateway)?}}
-                }},
-                "private": {"availablePorts": to_value(&AvailablePorts::new())?}
-            })).await?;
-            assert!(
-                db.mutate(|db| incoming::configure_in(db, true))
-                    .await
-                    .result?
-                    .is_none()
-            );
-            let binding = db
-                .peek()
-                .await
-                .as_public()
-                .as_server_info()
-                .as_network()
-                .as_host()
-                .as_bindings()
-                .as_idx(&6881)
-                .unwrap()
-                .de()?;
-            assert!(!binding.enabled);
-            assert!(binding.addresses.enabled().is_empty());
-            assert_eq!(binding.addresses.available.len(), 2);
-            let address = binding
-                .addresses
-                .available
-                .iter()
-                .find(|address| address.hostname == InternedString::intern(hostname))
-                .unwrap()
-                .clone();
-            assert_eq!(address.public, public);
-            update_preferences(
-                &db,
-                SetPreferencesParams {
-                    downloads: Some(true),
-                    seeding: Some(true),
-                },
-            )
-            .await?;
-            assert!(
-                db.mutate(|db| incoming::configure_in(db, true))
-                    .await
-                    .result?
-                    .is_none()
-            );
-            db.mutate(|db| {
-                db.as_public_mut()
-                    .as_server_info_mut()
-                    .as_network_mut()
-                    .as_host_mut()
-                    .as_bindings_mut()
-                    .as_idx_mut(&6881)
-                    .unwrap()
-                    .mutate(|binding| binding.set_address_enabled(&address, true))
-            })
-            .await
-            .result?;
-            assert!(
-                db.mutate(|db| incoming::configure_in(db, true))
-                    .await
-                    .result?
-                    .is_some()
-            );
-            update_preferences(
-                &db,
-                SetPreferencesParams {
-                    downloads: disable_downloads.then_some(false),
-                    seeding: (!disable_downloads).then_some(false),
-                },
-            )
-            .await?;
-            let binding = db
-                .peek()
-                .await
-                .as_public()
-                .as_server_info()
-                .as_network()
-                .as_host()
-                .as_bindings()
-                .as_idx(&6881)
-                .unwrap()
-                .de()?;
-            assert!(!binding.enabled);
-            assert!(binding.addresses.enabled().is_empty());
-            assert!(
-                db.mutate(|db| incoming::configure_in(db, true))
-                    .await
-                    .result?
-                    .is_none()
-            );
-            update_preferences(
-                &db,
-                SetPreferencesParams {
-                    downloads: Some(true),
-                    seeding: Some(true),
-                },
-            )
-            .await?;
-            assert!(
-                db.mutate(|db| incoming::configure_in(db, true))
-                    .await
-                    .result?
-                    .is_none()
-            );
-            assert!(
-                db.peek()
-                    .await
-                    .as_public()
-                    .as_server_info()
-                    .as_network()
-                    .as_host()
-                    .as_bindings()
-                    .as_idx(&6881)
-                    .unwrap()
-                    .de()?
-                    .addresses
-                    .enabled()
-                    .is_empty()
-            );
-        }
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn watcher_failure_stops_peer_work_and_ingress_without_erasing_intent()
-    -> Result<(), Error> {
-        use std::sync::Arc;
-
-        use crate::db::model::public::{GatewayType, IpInfo, NetworkInterfaceInfo, ServerStatus};
-        use crate::net::forward::AvailablePorts;
-        use crate::net::host::Host;
-
-        let preferences = TorrentPreferences {
-            downloads: true,
-            seeding: true,
-        };
-        let gateway = NetworkInterfaceInfo {
-            gateway_type: GatewayType::InboundOutbound,
-            ip_info: Some(Arc::new(IpInfo {
-                subnets: ["192.168.1.2/24".parse::<ipnet::IpNet>()?]
-                    .into_iter()
-                    .collect(),
-                wan_ip: Some("203.0.113.45".parse()?),
-                ..Default::default()
-            })),
-            ..Default::default()
-        };
-        let db = TypedPatchDb::<Database>::load_unchecked(PatchDb::in_memory());
-        db.put(&patch_db::json_ptr::ROOT, &imbl_value::json!({
-            "public": {"serverInfo": {
-                "hostname": "server",
-                "statusInfo": to_value(&ServerStatus::default())?,
-                "bittorrent": to_value(&preferences)?,
-                "network": {"host": to_value(&Host::default())?, "gateways": {"eth0": to_value(&gateway)?}}
-            }},
-            "private": {"availablePorts": to_value(&AvailablePorts::new())?}
-        })).await?;
-        db.mutate(|db| {
-            incoming::configure_in(db, true)?;
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_network_mut()
-                .as_host_mut()
-                .as_bindings_mut()
-                .as_idx_mut(&6881)
-                .unwrap()
-                .mutate(|binding| {
-                    let address = binding.addresses.available.first().unwrap().clone();
-                    binding.set_address_enabled(&address, true)
-                })
-        })
-        .await
-        .result?;
-        let torrents = TorrentClient::for_server(Default::default(), None);
-        torrents.set_downloads_enabled(true);
-        assert!(torrents.downloads_enabled());
-        watcher_failed(&db, &torrents).await?;
-        torrents.set_downloads_enabled(true);
-        assert!(!torrents.downloads_enabled());
-        let peek = db.peek().await;
-        let info = peek.as_public().as_server_info();
-        assert!(info.as_status_info().as_bittorrent_watcher_failed().de()?);
-        assert_eq!(info.as_bittorrent().de()?, preferences);
-        let binding = info
-            .as_network()
-            .as_host()
-            .as_bindings()
-            .as_idx(&6881)
-            .unwrap()
-            .de()?;
-        assert!(!binding.enabled);
-        assert!(binding.addresses.enabled().is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn preference_flags_require_explicit_booleans() {
-        for flag in ["--downloads", "--seeding"] {
-            assert!(SetPreferencesParams::try_parse_from(["set-preferences", flag]).is_err());
-            assert!(
-                SetPreferencesParams::try_parse_from(["set-preferences", flag, "false"]).is_ok()
-            );
-        }
-    }
 }

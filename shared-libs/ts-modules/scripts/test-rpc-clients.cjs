@@ -1488,8 +1488,12 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
   const fixtures = load(
     'projects/start-os/web/ui/src/app/services/api/bittorrent.fixture.ts',
   )
+  // Core compares plain records in its own JavaScript realm.
+  for (const name of ['mockBitTorrentBinding', 'mockBitTorrentPreview']) {
+    const make = fixtures[name]
+    fixtures[name] = () => structuredClone(make())
+  }
   const port = fixtures.BITTORRENT_INTERFACE.addressInfo.internalPort
-  data.serverInfo.network.host.bindings[port] = fixtures.mockBitTorrentBinding()
   const binding = () => data.serverInfo.network.host.bindings[port]
   dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
@@ -1497,9 +1501,11 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
   const client = new (load(
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()
-  const subscription = client.mockWsSource$.subscribe(revision =>
-    applyPatch(data, revision.patch),
-  )
+  const revisions = []
+  const subscription = client.mockWsSource$.subscribe(revision => {
+    revisions.push(structuredClone(revision))
+    applyPatch(data, revision.patch)
+  })
   const config = await client.rpc.server.bittorrent.config({})
   assert.equal(config.available, true)
   assert.equal(config.interface.type, 'p2p')
@@ -1513,10 +1519,12 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
     },
     { downloads: false, seeding: false },
   )
-  assert.equal(binding().enabled, false)
-  assert.equal(binding().addresses.enabled.length, 0)
-  assert.ok(binding().addresses.available.some(address => !address.public))
-  assert.equal(binding().addresses.selected.length, 0)
+  assert.equal(binding(), undefined)
+  assert.ok(config.preview.addresses.available.some(address => !address.public))
+  assert.ok(
+    config.preview.addresses.available.every(address => address.port === null),
+  )
+  assert.equal(config.preview.addresses.selected.length, 0)
   for (const [off, hostname] of [
     [{ seeding: false }, '203.0.113.45'],
     [{ downloads: false }, '203.0.113.45'],
@@ -1532,17 +1540,24 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
       },
       { downloads: true, seeding: true },
     )
-    assert.equal(binding().enabled, true)
-    assert.equal(binding().addresses.enabled.length, 0)
-    await client.rpc.package.host.binding.setAddressEnabled({
-      package: 'start-os',
-      host: 'admin',
-      internalPort: port,
-      address: binding().addresses.available.find(
+    assert.equal(binding(), undefined)
+    const preview = await client.rpc.server.bittorrent.config({})
+    const selected = await client.rpc.server.bittorrent.setAddressEnabled({
+      address: preview.preview.addresses.available.find(
         address => address.hostname === hostname,
       ),
       enabled: true,
     })
+    assert.equal(selected.port, binding().net.assignedPort)
+    const publication = revisions.at(-1).patch
+    assert.equal(publication.length, 1)
+    assert.equal(
+      publication[0].path,
+      `/serverInfo/network/host/bindings/${port}`,
+    )
+    assert.ok(publication[0].value.addresses.selected.length > 0)
+    assert.equal(binding().enabled, true)
+    assert.equal((await client.rpc.server.bittorrent.config({})).preview, null)
     assert.ok(binding().addresses.selected.length > 0)
     assert.ok(
       binding().addresses.selected.every(
@@ -1550,16 +1565,17 @@ test('StartOS BitTorrent mock uses address opt-ins and clears them when either p
       ),
     )
     await client.rpc.server.bittorrent.setPreferences(off)
-    assert.equal(binding().enabled, false)
-    assert.equal(binding().addresses.enabled.length, 0)
-    assert.equal(binding().addresses.selected.length, 0)
-    assert.equal(binding().addresses.enabledNames.length, 0)
+    assert.equal(binding(), undefined)
     await client.rpc.server.bittorrent.setPreferences({
       downloads: true,
       seeding: true,
     })
-    assert.equal(binding().addresses.enabled.length, 0)
-    assert.equal(binding().addresses.selected.length, 0)
+    assert.equal(binding(), undefined)
+    assert.equal(
+      (await client.rpc.server.bittorrent.config({})).preview.addresses.selected
+        .length,
+      0,
+    )
   }
   subscription.unsubscribe()
 })

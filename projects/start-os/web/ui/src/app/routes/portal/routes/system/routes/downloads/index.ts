@@ -11,11 +11,13 @@ import {
   TuiNotification,
   TuiTitle,
 } from '@taiga-ui/core'
+import { tuiProvide } from '@taiga-ui/cdk'
 import { TuiSwitch } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
 import { tap } from 'rxjs'
 
+import { DomainHealthService } from 'src/app/routes/portal/components/interfaces/addresses/gateway/domain-health.service'
 import { InterfaceComponent } from 'src/app/routes/portal/components/interfaces/interface.component'
 import { InterfaceService } from 'src/app/routes/portal/components/interfaces/interface.service'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
@@ -23,6 +25,7 @@ import { GatewayService } from 'src/app/services/gateway.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
 import { DOWNLOADS_MENU_ITEM } from '../../system.const'
+import { SharingAddresses } from './service'
 
 @Component({
   template: `
@@ -50,7 +53,7 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
         </a>
       </header>
       @let settings = preferences();
-      @let configuration = config();
+      @let configuration = sharing.config();
       @if (watcherFailed()) {
         <div tuiNotification appearance="negative">
           {{
@@ -62,7 +65,12 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
       @if (configuration === 'error') {
         <div tuiNotification appearance="negative">
           {{ 'Sharing settings could not be loaded.' | i18n }}
-          <button tuiButton appearance="flat" size="s" (click)="load()">
+          <button
+            tuiButton
+            appearance="flat"
+            size="s"
+            (click)="sharing.refresh.next()"
+          >
             {{ 'Retry' | i18n }}
           </button>
         </div>
@@ -188,6 +196,14 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
               | i18n
           }}
         </p>
+        @if (incomingInterface()?.pendingPort) {
+          <p class="g-secondary">
+            {{
+              'Enable an address to allocate an incoming port and use domain and URL actions. Disabling every address releases the port.'
+                | i18n
+            }}
+          </p>
+        }
         <fieldset
           [disabled]="!editable() || !settings?.seeding || watcherFailed()"
         >
@@ -220,7 +236,11 @@ import { DOWNLOADS_MENU_ITEM } from '../../system.const'
     }
   `,
   host: { class: 'g-subpage' },
-  providers: [GatewayService],
+  providers: [
+    GatewayService,
+    SharingAddresses,
+    tuiProvide(DomainHealthService, SharingAddresses),
+  ],
   imports: [
     ReactiveFormsModule,
     RouterLink,
@@ -250,15 +270,13 @@ export default class Downloads {
 
   protected readonly gateways = inject(GatewayService)
   protected readonly entry = DOWNLOADS_MENU_ITEM
-  protected readonly config = signal<T.BitTorrentConfig | 'loading' | 'error'>(
-    'loading',
-  )
+  protected readonly sharing = inject(SharingAddresses)
   protected readonly saving = signal(false)
   protected readonly watcherFailed = toSignal(
     this.patch.watch$('serverInfo', 'statusInfo', 'bittorrentWatcherFailed'),
   )
   protected readonly editable = computed(() => {
-    const config = this.config()
+    const config = this.sharing.config()
     return (
       config !== 'loading' &&
       config !== 'error' &&
@@ -277,27 +295,37 @@ export default class Downloads {
     this.controls,
   ) as (keyof T.TorrentPreferences)[]
   protected readonly preferences = toSignal(
-    this.patch
-      .watch$('serverInfo', 'bittorrent')
-      .pipe(tap(preferences => this.syncControls(preferences))),
+    this.sharing.preferences.pipe(
+      tap(preferences => this.syncControls(preferences)),
+    ),
   )
   protected readonly incomingInterface = computed(() => {
-    const config = this.config()
+    const config = this.sharing.config()
     const network = this.network()
     const gateways = this.gateways.gateways()
     if (config === 'loading' || config === 'error' || !network || !gateways)
       return
-    return this.interfaces
-      .getServiceInterfaces(
-        { hosts: { [config.interface.addressInfo.hostId]: network.host } },
-        gateways,
-        this.packages(),
-      )
-      .find(iface => iface.id === config.interface.id)
+    if (!network.host.bindings[config.interface.addressInfo.internalPort]) {
+      return config.preview
+        ? this.interfaces.mapPreviewServiceInterface(
+            config.interface,
+            network.host,
+            config.preview,
+            gateways,
+            this.packages(),
+          )
+        : undefined
+    }
+    return this.interfaces.mapServiceInterface(
+      config.interface,
+      network.host,
+      gateways,
+      this.packages(),
+    )
   })
 
   protected readonly incomingEnabled = computed(() => {
-    const config = this.config()
+    const config = this.sharing.config()
     if (config === 'loading' || config === 'error') return false
     const binding =
       this.network()?.host.bindings[config.interface.addressInfo.internalPort]
@@ -317,19 +345,6 @@ export default class Downloads {
           void this.save(preference, enabled)
         })
     }
-    this.load()
-  }
-
-  protected async load() {
-    this.config.set('loading')
-    if (
-      !(await this.tasks.runInline(async () => {
-        this.config.set(await this.api.rpc.server.bittorrent.config({}))
-      }))
-    )
-      this.config.set('error')
-    const preferences = this.preferences()
-    if (preferences) this.syncControls(preferences)
   }
 
   private syncControls(preferences: T.TorrentPreferences) {

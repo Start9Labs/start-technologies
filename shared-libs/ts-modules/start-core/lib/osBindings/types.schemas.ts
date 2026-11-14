@@ -6543,21 +6543,6 @@ export const BindingSetGuaWanParams: z.ZodObject<{
 }).meta({
   id: 'BindingSetGuaWanParams',
 })
-
-/**
- * Effective transport availability and the native incoming peer interface.
- */
-export const BitTorrentConfig: z.ZodObject<{
-  available: z.ZodBoolean
-  interface: typeof ServiceInterface
-}> = /* @__PURE__ */ object({
-  available: z.boolean(),
-  interface: ServiceInterface,
-}).meta({
-  id: 'BitTorrentConfig',
-  description:
-    'Effective transport availability and the native incoming peer interface.',
-})
 export const CreateTaskParams: z.ZodIntersection<
   z.ZodObject<{ replayId: typeof ReplayId }>,
   typeof Task
@@ -7442,6 +7427,21 @@ export const BindParams: z.ZodIntersection<
   .meta({
     id: 'BindParams',
   })
+
+/**
+ * Unallocated candidates; absent ports are pending rather than protocol defaults.
+ */
+export const BindingPreview: z.ZodObject<{
+  options: typeof BindOptions
+  addresses: typeof DerivedAddressInfo
+}> = /* @__PURE__ */ object({
+  options: BindOptions,
+  addresses: DerivedAddressInfo,
+}).meta({
+  id: 'BindingPreview',
+  description:
+    'Unallocated candidates; absent ports are pending rather than protocol defaults.',
+})
 export const InstallingState: z.ZodObject<{
   installingInfo: typeof InstallingInfo
 }> = /* @__PURE__ */ object({ installingInfo: InstallingInfo }).meta({
@@ -7462,6 +7462,29 @@ export const Bindings: z.ZodRecord<z.ZodString, typeof BindInfo> =
   /* @__PURE__ */ z.record(z.string(), BindInfo).meta({
     id: 'Bindings',
   })
+
+/**
+ * Effective transport availability and incoming candidates without reserved resources.
+ */
+export const BitTorrentConfig: z.ZodObject<{
+  available: z.ZodBoolean
+  interface: typeof ServiceInterface
+  preview: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof BindingPreview>>,
+    z.ZodNullable<typeof BindingPreview>
+  >
+}> = /* @__PURE__ */ object({
+  available: z.boolean(),
+  interface: ServiceInterface,
+  preview: wire(
+    BindingPreview.nullable().optional(),
+    BindingPreview.nullable(),
+  ),
+}).meta({
+  id: 'BitTorrentConfig',
+  description:
+    'Effective transport availability and incoming candidates without reserved resources.',
+})
 export const PackageState: z.ZodUnion<
   readonly [
     z.ZodIntersection<

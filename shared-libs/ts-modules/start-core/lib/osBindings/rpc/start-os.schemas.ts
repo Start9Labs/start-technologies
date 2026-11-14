@@ -5828,21 +5828,6 @@ export const BindingSetGuaWanParams: z.ZodObject<{
 }).meta({
   id: 'BindingSetGuaWanParams',
 })
-
-/**
- * Effective transport availability and the native incoming peer interface.
- */
-export const BitTorrentConfig: z.ZodObject<{
-  available: z.ZodBoolean
-  interface: typeof ServiceInterface
-}> = /* @__PURE__ */ object({
-  available: z.boolean(),
-  interface: ServiceInterface,
-}).meta({
-  id: 'BitTorrentConfig',
-  description:
-    'Effective transport availability and the native incoming peer interface.',
-})
 export const DerivedAddressInfo: z.ZodObject<{
   /**
    * Public IP opt-ins.
@@ -6037,6 +6022,21 @@ export const PackageVersionInfo: z.ZodIntersection<
   .meta({
     id: 'PackageVersionInfo',
   })
+export const SelectAddressParams: z.ZodObject<{
+  address: typeof HostnameInfo
+  enabled: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  address: HostnameInfo,
+  enabled: z.boolean(),
+}).meta({
+  id: 'SelectAddressParams',
+})
+export const SelectGuaParams: z.ZodObject<{
+  address: typeof HostnameInfo
+  wan: z.ZodBoolean
+}> = /* @__PURE__ */ object({ address: HostnameInfo, wan: z.boolean() }).meta({
+  id: 'SelectGuaParams',
+})
 export const SessionList: z.ZodObject<{
   current: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -6348,10 +6348,48 @@ export const BindInfo: z.ZodObject<{
 }).meta({
   id: 'BindInfo',
 })
+
+/**
+ * Unallocated candidates; absent ports are pending rather than protocol defaults.
+ */
+export const BindingPreview: z.ZodObject<{
+  options: typeof BindOptions
+  addresses: typeof DerivedAddressInfo
+}> = /* @__PURE__ */ object({
+  options: BindOptions,
+  addresses: DerivedAddressInfo,
+}).meta({
+  id: 'BindingPreview',
+  description:
+    'Unallocated candidates; absent ports are pending rather than protocol defaults.',
+})
 export const Bindings: z.ZodRecord<z.ZodString, typeof BindInfo> =
   /* @__PURE__ */ z.record(z.string(), BindInfo).meta({
     id: 'Bindings',
   })
+
+/**
+ * Effective transport availability and incoming candidates without reserved resources.
+ */
+export const BitTorrentConfig: z.ZodObject<{
+  available: z.ZodBoolean
+  interface: typeof ServiceInterface
+  preview: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof BindingPreview>>,
+    z.ZodNullable<typeof BindingPreview>
+  >
+}> = /* @__PURE__ */ object({
+  available: z.boolean(),
+  interface: ServiceInterface,
+  preview: wire(
+    BindingPreview.nullable().optional(),
+    BindingPreview.nullable(),
+  ),
+}).meta({
+  id: 'BitTorrentConfig',
+  description:
+    'Effective transport availability and incoming candidates without reserved resources.',
+})
 export const Api = {
   _PARAMS: /* @__PURE__ */ empty,
   _CHILDREN: {
@@ -8399,6 +8437,18 @@ export const Api = {
                 empty,
               ),
               _RETURN: /* @__PURE__ */ BitTorrentConfig,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            'set-address-enabled': {
+              _PARAMS: /* @__PURE__ */ SelectAddressParams,
+              _RETURN: /* @__PURE__ */ HostnameInfo,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            'set-gua-wan': {
+              _PARAMS: /* @__PURE__ */ SelectGuaParams,
+              _RETURN: /* @__PURE__ */ z.null(),
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
             },

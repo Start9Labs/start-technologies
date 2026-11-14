@@ -1111,4 +1111,5 @@ export default {
   1310: 'Les connexions entrantes exposent les adresses activées ci-dessous.',
   1311: 'Partager les S9PK et les images système',
   1312: 'La surveillance des paramètres BitTorrent s’est arrêtée. Redémarrez StartOS pour rétablir les téléchargements et le partage.',
+  1313: 'Activez une adresse pour attribuer un port entrant et utiliser les actions de domaine et d’URL. Désactiver toutes les adresses libère le port.',
 } satisfies i18n

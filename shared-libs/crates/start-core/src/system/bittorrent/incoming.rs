@@ -1,10 +1,17 @@
 use librqbit::ListenerOptions;
+use rpc_toolkit::Empty;
 
 use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
-use crate::net::host::binding::{BindInfo, BindOptions, ProxyOptions, Security};
-use crate::net::net_controller::{bind_in, export_interface_in};
-use crate::net::service_interface::{AddressInfo, ServiceInterface, ServiceInterfaceType};
+use crate::hostname::ServerHostname;
+use crate::net::host::ForServer;
+use crate::net::host::binding::{
+    self, BindInfo, BindOptions, BindingPreview, ProxyOptions, Security,
+};
+use crate::net::net_controller::{bind_in, export_interface_in, retire_binding_in};
+use crate::net::service_interface::{
+    AddressInfo, HostnameInfo, ServiceInterface, ServiceInterfaceType,
+};
 use crate::prelude::*;
 use crate::registry::bittorrent::TorrentPreferences;
 use crate::{HostId, Id, PackageId, ServiceInterfaceId};
@@ -30,27 +37,99 @@ pub(super) fn interface() -> ServiceInterface {
     }
 }
 
-/// Address rows own ingress opt-in; disabling either parent clears their selections.
-pub(super) fn clear_selections(db: &mut DatabaseModel) -> Result<(), Error> {
-    if let Some(binding) = db
-        .as_public_mut()
-        .as_server_info_mut()
-        .as_network_mut()
-        .as_host_mut()
-        .as_bindings_mut()
-        .as_idx_mut(&INTERNAL_PORT)
+fn stored_binding(db: &DatabaseModel) -> Result<Option<BindInfo>, Error> {
+    db.as_public()
+        .as_server_info()
+        .as_network()
+        .as_host()
+        .as_bindings()
+        .as_idx(&INTERNAL_PORT)
+        .map(|binding| binding.de())
+        .transpose()
+}
+
+/// Startup preserves consented bindings while their feature owner resumes.
+pub(crate) fn retained_bindings(
+    db: &DatabaseModel,
+    available: bool,
+) -> Result<std::collections::BTreeSet<binding::BindId>, Error> {
+    if !available
+        || !stored_binding(db)?
+            .is_some_and(|binding| binding.enabled && !binding.enabled_addresses().is_empty())
     {
-        binding.mutate(|binding| {
-            binding.addresses.disable_all();
-            binding.disable();
-            Ok(())
-        })?;
+        return Ok(Default::default());
+    }
+    let preferences: TorrentPreferences = db.as_public().as_server_info().as_bittorrent().de()?;
+    let retain = preferences.downloads && preferences.seeding;
+    Ok(if retain {
+        [binding::BindId {
+            id: HostId::admin(),
+            internal_port: INTERNAL_PORT,
+        }]
+        .into()
+    } else {
+        Default::default()
+    })
+}
+
+pub(super) fn preview(db: &DatabaseModel) -> Result<Option<BindingPreview>, Error> {
+    if stored_binding(db)?.is_some() {
+        return Ok(None);
+    }
+    let info = db.as_public().as_server_info();
+    let hostname = ServerHostname::load(info)?;
+    info.as_network()
+        .as_host()
+        .preview_binding(
+            INTERNAL_PORT,
+            binding_options(None),
+            &hostname,
+            &info.as_network().as_gateways().de()?,
+            &db.as_private().as_available_ports().de()?,
+        )
+        .map(Some)
+}
+
+/// Incoming consent owns the binding's lifetime, including its ports and interfaces.
+pub(super) fn clear_selections(db: &mut DatabaseModel) -> Result<(), Error> {
+    if stored_binding(db)?.is_some() {
+        retire_binding_in(db, &PackageId::start_os(), &HostId::admin(), INTERNAL_PORT)?;
     }
     Ok(())
 }
 
+fn eligible(db: &DatabaseModel, available: bool) -> Result<bool, Error> {
+    if !available {
+        return Ok(false);
+    }
+    let info = db.as_public().as_server_info();
+    let preferences: TorrentPreferences = info.as_bittorrent().de()?;
+    Ok(preferences.downloads
+        && preferences.seeding
+        && !info.as_status_info().as_bittorrent_watcher_failed().de()?)
+}
+
+fn configured(binding: &BindInfo) -> bool {
+    matches!(binding.options.proxy, Some(ProxyOptions::Tcp))
+        && binding.options.secure.is_some_and(|security| !security.ssl)
+        && binding.options.default_off
+        && binding.options.preferred_external_port == 0
+}
+
+fn active(db: &DatabaseModel, available: bool, binding: &BindInfo) -> Result<bool, Error> {
+    Ok(eligible(db, available)? && binding.enabled && !binding.enabled_addresses().is_empty())
+}
+
 pub(crate) async fn configure_incoming(ctx: &RpcContext) -> Result<Option<ListenerOptions>, Error> {
     let available = ctx.torrents.available();
+    let snapshot = ctx.db.peek().await;
+    let Some(binding) = stored_binding(&snapshot)? else {
+        return Ok(None);
+    };
+    if configured(&binding) && active(&snapshot, available, &binding)? {
+        return listener_for(&binding).map(Some);
+    }
+    drop(snapshot);
     ctx.db.mutate(|db| configure_in(db, available)).await.result
 }
 
@@ -58,60 +137,127 @@ pub(super) fn configure_in(
     db: &mut DatabaseModel,
     available: bool,
 ) -> Result<Option<ListenerOptions>, Error> {
-    let preferences: TorrentPreferences = db.as_public().as_server_info().as_bittorrent().de()?;
-    let binding: Option<BindInfo> = db
-        .as_public()
-        .as_server_info()
-        .as_network()
-        .as_host()
-        .as_bindings()
-        .as_idx(&INTERNAL_PORT)
-        .map(|binding| binding.de())
-        .transpose()?;
-    let configured = binding.as_ref().is_some_and(|binding| {
-        matches!(binding.options.proxy, Some(ProxyOptions::Tcp))
-            && binding.options.secure.is_some_and(|security| !security.ssl)
-            && binding.options.default_off
-    });
-    if !configured {
+    let Some(binding) = stored_binding(db)? else {
+        return Ok(None);
+    };
+    if !active(db, available, &binding)? {
         clear_selections(db)?;
+        return Ok(None);
+    }
+    if !configured(&binding) {
         bind_in(
             db,
             &PackageId::start_os(),
             &HostId::admin(),
             INTERNAL_PORT,
-            binding_options(binding.as_ref().map(|binding| binding.options.clone())),
+            binding_options(Some(binding.options)),
         )?;
     }
-    let interface = interface();
-    if binding
-        .as_ref()
-        .is_none_or(|binding| !binding.interfaces.contains_key(&interface.id))
-    {
-        export_interface_in(db, &PackageId::start_os(), interface)?;
+    listener_for(&stored_binding(db)?.unwrap()).map(Some)
+}
+
+fn unavailable() -> Error {
+    Error::new(
+        eyre!("{}", t!("net.host.binding.address-unavailable")),
+        ErrorKind::InvalidRequest,
+    )
+}
+
+fn validate_selection(
+    db: &DatabaseModel,
+    available: bool,
+    address: &HostnameInfo,
+) -> Result<(), Error> {
+    if !eligible(db, available)? {
+        return Err(unavailable());
     }
-    db.as_public_mut()
-        .as_server_info_mut()
-        .as_network_mut()
-        .as_host_mut()
-        .as_bindings_mut()
-        .as_idx_mut(&INTERNAL_PORT)
-        .or_not_found(INTERNAL_PORT)?
-        .mutate(|binding| {
-            binding.enabled = available && preferences.seeding;
-            if !binding.enabled {
-                binding.addresses.disable_all();
-            }
-            if !binding.enabled || binding.enabled_addresses().is_empty() {
-                return Ok(None);
-            }
-            Ok(Some(listener(
-                binding
-                    .net
-                    .assigned_port
-                    .or_not_found("BitTorrent external port")?,
-            )))
-        })
+    let candidates = match stored_binding(db)? {
+        Some(binding) if binding.enabled => binding.addresses.available,
+        Some(_) => return Err(unavailable()),
+        None => preview(db)?.unwrap().addresses.available,
+    };
+    if !candidates.contains(address) {
+        return Err(unavailable());
+    }
+    Ok(())
+}
+
+fn allocate_address(
+    db: &mut DatabaseModel,
+    mut address: HostnameInfo,
+) -> Result<HostnameInfo, Error> {
+    if stored_binding(db)?.is_none() {
+        bind_in(
+            db,
+            &PackageId::start_os(),
+            &HostId::admin(),
+            INTERNAL_PORT,
+            binding_options(None),
+        )?;
+        export_interface_in(db, &PackageId::start_os(), interface())?;
+        address.port = stored_binding(db)?.unwrap().net.assigned_port;
+    }
+    Ok(address)
+}
+
+fn release_if_unselected(db: &mut DatabaseModel) -> Result<(), Error> {
+    if stored_binding(db)?.is_some_and(|binding| binding.enabled_addresses().is_empty()) {
+        clear_selections(db)?;
+    }
+    Ok(())
+}
+
+pub(super) fn select_address_in(
+    db: &mut DatabaseModel,
+    available: bool,
+    address: HostnameInfo,
+    enabled: bool,
+) -> Result<HostnameInfo, Error> {
+    validate_selection(db, available, &address)?;
+    if !enabled && stored_binding(db)?.is_none() {
+        return Ok(address);
+    }
+    let address = allocate_address(db, address)?;
+    binding::set_address_enabled_in::<ForServer>(
+        db,
+        binding::BindingSetAddressEnabledParams {
+            internal_port: INTERNAL_PORT,
+            address: address.clone(),
+            enabled: Some(enabled),
+        },
+        &Empty {},
+    )?;
+    release_if_unselected(db)?;
+    Ok(address)
+}
+
+pub(super) fn select_gua_in(
+    db: &mut DatabaseModel,
+    available: bool,
+    address: HostnameInfo,
+    wan: bool,
+) -> Result<(), Error> {
+    validate_selection(db, available, &address)?;
+    if address.gua_ip().is_none() {
+        return Err(Error::new(
+            eyre!("{}", t!("net.host.binding.not-global-unicast")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    if !wan && stored_binding(db)?.is_none() {
+        return Ok(());
+    }
+    let address = allocate_address(db, address)?;
+    binding::set_gua_wan_in::<ForServer>(
+        db,
+        binding::BindingSetGuaWanParams {
+            internal_port: INTERNAL_PORT,
+            address,
+            wan,
+        },
+        &Empty {},
+    )?;
+    release_if_unselected(db)
 }
 
 fn binding_options(existing: Option<BindOptions>) -> BindOptions {
@@ -127,6 +273,15 @@ fn binding_options(existing: Option<BindOptions>) -> BindOptions {
     options.secure = Some(Security { ssl: false });
     options.default_off = true;
     options
+}
+
+fn listener_for(binding: &BindInfo) -> Result<ListenerOptions, Error> {
+    Ok(listener(
+        binding
+            .net
+            .assigned_port
+            .or_not_found("BitTorrent external port")?,
+    ))
 }
 
 fn listener(assigned_port: u16) -> ListenerOptions {

@@ -22,6 +22,10 @@ loadTypeScript(
       'export class TuiCardLarge {} export class TuiHeader {}',
     ],
     ['src/app/services/api/embassy-api.service', 'export class ApiService {}'],
+    [
+      'src/app/routes/portal/components/interfaces/addresses/gateway/domain-health.service',
+      'export class DomainHealthService {}',
+    ],
     ['src/app/services/title.service', 'export class TitleDirective {}'],
     [
       'src/app/routes/portal/components/interfaces/interface.component',
@@ -38,6 +42,8 @@ const { default: Downloads } =
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
 const { TaskService } = await import('@start9labs/shared')
 const { GatewayService } = await import('src/app/services/gateway.service')
+const { SharingAddresses } =
+  await import('src/app/routes/portal/routes/system/routes/downloads/service')
 const { InterfaceService } =
   await import('src/app/routes/portal/components/interfaces/interface.service')
 
@@ -45,6 +51,7 @@ const defaults = { downloads: false, seeding: false }
 const downloadsEnabled = { downloads: true, seeding: false }
 const config = {
   available: true,
+  preview: null,
   interface: {
     id: 'bittorrent',
     addressInfo: { hostId: 'admin', internalPort: 6881 },
@@ -91,7 +98,21 @@ function fixture(t, initial, setPreferences, readConfig = async () => config) {
     {
       provide: ApiService,
       useValue: {
-        rpc: { server: { bittorrent: { config: readConfig, setPreferences } } },
+        rpc: {
+          server: {
+            bittorrent: {
+              config: () => {
+                const response = readConfig()
+                reading = response.then(
+                  () => undefined,
+                  () => undefined,
+                )
+                return response
+              },
+              setPreferences,
+            },
+          },
+        },
       },
     },
     {
@@ -100,6 +121,7 @@ function fixture(t, initial, setPreferences, readConfig = async () => config) {
     },
     { provide: InterfaceService, useValue: { getServiceInterfaces: () => [] } },
     GatewayService,
+    SharingAddresses,
   ])
   t.after(() => {
     injector.destroy()
@@ -109,7 +131,7 @@ function fixture(t, initial, setPreferences, readConfig = async () => config) {
   let revision = 1
   const observe = (value, path = '/serverInfo/bittorrent') =>
     updates.next([{ id: ++revision, patch: [{ op: 'replace', path, value }] }])
-  return { page, errors, reading, observe }
+  return { page, errors, reading, observe, waitForConfig: () => reading }
 }
 
 for (const scenario of [
@@ -233,9 +255,9 @@ test('software sharing: configured availability is separate from persisted inten
     async () => downloadsEnabled,
     async () => ({ ...config, available: false }),
   )
-  assert.equal(page.config(), 'loading')
+  assert.equal(page.sharing.config(), 'loading')
   await reading
-  assert.equal(page.config().available, false)
+  assert.equal(page.sharing.config().available, false)
   assert.deepEqual(page.preferences(), downloadsEnabled)
   assert.ok(Object.values(page.controls).every(control => control.disabled))
 })
@@ -262,7 +284,7 @@ test('software sharing: watcher failure is observed without reloading configurat
 
 test('software sharing: configuration failures remain retryable', async t => {
   let failed = true
-  const { page, reading, errors } = fixture(
+  const { page, reading, errors, waitForConfig } = fixture(
     t,
     defaults,
     async () => defaults,
@@ -272,11 +294,31 @@ test('software sharing: configuration failures remain retryable', async t => {
     },
   )
   await reading
-  assert.equal(page.config(), 'error')
-  assert.equal(errors.length, 1)
+  assert.equal(page.sharing.config(), 'error')
+  assert.equal(errors.length, 0)
   failed = false
-  await page.load()
-  assert.deepEqual(page.config(), config)
+  page.sharing.refresh.next()
+  await waitForConfig()
+  assert.deepEqual(page.sharing.config(), config)
+})
+
+test('software sharing: network revisions refresh previews and discard older replies', async t => {
+  const pending = []
+  const state = fixture(
+    t,
+    defaults,
+    async () => defaults,
+    () => new Promise(resolve => pending.push(resolve)),
+  )
+  assert.equal(pending.length, 1)
+  state.observe('wireguard2', '/serverInfo/network/defaultOutbound')
+  assert.equal(pending.length, 2)
+  pending[1]({ ...config, available: false })
+  await state.waitForConfig()
+  assert.equal(state.page.sharing.config().available, false)
+  pending[0](config)
+  await state.reading
+  assert.equal(state.page.sharing.config().available, false)
 })
 
 test('software sharing: default gateway follows the authoritative network selection', async t => {

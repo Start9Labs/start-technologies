@@ -176,6 +176,40 @@ impl Model<Host> {
         self.derive_addresses(mdns, gateways, available_ports)
     }
 
+    /// Returns unselected candidates without changing the host or reserving ports.
+    pub(crate) fn preview_binding(
+        &self,
+        internal_port: u16,
+        options: BindOptions,
+        mdns: &ServerHostname,
+        gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+        available_ports: &AvailablePorts,
+    ) -> Result<binding::BindingPreview, Error> {
+        let mut preview = self.clone();
+        let mut binding = BindInfo::unallocated(options);
+        // Port zero is a derivation placeholder, never a reservation.
+        binding.net.assigned_port = binding.options.wants_plain_port().then_some(0);
+        binding.net.assigned_ssl_port = binding.options.preferred_ssl_port().map(|_| 0);
+        preview.as_bindings_mut().insert(&internal_port, &binding)?;
+        preview.derive_addresses(mdns, gateways, available_ports)?;
+        let binding: BindInfo = preview.as_bindings().as_idx(&internal_port).unwrap().de()?;
+        let available = binding
+            .addresses
+            .available
+            .into_iter()
+            .map(|mut address| {
+                address.port = None;
+                address
+            })
+            .collect();
+        let mut addresses = binding::DerivedAddressInfo::default();
+        addresses.set_available(available, true);
+        Ok(binding::BindingPreview {
+            options: binding.options,
+            addresses,
+        })
+    }
+
     /// Rebuilds the address rows and port forwards from the stored selections.
     fn derive_addresses(
         &mut self,

@@ -1111,4 +1111,5 @@ export default {
   1310: 'Połączenia przychodzące ujawniają adresy włączone poniżej.',
   1311: 'Udostępniaj pliki S9PK i obrazy systemu',
   1312: 'Monitor ustawień BitTorrent zatrzymał się. Uruchom ponownie StartOS, aby przywrócić pobieranie i udostępnianie.',
+  1313: 'Włącz adres, aby przydzielić port przychodzący i korzystać z działań dla domen i adresów URL. Wyłączenie wszystkich adresów zwalnia port.',
 } satisfies i18n

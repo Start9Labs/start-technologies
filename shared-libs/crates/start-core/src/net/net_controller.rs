@@ -234,7 +234,11 @@ impl NetController {
         Ok(res)
     }
 
-    pub async fn os_bindings(self: &Arc<Self>) -> Result<NetService, Error> {
+    /// The caller retains bindings whose feature owners resume after startup.
+    pub async fn os_bindings(
+        self: &Arc<Self>,
+        retained: BTreeSet<BindId>,
+    ) -> Result<NetService, Error> {
         let dns = self.dns.add_service(None, HOST_IP.into(), None)?;
 
         let service = NetService::new(NetServiceData {
@@ -245,7 +249,7 @@ impl NetController {
             controller: Arc::downgrade(self),
             binds: BTreeMap::new(),
         })?;
-        service.clear_bindings(Default::default()).await?;
+        service.clear_bindings(retained).await?;
         service
             .bind(
                 HostId::admin(),
@@ -1267,6 +1271,40 @@ pub(crate) fn bind_in(
     Ok(())
 }
 
+/// Removes a binding and its interfaces, releasing its native port reservations.
+pub(crate) fn retire_binding_in(
+    db: &mut crate::db::model::DatabaseModel,
+    package: &PackageId,
+    id: &HostId,
+    internal_port: u16,
+) -> Result<bool, Error> {
+    let gateways = db
+        .as_public()
+        .as_server_info()
+        .as_network()
+        .as_gateways()
+        .de()?;
+    let hostname = ServerHostname::load(db.as_public().as_server_info())?;
+    let mut ports = db.as_private().as_available_ports().de()?;
+    let Some(host) = host_for_existing(db, package, id)? else {
+        return Ok(false);
+    };
+    let mut retired = false;
+    if let Some(binding) = host.as_bindings_mut().remove(&internal_port)? {
+        binding.de()?.release(&mut ports);
+        retired = true;
+    }
+    if let Some(range) = host.as_binding_ranges_mut().remove(&internal_port)? {
+        range.de()?.release(&mut ports);
+        retired = true;
+    }
+    if retired {
+        host.update_addresses(&hostname, &gateways, &ports)?;
+        db.as_private_mut().as_available_ports_mut().ser(&ports)?;
+    }
+    Ok(retired)
+}
+
 pub(crate) fn export_interface_in(
     db: &mut crate::db::model::DatabaseModel,
     package: &PackageId,
@@ -1668,37 +1706,7 @@ impl NetService {
             ));
         };
         ctrl.db
-            .mutate(|db| {
-                let gateways = db
-                    .as_public()
-                    .as_server_info()
-                    .as_network()
-                    .as_gateways()
-                    .de()?;
-                let hostname = ServerHostname::load(db.as_public().as_server_info())?;
-                let mut ports = db.as_private().as_available_ports().de()?;
-
-                let Some(host) = host_for_existing(db, &pkg_id, &id)? else {
-                    return Ok(false);
-                };
-                let mut retired = false;
-                if let Some(bind) = host.as_bindings_mut().remove(&internal_port)? {
-                    bind.de()?.release(&mut ports);
-                    retired = true;
-                }
-                if let Some(range) = host.as_binding_ranges_mut().remove(&internal_port)? {
-                    range.de()?.release(&mut ports);
-                    retired = true;
-                }
-                if !retired {
-                    return Ok(false);
-                }
-                // `port_forwards` is computed from the bindings, so it still
-                // advertises the retired one until this re-derives it.
-                host.update_addresses(&hostname, &gateways, &ports)?;
-                db.as_private_mut().as_available_ports_mut().ser(&ports)?;
-                Ok(true)
-            })
+            .mutate(|db| retire_binding_in(db, &pkg_id, &id, internal_port))
             .await
             .result
     }

@@ -1111,4 +1111,5 @@ export default {
   1310: 'Eingehende Verbindungen machen die unten aktivierten Adressen sichtbar.',
   1311: 'S9PKs und OS-Images teilen',
   1312: 'Die BitTorrent-Einstellungsüberwachung wurde beendet. Starte StartOS neu, um Downloads und das Teilen wiederherzustellen.',
+  1313: 'Aktiviere eine Adresse, um einen eingehenden Port zuzuweisen und Domain- und URL-Aktionen zu nutzen. Wenn alle Adressen deaktiviert werden, wird der Port freigegeben.',
 } satisfies i18n

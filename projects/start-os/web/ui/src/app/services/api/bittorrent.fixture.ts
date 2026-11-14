@@ -17,10 +17,24 @@ export const BITTORRENT_INTERFACE: T.ServiceInterface = {
   preferredLauncherAddress: null,
 }
 
+export function mockBitTorrentPreview(): T.BindingPreview {
+  const { options, addresses } = mockBitTorrentBinding()
+  return {
+    options,
+    addresses: {
+      ...addresses,
+      available: addresses.available.map(address => ({
+        ...address,
+        port: null,
+      })),
+    },
+  }
+}
+
 export function mockBitTorrentBinding(): T.BindInfo {
   const port = 50000
   return {
-    enabled: false,
+    enabled: true,
     options: {
       preferredExternalPort: 0,
       addSsl: null,

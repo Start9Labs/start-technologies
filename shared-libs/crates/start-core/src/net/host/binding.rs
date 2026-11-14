@@ -224,10 +224,9 @@ impl DerivedAddressInfo {
     }
 
     fn public_ip_on(&self, address: &HostnameInfo) -> bool {
-        address.to_socket_addr().map_or(
-            true, // should never happen, but would rather see them if it does
-            |sa| self.enabled.contains(&sa),
-        )
+        address
+            .to_socket_addr()
+            .is_some_and(|sa| self.enabled.contains(&sa))
     }
 
     /// An override decides; without one the mDNS address resolving to it does.
@@ -600,6 +599,17 @@ pub struct BindInfo {
 rpc_toolkit::reflect_ts!(BindInfo);
 rpc_toolkit::ts_export!(BindInfo, namespaces = [""]);
 
+/// Unallocated candidates; absent ports are pending rather than protocol defaults.
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct BindingPreview {
+    pub options: BindOptions,
+    pub addresses: DerivedAddressInfo,
+}
+
+rpc_toolkit::reflect_ts!(BindingPreview);
+rpc_toolkit::ts_export!(BindingPreview, namespaces = [""]);
+
 #[derive(Clone, Debug, Deserialize, Serialize, VisitFields, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub struct NetInfo {
@@ -656,6 +666,19 @@ impl BindInfo {
         Ok(())
     }
 
+    pub(crate) fn unallocated(options: BindOptions) -> Self {
+        Self {
+            enabled: true,
+            options,
+            net: NetInfo {
+                assigned_port: None,
+                assigned_ssl_port: None,
+            },
+            addresses: DerivedAddressInfo::default(),
+            interfaces: BTreeMap::new(),
+        }
+    }
+
     pub fn new(
         available_ports: &mut AvailablePorts,
         options: BindOptions,
@@ -677,14 +700,11 @@ impl BindInfo {
             .transpose()?;
 
         Ok(Self {
-            enabled: true,
-            options,
             net: NetInfo {
                 assigned_port,
                 assigned_ssl_port,
             },
-            addresses: DerivedAddressInfo::default(),
-            interfaces: BTreeMap::new(),
+            ..Self::unallocated(options)
         })
     }
     pub fn update(
@@ -1148,9 +1168,9 @@ pub async fn list_bindings<Kind: HostApiKind>(
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct BindingSetAddressEnabledParams {
-    internal_port: u16,
-    address: HostnameInfo,
-    enabled: Option<bool>,
+    pub(crate) internal_port: u16,
+    pub(crate) address: HostnameInfo,
+    pub(crate) enabled: Option<bool>,
 }
 
 rpc_toolkit::reflect_ts!(BindingSetAddressEnabledParams);
@@ -1442,12 +1462,23 @@ fn set_address_enabled_on(
 /// subtree, so the API distinguishes the two rather than probing both.
 pub async fn set_address_enabled<Kind: HostApiKind>(
     ctx: RpcContext,
+    params: BindingSetAddressEnabledParams,
+    inheritance: Kind::Inheritance,
+) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| set_address_enabled_in::<Kind>(db, params, &inheritance))
+        .await
+        .result
+}
+
+pub(crate) fn set_address_enabled_in<Kind: HostApiKind>(
+    db: &mut crate::db::model::DatabaseModel,
     BindingSetAddressEnabledParams {
         internal_port,
         address,
         enabled,
     }: BindingSetAddressEnabledParams,
-    inheritance: Kind::Inheritance,
+    inheritance: &Kind::Inheritance,
 ) -> Result<(), Error> {
     let enabled = enabled.unwrap_or(true);
     if !enabled && address.is_internal() {
@@ -1456,27 +1487,15 @@ pub async fn set_address_enabled<Kind: HostApiKind>(
             ErrorKind::InvalidRequest,
         ));
     }
-    ctx.db
-        .mutate(|db| {
-            Kind::host_for(&inheritance, db)?
-                .as_bindings_mut()
-                .mutate(|b| {
-                    let bind = b.get_mut(&internal_port).or_not_found(internal_port)?;
-                    bind.set_address_enabled(&address, enabled)
-                })?;
-            let hostname = ServerHostname::load(db.as_public().as_server_info())?;
-            let gateways = db
-                .as_public()
-                .as_server_info()
-                .as_network()
-                .as_gateways()
-                .de()?;
-            let ports = db.as_private().as_available_ports().de()?;
-            Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
-        })
-        .await
-        .result?;
-    Ok(())
+    Kind::host_for(inheritance, db)?
+        .as_bindings_mut()
+        .mutate(|bindings| {
+            bindings
+                .get_mut(&internal_port)
+                .or_not_found(internal_port)?
+                .set_address_enabled(&address, enabled)
+        })?;
+    refresh_addresses::<Kind>(db, inheritance)
 }
 
 /// Toggle one address of a port-range binding (keyed by its internal start
@@ -1506,15 +1525,7 @@ pub async fn set_range_address_enabled<Kind: HostApiKind>(
                     let range = ranges.get_mut(&internal_port).or_not_found(internal_port)?;
                     set_address_enabled_on(&mut range.addresses, &address, enabled)
                 })?;
-            let hostname = ServerHostname::load(db.as_public().as_server_info())?;
-            let gateways = db
-                .as_public()
-                .as_server_info()
-                .as_network()
-                .as_gateways()
-                .de()?;
-            let ports = db.as_private().as_available_ports().de()?;
-            Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
+            refresh_addresses::<Kind>(db, &inheritance)
         })
         .await
         .result?;
@@ -1524,9 +1535,9 @@ pub async fn set_range_address_enabled<Kind: HostApiKind>(
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct BindingSetGuaWanParams {
-    internal_port: u16,
-    address: HostnameInfo,
-    wan: bool,
+    pub(crate) internal_port: u16,
+    pub(crate) address: HostnameInfo,
+    pub(crate) wan: bool,
 }
 
 rpc_toolkit::reflect_ts!(BindingSetGuaWanParams);
@@ -1581,34 +1592,48 @@ fn set_gua_wan_on(
 /// Selects WAN exposure for a global-unicast IPv6 address; linked public domains follow.
 pub async fn set_gua_wan<Kind: HostApiKind>(
     ctx: RpcContext,
+    params: BindingSetGuaWanParams,
+    inheritance: Kind::Inheritance,
+) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| set_gua_wan_in::<Kind>(db, params, &inheritance))
+        .await
+        .result
+}
+
+pub(crate) fn set_gua_wan_in<Kind: HostApiKind>(
+    db: &mut crate::db::model::DatabaseModel,
     BindingSetGuaWanParams {
         internal_port,
         address,
         wan,
     }: BindingSetGuaWanParams,
-    inheritance: Kind::Inheritance,
+    inheritance: &Kind::Inheritance,
 ) -> Result<(), Error> {
-    ctx.db
-        .mutate(|db| {
-            Kind::host_for(&inheritance, db)?
-                .as_bindings_mut()
-                .mutate(|b| {
-                    let bind = b.get_mut(&internal_port).or_not_found(internal_port)?;
-                    bind.set_gua_wan(&address, wan)
-                })?;
-            let hostname = ServerHostname::load(db.as_public().as_server_info())?;
-            let gateways = db
-                .as_public()
-                .as_server_info()
-                .as_network()
-                .as_gateways()
-                .de()?;
-            let ports = db.as_private().as_available_ports().de()?;
-            Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
-        })
-        .await
-        .result?;
-    Ok(())
+    Kind::host_for(inheritance, db)?
+        .as_bindings_mut()
+        .mutate(|bindings| {
+            bindings
+                .get_mut(&internal_port)
+                .or_not_found(internal_port)?
+                .set_gua_wan(&address, wan)
+        })?;
+    refresh_addresses::<Kind>(db, inheritance)
+}
+
+fn refresh_addresses<Kind: HostApiKind>(
+    db: &mut crate::db::model::DatabaseModel,
+    inheritance: &Kind::Inheritance,
+) -> Result<(), Error> {
+    let hostname = ServerHostname::load(db.as_public().as_server_info())?;
+    let gateways = db
+        .as_public()
+        .as_server_info()
+        .as_network()
+        .as_gateways()
+        .de()?;
+    let ports = db.as_private().as_available_ports().de()?;
+    Kind::host_for(inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
 }
 
 async fn cli_set_address_enabled<Kind: HostApiKind>(

@@ -831,11 +831,6 @@ export type BindingSetAddressEnabledParamsInput = z.input<
 export type BindingSetGuaWanParamsInput = z.input<
   typeof schemas.BindingSetGuaWanParams
 >
-
-/**
- * Effective transport availability and the native incoming peer interface.
- */
-export type BitTorrentConfig = z.output<typeof schemas.BitTorrentConfig>
 export type DerivedAddressInfo = z.output<typeof schemas.DerivedAddressInfo>
 export type DeviceInfo = z.output<typeof schemas.DeviceInfo>
 
@@ -849,6 +844,10 @@ export type MetricsFollowResponse = z.output<
 export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
+export type SelectAddressParamsInput = z.input<
+  typeof schemas.SelectAddressParams
+>
+export type SelectGuaParamsInput = z.input<typeof schemas.SelectGuaParams>
 export type SessionList = z.output<typeof schemas.SessionList>
 
 /**
@@ -878,5 +877,15 @@ export type PackageIndex = z.output<typeof schemas.PackageIndex>
 export type BindOptions = z.output<typeof schemas.BindOptions>
 export type FullIndex = z.output<typeof schemas.FullIndex>
 export type BindInfo = z.output<typeof schemas.BindInfo>
+
+/**
+ * Unallocated candidates; absent ports are pending rather than protocol defaults.
+ */
+export type BindingPreview = z.output<typeof schemas.BindingPreview>
 export type Bindings = z.output<typeof schemas.Bindings>
+
+/**
+ * Effective transport availability and incoming candidates without reserved resources.
+ */
+export type BitTorrentConfig = z.output<typeof schemas.BitTorrentConfig>
 export type Api = RpcSchemaTree<typeof schemas.Api>
