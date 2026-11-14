@@ -123,15 +123,14 @@ export class RpcSocketService {
               .subscribe(observer),
           )
         subscription.add(
-          (logged
-            ? responses.pipe(
-                tap({
-                  next: frame => logged.reply(frame.value),
-                  error: error => logged.failure(error),
-                }),
-              )
-            : responses
-          ).subscribe(subscriber),
+          responses
+            .pipe(
+              tap({
+                next: frame => logged.reply(frame.value),
+                error: error => logged.failure(error),
+              }),
+            )
+            .subscribe(subscriber),
         )
         return subscription
       })

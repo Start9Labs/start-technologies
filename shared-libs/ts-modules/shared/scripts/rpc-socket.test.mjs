@@ -256,6 +256,76 @@ test('enabled RPC console logging prints decrypted requests, replies and stream 
   )
 })
 
+test('disabling RPC console logging silences in-flight replies, stream frames and failures', async context => {
+  const { service, lease, window } = await streamFixture(context)
+  const lines = consoleLines(context)
+  window[RPC_CONSOLE_LOG_GLOBAL].enable()
+  const call = service.message(body, {}, lease)
+  const pending = service.stream(body, lease)
+  await tick()
+  const socket = LogicalSocket.instances[0]
+  const [request, stream] = socket.writes
+  socket.receive({ jsonrpc: '2.0', id: stream.id, result: 'initial' })
+  const { items } = await pending
+
+  window[RPC_CONSOLE_LOG_GLOBAL].disable()
+  lines.length = 0
+  socket.receive({ jsonrpc: '2.0', id: request.id, result: 'private reply' })
+  socket.receive({
+    rpcstream: version,
+    id: stream.id,
+    result: 'private item',
+    end: false,
+  })
+  assert.equal((await call).result, 'private reply')
+  assert.deepEqual(await items.next(), { value: 'private item', done: false })
+  const failed = items.next().catch(error => error)
+  socket.fail()
+  network(await failed)
+  assert.deepEqual(lines, [])
+})
+
+test('enabling RPC console logging includes already-active replies, streams and failures', async context => {
+  const { service, lease, window } = await streamFixture(context)
+  const lines = consoleLines(context)
+  const call = service.message(body, {}, lease)
+  const pending = service.stream(body, lease)
+  const failedCall = service.message(body, {}, lease).catch(error => error)
+  await tick()
+  const socket = LogicalSocket.instances[0]
+  const [request, stream] = socket.writes
+  socket.receive({ jsonrpc: '2.0', id: stream.id, result: 'initial' })
+  const { items } = await pending
+  assert.deepEqual(lines, [])
+
+  window[RPC_CONSOLE_LOG_GLOBAL].enable()
+  lines.length = 0
+  const reply = { jsonrpc: '2.0', id: request.id, result: 'reply' }
+  const item = { rpcstream: version, id: stream.id, result: 'item', end: false }
+  socket.receive(reply)
+  socket.receive(item)
+  assert.equal((await call).result, 'reply')
+  assert.deepEqual(await items.next(), { value: 'item', done: false })
+  assert.deepEqual(
+    lines.map(({ level, value }) => [level, value]),
+    [
+      ['log', reply],
+      ['log', item],
+    ],
+  )
+
+  lines.length = 0
+  const failedStream = items.next().catch(error => error)
+  socket.fail()
+  network(await failedCall)
+  network(await failedStream)
+  assert.equal(lines.length, 2)
+  for (const line of lines) {
+    assert.equal(line.level, 'warn')
+    assert.match(line.message, /transport failed \d+ ms$/)
+  }
+})
+
 test('RPC console logging persists across page loads until disabled', async context => {
   const storage = new MemoryStorage()
   const first = await fixture(context, browserWindow(storage))
