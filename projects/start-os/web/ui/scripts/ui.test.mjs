@@ -4839,6 +4839,9 @@ test('provider marketplace preserves its request across tiles and distinguishes 
   f.routeParams.next(convertToParamMap({ ...params, requireRange: '>=27.0.0' }))
   assert.equal(calls.length, 2)
   assert.equal(page.registry().loading, true)
+  f.replace('/registryCache', { [url]: registryEntry('1.0.0:0', 'connecting') })
+  assert.equal(calls.length, 2)
+  assert.equal(page.registry().status, 'connecting')
   replies[1].next([])
   assert.equal(page.registry().loading, false)
   f.routeParams.next(
@@ -4848,16 +4851,92 @@ test('provider marketplace preserves its request across tiles and distinguishes 
       providerId: 'pinned',
     }),
   )
-  replies[2].next([])
+  replies[2].next([{ id: 'pinned' }])
   assert.deepEqual(calls, [
     [url, 'bitcoin', '>=26.0.0', null],
     [url, 'bitcoin', '>=27.0.0', null],
     [url, 'bitcoin', '>=27.0.0', 'pinned'],
   ])
   f.replace('/registryCache', { [url]: registryEntry('1.0.0:0', 'error') })
-  replies.at(-1).next([])
+  assert.equal(calls.length, 3)
   assert.equal(page.registry().status, 'error')
   assert.equal(page.registry().loading, false)
+  assert.deepEqual(page.registry().packages, [{ id: 'pinned' }])
+})
+
+test('provider RPC failures show an empty result and retry on cache updates without restoring the loading placeholder', async t => {
+  const url = 'https://registry.test/'
+  const f = marketplaceFixture(t, { [url]: registryEntry() })
+  const calls = []
+  const discover = f.service.fetchProviders$.bind(f.service)
+  f.service.fetchProviders$ = (...args) => {
+    calls.push(args)
+    return discover(...args)
+  }
+  f.routeParams.next(
+    convertToParamMap({
+      registry: url,
+      provides: 'bitcoin',
+      requireRange: '>=26.0.0',
+    }),
+  )
+  const page = f.makePage()
+  const errors = []
+  page.error.handleError = error => errors.push(error)
+  const failure = new Error('Transient local RPC failure')
+  f.responses[0].reject(failure)
+  await tick()
+  assert.deepEqual(errors, [failure])
+  assert.equal(page.registry().loading, false)
+  assert.deepEqual(page.registry().packages, [])
+  f.replace('/registryCache', { [url]: registryEntry('1.0.0:0', 'connecting') })
+  assert.equal(calls.length, 1)
+  assert.equal(f.queries.length, 2)
+  assert.equal(page.registry().loading, false)
+  assert.equal(page.registry().status, 'connecting')
+  f.responses[1].resolve({
+    alternate: {
+      categories: [],
+      otherVersions: {},
+      best: {
+        '1.0.0:0': {
+          title: 'Alternate',
+          satisfies: [],
+          satisfiesPackages: { bitcoin: ['26.0.0:0'] },
+        },
+      },
+    },
+  })
+  await tick()
+  assert.equal(page.registry().packages[0].id, 'alternate')
+  assert.equal(page.registry().loading, false)
+})
+
+test('changing provider query cancels cache-update recovery for the failed query', async t => {
+  const url = 'https://registry.test/'
+  const f = marketplaceFixture(t, { [url]: registryEntry() })
+  const params = {
+    registry: url,
+    provides: 'bitcoin',
+    requireRange: '>=26.0.0',
+  }
+  f.routeParams.next(convertToParamMap(params))
+  const page = f.makePage()
+  page.error.handleError = () => {}
+  f.responses[0].reject(new Error('Transient RPC failure'))
+  await tick()
+  f.routeParams.next(convertToParamMap({ ...params, requireRange: '>=27.0.0' }))
+  assert.equal(page.registry().loading, true)
+  f.replace('/registryCache', { [url]: registryEntry('2.0.0:0') })
+  assert.equal(f.queries.length, 3)
+  assert.deepEqual(
+    f.queries.map(query => query.targetVersion),
+    ['>=26.0.0', '>=27.0.0', '>=27.0.0'],
+  )
+  f.responses[2].resolve({})
+  await tick()
+  assert.equal(page.registry().loading, false)
+  assert.deepEqual(page.registry().packages, [])
 })
 
 test('provider discovery waits for the selected cache and refreshes its backend-cache query offline', async t => {

@@ -20,11 +20,14 @@ import { TuiBlockStatus } from '@taiga-ui/layout'
 import {
   catchError,
   combineLatest,
+  concat,
   distinctUntilChanged,
   map,
   of,
+  skip,
   startWith,
   switchMap,
+  take,
   tap,
 } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
@@ -168,42 +171,61 @@ export default class Marketplace {
     )
     .subscribe()
 
-  // Tile navigation does not restart provider discovery.
+  // Registry status changes must not reset loaded tiles or open previews.
+  private readonly providers$ = combineLatest([
+    this.marketplaceService.currentRegistry$.pipe(
+      map(({ url }) => url),
+      distinctUntilChanged(),
+    ),
+    inject(ActivatedRoute).queryParamMap.pipe(
+      map(params => [
+        params.get('provides'),
+        params.get('requireRange'),
+        params.get('providerId'),
+      ]),
+      distinctUntilChanged(
+        ([a, b, c], [d, e, f]) => a === d && b === e && c === f,
+      ),
+    ),
+  ]).pipe(
+    switchMap(([url, [provides, range, providerId]]) =>
+      provides && range
+        ? this.marketplaceService
+            .fetchProviders$(url, provides, range, providerId)
+            .pipe(
+              catchError((error, retry$) => {
+                this.error.handleError(error)
+                return concat(
+                  of([]),
+                  this.marketplaceService.currentRegistry$.pipe(
+                    skip(1),
+                    take(1),
+                    switchMap(() => retry$),
+                  ),
+                )
+              }),
+              startWith(null),
+            )
+        : of(undefined),
+    ),
+  )
+
   protected readonly registry = toSignal(
     combineLatest([
-      this.marketplaceService.currentRegistry$.pipe(distinctUntilChanged()),
-      inject(ActivatedRoute).queryParamMap.pipe(
-        map(params => [
-          params.get('provides'),
-          params.get('requireRange'),
-          params.get('providerId'),
-        ]),
-        distinctUntilChanged(
-          ([a, b, c], [d, e, f]) => a === d && b === e && c === f,
-        ),
-      ),
+      this.marketplaceService.currentRegistry$,
+      this.providers$,
     ]).pipe(
-      switchMap(([registry, [provides, range, providerId]]) => {
-        return provides && range
-          ? this.marketplaceService
-              .fetchProviders$(registry.url, provides, range, providerId)
-              .pipe(
-                map(packages => ({
-                  ...registry,
-                  packages,
-                  loading: isRegistryLoading(
-                    registry.status,
-                    registry.packages.length,
-                  ),
-                })),
-                catchError(error => {
-                  this.error.handleError(error)
-                  return of({ ...registry, packages: [], loading: false })
-                }),
-                startWith({ ...registry, packages: [], loading: true }),
-              )
-          : of(registry)
-      }),
+      map(([registry, packages]) =>
+        packages === undefined
+          ? registry
+          : {
+              ...registry,
+              packages: packages || [],
+              loading:
+                !packages ||
+                isRegistryLoading(registry.status, registry.packages.length),
+            },
+      ),
     ),
   )
 
