@@ -772,7 +772,7 @@ pub struct VHostBindListener {
     ip_info: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     port: u16,
     bind_reqs: Watch<VHostBindRequirements>,
-    listeners: BTreeMap<SocketAddr, (TcpListener, GatewayInfo)>,
+    listeners: BTreeMap<SocketAddr, TcpListener>,
     /// Backoff timer armed after a failed bind; fires a retry reconcile.
     retry: Option<Pin<Box<tokio::time::Sleep>>>,
 }
@@ -799,11 +799,11 @@ fn desired_listeners(
     port: u16,
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     reqs: &VHostBindRequirements,
-) -> BTreeMap<SocketAddr, GatewayInfo> {
+) -> BTreeSet<SocketAddr> {
     ip_info
         .iter()
-        .filter_map(|(id, iface)| Some((id, iface, iface.ip_info.as_ref()?)))
-        .flat_map(|(id, iface, ip_info)| {
+        .filter_map(|(id, iface)| Some((id, iface.ip_info.as_ref()?)))
+        .flat_map(|(id, ip_info)| {
             ip_info.subnets.iter().filter_map(move |subnet| {
                 let ip = subnet.addr();
                 if crate::net::bridge::is_os_target(ip) {
@@ -817,11 +817,7 @@ fn desired_listeners(
                         }
                         ip => SocketAddr::new(ip, port),
                     };
-                    let gateway = GatewayInfo {
-                        id: id.clone(),
-                        info: iface.clone(),
-                    };
-                    (addr, gateway)
+                    addr
                 })
             })
         })
@@ -833,27 +829,27 @@ fn desired_listeners(
 /// caller can retry — rather than aborting the pass and latching the hole until
 /// the next network change.
 fn update_vhost_listeners(
-    listeners: &mut BTreeMap<SocketAddr, (TcpListener, GatewayInfo)>,
+    listeners: &mut BTreeMap<SocketAddr, TcpListener>,
     port: u16,
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     reqs: &VHostBindRequirements,
 ) -> bool {
     let desired = desired_listeners(port, ip_info, reqs);
-    listeners.retain(|addr, _| desired.contains_key(addr));
+    listeners.retain(|addr, _| desired.contains(addr));
 
     let mut failed = false;
-    for (addr, gateway) in desired {
-        match listeners.get_mut(&addr) {
-            Some((_, current)) => *current = gateway,
-            None => match bind_mio_listener(addr).and_then(|l| TcpListener::from_std(l.into())) {
-                Ok(listener) => {
-                    listeners.insert(addr, (listener, gateway));
-                }
-                Err(e) => {
-                    tracing::warn!("failed to bind vhost listener on {addr}: {e}");
-                    failed = true;
-                }
-            },
+    for addr in desired {
+        if listeners.contains_key(&addr) {
+            continue;
+        }
+        match bind_mio_listener(addr).and_then(|l| TcpListener::from_std(l.into())) {
+            Ok(listener) => {
+                listeners.insert(addr, listener);
+            }
+            Err(e) => {
+                tracing::warn!("failed to bind vhost listener on {addr}: {e}");
+                failed = true;
+            }
         }
     }
     failed
@@ -895,25 +891,14 @@ impl Accept for VHostBindListener {
         }
 
         // Poll each listener for incoming connections
-        for (&addr, (listener, gw_info)) in &self.listeners {
+        for (&addr, listener) in &self.listeners {
             match listener.poll_accept(cx) {
-                Poll::Ready(Ok((stream, peer_addr))) => {
-                    if let Err(e) = socket2::SockRef::from(&stream)
-                        .set_tcp_keepalive(&crate::net::utils::default_keepalive())
-                    {
-                        tracing::error!("Failed to set tcp keepalive: {e}");
-                        tracing::debug!("{e:?}");
-                    }
-                    return Poll::Ready(Ok((
-                        NetworkInterfaceListenerAcceptMetadata {
-                            inner: TcpMetadata {
-                                local_addr: addr,
-                                peer_addr,
-                            },
-                            info: gw_info.clone(),
-                        },
-                        Box::pin(stream),
-                    )));
+                Poll::Ready(Ok((stream, _))) => {
+                    crate::net::utils::set_default_keepalive(&stream);
+                    let metadata = self.ip_info.peek(|interfaces| {
+                        NetworkInterfaceListenerAcceptMetadata::from_stream(&stream, interfaces)
+                    })?;
+                    return Poll::Ready(Ok((metadata, Box::pin(stream))));
                 }
                 Poll::Ready(Err(error)) => {
                     tracing::trace!(%addr, ?error, "Vhost listener failed to accept connection");
@@ -2392,7 +2377,7 @@ mod reserved_target_tests {
         for port in [80, 443, 49152] {
             assert_eq!(
                 desired_listeners(port, &interfaces, &requirements)
-                    .keys()
+                    .iter()
                     .map(|addr| addr.ip())
                     .collect::<BTreeSet<_>>(),
                 ["127.0.0.1", "::1", "192.0.2.10"]
@@ -3219,8 +3204,29 @@ mod upstream_alpn_tests {
         Ok(alpn.map(|a| String::from_utf8(a.0).unwrap()))
     }
 
+    #[test]
+    fn malformed_backend_tls_is_trace_only() {
+        // Tracing callsite interest is process-global.
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "net::vhost::upstream_alpn_tests::malformed_backend_tls_log_probe",
+                "--ignored",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
-    async fn malformed_backend_tls_is_trace_only() {
+    #[ignore = "invoked with isolated tracing callsites"]
+    async fn malformed_backend_tls_log_probe() {
         for trace_enabled in [false, true] {
             let (logs, dispatch) = if trace_enabled {
                 connection_error_tests::capture_trace_logs()
@@ -3275,18 +3281,7 @@ mod upstream_alpn_tests {
                         private_ips: [frontend_addr.ip()].into_iter().collect(),
                         ..Default::default()
                     }),
-                    listeners: [(
-                        frontend_addr,
-                        (
-                            frontend,
-                            GatewayInfo {
-                                id: gateway_id.clone(),
-                                info,
-                            },
-                        ),
-                    )]
-                    .into_iter()
-                    .collect(),
+                    listeners: [(frontend_addr, frontend)].into_iter().collect(),
                     retry: None,
                 };
                 let mut target = target(backend.local_addr().unwrap(), None, None);
@@ -3367,19 +3362,12 @@ mod upstream_alpn_tests {
                 })),
                 ..Default::default()
             };
-            let gateway = GatewayInfo {
-                id: gateway_id.clone(),
-                info: info.clone(),
-            };
             let bind_reqs = Watch::new(VHostBindRequirements::default());
             let listener = VHostBindListener {
                 ip_info: Watch::new([(gateway_id, info)].into_iter().collect()),
                 port: old_addr.port(),
                 bind_reqs: bind_reqs.clone_unseen(),
-                listeners: BTreeMap::from([
-                    (old_addr, (old_listener, gateway.clone())),
-                    (new_addr, (new_listener, gateway)),
-                ]),
+                listeners: BTreeMap::from([(old_addr, old_listener), (new_addr, new_listener)]),
                 retry: None,
             };
             let temp = tempfile::tempdir().unwrap();

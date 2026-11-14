@@ -71,10 +71,10 @@ async fn proxy(
         ..Default::default()
     };
     let listener = VHostBindListener {
-        ip_info: Watch::new([(gateway.clone(), info.clone())].into_iter().collect()),
+        ip_info: Watch::new([(gateway, info)].into_iter().collect()),
         port: addr.port(),
         bind_reqs: Watch::new(requirements),
-        listeners: BTreeMap::from([(addr, (listener, GatewayInfo { id: gateway, info }))]),
+        listeners: BTreeMap::from([(addr, listener)]),
         retry: None,
     };
     let target = ProxyTarget {

@@ -9,6 +9,7 @@ pub mod forward;
 pub mod gateway;
 pub mod host;
 pub mod http;
+pub(crate) mod ingress;
 pub mod keys;
 pub mod mdns;
 pub mod net_controller;

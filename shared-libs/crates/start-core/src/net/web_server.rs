@@ -77,7 +77,7 @@ pub fn extract<
 #[derive(Clone, Copy, Debug)]
 pub struct TcpMetadata {
     pub peer_addr: SocketAddr,
-    /// The accepted connection's destination.
+    /// The original destination for translated OS ingress; the socket destination otherwise.
     pub local_addr: SocketAddr,
 }
 impl<V: MetadataVisitor> Visit<V> for TcpMetadata {
@@ -108,12 +108,7 @@ impl Accept for TcpListener {
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(Self::Metadata, AcceptStream), Error>> {
         if let Poll::Ready((stream, peer_addr)) = TcpListener::poll_accept(self, cx)? {
-            if let Err(e) = socket2::SockRef::from(&stream)
-                .set_tcp_keepalive(&crate::net::utils::default_keepalive())
-            {
-                tracing::error!("Failed to set tcp keepalive: {e}");
-                tracing::debug!("{e:?}");
-            }
+            crate::net::utils::set_default_keepalive(&stream);
             return Poll::Ready(Ok((
                 TcpMetadata {
                     local_addr: stream.local_addr()?,

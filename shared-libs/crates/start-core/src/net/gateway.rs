@@ -1994,8 +1994,15 @@ fn policy_table_for(device_type: Option<NetworkInterfaceType>, iface: &GatewayId
 
 /// Rebuilds the mangle chains in one transaction. The gateway coordinator is
 /// their only writer.
-async fn reconcile_mangle_rules(policy_ifaces: &BTreeMap<GatewayId, u32>) -> Result<(), Error> {
+pub(super) async fn reconcile_mangle_rules(
+    policy_ifaces: &BTreeMap<GatewayId, u32>,
+) -> Result<(), Error> {
     nft_ensure_base().await?;
+    // Accepted TCP sockets retain ingress-gateway identity across DNAT.
+    Command::new("sysctl")
+        .args(["-qw", "net.ipv4.tcp_fwmark_accept=1"])
+        .invoke(ErrorKind::Network)
+        .await?;
     let mut script = String::new();
     script.push_str("flush chain ip startos mangle_prerouting\n");
     script.push_str("flush chain ip startos mangle_output\n");
@@ -3557,16 +3564,21 @@ impl NetworkInterfaceController {
     }
 }
 
+/// Finds the interface owning the destination, including its IPv6 zone.
 pub fn lookup_info_by_addr(
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     addr: SocketAddr,
 ) -> Option<(&GatewayId, &NetworkInterfaceInfo)> {
-    // IPv4 clients arrive mapped through the dual-stack listener.
     let ip = addr.ip().to_canonical();
-    ip_info.iter().find(|(_, i)| {
-        i.ip_info
-            .as_ref()
-            .map_or(false, |i| i.subnets.iter().any(|i| i.addr() == ip))
+    let scope = match addr {
+        SocketAddr::V6(addr) if ipv6_is_link_local(*addr.ip()) => Some(addr.scope_id()),
+        _ => None,
+    };
+    ip_info.iter().find(|(_, interface)| {
+        interface.ip_info.as_ref().is_some_and(|info| {
+            scope.is_none_or(|scope| scope != 0 && scope == info.scope_id)
+                && info.subnets.iter().any(|subnet| subnet.addr() == ip)
+        })
     })
 }
 
@@ -3591,6 +3603,43 @@ pub struct NetworkInterfaceListenerAcceptMetadata {
     pub inner: TcpMetadata,
     pub info: GatewayInfo,
 }
+impl NetworkInterfaceListenerAcceptMetadata {
+    pub(crate) fn from_stream(
+        stream: &tokio::net::TcpStream,
+        interfaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    ) -> Result<Self, Error> {
+        let inner = crate::net::ingress::tcp_metadata(stream)?;
+        #[cfg(target_os = "linux")]
+        let inner = {
+            let mut inner = inner;
+            if let SocketAddr::V6(destination) = &mut inner.local_addr
+                && ipv6_is_link_local(*destination.ip())
+                && destination.scope_id() == 0
+            {
+                let mark = socket2::SockRef::from(stream).mark()?;
+                let scope = interfaces
+                    .values()
+                    .filter_map(|interface| interface.ip_info.as_ref())
+                    .find(|info| info.scope_id != 0 && gateway_table_id(info.scope_id) == mark)
+                    .map(|info| info.scope_id)
+                    .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::PermissionDenied))?;
+                destination.set_scope_id(scope);
+            }
+            inner
+        };
+        let info = lookup_info_by_addr(interfaces, inner.local_addr)
+            .map(|(id, info)| GatewayInfo {
+                id: id.clone(),
+                info: info.clone(),
+            })
+            .unwrap_or_else(|| GatewayInfo {
+                id: InternedString::from_static("").into(),
+                info: NetworkInterfaceInfo::default(),
+            });
+        Ok(Self { inner, info })
+    }
+}
+
 impl<V: MetadataVisitor> Visit<V> for NetworkInterfaceListenerAcceptMetadata {
     fn visit(&self, visitor: &mut V) -> V::Result {
         self.visit_fields(visitor).collect()
@@ -3640,36 +3689,12 @@ impl Accept for WildcardListener {
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(Self::Metadata, AcceptStream), Error>> {
-        if let Poll::Ready((stream, peer_addr)) = TcpListener::poll_accept(&self.listener, cx)? {
-            if let Err(e) = socket2::SockRef::from(&stream)
-                .set_tcp_keepalive(&crate::net::utils::default_keepalive())
-            {
-                tracing::error!("Failed to set tcp keepalive: {e}");
-                tracing::debug!("{e:?}");
-            }
-            let local_addr = stream.local_addr()?;
-            let info = self
+        if let Poll::Ready((stream, _)) = TcpListener::poll_accept(&self.listener, cx)? {
+            crate::net::utils::set_default_keepalive(&stream);
+            let metadata = self
                 .ip_info
-                .peek(|ip_info| {
-                    lookup_info_by_addr(ip_info, local_addr).map(|(id, info)| GatewayInfo {
-                        id: id.clone(),
-                        info: info.clone(),
-                    })
-                })
-                .unwrap_or_else(|| GatewayInfo {
-                    id: InternedString::from_static("").into(),
-                    info: NetworkInterfaceInfo::default(),
-                });
-            return Poll::Ready(Ok((
-                NetworkInterfaceListenerAcceptMetadata {
-                    inner: TcpMetadata {
-                        local_addr,
-                        peer_addr,
-                    },
-                    info,
-                },
-                Box::pin(stream),
-            )));
+                .peek(|info| NetworkInterfaceListenerAcceptMetadata::from_stream(&stream, info))?;
+            return Poll::Ready(Ok((metadata, Box::pin(stream))));
         }
         Poll::Pending
     }
