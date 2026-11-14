@@ -3,6 +3,8 @@ import type * as schemas from './bindings.schemas'
 export type RpcHandler = {
   _PARAMS: unknown
   _RETURN?: unknown
+  _ITEM?: unknown
+  _FINAL?: unknown
   _CHILDREN?: { [name: string]: RpcHandler }
 }
 
@@ -20,47 +22,71 @@ export type RpcMethod<Root extends RpcHandler> =
         }[keyof Children & string]
       : never)
 
-export type RpcParamType<
+export type RpcEndpointType<
   Root extends RpcHandler,
   Method extends string,
 > = Method extends ''
   ? Root extends { _RETURN: unknown }
-    ? Root['_PARAMS']
+    ? Root
     : never
   : Root extends { _CHILDREN: infer Children }
     ? Method extends `${infer Head}.${infer Tail}`
       ? Head extends keyof Children
         ? Children[Head] extends RpcHandler
-          ? RpcParamType<Children[Head], Tail>
+          ? RpcEndpointType<Children[Head], Tail>
           : never
         : never
       : Method extends keyof Children
         ? Children[Method] extends RpcHandler
-          ? RpcParamType<Children[Method], ''>
+          ? RpcEndpointType<Children[Method], ''>
           : never
         : never
     : never
 
+export type RpcEndpointField<
+  Endpoint,
+  Field extends PropertyKey,
+> = Endpoint extends { _RETURN: unknown }
+  ? Field extends keyof Endpoint
+    ? Endpoint[Field]
+    : unknown
+  : never
+
+export type RpcParamType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_PARAMS'>
+
 export type RpcReturnType<
   Root extends RpcHandler,
   Method extends string,
-> = Method extends ''
-  ? Root extends { _RETURN: infer Return }
-    ? Return
-    : never
-  : Root extends { _CHILDREN: infer Children }
-    ? Method extends `${infer Head}.${infer Tail}`
-      ? Head extends keyof Children
-        ? Children[Head] extends RpcHandler
-          ? RpcReturnType<Children[Head], Tail>
-          : never
-        : never
-      : Method extends keyof Children
-        ? Children[Method] extends RpcHandler
-          ? RpcReturnType<Children[Method], ''>
-          : never
-        : never
-    : never
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_RETURN'>
+
+export type RpcStreamItemType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_ITEM'>
+
+export type RpcStreamFinalType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_FINAL'>
+
+export type RpcIsStreaming<Root extends RpcHandler, Method extends string> = [
+  RpcEndpointType<Root, Method>,
+] extends [never]
+  ? never
+  : unknown extends RpcStreamItemType<Root, Method>
+    ? boolean
+    : [RpcStreamItemType<Root, Method>] extends [never]
+      ? false
+      : true
+
+export type RpcStreamingMethod<Root extends RpcHandler> = {
+  [Method in RpcMethod<Root>]: RpcIsStreaming<Root, Method> extends false
+    ? never
+    : Method
+}[RpcMethod<Root>]
 
 export type RpcSchemaTree<Schema> = {
   [Key in keyof Schema as Key extends '_OPAQUE'
@@ -69,7 +95,7 @@ export type RpcSchemaTree<Schema> = {
     ? Schema[Key] extends z.ZodType
       ? z.input<Schema[Key]>
       : never
-    : Key extends '_RETURN'
+    : Key extends '_RETURN' | '_ITEM' | '_FINAL'
       ? Schema[Key] extends z.ZodType
         ? z.output<Schema[Key]>
         : never
@@ -147,6 +173,7 @@ export type ExecReqInput = z.input<typeof schemas.ExecReq>
 export type ExecRes = z.output<typeof schemas.ExecRes>
 export type FileContents = z.output<typeof schemas.FileContents>
 export type FileType = z.output<typeof schemas.FileType>
+export type FlashModeInput = z.input<typeof schemas.FlashMode>
 export type FollowLogsParamsInput = z.input<typeof schemas.FollowLogsParams>
 export type GetArgsInput = z.input<typeof schemas.GetArgs>
 export type GetFileArgsInput = z.input<typeof schemas.GetFileArgs>
@@ -155,7 +182,7 @@ export type Guid = z.output<typeof schemas.Guid>
 /**
  * Proof that a set of auth keys was unenrolled — removed from the persisted
  * and ephemeral signer stores with any continuations they opened killed.
- * Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
+ * Obtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]
  * from inside a db transaction.
  */
 export type HasUnenrolledKeys = z.output<typeof schemas.HasUnenrolledKeys>
@@ -224,6 +251,11 @@ export type SetRouterAdvertisementsReqInput = z.input<
   typeof schemas.SetRouterAdvertisementsReq
 >
 export type SetTimezoneParamsInput = z.input<typeof schemas.SetTimezoneParams>
+
+/**
+ * Legacy NDJSON adds Complete/Error; typed RPC carries completion in its terminal.
+ */
+export type SetupEvent = z.output<typeof schemas.SetupEvent>
 export type SniPortUse = z.output<typeof schemas.SniPortUse>
 export type SpeedData = z.output<typeof schemas.SpeedData>
 export type SshKeyAddParamsInput = z.input<typeof schemas.SshKeyAddParams>
@@ -290,6 +322,7 @@ export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 export type LogsResponse = z.output<typeof schemas.LogsResponse>
 export type OutboundVpn = z.output<typeof schemas.OutboundVpn>
+export type PasswordTypeInput = z.input<typeof schemas.PasswordType>
 export type PeerAddArgsInput = z.input<typeof schemas.PeerAddArgs>
 
 /**
@@ -308,9 +341,6 @@ export type PublishedPort = z.output<typeof schemas.PublishedPort>
 export type PublishedPortInputInput = z.input<typeof schemas.PublishedPortInput>
 export type ScheduleWindowsInput = z.input<typeof schemas.ScheduleWindows>
 export type SetArgsInput = z.input<typeof schemas.SetArgs>
-export type SetInitialPasswordParamsInput = z.input<
-  typeof schemas.SetInitialPasswordParams
->
 export type SetupStatusRes = z.output<typeof schemas.SetupStatusRes>
 export type UciFile = z.output<typeof schemas.UciFile>
 export type UciFileInput = z.input<typeof schemas.UciFile>
@@ -352,6 +382,7 @@ export type WifiSetResult = z.output<typeof schemas.WifiSetResult>
  */
 export type BlackoutSetRequestInput = z.input<typeof schemas.BlackoutSetRequest>
 export type ConfigCheck = z.output<typeof schemas.ConfigCheck>
+export type FlashParamsInput = z.input<typeof schemas.FlashParams>
 export type PublishedPortsSetRequestInput = z.input<
   typeof schemas.PublishedPortsSetRequest
 >
@@ -368,6 +399,9 @@ export type PublishedPortsSetResult = z.output<
  * The server's sessions, by credential type.
  */
 export type Sessions = z.output<typeof schemas.Sessions>
+export type SetInitialPasswordParamsInput = z.input<
+  typeof schemas.SetInitialPasswordParams
+>
 
 /**
  * Response containing all VPN servers

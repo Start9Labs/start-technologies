@@ -3,8 +3,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use axum::extract::ws;
-use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
 use patch_db::ModelExt;
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
@@ -26,9 +24,9 @@ use crate::net::socks::DEFAULT_SOCKS_LISTEN;
 use crate::net::web_server::WebServerAcceptorSetter;
 use crate::prelude::*;
 use crate::progress::{
-    FullProgress, FullProgressTracker, PhaseProgressTrackerHandle, PhasedProgressBar, ProgressUnits,
+    FullProgress, FullProgressTracker, PhaseProgressTrackerHandle, ProgressUnits,
 };
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::ssh::SSH_DIR;
 use crate::system::{get_mem_info, sync_kiosk};
 use crate::util::io::{IOHook, dir_copy, open_file};
@@ -39,17 +37,35 @@ use crate::{Error, MAIN_DATA, PACKAGE_DATA, ResultExt};
 pub const SYSTEM_REBUILD_PATH: &str = "/media/startos/config/system-rebuild";
 pub const STANDBY_MODE_PATH: &str = "/media/startos/config/standby";
 
+/// Observes systemd-compatible clock synchronization without subprocesses on Linux.
 pub async fn check_time_is_synchronized() -> Result<bool, Error> {
-    Ok(String::from_utf8(
-        Command::new("timedatectl")
-            .arg("show")
-            .arg("-p")
-            .arg("NTPSynchronized")
-            .invoke(crate::ErrorKind::Unknown)
-            .await?,
-    )?
-    .trim()
-        == "NTPSynchronized=yes")
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: all timex fields permit zero; modes zero requests a read.
+        let mut sample: libc::timex = unsafe { std::mem::zeroed() };
+        // SAFETY: the kernel receives a valid writable timex with modes zero.
+        let result = unsafe { libc::adjtimex(&mut sample) };
+        Ok(ntp_synchronized(result, &sample))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(String::from_utf8(
+            Command::new("timedatectl")
+                .arg("show")
+                .arg("-p")
+                .arg("NTPSynchronized")
+                .invoke(crate::ErrorKind::Unknown)
+                .await?,
+        )?
+        .trim()
+            == "NTPSynchronized=yes")
+    }
+}
+
+#[cfg(target_os = "linux")]
+/// Matches [systemd's NTPSynchronized](https://sources.debian.org/src/systemd/252.39-1~deb12u2/src/timedate/timedated.c/#L516); `STA_UNSYNC` may encode RTC policy.
+fn ntp_synchronized(query_result: libc::c_int, sample: &libc::timex) -> bool {
+    query_result >= 0 && sample.maxerror < 16_000_000
 }
 
 pub struct InitResult {
@@ -121,8 +137,6 @@ pub async fn run_script<P: AsRef<Path>>(path: P, mut progress: PhaseProgressTrac
             .input(Some(&mut reader))
             .invoke(ErrorKind::Unknown)
             .await?;
-        // TODO: inherit?
-
         Ok::<_, Error>(())
     }
     .await
@@ -209,7 +223,7 @@ pub async fn init(
 
     load_ssh_keys.start();
     crate::developer::write_signing_key(
-        &peek.as_private().as_developer_key().de()?.0,
+        &peek.as_private().as_server_identity_key().de()?.0,
         OS_ID_KEY_PATH,
     )
     .await?;
@@ -488,7 +502,8 @@ pub fn init_api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
             "logs",
-            crate::system::logs::<InitContext>().with_about("about.display-os-logs"),
+            crate::system::logs::<InitContext>(WebSocketPolicy::Public)
+                .with_about("about.display-os-logs"),
         )
         .subcommand(
             "logs",
@@ -499,7 +514,8 @@ pub fn init_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "kernel-logs",
-            crate::system::kernel_logs::<InitContext>().with_about("about.display-kernel-logs"),
+            crate::system::kernel_logs::<InitContext>(WebSocketPolicy::Public)
+                .with_about("about.display-kernel-logs"),
         )
         .subcommand(
             "kernel-logs",
@@ -521,56 +537,52 @@ pub fn init_api<C: Context>() -> ParentHandler<C> {
 #[serde(rename_all = "camelCase")]
 pub struct InitProgressRes {
     pub progress: FullProgress,
-    pub guid: Guid,
+    /// Present for ordinary replies; typed streams use same-ID events.
+    pub guid: Option<Guid>,
 }
 
 rpc_toolkit::reflect_ts!(InitProgressRes);
 rpc_toolkit::ts_export!(InitProgressRes, namespaces = [""]);
 
-pub async fn init_progress(ctx: InitContext) -> Result<InitProgressRes, Error> {
-    let progress_tracker = ctx.progress.clone();
-    let progress = progress_tracker.snapshot();
-    let mut error = ctx.error.subscribe();
+pub async fn init_progress(
+    HandlerArgs {
+        context: ctx,
+        rpc_stream,
+        ..
+    }: HandlerArgs<InitContext, Empty, Empty, FullProgress>,
+) -> Result<InitProgressRes, Error> {
+    let progress = ctx.progress.snapshot();
+    let source = ctx.progress_stream();
+    if let Some(stream) = rpc_stream {
+        let observer = ctx.observers.subscribe()?;
+        tokio::spawn(async move {
+            let _observer = observer;
+            let result = stream.forward(source).await;
+            let _ = stream.close_and_flush(result).await;
+        });
+        return Ok(InitProgressRes {
+            progress,
+            guid: None,
+        });
+    }
+    drop(ctx.observers.subscribe()?);
+    let observers = ctx.observers.clone();
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(
             guid.clone(),
             RpcContinuation::ws(
-                |mut ws| async move {
-                    let res = tokio::try_join!(
-                        async {
-                            let mut stream =
-                                progress_tracker.stream(Some(Duration::from_millis(100)));
-                            while let Some(progress) = stream.next().await {
-                                ws.send(ws::Message::Text(
-                                    serde_json::to_string(&progress)
-                                        .with_kind(ErrorKind::Serialization)?
-                                        .into(),
-                                ))
-                                .await
-                                .with_kind(ErrorKind::Network)?;
-                                if progress.overall.is_complete() {
-                                    break;
-                                }
-                            }
-
-                            Ok::<_, Error>(())
-                        },
-                        async {
-                            if let Some(e) = error
-                                .wait_for(|e| e.is_some())
-                                .await
-                                .ok()
-                                .and_then(|e| e.as_ref().map(|e| e.clone_output()))
-                            {
-                                Err::<(), _>(e)
-                            } else {
-                                Ok(())
-                            }
+                WebSocketPolicy::Public,
+                ctx.secure_session().cloned(),
+                |ws| async move {
+                    let result = match observers.subscribe() {
+                        Ok(observer) => {
+                            let _observer = observer;
+                            crate::progress::forward_progress(ws, source).await
                         }
-                    );
-
-                    if let Err(e) = ws.close_result(res.map(|_| "complete")).await {
+                        Err(error) => ws.close_result(Err::<String, _>(error)).await,
+                    };
+                    if let Err(e) = result {
                         if !crate::util::net::is_ws_reset_without_close(&e) {
                             tracing::error!("{}", t!("init.error-closing-websocket", error = e));
                             tracing::debug!("{e:?}");
@@ -581,7 +593,10 @@ pub async fn init_progress(ctx: InitContext) -> Result<InitProgressRes, Error> {
             ),
         )
         .await;
-    Ok(InitProgressRes { progress, guid })
+    Ok(InitProgressRes {
+        progress,
+        guid: Some(guid),
+    })
 }
 
 pub async fn cli_init_progress(
@@ -593,29 +608,106 @@ pub async fn cli_init_progress(
         ..
     }: HandlerArgs<CliContext>,
 ) -> Result<(), Error> {
-    let res: InitProgressRes = from_value(
-        ctx.call_remote::<InitContext>(
-            &parent_method
-                .into_iter()
-                .chain(method.into_iter())
-                .join("."),
+    let response = ctx
+        .call_startup_stream::<FullProgress, ()>(
+            &parent_method.into_iter().chain(method).join("."),
             raw_params,
+            http::HeaderMap::new(),
         )
-        .await?,
-    )?;
-    let mut ws = ctx.ws_continuation(res.guid).await?;
-    let mut bar = PhasedProgressBar::new(&t!("init.initializing"));
-    while let Some(msg) = ws.try_next().await.with_kind(ErrorKind::Network)? {
-        if let tokio_tungstenite::tungstenite::Message::Text(msg) = msg {
-            bar.update(&serde_json::from_str(&msg).with_kind(ErrorKind::Deserialization)?);
-        }
-    }
-    Ok(())
+        .await?;
+    crate::progress::with_cli_progress(response.items, &t!("init.initializing")).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::persist_pstore_archive;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn clock_observation_does_not_launch_timedatectl() {
+        use std::os::unix::fs::PermissionsExt;
+
+        const CHILD: &str = "STARTOS_CLOCK_OBSERVATION_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let directory = tempfile::tempdir().unwrap();
+            let program = directory.path().join("timedatectl");
+            let marker = directory.path().join("invocations");
+            std::fs::write(
+                &program,
+                "#!/bin/sh\nprintf x >> \"$STARTOS_CLOCK_INVOCATIONS\"\nprintf 'NTPSynchronized=yes\\n'\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let output = tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                tokio::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "init::tests::clock_observation_does_not_launch_timedatectl",
+                        "--nocapture",
+                    ])
+                    .env(CHILD, "1")
+                    .env("PATH", directory.path())
+                    .env("STARTOS_CLOCK_INVOCATIONS", &marker)
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let launches = if marker.exists() {
+                std::fs::read(marker).unwrap().len()
+            } else {
+                0
+            };
+            assert_eq!(launches, 0, "clock observations launched timedatectl");
+            return;
+        }
+        for _ in 0..16 {
+            assert!(super::check_time_is_synchronized().await.is_ok());
+            crate::context::startup::StartupRpc::clock_synced().await;
+        }
+        crate::net::ssl::root_ca_start_time().await;
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn kernel_ntp_observation_matches_the_systemd_maximum_error_boundary() {
+        let mut sample: libc::timex = unsafe { std::mem::zeroed() };
+        sample.maxerror = 15_999_999;
+        assert!(super::ntp_synchronized(libc::TIME_OK, &sample));
+        sample.maxerror = 16_000_000;
+        assert!(!super::ntp_synchronized(libc::TIME_OK, &sample));
+        sample.maxerror = 0;
+        sample.status = libc::STA_UNSYNC;
+        assert!(super::ntp_synchronized(libc::TIME_ERROR, &sample));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn kernel_ntp_query_failure_does_not_establish_synchronization() {
+        let sample: libc::timex = unsafe { std::mem::zeroed() };
+        assert!(!super::ntp_synchronized(-1, &sample));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn kernel_ntp_observations_retain_changes_in_both_directions() {
+        let mut sample: libc::timex = unsafe { std::mem::zeroed() };
+        for (maximum_error, synchronized) in [(16_000_000, false), (0, true), (16_000_000, false)] {
+            sample.maxerror = maximum_error;
+            assert_eq!(
+                super::ntp_synchronized(libc::TIME_OK, &sample),
+                synchronized
+            );
+        }
+    }
 
     #[tokio::test]
     async fn pstore_archive_preserves_nested_and_flat_files() {
