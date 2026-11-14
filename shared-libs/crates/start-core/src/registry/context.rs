@@ -208,16 +208,7 @@ impl RegistryContext {
                 Ok::<_, Error>(Upstream::spawn(
                     db.clone(),
                     icons_dir(&datadir),
-                    UpstreamClients {
-                        http: client_builder(tor_proxy_url.clone())
-                            .build()
-                            .with_kind(ErrorKind::ParseUrl)?,
-                        websocket: client_builder(tor_proxy_url.clone())
-                            .http1_only()
-                            .redirect(reqwest::redirect::Policy::none())
-                            .build()
-                            .with_kind(ErrorKind::ParseUrl)?,
-                    },
+                    UpstreamClients::new(tor_proxy_url.clone())?,
                     server_identity.clone(),
                     url,
                 ))
@@ -247,7 +238,7 @@ impl RegistryContext {
     }
 }
 /// Proxies `.onion` hosts through Tor and dials everything else directly.
-fn client_builder(tor_proxy_url: Url) -> reqwest::ClientBuilder {
+pub(super) fn client_builder(tor_proxy_url: Url) -> reqwest::ClientBuilder {
     Client::builder().proxy(Proxy::custom(move |url| {
         if url.host_str().map_or(false, |h| h.ends_with(".onion")) {
             Some(tor_proxy_url.clone())

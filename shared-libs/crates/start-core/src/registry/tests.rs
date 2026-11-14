@@ -59,12 +59,16 @@ pub(crate) async fn fixture() -> (tempfile::TempDir, RegistryContext, Signer, Si
 }
 
 pub(crate) async fn server(ctx: RegistryContext) -> (Url, NonDetachingJoinHandle<()>) {
+    serve(registry_router(ctx)).await
+}
+
+pub(crate) async fn serve(router: Router) -> (Url, NonDetachingJoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/", listener.local_addr().unwrap())
         .parse()
         .unwrap();
     let task = tokio::spawn(async move {
-        axum::serve(listener, registry_router(ctx)).await.unwrap();
+        axum::serve(listener, router).await.unwrap();
     })
     .into();
     (url, task)

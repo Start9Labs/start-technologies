@@ -1,24 +1,21 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use axum::Router;
+use axum::routing::get;
 use imbl_value::json;
 use patch_db::PatchDb;
 use patch_db::json_ptr::ROOT;
 
 use super::*;
 use crate::registry::package::icon::icons_dir;
-use crate::registry::tests::{fixture, rpc, server};
+use crate::registry::tests::{fixture, rpc, serve, server};
 use crate::sign::AnySigningKey;
 
 fn clients() -> UpstreamClients {
-    UpstreamClients {
-        http: reqwest::Client::new(),
-        websocket: reqwest::Client::builder()
-            .http1_only()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap(),
-    }
+    UpstreamClients::new("socks5h://127.0.0.1:9050".parse().unwrap()).unwrap()
 }
 
 async fn mirror_db() -> TypedPatchDb<RegistryDatabase> {
@@ -119,10 +116,101 @@ async fn copy_icon_rejects_bytes_that_do_not_match_the_path() {
     let temp = tempfile::tempdir().unwrap();
     let icons = icons_dir(temp.path());
 
-    let error = copy_icon(&reqwest::Client::new(), &reader, &url, &icons, &icon)
+    let error = copy_icon(&clients().http, &reader, &url, &icons, &icon)
         .await
         .unwrap_err();
     assert_eq!(error.kind, ErrorKind::Incoherent);
+    assert!(!tokio::fs::try_exists(icons.join(&icon)).await.unwrap());
+}
+
+#[tokio::test]
+async fn icon_downloads_do_not_follow_redirects() {
+    let (_upstream_temp, _upstream, _admin, reader, icon) = fixture().await;
+    let requests = Arc::new(AtomicUsize::new(0));
+    let (target, _target_server) = serve(Router::new().route(
+        "/target",
+        get({
+            let requests = requests.clone();
+            move || {
+                requests.fetch_add(1, Ordering::SeqCst);
+                async { "secret" }
+            }
+        }),
+    ))
+    .await;
+    let target = target.join("target").unwrap().to_string();
+    let (url, _origin_server) = serve(Router::new().route(
+        "/icons/{*path}",
+        get(move || {
+            let target = target.clone();
+            async move { axum::response::Redirect::temporary(&target) }
+        }),
+    ))
+    .await;
+    let temp = tempfile::tempdir().unwrap();
+    let icons = icons_dir(temp.path());
+
+    assert!(
+        copy_icon(&clients().http, &reader, &url, &icons, &icon)
+            .await
+            .is_err()
+    );
+    assert_eq!(requests.load(Ordering::SeqCst), 0);
+    assert!(!tokio::fs::try_exists(icons.join(&icon)).await.unwrap());
+}
+
+#[tokio::test]
+async fn mirror_replaces_the_index_when_an_icon_body_stalls() {
+    let (_upstream_temp, upstream, _admin, reader, icon) = fixture().await;
+    let index = upstream.db.peek().await.into_index().de().unwrap();
+    let value = to_value(&index).unwrap();
+    let requested = Arc::new(tokio::sync::Notify::new());
+    let (url, _server) = serve(Router::new().route(
+        "/icons/{*path}",
+        get({
+            let requested = requested.clone();
+            move || {
+                requested.notify_one();
+                async {
+                    axum::response::Response::builder()
+                        .header(http::header::CONTENT_LENGTH, "6")
+                        .body(axum::body::Body::from_stream(futures::stream::pending::<
+                            Result<bytes::Bytes, std::io::Error>,
+                        >()))
+                        .unwrap()
+                }
+            }
+        }),
+    ))
+    .await;
+    let temp = tempfile::tempdir().unwrap();
+    let icons = icons_dir(temp.path());
+    let db = mirror_db().await;
+    let sync: NonDetachingJoinHandle<Result<(), Error>> = {
+        let db = db.clone();
+        let icons = icons.clone();
+        let value = value.clone();
+        tokio::spawn(async move {
+            replace_index(&db, &icons, &clients().http, &reader, &url, &value).await
+        })
+        .into()
+    };
+    tokio::time::timeout(Duration::from_secs(5), requested.notified())
+        .await
+        .unwrap();
+    tokio::time::pause();
+    tokio::time::advance(ICON_DOWNLOAD_TIMEOUT + Duration::from_secs(1)).await;
+    tokio::time::resume();
+    tokio::time::timeout(Duration::from_secs(5), sync)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        to_value(&db.peek().await.into_index().de().unwrap()).unwrap(),
+        value
+    );
     assert!(!tokio::fs::try_exists(icons.join(&icon)).await.unwrap());
 }
 

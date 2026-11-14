@@ -90,9 +90,9 @@ Clients synchronize registry metadata through `db.subscribe`: `rpcstream` opt-in
 
 ## Mirroring another registry
 
-A registry started with `--mirror-of <url>` (or `mirror-of: <url>` in its config file) keeps its index identical to the upstream registry's, so clients can fail over to it. It follows the upstream's `/index` subscription and copies the package icons that index refers to. Index changes appear on the mirror as the upstream publishes them. The upstream must support encrypted `db.subscribe` streaming. Package and OS files stay at the URLs the index lists.
+A registry started with `--mirror-of <url>` (or `mirror-of: <url>` in its config file) keeps a synchronized copy of the upstream index visible to its identity. It follows the upstream's `/index` subscription and copies the package icons that index refers to. Index changes appear on the mirror as the upstream publishes them. The upstream must support encrypted `db.subscribe` streaming. Package and OS files stay at the URLs the index lists.
 
-The mirror subscribes with its own server identity, logged as `key` when mirroring starts. It receives what the upstream shows that identity: public packages to an unknown identity, private packages it may read once the upstream adds it as a signer and reader, and reader lists only when that signer is an upstream admin.
+The mirror subscribes with its own server identity, logged as `key` when mirroring starts. It receives what the upstream shows that identity: public packages to an unknown identity, private packages it may read once the upstream adds it as a signer and reader, and reader lists only when that signer is an upstream admin. Restart a public-only mirror after granting its identity private-package access or upstream admin status. For failover with private-package reader lists intact, make the mirror an upstream admin.
 
 While mirroring, the registry rejects every call that writes the index: publishing, signers, categories, access, registry info and `db apply`. Its admins, metrics and identity stay its own. To promote a mirror, remove `mirror-of` and restart it. It keeps the last synchronized index and accepts writes again. Admins refer to signer IDs, so add the upstream's admins on the mirror with `start-registry admin add <signer-id>` before promotion.
 

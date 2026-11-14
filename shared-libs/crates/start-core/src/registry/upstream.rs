@@ -2,9 +2,12 @@
 //! The mirror stores the index the upstream shows to the mirror's server identity.
 //! Admins, metrics and the server identity stay local.
 //! Index-writing RPCs are rejected until the setting is removed and the daemon restarts.
+//! Icon download failures do not prevent index synchronization.
+//! Public-only subscriptions require a restart after private-access grants.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use http::HeaderMap;
 use rpc_toolkit::{Middleware, RpcRequest, RpcResponse};
@@ -26,6 +29,8 @@ use crate::util::future::NonDetachingJoinHandle;
 /// RPC metadata marking a handler that writes the registry index.
 pub const WRITES_INDEX: &str = "writes_index";
 
+const ICON_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub struct Upstream {
     pub url: Url,
     _sync: NonDetachingJoinHandle<()>,
@@ -36,6 +41,25 @@ pub(crate) struct UpstreamClients {
     pub http: reqwest::Client,
     /// HTTP/1-only and non-redirecting, as WebSocket upgrades require.
     pub websocket: reqwest::Client,
+}
+
+impl UpstreamClients {
+    pub(crate) fn new(tor_proxy_url: Url) -> Result<Self, Error> {
+        let builder = || {
+            super::context::client_builder(tor_proxy_url.clone())
+                .redirect(reqwest::redirect::Policy::none())
+        };
+        Ok(Self {
+            http: builder()
+                .timeout(ICON_DOWNLOAD_TIMEOUT)
+                .build()
+                .with_kind(ErrorKind::ParseUrl)?,
+            websocket: builder()
+                .http1_only()
+                .build()
+                .with_kind(ErrorKind::ParseUrl)?,
+        })
+    }
 }
 
 impl Upstream {

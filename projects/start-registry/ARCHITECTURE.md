@@ -108,11 +108,12 @@ With `mirror-of` set, `RegistryContext::init` spawns one task that admits an enc
 upstream under the registry's server identity and streams `db.subscribe` for `/index` in canonical
 format. It shares `SubscriptionFollower` (dump/revision application, heartbeat and initial deadline)
 with StartOS's registry caches. Each update copies missing stored icons from the upstream's `/icons/`,
-verifying their blake3 names, then replaces the local `index`. An icon the upstream withholds is retried on
-the next update. Connection failures reconnect with the shared jittered 30–300 second backoff.
+verifying their blake3 names, then replaces the local `index`. Signed icon requests refuse redirects and
+have a 30-second total deadline. An icon the upstream withholds is retried on the next update. Connection
+failures reconnect with the shared jittered 30–300 second backoff.
 
-Handlers that write the index carry the `WRITES_INDEX` metadata, inherited by subtrees. `MirrorGuard`,
-the first RPC middleware, rejects them while mirroring. `admins`, metrics and `serverIdentityKey` live
+Handlers that write the index carry the `WRITES_INDEX` metadata, inherited by subtrees. The
+`MirrorGuard` RPC middleware rejects them while mirroring. `admins`, metrics and `serverIdentityKey` live
 outside `index` and remain local.
 
 ## Data model

@@ -77,7 +77,7 @@ pub(crate) fn is_icon_url(registry: &Url, target: &Url) -> bool {
 }
 
 /// Requests an icon with an empty-body signature header when a signer is given.
-/// Registries serve private icons only to signers who can read the package.
+/// Signed requests require a non-redirecting client.
 pub(crate) async fn request_icon(
     client: &reqwest::Client,
     url: Url,
