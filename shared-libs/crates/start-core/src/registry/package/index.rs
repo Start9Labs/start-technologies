@@ -329,6 +329,7 @@ impl PackageVersionInfo {
         })
     }
     /// Persisted package signatures must belong to keys in `FullIndex.signers`.
+    /// A `mirror-of` registry stores its upstream's signatures unfiltered.
     pub fn retain_registered_signatures(&mut self, signers: &BTreeMap<Guid, SignerInfo>) {
         let keys: BTreeSet<&AnyVerifyingKey> = signers.values().flat_map(|s| &s.keys).collect();
         for (_, asset) in &mut self.s9pks {
