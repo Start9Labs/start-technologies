@@ -1,1 +1,0 @@
-- Los usuarios de Gitea pueden optar por flujos de trabajo autónomos incluidos en la guía de empaquetado para compilaciones, lanzamientos, publicación en registros y sincronización automática de la rama `next`.

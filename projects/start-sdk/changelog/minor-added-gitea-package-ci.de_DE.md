@@ -1,1 +1,0 @@
-- Gitea-Nutzer können eigenständige Paket-Workflows aus der Paketierungsanleitung aktivieren: Builds, Veröffentlichungen, Registry-Publikation und automatischer Abgleich des `next`-Branches.

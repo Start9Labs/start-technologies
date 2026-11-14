@@ -1,1 +1,0 @@
-- Los flujos de publicación de paquetes advierten y continúan si falla una consulta al registro, en lugar de salir antes de intentar publicar; las consultas fallidas al registro de referencia muestran el error antes de detenerse.

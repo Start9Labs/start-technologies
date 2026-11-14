@@ -1,1 +1,0 @@
-- Użytkownicy Gitea mogą wybrać samodzielne workflow z przewodnika pakowania, obsługujące budowanie, wydania, publikację w rejestrach i automatyczną synchronizację gałęzi `next`.

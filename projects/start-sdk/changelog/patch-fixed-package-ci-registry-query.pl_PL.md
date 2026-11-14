@@ -1,1 +1,0 @@
-- Workflow publikacji pakietów ostrzegają i kontynuują po nieudanym zapytaniu do rejestru, zamiast kończyć się przed próbą publikacji; nieudane kontrole rejestru referencyjnego pokazują błąd przed zatrzymaniem.

@@ -1,1 +1,0 @@
-- Les utilisateurs de Gitea peuvent choisir les workflows autonomes fournis dans le guide de création de paquets pour les constructions, les versions, la publication dans les registres et la synchronisation automatique de la branche `next`.
