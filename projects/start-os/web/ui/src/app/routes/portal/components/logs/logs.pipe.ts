@@ -1,14 +1,20 @@
 import { inject, Pipe, PipeTransform } from '@angular/core'
-import { convertAnsi, i18nPipe, toLocalIsoString } from '@start9labs/shared'
-import { T } from '@start9labs/start-core'
+import {
+  convertAnsi,
+  i18nPipe,
+  toLocalIsoString,
+  withAbortSignal,
+} from '@start9labs/shared'
 import {
   bufferTime,
   catchError,
   concat,
+  concatWith,
   defer,
   delay,
   EMPTY,
   filter,
+  from,
   ignoreElements,
   map,
   merge,
@@ -20,9 +26,9 @@ import {
   switchMap,
   take,
   tap,
+  throwError,
 } from 'rxjs'
-import { FollowServerLogsReq } from 'src/app/services/api/api.types'
-import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { FollowLogs } from 'src/app/services/api/api.types'
 import { ConnectionService } from 'src/app/services/connection.service'
 import { LogsComponent } from './logs.component'
 
@@ -30,36 +36,29 @@ import { LogsComponent } from './logs.component'
   name: 'logs',
 })
 export class LogsPipe implements PipeTransform {
-  private readonly api = inject(ApiService)
   private readonly logs = inject(LogsComponent)
   private readonly connection = inject(ConnectionService)
   private readonly i18n = inject(i18nPipe)
 
-  transform(
-    followLogs: (params: FollowServerLogsReq) => Promise<T.LogFollowResponse>,
-  ): Observable<readonly string[]> {
+  transform(followLogs: FollowLogs): Observable<readonly string[]> {
     return merge(
       this.logs.status$.pipe(
         skipWhile(value => value === 'connected'),
         filter(value => value === 'connected'),
         map(() => this.getMessage(true)),
       ),
-      defer(() => followLogs(this.options)).pipe(
-        tap(r => {
-          if (r.startCursor) {
-            this.logs.setCursor(r.startCursor)
-          }
-        }),
-        switchMap(r =>
-          this.api.openWebsocket$<T.LogEntry>(r.guid, {
-            openObserver: {
-              next: () => this.logs.status$.next('connected'),
-            },
+      withAbortSignal(signal =>
+        defer(() => followLogs(this.options, { signal })).pipe(
+          tap(({ initial }) => {
+            if (initial.startCursor) this.logs.setCursor(initial.startCursor)
+            this.logs.status$.next('connected')
           }),
+          switchMap(({ items }) => from(items)),
+          bufferTime(1000),
+          filter(logs => !!logs.length),
+          map(convertAnsi),
+          concatWith(throwError(() => new Error('Log observation ended'))),
         ),
-        bufferTime(1000),
-        filter(logs => !!logs.length),
-        map(convertAnsi),
       ),
     ).pipe(
       catchError(() =>
@@ -72,7 +71,7 @@ export class LogsPipe implements PipeTransform {
               this.logs.status$.next(v ? 'reconnecting' : 'disconnected'),
             ),
             filter(Boolean),
-            delay(1000), // @TODO Alex why delay here?
+            delay(1000),
             take(1),
             ignoreElements(),
           ),

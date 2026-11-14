@@ -11,13 +11,17 @@ root and `shared-libs/` guidance first. `CLAUDE.md` imports this file.
   share forwarding without changing caller-specific behavior.
 - `handler/from_fn.rs` owns sync, blocking, async and local-async factories.
 - `server/` owns dispatch and HTTP/socket transports; `cli.rs` owns clap and
-  remote calls. `output.rs` owns stdout/stderr broken-pipe handling; callers must
+  remote calls. `output.rs` owns stdout/stderr broken-pipe handling and best-effort `advisory` notices; callers must
   not apply that policy to network or filesystem errors. `server/mcp.rs` (`mcp` feature) owns the MCP tool surface and
   reuses `HttpServer`'s middleware steps rather than reimplementing them.
-  `server/websocket.rs` (`websocket` feature) owns the shared WebSocket connection;
+  `server/websocket.rs` (`websocket` feature) owns the shared WebSocket connection.
+  Its `WebSocketUpgrader` admits a connection-scoped context and adapted message
+  transport before RPC dispatch; wire allowances do not change logical RPC limits.
   `server/rpcstream.rs` owns single-owner producers, bounded event queues, terminal
-  results, drop cancellation, and event encoding.
-  Forward `HandlerArgs::rpc_stream` through adapters; initialize it to `None` for
+  results, drop cancellation, and shared event encoding/decoding (`RpcStreamResponse`).
+  `HandlerTypes::Item` / `Final` and typed `RpcStream<Item, Final>` own the stream contract;
+  defaults are `Never` / `()`. Forward both facts and `HandlerArgs::rpc_stream` through
+  adapters; initialize the producer to `None` for
   non-WebSocket dispatch. Read [docs/websocket.md](docs/websocket.md) before changing
   streaming, cancellation, connection limits, or upgrade middleware.
 - `ts.rs` owns handler traversal, deferred parameter/result writers and binding
