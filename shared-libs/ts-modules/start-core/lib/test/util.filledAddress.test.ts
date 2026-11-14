@@ -11,6 +11,7 @@ const host = (fingerprint: string): Host =>
     bindings: {
       5223: {
         enabled: true,
+        proxyChains: [],
         options: {
           transport: ['tcp', 'udp'],
           preferredExternalPort: 5223,

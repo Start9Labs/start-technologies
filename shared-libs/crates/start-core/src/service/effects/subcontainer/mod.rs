@@ -1,7 +1,8 @@
+use std::ffi::CString;
 use std::path::{Path, PathBuf};
 
 use imbl_value::InternedString;
-use tokio::process::Command;
+use nix::unistd::{Gid, Uid, fchown};
 
 use crate::ImageId;
 use crate::disk::mount::filesystem::overlayfs::OverlayGuard;
@@ -9,8 +10,21 @@ use crate::disk::mount::guard::GenericMountGuard;
 use crate::rpc_continuations::Guid;
 use crate::service::effects::prelude::*;
 use crate::service::persistent_container::Subcontainer;
-use crate::util::Invoke;
-use crate::util::io::write_file_owned_atomic;
+use crate::util::directory::{
+    create_directory_at, create_directory_beneath, open_directory_nofollow,
+};
+use crate::util::io::write_file_owned_at;
+
+fn chown_directory(directory: &std::fs::File) -> Result<(), Error> {
+    fchown(
+        directory,
+        Some(Uid::from_raw(crate::lxc::BASE_IDMAP.to_id)),
+        Some(Gid::from_raw(crate::lxc::BASE_IDMAP.to_id)),
+    )
+    .with_kind(ErrorKind::Filesystem)
+}
+
+const SUBCONTAINER_DIR: &str = "/media/startos/subcontainers";
 
 pub const NVIDIA_OVERLAY_PATH: &str = "/var/tmp/startos/nvidia-overlay";
 pub const NVIDIA_OVERLAY_DEBIAN: &str = "/var/tmp/startos/nvidia-overlay/debian";
@@ -50,20 +64,9 @@ pub async fn destroy_subcontainer_fs(
         .remove(&guid);
     if let Some(overlay) = overlay {
         #[cfg(target_os = "linux")]
-        if tokio::fs::metadata(overlay.overlay.path().join("proc/1"))
-            .await
-            .is_ok()
         {
-            let procfs = context
-                .seed
-                .persistent_container
-                .lxc_container
-                .get()
-                .or_not_found("lxc container")?
-                .rootfs_dir()
-                .join("proc");
-            let overlay_path = overlay.overlay.path().to_owned();
-            tokio::task::spawn_blocking(move || sync::kill_init(&procfs, &overlay_path))
+            let root = std::fs::File::open(overlay.overlay.path())?;
+            tokio::task::spawn_blocking(move || sync::kill_init(&root))
                 .await
                 .with_kind(ErrorKind::Unknown)??;
         }
@@ -74,7 +77,7 @@ pub async fn destroy_subcontainer_fs(
             .lock()
             .await
             .remove_subcontainer(&guid);
-        overlay.overlay.unmount(true).await?;
+        overlay.unmount().await?;
     } else {
         tracing::warn!(
             "Could not find a subcontainer fs to destroy; assumming that it already is destroyed and will be skipping"
@@ -119,16 +122,11 @@ pub async fn create_subcontainer_fs(
                 )
             })?;
         let container_guid = &lxc_container.guid;
-        let rootfs_dir = lxc_container.rootfs_dir();
-        let mountpoint = rootfs_dir
-            .join("media/startos/subcontainers")
-            .join(guid.as_ref());
-        tokio::fs::create_dir_all(&mountpoint).await?;
-        let container_mountpoint = Path::new("/").join(
-            mountpoint
-                .strip_prefix(rootfs_dir)
-                .with_kind(ErrorKind::Incoherent)?,
-        );
+        let rootfs = open_directory_nofollow(lxc_container.rootfs_dir())?;
+        let parent =
+            create_directory_beneath(&rootfs, Path::new(SUBCONTAINER_DIR.trim_start_matches('/')))?;
+        let entry_name = CString::new(guid.as_ref()).unwrap();
+        let container_mountpoint = Path::new(SUBCONTAINER_DIR).join(guid.as_ref());
         tracing::info!("Mounting overlay {guid} for {image_id}");
 
         let nvidia_overlay: &[&str] = if context
@@ -154,41 +152,54 @@ pub async fn create_subcontainer_fs(
             &[]
         };
 
+        let overlay =
+            OverlayGuard::mount_layers_at(&[], image, nvidia_overlay, &parent, &entry_name).await?;
+        let root = std::fs::File::open(overlay.path())?;
+        let proxy_mounts = if context
+            .seed
+            .persistent_container
+            .s9pk
+            .as_manifest()
+            .metadata
+            .plugins
+            .contains(&crate::service::effects::plugin::PluginId::HttpProxyV0)
+        {
+            Some(
+                context
+                    .seed
+                    .ctx
+                    .net_controller
+                    .http_proxy
+                    .mount_provider_at(&context.seed.id, &root)
+                    .await?,
+            )
+        } else {
+            None
+        };
         let subcontainer_wrapper = Subcontainer {
-            overlay: OverlayGuard::mount_layers(&[], image, nvidia_overlay, &mountpoint).await?,
+            overlay,
+            proxy_mounts,
             name: name
                 .unwrap_or_else(|| InternedString::intern(format!("subcontainer-{}", image_id))),
             image_id: image_id.clone(),
         };
 
-        Command::new("chown")
-            .arg(format!("{0}:{0}", crate::lxc::BASE_IDMAP.to_id))
-            .arg(&mountpoint)
-            .invoke(ErrorKind::Filesystem)
-            .await?;
-        let etc = mountpoint.join("etc");
-        match tokio::fs::create_dir(&etc).await {
-            Ok(()) => {
-                Command::new("chown")
-                    .arg(format!("{0}:{0}", crate::lxc::BASE_IDMAP.to_id))
-                    .arg(&etc)
-                    .invoke(ErrorKind::Filesystem)
-                    .await?;
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
-            Err(e) => {
-                return Err(e).with_ctx(|_| (ErrorKind::Filesystem, format!("mkdir {etc:?}")));
-            }
+        chown_directory(&root)?;
+        let (etc, created) = create_directory_at(&root, c"etc")?;
+        if created {
+            chown_directory(&etc)?;
         }
-        write_file_owned_atomic(
-            mountpoint.join("etc/hostname"),
+        write_file_owned_at(
+            &etc,
+            c"hostname",
             format!("{container_guid}\n"),
             crate::lxc::BASE_IDMAP.to_id,
             crate::lxc::BASE_IDMAP.to_id,
         )
         .await?;
-        write_file_owned_atomic(
-            mountpoint.join("etc/hosts"),
+        write_file_owned_at(
+            &etc,
+            c"hosts",
             format!("127.0.0.1\tlocalhost\n127.0.1.1\t{container_guid}\n::1\tlocalhost ip6-localhost ip6-loopback\n"),
             crate::lxc::BASE_IDMAP.to_id,
             crate::lxc::BASE_IDMAP.to_id,

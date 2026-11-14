@@ -96,6 +96,15 @@ export const manifest = setupManifest({
 | `images`            | Docker image configuration (including `arch`)                                            |
 | `dependencies`      | Service dependencies                                                                     |
 
+## Plugins
+
+The optional `plugins` list declares capabilities implemented by the package:
+
+- `url-v0` publishes additional interface addresses, such as Tor onion addresses.
+- `http-proxy-v0` publishes selectable [HTTP proxy profiles](http-proxy-plugins.md) and processes attached bindings' traffic.
+
+The corresponding `sdk.plugin` API is available when the capability is declared in the manifest.
+
 ## Pre-download alerts
 
 A package can ask StartOS to confirm an update **before downloading it** when the installed version matches an ExVer range. Add `preDownloadAlert` to `setupManifest()`:

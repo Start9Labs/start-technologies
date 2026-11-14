@@ -714,6 +714,31 @@ export const HealthCheckId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 export const HostId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'HostId',
 })
+
+/**
+ * A socket path in the provider's container namespace.
+ */
+export const HttpProxyEndpoint: z.ZodIntersection<
+  z.ZodObject<{ transport: z.ZodLiteral<'unix'> }>,
+  z.ZodObject<{ path: z.ZodString }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ transport: z.literal('unix') }),
+    object({ path: z.string() }),
+  )
+  .meta({
+    id: 'HttpProxyEndpoint',
+    description: "A socket path in the provider's container namespace.",
+  })
+
+/**
+ * HTTP framing supported on the plugin's Unix stream sockets.
+ */
+export const HttpProxyProtocol: z.ZodEnum<{ http1: 'http1'; http2: 'http2' }> =
+  /* @__PURE__ */ z.enum(['http1', 'http2']).meta({
+    id: 'HttpProxyProtocol',
+    description: "HTTP framing supported on the plugin's Unix stream sockets.",
+  })
 export const IdMap: z.ZodObject<{
   fromId: z.ZodInt
   toId: z.ZodInt
@@ -1289,11 +1314,12 @@ export const Pem: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 export const Percentage: typeof literal_10 = /* @__PURE__ */ literal_10.meta({
   id: 'Percentage',
 })
-export const PluginId: z.ZodEnum<{ 'url-v0': 'url-v0' }> = /* @__PURE__ */ z
-  .enum(['url-v0'])
-  .meta({
-    id: 'PluginId',
-  })
+export const PluginId: z.ZodEnum<{
+  'url-v0': 'url-v0'
+  'http-proxy-v0': 'http-proxy-v0'
+}> = /* @__PURE__ */ z.enum(['url-v0', 'http-proxy-v0']).meta({
+  id: 'PluginId',
+})
 export const PreDownloadAlertWhen: z.ZodObject<{ sourceVersion: z.ZodString }> =
   /* @__PURE__ */ object({ sourceVersion: z.string() }).meta({
     id: 'PreDownloadAlertWhen',
@@ -3137,6 +3163,16 @@ export const GetHostInfoParams: z.ZodObject<{
 }).meta({
   id: 'GetHostInfoParams',
 })
+export const GetHttpProxyAttachmentsParams: z.ZodObject<{
+  callback: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof CallbackId>>,
+    z.ZodNullable<typeof CallbackId>
+  >
+}> = /* @__PURE__ */ object({
+  callback: wire(CallbackId.nullable().optional(), CallbackId.nullable()),
+}).meta({
+  id: 'GetHttpProxyAttachmentsParams',
+})
 export const GetOutboundGatewayParams: z.ZodObject<{
   callback: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof CallbackId>>,
@@ -3395,6 +3431,92 @@ export const HostnameMetadata: z.ZodUnion<
   .meta({
     id: 'HostnameMetadata',
   })
+
+/**
+ * The protected binding, shared by its exported interfaces.
+ */
+export const HttpProxyBinding: z.ZodObject<{
+  packageId: typeof PackageId
+  hostId: typeof HostId
+  /**
+   * The container-side port passed to `bindPort`.
+   */
+  internalPort: z.ZodInt
+}> = /* @__PURE__ */ object({
+  packageId: PackageId,
+  hostId: HostId,
+  /**
+   * The container-side port passed to `bindPort`.
+   */
+  internalPort: z.int().meta({
+    description: 'The container-side port passed to `bindPort`.',
+  }),
+}).meta({
+  id: 'HttpProxyBinding',
+  description: 'The protected binding, shared by its exported interfaces.',
+})
+
+/**
+ * The ingress gateway, independent of chain order and public-only applicability.
+ */
+export const HttpProxyGateway: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'network'> }>,
+      z.ZodObject<{ gatewayId: typeof GatewayId }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'url-plugin'> }>,
+      z.ZodObject<{ packageId: typeof PackageId }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(
+      object({ kind: z.literal('network') }),
+      object({ gatewayId: GatewayId }),
+    ),
+    z.intersection(
+      object({ kind: z.literal('url-plugin') }),
+      object({ packageId: PackageId }),
+    ),
+  ])
+  .meta({
+    id: 'HttpProxyGateway',
+    description:
+      'The ingress gateway, independent of chain order and public-only applicability.',
+  })
+
+/**
+ * Provider-owned settings selectable in a binding's proxy chain.
+ */
+export const HttpProxyProfile: z.ZodObject<{
+  id: z.ZodString
+  name: typeof LocaleString
+  protocols: z.ZodArray<typeof HttpProxyProtocol>
+}> = /* @__PURE__ */ object({
+  id: z.string(),
+  name: LocaleString,
+  protocols: z.array(HttpProxyProtocol),
+}).meta({
+  id: 'HttpProxyProfile',
+  description: "Provider-owned settings selectable in a binding's proxy chain.",
+})
+
+/**
+ * A provider/profile pair occurring once in a gateway's ordered chain.
+ */
+export const HttpProxyStage: z.ZodObject<{
+  packageId: typeof PackageId
+  profileId: z.ZodString
+}> = /* @__PURE__ */ object({
+  packageId: PackageId,
+  profileId: z.string(),
+}).meta({
+  id: 'HttpProxyStage',
+  description:
+    "A provider/profile pair occurring once in a gateway's ordered chain.",
+})
 export const ImageSource: z.ZodUnion<
   readonly [
     z.ZodLiteral<'packed'>,
@@ -5399,6 +5521,64 @@ export const HostnameInfo: z.ZodObject<{
 }).meta({
   id: 'HostnameInfo',
 })
+
+/**
+ * Identified within its provider by binding, gateway and profile, independently of chain order.
+ */
+export const HttpProxyAttachment: z.ZodObject<{
+  binding: typeof HttpProxyBinding
+  gateway: typeof HttpProxyGateway
+  profileId: z.ZodString
+  ingress: typeof HttpProxyEndpoint
+  next: typeof HttpProxyEndpoint
+  protocols: z.ZodArray<typeof HttpProxyProtocol>
+}> = /* @__PURE__ */ object({
+  binding: HttpProxyBinding,
+  gateway: HttpProxyGateway,
+  profileId: z.string(),
+  ingress: HttpProxyEndpoint,
+  next: HttpProxyEndpoint,
+  protocols: z.array(HttpProxyProtocol),
+}).meta({
+  id: 'HttpProxyAttachment',
+  description:
+    'Identified within its provider by binding, gateway and profile, independently of chain order.',
+})
+
+/**
+ * Operator intent for one binding × gateway. Missing policies have empty chains.
+ */
+export const HttpProxyChain: z.ZodObject<{
+  gateway: typeof HttpProxyGateway
+  chain: z.ZodArray<typeof HttpProxyStage>
+  /**
+   * Bypasses private clients. URL-plugin gateways require false.
+   */
+  publicOnly: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  gateway: HttpProxyGateway,
+  chain: z.array(HttpProxyStage),
+  /**
+   * Bypasses private clients. URL-plugin gateways require false.
+   */
+  publicOnly: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Bypasses private clients. URL-plugin gateways require false.',
+  }),
+}).meta({
+  id: 'HttpProxyChain',
+  description:
+    'Operator intent for one binding × gateway. Missing policies have empty chains.',
+})
+
+/**
+ * The provider's complete published profile list.
+ */
+export const HttpProxyRegistration: z.ZodObject<{
+  profiles: z.ZodArray<typeof HttpProxyProfile>
+}> = /* @__PURE__ */ object({ profiles: z.array(HttpProxyProfile) }).meta({
+  id: 'HttpProxyRegistration',
+  description: "The provider's complete published profile list.",
+})
 export const ImageConfigRepr: z.ZodObject<{
   source: typeof ImageSource
   arch: z.ZodArray<z.ZodString>
@@ -5789,19 +5969,6 @@ export const PackageMetadata: z.ZodObject<{
 }).meta({
   id: 'PackageMetadata',
 })
-export const PackagePlugin: z.ZodObject<{
-  url: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof UrlPluginRegistration>>,
-    z.ZodNullable<typeof UrlPluginRegistration>
-  >
-}> = /* @__PURE__ */ object({
-  url: wire(
-    UrlPluginRegistration.nullable().optional(),
-    UrlPluginRegistration.nullable(),
-  ),
-}).meta({
-  id: 'PackagePlugin',
-})
 export const PartitionInfo: z.ZodObject<{
   logicalname: z.ZodString
   stablePath: z.ZodString
@@ -6034,6 +6201,11 @@ export const SetDependenciesParams: z.ZodObject<{
   dependencies: z.array(DependencyRequirement),
 }).meta({
   id: 'SetDependenciesParams',
+})
+export const SetHttpProxyProfilesParams: z.ZodObject<{
+  profiles: z.ZodArray<typeof HttpProxyProfile>
+}> = /* @__PURE__ */ object({ profiles: z.array(HttpProxyProfile) }).meta({
+  id: 'SetHttpProxyProfilesParams',
 })
 export const SetupExecuteParams: z.ZodObject<{
   guid: z.ZodString
@@ -6817,6 +6989,27 @@ export const OsIndex: z.ZodObject<{ versions: typeof OsVersionInfoMap }> =
   /* @__PURE__ */ object({ versions: OsVersionInfoMap }).meta({
     id: 'OsIndex',
   })
+export const PackagePlugin: z.ZodObject<{
+  url: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof UrlPluginRegistration>>,
+    z.ZodNullable<typeof UrlPluginRegistration>
+  >
+  httpProxy: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof HttpProxyRegistration>>,
+    z.ZodNullable<typeof HttpProxyRegistration>
+  >
+}> = /* @__PURE__ */ object({
+  url: wire(
+    UrlPluginRegistration.nullable().optional(),
+    UrlPluginRegistration.nullable(),
+  ),
+  httpProxy: wire(
+    HttpProxyRegistration.nullable().optional(),
+    HttpProxyRegistration.nullable(),
+  ),
+}).meta({
+  id: 'PackagePlugin',
+})
 export const PackageVersionInfo: z.ZodIntersection<
   z.ZodObject<{
     icon: z.ZodOptional<z.ZodNullable<typeof PackageIcon>>
@@ -6918,6 +7111,21 @@ export const SetHealth: z.ZodIntersection<
   .meta({
     id: 'SetHealth',
   })
+
+/**
+ * Replaces one gateway's chain without changing the binding's other gateways.
+ */
+export const SetHttpProxyChainParams: z.ZodObject<{
+  internalPort: z.ZodInt
+  policy: typeof HttpProxyChain
+}> = /* @__PURE__ */ object({
+  internalPort: z.int(),
+  policy: HttpProxyChain,
+}).meta({
+  id: 'SetHttpProxyChainParams',
+  description:
+    "Replaces one gateway's chain without changing the binding's other gateways.",
+})
 export const SetInitProgress: z.ZodObject<{ progress: typeof Progress }> =
   /* @__PURE__ */ object({ progress: Progress }).meta({
     id: 'SetInitProgress',
@@ -7393,6 +7601,10 @@ export const BindInfo: z.ZodObject<{
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof ServiceInterface>>,
     z.ZodRecord<z.ZodString, typeof ServiceInterface>
   >
+  proxyChains: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof HttpProxyChain>>,
+    z.ZodArray<typeof HttpProxyChain>
+  >
 }> = /* @__PURE__ */ object({
   enabled: z.boolean(),
   options: BindOptions,
@@ -7410,6 +7622,10 @@ export const BindInfo: z.ZodObject<{
     description:
       'Service interfaces exported from this binding (`Origin.export`). A single\nbinding (host + internal port) may back several interfaces (e.g. a `ui`\nand an `api` on the same port), so this is keyed by interface id.',
   }),
+  proxyChains: wire(
+    z.array(HttpProxyChain).optional(),
+    z.array(HttpProxyChain),
+  ),
 }).meta({
   id: 'BindInfo',
 })

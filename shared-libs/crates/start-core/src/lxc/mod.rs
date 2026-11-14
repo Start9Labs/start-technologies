@@ -501,6 +501,7 @@ impl LxcContainer {
         }
     }
 
+    /// Host-side bind alias; reconnects must not traverse the mutable rootfs.
     pub fn rpc_dir(&self) -> &Path {
         self.rpc_bind.path()
     }
@@ -557,7 +558,7 @@ impl LxcContainer {
     pub async fn connect_rpc(&self, timeout: Option<Duration>) -> Result<UnixRpcClient, Error> {
         let started = Instant::now();
         let sock_path = self.rpc_dir().join(CONTAINER_RPC_SERVER_SOCKET);
-        while tokio::fs::metadata(&sock_path).await.is_err() {
+        while tokio::fs::symlink_metadata(&sock_path).await.is_err() {
             if timeout.map_or(false, |t| started.elapsed() > t) {
                 tracing::error!(
                     "{:?}",

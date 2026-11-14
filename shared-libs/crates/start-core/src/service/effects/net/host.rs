@@ -59,11 +59,6 @@ pub async fn get_host_info(
     Ok(res)
 }
 
-pub(in crate::service::effects) fn project_host_info(value: Value) -> Result<Value, Error> {
-    let host: Option<Host> = imbl_value::from_value(value)?;
-    Ok(imbl_value::to_value(&host.map(Host::into_service_view))?)
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -74,7 +69,7 @@ mod tests {
     use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
 
     #[test]
-    fn initial_and_callback_host_views_keep_legacy_service_readers_in_sync() {
+    fn host_views_keep_legacy_service_readers_in_sync() {
         let mut host = Host::default();
         let mut ports = AvailablePorts::new();
         let mut bind = BindInfo::new(
@@ -139,11 +134,6 @@ mod tests {
             hidden.bindings[&80].addresses.available,
             BTreeSet::from([trusted_name])
         );
-        assert_eq!(
-            project_host_info(snapshot).unwrap(),
-            imbl_value::to_value(&hidden).unwrap()
-        );
-
         let mut host = hidden;
         let addresses = &mut host.bindings.get_mut(&80).unwrap().addresses;
         addresses
@@ -152,15 +142,9 @@ mod tests {
         addresses.insecure_enabled = addresses.insecure.clone();
         addresses.lan_enabled.insert((lan.hostname.clone(), 8080));
         addresses.effective = addresses.enabled().into_iter().cloned().collect();
-        let snapshot = imbl_value::to_value(&host).unwrap();
         let enabled = host.into_service_view();
         let addresses = &enabled.bindings[&80].addresses;
         assert_eq!(addresses.available, BTreeSet::from([insecure_name, lan]));
         assert!(addresses.disabled.is_empty());
-        assert_eq!(
-            project_host_info(snapshot).unwrap(),
-            imbl_value::to_value(&enabled).unwrap()
-        );
-        assert_eq!(project_host_info(Value::Null).unwrap(), Value::Null);
     }
 }

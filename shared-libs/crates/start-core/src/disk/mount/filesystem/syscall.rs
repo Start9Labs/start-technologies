@@ -1,11 +1,11 @@
-//! Detached Linux bind mounts with optional idmaps and read-only attributes.
+//! Detached Linux mounts with optional idmaps and read-only attributes.
 //! `open_tree_attr` requires Linux 6.15+ for cloning an already-idmapped source.
 
-use std::ffi::{CString, OsString};
+use std::ffi::{CStr, CString, OsString};
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use libc::{
@@ -15,9 +15,15 @@ use libc::{
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
+use crate::disk::mount::guard::GenericMountGuard;
 use crate::prelude::*;
+use crate::util::directory::descriptor_path;
 
 // libc's musl targets omit these linux/mount.h flags.
+const FSOPEN_CLOEXEC: libc::c_uint = 0x00000001;
+const FSMOUNT_CLOEXEC: libc::c_uint = 0x00000001;
+const FSCONFIG_SET_STRING: libc::c_uint = 1;
+const FSCONFIG_CMD_CREATE: libc::c_uint = 6;
 const MOVE_MOUNT_F_EMPTY_PATH: libc::c_uint = 0x00000004;
 const MOVE_MOUNT_T_EMPTY_PATH: libc::c_uint = 0x00000040;
 const MOVE_MOUNT_BENEATH: libc::c_uint = 0x00000200;
@@ -280,6 +286,57 @@ pub struct DetachedMount {
     fd: OwnedFd,
 }
 impl DetachedMount {
+    /// Creates a filesystem without attaching it to a host pathname.
+    pub fn create<'a>(
+        filesystem: &CStr,
+        options: impl IntoIterator<Item = (&'a CStr, &'a CStr)>,
+    ) -> Result<Self, Error> {
+        let context = fd_from_raw(
+            unsafe { libc::syscall(libc::SYS_fsopen, filesystem.as_ptr(), FSOPEN_CLOEXEC) },
+            "fsopen",
+        )?;
+        for (key, value) in options {
+            check(
+                unsafe {
+                    libc::syscall(
+                        libc::SYS_fsconfig,
+                        context.as_raw_fd(),
+                        FSCONFIG_SET_STRING,
+                        key.as_ptr(),
+                        value.as_ptr(),
+                        0_i32,
+                    )
+                },
+                "fsconfig option",
+            )?;
+        }
+        check(
+            unsafe {
+                libc::syscall(
+                    libc::SYS_fsconfig,
+                    context.as_raw_fd(),
+                    FSCONFIG_CMD_CREATE,
+                    std::ptr::null::<libc::c_char>(),
+                    std::ptr::null::<libc::c_void>(),
+                    0_i32,
+                )
+            },
+            "fsconfig create",
+        )?;
+        let fd = fd_from_raw(
+            unsafe {
+                libc::syscall(
+                    libc::SYS_fsmount,
+                    context.as_raw_fd(),
+                    FSMOUNT_CLOEXEC,
+                    0_u32,
+                )
+            },
+            "fsmount",
+        )?;
+        Ok(Self::from_fd(fd))
+    }
+
     pub fn from_fd(fd: OwnedFd) -> Self {
         Self { fd }
     }
@@ -308,6 +365,15 @@ impl DetachedMount {
     pub fn attach(self, mountpoint: &Path) -> Result<(), Error> {
         move_mount(self.fd.as_fd(), mountpoint, 0)
     }
+    /// Attaches to a pinned directory; the returned guard detaches on drop.
+    pub fn attach_at(self, directory: BorrowedFd<'_>) -> Result<AttachedMount, Error> {
+        let fd = self.attach_to_fd(directory)?;
+        Ok(AttachedMount {
+            path: descriptor_path(fd.as_fd()),
+            fd,
+            mounted: true,
+        })
+    }
     /// Attaches to a pinned directory and retains a handle to the attached mount.
     pub fn attach_to_fd(self, target: BorrowedFd) -> Result<OwnedFd, Error> {
         move_mount_at(
@@ -321,6 +387,42 @@ impl DetachedMount {
     /// Insert beneath the top mount; detaching the top reveals this mount. Requires Linux 6.5+.
     pub fn attach_beneath(self, mountpoint: &Path) -> Result<(), Error> {
         move_mount(self.fd.as_fd(), mountpoint, MOVE_MOUNT_BENEATH)
+    }
+}
+
+/// Owns an attached mount independently of replacements of its target pathname.
+/// Cleanup lazily detaches the tree, including in unstable builds.
+#[derive(Debug)]
+pub struct AttachedMount {
+    path: PathBuf,
+    fd: OwnedFd,
+    mounted: bool,
+}
+
+impl AttachedMount {
+    fn detach(&mut self) -> Result<(), Error> {
+        if self.mounted {
+            unmount_fd(self.fd.as_fd())?;
+            self.mounted = false;
+        }
+        Ok(())
+    }
+}
+
+impl GenericMountGuard for AttachedMount {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+    async fn unmount(mut self) -> Result<(), Error> {
+        self.detach()
+    }
+}
+
+impl Drop for AttachedMount {
+    fn drop(&mut self) {
+        if let Err(error) = self.detach() {
+            tracing::error!(?error, "Failed to detach pinned mount");
+        }
     }
 }
 

@@ -232,9 +232,13 @@ HTTP proxying and TLS termination are separate: `proxy` describes HTTP handling,
 
 Both HTTP-proxied legs connect to the container from StartOS, rather than preserving the client's TCP source address. With forwarded-header generation enabled, applications identify the client through `X-Forwarded-For`.
 
-The HTTP proxy strips client-supplied `X-Forwarded-*` values even when header generation is disabled. TLS legs generate `X-Forwarded-Proto: https`; plaintext legs strip that header and generate no replacement. Treat a missing header as plaintext rather than trusting a client-provided scheme.
+The HTTP proxy strips client-supplied `X-Forwarded-*`, `Forwarded`, and `X-Real-IP` values even when header generation is disabled. TLS legs generate `X-Forwarded-Proto: https`; plaintext legs strip that header and generate no replacement. Treat a missing header as plaintext rather than trusting a client-provided scheme.
 
 An `addSsl` binding on any port can carry a Let's Encrypt certificate — issuance is per name, not per port. The user's side of that is one extra requirement: Let's Encrypt validates on port `443` whatever port you bind, so StartOS asks their gateway to route `443` for the domain as well. On a gateway that cannot do it automatically they forward `443` by hand. Worth a line in your instructions for an interface on a non-standard port that users will reach from software validating against public roots — an Electrum client, say.
+
+## HTTP proxy chains
+
+Users can attach installed [HTTP proxy plugins](http-proxy-plugins.md) independently to each gateway of an HTTP-proxied binding. Each ordered chain applies to that gateway's addresses and exported interfaces sharing the binding, including different paths. Network gateways offer a **Public only** option; private clients then bypass the chain and its HTTP-version restrictions. URL-plugin gateways are identified by the originating service container and have no Public-only option. Rebinding preserves every gateway's settings; disabling HTTP proxying requires clearing every nonempty chain first. Keep authentication on the binding or application authoritative for every route.
 
 ## Interface Options
 

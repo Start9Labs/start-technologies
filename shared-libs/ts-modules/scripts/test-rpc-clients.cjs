@@ -1334,6 +1334,7 @@ test('StartOS interface rows hide disabled insecure HTTP and keep private GUA ac
     bindings: {
       80: {
         addresses,
+        proxyChains: [],
         options: { addSsl: { preferredExternalPort: 8443 }, secure: null },
       },
     },
@@ -1431,6 +1432,105 @@ test('StartOS mock routes preserve registry fixtures, configured build identity,
       targetVersion: '=1.0.0',
     }),
     version,
+  )
+})
+
+test('StartOS mock uninstall retires stages and effective plugin addresses in one revision', async () => {
+  const address = packageId => ({
+    hostname: `${packageId}.test`,
+    port: 443,
+    ssl: true,
+    public: false,
+    metadata: {
+      kind: 'plugin',
+      packageId,
+      removeAction: null,
+      overflowActions: [],
+      info: null,
+    },
+  })
+  const available = [address('waf'), address('keeper')]
+  const host = () => ({
+    bindings: {
+      80: {
+        proxyChains: [
+          {
+            gateway: { kind: 'network', gatewayId: 'eth0' },
+            publicOnly: true,
+            chain: ['waf', 'keeper'].map(packageId => ({
+              packageId,
+              profileId: 'default',
+            })),
+          },
+        ],
+        addresses: {
+          available,
+          effective: available,
+          enabled: [],
+          disabled: [],
+          guaWan: [],
+          lanEnabled: [],
+          insecure: [],
+          insecureEnabled: [],
+        },
+      },
+    },
+  })
+  const data = {
+    serverInfo: { network: { host: host() } },
+    packageData: { waf: { hosts: {} }, app: { hosts: { ui: host() } } },
+  }
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['src/app/utils/acme', {}],
+      ['./api.fixures', { Mock: {} }],
+      ['./mock-patch', mockPatchFixture(data)],
+      ['./md-sample.md', ''],
+    ]),
+    { setTimeout: callback => queueMicrotask(callback) },
+  )
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
+  dependencies.set(tokens.AuthService, { isVerified$: of(true) })
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+  ).MockApiService)()
+  const revisions = []
+  const subscription = client.mockWsSource$.subscribe(r => revisions.push(r))
+  await client.rpc.package.uninstall({ id: 'waf' })
+  subscription.unsubscribe()
+  const cleanup = revisions.find(r =>
+    r.patch.some(p => p.op === 'remove' && p.path === '/packageData/waf'),
+  )
+  assert.ok(cleanup)
+  assert.equal(cleanup.patch.length, 5)
+  for (const path of [
+    '/serverInfo/network/host',
+    '/packageData/app/hosts/ui',
+  ]) {
+    const chains = cleanup.patch.find(
+      p => p.path === `${path}/bindings/80/proxyChains`,
+    ).value
+    assert.equal(chains[0].publicOnly, true)
+    assert.deepEqual(
+      Array.from(chains[0].chain, s => s.packageId),
+      ['keeper'],
+    )
+    const addresses = cleanup.patch.find(
+      p => p.path === `${path}/bindings/80/addresses`,
+    ).value
+    assert.deepEqual(
+      Array.from(addresses.available, a => a.hostname),
+      ['keeper.test'],
+    )
+    assert.deepEqual(
+      Array.from(addresses.effective, a => a.hostname),
+      ['keeper.test'],
+    )
+  }
+  assert.equal(
+    data.serverInfo.network.host.bindings[80].addresses.effective.length,
+    2,
   )
 })
 
@@ -2276,7 +2376,11 @@ test('Brochure reports malformed registry URLs and can load the next selection',
       .ApiService,
     api,
   )
-  dependencies.set(storage, { getItem: () => null })
+  const stored = new Map()
+  dependencies.set(storage, {
+    getItem: key => stored.get(key) ?? null,
+    setItem: (key, value) => stored.set(key, value),
+  })
   dependencies.set(shared.Exver, {})
   dependencies.set(shared.i18nPipe, { transform: value => value })
   dependencies.set(shared.i18nService, { localize: value => value })
@@ -2301,6 +2405,8 @@ test('Brochure reports malformed registry URLs and can load the next selection',
     assert.equal(subscription.closed, false)
     service.currentRegistryUrl$.next('https://registry.test/')
     await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(errors, [])
+    assert.equal(subscription.closed, false)
     assert.equal(registries.length, 1)
     assert.equal(registries[0].url, 'https://registry.test/')
     assert.equal(registries[0].info.name, info.name)

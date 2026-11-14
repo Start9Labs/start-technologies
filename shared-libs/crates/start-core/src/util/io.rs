@@ -1,7 +1,9 @@
 use std::collections::VecDeque;
+use std::ffi::CStr;
 use std::future::Future;
 use std::io::Cursor;
 use std::mem::MaybeUninit;
+use std::os::fd::AsFd;
 use std::os::unix::prelude::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
@@ -1235,11 +1237,33 @@ pub async fn write_file_owned_atomic(
             .await
             .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}")))?;
     }
-    let mut file = AtomicFile::new(path, None::<&Path>)
+    let file = AtomicFile::new(path, None::<&Path>)
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("create {path:?}")))?;
+    write_owned_atomic(file, contents.as_ref(), uid, gid).await
+}
+
+pub(crate) async fn write_file_owned_at(
+    directory: &std::fs::File,
+    name: &CStr,
+    contents: impl AsRef<[u8]>,
+    uid: u32,
+    gid: u32,
+) -> Result<(), Error> {
+    let file = AtomicFile::new_at(directory, name).await?;
+    write_owned_atomic(file, contents.as_ref(), uid, gid).await
+}
+
+async fn write_owned_atomic(
+    mut file: AtomicFile,
+    contents: &[u8],
+    uid: u32,
+    gid: u32,
+) -> Result<(), Error> {
+    let file_path = file.path.clone();
+    let path = file_path.as_path();
     fchown(&*file, Some(uid.into()), Some(gid.into())).with_kind(ErrorKind::Filesystem)?;
-    file.write_all(contents.as_ref())
+    file.write_all(contents)
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("write {path:?}")))?;
     file.save()
@@ -1937,6 +1961,7 @@ pub struct AtomicFile {
     tmp_path: PathBuf,
     path: PathBuf,
     file: Option<File>,
+    directory: Option<std::fs::File>,
 }
 impl AtomicFile {
     pub async fn new(
@@ -1956,6 +1981,27 @@ impl AtomicFile {
             tmp_path,
             path,
             file: Some(file),
+            directory: None,
+        })
+    }
+
+    /// The caller supplies one entry name; the directory remains pinned through cleanup.
+    pub(crate) async fn new_at(directory: &std::fs::File, name: &CStr) -> Result<Self, Error> {
+        use std::os::unix::ffi::OsStrExt;
+        let directory = directory.try_clone()?;
+        let path = crate::util::directory::descriptor_path(directory.as_fd())
+            .join(std::ffi::OsStr::from_bytes(name.to_bytes()));
+        let tmp_path = to_tmp_path(&path)?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+            .await?;
+        Ok(Self {
+            tmp_path,
+            path,
+            file: Some(file),
+            directory: Some(directory),
         })
     }
 
@@ -2027,7 +2073,11 @@ impl Drop for AtomicFile {
         if let Some(file) = self.file.take() {
             drop(file);
             let path = std::mem::take(&mut self.tmp_path);
-            tokio::spawn(async move { tokio::fs::remove_file(path).await.log_err() });
+            let directory = self.directory.take();
+            tokio::spawn(async move {
+                let _directory = directory;
+                tokio::fs::remove_file(path).await.log_err();
+            });
         }
     }
 }

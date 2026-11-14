@@ -2070,6 +2070,48 @@ backup.volume.volumes:
   pl_PL: "Woluminy"
 
 # service/effects/net/plugin.rs
+net.http-proxy.duplicate-stage:
+  en_US: A proxy profile can appear only once in a gateway's chain.
+  de_DE: Ein Proxy-Profil darf nur einmal in der Kette eines Gateways vorkommen.
+  es_ES: Un perfil de proxy solo puede aparecer una vez en la cadena de una puerta de enlace.
+  fr_FR: Un profil de proxy ne peut apparaître qu’une fois dans la chaîne d’une passerelle.
+  pl_PL: Profil proxy może wystąpić tylko raz w łańcuchu bramy.
+
+net.http-proxy.incompatible-chain:
+  en_US: All proxy profiles must exist and support a common HTTP protocol.
+  de_DE: Alle Proxy-Profile müssen vorhanden sein und ein gemeinsames HTTP-Protokoll unterstützen.
+  es_ES: Todos los perfiles de proxy deben existir y admitir un protocolo HTTP común.
+  fr_FR: Tous les profils de proxy doivent exister et prendre en charge un protocole HTTP commun.
+  pl_PL: Wszystkie profile proxy muszą istnieć i obsługiwać wspólny protokół HTTP.
+
+net.http-proxy.invalid-profiles:
+  en_US: Proxy profiles require unique nonempty IDs and at least one supported HTTP protocol.
+  de_DE: Proxy-Profile benötigen eindeutige, nicht leere IDs und mindestens ein unterstütztes HTTP-Protokoll.
+  es_ES: Los perfiles de proxy requieren identificadores únicos no vacíos y al menos un protocolo HTTP compatible.
+  fr_FR: Les profils de proxy nécessitent des identifiants uniques non vides et au moins un protocole HTTP pris en charge.
+  pl_PL: Profile proxy wymagają unikalnych niepustych identyfikatorów i co najmniej jednego obsługiwanego protokołu HTTP.
+
+net.http-proxy.public-only-network:
+  en_US: Public-only filtering is available only for network gateways.
+  de_DE: Die Filterung nur öffentlicher Clients ist nur für Netzwerk-Gateways verfügbar.
+  es_ES: El filtrado solo público está disponible únicamente para puertas de enlace de red.
+  fr_FR: Le filtrage public uniquement est réservé aux passerelles réseau.
+  pl_PL: Filtrowanie tylko publicznych klientów jest dostępne tylko dla bram sieciowych.
+
+net.http-proxy.remove-chain-before-disabling:
+  en_US: Clear all gateway proxy chains before disabling HTTP proxying for this binding.
+  de_DE: Leeren Sie alle Gateway-Proxy-Ketten, bevor Sie den HTTP-Proxy für diese Bindung deaktivieren.
+  es_ES: Borre todas las cadenas de proxy de las puertas de enlace antes de desactivar el proxy HTTP para este enlace.
+  fr_FR: Videz toutes les chaînes de proxy des passerelles avant de désactiver le proxy HTTP pour cette liaison.
+  pl_PL: Wyczyść wszystkie łańcuchy proxy bram przed wyłączeniem proxy HTTP dla tego powiązania.
+
+net.http-proxy.requires-http:
+  en_US: This binding must enable HTTP proxying before attaching proxy profiles.
+  de_DE: Diese Bindung muss den HTTP-Proxy aktivieren, bevor Proxy-Profile zugewiesen werden.
+  es_ES: Este enlace debe activar el proxy HTTP antes de adjuntar perfiles de proxy.
+  fr_FR: Cette liaison doit activer le proxy HTTP avant d’associer des profils de proxy.
+  pl_PL: To powiązanie musi mieć włączone proxy HTTP przed dołączeniem profili proxy.
+
 net.plugin.manifest-missing-plugin:
   en_US: "manifest does not declare the \"%{plugin}\" plugin"
   de_DE: "Manifest deklariert das Plugin \"%{plugin}\" nicht"

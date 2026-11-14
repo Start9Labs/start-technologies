@@ -1763,12 +1763,60 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
 
       setTimeout(async () => {
-        const patch2: RemoveOperation[] = [
+        const patch2: Operation<T.HttpProxyChain[] | T.DerivedAddressInfo>[] = [
           {
             op: PatchOp.REMOVE,
             path: `/packageData/${params.id}`,
           },
         ]
+        const hosts: Array<[string, T.Host]> = [
+          [
+            '/serverInfo/network/host',
+            this.cache.value.value.serverInfo.network.host,
+          ],
+          ...Object.entries(this.cache.value.value.packageData)
+            .filter(([id]) => id !== params.id)
+            .flatMap(([id, pkg]) =>
+              Object.entries(pkg.hosts).map(
+                ([hostId, host]): [string, T.Host] => [
+                  this.mockHostPath(id, hostId),
+                  host,
+                ],
+              ),
+            ),
+        ]
+        for (const [path, host] of hosts) {
+          for (const [port, binding] of Object.entries(host.bindings)) {
+            const addresses = {
+              ...binding.addresses,
+              available: binding.addresses.available.filter(
+                address =>
+                  address.metadata.kind !== 'plugin' ||
+                  address.metadata.packageId !== params.id,
+              ),
+            }
+            patch2.push(
+              {
+                op: PatchOp.REPLACE,
+                path: `${path}/bindings/${port}/proxyChains`,
+                value: binding.proxyChains.map(policy => ({
+                  ...policy,
+                  chain: policy.chain.filter(
+                    stage => stage.packageId !== params.id,
+                  ),
+                })),
+              },
+              {
+                op: PatchOp.REPLACE,
+                path: `${path}/bindings/${port}/addresses`,
+                value: {
+                  ...addresses,
+                  effective: this.getMockEffectiveAddresses(addresses),
+                },
+              },
+            )
+          }
+        }
         this.mockRevision(patch2)
       }, this.revertTime)
 
@@ -1919,6 +1967,13 @@ export class MockApiService extends ApiService implements StartupApiService {
 
       return null
     },
+    'package.host.binding.set-http-proxy-chain': async params =>
+      this.mockSetProxyChain(
+        this.mockHostPath(params.package, params.host),
+        params,
+      ),
+    'server.host.binding.set-http-proxy-chain': async params =>
+      this.mockSetProxyChain('/serverInfo/network/host', params),
     'package.host.binding.set-address-enabled': async params => {
       await pauseFor(2000)
 
@@ -2865,12 +2920,16 @@ export class MockApiService extends ApiService implements StartupApiService {
     this.refreshMockAddresses(basePath, current)
   }
 
+  private getMockEffectiveAddresses(current: T.DerivedAddressInfo) {
+    const { effective: _, ...legacy } = current
+    return utils.getEnabledAddresses(legacy)
+  }
+
   private refreshMockAddresses(
     basePath: string,
     current: T.DerivedAddressInfo,
   ): void {
-    const { effective: _, ...legacy } = current
-    current.effective = utils.getEnabledAddresses(legacy)
+    current.effective = this.getMockEffectiveAddresses(current)
     this.mockRevision([
       {
         op: PatchOp.ADD,
@@ -3261,6 +3320,27 @@ export class MockApiService extends ApiService implements StartupApiService {
     progress.complete()
     job.progress = progress.snapshot()
     await this.publishConversions()
+  }
+
+  private async mockSetProxyChain(
+    host: string,
+    { internalPort, policy }: T.SetHttpProxyChainParamsInput,
+  ): Promise<null> {
+    const path = `${host}/bindings/${internalPort}/proxyChains`
+    const previous = this.mockData(path) as T.HttpProxyChain[]
+    await this.mockRevision([
+      {
+        op: PatchOp.ADD,
+        path,
+        value: [
+          ...previous.filter(
+            entry => !utils.deepEqual(entry.gateway, policy.gateway),
+          ),
+          { ...policy, publicOnly: policy.publicOnly ?? false },
+        ],
+      },
+    ])
+    return null
   }
 
   private mockData(path: string): any {

@@ -190,6 +190,26 @@ export type HealthCheckId = z.output<typeof schemas.HealthCheckId>
 export type HealthCheckIdInput = z.input<typeof schemas.HealthCheckId>
 export type HostId = z.output<typeof schemas.HostId>
 export type HostIdInput = z.input<typeof schemas.HostId>
+
+/**
+ * A socket path in the provider's container namespace.
+ */
+export type HttpProxyEndpoint = z.output<typeof schemas.HttpProxyEndpoint>
+
+/**
+ * A socket path in the provider's container namespace.
+ */
+export type HttpProxyEndpointInput = z.input<typeof schemas.HttpProxyEndpoint>
+
+/**
+ * HTTP framing supported on the plugin's Unix stream sockets.
+ */
+export type HttpProxyProtocol = z.output<typeof schemas.HttpProxyProtocol>
+
+/**
+ * HTTP framing supported on the plugin's Unix stream sockets.
+ */
+export type HttpProxyProtocolInput = z.input<typeof schemas.HttpProxyProtocol>
 export type IdMap = z.output<typeof schemas.IdMap>
 export type IdMapInput = z.input<typeof schemas.IdMap>
 export type ImageId = z.output<typeof schemas.ImageId>
@@ -858,6 +878,12 @@ export type GetContainerIpParamsInput = z.input<
 >
 export type GetHostInfoParams = z.output<typeof schemas.GetHostInfoParams>
 export type GetHostInfoParamsInput = z.input<typeof schemas.GetHostInfoParams>
+export type GetHttpProxyAttachmentsParams = z.output<
+  typeof schemas.GetHttpProxyAttachmentsParams
+>
+export type GetHttpProxyAttachmentsParamsInput = z.input<
+  typeof schemas.GetHttpProxyAttachmentsParams
+>
 export type GetOutboundGatewayParams = z.output<
   typeof schemas.GetOutboundGatewayParams
 >
@@ -914,6 +940,46 @@ export type HardwareRequirementsInput = z.input<
 >
 export type HostnameMetadata = z.output<typeof schemas.HostnameMetadata>
 export type HostnameMetadataInput = z.input<typeof schemas.HostnameMetadata>
+
+/**
+ * The protected binding, shared by its exported interfaces.
+ */
+export type HttpProxyBinding = z.output<typeof schemas.HttpProxyBinding>
+
+/**
+ * The protected binding, shared by its exported interfaces.
+ */
+export type HttpProxyBindingInput = z.input<typeof schemas.HttpProxyBinding>
+
+/**
+ * The ingress gateway, independent of chain order and public-only applicability.
+ */
+export type HttpProxyGateway = z.output<typeof schemas.HttpProxyGateway>
+
+/**
+ * The ingress gateway, independent of chain order and public-only applicability.
+ */
+export type HttpProxyGatewayInput = z.input<typeof schemas.HttpProxyGateway>
+
+/**
+ * Provider-owned settings selectable in a binding's proxy chain.
+ */
+export type HttpProxyProfile = z.output<typeof schemas.HttpProxyProfile>
+
+/**
+ * Provider-owned settings selectable in a binding's proxy chain.
+ */
+export type HttpProxyProfileInput = z.input<typeof schemas.HttpProxyProfile>
+
+/**
+ * A provider/profile pair occurring once in a gateway's ordered chain.
+ */
+export type HttpProxyStage = z.output<typeof schemas.HttpProxyStage>
+
+/**
+ * A provider/profile pair occurring once in a gateway's ordered chain.
+ */
+export type HttpProxyStageInput = z.input<typeof schemas.HttpProxyStage>
 export type ImageSource = z.output<typeof schemas.ImageSource>
 export type ImageSourceInput = z.input<typeof schemas.ImageSource>
 export type InfoParams = z.output<typeof schemas.InfoParams>
@@ -1320,6 +1386,42 @@ export type ExportServiceInterfaceParamsInput = z.input<
 >
 export type HostnameInfo = z.output<typeof schemas.HostnameInfo>
 export type HostnameInfoInput = z.input<typeof schemas.HostnameInfo>
+
+/**
+ * Identified within its provider by binding, gateway and profile, independently of chain order.
+ */
+export type HttpProxyAttachment = z.output<typeof schemas.HttpProxyAttachment>
+
+/**
+ * Identified within its provider by binding, gateway and profile, independently of chain order.
+ */
+export type HttpProxyAttachmentInput = z.input<
+  typeof schemas.HttpProxyAttachment
+>
+
+/**
+ * Operator intent for one binding × gateway. Missing policies have empty chains.
+ */
+export type HttpProxyChain = z.output<typeof schemas.HttpProxyChain>
+
+/**
+ * Operator intent for one binding × gateway. Missing policies have empty chains.
+ */
+export type HttpProxyChainInput = z.input<typeof schemas.HttpProxyChain>
+
+/**
+ * The provider's complete published profile list.
+ */
+export type HttpProxyRegistration = z.output<
+  typeof schemas.HttpProxyRegistration
+>
+
+/**
+ * The provider's complete published profile list.
+ */
+export type HttpProxyRegistrationInput = z.input<
+  typeof schemas.HttpProxyRegistration
+>
 export type ImageConfigRepr = z.output<typeof schemas.ImageConfigRepr>
 export type ImageConfigReprInput = z.input<typeof schemas.ImageConfigRepr>
 export type InitProgressRes = z.output<typeof schemas.InitProgressRes>
@@ -1370,8 +1472,6 @@ export type PackageAccess = z.output<typeof schemas.PackageAccess>
 export type PackageAccessInput = z.input<typeof schemas.PackageAccess>
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
 export type PackageMetadataInput = z.input<typeof schemas.PackageMetadata>
-export type PackagePlugin = z.output<typeof schemas.PackagePlugin>
-export type PackagePluginInput = z.input<typeof schemas.PackagePlugin>
 export type PartitionInfo = z.output<typeof schemas.PartitionInfo>
 export type PartitionInfoInput = z.input<typeof schemas.PartitionInfo>
 export type Progress = z.output<typeof schemas.Progress>
@@ -1401,6 +1501,12 @@ export type SetDependenciesParams = z.output<
 >
 export type SetDependenciesParamsInput = z.input<
   typeof schemas.SetDependenciesParams
+>
+export type SetHttpProxyProfilesParams = z.output<
+  typeof schemas.SetHttpProxyProfilesParams
+>
+export type SetHttpProxyProfilesParamsInput = z.input<
+  typeof schemas.SetHttpProxyProfilesParams
 >
 export type SetupExecuteParams = z.output<typeof schemas.SetupExecuteParams>
 export type SetupExecuteParamsInput = z.input<typeof schemas.SetupExecuteParams>
@@ -1504,6 +1610,8 @@ export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type NetworkGatewayInfoInput = z.input<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type OsIndexInput = z.input<typeof schemas.OsIndex>
+export type PackagePlugin = z.output<typeof schemas.PackagePlugin>
+export type PackagePluginInput = z.input<typeof schemas.PackagePlugin>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type PackageVersionInfoInput = z.input<typeof schemas.PackageVersionInfo>
 export type ServerStatus = z.output<typeof schemas.ServerStatus>
@@ -1514,6 +1622,20 @@ export type SetBackupProgress = z.output<typeof schemas.SetBackupProgress>
 export type SetBackupProgressInput = z.input<typeof schemas.SetBackupProgress>
 export type SetHealth = z.output<typeof schemas.SetHealth>
 export type SetHealthInput = z.input<typeof schemas.SetHealth>
+
+/**
+ * Replaces one gateway's chain without changing the binding's other gateways.
+ */
+export type SetHttpProxyChainParams = z.output<
+  typeof schemas.SetHttpProxyChainParams
+>
+
+/**
+ * Replaces one gateway's chain without changing the binding's other gateways.
+ */
+export type SetHttpProxyChainParamsInput = z.input<
+  typeof schemas.SetHttpProxyChainParams
+>
 export type SetInitProgress = z.output<typeof schemas.SetInitProgress>
 export type SetInitProgressInput = z.input<typeof schemas.SetInitProgress>
 

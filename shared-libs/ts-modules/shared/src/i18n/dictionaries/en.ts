@@ -1094,4 +1094,16 @@ export const ENGLISH: Record<string, number> = {
   'View custom registry': 1296,
   'Custom': 1297, // as in, a custom registry
   'Enter a domain or URL': 1298,
+  'HTTP proxy chain': 1299,
+  'Applies to every address and interface on this gateway and binding.': 1300,
+  'Proxy services can read and modify traffic, including credentials.': 1301,
+  'Unavailable proxies block traffic. Applying changes disconnects existing clients.': 1302,
+  'No proxy stages': 1303,
+  'Add proxy': 1304,
+  'No proxy profiles available': 1305,
+  'Profile unavailable': 1306,
+  'Move up': 1307,
+  'Move down': 1308,
+  'Public only': 1309,
+  'Private clients bypass this chain.': 1310,
 }
