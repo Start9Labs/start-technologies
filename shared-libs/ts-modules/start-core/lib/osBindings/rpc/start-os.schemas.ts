@@ -7063,6 +7063,8 @@ export const Api = {
         'force-stop': {
           _PARAMS: /* @__PURE__ */ ForceStopParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         host: {
           _PARAMS: /* @__PURE__ */ RequiresPackageId,
