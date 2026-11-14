@@ -26,8 +26,8 @@ import {
 
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreIconDirective } from './store-icon.directive'
-import { RegistryStatus } from './registry-status'
 
+// Connection status stays outside the registry selector.
 @Component({
   selector: 'marketplace-registry-select',
   template: `
@@ -46,9 +46,6 @@ import { RegistryStatus } from './registry-status'
       <b tuiFade>
         {{ data()?.current?.name || fetched()?.info?.name || 'Loading...' }}
       </b>
-      @if (data()?.current?.status; as status) {
-        <span [marketplaceRegistryStatus]="status"></span>
-      }
       @if (data(); as d) {
         <tui-data-list *tuiDropdown size="m">
           <div class="g-title">
@@ -86,9 +83,6 @@ import { RegistryStatus } from './registry-status'
                 {{ registry.name }}
                 <span tuiSubtitle>{{ registry.url }}</span>
               </span>
-              @if (registry.status; as status) {
-                <span [marketplaceRegistryStatus]="status"></span>
-              }
               @if (registry.selected) {
                 <tui-icon icon="@tui.check" />
               }
@@ -123,9 +117,6 @@ import { RegistryStatus } from './registry-status'
                 {{ registry.name }}
                 <span tuiSubtitle>{{ registry.url }}</span>
               </span>
-              @if (registry.status; as status) {
-                <span [marketplaceRegistryStatus]="status"></span>
-              }
               <tui-icon icon="@tui.trash" (click.stop)="delete(registry.url)" />
               @if (registry.selected) {
                 <tui-icon icon="@tui.check" />
@@ -139,7 +130,6 @@ import { RegistryStatus } from './registry-status'
   styles: `
     :host {
       display: grid;
-      margin-block-end: 0.75rem;
 
       [tuiAvatar] {
         margin-inline-start: -0.375rem;
@@ -164,7 +154,6 @@ import { RegistryStatus } from './registry-status'
     }
   `,
   imports: [
-    RegistryStatus,
     StoreIconDirective,
     RouterLink,
     TuiButton,

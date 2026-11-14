@@ -10,6 +10,7 @@ release-notes: false
 - Establish CLI connections on the first call and reuse them for subsequent calls without silently repeating a possibly executed request.
 - Detect firmware changes through authenticated reply metadata and verify the requested version before reporting recovery from an interrupted update.
 - Remember the browser's verified server identity and warn on changes without blocking the connection, with fingerprint details for verification.
+- Persist the server's handshake signing key in the authentication PatchDB retained during sysupgrade.
 - Cancel pending device-key acquisition and enrollment across logout, replacement and rollback.
 - Bound replay-cache memory when clock synchronization is unavailable.
 - Preserve request IDs on middleware errors and consecutive browser RPC calls as prior connections finish closing.

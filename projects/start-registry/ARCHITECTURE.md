@@ -78,7 +78,7 @@ package and OS metadata through PatchDB. Subscriptions reconnect with jittered b
 dump. Cached metadata remains available offline, with connection availability reported separately
 from registry configuration. Malformed saved source URLs are skipped independently without
 rewriting configured intent. Streaming requires signed-DH admission, `rpcstream` and a configured
-hostname covering the client's selected URL host. An upgrade HTTP 404/405/501 selects signed HTTP
+hostname covering the client's selected URL host. A legacy HTTP 200 without upgrading, or upgrade HTTP 404/405/501, selects signed HTTP
 polling every 15 minutes, using full/all-revision `package.get`, `info` and the selected `os.index`.
 Each cycle rechecks upgrade support. Successful polling marks observed availability; failed polls
 retain caches without granting trust. Redirects, authorization errors and failed encrypted admission
@@ -95,8 +95,8 @@ including legacy icons, notes and key/signature encodings. Canonical storage rem
 the current schema; PatchDB derives patches from the projected values. A projection failure ends
 its subscriptions and permits rebuilding the failed replica without closing unrelated streams.
 A public-mirror subscriber must resubscribe after receiving a private-access grant. StartOS's
-marketplace refresh action restarts that registry's grouped watches without changing signing-key
-trust or discarding cached listings. Weak mirror entries share work across subscribers; dropping the last subscriber cancels that mirror's task.
+registry-management More menu offers refresh in every connection state, restarting that
+registry's grouped watches without changing signing-key trust or discarding cached listings. Weak mirror entries share work across subscribers; dropping the last subscriber cancels that mirror's task.
 
 StartOS derives security notifications from the selected source's OS metadata, filtering by source
 version, platform, and installed build. Delivery history remains keyed by registry URL, version, and

@@ -48,6 +48,7 @@ function context() {
     onLeaveContext: (callback: () => void) => callbacks.push(callback),
     setHealth: async () => null,
     clearCallbacks: async () => null,
+    getSharedVolumes: async () => [],
     subcontainer: {
       createFs: jest.fn(async () => ['/rootfs', 'guid']),
       destroyFs: jest.fn(async () => null),

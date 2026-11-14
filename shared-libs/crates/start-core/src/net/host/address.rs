@@ -802,6 +802,9 @@ mod test {
                 "registryCache": {},
                 "osUpdateCache": null,
                 "ui": {},
+                "disks": [],
+                "sharedVolumes": {},
+                "backupTargets": {},
                 "serverInfo": {
                     "hostname": "server",
                     "network": {

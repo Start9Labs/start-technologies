@@ -37,6 +37,7 @@ S3_ORIGIN="https://startos-images.nyc3.digitaloceanspaces.com"
 START9_GPG_KEY="2D63C217"
 SDK_NPM_PACKAGE="@start9labs/start-sdk"
 CHANGELOG_SUMMARY="<summary>Full changelog</summary>"
+IMAGE_DOWNLOADS_HEADING="## Image Downloads"
 # The GitHub release asset holding the edited notes for every locale. Tag CI
 # (changelog.mjs sync) archives it onto master, so it must exist before the tag.
 NOTES_ASSET="release-notes.json"
@@ -166,19 +167,47 @@ Use these section titles: ${labels}.
     } | claude -p --tools "" --no-session-persistence --output-format text "$prompt"
 }
 
-# The newest earlier prerelease of this version with uploaded notes, if any.
-previous_prerelease() {
+prerelease_tags() {
     local name number
     git -C "$REPO_ROOT" fetch -q --tags origin
     while read -r name; do
-        [ "$name" != "$TAG" ] || continue
         number="${name#"${PROJECT}/v${VERSION}-rc."}"
         [[ "$number" =~ ^[1-9][0-9]*$ ]] || continue
+        echo "$name"
+    done < <(git -C "$REPO_ROOT" for-each-ref --sort=-version:refname --format='%(refname:short)' "refs/tags/${PROJECT}/v${VERSION}-rc.*")
+}
+
+# The newest earlier prerelease of this version with uploaded notes, if any.
+previous_prerelease() {
+    local name
+    while read -r name; do
+        [ "$name" != "$TAG" ] || continue
         if gh release view -R "$REPO" "$name" --json assets --jq '.assets[].name' 2>/dev/null | grep -qxF "$NOTES_ASSET"; then
             echo "$name"
             return 0
         fi
-    done < <(git -C "$REPO_ROOT" for-each-ref --sort=-version:refname --format='%(refname:short)' "refs/tags/${PROJECT}/v${VERSION}-rc.*")
+    done < <(prerelease_tags)
+}
+
+# Published OS image links, checksums, and signatures are reusable for the same commit.
+reusable_os_release() {
+    local name sha release
+    sha=$(tag_commit_sha)
+    while read -r name; do
+        [ "$name" != "$TAG" ] || continue
+        [ "$(git -C "$REPO_ROOT" rev-parse "${name}^{commit}")" = "$sha" ] || continue
+        release=$(gh release view -R "$REPO" "$name" --json tagName,isDraft,isPrerelease,assets,body) || continue
+        if jq -e --arg notes "$NOTES_ASSET" --arg heading "$IMAGE_DOWNLOADS_HEADING" '
+            .isDraft == false and .isPrerelease == true and
+            any(.assets[]; .name == $notes) and
+            any(.assets[]; .name == "CHANGELOG.md") and
+            any(.assets[]; .name == "signatures.tar.gz") and
+            (.body | contains("\n" + $heading + "\n"))
+        ' <<< "$release" >/dev/null; then
+            echo "$release"
+            return 0
+        fi
+    done < <(prerelease_tags)
 }
 
 # Build the English notes to start editing from: <bundle out> <english out> <ref>.
@@ -191,7 +220,11 @@ seed_notes() {
         return
     fi
     work=$(dirname "$bundle")
-    previous=$(previous_prerelease)
+    if [ -n "${REUSED_OS_RELEASE:-}" ]; then
+        previous=$(jq -r .tagName <<< "$REUSED_OS_RELEASE")
+    else
+        previous=$(previous_prerelease)
+    fi
     if [ -n "$previous" ]; then
         TAG="$previous" download_notes_bundle "$bundle"
         jq -j .en_US "$bundle" > "$work/base.md"
@@ -210,12 +243,10 @@ seed_notes() {
         ${since:+--since "$since"} "${base_args[@]}") > "$english"
 }
 
-# Open the English notes in the editor, translate them into every catalog
-# locale with the claude CLI, open the translations for review, and write the
-# prettier-formatted result into the bundle: <bundle> <english>. Translations
-# already in the bundle are kept while the English matches its en_US.
+# English is the editable source; generated translations bypass the editor.
+# Existing translations are kept while the English matches the bundle's en_US.
 edit_notes_bundle() (
-    local bundle=$1 dir locale file args=() filter="" translated=() pids=() pid
+    local bundle=$1 dir locale file args=() filter="" pids=() pid
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
     cp "$2" "$dir/en_US.md"
@@ -244,13 +275,8 @@ edit_notes_bundle() (
         echo "Translating into ${locale}..."
         translate_notes "$dir/en_US.md" "$dir/$locale.previous" "$locale" > "$dir/$locale.md" &
         pids+=("$!")
-        translated+=("$dir/$locale.md")
     done
     for pid in "${pids[@]}"; do wait "$pid"; done
-    if [ ${#translated[@]} -gt 0 ]; then
-        echo "Opening the generated translations for review..."
-        launch_editor "${translated[@]}"
-    fi
     for file in "$dir"/*.md; do
         locale=$(basename "$file" .md)
         if [ -s "$file" ] && [ "$(grep -o '<!--[^>]*-->' "$file")" != "$(grep -o '<!--[^>]*-->' "$dir/en_US.md")" ]; then
@@ -1165,9 +1191,7 @@ cmd_pre_check() {
         >&2 echo "  ✗ gh not authenticated (run: gh auth login)"
         errors=1
     fi
-    # os/cli/deb/wrt also sign their artifacts with the Start9 org key, and
-    # render checksum blocks into the release notes (see checksum_block).
-    if [ "$KIND" != npm ]; then
+    if [ "$KIND" != npm ] && [ -z "${REUSED_OS_RELEASE:-}" ]; then
         if gpg --list-secret-keys "$START9_GPG_KEY" >/dev/null 2>&1; then
             echo "  ✓ Start9 signing key ${START9_GPG_KEY} present"
         else
@@ -1188,9 +1212,7 @@ cmd_pre_check() {
         fi
     fi
 
-    # cli/deb publish debs to the apt repo and os pushes the compressed images
-    # (push-gz) — all three upload to S3, which needs s3cmd + credentials.
-    if [ "$KIND" = cli ] || [ "$KIND" = deb ] || [ "$KIND" = os ]; then
+    if { [ "$KIND" = cli ] || [ "$KIND" = deb ] || [ "$KIND" = os ]; } && [ -z "${REUSED_OS_RELEASE:-}" ]; then
         if command -v s3cmd >/dev/null 2>&1; then
             echo "  ✓ s3cmd available"
         else
@@ -1482,7 +1504,7 @@ cmd_create_gh_release() (
         fi
         sha=$(tag_commit_sha)
     fi
-    if [ "$KIND" != npm ]; then
+    if [ "$KIND" != npm ] && [ -z "${REUSED_OS_RELEASE:-}" ]; then
         enter_release_dir
         ensure_img_gz
     fi
@@ -1707,6 +1729,16 @@ cmd_register() {
 
 cmd_sign() {
     require_kind os cli deb wrt
+    if [ -n "${REUSED_OS_RELEASE:-}" ]; then
+        (
+            dir=$(mktemp -d)
+            trap 'rm -rf "$dir"' EXIT
+            gh release download -R "$REPO" "$(jq -r .tagName <<< "$REUSED_OS_RELEASE")" \
+                --pattern signatures.tar.gz --output "$dir/signatures.tar.gz"
+            gh release upload -R "$REPO" "$TAG" "$dir/signatures.tar.gz" --clobber
+        )
+        return
+    fi
     enter_release_dir
     ensure_img_gz
     resolve_gh_user
@@ -1822,11 +1854,18 @@ release_body() {
 }
 
 generated_sections() {
-
+    if [ -n "${REUSED_OS_RELEASE:-}" ]; then
+        jq -j .body <<< "$REUSED_OS_RELEASE" | awk -v heading="$IMAGE_DOWNLOADS_HEADING" '
+            $0 == heading {section=""; assets=1}
+            assets {section=section $0 ORS}
+            END {printf "%s", section}
+        '
+        return
+    fi
     local platform
     case "$KIND" in
         os)
-            echo "## Image Downloads"
+            echo "$IMAGE_DOWNLOADS_HEADING"
             echo
             echo "| Hardware | Image | Download |"
             echo "| --- | --- | --- |"
@@ -1871,7 +1910,7 @@ generated_sections() {
             checksum_block "${PROJECT} packages" "${debs[@]}"
             ;;
         wrt)
-            echo "## Image Downloads"
+            echo "$IMAGE_DOWNLOADS_HEADING"
             echo
             echo "| Hardware | Image | Download |"
             echo "| --- | --- | --- |"
@@ -1935,12 +1974,10 @@ cmd_body() {
 
 select_prerelease_tag() {
     local name number highest=0
-    git -C "$REPO_ROOT" fetch --tags origin
     while read -r name; do
         number="${name#"${PROJECT}/v${VERSION}-rc."}"
-        [[ "$number" =~ ^[1-9][0-9]*$ ]] || continue
         if [ "$number" -gt "$highest" ]; then highest=$number; fi
-    done < <(git -C "$REPO_ROOT" for-each-ref --sort=-version:refname --format='%(refname:short)' "refs/tags/${PROJECT}/v${VERSION}-rc.*")
+    done < <(prerelease_tags)
     TAG="${PROJECT}/v${VERSION}-rc.$((highest + 1))"
 }
 
@@ -1957,9 +1994,20 @@ cmd_pre_release() {
 }
 
 cmd_release() {
-    if [ "$KIND" = os ]; then resolve_os_commit; fi
-    local step draft_sha
+    local REUSED_OS_RELEASE="" step draft_sha
+    if [ "$KIND" = os ]; then
+        resolve_os_commit
+        if [ -z "${FORCE:-}" ]; then REUSED_OS_RELEASE=$(reusable_os_release); fi
+    fi
     for step in $(release_steps); do
+        if [ -n "$REUSED_OS_RELEASE" ]; then
+            case "$step" in
+                pull | push-gz)
+                    echo "Skipping ${step}: reusing assets from $(jq -r .tagName <<< "$REUSED_OS_RELEASE")."
+                    continue
+                    ;;
+            esac
+        fi
         if [ -n "${DONE[$step]:-}" ] && [ -z "${FORCE:-}" ]; then
             # Untagged drafts pin the build when reusing release metadata.
             if [ "$step" = create-gh-release ] && [ -z "${DONE[tag]:-}" ]; then
@@ -2004,7 +2052,9 @@ Subcommands:
   pre-release        start-os only: promote alpha -> beta and publish a GitHub
                      prerelease tagged start-os/v<VERSION>-rc.N. N increments
                      on every invocation; the beta listing is replaced.
-                     The image's internal version stays unchanged.
+                     The image's internal version stays unchanged. Same-commit
+                     prereleases reuse their published image metadata and
+                     signatures, as described under release.
   pre-check          Verify changelog fragments and their version severity,
                      and report which release steps are already published
                      (tag, GitHub release, uploads, registry, signatures).
@@ -2034,7 +2084,7 @@ Subcommands:
                      checked; tab rewords one; security fragments are always
                      included), edit the compiled notes in $VISUAL/$EDITOR
                      (default: sensible-editor), translate them into every
-                     locale with the claude CLI and review those, then draft (or
+                     locale with the claude CLI, then draft (or
                      update) the GitHub release at the commit being tagged with
                      the notes, an expandable changelog, the full-history
                      attachment, and the prettier-formatted notes for every
@@ -2083,7 +2133,10 @@ Subcommands:
                      changelog, downloads and checksums. (all projects.)
   release            Run the full applicable pipeline for the project, skipping
                      the steps pre-check finds already published — re-running
-                     after a failure resumes at the step that failed.
+                     after a failure resumes at the step that failed. StartOS
+                     reuses a published same-commit prerelease's image links,
+                     checksums and signatures, without downloading or signing
+                     the images again. Notes still receive a final edit.
 
 Environment variables:
   VERSION                  Override the version (default: read from the manifest)

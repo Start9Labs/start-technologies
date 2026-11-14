@@ -107,6 +107,7 @@ pub(crate) async fn enroll(
                     )]
                     .into(),
                 ),
+                ..Default::default()
             },
         )
         .await

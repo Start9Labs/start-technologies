@@ -8367,7 +8367,7 @@ dependencies = [
 
 [[package]]
 name = "start-core"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "aes 0.9.3",
  "astral-tokio-tar",
@@ -8497,6 +8497,7 @@ dependencies = [
  "textwrap",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-native-tls",
  "tokio-rustls",
  "tokio-stream",
  "tokio-tungstenite 0.26.2",
@@ -8525,7 +8526,7 @@ dependencies = [
 
 [[package]]
 name = "start-os"
-version = "0.4.2-rev.2"
+version = "0.4.3"
 dependencies = [
  "include_dir",
  "start-core",

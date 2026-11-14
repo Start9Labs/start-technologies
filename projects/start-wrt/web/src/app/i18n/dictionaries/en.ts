@@ -24,9 +24,7 @@ export const ENGLISH: Record<string, number> = {
   'Theme': 16,
   'Timezone': 17,
   'Remote Access': 18,
-  'never': 19,
   'always': 20,
-  'When behind NAT (Default)': 21,
   'Security': 22,
   'Download your Root CA to trust HTTPS connections from additional devices.': 23,
   'Download Root CA': 24,
@@ -599,4 +597,6 @@ export const ENGLISH: Record<string, number> = {
   'Your traffic': 640,
   "To delete this VPN, first change {vpns} to connect via something else.": 641,
   "To disable this VPN, first change {vpns} to connect via something else.": 642,
+  'Never (Default)': 643,
+  'When behind NAT': 644,
 }

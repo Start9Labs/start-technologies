@@ -70,6 +70,7 @@ pub mod mcp;
 pub mod middleware;
 pub mod net;
 pub mod notifications;
+pub mod nut;
 pub mod os_install;
 pub mod prelude;
 pub mod progress;
@@ -79,6 +80,7 @@ pub mod rpc_continuations;
 pub mod s9pk;
 pub mod service;
 pub mod setup;
+pub mod shared_volumes;
 pub mod shutdown;
 pub mod sign;
 pub mod sound;
@@ -243,6 +245,12 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
                     auth::token::<C, RpcContext>().with_about("about.commands-auth-tokens"),
                 )
                 .with_about("about.commands-authentication"),
+        )
+        .subcommand(
+            "volumes",
+            shared_volumes::handler::<C>()
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_cli(),
         )
         .subcommand("db", db::db::<C>().with_about("about.commands-db"))
         .subcommand("ssh", ssh::ssh::<C>().with_about("about.commands-ssh-keys"))
@@ -509,6 +517,11 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_about("about.clear-smtp")
                 .with_call_remote::<CliContext>(),
         )
+        .subcommand("set-nut", from_fn_async(nut::set_nut).no_cli())
+        .subcommand("clear-nut", from_fn_async(nut::clear_nut).no_cli())
+        .subcommand("nut-status", from_fn_async(nut::get_nut_status).no_cli())
+        .subcommand("nut-scan", from_fn_async(nut::scan_nut).no_cli())
+        .subcommand("nut-list-ups", from_fn_async(nut::list_nut_ups).no_cli())
         .subcommand(
             "host",
             net::host::server_host_api::<C>().with_about("about.commands-host-system-ui"),

@@ -57,7 +57,18 @@ async fn server(
                 },
             )),
         )
-        .route("/catalog/rpc/v2", get(move || async move { status }));
+        .route(
+            "/catalog/rpc/v2",
+            get(move || async move {
+                (
+                    status,
+                    axum::Json(serde_json::json!({
+                        "jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error",
+                            "data": "EOF while parsing a value at line 1 column 0"}, "id": null
+                    })),
+                )
+            }),
+        );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!(
         "http://registry.test:{}/catalog",
@@ -77,7 +88,7 @@ fn fallback_only_recognizes_missing_upgrade_support() {
         let error = Error::new(WebSocketError::Http(response), ErrorKind::Network);
         assert_eq!(
             connection::websocket_unsupported(&error),
-            matches!(status, 404 | 405 | 501)
+            matches!(status, 200 | 404 | 405 | 501)
         );
     }
     for kind in [
@@ -93,7 +104,7 @@ fn fallback_only_recognizes_missing_upgrade_support() {
 #[tokio::test]
 async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selection() {
     let temp = tempfile::tempdir().unwrap();
-    let (ctx, registry, requests, _server) = server(&temp, StatusCode::NOT_FOUND).await;
+    let (ctx, registry, requests, _server) = server(&temp, StatusCode::OK).await;
     let (client, _proxy) = socks_client(&registry).await;
     let info = call(
         &client,

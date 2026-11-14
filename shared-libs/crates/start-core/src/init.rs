@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
+use patch_db::ModelExt;
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
@@ -222,7 +223,7 @@ pub async fn init(
 
     load_ssh_keys.start();
     crate::developer::write_signing_key(
-        &peek.as_private().as_developer_key().de()?.0,
+        &peek.as_private().as_server_identity_key().de()?.0,
         OS_ID_KEY_PATH,
     )
     .await?;
@@ -437,6 +438,10 @@ pub async fn init(
 
     update_server_info.start();
     sync_kiosk(server_info.as_kiosk().de()?.unwrap_or(false)).await?;
+    if let Err(e) = crate::nut::sync_nut(server_info.as_nut().de().unwrap_or_default()).await {
+        tracing::warn!("could not synchronize NUT configuration: {e}");
+        tracing::debug!("{e:?}");
+    }
     let ram = get_mem_info().await?.total.0 as u64 * 1024 * 1024;
     let devices = lshw().await?;
     let status_info = ServerStatus {
@@ -469,8 +474,13 @@ pub async fn init(
 
     validate_db.start();
     db.mutate(|d| {
-        let model = d.de()?;
-        d.ser(&model)
+        let mut model = d.de()?;
+        crate::shared_volumes::recover_pending_deletions(
+            &mut model.public.shared_volumes,
+            d.as_private().as_value(),
+        )?;
+        d.ser(&model)?;
+        crate::backup::target::catalog::initialize(d)
     })
     .await
     .result?;

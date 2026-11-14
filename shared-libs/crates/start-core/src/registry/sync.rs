@@ -1,6 +1,7 @@
 //! Registries expose connecting/connected/error independently of cached catalog contents.
 //! Connecting retains cached data; an empty connecting catalog is loading, not empty.
 //! Connected includes successful polling without a persistent socket.
+//! Retries clear failure details while retaining the last synchronized catalog.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -48,6 +49,9 @@ pub struct RegistryCache {
     pub packages: GetPackagesResponse,
     #[serde(default)]
     pub status: RegistryStatus,
+    /// Failure of the latest synchronization attempt; absent while connecting or connected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 rpc_toolkit::reflect_ts!(RegistryCache);
@@ -61,6 +65,9 @@ pub struct OsUpdateCache {
     pub versions: BTreeMap<exver::Version, OsVersionInfo>,
     #[serde(default)]
     pub status: RegistryStatus,
+    /// Failure of the latest synchronization attempt; absent while connecting or connected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 rpc_toolkit::reflect_ts!(OsUpdateCache);
@@ -211,7 +218,7 @@ pub async fn watch_registries(
                             .filter(|subscriptions| !tasks.contains_key(*subscriptions))
                         {
                             for subscription in subscriptions {
-                                set_status(db, subscription, RegistryStatus::Connecting)?;
+                                set_status(db, subscription, RegistryStatus::Connecting, None)?;
                             }
                         }
                         Ok::<_, Error>(())
@@ -296,7 +303,7 @@ async fn watch_registry(
         let _ = db
             .mutate(|db| {
                 for subscription in &subscriptions {
-                    set_status(db, subscription, RegistryStatus::Connecting)?;
+                    set_status(db, subscription, RegistryStatus::Connecting, None)?;
                 }
                 Ok::<_, Error>(())
             })
@@ -328,10 +335,15 @@ async fn watch_registry(
             tracing::debug!(?error, ?subscriptions, "Registry synchronization failed");
         }
         if !polling || result.is_err() {
+            let error = result
+                .as_ref()
+                .err()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| t!("registry.sync.closed").into_owned());
             let _ = db
                 .mutate(|db| {
                     for subscription in &subscriptions {
-                        set_status(db, subscription, RegistryStatus::Error)?;
+                        set_status(db, subscription, RegistryStatus::Error, Some(&error))?;
                     }
                     Ok::<_, Error>(())
                 })
@@ -356,6 +368,7 @@ fn set_status(
     db: &mut DatabaseModel,
     subscription: &Subscription,
     status: RegistryStatus,
+    error: Option<&str>,
 ) -> Result<(), Error> {
     if !subscription.selected(&db.as_public().as_server_info().de()?) {
         return Ok(());
@@ -365,14 +378,14 @@ fn set_status(
             db.as_public_mut()
                 .as_registry_cache_mut()
                 .mutate(|caches| {
-                    caches
-                        .entry(url.clone())
-                        .or_insert_with(|| RegistryCache {
-                            info: RegistryInfo::default(),
-                            packages: BTreeMap::new(),
-                            status,
-                        })
-                        .status = status;
+                    let cache = caches.entry(url.clone()).or_insert_with(|| RegistryCache {
+                        info: RegistryInfo::default(),
+                        packages: BTreeMap::new(),
+                        status,
+                        error: None,
+                    });
+                    cache.status = status;
+                    cache.error = error.map(str::to_owned);
                     Ok(())
                 })?;
         }
@@ -385,9 +398,11 @@ fn set_status(
                             registry: url.clone(),
                             versions: BTreeMap::new(),
                             status,
+                            error: error.map(str::to_owned),
                         });
                     } else if let Some(cache) = cache {
                         cache.status = status;
+                        cache.error = error.map(str::to_owned);
                     }
                     Ok(())
                 })?;
@@ -446,6 +461,7 @@ fn publish_snapshot(
                     info,
                     packages,
                     status: RegistryStatus::Connected,
+                    error: None,
                 },
             )?;
         }
@@ -471,6 +487,7 @@ fn publish_snapshot(
                     registry: url.clone(),
                     versions,
                     status: RegistryStatus::Connected,
+                    error: None,
                 }))?;
         }
     }

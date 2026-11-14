@@ -7,9 +7,10 @@ export function registryStatus(
   return cache?.status ?? 'connecting'
 }
 
+/** An unavailable catalog must not appear to be a successful empty listing. */
 export function isRegistryLoading(
   status: T.RegistryStatus | undefined,
   packageCount: number,
 ): boolean {
-  return status === 'connecting' && packageCount === 0
+  return (status === 'connecting' || status === 'error') && packageCount === 0
 }

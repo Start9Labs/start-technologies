@@ -8,6 +8,7 @@ lazy_static::lazy_static! {
     static ref V0_4_2_2: exver::Version = exver::Version::new([0, 4, 2, 2], []);
 }
 
+/// Recognizes databases written by unreleased 0.4.2.2 builds.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;
 

@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict')
+const { webcrypto } = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const test = require('node:test')
@@ -50,6 +51,8 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       'StaleUiService',
       'PATCH_CACHE',
       'RELATIVE_URL',
+      'WA_CRYPTO',
+      'WA_SESSION_STORAGE',
     ].map(name => [name, Symbol(name)]),
   )
   tokens.HttpClient = HttpClient
@@ -126,6 +129,11 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       if (moduleOverrides.has(request)) return moduleOverrides.get(request)
       if (request === '@angular/core') return angular
       if (request === '@angular/common/http') return httpAngular
+      if (request === '@ng-web-apis/common')
+        return {
+          WA_CRYPTO: tokens.WA_CRYPTO,
+          WA_SESSION_STORAGE: tokens.WA_SESSION_STORAGE,
+        }
       if (request === '@start9labs/shared') return shared()
       if (request === '@start9labs/marketplace')
         return load('shared-libs/ts-modules/marketplace/src/types.ts')
@@ -133,10 +141,10 @@ function harness(moduleOverrides = new Map(), globals = {}) {
         return { ConfigService: tokens.ConfigService }
       if (request.endsWith('auth.service'))
         return { AuthService: tokens.AuthService }
-      if (request.endsWith('http.service'))
-        return { HttpService: tokens.HttpService }
       if (request.endsWith('config.service'))
         return { ConfigService: tokens.ConfigService }
+      if (request.endsWith('http.service'))
+        return { HttpService: tokens.HttpService }
       if (request.endsWith('stale-ui.service'))
         return { StaleUiService: tokens.StaleUiService }
       if (request.endsWith('patch-db-source'))
@@ -181,7 +189,9 @@ function harness(moduleOverrides = new Map(), globals = {}) {
     location: { origin: 'https://router.test' },
     defaultView: { location: { host: 'server.test', protocol: 'https:' } },
   })
+  dependencies.set(tokens.ConfigService, { gitHash: 'configured-mock-build' })
   dependencies.set(tokens.RELATIVE_URL, '/rpc/v1')
+  dependencies.set(tokens.WA_CRYPTO, webcrypto)
   return { dependencies, tokens, load }
 }
 
@@ -1283,8 +1293,7 @@ test('Brochure serves each registry root through its own client', async () => {
   assert.equal(calls[1].url, 'https://registry.test/base/rpc/v0')
 })
 
-test('StartOS mock registry calls reach list and single-package fixtures', async () => {
-  const storage = Symbol('session storage')
+test('StartOS mock routes preserve registry fixtures, configured build identity, and UPS discovery', async () => {
   const pkg = { categories: [], best: {}, otherVersions: {} }
   const version = { ...pkg, best: { '1.0.0': {} } }
   const fixtures = {
@@ -1293,19 +1302,32 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
   }
   const { dependencies, tokens, load } = harness(
     new Map([
-      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: fixtures }],
       ['./mock-patch', mockPatchFixture({})],
       ['./md-sample.md', ''],
     ]),
   )
-  dependencies.set(storage, null)
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: {} }))
   const client = new (load(
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()
+  assert.equal(
+    await client.rpc['git-info']({}),
+    dependencies.get(tokens.ConfigService).gitHash,
+  )
+  assert.equal(
+    (await client.rpc.server['nut-scan']({}))[0].driver,
+    'usbhid-ups',
+  )
+  assert.equal(
+    (
+      await client.rpc.server['nut-list-ups']({ host: 'ups.test', port: 3493 })
+    )[0].name,
+    'ups',
+  )
   const params = {
     registry: 'https://registry.test/',
     id: null,
@@ -1331,8 +1353,39 @@ test('StartOS mock registry calls reach list and single-package fixtures', async
   )
 })
 
+test('StartOS generated UPS contracts preserve the selected USB location', () => {
+  const { load } = harness()
+  const device = {
+    driver: 'usbhid-ups',
+    port: 'auto',
+    vendorId: '051D',
+    productId: '0002',
+    serial: null,
+    bus: '001',
+    busPort: '003',
+    vendor: null,
+    product: null,
+  }
+  for (const file of ['types.schemas.ts', 'rpc/start-os.schemas.ts']) {
+    const { NutDevice, NutSettings } = load(
+      `shared-libs/ts-modules/start-core/lib/osBindings/${file}`,
+    )
+    const parsed = NutDevice.parse(device)
+    assert.equal(parsed.bus, '001')
+    assert.equal(parsed.busPort, '003')
+    const settings = NutSettings.encode({
+      mode: 'server',
+      device: parsed,
+      listenAll: false,
+      remoteUsername: null,
+      remotePassword: null,
+    })
+    assert.equal(settings.device.bus, '001')
+    assert.equal(settings.device.busPort, '003')
+  }
+})
+
 test('StartOS trust mock rejects whole batches and imports the requested trust atomically', async () => {
-  const storage = Symbol('session storage')
   const ids = [
     'MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=',
     'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
@@ -1365,14 +1418,13 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
   }
   const { dependencies, tokens, load } = harness(
     new Map([
-      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: {} }],
       ['./mock-patch', mockPatchFixture(data)],
       ['./md-sample.md', ''],
     ]),
   )
-  dependencies.set(storage, null)
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
   const client = new (load(
@@ -1415,10 +1467,8 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
 })
 
 test('StartOS DNS mock updates the selected gateway using live gateway state', async () => {
-  const storage = Symbol('session storage')
   const { dependencies, tokens, load } = harness(
     new Map([
-      ['@ng-web-apis/common', { WA_SESSION_STORAGE: storage }],
       ['src/app/utils/acme', {}],
       ['./api.fixures', { Mock: {} }],
       [
@@ -1440,7 +1490,7 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
   const cache = new BehaviorSubject({
     value: { serverInfo: { network: { gateways: { wg0: gateway } } } },
   })
-  dependencies.set(storage, null)
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, cache)
   const client = new (load(

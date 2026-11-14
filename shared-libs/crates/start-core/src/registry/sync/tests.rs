@@ -13,7 +13,9 @@ use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::Guid;
 use crate::util::future::NonDetachingJoinHandle;
 
+mod error_details;
 mod live;
+mod live_legacy;
 mod polling;
 
 fn url() -> Url {
@@ -403,7 +405,13 @@ fn cached_package_queries_keep_target_and_source_selection_while_offline() {
         &device(),
     )
     .unwrap();
-    set_status(&mut db, &Subscription::Index(url()), RegistryStatus::Error).unwrap();
+    set_status(
+        &mut db,
+        &Subscription::Index(url()),
+        RegistryStatus::Error,
+        None,
+    )
+    .unwrap();
     let result = cached_response(
         &db,
         &url(),
@@ -447,8 +455,20 @@ fn cached_package_queries_keep_target_and_source_selection_while_offline() {
 #[test]
 fn first_connection_failure_publishes_availability_and_does_not_fetch_on_cache_queries() {
     let mut db = database();
-    set_status(&mut db, &Subscription::Index(url()), RegistryStatus::Error).unwrap();
-    set_status(&mut db, &Subscription::Os(url()), RegistryStatus::Error).unwrap();
+    set_status(
+        &mut db,
+        &Subscription::Index(url()),
+        RegistryStatus::Error,
+        None,
+    )
+    .unwrap();
+    set_status(
+        &mut db,
+        &Subscription::Os(url()),
+        RegistryStatus::Error,
+        None,
+    )
+    .unwrap();
     assert_eq!(
         db.as_public()
             .as_registry_cache()
@@ -508,7 +528,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
         RegistryStatus::Error,
         RegistryStatus::Connecting,
     ] {
-        set_status(&mut db, &subscription, status).unwrap();
+        set_status(&mut db, &subscription, status, None).unwrap();
         let cache = db
             .as_public()
             .as_registry_cache()
@@ -552,7 +572,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
         .packages;
     assert!(!packages.is_empty());
     for status in [RegistryStatus::Error, RegistryStatus::Connecting] {
-        set_status(&mut db, &subscription, status).unwrap();
+        set_status(&mut db, &subscription, status, None).unwrap();
         let cache = db
             .as_public()
             .as_registry_cache()
@@ -577,7 +597,7 @@ fn os_catalog_status_distinguishes_initial_attempt_failure_and_success() {
         RegistryStatus::Error,
         RegistryStatus::Connecting,
     ] {
-        set_status(&mut db, &subscription, status).unwrap();
+        set_status(&mut db, &subscription, status, None).unwrap();
         let cache = db.as_public().as_os_update_cache().de().unwrap().unwrap();
         assert_eq!(cache.status, status);
         assert!(cache.versions.is_empty());

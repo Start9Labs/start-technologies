@@ -50,6 +50,8 @@ pub(crate) mod tests;
 #[model = "Model<Self>"]
 pub struct RegistryDatabase {
     #[serde(default)]
+    pub server_identity_key: crate::sign::instance::StoredIdentityKey,
+    #[serde(default)]
     pub migrations: BTreeSet<InternedString>,
     pub admins: BTreeSet<Guid>,
     pub index: FullIndex,

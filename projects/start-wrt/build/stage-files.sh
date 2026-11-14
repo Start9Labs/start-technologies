@@ -211,7 +211,6 @@ cat > "${FILES_DIR}/lib/upgrade/keep.d/startwrt" << 'KEEPEOF'
 /etc/startwrt/pending-update
 /etc/startwrt/migrations
 /etc/startwrt/auth.db
-/etc/startwrt/rpc-identity.pem
 # Persistent device-identity cache (hostnames + DHCP fingerprints). Written
 # atomically (temp + rename), so a live `sysupgrade --create-backup` always
 # captures one complete JSON document.

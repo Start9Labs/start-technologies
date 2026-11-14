@@ -132,17 +132,14 @@ async fn inner_main() -> Result<(), Error> {
     let setup_mode = setup::is_setup_mode().await;
 
     let continuations = Arc::new(RpcContinuations::new());
+    let auth = Arc::new(crate::auth::AuthState::open().await?);
+    let server_identity = auth.server_identity().await?;
     let ctx = ServerContext {
         setup_flash: Arc::new(tokio::sync::Mutex::new(())),
         secure_session: None,
         continuations: continuations.clone(),
-        auth: Arc::new(crate::auth::AuthState::open().await?),
-        server_identity: startos::sign::instance::load(
-            std::path::Path::new(crate::auth::AUTH_DB_PATH)
-                .parent()
-                .unwrap(),
-        )
-        .await?,
+        auth,
+        server_identity,
     };
 
     if setup_mode {

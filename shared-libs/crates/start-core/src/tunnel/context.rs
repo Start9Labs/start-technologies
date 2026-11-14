@@ -268,13 +268,13 @@ impl TunnelContext {
             .unwrap_or_else(|| Path::new("/var/lib/start-tunnel"))
             .to_owned();
         restrict_datadir(&datadir).await?;
-        let server_identity = crate::sign::instance::load(&datadir).await?;
         let db_path = datadir.join("tunnel.db");
         let db = TypedPatchDb::<TunnelDatabase>::load_unchecked(PatchDb::open(&db_path).await?);
         if db.dump(&ROOT).await.value.is_null() {
             db.put(&ROOT, &TunnelDatabase::init()).await?;
         }
         db.mutate(|db| run_migrations(db)).await.result?;
+        let server_identity = crate::sign::instance::load(&db).await?;
         let listen = config.tunnel_listen.unwrap_or(TUNNEL_DEFAULT_LISTEN);
         let ip_info = crate::net::utils::load_ip_info().await?;
         let net_iface = db

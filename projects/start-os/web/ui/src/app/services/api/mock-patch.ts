@@ -14,6 +14,7 @@ function mockService(
   title: string,
   pkgVersion: string,
   statusInfo: T.StatusInfo,
+  sharedVolumes = false,
 ): PackageDataEntry<InstalledState> {
   return {
     stateInfo: {
@@ -23,6 +24,7 @@ function mockService(
         id,
         title,
         version: pkgVersion,
+        sharedVolumes,
       },
     },
     s9pk: `/media/startos/data/package-data/archive/installed/${id}.s9pk`,
@@ -72,10 +74,19 @@ function mockStart9Key(
   }
 }
 
+/** The community registry mocks an unreachable registry. */
 export function mockRegistryCache(
+  url: string,
   info: T.RegistryInfo,
 ): DataModel['registryCache'][string] {
-  return { info, packages: Mock.RegistryPackages, status: 'connected' }
+  return sameUrl(url, defaultRegistries.community)
+    ? {
+        info,
+        packages: {},
+        status: 'error',
+        error: `error sending request for url (${registryUrl(url)}): connection timed out`,
+      }
+    : { info, packages: Mock.RegistryPackages, status: 'connected' }
 }
 
 export function mockOsUpdateCache(
@@ -92,13 +103,206 @@ export function mockOsUpdateCache(
 
 export const mockPatchData: DataModel = {
   registryCache: {
-    'https://registry.start9.com/': mockRegistryCache(Mock.RegistryInfo),
-    'https://community-registry.start9.com/': mockRegistryCache({
-      ...Mock.RegistryInfo,
-      name: 'Community Registry',
-    }),
+    [defaultRegistries.start9]: mockRegistryCache(
+      defaultRegistries.start9,
+      Mock.RegistryInfo,
+    ),
+    [defaultRegistries.community]: mockRegistryCache(
+      defaultRegistries.community,
+      { ...Mock.RegistryInfo, name: 'Community Registry' },
+    ),
   },
   osUpdateCache: mockOsUpdateCache(defaultRegistries.start9),
+  disks: structuredClone(Mock.Disks),
+  sharedVolumes: {
+    MOCKLOCALVOLUME234567ABCDEFGHIJK: {
+      name: 'Shared files',
+      source: { kind: 'local' },
+      grants: {
+        'btc-rpc-proxy': { readonly: false },
+        nextcloud: { readonly: false },
+      },
+      availability: 'available',
+      available: 812400000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+    },
+    MOCKDISKVOLUME234567ABCDEFGHIJKL: {
+      name: 'Photos library',
+      source: Mock.diskSource('/dev/sdc1', 'media/photos'),
+      grants: {
+        nextcloud: { readonly: true },
+        jellyfin: { readonly: true },
+      },
+      availability: 'available',
+      available: 900000000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+    },
+    MOCKMISSINGDRIVE234567ABCDEFGHIJ: {
+      name: 'Movies',
+      source: {
+        ...Mock.diskSource('/dev/sdz1', 'movies'),
+        drive: {
+          vendor: 'WD',
+          model: 'Elements 25A3',
+          label: 'Elements',
+          capacity: 4000000000000,
+        },
+      },
+      grants: { jellyfin: { readonly: true } },
+      availability: 'unavailable',
+      available: null,
+      error:
+        'The volume source is unavailable. Check the source, network and credentials.: mount: special device ' +
+        Mock.driveLink('/dev/sdz1') +
+        ' does not exist',
+      checkedAt: new Date(Date.now() - 3600000).toISOString(),
+    },
+    MOCKCIFSDOCUMENTS234567ABCDEFGHI: {
+      name: 'nas.local',
+      source: {
+        kind: 'cifs',
+        hostname: 'nas.local',
+        path: '/documents',
+        username: 'family',
+      },
+      grants: { nextcloud: { readonly: false } },
+      availability: 'available',
+      available: 3215000000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+    },
+    MOCKCIFSVOLUME234567ABCDEFGHIJKL: {
+      name: 'nas.invalid',
+      source: {
+        kind: 'cifs',
+        hostname: 'nas.invalid',
+        path: '/music',
+        username: 'media',
+      },
+      grants: { jellyfin: { readonly: true } },
+      availability: 'unavailable',
+      available: null,
+      error:
+        'The volume source is unavailable. Check the source, network and credentials.: mount error(113): could not connect to nas.invalid',
+      checkedAt: new Date().toISOString(),
+    },
+  },
+  backupTargets: {
+    MOCKBACKUPLOCAL234567ABCDEFGHIJK: {
+      name: 'Quick restore',
+      source: { kind: 'local' },
+      availability: 'available',
+      available: 812400000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+      startOs: {
+        [Mock.ServerId]: {
+          hostname: 'server-name',
+          timestamp: new Date(Date.now() - 86400000 * 2).toISOString(),
+          version: '0.4.0',
+          formatStatus: 'current',
+        },
+      },
+      legacyBackup: false,
+    },
+    MOCKBACKUPDRIVE234567ABCDEFGHIJK: {
+      name: 'Samsung T7',
+      source: Mock.diskSource('/dev/sdc1'),
+      availability: 'available',
+      available: 900000000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+      startOs: {
+        [Mock.ServerId]: {
+          hostname: 'server-name',
+          timestamp: new Date().toISOString(),
+          version: '0.4.0',
+          formatStatus: 'legacy',
+        },
+      },
+      legacyBackup: false,
+    },
+    MOCKBACKUPLEGACY234567ABCDEFGHIJ: {
+      name: 'SSK drive',
+      source: Mock.diskSource('/dev/sdd1', 'backups'),
+      availability: 'available',
+      available: 1000000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+      startOs: {
+        [Mock.ServerId]: {
+          hostname: 'server-name',
+          timestamp: new Date().toISOString(),
+          version: '0.4.0',
+          formatStatus: 'interrupted',
+        },
+      },
+      legacyBackup: true,
+    },
+    MOCKBACKUPPASSPORT234567ABCDEFGH: {
+      name: 'WD Passport',
+      source: Mock.diskSource('/dev/sde1', 'StartOS'),
+      availability: 'available',
+      available: 61200000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+      startOs: {
+        [Mock.ServerId]: {
+          hostname: 'server-name',
+          timestamp: new Date(Date.now() - 86400000).toISOString(),
+          version: '0.4.0',
+          formatStatus: 'current',
+        },
+      },
+      legacyBackup: true,
+    },
+    MOCKBACKUPNAS234567ABCDEFGHIJKLM: {
+      name: 'office-nas.local',
+      source: {
+        kind: 'cifs',
+        hostname: 'office-nas.local',
+        path: '/startos-backups',
+        username: 'TestUser',
+      },
+      availability: 'available',
+      available: 50000000000,
+      error: null,
+      checkedAt: new Date().toISOString(),
+      startOs: {
+        [Mock.ServerId]: {
+          hostname: 'server-name',
+          timestamp: new Date(Date.now() - 86400000 * 3).toISOString(),
+          version: '0.4.0',
+          formatStatus: 'current',
+        },
+        'archive-server': {
+          hostname: 'archive-server',
+          timestamp: new Date(Date.now() - 86400000 * 90).toISOString(),
+          version: '0.4.0',
+          formatStatus: 'legacy',
+        },
+      },
+      legacyBackup: false,
+    },
+    MOCKBACKUPDESKTOP234567ABCDEFGHI: {
+      name: 'desktop.invalid',
+      source: {
+        kind: 'cifs',
+        hostname: 'desktop.invalid',
+        path: '/Desktop/startos-backups',
+        username: 'TestUser',
+      },
+      availability: 'unavailable',
+      available: null,
+      error:
+        'The volume source is unavailable. Check the source, network and credentials.: mount error(113): could not connect to desktop.invalid',
+      checkedAt: new Date(Date.now() - 3600000).toISOString(),
+      startOs: {},
+      legacyBackup: false,
+    },
+  },
   ui: {
     snakeHighScore: 0,
     hiddenUpdates: {},
@@ -481,6 +685,7 @@ export const mockPatchData: DataModel = {
     caFingerprint: '63:2B:11:99:44:40:17:DF:37:FC:C3:DF:0F:3D:15',
     ntpSynced: false,
     smtp: null,
+    nut: { enabled: false, settings: null },
     echoipUrls: ['https://ipconfig.me', 'https://ifconfig.co'],
     zram: false,
     governor: 'performance',
@@ -499,6 +704,7 @@ export const mockPatchData: DataModel = {
     // keyboard: null,
   },
   packageData: {
+    'btc-rpc-proxy': structuredClone(Mock.LocalPkgs['btc-rpc-proxy']!),
     lnd: {
       stateInfo: {
         state: 'installed',
@@ -507,7 +713,7 @@ export const mockPatchData: DataModel = {
           version: '0.11.0:0.0.1',
         },
       },
-      s9pk: '/media/startos/data/package-data/archive/installed/asdfasdf.s9pk',
+      s9pk: '/media/startos/data/package-data/archive/installed/lnd.s9pk',
       lastBackup: null,
       statusInfo: {
         desired: { main: 'stopped' },
@@ -639,7 +845,7 @@ export const mockPatchData: DataModel = {
           version: '0.20.0:0-alpha.1',
         },
       },
-      s9pk: '/media/startos/data/package-data/archive/installed/asdfasdf.s9pk',
+      s9pk: '/media/startos/data/package-data/archive/installed/bitcoind.s9pk',
       lastBackup: new Date(new Date().valueOf() - 604800001).toISOString(),
       statusInfo: {
         desired: { main: 'stopped' },
@@ -1266,14 +1472,20 @@ export const mockPatchData: DataModel = {
       plugin: { url: { tableAction: 'create-onion-service' } },
       tasks: {},
     },
-    nextcloud: mockService('nextcloud', 'Nextcloud', '30.0.2:0', {
-      desired: { main: 'running' },
-      error: null,
-      health: {
-        web: { name: 'Web Interface', result: 'success', message: null },
+    nextcloud: mockService(
+      'nextcloud',
+      'Nextcloud',
+      '30.0.2:0',
+      {
+        desired: { main: 'running' },
+        error: null,
+        health: {
+          web: { name: 'Web Interface', result: 'success', message: null },
+        },
+        started: new Date(Date.now() - 86400000).toISOString(),
       },
-      started: new Date(Date.now() - 86400000).toISOString(),
-    }),
+      true,
+    ),
     vaultwarden: mockService('vaultwarden', 'Vaultwarden', '1.32.7:0', {
       desired: { main: 'running' },
       error: null,
@@ -1287,12 +1499,18 @@ export const mockPatchData: DataModel = {
       },
       started: new Date(Date.now() - 30000).toISOString(),
     }),
-    jellyfin: mockService('jellyfin', 'Jellyfin', '10.10.3:0', {
-      desired: { main: 'stopped' },
-      error: null,
-      health: {},
-      started: null,
-    }),
+    jellyfin: mockService(
+      'jellyfin',
+      'Jellyfin',
+      '10.10.3:0',
+      {
+        desired: { main: 'stopped' },
+        error: null,
+        health: {},
+        started: null,
+      },
+      true,
+    ),
     electrs: mockService('electrs', 'Electrs', '0.10.5:0', {
       desired: { main: 'running' },
       error: null,
@@ -1319,6 +1537,7 @@ export const mockPatchData: DataModel = {
         health: {},
         started: null,
       },
+      true,
     ),
   },
 }
