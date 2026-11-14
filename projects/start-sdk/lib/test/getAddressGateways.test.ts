@@ -23,13 +23,14 @@ const domain = pub('turn.example.com', {
 const addresses = (
   available: T.HostnameInfo[],
   enabled: string[],
-): T.DerivedAddressInfo => ({
-  enabled,
-  disabled: [],
-  guaWan: [],
-  lanEnabled: [],
-  available,
-})
+): T.DerivedAddressInfo =>
+  ({
+    enabled,
+    disabled: [],
+    guaWan: [],
+    lanEnabled: [],
+    available,
+  }) as unknown as T.DerivedAddressInfo
 
 const host = (
   binding: T.DerivedAddressInfo,
@@ -39,6 +40,7 @@ const host = (
     3478: {
       enabled: true,
       options: {
+        transport: ['tcp', 'udp'],
         preferredExternalPort: 3478,
         addSsl: null,
         secure: null,
@@ -70,6 +72,7 @@ const host = (
     ? {
         42000: {
           enabled: true,
+          transport: ['tcp', 'udp'],
           externalStartPort: 42000,
           numberOfPorts: 500,
           addresses: range,

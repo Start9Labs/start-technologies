@@ -1785,6 +1785,10 @@ export const TimeInfo: z.ZodObject<{ now: z.ZodString; uptime: z.ZodInt }> =
   /* @__PURE__ */ object({ now: z.string(), uptime: z.int() }).meta({
     id: 'TimeInfo',
   })
+export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
+  /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
+    id: 'TransportProtocol',
+  })
 export const TrustCaParams: z.ZodObject<{ cert: typeof literal_0 }> =
   /* @__PURE__ */ object({ cert: literal_0 }).meta({
     id: 'TrustCaParams',
@@ -2404,7 +2408,6 @@ export const AddTunnelParams: z.ZodObject<{
 })
 export const AddVersionParams: z.ZodObject<{
   version: z.ZodString
-  headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   gitHash: z.ZodCodec<
@@ -2418,7 +2421,6 @@ export const AddVersionParams: z.ZodObject<{
   security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   version: z.string(),
-  headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
   gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
@@ -3044,6 +3046,47 @@ export const EditSignerParams: z.ZodObject<{
   }),
 }).meta({
   id: 'EditSignerParams',
+})
+
+/**
+ * Edits an existing release; omitted fields, assets and authorized signers remain unchanged.
+ */
+export const EditVersionParams: z.ZodObject<{
+  version: z.ZodString
+  releaseNotes: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
+    z.ZodNullable<typeof LocaleString>
+  >
+  sourceVersion: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  expectedGitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  security: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+    z.ZodNullable<z.ZodBoolean>
+  >
+}> = /* @__PURE__ */ object({
+  version: z.string(),
+  releaseNotes: wire(
+    LocaleString.nullable().optional(),
+    LocaleString.nullable(),
+  ),
+  sourceVersion: wire(z.string().nullable().optional(), z.string().nullable()),
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  expectedGitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  security: wire(z.boolean().nullable().optional(), z.boolean().nullable()),
+}).meta({
+  id: 'EditVersionParams',
+  description:
+    'Edits an existing release; omitted fields, assets and authorized signers remain unchanged.',
 })
 export const EppInfo: z.ZodObject<{
   current: z.ZodCodec<
@@ -3833,7 +3876,6 @@ export const OsInfo: z.ZodObject<{
   id: 'OsInfo',
 })
 export const OsVersionInfo: z.ZodObject<{
-  headline: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
   /**
@@ -3861,7 +3903,6 @@ export const OsVersionInfo: z.ZodObject<{
     ReturnType<typeof RegistryAsset<typeof Blake3Commitment>>
   >
 }> = /* @__PURE__ */ object({
-  headline: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
   /**
@@ -5004,6 +5045,13 @@ export const TestSmtpParams: z.ZodObject<{
 }).meta({
   id: 'TestSmtpParams',
 })
+export const TransportWire: z.ZodUnion<
+  readonly [typeof TransportProtocol, z.ZodArray<typeof TransportProtocol>]
+> = /* @__PURE__ */ z
+  .union([TransportProtocol, z.array(TransportProtocol)])
+  .meta({
+    id: 'TransportWire',
+  })
 export const UmountParams: z.ZodObject<{
   targetId: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof BackupTargetId>>,
@@ -6233,6 +6281,19 @@ export const SubscribeResult: z.ZodUnion<
 })
 
 /**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export const Transport: z.ZodCodec<
+  typeof TransportWire,
+  z.ZodArray<typeof TransportProtocol>
+> = /* @__PURE__ */ wire(TransportWire, z.array(TransportProtocol)).meta({
+  id: 'Transport',
+  description:
+    'Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.',
+})
+
+/**
  * Signing-key material and independent package and OS-update trust.
  */
 export const TrustedKey: z.ZodObject<{
@@ -6567,10 +6628,21 @@ export const BindingSetAddressEnabledParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
     z.ZodNullable<z.ZodBoolean>
   >
+  /**
+   * Accepts readable and alterable plaintext traffic, including passwords.
+   */
+  allowInsecure: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   internalPort: z.int(),
   address: HostnameInfo,
   enabled: wire(z.boolean().nullable().optional(), z.boolean().nullable()),
+  /**
+   * Accepts readable and alterable plaintext traffic, including passwords.
+   */
+  allowInsecure: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts readable and alterable plaintext traffic, including passwords.',
+  }),
 }).meta({
   id: 'BindingSetAddressEnabledParams',
 })
@@ -6612,9 +6684,35 @@ export const DerivedAddressInfo: z.ZodObject<{
     z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt], null>>
   >
   /**
+   * Plaintext private addresses requiring consent, keyed by hostname, port and gateway.
+   */
+  insecure: z.ZodCodec<
+    z.ZodOptional<
+      z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
+    >,
+    z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
+  >
+  /**
+   * Persisted consent; ordinary address changes must not grant insecure access.
+   * Address removal retains consent; explicit disabling or gateway removal revokes it.
+   */
+  insecureEnabled: z.ZodCodec<
+    z.ZodOptional<
+      z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
+    >,
+    z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
+  >
+  /**
    * COMPUTED: NetServiceData::update — all possible addresses for this binding
    */
   available: z.ZodArray<typeof HostnameInfo>
+  /**
+   * Effective address selections shared by network enforcement and clients.
+   */
+  effective: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof HostnameInfo>>,
+    z.ZodArray<typeof HostnameInfo>
+  >
 }> = /* @__PURE__ */ object({
   /**
    * User override: enable these addresses (only for public IP & port)
@@ -6651,12 +6749,42 @@ export const DerivedAddressInfo: z.ZodObject<{
       'User override: enable these private IPs regardless of their mDNS address.',
   }),
   /**
+   * Plaintext private addresses requiring consent, keyed by hostname, port and gateway.
+   */
+  insecure: wire(
+    z.array(z.tuple([z.string(), z.int(), GatewayId])).optional(),
+    z.array(z.tuple([z.string(), z.int(), GatewayId])),
+  ).meta({
+    description:
+      'Plaintext private addresses requiring consent, keyed by hostname, port and gateway.',
+  }),
+  /**
+   * Persisted consent; ordinary address changes must not grant insecure access.
+   * Address removal retains consent; explicit disabling or gateway removal revokes it.
+   */
+  insecureEnabled: wire(
+    z.array(z.tuple([z.string(), z.int(), GatewayId])).optional(),
+    z.array(z.tuple([z.string(), z.int(), GatewayId])),
+  ).meta({
+    description:
+      'Persisted consent; ordinary address changes must not grant insecure access.\nAddress removal retains consent; explicit disabling or gateway removal revokes it.',
+  }),
+  /**
    * COMPUTED: NetServiceData::update — all possible addresses for this binding
    */
   available: z.array(HostnameInfo).meta({
     description:
       'COMPUTED: NetServiceData::update — all possible addresses for this binding',
   }),
+  /**
+   * Effective address selections shared by network enforcement and clients.
+   */
+  effective: wire(z.array(HostnameInfo).optional(), z.array(HostnameInfo)).meta(
+    {
+      description:
+        'Effective address selections shared by network enforcement and clients.',
+    },
+  ),
 }).meta({
   id: 'DerivedAddressInfo',
 })
@@ -6882,6 +7010,7 @@ export const Revision: z.ZodObject<{ id: z.ZodInt; patch: typeof DiffPatch }> =
     id: 'Revision',
   })
 export const CompatibleBindOptions: z.ZodObject<{
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
   preferredExternalPort: z.ZodInt
   addSsl: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>,
@@ -6896,6 +7025,7 @@ export const CompatibleBindOptions: z.ZodObject<{
     z.ZodNullable<typeof ProxyOptions>
   >
 }> = /* @__PURE__ */ object({
+  transport: wire(Transport.optional(), Transport),
   preferredExternalPort: z.int(),
   addSsl: wire(
     LegacyProxySslOptions.nullable().optional(),
@@ -6935,6 +7065,10 @@ export const PackageIndex: z.ZodObject<{
 export const BindOptions: z.ZodCodec<
   typeof CompatibleBindOptions,
   z.ZodObject<{
+    /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: typeof Transport
     preferredExternalPort: z.ZodInt
     addSsl: z.ZodNullable<typeof AddSslOptions>
     secure: z.ZodNullable<typeof Security>
@@ -6946,6 +7080,13 @@ export const BindOptions: z.ZodCodec<
 > = /* @__PURE__ */ wire(
   CompatibleBindOptions,
   object({
+    /**
+     * Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
+     */
+    transport: Transport.meta({
+      description:
+        'Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.',
+    }),
     preferredExternalPort: z.int(),
     addSsl: AddSslOptions.nullable(),
     secure: Security.nullable(),
@@ -9053,6 +9194,15 @@ export const Api = {
                   _PARAMS: /* @__PURE__ */ z.intersection(
                     z.intersection(empty, RegistryUrlParams),
                     AddVersionParams,
+                  ),
+                  _RETURN: /* @__PURE__ */ z.null(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
+                },
+                edit: {
+                  _PARAMS: /* @__PURE__ */ z.intersection(
+                    z.intersection(empty, RegistryUrlParams),
+                    EditVersionParams,
                   ),
                   _RETURN: /* @__PURE__ */ z.null(),
                   _ITEM: /* @__PURE__ */ z.never(),

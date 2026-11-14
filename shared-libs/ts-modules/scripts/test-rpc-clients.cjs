@@ -66,7 +66,6 @@ function harness(moduleOverrides = new Map(), globals = {}) {
   dependencies.set(tokens.ServerIdentityService, {
     openObserver: { next() {} },
   })
-  dependencies.set(tokens.ConfigService, { gitHash: 'fixture-running-build' })
   dependencies.set(tokens.StaleUiService, { checkHash() {} })
   dependencies.set(tokens.i18nPipe, { transform: value => value })
 
@@ -141,8 +140,6 @@ function harness(moduleOverrides = new Map(), globals = {}) {
         return { ConfigService: tokens.ConfigService }
       if (request.endsWith('auth.service'))
         return { AuthService: tokens.AuthService }
-      if (request.endsWith('config.service'))
-        return { ConfigService: tokens.ConfigService }
       if (request.endsWith('http.service'))
         return { HttpService: tokens.HttpService }
       if (request.endsWith('stale-ui.service'))
@@ -189,7 +186,10 @@ function harness(moduleOverrides = new Map(), globals = {}) {
     location: { origin: 'https://router.test' },
     defaultView: { location: { host: 'server.test', protocol: 'https:' } },
   })
-  dependencies.set(tokens.ConfigService, { gitHash: 'configured-mock-build' })
+  dependencies.set(tokens.ConfigService, {
+    gitHash: 'configured-mock-build',
+    accessType: 'local',
+  })
   dependencies.set(tokens.RELATIVE_URL, '/rpc/v1')
   dependencies.set(tokens.WA_CRYPTO, webcrypto)
   return { dependencies, tokens, load }
@@ -1293,6 +1293,87 @@ test('Brochure serves each registry root through its own client', async () => {
   assert.equal(calls[1].url, 'https://registry.test/base/rpc/v0')
 })
 
+test('StartOS interface rows hide disabled insecure HTTP and keep private GUA access private', () => {
+  const { load } = harness(
+    new Map([
+      ['@taiga-ui/cdk', {}],
+      ['src/app/services/pkg-status-rendering.service', {}],
+      ['src/app/utils/acme', { toAuthorityName: () => '-' }],
+      ['src/app/utils/get-package-data', {}],
+    ]),
+  )
+  const service = new (load(
+    'projects/start-os/web/ui/src/app/routes/portal/components/interfaces/interface.service.ts',
+  ).InterfaceService)()
+  const row = (ssl, hostname, gateway, kind = 'ipv4') => ({
+    ssl,
+    public: false,
+    hostname,
+    port: ssl ? 8443 : 8080,
+    metadata:
+      kind === 'mdns'
+        ? { kind, gateways: [gateway] }
+        : { kind, gateway, ...(kind === 'ipv6' ? { scopeId: 0 } : {}) },
+  })
+  const ssl = row(true, '192.0.2.10', 'eth0')
+  const plain = row(false, '192.0.2.10', 'eth0')
+  const gua = row(false, '2001:db8::10', 'eth0', 'ipv6')
+  const insecureName = row(false, 'server.local', 'eth0', 'mdns')
+  const trustedName = row(false, 'server.local', 'wlan0', 'mdns')
+  const addresses = {
+    enabled: [],
+    disabled: [],
+    lanEnabled: [],
+    guaWan: [],
+    insecure: [plain, gua, insecureName].map(h => [h.hostname, h.port, 'eth0']),
+    insecureEnabled: [],
+    available: [ssl, plain, gua, insecureName, trustedName],
+    effective: [ssl, trustedName],
+  }
+  const host = {
+    bindings: {
+      80: {
+        addresses,
+        options: { addSsl: { preferredExternalPort: 8443 }, secure: null },
+      },
+    },
+    publicDomains: {},
+  }
+  const iface = {
+    addressInfo: {
+      internalPort: 80,
+      hostId: 'main',
+      username: null,
+      scheme: 'http',
+      sslScheme: 'https',
+      suffix: '',
+    },
+    masked: false,
+    type: 'ui',
+  }
+  const gateways = ['eth0', 'wlan0'].map(id => ({ id, name: id }))
+  const groups = () => service.getGatewayGroups(iface, host, gateways)
+  assert.deepEqual(
+    Array.from(groups(), g => g.addresses.length),
+    [1, 1],
+  )
+  addresses.effective.push(plain, gua, insecureName)
+  const enabled = groups()
+  assert.deepEqual(
+    Array.from(enabled, g => g.addresses.length),
+    [4, 1],
+  )
+  assert.equal(
+    enabled[0].addresses.find(a => a.hostnameInfo === gua).gua,
+    false,
+  )
+  addresses.effective = [ssl, trustedName]
+  assert.deepEqual(
+    Array.from(groups(), g => g.addresses.length),
+    [1, 1],
+  )
+})
+
 test('StartOS mock routes preserve registry fixtures, configured build identity, and UPS discovery', async () => {
   const pkg = { categories: [], best: {}, otherVersions: {} }
   const version = { ...pkg, best: { '1.0.0': {} } }
@@ -2195,7 +2276,11 @@ test('Brochure reports malformed registry URLs and can load the next selection',
       .ApiService,
     api,
   )
-  dependencies.set(storage, { getItem: () => null })
+  const saved = new Map()
+  dependencies.set(storage, {
+    getItem: key => saved.get(key) ?? null,
+    setItem: (key, value) => saved.set(key, value),
+  })
   dependencies.set(shared.Exver, {})
   dependencies.set(shared.i18nPipe, { transform: value => value })
   dependencies.set(shared.i18nService, { localize: value => value })
@@ -2220,10 +2305,15 @@ test('Brochure reports malformed registry URLs and can load the next selection',
     assert.equal(subscription.closed, false)
     service.currentRegistryUrl$.next('https://registry.test/')
     await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(errors, [])
     assert.equal(registries.length, 1)
     assert.equal(registries[0].url, 'https://registry.test/')
     assert.equal(registries[0].info.name, info.name)
     assert.equal(registries[0].packages.length, 0)
+    assert.deepEqual(JSON.parse(saved.get('_startos/customRegistry')), {
+      url: 'https://registry.test/',
+      name: info.name,
+    })
   } finally {
     subscription.unsubscribe()
     errorSubscription.unsubscribe()
@@ -2610,40 +2700,69 @@ test('WRT mock flash uses local typed progress and its own terminal without netw
   )
 })
 
-test('WRT mock continuations emit local events and close asynchronously without networking', async () => {
-  const { load } = harness(new Map(), {
-    queueMicrotask,
-    Event,
-    MessageEvent,
-    CloseEvent: class extends Event {
-      constructor(type, init) {
-        super(type)
-        Object.assign(this, init)
-      }
-    },
-  })
-  const { MockContinuation } = load(
-    'projects/start-wrt/web/src/app/services/api/mock-continuation.ts',
+test('WRT mock update and log streams use local typed items without networking', async () => {
+  const { load } = harness(wrtMockOverrides())
+  const mock = Object.create(
+    load('projects/start-wrt/web/src/app/services/api/mock-api.service.ts')
+      .MockApiService.prototype,
   )
-  const progress = { overall: true, phases: [] }
-  const socket = new MockContinuation(progress)
-  const events = []
-  const closed = Promise.withResolvers()
-  socket.onopen = () => events.push('open')
-  socket.onmessage = event => {
-    assert.deepEqual(JSON.parse(event.data), progress)
-    events.push('message')
-    socket.close()
-    events.push('after-close')
-  }
-  socket.onclose = () => {
-    events.push('close')
-    closed.resolve()
-  }
-  await closed.promise
-  assert.deepEqual(events, ['open', 'message', 'after-close', 'close'])
-  socket.close()
+  mock.mockSystemInfo = { version: '1.4.0' }
+  const update = await mock.systemUpdate({ targetVersion: '1.5.0' })
+  assert.equal(update.initial.target, '1.5.0')
+  assert.equal(update.initial.progress, null)
+  const progress = await update.items.next()
+  assert.equal(progress.done, false)
+  assert.equal(progress.value.overall, true)
+  const final = await update.items.next()
+  assert.equal(final.done, true)
+  assert.equal(final.value, null)
+
+  const following = new AbortController()
+  const logs = await mock.followLogs({ signal: following.signal })
+  assert.equal(logs.initial.guid, null)
+  const ended = assert.rejects(logs.items.next(), { name: 'AbortError' })
+  following.abort()
+  await ended
+
+  const aborted = new AbortController()
+  aborted.abort()
+  await assert.rejects(mock.followLogs({ signal: aborted.signal }), {
+    name: 'AbortError',
+  })
 })
+
+test(
+  'WRT mock streams honor cancellation after acquisition and before their next item',
+  { timeout: 1000 },
+  async () => {
+    const { load } = harness(wrtMockOverrides())
+    const mock = Object.create(
+      load('projects/start-wrt/web/src/app/services/api/mock-api.service.ts')
+        .MockApiService.prototype,
+    )
+    mock.mockSystemInfo = { version: '1.4.0' }
+
+    const updateAbort = new AbortController()
+    const update = await mock.systemUpdate(
+      { targetVersion: '1.5.0' },
+      { signal: updateAbort.signal },
+    )
+    updateAbort.abort()
+    await assert.rejects(update.items.next(), { name: 'AbortError' })
+    assert.equal(mock.mockSystemInfo.version, '1.5.0')
+
+    const finalAbort = new AbortController()
+    const finishing = await mock.systemUpdate({}, { signal: finalAbort.signal })
+    await finishing.items.next()
+    finalAbort.abort()
+    await assert.rejects(finishing.items.next(), { name: 'AbortError' })
+
+    const logsAbort = new AbortController()
+    const logs = await mock.followLogs({ signal: logsAbort.signal })
+    logsAbort.abort()
+    await assert.rejects(logs.items.next(), { name: 'AbortError' })
+  },
+)
 
 function wrtFlowHarness(globals = {}) {
   const overrides = new Map([
@@ -2843,6 +2962,86 @@ test('WRT every failed recovery probe discards its stalled multiplexed session',
   await service.poll()
   await service.poll()
   assert.equal(aborted, 2)
+})
+
+function wrtUpdateObserver(systemUpdate) {
+  const { load } = wrtFlowHarness()
+  const service = Object.create(
+    load('projects/start-wrt/web/src/app/services/system.service.ts')
+      .SystemService.prototype,
+  )
+  const outcomes = []
+  let updating = false
+  Object.assign(service, {
+    api: { systemUpdate },
+    updating: Object.assign(() => updating, {
+      set: value => {
+        updating = value
+      },
+    }),
+    connection: {
+      suppress() {},
+      resume: () => outcomes.push('resumed'),
+    },
+    awaitReboot: () => outcomes.push('reboot'),
+    onUpdateFailed: () => outcomes.push('failed'),
+  })
+  return { service, outcomes, updating: () => updating }
+}
+
+function updateItems(end) {
+  return (async function* () {
+    yield { overall: { done: 1, total: 2, units: null }, phases: [] }
+    return end()
+  })()
+}
+
+for (const [name, end, outcome] of [
+  ['a successful terminal awaits the reboot', () => null, 'reboot'],
+  [
+    'transport loss awaits the reboot',
+    () => {
+      throw Object.assign(new Error('lost transport'), { code: 0 })
+    },
+    'reboot',
+  ],
+  [
+    'an application terminal reports a failed update',
+    () => {
+      throw Object.assign(new Error('sysupgrade exited with code 1'), {
+        code: -1,
+      })
+    },
+    'failed',
+  ],
+]) {
+  test(`WRT update stream: ${name}`, async () => {
+    const fixture = wrtUpdateObserver(async params => {
+      assert.equal(params.targetVersion, '1.5.0')
+      return {
+        initial: { target: '1.5.0', progress: null },
+        items: updateItems(end),
+      }
+    })
+    await fixture.service.startUpdate('1.5.0')
+    assert.equal(fixture.updating(), true)
+    assert.equal(fixture.service.targetVersion, '1.5.0')
+    await new Promise(setImmediate)
+    assert.deepEqual(fixture.outcomes, [outcome])
+  })
+}
+
+test('WRT update without a target releases the update state without observing', async () => {
+  const fixture = wrtUpdateObserver(async () => ({
+    initial: { target: null, progress: null },
+    items: (async function* () {
+      assert.fail('no-target updates are not observed')
+    })(),
+  }))
+  await fixture.service.startUpdate('1.5.0')
+  await new Promise(setImmediate)
+  assert.equal(fixture.updating(), false)
+  assert.deepEqual(fixture.outcomes, ['resumed'])
 })
 
 test('WRT interrupted-update recovery cannot claim the requested version from an old firmware reply', async () => {

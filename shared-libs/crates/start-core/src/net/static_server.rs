@@ -34,15 +34,15 @@ use crate::context::{DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::hostname::ServerHostname;
 use crate::middleware::auth::Auth;
 use crate::middleware::auth::signature::{
-    AUTH_SIG_HEADER, LoginMetadata, SignatureAuthContext, SignatureAuthorizationContext,
-    SignatureHeader, SigningContext, verify_request_signature,
+    LoginMetadata, SignatureAuthContext, SignatureAuthorizationContext, SigningContext,
+    verify_request_signature,
 };
 use crate::middleware::cors;
 use crate::middleware::db::{SyncDb, SyncDbHeaderCompat};
 use crate::middleware::json::RequireJson;
 use crate::net::http::request_authority;
 use crate::prelude::*;
-use crate::registry::package::icon::is_icon_url;
+use crate::registry::package::icon::{is_icon_url, request_icon};
 use crate::rpc_continuations::{Guid, RpcContinuations};
 use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::file_contents::FileContents;
@@ -600,20 +600,7 @@ async fn registry_icon_response(
     url: Url,
     signer: Option<&Signer>,
 ) -> Result<Response, Error> {
-    let mut request = client.get(url.clone());
-    if let Some(signer) = signer {
-        request = request.header(
-            AUTH_SIG_HEADER,
-            SignatureHeader::sign(
-                signer,
-                b"",
-                url.host_str().or_not_found("registry hostname")?,
-            )
-            .await?
-            .to_header(),
-        );
-    }
-    let upstream = request.send().await.with_kind(ErrorKind::Network)?;
+    let upstream = request_icon(&client, url, signer).await?;
     let mut response = Response::builder().status(upstream.status());
     for name in [CONTENT_TYPE, CACHE_CONTROL] {
         if let Some(value) = upstream.headers().get(&name) {

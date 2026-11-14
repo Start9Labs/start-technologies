@@ -111,8 +111,7 @@ pub async fn export_url(
                     )
                 ))?
                 .as_addresses_mut()
-                .as_available_mut()
-                .mutate(|available: &mut BTreeSet<_>| {
+                .mutate_available(|available: &mut BTreeSet<_>| {
                     // Dedupe by the same address identity `clear_urls` retains
                     // on (row-action fields excluded). Without this, re-exporting
                     // a URL whose actions changed inserts a second `Ord`-distinct
@@ -154,8 +153,8 @@ pub async fn clear_urls(
             for host in all_hosts(db) {
                 let host = host?;
                 for (_, bind) in host.as_bindings_mut().as_entries_mut()? {
-                    bind.as_addresses_mut().as_available_mut().mutate(
-                        |available: &mut BTreeSet<_>| {
+                    bind.as_addresses_mut()
+                        .mutate_available(|available: &mut BTreeSet<_>| {
                             available.retain(|h| {
                                 match &h.metadata {
                                     HostnameMetadata::Plugin { package_id, .. }
@@ -170,8 +169,7 @@ pub async fn clear_urls(
                                 }
                             });
                             Ok(())
-                        },
-                    )?;
+                        })?;
                 }
             }
             Ok(())

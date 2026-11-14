@@ -244,7 +244,10 @@ struct VersionInfo {
 
 Initiate an OTA firmware update. Downloads the asset from the registry,
 verifies BLAKE3 hash + Ed25519 signatures, then runs `sysupgrade`.
-Returns a GUID for WebSocket progress streaming.
+A typed response stream (the web UI) receives `FullProgress` items and a null final
+result, or the update's error; `progress` is then null. Other callers receive a GUID
+for WebSocket progress streaming. Canceling observation does not cancel an accepted
+update, and revoking the requesting key ends observation.
 
 ```rust
 // Request:
@@ -262,13 +265,13 @@ struct UpdateSystemParams {
 #[serde(rename_all = "camelCase")]
 struct UpdateSystemRes {
     target: Option<String>,   // Version being installed
-    progress: Option<String>, // GUID for /rpc/v2/{guid}
+    progress: Option<String>, // GUID for /rpc/v2/{guid}; null on a response stream
 }
 ```
 
-#### WebSocket progress: `/rpc/v2/{guid}`
+#### Progress
 
-Connect via WebSocket to stream `FullProgress` JSON frames:
+Stream items, and the legacy `/rpc/v2/{guid}` WebSocket's JSON frames, are `FullProgress`:
 
 ```typescript
 type FullProgress = {
@@ -392,10 +395,13 @@ Live-streaming endpoint for the web UI. Not exposed to the CLI.
 
 #[derive(Serialize)]
 struct FollowLogsRes {
-    guid: Guid,
+    guid: Option<Guid>, // null on a response stream
 }
 // Response: FollowLogsRes
 ```
+
+A typed response stream (the web UI) receives each `LogEntry` as a stream item and
+ends when `logread` exits or the requesting key is revoked. Without one:
 
 1. Client opens a WebSocket to `/rpc/v2/{guid}` within 30 seconds; the GUID is single-use
 2. Server spawns `logread -f` (dumps historical entries then follows new ones)
@@ -2463,7 +2469,7 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `/rpc/v2`                                          | WebSocket GET / HTTP/2 extended CONNECT | Signed-DH admission + live authorization (see § 1)                                     | Encrypted JSON-RPC for keyed browser and CLI calls                                            |
 | `/rpc/v1`                                          | POST                                    | Request signature or local token (see § 1)                                             | JSON-RPC 2.0 compatibility/anonymous endpoint                                                 |
 | `/rest/rpc/{guid}`                                 | GET/POST                                | GUID capability (one-shot)                                                             | RPC continuation: binary download (backup, diagnostics) / upload (restore); 64 MiB body limit |
-| `/rpc/v2/{guid}` (legacy alias `/ws/rpc/{guid}`)   | WebSocket                               | GUID capability; secure origin requires fresh same-peer admission signed for that GUID | Streaming: update progress (`system.update`), live logs (`system.logs-follow`)                |
+| `/rpc/v2/{guid}` (legacy alias `/ws/rpc/{guid}`)   | WebSocket                               | GUID capability; secure origin requires fresh same-peer admission signed for that GUID | Legacy streaming: update progress (`system.update`), live logs (`system.logs-follow`)         |
 | `/api/setup/flash`                                 | POST                                    | None (setup wizard)                                                                    | Streams NDJSON `SetupEvent` progress while flashing the eMMC; one flash at a time             |
 | `/static/local-root-ca.crt`                        | GET                                     | None                                                                                   | Root CA certificate download                                                                  |
 | `/static/local-root-ca.mobileconfig`               | GET                                     | None                                                                                   | Root CA as an Apple configuration profile                                                     |

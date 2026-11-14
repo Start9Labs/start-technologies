@@ -1291,16 +1291,15 @@ start-cli() {
     const result = run('bash', ['-c', harness + command], { encoding: 'utf8' })
     assert.equal(result.status, 0, result.stderr)
     const args = text(capture).split('\0').slice(0, -1)
-    assert.deepEqual(args.slice(1, 7), [
+    assert.deepEqual(args.slice(1, 6), [
       'registry',
       'os',
       'version',
       'add',
       VERSION,
-      `v${VERSION}`,
     ])
-    assert.deepEqual(JSON.parse(args[7]), expected.releaseNotes)
-    assert.equal(args.length, 9)
+    assert.deepEqual(JSON.parse(args[6]), expected.releaseNotes)
+    assert.equal(args.length, 8)
   }
   for (const [workflow, name] of [
     ['startos-iso.yaml', 'Register OS version'],
@@ -1331,7 +1330,7 @@ start-cli() {
     )
     assert.equal(result.status, 0, result.stderr)
     const args = text(capture).split('\0').slice(0, -1)
-    const notesIndex = workflow === 'startos-iso.yaml' ? 10 : 7
+    const notesIndex = workflow === 'startos-iso.yaml' ? 9 : 6
     assert.deepEqual(JSON.parse(args[notesIndex]), expected.releaseNotes)
     assert.equal(args.length, notesIndex + 2)
     if (workflow === 'startos-iso.yaml')
@@ -1545,8 +1544,11 @@ enter_release_dir() { touch "${marker}"; }
     )
     const rejected = run('bash', ['-e', '-c', command], { encoding: 'utf8' })
     assert.notEqual(rejected.status, 0)
-    contains(rejected.stderr, 'lacks LocaleString release notes')
+    contains(rejected.stderr, 'lacks headline-free LocaleString release notes')
   }
+  env.CLI_HELP = 'Arguments:\n  <HEADLINE>\n  <RELEASE_NOTES_OR_JSON>\n'
+  script('check-registry-notes-cli', 'start-wrt', false)
+  assert.equal(existsSync(marker), false)
   env.CLI_HELP = 'Arguments:\n  <RELEASE_NOTES_OR_JSON>\n'
   script('check-registry-notes-cli', 'start-wrt')
   env.HELP_STATUS = '1'

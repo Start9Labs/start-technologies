@@ -306,6 +306,7 @@ Enable or disable a specific address binding.
 
 - `--address <ADDRESS>` — Address to modify (required)
 - `--enabled <true|false>` — Enable or disable
+- `--allow-insecure` — Accept readable and alterable plaintext traffic, including passwords; required to enable a [plain-HTTP private address](interfaces.md#plain-http-private-addresses) on an insecure gateway
 
 ## Services
 
@@ -474,6 +475,7 @@ Enable or disable a specific address binding for a service.
 
 - `--address <ADDRESS>` — Address to modify (required)
 - `--enabled <true|false>` — Enable or disable
+- `--allow-insecure` — Accept readable and alterable plaintext traffic, including passwords; required to enable a [plain-HTTP private address](interfaces.md#plain-http-private-addresses) on an insecure gateway
 
 ## Backups
 
@@ -1312,7 +1314,7 @@ List all OS versions.
 
 - `--format` — Output format
 
-### `start-cli registry os version add <VERSION> <HEADLINE> <RELEASE_NOTES> <SOURCE_VERSION>`
+### `start-cli registry os version add <VERSION> <RELEASE_NOTES> <SOURCE_VERSION>`
 
 Register a new OS version.
 

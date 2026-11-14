@@ -2910,6 +2910,22 @@ export class MockApiService extends ApiService implements StartupApiService {
         },
       ])
     }
+    this.refreshMockAddresses(basePath, current)
+  }
+
+  private refreshMockAddresses(
+    basePath: string,
+    current: T.DerivedAddressInfo,
+  ): void {
+    const { effective: _, ...legacy } = current
+    current.effective = utils.getEnabledAddresses(legacy)
+    this.mockRevision([
+      {
+        op: PatchOp.ADD,
+        path: `${basePath}/effective`,
+        value: current.effective,
+      },
+    ])
   }
 
   // Mirrors the backend set_gua_wan: update the gua_wan set, carry the row's
@@ -2948,6 +2964,7 @@ export class MockApiService extends ApiService implements StartupApiService {
       { op: PatchOp.ADD, path: `${basePath}/available`, value: available },
     ]
     this.mockRevision(patch)
+    this.refreshMockAddresses(basePath, current)
   }
 
   private mockDnsServers(servers: string[] | null): string[] | null {

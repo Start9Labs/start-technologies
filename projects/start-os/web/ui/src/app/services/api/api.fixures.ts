@@ -1,5 +1,5 @@
 import { GetPackagesRes } from '@start9labs/marketplace'
-import { ISB, IST, T } from '@start9labs/start-core'
+import { ISB, IST, T, utils } from '@start9labs/start-core'
 import type { BackupRun } from 'src/app/routes/portal/routes/system/routes/backups/backup.types'
 import {
   InstalledState,
@@ -24,6 +24,20 @@ const unknownSigner =
 const mockDescription = {
   short: 'Lorem ipsum dolor sit amet',
   long: 'Lorem ipsum dolor sit amet, <p>consectetur adipiscing elit</p>, sed do eiusmod <i>tempor</i> incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.',
+}
+
+export function mockAddresses(
+  addresses: Omit<
+    T.DerivedAddressInfo,
+    'insecure' | 'insecureEnabled' | 'effective'
+  >,
+): T.DerivedAddressInfo {
+  return {
+    ...addresses,
+    insecure: [],
+    insecureEnabled: [],
+    effective: utils.getEnabledAddresses(addresses),
+  }
 }
 
 export namespace Mock {
@@ -88,7 +102,6 @@ export namespace Mock {
     [`${version}.2`]: {
       gitHash: null,
       security: false,
-      headline: `v${version}.2`,
       releaseNotes:
         '## Highlights\n\n- Backups resume where they left off after an interruption.\n- The Updates tab shows release notes in place.\n\n## Fixes\n\n- Services no longer restart twice after a reboot.',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.17:0',
@@ -180,7 +193,6 @@ export namespace Mock {
     [`${version}.1`]: {
       gitHash: null,
       security: false,
-      headline: `v${version}.1`,
       releaseNotes:
         '## Fixes\n\n- Restored network profiles after upgrading from 0.3.5.1.\n- Long service names no longer overflow the sidebar.',
       sourceVersion: '*',
@@ -192,7 +204,6 @@ export namespace Mock {
     '0.4.1-alpha.5': {
       gitHash: null,
       security: false,
-      headline: 'v0.4.1-alpha.5',
       releaseNotes: 'Some more release notes',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.5:0',
       authorized: ['G24CSA5HNYEPIXJNMK7ZM4KD5SX5N6X4'],
@@ -2701,7 +2712,7 @@ PersistentKeepalive = 25`
               assignedPort: null,
               assignedSslPort: 443,
             },
-            addresses: {
+            addresses: mockAddresses({
               enabled: ['[2001:db8:abcd::a3b:2]:1234'],
               disabled: [],
               guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
@@ -2753,8 +2764,9 @@ PersistentKeepalive = 25`
                   metadata: { kind: 'ipv6', gateway: 'eth0', scopeId: 0 },
                 },
               ],
-            },
+            }),
             options: {
+              transport: ['tcp', 'udp'],
               addSsl: null,
               preferredExternalPort: 443,
               secure: { ssl: true },
@@ -2794,14 +2806,15 @@ PersistentKeepalive = 25`
               assignedPort: 8332,
               assignedSslPort: null,
             },
-            addresses: {
+            addresses: mockAddresses({
               enabled: [],
               disabled: [],
               guaWan: [],
               lanEnabled: [],
               available: [],
-            },
+            }),
             options: {
+              transport: ['tcp', 'udp'],
               addSsl: null,
               preferredExternalPort: 8332,
               secure: { ssl: false },
@@ -2841,14 +2854,15 @@ PersistentKeepalive = 25`
               assignedPort: 8333,
               assignedSslPort: null,
             },
-            addresses: {
+            addresses: mockAddresses({
               enabled: [],
               disabled: [],
               guaWan: [],
               lanEnabled: [],
               available: [],
-            },
+            }),
             options: {
+              transport: ['tcp', 'udp'],
               addSsl: null,
               preferredExternalPort: 8333,
               secure: { ssl: false },

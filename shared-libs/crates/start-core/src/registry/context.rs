@@ -37,6 +37,7 @@ use crate::registry::mirror::IndexMirrors;
 use crate::registry::package::icon::{icons_dir, referenced_icons, sweep_icons};
 use crate::registry::package::promote::registry_rpc_url;
 use crate::registry::signer::SignerInfo;
+use crate::registry::upstream::{Upstream, UpstreamClients};
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
 use crate::sign::AnyVerifyingKey;
 use crate::util::io::append_file;
@@ -67,6 +68,8 @@ pub struct RegistryConfig {
     #[arg(long, help = "help.arg.registry-startwrt")]
     #[serde(default)]
     pub startwrt: bool,
+    #[arg(long, help = "help.arg.registry-mirror-of")]
+    pub mirror_of: Option<Url>,
 }
 impl ContextConfig for RegistryConfig {
     fn next(&mut self) -> Option<PathBuf> {
@@ -78,6 +81,7 @@ impl ContextConfig for RegistryConfig {
         self.tor_proxy = self.tor_proxy.take().or(other.tor_proxy);
         self.datadir = self.datadir.take().or(other.datadir);
         self.startwrt |= other.startwrt;
+        self.mirror_of = self.mirror_of.take().or(other.mirror_of);
     }
 }
 
@@ -87,6 +91,18 @@ impl RegistryConfig {
         self.load_path_rec(path)?;
         self.load_path_rec(Some(CONFIG_PATH))?;
         Ok(self)
+    }
+
+    fn initialize_database(
+        &self,
+        db: &mut Model<RegistryDatabase>,
+        datadir: &Path,
+    ) -> Result<(), Error> {
+        run_migrations(db, datadir)?;
+        if self.mirror_of.is_none() {
+            db.as_index_mut().retain_registered_package_signatures()?;
+        }
+        Ok(())
     }
 }
 
@@ -102,6 +118,8 @@ pub struct RegistryContextSeed {
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub client: Client,
     pub server_identity: crate::sign::Signer,
+    /// Present while this registry mirrors another.
+    pub upstream: Option<Upstream>,
     pub shutdown: Sender<()>,
     pub metrics_db: SyncMutex<Connection>,
 }
@@ -151,7 +169,9 @@ impl RegistryContext {
         if db.dump(&ROOT).await.value.is_null() {
             db.put(&ROOT, &RegistryDatabase::init()).await?;
         }
-        db.mutate(|db| run_migrations(db, &datadir)).await.result?;
+        db.mutate(|db| config.initialize_database(db, &datadir))
+            .await
+            .result?;
         let server_identity = crate::sign::instance::load(&db).await?;
         sweep_icons(
             &icons_dir(&datadir),
@@ -195,6 +215,19 @@ impl RegistryContext {
                 ErrorKind::NotFound,
             ));
         }
+        let upstream = config
+            .mirror_of
+            .clone()
+            .map(|url| {
+                Ok::<_, Error>(Upstream::spawn(
+                    db.clone(),
+                    icons_dir(&datadir),
+                    UpstreamClients::new(tor_proxy_url.clone())?,
+                    server_identity.clone(),
+                    url,
+                ))
+            })
+            .transpose()?;
         Ok(Self(
             Arc::new(RegistryContextSeed {
                 hostnames: config.registry_hostname.clone(),
@@ -206,17 +239,11 @@ impl RegistryContext {
                 rpc_continuations: RpcContinuations::new(),
                 open_authed_continuations: OpenAuthedContinuations::new(),
                 auth_sig_nonce_cache: SyncMutex::new(Default::default()),
-                client: Client::builder()
-                    .proxy(Proxy::custom(move |url| {
-                        if url.host_str().map_or(false, |h| h.ends_with(".onion")) {
-                            Some(tor_proxy_url.clone())
-                        } else {
-                            None
-                        }
-                    }))
+                client: client_builder(tor_proxy_url)
                     .build()
                     .with_kind(crate::ErrorKind::ParseUrl)?,
                 server_identity,
+                upstream,
                 shutdown,
                 metrics_db,
             }),
@@ -224,6 +251,17 @@ impl RegistryContext {
         ))
     }
 }
+/// Proxies `.onion` hosts through Tor and dials everything else directly.
+pub(super) fn client_builder(tor_proxy_url: Url) -> reqwest::ClientBuilder {
+    Client::builder().proxy(Proxy::custom(move |url| {
+        if url.host_str().map_or(false, |h| h.ends_with(".onion")) {
+            Some(tor_proxy_url.clone())
+        } else {
+            None
+        }
+    }))
+}
+
 impl AsRef<RpcContinuations> for RegistryContext {
     fn as_ref(&self) -> &RpcContinuations {
         &self.rpc_continuations
@@ -545,13 +583,16 @@ impl SignatureAuthorizationContext for RegistryContext {
         db: &mut Model<Self::Database>,
         keys: &BTreeSet<InternedString>,
     ) -> Result<(), Error> {
+        if keys.is_empty() {
+            return Ok(());
+        }
         for (_, signer) in db.as_index_mut().as_signers_mut().as_entries_mut()? {
             signer.as_keys_mut().mutate(|signer_keys| {
                 signer_keys.retain(|k| !keys.contains(&*k.interned_der64()));
                 Ok(())
             })?;
         }
-        Ok(())
+        db.as_index_mut().retain_registered_package_signatures()
     }
     fn check_pubkey(
         &self,
@@ -602,6 +643,51 @@ impl SignatureAuthorizationContext for RegistryContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_preserves_mirror_signatures_and_normalizes_each_return_to_authority() {
+        use crate::registry::package::index::tests::{signers_with, version_info_signed_by};
+
+        let (publisher, mut info) = version_info_signed_by(1);
+        let (_, unregistered) = version_info_signed_by(2);
+        info.merge_with(unregistered, true).unwrap();
+        let version: crate::util::VersionString = "1.0.0:0".parse().unwrap();
+        let mut database = RegistryDatabase::init();
+        database.index.signers = signers_with([publisher.clone()]);
+        database
+            .index
+            .package
+            .packages
+            .entry("test".parse().unwrap())
+            .or_default()
+            .versions
+            .insert(version.clone(), info);
+        let original_index = to_value(&database.index).unwrap();
+        let mut db = Model::new(&database).unwrap();
+        let datadir = tempfile::tempdir().unwrap();
+        let mirror = RegistryConfig {
+            mirror_of: Some("https://upstream.example/".parse().unwrap()),
+            ..Default::default()
+        };
+        let authoritative = RegistryConfig::default();
+
+        for _ in 0..2 {
+            db.as_index_mut().ser(&database.index).unwrap();
+            mirror.initialize_database(&mut db, datadir.path()).unwrap();
+            let mirrored = db.as_index().de().unwrap();
+            assert_eq!(to_value(&mirrored).unwrap(), original_index);
+
+            authoritative
+                .initialize_database(&mut db, datadir.path())
+                .unwrap();
+            let index = db.as_index().de().unwrap();
+            let asset = &index.package.packages["test"].versions[&version].s9pks[0].1;
+            assert_eq!(
+                asset.signatures.keys().collect::<BTreeSet<_>>(),
+                [&publisher].into()
+            );
+        }
+    }
 
     #[test]
     fn legacy_security_notification_config_does_not_gate_registry_subscriptions() {
@@ -666,11 +752,20 @@ pub(crate) async fn test_context_for_hosts(
             auth_sig_nonce_cache: SyncMutex::new(Default::default()),
             client: Client::new(),
             server_identity: crate::sign::AnySigningKey::generate().into(),
+            upstream: None,
             shutdown: tokio::sync::broadcast::channel(1).0,
             metrics_db: SyncMutex::new(Connection::open_in_memory().unwrap()),
         }),
         None,
     )
+}
+
+#[cfg(test)]
+impl RegistryContext {
+    pub(crate) fn with_upstream(mut self, upstream: Upstream) -> Self {
+        Arc::get_mut(&mut self.0).unwrap().upstream = Some(upstream);
+        self
+    }
 }
 
 #[cfg(test)]

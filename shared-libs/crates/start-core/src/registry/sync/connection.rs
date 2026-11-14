@@ -36,9 +36,27 @@ pub(super) fn subscription_request(
     subscription: &Subscription,
     os_version: &exver::Version,
 ) -> Value {
+    db_subscribe_request(
+        subscription.request_id(),
+        subscription.pointer(),
+        Some(os_version),
+    )
+}
+
+/// Streams the registry subtree at the pointer.
+/// Omitting the StartOS version selects the canonical index format.
+pub(crate) fn db_subscribe_request(
+    id: u64,
+    pointer: &str,
+    os_version: Option<&exver::Version>,
+) -> Value {
+    let mut params = imbl_value::json!({ "pointer": pointer });
+    if let Some(os_version) = os_version {
+        params["osVersion"] = imbl_value::json!(os_version);
+    }
     imbl_value::json!({
-        "jsonrpc": "2.0", "rpcstream": RPCSTREAM_VERSION, "id": subscription.request_id(),
-        "method": "db.subscribe", "params": { "pointer": subscription.pointer(), "osVersion": os_version }
+        "jsonrpc": "2.0", "rpcstream": RPCSTREAM_VERSION, "id": id,
+        "method": "db.subscribe", "params": params
     })
 }
 
@@ -89,7 +107,6 @@ pub(super) async fn subscribe(
 }
 
 struct WatchState {
-    subscription: Subscription,
     dump: Option<Dump>,
 }
 
@@ -126,66 +143,107 @@ fn update_dump(state: &mut WatchState, message: Value) -> Result<bool, Error> {
 }
 
 pub(super) async fn receive_updates(
-    mut socket: EncryptedSocket,
+    socket: EncryptedSocket,
     db: &TypedPatchDb<Database>,
     subscriptions: &BTreeSet<Subscription>,
     device: &DeviceInfo,
     backoff: &mut u64,
 ) -> Result<(), Error> {
-    let mut watches = BTreeMap::new();
-    for subscription in subscriptions {
-        let id = subscription.request_id();
-        let request = subscription_request(subscription, &device.os.version);
-        tokio::time::timeout(
-            Duration::from_secs(15),
-            socket.send(Message::Text(request.to_string().into())),
-        )
-        .await
-        .with_kind(ErrorKind::Network)?
-        .with_kind(ErrorKind::Network)?;
-        watches.insert(
-            id,
-            WatchState {
-                subscription: subscription.clone(),
-                dump: None,
-            },
-        );
+    let by_id: BTreeMap<u64, &Subscription> = subscriptions
+        .iter()
+        .map(|subscription| (subscription.request_id(), subscription))
+        .collect();
+    let mut follower = SubscriptionFollower::start(
+        socket,
+        subscriptions
+            .iter()
+            .map(|subscription| {
+                (
+                    subscription.request_id(),
+                    subscription_request(subscription, &device.os.version),
+                )
+            })
+            .collect(),
+    )
+    .await?;
+    while let Some((id, value)) = follower.next().await? {
+        publish(db, by_id[&id], &value, device).await?;
+        *backoff = INITIAL_BACKOFF;
     }
-    let initial_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    let mut heartbeat = tokio::time::interval(Duration::from_secs(60));
-    heartbeat.tick().await;
-    let mut last_received = tokio::time::Instant::now();
-    loop {
-        tokio::select! {
-            message = socket.next() => {
-                last_received = tokio::time::Instant::now();
-                match message.transpose().with_kind(ErrorKind::Network)? {
-                    Some(Message::Text(text)) => {
-                        let message: Value = serde_json::from_str(&text).with_kind(ErrorKind::Deserialization)?;
-                        let id = message.get("id").and_then(Value::as_u64).or_not_found("registry response id")?;
-                        let state = watches.get_mut(&id).or_not_found("registry watch")?;
-                        if !update_dump(state, message)? { return Ok(()); }
-                        publish(db, &state.subscription, &state.dump.as_ref().unwrap().value, device).await?;
-                        *backoff = 30;
+    Ok(())
+}
+
+/// Follows `db.subscribe` streams on one admitted socket.
+pub(crate) struct SubscriptionFollower {
+    socket: EncryptedSocket,
+    watches: BTreeMap<u64, WatchState>,
+    initial_deadline: tokio::time::Instant,
+    heartbeat: tokio::time::Interval,
+    last_received: tokio::time::Instant,
+}
+
+impl SubscriptionFollower {
+    /// Sends each request; the key is its JSON-RPC ID.
+    pub(crate) async fn start(
+        mut socket: EncryptedSocket,
+        requests: BTreeMap<u64, Value>,
+    ) -> Result<Self, Error> {
+        let mut watches = BTreeMap::new();
+        for (id, request) in requests {
+            tokio::time::timeout(
+                Duration::from_secs(15),
+                socket.send(Message::Text(request.to_string().into())),
+            )
+            .await
+            .with_kind(ErrorKind::Network)?
+            .with_kind(ErrorKind::Network)?;
+            watches.insert(id, WatchState { dump: None });
+        }
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(60));
+        heartbeat.tick().await;
+        Ok(Self {
+            socket,
+            watches,
+            initial_deadline: tokio::time::Instant::now() + Duration::from_secs(30),
+            heartbeat,
+            last_received: tokio::time::Instant::now(),
+        })
+    }
+
+    /// Returns the request ID and full subtree after each dump or revision.
+    /// `None` once the registry ends a subscription or closes the socket.
+    pub(crate) async fn next(&mut self) -> Result<Option<(u64, Value)>, Error> {
+        loop {
+            tokio::select! {
+                message = self.socket.next() => {
+                    self.last_received = tokio::time::Instant::now();
+                    match message.transpose().with_kind(ErrorKind::Network)? {
+                        Some(Message::Text(text)) => {
+                            let message: Value = serde_json::from_str(&text).with_kind(ErrorKind::Deserialization)?;
+                            let id = message.get("id").and_then(Value::as_u64).or_not_found("registry response id")?;
+                            let state = self.watches.get_mut(&id).or_not_found("registry watch")?;
+                            if !update_dump(state, message)? { return Ok(None); }
+                            return Ok(Some((id, state.dump.as_ref().unwrap().value.clone())));
+                        }
+                        Some(Message::Ping(_)) => {
+                            tokio::time::timeout(Duration::from_secs(15), self.socket.flush())
+                                .await.with_kind(ErrorKind::Network)?.with_kind(ErrorKind::Network)?;
+                        }
+                        Some(Message::Binary(_)) => return Err(Error::new(eyre!("expected a JSON registry response"), ErrorKind::Network)),
+                        Some(Message::Close(_)) | None => return Ok(None),
+                        _ => (),
                     }
-                    Some(Message::Ping(_)) => {
-                        tokio::time::timeout(Duration::from_secs(15), socket.flush())
-                            .await.with_kind(ErrorKind::Network)?.with_kind(ErrorKind::Network)?;
-                    }
-                    Some(Message::Binary(_)) => return Err(Error::new(eyre!("expected a JSON registry response"), ErrorKind::Network)),
-                    Some(Message::Close(_)) | None => return Ok(()),
-                    _ => (),
                 }
-            }
-            _ = heartbeat.tick() => {
-                tokio::time::timeout(Duration::from_secs(15), socket.send(Message::Ping(Default::default())))
-                    .await.with_kind(ErrorKind::Network)?.with_kind(ErrorKind::Network)?;
-            }
-            _ = tokio::time::sleep_until(last_received + Duration::from_secs(120)) => {
-                return Err(Error::new(eyre!("registry heartbeat timed out"), ErrorKind::Network));
-            }
-            _ = tokio::time::sleep_until(initial_deadline), if watches.values().any(|state| state.dump.is_none()) => {
-                return Err(Error::new(eyre!("registry initial response timed out"), ErrorKind::Network));
+                _ = self.heartbeat.tick() => {
+                    tokio::time::timeout(Duration::from_secs(15), self.socket.send(Message::Ping(Default::default())))
+                        .await.with_kind(ErrorKind::Network)?.with_kind(ErrorKind::Network)?;
+                }
+                _ = tokio::time::sleep_until(self.last_received + Duration::from_secs(120)) => {
+                    return Err(Error::new(eyre!("registry heartbeat timed out"), ErrorKind::Network));
+                }
+                _ = tokio::time::sleep_until(self.initial_deadline), if self.watches.values().any(|state| state.dump.is_none()) => {
+                    return Err(Error::new(eyre!("registry initial response timed out"), ErrorKind::Network));
+                }
             }
         }
     }
