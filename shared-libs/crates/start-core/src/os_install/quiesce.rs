@@ -230,10 +230,7 @@ pub async fn update_partition_table(disk_path: &Path) -> Result<(), Error> {
         .arg(disk_path)
         .invoke(ErrorKind::DiskManagement)
         .await?;
-    Command::new("udevadm")
-        .arg("settle")
-        .invoke(ErrorKind::DiskManagement)
-        .await?;
+    crate::disk::util::settle_udev().await?;
     // Forget any btrfs scan refs udev just re-installed for the target's
     // partitions only, for the same reason as in quiesce_disk.
     for part in list_partitions(disk_path).await.unwrap_or_default() {

@@ -194,7 +194,6 @@ pub async fn init(
     RpcContext::init_auth_cookie().await?;
     local_auth.complete();
 
-    // Re-enroll MOK on every boot if Secure Boot key exists but isn't enrolled yet
     if let Err(e) = crate::util::mok::enroll_mok(std::path::Path::new("/")).await {
         tracing::warn!("MOK enrollment failed: {e}");
     }
@@ -205,6 +204,7 @@ pub async fn init(
     let db = TypedPatchDb::<Database>::load_unchecked(db);
     db.mutate(crate::net::ssl::repair_root_cert).await.result?;
     let peek = db.peek().await;
+    let secret_memory = crate::fde::memory::protect_authorities(&peek)?;
     load_database.complete();
 
     load_ssh_keys.start();
@@ -406,7 +406,7 @@ pub async fn init(
     sync_clock.complete();
 
     enable_zram.start();
-    if server_info.as_zram().de()? {
+    if server_info.as_zram().de()? && secret_memory.is_none() {
         crate::system::enable_zram().await?;
         tracing::info!("{}", t!("init.enabled-zram"));
     }
@@ -476,6 +476,9 @@ pub async fn init(
         run_script("/media/startos/config/postinit.sh", progress).await;
     }
 
+    if let Some(memory) = secret_memory {
+        memory.check()?;
+    }
     tracing::info!("{}", t!("init.system-initialized"));
 
     Ok(InitResult {

@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use crate::db::model::DatabaseModel;
 use crate::prelude::*;
 use crate::util::io::TmpDir;
 
@@ -15,8 +16,23 @@ fn unsafe_memory() -> Error {
     Error::new(eyre!(t!("fde.memory.unsafe-environment")), ErrorKind::Bios)
 }
 
+/// Signing and disk authority suppress swap independently of the saved ZRAM preference.
+pub(crate) fn requires_protection(db: &DatabaseModel) -> bool {
+    let private = db.as_private();
+    private.as_fde_enrollment().transpose_ref().is_some()
+        || private.as_luks_credentials().transpose_ref().is_some()
+}
+
+pub(crate) fn protect_authorities(
+    db: &DatabaseModel,
+) -> Result<Option<ProcessSecretMemory>, Error> {
+    requires_protection(db)
+        .then(ProcessSecretMemory::protect)
+        .transpose()
+}
+
 fn check_kernel_state(swaps: &str, core_pattern: &str) -> Result<(), Error> {
-    if swaps.lines().skip(1).any(|line| !line.trim().is_empty()) || core_pattern.starts_with('|') {
+    if crate::system::swap_devices(swaps).next().is_some() || core_pattern.starts_with('|') {
         return Err(unsafe_memory());
     }
     Ok(())
@@ -125,7 +141,35 @@ mod tests {
         assert!(
             check_kernel_state(&format!("{header}/swapfile file 1024 0 -2\n"), "core\n").is_err()
         );
+        assert!(
+            check_kernel_state(
+                &format!("{header}/dev/zram0 partition 1024 0 5\n"),
+                "core\n"
+            )
+            .is_err()
+        );
         assert!(check_kernel_state(header, "|/usr/lib/systemd/systemd-coredump %P\n").is_err());
+    }
+
+    #[test]
+    fn ordinary_zram_preference_does_not_impose_fde_memory_policy() {
+        let account = crate::account::AccountInfo::new(
+            "ordinary-memory-test-password",
+            std::time::SystemTime::now(),
+            None,
+        )
+        .unwrap();
+        let initial = crate::db::model::Database::init(&account, false, None, None).unwrap();
+        let mut db = crate::db::prelude::Model::new(&initial).unwrap();
+        for preference in [false, true] {
+            db.as_public_mut()
+                .as_server_info_mut()
+                .as_zram_mut()
+                .ser(&preference)
+                .unwrap();
+            assert!(!requires_protection(&db));
+            assert!(protect_authorities(&db).unwrap().is_none());
+        }
     }
 
     #[cfg(target_os = "linux")]

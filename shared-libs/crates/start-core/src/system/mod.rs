@@ -32,6 +32,9 @@ use crate::util::serde::{WithIoFormat, display_serializable};
 use crate::util::sync::Watch;
 use crate::{MAIN_DATA, PACKAGE_DATA};
 
+#[cfg(test)]
+mod zram_tests;
+
 mod disk_health;
 pub(crate) mod log_level;
 pub(crate) mod trust_ca;
@@ -46,29 +49,67 @@ pub fn experimental<C: Context>() -> ParentHandler<C> {
     )
 }
 
+const ZRAM_DEVICE: &str = "/dev/zram0";
+const ZRAM_DISKSIZE: &str = "/sys/block/zram0/disksize";
+
+pub(crate) fn swap_devices(swaps: &str) -> impl Iterator<Item = &str> {
+    swaps
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_whitespace().next())
+}
+
+async fn zram_active() -> Result<bool, Error> {
+    let swaps = crate::util::io::read_file_to_string("/proc/swaps").await?;
+    Ok(swap_devices(&swaps).any(|device| device == ZRAM_DEVICE))
+}
+
+pub(crate) async fn disable_zram() -> Result<(), Error> {
+    if zram_active().await? {
+        Command::new("swapoff")
+            .arg(ZRAM_DEVICE)
+            .invoke(ErrorKind::Zram)
+            .await?;
+    }
+    match crate::util::io::maybe_read_file_to_string(ZRAM_DISKSIZE).await? {
+        Some(size) if size.trim() != "0" => {
+            // udev can retain the device after swapoff.
+            crate::disk::util::settle_udev().await?;
+            tokio::fs::write("/sys/block/zram0/reset", "1")
+                .await
+                .with_kind(ErrorKind::Zram)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// The caller must exclude FDE signing and disk authority.
 pub async fn enable_zram() -> Result<(), Error> {
+    if zram_active().await? {
+        return Ok(());
+    }
     let mem_info = get_mem_info().await?;
     Command::new("modprobe")
         .arg("zram")
         .invoke(ErrorKind::Zram)
         .await?;
+    crate::disk::util::settle_udev().await?;
+    disable_zram().await?;
     tokio::fs::write("/sys/block/zram0/comp_algorithm", "lz4")
         .await
         .with_kind(ErrorKind::Zram)?;
-    tokio::fs::write(
-        "/sys/block/zram0/disksize",
-        format!("{}M", mem_info.total.0 as u64 / 4),
-    )
-    .await
-    .with_kind(ErrorKind::Zram)?;
+    tokio::fs::write(ZRAM_DISKSIZE, format!("{}M", mem_info.total.0 as u64 / 4))
+        .await
+        .with_kind(ErrorKind::Zram)?;
     Command::new("mkswap")
-        .arg("/dev/zram0")
+        .arg(ZRAM_DEVICE)
         .invoke(ErrorKind::Zram)
         .await?;
     Command::new("swapon")
         .arg("-p")
         .arg("5")
-        .arg("/dev/zram0")
+        .arg(ZRAM_DEVICE)
         .invoke(ErrorKind::Zram)
         .await?;
     Ok(())
@@ -135,34 +176,33 @@ pub struct ZramParams {
 rpc_toolkit::reflect_ts!(ZramParams);
 
 pub async fn zram(ctx: RpcContext, ZramParams { enable }: ZramParams) -> Result<(), Error> {
-    let db = ctx.db.peek().await;
-
-    let zram = db.as_public().as_server_info().as_zram().de()?;
-    if enable == zram {
-        return Ok(());
-    }
-    if enable {
-        enable_zram().await?;
-    } else {
-        Command::new("swapoff")
-            .arg("/dev/zram0")
-            .invoke(ErrorKind::Zram)
-            .await?;
-        tokio::fs::write("/sys/block/zram0/reset", "1")
+    crate::util::future::complete_owned_operation(async move {
+        let _exclusive = ctx.password_changes.lock().await;
+        let db = ctx.db.peek().await;
+        if enable && crate::fde::memory::requires_protection(&db) {
+            return Err(Error::new(
+                eyre!(t!("system.zram-disabled-by-fde")),
+                ErrorKind::Zram,
+            ));
+        }
+        if enable {
+            enable_zram().await?;
+        } else {
+            disable_zram().await?;
+        }
+        ctx.db
+            .mutate(|v| {
+                v.as_public_mut()
+                    .as_server_info_mut()
+                    .as_zram_mut()
+                    .ser(&enable)?;
+                Ok(())
+            })
             .await
-            .with_kind(ErrorKind::Zram)?;
-    }
-    ctx.db
-        .mutate(|v| {
-            v.as_public_mut()
-                .as_server_info_mut()
-                .as_zram_mut()
-                .ser(&enable)?;
-            Ok(())
-        })
-        .await
-        .result?;
-    Ok(())
+            .result?;
+        Ok(())
+    })
+    .await
 }
 
 #[derive(Debug, Deserialize, Serialize, VisitFields)]

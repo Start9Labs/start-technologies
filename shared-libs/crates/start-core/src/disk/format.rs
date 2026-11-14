@@ -105,10 +105,7 @@ async fn erase_and_partition(
         .invoke(ErrorKind::DiskManagement)
         .await?;
     create_backup_filesystem(&partition, &label).await?;
-    Command::new("udevadm")
-        .arg("settle")
-        .invoke(ErrorKind::DiskManagement)
-        .await?;
+    crate::disk::util::settle_udev().await?;
     Ok(partition)
 }
 

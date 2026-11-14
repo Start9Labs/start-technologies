@@ -170,6 +170,7 @@ pub async fn begin(
                 ErrorKind::Bios,
             ));
         }
+        crate::system::disable_zram().await?;
         super::memory::require_tmpfs(Path::new("/run"))?;
         let memory = super::memory::ProcessSecretMemory::protect()?;
         let mut enrollment = match snapshot.as_private().as_fde_enrollment().de()? {
@@ -301,6 +302,31 @@ mod tests {
         assert_eq!(enrollment.approval_code.as_ref().unwrap().len(), 16);
         assert!(!format!("{enrollment:?}").contains(enrollment.approval_code.as_ref().unwrap()));
         assert!(std::fs::read_dir(runtime.path()).unwrap().next().is_none());
+        let account = crate::account::AccountInfo::new(
+            "memory-policy-test-password",
+            std::time::SystemTime::now(),
+            None,
+        )
+        .unwrap();
+        let initial = crate::db::model::Database::init(&account, false, None, None).unwrap();
+        let mut db = crate::db::prelude::Model::new(&initial).unwrap();
+        db.as_private_mut()
+            .as_fde_enrollment_mut()
+            .ser(&Some(enrollment.clone()))
+            .unwrap();
+        for preference in [false, true] {
+            db.as_public_mut()
+                .as_server_info_mut()
+                .as_zram_mut()
+                .ser(&preference)
+                .unwrap();
+            assert!(super::super::memory::requires_protection(&db));
+            super::super::memory::protect_authorities(&db)
+                .unwrap()
+                .unwrap()
+                .check()
+                .unwrap();
+        }
         let roundtrip: Enrollment =
             serde_json::from_slice(&serde_json::to_vec(&enrollment).unwrap()).unwrap();
         assert!(roundtrip.image_key.public_eq(&enrollment.image_key));

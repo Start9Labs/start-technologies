@@ -70,7 +70,7 @@ pub struct RpcContextSeed {
     pub sync_db: watch::Sender<u64>,
     pub disk_updates: watch::Sender<()>,
     pub account: SyncRwLock<AccountInfo>,
-    /// Callers hold through slot, account and shadow changes.
+    /// Callers hold through credential and managed-swap changes.
     pub password_changes: Mutex<()>,
     pub os_net_service: NetService,
     pub net_controller: Arc<NetController>,
@@ -250,6 +250,7 @@ impl RpcContext {
         .await
         .result?;
         let peek = db.peek().await;
+        let secret_memory = crate::fde::memory::protect_authorities(&peek)?;
         let account = AccountInfo::load(&peek)?;
         load_db.complete();
         tracing::info!("{}", t!("context.rpc.opened-patchdb"));
@@ -523,6 +524,9 @@ impl RpcContext {
                 }
             }
         });
+        if let Some(memory) = secret_memory {
+            memory.check()?;
+        }
         Ok(res)
     }
 
