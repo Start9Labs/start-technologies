@@ -31,6 +31,8 @@ ip -6 addr add 2001:db8:59::2/124 dev wg0 nodad
 ip addr add 10.60.0.2/24 dev wg1
 ip addr add 10.0.3.1/24 dev lxcbr0
 ip -6 addr add fd00:3::1/64 dev lxcbr0 nodad
+ip addr add "$OS_TARGET_V4/32" dev lxcbr0
+ip -6 addr add "$OS_TARGET_V6/128" dev lxcbr0 nodad
 
 ip route add default via 192.168.1.1 dev eth0
 ip -6 route add default via 2001:db8:1::1 dev eth0
@@ -53,12 +55,14 @@ for family in -4 -6; do
   ip $family rule add lookup default priority $AUTO_DEFAULT
 done
 ip -6 rule add fwmark $T_WG0 to 2000::/3 lookup $T_WG0 priority $TUNNEL_REPLY
-ip rule add from 192.168.1.5 fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
-ip rule add from 10.59.0.2 fwmark 0/0xffffffff lookup $T_WG0 priority $SOURCE
-ip rule add from 10.60.0.2 fwmark 0/0xffffffff lookup $T_WG1 priority $SOURCE
-ip -6 rule add from 2001:db8:1::5 fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
-ip -6 rule add from fd12:3456::5 fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
-ip -6 rule add from 2001:db8:59::2 fwmark 0/0xffffffff lookup $T_WG0 priority $SOURCE
+ip rule add from 192.168.1.5 iif lo fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
+ip rule add from 10.59.0.2 iif lo fwmark 0/0xffffffff lookup $T_WG0 priority $SOURCE
+ip rule add from 10.60.0.2 iif lo fwmark 0/0xffffffff lookup $T_WG1 priority $SOURCE
+ip -6 rule add from 2001:db8:1::5 iif lo fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
+ip -6 rule add from fd12:3456::5 iif lo fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
+ip -6 rule add from 2001:db8:59::2 iif lo fwmark 0/0xffffffff lookup $T_WG0 priority $SOURCE
+ip rule add from "$OS_TARGET_V4" iif lo fwmark 0/0xffffffff lookup main priority $SOURCE
+ip -6 rule add from "$OS_TARGET_V6" iif lo fwmark 0/0xffffffff lookup main priority $SOURCE
 
 # pin_system <table>: an empty table id models a gateway whose interface is gone.
 pin_system() {
@@ -76,10 +80,11 @@ unpin_system() {
   done
 }
 pin_service() {
-  ip rule add from 10.0.3.5 lookup $1 priority $SERVICE_OUTBOUND
-  ip rule add from 10.0.3.5 unreachable priority $SERVICE_OUTBOUND_REJECT
-  ip -6 rule add from fd00:3::5 lookup $1 priority $SERVICE_OUTBOUND
-  ip -6 rule add from fd00:3::5 unreachable priority $SERVICE_OUTBOUND_REJECT
+  local source4=${2:-10.0.3.5} source6=${3:-fd00:3::5}
+  ip rule add from "$source4" lookup $1 priority $SERVICE_OUTBOUND
+  ip rule add from "$source4" unreachable priority $SERVICE_OUTBOUND_REJECT
+  ip -6 rule add from "$source6" lookup $1 priority $SERVICE_OUTBOUND
+  ip -6 rule add from "$source6" unreachable priority $SERVICE_OUTBOUND_REJECT
 }
 unpin_service() {
   for family in -4 -6; do
@@ -123,6 +128,12 @@ every_state() {
   expect reply-forwarded eth0 203.0.113.9 mark $T_ETH $from_container
   expect reply-forwarded wg0 203.0.113.9 mark $T_WG0 $from_container
   expect reply-marked eth0 203.0.113.9 mark $T_ETH
+  expect backend-reply-unmarked eth0 203.0.113.9 from "$OS_TARGET_V4"
+  expect backend-reply-unmarked eth0 2001:db8:99::9 from "$OS_TARGET_V6"
+  expect reply-marked eth0 203.0.113.9 from "$OS_TARGET_V4" mark $T_ETH
+  expect reply-marked wg0 203.0.113.9 from "$OS_TARGET_V4" mark $T_WG0
+  expect reply-marked eth0 2001:db8:99::9 from "$OS_TARGET_V6" mark $T_ETH
+  expect reply-marked wg0 2001:db8:99::9 from "$OS_TARGET_V6" mark $T_WG0
   expect reply-unmarked eth0 203.0.113.9 from 192.168.1.5
   expect reply-unmarked wg0 203.0.113.9 from 10.59.0.2
   expect reply-unmarked eth0 2001:db8:99::9 from 2001:db8:1::5
@@ -143,6 +154,8 @@ every_state
 expect system-selection wg0 203.0.113.9
 expect system-selection wg0 2001:db8:99::9
 expect system-selection wg0 203.0.113.9 $from_container
+expect local-outbound wg0 203.0.113.9 from "$OS_TARGET_V4" mark $LOCAL_OUTBOUND_MARK
+expect local-outbound wg0 2001:db8:99::9 from "$OS_TARGET_V6" mark $LOCAL_OUTBOUND_MARK
 expect local-outbound wg0 203.0.113.9 from 192.168.1.5 mark $LOCAL_OUTBOUND_MARK
 expect local-outbound wg0 2001:db8:99::9 from 2001:db8:1::5 mark $LOCAL_OUTBOUND_MARK
 expect local-outbound eth0 192.168.1.77 mark $LOCAL_OUTBOUND_MARK
@@ -157,6 +170,8 @@ every_state
 expect system-kill-switch REJECT 203.0.113.9
 expect system-kill-switch REJECT 2001:db8:99::9
 expect system-kill-switch REJECT 203.0.113.9 $from_container
+expect local-outbound REJECT 203.0.113.9 from "$OS_TARGET_V4" mark $LOCAL_OUTBOUND_MARK
+expect local-outbound REJECT 2001:db8:99::9 from "$OS_TARGET_V6" mark $LOCAL_OUTBOUND_MARK
 expect local-outbound REJECT 203.0.113.9 from 192.168.1.5 mark $LOCAL_OUTBOUND_MARK
 expect local-outbound REJECT 2001:db8:99::9 from 2001:db8:1::5 mark $LOCAL_OUTBOUND_MARK
 expect local-outbound eth0 2001:db8:1::77 from 2001:db8:1::5 mark $LOCAL_OUTBOUND_MARK
@@ -169,6 +184,7 @@ every_state
 expect system-selection wg1 203.0.113.9
 expect v6-leak-guard REJECT 2001:db8:99::9
 expect v6-leak-guard REJECT 2001:db8:99::9 $from_container_v6
+expect local-outbound REJECT 2001:db8:99::9 from "$OS_TARGET_V6" mark $LOCAL_OUTBOUND_MARK
 expect local-outbound REJECT 2001:db8:99::9 from 2001:db8:1::5 mark $LOCAL_OUTBOUND_MARK
 unpin_system
 
@@ -204,6 +220,37 @@ pin_system $T_WG0
 every_state
 expect service-over-system wg1 203.0.113.9 $from_container
 expect system-selection wg0 203.0.113.9
+unpin_service
+unpin_system
+
+ip addr del "$OS_TARGET_V4/32" dev lxcbr0
+ip -6 addr del "$OS_TARGET_V6/128" dev lxcbr0
+from_unassigned_target="from $OS_TARGET_V4 iif lxcbr0"
+from_unassigned_target_v6="from $OS_TARGET_V6 iif lxcbr0"
+
+state="forwarded backend source, system pinned to wg0"
+pin_system $T_WG0
+expect system-selection wg0 203.0.113.9 $from_unassigned_target
+expect system-selection wg0 2001:db8:99::9 $from_unassigned_target_v6
+unpin_system
+
+state="forwarded backend source, system gateway gone"
+pin_system ""
+expect system-kill-switch REJECT 203.0.113.9 $from_unassigned_target
+expect system-kill-switch REJECT 2001:db8:99::9 $from_unassigned_target_v6
+unpin_system
+
+state="forwarded backend source, service pinned to wg0"
+pin_service $T_WG0 "$OS_TARGET_V4" "$OS_TARGET_V6"
+expect service-selection wg0 203.0.113.9 $from_unassigned_target
+expect service-selection wg0 2001:db8:99::9 $from_unassigned_target_v6
+unpin_service
+
+state="forwarded backend source, service gateway gone, system pinned to wg0"
+pin_service 1999 "$OS_TARGET_V4" "$OS_TARGET_V6"
+pin_system $T_WG0
+expect service-kill-switch REJECT 203.0.113.9 $from_unassigned_target
+expect service-kill-switch REJECT 2001:db8:99::9 $from_unassigned_target_v6
 unpin_service
 unpin_system
 

@@ -1566,7 +1566,7 @@ async fn watcher(
                         reconcile_mangle_rules(&policy_ifaces).await.log_err();
                         if !policy_ifaces.is_empty() {
                             for v6 in [false, true] {
-                                ensure_main_suppress_rule(v6).await.log_err();
+                                ensure_base_rules(v6).await.log_err();
                             }
                         }
                         let mut jobs = jobs
@@ -1741,11 +1741,7 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
             let Some(rest) = reply.or(source) else {
                 continue;
             };
-            let Some(pos) = rest.find("lookup ") else {
-                continue;
-            };
-            let token = rest[pos + 7..].split_whitespace().next().unwrap_or("");
-            let Ok(table_id) = token.parse::<u32>() else {
+            let Some(table_id) = rule_lookup_table(rest) else {
                 continue;
             };
             if table_id < GATEWAY_TABLE_BASE || active_tables.contains(&table_id) {
@@ -2227,11 +2223,23 @@ async fn watch_ip(
     }
 }
 
+fn rule_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let mut tokens = line.split_whitespace();
+    tokens.find(|token| *token == key)?;
+    tokens.next()
+}
+
 fn rule_has(line: &str, key: &str, value: &str) -> bool {
-    line.split_whitespace()
-        .collect::<Vec<_>>()
-        .windows(2)
-        .any(|w| w[0] == key && w[1] == value)
+    rule_value(line, key) == Some(value)
+}
+
+const MAIN_TABLE_ID: u32 = 254;
+
+fn rule_lookup_table(line: &str) -> Option<u32> {
+    match rule_value(line, "lookup")? {
+        "main" => Some(MAIN_TABLE_ID),
+        table => table.parse().ok(),
+    }
 }
 
 fn main_suppress_rule(line: &str) -> bool {
@@ -2247,8 +2255,8 @@ fn main_suppress_rule(line: &str) -> bool {
     })
 }
 
-/// Specific routes are `main`'s; per-interface tables hold only defaults.
-async fn ensure_main_suppress_rule(v6: bool) -> Result<(), Error> {
+/// Installs shared destination and mark-zero backend source lookups.
+async fn ensure_base_rules(v6: bool) -> Result<(), Error> {
     // Reject-type defaults terminate before suppression; `throw` routes fall through.
     let mut ip = Command::new("ip");
     if v6 {
@@ -2276,6 +2284,12 @@ async fn ensure_main_suppress_rule(v6: bool) -> Result<(), Error> {
             .invoke(ErrorKind::Network)
             .await?;
     }
+    let source = if v6 {
+        crate::net::bridge::OS_TARGET_IPV6.to_string()
+    } else {
+        crate::net::bridge::OS_TARGET_IPV4.to_string()
+    };
+    reconcile_source_rules(v6, MAIN_TABLE_ID, &[source].into(), &rules).await;
     Ok(())
 }
 
@@ -2508,7 +2522,20 @@ async fn apply_policy_routing_v6(
     Ok(())
 }
 
-/// A reply is first routed unmarked, by its source address alone.
+fn source_rule_addresses(table_id: u32, rules: &str) -> BTreeSet<String> {
+    rules
+        .lines()
+        .filter_map(|line| {
+            let rule = rule_at_priority(line, SOURCE_RULE_PRIORITY)?;
+            (rule_lookup_table(rule) == Some(table_id))
+                .then(|| rule_value(rule, "from"))
+                .flatten()
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+/// Local-origin source lookups cannot route forwarded traffic.
 async fn reconcile_source_rules(
     v6: bool,
     table_id: u32,
@@ -2516,19 +2543,7 @@ async fn reconcile_source_rules(
     rules_output: &str,
 ) {
     let table_str = table_id.to_string();
-    let existing: BTreeSet<String> = rules_output
-        .lines()
-        .filter_map(|l| {
-            let toks: Vec<&str> = rule_at_priority(l, SOURCE_RULE_PRIORITY)?
-                .split_whitespace()
-                .collect();
-            toks.windows(2)
-                .any(|w| w[0] == "lookup" && w[1].parse::<u32>().ok() == Some(table_id))
-                .then(|| toks.windows(2).find(|w| w[0] == "from").map(|w| w[1]))
-                .flatten()
-                .map(|addr| addr.to_owned())
-        })
-        .collect();
+    let existing = source_rule_addresses(table_id, rules_output);
     for (action, addrs) in [
         ("add", addrs.difference(&existing)),
         ("del", existing.difference(addrs)),
@@ -2542,6 +2557,8 @@ async fn reconcile_source_rules(
                 .arg(action)
                 .arg("from")
                 .arg(addr)
+                .arg("iif")
+                .arg("lo")
                 .arg("fwmark")
                 .arg("0/0xffffffff")
                 .arg("lookup")
@@ -3661,6 +3678,21 @@ impl Accept for WildcardListener {
 #[cfg(test)]
 mod policy_rule_tests {
     use super::*;
+
+    #[test]
+    fn main_source_rules_match_named_and_numeric_table_output() {
+        let rules = "60: from 10.0.3.254 fwmark 0 lookup main\n60: from 10.0.3.253 fwmark 0 lookup 254\n60: from 192.0.2.10 fwmark 0 lookup 1004\n600: from 192.0.2.11 fwmark 0 lookup main\n";
+        assert_eq!(
+            source_rule_addresses(MAIN_TABLE_ID, rules),
+            ["10.0.3.254".to_owned(), "10.0.3.253".to_owned()].into()
+        );
+        assert_eq!(
+            source_rule_addresses(1004, rules),
+            ["192.0.2.10".to_owned()].into()
+        );
+        assert_eq!(rule_lookup_table("from all lookup main"), Some(254));
+        assert_eq!(rule_lookup_table("from all lookup missing"), None);
+    }
 
     #[test]
     fn main_suppress_rule_requires_the_unrestricted_rule() {
