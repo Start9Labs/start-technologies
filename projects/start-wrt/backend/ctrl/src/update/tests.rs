@@ -1,6 +1,7 @@
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::Router;
+use futures_util::StreamExt;
 use openssl::pkey::PKey;
 use startos::s9pk::manifest::LocaleString;
 use startos::sign::{AnySignature, AnySigningKey, SignatureMap, Signer};
@@ -8,6 +9,7 @@ use startos::util::future::NonDetachingJoinHandle;
 use startos::util::serde::Base64;
 
 use super::*;
+use crate::progress::Progress;
 
 const FIRMWARE: &[u8] = b"firmware fixture";
 
@@ -226,4 +228,112 @@ async fn firmware_download_rejects_invalid_commitments_and_unavailable_mirrors()
     assert!(download_firmware(&client, &asset, &path, |_| {})
         .await
         .is_err());
+}
+
+#[tokio::test]
+async fn revocation_closes_legacy_update_progress_while_update_is_active() {
+    use startos::middleware::auth::signature::SignatureAuthorizationContext;
+    use tokio_tungstenite::tungstenite::Message;
+
+    let context = ServerContext::default();
+    let signer: Signer = AnySigningKey::generate().into();
+    let key = crate::rpc::tests::enroll(&context, &signer).await;
+    let subscription = startos::auth::continuation_subscription(&context, Some(key.clone()))
+        .await
+        .unwrap();
+    let tracker = FullProgressTracker::new();
+    let mut phase = tracker.add_phase("Downloading firmware".into(), Some(1));
+    phase.start();
+    let guid = Guid::new();
+    context
+        .continuations
+        .add(
+            guid.clone(),
+            legacy_progress_continuation(subscription, None, tracker.clone()),
+        )
+        .await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let path = format!("/progress/{guid}");
+    let continuations = context.continuations.clone();
+    let app = Router::new().route(
+        &path,
+        get(move |upgrade: axum::extract::ws::WebSocketUpgrade| {
+            let continuations = continuations.clone();
+            let guid = guid.clone();
+            async move {
+                continuations
+                    .get_ws_handler(&guid)
+                    .await
+                    .unwrap()
+                    .on_upgrade(upgrade, guid)
+            }
+        }),
+    );
+    let _server: NonDetachingJoinHandle<()> = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    })
+    .into();
+    let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{address}{path}"))
+        .await
+        .unwrap();
+    let initial = tokio::time::timeout(Duration::from_secs(3), socket.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let initial: FullProgress = serde_json::from_str(initial.to_text().unwrap()).unwrap();
+    assert!(!initial.overall.is_complete());
+
+    context.unenroll([key]).await.unwrap();
+    let closed = tokio::time::timeout(Duration::from_secs(3), socket.next())
+        .await
+        .expect("revocation must close an idle legacy update observer");
+    assert!(matches!(
+        closed,
+        None | Some(Err(_)) | Some(Ok(Message::Close(_)))
+    ));
+    assert!(!tracker.snapshot().overall.is_complete());
+    phase.complete();
+    tracker.complete();
+    assert_eq!(tracker.snapshot().overall, Progress::Complete(true));
+}
+
+async fn streamed(succeed: bool) -> Vec<Result<FullProgress, Error>> {
+    let tracker = FullProgressTracker::new();
+    let mut phase = tracker.add_phase("Downloading firmware".into(), Some(1));
+    let finished = tracker.clone();
+    let done = tokio::spawn(async move {
+        phase.start();
+        if succeed {
+            phase.complete();
+            finished.complete();
+            Ok(())
+        } else {
+            finished.fail();
+            Err(Error::other("sysupgrade exited with code 1"))
+        }
+    });
+    progress_until_done(tracker, done).collect().await
+}
+
+#[tokio::test]
+async fn streamed_progress_ends_with_the_update_result() {
+    let succeeded = streamed(true).await;
+    let last = succeeded.last().unwrap().as_ref().unwrap();
+    assert_eq!(last.overall, Progress::Complete(true));
+    assert!(succeeded.iter().all(Result::is_ok));
+
+    let failed = streamed(false).await;
+    let (error, snapshots) = failed.split_last().unwrap();
+    assert!(error
+        .as_ref()
+        .unwrap_err()
+        .to_string()
+        .contains("sysupgrade exited with code 1"));
+    assert_eq!(
+        snapshots.last().unwrap().as_ref().unwrap().overall,
+        Progress::Complete(false)
+    );
 }

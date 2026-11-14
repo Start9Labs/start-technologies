@@ -9,6 +9,7 @@ import {
   AUTH_KEY_STORAGE_KEY,
   AUTH_SIGNING_HOST,
 } from '../src/services/auth-key.service'
+import { RpcConsoleLog } from '../src/services/rpc-console-log'
 import { RpcSocketService } from '../src/services/rpc-socket.service'
 import { ServerIdentityService } from '../src/services/server-identity.service'
 import { sessionWebSocketConstructor } from '../src/services/session-websocket'
@@ -39,6 +40,7 @@ Object.defineProperty(globalThis, 'WebSocket', {
 const injector = Injector.create({
   providers: [
     AuthKeyService,
+    RpcConsoleLog,
     RpcSocketService,
     ServerIdentityService,
     { provide: DOCUMENT, useValue: document },

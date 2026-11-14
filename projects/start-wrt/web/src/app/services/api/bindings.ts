@@ -226,6 +226,7 @@ export type PeerSetDnsInjectionArgsInput = z.input<
 >
 export type ProfileId = z.output<typeof schemas.ProfileId>
 export type ProfileIdOptInput = z.input<typeof schemas.ProfileIdOpt>
+export type ProgressUnits = z.output<typeof schemas.ProgressUnits>
 export type Protocol = z.output<typeof schemas.Protocol>
 export type ProtocolInput = z.input<typeof schemas.Protocol>
 export type PublishedPortStatus = z.output<typeof schemas.PublishedPortStatus>
@@ -337,6 +338,12 @@ export type ProfileDeleteRequestInput = z.input<
  */
 export type ProfileDeleteResult = z.output<typeof schemas.ProfileDeleteResult>
 export type ProfileSetRequestInput = z.input<typeof schemas.ProfileSetRequest>
+
+/**
+ * Progress state for a single phase or overall operation.
+ * Wire-compatible with start-os's `Progress` (serialized as untagged).
+ */
+export type Progress = z.output<typeof schemas.Progress>
 export type PublishedPort = z.output<typeof schemas.PublishedPort>
 export type PublishedPortInputInput = z.input<typeof schemas.PublishedPortInput>
 export type ScheduleWindowsInput = z.input<typeof schemas.ScheduleWindows>
@@ -383,6 +390,7 @@ export type WifiSetResult = z.output<typeof schemas.WifiSetResult>
 export type BlackoutSetRequestInput = z.input<typeof schemas.BlackoutSetRequest>
 export type ConfigCheck = z.output<typeof schemas.ConfigCheck>
 export type FlashParamsInput = z.input<typeof schemas.FlashParams>
+export type NamedProgress = z.output<typeof schemas.NamedProgress>
 export type PublishedPortsSetRequestInput = z.input<
   typeof schemas.PublishedPortsSetRequest
 >
@@ -408,5 +416,10 @@ export type SetInitialPasswordParamsInput = z.input<
  */
 export type VpnServers = z.output<typeof schemas.VpnServers>
 export type WifiRegulatory = z.output<typeof schemas.WifiRegulatory>
+
+/**
+ * Snapshot of overall + per-phase progress, sent over WebSocket.
+ */
+export type FullProgress = z.output<typeof schemas.FullProgress>
 export type SessionList = z.output<typeof schemas.SessionList>
 export type Api = RpcSchemaTree<typeof schemas.Api>
