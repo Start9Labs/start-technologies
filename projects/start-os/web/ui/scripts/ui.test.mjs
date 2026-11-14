@@ -4848,16 +4848,17 @@ test('provider marketplace preserves its request across tiles and distinguishes 
       providerId: 'pinned',
     }),
   )
-  replies[2].next([])
+  replies[2].next([{ id: 'pinned' }])
   assert.deepEqual(calls, [
     [url, 'bitcoin', '>=26.0.0', null],
     [url, 'bitcoin', '>=27.0.0', null],
     [url, 'bitcoin', '>=27.0.0', 'pinned'],
   ])
   f.replace('/registryCache', { [url]: registryEntry('1.0.0:0', 'error') })
-  replies.at(-1).next([])
+  assert.equal(calls.length, 3)
   assert.equal(page.registry().status, 'error')
   assert.equal(page.registry().loading, false)
+  assert.deepEqual(page.registry().packages, [{ id: 'pinned' }])
 })
 
 test('provider discovery waits for the selected cache and refreshes its backend-cache query offline', async t => {
