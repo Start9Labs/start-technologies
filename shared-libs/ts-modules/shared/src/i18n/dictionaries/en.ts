@@ -1022,9 +1022,9 @@ export const ENGLISH: Record<string, number> = {
   'Restore': 1220, // as in, restore from a backup
   'Go to Backup Targets': 1221,
   'A backup is currently running. Interrupting it now can corrupt the backup being written.': 1300,
-  'Wait for backup to complete': 1296,
-  'Shut down now': 1297,
-  'A backup is running. Your server will restart when it finishes.': 1298,
+  'Wait for backup to complete': 1301,
+  'Shut down now': 1302,
+  'A backup is running. Your server will restart when it finishes.': 1303,
   'A backup is running. Your server will shut down when it finishes.': 1299,
   'UPS Monitor': 1222,
   'NUT server': 1223,
