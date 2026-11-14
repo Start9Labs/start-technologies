@@ -7,7 +7,11 @@ use crate::net::web_server::TcpMetadata;
 
 /// Restores the destination before OS-backend DNAT; peer addresses remain unchanged.
 /// Requires an original destination outside the reserved backend targets.
-pub(crate) fn tcp_metadata(stream: &TcpStream) -> std::io::Result<TcpMetadata> {
+/// Expects the peer address from `accept`; `TcpStream::peer_addr` fails after a reset.
+pub(crate) fn tcp_metadata(
+    stream: &TcpStream,
+    peer_addr: SocketAddr,
+) -> std::io::Result<TcpMetadata> {
     let destination = stream.local_addr()?;
     let local_addr = if is_os_target(destination.ip()) {
         let original = original_destination(stream, destination)?;
@@ -20,7 +24,7 @@ pub(crate) fn tcp_metadata(stream: &TcpStream) -> std::io::Result<TcpMetadata> {
     };
     Ok(TcpMetadata {
         local_addr,
-        peer_addr: stream.peer_addr()?,
+        peer_addr,
     })
 }
 

@@ -40,6 +40,7 @@ use crate::net::acme::{
 use crate::net::forward::START9_BRIDGE_V6_SUBNET;
 use crate::net::gateway::{
     GatewayInfo, NetworkInterfaceController, NetworkInterfaceListenerAcceptMetadata,
+    poll_accept_ingress,
 };
 use crate::net::host::binding::ProxyOptions;
 use crate::net::http::ForwardedHeaders;
@@ -892,14 +893,8 @@ impl Accept for VHostBindListener {
 
         // Poll each listener for incoming connections
         for (&addr, listener) in &self.listeners {
-            match listener.poll_accept(cx) {
-                Poll::Ready(Ok((stream, _))) => {
-                    crate::net::utils::set_default_keepalive(&stream);
-                    let metadata = self.ip_info.peek(|interfaces| {
-                        NetworkInterfaceListenerAcceptMetadata::from_stream(&stream, interfaces)
-                    })?;
-                    return Poll::Ready(Ok((metadata, Box::pin(stream))));
-                }
+            match poll_accept_ingress(listener, &self.ip_info, cx) {
+                Poll::Ready(Ok(accepted)) => return Poll::Ready(Ok(accepted)),
                 Poll::Ready(Err(error)) => {
                     tracing::trace!(%addr, ?error, "Vhost listener failed to accept connection");
                 }
