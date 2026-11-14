@@ -7013,6 +7013,13 @@ about.echo-message:
   fr_FR: "Renvoyer un message"
   pl_PL: "Odzew wiadomości"
 
+about.edit-os-version:
+  en_US: "Edit OS version metadata; omitted fields remain unchanged"
+  de_DE: "Metadaten einer OS-Version bearbeiten; ausgelassene Felder bleiben unverändert"
+  es_ES: "Editar metadatos de una versión del SO; los campos omitidos no cambian"
+  fr_FR: "Modifier les métadonnées d'une version du système ; les champs omis restent inchangés"
+  pl_PL: "Edytuj metadane wersji systemu; pominięte pola pozostają bez zmian"
+
 about.edit-s9pk-manifest:
   en_US: "Edit s9pk manifest"
   de_DE: "s9pk-Manifest bearbeiten"

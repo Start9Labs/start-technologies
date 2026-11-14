@@ -8401,6 +8401,57 @@
     }
   },
   {
+    "name": "registry.os.version.edit",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RegistryUrlParams" },
+        { "$ref": "#/$defs/EditVersionParams" }
+      ],
+      "$defs": {
+        "RegistryUrlParams": {
+          "type": "object",
+          "properties": { "registry": { "type": "string" } },
+          "required": ["registry"],
+          "additionalProperties": true
+        },
+        "EditVersionParams": {
+          "type": "object",
+          "properties": {
+            "version": { "type": "string" },
+            "releaseNotes": {
+              "anyOf": [{ "$ref": "#/$defs/LocaleString" }, { "type": "null" }]
+            },
+            "sourceVersion": { "type": ["string", "null"] },
+            "gitHash": {
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "expectedGitHash": {
+              "anyOf": [{ "$ref": "#/$defs/GitHash" }, { "type": "null" }]
+            },
+            "security": { "type": ["boolean", "null"] }
+          },
+          "required": ["version"],
+          "additionalProperties": true,
+          "description": "Edits an existing release; omitted fields, assets and authorized signers remain unchanged."
+        },
+        "LocaleString": {
+          "anyOf": [
+            { "type": "string" },
+            {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "type": "string" }
+            }
+          ]
+        },
+        "GitHash": { "type": "string" }
+      },
+      "type": "object"
+    }
+  },
+  {
     "name": "registry.os.version.get",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
