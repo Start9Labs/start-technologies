@@ -70,7 +70,7 @@ pub(crate) async fn server(ctx: RegistryContext) -> (Url, NonDetachingJoinHandle
     (url, task)
 }
 
-async fn rpc(url: &Url, method: &str, params: Value, signer: Option<&Signer>) -> Value {
+pub(crate) async fn rpc(url: &Url, method: &str, params: Value, signer: Option<&Signer>) -> Value {
     let body =
         serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}))
             .unwrap();
