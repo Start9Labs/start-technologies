@@ -8,7 +8,7 @@ import {
   i18nPipe,
   TaskService,
 } from '@start9labs/shared'
-import { TuiButton, TuiHint, TuiIcon } from '@taiga-ui/core'
+import { TUI_BREAKPOINT, TuiButton, TuiHint, TuiIcon } from '@taiga-ui/core'
 import { TuiTooltip } from '@taiga-ui/kit'
 import { filter, firstValueFrom } from 'rxjs'
 
@@ -169,15 +169,27 @@ const TARGET_SOURCES: SourcePickerData = {
             </td>
             <td>
               @if (conversion) {
-                <button
-                  tuiButton
-                  size="s"
-                  appearance="warning"
-                  iconStart="@tui.shield-alert"
-                  (click)="convert(id)"
-                >
-                  {{ conversion | i18n }}
-                </button>
+                @if (breakpoint() === 'mobile') {
+                  <button
+                    tuiIconButton
+                    size="s"
+                    appearance="warning"
+                    iconStart="@tui.shield-alert"
+                    (click)="convert(id)"
+                  >
+                    {{ conversion | i18n }}
+                  </button>
+                } @else {
+                  <button
+                    tuiButton
+                    size="s"
+                    appearance="warning"
+                    iconStart="@tui.shield-alert"
+                    (click)="convert(id)"
+                  >
+                    {{ conversion | i18n }}
+                  </button>
+                }
               } @else if (target.legacyBackup) {
                 <backup-legacy-warning [id]="id" />
               }
@@ -255,12 +267,6 @@ const TARGET_SOURCES: SourcePickerData = {
         align-self: center;
       }
 
-      td:last-child:not([colspan]):has(> :nth-child(2)) {
-        grid-column: 1 / -1;
-        grid-row: auto;
-        white-space: normal;
-      }
-
       td.path {
         display: none;
       }
@@ -293,6 +299,8 @@ export default class BackupTargets {
   private readonly dialogs = inject(DialogService)
   private readonly formDialog = inject(FormDialogService)
   private readonly addSource = inject(AddSourceService)
+
+  protected readonly breakpoint = inject(TUI_BREAKPOINT)
 
   protected readonly service = inject(BackupService)
   protected readonly types = VOLUME_TYPES

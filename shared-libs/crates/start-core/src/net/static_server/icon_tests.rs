@@ -4,6 +4,7 @@ use imbl_value::json;
 use super::*;
 use crate::auth::{LoginContext, Session};
 use crate::middleware::auth::DbContext;
+use crate::middleware::auth::signature::{AUTH_SIG_HEADER, SignatureHeader};
 use crate::registry::package::icon::store_icon;
 use crate::sign::AnySigningKey;
 use crate::util::DataUrl;

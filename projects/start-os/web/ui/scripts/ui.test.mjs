@@ -241,6 +241,7 @@ const {
   i18nPipe,
   i18nService,
 } = await import('@start9labs/shared')
+const { TUI_BREAKPOINT } = await import('@taiga-ui/core')
 const { CONTEXT } = await import('@taiga-ui/polymorpheus')
 const { WA_WINDOW } = await import('@ng-web-apis/common')
 const { UiUpdateService } = await import('src/app/services/ui-update.service')
@@ -1820,6 +1821,7 @@ function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
   const injector = createEnvironmentInjector([
     AddSourceService,
     BackupService,
+    { provide: TUI_BREAKPOINT, useValue: () => 'desktopLarge' },
     { provide: OSService, useValue: { backingUp$: of(false) } },
     {
       provide: ActivatedRoute,

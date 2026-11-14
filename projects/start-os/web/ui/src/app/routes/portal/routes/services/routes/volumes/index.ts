@@ -6,6 +6,7 @@ import { DocsLinkDirective, i18nPipe } from '@start9labs/shared'
 import {
   TuiButton,
   TuiCell,
+  TuiHint,
   TuiIcon,
   TuiNotification,
   TuiTitle,
@@ -49,8 +50,11 @@ import {
           <span tuiTitle>
             {{ name(entry.value) }}
             <span tuiSubtitle class="location">
-              <tui-icon [icon]="types[entry.value.source.kind].icon" />
-              {{ types[entry.value.source.kind].label | i18n }} ·
+              <tui-icon
+                [icon]="types[entry.value.source.kind].icon"
+                [tuiHint]="types[entry.value.source.kind].label | i18n"
+                [tuiHintShowDelay]="128"
+              />
               {{ path(entry.value.source) }}
             </span>
           </span>
@@ -98,6 +102,7 @@ import {
     i18nPipe,
     TuiButton,
     TuiCell,
+    TuiHint,
     TuiIcon,
     KeyValuePipe,
     TuiNotification,
