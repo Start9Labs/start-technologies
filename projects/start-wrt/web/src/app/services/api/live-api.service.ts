@@ -15,7 +15,7 @@ import {
   SetUciRes,
   VersionInfo,
   SystemUpdateReq,
-  SystemUpdateRes,
+  SystemUpdateStream,
   SetPasswordReq,
   SetPreferencesReq,
   VpnServerDeleteArgs,
@@ -42,6 +42,7 @@ import {
   SetupFlashReq,
   SetupFlashStream,
   LogsResponse,
+  LogsFollowStream,
   DeviceFromApi,
   DeviceUpdateReq,
   InjectedDnsRecordFromApi,
@@ -87,7 +88,6 @@ import {
 } from './api.service'
 import type { RpcStreamOptions } from '@start9labs/start-core'
 import { RpcService } from '../rpc.service'
-import { RpcSocketService, ServerIdentityService } from '@start9labs/shared'
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
 
 @Injectable({
@@ -95,16 +95,6 @@ import type { Api, RpcParamType, RpcReturnType } from './bindings'
 })
 export class LiveApiService extends ApiService {
   private readonly rpc = inject(RpcService)
-  private readonly sockets = inject(RpcSocketService)
-  private readonly identity = inject(ServerIdentityService)
-
-  openWebsocket(guid: string) {
-    const socket = this.sockets.openSocket(guid)
-    socket.addEventListener('open', this.identity.openObserver.next, {
-      once: true,
-    })
-    return socket
-  }
 
   async login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>> {
     return this.rpc.request({ method: 'auth.login', params })
@@ -154,8 +144,11 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'system.newer-versions', params: {} })
   }
 
-  async systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes> {
-    return this.rpc.request({ method: 'system.update', params })
+  async systemUpdate(
+    params: SystemUpdateReq,
+    options?: RpcStreamOptions,
+  ): Promise<SystemUpdateStream> {
+    return this.rpc.streams.system.update(params, options)
   }
 
   async systemRestart(): Promise<null> {
@@ -309,8 +302,8 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'system.logs', params: {} })
   }
 
-  async followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>> {
-    return this.rpc.request({ method: 'system.logs-follow', params: {} })
+  async followLogs(options?: RpcStreamOptions): Promise<LogsFollowStream> {
+    return this.rpc.streams.system.logsFollow({}, options)
   }
 
   async devicesList(): Promise<DeviceFromApi[]> {
