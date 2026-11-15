@@ -12,9 +12,8 @@ import {
 import {
   defaultRegistries,
   Exver,
-  i18nPipe,
   i18nService,
-  registryUrl,
+  isDefaultRegistry,
   sameUrl,
   toUrl,
 } from '@start9labs/shared'
@@ -23,7 +22,6 @@ import {
   BehaviorSubject,
   combineLatest,
   defer,
-  firstValueFrom,
   from,
   Observable,
   of,
@@ -47,8 +45,8 @@ import { Localize, localizePackageRes, localizeRegistryInfo } from './localize'
 const { start9, community } = defaultRegistries
 
 const PREFIX = '_startos/'
-const CUSTOM_KEY = 'customRegistries'
 const SELECTED_KEY = 'selectedRegistry'
+const CUSTOM_KEY = 'customRegistry'
 
 @Injectable({
   providedIn: 'root',
@@ -57,7 +55,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly api = inject(ApiService)
   private readonly exver = inject(Exver)
   private readonly storage = inject(WA_LOCAL_STORAGE)
-  private readonly i18n = inject(i18nPipe)
   private readonly i18nService = inject(i18nService)
 
   // Collapse LocaleString metadata to the active locale as it enters the app —
@@ -68,28 +65,23 @@ export class MarketplaceService extends AbstractMarketplaceService {
   // Emits the url of a registry that failed to load (unreachable / CORS).
   readonly registryError$ = new Subject<string>()
 
-  // Custom registries live in localStorage; back them with a subject so the
-  // picker updates reactively (localStorage itself is not observable).
-  private readonly custom$ = new BehaviorSubject<Record<string, string | null>>(
-    this.read<Record<string, string | null>>(CUSTOM_KEY) || {},
+  // The custom slot retains the last successfully loaded non-default registry.
+  private readonly custom$ = new BehaviorSubject(
+    this.read<StoreIdentity>(CUSTOM_KEY),
   )
 
   readonly registries$: Observable<StoreIdentity[]> = this.custom$.pipe(
     map(custom => [
       { url: start9, name: 'Start9 Registry' },
       { url: community, name: 'Community Registry' },
-      ...Object.entries(custom)
-        .filter(([u]) => !sameUrl(u, start9) && !sameUrl(u, community))
-        .map(([url, name]) => ({ url, name: name || url })),
+      ...(custom ? [custom] : []),
     ]),
-    shareReplay(1),
   )
 
   readonly currentRegistryUrl$ = new ReplaySubject<string>(1)
 
   private readonly fetched = new Map<string, StoreDataWithUrl>()
 
-  // Fetches any url, saved or not, so a deep link to an unsaved registry loads.
   readonly currentRegistry$: Observable<StoreDataWithUrl> =
     this.currentRegistryUrl$.pipe(
       distinctUntilChanged((a: string, b: string) => sameUrl(a, b)),
@@ -99,7 +91,11 @@ export class MarketplaceService extends AbstractMarketplaceService {
       filter((r): r is StoreDataWithUrl => !!r),
       tap(reg => {
         this.fetched.set(toUrl(reg.url), reg)
-        this.cacheName(reg.url, reg.info.name)
+        if (!isDefaultRegistry(reg.url)) {
+          const custom = { url: reg.url, name: reg.info.name || reg.url }
+          this.write(CUSTOM_KEY, custom)
+          this.custom$.next(custom)
+        }
       }),
       shareReplay(1),
     )
@@ -148,37 +144,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
   async connect(url: string): Promise<void> {
     this.currentRegistryUrl$.next(url)
     this.write(SELECTED_KEY, url)
-  }
-
-  async add(rawUrl: string): Promise<string> {
-    const url = registryUrl(rawUrl)
-
-    if (
-      (await firstValueFrom(this.registries$)).some(r => sameUrl(r.url, url))
-    ) {
-      throw new Error(this.i18n.transform('Registry already added'))
-    }
-
-    // validates the registry is reachable and provides a display name
-    const info = await firstValueFrom(this.fetchInfo$(url))
-    this.setCustom({ ...this.custom$.value, [url]: info.name })
-
-    return url
-  }
-
-  async delete(url: string): Promise<void> {
-    this.setCustom(
-      Object.fromEntries(
-        Object.entries(this.custom$.value).filter(([u]) => !sameUrl(u, url)),
-      ),
-    )
-
-    // If the deleted registry was the persisted selection, clear it so the next
-    // no-?registry load falls back to the default rather than the deleted one.
-    const selected = this.read<string>(SELECTED_KEY)
-    if (selected && sameUrl(selected, url)) {
-      this.write(SELECTED_KEY, null)
-    }
   }
 
   fetchInfo$(url: string): Observable<T.RegistryInfo> {
@@ -282,18 +247,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
       ...pkgInfo,
       ...best,
     }
-  }
-
-  private cacheName(url: string, name: string | null): void {
-    const key = Object.keys(this.custom$.value).find(u => sameUrl(u, url))
-    if (key && this.custom$.value[key] !== name) {
-      this.setCustom({ ...this.custom$.value, [key]: name })
-    }
-  }
-
-  private setCustom(value: Record<string, string | null>): void {
-    this.write(CUSTOM_KEY, value)
-    this.custom$.next(value)
   }
 
   private read<T>(key: string): T | null {

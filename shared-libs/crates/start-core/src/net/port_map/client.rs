@@ -48,6 +48,7 @@ use crate::db::model::public::{
 use crate::net::port_map::pcp::hostname::OPTION_HOSTNAME;
 use crate::net::port_map::pcp::portset::{OPTION_PORT_SET, PortSet};
 use crate::net::port_map::{probe, upnp};
+use crate::net::transport::{Transport, TransportProtocol};
 use crate::net::utils::ipv6_is_link_local;
 use crate::prelude::*;
 use crate::util::collections::OrdMapIterMut;
@@ -69,12 +70,6 @@ const PCP_TIMEOUTS: TimeoutConfig = TimeoutConfig {
 
 fn retry_delay(failures: u32) -> Duration {
     (RETRY_INTERVAL * 2u32.pow(failures.saturating_sub(1).min(6))).min(BACKOFF_MAX)
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum TransportProtocol {
-    Tcp,
-    Udp,
 }
 
 impl TransportProtocol {
@@ -243,8 +238,9 @@ impl PortMapController {
         external_port: u16,
         internal_port: u16,
         gateways: Vec<(IpAddr, Option<u32>)>,
+        transport: Transport,
     ) {
-        for protocol in [TransportProtocol::Tcp, TransportProtocol::Udp] {
+        for &protocol in transport.protocols() {
             self.send_ensure(
                 local_ip,
                 external_port,
@@ -287,8 +283,9 @@ impl PortMapController {
         internal_port: u16,
         count: u16,
         gateways: Vec<(IpAddr, Option<u32>)>,
+        transport: Transport,
     ) {
-        for protocol in [TransportProtocol::Tcp, TransportProtocol::Udp] {
+        for &protocol in transport.protocols() {
             self.send_ensure(
                 local_ip,
                 external_port,
@@ -323,8 +320,8 @@ impl PortMapController {
             .ok();
     }
 
-    pub fn remove(&self, local_ip: IpAddr, external_port: u16) {
-        for protocol in [TransportProtocol::Tcp, TransportProtocol::Udp] {
+    pub fn remove(&self, local_ip: IpAddr, external_port: u16, transport: Transport) {
+        for &protocol in transport.protocols() {
             self.shard(local_ip)
                 .send(Command::Remove {
                     key: (local_ip, external_port, None, protocol),
@@ -1111,6 +1108,53 @@ fn renew_due(now: std::time::Instant, expiration: std::time::Instant, lifetime: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plain_mapping_commands_select_exactly_the_requested_protocols() {
+        let ip: IpAddr = "2001:db8::2".parse().unwrap();
+        for (transport, expected) in [
+            (Transport::tcp(), vec![TransportProtocol::Tcp]),
+            (Transport::udp(), vec![TransportProtocol::Udp]),
+            (
+                Transport::default(),
+                vec![TransportProtocol::Tcp, TransportProtocol::Udp],
+            ),
+        ] {
+            let (send, mut recv) = mpsc::unbounded_channel();
+            let controller = PortMapController {
+                interfaces: interfaces(),
+                shards: Arc::new(SyncMutex::new(BTreeMap::from([(ip, send)]))),
+            };
+            for count in [1, 10] {
+                controller.ensure_range(ip, 5000, 6000, count, Vec::new(), transport.clone());
+                for &protocol in &expected {
+                    let Command::Ensure { key, spec } = recv.try_recv().unwrap() else {
+                        panic!("expected ensure");
+                    };
+                    assert_eq!(key, (ip, 5000, None, protocol));
+                    assert_eq!(spec.count, count);
+                    assert_eq!(spec.internal_port, 6000);
+                }
+                assert!(recv.try_recv().is_err());
+            }
+            controller.ensure(ip, 5000, 6000, Vec::new(), transport.clone());
+            for &protocol in &expected {
+                let Command::Ensure { key, spec } = recv.try_recv().unwrap() else {
+                    panic!("expected ensure");
+                };
+                assert_eq!(key, (ip, 5000, None, protocol));
+                assert_eq!(spec.count, 1);
+            }
+            controller.remove(ip, 5000, transport);
+            for &protocol in &expected {
+                let Command::Remove { key } = recv.try_recv().unwrap() else {
+                    panic!("expected remove");
+                };
+                assert_eq!(key, (ip, 5000, None, protocol));
+            }
+            assert!(recv.try_recv().is_err());
+        }
+    }
 
     fn spec() -> Spec {
         // No gateways: try_apply() does no network I/O, so these tests exercise

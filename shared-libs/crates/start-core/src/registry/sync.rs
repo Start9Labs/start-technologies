@@ -298,7 +298,7 @@ async fn watch_registry(
     subscriptions: BTreeSet<Subscription>,
     context: ContextProvider,
 ) {
-    let mut backoff = 30;
+    let mut backoff = INITIAL_BACKOFF;
     loop {
         let _ = db
             .mutate(|db| {
@@ -356,12 +356,20 @@ async fn watch_registry(
         let next_attempt = if polling {
             next_poll
         } else {
-            let delay = Duration::from_secs(rand::random_range(backoff / 2..=backoff));
-            backoff = (backoff * 2).min(300);
-            tokio::time::Instant::now() + delay
+            tokio::time::Instant::now() + next_retry(&mut backoff)
         };
         tokio::time::sleep_until(next_attempt).await;
     }
+}
+
+/// Seconds before the first reconnection attempt after a successful update.
+pub(crate) const INITIAL_BACKOFF: u64 = 30;
+
+/// Returns a jittered reconnection delay and doubles the backoff, up to five minutes.
+pub(crate) fn next_retry(backoff: &mut u64) -> Duration {
+    let delay = Duration::from_secs(rand::random_range(*backoff / 2..=*backoff));
+    *backoff = (*backoff * 2).min(300);
+    delay
 }
 
 fn set_status(

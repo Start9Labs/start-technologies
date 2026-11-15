@@ -11,6 +11,7 @@ import {
   ReplaySubject,
   Subscription,
   take,
+  tap,
   throwError,
 } from 'rxjs'
 import { webSocket } from 'rxjs/webSocket'
@@ -26,6 +27,7 @@ import {
   SessionOpenEvent,
   sessionWebSocketConstructor,
 } from './session-websocket'
+import { RpcConsoleLog } from './rpc-console-log'
 import { rpcWebSocketUrl } from './rpc-request'
 import { isRpcResponse, rpcResponseStream } from './rpc-stream'
 import type { RpcFrame, SocketResponseStream } from './rpc-stream'
@@ -40,6 +42,7 @@ export class RpcSocketService {
   private readonly relativeUrl = inject(RELATIVE_URL)
   private readonly context = inject(AUTH_SIGNING_HOST)
   private readonly authKeys = inject(AuthKeyService)
+  private readonly consoleLog = inject(RpcConsoleLog)
   private session?: {
     signal: AbortSignal
     abort: AbortController
@@ -106,6 +109,7 @@ export class RpcSocketService {
       )
       return new Observable<RpcFrame>(subscriber => {
         const subscription = new Subscription()
+        const logged = this.consoleLog.request(id, request)
         if (observer)
           subscription.add(
             opened
@@ -118,7 +122,16 @@ export class RpcSocketService {
               )
               .subscribe(observer),
           )
-        subscription.add(responses.subscribe(subscriber))
+        subscription.add(
+          responses
+            .pipe(
+              tap({
+                next: frame => logged.reply(frame.value),
+                error: error => logged.failure(error),
+              }),
+            )
+            .subscribe(subscriber),
+        )
         return subscription
       })
     }).pipe(catchError(cause => throwError(() => transportError(cause))))

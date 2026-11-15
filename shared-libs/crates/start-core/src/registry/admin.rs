@@ -13,6 +13,7 @@ use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
 use crate::registry::signer::{ContactInfo, SignerInfo};
+use crate::registry::upstream::WRITES_INDEX;
 use crate::rpc_continuations::Guid;
 use crate::sign::AnyVerifyingKey;
 use crate::sign::gpg::{GpgPublicKeyExport, parse_public_keys};
@@ -70,6 +71,7 @@ fn signers_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add_signer)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_cli(),
         )
@@ -82,6 +84,7 @@ fn signers_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "edit",
             from_fn_async(edit_signer)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.edit-signer")
@@ -90,6 +93,7 @@ fn signers_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove_signer)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.remove-signer")

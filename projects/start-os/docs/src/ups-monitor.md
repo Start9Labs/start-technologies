@@ -8,7 +8,7 @@ In the StartOS web interface, open **System > UPS Monitor** and select **Connect
 
 ## NUT server
 
-Choose **NUT server** when the UPS's USB or serial cable is connected to this server. StartOS reads the UPS itself and can share it with other devices on the network.
+Choose **NUT server** when the UPS's USB cable is connected to this server. StartOS reads the UPS itself and can share it with other devices on the network.
 
 StartOS searches USB for a connected UPS and shows the one it finds. If it finds more than one, choose the UPS to monitor. If it finds none, check the cable and try again.
 

@@ -108,7 +108,8 @@ impl Future for RevocationSubscription {
 }
 
 impl RevocationSubscription {
-    pub(crate) fn forward_stream<V: serde::Serialize + Send + 'static>(
+    /// Closes the stream with an authorization error once the session is revoked.
+    pub fn forward_stream<V: serde::Serialize + Send + 'static>(
         self,
         stream: rpc_toolkit::RpcStream<V>,
         source: impl Stream<Item = Result<V, Error>> + Send + 'static,

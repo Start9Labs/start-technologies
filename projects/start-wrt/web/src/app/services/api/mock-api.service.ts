@@ -1,6 +1,6 @@
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
 import { inject, Injectable } from '@angular/core'
-import { MockContinuation } from './mock-continuation'
+import type { RpcStreamOptions } from '@start9labs/start-core'
 import { pauseFor, RPCErrorDetails, RpcError } from '@start9labs/shared'
 import { GIT_HASH } from 'src/app/utils/workspace-config'
 import {
@@ -19,7 +19,8 @@ import {
   SetUciRes,
   VersionInfo,
   SystemUpdateReq,
-  SystemUpdateRes,
+  SystemUpdateStream,
+  LogsFollowStream,
   SetPasswordReq,
   SetPreferencesReq,
   VpnServer,
@@ -129,18 +130,10 @@ function mockWidths(band: string, channel: number, listed: number[]): number[] {
   ]
 }
 
-const MOCK_UPDATE_GUID = 'mock-guid-1234'
-
 @Injectable({
   providedIn: 'root',
 })
 export class MockApiService extends ApiService {
-  openWebsocket(guid: string) {
-    return new MockContinuation(
-      guid === MOCK_UPDATE_GUID ? { overall: true, phases: [] } : undefined,
-    )
-  }
-
   async login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>> {
     await pauseFor(250)
 
@@ -333,11 +326,22 @@ export class MockApiService extends ApiService {
     ]
   }
 
-  async systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes> {
-    await pauseFor(500)
+  async systemUpdate(
+    params: SystemUpdateReq,
+    options?: RpcStreamOptions,
+  ): Promise<SystemUpdateStream> {
+    await pauseFor(500, options?.signal)
     const target = params.targetVersion ?? '1.5.0'
     this.mockSystemInfo.version = target
-    return { target, progress: MOCK_UPDATE_GUID }
+    return {
+      initial: { target, progress: null },
+      items: (async function* () {
+        options?.signal?.throwIfAborted()
+        yield { overall: true, phases: [] }
+        options?.signal?.throwIfAborted()
+        return null
+      })(),
+    }
   }
 
   async systemRestart(): Promise<null> {
@@ -1189,7 +1193,7 @@ export class MockApiService extends ApiService {
 
   async setupFlash(
     params: SetupFlashReq,
-    options?: import('@start9labs/start-core').RpcStreamOptions,
+    options?: RpcStreamOptions,
   ): Promise<SetupFlashStream> {
     options?.signal?.throwIfAborted()
     await pauseFor(250, options?.signal)
@@ -1217,9 +1221,20 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>> {
-    await pauseFor(250)
-    return { guid: 'MOCKLOGSFOLLOWGUIDAAAAAAAAAAAAAA' }
+  async followLogs(options?: RpcStreamOptions): Promise<LogsFollowStream> {
+    await pauseFor(250, options?.signal)
+    const signal = options?.signal
+    return {
+      initial: { guid: null },
+      items: (async function* () {
+        signal?.throwIfAborted()
+        await new Promise(resolve =>
+          signal?.addEventListener('abort', resolve, { once: true }),
+        )
+        signal?.throwIfAborted()
+        return null
+      })(),
+    }
   }
 
   async systemLogs(): Promise<LogsResponse> {

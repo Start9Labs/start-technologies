@@ -25,6 +25,7 @@ use crate::registry::context::RegistryContext;
 use crate::registry::device_info::WireCompatibility;
 use crate::registry::mirror::{IndexMirror, index_mirror, mirror_key};
 use crate::registry::package::index::ReaderParams;
+use crate::registry::upstream::WRITES_INDEX;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
 
@@ -65,6 +66,7 @@ pub fn db_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "apply",
             from_fn_async(apply)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_cli(),
         )

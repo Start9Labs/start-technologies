@@ -119,7 +119,7 @@ export const mockTunnelData: TunnelData = {
         auto: false,
       },
     },
-    '203.0.113.42:8333': {
+    'tcp@203.0.113.42:8333': {
       kind: 'dnat',
       target: '10.59.0.2:8333',
       label: 'Bitcoin',
@@ -145,7 +145,7 @@ export const mockTunnelData: TunnelData = {
       internalPort: null,
       auto: false,
     },
-    '[2001:db8:59::a3b:2]:443': {
+    'udp@[2001:db8:59::a3b:2]:443': {
       label: 'PCP',
       enabled: true,
       count: 1,

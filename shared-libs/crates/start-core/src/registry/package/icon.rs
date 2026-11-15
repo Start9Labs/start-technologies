@@ -8,12 +8,16 @@ use http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use imbl_value::InternedString;
 use new_mime_guess::MimeGuess;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
-use crate::middleware::auth::signature::{AUTH_SIG_HEADER, verify_request_signature};
+use crate::middleware::auth::signature::{
+    AUTH_SIG_HEADER, SignatureHeader, verify_request_signature,
+};
 use crate::net::static_server::{bad_request, not_found, server_error};
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::registry::package::index::{PackageIndex, PackageInfo, Reader};
+use crate::sign::Signer;
 use crate::util::DataUrl;
 
 pub(crate) const ICON_PATH: &str = "icons";
@@ -52,17 +56,94 @@ fn is_stored_path(path: &str) -> bool {
         .is_some_and(|(scheme, name)| scheme == BLAKE3_DIR && is_blake3_file_name(name))
 }
 
-pub(crate) fn is_icon_url(registry: &url::Url, target: &url::Url) -> bool {
+fn icons_url(registry: &Url) -> Option<Url> {
     let mut prefix = registry.clone();
-    let Ok(mut path) = prefix.path_segments_mut() else {
-        return false;
+    prefix
+        .path_segments_mut()
+        .ok()?
+        .pop_if_empty()
+        .push(ICON_PATH)
+        .push("");
+    Some(prefix)
+}
+
+pub(crate) fn is_icon_url(registry: &Url, target: &Url) -> bool {
+    icons_url(registry).is_some_and(|prefix| {
+        target
+            .as_str()
+            .strip_prefix(prefix.as_str())
+            .is_some_and(is_stored_path)
+    })
+}
+
+/// Requests an icon with an empty-body signature header when a signer is given.
+/// Signed requests require a non-redirecting client.
+pub(crate) async fn request_icon(
+    client: &reqwest::Client,
+    url: Url,
+    signer: Option<&Signer>,
+) -> Result<reqwest::Response, Error> {
+    let mut request = client.get(url.clone());
+    if let Some(signer) = signer {
+        request = request.header(
+            AUTH_SIG_HEADER,
+            SignatureHeader::sign(
+                signer,
+                b"",
+                url.host_str().or_not_found("registry hostname")?,
+            )
+            .await?
+            .to_header(),
+        );
+    }
+    request.send().await.with_kind(ErrorKind::Network)
+}
+
+/// Copies a stored icon from another registry unless the store already has it.
+/// Bytes whose blake3 differs from the path are rejected.
+pub(crate) async fn copy_icon(
+    client: &reqwest::Client,
+    signer: &Signer,
+    registry: &Url,
+    dir: &Path,
+    path: &str,
+) -> Result<(), Error> {
+    let Some(name) = path
+        .strip_prefix(BLAKE3_DIR)
+        .and_then(|name| name.strip_prefix('/'))
+        .filter(|_| is_stored_path(path))
+    else {
+        return Err(Error::new(
+            eyre!("{}", t!("registry.package.icon.invalid-name", name = path)),
+            ErrorKind::InvalidRequest,
+        ));
     };
-    path.pop_if_empty().push(ICON_PATH).push("");
-    drop(path);
-    target
-        .as_str()
-        .strip_prefix(prefix.as_str())
-        .is_some_and(is_stored_path)
+    if tokio::fs::try_exists(dir.join(path)).await.unwrap_or(false) {
+        return Ok(());
+    }
+    let url = icons_url(registry)
+        .or_not_found("registry icon URL")?
+        .join(path)
+        .with_kind(ErrorKind::ParseUrl)?;
+    let data = request_icon(client, url, Some(signer))
+        .await?
+        .error_for_status()
+        .with_kind(ErrorKind::Network)?
+        .bytes()
+        .await
+        .with_kind(ErrorKind::Network)?;
+    ensure_code!(
+        name.split_once('.')
+            .is_some_and(|(hash, _)| hash == icon_hash(&data)),
+        ErrorKind::Incoherent,
+        "{}",
+        t!("registry.package.icon.hash-mismatch", name = path)
+    );
+    let dir = dir.to_owned();
+    let name = name.to_owned();
+    tokio::task::spawn_blocking(move || write_icon(&dir, &name, &data))
+        .await
+        .with_kind(ErrorKind::Unknown)?
 }
 
 fn icon_mime(path: &str) -> String {
@@ -72,20 +153,17 @@ fn icon_mime(path: &str) -> String {
         .to_owned()
 }
 
-/// Writes the icon into the store unless it is already there.
-pub fn store_icon(dir: &Path, icon: &DataUrl<'_>) -> Result<InternedString, Error> {
-    let hash = base32::encode(
+fn icon_hash(data: &[u8]) -> String {
+    base32::encode(
         base32::Alphabet::Rfc4648 { padding: false },
-        blake3::hash(&icon.data).as_bytes(),
+        blake3::hash(data).as_bytes(),
     )
-    .to_lowercase();
-    let ext = new_mime_guess::get_mime_extensions_str(&icon.mime)
-        .and_then(|exts| exts.first())
-        .copied()
-        .unwrap_or("bin");
-    let name = format!("{hash}.{ext}");
+    .to_lowercase()
+}
+
+fn write_icon(dir: &Path, name: &str, data: &[u8]) -> Result<(), Error> {
     let blake3_dir = &dir.join(BLAKE3_DIR);
-    let file = &blake3_dir.join(&name);
+    let file = &blake3_dir.join(name);
     if !file.exists() {
         std::fs::create_dir_all(blake3_dir).with_ctx(|_| {
             (
@@ -94,7 +172,7 @@ pub fn store_icon(dir: &Path, icon: &DataUrl<'_>) -> Result<InternedString, Erro
             )
         })?;
         let tmp = &blake3_dir.join(format!(".{name}.{:016x}", rand::random::<u64>()));
-        std::fs::write(tmp, &icon.data)
+        std::fs::write(tmp, data)
             .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("write {tmp:?}")))?;
         std::fs::rename(tmp, file).with_ctx(|_| {
             (
@@ -103,6 +181,17 @@ pub fn store_icon(dir: &Path, icon: &DataUrl<'_>) -> Result<InternedString, Erro
             )
         })?;
     }
+    Ok(())
+}
+
+/// Writes the icon into the store unless it is already there.
+pub fn store_icon(dir: &Path, icon: &DataUrl<'_>) -> Result<InternedString, Error> {
+    let ext = new_mime_guess::get_mime_extensions_str(&icon.mime)
+        .and_then(|exts| exts.first())
+        .copied()
+        .unwrap_or("bin");
+    let name = format!("{}.{ext}", icon_hash(&icon.data));
+    write_icon(dir, &name, &icon.data)?;
     Ok(InternedString::from_display(&lazy_format!(
         "{BLAKE3_DIR}/{name}"
     )))

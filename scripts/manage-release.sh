@@ -427,8 +427,8 @@ release_security() {
 check_registry_notes_cli() {
     local help
     help=$(start-cli registry os version add --help) || return
-    if ! grep -Fq -- '<RELEASE_NOTES_OR_JSON>' <<< "$help"; then
-        >&2 echo "  ✗ start-cli lacks LocaleString release notes; update it before publishing registry notes."
+    if ! grep -Fq -- '<RELEASE_NOTES_OR_JSON>' <<< "$help" || grep -Fq -- '<HEADLINE>' <<< "$help"; then
+        >&2 echo "  ✗ start-cli lacks headline-free LocaleString release notes; update it before publishing registry notes."
         return 1
     fi
 }
@@ -453,7 +453,7 @@ refresh_registry_notes() {
     echo "Setting ${VERSION} release notes on ${registry}..."
     start-cli --registry="$registry" registry os version add \
         "${metadata_args[@]}" \
-        "$VERSION" "v${VERSION}" "$notes" "$range"
+        "$VERSION" "$notes" "$range"
     _INDEX_REGISTRY=""
 }
 
@@ -1703,7 +1703,7 @@ cmd_register() {
     enter_release_dir
     echo "Registering StartWRT ${VERSION} in ${STARTWRT_SOURCE_REGISTRY}..."
     start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os version add \
-        "$VERSION" "v$VERSION" "$notes" "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
+        "$VERSION" "$notes" "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
 
     # start-cli infers the asset slot from the file extension and only accepts
     # iso/img/squashfs. Both images ship gzipped, so present each under a

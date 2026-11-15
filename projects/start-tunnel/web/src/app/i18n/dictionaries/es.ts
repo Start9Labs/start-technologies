@@ -104,7 +104,6 @@ const es: Record<number, string> = {
   98: 'Predeterminado de la subred',
   99: 'Éxito',
   100: 'Predeterminado del sistema',
-  101: 'TCP/UDP',
   102: 'El dispositivo puede añadir o actualizar los registros DNS que el túnel sirve para que los resuelvan todos los pares. Actívalo solo para dispositivos de confianza.',
   103: 'El dispositivo puede publicar sus propios puertos en la puerta de enlace automáticamente (mediante PCP). Actívalo solo para dispositivos de confianza.',
   104: 'El VPS se está reiniciando. Espera 1–2 minutos y luego actualiza la página.',

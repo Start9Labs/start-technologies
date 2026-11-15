@@ -17,12 +17,10 @@ use crate::db::DbAccessByKey;
 use crate::db::model::Database;
 use crate::db::model::package::AllPackageData;
 use crate::net::acme::AcmeProvider;
-use crate::net::host::binding::{
-    AddSslOptions, BindInfo, BindOptions, Bindings, DerivedAddressInfo, NetInfo,
-};
+use crate::net::host::binding::{BindInfo, BindOptions, Bindings, DerivedAddressInfo, NetInfo};
 use crate::net::host::{Host, SERVER_UI_SSL_PORT};
 use crate::net::ssl::x509_sha256_fingerprint;
-use crate::net::vhost::{AlpnInfo, PassthroughInfo};
+use crate::net::vhost::PassthroughInfo;
 use crate::nut::NutConfig;
 use crate::prelude::*;
 use crate::progress::FullProgress;
@@ -32,7 +30,6 @@ use crate::trusted_keys::{
 };
 use crate::util::cpupower::{Epp, Governor};
 use crate::util::lshw::LshwDevice;
-use crate::util::serde::MaybeUtf8String;
 use crate::version::{Current, VersionT};
 use crate::{GatewayId, PLATFORM};
 
@@ -85,19 +82,7 @@ impl Public {
                                 80,
                                 BindInfo {
                                     enabled: false,
-                                    options: BindOptions {
-                                        preferred_external_port: 80,
-                                        add_ssl: Some(AddSslOptions {
-                                            preferred_external_port: SERVER_UI_SSL_PORT,
-                                            alpn: Some(AlpnInfo(vec![
-                                                MaybeUtf8String("h2".into()),
-                                                MaybeUtf8String("http/1.1".into()),
-                                            ])),
-                                            upstream_cert_validation: Default::default(),
-                                        }),
-                                        secure: None,
-                                        proxy: None,
-                                    },
+                                    options: BindOptions::server_ui(),
                                     net: NetInfo {
                                         assigned_port: None,
                                         assigned_ssl_port: Some(SERVER_UI_SSL_PORT),

@@ -84,6 +84,14 @@ impl Host {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Hides disabled insecure candidates from legacy service SDK address readers.
+    pub fn into_service_view(mut self) -> Self {
+        for binding in self.bindings.values_mut() {
+            binding.addresses.project_service_selections();
+        }
+        self
+    }
     /// Hand every external port this host holds back to the pool. Shared by
     /// uninstall and retirement so the two cannot drift apart.
     pub fn release(&self, available_ports: &mut AvailablePorts) {
@@ -142,17 +150,6 @@ fn mdns_gateways(
         .collect()
 }
 
-fn secure_gateways<'a>(
-    gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
-    candidates: impl IntoIterator<Item = &'a GatewayId>,
-) -> BTreeSet<GatewayId> {
-    candidates
-        .into_iter()
-        .filter(|g| gateways.get(*g).map_or(false, |g| g.secure()))
-        .cloned()
-        .collect()
-}
-
 impl Model<Host> {
     /// Runs for service, network and operator changes alike. An operator action
     /// that groups addresses applies its intent first through `derive_addresses`.
@@ -202,7 +199,6 @@ impl Model<Host> {
                 let Some(ip_info) = &g.ip_info else {
                     continue;
                 };
-                let gateway_secure = g.secure();
                 for subnet in &ip_info.subnets {
                     let host = InternedString::from_display(&subnet.addr());
                     let metadata = if subnet.addr().is_ipv4() {
@@ -215,10 +211,7 @@ impl Model<Host> {
                             scope_id: ip_info.scope_id,
                         }
                     };
-                    if let Some(port) = net.assigned_port.filter(|_| {
-                        opt.secure
-                            .map_or(gateway_secure, |_| opt.wants_plain_port())
-                    }) {
+                    if let Some(port) = net.assigned_port.filter(|_| opt.wants_plain_port()) {
                         available.insert(HostnameInfo {
                             ssl: opt.secure.map_or(false, |s| s.ssl),
                             public: false,
@@ -242,12 +235,10 @@ impl Model<Host> {
                     let metadata = HostnameMetadata::Ipv4 {
                         gateway: gid.clone(),
                     };
-                    if let Some(port) = net.assigned_port.filter(|_| {
-                        opt.secure.map_or(
-                            false, // the public internet is never secure
-                            |_| opt.wants_plain_port(),
-                        )
-                    }) {
+                    if let Some(port) = net
+                        .assigned_port
+                        .filter(|_| opt.allows_public_address(false) && opt.wants_plain_port())
+                    {
                         available.insert(HostnameInfo {
                             ssl: opt.secure.map_or(false, |s| s.ssl),
                             public: true,
@@ -270,15 +261,8 @@ impl Model<Host> {
 
             // mdns
             let mdns_host = mdns.local_domain_name();
-            if let Some(port) = net
-                .assigned_port
-                .filter(|_| opt.secure.map_or(true, |_| opt.wants_plain_port()))
-            {
-                let mdns_gateways = if opt.secure.is_some() {
-                    mdns_gateways.clone()
-                } else {
-                    secure_gateways(gateways, mdns_gateways.iter())
-                };
+            if let Some(port) = net.assigned_port.filter(|_| opt.wants_plain_port()) {
+                let mdns_gateways = mdns_gateways.clone();
                 if !mdns_gateways.is_empty() {
                     available.insert(HostnameInfo {
                         ssl: opt.secure.map_or(false, |s| s.ssl),
@@ -308,12 +292,10 @@ impl Model<Host> {
                 let metadata = HostnameMetadata::PublicDomain {
                     gateway: info.gateway.clone(),
                 };
-                if let Some(port) = net.assigned_port.filter(|_| {
-                    opt.secure.map_or(
-                        false, // the public internet is never secure
-                        |_| opt.wants_plain_port(),
-                    )
-                }) {
+                if let Some(port) = net
+                    .assigned_port
+                    .filter(|_| opt.allows_public_address(false) && opt.wants_plain_port())
+                {
                     available.insert(HostnameInfo {
                         ssl: opt.secure.map_or(false, |s| s.ssl),
                         public: true,
@@ -344,15 +326,8 @@ impl Model<Host> {
 
             // private domains
             for (domain, domain_gateways) in this.private_domains.de()? {
-                if let Some(port) = net
-                    .assigned_port
-                    .filter(|_| opt.secure.map_or(true, |_| opt.wants_plain_port()))
-                {
-                    let gateways = if opt.secure.is_some() {
-                        domain_gateways.clone()
-                    } else {
-                        secure_gateways(gateways, domain_gateways.iter())
-                    };
+                if let Some(port) = net.assigned_port.filter(|_| opt.wants_plain_port()) {
+                    let gateways = domain_gateways.clone();
                     available.insert(HostnameInfo {
                         ssl: opt.secure.map_or(false, |s| s.ssl),
                         public: false,
@@ -380,7 +355,50 @@ impl Model<Host> {
                 }
             }
             let mut addresses = bind.as_addresses().de()?;
-            addresses.set_available(available);
+            if !opt.allows_public_address(false) {
+                addresses
+                    .gua_wan
+                    .retain(|g| Some(g.port()) != net.assigned_port);
+            }
+            let mut split = BTreeSet::new();
+            for address in available {
+                if opt.secure.is_none() && !address.ssl {
+                    if let HostnameMetadata::Mdns {
+                        gateways: candidates,
+                    }
+                    | HostnameMetadata::PrivateDomain {
+                        gateways: candidates,
+                    } = &address.metadata
+                    {
+                        for gateway in candidates {
+                            let mut row = address.clone();
+                            match &mut row.metadata {
+                                HostnameMetadata::Mdns { gateways }
+                                | HostnameMetadata::PrivateDomain { gateways } => {
+                                    *gateways = BTreeSet::from([gateway.clone()])
+                                }
+                                _ => unreachable!(),
+                            }
+                            split.insert(row);
+                        }
+                        continue;
+                    }
+                }
+                split.insert(address);
+            }
+            addresses.set_available(split);
+            addresses.insecure = addresses
+                .available
+                .iter()
+                .filter(|a| opt.secure.is_none() && !a.ssl && !a.public && !a.is_internal())
+                .filter(|a| {
+                    a.metadata
+                        .gateways()
+                        .any(|g| !gateways.get(g).is_some_and(|g| g.secure()))
+                })
+                .filter_map(crate::net::host::binding::insecure_key)
+                .collect();
+            addresses.refresh_effective();
             bind.as_addresses_mut().ser(&addresses)?;
         }
 
@@ -391,6 +409,9 @@ impl Model<Host> {
         // enabled/disabled + forward machinery applies unchanged.
         let mdns_host = mdns.local_domain_name();
         for (_, range) in this.binding_ranges.as_entries_mut()? {
+            let transport = range.de()?.transport;
+            // PatchDB clients must receive the serde-defaulted transport before service rebinding.
+            range.as_transport_mut().ser(&transport)?;
             let port = range.as_external_start_port().de()?;
 
             // Preserve any plugin-provided addresses across recomputation.
@@ -469,10 +490,10 @@ impl Model<Host> {
                 });
             }
 
-            range
-                .as_addresses_mut()
-                .as_available_mut()
-                .ser(&available)?;
+            let mut addresses = range.as_addresses().de()?;
+            addresses.available = available;
+            addresses.refresh_effective();
+            range.as_addresses_mut().ser(&addresses)?;
         }
 
         // compute port forwards from enabled public addresses. A non-exported
@@ -721,6 +742,7 @@ impl Model<Host> {
         external_start_port: u16,
         number_of_ports: u16,
         privileged: bool,
+        transport: crate::net::transport::Transport,
     ) -> Result<(), Error> {
         if number_of_ports < 2 {
             return Err(Error::new(
@@ -785,6 +807,7 @@ impl Model<Host> {
                 internal_start_port,
                 RangeBindInfo {
                     enabled: true,
+                    transport,
                     external_start_port,
                     number_of_ports,
                     addresses,
@@ -967,7 +990,7 @@ mod tests {
     use imbl_value::InternedString;
     use ipnet::IpNet;
 
-    use super::{Host, Model, PublicDomainConfig, mdns_gateways, secure_gateways};
+    use super::{Host, Model, PublicDomainConfig, mdns_gateways};
     use crate::GatewayId;
     use crate::db::model::public::{
         CapabilityVerdict, GatewayType, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
@@ -1046,10 +1069,52 @@ mod tests {
 
     fn plain(preferred_external_port: u16) -> BindOptions {
         BindOptions {
+            transport: Default::default(),
             preferred_external_port,
             add_ssl: None,
             secure: Some(crate::net::host::binding::Security { ssl: false }),
             proxy: None,
+        }
+    }
+
+    #[test]
+    fn address_updates_publish_legacy_range_transport_without_service_rebinding() {
+        use crate::net::transport::Transport;
+
+        for (transport, stored, expected) in [
+            (
+                Transport::default(),
+                false,
+                serde_json::json!(["tcp", "udp"]),
+            ),
+            (
+                Transport::default(),
+                true,
+                serde_json::json!(["tcp", "udp"]),
+            ),
+            (Transport::tcp(), true, serde_json::json!(["tcp"])),
+            (Transport::udp(), true, serde_json::json!(["udp"])),
+        ] {
+            let mut ports = AvailablePorts::new();
+            let mut host = host();
+            host.add_binding_range(&mut ports, 42000, 43000, 3, false, transport)
+                .unwrap();
+            let mut value = serde_json::to_value(&host).unwrap();
+            let range = value["bindingRanges"]["42000"].as_object_mut().unwrap();
+            range.insert("enabled".into(), false.into());
+            if !stored {
+                range.remove("transport");
+            }
+            let mut host = Model::<Host>::from(imbl_value::to_value(&value).unwrap());
+            host.update_addresses(
+                &ServerHostname::new(InternedString::intern("server")).unwrap(),
+                &Default::default(),
+                &ports,
+            )
+            .unwrap();
+            let value = serde_json::to_value(&host).unwrap();
+            assert_eq!(value["bindingRanges"]["42000"]["transport"], expected);
+            assert_eq!(value["bindingRanges"]["42000"]["enabled"], false);
         }
     }
 
@@ -1190,7 +1255,7 @@ mod tests {
             .unwrap();
 
         let err = host
-            .add_binding_range(&mut ports, 28331, 40000, 4, false)
+            .add_binding_range(&mut ports, 28331, 40000, 4, false, Default::default())
             .unwrap_err();
         assert_eq!(err.kind, ErrorKind::InvalidRequest);
         assert!(host.as_binding_ranges().de().unwrap().is_empty());
@@ -1209,7 +1274,7 @@ mod tests {
             .mutate(|b| Ok(b.values_mut().for_each(|i| i.disable())))
             .unwrap();
 
-        host.add_binding_range(&mut ports, 28332, 40000, 2, false)
+        host.add_binding_range(&mut ports, 28332, 40000, 2, false, Default::default())
             .unwrap();
         assert!(host.as_binding_ranges().de().unwrap().contains_key(&28332));
     }
@@ -1218,7 +1283,7 @@ mod tests {
     fn a_port_inside_an_enabled_range_may_not_be_bound_singly() {
         let mut ports = AvailablePorts::new();
         let mut host = host();
-        host.add_binding_range(&mut ports, 42000, 42000, 500, false)
+        host.add_binding_range(&mut ports, 42000, 42000, 500, false, Default::default())
             .unwrap();
 
         let err = host
@@ -1235,54 +1300,195 @@ mod tests {
         let mut host = host();
         host.add_binding(&mut ports, 3478, plain(3478), false)
             .unwrap();
-        host.add_binding_range(&mut ports, 42000, 42000, 500, false)
+        host.add_binding_range(&mut ports, 42000, 42000, 500, false, Default::default())
             .unwrap();
-        host.add_binding_range(&mut ports, 42000, 42000, 500, false)
+        host.add_binding_range(&mut ports, 42000, 42000, 500, false, Default::default())
             .unwrap();
 
         let err = host
-            .add_binding_range(&mut ports, 42499, 50000, 2, false)
+            .add_binding_range(&mut ports, 42499, 50000, 2, false, Default::default())
             .unwrap_err();
         assert_eq!(err.kind, ErrorKind::InvalidRequest);
+    }
+
+    #[test]
+    fn transport_only_rebind_preserves_range_allocation_and_address_choices() {
+        use crate::net::transport::Transport;
+
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        host.add_binding_range(&mut ports, 42000, 43000, 10, false, Transport::default())
+            .unwrap();
+        host.as_binding_ranges_mut()
+            .mutate(|ranges| {
+                ranges
+                    .get_mut(&42000)
+                    .unwrap()
+                    .addresses
+                    .disabled
+                    .insert(("relay.example.com".into(), 43000));
+                Ok(())
+            })
+            .unwrap();
+        let before = host
+            .as_binding_ranges()
+            .de()
+            .unwrap()
+            .remove(&42000)
+            .unwrap();
+        for transport in [Transport::tcp(), Transport::udp(), Transport::default()] {
+            host.add_binding_range(&mut ports, 42000, 43000, 10, false, transport.clone())
+                .unwrap();
+            let after = host
+                .as_binding_ranges()
+                .de()
+                .unwrap()
+                .remove(&42000)
+                .unwrap();
+            assert_eq!(after.transport, transport);
+            assert_eq!(after.external_start_port, before.external_start_port);
+            assert_eq!(
+                serde_json::to_value(&after.addresses).unwrap(),
+                serde_json::to_value(&before.addresses).unwrap()
+            );
+            assert!(ports.try_alloc(43000, false, false).is_none());
+        }
     }
 
     #[test]
     fn a_range_may_not_run_off_the_end_of_the_port_space() {
         let mut ports = AvailablePorts::new();
         let err = host()
-            .add_binding_range(&mut ports, 65535, 40000, 2, false)
+            .add_binding_range(&mut ports, 65535, 40000, 2, false, Default::default())
             .unwrap_err();
         assert_eq!(err.kind, ErrorKind::InvalidRequest);
     }
 
     #[test]
-    fn secure_gateways_follows_the_operators_override() {
-        let mut ifaces: OrdMap<GatewayId, NetworkInterfaceInfo> = [
-            (gw("lxcbr0"), iface(NetworkInterfaceType::Bridge, None)),
-            (gw("eth0"), iface(NetworkInterfaceType::Ethernet, None)),
-            (gw("wlan0"), iface(NetworkInterfaceType::Wireless, None)),
-            // Secure, but never a candidate: the result is the intersection.
-            (gw("lo"), iface(NetworkInterfaceType::Loopback, None)),
-        ]
-        .into_iter()
-        .collect();
-        let candidates = [gw("lxcbr0"), gw("eth0"), gw("wlan0"), gw("gone")];
+    fn insecure_http_addresses_are_private_opt_ins_and_follow_gateway_defaults() {
+        use crate::net::host::binding::AddSslOptions;
+        let server = ServerHostname::new(InternedString::intern("server")).unwrap();
+        let mut network = wireguard(GatewayType::InboundOutbound);
+        network.dns_update.supported = Some(true);
+        Arc::make_mut(network.ip_info.as_mut().unwrap())
+            .subnets
+            .insert("2001:db8::2/64".parse().unwrap());
+        let mut gateways: OrdMap<_, _> = [(gw("wg0"), network)].into_iter().collect();
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        let mut options = plain(8096);
+        options.secure = None;
+        options.add_ssl = Some(AddSslOptions {
+            preferred_external_port: 8443,
+            alpn: None,
+            upstream_cert_validation: None,
+        });
+        host.add_binding(&mut ports, 8096, options, false).unwrap();
+        host.as_private_domains_mut()
+            .insert(
+                &InternedString::intern("media.lan"),
+                &BTreeSet::from([gw("wg0")]),
+            )
+            .unwrap();
+        host.as_public_domains_mut()
+            .insert(
+                &InternedString::intern("media.example.com"),
+                &PublicDomainConfig {
+                    gateway: gw("wg0"),
+                    acme: None,
+                },
+            )
+            .unwrap();
+        host.update_addresses(&server, &gateways, &ports).unwrap();
+        let initial = host.de().unwrap();
+        let addresses = &initial.bindings[&8096].addresses;
+        assert_eq!(addresses.available.iter().filter(|a| !a.ssl).count(), 4);
+        assert!(
+            addresses
+                .available
+                .iter()
+                .filter(|a| !a.ssl)
+                .all(|a| !a.public)
+        );
+        assert!(addresses.enabled().iter().all(|a| a.ssl));
+        assert_eq!(addresses.insecure.len(), 4);
 
-        assert_eq!(
-            secure_gateways(&ifaces, candidates.iter()),
-            [gw("lxcbr0")].into_iter().collect()
+        gateways[&gw("wg0")].secure = Some(true);
+        host.update_addresses(&server, &gateways, &ports).unwrap();
+        let secure = host.de().unwrap();
+        let addresses = &secure.bindings[&8096].addresses;
+        assert!(addresses.insecure.is_empty());
+        assert!(
+            addresses
+                .available
+                .iter()
+                .filter(|a| !a.ssl)
+                .all(|a| addresses.enabled().contains(a))
         );
 
-        ifaces[&gw("eth0")].secure = Some(true);
-        assert_eq!(
-            secure_gateways(&ifaces, candidates.iter()),
-            [gw("lxcbr0"), gw("eth0")].into_iter().collect()
+        gateways[&gw("wg0")].secure = Some(false);
+        host.update_addresses(&server, &gateways, &ports).unwrap();
+        assert!(
+            host.de().unwrap().bindings[&8096]
+                .addresses
+                .enabled()
+                .iter()
+                .all(|a| a.ssl)
         );
 
-        ifaces[&gw("lxcbr0")].secure = Some(false);
-        assert_eq!(
-            secure_gateways(&ifaces, candidates.iter()),
-            [gw("eth0")].into_iter().collect()
+        let mut trusted = wireguard(GatewayType::InboundOutbound);
+        trusted.secure = Some(true);
+        trusted.dns_update.supported = Some(true);
+        Arc::make_mut(trusted.ip_info.as_mut().unwrap()).subnets =
+            ["192.0.3.2/24".parse::<IpNet>().unwrap()]
+                .into_iter()
+                .collect();
+        gateways.insert(gw("wg-trusted"), trusted);
+        host.as_private_domains_mut()
+            .mutate(|domains| {
+                domains
+                    .get_mut(&InternedString::intern("media.lan"))
+                    .unwrap()
+                    .insert(gw("wg-trusted"));
+                Ok(())
+            })
+            .unwrap();
+        host.update_addresses(&server, &gateways, &ports).unwrap();
+        let snapshot = host.de().unwrap();
+        let addresses = &snapshot.bindings[&8096].addresses;
+        let insecure_domain = addresses.available.iter().find(|a| !a.ssl && matches!(&a.metadata, HostnameMetadata::PrivateDomain { gateways } if gateways == &BTreeSet::from([gw("wg0")]))).unwrap().clone();
+        let trusted_names: BTreeSet<_> = addresses.available.iter().filter(|a| !a.ssl && matches!(&a.metadata, HostnameMetadata::PrivateDomain { gateways } | HostnameMetadata::Mdns { gateways } if gateways.contains(&gw("wg-trusted")))).cloned().collect();
+        assert_eq!(trusted_names.len(), 2);
+        assert!(
+            trusted_names
+                .iter()
+                .all(|a| addresses.enabled().contains(a))
         );
+        assert!(!addresses.enabled().contains(&insecure_domain));
+        for on in [true, false] {
+            host.as_bindings_mut()
+                .mutate(|bindings| {
+                    super::binding::set_address_enabled_with_consent(
+                        &mut bindings.get_mut(&8096).unwrap().addresses,
+                        &insecure_domain,
+                        on,
+                        on,
+                    )
+                })
+                .unwrap();
+            host.update_addresses(&server, &gateways, &ports).unwrap();
+            let snapshot = host.de().unwrap();
+            let addresses = &snapshot.bindings[&8096].addresses;
+            assert_eq!(addresses.enabled().contains(&insecure_domain), on);
+            assert!(
+                trusted_names
+                    .iter()
+                    .all(|a| addresses.enabled().contains(a))
+            );
+            assert_eq!(
+                addresses.effective,
+                addresses.enabled().into_iter().cloned().collect()
+            );
+        }
     }
 }

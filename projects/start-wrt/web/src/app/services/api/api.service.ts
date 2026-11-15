@@ -4,17 +4,10 @@ import type * as Bindings from './bindings'
 import type * as Events from './events'
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
 
-export type ContinuationSocket = Pick<
-  WebSocket,
-  'onopen' | 'onmessage' | 'onclose' | 'onerror' | 'close'
->
-
 @Injectable({
   providedIn: 'root',
 })
 export abstract class ApiService {
-  /** Opens a JSON continuation while the caller owns its event handlers and closure. */
-  abstract openWebsocket(guid: string): ContinuationSocket
   abstract login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>>
   abstract logout(): Promise<RpcReturnType<Api, 'auth.logout'>>
   abstract exec(params: ExecReq): Promise<ExecRes>
@@ -25,7 +18,11 @@ export abstract class ApiService {
   abstract systemInfo(timeout?: number): Promise<SystemInfoRes>
   abstract configCheck(): Promise<ConfigCheck>
   abstract systemNewerVersions(): Promise<VersionInfo[]>
-  abstract systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes>
+  /** Cancels observation, never an accepted update. A successful terminal precedes the reboot. */
+  abstract systemUpdate(
+    params: SystemUpdateReq,
+    options?: RpcStreamOptions,
+  ): Promise<SystemUpdateStream>
   abstract systemRestart(): Promise<null>
   abstract setPassword(params: SetPasswordReq): Promise<null>
   abstract setPreferences(
@@ -78,7 +75,7 @@ export abstract class ApiService {
   ): Promise<SetupFlashStream>
   abstract systemFactoryReset(): Promise<null>
   abstract systemLogs(): Promise<LogsResponse>
-  abstract followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>>
+  abstract followLogs(options?: RpcStreamOptions): Promise<LogsFollowStream>
   abstract devicesList(): Promise<DeviceFromApi[]>
   abstract devicesUpdate(params: DeviceUpdateReq): Promise<null>
   abstract devicesSetAutoForward(params: {
@@ -184,6 +181,10 @@ export type LogEntry = Bindings.LogEntry
 
 export type LogsResponse = RpcReturnType<Api, 'system.logs'>
 
+export type LogsFollowStream = Awaited<
+  ReturnType<RpcStreamClient<Api>['system']['logsFollow']>
+>
+
 export type LoginReq = RpcParamType<Api, 'auth.login'>
 
 export type ExecReq = RpcParamType<Api, 'exec'>
@@ -216,7 +217,9 @@ export type VersionInfo = RpcReturnType<Api, 'system.newer-versions'>[number]
 
 export type SystemUpdateReq = RpcParamType<Api, 'system.update'>
 
-export type SystemUpdateRes = RpcReturnType<Api, 'system.update'>
+export type SystemUpdateStream = Awaited<
+  ReturnType<RpcStreamClient<Api>['system']['update']>
+>
 
 export type FullProgress = Events.FullProgress
 

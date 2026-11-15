@@ -318,10 +318,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
     return orphaned
   }
 
-  async delete(url: string): Promise<void> {
-    await this.removeRegistry(url)
-  }
-
   /** Resolves to the keys it newly trusted for StartOS updates. */
   async setOsRegistry(url: string): Promise<string[]> {
     return this.api.rpc.server.registries.setOs({ url })

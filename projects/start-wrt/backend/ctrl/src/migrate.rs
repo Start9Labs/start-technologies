@@ -26,6 +26,7 @@ const RECORD: &str = "etc/startwrt/migrations";
 /// one from any earlier release. The runner replays migrations after power
 /// loss before the record advances, after a restored backup without a
 /// record, and on a pre-runner install.
+/// Published entries keep their indices; the record stores their count.
 const MIGRATIONS: &[Migration] = &[
     Migration::RemoveEtcNftablesRules,
     Migration::StripUnreferencedWanZoneVpns,
@@ -43,6 +44,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::BindLuciToLoopback,
     Migration::DisableFlowOffloading,
     Migration::TurnOffRemoteAccess,
+    Migration::SplitAutomaticForwardTransports,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -82,6 +84,7 @@ enum Migration {
     DisableFlowOffloading,
     /// Earlier releases defaulted Remote Access to When behind NAT, stored as `default`.
     TurnOffRemoteAccess,
+    SplitAutomaticForwardTransports,
 }
 
 impl Migration {
@@ -103,6 +106,11 @@ impl Migration {
             Migration::BindLuciToLoopback => bind_luci_to_loopback(root).await,
             Migration::DisableFlowOffloading => disable_flow_offloading(root).await,
             Migration::TurnOffRemoteAccess => turn_off_remote_access(root).await,
+            Migration::SplitAutomaticForwardTransports => {
+                crate::port_control::split_legacy_forwards_uci(&uci_root(root))
+                    .await
+                    .map(|_| ())
+            }
         }
     }
 
@@ -141,6 +149,7 @@ impl Migration {
             Migration::TurnOffRemoteAccess => {
                 "turn off Remote Access if it was still set to When behind NAT"
             }
+            Migration::SplitAutomaticForwardTransports => "track automatic TCP and UDP mappings independently",
         }
     }
 }
@@ -856,6 +865,42 @@ config forwarding
             .position(|m| std::mem::discriminant(m) == std::mem::discriminant(&migration))
             .unwrap();
         format!("{index}\n")
+    }
+
+    #[tokio::test]
+    async fn completed_remote_access_migration_still_splits_automatic_transports() {
+        let dir = router(Some("16\n"), true);
+        write(&dir, "etc/config/startwrt", &preferences(Some("always")));
+        write(
+            &dir,
+            "etc/config/firewall",
+            "config redirect 'apf_legacy'\n\toption name 'retained label'\n\toption src 'wan'\n\toption target 'DNAT'\n\toption _apf_label 'PCP'\n\toption enabled '0'\n\tlist proto 'tcp'\n\tlist proto 'udp'\n",
+        );
+        run(dir.path()).await.unwrap();
+        assert_eq!(record(&dir), current());
+        assert_eq!(
+            read(&dir, "etc/config/startwrt"),
+            preferences(Some("always"))
+        );
+        let firewall = read(&dir, "etc/config/firewall");
+        let arena = Arena::new();
+        let parsed = uciedit::Config::parse_str(&arena, &firewall).unwrap();
+        assert_eq!(parsed.sections.len(), 2);
+        for protocol in ["tcp", "udp"] {
+            let section = parsed
+                .sections
+                .iter()
+                .find(|section| {
+                    section.name().as_deref() == Some(&format!("apf_legacy_{protocol}"))
+                })
+                .unwrap();
+            let redirect = section.get::<uciedit::openwrt::FirewallRedirect>().unwrap();
+            assert_eq!(redirect.proto, vec![protocol.to_string()]);
+            assert_eq!(redirect.name, "retained label");
+            assert_eq!(redirect.enabled.as_deref(), Some("0"));
+        }
+        run(dir.path()).await.unwrap();
+        assert_eq!(read(&dir, "etc/config/firewall"), firewall);
     }
 
     #[tokio::test]

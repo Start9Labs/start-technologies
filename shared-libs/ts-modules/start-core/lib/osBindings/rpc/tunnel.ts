@@ -142,6 +142,11 @@ export type DnsModeInput = z.input<typeof schemas.DnsMode>
 export type DnsRecordEntry = z.output<typeof schemas.DnsRecordEntry>
 export type Dump = z.output<typeof schemas.Dump>
 export type DumpParamsInput = z.input<typeof schemas.DumpParams>
+
+/**
+ * Transport-qualified keys use `tcp@socket` or `udp@socket`; socket-only keys retain both.
+ */
+export type ForwardAddressInput = z.input<typeof schemas.ForwardAddress>
 export type GenerateCertParamsInput = z.input<typeof schemas.GenerateCertParams>
 export type Guid = z.output<typeof schemas.Guid>
 
@@ -171,12 +176,6 @@ export type RemoveDnsRecordParamsInput = z.input<
  * JSON Patch 'remove' operation representation
  */
 export type RemoveOperation = z.output<typeof schemas.RemoveOperation>
-export type RemovePinholeParamsInput = z.input<
-  typeof schemas.RemovePinholeParams
->
-export type RemovePortForwardParamsInput = z.input<
-  typeof schemas.RemovePortForwardParams
->
 
 /**
  * JSON Patch 'replace' operation representation
@@ -195,12 +194,6 @@ export type SetHttpRedirectEnabledParamsInput = z.input<
 >
 export type SetListenParamsInput = z.input<typeof schemas.SetListenParams>
 export type SetPasswordParamsInput = z.input<typeof schemas.SetPasswordParams>
-export type SetPinholeEnabledParamsInput = z.input<
-  typeof schemas.SetPinholeEnabledParams
->
-export type SetPortForwardEnabledParamsInput = z.input<
-  typeof schemas.SetPortForwardEnabledParams
->
 export type SetSubnetIpv6ParamsInput = z.input<
   typeof schemas.SetSubnetIpv6Params
 >
@@ -213,14 +206,9 @@ export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
  * JSON Patch 'test' operation representation
  */
 export type TestOperation = z.output<typeof schemas.TestOperation>
+export type TransportProtocolInput = z.input<typeof schemas.TransportProtocol>
 export type TunnelCertDataInput = z.input<typeof schemas.TunnelCertData>
 export type TunnelUpdateResult = z.output<typeof schemas.TunnelUpdateResult>
-export type UpdatePinholeLabelParamsInput = z.input<
-  typeof schemas.UpdatePinholeLabelParams
->
-export type UpdatePortForwardLabelParamsInput = z.input<
-  typeof schemas.UpdatePortForwardLabelParams
->
 
 /**
  * A WireGuard client's role. A `Server` is a StartOS box that may configure the
@@ -255,11 +243,21 @@ export type LoginParamsInput = z.input<typeof schemas.LoginParams>
  */
 export type PatchOperation = z.output<typeof schemas.PatchOperation>
 export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
+export type RemovePortForwardParamsInput = z.input<
+  typeof schemas.RemovePortForwardParams
+>
 export type SetDeviceKindParamsInput = z.input<
   typeof schemas.SetDeviceKindParams
 >
+export type SetPortForwardEnabledParamsInput = z.input<
+  typeof schemas.SetPortForwardEnabledParams
+>
 export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
+export type TransportWireInput = z.input<typeof schemas.TransportWire>
+export type UpdatePortForwardLabelParamsInput = z.input<
+  typeof schemas.UpdatePortForwardLabelParams
+>
 export type WgConfig = z.output<typeof schemas.WgConfig>
 
 /**
@@ -276,13 +274,28 @@ export type Sessions = z.output<typeof schemas.Sessions>
  * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
  */
 export type SubscribeResult = z.output<typeof schemas.SubscribeResult>
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export type TransportInput = z.input<typeof schemas.Transport>
 export type WgSubnetClients = z.output<typeof schemas.WgSubnetClients>
 
 /**
  * Database-generated patches contain only add, remove and replace operations.
  */
 export type DiffPatch = z.output<typeof schemas.DiffPatch>
+export type RemovePinholeParamsInput = z.input<
+  typeof schemas.RemovePinholeParams
+>
 export type SessionList = z.output<typeof schemas.SessionList>
+export type SetPinholeEnabledParamsInput = z.input<
+  typeof schemas.SetPinholeEnabledParams
+>
+export type UpdatePinholeLabelParamsInput = z.input<
+  typeof schemas.UpdatePinholeLabelParams
+>
 export type WgSubnetConfig = z.output<typeof schemas.WgSubnetConfig>
 export type Revision = z.output<typeof schemas.Revision>
 export type Api = RpcSchemaTree<typeof schemas.Api>

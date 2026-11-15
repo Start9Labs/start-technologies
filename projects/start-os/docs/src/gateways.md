@@ -50,9 +50,9 @@ Which gateway carries the OS's and each service's outbound connections is set un
 
 ## Secure Gateways
 
-Some service interfaces are served without SSL — plain HTTP, or another protocol carrying no encryption of its own. StartOS offers those addresses only on a network it treats as secure. Loopback and the container bridge are secure, because they never leave your server. Every other gateway — your router, WiFi, a WireGuard tunnel — is not, so a service interface bound without SSL is neither listed nor reachable through it.
+For an interface whose SSL StartOS terminates, the gateway's secure setting decides whether its plain-HTTP private addresses are enabled by default. Loopback and the container bridge are secure, because they never leave your server. Other gateways — your router, WiFi, a WireGuard tunnel — are insecure by default.
 
-Marking a gateway secure tells StartOS that you trust the network on the other side of it. Those addresses are then offered there: your server's LAN IP addresses, its [`.local` name](mdns.md), and any [private domains](private-domains.md) you have added on that gateway.
+On an insecure gateway, each plain-HTTP address requires an explicit [command-line opt-in](interfaces.md#plain-http-private-addresses). The UI hides those addresses until they are enabled and lets you disable them again. Marking a gateway secure instead enables the default plaintext addresses server-wide: your server's LAN IP addresses, its [`.local` name](mdns.md), and [private domains](private-domains.md) on that gateway.
 
 This setting lives on the command line. [SSH](ssh.md) into your server, then:
 
@@ -69,7 +69,7 @@ start-cli net gateway unset-secure <GATEWAY>
 `start-cli net gateway list` shows each gateway's current setting, with `(auto)` marking one StartOS decided.
 
 > [!WARNING]
-> This is one switch for the whole server, and it takes effect immediately. Every service you have installed that has a non-SSL address gains it on that network at once, and those addresses are enabled as soon as they are offered — there is no per-service confirmation. A service you normally reach over HTTPS may still have a plaintext leg, and anything on that network — or, over IPv4, on any private network routed to it — can read and alter traffic to it, including the passwords you type into it.
+> Marking a gateway secure takes effect across the whole server immediately. Plaintext addresses without a saved disable become enabled by default on that network. Anything on that network — or, over IPv4, on any private network routed to it — can read and alter traffic, including passwords. Prefer a per-address opt-in when a client cannot use HTTPS.
 >
 > Mark a gateway secure only when you control every device on the network it reaches and on every private network routed to it. Leave a guest network, an office LAN, a coffee-shop WiFi, or any network carrying devices you do not manage as it is.
 

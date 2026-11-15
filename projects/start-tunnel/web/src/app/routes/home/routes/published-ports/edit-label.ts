@@ -18,8 +18,10 @@ export interface EditLabelData {
   readonly source: string
   readonly label: T.Tunnel.SniRoute['label']
   readonly hostname: string | null
-  // Set for a v6 pinhole row — relabel the pinhole instead of a v4 forward.
-  readonly pinhole?: { readonly gua: string; readonly externalPort: number }
+  readonly pinhole?: Pick<
+    T.Tunnel.UpdatePinholeLabelParams,
+    'gua' | 'externalPort' | 'transport'
+  >
 }
 
 @Component({
@@ -65,8 +67,7 @@ export class PublishedPortsEditLabel {
 
     this.tasks.run(async () => {
       if (pinhole) {
-        const { gua, externalPort } = pinhole
-        await this.api.rpc.pinhole.updateLabel({ gua, externalPort, label })
+        await this.api.rpc.pinhole.updateLabel({ ...pinhole, label })
       } else {
         await this.api.rpc.portForward.updateLabel({ source, label, hostname })
       }

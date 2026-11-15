@@ -3987,7 +3987,7 @@ test('a late registry cache update cannot restore a removed registry', async t =
   )
   const subscription = service.marketplace$.subscribe()
   t.after(() => subscription.unsubscribe())
-  await service.delete('https://registry.test')
+  await service.removeRegistry('https://registry.test')
   metadata.next({
     'https://registry.test/': {
       status: 'connected',

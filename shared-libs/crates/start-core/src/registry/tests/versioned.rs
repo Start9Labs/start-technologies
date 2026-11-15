@@ -1,4 +1,5 @@
 use axum::extract::ws::Message;
+use patch_db::ModelExt;
 use patch_db::json_ptr::JsonPointer;
 
 use super::session::receive as response;
@@ -44,9 +45,10 @@ async fn subscribe_selects_each_messages_os_version_for_dumps_and_revisions() {
     drop(ctx.rpc_continuations.get_ws_handler(&guid).await);
     let mut socket = registry_socket(&url, &reader).await;
     subscribe(&mut socket, 71, "0.4.0.2").await;
-    subscribe(&mut socket, 72, "0.4.1.3").await;
+    subscribe(&mut socket, 72, "0.4.3.1").await;
+    subscribe(&mut socket, 73, "0.4.3").await;
     let mut views = BTreeMap::new();
-    for _ in 0..2 {
+    for _ in 0..3 {
         let message = response(&mut socket).await;
         assert!(message.get("error").is_none(), "{message}");
         assert!(message["result"].get("guid").is_none());
@@ -61,6 +63,20 @@ async fn subscribe_selects_each_messages_os_version_for_dumps_and_revisions() {
     );
     assert!(views[&72]["os"]["versions"]["0.4.0.6"]["releaseNotes"].is_object());
     assert_eq!(
+        views[&71]["os"]["versions"]["0.4.0.6"]["headline"],
+        json!("v0.4.0.6")
+    );
+    assert_eq!(
+        views[&73]["os"]["versions"]["0.4.0.6"]["headline"],
+        json!("v0.4.0.6")
+    );
+    assert!(views[&73]["os"]["versions"]["0.4.0.6"]["releaseNotes"].is_object());
+    assert!(
+        views[&72]["os"]["versions"]["0.4.0.6"]
+            .get("headline")
+            .is_none()
+    );
+    assert_eq!(
         views[&71]["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["dependencyMetadata"]["dependency"]
             ["icon"],
         json!("data:image/png;base64,c2VjcmV0")
@@ -73,15 +89,14 @@ async fn subscribe_selects_each_messages_os_version_for_dumps_and_revisions() {
     info.release_notes = from_value(json!({"en_US":"Updated", "pl_PL":"Nowe"})).unwrap();
     ctx.db
         .mutate(|db| {
-            db.as_index_mut()
-                .as_os_mut()
-                .as_versions_mut()
-                .insert(&version, &info)
+            let versions = db.as_index_mut().as_os_mut().as_versions_mut();
+            versions.insert(&version, &info)?;
+            versions.insert(&"0.4.0.7".parse().unwrap(), &info)
         })
         .await
         .result
         .unwrap();
-    for _ in 0..2 {
+    for _ in 0..3 {
         let event = response(&mut socket).await;
         assert_eq!(event["rpcstream"], json!("1.0"));
         assert_eq!(event["end"], json!(false));
@@ -100,6 +115,24 @@ async fn subscribe_selects_each_messages_os_version_for_dumps_and_revisions() {
         views[&72]["os"]["versions"]["0.4.0.6"]["releaseNotes"],
         json!({"en_US":"Updated", "pl_PL":"Nowe"})
     );
+    for version in ["0.4.0.6", "0.4.0.7"] {
+        for id in [71, 73] {
+            assert_eq!(
+                views[&id]["os"]["versions"][version]["headline"],
+                json!(format!("v{version}"))
+            );
+        }
+        assert!(
+            views[&72]["os"]["versions"][version]
+                .get("headline")
+                .is_none()
+        );
+        assert!(
+            ctx.db.peek().await.into_value()["index"]["os"]["versions"][version]
+                .get("headline")
+                .is_none()
+        );
+    }
     socket.close().await.unwrap();
 }
 

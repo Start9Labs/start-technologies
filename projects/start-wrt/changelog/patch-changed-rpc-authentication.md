@@ -17,3 +17,5 @@ release-notes: false
 - Reject unsupported parameter shapes without dropping an authenticated connection.
 - Keep encrypted browser RPC available over HTTP/2 connections.
 - Cancel timed-out or disposed WebSocket requests without interrupting sibling calls, and release pending handlers when the socket closes.
+- Log decrypted browser RPC requests and replies to the developer console for 30 minutes after `rpcLog.enable()`, or a chosen number of minutes, until it expires or `rpcLog.disable()`.
+- Stream update progress and live logs over the encrypted RPC session instead of separate continuation sockets, ending log follow and update observation when the requesting key is revoked; the CLI and older clients keep the GUID WebSocket.

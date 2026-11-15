@@ -38,7 +38,7 @@ start-os-grub-test: projects/start-os/build/tests/grub-overrides-test.sh project
 	./projects/start-os/build/tests/grub-overrides-test.sh
 
 start-os-scripts-test: projects/start-os/build/tests/nut-package-selection-test.sh $(NUT_PACKAGE_SRC) projects/start-os/build/dpkg-deps/generate.sh
-start-os-scripts-test: start-os-grub-test projects/start-os/build/tests/dns-config-test.sh projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/update-image.sh projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/lib/scripts/gather-debug-info projects/start-os/debian/postinst projects/start-os/build/tests/crash-diagnostics-test.sh projects/start-os/build/tests/btrfsmaintenance-test.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/tests/runtime-package-upgrade-test.sh projects/start-os/build/tests/migration-images-test.sh projects/start-os/build/save-migration-images.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh
+start-os-scripts-test: start-os-grub-test start-os-forward-transport-test projects/start-os/build/tests/dns-config-test.sh projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/update-image.sh projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh projects/start-os/build/lib/scripts/gather-debug-info projects/start-os/debian/postinst projects/start-os/build/tests/crash-diagnostics-test.sh projects/start-os/build/tests/btrfsmaintenance-test.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/tests/runtime-package-upgrade-test.sh projects/start-os/build/tests/migration-images-test.sh projects/start-os/build/save-migration-images.sh
 	./projects/start-os/build/tests/nut-package-selection-test.sh
 	./projects/start-os/build/tests/migration-images-test.sh
 	./projects/start-os/build/tests/normalize-fstab-test.sh
@@ -48,6 +48,10 @@ start-os-scripts-test: start-os-grub-test projects/start-os/build/tests/dns-conf
 	./projects/start-os/build/tests/dns-config-test.sh
 	./projects/start-os/build/tests/btrfsmaintenance-test.sh
 	./projects/start-os/build/tests/runtime-package-upgrade-test.sh
+
+.PHONY: start-os-forward-transport-test
+start-os-forward-transport-test: build/lib/scripts/forward-port build/lib/scripts/forward-port6 projects/start-os/build/tests/forward-transport-test.sh
+	./projects/start-os/build/tests/forward-transport-test.sh
 
 projects/start-os/build/lib/migration-images/.done: projects/start-os/build/save-migration-images.sh
 	./projects/start-os/build/save-migration-images.sh projects/start-os/build/lib/migration-images
@@ -264,21 +268,21 @@ target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(CORE_SRC) $(EN
 compiled-$(ARCH).tar: $(COMPILED_TARGETS) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE) $(NUT_PACKAGE_DIR)/.done
 	tar -cvf $@ $(filter-out $(NUT_PACKAGE_DIR)/.done,$^) $(NUT_PACKAGE_DIR)
 
-target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs: $(call ls-files, projects/start-os/backup-fs) $(BACKUP_PROTOCOL_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE)
+target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs: $(call ls-files, projects/start-os/backup-fs) $(BACKUP_PROTOCOL_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE) $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=$(ARCH) PROFILE=release ./projects/start-os/backup-fs/build-backup-fs.sh
 	touch $@
 
 # --- pi-beep: first-party crate, built like the other in-repo bins ---
-target/aarch64-unknown-linux-musl/release/pi-beep: $(call ls-files, shared-libs/crates/pi-beep) $(ENVIRONMENT_FILE)
+target/aarch64-unknown-linux-musl/release/pi-beep: $(call ls-files, shared-libs/crates/pi-beep) $(ENVIRONMENT_FILE) $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=aarch64 PROFILE=release ./shared-libs/crates/pi-beep/build-pi-beep.sh
 	touch $@
 
 # --- external cargo dev tools (crates.io) bundled into unstable/console images ---
-target/$(RUST_ARCH)-unknown-linux-musl/release/tokio-console: ./build/build-cargo-dep.sh
+target/$(RUST_ARCH)-unknown-linux-musl/release/tokio-console: ./build/build-cargo-dep.sh $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=$(ARCH) ./build/build-cargo-dep.sh tokio-console
 	touch $@
 
-target/$(RUST_ARCH)-unknown-linux-musl/release/flamegraph: ./build/build-cargo-dep.sh
+target/$(RUST_ARCH)-unknown-linux-musl/release/flamegraph: ./build/build-cargo-dep.sh $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=$(ARCH) ./build/build-cargo-dep.sh flamegraph
 	touch $@
 

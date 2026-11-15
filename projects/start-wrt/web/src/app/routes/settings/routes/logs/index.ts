@@ -8,11 +8,7 @@ import {
   viewChild,
 } from '@angular/core'
 import { TuiButton } from '@taiga-ui/core'
-import {
-  ApiService,
-  LogEntry,
-  type ContinuationSocket,
-} from 'src/app/services/api/api.service'
+import { ApiService, LogEntry } from 'src/app/services/api/api.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
 @Component({
@@ -81,20 +77,18 @@ export default class Logs {
       .join('\n'),
   )
 
-  private ws: ContinuationSocket | null = null
+  private readonly lifetime = new AbortController()
   private shouldAutoScroll = true
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempts = 0
-  private destroyed = false
 
   constructor() {
     // Open the live stream before loading the snapshot. The snapshot RPC is
     // best-effort historical context for what happened before this view.
-    this.connectWs()
+    this.follow()
     this.loadInitial()
     this.destroyRef.onDestroy(() => {
-      this.destroyed = true
-      this.ws?.close()
+      this.lifetime.abort()
       if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     })
   }
@@ -109,38 +103,26 @@ export default class Logs {
     }
   }
 
-  private async connectWs() {
-    let guid: string
+  private async follow() {
+    const { signal } = this.lifetime
     try {
-      guid = (await this.api.followLogs()).guid
-    } catch {
-      this.reconnect()
-      return
-    }
-    if (this.destroyed) return
-    const ws = this.api.openWebsocket(guid)
-    this.ws = ws
-
-    ws.onopen = () => {
+      const { items } = await this.api.followLogs({ signal })
       this.reconnectAttempts = 0
-    }
-
-    ws.onmessage = event => {
-      const entry: LogEntry = JSON.parse(event.data)
-      this.checkAutoScroll()
-      this.entries.update(entries => [...entries, entry])
-      if (this.shouldAutoScroll) {
-        requestAnimationFrame(() => this.scrollToBottom())
+      for await (const entry of items) {
+        this.checkAutoScroll()
+        this.entries.update(entries => [...entries, entry])
+        if (this.shouldAutoScroll) {
+          requestAnimationFrame(() => this.scrollToBottom())
+        }
       }
-    }
-
-    ws.onclose = () => this.reconnect()
+    } catch {}
+    this.reconnect()
   }
 
   private reconnect() {
-    if (this.destroyed || this.reconnectAttempts >= 5) return
+    if (this.lifetime.signal.aborted || this.reconnectAttempts >= 5) return
     this.reconnectAttempts++
-    this.reconnectTimer = setTimeout(() => this.connectWs(), 3000)
+    this.reconnectTimer = setTimeout(() => this.follow(), 3000)
   }
 
   private checkAutoScroll() {
