@@ -680,10 +680,10 @@ impl Filesystem for BackupFS {
         });
     }
 
-    fn opendir(&self, req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
+    fn opendir(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
         debug!("opendir() called on {:?}", ino);
         let mut h = self.handler();
-        match h.opendir(req, Inode(ino.into()), flags.0) {
+        match h.opendir(Inode(ino.into()), flags.0) {
             Ok(FileHandleId(fh)) => reply.opened(FileHandle(fh), FopenFlags::FOPEN_DIRECT_IO),
             Err(e) => reply.error(errno(e.to_errno_log())),
         }
@@ -691,7 +691,7 @@ impl Filesystem for BackupFS {
 
     fn readdir(
         &self,
-        req: &Request,
+        _req: &Request,
         ino: INodeNo,
         fh: FileHandle,
         offset: u64,
@@ -699,7 +699,6 @@ impl Filesystem for BackupFS {
     ) {
         let mut h = self.handler();
         match h.readdir(
-            req,
             Inode(ino.into()),
             FileHandleId(fh.into()),
             offset as i64,
@@ -719,7 +718,7 @@ impl Filesystem for BackupFS {
 
     fn readdirplus(
         &self,
-        req: &Request,
+        _req: &Request,
         ino: INodeNo,
         fh: FileHandle,
         offset: u64,
@@ -727,7 +726,6 @@ impl Filesystem for BackupFS {
     ) {
         let mut h = self.handler();
         match h.readdir(
-            req,
             Inode(ino.into()),
             FileHandleId(fh.into()),
             offset as i64,

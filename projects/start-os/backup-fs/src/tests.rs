@@ -2191,6 +2191,64 @@ fn every_commit_records_the_namespace_between_requests() {
 }
 
 #[test_log::test]
+#[cfg(target_os = "linux")]
+fn directory_pagination_with_small_getdents_buffers_reaches_eof() {
+    use std::collections::BTreeSet;
+    use std::os::fd::AsRawFd;
+
+    let data = TempDir::with_prefix("backupfs_data").unwrap();
+    with_backupfs(
+        data.path(),
+        "ohea".to_owned(),
+        |mnt| {
+            let expected: BTreeSet<_> = (0..70).map(|i| format!("{i:032}.txt.br")).collect();
+            for name in &expected {
+                fs::write(mnt.join(name), b"data").unwrap();
+            }
+            for capacity in [256, 1024, 2048, 32768] {
+                let dir = fs::File::open(mnt).unwrap();
+                let mut buffer = vec![0u8; capacity];
+                let mut listed = BTreeSet::new();
+                let mut eof = false;
+                for _ in 0..=expected.len() + 2 {
+                    let bytes = unsafe {
+                        libc::syscall(
+                            libc::SYS_getdents64,
+                            dir.as_raw_fd(),
+                            buffer.as_mut_ptr(),
+                            capacity,
+                        )
+                    };
+                    assert!(bytes >= 0, "{}", io::Error::last_os_error());
+                    if bytes == 0 {
+                        eof = true;
+                        break;
+                    }
+                    let mut at = 0;
+                    while at < bytes as usize {
+                        let len = u16::from_ne_bytes(buffer[at + 16..at + 18].try_into().unwrap())
+                            as usize;
+                        let raw_name = &buffer[at + 19..at + len];
+                        let end = raw_name.iter().position(|b| *b == 0).unwrap();
+                        let name = String::from_utf8(raw_name[..end].to_vec()).unwrap();
+                        assert!(
+                            listed.insert(name),
+                            "duplicate entry with buffer size {capacity}"
+                        );
+                        at += len;
+                    }
+                }
+                assert!(eof, "EOF not reached with buffer size {capacity}");
+                assert!(listed.remove("."));
+                assert!(listed.remove(".."));
+                assert_eq!(listed, expected, "buffer size {capacity}");
+            }
+        },
+        None,
+    );
+}
+
+#[test_log::test]
 fn directory_offsets_survive_seekdir_retries() {
     let data = TempDir::with_prefix("backupfs_data").unwrap();
 

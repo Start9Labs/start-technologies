@@ -77,6 +77,83 @@ mod non_fuse_tests {
     }
 
     #[test]
+    fn directory_pagination_lists_every_entry_once_and_reaches_eof() {
+        let data = TempDir::with_prefix("backupfs_data").unwrap();
+        let ctrl = controller(&data);
+        let inode = Inode(FUSE_ROOT_ID);
+        let names: Vec<OsString> = (0..70).map(|i| format!("entry-{i:04}").into()).collect();
+        let mut entries = crate::directory::DirectoryContents::new();
+        for name in &names {
+            entries
+                .insert(
+                    &ctrl,
+                    inode,
+                    name.clone(),
+                    crate::directory::DirectoryEntry {
+                        inode: Inode(FUSE_ROOT_ID + 1),
+                        ty: fuser::FileType::RegularFile,
+                    },
+                )
+                .unwrap();
+        }
+        ctrl.save(&InodeAttributes::new(
+            inode,
+            None,
+            FileData::Directory(entries),
+        ))
+        .unwrap();
+        let mut handler = Handler::new(ctrl);
+        let expected: Vec<OsString> = [OsString::from("."), OsString::from("..")]
+            .into_iter()
+            .chain(names)
+            .collect();
+
+        for capacity in [1, 2, 32, 64, 4096] {
+            let fh = handler.opendir(inode, 0).unwrap();
+            let mut offset = 0;
+            let mut listed = Vec::new();
+            for _ in 0..=expected.len() {
+                let mut count = 0;
+                handler
+                    .readdir(inode, fh, offset, |_, name, _, next| {
+                        if count == capacity {
+                            return Ok(true);
+                        }
+                        listed.push(name.to_owned());
+                        offset = next;
+                        count += 1;
+                        Ok(false)
+                    })
+                    .unwrap();
+                if count == 0 {
+                    break;
+                }
+                assert!(
+                    listed.len() <= expected.len(),
+                    "repeated entries at capacity {capacity}"
+                );
+            }
+            assert_eq!(listed, expected, "capacity {capacity}");
+            for resume in [1, 2, 34, 71, 72] {
+                for _ in 0..2 {
+                    let mut replayed = Vec::new();
+                    handler
+                        .readdir(inode, fh, resume, |_, name, _, _| {
+                            replayed.push(name.to_owned());
+                            Ok(false)
+                        })
+                        .unwrap();
+                    assert_eq!(
+                        replayed,
+                        expected[resume as usize..],
+                        "capacity {capacity}, offset {resume}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn root_directory_sync_reclaims_dead_segments_with_open_files() {
         let data = TempDir::with_prefix("backupfs_data").unwrap();
         let ctrl = controller(&data);
@@ -1381,12 +1458,7 @@ impl Handler {
         Ok(written)
     }
 
-    pub fn opendir(
-        &mut self,
-        _req: &Request,
-        inode: Inode,
-        _flags: i32,
-    ) -> BkfsResult<FileHandleId> {
+    pub fn opendir(&mut self, inode: Inode, _flags: i32) -> BkfsResult<FileHandleId> {
         let inode = self.load_inode(inode)?;
         let entries = match &inode.attrs.contents {
             FileData::Directory(dir) => dir.snapshot(self.ctrl(), inode.inode)?,
@@ -1407,7 +1479,6 @@ impl Handler {
 
     pub fn readdir(
         &mut self,
-        _req: &Request,
         inode: Inode,
         fh: FileHandleId,
         mut offset: i64,
