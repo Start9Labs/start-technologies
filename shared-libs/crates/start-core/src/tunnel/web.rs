@@ -71,7 +71,10 @@ impl WebserverInfo {
                 PortForward::Dnat { enabled, .. } => *enabled,
                 PortForward::Sni { fallback, .. } => fallback.as_ref().is_some_and(|f| f.enabled),
             };
-            if enabled && self.reserves_plain_forward(*source, forward.port_span()) {
+            if enabled
+                && forward.transport(source.clone()) != crate::net::transport::Transport::udp()
+                && self.reserves_plain_forward(source.address, forward.port_span())
+            {
                 return Err(Error::new(
                     eyre!(t!("tunnel.web.listen-port-forwarded")),
                     ErrorKind::InvalidRequest,
@@ -106,7 +109,8 @@ mod tests {
 
         use crate::tunnel::db::SniRoute;
 
-        let source = "203.0.113.4:442".parse().unwrap();
+        let source: crate::tunnel::forward::address::ForwardAddress =
+            "203.0.113.4:442".parse().unwrap();
         let target = "10.0.0.2:442".parse().unwrap();
         let original = "0.0.0.0:8443".parse().unwrap();
         let mut db = Model::new(&TunnelDatabase::default()).unwrap();
@@ -115,7 +119,7 @@ mod tests {
             for auto in [false, true] {
                 db.as_port_forwards_mut()
                     .ser(&PortForwards(BTreeMap::from([(
-                        source,
+                        source.clone(),
                         PortForward::Dnat {
                             target,
                             label: None,
@@ -167,7 +171,8 @@ mod tests {
 
         use crate::tunnel::db::SniRoute;
 
-        let source = "203.0.113.4:443".parse().unwrap();
+        let source: crate::tunnel::forward::address::ForwardAddress =
+            "203.0.113.4:443".parse().unwrap();
         let target = "10.0.0.2:443".parse().unwrap();
         for enabled in [false, true] {
             for forward in [
@@ -198,7 +203,7 @@ mod tests {
             ] {
                 let mut db = Model::new(&TunnelDatabase::default()).unwrap();
                 db.as_port_forwards_mut()
-                    .ser(&PortForwards(BTreeMap::from([(source, forward)])))
+                    .ser(&PortForwards(BTreeMap::from([(source.clone(), forward)])))
                     .unwrap();
                 update_listen_address(&mut db, "0.0.0.0:443".parse().unwrap()).unwrap();
                 assert!(!db.as_webserver().as_enabled().de().unwrap());

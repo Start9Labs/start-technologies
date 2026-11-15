@@ -8,6 +8,7 @@ mod m_01_port_forward_kind;
 mod m_02_wg_client_kind;
 mod m_03_port_forward_auto;
 mod m_04_reclaim_port_80_redirect;
+mod m_05_forward_transports;
 
 #[cfg(test)]
 pub use m_01_port_forward_kind::PortForwardKind;
@@ -26,6 +27,7 @@ pub const MIGRATIONS: &[&dyn TunnelMigration] = &[
     &m_02_wg_client_kind::WgClientKind,
     &m_03_port_forward_auto::PortForwardAuto,
     &m_04_reclaim_port_80_redirect::ReclaimPort80Redirect,
+    &m_05_forward_transports::ForwardTransports,
 ];
 
 #[instrument(skip_all)]

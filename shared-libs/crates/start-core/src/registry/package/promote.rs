@@ -28,13 +28,7 @@ pub struct CliPromoteParams {
 }
 
 pub fn registry_rpc_url(url: &Url) -> Result<Url, Error> {
-    let mut url = url.clone();
-    url.path_segments_mut()
-        .map_err(|_| eyre!("Url cannot be base"))
-        .with_kind(ErrorKind::ParseUrl)?
-        .push("rpc")
-        .push("v0");
-    Ok(url)
+    crate::util::net::rpc_url(url, 0)
 }
 
 pub fn resolve_registry_url(explicit: Option<&str>, ctx: &CliContext) -> Result<Url, Error> {
@@ -54,15 +48,14 @@ pub async fn call_registry(
     ctx: &CliContext,
     url: Url,
     method: &str,
-    mut params: Value,
+    params: Value,
 ) -> Result<Value, Error> {
-    crate::registry::compat::pem_wire(&mut params);
     let sig_context = url.host().as_ref().map(InternedString::from_display);
-    crate::middleware::auth::signature::call_remote(
+    crate::registry::context::call_cli(
         ctx,
         url,
         HeaderMap::new(),
-        sig_context.as_deref(),
+        sig_context.as_deref().or_not_found("registry hostname")?,
         method,
         params,
     )

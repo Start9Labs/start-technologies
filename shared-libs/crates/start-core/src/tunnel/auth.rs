@@ -12,7 +12,8 @@ use crate::context::CliContext;
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::LocalAuthContext;
 use crate::middleware::auth::signature::{
-    LoginMetadata, SignatureAuthContext, check_enrolled, url_host_str,
+    LoginMetadata, SignatureAuthContext, SignatureAuthorizationContext, check_enrolled,
+    url_host_str,
 };
 use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
@@ -28,8 +29,15 @@ impl DbContext for TunnelContext {
     }
 }
 impl SignatureAuthContext for TunnelContext {
-    type AdditionalMetadata = LoginMetadata;
-    type CheckPubkeyRes = Option<InternedString>;
+    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+        TunnelContext::server_identity(self)
+    }
+    fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
+        TunnelContext::replay_check(self)
+    }
+    fn with_secure_session(self, session: crate::middleware::auth::session::SecureSession) -> Self {
+        TunnelContext::with_secure_session(self, session)
+    }
     fn mutate_nonce_cache<
         F: FnOnce(&mut crate::middleware::auth::signature::NonceCache) -> T,
         T,
@@ -39,21 +47,9 @@ impl SignatureAuthContext for TunnelContext {
     ) -> T {
         self.auth_sig_nonce_cache.mutate(f)
     }
+    /// Trusts the Tunnel host clock.
     async fn clock_synced(&self) -> bool {
-        true // Assume. Validating VPS clock sync out of scope for now,
-    }
-    fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
-        &self.open_authed_continuations
-    }
-    fn remove_enrolled_keys(
-        db: &mut Model<Self::Database>,
-        keys: &BTreeSet<InternedString>,
-    ) -> Result<(), Error> {
-        let auth_keys = db.as_session_pubkeys_mut();
-        for key in keys {
-            auth_keys.remove(key)?;
-        }
-        Ok(())
+        true
     }
     async fn sig_context(
         &self,
@@ -99,6 +95,23 @@ impl SignatureAuthContext for TunnelContext {
                 .flatten(),
             )
     }
+}
+impl SignatureAuthorizationContext for TunnelContext {
+    type AdditionalMetadata = LoginMetadata;
+    type CheckPubkeyRes = Option<InternedString>;
+    fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
+        &self.open_authed_continuations
+    }
+    fn remove_enrolled_keys(
+        db: &mut Model<Self::Database>,
+        keys: &BTreeSet<InternedString>,
+    ) -> Result<(), Error> {
+        let auth_keys = db.as_session_pubkeys_mut();
+        for key in keys {
+            auth_keys.remove(key)?;
+        }
+        Ok(())
+    }
     fn check_pubkey(
         &self,
         db: &Model<Self::Database>,
@@ -106,7 +119,7 @@ impl SignatureAuthContext for TunnelContext {
         metadata: Self::AdditionalMetadata,
     ) -> Result<Self::CheckPubkeyRes, Error> {
         check_enrolled(pubkey, metadata.login, |key| {
-            Ok(db.as_session_pubkeys().de()?.0.contains_key(&**key))
+            self.auth_key_is_enrolled(db, key)
         })
     }
     async fn post_auth_hook(
@@ -125,6 +138,16 @@ impl LocalAuthContext for TunnelContext {
     const LOCAL_AUTH_COOKIE_OWNERSHIP: &str = "root:root";
 }
 impl LoginContext for TunnelContext {
+    fn auth_key_is_enrolled(
+        &self,
+        db: &Model<Self::Database>,
+        key: &InternedString,
+    ) -> Result<bool, Error> {
+        Ok(Self::access_auth_keys(&mut db.clone())
+            .de()?
+            .0
+            .contains_key(&**key))
+    }
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys> {
         db.as_session_pubkeys_mut()
     }

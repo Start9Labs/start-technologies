@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "reflect", derive(visit_rs::VisitFields))]
 pub struct Revision {
     pub id: u64,
     pub patch: DiffPatch,
@@ -29,7 +30,9 @@ pub struct Dump {
     pub value: Value,
 }
 
+/// Database-generated patches contain only add, remove and replace operations.
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "reflect", derive(visit_rs::VisitFields))]
 pub struct DiffPatch(pub(crate) Patch);
 impl DiffPatch {
     pub fn prepend<S: AsRef<str>, V: SegList>(&mut self, ptr: &JsonPointer<S, V>) {

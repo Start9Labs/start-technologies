@@ -17,6 +17,17 @@ pub fn type_helpers() -> &'static str {
     include_str!("./type-helpers.ts")
 }
 
+/// Exported method-tree helper type names, shared by bindings and consumer barrels.
+pub fn type_helper_names() -> impl Iterator<Item = &'static str> {
+    type_helpers().lines().filter_map(|line| {
+        line.strip_prefix("export type ").and_then(|declaration| {
+            declaration
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .next()
+        })
+    })
+}
+
 /// Runtime code appended to a handler tree's schema module under the `mcp` feature.
 #[cfg(feature = "mcp")]
 pub fn tool_catalog() -> &'static str {
@@ -49,6 +60,25 @@ pub trait ReturnTS {
     }
     fn return_ts<'a>(&'a self) -> Option<TSWriter<'a>>;
 }
+
+/// Supplies response-stream item and terminal output shapes independently of the initiating result.
+pub trait StreamTS {
+    fn stream_ts(&self) -> (TSWriter<'_>, TSWriter<'_>) {
+        default_stream_writers()
+    }
+}
+
+fn default_stream_writers() -> (TSWriter<'static>, TSWriter<'static>) {
+    (type_writer::<crate::Never>(), type_writer::<()>())
+}
+
+fn stream_writers<H: HandlerTypes>() -> (TSWriter<'static>, TSWriter<'static>)
+where
+    Static<H::Item>: Visit<TSVisitor>,
+    Static<H::Final>: Visit<TSVisitor>,
+{
+    (type_writer::<H::Item>(), type_writer::<H::Final>())
+}
 /// Supplies the child method map and preserves binding opt-outs across adapters.
 pub trait ChildrenTS {
     fn ts_enabled(&self) -> bool {
@@ -58,10 +88,10 @@ pub trait ChildrenTS {
 }
 
 /// Composes parameter, result and child bindings unless the handler opts out.
-pub trait HandlerTSBindings: ParamsTS + ReturnTS + ChildrenTS {
+pub trait HandlerTSBindings: ParamsTS + ReturnTS + StreamTS + ChildrenTS {
     fn get_ts<'a>(&'a self) -> Option<HandlerTS<'a>>;
 }
-impl<T: ParamsTS + ReturnTS + ChildrenTS> HandlerTSBindings for T {
+impl<T: ParamsTS + ReturnTS + StreamTS + ChildrenTS> HandlerTSBindings for T {
     fn get_ts<'a>(&'a self) -> Option<HandlerTS<'a>> {
         self.ts_enabled().then(|| HandlerTS::new(self))
     }
@@ -77,6 +107,11 @@ impl<T: ReturnTS> ReturnTS for Arc<T> {
     }
     fn return_ts(&self) -> Option<Box<dyn Fn(&mut TSVisitor) + Send + Sync + '_>> {
         self.deref().return_ts()
+    }
+}
+impl<T: StreamTS> StreamTS for Arc<T> {
+    fn stream_ts(&self) -> (TSWriter<'_>, TSWriter<'_>) {
+        self.deref().stream_ts()
     }
 }
 impl<T: ChildrenTS> ChildrenTS for Arc<T> {
@@ -100,6 +135,11 @@ impl<C, I> ReturnTS for crate::DynHandler<C, I> {
         self.0.return_ts()
     }
 }
+impl<C, I> StreamTS for crate::DynHandler<C, I> {
+    fn stream_ts(&self) -> (TSWriter<'_>, TSWriter<'_>) {
+        self.0.stream_ts()
+    }
+}
 impl<C, I> ChildrenTS for crate::DynHandler<C, I> {
     fn ts_enabled(&self) -> bool {
         self.0.ts_enabled()
@@ -113,17 +153,19 @@ impl<C, I> ChildrenTS for crate::DynHandler<C, I> {
 pub struct HandlerTS<'a> {
     params_ts: TSWriter<'a>,
     return_ts: Option<TSWriter<'a>>,
+    stream_types: (TSWriter<'a>, TSWriter<'a>),
     children: Option<TSWriter<'a>>,
     opaque: bool,
 }
 impl<'a> HandlerTS<'a> {
     pub fn new<H>(handler: &'a H) -> Self
     where
-        H: ParamsTS + ReturnTS + ChildrenTS,
+        H: ParamsTS + ReturnTS + StreamTS + ChildrenTS,
     {
         Self {
             params_ts: handler.params_ts(),
             return_ts: handler.return_ts(),
+            stream_types: handler.stream_ts(),
             children: handler.children_ts(),
             opaque: !handler.return_ts_enabled(),
         }
@@ -148,6 +190,15 @@ impl<'a> Visit<TSVisitor> for HandlerTS<'a> {
             visitor.ts.push_str(PURE);
             visitor.ts.push(' ');
             visitor.in_direction(Direction::Output, |visitor| return_ty(visitor));
+            if !self.opaque {
+                for (name, writer) in [
+                    ("_ITEM", &self.stream_types.0),
+                    ("_FINAL", &self.stream_types.1),
+                ] {
+                    visitor.ts.push_str(&format!(", {name}: {PURE} "));
+                    visitor.in_direction(Direction::Output, |visitor| writer(visitor));
+                }
+            }
         }
         if let Some(children) = &self.children {
             visitor.ts.push_str(", _CHILDREN: ");
@@ -206,6 +257,16 @@ where
         Some(type_writer::<<Self as HandlerTypes>::Ok>())
     }
 }
+impl<F, T, E, Args> StreamTS for FromFn<F, T, E, Args>
+where
+    Self: HandlerTypes,
+    Static<<Self as HandlerTypes>::Item>: Visit<TSVisitor>,
+    Static<<Self as HandlerTypes>::Final>: Visit<TSVisitor>,
+{
+    fn stream_ts(&self) -> (TSWriter<'_>, TSWriter<'_>) {
+        stream_writers::<Self>()
+    }
+}
 impl<F, Fut, T, E, Args> ReturnTS for FromFnAsync<F, Fut, T, E, Args>
 where
     Self: HandlerTypes,
@@ -215,6 +276,16 @@ where
         Some(type_writer::<<Self as HandlerTypes>::Ok>())
     }
 }
+impl<F, Fut, T, E, Args> StreamTS for FromFnAsync<F, Fut, T, E, Args>
+where
+    Self: HandlerTypes,
+    Static<<Self as HandlerTypes>::Item>: Visit<TSVisitor>,
+    Static<<Self as HandlerTypes>::Final>: Visit<TSVisitor>,
+{
+    fn stream_ts(&self) -> (TSWriter<'_>, TSWriter<'_>) {
+        stream_writers::<Self>()
+    }
+}
 impl<F, Fut, T, E, Args> ReturnTS for FromFnAsyncLocal<F, Fut, T, E, Args>
 where
     Self: HandlerTypes,
@@ -222,6 +293,16 @@ where
 {
     fn return_ts(&self) -> Option<Box<dyn Fn(&mut TSVisitor) + Send + Sync>> {
         Some(type_writer::<<Self as HandlerTypes>::Ok>())
+    }
+}
+impl<F, Fut, T, E, Args> StreamTS for FromFnAsyncLocal<F, Fut, T, E, Args>
+where
+    Self: HandlerTypes,
+    Static<<Self as HandlerTypes>::Item>: Visit<TSVisitor>,
+    Static<<Self as HandlerTypes>::Final>: Visit<TSVisitor>,
+{
+    fn stream_ts(&self) -> (TSWriter<'_>, TSWriter<'_>) {
+        stream_writers::<Self>()
     }
 }
 impl<Context, Params, InheritedParams> ReturnTS
@@ -236,6 +317,21 @@ impl<Context, Params, InheritedParams> ReturnTS
         match self.subcommands.0.as_ref()?.get_ts() {
             Some(ts) => ts.return_ts,
             None => Some(type_writer::<serde_json::Value>()),
+        }
+    }
+}
+impl<Context, Params, InheritedParams> StreamTS
+    for ParentHandler<Context, Params, InheritedParams>
+{
+    fn stream_ts(&self) -> (TSWriter<'_>, TSWriter<'_>) {
+        match self
+            .subcommands
+            .0
+            .as_ref()
+            .and_then(|handler| handler.get_ts())
+        {
+            Some(ts) => ts.stream_types,
+            None => default_stream_writers(),
         }
     }
 }
@@ -283,6 +379,7 @@ where
                     HandlerTS {
                         params_ts: type_writer::<serde_json::Value>(),
                         return_ts: Some(type_writer::<serde_json::Value>()),
+                        stream_types: default_stream_writers(),
                         children: None,
                         opaque: true,
                     }
@@ -305,7 +402,7 @@ where
     }
 }
 
-/// Forwards an adapter's result bindings unchanged.
+/// Forwards an adapter's initiating and stream result bindings unchanged.
 pub trait PassthroughReturnTS: Adapter {}
 impl<T: PassthroughReturnTS> ReturnTS for T
 where
@@ -316,6 +413,14 @@ where
     }
     fn return_ts<'a>(&'a self) -> Option<Box<dyn Fn(&mut TSVisitor) + Send + Sync + 'a>> {
         self.as_inner().return_ts()
+    }
+}
+impl<T: PassthroughReturnTS> StreamTS for T
+where
+    T::Inner: StreamTS,
+{
+    fn stream_ts(&self) -> (TSWriter<'_>, TSWriter<'_>) {
+        self.as_inner().stream_ts()
     }
 }
 
@@ -347,13 +452,7 @@ pub fn handler_bindings<H: HandlerTSBindings>(
         return Ok(None);
     };
     let mut visitor = TSVisitor::new();
-    visitor.reserve(type_helpers().lines().filter_map(|line| {
-        line.strip_prefix("export type ").and_then(|declaration| {
-            declaration
-                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-                .next()
-        })
-    }));
+    visitor.reserve(type_helper_names());
     #[cfg(feature = "mcp")]
     visitor.reserve(["toolCatalog"]);
     visitor.types_prelude(type_helpers());

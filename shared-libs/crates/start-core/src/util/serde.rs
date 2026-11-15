@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::ffi::OsString;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -24,6 +25,26 @@ use sha2::Digest;
 use super::IntoDoubleEndedIterator;
 use crate::prelude::*;
 use crate::util::{Apply, FromStrParser};
+
+/// Accepts strings and Serde's native byte-preserving argument representation.
+pub fn deserialize_os_strings<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Vec<OsString>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Argument {
+        Text(String),
+        Native(OsString),
+    }
+    Vec::<Argument>::deserialize(deserializer).map(|arguments| {
+        IntoIterator::into_iter(arguments)
+            .map(|argument| match argument {
+                Argument::Text(text) => text.into(),
+                Argument::Native(native) => native,
+            })
+            .collect()
+    })
+}
 
 pub fn const_true() -> bool {
     true
@@ -544,6 +565,8 @@ impl<T: HandlerTypes> HandlerTypes for DisplaySerializable<T> {
     type InheritedParams = T::InheritedParams;
     type Ok = T::Ok;
     type Err = T::Err;
+    type Item = T::Item;
+    type Final = T::Final;
 }
 impl<T: HandlerFor<C>, C: Context> HandlerFor<C> for DisplaySerializable<T> {
     fn handle_sync(
@@ -1355,6 +1378,7 @@ pub fn apply_expr(input: jaq_core::Val, expr: &str) -> Result<jaq_core::Val, Err
     Ok(res)
 }
 
+pub mod binary;
 pub mod der64;
 pub use der64::{Der64, DerEncoding};
 

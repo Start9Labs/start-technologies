@@ -16,6 +16,10 @@ use crate::db::model::{Database, DatabaseModel};
 use crate::prelude::*;
 use crate::util::future::NonDetachingJoinHandle;
 
+mod rpc;
+pub use rpc::with_cli_progress;
+pub(crate) use rpc::{forward_progress, progress_until_complete, progress_with_null};
+
 lazy_static::lazy_static! {
     static ref SPINNER: ProgressStyle = ProgressStyle::with_template("{spinner} {msg}...").unwrap();
     static ref PERCENTAGE: ProgressStyle = ProgressStyle::with_template("{msg} {percent}% {wide_bar} [{human_pos}/{human_len}] [{per_sec} {eta}]").unwrap();
@@ -164,12 +168,7 @@ impl Progress {
     }
     pub fn set_complete(&mut self) {
         match self {
-            Self::Nested(fp) => {
-                fp.overall.set_complete();
-                for phase in &mut fp.phases {
-                    phase.progress.set_complete();
-                }
-            }
+            Self::Nested(fp) => fp.set_complete(),
             _ => *self = Self::Complete(true),
         }
     }
@@ -221,6 +220,14 @@ pub struct FullProgress {
 rpc_toolkit::reflect_ts!(FullProgress);
 rpc_toolkit::ts_export!(FullProgress, namespaces = [""]);
 impl FullProgress {
+    /// Completes all phases; callers must already know the operation succeeded.
+    pub fn set_complete(&mut self) {
+        for phase in &mut self.phases {
+            phase.progress.set_complete();
+        }
+        self.overall.set_complete();
+    }
+
     pub fn new() -> Self {
         Self {
             overall: Progress::new(),
@@ -262,6 +269,7 @@ impl FullProgressTracker {
                 .collect(),
         }
     }
+    /// Observes snapshots until dropped; completion requires the operation's own result.
     pub fn stream(&self, min_interval: Option<Duration>) -> BoxStream<'static, FullProgress> {
         struct StreamState {
             overall: watch::Receiver<Progress>,
@@ -269,7 +277,7 @@ impl FullProgressTracker {
             phases: Vector<(InternedString, watch::Receiver<Progress>)>,
         }
         let mut overall = self.overall.subscribe();
-        overall.mark_changed(); // make sure stream starts with a value
+        overall.mark_changed();
         let phases_recv = self.phases.subscribe();
         let phases = phases_recv.borrow().clone();
         let state = StreamState {

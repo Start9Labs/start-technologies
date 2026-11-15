@@ -27,7 +27,7 @@ use crate::db::model::public::{NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::middleware::auth::Auth;
 use crate::middleware::auth::local::{LocalAuthContext, dial_addr, local_auth_header};
 use crate::middleware::auth::signature::{NonceCache, url_host_str};
-use crate::middleware::cors::Cors;
+use crate::middleware::db::SyncDb;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord, UpdateAuth};
 use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
 use crate::net::static_server::{EMPTY_DIR, UiContext};
@@ -37,6 +37,7 @@ use crate::tunnel::TUNNEL_DEFAULT_LISTEN;
 use crate::tunnel::api::tunnel_api;
 use crate::tunnel::db::{DnsRecordEntry, DnsRecords, PortForward, PortForwards, TunnelDatabase};
 use crate::tunnel::dns::DnsProxyController;
+use crate::tunnel::forward::address::ForwardAddress;
 use crate::tunnel::migrations::run_migrations;
 use crate::tunnel::wg::{WIREGUARD_INTERFACE_NAME, WgServer, current_ifindex};
 use crate::util::Invoke;
@@ -177,6 +178,7 @@ pub struct TunnelContextSeed {
     pub rpc_continuations: RpcContinuations,
     pub open_authed_continuations: OpenAuthedContinuations<Option<InternedString>>,
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
+    pub server_identity: crate::sign::Signer,
     pub net_iface: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     pub forward: PortForwardController,
     pub dns_proxy: DnsProxyController,
@@ -187,7 +189,7 @@ pub struct TunnelContextSeed {
     pub dns_allowed: Arc<SyncMutex<BTreeSet<IpAddr>>>,
     /// Per-injector TSIG keys, read live so the injector can verify UPDATEs.
     pub dns_keys: Arc<SyncMutex<BTreeMap<IpAddr, [u8; 32]>>>,
-    pub active_forwards: SyncMutex<BTreeMap<SocketAddrV4, Arc<()>>>,
+    pub active_forwards: SyncMutex<BTreeMap<ForwardAddress, Arc<()>>>,
     pub forward_write_lock: tokio::sync::Mutex<()>,
     /// In-memory leases for auto (PCP-created) forwards/pinholes/SNI routes,
     /// reaped by [`crate::tunnel::forward::lease`] when a client stops renewing.
@@ -229,7 +231,33 @@ async fn restrict_datadir(datadir: &Path) -> Result<(), Error> {
 }
 
 #[derive(Clone)]
-pub struct TunnelContext(Arc<TunnelContextSeed>);
+pub struct TunnelContext(
+    Arc<TunnelContextSeed>,
+    Option<Arc<crate::middleware::auth::session::SecureSession>>,
+);
+
+impl SessionContext for TunnelContext {
+    fn secure_session(&self) -> Option<&crate::middleware::auth::session::SecureSession> {
+        self.1.as_deref()
+    }
+}
+impl TunnelContext {
+    pub(crate) fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
+        crate::middleware::auth::signature::RequestReplayCheck::new(&self.0, |seed| {
+            Some(Self(seed, None))
+        })
+    }
+    pub(crate) fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+        Ok(self.server_identity.clone())
+    }
+    pub(crate) fn with_secure_session(
+        mut self,
+        session: crate::middleware::auth::session::SecureSession,
+    ) -> Self {
+        self.1 = Some(Arc::new(session));
+        self
+    }
+}
 impl TunnelContext {
     #[instrument(skip_all)]
     pub async fn init(config: &TunnelConfig) -> Result<Self, Error> {
@@ -247,6 +275,7 @@ impl TunnelContext {
             db.put(&ROOT, &TunnelDatabase::init()).await?;
         }
         db.mutate(|db| run_migrations(db)).await.result?;
+        let server_identity = crate::sign::instance::load(&db).await?;
         let listen = config.tunnel_listen.unwrap_or(TUNNEL_DEFAULT_LISTEN);
         let ip_info = crate::net::utils::load_ip_info().await?;
         let net_iface = db
@@ -362,9 +391,16 @@ impl TunnelContext {
                         .map(|s| s.prefix_len())
                         .unwrap_or(32);
                     active_forwards.insert(
-                        from,
+                        from.clone(),
                         forward
-                            .add_forward_range(from, to, count, prefix, None)
+                            .add_forward_range(
+                                from.address,
+                                to,
+                                count,
+                                prefix,
+                                None,
+                                from.transport,
+                            )
                             .await?,
                     );
                 }
@@ -395,30 +431,34 @@ impl TunnelContext {
             }
         }
 
-        let ctx = Self(Arc::new(TunnelContextSeed {
-            listen,
-            db,
-            datadir,
-            rpc_continuations: RpcContinuations::new(),
-            open_authed_continuations: OpenAuthedContinuations::new(),
-            auth_sig_nonce_cache: SyncMutex::new(Default::default()),
-            net_iface,
-            forward,
-            dns_proxy,
-            sni,
-            dns_injector,
-            dns_allowed,
-            dns_keys,
-            active_forwards: SyncMutex::new(active_forwards),
-            forward_write_lock: tokio::sync::Mutex::new(()),
-            leases: SyncMutex::new(BTreeMap::new()),
-            lease_wake: tokio::sync::Notify::new(),
-            forward_ifindex: tokio::sync::watch::channel(current_ifindex()).0,
-            egress_lock: tokio::sync::Mutex::new(()),
-            v6_proxy: SyncMutex::new(BTreeMap::new()),
-            v6_lock: tokio::sync::Mutex::new(()),
-            shutdown,
-        }));
+        let ctx = Self(
+            Arc::new(TunnelContextSeed {
+                listen,
+                db,
+                datadir,
+                rpc_continuations: RpcContinuations::new(),
+                open_authed_continuations: OpenAuthedContinuations::new(),
+                auth_sig_nonce_cache: SyncMutex::new(Default::default()),
+                server_identity,
+                net_iface,
+                forward,
+                dns_proxy,
+                sni,
+                dns_injector,
+                dns_allowed,
+                dns_keys,
+                active_forwards: SyncMutex::new(active_forwards),
+                forward_write_lock: tokio::sync::Mutex::new(()),
+                leases: SyncMutex::new(BTreeMap::new()),
+                lease_wake: tokio::sync::Notify::new(),
+                forward_ifindex: tokio::sync::watch::channel(current_ifindex()).0,
+                egress_lock: tokio::sync::Mutex::new(()),
+                v6_proxy: SyncMutex::new(BTreeMap::new()),
+                v6_lock: tokio::sync::Mutex::new(()),
+                shutdown,
+            }),
+            None,
+        );
 
         ctx.resync_egress().await?;
         ctx.resync_v6().await?;
@@ -439,7 +479,7 @@ impl TunnelContext {
 
     pub async fn gc_forwards(
         &self,
-        keep: &BTreeSet<SocketAddrV4>,
+        keep: &BTreeSet<ForwardAddress>,
         dropped_sni: &[(SocketAddrV4, String, SocketAddrV4)],
         dropped_fallbacks: &[(SocketAddrV4, SocketAddrV4)],
     ) -> Result<(), Error> {
@@ -461,8 +501,9 @@ impl TunnelContext {
         use crate::tunnel::forward::lease::LeaseKey;
         self.leases.mutate(|l| {
             l.retain(|k, _| match k {
-                LeaseKey::Dnat(s) | LeaseKey::Sni { source: s, .. } | LeaseKey::SniFallback(s) => {
-                    keep.contains(s)
+                LeaseKey::Dnat(s) => keep.contains(s),
+                LeaseKey::Sni { source: s, .. } | LeaseKey::SniFallback(s) => {
+                    keep.contains(&(*s).into())
                 }
                 LeaseKey::Pinhole(_) => true,
             })
@@ -626,7 +667,7 @@ impl TunnelContext {
     pub async fn resync_forward_keys(&self) -> Result<(), Error> {
         let old = self.db.peek().await.as_port_forwards().de()?.0;
 
-        let mut want: BTreeMap<SocketAddrV4, PortForward> = BTreeMap::new();
+        let mut want: BTreeMap<ForwardAddress, PortForward> = BTreeMap::new();
         for (src, entry) in &old {
             match entry {
                 PortForward::Dnat {
@@ -640,7 +681,10 @@ impl TunnelContext {
                         .await
                         .unwrap_or(*src.ip());
                     want.insert(
-                        SocketAddrV4::new(ip, src.port()),
+                        ForwardAddress::new(
+                            SocketAddrV4::new(ip, src.port()),
+                            src.transport.clone(),
+                        ),
                         PortForward::Dnat {
                             target: *target,
                             label: label.clone(),
@@ -656,8 +700,8 @@ impl TunnelContext {
                             crate::tunnel::forward::igd::external_ipv4(self, *route.target.ip())
                                 .await
                                 .unwrap_or(*src.ip());
-                        let key = SocketAddrV4::new(ip, src.port());
-                        match want.entry(key).or_insert_with(|| PortForward::Sni {
+                        let key = ForwardAddress::from(SocketAddrV4::new(ip, src.port()));
+                        match want.entry(key.clone()).or_insert_with(|| PortForward::Sni {
                             routes: BTreeMap::new(),
                             fallback: None,
                         }) {
@@ -675,8 +719,8 @@ impl TunnelContext {
                         let ip = crate::tunnel::forward::igd::external_ipv4(self, *f.target.ip())
                             .await
                             .unwrap_or(*src.ip());
-                        let key = SocketAddrV4::new(ip, src.port());
-                        match want.entry(key).or_insert_with(|| PortForward::Sni {
+                        let key = ForwardAddress::from(SocketAddrV4::new(ip, src.port()));
+                        match want.entry(key.clone()).or_insert_with(|| PortForward::Sni {
                             routes: BTreeMap::new(),
                             fallback: None,
                         }) {
@@ -696,11 +740,11 @@ impl TunnelContext {
 
         reconcile_sni_demux(&self.sni, &old, &want);
 
-        let old_dnat: BTreeSet<SocketAddrV4> = old
+        let old_dnat: BTreeSet<ForwardAddress> = old
             .iter()
-            .filter_map(|(src, e)| matches!(e, PortForward::Dnat { .. }).then_some(*src))
+            .filter_map(|(src, e)| matches!(e, PortForward::Dnat { .. }).then_some(src.clone()))
             .collect();
-        let new_dnat: BTreeMap<SocketAddrV4, (SocketAddrV4, u16, bool)> = want
+        let new_dnat: BTreeMap<ForwardAddress, (SocketAddrV4, u16, bool)> = want
             .iter()
             .filter_map(|(src, e)| match e {
                 PortForward::Dnat {
@@ -708,7 +752,7 @@ impl TunnelContext {
                     enabled,
                     count,
                     ..
-                } => Some((*src, (*target, *count, *enabled))),
+                } => Some((src.clone(), (*target, *count, *enabled))),
                 _ => None,
             })
             .collect();
@@ -729,10 +773,17 @@ impl TunnelContext {
             let prefix = crate::tunnel::forward::igd::prefix_for(self, target.ip()).await;
             let rc = self
                 .forward
-                .add_forward_range(*src, *target, *count, prefix, None)
+                .add_forward_range(
+                    src.address,
+                    *target,
+                    *count,
+                    prefix,
+                    None,
+                    src.transport.clone(),
+                )
                 .await?;
             self.active_forwards.mutate(|m| {
-                m.insert(*src, rc);
+                m.insert(src.clone(), rc);
             });
         }
         self.forward.gc().await.log_err();
@@ -746,16 +797,16 @@ impl TunnelContext {
 }
 fn reconcile_sni_demux(
     sni: &Arc<crate::tunnel::forward::sni::SniDemux>,
-    old: &BTreeMap<SocketAddrV4, PortForward>,
-    want: &BTreeMap<SocketAddrV4, PortForward>,
+    old: &BTreeMap<ForwardAddress, PortForward>,
+    want: &BTreeMap<ForwardAddress, PortForward>,
 ) {
-    let routes = |map: &BTreeMap<SocketAddrV4, PortForward>, enabled_only: bool| {
+    let routes = |map: &BTreeMap<ForwardAddress, PortForward>, enabled_only: bool| {
         let mut out: BTreeMap<(SocketAddrV4, String), SocketAddrV4> = BTreeMap::new();
         for (source, entry) in map {
             if let PortForward::Sni { routes, .. } = entry {
                 for (hostname, route) in routes {
                     if !enabled_only || route.enabled {
-                        out.insert((*source, hostname.clone()), route.target);
+                        out.insert((source.address, hostname.clone()), route.target);
                     }
                 }
             }
@@ -786,7 +837,7 @@ fn reconcile_sni_demux(
         }
     }
 
-    let fallbacks = |map: &BTreeMap<SocketAddrV4, PortForward>, enabled_only: bool| {
+    let fallbacks = |map: &BTreeMap<ForwardAddress, PortForward>, enabled_only: bool| {
         let mut out = BTreeMap::new();
         for (source, entry) in map {
             if let PortForward::Sni {
@@ -795,7 +846,7 @@ fn reconcile_sni_demux(
             } = entry
             {
                 if !enabled_only || fallback.enabled {
-                    out.insert(*source, fallback.target);
+                    out.insert(source.clone(), fallback.target);
                 }
             }
         }
@@ -866,25 +917,22 @@ impl CallRemote<TunnelContext> for CliContext {
         };
 
         let mut headers = HeaderMap::new();
-        let (url, sig_ctx) = if let Some(auth) = local_auth {
+        let (scheme, sig_ctx) = if let Some(auth) = local_auth {
             headers.insert(AUTHORIZATION, auth);
-            (format!("http://{tunnel_addr}/rpc/v0").parse()?, None)
+            ("http", None)
         } else if addr_from_config {
-            (
-                format!("https://{tunnel_addr}/rpc/v0").parse()?,
-                Some(url_host_str(tunnel_addr.ip())),
-            )
+            ("https", Some(url_host_str(tunnel_addr.ip())))
         } else {
             return Err(Error::new(eyre!("`--tunnel` required"), ErrorKind::InvalidRequest).into());
         };
 
+        let url = crate::util::net::rpc_url(&format!("{scheme}://{tunnel_addr}").parse()?, 0)?;
         method = method.strip_prefix("tunnel.").unwrap_or(method);
 
-        crate::middleware::auth::signature::call_remote(
-            self,
+        self.call_rpc(
             url,
             headers,
-            sig_ctx.as_deref(),
+            sig_ctx.as_deref().unwrap_or_default(),
             method,
             params,
         )
@@ -904,8 +952,15 @@ impl UiContext for TunnelContext {
     }
     fn middleware(server: rpc_toolkit::Server<Self>) -> rpc_toolkit::HttpServer<Self> {
         server
-            .middleware(Cors::new())
             .middleware(Auth::new().with_local_auth().with_signature_auth())
+            .middleware(SyncDb::new())
+    }
+    fn rpc_server_routes(self, server: rpc_toolkit::HttpServer<Self>) -> axum::Router {
+        crate::net::static_server::session_rpc_router(
+            self,
+            server.clone(),
+            axum::routing::any(server).layer(crate::middleware::cors::layer()),
+        )
     }
 }
 
@@ -1018,7 +1073,7 @@ mod tests {
             },
         );
         let forwards = BTreeMap::from([(
-            source,
+            source.into(),
             PortForward::Sni {
                 routes,
                 fallback: None,

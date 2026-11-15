@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use heck::*;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned};
-use syn::parse::ParseStream;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::token::{Comma, Paren, Pub};
@@ -26,17 +25,42 @@ pub fn build_model(item: &DeriveInput) -> TokenStream {
     }
 }
 
-fn get_accessor(serde_rename_all: &Option<String>, attrs: &[Attribute], ident: &Ident) -> LitStr {
-    if let Some(serde_rename) = attrs
+fn serde_meta(attrs: &[Attribute]) -> impl Iterator<Item = Meta> + '_ {
+    attrs
         .iter()
         .filter(|attr| attr.path.is_ident("serde"))
-        .filter_map(|attr| syn::parse2::<MetaNameValue>(attr.tokens.clone()).ok())
-        .filter(|nv| nv.path.is_ident("rename"))
-        .find_map(|nv| match nv.lit {
-            Lit::Str(s) => Some(s),
+        .filter_map(|attr| {
+            attr.parse_args_with(Punctuated::<Meta, Comma>::parse_terminated)
+                .ok()
+        })
+        .flatten()
+}
+
+fn serde_name_values(attrs: &[Attribute]) -> impl Iterator<Item = MetaNameValue> + '_ {
+    serde_meta(attrs).filter_map(|meta| match meta {
+        Meta::NameValue(value) => Some(value),
+        _ => None,
+    })
+}
+
+fn serde_flag(attrs: &[Attribute], name: &str) -> Option<Path> {
+    serde_meta(attrs).find_map(|meta| match meta {
+        Meta::Path(path) if path.is_ident(name) => Some(path),
+        _ => None,
+    })
+}
+
+fn serde_string(attrs: &[Attribute], name: &str) -> Option<LitStr> {
+    serde_name_values(attrs)
+        .filter(|value| value.path.is_ident(name))
+        .find_map(|value| match value.lit {
+            Lit::Str(value) => Some(value),
             _ => None,
         })
-    {
+}
+
+fn get_accessor(serde_rename_all: &Option<String>, attrs: &[Attribute], ident: &Ident) -> LitStr {
+    if let Some(serde_rename) = serde_string(attrs, "rename") {
         return serde_rename;
     }
     let ident_string = ident.to_string();
@@ -77,13 +101,7 @@ impl ChildInfo {
                 for field in &f.named {
                     let ident = field.ident.clone().unwrap();
                     let ty = field.ty.clone();
-                    let accessor = if field
-                        .attrs
-                        .iter()
-                        .filter(|attr| attr.path.is_ident("serde"))
-                        .filter_map(|attr| attr.parse_args::<Path>().ok())
-                        .any(|path| path.is_ident("flatten"))
-                    {
+                    let accessor = if serde_flag(&field.attrs, "flatten").is_some() {
                         None
                     } else {
                         Some(Lit::Str(get_accessor(
@@ -386,16 +404,7 @@ fn build_model_struct(base: &DeriveInput, ast: &DataStruct) -> TokenStream {
             path: base.ident.clone().into(),
         }),
     );
-    let serde_rename_all = base
-        .attrs
-        .iter()
-        .filter(|attr| attr.path.is_ident("serde"))
-        .filter_map(|attr| attr.parse_args::<MetaNameValue>().ok())
-        .filter(|nv| nv.path.is_ident("rename_all"))
-        .find_map(|nv| match nv.lit {
-            Lit::Str(s) => Some(s.value()),
-            _ => None,
-        });
+    let serde_rename_all = serde_string(&base.attrs, "rename_all").map(|value| value.value());
     let children = ChildInfo::from_fields(&serde_rename_all, &ast.fields);
     let name = &base.ident;
     let Fns {
@@ -494,38 +503,13 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
         .unwrap_or_else(|| Ident::new(&format!("{}MatchModelRef", base.ident), Span::call_site()));
     let match_name_mut = match_name_mut
         .unwrap_or_else(|| Ident::new(&format!("{}MatchModelMut", base.ident), Span::call_site()));
-    let serde_rename_all = base
-        .attrs
-        .iter()
-        .filter(|attr| attr.path.is_ident("serde"))
-        .filter_map(|attr| attr.parse_args::<MetaNameValue>().ok())
-        .filter(|nv| nv.path.is_ident("rename_all"))
-        .find_map(|nv| match nv.lit {
-            Lit::Str(s) => Some(s.value()),
-            _ => None,
-        });
-    if let Some(untagged) = base
-        .attrs
-        .iter()
-        .filter(|attr| attr.path.is_ident("serde"))
-        .filter_map(|attr| attr.parse_args::<MetaNameValue>().ok())
-        .find(|nv| nv.path.is_ident("untagged"))
-    {
+    let serde_rename_all = serde_string(&base.attrs, "rename_all").map(|value| value.value());
+    if let Some(untagged) = serde_flag(&base.attrs, "untagged") {
         return Error::new(untagged.span(), "Cannot derive HasModel for untagged enum")
             .into_compile_error();
     }
-    let mut serde_tag: BTreeMap<&'static str, Lit> = base
-        .attrs
-        .iter()
-        .filter(|attr| attr.path.is_ident("serde"))
-        .filter_map(|attr| -> Option<Punctuated<MetaNameValue, Comma>> {
-            attr.parse_args_with(|s: ParseStream| {
-                Punctuated::<MetaNameValue, Comma>::parse_terminated(s)
-            })
-            .ok()
-        })
-        .flatten()
-        .filter_map(|nv: MetaNameValue| {
+    let mut serde_tag: BTreeMap<&'static str, Lit> = serde_name_values(&base.attrs)
+        .filter_map(|nv| {
             if nv.path.is_ident("tag") {
                 Some(("tag", nv.lit))
             } else if nv.path.is_ident("content") {
@@ -585,7 +569,7 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
                     use patch_db::ModelExt;
                     match self.as_value()[#tag].as_str() {
                         #tag_variants
-                        _ => #match_name::Error(self.into_inner()),
+                        _ => #match_name::Error(self.into_value()),
                     }
                 },
                 quote! {
@@ -599,14 +583,14 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
                     use patch_db::ModelExt;
                     match self.as_value()[#tag].as_str() {
                         #tag_variants_ref
-                        _ => #match_name_ref::Error(&*self),
+                        _ => #match_name_ref::Error(self.as_value()),
                     }
                 },
                 quote! {
                     use patch_db::ModelExt;
                     match self.as_value()[#tag].as_str() {
                         #tag_variants_mut
-                        _ => #match_name_mut::Error(&mut *self),
+                        _ => #match_name_mut::Error(self.as_value_mut()),
                     }
                 },
             )
@@ -714,7 +698,7 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
             quote! {
                 use patch_db::ModelExt;
                 #tag_variants {
-                    #match_name::Error(self.into_inner()),
+                    #match_name::Error(self.into_value()),
                 }
             },
             quote! {
@@ -727,13 +711,13 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
             quote! {
                 use patch_db::ModelExt;
                 #tag_variants_ref {
-                    #match_name_ref::Error(&*self),
+                    #match_name_ref::Error(self.as_value()),
                 }
             },
             quote! {
                 use patch_db::ModelExt;
                 #tag_variants_mut {
-                    #match_name_mut::Error(&mut *self),
+                    #match_name_mut::Error(self.as_value_mut()),
                 }
             },
         )
@@ -808,3 +792,6 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

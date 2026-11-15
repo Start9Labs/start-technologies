@@ -1,0 +1,19 @@
+{
+  "context": "server.test",
+  "clientPrivate": "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a",
+  "serverPrivate": "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb",
+  "clientPublic": "hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=",
+  "serverPublic": "3p7bfXt9wbTTW2HC7OQ1Nz+DQ8hbeGdNrfx+FG+IK08=",
+  "clientIdentity": "MCowBQYDK2VwAyEAQwRr/kCSs+lJlOraFdzCDYqqB7ZY/TlU644O+4vcpd4=",
+  "serverIdentity": "MCowBQYDK2VwAyEATtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqg=",
+  "client": "o2VoZWxsb6Nkcm9sZWZjbGllbnRmdGFyZ2V0Y3JwY2llcGhlbWVyYWxYIIUg8AmJMKdUdIt93LQ+91oNvzoNJjga9OukqY6qm05qZ3ZlcnNpb24BaHByb3RvY29scVN0YXJ0LVJQQy1TZXNzaW9uo2ZzaWduZXJYLDAqMAUGAytlcAMhAEMEa/5AkrPpSZTq2hXcwg2Kqge2WP05VOuODvuL3KXeaXNpZ25hdHVyZVhLMEkwBQYDK2VwBECPvwTHIWpQjuNOhUZwDOSC1OhXdtJfshSvQGLJNv+PkUtXoBPjVFahDYu3mvB0J/UbqUZrQ/Z4dsRfHH79j70OamNvbW1pdG1lbnSkZHNpemUYb2Vub25jZRv//////////2ZibGFrZTNYIC6OHGBYDXN8qtcqgGPHHLXOO/2CsXoZe3euZNaL3AnqaXRpbWVzdGFtcBpq2ZbZ",
+  "server": "o2VoZWxsb6Nkcm9sZWZzZXJ2ZXJpZXBoZW1lcmFsWCDentt9e33BtNNbYcLs5DU3P4NDyFt4Z02t/H4Ub4grT2tjbGllbnRIZWxsb1ggbmOMprplhI8S5qDCeB4wsX98GfDrHxjh2s0boM65aiZndmVyc2lvbgFocHJvdG9jb2xxU3RhcnQtUlBDLVNlc3Npb26jZnNpZ25lclgsMCowBQYDK2VwAyEATtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqhpc2lnbmF0dXJlWEswSTAFBgMrZXAEQPPMQIlQnqQ0SQdE1eMYiPHf3nq4yRy2SzgRVMhBFDY7/9iMm81QnyKf1AzIa9NZSzXWSVO/twaEgl31aSnyjQFqY29tbWl0bWVudKRkc2l6ZRiSZW5vbmNlG//////////+ZmJsYWtlM1ggEr3STFZNYnN5zK3ppvPamRq2ggctit0jaQTk1KAZVBdpdGltZXN0YW1wGmrZltk=",
+  "clientRecord": {
+    "plaintext": "client request",
+    "ciphertext": "4/nDiuGlZEaG5ytoMrOdMuSqVYGEAvLTtfKoTprg"
+  },
+  "serverRecord": {
+    "plaintext": "server reply",
+    "ciphertext": "xt/Ymk4H7/LVRMXQXgnqCjbzYFOYgSAlHOCTtw=="
+  }
+}

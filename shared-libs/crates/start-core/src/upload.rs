@@ -38,8 +38,7 @@ pub async fn upload(
         .add(
             guid.clone(),
             RpcContinuation::rest_authed(
-                ctx,
-                session,
+                crate::auth::continuation_subscription(ctx, session).await?,
                 |request| async move {
                     handle.upload(request).await;
 

@@ -7,9 +7,11 @@ type ParamPrimitive = string | number | boolean
 export interface HttpOptions {
   method: Method
   url: string
-  headers?: {
-    [header: string]: string | string[]
-  }
+  headers?:
+    | HttpHeaders
+    | {
+        [header: string]: string | string[]
+      }
   params?: {
     [param: string]: ParamPrimitive | ParamPrimitive[]
   }
@@ -23,11 +25,7 @@ export interface HttpOptions {
 
 export interface HttpAngularOptions {
   observe: 'response'
-  headers?:
-    | HttpHeaders
-    | {
-        [header: string]: string | string[]
-      }
+  headers?: HttpOptions['headers']
   params?: {
     [param: string]: ParamPrimitive | ParamPrimitive[]
   }

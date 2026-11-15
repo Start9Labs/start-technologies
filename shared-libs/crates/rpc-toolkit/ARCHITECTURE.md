@@ -19,7 +19,7 @@ emitting zod schemas and TypeScript types for clients.
 ## Handlers
 
 A handler is described by `HandlerTypes` (its `Params`, `InheritedParams`, `Ok`, and `Err`
-associated types) and implemented for a context by `HandlerFor<Context>`. `HandlerArgs` bundles
+associated types, plus response-stream `Item` and `Final`) and implemented for a context by `HandlerFor<Context>`. `HandlerArgs` bundles
 everything a handler receives: the context, the parent method path, the method name, parsed and
 raw params, and inherited params.
 
@@ -48,16 +48,31 @@ context factory plus the root `ParentHandler`, and exposes:
 - `handle(request)` — decode and run a single or batch JSON-RPC request.
 - `stream(requests)` — drive a stream of requests concurrently via `JobRunner`.
 
+`server/response.rs` owns `RpcResponse`, composing yajrc's response validation with an optional
+`meta` object. Middleware adds typed metadata through `add_meta`, which rejects duplicate fields;
+`read_meta` applies the owner's serde schema. JSON, CBOR, and WebSocket initiating replies retain
+these fields; MCP maps them to tool-result `_meta`. Empty metadata preserves the legacy wire shape.
+
 Transports wrap a `Server`:
 
-- **HTTP** (`server/http.rs`): `HttpServer` on `axum`, with content-negotiated CBOR/JSON encoding
+- **HTTP** (`server/http.rs`): `HttpServer` on `axum`, with JSON request/reply encoding
   and a `Middleware` pipeline (`process_http_request`, `process_rpc_request`, `process_rpc_response`,
   `process_http_response`, all defaulting to no-ops) erased through `DynMiddleware`.
+  `begin_http_request` bounds and buffers the body before context creation or middleware. The
+  default is 1 MiB, configurable through `with_max_request_body_size`; oversized bodies return
+  HTTP 413. `RequestBodyLimit` in the request extensions exposes that limit to middleware.
+  MCP and WebSocket upgrades reuse this preparation and its final bounded bytes. Outgoing bodies
+  are independent. Dispatch restores the caller's ID after response hooks, including middleware
+  rejections.
 - **WebSocket** (`server/websocket.rs`, opt-in `websocket` feature): `WebSocketServer` accepts JSON
   text requests and batches through the existing RPC middleware pipeline. HTTP middleware prepares
-  the upgrade; each call clones that prepared middleware state. The connection owns pending call
+  the upgrade; each call clones that prepared middleware state. An optional `WebSocketUpgrader`
+  completes application admission and returns a connection-scoped context plus a boxed message
+  transport before dispatch starts. Its `request_context` supplies owned handler contexts through
+  the connection's private server factory. Raw wire allowances and post-adaptation logical limits
+  are separate; the default remains a plain socket. The connection owns pending call
   futures, buffered initiating replies, and directly polled event receivers, with resource limits
-  and send deadlines. `server/rpcstream.rs` owns the single-owner `RpcStream` producer: a bounded
+  and send deadlines. `server/rpcstream.rs` owns the single-owner `RpcStream<Item, Final>` producer: a bounded
   event channel and a reserved terminal slot. Explicit close carries a result; dropping without
   close yields a fixed cancellation error after queued events. `HandlerArgs::rpc_stream` carries
   the producer through normal handler adapters; non-opted-in calls and other transports receive
@@ -74,8 +89,8 @@ Transports wrap a `Server`:
   `ToolPolicy` decides from each method's metadata whether it is offered and which
   `ToolAnnotations` it carries. `McpService` runs the `HttpServer`'s middleware unchanged:
   `process_http_request` once per HTTP request (shared with the JSON-RPC path through
-  `begin_http_request`), then `process_rpc_request`, dispatch and `process_rpc_response` per tool
-  call, then `process_http_response`. Handler results become text content, plus
+  `begin_http_request`), then `process_rpc_request`, dispatch and `process_rpc_response` per tool call, then
+  `process_http_response`. Handler results become text content, plus
   `structuredContent` when the tool declares an `outputSchema`; RPC errors become `isError`
   results carrying the serialized `RpcError`.
 - **Sockets** (`server/socket.rs`): `run_socket` over any `AsyncRead + AsyncWrite`, `run_unix`,
@@ -93,7 +108,8 @@ constructs the context, dispatches synchronously, then renders the result with `
 `println!`, `eprint!` and `eprintln!` macros. A broken output pipe exits with status 141
 without changing signal dispositions. Default handler displays and clap diagnostics use
 that policy; consumers import the macros with `#[macro_use]` to shadow `std`'s and use the same writers for
-custom formatters and serialization.
+custom formatters and serialization. `output::advisory` writes optional stderr notices
+without propagating output errors or changing process status.
 
 For talking to a _remote_ server, `CallRemote` + `CallRemoteHandler` forward a local invocation
 over the wire using `call_remote_http` (CBOR or JSON over `reqwest`) or `call_remote_socket`
@@ -110,7 +126,8 @@ param-flattening newtype, and the async plumbing (`JobRunner`, `StreamUntil`, `p
 ## TypeScript generation
 
 Under the opt-in `ts` feature, handler bindings compose parameter, return and child
-writers through `HandlerTSBindings`. Each Rust type renders once, as a zod schema
+writers through `HandlerTSBindings`. Independent `StreamTS` writers preserve stream facts
+through initiating-result overrides and binding opt-outs. Each Rust type renders once, as a zod schema
 whose `z.input` is serde's deserialization shape and whose `z.output` is its
 serialization shape. RPC parses raw `DeclarationInfo::source` and owns one
 normalization plan per direction through pinned `serde_derive_internals`

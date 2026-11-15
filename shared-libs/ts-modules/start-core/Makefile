@@ -2,7 +2,7 @@ include ../../../build/source-files.mk
 
 TS_FILES := $(call ls-files, lib)
 
-.PHONY: all dist test check fmt check-fmt clean node_modules
+.PHONY: all dist test check fmt check-fmt clean
 
 all: dist
 
@@ -37,3 +37,4 @@ package-lock.json: package.json
 
 node_modules: package-lock.json
 	npm ci
+	touch node_modules

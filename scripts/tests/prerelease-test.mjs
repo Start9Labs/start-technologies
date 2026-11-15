@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { copyFileSync, existsSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { fixture, REPO } from './fixtures.mjs'
@@ -8,6 +8,7 @@ const VERSION = '0.4.0.1'
 const PREFIX = `start-os/v${VERSION}`
 const ALPHA = 'https://alpha-registry-x.start9.com'
 const BETA = 'https://beta-registry.start9.com'
+const PRODUCTION = 'https://registry.start9.com'
 
 function prereleaseFixture(t) {
   const f = fixture(t)
@@ -87,6 +88,7 @@ function prereleaseFixture(t) {
   }
   alpha(imageCommit)
   write('beta.json', '{"versions":{}}')
+  write('production.json', '{"versions":{}}')
   nodeExecutable(
     'bin/start-cli',
     `
@@ -98,14 +100,16 @@ const read = name => JSON.parse(readFileSync(join(root, name + '.json')))
 const write = (name, data) => writeFileSync(join(root, name + '.json'), JSON.stringify(data))
 const flag = name => args[args.indexOf(name) + 1]
 const registry = args.find(arg => arg.startsWith('--registry='))?.slice(11)
-const channel = registry === ${JSON.stringify(ALPHA)} ? 'alpha' : 'beta'
+const channelFor = registry => registry === ${JSON.stringify(ALPHA)} ? 'alpha' : registry === ${JSON.stringify(BETA)} ? 'beta' : 'production'
+const channel = channelFor(registry)
 if (args.at(-1) === '--help') console.log('<RELEASE_NOTES_OR_JSON>')
 else if (args.includes('index')) console.log(JSON.stringify(read(channel)))
 else if (args.includes('promote')) {
   appendFileSync(join(root, 'promotions'), 'promote\\n')
   if (process.env.FAIL_PROMOTE === '1') process.exit(41)
-  if (flag('--expected-git-hash') !== read('alpha').versions[${JSON.stringify(VERSION)}].gitHash) throw new Error('promoted hash mismatch')
-  write('beta', read('alpha'))
+  const source = read(channelFor(flag('--from')))
+  if (flag('--expected-git-hash') !== source.versions[${JSON.stringify(VERSION)}].gitHash) throw new Error('promoted hash mismatch')
+  write(channelFor(flag('--to')), source)
 } else if (args.includes('remove')) {
   appendFileSync(join(root, 'removals'), 'remove\\n')
   write(channel, {versions: {}})
@@ -136,17 +140,21 @@ if (args[1] === 'view') {
   if (!data) process.exit(1)
   const jq = args.includes('--jq') ? flag('--jq') : null
   if (jq === '.isDraft') console.log(data.isDraft)
+  else if (jq === '.targetCommitish') console.log(data.targetCommitish)
   else if (jq) for (const asset of data.assets) console.log(asset.name)
   else console.log(JSON.stringify(data))
   process.exit(0)
 }
 if (args[1] === 'download') {
-  if (!data?.notes) process.exit(1)
-  writeFileSync(flag('--output'), data.notes)
+  const asset = flag('--pattern')
+  appendFileSync(join(root, 'downloads'), tag + ' ' + asset + '\\n')
+  const content = asset === 'signatures.tar.gz' ? data?.signatures : data?.notes
+  if (!content || (asset === 'signatures.tar.gz' && process.env.FAIL_SIGNATURE_DOWNLOAD)) process.exit(1)
+  writeFileSync(flag('--output'), content)
   process.exit(0)
 }
 appendFileSync(join(root, 'gh-events'), args.join(' ') + '\\n')
-if (args[1] === 'create') data = {isDraft: true, assets: []}
+if (args[1] === 'create') data = {tagName: tag, targetCommitish: flag('--target'), isDraft: true, assets: []}
 if (!data) throw new Error('release missing')
 if (args.includes('--notes-file')) data.body = readFileSync(flag('--notes-file'), 'utf8')
 if (args.includes('--title')) data.title = flag('--title')
@@ -157,6 +165,7 @@ if (args[1] === 'upload') {
   for (const file of args.filter(arg => arg.startsWith('/'))) {
     const name = file.split('/').pop()
     if (name === 'release-notes.json') data.notes = readFileSync(file, 'utf8')
+    if (name === 'signatures.tar.gz') data.signatures = readFileSync(file, 'utf8')
     if (!data.assets.some(asset => asset.name === name)) data.assets.push({name})
   }
 }
@@ -172,7 +181,7 @@ const locale = process.argv.at(-1).match(/into the (\\S+) locale/)[1]
 process.stdout.write('Translated ' + locale + '.\\n\\n' + english + '\\n')
 `,
   )
-  function release(success = true, extra = '') {
+  function release(success = true, extra = '', command = 'cmd_pre_release') {
     const result = run(
       'bash',
       [
@@ -181,15 +190,25 @@ process.stdout.write('Translated ' + locale + '.\\n\\n' + english + '\\n')
 source <(awk '/^SUBCOMMAND=/{exit} {print}' scripts/manage-release.sh)
 REPO_ROOT="$PWD"; PROJECT=start-os; KIND=os; VERSION=${VERSION}; TAG=${PREFIX}
 OS_PLATFORMS=x86_64
-cmd_pull() { mkdir -p "$(release_dir)"; }
+production_sign=$(declare -f cmd_sign)
+cmd_pull() {
+    mkdir -p "$(release_dir)"
+    printf image > "$(release_dir)/image.iso"
+}
 cmd_push_gz() { :; }
-cmd_sign() { :; }
-generated_sections() { :; }
+cmd_sign() {
+    if [ -n "\${REUSED_OS_RELEASE:-}" ]; then
+        (eval "$production_sign"; cmd_sign)
+        return
+    fi
+    printf 'org and personal signatures' > "$(release_dir)/signatures.tar.gz"
+    gh release upload -R "$REPO" "$TAG" "$(release_dir)/signatures.tar.gz" --clobber
+}
 gpg() { :; }
 b3sum() { :; }
 s3cmd() { :; }
 ${extra}
-cmd_pre_release
+${command}
 `,
       ],
       { encoding: 'utf8', input: '\r' },
@@ -294,6 +313,130 @@ test('the same image commit gets a new GitHub prerelease and replaces beta', t =
     'promote\npromote\n',
   )
 })
+
+test('stable release reuses same-commit prerelease assets without local images or signing keys', t => {
+  const { release, git, data, root, env, nodeExecutable, imageCommit } =
+    prereleaseFixture(t)
+  env.VISUAL = nodeExecutable(
+    'bin/draft-edit',
+    `import { appendFileSync } from 'node:fs'
+appendFileSync(process.argv[2], '\\n## Image Downloads\\n\\nDraft notice.\\n')
+`,
+  )
+  release()
+  const original = data(`start-os_v${VERSION}-rc.1.json`)
+  rmSync(join(root, 'home/Downloads'), { recursive: true })
+  env.VISUAL = nodeExecutable(
+    'bin/final-edit',
+    `import { appendFileSync } from 'node:fs'
+appendFileSync(process.argv[2], '\\nFinal release edit.\\n')
+`,
+  )
+  const result = release(
+    true,
+    `
+eval "$production_sign"
+gpg() { echo 'unexpected signing-key access' >&2; return 91; }
+cmd_pull() { echo 'unexpected image download' >&2; return 92; }
+cmd_push_gz() { echo 'unexpected image upload' >&2; return 93; }
+`,
+    'cmd_release',
+  )
+  assert.ok(result.stdout.includes(`reusing assets from ${PREFIX}-rc.1`))
+  assert.equal(git('rev-parse', `${PREFIX}^{commit}`).trim(), imageCommit)
+  const stable = data(`start-os_v${VERSION}.json`)
+  const assetSections = body =>
+    body.slice(body.lastIndexOf('## Image Downloads'))
+  assert.equal(assetSections(stable.body), assetSections(original.body))
+  assert.equal(stable.signatures, original.signatures)
+  assert.equal(stable.isDraft, false)
+  assert.ok(!stable.isPrerelease)
+  assert.ok(stable.body.includes('Final release edit.'))
+  assert.equal((stable.body.match(/Draft notice\./g) ?? []).length, 1)
+  const notes = data('production.json').versions[VERSION].releaseNotes
+  assert.ok(notes.en_US.includes('Final release edit.'))
+  assert.ok(notes.pl_PL.includes('Final release edit.'))
+  assert.equal(data('production.json').versions[VERSION].gitHash, imageCommit)
+  assert.deepEqual(data(`start-os_v${VERSION}-rc.1.json`), original)
+  assert.equal(existsSync(join(root, 'home/Downloads')), false)
+  assert.ok(
+    readFileSync(join(root, 'downloads'), 'utf8').includes(
+      `${PREFIX}-rc.1 signatures.tar.gz\n`,
+    ),
+  )
+})
+
+test('a repeated same-commit prerelease copies the prior signatures and checksum sections', t => {
+  const { release, data } = prereleaseFixture(t)
+  release()
+  const first = data(`start-os_v${VERSION}-rc.1.json`)
+  release(
+    true,
+    `
+eval "$production_sign"
+gpg() { return 91; }
+cmd_pull() { return 92; }
+cmd_push_gz() { return 93; }
+`,
+  )
+  const second = data(`start-os_v${VERSION}-rc.2.json`)
+  assert.equal(second.body, first.body)
+  assert.equal(second.signatures, first.signatures)
+})
+
+test('a failed signature copy resumes without downloading images or signing again', t => {
+  const { release, data, env, git } = prereleaseFixture(t)
+  release()
+  env.FAIL_SIGNATURE_DOWNLOAD = '1'
+  const reuseOnly = `
+eval "$production_sign"
+gpg() { return 91; }
+cmd_pull() { return 92; }
+cmd_push_gz() { return 93; }
+`
+  release(false, reuseOnly, 'cmd_release')
+  const stable = data(`start-os_v${VERSION}.json`)
+  assert.equal(stable.isDraft, false)
+  assert.ok(!stable.assets.some(asset => asset.name === 'signatures.tar.gz'))
+  assert.equal(git('tag', '--list', PREFIX).trim(), PREFIX)
+  delete env.FAIL_SIGNATURE_DOWNLOAD
+  release(true, reuseOnly, 'cmd_release')
+  assert.equal(
+    data(`start-os_v${VERSION}.json`).signatures,
+    data(`start-os_v${VERSION}-rc.1.json`).signatures,
+  )
+})
+
+for (const unavailable of [
+  'different commit',
+  'draft',
+  'missing signatures',
+  'forced',
+]) {
+  test(`stable release uses the normal asset flow for ${unavailable}`, t => {
+    const { release, data, write, commit, alpha, env } = prereleaseFixture(t)
+    release()
+    if (unavailable === 'different commit') {
+      const next = commit()
+      alpha(next)
+      write('beta.json', JSON.stringify(data('alpha.json')))
+    } else if (unavailable === 'forced') {
+      env.FORCE = '1'
+    } else {
+      const name = `start-os_v${VERSION}-rc.1.json`
+      const prerelease = data(name)
+      if (unavailable === 'draft') prerelease.isDraft = true
+      else
+        prerelease.assets = prerelease.assets.filter(
+          asset => asset.name !== 'signatures.tar.gz',
+        )
+      write(name, JSON.stringify(prerelease))
+    }
+    const result = release(true, '', 'cmd_release')
+    assert.ok(!result.stdout.includes('reusing assets from'))
+    assert.ok(data(`start-os_v${VERSION}.json`).signatures)
+  })
+}
 
 test('new image commit increments the RC and replaces the old beta entry', t => {
   const { write, commit, alpha, release, git, data, root } =

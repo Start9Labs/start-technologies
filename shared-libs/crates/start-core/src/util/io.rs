@@ -1967,14 +1967,38 @@ impl AtomicFile {
         Ok(())
     }
 
-    pub async fn save(mut self) -> Result<(), Error> {
-        use tokio::io::AsyncWriteExt;
+    async fn finish_writes(&mut self) -> Result<(), Error> {
         if let Some(file) = self.file.as_mut() {
             file.flush().await?;
             file.shutdown().await?;
             file.sync_all().await?;
         }
-        drop(self.file.take());
+        Ok(())
+    }
+
+    /// Publishes complete contents without replacing an existing destination.
+    /// Returns false if the destination already exists.
+    /// Temporary files must differ from the destination and concurrent writers, on the same filesystem.
+    pub async fn save_no_replace(mut self) -> Result<bool, Error> {
+        self.finish_writes().await?;
+        let published = match tokio::fs::hard_link(&self.tmp_path, &self.path).await {
+            Ok(()) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
+            Err(error) => {
+                return Err(error).with_ctx(|_| {
+                    (
+                        ErrorKind::Filesystem,
+                        format!("link {:?} -> {:?}", self.tmp_path, self.path),
+                    )
+                });
+            }
+        };
+        self.rollback().await?;
+        Ok(published)
+    }
+
+    pub async fn save(mut self) -> Result<(), Error> {
+        self.finish_writes().await?;
         tokio::fs::rename(&self.tmp_path, &self.path)
             .await
             .with_ctx(|_| {
@@ -1983,6 +2007,7 @@ impl AtomicFile {
                     format!("mv {} -> {}", self.tmp_path.display(), self.path.display()),
                 )
             })?;
+        drop(self.file.take());
         Ok(())
     }
 }
@@ -2009,6 +2034,23 @@ impl Drop for AtomicFile {
 
 #[cfg(test)]
 mod test {
+    #[tokio::test]
+    async fn atomic_publication_does_not_replace_existing_contents() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("identity");
+        let candidate = temp.path().join("candidate");
+        super::write_file_private_atomic(&path, b"original")
+            .await
+            .unwrap();
+        let mut file = super::AtomicFile::new(&path, Some(&candidate))
+            .await
+            .unwrap();
+        file.write_all(b"replacement").await.unwrap();
+        assert!(!file.save_no_replace().await.unwrap());
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), b"original");
+        assert!(!candidate.exists());
+    }
+
     #[tokio::test]
     async fn write_file_private_atomic_replaces_a_readable_file() {
         use std::os::unix::fs::PermissionsExt;

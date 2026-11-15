@@ -700,7 +700,7 @@ jobs:
           if [ "$(cat "$RUNNER_TEMP/release-security")" = true ]; then SECURITY_ARGS+=(--security); fi
           start-cli --registry="${{ env.REGISTRY }}" registry os version add \
             --git-hash "${{ github.sha }}" "${SECURITY_ARGS[@]}" \
-            "$VERSION" "v${VERSION}" "$NOTES" ">=0.3.5 <=${VERSION}"
+            "$VERSION" "$NOTES" ">=0.3.5 <=${VERSION}"
 
       - name: Index assets in registry
         run: |

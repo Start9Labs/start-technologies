@@ -21,6 +21,39 @@ export const AddDnsRecordParams: z.ZodObject<{
 }).meta({
   id: 'AddDnsRecordParams',
 })
+
+/**
+ * JSON Patch 'add' operation representation
+ */
+export const AddOperation: z.ZodObject<{
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.ZodString
+  /**
+   * Value to add to the target location.
+   */
+  value: z.ZodUnknown
+}> = /* @__PURE__ */ object({
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nwithin the target document where the operation is performed.',
+  }),
+  /**
+   * Value to add to the target location.
+   */
+  value: z.unknown().meta({
+    description: 'Value to add to the target location.',
+  }),
+}).meta({
+  id: 'AddOperation',
+  description: "JSON Patch 'add' operation representation",
+})
 export const AddPinholeParams: z.ZodObject<{
   /**
    * The client's global IPv6 (GUA) to expose. Must be an address this tunnel
@@ -156,6 +189,42 @@ export const ApplyParams: z.ZodObject<{ expr: z.ZodString }> =
   })
 
 /**
+ * JSON Patch 'copy' operation representation
+ */
+export const CopyOperation: z.ZodObject<{
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * to copy value from.
+   */
+  from: z.ZodString
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * to copy value from.
+   */
+  from: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nto copy value from.',
+  }),
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nwithin the target document where the operation is performed.',
+  }),
+}).meta({
+  id: 'CopyOperation',
+  description: "JSON Patch 'copy' operation representation",
+})
+
+/**
  * Per-subnet DNS proxy configuration. WireGuard clients on a subnet are pointed
  * at the subnet's in-tunnel server address (`.1`) for DNS; the forward-only proxy
  * listening there resolves every query against the upstream(s) selected here.
@@ -289,6 +358,15 @@ export const DumpParams: z.ZodObject<{
 }).meta({
   id: 'DumpParams',
 })
+
+/**
+ * Transport-qualified keys use `tcp@socket` or `udp@socket`; socket-only keys retain both.
+ */
+export const ForwardAddress: z.ZodString = /* @__PURE__ */ z.string().meta({
+  id: 'ForwardAddress',
+  description:
+    'Transport-qualified keys use `tcp@socket` or `udp@socket`; socket-only keys retain both.',
+})
 export const GenerateCertParams: z.ZodObject<{
   subject: z.ZodArray<z.ZodString>
 }> = /* @__PURE__ */ object({ subject: z.array(z.string()) }).meta({
@@ -301,13 +379,13 @@ export const Guid: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 /**
  * Proof that a set of auth keys was unenrolled — removed from the persisted
  * and ephemeral signer stores with any continuations they opened killed.
- * Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
+ * Obtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]
  * from inside a db transaction.
  */
 export const HasUnenrolledKeys: z.ZodNull = /* @__PURE__ */ z.null().meta({
   id: 'HasUnenrolledKeys',
   description:
-    'Proof that a set of auth keys was unenrolled — removed from the persisted\nand ephemeral signer stores with any continuations they opened killed.\nObtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]\nfrom inside a db transaction.',
+    'Proof that a set of auth keys was unenrolled — removed from the persisted\nand ephemeral signer stores with any continuations they opened killed.\nObtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]\nfrom inside a db transaction.',
 })
 export const HttpRedirectStatus: z.ZodObject<{
   ip: z.ZodString
@@ -361,6 +439,42 @@ export const ListParams: typeof empty = /* @__PURE__ */ empty.meta({
 export const LogoutParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'LogoutParams',
 })
+
+/**
+ * JSON Patch 'move' operation representation
+ */
+export const MoveOperation: z.ZodObject<{
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * to move value from.
+   */
+  from: z.ZodString
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * to move value from.
+   */
+  from: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nto move value from.',
+  }),
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nwithin the target document where the operation is performed.',
+  }),
+}).meta({
+  id: 'MoveOperation',
+  description: "JSON Patch 'move' operation representation",
+})
 export const RemoveDeviceParams: z.ZodObject<{
   subnet: z.ZodString
   ip: z.ZodString
@@ -379,32 +493,61 @@ export const RemoveDnsRecordParams: z.ZodObject<{
 }).meta({
   id: 'RemoveDnsRecordParams',
 })
-export const RemovePinholeParams: z.ZodObject<{
-  gua: z.ZodString
-  externalPort: z.ZodInt
-}> = /* @__PURE__ */ object({ gua: z.string(), externalPort: z.int() }).meta({
-  id: 'RemovePinholeParams',
-})
-export const RemovePortForwardParams: z.ZodObject<{
-  source: z.ZodString
+
+/**
+ * JSON Patch 'remove' operation representation
+ */
+export const RemoveOperation: z.ZodObject<{
   /**
-   * Remove a single SNI route on `source`; omit to remove the whole forward.
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
    */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  path: z.ZodString
 }> = /* @__PURE__ */ object({
-  source: z.string(),
   /**
-   * Remove a single SNI route on `source`; omit to remove the whole forward.
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
    */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+  path: z.string().meta({
     description:
-      'Remove a single SNI route on `source`; omit to remove the whole forward.',
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nwithin the target document where the operation is performed.',
   }),
 }).meta({
-  id: 'RemovePortForwardParams',
+  id: 'RemoveOperation',
+  description: "JSON Patch 'remove' operation representation",
+})
+
+/**
+ * JSON Patch 'replace' operation representation
+ */
+export const ReplaceOperation: z.ZodObject<{
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.ZodString
+  /**
+   * Value to replace with.
+   */
+  value: z.ZodUnknown
+}> = /* @__PURE__ */ object({
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nwithin the target document where the operation is performed.',
+  }),
+  /**
+   * Value to replace with.
+   */
+  value: z.unknown().meta({
+    description: 'Value to replace with.',
+  }),
+}).meta({
+  id: 'ReplaceOperation',
+  description: "JSON Patch 'replace' operation representation",
 })
 export const Session: z.ZodObject<{
   /**
@@ -498,40 +641,6 @@ export const SetPasswordParams: z.ZodObject<{ password: z.ZodString }> =
   /* @__PURE__ */ object({ password: z.string() }).meta({
     id: 'SetPasswordParams',
   })
-export const SetPinholeEnabledParams: z.ZodObject<{
-  gua: z.ZodString
-  externalPort: z.ZodInt
-  enabled: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  gua: z.string(),
-  externalPort: z.int(),
-  enabled: z.boolean(),
-}).meta({
-  id: 'SetPinholeEnabledParams',
-})
-export const SetPortForwardEnabledParams: z.ZodObject<{
-  source: z.ZodString
-  enabled: z.ZodBoolean
-  /**
-   * Toggle a single SNI route on `source`; omit for a DNAT forward.
-   */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  source: z.string(),
-  enabled: z.boolean(),
-  /**
-   * Toggle a single SNI route on `source`; omit for a DNAT forward.
-   */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Toggle a single SNI route on `source`; omit for a DNAT forward.',
-  }),
-}).meta({
-  id: 'SetPortForwardEnabledParams',
-})
 export const SetSubnetIpv6Params: z.ZodObject<{
   /**
    * The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner,
@@ -600,6 +709,43 @@ export const SubscribeParams: z.ZodObject<{
 }).meta({
   id: 'SubscribeParams',
 })
+
+/**
+ * JSON Patch 'test' operation representation
+ */
+export const TestOperation: z.ZodObject<{
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.ZodString
+  /**
+   * Value to test against.
+   */
+  value: z.ZodUnknown
+}> = /* @__PURE__ */ object({
+  /**
+   * JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location
+   * within the target document where the operation is performed.
+   */
+  path: z.string().meta({
+    description:
+      'JSON-Pointer value [RFC6901](https://tools.ietf.org/html/rfc6901) that references a location\nwithin the target document where the operation is performed.',
+  }),
+  /**
+   * Value to test against.
+   */
+  value: z.unknown().meta({
+    description: 'Value to test against.',
+  }),
+}).meta({
+  id: 'TestOperation',
+  description: "JSON Patch 'test' operation representation",
+})
+export const TransportProtocol: z.ZodEnum<{ tcp: 'tcp'; udp: 'udp' }> =
+  /* @__PURE__ */ z.enum(['tcp', 'udp']).meta({
+    id: 'TransportProtocol',
+  })
 export const TunnelCertData: z.ZodObject<{
   key: typeof literal_0
   cert: typeof literal_0
@@ -646,46 +792,6 @@ export const TunnelUpdateResult: z.ZodObject<{
   }),
 }).meta({
   id: 'TunnelUpdateResult',
-})
-export const UpdatePinholeLabelParams: z.ZodObject<{
-  gua: z.ZodString
-  externalPort: z.ZodInt
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  gua: z.string(),
-  externalPort: z.int(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'UpdatePinholeLabelParams',
-})
-export const UpdatePortForwardLabelParams: z.ZodObject<{
-  source: z.ZodString
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * Label a single SNI route on `source`; omit to label the DNAT forward.
-   */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  source: z.string(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
-  /**
-   * Label a single SNI route on `source`; omit to label the DNAT forward.
-   */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Label a single SNI route on `source`; omit to label the DNAT forward.',
-  }),
-}).meta({
-  id: 'UpdatePortForwardLabelParams',
 })
 
 /**
@@ -808,10 +914,165 @@ export const LoginParams: z.ZodObject<{
 }).meta({
   id: 'LoginParams',
 })
+
+/**
+ * JSON Patch single patch operation
+ */
+export const PatchOperation: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * 'add' operation
+         */
+        op: z.ZodLiteral<'add'>
+      }>,
+      typeof AddOperation
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * 'remove' operation
+         */
+        op: z.ZodLiteral<'remove'>
+      }>,
+      typeof RemoveOperation
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * 'replace' operation
+         */
+        op: z.ZodLiteral<'replace'>
+      }>,
+      typeof ReplaceOperation
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * 'move' operation
+         */
+        op: z.ZodLiteral<'move'>
+      }>,
+      typeof MoveOperation
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * 'copy' operation
+         */
+        op: z.ZodLiteral<'copy'>
+      }>,
+      typeof CopyOperation
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * 'test' operation
+         */
+        op: z.ZodLiteral<'test'>
+      }>,
+      typeof TestOperation
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(
+      object({
+        /**
+         * 'add' operation
+         */
+        op: z.literal('add').meta({
+          description: "'add' operation",
+        }),
+      }),
+      AddOperation,
+    ),
+    z.intersection(
+      object({
+        /**
+         * 'remove' operation
+         */
+        op: z.literal('remove').meta({
+          description: "'remove' operation",
+        }),
+      }),
+      RemoveOperation,
+    ),
+    z.intersection(
+      object({
+        /**
+         * 'replace' operation
+         */
+        op: z.literal('replace').meta({
+          description: "'replace' operation",
+        }),
+      }),
+      ReplaceOperation,
+    ),
+    z.intersection(
+      object({
+        /**
+         * 'move' operation
+         */
+        op: z.literal('move').meta({
+          description: "'move' operation",
+        }),
+      }),
+      MoveOperation,
+    ),
+    z.intersection(
+      object({
+        /**
+         * 'copy' operation
+         */
+        op: z.literal('copy').meta({
+          description: "'copy' operation",
+        }),
+      }),
+      CopyOperation,
+    ),
+    z.intersection(
+      object({
+        /**
+         * 'test' operation
+         */
+        op: z.literal('test').meta({
+          description: "'test' operation",
+        }),
+      }),
+      TestOperation,
+    ),
+  ])
+  .meta({
+    id: 'PatchOperation',
+    description: 'JSON Patch single patch operation',
+  })
 export const RemoveKeyParams: z.ZodObject<{ key: typeof AnyVerifyingKey }> =
   /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
     id: 'RemoveKeyParams',
   })
+export const RemovePortForwardParams: z.ZodObject<{
+  source: typeof ForwardAddress
+  /**
+   * Remove a single SNI route on `source`; omit to remove the whole forward.
+   */
+  hostname: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  source: ForwardAddress,
+  /**
+   * Remove a single SNI route on `source`; omit to remove the whole forward.
+   */
+  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'Remove a single SNI route on `source`; omit to remove the whole forward.',
+  }),
+}).meta({
+  id: 'RemovePortForwardParams',
+})
 export const SetDeviceKindParams: z.ZodObject<{
   subnet: z.ZodString
   ip: z.ZodString
@@ -822,6 +1083,29 @@ export const SetDeviceKindParams: z.ZodObject<{
   kind: WgClientKind,
 }).meta({
   id: 'SetDeviceKindParams',
+})
+export const SetPortForwardEnabledParams: z.ZodObject<{
+  source: typeof ForwardAddress
+  enabled: z.ZodBoolean
+  /**
+   * Toggle a single SNI route on `source`; omit for a DNAT forward.
+   */
+  hostname: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  source: ForwardAddress,
+  enabled: z.boolean(),
+  /**
+   * Toggle a single SNI route on `source`; omit for a DNAT forward.
+   */
+  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'Toggle a single SNI route on `source`; omit for a DNAT forward.',
+  }),
+}).meta({
+  id: 'SetPortForwardEnabledParams',
 })
 export const SetSubnetDnsParams: z.ZodObject<{
   mode: typeof DnsMode
@@ -860,6 +1144,39 @@ export const SubscribeRes: z.ZodObject<{
   guid: typeof Guid
 }> = /* @__PURE__ */ object({ dump: Dump, guid: Guid }).meta({
   id: 'SubscribeRes',
+})
+export const TransportWire: z.ZodUnion<
+  readonly [typeof TransportProtocol, z.ZodArray<typeof TransportProtocol>]
+> = /* @__PURE__ */ z
+  .union([TransportProtocol, z.array(TransportProtocol)])
+  .meta({
+    id: 'TransportWire',
+  })
+export const UpdatePortForwardLabelParams: z.ZodObject<{
+  source: typeof ForwardAddress
+  label: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * Label a single SNI route on `source`; omit to label the DNAT forward.
+   */
+  hostname: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  source: ForwardAddress,
+  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * Label a single SNI route on `source`; omit to label the DNAT forward.
+   */
+  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'Label a single SNI route on `source`; omit to label the DNAT forward.',
+  }),
+}).meta({
+  id: 'UpdatePortForwardLabelParams',
 })
 export const WgConfig: z.ZodObject<{
   name: z.ZodString
@@ -935,6 +1252,16 @@ export const WgConfig: z.ZodObject<{
 })
 
 /**
+ * Representation of JSON Patch (list of patch operations)
+ */
+export const Patch: z.ZodArray<typeof PatchOperation> = /* @__PURE__ */ z
+  .array(PatchOperation)
+  .meta({
+    id: 'Patch',
+    description: 'Representation of JSON Patch (list of patch operations)',
+  })
+
+/**
  * The server's sessions, by credential type.
  */
 export const Sessions: z.ZodObject<{
@@ -947,10 +1274,54 @@ export const Sessions: z.ZodObject<{
   id: 'Sessions',
   description: "The server's sessions, by credential type.",
 })
+
+/**
+ * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
+ */
+export const SubscribeResult: z.ZodUnion<
+  readonly [typeof SubscribeRes, typeof Dump]
+> = /* @__PURE__ */ z.union([SubscribeRes, Dump]).meta({
+  id: 'SubscribeResult',
+  description:
+    'Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.',
+})
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export const Transport: z.ZodCodec<
+  typeof TransportWire,
+  z.ZodArray<typeof TransportProtocol>
+> = /* @__PURE__ */ wire(TransportWire, z.array(TransportProtocol)).meta({
+  id: 'Transport',
+  description:
+    'Non-empty selected transports, serialized as a sorted, deduplicated array.\nA protocol string is accepted as a singleton. Omission selects TCP and UDP.',
+})
 export const WgSubnetClients: z.ZodRecord<z.ZodString, typeof WgConfig> =
   /* @__PURE__ */ z.record(z.string(), WgConfig).meta({
     id: 'WgSubnetClients',
   })
+
+/**
+ * Database-generated patches contain only add, remove and replace operations.
+ */
+export const DiffPatch: typeof Patch = /* @__PURE__ */ Patch.meta({
+  id: 'DiffPatch',
+  description:
+    'Database-generated patches contain only add, remove and replace operations.',
+})
+export const RemovePinholeParams: z.ZodObject<{
+  gua: z.ZodString
+  externalPort: z.ZodInt
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
+}> = /* @__PURE__ */ object({
+  gua: z.string(),
+  externalPort: z.int(),
+  transport: wire(Transport.optional(), Transport),
+}).meta({
+  id: 'RemovePinholeParams',
+})
 export const SessionList: z.ZodObject<{
   current: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -962,6 +1333,35 @@ export const SessionList: z.ZodObject<{
   sessions: Sessions,
 }).meta({
   id: 'SessionList',
+})
+export const SetPinholeEnabledParams: z.ZodObject<{
+  gua: z.ZodString
+  externalPort: z.ZodInt
+  enabled: z.ZodBoolean
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
+}> = /* @__PURE__ */ object({
+  gua: z.string(),
+  externalPort: z.int(),
+  enabled: z.boolean(),
+  transport: wire(Transport.optional(), Transport),
+}).meta({
+  id: 'SetPinholeEnabledParams',
+})
+export const UpdatePinholeLabelParams: z.ZodObject<{
+  gua: z.ZodString
+  externalPort: z.ZodInt
+  label: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
+}> = /* @__PURE__ */ object({
+  gua: z.string(),
+  externalPort: z.int(),
+  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  transport: wire(Transport.optional(), Transport),
+}).meta({
+  id: 'UpdatePinholeLabelParams',
 })
 export const WgSubnetConfig: z.ZodObject<{
   name: z.ZodString
@@ -1008,6 +1408,10 @@ export const WgSubnetConfig: z.ZodObject<{
 }).meta({
   id: 'WgSubnetConfig',
 })
+export const Revision: z.ZodObject<{ id: z.ZodInt; patch: typeof DiffPatch }> =
+  /* @__PURE__ */ object({ id: z.int(), patch: DiffPatch }).meta({
+    id: 'Revision',
+  })
 export const Api = {
   _PARAMS: /* @__PURE__ */ empty,
   _CHILDREN: {
@@ -1020,6 +1424,8 @@ export const Api = {
             add: {
               _PARAMS: /* @__PURE__ */ AddKeyParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1035,20 +1441,28 @@ export const Api = {
                 empty,
               ),
               _RETURN: /* @__PURE__ */ AuthKeys,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             remove: {
               _PARAMS: /* @__PURE__ */ RemoveKeyParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
         login: {
           _PARAMS: /* @__PURE__ */ LoginParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         logout: {
           _PARAMS: /* @__PURE__ */ LogoutParams,
           _RETURN: /* @__PURE__ */ HasUnenrolledKeys.nullable(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         session: {
           _PARAMS: /* @__PURE__ */ empty,
@@ -1056,6 +1470,8 @@ export const Api = {
             kill: {
               _PARAMS: /* @__PURE__ */ KillParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1071,12 +1487,16 @@ export const Api = {
                 ListParams,
               ),
               _RETURN: /* @__PURE__ */ SessionList,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
         'set-password': {
           _PARAMS: /* @__PURE__ */ SetPasswordParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -1086,14 +1506,20 @@ export const Api = {
         apply: {
           _PARAMS: /* @__PURE__ */ ApplyWithPathParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         dump: {
           _PARAMS: /* @__PURE__ */ DumpParams,
           _RETURN: /* @__PURE__ */ Dump,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         subscribe: {
           _PARAMS: /* @__PURE__ */ SubscribeParams,
-          _RETURN: /* @__PURE__ */ SubscribeRes,
+          _RETURN: /* @__PURE__ */ SubscribeResult,
+          _ITEM: /* @__PURE__ */ Revision,
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -1103,6 +1529,8 @@ export const Api = {
         add: {
           _PARAMS: /* @__PURE__ */ AddDeviceParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1118,30 +1546,44 @@ export const Api = {
             ListDevicesParams,
           ),
           _RETURN: /* @__PURE__ */ WgSubnetConfig,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         remove: {
           _PARAMS: /* @__PURE__ */ RemoveDeviceParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-auto-port-forward': {
           _PARAMS: /* @__PURE__ */ SetAutoPortForwardParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-dns-injection': {
           _PARAMS: /* @__PURE__ */ SetDnsInjectionParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-kind': {
           _PARAMS: /* @__PURE__ */ SetDeviceKindParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-wan': {
           _PARAMS: /* @__PURE__ */ SetDeviceWanParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'show-config': {
           _PARAMS: /* @__PURE__ */ ShowConfigParams,
           _RETURN: /* @__PURE__ */ z.string(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -1151,6 +1593,8 @@ export const Api = {
         add: {
           _PARAMS: /* @__PURE__ */ AddDnsRecordParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1166,10 +1610,14 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(DnsRecordEntry),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         remove: {
           _PARAMS: /* @__PURE__ */ RemoveDnsRecordParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -1190,10 +1638,14 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(HttpRedirectStatus),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-enabled': {
           _PARAMS: /* @__PURE__ */ SetHttpRedirectEnabledParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -1203,18 +1655,26 @@ export const Api = {
         add: {
           _PARAMS: /* @__PURE__ */ AddPinholeParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         remove: {
           _PARAMS: /* @__PURE__ */ RemovePinholeParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-enabled': {
           _PARAMS: /* @__PURE__ */ SetPinholeEnabledParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'update-label': {
           _PARAMS: /* @__PURE__ */ UpdatePinholeLabelParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -1224,24 +1684,34 @@ export const Api = {
         add: {
           _PARAMS: /* @__PURE__ */ AddPortForwardParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         remove: {
           _PARAMS: /* @__PURE__ */ RemovePortForwardParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-enabled': {
           _PARAMS: /* @__PURE__ */ SetPortForwardEnabledParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'update-label': {
           _PARAMS: /* @__PURE__ */ UpdatePortForwardLabelParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
     restart: {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     subnet: {
       _PARAMS: /* @__PURE__ */ SubnetParams,
@@ -1252,10 +1722,14 @@ export const Api = {
             AddSubnetParams,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         remove: {
           _PARAMS: /* @__PURE__ */ SubnetParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-dns': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1263,6 +1737,8 @@ export const Api = {
             SetSubnetDnsParams,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-ipv6': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1270,6 +1746,8 @@ export const Api = {
             SetSubnetIpv6Params,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-wan': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1277,6 +1755,8 @@ export const Api = {
             SetSubnetWanParams,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -1297,6 +1777,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ TunnelUpdateResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         check: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1312,6 +1794,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ TunnelUpdateResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -1321,14 +1805,20 @@ export const Api = {
         disable: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         enable: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'generate-certificate': {
           _PARAMS: /* @__PURE__ */ GenerateCertParams,
           _RETURN: /* @__PURE__ */ literal_0,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'get-available-ips': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1344,6 +1834,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(z.string()),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'get-certificate': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1359,6 +1851,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ literal_0.nullable(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'get-listen': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -1374,18 +1868,26 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.string().nullable(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'import-certificate': {
           _PARAMS: /* @__PURE__ */ TunnelCertData,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-listen': {
           _PARAMS: /* @__PURE__ */ SetListenParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         uninit: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },

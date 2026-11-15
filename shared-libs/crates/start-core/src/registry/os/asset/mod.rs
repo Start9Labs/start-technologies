@@ -3,6 +3,7 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
+use crate::registry::upstream::WRITES_INDEX;
 use crate::rpc_continuations::Guid;
 
 pub mod add;
@@ -28,7 +29,10 @@ fn may_manage_assets(
 
 pub fn asset_api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("add", add::add_api::<C>())
+        .subcommand(
+            "add",
+            add::add_api::<C>().with_metadata(WRITES_INDEX, Value::Bool(true)),
+        )
         .subcommand(
             "add",
             from_fn_async(add::cli_add_asset)
@@ -38,9 +42,14 @@ pub fn asset_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "remove",
-            add::remove_api::<C>().with_about("about.commands-remove-assets"),
+            add::remove_api::<C>()
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
+                .with_about("about.commands-remove-assets"),
         )
-        .subcommand("sign", sign::sign_api::<C>())
+        .subcommand(
+            "sign",
+            sign::sign_api::<C>().with_metadata(WRITES_INDEX, Value::Bool(true)),
+        )
         .subcommand(
             "sign",
             from_fn_async(sign::cli_sign_asset)

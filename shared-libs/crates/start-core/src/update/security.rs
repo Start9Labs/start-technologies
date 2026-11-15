@@ -1,161 +1,61 @@
-use std::collections::BTreeMap;
-use std::time::Duration;
+use std::collections::{BTreeMap, BTreeSet};
 
-use exver::Version;
-use futures::{SinkExt, StreamExt};
-use patch_db::{Dump, Revision};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use exver::{Version, VersionRange};
+use imbl_value::InternedString;
 use url::Url;
 
-use crate::context::RpcContext;
-use crate::db::model::{Database, DatabaseModel};
+use crate::db::model::DatabaseModel;
 use crate::notifications::{NotificationLevel, OsUpdateAvailable, notify};
 use crate::prelude::*;
-use crate::registry::os::security::SecurityFeedState;
+use crate::registry::os::index::OsIndex;
 use crate::s9pk::git_hash::GitHash;
 
 pub type SecurityNotifications = BTreeMap<Url, BTreeMap<Version, Option<GitHash>>>;
 
-pub async fn watch_updates(
-    db: TypedPatchDb<Database>,
-    context: impl Fn() -> Option<RpcContext> + Send + Sync,
-) {
-    let mut registry = db
-        .watch("/public/serverInfo/osRegistry".parse().unwrap())
-        .await;
-    let mut backoff = 30;
-    tokio::time::sleep(Duration::from_secs(rand::random_range(0..30))).await;
-    loop {
-        let selected = registry
-            .peek_and_mark_seen()
-            .with_kind(ErrorKind::Database)
-            .and_then(from_value::<Url>);
-        if let Ok(selected) = selected {
-            tokio::select! {
-                result = subscribe(&db, &selected, &context, &mut backoff) => {
-                    if let Err(error) = result {
-                        tracing::debug!(?error, registry = %selected, "Security update subscription disconnected");
-                    }
-                }
-                result = registry.changed() => {
-                    if result.is_err() { return; }
-                    backoff = 30;
-                    continue;
-                }
-            }
-        }
-        let delay = Duration::from_secs(rand::random_range(backoff / 2..=backoff));
-        backoff = (backoff * 2).min(300);
-        tokio::select! {
-            _ = tokio::time::sleep(delay) => (),
-            result = registry.changed() => {
-                if result.is_err() { return; }
-                backoff = 30;
-            }
-        }
-    }
+#[derive(Default)]
+struct SecurityFeedState {
+    name: Option<String>,
+    updates: BTreeMap<Version, SecurityUpdate>,
 }
 
-fn subscription_url(registry: &Url) -> Result<Url, Error> {
-    let mut url = registry.join("os/security")?;
-    let scheme = match url.scheme() {
-        "https" => "wss",
-        "http" => "ws",
-        _ => {
-            return Err(Error::new(
-                eyre!("unsupported registry scheme"),
-                ErrorKind::ParseUrl,
-            ));
-        }
-    };
-    url.set_scheme(scheme)
-        .map_err(|_| Error::new(eyre!("invalid registry scheme"), ErrorKind::ParseUrl))?;
-    Ok(url)
+struct SecurityUpdate {
+    git_hash: Option<GitHash>,
+    source_version: VersionRange,
+    platforms: BTreeSet<InternedString>,
 }
 
-async fn subscribe(
-    db: &TypedPatchDb<Database>,
+pub(crate) fn notify_updates(
+    db: &mut DatabaseModel,
     registry: &Url,
-    context: &(impl Fn() -> Option<RpcContext> + Sync),
-    backoff: &mut u64,
+    name: Option<String>,
+    index: OsIndex,
 ) -> Result<(), Error> {
-    let url = subscription_url(registry)?;
-    let config = WebSocketConfig::default()
-        .read_buffer_size(4096)
-        .write_buffer_size(0)
-        .max_write_buffer_size(4096)
-        .max_message_size(Some(1024 * 1024))
-        .max_frame_size(Some(1024 * 1024));
-    let socket = {
-        let Some(context) = context() else {
-            return Ok(());
-        };
-        tokio::time::timeout(
-            Duration::from_secs(30),
-            context.client.websocket(url, config),
-        )
-        .await
-        .with_kind(ErrorKind::Network)??
+    let feed = SecurityFeedState {
+        name,
+        updates: index
+            .versions
+            .0
+            .into_iter()
+            .filter(|(_, info)| info.security)
+            .map(|(version, info)| {
+                (
+                    version,
+                    SecurityUpdate {
+                        git_hash: info.git_hash,
+                        source_version: info.source_version,
+                        platforms: info.squashfs.into_keys().collect(),
+                    },
+                )
+            })
+            .collect(),
     };
-    receive_updates(socket, db, registry, backoff).await
-}
-
-async fn receive_updates<S: AsyncRead + AsyncWrite + Unpin>(
-    mut socket: WebSocketStream<S>,
-    db: &TypedPatchDb<Database>,
-    registry: &Url,
-    backoff: &mut u64,
-) -> Result<(), Error> {
-    let mut state = None;
-    loop {
-        let message = tokio::time::timeout(Duration::from_secs(120), socket.next())
-            .await
-            .with_kind(ErrorKind::Network)?
-            .transpose()
-            .with_kind(ErrorKind::Network)?;
-        match message {
-            Some(Message::Text(text)) => {
-                let value = match &mut state {
-                    None => &*state.insert(
-                        serde_json::from_str::<Dump>(&text)
-                            .with_kind(ErrorKind::Deserialization)?
-                            .value,
-                    ),
-                    Some(value) => {
-                        let revision: Revision =
-                            serde_json::from_str(&text).with_kind(ErrorKind::Deserialization)?;
-                        patch_db::json_patch::patch(value, &revision.patch)
-                            .with_kind(ErrorKind::Database)?;
-                        &*value
-                    }
-                };
-                let feed: SecurityFeedState = from_value(value.clone())?;
-                db.mutate(|db| {
-                    notify_security_updates(
-                        db,
-                        registry,
-                        &feed,
-                        crate::version::COMMIT_HASH.trim(),
-                        &crate::PLATFORM,
-                    )
-                })
-                .await
-                .result?;
-                *backoff = 30;
-            }
-            Some(Message::Ping(_)) => {
-                tokio::time::timeout(Duration::from_secs(30), socket.flush())
-                    .await
-                    .with_kind(ErrorKind::Network)?
-                    .with_kind(ErrorKind::Network)?;
-            }
-            Some(Message::Close(_)) | None => return Ok(()),
-            _ => (),
-        }
-    }
+    notify_security_updates(
+        db,
+        registry,
+        &feed,
+        crate::version::COMMIT_HASH.trim(),
+        &crate::PLATFORM,
+    )
 }
 
 fn notify_security_updates(
@@ -214,10 +114,9 @@ mod tests {
     use patch_db::ModelExt;
 
     use super::*;
-    use crate::registry::os::security::SecurityUpdate;
 
     fn database() -> DatabaseModel {
-        let mut db = Model::from_value(json!({
+        let mut db = DatabaseModel::from_value(json!({
             "public": { "serverInfo": { "version": "0.4.0.5", "unreadNotificationCount": 0 } },
             "private": { "notifications": {}, "osSecurityNotifications": {} }
         }));
@@ -422,91 +321,5 @@ mod tests {
         let other: Url = "https://other.test".parse().unwrap();
         notify_security_updates(&mut db, &other, &second, "installed-build", "x86_64").unwrap();
         assert_eq!(count(&db), 3);
-    }
-
-    #[tokio::test]
-    async fn subscription_applies_revisions_answers_heartbeats_and_deduplicates_reconnects() {
-        use patch_db::json_ptr::ROOT;
-
-        let temp = tempfile::tempdir().unwrap();
-        let raw = patch_db::PatchDb::open(temp.path().join("db"))
-            .await
-            .unwrap();
-        let db = TypedPatchDb::<Database>::load_unchecked(raw);
-        db.put(&ROOT, database().as_value()).await.unwrap();
-        let registry: Url = "https://registry.test/".parse().unwrap();
-        let feed = patch_db::PatchDb::in_memory();
-        feed.put(
-            &ROOT,
-            &catalog("0.4.0.6", Some("published-build"), "*", &crate::PLATFORM),
-        )
-        .await
-        .unwrap();
-        for attempt in 0..2 {
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let url = format!("ws://{}", listener.local_addr().unwrap());
-            let feed = feed.clone();
-            let server = tokio::spawn(async move {
-                let (stream, _) = listener.accept().await.unwrap();
-                let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
-                let dump = feed.dump(&ROOT).await;
-                socket
-                    .send(Message::Text(serde_json::to_string(&dump).unwrap().into()))
-                    .await
-                    .unwrap();
-                if attempt == 0 {
-                    let replacement =
-                        catalog("0.4.0.6", Some("replacement-build"), "*", &crate::PLATFORM);
-                    for value in [&replacement, &SecurityFeedState::default(), &replacement] {
-                        let revision = feed.put(&ROOT, value).await.unwrap().unwrap();
-                        socket
-                            .send(Message::Text(
-                                serde_json::to_string(&revision).unwrap().into(),
-                            ))
-                            .await
-                            .unwrap();
-                    }
-                }
-                socket
-                    .send(Message::Ping(vec![1, 2, 3].into()))
-                    .await
-                    .unwrap();
-                assert_eq!(
-                    socket.next().await.unwrap().unwrap(),
-                    Message::Pong(vec![1, 2, 3].into())
-                );
-                socket.send(Message::Close(None)).await.unwrap();
-            });
-            let (socket, _) = tokio_tungstenite::connect_async(url).await.unwrap();
-            let mut backoff = 300;
-            tokio::time::timeout(
-                Duration::from_secs(5),
-                receive_updates(socket, &db, &registry, &mut backoff),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-            assert_eq!(backoff, 30);
-            server.await.unwrap();
-        }
-        assert_eq!(count(&db.peek().await), 2);
-    }
-
-    #[test]
-    fn subscription_url_preserves_registry_prefix_and_uses_tls() {
-        for (registry, expected) in [
-            ("https://registry.test/", "wss://registry.test/os/security"),
-            (
-                "http://registry.test:5959/prefix/",
-                "ws://registry.test:5959/prefix/os/security",
-            ),
-        ] {
-            assert_eq!(
-                subscription_url(&registry.parse().unwrap())
-                    .unwrap()
-                    .as_str(),
-                expected
-            );
-        }
     }
 }

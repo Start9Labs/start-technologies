@@ -14,6 +14,10 @@ mid-migration — _"matches existing repo patterns" is not a quality bar_; old c
 exactly what this skill exists to eliminate. Never guess a Taiga API: verify against the
 `taiga-ui-mcp` MCP server or `https://taiga-ui.dev/llms-full.txt`.
 
+**House style does not expand visual scope.** Transport, data and lifecycle refactors preserve
+existing presentation unless a visual change is requested or required for the feature. Keep
+unrelated redesigns in a separate PR; do not turn touching a component into a styling migration.
+
 ## Reference files (read on demand — don't preload)
 
 | File                         | Read when                                                                                                 |
@@ -40,7 +44,7 @@ exactly what this skill exists to eliminate. Never guess a Taiga API: verify aga
 | StartOS `ui`           | `start-technologies` `projects/start-os/web/ui` | 22      | 5.29  | zone.js (zoneless pending) | dark, `provideTaiga({mode})`         | yes (shared dicts) | JSON-RPC + PatchDB push                             |
 | `setup-wizard`         | `projects/start-os/web/setup-wizard`            | 22      | 5.29  | zone.js                    | dark                                 | yes (shared)       | JSON-RPC                                            |
 | `start-tunnel`         | `projects/start-tunnel/web`                     | 22      | 5.29  | **zoneless**               | dark                                 | yes (local dicts)  | JSON-RPC + PatchDB                                  |
-| `start-wrt`            | `projects/start-wrt/web`                        | 22      | 5.29  | **zoneless**               | dual (`TUI_DARK_MODE`)               | yes (local dicts)  | JSON-RPC, own HTTP stack, 5s polling                |
+| `start-wrt`            | `projects/start-wrt/web`                        | 22      | 5.29  | **zoneless**               | dual (`TUI_DARK_MODE`)               | yes (local dicts)  | Signed-DH RPC + bootstrap possession, 5s polling    |
 | `brochure-marketplace` | `projects/brochure-marketplace`                 | 22      | 5.29  | zone.js (legacy)           | dark                                 | yes (shared)       | registry RPC direct                                 |
 | `start9-store`         | `ops/start9-store/web`                          | 22      | 5.32  | **zoneless**               | light                                | no                 | REST + Zod via `/api` BFF, **SSR**                  |
 | `ops-server`           | `ops/ops-server/web`                            | 22      | 5.29  | **zoneless**               | dark, `#07a4ff`, Montserrat          | no                 | REST `/_api`, same-origin Express                   |

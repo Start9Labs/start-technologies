@@ -1,6 +1,11 @@
+import { HttpHeaders } from '@angular/common/http'
 import { inject, InjectionToken, Service } from '@angular/core'
 import { WA_WINDOW } from '@ng-web-apis/common'
 import { auth } from '@start9labs/start-core'
+
+import type { HttpOptions } from '../types/http.types'
+import { identityStore } from './identity-store'
+import type { SessionSocketIdentity } from './session-websocket'
 
 /** IndexedDB record key for the device key. Override per app so two apps
  *  served from one origin (dev servers, a re-pointed forward) can't clobber
@@ -16,15 +21,18 @@ export const AUTH_SIGNING_HOST = new InjectionToken<string>(
   { factory: () => inject(WA_WINDOW).location.hostname },
 )
 
-const DB_NAME = 'startos-auth'
-const STORE = 'keys'
+/** The active device identity and its cancellation lifetime. */
+export interface AuthKeyLease extends SessionSocketIdentity {
+  readonly key: auth.AuthKey
+}
 
 /**
  * Holds the device key this browser enrolled at login: a non-extractable
  * WebCrypto Ed25519 key persisted in IndexedDB, so a script can sign with it
  * while the page lives but can never read it out. Cleared by the app on
  * logout or server rejection; the server-side enrollment is revoked
- * separately.
+ * separately. Key acquisition and enrollment cannot adopt a replacement identity
+ * after their cancellation lifetime ends.
  */
 @Service()
 export class AuthKeyService {
@@ -32,33 +40,70 @@ export class AuthKeyService {
   private readonly storageKey = inject(AUTH_KEY_STORAGE_KEY)
   private readonly host = inject(AUTH_SIGNING_HOST)
   private cached: auth.AuthKey | null | undefined
-  /** Record displaced by this tab's `create()`, restored by `rollback()` so a
-   *  failed login here can't wipe the key another tab is signing with. */
+  private lifetime = new AbortController()
+  private admissionKey?: Promise<auth.RequestSigner>
+  /** Preserves another tab's displaced key across a failed login. */
   private displaced: auth.AuthKey | null = null
 
   async get(): Promise<auth.AuthKey | null> {
     if (this.cached === undefined) {
       try {
-        this.cached =
-          (await this.idb('readonly', s => s.get(this.storageKey))) ?? null
+        const stored = await this.idb('readonly', s => s.get(this.storageKey))
+        if (this.cached === undefined) this.cached = stored ?? null
       } catch {
-        // A corrupt slot must degrade to logged-out, not brick the app.
-        this.cached = null
-        await this.delete().catch(() => {})
+        if (this.cached === undefined) await this.delete().catch(() => {})
       }
     }
     return this.cached ?? null
   }
 
+  /** Invalidated when the active device identity changes. */
+  async lease(): Promise<AuthKeyLease | null> {
+    const lifetime = this.lifetime
+    await this.get()
+    lifetime.signal.throwIfAborted()
+    return this.cached
+      ? {
+          key: this.cached,
+          signer: auth.requestSigner(this.cached),
+          signal: lifetime.signal,
+        }
+      : null
+  }
+
+  /** Carries a device key when present; otherwise uses an unpersisted signer. */
+  async admissionLease(): Promise<AuthKeyLease | SessionSocketIdentity> {
+    const lifetime = this.lifetime
+    const stored = await this.get()
+    lifetime.signal.throwIfAborted()
+    const signer = stored
+      ? auth.requestSigner(stored)
+      : await (this.admissionKey ??= auth
+          .generateEphemeralRequestSigner()
+          .catch(error => {
+            if (this.lifetime === lifetime) this.admissionKey = undefined
+            throw error
+          }))
+    lifetime.signal.throwIfAborted()
+    return {
+      signer,
+      signal: lifetime.signal,
+      ...(stored ? { key: stored } : {}),
+    }
+  }
+
   async create(): Promise<auth.AuthKey> {
+    const lifetime = this.lifetime
     const key = await auth.generateAuthKey()
-    this.displaced = await this.get()
+    lifetime.signal.throwIfAborted()
+    const displaced = await this.get()
+    lifetime.signal.throwIfAborted()
+    this.displaced = displaced
     await this.put(key)
     return key
   }
 
-  /** Roll back `create()` after a failed login: restore whatever the slot held
-   *  before, so a mistyped password in one tab can't sign out the others. */
+  /** Restores the key displaced by a failed login. */
   async rollback(): Promise<void> {
     const restore = this.displaced
     this.displaced = null
@@ -75,62 +120,45 @@ export class AuthKeyService {
     await this.delete()
   }
 
-  async signHeader(body: string | Uint8Array): Promise<Record<string, string>> {
-    const key = await this.get()
-    if (!key) return {}
+  async signHeader(
+    body: string | Uint8Array,
+    headers?: HttpOptions['headers'],
+  ): Promise<HttpHeaders> {
+    const result =
+      headers instanceof HttpHeaders ? headers : new HttpHeaders(headers)
+    const lease = await this.lease()
+    if (!lease) return result
     const bytes =
       typeof body === 'string' ? new TextEncoder().encode(body) : body
-    return {
-      [auth.AUTH_SIG_HEADER]: await auth.signRequest(key, this.host, bytes),
-    }
-  }
-
-  /** Sign an RPC request. The signed bytes must match the body `HttpService`
-   *  serializes — `{ method, params }`, in this order, via `JSON.stringify`. */
-  signRpcHeaders(options: {
-    method: string
-    params: unknown
-  }): Promise<Record<string, string>> {
-    return this.signHeader(
-      JSON.stringify({ method: options.method, params: options.params }),
-    )
+    const proof = await auth.signRequest(lease.key, this.host, bytes)
+    lease.signal.throwIfAborted()
+    return result.set(auth.AUTH_SIG_HEADER, proof)
   }
 
   private async put(key: auth.AuthKey): Promise<void> {
+    const lifetime = this.replaceLifetime()
     this.cached = key
     await this.idb('readwrite', s => s.put(key, this.storageKey))
+    lifetime.signal.throwIfAborted()
   }
 
   private async delete(): Promise<void> {
+    this.replaceLifetime()
     this.cached = null
     await this.idb('readwrite', s => s.delete(this.storageKey))
+  }
+
+  private replaceLifetime(): AbortController {
+    this.lifetime.abort()
+    this.lifetime = new AbortController()
+    this.admissionKey = undefined
+    return this.lifetime
   }
 
   private idb<T>(
     mode: IDBTransactionMode,
     op: (store: IDBObjectStore) => IDBRequest<T>,
   ): Promise<T> {
-    return new Promise((resolve, reject) => {
-      const open = this.win.indexedDB.open(DB_NAME, 1)
-      open.onupgradeneeded = () => open.result.createObjectStore(STORE)
-      open.onerror = () => reject(open.error)
-      open.onsuccess = () => {
-        const db = open.result
-        const tx = db.transaction(STORE, mode)
-        const req = op(tx.objectStore(STORE))
-        tx.oncomplete = () => {
-          db.close()
-          resolve(req.result)
-        }
-        tx.onerror = () => {
-          db.close()
-          reject(tx.error)
-        }
-        tx.onabort = () => {
-          db.close()
-          reject(tx.error)
-        }
-      }
-    })
+    return identityStore(this.win, mode, op)
   }
 }

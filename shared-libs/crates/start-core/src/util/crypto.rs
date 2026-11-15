@@ -204,7 +204,7 @@ impl EncryptedWire {
             Ok(a) => Some(a),
             Err(e) => {
                 tracing::warn!("Could not decrypt into utf8");
-                tracing::debug!("{:?}", e);
+                tracing::debug!("{:?}", e.utf8_error());
                 return None;
             }
         }

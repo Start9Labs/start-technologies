@@ -8,13 +8,16 @@ use crate::context::RpcContext;
 use crate::db::model::Database;
 use crate::middleware::auth::bearer::BearerAuth;
 use crate::middleware::auth::local::{LocalAuth, LocalAuthContext};
-use crate::middleware::auth::signature::{LoginMetadata, SignatureAuth, SignatureAuthContext};
+use crate::middleware::auth::signature::{
+    LoginMetadata, SignatureAuth, SignatureAuthorizationContext,
+};
 use crate::prelude::*;
 use crate::util::serde::const_true;
 
 pub mod bearer;
 pub mod local;
 mod login_rate_limit;
+pub mod session;
 pub mod signature;
 
 #[cfg(test)]
@@ -75,7 +78,7 @@ impl<C: LocalAuthContext> Auth<C> {
         self
     }
 }
-impl<C: SignatureAuthContext> Auth<C> {
+impl<C: SignatureAuthorizationContext> Auth<C> {
     pub fn with_signature_auth(mut self) -> Self {
         self.signature = Some(DynMiddleware::new(SignatureAuth::new()));
         self
@@ -107,6 +110,9 @@ impl<C: Context> Middleware<C> for Auth<C> {
     ) -> Result<(), RpcResponse> {
         let m: Metadata =
             from_value(metadata.clone()).map_err(|e| RpcResponse::from_result(Err(e)))?;
+        if let Some(params) = request.params.as_object_mut() {
+            params.retain(|key, _| !key.starts_with("__Auth_"));
+        }
         let mut authorized = false;
         let mut err = None;
         if let Some(local) = &mut self.local {

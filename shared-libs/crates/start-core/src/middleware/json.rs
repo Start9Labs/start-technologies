@@ -1,10 +1,10 @@
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
-use http::header::CONTENT_TYPE;
+use http::header::{CONTENT_TYPE, ORIGIN};
 use http::{HeaderMap, StatusCode};
 use rpc_toolkit::{Empty, Middleware};
 
-/// Rejects requests whose Content-Type is not `application/json`.
+/// Restricts browser RPC to same-origin WebSockets or JSON HTTP bodies.
 #[derive(Clone)]
 pub struct RequireJson;
 
@@ -15,12 +15,47 @@ impl<Context: Send + Sync + 'static> Middleware<Context> for RequireJson {
         _: &Context,
         request: &mut Request,
     ) -> Result<(), Response> {
+        if request
+            .extensions()
+            .get::<rpc_toolkit::WebSocketRequest>()
+            .is_some()
+        {
+            return if same_origin(request) {
+                Ok(())
+            } else {
+                Err(StatusCode::FORBIDDEN.into_response())
+            };
+        }
         if is_json(request.headers()) {
             Ok(())
         } else {
             Err(StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response())
         }
     }
+}
+
+fn same_origin(request: &Request) -> bool {
+    let Some(origin) = request.headers().get(ORIGIN) else {
+        return true;
+    };
+    let Some(authority) = crate::net::http::request_authority(request) else {
+        return false;
+    };
+    let scheme = if request
+        .extensions()
+        .get::<crate::net::tls::TlsHandshakeInfo>()
+        .is_some()
+    {
+        "https"
+    } else {
+        request.uri().scheme_str().unwrap_or("http")
+    };
+    let expected = url::Url::parse(&format!("{scheme}://{authority}"));
+    let supplied = origin
+        .to_str()
+        .ok()
+        .and_then(|value| url::Url::parse(value).ok());
+    matches!((expected, supplied), (Ok(expected), Some(supplied)) if expected.origin() == supplied.origin())
 }
 
 fn is_json(headers: &HeaderMap) -> bool {
@@ -71,6 +106,39 @@ mod tests {
         let status = response.status();
         let body = response.into_body().collect().await.unwrap().to_bytes();
         (status, body.to_vec())
+    }
+
+    #[test]
+    fn browser_origins_match_scheme_host_and_effective_port() {
+        for (origin, allowed) in [
+            ("http://server.local", true),
+            ("http://server.local:80", true),
+            ("https://server.local", false),
+            ("http://server.local:8080", false),
+            ("http://other.local", false),
+            ("null", false),
+        ] {
+            let request = Request::builder()
+                .uri("/rpc/v2")
+                .header(http::header::HOST, "server.local")
+                .header(ORIGIN, origin)
+                .body(Body::empty())
+                .unwrap();
+            assert_eq!(same_origin(&request), allowed, "{origin}");
+        }
+        let mut request = Request::builder()
+            .uri("/rpc/v2")
+            .header(http::header::HOST, "server.local")
+            .header(ORIGIN, "https://server.local")
+            .body(Body::empty())
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(crate::net::tls::TlsHandshakeInfo {
+                sni: None,
+                alpn: None,
+            });
+        assert!(same_origin(&request));
     }
 
     #[tokio::test]

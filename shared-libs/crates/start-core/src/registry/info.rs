@@ -12,6 +12,7 @@ use crate::registry::FullIndex;
 use crate::registry::context::RegistryContext;
 use crate::registry::package::index::Category;
 use crate::registry::signer::SignerInfo;
+use crate::registry::upstream::WRITES_INDEX;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::manifest::LocaleString;
 use crate::util::DataUrl;
@@ -29,6 +30,7 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
         .subcommand(
             "set-trust-signers",
             from_fn_async(set_trust_signers)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.set-registry-trust-signers")
@@ -37,6 +39,7 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
         .subcommand(
             "set-name",
             from_fn_async(set_name)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.set-registry-name")
@@ -45,6 +48,7 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
         .subcommand(
             "set-description",
             from_fn_async(set_description)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_cli(),
         )
@@ -57,6 +61,7 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
         .subcommand(
             "set-icon",
             from_fn_async(set_icon)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_cli(),
         )
@@ -85,7 +90,11 @@ rpc_toolkit::reflect_ts!(RegistryInfo);
 rpc_toolkit::ts_export!(RegistryInfo, namespaces = [""]);
 
 pub async fn get_info(ctx: RegistryContext) -> Result<RegistryInfo, Error> {
-    let index: FullIndex = ctx.db.peek().await.into_index().de()?;
+    from_index(&ctx.db.peek().await.into_index())
+}
+
+pub(crate) fn from_index(index: &Model<FullIndex>) -> Result<RegistryInfo, Error> {
+    let index = index.de()?;
     let trust_signers = proposed_signers(&index);
     Ok(RegistryInfo {
         name: index.name,

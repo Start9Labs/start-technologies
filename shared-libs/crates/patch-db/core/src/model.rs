@@ -27,6 +27,7 @@ impl<T> std::ops::Deref for Pointer<T> {
     }
 }
 
+/// Derived accessors preserve explicit `serde(rename = "...")` field and variant names.
 pub trait HasModel: Sized {
     type Model: Model<Self>;
 }
@@ -129,7 +130,7 @@ mod test {
 
     use imbl_value::{from_value, json, to_value, Value};
     use serde::de::DeserializeOwned;
-    use serde::Serialize;
+    use serde::{Deserialize, Serialize};
 
     use crate as patch_db;
 
@@ -198,7 +199,6 @@ mod test {
 
     #[derive(crate::HasModel)]
     #[model = "Model<Self>"]
-    // #[macro_debug]
     struct Foo {
         #[allow(dead_code)]
         a: Bar,
@@ -209,6 +209,84 @@ mod test {
     struct Bar {
         #[allow(dead_code)]
         b: String,
+    }
+
+    #[derive(Deserialize, Serialize, crate::HasModel)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    #[model = "Model<Self>"]
+    struct RenamedFields {
+        #[serde(rename = "legacyName")]
+        current_name: String,
+        #[serde(default, rename = "legacyKey")]
+        current_key: String,
+        other_field: String,
+    }
+
+    #[test]
+    fn accessors_preserve_serialized_names_with_combined_attributes() {
+        let original = RenamedFields {
+            current_name: "name".into(),
+            current_key: "key".into(),
+            other_field: "other".into(),
+        };
+        let mut model = Model::<RenamedFields>::from(to_value(&original).unwrap());
+        assert_eq!(model.as_current_name().clone().de().unwrap(), "name");
+        assert_eq!(model.as_current_key().clone().de().unwrap(), "key");
+        assert_eq!(model.as_other_field().clone().de().unwrap(), "other");
+        model.as_current_key_mut().ser(&"changed".into()).unwrap();
+        assert_eq!(
+            Value::from(model),
+            json!({"legacyName": "name", "legacyKey": "changed", "otherField": "other"})
+        );
+    }
+
+    #[derive(Deserialize, Serialize, crate::HasModel)]
+    #[serde(tag = "kind", content = "value", rename_all = "kebab-case")]
+    #[model = "Model<Self>"]
+    enum RenamedVariant {
+        #[serde(rename = "legacy")]
+        CurrentName(String),
+        DerivedName(String),
+    }
+
+    #[test]
+    fn variant_accessors_preserve_explicit_and_container_names() {
+        for variant in [
+            RenamedVariant::CurrentName("key".into()),
+            RenamedVariant::DerivedName("key".into()),
+        ] {
+            let encoded = to_value(&variant).unwrap();
+            let model = Model::<RenamedVariant>::from(encoded.clone());
+            let matched = model.into_match();
+            let key = match &matched {
+                RenamedVariantMatchModel::CurrentName(key)
+                | RenamedVariantMatchModel::DerivedName(key) => key.clone().de().unwrap(),
+                RenamedVariantMatchModel::Error(_) => panic!("Serialized variant must match"),
+            };
+            assert_eq!(key, "key");
+            assert_eq!(
+                Value::from(Model::<RenamedVariant>::from_match(matched)),
+                encoded
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_variants_preserve_the_value_through_model_ext() {
+        let unknown = json!({"kind": "unknown", "value": "key"});
+        let mut model = Model::<RenamedVariant>::from(unknown.clone());
+        assert!(matches!(
+            model.as_match(),
+            RenamedVariantMatchModelRef::Error(value) if value == &unknown
+        ));
+        assert!(matches!(
+            model.as_match_mut(),
+            RenamedVariantMatchModelMut::Error(value) if &*value == &unknown
+        ));
+        assert!(matches!(
+            model.into_match(),
+            RenamedVariantMatchModel::Error(value) if value == unknown
+        ));
     }
 
     fn mutate_fn(v: &mut Model<Foo>) {

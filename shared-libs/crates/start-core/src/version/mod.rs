@@ -87,6 +87,7 @@ mod v0_4_1_2;
 mod v0_4_1_3;
 mod v0_4_2;
 mod v0_4_2_1;
+mod v0_4_2_2;
 mod v0_4_3;
 #[cfg(test)]
 pub(crate) use v0_4_1_2::retired_alpha_keys;
@@ -243,6 +244,7 @@ enum Version {
     V0_4_1_3(Wrapper<v0_4_1_3::Version>),
     V0_4_2(Wrapper<v0_4_2::Version>),
     V0_4_2_1(Wrapper<v0_4_2_1::Version>),
+    V0_4_2_2(Wrapper<v0_4_2_2::Version>),
     V0_4_3(Wrapper<v0_4_3::Version>), // VERSION_BUMP
     Other(exver::Version),
 }
@@ -333,6 +335,7 @@ impl Version {
             Self::V0_4_1_3(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_2(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_2_1(v) => DynVersion(Box::new(v.0)),
+            Self::V0_4_2_2(v) => DynVersion(Box::new(v.0)),
             Self::V0_4_3(v) => DynVersion(Box::new(v.0)), // VERSION_BUMP
             Self::Other(v) => {
                 return Err(Error::new(
@@ -415,6 +418,7 @@ impl Version {
             Version::V0_4_1_3(Wrapper(x)) => x.semver(),
             Version::V0_4_2(Wrapper(x)) => x.semver(),
             Version::V0_4_2_1(Wrapper(x)) => x.semver(),
+            Version::V0_4_2_2(Wrapper(x)) => x.semver(),
             Version::V0_4_3(Wrapper(x)) => x.semver(), // VERSION_BUMP
             Version::Other(x) => x.clone(),
         }
@@ -898,7 +902,8 @@ mod tests {
             ("0.4.1.2", "0.4.1.3", 0),
             ("0.4.1.3", "0.4.2", 0),
             ("0.4.2", "0.4.2.1", 2),
-            ("0.4.2.1", "0.4.3", 0),
+            ("0.4.2.1", "0.4.2.2", 0),
+            ("0.4.2.2", "0.4.3", 0),
         ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()

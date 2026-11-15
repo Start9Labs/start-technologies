@@ -6,8 +6,20 @@ export function isEmptyObject(obj: object): boolean {
   return obj === undefined || !Object.keys(obj).length
 }
 
-export function pauseFor(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
+/** Rejects with the signal's reason when canceled. */
+export function pauseFor(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer)
+      reject(signal?.reason)
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort)
+      resolve()
+    }, ms)
+    if (signal?.aborted) abort()
+    else signal?.addEventListener('abort', abort, { once: true })
+  })
 }
 
 export function debounce(delay: number = 300): MethodDecorator {

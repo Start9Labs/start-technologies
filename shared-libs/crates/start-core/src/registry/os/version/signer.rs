@@ -10,6 +10,7 @@ use crate::prelude::*;
 use crate::registry::admin::display_signers;
 use crate::registry::context::RegistryContext;
 use crate::registry::signer::SignerInfo;
+use crate::registry::upstream::WRITES_INDEX;
 use crate::rpc_continuations::Guid;
 use crate::util::serde::HandlerExtSerde;
 
@@ -18,6 +19,7 @@ pub fn signer_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add_version_signer)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.add-version-signer")
@@ -26,6 +28,7 @@ pub fn signer_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove_version_signer)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.remove-version-signer")

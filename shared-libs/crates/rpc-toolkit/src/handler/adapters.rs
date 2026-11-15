@@ -353,6 +353,8 @@ where
             InheritedParams = H::InheritedParams,
             Ok = H::Ok,
             Err = H::Err,
+            Item = H::Item,
+            Final = H::Final,
         > + Send
         + Sync
         + Clone
@@ -654,6 +656,8 @@ where
     type InheritedParams = Flat<Params, InheritedParams>;
     type Ok = H::Ok;
     type Err = H::Err;
+    type Item = H::Item;
+    type Final = H::Final;
 }
 
 #[cfg(feature = "ts")]
@@ -848,7 +852,7 @@ pub use ts::*;
 #[cfg(feature = "ts")]
 mod ts {
     use super::*;
-    use crate::ts::{ChildrenTS, ParamsTS, ReturnTS};
+    use crate::ts::{ChildrenTS, ParamsTS, ReturnTS, StreamTS, TSWriter};
 
     #[derive(Debug, Clone)]
     pub struct NoTS<H>(pub H);
@@ -875,6 +879,7 @@ mod ts {
             Some(Box::new(|v| v.leaf("z.unknown()", "z.ZodUnknown")))
         }
     }
+    impl<H> StreamTS for NoTS<H> {}
     impl<H> ChildrenTS for NoTS<H> {
         fn ts_enabled(&self) -> bool {
             false
@@ -934,6 +939,11 @@ mod ts {
     {
         fn return_ts<'a>(&'a self) -> Option<Box<dyn Fn(&mut TSVisitor) + Send + Sync + 'a>> {
             Some(Box::new(move |visitor| self.return_ty.visit(visitor)))
+        }
+    }
+    impl<H: StreamTS, R> StreamTS for OverrideReturnTS<H, R> {
+        fn stream_ts(&self) -> (TSWriter<'_>, TSWriter<'_>) {
+            self.handler.stream_ts()
         }
     }
     impl<H, R> PassthroughChildrenTS for OverrideReturnTS<H, R> {}

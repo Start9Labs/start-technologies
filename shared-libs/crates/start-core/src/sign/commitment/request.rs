@@ -14,7 +14,10 @@ use url::Url;
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::hash::VerifyingWriter;
 use crate::sign::commitment::{Commitment, Digestable, SignedCommitment};
-use crate::util::serde::Base64;
+use crate::sign::{AnySignature, AnyVerifyingKey, Signer};
+use crate::util::serde::{Base64, DerEncoding};
+
+pub mod binary;
 
 #[derive(Clone, Debug, Deserialize, Serialize, HasModel, PartialEq, Eq, VisitFields)]
 #[serde(rename_all = "camelCase", tag = "type", rename = "request")]
@@ -30,6 +33,34 @@ pub struct RequestCommitment {
 rpc_toolkit::reflect_ts!(RequestCommitment);
 rpc_toolkit::ts_export!(RequestCommitment, namespaces = [""]);
 impl RequestCommitment {
+    /// Commits the complete byte slice with a fresh timestamp and nonce.
+    pub fn for_bytes(body: &[u8]) -> Self {
+        Self {
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1),
+            nonce: rand::random(),
+            size: body.len() as u64,
+            blake3: Base64(*blake3::hash(body).as_bytes()),
+        }
+    }
+
+    /// Checks all bytes, including any bytes beyond the declared size.
+    pub async fn verify_bytes(&self, body: &[u8]) -> Result<(), Error> {
+        use tokio::io::AsyncWriteExt;
+        let mut writer = VerifyingWriter::new(
+            tokio::io::sink(),
+            Some((blake3::Hash::from_bytes(*self.blake3), self.size)),
+        );
+        writer
+            .write_all(body)
+            .await
+            .with_kind(ErrorKind::InvalidSignature)?;
+        writer.verify().await?;
+        Ok(())
+    }
+
     pub fn append_query(&self, url: &mut Url) {
         use base64::Engine;
         url.query_pairs_mut()
@@ -73,6 +104,102 @@ impl RequestCommitment {
         })
     }
 }
+/// A signed request commitment; the receiver separately enforces nonce freshness.
+#[derive(Clone)]
+pub struct RequestProof {
+    pub commitment: RequestCommitment,
+    pub signer: AnyVerifyingKey,
+    pub signature: AnySignature,
+}
+
+impl RequestProof {
+    /// Emits pure Ed25519 through the configured provider without exporting private keys.
+    pub async fn sign_commitment(
+        signer: &Signer,
+        body: &[u8],
+        context: &str,
+    ) -> Result<Self, Error> {
+        let commitment = RequestCommitment::for_bytes(body);
+        let signature = signer
+            .sign_message(&crate::sign::signing_message(
+                crate::sign::COMMITMENT_SIG_TAG,
+                &commitment,
+                context,
+            )?)
+            .await?;
+        Ok(Self {
+            commitment,
+            signer: signer.verifying_key().await?,
+            signature,
+        })
+    }
+
+    /// Verifies identity and captured bytes, independently of replay or authorization policy.
+    pub async fn verify_commitment(
+        &self,
+        body: &[u8],
+        contexts: &[InternedString],
+    ) -> Result<InternedString, Error> {
+        let context = contexts
+            .iter()
+            .find(|context| {
+                self.signer
+                    .verify_commitment(&self.commitment, context, &self.signature)
+                    .is_ok()
+            })
+            .ok_or_else(|| {
+                Error::new(
+                    eyre!("{}", t!("middleware.auth.invalid-request-signature")),
+                    ErrorKind::InvalidSignature,
+                )
+            })?;
+        self.commitment.verify_bytes(body).await?;
+        Ok(context.clone())
+    }
+
+    /// Encodes full-width commitment fields and algorithm-tagged DER identities/signatures.
+    pub fn to_header(&self) -> HeaderValue {
+        let mut url: Url = "http://localhost".parse().unwrap();
+        self.commitment.append_query(&mut url);
+        url.query_pairs_mut().append_pair(
+            "signer",
+            &encode_header_der(&self.signer).expect("encode verifying key"),
+        );
+        url.query_pairs_mut().append_pair(
+            "signature",
+            &encode_header_der(&self.signature).expect("encode signature"),
+        );
+        HeaderValue::from_str(url.query().unwrap_or_default()).unwrap()
+    }
+
+    /// Decodes the common request-proof wire fields without selecting a signing scheme.
+    pub fn from_header(header: &HeaderValue) -> Result<Self, Error> {
+        let query: BTreeMap<_, _> = form_urlencoded::parse(header.as_bytes()).collect();
+        Ok(Self {
+            commitment: RequestCommitment::from_query(header)?,
+            signer: decode_header_der(query.get("signer").or_not_found("signer")?)?,
+            signature: decode_header_der(query.get("signature").or_not_found("signature")?)?,
+        })
+    }
+}
+
+fn encode_header_der(value: &impl DerEncoding) -> Result<String, Error> {
+    use base64::Engine;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+        value
+            .to_der::<serde_json::Error>()
+            .with_kind(ErrorKind::Serialization)?,
+    ))
+}
+
+fn decode_header_der<T: DerEncoding>(value: &str) -> Result<T, Error> {
+    use base64::Engine;
+    let der = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(value)
+        .with_kind(ErrorKind::Deserialization)?;
+    T::from_der::<serde_json::Error>(&der).with_kind(ErrorKind::Deserialization)
+}
+
 impl SignedCommitment for RequestCommitment {
     const TYPE_ID: u8 = 3;
     const TYPE_NAME: &'static str = "request";
@@ -94,15 +221,7 @@ impl<'a> Commitment<&'a mut Request> for RequestCommitment {
             .await
             .with_kind(ErrorKind::Network)?
             .to_bytes();
-        let res = Self {
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1),
-            nonce: rand::random(),
-            size: body.len() as u64,
-            blake3: Base64(*blake3::hash(&*body).as_bytes()),
-        };
+        let res = Self::for_bytes(&body);
         *resource.body_mut() = Body::from(body);
         Ok(res)
     }

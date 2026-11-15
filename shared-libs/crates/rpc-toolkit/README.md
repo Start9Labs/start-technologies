@@ -49,6 +49,22 @@ The same `ParentHandler` can be handed to `CliApp` (see `cli` module) to expose 
 CLI subcommands, or served over HTTP via `HttpServer` / over a socket via `Server::run_unix` /
 `run_tcp`. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full surface.
 
+## HTTP request limits
+
+`HttpServer` buffers at most 1 MiB before context creation, HTTP middleware, or JSON parsing,
+including streamed bodies. Oversized requests receive HTTP 413. The limit applies to JSON-RPC,
+MCP, and WebSocket upgrade bodies; WebSocket messages have their own inbound limit.
+Configure larger request payloads explicitly:
+
+```rust
+let server = server.for_http().with_max_request_body_size(
+    std::num::NonZeroUsize::new(8 * 1024 * 1024).unwrap(),
+);
+```
+
+These limits apply to incoming requests, not outgoing dumps, results, or stream events.
+Receiving clients choose their own response message/frame limits.
+
 ## Features
 
 - `cbor` _(default)_ — enables CBOR request/response encoding alongside JSON over HTTP.

@@ -9,10 +9,8 @@ import { DOCUMENT, inject, Service } from '@angular/core'
 import {
   filter,
   firstValueFrom,
-  from,
   fromEvent,
   interval,
-  lastValueFrom,
   map,
   Observable,
   race,
@@ -29,6 +27,8 @@ import {
   LocalHttpResponse,
 } from '../types/http.types'
 import { RPCOptions, RPCResponse } from '../types/rpc.types'
+import { rpcRequestBody, rpcRequestHeaders } from './rpc-request'
+import { withLegacyPatchSequence } from './rpc-response'
 
 @Service()
 export class HttpService {
@@ -41,15 +41,27 @@ export class HttpService {
     opts: RPCOptions,
     fullUrl?: string,
   ): Promise<LocalHttpResponse<RPCResponse<T>>> {
-    const { method, headers, params, timeout } = opts
+    return this.rpcMessage<T>(rpcRequestBody(opts), opts, fullUrl)
+  }
 
-    return this.httpRequest<RPCResponse<T>>({
+  async rpcMessage<T>(
+    body: string,
+    { headers, timeout }: Pick<RPCOptions, 'headers' | 'timeout'>,
+    fullUrl?: string,
+  ): Promise<LocalHttpResponse<RPCResponse<T>>> {
+    const response = await this.httpRequest<RPCResponse<T>>({
       method: 'POST',
       url: fullUrl || this.relativeUrl,
-      headers,
-      body: { method, params },
+      headers: rpcRequestHeaders(headers),
+      body,
       timeout,
     })
+    return response.clone({
+      body: withLegacyPatchSequence(
+        response.body,
+        response.headers.get('x-patch-sequence'),
+      ),
+    }) as LocalHttpResponse<RPCResponse<T>>
   }
 
   async httpRequest<T>(opts: HttpOptions): Promise<LocalHttpResponse<T>> {
@@ -118,9 +130,13 @@ function hasParams(
   return !!params
 }
 
-function withTimeout<U>(req: Observable<U>, timeout: number): Observable<U> {
+/** Unsubscribes the source when the response deadline wins. */
+export function withTimeout<U>(
+  req: Observable<U>,
+  timeout: number,
+): Observable<U> {
   return race(
-    from(lastValueFrom(req)), // this guarantees it only emits on completion, intermediary emissions are suppressed.
+    req,
     interval(timeout).pipe(
       take(1),
       map(() => {

@@ -200,9 +200,21 @@ impl<Context: crate::Context> ServerHandler for McpServer<Context> {
         let mut middleware = http_request.middleware.lock().await;
         let response = self
             .http
-            .process_rpc_request(&http_request.context, &mut middleware, rpc_request)
+            .process_rpc_request_with_stream(
+                &http_request.context,
+                &mut middleware,
+                rpc_request,
+                None,
+            )
             .await;
-        Ok(Self::tool_result(tool, response.result).into())
+        let mut result = Self::tool_result(tool, response.result);
+        if !response.meta.is_empty() {
+            result.meta = Some(
+                imbl_value::from_value(Value::Object(response.meta))
+                    .map_err(|error| McpError::internal_error(error.to_string(), None))?,
+            );
+        }
+        Ok(result.into())
     }
 }
 
@@ -224,7 +236,7 @@ impl<Context: crate::Context> McpService<Context> {
     pub fn handle(&self, mut req: Request) -> BoxFuture<'static, Response> {
         let this = self.clone();
         async move {
-            let (context, middleware) = match this.http.begin_http_request(&mut req).await {
+            let (context, middleware, _) = match this.http.begin_http_request(&mut req).await {
                 Ok(a) => a,
                 Err(res) => return res,
             };
