@@ -37,6 +37,30 @@ fn serve_rpc(server: &mut WebServer<WildcardListener>, ctx: &RpcContext) -> Shut
     requests
 }
 
+/// Shutdown requests preempt metrics initialization and polling.
+async fn wait_for_shutdown(
+    requests: &mut ShutdownRequests,
+    metrics_task: NonDetachingJoinHandle<()>,
+) -> Result<Option<Shutdown>, Error> {
+    let metrics_task = metrics_task
+        .map_err(|e| {
+            Error::new(
+                eyre!("{}", e).wrap_err(t!("bins.startd.metrics-daemon-panicked").to_string()),
+                ErrorKind::Unknown,
+            )
+        })
+        .map_ok(|_| tracing::debug!("{}", t!("bins.startd.metrics-daemon-shutdown")));
+    tokio::pin!(metrics_task);
+
+    tokio::select! {
+        shutdown = recv_request(requests) => shutdown,
+        result = &mut metrics_task => {
+            result?;
+            recv_request(requests).await
+        }
+    }
+}
+
 /// The requested power action, and the receiver for requests the served
 /// `RpcContext` may still accept until the web server shuts down.
 #[instrument(skip_all)]
@@ -126,24 +150,14 @@ async fn inner_main(
         }));
 
         let metrics_ctx = rpc_ctx.clone();
-        let metrics_task = tokio::spawn(async move {
+        let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(async move {
             launch_metrics_task(&metrics_ctx.metrics_cache, &metrics_ctx.db, || {
                 metrics_ctx.shutdown.subscribe()
             })
             .await
-        });
+        }));
 
-        metrics_task
-            .map_err(|e| {
-                Error::new(
-                    eyre!("{}", e).wrap_err(t!("bins.startd.metrics-daemon-panicked").to_string()),
-                    ErrorKind::Unknown,
-                )
-            })
-            .map_ok(|_| tracing::debug!("{}", t!("bins.startd.metrics-daemon-shutdown")))
-            .await?;
-
-        let shutdown = recv_request(&mut requests).await?;
+        let shutdown = wait_for_shutdown(&mut requests, metrics_task).await?;
 
         drop(sig_handler);
 
@@ -240,5 +254,47 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
             drop(e.source);
             std::process::exit(e.kind as i32)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::future::DropSignaling;
+
+    #[tokio::test]
+    async fn shutdown_does_not_wait_for_metrics_to_observe_the_request() {
+        let (send, mut requests) = broadcast::channel(1);
+        send.send(Some(Shutdown {
+            disk_guid: None,
+            restart: true,
+        }))
+        .unwrap();
+        let metrics = DropSignaling::new(std::future::pending::<()>());
+        let mut metrics_stopped = metrics.subscribe();
+        let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(metrics));
+
+        let shutdown = wait_for_shutdown(&mut requests, metrics_task)
+            .now_or_never()
+            .expect("shutdown waited for metrics")
+            .unwrap()
+            .unwrap();
+
+        assert!(shutdown.restart);
+        metrics_stopped.wait().await;
+    }
+
+    #[tokio::test]
+    async fn metrics_panics_still_fail_the_shutdown_wait() {
+        let (_send, mut requests) = broadcast::channel(1);
+        let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(async {
+            panic!("metrics task failed");
+        }));
+
+        let error = wait_for_shutdown(&mut requests, metrics_task)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error.kind, ErrorKind::Unknown));
     }
 }
