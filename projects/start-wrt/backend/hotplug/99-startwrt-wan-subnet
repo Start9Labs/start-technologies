@@ -1,0 +1,5 @@
+#!/bin/sh
+# Log Security Profiles whose subnet the WAN's new address overlaps.
+[ "$ACTION" = "ifup" -o "$ACTION" = "ifupdate" ] && [ "$INTERFACE" = "wan" ] && {
+    /usr/bin/startwrt-cli profiles wan-changed 2>/dev/null &
+}

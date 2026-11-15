@@ -258,6 +258,7 @@ class Profiles {
         label: v.label,
       }))
     const subnet = this.lanSubnet()
+    const overlap = await this.api.profilesWanOverlap({}).catch(() => null)
 
     // Check if editing a profile that has static IPs in its subnet, and collect
     // the labels of any published ports on its devices (to confirm VPN exposure
@@ -315,6 +316,8 @@ class Profiles {
           otherProfiles,
           outboundVpns,
           usedSubnets,
+          wanSubnets: overlap?.wan_octets ?? [],
+          freeSubnet: overlap?.free_octet ?? null,
           subnetBase: {
             firstOctet: subnet.firstOctet,
             secondOctet: subnet.secondOctet,

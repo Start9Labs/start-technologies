@@ -164,6 +164,8 @@ cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-port-control "${FILES_DIR}/etc/hot
 chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-port-control"
 cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-smartdns "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-smartdns"
 chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-smartdns"
+cp "$PROJECT_DIR"/backend/hotplug/99-startwrt-wan-subnet "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-wan-subnet"
+chmod +x "${FILES_DIR}/etc/hotplug.d/iface/99-startwrt-wan-subnet"
 
 # fw4 auto-includes these into `table inet fw4`. They must not go in
 # /etc/nftables.d, which sysupgrade restores over the image.

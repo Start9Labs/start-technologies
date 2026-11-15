@@ -61,6 +61,7 @@ export abstract class ApiService {
     interface: string
     windows: ScheduleWindow[]
   }): Promise<null>
+  abstract profilesWanOverlap(params: WanOverlapReq): Promise<WanOverlap>
   abstract setTimezone(params: { timezone: string }): Promise<null>
   abstract getTimezones(): Promise<string[]>
   abstract checkInitialized(): Promise<CheckInitializedRes>
@@ -208,6 +209,12 @@ export type SetUciRes = RpcReturnType<Api, 'uci.set'>
 export type SystemInfoRes = RpcReturnType<Api, 'system.info'>
 
 export type ConfigCheck = RpcReturnType<Api, 'config.check'>
+
+export type WanOverlapReq = RpcParamType<Api, 'profiles.wan-overlap'>
+
+export type WanOverlap = RpcReturnType<Api, 'profiles.wan-overlap'>
+
+export type WanConflict = WanOverlap['conflicts'][number]
 
 export type ConfigFinding = ConfigCheck['findings'][number]
 

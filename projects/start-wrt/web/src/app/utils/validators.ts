@@ -107,6 +107,13 @@ export class CustomValidators {
     }
   }
 
+  static wanSubnet(wan: number[]): ValidatorFn {
+    return (control: AbstractControl): ValidationErrors | null =>
+      control.value != null && wan.includes(control.value)
+        ? { wanSubnet: true }
+        : null
+  }
+
   static duplicateName(existing: string[]): ValidatorFn {
     const names = new Set(existing.map(n => n.trim().toLowerCase()))
     return (control: AbstractControl): ValidationErrors | null => {

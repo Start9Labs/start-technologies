@@ -4,6 +4,7 @@ use std::net::Ipv4Addr;
 use std::path::PathBuf;
 
 use clap::Parser;
+use ipnet::Ipv4Net;
 use rpc_toolkit::{from_fn_async_local, HandlerExt as _, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
@@ -133,6 +134,14 @@ pub fn profiles<C: CtrlContext>() -> ParentHandler<C> {
         .subcommand(
             "schedule-set",
             from_fn_async_local(schedule_set::<C>).no_display(),
+        )
+        .subcommand(
+            "wan-overlap",
+            from_fn_async_local(wan_overlap::<C>).with_display_serializable(),
+        )
+        .subcommand(
+            "wan-changed",
+            from_fn_async_local(wan_changed::<C>).no_display(),
         )
 }
 
@@ -1562,16 +1571,8 @@ pub async fn set<C: CtrlContext>(
     }
 }
 
-/// Read the current LAN interface IP from parsed configs.
 fn get_lan_ip(cfgs: &uciedit::Configs) -> Option<Ipv4Addr> {
-    for section in &cfgs["network"].sections {
-        if section.name().as_deref() == Some(crate::lan::LAN_INTERFACE) {
-            if let Ok(Some(iface)) = section.get_typed::<NetworkInterface>() {
-                return iface.ipv4();
-            }
-        }
-    }
-    None
+    interface_ipv4(cfgs, crate::lan::LAN_INTERFACE)
 }
 
 /// Validate a profile's gateway IP stays within the allowed network block.
@@ -1604,68 +1605,287 @@ fn validate_profile_block(cfgs: &Configs, profile: &Profile<ProfileIdOpt>) -> Re
     Ok(())
 }
 
-/// Reject a profile gateway whose /24 collides with another profile's subnet.
+/// Subnet octets common on consumer routers, which a new profile's default skips.
+const COMMON_ROUTER_OCTETS: [u8; 5] = [0, 1, 2, 10, 100];
+
+fn interface_ipv4(cfgs: &Configs, interface: &str) -> Option<Ipv4Addr> {
+    cfgs["network"]
+        .sections
+        .iter()
+        .find(|s| s.name().as_deref() == Some(interface))
+        .and_then(|s| s.get_typed::<NetworkInterface>().ok().flatten())
+        .and_then(|i| i.ipv4())
+}
+
+struct ProfileGateway {
+    fullname: String,
+    interface: String,
+    gateway: Ipv4Addr,
+}
+
+/// Every profile with an IPv4 gateway, in config order.
+fn profile_gateways(cfgs: &Configs) -> Vec<ProfileGateway> {
+    cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<UciProfile>().ok())
+        .filter_map(|p| {
+            Some(ProfileGateway {
+                gateway: interface_ipv4(cfgs, &p.interface)?,
+                fullname: p.fullname,
+                interface: p.interface,
+            })
+        })
+        .collect()
+}
+
+/// The /24 a profile gateway serves.
+fn profile_subnet(gateway: Ipv4Addr) -> Ipv4Net {
+    Ipv4Net::new(gateway, 24)
+        .expect("24 is a valid prefix length")
+        .trunc()
+}
+
+/// The WAN network that shares addresses with the /24 a gateway serves.
+fn overlapping_wan(wan: &[Ipv4Net], gateway: Ipv4Addr) -> Option<Ipv4Net> {
+    let subnet = profile_subnet(gateway);
+    wan.iter()
+        .copied()
+        .find(|net| net.contains(&subnet.network()) || subnet.contains(&net.network()))
+}
+
+/// The gateway at the same subnet and host inside the block of a router LAN address.
+fn in_block(gateway: Ipv4Addr, lan: Ipv4Addr) -> Ipv4Addr {
+    let (g, l) = (gateway.octets(), lan.octets());
+    Ipv4Addr::new(l[0], l[1], g[2], g[3])
+}
+
+fn subnet_on_wan(subnet: Ipv4Net, wan: Ipv4Net, profile: Option<&str>) -> Error {
+    let subject = match profile {
+        Some(name) => format!("subnet {subnet} of profile '{name}'"),
+        None => format!("subnet {subnet}"),
+    };
+    Error::new(
+        eyre!("{subject} is used by your Internet connection (WAN {wan})"),
+        ErrorKind::SubnetCollision,
+    )
+}
+
+/// Reject a profile gateway whose /24 another profile holds or the WAN overlaps.
 ///
-/// Every profile — including the admin LAN (`owns_lan`) — must occupy a distinct
-/// /24 within the shared /16. Two interfaces on the same /24 produce overlapping
-/// connected routes and a duplicate gateway IP, which silently breaks L3
-/// reachability to the router. The web UI blocks this per-field
-/// (`duplicateSubnet`), but a direct RPC/CLI call bypasses that, so enforce it
-/// on the backend too. `self_interface` is the interface being changed; its own
-/// subnet is skipped so a no-op edit passes.
+/// Two interfaces on one /24 leave the router with a duplicate gateway IP, which
+/// silently breaks L3 reachability; a /24 on the WAN takes the upstream router's
+/// addresses. `self_interface` is the interface being changed: a gateway in its
+/// current /24 passes, even onto a collision the stored config already holds. A
+/// new block for the LAN moves every profile into it before the comparison.
 pub(crate) fn guard_subnet_collision(
     cfgs: &Configs,
+    wan: &[Ipv4Net],
     gateway_ip: Ipv4Addr,
     self_interface: Option<&str>,
 ) -> Result<(), Error> {
-    let new = gateway_ip.octets();
-    // Read the current /24 of the interface being changed. Only enforce on an
-    // actual subnet change — a no-op edit (e.g. changing DNS) must not be blocked
-    // by a collision that already exists in the stored config.
-    let current_ip = self_interface.and_then(|iface| {
-        cfgs["network"]
-            .sections
-            .iter()
-            .find(|s| s.name().as_deref() == Some(iface))
-            .and_then(|s| s.get_typed::<NetworkInterface>().ok().flatten())
-            .and_then(|i| i.ipv4())
-    });
-    if let Some(cur) = current_ip {
-        let c = cur.octets();
-        if c[0] == new[0] && c[1] == new[1] && c[2] == new[2] {
-            return Ok(());
-        }
+    let subnet = profile_subnet(gateway_ip);
+    let current = self_interface.and_then(|iface| interface_ipv4(cfgs, iface));
+    if current.is_some_and(|ip| profile_subnet(ip) == subnet) {
+        return Ok(());
     }
-    for section in &cfgs["startwrt"].sections {
-        let Ok(existing) = section.get::<UciProfile>() else {
-            continue;
-        };
-        if Some(existing.interface.as_str()) == self_interface {
+    let block_move = self_interface == Some(crate::lan::LAN_INTERFACE)
+        && current.is_some_and(|ip| ip.octets()[..2] != gateway_ip.octets()[..2]);
+    for profile in profile_gateways(cfgs) {
+        if Some(profile.interface.as_str()) == self_interface {
             continue;
         }
-        let existing_ip = cfgs["network"]
-            .sections
-            .iter()
-            .find(|s| s.name().as_deref() == Some(existing.interface.as_str()))
-            .and_then(|s| s.get_typed::<NetworkInterface>().ok().flatten())
-            .and_then(|i| i.ipv4());
-        if let Some(ip) = existing_ip {
-            let o = ip.octets();
-            if o[0] == new[0] && o[1] == new[1] && o[2] == new[2] {
-                return Err(Error::new(
-                    eyre!(
-                        "subnet {}.{}.{}.0/24 is already in use by profile '{}'",
-                        new[0],
-                        new[1],
-                        new[2],
-                        existing.fullname
-                    ),
-                    ErrorKind::SubnetCollision,
+        let gateway = if block_move {
+            in_block(profile.gateway, gateway_ip)
+        } else {
+            profile.gateway
+        };
+        if profile_subnet(gateway) == subnet {
+            return Err(Error::new(
+                eyre!(
+                    "subnet {subnet} is already in use by profile '{}'",
+                    profile.fullname
+                ),
+                ErrorKind::SubnetCollision,
+            ));
+        }
+        if block_move {
+            if let Some(net) = overlapping_wan(wan, gateway) {
+                return Err(subnet_on_wan(
+                    profile_subnet(gateway),
+                    net,
+                    Some(&profile.fullname),
                 ));
             }
         }
     }
+    match overlapping_wan(wan, gateway_ip) {
+        Some(net) => Err(subnet_on_wan(subnet, net, None)),
+        None => Ok(()),
+    }
+}
+
+/// Reject a static WAN network that overlaps a profile's /24.
+pub(crate) fn guard_static_wan(cfgs: &Configs, wan: Ipv4Net) -> Result<(), Error> {
+    match profile_gateways(cfgs)
+        .into_iter()
+        .find(|p| overlapping_wan(&[wan], p.gateway).is_some())
+    {
+        Some(profile) => Err(Error::new(
+            eyre!(
+                "WAN {wan} overlaps subnet {} of profile '{}'",
+                profile_subnet(profile.gateway),
+                profile.fullname
+            ),
+            ErrorKind::SubnetCollision,
+        )),
+        None => Ok(()),
+    }
+}
+
+/// A profile whose subnet overlaps the WAN.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitFields)]
+pub struct WanConflict {
+    pub profile: String,
+    /// The profile's subnet in CIDR notation.
+    pub subnet: String,
+    /// The WAN address it overlaps, with its prefix length.
+    pub wan: String,
+}
+rpc_toolkit::reflect_ts!(WanConflict);
+
+/// How the profiles' subnets in a LAN block meet the WAN.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitFields)]
+pub struct WanOverlap {
+    /// The WAN's IPv4 addresses with their prefix lengths. Empty when unknown.
+    pub wan: Vec<String>,
+    /// Subnet octets in the block whose /24 overlaps the WAN.
+    pub wan_octets: Vec<u8>,
+    pub conflicts: Vec<WanConflict>,
+    /// The subnet octet a new profile defaults to. Absent when the block has none free.
+    pub free_octet: Option<u8>,
+}
+rpc_toolkit::reflect_ts!(WanOverlap);
+
+/// `profiles.wan-overlap` request.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
+pub struct WanOverlapRequest {
+    /// A router LAN address to test in place of the current one, as `lan.ipv4-set` would apply it.
+    #[serde(default)]
+    #[clap(long)]
+    pub lan_address: Option<Ipv4Addr>,
+}
+rpc_toolkit::reflect_ts!(WanOverlapRequest);
+
+fn wan_overlap_report(
+    cfgs: &Configs,
+    wan: &[Ipv4Net],
+    lan_address: Option<Ipv4Addr>,
+) -> WanOverlap {
+    let mut report = WanOverlap {
+        wan: wan.iter().map(ToString::to_string).collect(),
+        wan_octets: Vec::new(),
+        conflicts: Vec::new(),
+        free_octet: None,
+    };
+    let Some(lan) = lan_address.or_else(|| get_lan_ip(cfgs)) else {
+        return report;
+    };
+    let [first, second, ..] = lan.octets();
+    let profiles: Vec<(String, Ipv4Addr)> = profile_gateways(cfgs)
+        .into_iter()
+        .map(|p| {
+            let gateway = if p.interface == crate::lan::LAN_INTERFACE {
+                lan
+            } else {
+                in_block(p.gateway, lan)
+            };
+            (p.fullname, gateway)
+        })
+        .collect();
+    report.wan_octets = (0..=254)
+        .filter(|&o| overlapping_wan(wan, Ipv4Addr::new(first, second, o, 1)).is_some())
+        .collect();
+    let used: BTreeSet<u8> = profiles.iter().map(|(_, g)| g.octets()[2]).collect();
+    let open = |o: &u8| !used.contains(o) && !report.wan_octets.contains(o);
+    report.free_octet = (0..=254)
+        .filter(open)
+        .find(|o| !COMMON_ROUTER_OCTETS.contains(o))
+        .or_else(|| (0..=254).find(open));
+    report.conflicts = profiles
+        .into_iter()
+        .filter_map(|(profile, gateway)| {
+            let net = overlapping_wan(wan, gateway)?;
+            Some(WanConflict {
+                profile,
+                subnet: profile_subnet(gateway).to_string(),
+                wan: net.to_string(),
+            })
+        })
+        .collect();
+    report
+}
+
+#[instrument(skip_all)]
+pub async fn wan_overlap<C: CtrlContext>(
+    ctx: C,
+    req: WanOverlapRequest,
+) -> Result<WanOverlap, Error> {
+    let arena = Arena::new();
+    let cfgs = parse_all(ctx.uci_root(), &arena, &["startwrt", "network"]).await?;
+    let wan = crate::wan::ipv4_nets(&ctx, &cfgs);
+    Ok(wan_overlap_report(&cfgs, &wan, req.lan_address))
+}
+
+/// The WAN conflicts logged since boot.
+const WAN_CONFLICTS_LOGGED: &str = "/var/run/startwrt-wan-conflicts";
+
+/// Logs each WAN conflict not already logged since boot.
+#[instrument(skip_all)]
+pub async fn wan_changed<C: CtrlContext>(ctx: C) -> Result<(), Error> {
+    if !ctx.effectful() {
+        return Ok(());
+    }
+    let arena = Arena::new();
+    let cfgs = parse_all(ctx.uci_root(), &arena, &["startwrt", "network"]).await?;
+    let wan = crate::wan::ipv4_nets(&ctx, &cfgs);
+    let report = wan_overlap_report(&cfgs, &wan, None);
+    log_wan_conflicts(
+        std::path::Path::new(WAN_CONFLICTS_LOGGED),
+        &report,
+        |summary| crate::activity::log("wan", "subnet-conflict", false, summary, None),
+    );
     Ok(())
+}
+
+/// Logs the conflicts the record lacks, then records the current ones.
+fn log_wan_conflicts(record: &std::path::Path, report: &WanOverlap, mut log: impl FnMut(&str)) {
+    let logged = std::fs::read_to_string(record).unwrap_or_default();
+    let logged: BTreeSet<&str> = logged.lines().collect();
+    let mut current = String::new();
+    for conflict in &report.conflicts {
+        let key = format!("{} {} {}", conflict.subnet, conflict.wan, conflict.profile);
+        if !logged.contains(key.as_str()) {
+            log(&wan_conflict_summary(conflict, report.free_octet));
+        }
+        current.push_str(&key);
+        current.push('\n');
+    }
+    let _ = std::fs::write(record, current);
+}
+
+fn wan_conflict_summary(conflict: &WanConflict, free_octet: Option<u8>) -> String {
+    let fix = match (free_octet, conflict.subnet.parse::<Ipv4Net>()) {
+        (Some(octet), Ok(net)) => {
+            let [first, second, ..] = net.addr().octets();
+            format!("Change its subnet, for example to {first}.{second}.{octet}.0/24.")
+        }
+        _ => "Change the Network Block in LAN Settings.".to_string(),
+    };
+    format!(
+        "Security Profile '{}' uses {}, which overlaps your Internet connection (WAN {}). {fix}",
+        conflict.profile, conflict.subnet, conflict.wan
+    )
 }
 
 fn set_config<C: CtrlContext>(
@@ -1746,10 +1966,9 @@ fn set_config<C: CtrlContext>(
         &profile.lan_access,
         profile.access_to_new_profiles,
     )?;
-    // Reject a /24 that collides with a sibling (or the admin LAN). Runs on the
-    // resolved interface, before the network config is mutated below, so the
-    // profile's own current subnet is correctly skipped.
-    guard_subnet_collision(cfgs, profile.gateway_ip, Some(&profile.id.interface))?;
+    // Must read the interface's current subnet before the mutation below.
+    let wan = crate::wan::ipv4_nets(&ctx, cfgs);
+    guard_subnet_collision(cfgs, &wan, profile.gateway_ip, Some(&profile.id.interface))?;
     let found_bridge = find_lan_bridge(cfgs)?.map(|dev| dev.name);
     let mut all_interfaces = BTreeSet::<String>::new();
     let mut found_interface = false;
@@ -1959,9 +2178,8 @@ fn create_config(
 ) -> Result<ProfileId, Error> {
     validate_profile_block(cfgs, profile)?;
     crate::vpn_client::guard_outbound_available(cfgs, &profile.outbound)?;
-    // The new interface isn't in the config yet, so no self-exclusion is needed:
-    // reject if the requested /24 already belongs to any existing profile.
-    guard_subnet_collision(cfgs, profile.gateway_ip, None)?;
+    let wan = crate::wan::ipv4_nets(&ctx, cfgs);
+    guard_subnet_collision(cfgs, &wan, profile.gateway_ip, None)?;
     let ipv6 = is_ipv6_enabled(cfgs) && outbound_supports_ipv6(cfgs, &profile.outbound);
     let interface = if profile.owns_lan {
         if Lookup::parse(ctx.clone(), cfgs)?.lan_owner.is_some() {
@@ -4063,6 +4281,7 @@ mod tests {
     use rpc_toolkit::Context;
 
     use super::*;
+    use crate::test_context::WanTestContext;
 
     /// Write a network/dhcp/startwrt fixture, run the config half of the IPv6
     /// heal over it, and hand back what it changed plus the resulting files.
@@ -4557,28 +4776,6 @@ config wifi-vlan
         }
     }
 
-    /// A test context that knows the router's WAN address.
-    #[derive(Clone)]
-    struct WanTestContext(PathBuf, Vec<Ipv4Addr>);
-
-    impl Context for WanTestContext {
-        fn runtime(&self) -> Option<Arc<Runtime>> {
-            None
-        }
-    }
-
-    impl CtrlContext for WanTestContext {
-        fn uci_root(&self) -> PathBuf {
-            self.0.clone()
-        }
-        fn effectful(&self) -> bool {
-            false
-        }
-        fn wan_ipv4_addrs(&self) -> Vec<Ipv4Addr> {
-            self.1.clone()
-        }
-    }
-
     async fn guest_hairpin_after(
         dir: &std::path::Path,
         profile: &Profile<ProfileIdOpt>,
@@ -4666,7 +4863,12 @@ config wifi-vlan
         // naming it is Internet access to the port, a Blacklist naming it is
         // not — and with the address unknown, neither entry covers anything.
         let wan_ip: Ipv4Addr = "203.0.113.7".parse().unwrap();
-        let with_wan = || WanTestContext(dir.path().to_path_buf(), vec![wan_ip]);
+        let with_wan = || {
+            WanTestContext(
+                dir.path().to_path_buf(),
+                vec![Ipv4Net::new(wan_ip, 32).unwrap()],
+            )
+        };
         let profile = guest_profile_with_wan(
             LanAccess::SameProfile,
             WanAccess::Whitelist(vec!["1.1.1.1".into(), wan_ip.to_string()]),
@@ -5533,26 +5735,26 @@ config profile guest
             .unwrap();
 
         // New profile onto the guest's /24 — rejected.
-        let err = guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 5, 1), None).unwrap_err();
+        let err = guard_subnet_collision(&cfgs, &[], Ipv4Addr::new(10, 0, 5, 1), None).unwrap_err();
         assert_eq!(err.kind, ErrorKind::SubnetCollision);
 
         // New profile onto the admin LAN's /24 — also rejected.
-        let err = guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 0, 1), None).unwrap_err();
+        let err = guard_subnet_collision(&cfgs, &[], Ipv4Addr::new(10, 0, 0, 1), None).unwrap_err();
         assert_eq!(err.kind, ErrorKind::SubnetCollision);
 
         // Editing the admin LAN onto the guest's /24 — rejected (the reported bug).
-        let err =
-            guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 5, 1), Some("lan")).unwrap_err();
+        let err = guard_subnet_collision(&cfgs, &[], Ipv4Addr::new(10, 0, 5, 1), Some("lan"))
+            .unwrap_err();
         assert_eq!(err.kind, ErrorKind::SubnetCollision);
 
         // A free /24 — accepted.
-        guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 9, 1), None)
+        guard_subnet_collision(&cfgs, &[], Ipv4Addr::new(10, 0, 9, 1), None)
             .expect("an unused /24 must be accepted");
 
         // No-op edits: a profile keeping its own /24 is skipped via self_interface.
-        guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 5, 1), Some("guest"))
+        guard_subnet_collision(&cfgs, &[], Ipv4Addr::new(10, 0, 5, 1), Some("guest"))
             .expect("a profile keeping its own subnet must be accepted");
-        guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 0, 1), Some("lan"))
+        guard_subnet_collision(&cfgs, &[], Ipv4Addr::new(10, 0, 0, 1), Some("lan"))
             .expect("the admin keeping its own subnet must be accepted");
     }
 
@@ -5603,11 +5805,341 @@ config profile guest
 
         // No-op edit of the admin (subnet unchanged) — allowed despite the
         // pre-existing collision with guest.
-        guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 15, 1), Some("lan"))
+        guard_subnet_collision(&cfgs, &[], Ipv4Addr::new(10, 0, 15, 1), Some("lan"))
             .expect("a no-op subnet edit must pass even when the config is already colliding");
         // Moving the admin off the collision to a free /24 — allowed (recovery).
-        guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 20, 1), Some("lan"))
+        guard_subnet_collision(&cfgs, &[], Ipv4Addr::new(10, 0, 20, 1), Some("lan"))
             .expect("moving off a collision to a free /24 must be accepted");
+    }
+
+    fn net(cidr: &str) -> Ipv4Net {
+        cidr.parse().unwrap()
+    }
+
+    /// Writes `network` and `startwrt` holding one profile per (name, interface, gateway).
+    fn write_profiles(dir: &std::path::Path, profiles: &[(&str, &str, &str)]) {
+        let mut network = String::new();
+        let mut startwrt = String::new();
+        for (i, (name, iface, gateway)) in profiles.iter().enumerate() {
+            network.push_str(&format!(
+                "config interface '{iface}'\n\toption proto 'static'\n\toption ipaddr '{gateway}'\n\toption netmask '255.255.255.0'\n\n"
+            ));
+            startwrt.push_str(&format!(
+                "config profile {iface}\n\toption fullname '{name}'\n\toption interface '{iface}'\n\toption vlan_tag '{}'\n\n",
+                i + 1
+            ));
+        }
+        std::fs::write(dir.join("network"), network).unwrap();
+        std::fs::write(dir.join("startwrt"), startwrt).unwrap();
+    }
+
+    #[tokio::test]
+    async fn guard_subnet_collision_rejects_the_wan_subnet() {
+        let dir = tempfile::tempdir().unwrap();
+        write_profiles(
+            dir.path(),
+            &[
+                ("Admin", "lan", "192.168.0.1"),
+                ("Guest", "guest", "192.168.2.1"),
+            ],
+        );
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path().to_path_buf(), &arena, &["startwrt", "network"])
+            .await
+            .unwrap();
+        let fios = [net("192.168.1.221/24")];
+
+        let err =
+            guard_subnet_collision(&cfgs, &fios, Ipv4Addr::new(192, 168, 1, 1), None).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::SubnetCollision);
+        assert!(
+            err.to_string().contains(
+                "subnet 192.168.1.0/24 is used by your Internet connection (WAN 192.168.1.221/24)"
+            ),
+            "{err}"
+        );
+        let err =
+            guard_subnet_collision(&cfgs, &fios, Ipv4Addr::new(192, 168, 1, 1), Some("guest"))
+                .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::SubnetCollision);
+        guard_subnet_collision(&cfgs, &fios, Ipv4Addr::new(192, 168, 3, 1), None)
+            .expect("a /24 clear of the WAN must be accepted");
+
+        // WAN unknown.
+        guard_subnet_collision(&cfgs, &[], Ipv4Addr::new(192, 168, 1, 1), None)
+            .expect("an unknown WAN must not block");
+        // PPPoE and point-to-point: the WAN's own address alone.
+        let ptp = [net("192.168.1.50/32")];
+        guard_subnet_collision(&cfgs, &ptp, Ipv4Addr::new(192, 168, 1, 1), None).unwrap_err();
+        guard_subnet_collision(&cfgs, &ptp, Ipv4Addr::new(192, 168, 3, 1), None)
+            .expect("a /32 WAN outside the subnet must not block");
+        // CGNAT never overlaps RFC 1918.
+        guard_subnet_collision(
+            &cfgs,
+            &[net("100.64.0.1/10")],
+            Ipv4Addr::new(192, 168, 1, 1),
+            None,
+        )
+        .expect("a CGNAT WAN must not block a private subnet");
+        // A WAN wider than the block covers every subnet in it.
+        guard_subnet_collision(
+            &cfgs,
+            &[net("192.168.50.2/16")],
+            Ipv4Addr::new(192, 168, 3, 1),
+            None,
+        )
+        .unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn guard_subnet_collision_allows_noop_edit_onto_the_wan() {
+        let dir = tempfile::tempdir().unwrap();
+        write_profiles(
+            dir.path(),
+            &[
+                ("Admin", "lan", "192.168.0.1"),
+                ("Guest", "guest", "192.168.1.1"),
+            ],
+        );
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path().to_path_buf(), &arena, &["startwrt", "network"])
+            .await
+            .unwrap();
+        let fios = [net("192.168.1.221/24")];
+
+        guard_subnet_collision(&cfgs, &fios, Ipv4Addr::new(192, 168, 1, 1), Some("guest"))
+            .expect("an edit keeping a subnet the WAN already overlaps must pass");
+        guard_subnet_collision(&cfgs, &fios, Ipv4Addr::new(192, 168, 3, 1), Some("guest"))
+            .expect("moving off the WAN subnet must pass");
+    }
+
+    #[tokio::test]
+    async fn guard_subnet_collision_moves_every_profile_with_a_new_lan_block() {
+        let dir = tempfile::tempdir().unwrap();
+        write_profiles(
+            dir.path(),
+            &[
+                ("Admin", "lan", "10.47.0.1"),
+                ("Guest", "guest", "10.47.1.1"),
+            ],
+        );
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path().to_path_buf(), &arena, &["startwrt", "network"])
+            .await
+            .unwrap();
+
+        // Guest keeps its octet and lands on the WAN.
+        let err = guard_subnet_collision(
+            &cfgs,
+            &[net("192.168.1.221/24")],
+            Ipv4Addr::new(192, 168, 0, 1),
+            Some("lan"),
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::SubnetCollision);
+        assert!(err.to_string().contains("of profile 'Guest'"), "{err}");
+        // Admin takes Guest's octet in the new block.
+        let err = guard_subnet_collision(&cfgs, &[], Ipv4Addr::new(192, 168, 1, 1), Some("lan"))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("in use by profile 'Guest'"),
+            "{err}"
+        );
+        guard_subnet_collision(
+            &cfgs,
+            &[net("192.168.5.9/24")],
+            Ipv4Addr::new(192, 168, 0, 1),
+            Some("lan"),
+        )
+        .expect("a block whose subnets are all clear must be accepted");
+    }
+
+    #[tokio::test]
+    async fn guard_static_wan_rejects_a_profile_subnet() {
+        let dir = tempfile::tempdir().unwrap();
+        write_profiles(
+            dir.path(),
+            &[
+                ("Admin", "lan", "192.168.0.1"),
+                ("Guest", "guest", "192.168.2.1"),
+            ],
+        );
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path().to_path_buf(), &arena, &["startwrt", "network"])
+            .await
+            .unwrap();
+
+        let err = guard_static_wan(&cfgs, net("192.168.2.5/24")).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::SubnetCollision);
+        assert!(err.to_string().contains("profile 'Guest'"), "{err}");
+        guard_static_wan(&cfgs, net("192.168.9.5/24")).unwrap();
+        guard_static_wan(&cfgs, net("203.0.113.9/30")).unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_and_create_refuse_the_wan_subnet() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_configs(dir.path());
+        let ctx = WanTestContext(dir.path().to_path_buf(), vec![net("192.168.7.9/24")]);
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp"],
+        )
+        .await
+        .unwrap();
+
+        let mut profile = guest_profile(LanAccess::SameProfile);
+        set_config(ctx.clone(), &mut cfgs, &profile).expect("the guest keeps its subnet");
+        profile.gateway_ip = Ipv4Addr::new(192, 168, 7, 1);
+        let err = set_config(ctx.clone(), &mut cfgs, &profile).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::SubnetCollision);
+
+        let mut new = guest_profile(LanAccess::SameProfile);
+        new.id = ProfileIdOpt {
+            fullname: Some("Kids".into()),
+            interface: None,
+            vlan_tag: None,
+        };
+        new.gateway_ip = Ipv4Addr::new(192, 168, 7, 1);
+        let err = create_config(ctx.clone(), &mut cfgs, &new, Some("kids".into())).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::SubnetCollision);
+    }
+
+    async fn report(
+        dir: &std::path::Path,
+        wan: &[Ipv4Net],
+        lan_address: Option<Ipv4Addr>,
+    ) -> WanOverlap {
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.to_path_buf(), &arena, &["startwrt", "network"])
+            .await
+            .unwrap();
+        wan_overlap_report(&cfgs, wan, lan_address)
+    }
+
+    #[tokio::test]
+    async fn wan_overlap_names_the_conflict_and_a_free_subnet() {
+        let dir = tempfile::tempdir().unwrap();
+        write_profiles(
+            dir.path(),
+            &[
+                ("Admin", "lan", "192.168.0.1"),
+                ("Guest", "guest", "192.168.1.1"),
+            ],
+        );
+
+        let fios = report(dir.path(), &[net("192.168.1.221/24")], None).await;
+        assert_eq!(fios.wan, vec!["192.168.1.221/24".to_string()]);
+        assert_eq!(fios.wan_octets, vec![1]);
+        assert_eq!(
+            fios.conflicts,
+            vec![WanConflict {
+                profile: "Guest".into(),
+                subnet: "192.168.1.0/24".into(),
+                wan: "192.168.1.221/24".into(),
+            }]
+        );
+        assert_eq!(fios.free_octet, Some(3));
+
+        let unknown = report(dir.path(), &[], None).await;
+        assert!(unknown.wan_octets.is_empty() && unknown.conflicts.is_empty());
+        assert_eq!(unknown.free_octet, Some(3));
+
+        let on_three = report(dir.path(), &[net("192.168.3.40/24")], None).await;
+        assert!(on_three.conflicts.is_empty());
+        assert_eq!(on_three.free_octet, Some(4));
+
+        // A tested block moves every profile into it.
+        let moved = report(
+            dir.path(),
+            &[net("10.47.1.9/24")],
+            Some(Ipv4Addr::new(10, 47, 0, 1)),
+        )
+        .await;
+        assert_eq!(moved.wan_octets, vec![1]);
+        assert_eq!(moved.conflicts[0].subnet, "10.47.1.0/24");
+
+        let whole_block = report(dir.path(), &[net("192.168.0.2/16")], None).await;
+        assert_eq!(whole_block.wan_octets.len(), 255);
+        assert_eq!(whole_block.conflicts.len(), 2);
+        assert_eq!(whole_block.free_octet, None);
+    }
+
+    #[tokio::test]
+    async fn wan_overlap_falls_back_to_common_router_subnets() {
+        let dir = tempfile::tempdir().unwrap();
+        let names: Vec<(String, String, String)> = (0..=254u8)
+            .filter(|o| *o == 0 || !COMMON_ROUTER_OCTETS.contains(o))
+            .map(|o| (format!("P{o}"), format!("p{o}"), format!("192.168.{o}.1")))
+            .collect();
+        let mut profiles: Vec<(&str, &str, &str)> = names
+            .iter()
+            .map(|(n, i, g)| (n.as_str(), i.as_str(), g.as_str()))
+            .collect();
+        profiles[0].1 = "lan";
+        write_profiles(dir.path(), &profiles);
+
+        assert_eq!(report(dir.path(), &[], None).await.free_octet, Some(1));
+        assert_eq!(
+            report(dir.path(), &[net("192.168.1.7/24")], None)
+                .await
+                .free_octet,
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn wan_conflicts_are_logged_once_until_they_clear() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = dir.path().join("logged");
+        let conflict = WanConflict {
+            profile: "Guest".into(),
+            subnet: "192.168.1.0/24".into(),
+            wan: "192.168.1.221/24".into(),
+        };
+        let with = WanOverlap {
+            wan: vec![conflict.wan.clone()],
+            wan_octets: vec![1],
+            conflicts: vec![conflict],
+            free_octet: Some(3),
+        };
+        let clear = WanOverlap {
+            conflicts: Vec::new(),
+            ..with.clone()
+        };
+        let logs = |report: &WanOverlap| {
+            let mut out = Vec::new();
+            log_wan_conflicts(&record, report, |s| out.push(s.to_string()));
+            out
+        };
+
+        let first = logs(&with);
+        assert_eq!(first.len(), 1);
+        assert!(
+            first[0].contains("Security Profile 'Guest' uses 192.168.1.0/24"),
+            "{}",
+            first[0]
+        );
+        assert!(
+            first[0].contains("for example to 192.168.3.0/24"),
+            "{}",
+            first[0]
+        );
+        assert!(logs(&with).is_empty());
+        assert!(logs(&clear).is_empty());
+        assert_eq!(logs(&with).len(), 1);
+
+        let full = WanOverlap {
+            free_octet: None,
+            ..with.clone()
+        };
+        let summary = wan_conflict_summary(&full.conflicts[0], full.free_octet);
+        assert!(
+            summary.ends_with("Change the Network Block in LAN Settings."),
+            "{summary}"
+        );
     }
 
     #[tokio::test]

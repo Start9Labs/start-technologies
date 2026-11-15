@@ -62,6 +62,10 @@ export interface ProfileDialogData {
   otherProfiles: SecurityProfile[]
   outboundVpns: Array<{ interface: string; label: string }>
   usedSubnets: number[]
+  /** Subnet octets the WAN overlaps. */
+  wanSubnets: number[]
+  /** The backend's default subnet octet for a new profile. */
+  freeSubnet: number | null
   subnetBase: { firstOctet: number; secondOctet: number }
   hasStaticIpsInSubnet?: boolean
   scheduleWindows?: ScheduleWindow[]
@@ -356,6 +360,8 @@ function nonEmptyList(control: AbstractControl): ValidationErrors | null {
       ipv4: 'Enter a valid IPv4 address',
       duplicateName: 'A profile with this name already exists',
       duplicateSubnet: 'This subnet is already in use by another profile',
+      wanSubnet:
+        'This subnet is used by your Internet connection (WAN). Choose another.',
       subnetLocked:
         'Cannot change subnet while devices have static IP reservations in this subnet',
       ipv4List:
@@ -426,6 +432,11 @@ class AddProfile {
         Validators.min(0),
         Validators.max(254),
         CustomValidators.duplicateSubnet(this.usedSubnets),
+        CustomValidators.wanSubnet(
+          this.context.data.wanSubnets.filter(
+            octet => !this.existing || octet !== this.nextAvailableSubnet(),
+          ),
+        ),
       ],
     ],
     outboundType: [this.getOutboundType()],
@@ -586,6 +597,9 @@ class AddProfile {
   private nextAvailableSubnet(): number {
     if (this.existing) {
       return parseInt(this.existing.gateway_ip.split('.')[2], 10)
+    }
+    if (this.context.data.freeSubnet !== null) {
+      return this.context.data.freeSubnet
     }
     for (let i = 1; i <= 254; i++) {
       if (!this.usedSubnets.includes(i)) return i

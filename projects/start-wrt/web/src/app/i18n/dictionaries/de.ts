@@ -594,4 +594,9 @@ export default {
   642: 'Um dieses VPN zu deaktivieren, stellen Sie zuerst {vpns} so um, dass sie sich über etwas anderes verbinden.',
   643: 'Nie (Standard)',
   644: 'Wenn hinter NAT',
+  645: 'Dieses Subnetz wird von Ihrer Internetverbindung (WAN) verwendet. Wählen Sie ein anderes.',
+  646: 'Das Sicherheitsprofil {profile} verwendet {subnet} und überschneidet sich mit Ihrer Internetverbindung (WAN {wan}).',
+  647: 'Ändern Sie sein Subnetz, zum Beispiel auf {subnet}.',
+  648: 'Ändern Sie den Netzwerkblock in den LAN-Einstellungen.',
+  649: 'Mit diesem Netzwerkblock läge das Sicherheitsprofil {profile} im Subnetz Ihrer Internetverbindung ({subnet}).',
 } satisfies i18n

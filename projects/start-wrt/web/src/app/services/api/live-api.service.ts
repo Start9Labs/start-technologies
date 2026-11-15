@@ -36,6 +36,8 @@ import {
   SecurityProfile,
   ProfileCreateInput,
   ProfileUpdateInput,
+  WanOverlap,
+  WanOverlapReq,
   CheckInitializedRes,
   SetInitialPasswordReq,
   SetupStatusRes,
@@ -252,6 +254,10 @@ export class LiveApiService extends ApiService {
     interface: string
   }): Promise<ScheduleWindow[]> {
     return this.rpc.request({ method: 'profiles.schedule-get', params })
+  }
+
+  async profilesWanOverlap(params: WanOverlapReq): Promise<WanOverlap> {
+    return this.rpc.request({ method: 'profiles.wan-overlap', params })
   }
 
   async profileScheduleSet(params: {

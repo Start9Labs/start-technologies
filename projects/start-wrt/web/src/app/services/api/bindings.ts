@@ -287,10 +287,20 @@ export type VpnServerPeer = z.output<typeof schemas.VpnServerPeer>
 export type VpnServerPeerInput = z.input<typeof schemas.VpnServerPeer>
 export type WanAccess = z.output<typeof schemas.WanAccess>
 export type WanAccessInput = z.input<typeof schemas.WanAccess>
+
+/**
+ * A profile whose subnet overlaps the WAN.
+ */
+export type WanConflict = z.output<typeof schemas.WanConflict>
 export type WanIpv4Mode = z.output<typeof schemas.WanIpv4Mode>
 export type WanIpv4ModeInput = z.input<typeof schemas.WanIpv4Mode>
 export type WanIpv6Mode = z.output<typeof schemas.WanIpv6Mode>
 export type WanIpv6ModeInput = z.input<typeof schemas.WanIpv6Mode>
+
+/**
+ * `profiles.wan-overlap` request.
+ */
+export type WanOverlapRequestInput = z.input<typeof schemas.WanOverlapRequest>
 export type WifiRadio = z.output<typeof schemas.WifiRadio>
 export type WifiRadioInput = z.input<typeof schemas.WifiRadio>
 export type ActivityListResponse = z.output<typeof schemas.ActivityListResponse>
@@ -366,6 +376,11 @@ export type WanIpv6Response = z.output<typeof schemas.WanIpv6Response>
 export type WanIpv6SetRequestInput = z.input<typeof schemas.WanIpv6SetRequest>
 export type WanMacResponse = z.output<typeof schemas.WanMacResponse>
 export type WanMacSetRequestInput = z.input<typeof schemas.WanMacSetRequest>
+
+/**
+ * How the profiles' subnets in a LAN block meet the WAN.
+ */
+export type WanOverlap = z.output<typeof schemas.WanOverlap>
 
 /**
  * An enabled IPv4 forward overlapping a router- or SNI-owned WAN port.

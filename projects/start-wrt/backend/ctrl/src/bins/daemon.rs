@@ -213,6 +213,10 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::profiles::heal_ipv6_state("/etc/config").await {
             tracing::error!("IPv6 state repair failed: {e}");
         }
+        // The WAN hotplug can run before bootstrap_admin_profile registers Admin.
+        if let Err(e) = crate::profiles::wan_changed(ctx.clone()).await {
+            tracing::error!("WAN subnet conflict check failed: {e}");
+        }
         // Installs the hairpin accept and the IPv6 MAC binding, and re-derives
         // every hairpin projection (fw4 drops a redirect whose list names a
         // deleted zone). Reloads the firewall only when something changed.

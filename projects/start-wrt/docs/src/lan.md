@@ -11,7 +11,7 @@ Configure the router's LAN IPv4 addressing.
   - `172.16.0.0/12` — the second octet is editable, `16`–`31`.
   - `10.0.0.0/8` — the second octet is editable, `0`–`255`.
 
-  The default is `192.168`, so existing networks are unaffected. Only RFC 1918 private ranges are accepted; out-of-range values are flagged inline (e.g. "Allowed: 16–31") and block saving rather than being auto-corrected. Each [Security Profile](security-profiles.md) receives its own `/24` subnet within this block, allowing up to 255 separate subnets. A profile's DHCP hands out addresses `.2`–`.199`; `.200`–`.254` are reserved for its [Inbound VPN](inbound-vpn.md).
+  The default is `192.168`, so existing networks are unaffected. Only RFC 1918 private ranges are accepted; out-of-range values are flagged inline (e.g. "Allowed: 16–31") and block saving rather than being auto-corrected. A block that would put a Security Profile on the subnet of your Internet connection (WAN) also blocks saving. Each [Security Profile](security-profiles.md) receives its own `/24` subnet within this block, allowing up to 255 separate subnets. A profile's DHCP hands out addresses `.2`–`.199`; `.200`–`.254` are reserved for its [Inbound VPN](inbound-vpn.md).
 
 - **Router address** — The router's LAN IP is the gateway (`.1`) of the primary **Admin** [Security Profile](security-profiles.md)'s subnet. The first two octets come from the Network Block above; the third octet is set by the Admin profile's **Subnet** field, not on this page. By default, the block is `192.168.x.x` and the Admin subnet is `0`, so the router is reachable at `192.168.0.1`. This is the address you use to access the web interface (or simply `router.lan`).
 

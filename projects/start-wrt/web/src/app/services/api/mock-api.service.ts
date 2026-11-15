@@ -42,6 +42,8 @@ import {
   SecurityProfile,
   ProfileCreateInput,
   ProfileUpdateInput,
+  WanOverlap,
+  WanOverlapReq,
   CheckInitializedRes,
   SetInitialPasswordReq,
   SetupStatusRes,
@@ -1168,6 +1170,41 @@ export class MockApiService extends ApiService {
     await pauseFor(250)
     this.mockSchedules[params.interface] = params.windows
     return null
+  }
+
+  async profilesWanOverlap(params: WanOverlapReq): Promise<WanOverlap> {
+    await pauseFor(250)
+    const wanIp = this.mockWanIpv4.assigned_ip
+    const lan =
+      params.lan_address ??
+      this.mockProfiles.find(p => p.owns_lan)?.gateway_ip ??
+      '192.168.0.1'
+    const [first, second, lanOctet] = lan.split('.')
+    const [w1, w2, w3] = wanIp?.split('.') ?? []
+    const wan = wanIp ? `${wanIp}/24` : null
+    const wanOctets = wan && w1 === first && w2 === second ? [Number(w3)] : []
+    const profiles = this.mockProfiles.map(p => ({
+      profile: p.fullname,
+      octet: Number(p.owns_lan ? lanOctet : p.gateway_ip.split('.')[2]),
+    }))
+    const open = (o: number) =>
+      !profiles.some(p => p.octet === o) && !wanOctets.includes(o)
+    const octets = Array.from({ length: 255 }, (_, o) => o)
+    return {
+      wan: wan ? [wan] : [],
+      wan_octets: wanOctets,
+      conflicts: profiles
+        .filter(p => wanOctets.includes(p.octet))
+        .map(p => ({
+          profile: p.profile,
+          subnet: `${first}.${second}.${p.octet}.0/24`,
+          wan: wan ?? '',
+        })),
+      free_octet:
+        octets.find(o => open(o) && ![0, 1, 2, 10, 100].includes(o)) ??
+        octets.find(open) ??
+        null,
+    }
   }
 
   private mockInitialized = true

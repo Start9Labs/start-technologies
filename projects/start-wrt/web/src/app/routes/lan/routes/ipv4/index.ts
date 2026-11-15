@@ -11,7 +11,16 @@ import {
 } from '@taiga-ui/core'
 import { TUI_CONFIRM } from '@taiga-ui/kit'
 import { TuiHeader } from '@taiga-ui/layout'
-import { firstValueFrom, startWith } from 'rxjs'
+import {
+  catchError,
+  distinctUntilChanged,
+  EMPTY,
+  firstValueFrom,
+  from,
+  map,
+  startWith,
+  switchMap,
+} from 'rxjs'
 import { Footer } from 'src/app/components/footer'
 import { Form } from 'src/app/components/form'
 import { ApiService } from 'src/app/services/api/api.service'
@@ -30,6 +39,7 @@ import {
   resolveSecondOctet,
 } from './utils'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { fill } from 'src/app/i18n/validation-errors'
 
 @Component({
   template: `
@@ -96,6 +106,21 @@ export default class LanIpv4 {
     { requireSync: true },
   )
 
+  /** Profiles the WAN would overlap at the entered router address. */
+  private readonly wanConflicts = toSignal(
+    this.form.valueChanges.pipe(
+      startWith(this.form.getRawValue()),
+      map(() => buildRouterIp(this.form.getRawValue().ip)),
+      distinctUntilChanged(),
+      switchMap(lan_address =>
+        from(this.api.profilesWanOverlap({ lan_address })).pipe(
+          map(({ conflicts }) => ({ lan_address, conflicts })),
+          catchError(() => EMPTY),
+        ),
+      ),
+    ),
+  )
+
   readonly saveBlocked = computed(() => {
     const current = this.formValue()
 
@@ -117,8 +142,27 @@ export default class LanIpv4 {
       return `Second octet must be ${min}–${max}`
     }
 
-    if (!this.hasStaticIps()) return null
     const data = this.service.data()
+    const entered = current.ip
+      ? buildRouterIp(this.form.getRawValue().ip)
+      : null
+    const wan = this.wanConflicts()
+    if (
+      data &&
+      entered !== buildRouterIp(data.ip) &&
+      wan?.lan_address === entered &&
+      wan.conflicts[0]
+    ) {
+      const { profile, subnet } = wan.conflicts[0]
+      return fill(
+        this.i18n.transform(
+          'This Network Block puts Security Profile {profile} on the subnet of your Internet connection ({subnet}).',
+        ),
+        { profile, subnet },
+      )
+    }
+
+    if (!this.hasStaticIps()) return null
     if (!data) return null
     // data.ip.secondOctet is backend-canonical (already resolved), so compare
     // against the resolved current value.

@@ -599,4 +599,9 @@ export const ENGLISH: Record<string, number> = {
   "To disable this VPN, first change {vpns} to connect via something else.": 642,
   'Never (Default)': 643,
   'When behind NAT': 644,
+  'This subnet is used by your Internet connection (WAN). Choose another.': 645,
+  'Security Profile {profile} uses {subnet}, which overlaps your Internet connection (WAN {wan}).': 646,
+  'Change its subnet, for example to {subnet}.': 647,
+  'Change the Network Block in LAN Settings.': 648,
+  'This Network Block puts Security Profile {profile} on the subnet of your Internet connection ({subnet}).': 649,
 }

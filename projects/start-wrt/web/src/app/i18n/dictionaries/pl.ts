@@ -594,4 +594,9 @@ export default {
   642: 'Aby wyłączyć ten VPN, najpierw zmień {vpns} tak, aby łączyły się przez coś innego.',
   643: 'Nigdy (domyślnie)',
   644: 'Gdy za NAT',
+  645: 'Ta podsieć jest używana przez połączenie internetowe (WAN). Wybierz inną.',
+  646: 'Profil bezpieczeństwa {profile} używa {subnet}, która nakłada się na połączenie internetowe (WAN {wan}).',
+  647: 'Zmień jego podsieć, na przykład na {subnet}.',
+  648: 'Zmień blok sieci w ustawieniach LAN.',
+  649: 'Ten blok sieci umieszcza profil bezpieczeństwa {profile} w podsieci połączenia internetowego ({subnet}).',
 } satisfies i18n

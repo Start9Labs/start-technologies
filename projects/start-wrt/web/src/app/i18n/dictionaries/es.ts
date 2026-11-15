@@ -594,4 +594,9 @@ export default {
   642: 'Para desactivar esta VPN, primero cambia {vpns} para que se conecten a través de otra cosa.',
   643: 'Nunca (predeterminado)',
   644: 'Cuando está detrás de NAT',
+  645: 'Tu conexión a Internet (WAN) usa esta subred. Elige otra.',
+  646: 'El perfil de seguridad {profile} usa {subnet}, que se superpone con tu conexión a Internet (WAN {wan}).',
+  647: 'Cambia su subred, por ejemplo a {subnet}.',
+  648: 'Cambia el bloque de red en la configuración de LAN.',
+  649: 'Este bloque de red coloca el perfil de seguridad {profile} en la subred de tu conexión a Internet ({subnet}).',
 } satisfies i18n

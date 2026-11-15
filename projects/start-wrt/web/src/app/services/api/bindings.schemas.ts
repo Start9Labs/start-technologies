@@ -1639,6 +1639,38 @@ export const WanAccess: z.ZodUnion<
   .meta({
     id: 'WanAccess',
   })
+
+/**
+ * A profile whose subnet overlaps the WAN.
+ */
+export const WanConflict: z.ZodObject<{
+  profile: z.ZodString
+  /**
+   * The profile's subnet in CIDR notation.
+   */
+  subnet: z.ZodString
+  /**
+   * The WAN address it overlaps, with its prefix length.
+   */
+  wan: z.ZodString
+}> = /* @__PURE__ */ object({
+  profile: z.string(),
+  /**
+   * The profile's subnet in CIDR notation.
+   */
+  subnet: z.string().meta({
+    description: "The profile's subnet in CIDR notation.",
+  }),
+  /**
+   * The WAN address it overlaps, with its prefix length.
+   */
+  wan: z.string().meta({
+    description: 'The WAN address it overlaps, with its prefix length.',
+  }),
+}).meta({
+  id: 'WanConflict',
+  description: 'A profile whose subnet overlaps the WAN.',
+})
 export const WanIpv4Mode: z.ZodEnum<{
   dhcp: 'dhcp'
   static: 'static'
@@ -1657,6 +1689,33 @@ export const WanIpv6Mode: z.ZodEnum<{
   .meta({
     id: 'WanIpv6Mode',
   })
+
+/**
+ * `profiles.wan-overlap` request.
+ */
+export const WanOverlapRequest: z.ZodObject<{
+  /**
+   * A router LAN address to test in place of the current one, as `lan.ipv4-set` would apply it.
+   */
+  lan_address: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * A router LAN address to test in place of the current one, as `lan.ipv4-set` would apply it.
+   */
+  lan_address: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description:
+      'A router LAN address to test in place of the current one, as `lan.ipv4-set` would apply it.',
+  }),
+}).meta({
+  id: 'WanOverlapRequest',
+  description: '`profiles.wan-overlap` request.',
+})
 export const WifiRadio: z.ZodObject<{
   band: z.ZodString
   channel: z.ZodString
@@ -3092,6 +3151,53 @@ export const WanMacSetRequest: z.ZodObject<{
 })
 
 /**
+ * How the profiles' subnets in a LAN block meet the WAN.
+ */
+export const WanOverlap: z.ZodObject<{
+  /**
+   * The WAN's IPv4 addresses with their prefix lengths. Empty when unknown.
+   */
+  wan: z.ZodArray<z.ZodString>
+  /**
+   * Subnet octets in the block whose /24 overlaps the WAN.
+   */
+  wan_octets: z.ZodArray<z.ZodInt>
+  conflicts: z.ZodArray<typeof WanConflict>
+  /**
+   * The subnet octet a new profile defaults to. Absent when the block has none free.
+   */
+  free_octet: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * The WAN's IPv4 addresses with their prefix lengths. Empty when unknown.
+   */
+  wan: z.array(z.string()).meta({
+    description:
+      "The WAN's IPv4 addresses with their prefix lengths. Empty when unknown.",
+  }),
+  /**
+   * Subnet octets in the block whose /24 overlaps the WAN.
+   */
+  wan_octets: z.array(z.int()).meta({
+    description: 'Subnet octets in the block whose /24 overlaps the WAN.',
+  }),
+  conflicts: z.array(WanConflict),
+  /**
+   * The subnet octet a new profile defaults to. Absent when the block has none free.
+   */
+  free_octet: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description:
+      'The subnet octet a new profile defaults to. Absent when the block has none free.',
+  }),
+}).meta({
+  id: 'WanOverlap',
+  description: "How the profiles' subnets in a LAN block meet the WAN.",
+})
+
+/**
  * An enabled IPv4 forward overlapping a router- or SNI-owned WAN port.
  */
 export const WanPortCollision: z.ZodObject<{
@@ -4031,6 +4137,29 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ ProfileId,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'wan-changed': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'wan-overlap': {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            WanOverlapRequest,
+          ),
+          _RETURN: /* @__PURE__ */ WanOverlap,
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },

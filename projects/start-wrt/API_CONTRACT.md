@@ -464,6 +464,8 @@ struct WanIpv4SetRequest {
 }
 // Response: null
 // Backend: updates UCI network.wan, restarts network
+// Validation: a static address whose network overlaps a profile's /24 is
+//   ErrorKind::SubnetCollision, unless the static network is unchanged.
 ```
 
 ### `wan.ipv6-get`
@@ -709,10 +711,11 @@ struct LanIpv4SetRequest {
 //   (3rd/4th octets unconstrained.) The same rule is enforced on the admin
 //   profile via profiles.set/create; non-admin profiles must additionally
 //   share the admin LAN's first two octets (stay inside its /16).
-//   The target /24 must not collide with another profile's subnet, else
-//   ErrorKind::SubnetCollision (same guard as profiles.create/profiles.edit;
-//   on a block change the check applies post-move, since every profile keeps
-//   its 3rd octet). A re-set of the current subnet always passes.
+//   The target /24 must not collide with another profile's subnet nor overlap
+//   a WAN IPv4 network, else ErrorKind::SubnetCollision (same guard as
+//   profiles.create/profiles.edit; on a block change the check applies
+//   post-move to every profile, since each keeps its 3rd octet). A re-set of
+//   the current subnet always passes.
 //   Changing the address while a DHCP reservation sits in the old /24 (the old
 //   /16 on a block change) is rejected with ErrorKind::DhcpStaticHostsInSubnet.
 ```
@@ -2032,6 +2035,10 @@ struct Profile<ProfileIdOpt> {
 //   client) is ErrorKind::NotFound, a disabled one ErrorKind::VpnDisabled.
 //   A disabled VPN's tunnel never comes up, so routing a profile through it
 //   would blackhole that profile.
+//   The gateway's /24 must not be another profile's, nor overlap a WAN IPv4
+//   network (the live addresses with their prefixes, plus a configured static
+//   address), else ErrorKind::SubnetCollision. An unknown WAN blocks nothing.
+//   On profiles.set, a gateway in the profile's current /24 always passes.
 ```
 
 On create and set, `lan_access: "ALL"` stores `access_to_new_profiles: true`,
@@ -2055,7 +2062,8 @@ struct ProfileSetRequest {
     force: bool,
 }
 // Response: ProfileId
-// Validation: same gateway_ip and outbound checks as profiles.create.
+// Validation: same gateway_ip and outbound checks as profiles.create. A new
+//   block for the owns_lan profile is checked as lan.ipv4-set checks it.
 // Inbound VPN peers the new subnet would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
 ```
@@ -2135,6 +2143,56 @@ struct ScheduleWindows {
 // full-week validation as wifi.blackout-set (equal startTime/endTime = full
 // 24-hour window; InvalidValue on overlap or gapless full-week coverage).
 ```
+
+### `profiles.wan-overlap`
+
+How the profiles' subnets meet the WAN, for the LAN block in force or a tested one.
+
+```rust
+#[derive(Deserialize)]
+struct WanOverlapRequest {
+    /// A router LAN address to test in place of the current one, as
+    /// lan.ipv4-set would apply it: every profile moves into its block.
+    #[serde(default)]
+    lan_address: Option<String>,
+}
+
+#[derive(Serialize)]
+struct WanConflict {
+    profile: String,  // fullname
+    subnet: String,   // "192.168.1.0/24"
+    wan: String,      // "192.168.1.221/24"
+}
+
+#[derive(Serialize)]
+struct WanOverlap {
+    /// WAN IPv4 networks: the live addresses with their prefixes, plus a
+    /// configured static address. Empty when unknown.
+    wan: Vec<String>,
+    /// Third octets 0..=254 in the block whose /24 overlaps the WAN.
+    wan_octets: Vec<u8>,
+    conflicts: Vec<WanConflict>,
+    /// The subnet octet a new profile defaults to: the first free octet clear
+    /// of the WAN, skipping 0, 1, 2, 10 and 100 while any other is free.
+    /// Absent when the block has none.
+    free_octet: Option<u8>,
+}
+// Response: WanOverlap
+```
+
+### `profiles.wan-changed`
+
+```rust
+// Request: {}
+// Response: null
+```
+
+Internal endpoint, **not called from the frontend**. Fired by the
+`/etc/hotplug.d/iface/99-startwrt-wan-subnet` hook on `wan` `ifup`/`ifupdate`, and
+run by the daemon once at boot after the Admin profile is registered. Runs in the
+calling process. Writes a `wan`/`subnet-conflict` activity entry for each conflict
+`profiles.wan-overlap` reports that was not already logged since boot, recorded in
+`/var/run/startwrt-wan-conflicts`. No-op in configs-only mode.
 
 ---
 
@@ -2563,6 +2621,8 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `profiles.edit`                     | Profiles        | CLI editor                  |
 | `profiles.schedule-get`             | Profiles        |                             |
 | `profiles.schedule-set`             | Profiles        |                             |
+| `profiles.wan-overlap`              | Profiles        |                             |
+| `profiles.wan-changed`              | Profiles        | Internal, hotplug           |
 | `ssh-keys.list`                     | SSH Keys        |                             |
 | `ssh-keys.add`                      | SSH Keys        |                             |
 | `ssh-keys.delete`                   | SSH Keys        |                             |

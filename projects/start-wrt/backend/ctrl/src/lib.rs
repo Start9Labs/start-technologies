@@ -115,8 +115,12 @@ pub trait CtrlContext: Context + Clone {
     /// The router's WAN IPv4 addresses: the public side of every IPv4
     /// published port. Empty when unknown.
     fn wan_ipv4_addrs(&self) -> Vec<std::net::Ipv4Addr> {
+        self.wan_ipv4_nets().iter().map(|net| net.addr()).collect()
+    }
+    /// The WAN interface's IPv4 addresses with their prefixes. Empty when unknown.
+    fn wan_ipv4_nets(&self) -> Vec<ipnet::Ipv4Net> {
         if self.effectful() {
-            crate::system::wan_ipv4_addrs()
+            crate::system::wan_ipv4_nets()
         } else {
             Vec::new()
         }
@@ -470,6 +474,38 @@ impl CtrlContext for ServerContext {
 
     fn effectful(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_context {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use ipnet::Ipv4Net;
+    use rpc_toolkit::Context;
+    use tokio::runtime::Runtime;
+
+    /// A configs-only context whose WAN holds the given networks.
+    #[derive(Clone)]
+    pub(crate) struct WanTestContext(pub PathBuf, pub Vec<Ipv4Net>);
+
+    impl Context for WanTestContext {
+        fn runtime(&self) -> Option<Arc<Runtime>> {
+            None
+        }
+    }
+
+    impl crate::CtrlContext for WanTestContext {
+        fn uci_root(&self) -> PathBuf {
+            self.0.clone()
+        }
+        fn effectful(&self) -> bool {
+            false
+        }
+        fn wan_ipv4_nets(&self) -> Vec<Ipv4Net> {
+            self.1.clone()
+        }
     }
 }
 

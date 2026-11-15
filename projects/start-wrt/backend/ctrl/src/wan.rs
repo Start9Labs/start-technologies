@@ -1,9 +1,10 @@
+use ipnet::Ipv4Net;
 use rpc_toolkit::{from_fn_async_local, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
     DdnsService, InterfaceProto, NetworkDevice, NetworkInterface, UciSystemDns,
 };
-use uciedit::{dump_all, parse_all, read_all, Arena, TypedSection};
+use uciedit::{dump_all, parse_all, read_all, Arena, Configs, TypedSection};
 
 use crate::dns::{self, DnsServer};
 use crate::invoke::Invoke;
@@ -25,6 +26,28 @@ pub const WAN6_INTERFACE: &str = "wan6";
 /// netifd alias for the `wan` interface's layer-3 device.
 pub const WAN6_DEVICE: &str = "@wan";
 const DDNS_SECTION: &str = "wan";
+
+/// The WAN's IPv4 networks: the live ones, and a configured static address.
+/// Empty when unknown.
+pub(crate) fn ipv4_nets(ctx: &impl CtrlContext, cfgs: &Configs) -> Vec<Ipv4Net> {
+    let mut nets = ctx.wan_ipv4_nets();
+    if let Some(net) = static_ipv4_net(cfgs) {
+        if !nets.contains(&net) {
+            nets.push(net);
+        }
+    }
+    nets
+}
+
+fn static_ipv4_net(cfgs: &Configs) -> Option<Ipv4Net> {
+    cfgs["network"]
+        .sections
+        .iter()
+        .find(|s| s.name().as_deref() == Some(WAN_INTERFACE))
+        .and_then(|s| s.get_typed::<NetworkInterface>().ok().flatten())
+        .filter(|iface| iface.proto == InterfaceProto::STATIC)
+        .and_then(|iface| Ipv4Net::with_netmask(iface.ipv4()?, iface.ipv4_netmask()?).ok())
+}
 
 /// The `auto` option of a network interface, written without touching its other options.
 #[derive(Debug, TypedSection, Default)]
@@ -394,7 +417,8 @@ pub async fn ipv4_set<C: CtrlContext>(
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await?;
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt"]).await?;
+        let old_static = static_ipv4_net(&cfgs);
 
         let mut found = false;
         for section in &mut cfgs["network"].sections {
@@ -451,6 +475,9 @@ pub async fn ipv4_set<C: CtrlContext>(
                 eyre!("WAN interface not found"),
                 ErrorKind::MissingWanInterface,
             ));
+        }
+        if let Some(net) = static_ipv4_net(&cfgs).filter(|net| Some(*net) != old_static) {
+            profiles::guard_static_wan(&cfgs, net)?;
         }
 
         let dump_result = dump_all(ctx.uci_root(), cfgs).await;
@@ -1322,6 +1349,80 @@ config service 'wan'
         assert_eq!(res.mode, WanIpv4Mode::Static);
         assert_eq!(res.address.as_deref(), Some("10.0.0.2"));
         assert_eq!(res.gateway.as_deref(), Some("10.0.0.1"));
+    }
+
+    #[tokio::test]
+    async fn ipv4_set_static_rejects_a_profile_subnet() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config interface 'wan'
+\toption device 'eth1'
+\toption proto 'dhcp'
+
+config interface 'lan'
+\toption device 'br-lan'
+\toption proto 'static'
+\toption ipaddr '192.168.0.1'
+\toption netmask '255.255.255.0'
+",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("startwrt"),
+            "\
+config profile lan
+\toption fullname 'Admin'
+\toption interface 'lan'
+\toption vlan_tag '1'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        let set = |address: &str, gateway: &str| {
+            ipv4_set(
+                ctx.clone(),
+                DeserializeStdin(WanIpv4SetRequest {
+                    mode: WanIpv4Mode::Static,
+                    address: Some(address.to_string()),
+                    netmask: Some("255.255.255.0".to_string()),
+                    gateway: Some(gateway.to_string()),
+                    username: None,
+                    password: None,
+                    device: None,
+                }),
+            )
+        };
+
+        let err = set("192.168.0.5", "192.168.0.254").await.unwrap_err();
+        assert_eq!(err.kind, ErrorKind::SubnetCollision);
+        assert_eq!(ipv4_get(ctx.clone()).await.unwrap().mode, WanIpv4Mode::Dhcp);
+
+        set("192.168.1.5", "192.168.1.1").await.unwrap();
+
+        // A static address already on a profile's subnet stays editable.
+        std::fs::write(
+            dir.path().join("startwrt"),
+            "\
+config profile lan
+\toption fullname 'Admin'
+\toption interface 'lan'
+\toption vlan_tag '1'
+
+config profile guest
+\toption fullname 'Guest'
+\toption interface 'guest'
+\toption vlan_tag '2'
+",
+        )
+        .unwrap();
+        let mut network = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        network.push_str(
+            "\nconfig interface 'guest'\n\toption proto 'static'\n\toption ipaddr '192.168.1.1'\n\toption netmask '255.255.255.0'\n",
+        );
+        std::fs::write(dir.path().join("network"), network).unwrap();
+        set("192.168.1.5", "192.168.1.254").await.unwrap();
     }
 
     #[tokio::test]

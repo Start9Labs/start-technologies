@@ -6,7 +6,7 @@ use std::process::Command as StdCommand;
 
 use chrono::Utc;
 use imbl_value::Value;
-use ipnet::IpNet;
+use ipnet::{IpNet, Ipv4Net};
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use rpc_toolkit::{from_fn_async, from_fn_async_local, HandlerExt, ParentHandler};
@@ -262,11 +262,22 @@ pub(crate) async fn get_wan_ipv4() -> Result<Option<Ipv4Addr>, Error> {
 /// Every IPv4 address on the `wan` interface, in ubus order. Empty when the
 /// interface is down or ubus is unavailable.
 pub(crate) fn wan_ipv4_addrs() -> Vec<Ipv4Addr> {
-    read_wan_ipv4_addrs().unwrap_or_default()
+    wan_ipv4_nets().iter().map(Ipv4Net::addr).collect()
 }
 
 /// `None` when ubus is unavailable; empty when the interface is down.
 pub(crate) fn read_wan_ipv4_addrs() -> Option<Vec<Ipv4Addr>> {
+    Some(read_wan_ipv4_nets()?.iter().map(Ipv4Net::addr).collect())
+}
+
+/// Every IPv4 address on the `wan` interface with its prefix, in ubus order.
+/// Empty when the interface is down or ubus is unavailable.
+pub(crate) fn wan_ipv4_nets() -> Vec<Ipv4Net> {
+    read_wan_ipv4_nets().unwrap_or_default()
+}
+
+/// `None` when ubus is unavailable; empty when the interface is down.
+fn read_wan_ipv4_nets() -> Option<Vec<Ipv4Net>> {
     let out = StdCommand::new("ubus")
         .args(["call", "network.interface.wan", "status"])
         .output()
@@ -275,16 +286,29 @@ pub(crate) fn read_wan_ipv4_addrs() -> Option<Vec<Ipv4Addr>> {
         return None;
     }
     let json = serde_json::from_slice::<serde_json::Value>(&out.stdout).ok()?;
-    Some(
-        json.get("ipv4-address")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|e| e.get("address")?.as_str()?.parse().ok())
-                    .collect()
-            })
-            .unwrap_or_default(),
-    )
+    Some(ipv4_nets(&json))
+}
+
+/// An address without a valid mask is its own /32.
+fn ipv4_nets(status: &serde_json::Value) -> Vec<Ipv4Net> {
+    status
+        .get("ipv4-address")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|e| {
+                    let addr: Ipv4Addr = e.get("address")?.as_str()?.parse().ok()?;
+                    let prefix = e
+                        .get("mask")
+                        .and_then(|m| m.as_u64())
+                        .and_then(|m| u8::try_from(m).ok())
+                        .filter(|m| *m <= 32)
+                        .unwrap_or(32);
+                    Ipv4Net::new(addr, prefix).ok()
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub async fn get_wan_ipv6s() -> Result<Vec<Ipv6Addr>, Error> {
@@ -1633,5 +1657,38 @@ config zone wan
         let status = serde_json::json!({ "ipv6-prefix": [] });
         assert_eq!(delegated_prefix_len(&status), None);
         assert_eq!(delegated_prefix_len(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn ipv4_nets_reads_netifd_mask() {
+        let net = |s: &str| s.parse::<Ipv4Net>().unwrap();
+        let dhcp = serde_json::json!({
+            "ipv4-address": [{ "address": "192.168.1.221", "mask": 24 }]
+        });
+        assert_eq!(ipv4_nets(&dhcp), vec![net("192.168.1.221/24")]);
+
+        let pppoe = serde_json::json!({
+            "ipv4-address": [{ "address": "203.0.113.9", "mask": 32, "ptpaddress": "203.0.113.1" }]
+        });
+        assert_eq!(ipv4_nets(&pppoe), vec![net("203.0.113.9/32")]);
+
+        let several = serde_json::json!({
+            "ipv4-address": [
+                { "address": "100.64.3.4", "mask": 10 },
+                { "address": "198.51.100.7" },
+                { "address": "198.51.100.8", "mask": 40 },
+                { "address": "not-an-address", "mask": 24 },
+            ]
+        });
+        assert_eq!(
+            ipv4_nets(&several),
+            vec![
+                net("100.64.3.4/10"),
+                net("198.51.100.7/32"),
+                net("198.51.100.8/32")
+            ]
+        );
+        assert!(ipv4_nets(&serde_json::json!({ "ipv4-address": [] })).is_empty());
+        assert!(ipv4_nets(&serde_json::json!({})).is_empty());
     }
 }

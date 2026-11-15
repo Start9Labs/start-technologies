@@ -4,8 +4,9 @@ import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { i18nKey } from 'src/app/i18n/i18n.providers'
 import { fill } from 'src/app/i18n/validation-errors'
-import { ConfigFinding } from 'src/app/services/api/api.service'
+import { ConfigFinding, WanConflict } from 'src/app/services/api/api.service'
 import { ConfigCheckService } from 'src/app/services/config-check.service'
+import { WanOverlapService } from 'src/app/services/wan-overlap.service'
 import { LUCI_URL } from 'src/app/utils/luci'
 
 const PROBLEMS: Record<ConfigFinding['problem'], i18nKey> = {
@@ -131,6 +132,14 @@ export class CustomConfig {
 @Component({
   selector: 'app-config-notices',
   template: `
+    @for (conflict of wan.conflicts(); track conflict.profile) {
+      <div tuiNotification appearance="warning">
+        <div tuiTitle>
+          {{ wanConflict(conflict) }}
+          <div tuiSubtitle>{{ wanFix(conflict.suggestion) }}</div>
+        </div>
+      </div>
+    }
     @for (finding of check.notices(); track key(finding)) {
       <div tuiNotification appearance="warning">
         <div tuiTitle>
@@ -158,6 +167,7 @@ export class ConfigNotices {
   private readonly i18n = inject(i18nPipe)
 
   protected readonly check = inject(ConfigCheckService)
+  protected readonly wan = inject(WanOverlapService)
   protected readonly key = key
 
   protected describe(finding: ConfigFinding): string {
@@ -166,5 +176,23 @@ export class ConfigNotices {
 
   protected locate(finding: ConfigFinding): string {
     return locate(this.i18n, finding)
+  }
+
+  protected wanConflict({ profile, subnet, wan }: WanConflict): string {
+    return fill(
+      this.i18n.transform(
+        'Security Profile {profile} uses {subnet}, which overlaps your Internet connection (WAN {wan}).',
+      ),
+      { profile, subnet, wan },
+    )
+  }
+
+  protected wanFix(suggestion: string | null): string {
+    return suggestion
+      ? fill(
+          this.i18n.transform('Change its subnet, for example to {subnet}.'),
+          { subnet: suggestion },
+        )
+      : this.i18n.transform('Change the Network Block in LAN Settings.')
   }
 }
