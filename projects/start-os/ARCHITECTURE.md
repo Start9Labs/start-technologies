@@ -144,3 +144,4 @@ resolving, so the UI is always eventually consistent with the backend.
 - [../../shared-libs/crates/start-core](../../shared-libs/crates/start-core) — Rust backend
 - [../../shared-libs/ts-modules](../../shared-libs/ts-modules) — shared TypeScript modules + workspace
 - [container-runtime/ARCHITECTURE.md](container-runtime/ARCHITECTURE.md) — runtime
+- [build/nut/updates.md](build/nut/updates.md) — verified NUT source-update discovery, architecture validation and signed proposals

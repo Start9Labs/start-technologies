@@ -271,3 +271,12 @@ start-os-format:
 
 start-os-format-check:
 	$(FMT) cargo fmt --check -p start-os -p startos-backup-fs
+
+.PHONY: start-os-nut-update-check start-os-nut-update-test
+start-os-nut-update-check:
+	node projects/start-os/build/nut/update.mjs
+
+start-os-nut-update-test:
+	node --test projects/start-os/build/nut/test-update.test.mjs projects/start-os/build/nut/test-workflow.test.mjs
+
+start-os-scripts-test: start-os-nut-update-test

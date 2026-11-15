@@ -1,0 +1,131 @@
+name: NUT Updates
+
+on:
+  schedule:
+    - cron: '23 5 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: nut-updates
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Discover and verify source update
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    outputs:
+      changed: ${{ steps.update.outputs.changed }}
+      base: ${{ steps.update.outputs.base }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.17.0'
+      - name: Test source updater
+        run: node --test projects/start-os/build/nut/test-update.test.mjs
+      - name: Prepare verified pins and changelog
+        id: update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          directory="$RUNNER_TEMP/nut-update"
+          mkdir -p "$directory"
+          node projects/start-os/build/nut/update.mjs --write --report "$directory/report.json"
+          echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          cat "$directory/report.json" >> "$GITHUB_STEP_SUMMARY"
+          echo 'changed=false' >> "$GITHUB_OUTPUT"
+          if [ "$(jq -r .changed "$directory/report.json")" != true ]; then exit 0; fi
+          candidate=$(jq -r .candidate "$directory/report.json")
+          branch="automation/nut-$(printf '%s' "$candidate" | sha256sum | cut -c 1-16)"
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --state all --head "$branch" --json url --jq '.[0].url // empty')
+          if [ -n "$existing" ]; then
+            printf '\nAlready proposed: %s\n' "$existing" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          mapfile -t files < <(jq -r '.files[]' "$directory/report.json")
+          git add -- "${files[@]}"
+          git diff --cached --binary HEAD > "$directory/update.patch"
+          # Release alignment failures keep proposals in draft.
+          if node scripts/changelog.mjs check-version projects/start-os > "$directory/release-check.txt" 2>&1; then
+            echo true > "$directory/release-aligned"
+          else
+            echo false > "$directory/release-aligned"
+          fi
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        if: steps.update.outputs.changed == 'true'
+        with:
+          name: nut-update
+          path: ${{ runner.temp }}/nut-update/
+          retention-days: 7
+
+  verify:
+    name: Validate NUT update (${{ matrix.arch }})
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+          - arch: riscv64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.base }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: nut-update
+          path: ${{ runner.temp }}/nut-update
+      - name: Apply verified update
+        run: git apply "$RUNNER_TEMP/nut-update/update.patch"
+      - uses: docker/setup-qemu-action@v4
+        if: matrix.arch == 'riscv64'
+        with:
+          platforms: riscv64
+      - name: Build and test fresh and upgrade installations
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: make start-os-nut start-os-nut-test
+
+  propose:
+    name: Open verified update PR
+    needs: [prepare, verify]
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.base }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.17.0'
+      - uses: actions/download-artifact@v8
+        with:
+          name: nut-update
+          path: ${{ runner.temp }}/nut-update
+      - name: Propose update with a signed commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_DIRECTORY: ${{ runner.temp }}/nut-update
+        run: bash projects/start-os/build/nut/open-update-pr.sh
