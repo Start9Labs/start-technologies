@@ -160,6 +160,18 @@ If the network you are visiting uses the same addresses as your home network, yo
 
 StartWRT's default addresses (`192.168.0.x` for the Admin profile, then `192.168.1.x` for the next profile) are among the most common on home, hotel, and office networks. To avoid the overlap, choose a less common **Network Block** in [LAN Settings](lan.md#ipv4), such as `10.47`. Changing the Network Block removes your existing [Inbound VPN](inbound-vpn.md) servers, so do it before setting up remote access, or recreate the servers and re-import their client configurations afterward.
 
+### Why does the Internet stop every few minutes while Wi-Fi stays connected?
+
+If StartWRT sits behind another router (for example an ISP router or gateway), check that none of your [Security Profiles](security-profiles.md) uses the same subnet as that router. Many ISP routers use `192.168.1.1` or `192.168.0.1`, and StartWRT's Admin profile defaults to `192.168.0.x`, with the next profile you add defaulting to `192.168.1.x`. If they match, both routers claim the same address. Devices stay connected to Wi-Fi, but Internet access stops for a minute or two at a time, the router may ignore the other router's DNS servers, and devices behind StartWRT cannot reach devices behind the other router.
+
+To check, look at the router's own WAN address in [WAN Settings](wan.md), for example `192.168.1.221`. Its third number is the other router's subnet, here `1`. If any profile's **Subnet** has the same number, do one of the following:
+
+- Change that profile's **Subnet** to an unused number, such as `10`. See [Creating a Profile](security-profiles.md#creating-a-profile).
+- Change StartWRT's **Network Block** in [LAN Settings](lan.md#ipv4) to a less common one, such as `10.47`. This moves every profile and removes existing [Inbound VPN](inbound-vpn.md) servers.
+- Change the other router's LAN address to a range StartWRT does not use.
+
+Changing a subnet is blocked while devices have static IP reservations in it, so remove those first.
+
 ### Why doesn't the router get an Internet address after I replaced my old router?
 
 Some ISPs only give an address to the device they already know, which they identify by its MAC address. In [WAN Settings](wan.md#mac-address), set **MAC Address** to **Custom** and enter the MAC address of your old router's Internet port. Take it from the old router's admin page, not its label, which usually shows a different port's address. Then disconnect the old router.

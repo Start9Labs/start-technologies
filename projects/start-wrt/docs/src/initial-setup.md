@@ -6,6 +6,8 @@ After unboxing your Start9 router or completing a fresh install, follow these st
 
 1. Connect your modem or upstream router to the Ethernet port labeled **WAN**, and the included switch to the port labeled **LAN**, for wired devices on your network.
 
+   If you connect StartWRT behind another router rather than a modem, note that router's address (often `192.168.0.1` or `192.168.1.1`). StartWRT's networks must not use the same subnet. See the [FAQ](faq.md#why-does-the-internet-stop-every-few-minutes-while-wi-fi-stays-connected).
+
 1. Power on the router.
 
 1. Connect your phone or computer to the router, either:
