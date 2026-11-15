@@ -1,5 +1,6 @@
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 
 use crate::PLATFORM;
 use crate::context::RpcContext;
@@ -135,7 +136,44 @@ pub struct ShutdownParams {
 rpc_toolkit::reflect_ts!(ShutdownParams);
 rpc_toolkit::ts_export!(ShutdownParams, namespaces = [""]);
 
-async fn begin_shutdown(ctx: &RpcContext, restart: bool, wait: bool) {
+/// Receives the next shutdown request. A request superseded before it was read
+/// is skipped.
+pub async fn recv_request(
+    requests: &mut broadcast::Receiver<Option<Shutdown>>,
+) -> Result<Option<Shutdown>, Error> {
+    loop {
+        match requests.recv().await {
+            Err(broadcast::error::RecvError::Lagged(_)) => (),
+            res => return res.with_kind(ErrorKind::Unknown),
+        }
+    }
+}
+
+/// The power action to execute once nothing can submit requests.
+/// A later explicit request supersedes the received one.
+pub fn final_request(
+    mut request: Option<Shutdown>,
+    mut requests: broadcast::Receiver<Option<Shutdown>>,
+) -> Option<Shutdown> {
+    use broadcast::error::TryRecvError;
+    loop {
+        match requests.try_recv() {
+            Ok(Some(later)) => request = Some(later),
+            Ok(None) | Err(TryRecvError::Lagged(_)) => (),
+            Err(TryRecvError::Empty | TryRecvError::Closed) => return request,
+        }
+    }
+}
+
+async fn begin_shutdown(ctx: &RpcContext, restart: bool, wait: bool) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| {
+            let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
+            status.as_shutting_down_mut().ser(&!restart)?;
+            status.as_restarting_mut().ser(&restart)
+        })
+        .await
+        .result?;
     ctx.shutdown
         .send(Some(Shutdown {
             disk_guid: Some(ctx.disk_guid.clone()),
@@ -146,45 +184,105 @@ async fn begin_shutdown(ctx: &RpcContext, restart: bool, wait: bool) {
     if wait {
         ctx.wait_closed().await;
     }
+    Ok(())
 }
 
 pub async fn shutdown(
     ctx: RpcContext,
     ShutdownParams { wait }: ShutdownParams,
 ) -> Result<(), Error> {
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_status_info_mut()
-                .as_shutting_down_mut()
-                .ser(&true)
-        })
-        .await
-        .result?;
-    begin_shutdown(&ctx, false, wait).await;
-    Ok(())
+    begin_shutdown(&ctx, false, wait).await
 }
 
 pub async fn restart(
     ctx: RpcContext,
     ShutdownParams { wait }: ShutdownParams,
 ) -> Result<(), Error> {
-    ctx.db
-        .mutate(|db| {
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_status_info_mut()
-                .as_restarting_mut()
-                .ser(&true)
-        })
-        .await
-        .result?;
-    begin_shutdown(&ctx, true, wait).await;
-    Ok(())
+    begin_shutdown(&ctx, true, wait).await
 }
 
 pub async fn rebuild(ctx: RpcContext) -> Result<(), Error> {
     tokio::fs::write(SYSTEM_REBUILD_PATH, b"").await?;
     restart(ctx, ShutdownParams { wait: false }).await
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::broadcast;
+
+    use super::{Shutdown, final_request, recv_request};
+
+    fn request(restart: bool) -> Option<Shutdown> {
+        Some(Shutdown {
+            disk_guid: None,
+            restart,
+        })
+    }
+
+    fn restart_of(request: Option<Shutdown>) -> Option<bool> {
+        request.map(|s| s.restart)
+    }
+
+    #[tokio::test]
+    async fn recv_request_returns_the_latest_of_unread_requests() {
+        let (send, mut requests) = broadcast::channel(1);
+        send.send(request(false)).unwrap();
+        send.send(request(true)).unwrap();
+
+        let received = recv_request(&mut requests).await.unwrap();
+
+        assert_eq!(restart_of(received), Some(true));
+    }
+
+    #[test]
+    fn final_request_keeps_the_received_request_without_later_ones() {
+        let (_send, requests) = broadcast::channel(1);
+
+        assert_eq!(
+            restart_of(final_request(request(false), requests)),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn final_request_honors_a_request_accepted_during_teardown() {
+        let (send, requests) = broadcast::channel(1);
+        send.send(request(true)).unwrap();
+
+        assert_eq!(
+            restart_of(final_request(request(false), requests)),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn final_request_honors_an_explicit_request_after_a_signal() {
+        let (send, requests) = broadcast::channel(1);
+        send.send(request(false)).unwrap();
+
+        assert_eq!(restart_of(final_request(None, requests)), Some(false));
+    }
+
+    #[test]
+    fn final_request_keeps_the_latest_of_several_later_requests() {
+        let (send, requests) = broadcast::channel(1);
+        send.send(request(true)).unwrap();
+        send.send(request(false)).unwrap();
+
+        assert_eq!(
+            restart_of(final_request(request(true), requests)),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn final_request_ignores_a_later_signal() {
+        let (send, requests) = broadcast::channel(1);
+        send.send(None).unwrap();
+
+        assert_eq!(
+            restart_of(final_request(request(true), requests)),
+            Some(true)
+        );
+    }
 }

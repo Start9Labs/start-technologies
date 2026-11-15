@@ -8,6 +8,7 @@ use color_eyre::eyre::eyre;
 use futures::{FutureExt, TryFutureExt};
 use rust_i18n::t;
 use tokio::signal::unix::signal;
+use tokio::sync::broadcast;
 use tracing::instrument;
 
 use crate::context::config::ServerConfig;
@@ -18,19 +19,33 @@ use crate::net::gateway::WildcardListener;
 use crate::net::static_server::refresher;
 use crate::net::web_server::{Acceptor, WebServer};
 use crate::prelude::*;
-use crate::shutdown::Shutdown;
+use crate::shutdown::{Shutdown, final_request, recv_request};
 use crate::system::launch_metrics_task;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::append_file;
 use crate::util::logger::LOGGER;
 
+type ShutdownRequests = broadcast::Receiver<Option<Shutdown>>;
+
+/// Serves the context with a receiver for every shutdown request it accepts.
+///
+/// The caller must hold the receiver until the web server shuts down, then pass
+/// it to [`final_request`]. Otherwise an accepted request is dropped.
+fn serve_rpc(server: &mut WebServer<WildcardListener>, ctx: &RpcContext) -> ShutdownRequests {
+    let requests = ctx.shutdown.subscribe();
+    server.serve_ui_for(ctx.clone());
+    requests
+}
+
+/// The requested power action, and the receiver for requests the served
+/// `RpcContext` may still accept until the web server shuts down.
 #[instrument(skip_all)]
 async fn inner_main(
     server: &mut WebServer<WildcardListener>,
     dns: &Arc<DnsController>,
     config: &ServerConfig,
-) -> Result<Option<Shutdown>, Error> {
-    let rpc_ctx = if !tokio::fs::metadata("/run/startos/initialized")
+) -> Result<(Option<Shutdown>, Option<ShutdownRequests>), Error> {
+    let (rpc_ctx, mut requests) = if !tokio::fs::metadata("/run/startos/initialized")
         .await
         .is_ok()
     {
@@ -38,16 +53,16 @@ async fn inner_main(
             append_file("/run/startos/init.log").await?.into_std().await,
         ));
         let (ctx, handle) = match super::start_init::main(server, dns.clone(), &config).await? {
-            Err(s) => return Ok(Some(s)),
+            Err(s) => return Ok((Some(s), None)),
             Ok(ctx) => ctx,
         };
         tokio::fs::write("/run/startos/initialized", "").await?;
 
-        server.serve_ui_for(ctx.clone());
+        let requests = serve_rpc(server, &ctx);
         LOGGER.set_logfile(None);
         handle.complete();
 
-        ctx
+        (ctx, requests)
     } else {
         let init_ctx = InitContext::init(config, dns.clone()).await?;
         let handle = init_ctx.progress.clone();
@@ -75,15 +90,13 @@ async fn inner_main(
             .await;
         let ctx = result?;
 
-        server.serve_ui_for(ctx.clone());
+        let requests = serve_rpc(server, &ctx);
 
-        ctx
+        (ctx, requests)
     };
 
     let (rpc_ctx, shutdown) = async {
         crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.clone())).await?;
-
-        let mut shutdown_recv = rpc_ctx.shutdown.subscribe();
 
         let shutdown_send = rpc_ctx.shutdown.clone();
         let sig_handler = NonDetachingJoinHandle::from(tokio::spawn(async move {
@@ -130,10 +143,7 @@ async fn inner_main(
             .map_ok(|_| tracing::debug!("{}", t!("bins.startd.metrics-daemon-shutdown")))
             .await?;
 
-        let shutdown = shutdown_recv
-            .recv()
-            .await
-            .with_kind(crate::ErrorKind::Unknown)?;
+        let shutdown = recv_request(&mut requests).await?;
 
         drop(sig_handler);
 
@@ -142,7 +152,7 @@ async fn inner_main(
     .await?;
     rpc_ctx.shutdown().await?;
 
-    Ok(shutdown)
+    Ok((shutdown, Some(requests)))
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {
@@ -172,9 +182,12 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
             let dns = Arc::new(DnsController::new(listener.subscribe()));
             let mut server = WebServer::new(Acceptor::new(listener), refresher());
             match inner_main(&mut server, &dns, &config).await {
-                Ok(a) => {
+                Ok((shutdown, requests)) => {
                     server.shutdown().await;
-                    Ok(a)
+                    Ok(match requests {
+                        Some(requests) => final_request(shutdown, requests),
+                        None => shutdown,
+                    })
                 }
                 Err(e) => {
                     async {
