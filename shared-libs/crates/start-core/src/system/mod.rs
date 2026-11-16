@@ -1346,19 +1346,43 @@ pub async fn test_smtp(
         .body("This is a test email sent from your StartOS Server".to_owned())?;
 
     let tls_parameters = TlsParameters::new(host.clone())?;
-    let transport = match security {
-        SmtpSecurity::Starttls => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)?
+    let transport =
+        AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(reachable_ip(&host, port).await?)
             .port(port)
-            .tls(Tls::Required(tls_parameters)),
-        SmtpSecurity::Tls => AsyncSmtpTransport::<Tokio1Executor>::relay(&host)?
-            .port(port)
-            .tls(Tls::Wrapper(tls_parameters)),
-    }
-    .credentials(creds)
-    .build();
+            .tls(match security {
+                SmtpSecurity::Starttls => Tls::Required(tls_parameters),
+                SmtpSecurity::Tls => Tls::Wrapper(tls_parameters),
+            })
+            .credentials(creds)
+            .build();
 
     transport.send(message).await?;
     Ok(())
+}
+
+/// The first of the host's addresses to accept a TCP connection, all tried at once.
+async fn reachable_ip(host: &str, port: u16) -> Result<String, Error> {
+    let mut attempts: futures::stream::FuturesUnordered<_> = tokio::net::lookup_host((host, port))
+        .await
+        .with_kind(ErrorKind::Network)?
+        .map(|addr| async move {
+            tokio::net::TcpStream::connect(addr)
+                .await
+                .map(|_| addr.ip().to_string())
+        })
+        .collect();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let mut failure = std::io::Error::from(std::io::ErrorKind::AddrNotAvailable);
+        while let Some(attempt) = attempts.next().await {
+            match attempt {
+                Ok(ip) => return Ok(ip),
+                Err(e) => failure = e,
+            }
+        }
+        Err(failure).with_kind(ErrorKind::Network)
+    })
+    .await
+    .with_kind(ErrorKind::Timeout)?
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, VisitFields, Parser)]
