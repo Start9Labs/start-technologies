@@ -217,15 +217,25 @@ pub(crate) async fn subscribe_stream(
     (start, sub)
 }
 
-/// Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
+/// Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
 #[derive(Deserialize, Serialize, VisitVariants)]
 #[serde(untagged)]
 pub enum SubscribeResult {
     Continuation(SubscribeRes),
-    Stream(SubscribeStream),
+    Stream(Dump),
 }
 
 rpc_toolkit::reflect_ts!(SubscribeResult);
+
+/// Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
+#[derive(Deserialize, Serialize, VisitVariants)]
+#[serde(untagged)]
+pub enum SubscribeStreamResult {
+    Continuation(SubscribeRes),
+    Stream(SubscribeStream),
+}
+
+rpc_toolkit::reflect_ts!(SubscribeStreamResult);
 
 struct DbSubscriber {
     rev: u64,
@@ -279,7 +289,7 @@ pub async fn subscribe(
         rpc_stream,
         ..
     }: HandlerArgs<RpcContext, SubscribeParams, rpc_toolkit::Empty, Revision>,
-) -> Result<SubscribeResult, Error> {
+) -> Result<SubscribeStreamResult, Error> {
     let pointer = pointer.unwrap_or_else(|| PUBLIC.clone());
     if let Some(stream) = rpc_stream {
         let (start, sub) = subscribe_stream(&ctx.db, pointer, since.as_ref()).await;
@@ -296,7 +306,7 @@ pub async fn subscribe(
                     sub.recv().await.map(|revision| (Ok(revision), sub))
                 }),
             );
-        return Ok(SubscribeResult::Stream(start));
+        return Ok(SubscribeStreamResult::Stream(start));
     }
     let (dump, sub) = ctx.db.dump_and_sub(pointer).await;
     let mut sub = DbSubscriber {
@@ -350,7 +360,10 @@ pub async fn subscribe(
         )
         .await;
 
-    Ok(SubscribeResult::Continuation(SubscribeRes { dump, guid }))
+    Ok(SubscribeStreamResult::Continuation(SubscribeRes {
+        dump,
+        guid,
+    }))
 }
 
 #[derive(Deserialize, Serialize, Parser)]

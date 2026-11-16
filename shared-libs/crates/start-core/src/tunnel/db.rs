@@ -22,7 +22,8 @@ use crate::context::CliContext;
 use crate::db::model::public::NetworkInterfaceInfo;
 use crate::db::subscribe_stream;
 pub use crate::db::{
-    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes, SubscribeResult,
+    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes,
+    SubscribeStreamResult,
 };
 use crate::net::transport::Transport;
 use crate::prelude::*;
@@ -609,7 +610,7 @@ pub async fn subscribe(
         rpc_stream,
         ..
     }: HandlerArgs<TunnelContext, SubscribeParams, rpc_toolkit::Empty, patch_db::Revision>,
-) -> Result<SubscribeResult, Error> {
+) -> Result<SubscribeStreamResult, Error> {
     let pointer = pointer.unwrap_or_else(|| ROOT.to_owned());
     if let Some(stream) = rpc_stream {
         let (start, sub) = subscribe_stream(&ctx.db, pointer, since.as_ref()).await;
@@ -621,7 +622,7 @@ pub async fn subscribe(
                     sub.recv().await.map(|revision| (Ok(revision), sub))
                 }),
             );
-        return Ok(SubscribeResult::Stream(start));
+        return Ok(SubscribeStreamResult::Stream(start));
     }
     let (dump, mut sub) = ctx.db.dump_and_sub(pointer).await;
     let guid = Guid::new();
@@ -670,7 +671,10 @@ pub async fn subscribe(
         )
         .await;
 
-    Ok(SubscribeResult::Continuation(SubscribeRes { dump, guid }))
+    Ok(SubscribeStreamResult::Continuation(SubscribeRes {
+        dump,
+        guid,
+    }))
 }
 
 #[test]
