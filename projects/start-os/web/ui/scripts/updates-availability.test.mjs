@@ -12,7 +12,11 @@ const classes = (path, names, extra = '') =>
     names.map(name => `export class ${name} {}`).join('\n') + extra,
   )
 classes('patch-db-client', ['PatchDB'])
-classes('@start9labs/shared', ['i18nPipe', 'TaskService'])
+classes(
+  '@start9labs/shared',
+  ['i18nPipe', 'TaskService'],
+  `export { isDefaultRegistry } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/types/workspace-config.ts', import.meta.url).href)};`,
+)
 classes(
   '@start9labs/marketplace',
   ['StoreIconDirective', 'RegistryConnectionStatus', 'RegistryStatePipe'],
@@ -175,4 +179,24 @@ test('mobile registry selection stays empty until a row is selected and can retu
   assert.equal(page.current().url, 'https://two.test/')
   page.selectedRegistry.set('')
   assert.equal(page.current(), null)
+})
+
+test('the sidebar heads the default registries apart from custom ones', t => {
+  const f = fixture(t)
+  const page = f.make(Updates)
+  const groups = () =>
+    page.groups().map(({ title, hosts }) => [title, hosts.map(h => h.name)])
+  assert.deepEqual(groups(), [[null, ['One', 'Two']]])
+  const row = (url, name) => ({ url, name, status: 'connected' })
+  f.hosts.next([
+    row('https://registry.start9.com/', 'Start9'),
+    row('https://community-registry.start9.com/', 'Community'),
+    row('https://alpha-registry-x.start9.com/', 'Alpha'),
+    row('https://beta-registry.start9.com/', 'Beta'),
+  ])
+  assert.deepEqual(groups(), [
+    ['Default Registries', ['Start9', 'Community']],
+    ['Custom Registries', ['Alpha', 'Beta']],
+  ])
+  assert.equal(page.current().name, 'Start9')
 })
