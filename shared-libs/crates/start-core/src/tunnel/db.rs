@@ -20,6 +20,7 @@ use crate::GatewayId;
 use crate::auth::AuthKeys;
 use crate::context::CliContext;
 use crate::db::model::public::NetworkInterfaceInfo;
+use crate::db::subscribe_stream;
 pub use crate::db::{
     ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes, SubscribeResult,
 };
@@ -599,16 +600,19 @@ pub async fn apply(
 pub async fn subscribe(
     HandlerArgs {
         context: ctx,
-        params: SubscribeParams { pointer, signer },
+        params:
+            SubscribeParams {
+                pointer,
+                since,
+                signer,
+            },
         rpc_stream,
         ..
     }: HandlerArgs<TunnelContext, SubscribeParams, rpc_toolkit::Empty, patch_db::Revision>,
 ) -> Result<SubscribeResult, Error> {
-    let (dump, mut sub) = ctx
-        .db
-        .dump_and_sub(pointer.unwrap_or_else(|| ROOT.to_owned()))
-        .await;
+    let pointer = pointer.unwrap_or_else(|| ROOT.to_owned());
     if let Some(stream) = rpc_stream {
+        let (start, sub) = subscribe_stream(&ctx.db, pointer, since.as_ref()).await;
         crate::auth::continuation_subscription(&ctx, signer)
             .await?
             .forward_stream(
@@ -617,8 +621,9 @@ pub async fn subscribe(
                     sub.recv().await.map(|revision| (Ok(revision), sub))
                 }),
             );
-        return Ok(SubscribeResult::Stream(dump));
+        return Ok(SubscribeResult::Stream(start));
     }
+    let (dump, mut sub) = ctx.db.dump_and_sub(pointer).await;
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(

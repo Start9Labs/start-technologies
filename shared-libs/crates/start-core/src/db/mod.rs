@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use axum::extract::ws;
 use clap::Parser;
-use imbl_value::InternedString;
+use imbl_value::{InternedString, Value};
 use itertools::Itertools;
 use patch_db::json_ptr::{JsonPointer, ROOT};
-use patch_db::{DiffPatch, Dump, Revision};
+use patch_db::{Catchup, DiffPatch, Dump, PatchDb, Revision, Subscriber};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
@@ -151,8 +151,19 @@ pub async fn dump(ctx: RpcContext, DumpParams { pointer }: DumpParams) -> Result
 
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
+pub struct DbCursor {
+    pub epoch: InternedString,
+    pub id: u64,
+}
+
+rpc_toolkit::reflect_ts!(DbCursor);
+
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
 pub struct SubscribeParams {
     pub pointer: Option<JsonPointer>,
+    /// The subscriber's last revision; resumes only within the epoch that reported it.
+    pub since: Option<DbCursor>,
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
     pub signer: Option<InternedString>,
@@ -169,12 +180,49 @@ pub struct SubscribeRes {
 
 rpc_toolkit::reflect_ts!(SubscribeRes);
 
-/// Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
+/// A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscribeStream {
+    pub epoch: InternedString,
+    pub id: u64,
+    pub value: Option<Value>,
+    pub revisions: Option<Vec<Revision>>,
+}
+
+rpc_toolkit::reflect_ts!(SubscribeStream);
+
+pub(crate) async fn subscribe_stream(
+    db: &PatchDb,
+    pointer: JsonPointer,
+    since: Option<&DbCursor>,
+) -> (SubscribeStream, Subscriber) {
+    let (epoch, catchup, sub) = db
+        .catch_up_and_sub(pointer, since.map(|since| (&*since.epoch, since.id)))
+        .await;
+    let start = match catchup {
+        Catchup::Dump(Dump { id, value }) => SubscribeStream {
+            epoch,
+            id,
+            value: Some(value),
+            revisions: None,
+        },
+        Catchup::Replay { id, revisions } => SubscribeStream {
+            epoch,
+            id,
+            value: None,
+            revisions: Some(revisions),
+        },
+    };
+    (start, sub)
+}
+
+/// Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
 #[derive(Deserialize, Serialize, VisitVariants)]
 #[serde(untagged)]
 pub enum SubscribeResult {
     Continuation(SubscribeRes),
-    Stream(Dump),
+    Stream(SubscribeStream),
 }
 
 rpc_toolkit::reflect_ts!(SubscribeResult);
@@ -222,21 +270,24 @@ impl DbSubscriber {
 pub async fn subscribe(
     HandlerArgs {
         context: ctx,
-        params: SubscribeParams { pointer, signer },
+        params:
+            SubscribeParams {
+                pointer,
+                since,
+                signer,
+            },
         rpc_stream,
         ..
     }: HandlerArgs<RpcContext, SubscribeParams, rpc_toolkit::Empty, Revision>,
 ) -> Result<SubscribeResult, Error> {
-    let (dump, sub) = ctx
-        .db
-        .dump_and_sub(pointer.unwrap_or_else(|| PUBLIC.clone()))
-        .await;
-    let mut sub = DbSubscriber {
-        rev: dump.id,
-        sub,
-        sync_db: ctx.sync_db.subscribe(),
-    };
+    let pointer = pointer.unwrap_or_else(|| PUBLIC.clone());
     if let Some(stream) = rpc_stream {
+        let (start, sub) = subscribe_stream(&ctx.db, pointer, since.as_ref()).await;
+        let sub = DbSubscriber {
+            rev: start.id,
+            sub,
+            sync_db: ctx.sync_db.subscribe(),
+        };
         crate::auth::continuation_subscription(&ctx, signer)
             .await?
             .forward_stream(
@@ -245,8 +296,14 @@ pub async fn subscribe(
                     sub.recv().await.map(|revision| (Ok(revision), sub))
                 }),
             );
-        return Ok(SubscribeResult::Stream(dump));
+        return Ok(SubscribeResult::Stream(start));
     }
+    let (dump, sub) = ctx.db.dump_and_sub(pointer).await;
+    let mut sub = DbSubscriber {
+        rev: dump.id,
+        sub,
+        sync_db: ctx.sync_db.subscribe(),
+    };
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(

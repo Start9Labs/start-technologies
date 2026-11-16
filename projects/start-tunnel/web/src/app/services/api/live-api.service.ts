@@ -2,6 +2,7 @@ import { inject, Service } from '@angular/core'
 import {
   AuthKeyService,
   databaseSubscription,
+  DatabaseUpdate,
   HttpService,
   RpcError,
   localRpcRequest,
@@ -12,7 +13,6 @@ import {
 import { createRpcClient } from '@start9labs/start-core'
 import { catchError } from 'rxjs'
 import type { Observable } from 'rxjs'
-import type { Update } from 'patch-db-client'
 import type { TunnelData } from '../patch-db/data-model'
 import { AuthService } from '../auth.service'
 import { PATCH_CACHE } from '../patch-db/patch-db-source'
@@ -41,7 +41,7 @@ export class LiveApiService extends ApiService {
     })
   }
 
-  override watchDb$(): Observable<Update<TunnelData>> {
+  override watchDb$(): Observable<DatabaseUpdate<TunnelData>> {
     return databaseSubscription<TunnelData>(
       this.sockets,
       this.authKeys,

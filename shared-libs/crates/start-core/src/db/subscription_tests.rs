@@ -45,3 +45,47 @@ async fn closed_sync_owner_does_not_spin_or_discard_remaining_revisions() {
     drop(send);
     assert!(subscriber.recv().await.is_none());
 }
+
+#[tokio::test]
+async fn stream_start_dumps_without_a_cursor_and_replays_with_one() {
+    let db = PatchDb::in_memory();
+    db.put(
+        &ROOT,
+        &serde_json::json!({ "public": { "a": 1 }, "private": {} }),
+    )
+    .await
+    .unwrap();
+    let (start, _) = subscribe_stream(&db, PUBLIC.clone(), None).await;
+    assert_eq!(
+        serde_json::to_value(&start).unwrap(),
+        serde_json::json!({
+            "epoch": &*start.epoch,
+            "id": 1,
+            "value": { "a": 1 },
+            "revisions": null,
+        })
+    );
+    db.put(&"/private/b".parse::<JsonPointer>().unwrap(), &1)
+        .await
+        .unwrap();
+    db.put(&"/public/a".parse::<JsonPointer>().unwrap(), &2)
+        .await
+        .unwrap();
+    let cursor = DbCursor {
+        epoch: start.epoch.clone(),
+        id: start.id,
+    };
+    let (resumed, _) = subscribe_stream(&db, PUBLIC.clone(), Some(&cursor)).await;
+    assert_eq!(
+        serde_json::to_value(&resumed).unwrap(),
+        serde_json::json!({
+            "epoch": &*start.epoch,
+            "id": 3,
+            "value": null,
+            "revisions": [{
+                "id": 3,
+                "patch": [{ "op": "replace", "path": "/a", "value": 2 }],
+            }],
+        })
+    );
+}
