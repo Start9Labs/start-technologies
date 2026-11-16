@@ -96,6 +96,10 @@ pub trait FileSystem: Send + Sync {
     fn source(&self) -> impl Future<Output = Result<Option<impl AsRef<Path>>, Error>> + Send {
         async { Ok(None::<&Path>) }
     }
+    /// Owns submounts cloned into the attachment.
+    fn is_mount_tree(&self) -> bool {
+        false
+    }
     /// The block-device path available for mount retirement.
     fn device(&self) -> impl Future<Output = Result<Option<std::path::PathBuf>, Error>> + Send {
         async { Ok(None) }

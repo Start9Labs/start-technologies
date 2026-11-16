@@ -21,7 +21,6 @@ use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::os_overlay::{PreparedGeneration, VerityMount};
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::DynFileSource;
-use crate::util::Invoke;
 use crate::util::future::complete_owned_operation;
 use crate::util::io::{TmpDir, create_file_mod};
 use crate::util::squashfs::Squashfs;
@@ -64,12 +63,12 @@ async fn query(root: &Path, configuration: &Path) -> Result<Vec<PathBuf>, Error>
             .get_envs()
             .filter_map(|(name, value)| value.map(|value| (name, value))),
     );
-    let output = command.invoke(ErrorKind::Filesystem).await?;
-    Ok(crate::ssh::parse_host_key_files(&output))
+    crate::ssh::query_host_key_files(&mut command).await
 }
 
 /// Requires fresh enable/commit authorization for the whole prospective snapshot.
 /// The caller quiesces configuration, base-image and query-input writers through completion.
+/// Consumes and unmounts a disposable data view, never the live system mount guard.
 /// The retained data tree contains the unlocked encrypted main/package filesystems.
 /// Returns an unpublished signed configuration and a source-independent legacy plan.
 pub(crate) async fn prepare_configuration<D: GenericMountGuard>(

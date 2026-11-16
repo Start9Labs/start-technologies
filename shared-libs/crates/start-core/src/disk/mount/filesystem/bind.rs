@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "bind_tests.rs"]
+mod tests;
+
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
@@ -6,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 use super::FileSystem;
+use super::syscall::{DetachedMount, open_tree_clone};
 use crate::disk::mount::filesystem::MountType;
 use crate::prelude::*;
 use crate::util::io::{canonicalize, create_file};
@@ -43,6 +48,7 @@ impl<Src: AsRef<Path>> Bind<Src> {
         self.filetype = filetype;
         self
     }
+    /// Cloned submounts share the attachment guard's lifetime and read-only policy.
     pub fn recursive(mut self, recursive: bool) -> Self {
         self.recursive = recursive;
         self
@@ -84,10 +90,30 @@ impl<Src: AsRef<Path> + Send + Sync> FileSystem for Bind<Src> {
         }
         Ok(())
     }
+    fn is_mount_tree(&self) -> bool {
+        self.recursive
+    }
+    async fn mount<P: AsRef<Path> + Send>(
+        &self,
+        mountpoint: P,
+        mount_type: MountType,
+    ) -> Result<(), Error> {
+        if self.recursive && mount_type == MountType::ReadOnly {
+            self.pre_mount(mountpoint.as_ref(), mount_type).await?;
+            let detached = DetachedMount::from_fd(open_tree_clone(self.src.as_ref(), true)?);
+            detached.set_private()?;
+            detached.set_readonly(true)?;
+            detached.attach(mountpoint.as_ref())
+        } else {
+            super::default_mount_impl(self, mountpoint, mount_type).await
+        }
+    }
     async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("Bind");
-        // tolerant of a not-yet-created source dir; pre_mount creates the leaf
+        if self.recursive {
+            sha.update(b"\0recursive");
+        }
         sha.update(
             canonicalize(self.src.as_ref(), false)
                 .await?
@@ -95,5 +121,17 @@ impl<Src: AsRef<Path> + Send + Sync> FileSystem for Bind<Src> {
                 .as_bytes(),
         );
         Ok(sha.finalize())
+    }
+    /// Recursive read-only views never share a writable cache attachment.
+    async fn mount_hash(&self, mount_type: MountType) -> Result<digest::Output<Sha256>, Error> {
+        let source = self.source_hash().await?;
+        if self.recursive {
+            let mut sha = Sha256::new();
+            sha.update(source);
+            sha.update([u8::from(mount_type == MountType::ReadOnly)]);
+            Ok(sha.finalize())
+        } else {
+            Ok(source)
+        }
     }
 }

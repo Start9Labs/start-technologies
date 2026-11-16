@@ -265,7 +265,7 @@ fn mount_setattr(fd: BorrowedFd, attr: &MountAttr) -> Result<(), Error> {
             libc::SYS_mount_setattr,
             fd.as_raw_fd(),
             empty.as_ptr(),
-            AT_EMPTY_PATH,
+            AT_EMPTY_PATH | AT_RECURSIVE,
             attr as *const _ as *const libc::c_void,
             std::mem::size_of::<MountAttr>(),
         )
@@ -283,7 +283,7 @@ impl DetachedMount {
     pub fn from_fd(fd: OwnedFd) -> Self {
         Self { fd }
     }
-    /// Toggle `MOUNT_ATTR_RDONLY` on the detached mount.
+    /// Sets read-only access across the detached tree.
     pub fn set_readonly(&self, ro: bool) -> Result<(), Error> {
         mount_setattr(
             self.fd.as_fd(),
@@ -294,7 +294,7 @@ impl DetachedMount {
             },
         )
     }
-    /// Isolates the clone from its source's propagation peer group.
+    /// Isolates the detached tree from its source's propagation peer groups.
     pub fn set_private(&self) -> Result<(), Error> {
         mount_setattr(
             self.fd.as_fd(),

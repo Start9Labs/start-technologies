@@ -17,7 +17,10 @@ async fn authorized_configuration_uses_prospective_native_inputs_and_redacts_bef
     for path in ["etc/ssh", "etc/ssl", "opt", "candidate/home", "custom"] {
         tokio::fs::create_dir_all(raw.join(path)).await.unwrap();
     }
-    tokio::fs::create_dir_all(data.join("main")).await.unwrap();
+    let main_mount = MountGuard::mount(&PrivateTmpfs::new(), data.join("main"), ReadWrite)
+        .await
+        .unwrap()
+        .with_strict_unmount();
     tokio::fs::create_dir(&store).await.unwrap();
     tokio::fs::write(raw.join("etc/shadow"), b"private-shadow-marker")
         .await
@@ -64,7 +67,7 @@ async fn authorized_configuration_uses_prospective_native_inputs_and_redacts_bef
         )
         .await
         .unwrap();
-    let mounted_data = MountGuard::mount(&Bind::new(&data), &data_view, ReadWrite)
+    let mounted_data = MountGuard::mount(&Bind::new(&data).recursive(true), &data_view, ReadWrite)
         .await
         .unwrap()
         .with_strict_unmount();
@@ -135,7 +138,7 @@ async fn authorized_configuration_uses_prospective_native_inputs_and_redacts_bef
         )
         .await
         .unwrap();
-    let mounted_data = MountGuard::mount(&Bind::new(&data), &data_view, ReadWrite)
+    let mounted_data = MountGuard::mount(&Bind::new(&data).recursive(true), &data_view, ReadWrite)
         .await
         .unwrap()
         .with_strict_unmount();
@@ -161,4 +164,59 @@ async fn authorized_configuration_uses_prospective_native_inputs_and_redacts_bef
             .unwrap()
     );
     assert_eq!(std::fs::read_dir(&store).unwrap().count(), 1);
+    tokio::fs::write(raw.join("etc/ssl/openssl.cnf"), b"")
+        .await
+        .unwrap();
+    tokio::fs::write(
+        raw.join("etc/ssh/sshd_config"),
+        format!("Include {}/main/blocked\n", crate::DATA_DIR),
+    )
+    .await
+    .unwrap();
+    nix::unistd::mkfifo(&data.join("main/blocked"), nix::sys::stat::Mode::S_IRUSR).unwrap();
+    let public = verity
+        .mount(
+            &rootfs,
+            &tree,
+            &format!("fde-authorized-{}", Guid::new()),
+            &source,
+        )
+        .await
+        .unwrap();
+    let mounted_data = MountGuard::mount(&Bind::new(&data).recursive(true), &data_view, ReadWrite)
+        .await
+        .unwrap()
+        .with_strict_unmount();
+    let snapshot = Squashfs::from_directory(&raw).await.unwrap().into_dyn();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(45),
+        prepare_configuration(
+            snapshot,
+            public,
+            mounted_data,
+            store.clone(),
+            crate::os_overlay::generate_signing_key().unwrap(),
+        ),
+    )
+    .await
+    .expect("native query must respect its deadline");
+    assert_eq!(result.err().unwrap().kind, ErrorKind::Timeout);
+    assert!(
+        !crate::disk::mount::util::is_mountpoint(&source)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !crate::disk::mount::util::is_mountpoint(&data_view)
+            .await
+            .unwrap()
+    );
+    assert_eq!(std::fs::read_dir(&store).unwrap().count(), 1);
+    assert!(
+        crate::disk::mount::util::is_mountpoint(data.join("main"))
+            .await
+            .unwrap()
+    );
+    std::fs::write(data.join("main/still-writable"), b"live data retained").unwrap();
+    main_mount.unmount(false).await.unwrap();
 }

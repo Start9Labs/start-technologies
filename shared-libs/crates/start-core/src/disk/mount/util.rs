@@ -80,14 +80,33 @@ pub async fn sync_directory<P: AsRef<Path>>(path: P) -> Result<(), Error> {
 
 #[instrument(skip_all)]
 pub async fn unmount<P: AsRef<Path>>(mountpoint: P, lazy: bool) -> Result<(), Error> {
-    let mountpoint = mountpoint.as_ref();
-    tracing::debug!("Unmounting {}.", mountpoint.display());
-    let mut cmd = tokio::process::Command::new("umount");
-    cmd.env("LANG", "C.UTF-8");
+    unmount_command(mountpoint.as_ref(), unmount_options(lazy)).await
+}
+
+/// Retires the owned attachment and its cloned submounts.
+#[instrument(skip_all)]
+pub async fn unmount_tree<P: AsRef<Path>>(mountpoint: P, lazy: bool) -> Result<(), Error> {
+    let mut command = unmount_options(lazy);
+    command.arg("--recursive");
+    unmount_command(mountpoint.as_ref(), command).await
+}
+
+fn unmount_options(lazy: bool) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new("umount");
+    command.env("LANG", "C.UTF-8");
     if lazy {
-        cmd.arg("-l");
+        command.arg("-l");
     }
-    match cmd
+    command
+}
+
+async fn unmount_command(
+    mountpoint: &Path,
+    mut command: tokio::process::Command,
+) -> Result<(), Error> {
+    tracing::debug!("Unmounting {}.", mountpoint.display());
+    match command
+        .arg("--")
         .arg(mountpoint)
         .invoke(crate::ErrorKind::Filesystem)
         .await

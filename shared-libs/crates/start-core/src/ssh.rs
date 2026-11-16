@@ -19,6 +19,7 @@ use crate::util::{FromStrParser, Invoke};
 
 pub const SSH_DIR: &str = "/home/start9/.ssh";
 pub(crate) const HOST_KEY_DIRECTORY: &str = "/etc/ssh";
+const HOST_KEY_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub(crate) fn is_installer_host_key(name: &std::ffi::OsStr) -> bool {
     use std::os::unix::ffi::OsStrExt;
@@ -30,7 +31,14 @@ pub(crate) fn is_installer_host_key(name: &std::ffi::OsStr) -> bool {
 /// The caller authenticates stable executable, library and runtime configuration inputs.
 /// OpenSSL initializes before configuration output and can load configured providers.
 pub(crate) async fn host_key_files(configuration: &Path) -> Result<Vec<std::path::PathBuf>, Error> {
-    let output = host_key_command(configuration)
+    query_host_key_files(&mut host_key_command(configuration)).await
+}
+
+pub(crate) async fn query_host_key_files(
+    command: &mut Command,
+) -> Result<Vec<std::path::PathBuf>, Error> {
+    let output = command
+        .timeout(Some(HOST_KEY_QUERY_TIMEOUT))
         .invoke(ErrorKind::Filesystem)
         .await?;
     Ok(parse_host_key_files(&output))
