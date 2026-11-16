@@ -232,6 +232,15 @@ impl LocaleString {
             *self = Self::Translated(first.unwrap_or_default())
         }
     }
+    /// Locales of a language map; none for a plain string.
+    pub fn languages(&self) -> impl Iterator<Item = &InternedString> {
+        match self {
+            Self::LanguageMap(map) => Some(map.keys()),
+            Self::Translated(_) => None,
+        }
+        .into_iter()
+        .flatten()
+    }
     pub fn localized_for(mut self, locale: &str) -> String {
         self.localize_for(locale);
         if let Self::Translated(s) = self {
@@ -419,11 +428,6 @@ pub struct Description {
 rpc_toolkit::reflect_ts!(Description);
 rpc_toolkit::ts_export!(Description, namespaces = [""]);
 impl Description {
-    pub fn localize_for(&mut self, locale: &str) {
-        self.short.localize_for(locale);
-        self.long.localize_for(locale);
-    }
-
     /// The marketplace tile clamps `short` to two lines and hides the rest —
     /// about 80 characters; the headroom is for locales that need more words
     /// to say the same thing. `long` is rendered unclamped.

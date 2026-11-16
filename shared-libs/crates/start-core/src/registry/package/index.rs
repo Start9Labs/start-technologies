@@ -203,13 +203,6 @@ pub struct DependencyMetadata {
 rpc_toolkit::reflect_ts!(DependencyMetadata);
 rpc_toolkit::ts_export!(DependencyMetadata, namespaces = [""]);
 
-impl DependencyMetadata {
-    pub fn localize_for(&mut self, locale: &str) {
-        self.title.as_mut().map(|t| t.localize_for(locale));
-        self.description.as_mut().map(|d| d.localize_for(locale));
-    }
-}
-
 fn placeholder_url() -> Url {
     "https://example.com".parse().unwrap()
 }
@@ -454,20 +447,32 @@ impl Model<PackageVersionInfo> {
 
     /// Replaces every `LocaleString` with its translation for the locale.
     pub fn localize_for(&mut self, locale: &str) -> Result<(), Error> {
-        self.as_dependency_metadata_mut()
-            .as_entries_mut()?
-            .into_iter()
-            .try_for_each(|(_, d)| d.mutate(|d| Ok(d.localize_for(locale))))?;
+        self.for_each_locale_string(&mut |s| s.localize_for(locale))
+    }
+
+    pub(crate) fn for_each_locale_string(
+        &mut self,
+        f: &mut impl FnMut(&mut LocaleString),
+    ) -> Result<(), Error> {
+        for (_, dependency) in self.as_dependency_metadata_mut().as_entries_mut()? {
+            dependency.mutate(|d| {
+                d.title
+                    .iter_mut()
+                    .chain(&mut d.description)
+                    .for_each(&mut *f);
+                Ok(())
+            })?;
+        }
         let metadata = self.as_metadata_mut();
-        metadata
-            .as_description_mut()
-            .mutate(|d| Ok(d.localize_for(locale)))?;
-        metadata
-            .as_release_notes_mut()
-            .mutate(|r| Ok(r.localize_for(locale)))?;
+        metadata.as_description_mut().mutate(|d| {
+            f(&mut d.short);
+            f(&mut d.long);
+            Ok(())
+        })?;
+        metadata.as_release_notes_mut().mutate(|r| Ok(f(r)))?;
         metadata.as_pre_download_alert_mut().mutate(|alert| {
             if let Some(alert) = alert {
-                alert.message.localize_for(locale);
+                f(&mut alert.message);
             }
             Ok(())
         })

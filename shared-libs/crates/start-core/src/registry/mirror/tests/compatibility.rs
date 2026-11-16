@@ -360,22 +360,27 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
     public["dependencyMetadata"]["dep"]["title"] = translated("Dependency", "Zależność");
     public["dependencyMetadata"]["dep"]["description"] = json!(null);
     public["dependencyMetadata"]["dep"]["optional"] = json!(false);
+    let secret = &mut state["index"]["package"]["packages"]["secret"]["versions"]["1.0.0:0"];
+    secret["description"] = json!({ "short": "Short", "long": "Long" });
+    secret["releaseNotes"] = json!({ "en_US": "Notes", "ja_JP": "ノート" });
+    secret["dependencyMetadata"]["dep"]["title"] = json!(null);
+    secret["dependencyMetadata"]["dep"]["description"] = json!(null);
+    secret["dependencyMetadata"]["dep"]["optional"] = json!(false);
     fixture
         .main
         .put(&JsonPointer::<&str>::default(), &state)
         .await
         .unwrap();
 
+    let snapshot = fixture.main.peek().await;
     let mirrors = IndexMirrors::default();
-    let mirror = |wire: WireCompatibility, language: Option<&str>| {
-        index_mirror(
-            &mirrors,
-            &fixture.main,
-            None,
-            IndexView::new(wire, language),
-            fixture.dir.path(),
-        )
-    };
+    let reader_mirror =
+        |key: Option<AnyVerifyingKey>, wire: WireCompatibility, language: Option<&str>| {
+            let view = IndexView::resolve(&snapshot, key.as_ref(), wire, language).unwrap();
+            index_mirror(&mirrors, &fixture.main, key, view, fixture.dir.path())
+        };
+    let mirror =
+        |wire: WireCompatibility, language: Option<&str>| reader_mirror(None, wire, language);
     let current = WireCompatibility::default();
     let polish = mirror(current, Some("pl_PL")).await.unwrap();
     for related in ["pl_PL", "pl", "pl_XX"] {
@@ -386,12 +391,25 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
     }
     let canonical = mirror(current, None).await.unwrap();
     let english = mirror(current, Some("en_US")).await.unwrap();
-    for unsupported in ["", "zz_ZZ", "zz_YY", "ja_JP"] {
+    for absent in ["", "zz_ZZ", "de_DE", "ja_JP"] {
         assert!(Arc::ptr_eq(
             &english,
-            &mirror(current, Some(unsupported)).await.unwrap()
+            &mirror(current, Some(absent)).await.unwrap()
         ));
     }
+    let japanese = reader_mirror(Some(key()), current, Some("ja_JP"))
+        .await
+        .unwrap();
+    let reader_english = reader_mirror(Some(key()), current, Some("en_US"))
+        .await
+        .unwrap();
+    assert!(!Arc::ptr_eq(&japanese, &reader_english));
+    assert_eq!(
+        japanese.db.dump(&"/index".parse().unwrap()).await.value["package"]["packages"]["secret"]["versions"]
+            ["1.0.0:0"]["releaseNotes"],
+        json!("ノート")
+    );
+    drop((japanese, reader_english));
     let legacy_polish = mirror(wire("0.4.0.2"), Some("pl_PL")).await.unwrap();
     for other in [&canonical, &english, &legacy_polish] {
         assert!(!Arc::ptr_eq(&polish, other));

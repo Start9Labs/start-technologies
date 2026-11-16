@@ -98,27 +98,33 @@ impl Model<FullIndex> {
 
     /// Replaces every `LocaleString` with its translation for the locale.
     pub fn localize_for(&mut self, locale: &str) -> Result<(), Error> {
-        self.as_description_mut().mutate(|d| {
-            if let Some(d) = d {
-                d.localize_for(locale);
-            }
-            Ok(())
-        })?;
+        self.for_each_locale_string(&mut |s| s.localize_for(locale))
+    }
+
+    /// Locales any `LocaleString` in the index is translated into.
+    pub fn languages(&mut self) -> Result<BTreeSet<InternedString>, Error> {
+        let mut languages = BTreeSet::new();
+        self.for_each_locale_string(&mut |s| languages.extend(s.languages().cloned()))?;
+        Ok(languages)
+    }
+
+    fn for_each_locale_string(
+        &mut self,
+        f: &mut impl FnMut(&mut LocaleString),
+    ) -> Result<(), Error> {
+        self.as_description_mut()
+            .mutate(|d| Ok(d.iter_mut().for_each(&mut *f)))?;
         let packages = self.as_package_mut();
         for (_, category) in packages.as_categories_mut().as_entries_mut()? {
-            category
-                .as_name_mut()
-                .mutate(|n| Ok(n.localize_for(locale)))?;
+            category.as_name_mut().mutate(|n| Ok(f(n)))?;
         }
         for (_, package) in packages.as_packages_mut().as_entries_mut()? {
             for (_, version) in package.as_versions_mut().as_entries_mut()? {
-                version.localize_for(locale)?;
+                version.for_each_locale_string(f)?;
             }
         }
         for (_, version) in self.as_os_mut().as_versions_mut().as_entries_mut()? {
-            version
-                .as_release_notes_mut()
-                .mutate(|n| Ok(n.localize_for(locale)))?;
+            version.as_release_notes_mut().mutate(|n| Ok(f(n)))?;
         }
         Ok(())
     }

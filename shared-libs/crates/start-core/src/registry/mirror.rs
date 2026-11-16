@@ -18,21 +18,32 @@ pub type IndexMirrors =
     tokio::sync::Mutex<BTreeMap<(Option<InternedString>, IndexView), Weak<IndexMirror>>>;
 
 /// Client-specific presentation of the index; equal views share one mirror.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IndexView {
     pub wire: WireCompatibility,
-    /// Bundled locale every `LocaleString` is resolved to. Unset keeps every translation.
-    language: Option<&'static str>,
+    /// Locale every `LocaleString` is resolved to. Unset keeps every translation.
+    language: Option<InternedString>,
 }
 
 impl IndexView {
-    /// Unsupported languages resolve to `FALLBACK_LOCALE`, bounding the number of views.
-    pub fn new(wire: WireCompatibility, language: Option<&str>) -> Self {
-        Self {
-            wire,
-            language: language
-                .map(|l| crate::supported_locale(l).unwrap_or(crate::FALLBACK_LOCALE)),
-        }
+    /// A language absent from the reader's visible index resolves to `FALLBACK_LOCALE`.
+    pub fn resolve(
+        db: &Model<RegistryDatabase>,
+        key: Option<&AnyVerifyingKey>,
+        wire: WireCompatibility,
+        language: Option<&str>,
+    ) -> Result<Self, Error> {
+        let language = match language {
+            Some(requested) => {
+                let languages = visible_index(db.clone(), key)?.languages()?;
+                Some(InternedString::intern(
+                    crate::best_locale(requested, languages.iter().map(|l| &**l))
+                        .unwrap_or(crate::FALLBACK_LOCALE),
+                ))
+            }
+            None => None,
+        };
+        Ok(Self { wire, language })
     }
 }
 
@@ -127,7 +138,7 @@ pub async fn index_mirror(
     view: IndexView,
     datadir: &Path,
 ) -> Result<Arc<IndexMirror>, Error> {
-    let identity = (key.as_ref().map(|key| key.interned_der64()), view);
+    let identity = (key.as_ref().map(|key| key.interned_der64()), view.clone());
     let mut mirrors = mirrors.lock().await;
     if let Some(mirror) = mirrors
         .get(&identity)
@@ -148,8 +159,8 @@ async fn projected_root(
     view: &IndexView,
     icons: &Path,
 ) -> Result<Value, Error> {
-    let mut index = visible_index(root, key)?;
-    if let Some(language) = view.language {
+    let mut index = visible_index(root.clone().into(), key)?;
+    if let Some(language) = view.language.as_deref() {
         index.localize_for(language)?;
     }
     let mut visible = imbl_value::json!({ "index": index.into_value() });
@@ -159,8 +170,10 @@ async fn projected_root(
     Ok(visible)
 }
 
-fn visible_index(root: &Value, key: Option<&AnyVerifyingKey>) -> Result<Model<FullIndex>, Error> {
-    let db: Model<RegistryDatabase> = root.clone().into();
+fn visible_index(
+    db: Model<RegistryDatabase>,
+    key: Option<&AnyVerifyingKey>,
+) -> Result<Model<FullIndex>, Error> {
     let reader = Reader::resolve(&db, key)?;
     let mut index = db.into_index();
     index.as_package_mut().retain_visible(reader.as_ref())?;
