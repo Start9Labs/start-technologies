@@ -1,8 +1,6 @@
-use std::sync::OnceLock;
-
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
+use tokio::sync::oneshot;
 
 use crate::PLATFORM;
 use crate::context::RpcContext;
@@ -12,6 +10,7 @@ use crate::init::STANDBY_MODE_PATH;
 use crate::prelude::*;
 use crate::sound::SHUTDOWN;
 use crate::util::Invoke;
+use crate::util::sync::SyncMutex;
 
 #[derive(Debug, Clone)]
 pub struct Shutdown {
@@ -139,65 +138,36 @@ pub struct ShutdownParams {
 rpc_toolkit::reflect_ts!(ShutdownParams);
 rpc_toolkit::ts_export!(ShutdownParams, namespaces = [""]);
 
-/// Accepts one shutdown request per RPC context, independently of database writes.
-/// Database status flags are best-effort observations of this state.
-pub struct ShutdownRequests {
-    accepted: OnceLock<Option<Shutdown>>,
-    sender: broadcast::Sender<Option<Shutdown>>,
-}
+/// The first request consumes the sender; the restart flag labels later errors.
+pub type ShutdownSender = SyncMutex<(Option<oneshot::Sender<Option<Shutdown>>>, bool)>;
 
-impl Default for ShutdownRequests {
-    fn default() -> Self {
-        Self {
-            accepted: OnceLock::new(),
-            sender: broadcast::channel(1).0,
-        }
-    }
-}
-
-impl ShutdownRequests {
-    /// Observes future requests. Startup must subscribe before exposing RPCs.
-    pub fn subscribe(&self) -> broadcast::Receiver<Option<Shutdown>> {
-        self.sender.subscribe()
-    }
-
-    /// Whether shutdown has been accepted.
-    pub fn is_requested(&self) -> bool {
-        self.accepted.get().is_some()
-    }
-
-    fn restarting(&self) -> bool {
-        matches!(
-            self.accepted.get(),
-            Some(Some(Shutdown { restart: true, .. }))
-        )
-    }
-
-    /// Rejects later requests with the accepted action.
-    /// `None` requests daemon exit without powering off.
-    pub fn request(&self, request: Option<Shutdown>) -> Result<(), Error> {
-        if self.accepted.set(request.clone()).is_err() {
-            let message = if self.restarting() {
+/// `None` requests daemon exit without powering off. Admission never writes to the database.
+pub fn send_shutdown(sender: &ShutdownSender, request: Option<Shutdown>) -> Result<(), Error> {
+    sender.mutate(|(sender, restarting)| {
+        let Some(sender) = sender.take() else {
+            let message = if *restarting {
                 t!("shutdown.already-restarting")
             } else {
                 t!("shutdown.already-shutting-down")
             };
             return Err(Error::new(eyre!(message), ErrorKind::InvalidRequest));
-        }
-        self.sender
-            .send(request)
-            .map_err(|_| eyre!("receiver dropped"))
-            .log_err();
+        };
+        let restart = request.as_ref().is_some_and(|request| request.restart);
+        sender.send(request).map_err(|_| {
+            Error::new(
+                eyre!(t!("shutdown.already-shutting-down")),
+                ErrorKind::InvalidRequest,
+            )
+        })?;
+        *restarting = restart;
         Ok(())
-    }
+    })
 }
 
-pub(crate) async fn publish_shutdown_status(
-    db: &TypedPatchDb<Database>,
-    requests: &ShutdownRequests,
-) {
-    let restarting = requests.restarting();
-    let shutting_down = requests.is_requested() && !restarting;
+/// UI observations; shutdown admission belongs to the oneshot sender.
+pub(crate) async fn publish_shutdown_status(db: &TypedPatchDb<Database>, sender: &ShutdownSender) {
+    let (shutting_down, restarting) =
+        sender.peek(|(sender, restarting)| (sender.is_none() && !*restarting, *restarting));
     db.mutate(|db| {
         let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
         status.as_shutting_down_mut().ser(&shutting_down)?;
@@ -210,11 +180,11 @@ pub(crate) async fn publish_shutdown_status(
 
 pub(crate) async fn request_shutdown(
     db: &TypedPatchDb<Database>,
-    requests: &ShutdownRequests,
+    sender: &ShutdownSender,
     request: Option<Shutdown>,
 ) -> Result<(), Error> {
-    requests.request(request)?;
-    publish_shutdown_status(db, requests).await;
+    send_shutdown(sender, request)?;
+    publish_shutdown_status(db, sender).await;
     Ok(())
 }
 
@@ -255,6 +225,11 @@ mod tests {
     use super::*;
     use crate::db::model::public::ServerStatus;
 
+    fn requests() -> (ShutdownSender, oneshot::Receiver<Option<Shutdown>>) {
+        let (sender, receiver) = oneshot::channel();
+        (SyncMutex::new((Some(sender), false)), receiver)
+    }
+
     async fn database() -> TypedPatchDb<Database> {
         let db = TypedPatchDb::load_unchecked(PatchDb::in_memory());
         db.put(
@@ -279,13 +254,11 @@ mod tests {
     async fn shutdown_rejects_repeated_and_conflicting_requests_during_teardown() {
         for restart in [false, true] {
             let db = database().await;
-            let requests = ShutdownRequests::default();
-            let mut receiver = requests.subscribe();
+            let (requests, receiver) = requests();
             request_shutdown(&db, &requests, request(restart))
                 .await
                 .unwrap();
-            assert_eq!(receiver.recv().await.unwrap().unwrap().restart, restart);
-            drop(receiver);
+            assert_eq!(receiver.await.unwrap().unwrap().restart, restart);
             let before = db.dump(&patch_db::json_ptr::ROOT).await;
 
             for later in [request(false), request(true), None] {
@@ -318,37 +291,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_closed_receiver_rejects_requests_without_publishing_status() {
+        let db = database().await;
+        let (requests, receiver) = requests();
+        drop(receiver);
+        let before = db.dump(&patch_db::json_ptr::ROOT).await;
+        let error = request_shutdown(&db, &requests, request(true))
+            .await
+            .unwrap_err();
+        assert!(matches!(error.kind, ErrorKind::InvalidRequest));
+        assert_eq!(
+            error.source.to_string(),
+            t!("shutdown.already-shutting-down")
+        );
+        let repeated = send_shutdown(&requests, request(false)).unwrap_err();
+        assert_eq!(repeated.source.to_string(), error.source.to_string());
+        assert_eq!(db.dump(&patch_db::json_ptr::ROOT).await.id, before.id);
+    }
+
+    #[tokio::test]
     async fn signal_exit_and_rejection_do_not_require_a_database() {
-        let requests = ShutdownRequests::default();
-        let mut receiver = requests.subscribe();
-        requests.request(None).unwrap();
-        assert!(requests.is_requested());
+        let (requests, receiver) = requests();
+        send_shutdown(&requests, None).unwrap();
+        assert!(requests.peek(|(sender, _)| sender.is_none()));
         for restart in [false, true] {
-            let error = requests.request(request(restart)).unwrap_err();
+            let error = send_shutdown(&requests, request(restart)).unwrap_err();
             assert_eq!(
                 error.source.to_string(),
                 t!("shutdown.already-shutting-down")
             );
         }
-        assert!(receiver.recv().await.unwrap().is_none());
-        assert!(matches!(
-            receiver.try_recv(),
-            Err(broadcast::error::TryRecvError::Empty)
-        ));
+        assert!(receiver.await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn new_rpc_context_clears_observed_status_and_accepts_a_new_request() {
         let db = database().await;
-        let previous = ShutdownRequests::default();
-        let receiver = previous.subscribe();
+        let (previous, receiver) = requests();
         request_shutdown(&db, &previous, request(false))
             .await
             .unwrap();
         drop((previous, receiver));
 
-        let requests = ShutdownRequests::default();
-        let mut receiver = requests.subscribe();
+        let (requests, receiver) = requests();
         publish_shutdown_status(&db, &requests).await;
         let status = db
             .peek()
@@ -360,36 +345,30 @@ mod tests {
             .unwrap();
         assert!(!status.shutting_down);
         assert!(!status.restarting);
-        assert!(!requests.is_requested());
+        assert!(requests.peek(|(sender, _)| sender.is_some()));
         request_shutdown(&db, &requests, request(true))
             .await
             .unwrap();
-        assert!(receiver.recv().await.unwrap().unwrap().restart);
+        assert!(receiver.await.unwrap().unwrap().restart);
     }
 
     #[tokio::test]
     async fn concurrent_shutdown_and_restart_publish_exactly_one_request() {
-        let requests = ShutdownRequests::default();
-        let mut receiver = requests.subscribe();
+        let (requests, receiver) = requests();
         let (shutdown, restart) = std::thread::scope(|scope| {
-            let shutdown = scope.spawn(|| requests.request(request(false)));
-            let restart = scope.spawn(|| requests.request(request(true)));
+            let shutdown = scope.spawn(|| send_shutdown(&requests, request(false)));
+            let restart = scope.spawn(|| send_shutdown(&requests, request(true)));
             (shutdown.join().unwrap(), restart.join().unwrap())
         });
         assert_ne!(shutdown.is_ok(), restart.is_ok());
-        let chosen = receiver.recv().await.unwrap().unwrap();
+        let chosen = receiver.await.unwrap().unwrap();
         assert_eq!(chosen.restart, restart.is_ok());
-        assert!(matches!(
-            receiver.try_recv(),
-            Err(broadcast::error::TryRecvError::Empty)
-        ));
     }
 
     #[tokio::test]
     async fn shutdown_notification_precedes_a_blocked_status_write() {
         let db = database().await;
-        let requests = ShutdownRequests::default();
-        let mut receiver = requests.subscribe();
+        let (requests, mut receiver) = requests();
         let locked_db = db.clone();
         let runtime = tokio::runtime::Handle::current();
         let (locked_send, locked_recv) = std::sync::mpsc::channel();
@@ -410,8 +389,8 @@ mod tests {
         tokio::pin!(shutdown);
         assert!(shutdown.as_mut().now_or_never().is_none());
         assert!(!receiver.try_recv().unwrap().unwrap().restart);
-        assert!(requests.is_requested());
-        assert!(requests.request(request(true)).is_err());
+        assert!(requests.peek(|(sender, _)| sender.is_none()));
+        assert!(send_shutdown(&requests, request(true)).is_err());
 
         drop(release_send);
         holder.join().unwrap();

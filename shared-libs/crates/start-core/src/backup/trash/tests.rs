@@ -12,6 +12,17 @@ impl GenericMountGuard for Directory {
 }
 
 #[tokio::test]
+async fn the_last_sweep_waiter_releases_its_mount() {
+    let root = tempfile::tempdir().unwrap();
+    let guard = Arc::new(Directory(root.path().to_owned()));
+    let weak = Arc::downgrade(&guard);
+    let sweep = ensure_sweep(guard).await.unwrap();
+    assert!(weak.upgrade().is_some());
+    drop(sweep);
+    assert!(weak.upgrade().is_none());
+}
+
+#[tokio::test]
 async fn aliases_of_the_same_target_join_one_sweep() {
     let root = tempfile::tempdir().unwrap();
     let directory = root.path().join("target");

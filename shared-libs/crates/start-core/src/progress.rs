@@ -17,8 +17,25 @@ use crate::prelude::*;
 use crate::util::future::NonDetachingJoinHandle;
 
 mod rpc;
+#[cfg(test)]
+mod tests;
 pub use rpc::with_cli_progress;
 pub(crate) use rpc::{forward_progress, progress_until_complete, progress_with_null};
+
+/// Scopes progress publication; publisher failure does not cancel the operation.
+pub(crate) async fn run_with_progress_sync<F: Future>(
+    operation: F,
+    sync: impl Future<Output = Result<(), Error>>,
+) -> F::Output {
+    tokio::pin!(operation);
+    tokio::select! {
+        result = &mut operation => result,
+        result = sync => {
+            result.log_err();
+            operation.await
+        }
+    }
+}
 
 lazy_static::lazy_static! {
     static ref SPINNER: ProgressStyle = ProgressStyle::with_template("{spinner} {msg}...").unwrap();

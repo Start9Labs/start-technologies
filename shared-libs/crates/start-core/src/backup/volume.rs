@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
@@ -11,6 +12,7 @@ use tokio::process::Command;
 
 use super::target::{BackupTargetId, BackupTargetSource, SharedVolumeBackupInfo, TargetMount};
 use super::{PackageBackupReport, VolumeBackupReport};
+use crate::context::rpc::{CleanupTasks, spawn_cleanup};
 use crate::context::{CliContext, RpcContext};
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
@@ -264,7 +266,9 @@ pub async fn restore_volumes_rpc(
         None => db.as_public().as_server_info().as_id().de()?,
     };
     let backup = BackupMountGuard::mount(fs.mount(ReadWrite).await?, &server_id, &password).await?;
-    tokio::spawn(async move {
+    let (reply, result) = tokio::sync::oneshot::channel();
+    let owner = ctx.clone();
+    owner.spawn_background(async move {
         let mut result = RestoreVolumeResult::default();
         for id in selected_ids(Some(ids), []) {
             match restore_volume(&ctx, &backup, &id).await {
@@ -277,23 +281,25 @@ pub async fn restore_volumes_rpc(
             }
         }
         backup.unmount().await.log_err();
-        Ok(result)
-    })
-    .await
-    .with_kind(ErrorKind::Unknown)?
+        let _ = reply.send(Ok(result));
+    })?;
+    result.await.with_kind(ErrorKind::Unknown)?
 }
 
-struct IncompleteRestore(Option<PathBuf>);
+struct IncompleteRestore {
+    path: Option<PathBuf>,
+    tasks: Arc<CleanupTasks>,
+}
 
 impl IncompleteRestore {
     async fn clean(&mut self) {
-        if let Some(path) = self.0.as_ref() {
+        if let Some(path) = self.path.as_ref() {
             if crate::util::btrfs::delete_tree(path)
                 .await
                 .log_err()
                 .is_some()
             {
-                self.0.take();
+                self.path.take();
             }
         }
     }
@@ -301,8 +307,8 @@ impl IncompleteRestore {
 
 impl Drop for IncompleteRestore {
     fn drop(&mut self) {
-        if let Some(path) = self.0.take() {
-            tokio::spawn(async move {
+        if let Some(path) = self.path.take() {
+            spawn_cleanup(&self.tasks, async move {
                 crate::util::btrfs::delete_tree(path).await.log_err();
             });
         }
@@ -319,26 +325,30 @@ async fn restore_local_copy<F: Future<Output = Result<(), Error>>>(
     package_data: &Path,
     source: &Path,
     name: String,
+    tasks: Arc<CleanupTasks>,
     publish: impl FnOnce(SharedVolumeId, SharedVolume) -> F,
 ) -> Result<SharedVolumeId, Error> {
     let (id, volume) = new_local_restore(name);
     let path = local_path(package_data, &id);
     tokio::fs::create_dir_all(path.parent().expect("local volume parent")).await?;
     crate::util::btrfs::create_subvolume(&path).await?;
-    let mut incomplete = IncompleteRestore(Some(path.clone()));
+    let mut incomplete = IncompleteRestore {
+        path: Some(path.clone()),
+        tasks,
+    };
     let result = async {
         source::set_local_permissions(&path).await?;
         copy_folder(source, &path).await?;
         source::set_local_permissions(&path).await?;
         sync_directory(&path).await?;
         // Publication can commit after its caller cancels.
-        incomplete.0.take();
+        incomplete.path.take();
         source::finish_directory_publication(&path, publish(id.clone(), volume).await).await?;
         Ok(id)
     }
     .await;
     if result.is_ok() {
-        incomplete.0.take();
+        incomplete.path.take();
     } else {
         incomplete.clean().await;
     }
@@ -360,6 +370,7 @@ pub(super) async fn restore_volume<G: GenericMountGuard>(
         Path::new(crate::PACKAGE_DATA),
         &source,
         info.name.clone(),
+        ctx.cleanup_tasks.clone(),
         |id, volume| async move {
             ctx.db
                 .mutate(|db| {
@@ -381,6 +392,10 @@ mod tests {
     use std::time::SystemTime;
 
     use super::*;
+
+    fn cleanup_tasks() -> Arc<CleanupTasks> {
+        Arc::new(crate::util::sync::SyncMutex::new(Vec::new()))
+    }
 
     #[tokio::test]
     async fn external_volume_backups_reject_overlapping_folders_through_any_device_alias() {
@@ -605,17 +620,23 @@ mod tests {
         std::fs::create_dir(&source).unwrap();
         std::fs::write(old_path.join("sentinel"), b"existing data").unwrap();
         std::fs::write(source.join("sentinel"), b"restored data").unwrap();
-        let created = restore_local_copy(fixture.path(), &source, "Photos".into(), |id, volume| {
-            assert_ne!(id, old_id);
-            assert_eq!(volume.name, "Photos");
-            assert_eq!(volume.source, SharedVolumeSource::Local);
-            assert!(volume.grants.is_empty());
-            assert_eq!(
-                std::fs::read(local_path(fixture.path(), &id).join("sentinel")).unwrap(),
-                b"restored data"
-            );
-            async { Ok(()) }
-        })
+        let created = restore_local_copy(
+            fixture.path(),
+            &source,
+            "Photos".into(),
+            cleanup_tasks(),
+            |id, volume| {
+                assert_ne!(id, old_id);
+                assert_eq!(volume.name, "Photos");
+                assert_eq!(volume.source, SharedVolumeSource::Local);
+                assert!(volume.grants.is_empty());
+                assert_eq!(
+                    std::fs::read(local_path(fixture.path(), &id).join("sentinel")).unwrap(),
+                    b"restored data"
+                );
+                async { Ok(()) }
+            },
+        )
         .await
         .unwrap();
         assert_ne!(created, old_id);
@@ -645,20 +666,26 @@ mod tests {
             fixture.path(),
             &fixture.path().join("missing"),
             "Photos".into(),
+            cleanup_tasks(),
             |_, _| async {
                 panic!("failed copy must not publish a catalog entry");
             },
         )
         .await;
         assert_eq!(failed_copy.unwrap_err().kind, ErrorKind::Backup);
-        let failed_publication =
-            restore_local_copy(fixture.path(), &source, "Photos".into(), |_, _| async {
+        let failed_publication = restore_local_copy(
+            fixture.path(),
+            &source,
+            "Photos".into(),
+            cleanup_tasks(),
+            |_, _| async {
                 Err(Error::new(
                     eyre!("database unavailable"),
                     ErrorKind::Database,
                 ))
-            })
-            .await;
+            },
+        )
+        .await;
         assert_eq!(failed_publication.unwrap_err().kind, ErrorKind::Database);
         assert_eq!(
             std::fs::read_dir(fixture.path().join("shared-volumes"))

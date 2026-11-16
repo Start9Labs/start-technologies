@@ -5,10 +5,10 @@ use std::time::Duration;
 
 use clap::Parser;
 use color_eyre::eyre::eyre;
-use futures::{FutureExt, TryFutureExt};
+use futures::FutureExt;
 use rust_i18n::t;
 use tokio::signal::unix::signal;
-use tokio::sync::broadcast;
+use tokio::sync::oneshot;
 use tracing::instrument;
 
 use crate::context::config::ServerConfig;
@@ -25,36 +25,23 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::append_file;
 use crate::util::logger::LOGGER;
 
-/// Holds requests accepted before startup finishes.
-fn serve_rpc(
-    server: &mut WebServer<WildcardListener>,
-    ctx: &RpcContext,
-) -> broadcast::Receiver<Option<Shutdown>> {
-    let requests = ctx.shutdown.subscribe();
-    server.serve_ui_for(ctx.clone());
-    requests
-}
-
-/// Shutdown requests preempt metrics initialization and polling.
+/// Joins metrics cancellation before background and service teardown can unmount storage.
 async fn wait_for_shutdown(
-    mut requests: broadcast::Receiver<Option<Shutdown>>,
-    metrics_task: NonDetachingJoinHandle<()>,
+    mut requests: oneshot::Receiver<Option<Shutdown>>,
+    mut metrics_task: NonDetachingJoinHandle<()>,
 ) -> Result<Option<Shutdown>, Error> {
-    let metrics_task = metrics_task
-        .map_err(|e| {
-            Error::new(
+    tokio::select! {
+        shutdown = &mut requests => {
+            let _ = metrics_task.wait_for_abort().await;
+            shutdown
+        }
+        result = &mut metrics_task => {
+            result.map_err(|e| Error::new(
                 eyre!("{}", e).wrap_err(t!("bins.startd.metrics-daemon-panicked").to_string()),
                 ErrorKind::Unknown,
-            )
-        })
-        .map_ok(|_| tracing::debug!("{}", t!("bins.startd.metrics-daemon-shutdown")));
-    tokio::pin!(metrics_task);
-
-    tokio::select! {
-        shutdown = requests.recv() => shutdown,
-        result = &mut metrics_task => {
-            result?;
-            requests.recv().await
+            ))?;
+            tracing::debug!("{}", t!("bins.startd.metrics-daemon-shutdown"));
+            requests.await
         }
     }
     .with_kind(ErrorKind::Unknown)
@@ -66,7 +53,7 @@ async fn inner_main(
     dns: &Arc<DnsController>,
     config: &ServerConfig,
 ) -> Result<Option<Shutdown>, Error> {
-    let (rpc_ctx, requests) = if !tokio::fs::metadata("/run/startos/initialized")
+    let rpc_ctx = if !tokio::fs::metadata("/run/startos/initialized")
         .await
         .is_ok()
     {
@@ -79,11 +66,11 @@ async fn inner_main(
         };
         tokio::fs::write("/run/startos/initialized", "").await?;
 
-        let requests = serve_rpc(server, &ctx);
+        server.serve_ui_for(ctx.clone());
         LOGGER.set_logfile(None);
         handle.complete();
 
-        (ctx, requests)
+        ctx
     } else {
         let init_ctx = InitContext::init(config, dns.clone()).await?;
         let handle = init_ctx.progress.clone();
@@ -111,50 +98,63 @@ async fn inner_main(
             .await;
         let ctx = result?;
 
-        let requests = serve_rpc(server, &ctx);
+        server.serve_ui_for(ctx.clone());
 
-        (ctx, requests)
+        ctx
     };
 
-    crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.clone())).await?;
+    let requests = rpc_ctx
+        .shutdown_recv
+        .replace(None)
+        .expect("startd owns the shutdown receiver");
+    let result = async {
+        crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.clone())).await?;
 
-    let shutdown_send = rpc_ctx.shutdown.clone();
-    let sig_handler = NonDetachingJoinHandle::from(tokio::spawn(async move {
-        use tokio::signal::unix::SignalKind;
-        futures::future::select_all(
-            [
-                SignalKind::interrupt(),
-                SignalKind::quit(),
-                SignalKind::terminate(),
-            ]
-            .iter()
-            .map(|s| {
-                async move {
-                    signal(*s)
-                        .unwrap_or_else(|_| panic!("register {:?} handler", s))
-                        .recv()
-                        .await
-                }
-                .boxed()
-            }),
-        )
-        .await;
-        shutdown_send.request(None).log_err();
-    }));
+        let shutdown_send = rpc_ctx.shutdown.clone();
+        let sig_handler = NonDetachingJoinHandle::from(tokio::spawn(async move {
+            use tokio::signal::unix::SignalKind;
+            futures::future::select_all(
+                [
+                    SignalKind::interrupt(),
+                    SignalKind::quit(),
+                    SignalKind::terminate(),
+                ]
+                .iter()
+                .map(|s| {
+                    async move {
+                        signal(*s)
+                            .unwrap_or_else(|_| panic!("register {:?} handler", s))
+                            .recv()
+                            .await
+                    }
+                    .boxed()
+                }),
+            )
+            .await;
+            crate::shutdown::send_shutdown(&shutdown_send, None).log_err();
+        }));
 
-    let metrics_ctx = rpc_ctx.clone();
-    let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(async move {
-        launch_metrics_task(&metrics_ctx.metrics_cache, &metrics_ctx.db, || {
-            metrics_ctx.shutdown.subscribe()
-        })
-        .await
-    }));
+        let metrics_ctx = rpc_ctx.clone();
+        let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(async move {
+            launch_metrics_task(&metrics_ctx.metrics_cache, &metrics_ctx.db).await
+        }));
 
-    let shutdown = wait_for_shutdown(requests, metrics_task).await?;
-    drop(sig_handler);
-    rpc_ctx.shutdown().await?;
-
-    Ok(shutdown)
+        let result = wait_for_shutdown(requests, metrics_task).await;
+        let _ = sig_handler.wait_for_abort().await;
+        result
+    }
+    .await;
+    let teardown = rpc_ctx.shutdown().await;
+    match result {
+        Ok(shutdown) => {
+            teardown?;
+            Ok(shutdown)
+        }
+        Err(error) => {
+            teardown.log_err();
+            Err(error)
+        }
+    }
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {
@@ -249,7 +249,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_does_not_wait_for_metrics_to_observe_the_request() {
-        let (send, requests) = broadcast::channel(1);
+        let (send, requests) = oneshot::channel();
         send.send(Some(Shutdown {
             disk_guid: None,
             restart: true,
@@ -259,19 +259,22 @@ mod tests {
         let mut metrics_stopped = metrics.subscribe();
         let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(metrics));
 
-        let shutdown = wait_for_shutdown(requests, metrics_task)
-            .now_or_never()
-            .expect("shutdown waited for metrics")
-            .unwrap()
-            .unwrap();
+        let shutdown = tokio::time::timeout(
+            Duration::from_secs(1),
+            wait_for_shutdown(requests, metrics_task),
+        )
+        .await
+        .expect("shutdown waited for metrics polling")
+        .unwrap()
+        .unwrap();
 
         assert!(shutdown.restart);
-        metrics_stopped.wait().await;
+        assert!(metrics_stopped.wait().now_or_never().is_some());
     }
 
     #[tokio::test]
     async fn metrics_panics_still_fail_the_shutdown_wait() {
-        let (_send, requests) = broadcast::channel(1);
+        let (_send, requests) = oneshot::channel();
         let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(async {
             panic!("metrics task failed");
         }));

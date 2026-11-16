@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures::FutureExt;
-use futures::future::{BoxFuture, Shared};
+use futures::future::{BoxFuture, Shared, WeakShared};
 
 use crate::disk::mount::guard::GenericMountGuard;
 use crate::prelude::*;
@@ -42,17 +42,17 @@ pub async fn move_to_trash(
     .await
 }
 
-type SweepFuture = Shared<BoxFuture<'static, Result<(), Arc<Error>>>>;
+type SweepFuture = BoxFuture<'static, Result<(), Arc<Error>>>;
 
 lazy_static::lazy_static! {
-    static ref SWEEPS: SyncMutex<BTreeMap<(u64, u64), SweepFuture>> =
+    static ref SWEEPS: SyncMutex<BTreeMap<(u64, u64), WeakShared<SweepFuture>>> =
         SyncMutex::new(BTreeMap::new());
 }
 
 /// Unlink everything in the target's trash, then return. A joined sweep that
 /// started before the caller's dir landed in the trash may finish without having
-/// seen it, so loop until the trash is actually gone. Each sweep holds its own
-/// clone of the guard, keeping the target mounted for as long as it runs.
+/// seen it, so loop until the trash is actually gone. Mount retention ends with
+/// the last waiter.
 pub async fn sweep_until_clear<G: GenericMountGuard + Clone>(guard: &G) -> Result<(), Error> {
     while has_trash(guard.path()).await {
         ensure_sweep(guard.clone())
@@ -63,23 +63,20 @@ pub async fn sweep_until_clear<G: GenericMountGuard + Clone>(guard: &G) -> Resul
     Ok(())
 }
 
-async fn ensure_sweep<G: GenericMountGuard>(guard: G) -> Result<SweepFuture, Error> {
+async fn ensure_sweep<G: GenericMountGuard>(guard: G) -> Result<Shared<SweepFuture>, Error> {
     let key = crate::util::io::file_identity(guard.path()).await?;
     Ok(SWEEPS.mutate(|sweeps| {
-        if let Some(sweep) = sweeps.get(&key) {
+        sweeps.retain(|_, sweep| sweep.upgrade().is_some());
+        if let Some(sweep) = sweeps.get(&key).and_then(WeakShared::upgrade) {
             if sweep.peek().is_none() {
-                return sweep.clone();
+                return sweep;
             }
         }
-        let sweep = tokio::spawn(sweep(guard))
-            .map(|res| {
-                res.map_err(|e| Error::new(eyre!("sweep task panicked: {e}"), ErrorKind::Unknown))
-                    .and_then(|res| res)
-                    .map_err(Arc::new)
-            })
+        let sweep = sweep(guard)
+            .map(|res| res.map_err(Arc::new))
             .boxed()
             .shared();
-        sweeps.insert(key, sweep.clone());
+        sweeps.insert(key, sweep.downgrade().unwrap());
         sweep
     }))
 }

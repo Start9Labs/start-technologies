@@ -7,6 +7,7 @@ use patch_db::PatchDb;
 
 use super::*;
 use crate::util::Invoke;
+use crate::util::future::NonDetachingJoinHandle;
 
 fn target(id: u32) -> BackupTargetId {
     format!("cifs-{id}").parse().unwrap()
@@ -96,6 +97,12 @@ impl GenericMountGuard for TestMount {
     }
 }
 
+impl Drop for TestMount {
+    fn drop(&mut self) {
+        self.unmounted.store(true, Ordering::SeqCst);
+    }
+}
+
 async fn worker_fixture(
     mode: &str,
     fail_unmount: bool,
@@ -162,12 +169,10 @@ async fn worker_publishes_result_after_cleanup_for_success_and_failures() {
     ] {
         let (_temp, db, conversion) = worker_fixture(mode, unmount_error).await;
         let unmounted = conversion.guard.unmounted.clone();
-        let (_shutdown, receiver) = broadcast::channel(1);
         conversion
             .run(
                 db.clone(),
                 backupfs::ConversionProgressSink::new(),
-                receiver,
                 watch::Sender::new(()),
             )
             .await
@@ -246,24 +251,23 @@ fn helper_pid(temp: &tempfile::TempDir) -> nix::unistd::Pid {
 async fn worker_streams_progress_and_cancels_on_shutdown() {
     let (temp, db, conversion) = worker_fixture("hold", false).await;
     let unmounted = conversion.guard.unmounted.clone();
-    let (shutdown, receiver) = broadcast::channel(1);
-    let running = tokio::spawn(conversion.run(
+    let running = NonDetachingJoinHandle::from(tokio::spawn(conversion.run(
         db.clone(),
         backupfs::ConversionProgressSink::new(),
-        receiver,
         watch::Sender::new(()),
-    ));
+    )));
     live_progress(&db).await;
     let pid = helper_pid(&temp);
-    shutdown.send(None).unwrap();
-    tokio::time::timeout(Duration::from_secs(10), running)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(10), running.wait_for_abort())
+            .await
+            .unwrap()
+            .unwrap_err()
+            .is_cancelled()
+    );
     assert!(unmounted.load(Ordering::SeqCst));
     let active = observed_jobs(&db).await;
-    assert_eq!(active["cifs-1"]["server-a"].state, ConversionState::Failed);
+    assert_eq!(active["cifs-1"]["server-a"].state, ConversionState::Running);
     assert!(!active["cifs-1"]["server-a"].progress.overall.is_complete());
     tokio::time::timeout(Duration::from_secs(5), async {
         while nix::sys::signal::kill(pid, None).is_ok() {
@@ -284,13 +288,11 @@ async fn worker_streams_progress_and_cancels_on_shutdown() {
 #[ignore = "requires testdata/backup-conversion helper on PATH"]
 async fn worker_progress_and_completion_are_scoped_to_one_backup() {
     let (temp, db, conversion) = worker_fixture("hold", false).await;
-    let (_shutdown, receiver) = broadcast::channel(1);
-    let running = tokio::spawn(conversion.run(
+    let running = NonDetachingJoinHandle::from(tokio::spawn(conversion.run(
         db.clone(),
         backupfs::ConversionProgressSink::new(),
-        receiver,
         watch::Sender::new(()),
-    ));
+    )));
     live_progress(&db).await;
     nix::sys::signal::kill(helper_pid(&temp), nix::sys::signal::Signal::SIGUSR2).unwrap();
     tokio::time::timeout(Duration::from_secs(10), running)
@@ -328,12 +330,10 @@ async fn real_helper_converts_the_frozen_backup_through_the_background_worker() 
         backup_fs_protocol::FormatStatus::Legacy
     );
     let unmounted = conversion.guard.unmounted.clone();
-    let (_shutdown, receiver) = broadcast::channel(1);
     conversion
         .run(
             db.clone(),
             backupfs::ConversionProgressSink::new(),
-            receiver,
             watch::Sender::new(()),
         )
         .await

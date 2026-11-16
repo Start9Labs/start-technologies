@@ -21,8 +21,13 @@ async fn backup_outcomes_persist_in_history_without_notifications() {
         )
         .await
         .unwrap();
-        let guard =
-            BackupStatusGuard::new(db.clone(), "cifs-1".parse().unwrap(), "Backup Drive".into());
+        let tasks = Arc::new(crate::util::sync::SyncMutex::new(Some(Vec::new())));
+        let guard = BackupStatusGuard::new(
+            db.clone(),
+            tasks,
+            "cifs-1".parse().unwrap(),
+            "Backup Drive".into(),
+        );
         let started_at = guard.started_at;
         let volume_id = SharedVolumeId::new();
         let report: BackupReport = serde_json::from_value(serde_json::json!({
