@@ -408,6 +408,18 @@ EOF
 
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(date '+%s')}"
 
+# Retries a step a transient mirror or registry error can fail. A retried
+# live-build stage resumes from its stagefiles but reruns a failed hook from its start.
+retry() {
+	local attempt
+	for attempt in 1 2 3; do
+		"$@" && return 0
+		[ "$attempt" -lt 3 ] || return 1
+		echo "'$*' failed; retrying in $((attempt * 30))s" >&2
+		sleep $((attempt * 30))
+	done
+}
+
 if lb bootstrap; then
 	true
 else
@@ -415,48 +427,48 @@ else
 	cat ./chroot/debootstrap/debootstrap.log
 	exit $EXIT
 fi
-lb chroot
+retry lb chroot
 
 # riscv64 binaries target RVA23, which the build host may lack.
 RUN_TARGET=()
 if [ "${QEMU_ARCH}" = riscv64 ]; then
 	RUN_TARGET=(qemu-riscv64-static -cpu max)
 fi
-"${RUN_TARGET[@]}" ./chroot/usr/bin/startbox start-cli --registry=https://registry.start9.com registry package download tor -d ./chroot/usr/lib/startos/tor_${QEMU_ARCH}.s9pk -a "${QEMU_ARCH}"
+retry "${RUN_TARGET[@]}" ./chroot/usr/bin/startbox start-cli --registry=https://registry.start9.com registry package download tor -d ./chroot/usr/lib/startos/tor_${QEMU_ARCH}.s9pk -a "${QEMU_ARCH}"
 
-lb installer
-lb binary_chroot
-lb chroot_prep install all mode-apt-install-binary mode-archives-chroot
-lb binary_rootfs
+retry lb installer
+retry lb binary_chroot
+retry lb chroot_prep install all mode-apt-install-binary mode-archives-chroot
+retry lb binary_rootfs
 
 cp $prep_results_dir/binary/live/filesystem.squashfs $RESULTS_DIR/$IMAGE_BASENAME.squashfs
 
 if [ "${IMAGE_TYPE}" = iso ]; then
 
-	lb binary_manifest
-	lb binary_package-lists
-	lb binary_linux-image
-	lb binary_memtest
-	lb binary_grub-legacy
-	lb binary_grub-pc
-	lb binary_grub_cfg
-	lb binary_syslinux
-	lb binary_disk
-	lb binary_loadlin
-	lb binary_win32-loader
-	lb binary_includes
-	lb binary_grub-efi
-	lb binary_hooks
-	lb binary_checksums
+	retry lb binary_manifest
+	retry lb binary_package-lists
+	retry lb binary_linux-image
+	retry lb binary_memtest
+	retry lb binary_grub-legacy
+	retry lb binary_grub-pc
+	retry lb binary_grub_cfg
+	retry lb binary_syslinux
+	retry lb binary_disk
+	retry lb binary_loadlin
+	retry lb binary_win32-loader
+	retry lb binary_includes
+	retry lb binary_grub-efi
+	retry lb binary_hooks
+	retry lb binary_checksums
 	find binary -newermt "$(date -d@${SOURCE_DATE_EPOCH} '+%Y-%m-%d %H:%M:%S')" -printf "%y %p\n" -exec touch '{}' -d@${SOURCE_DATE_EPOCH} --no-dereference ';' > binary.modified_timestamps
-	lb binary_iso
-	lb binary_onie
-	lb binary_netboot
-	lb binary_tar
-	lb binary_hdd
-	lb binary_zsync
-	lb chroot_prep remove all mode-archives-chroot
-	lb source
+	retry lb binary_iso
+	retry lb binary_onie
+	retry lb binary_netboot
+	retry lb binary_tar
+	retry lb binary_hdd
+	retry lb binary_zsync
+	retry lb chroot_prep remove all mode-archives-chroot
+	retry lb source
 
 	mv $prep_results_dir/live-image-${IB_TARGET_ARCH}.hybrid.iso $RESULTS_DIR/$IMAGE_BASENAME.iso
 

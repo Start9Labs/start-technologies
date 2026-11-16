@@ -68,7 +68,7 @@ Additional HTTP routes:
 
 - `POST /api/setup/flash` — legacy NDJSON flash observation; the wizard uses typed `setup.flash` over encrypted RPC
 - `GET|POST /rest/rpc/{guid}` — Continuation endpoint for backup/restore/diagnostics
-- `GET /rpc/v2/{guid}` — WebSocket continuation for update progress and live logs; `/ws/rpc/{guid}` remains a compatibility alias
+- `GET /rpc/v2/{guid}` — legacy WebSocket continuation for update progress and live logs; the web UI streams both over encrypted RPC. `/ws/rpc/{guid}` remains a compatibility alias
 - `GET /static/local-root-ca.crt`, `GET /static/local-root-ca.mobileconfig` — Root CA download, as a certificate or an Apple configuration profile (no auth)
 - `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` — LuCI reverse proxy (localhost:8080), HTTPS only (plain HTTP redirects); `/luci` redirects to `/cgi-bin/luci`
 - Fallback — Serves embedded web UI

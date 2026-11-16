@@ -1112,6 +1112,10 @@ export const ProfileIdOpt: z.ZodObject<{
 }).meta({
   id: 'ProfileIdOpt',
 })
+export const ProgressUnits: z.ZodEnum<{ bytes: 'bytes'; steps: 'steps' }> =
+  /* @__PURE__ */ z.enum(['bytes', 'steps']).meta({
+    id: 'ProgressUnits',
+  })
 export const Protocol: z.ZodEnum<{
   tcp: 'tcp'
   udp: 'udp'
@@ -2189,14 +2193,20 @@ export const EthernetSetResult: z.ZodObject<{
 export const FollowLogsRes: z.ZodObject<{
   /**
    * Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.
+   * Null when the entries arrive on the request's response stream.
    */
-  guid: typeof Guid
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
 }> = /* @__PURE__ */ object({
   /**
    * Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.
+   * Null when the entries arrive on the request's response stream.
    */
-  guid: Guid.meta({
-    description: 'Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.',
+  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      "Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.\nNull when the entries arrive on the request's response stream.",
   }),
 }).meta({
   id: 'FollowLogsRes',
@@ -2457,6 +2467,52 @@ export const ProfileSetRequest: z.ZodIntersection<
   )
   .meta({
     id: 'ProfileSetRequest',
+  })
+
+/**
+ * Progress state for a single phase or overall operation.
+ * Wire-compatible with start-os's `Progress` (serialized as untagged).
+ */
+export const Progress: z.ZodUnion<
+  readonly [
+    z.ZodNull,
+    z.ZodBoolean,
+    z.ZodObject<{
+      done: z.ZodInt
+      total: z.ZodCodec<
+        z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+        z.ZodNullable<z.ZodInt>
+      >
+      units: z.ZodCodec<
+        z.ZodOptional<z.ZodNullable<typeof ProgressUnits>>,
+        z.ZodNullable<typeof ProgressUnits>
+      >
+    }>,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.null().meta({
+      description: 'Not started yet — serializes as `null`',
+    }),
+    z.boolean().meta({
+      description:
+        'Complete — serializes as `true` (success) or `false` (failure)',
+    }),
+    object({
+      done: z.int(),
+      total: wire(z.int().nullable().optional(), z.int().nullable()),
+      units: wire(
+        ProgressUnits.nullable().optional(),
+        ProgressUnits.nullable(),
+      ),
+    }).meta({
+      description: 'In progress',
+    }),
+  ])
+  .meta({
+    id: 'Progress',
+    description:
+      "Progress state for a single phase or overall operation.\nWire-compatible with start-os's `Progress` (serialized as untagged).",
   })
 export const PublishedPort: z.ZodObject<{
   id: z.ZodString
@@ -3189,6 +3245,12 @@ export const FlashParams: z.ZodObject<{
 }).meta({
   id: 'FlashParams',
 })
+export const NamedProgress: z.ZodObject<{
+  name: z.ZodString
+  progress: typeof Progress
+}> = /* @__PURE__ */ object({ name: z.string(), progress: Progress }).meta({
+  id: 'NamedProgress',
+})
 export const PublishedPortsSetRequest: z.ZodObject<{
   ports: z.ZodArray<typeof PublishedPortInput>
 }> = /* @__PURE__ */ object({ ports: z.array(PublishedPortInput) }).meta({
@@ -3278,6 +3340,20 @@ export const WifiRegulatory: z.ZodObject<{
   }),
 }).meta({
   id: 'WifiRegulatory',
+})
+
+/**
+ * Snapshot of overall + per-phase progress, sent over WebSocket.
+ */
+export const FullProgress: z.ZodObject<{
+  overall: typeof Progress
+  phases: z.ZodArray<typeof NamedProgress>
+}> = /* @__PURE__ */ object({
+  overall: Progress,
+  phases: z.array(NamedProgress),
+}).meta({
+  id: 'FullProgress',
+  description: 'Snapshot of overall + per-phase progress, sent over WebSocket.',
 })
 export const SessionList: z.ZodObject<{
   current: z.ZodCodec<
@@ -4163,7 +4239,7 @@ export const Api = {
         'logs-follow': {
           _PARAMS: /* @__PURE__ */ FollowLogsParams,
           _RETURN: /* @__PURE__ */ FollowLogsRes,
-          _ITEM: /* @__PURE__ */ z.never(),
+          _ITEM: /* @__PURE__ */ LogEntry,
           _FINAL: /* @__PURE__ */ z.null(),
         },
         'newer-versions': {
@@ -4232,7 +4308,7 @@ export const Api = {
             UpdateSystemParams,
           ),
           _RETURN: /* @__PURE__ */ UpdateSystemRes,
-          _ITEM: /* @__PURE__ */ z.never(),
+          _ITEM: /* @__PURE__ */ FullProgress,
           _FINAL: /* @__PURE__ */ z.null(),
         },
       },

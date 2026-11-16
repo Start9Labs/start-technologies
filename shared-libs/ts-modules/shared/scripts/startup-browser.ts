@@ -10,6 +10,7 @@ import {
   AuthKeyService,
 } from '../src/services/auth-key.service'
 import { identityStore } from '../src/services/identity-store'
+import { RpcConsoleLog } from '../src/services/rpc-console-log'
 import { RpcSocketService } from '../src/services/rpc-socket.service'
 import { ServerIdentityService } from '../src/services/server-identity.service'
 import { RELATIVE_URL } from '../src/tokens/relative-url'
@@ -17,6 +18,7 @@ import { RELATIVE_URL } from '../src/tokens/relative-url'
 const injector = Injector.create({
   providers: [
     AuthKeyService,
+    RpcConsoleLog,
     RpcSocketService,
     StartupLiveApiService,
     { provide: WA_WINDOW, useValue: window },

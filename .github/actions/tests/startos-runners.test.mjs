@@ -6,13 +6,12 @@ import { test } from 'node:test'
 import yaml from 'js-yaml'
 import { fixture } from '../../../scripts/tests/fixtures.mjs'
 
-const workflow = yaml.load(
-  readFileSync(
-    new URL('../../workflows/startos-iso.yaml', import.meta.url),
-    'utf8',
-  ),
-)
-const image = workflow.jobs.image
+const load = name =>
+  yaml.load(
+    readFileSync(new URL(`../../workflows/${name}`, import.meta.url), 'utf8'),
+  )
+const workflow = load('startos-iso.yaml')
+const image = load('startos-image.yaml').jobs.build
 const [standard, fast] = Array.from(
   image['runs-on'].matchAll(/fromJson\('([\s\S]*?)'\)/g),
   match => yaml.load(match[1]),
@@ -37,7 +36,15 @@ test('the native runtime bootstrap precedes every JavaScript action', () => {
   assert.ok(image.steps.indexOf(bootstrap) < image.steps.findIndex(s => s.uses))
   assert.equal(
     bootstrap.if,
-    "${{ env.ARCH == 'riscv64' && github.event.inputs.runner != 'fast' }}",
+    "${{ env.ARCH == 'riscv64' && !inputs.fast-runner }}",
+  )
+  assert.equal(
+    workflow.jobs.image.with['fast-runner'],
+    "${{ github.event.inputs.runner == 'fast' }}",
+  )
+  assert.equal(
+    workflow.jobs.image.with['nodejs-version'],
+    workflow.env.NODEJS_VERSION,
   )
 })
 
@@ -50,12 +57,14 @@ for (const [name, validChecksum, startsJavaScript] of [
     const f = fixture(t)
     const version = workflow.env.NODEJS_VERSION
     const nodeDir = `node-v${version}-linux-riscv64`
-    const nodeSource = `#!/bin/sh
-if [ "$1" = --version ]; then
-  printf 'v${version}\\n'
-else
-  ${startsJavaScript ? 'exec "$PROBE_NODE" "$@"' : 'exit 132'}
-fi
+    const nodeSource = `#!/bin/bash
+for arg; do
+  if [ "$arg" = --version ]; then
+    printf 'v${version}\\n'
+    exit
+  fi
+done
+${startsJavaScript ? 'exec "$PROBE_NODE" "$@"' : 'exit 132'}
 `
     chmodSync(f.write(`archive/${nodeDir}/bin/node`, nodeSource), 0o755)
     const tarball = `${nodeDir}.tar.xz`
@@ -100,10 +109,24 @@ else process.stdout.write(readFileSync(source))`,
     })
     const healthy = validChecksum && startsJavaScript
     assert.equal(result.status === 0, healthy, result.stdout + result.stderr)
-    assert.equal(
-      readFileSync(runnerNode, 'utf8'),
-      healthy ? nodeSource : oldNode,
-    )
+    if (healthy) {
+      assert.equal(readFileSync(`${runnerNode}.real`, 'utf8'), nodeSource)
+      const host = f.run(
+        runnerNode,
+        ['-p', 'process.execArgv[0] + " " + process.env["INPUT_CACHE-IMAGE"]'],
+        {
+          env: {
+            ...f.env,
+            PROBE_NODE: process.execPath,
+            'INPUT_CACHE-IMAGE': 'true',
+          },
+          encoding: 'utf8',
+        },
+      )
+      assert.equal(host.stdout.trim(), '--single-threaded true', host.stderr)
+    } else {
+      assert.equal(readFileSync(runnerNode, 'utf8'), oldNode)
+    }
     assert.equal(
       readFileSync(pathFile, 'utf8'),
       `/existing/bin\n${healthy ? `${temp}/${nodeDir}/bin\n` : ''}`,

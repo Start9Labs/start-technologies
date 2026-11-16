@@ -16,7 +16,7 @@ export abstract class AbstractMarketplaceService {
   /** The url of the registry currently being browsed. */
   abstract readonly currentRegistryUrl$: Observable<string>
 
-  /** Registries saved by this app. */
+  /** Registries the picker lists. */
   abstract readonly registries$: Observable<StoreIdentity[]>
 
   /** Resolve one package. version/flavor/registryUrl are optional. */
@@ -40,10 +40,4 @@ export abstract class AbstractMarketplaceService {
 
   /** Switch the browsed registry to `url` and persist the selection. */
   abstract connect(url: string): Promise<void>
-
-  /** Saves a registry and returns its normalized URL. */
-  abstract add(rawUrl: string): Promise<string>
-
-  /** Removes a saved registry. */
-  abstract delete(url: string): Promise<void>
 }

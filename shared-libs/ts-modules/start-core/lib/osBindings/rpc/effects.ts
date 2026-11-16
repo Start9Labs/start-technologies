@@ -197,6 +197,8 @@ export type TaskInputRepr = z.output<typeof schemas.TaskInputRepr>
 export type TaskInputReprInput = z.input<typeof schemas.TaskInputRepr>
 export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
+export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
+export type TransportProtocolInput = z.input<typeof schemas.TransportProtocol>
 export type UploadLimits = z.output<typeof schemas.UploadLimits>
 export type UploadLimitsInput = z.input<typeof schemas.UploadLimits>
 
@@ -238,7 +240,6 @@ export type AlpnInfo = z.output<typeof schemas.AlpnInfo>
  */
 export type AlpnInfoInput = z.input<typeof schemas.AlpnInfo>
 export type BindIdInput = z.input<typeof schemas.BindId>
-export type BindRangeParamsInput = z.input<typeof schemas.BindRangeParams>
 export type CheckDependenciesParamInput = z.input<
   typeof schemas.CheckDependenciesParam
 >
@@ -395,6 +396,8 @@ export type TaskInput = z.output<typeof schemas.TaskInput>
 export type TaskInputInput = z.input<typeof schemas.TaskInput>
 export type TaskTrigger = z.output<typeof schemas.TaskTrigger>
 export type TaskTriggerInput = z.input<typeof schemas.TaskTrigger>
+export type TransportWire = z.output<typeof schemas.TransportWire>
+export type TransportWireInput = z.input<typeof schemas.TransportWire>
 export type UploadedFile = z.output<typeof schemas.UploadedFile>
 export type UrlPluginRegisterParamsInput = z.input<
   typeof schemas.UrlPluginRegisterParams
@@ -430,6 +433,18 @@ export type SetDependenciesParamsInput = z.input<
 >
 export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export type Transport = z.output<typeof schemas.Transport>
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export type TransportInput = z.input<typeof schemas.Transport>
 export type UrlPluginClearUrlsParamsInput = z.input<
   typeof schemas.UrlPluginClearUrlsParams
 >
@@ -439,6 +454,7 @@ export type UrlPluginExportUrlParamsInput = z.input<
 export type ActionResult = z.output<typeof schemas.ActionResult>
 export type AddSslOptions = z.output<typeof schemas.AddSslOptions>
 export type AddSslOptionsInput = z.input<typeof schemas.AddSslOptions>
+export type BindRangeParamsInput = z.input<typeof schemas.BindRangeParams>
 export type CreateTaskParamsInput = z.input<typeof schemas.CreateTaskParams>
 export type DepInfo = z.output<typeof schemas.DepInfo>
 export type DerivedAddressInfo = z.output<typeof schemas.DerivedAddressInfo>
@@ -460,12 +476,8 @@ export type LegacyProxySslOptionsInput = z.input<
 >
 
 /**
- * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
- *
- * Keyed by `internal_start_port` in [`BindingRanges`]. The range covers
- * `internal_start_port..(internal_start_port + number_of_ports)` and is
- * forwarded through a single iptables rule per protocol per gateway,
- * preserving the destination port number.
+ * A contiguous binding keyed by its internal start port in [`BindingRanges`].
+ * External ports map to internal ports by offset.
  */
 export type RangeBindInfo = z.output<typeof schemas.RangeBindInfo>
 export type BindingRanges = z.output<typeof schemas.BindingRanges>

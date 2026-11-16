@@ -58,6 +58,6 @@ try {
 }
 const recipe = read(base + 'build/image-recipe/build.sh')
 assert.doesNotMatch(recipe, /resolv\.conf\.bak/, 'must not restore build-host DNS into the shipped rootfs')
-assert.match(recipe, /lb chroot\n[\s\S]*?\nlb installer\nlb binary_chroot\nlb chroot_prep install all mode-apt-install-binary mode-archives-chroot\nlb binary_rootfs\n[\s\S]*?if \[ "\$\{IMAGE_TYPE\}" = iso \]; then/, 'ISO and img share live-build resolver cleanup and rootfs assembly')
+assert.match(recipe, /\nretry lb chroot\n[\s\S]*?\nretry lb installer\nretry lb binary_chroot\nretry lb chroot_prep install all mode-apt-install-binary mode-archives-chroot\nretry lb binary_rootfs\n[\s\S]*?if \[ "\$\{IMAGE_TYPE\}" = iso \]; then/, 'ISO and img share live-build resolver cleanup and rootfs assembly')
 console.log('DNS configuration preserves build DNS until live-build restores the runtime OS stub')
 NODE

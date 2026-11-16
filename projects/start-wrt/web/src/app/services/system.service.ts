@@ -2,10 +2,9 @@ import { inject, Injectable, signal } from '@angular/core'
 import { TuiNotificationService } from '@taiga-ui/core'
 import {
   ApiService,
-  FullProgress,
   SystemInfoRes,
+  SystemUpdateStream,
   VersionInfo,
-  type ContinuationSocket,
 } from './api/api.service'
 import { AuthService } from './auth.service'
 import {
@@ -33,7 +32,6 @@ export class SystemService {
   private readonly sockets = inject(RpcSocketService)
   private readonly staleUi = inject(StaleUiService)
   private readonly i18n = inject(i18nPipe)
-  private ws: ContinuationSocket | null = null
   private targetVersion = ''
 
   readonly info = signal<SystemInfoRes | null>(null)
@@ -104,58 +102,35 @@ export class SystemService {
     // terminal path here and in onUpdateFailed / pollForReconnect.
     this.connection.suppress()
 
+    let stream: SystemUpdateStream
     try {
-      const { progress, target } = await this.api.systemUpdate({
-        targetVersion,
-      })
-      this.targetVersion = target ?? targetVersion
-
-      if (progress) {
-        this.subscribeToProgress(progress)
-      } else {
-        // No progress channel returned — nothing to stream; clear the
-        // updating state so the progress dialog doesn't hang open.
-        this.updating.set(false)
-        this.connection.resume()
-      }
+      stream = await this.api.systemUpdate({ targetVersion })
     } catch (e) {
       this.updating.set(false)
       this.connection.resume()
       throw e
     }
+    const { target } = stream.initial
+    if (!target) {
+      this.updating.set(false)
+      this.connection.resume()
+      return
+    }
+    this.targetVersion = target
+    void this.observeUpdate(stream.items)
   }
 
-  private subscribeToProgress(guid: string): void {
-    const ws = this.api.openWebsocket(guid)
-
-    ws.onmessage = event => {
-      try {
-        const progress = JSON.parse(event.data) as FullProgress
-        if (progress.overall === true) {
-          ws.close()
-          this.awaitReboot()
-        } else if (progress.overall === false) {
-          ws.close()
-          this.onUpdateFailed()
-        }
-      } catch {
-        // Ignore parse errors
-      }
+  /** A dropped stream starts recovery; a verified response confirms the update. */
+  private async observeUpdate(
+    items: SystemUpdateStream['items'],
+  ): Promise<void> {
+    try {
+      for await (const _ of items);
+      this.awaitReboot()
+    } catch (error) {
+      if (isNetworkError(error)) this.awaitReboot()
+      else this.onUpdateFailed()
     }
-
-    ws.onclose = () => {
-      this.ws = null
-      // A dropped stream starts recovery; a verified response confirms the update.
-      if (this.updating()) {
-        this.awaitReboot()
-      }
-    }
-
-    ws.onerror = () => {
-      // onerror is always followed by onclose, so let onclose handle cleanup
-    }
-
-    this.ws = ws
   }
 
   private awaitReboot(): void {
@@ -181,7 +156,7 @@ export class SystemService {
     const maxAttempts = 60
     // A successful update reboots the device, so a poll throws a network
     // error before it comes back; a failed update reaches here via
-    // ws.onclose without the device ever going unreachable.
+    // a dropped progress stream without the device ever going unreachable.
     let wentOffline = false
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 5000))

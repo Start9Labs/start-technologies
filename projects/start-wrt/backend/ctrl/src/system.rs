@@ -973,6 +973,7 @@ pub fn system<C: CtrlContext>() -> ParentHandler<C> {
         .subcommand(
             "update",
             from_fn_async(crate::update::update_system)
+                .with_metadata("get_signer", Value::Bool(true))
                 .with_display_serializable()
                 .with_call_remote::<CliContext>(),
         )

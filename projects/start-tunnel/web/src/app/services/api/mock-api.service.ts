@@ -20,6 +20,7 @@ import {
 } from 'patch-db-client'
 import { toObservable } from '@angular/core/rxjs-interop'
 import { mockTunnelData } from '../patch-db/data-model'
+import { parseForwardKey } from '../../routes/home/routes/published-ports/utils'
 
 @Injectable({
   providedIn: 'root',
@@ -384,47 +385,42 @@ export class MockApiService extends ApiService {
     'pinhole.update-label': async params => {
       await pauseFor(1000)
 
-      const key = `[${params.gua}]:${params.externalPort}`
-      const entry = mockTunnelData.pinholes6[key]
-      if (!entry) return null
-
-      entry.label = params.label ?? null
-      this.mockRevision([
-        {
-          op: PatchOp.REPLACE,
-          path: `/pinholes6/${key}/label`,
-          value: params.label,
-        },
-      ])
+      for (const key of pinholeKeys(params)) {
+        mockTunnelData.pinholes6[key]!.label = params.label ?? null
+        this.mockRevision([
+          {
+            op: PatchOp.REPLACE,
+            path: `/pinholes6/${key}/label`,
+            value: params.label,
+          },
+        ])
+      }
 
       return null
     },
     'pinhole.set-enabled': async params => {
       await pauseFor(1000)
 
-      const key = `[${params.gua}]:${params.externalPort}`
-      const entry = mockTunnelData.pinholes6[key]
-      if (!entry) return null
-
-      entry.enabled = params.enabled
-      this.mockRevision([
-        {
-          op: PatchOp.REPLACE,
-          path: `/pinholes6/${key}/enabled`,
-          value: params.enabled,
-        },
-      ])
+      for (const key of pinholeKeys(params)) {
+        mockTunnelData.pinholes6[key]!.enabled = params.enabled
+        this.mockRevision([
+          {
+            op: PatchOp.REPLACE,
+            path: `/pinholes6/${key}/enabled`,
+            value: params.enabled,
+          },
+        ])
+      }
 
       return null
     },
     'pinhole.remove': async params => {
       await pauseFor(1000)
 
-      const key = `[${params.gua}]:${params.externalPort}`
-      if (!mockTunnelData.pinholes6[key]) return null
-
-      delete mockTunnelData.pinholes6[key]
-      this.mockRevision([{ op: PatchOp.REMOVE, path: `/pinholes6/${key}` }])
+      for (const key of pinholeKeys(params)) {
+        delete mockTunnelData.pinholes6[key]
+        this.mockRevision([{ op: PatchOp.REMOVE, path: `/pinholes6/${key}` }])
+      }
 
       return null
     },
@@ -609,6 +605,19 @@ export class MockApiService extends ApiService {
 
     return null
   }
+}
+
+function pinholeKeys(params: T.Tunnel.RemovePinholeParamsInput): string[] {
+  const selected = new Set([params.transport ?? ['tcp', 'udp']].flat())
+  return Object.keys(mockTunnelData.pinholes6).filter(key => {
+    const { address, transport } = parseForwardKey(key)
+    return (
+      address === `[${params.gua}]:${params.externalPort}` &&
+      ((selected.has('tcp') && selected.has('udp')) ||
+        (selected.size === transport.length &&
+          transport.every(p => selected.has(p))))
+    )
+  })
 }
 
 function replaceSlashes(val: string) {

@@ -3,9 +3,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use imbl_value::InternedString;
+use rpc_toolkit::{Empty, HandlerArgs, RpcStream};
 use serde::{Deserialize, Serialize};
-use startos::middleware::auth::session::SessionContext;
+use startos::middleware::auth::session::{SecureSession, SessionContext};
 use startos::registry::asset::RegistryAsset;
+use startos::rpc_continuations::RevocationSubscription;
 use startos::sign::commitment::blake3::Blake3Commitment;
 use startos::util::io::create_file;
 use tokio::io::AsyncWriteExt;
@@ -13,7 +16,7 @@ use tokio::process::Command;
 
 use crate::continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::error::Error;
-use crate::progress::{FullProgressTracker, ProgressUnits};
+use crate::progress::{FullProgress, FullProgressTracker, ProgressUnits};
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::os::{asset_for_platform, OsVersionInfo, SIG_CONTEXT};
 use crate::registry::{self};
@@ -31,6 +34,10 @@ pub struct UpdateSystemParams {
     pub registry: Option<String>,
     #[arg(long)]
     pub target_version: Option<String>,
+    #[arg(skip)]
+    #[visit(ts(skip))]
+    #[serde(rename = "__Auth_signer")]
+    pub signer: Option<InternedString>,
 }
 rpc_toolkit::reflect_ts!(UpdateSystemParams);
 
@@ -68,14 +75,30 @@ pub async fn fetch_versions(registry_url: &str) -> Result<BTreeMap<String, OsVer
     Ok(versions)
 }
 
-/// Main update handler: fetch, validate, download, verify, sysupgrade.
+/// Revoking the requesting key ends observation on both transports.
+/// Canceling observation does not cancel an accepted update.
 pub async fn update_system(
-    ctx: ServerContext,
-    UpdateSystemParams {
-        registry,
-        target_version,
-    }: UpdateSystemParams,
+    HandlerArgs {
+        context: ctx,
+        params:
+            UpdateSystemParams {
+                registry,
+                target_version,
+                signer,
+            },
+        rpc_stream,
+        ..
+    }: HandlerArgs<ServerContext, UpdateSystemParams, Empty, FullProgress>,
 ) -> Result<UpdateSystemRes, Error> {
+    let none = |rpc_stream: Option<RpcStream<FullProgress>>| {
+        if let Some(stream) = rpc_stream {
+            let _ = stream.close(Ok::<_, Error>(()));
+        }
+        Ok(UpdateSystemRes {
+            target: None,
+            progress: None,
+        })
+    };
     let platform = DeviceInfo::load()?.os.platform;
     let registry = registry.unwrap_or_else(|| {
         crate::system::read_registry_url()
@@ -85,10 +108,7 @@ pub async fn update_system(
     let versions = fetch_versions(&registry).await?;
 
     if versions.is_empty() {
-        return Ok(UpdateSystemRes {
-            target: None,
-            progress: None,
-        });
+        return none(rpc_stream);
     }
 
     let (target_ver, version_info) = if let Some(ref target) = target_version {
@@ -101,10 +121,7 @@ pub async fn update_system(
             .iter()
             .max_by(|(a, _), (b, _)| crate::system::cmp_versions(a, b))
         else {
-            return Ok(UpdateSystemRes {
-                target: None,
-                progress: None,
-            });
+            return none(rpc_stream);
         };
         (ver.clone(), info)
     };
@@ -127,45 +144,12 @@ pub async fn update_system(
     let mut verify_phase = tracker.add_phase("Verifying integrity".into(), Some(10));
     let mut apply_phase = tracker.add_phase("Applying update".into(), Some(1));
 
-    let guid = Guid::new();
-    let guid_str = guid.to_string();
-    let tracker_for_ws = tracker.clone();
-
-    ctx.continuations
-        .add(
-            guid.clone(),
-            RpcContinuation::ws(
-                WebSocketPolicy::Authenticated,
-                ctx.secure_session().cloned(),
-                move |mut ws| async move {
-                    let stream = tracker_for_ws.stream(Some(Duration::from_millis(300)));
-                    tokio::pin!(stream);
-                    while let Some(progress) = stream.next().await {
-                        let json = match serde_json::to_string(&progress) {
-                            Ok(j) => j,
-                            Err(_) => break,
-                        };
-                        if ws
-                            .send(axum::extract::ws::Message::Text(json.into()))
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                        if progress.overall.is_complete() {
-                            break;
-                        }
-                    }
-                    let _ = ws.send(axum::extract::ws::Message::Close(None)).await;
-                },
-                Duration::from_secs(600),
-            ),
-        )
-        .await;
-
+    let subscription = startos::auth::continuation_subscription(&ctx, signer).await?;
     let client = reqwest::Client::new();
     let target_ver_for_task = target_ver.clone();
-    tokio::spawn(async move {
+    let tracker_for_task = tracker.clone();
+    let done = tokio::spawn(async move {
+        let tracker = tracker_for_task;
         let target_ver = target_ver_for_task;
         let result = do_update(
             &client,
@@ -177,7 +161,7 @@ pub async fn update_system(
         )
         .await;
 
-        match result {
+        match &result {
             Ok(()) => {
                 tracing::info!("Update to {target_ver} initiated successfully");
                 tracker.complete();
@@ -194,12 +178,81 @@ pub async fn update_system(
                 tracker.fail();
             }
         }
+        result
     });
+
+    let progress = if let Some(stream) = rpc_stream {
+        subscription.forward_stream(
+            stream,
+            progress_until_done(tracker, done).map(|item| item.map_err(startos::Error::from)),
+        );
+        None
+    } else {
+        let guid = Guid::new();
+        ctx.continuations
+            .add(
+                guid.clone(),
+                legacy_progress_continuation(subscription, ctx.secure_session().cloned(), tracker),
+            )
+            .await;
+        Some(guid.to_string())
+    };
 
     Ok(UpdateSystemRes {
         target: Some(target_ver),
-        progress: Some(guid_str),
+        progress,
     })
+}
+
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(300);
+
+fn legacy_progress_continuation(
+    subscription: RevocationSubscription,
+    secure: Option<SecureSession>,
+    tracker: FullProgressTracker,
+) -> RpcContinuation {
+    RpcContinuation::ws_authed(
+        subscription,
+        WebSocketPolicy::Authenticated,
+        secure,
+        move |mut ws| async move {
+            let stream = tracker.stream(Some(PROGRESS_INTERVAL));
+            tokio::pin!(stream);
+            while let Some(progress) = stream.next().await {
+                let json = match serde_json::to_string(&progress) {
+                    Ok(j) => j,
+                    Err(_) => break,
+                };
+                if ws
+                    .send(axum::extract::ws::Message::Text(json.into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+                if progress.overall.is_complete() {
+                    break;
+                }
+            }
+            let _ = ws.send(axum::extract::ws::Message::Close(None)).await;
+        },
+        Duration::from_secs(600),
+    )
+}
+
+/// Yields snapshots through the final one, then the update's failure, if any.
+fn progress_until_done(
+    tracker: FullProgressTracker,
+    done: tokio::task::JoinHandle<Result<(), Error>>,
+) -> impl futures::Stream<Item = Result<FullProgress, Error>> + Send + 'static {
+    tracker.stream(Some(PROGRESS_INTERVAL)).map(Ok).chain(
+        futures::stream::once(async move {
+            done.await
+                .map_err(|e| Error::other(format!("update task failed: {e}")))
+                .and_then(std::convert::identity)
+        })
+        .filter_map(|result| async move { result.err().map(Err) }),
+    )
 }
 
 // Must match `keep.d/startwrt` in `build/stage-files.sh`.

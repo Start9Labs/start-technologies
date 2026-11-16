@@ -25,7 +25,7 @@ npm run build:ui             # prod build of a single app
 - `@start9labs/start-core` and `patch-db-client` are `file:` deps built by `build:deps`; a fresh checkout won't type-check until you run it.
 - `start-core` builds CommonJS and ESM. Preserve both module builds when updating it.
 - `npm run check:rpc-clients` includes production OS/Tunnel PatchDB source lifecycle cases with real Angular authentication/signal scheduling, RxJS and the PatchDB consumer. Network and server-availability feeds are controlled test boundaries.
-- `start-core` has a jest suite in `start-core/lib/test/`, run by `make -C shared-libs/ts-modules/start-core test` and reached by the root `make test` in CI. The Angular libs use focused `node:test` tests for state logic (`check:shared` runs the icon loading-state tests, `check:marketplace` the compatible-version selection tests); `npm run check` (tsc, strict + strictTemplates) plus a successful `build:*` is the verification bar. `check:ui` also runs focused `node:test` OS-update sequencing tests against the service and caller methods with Angular DI and real PatchDB; it does not render templates.
+- `start-core` has a jest suite in `start-core/lib/test/`, run by `make -C shared-libs/ts-modules/start-core test` and reached by the root `make test` in CI. The Angular libs use focused `node:test` tests for state logic (`check:shared` runs the icon loading-state tests, `check:marketplace` the compatible-version selection and registry-picker tests); `npm run check` (tsc, strict + strictTemplates) plus a successful `build:*` is the verification bar. `check:ui` also runs focused `node:test` OS-update sequencing tests against the service and caller methods with Angular DI and real PatchDB; it does not render templates.
 - `shared-libs/crates/patch-db` is a first-party crate; `build:deps` runs `npm ci && npm run build` inside its `client/` directory.
 - **`brochure-marketplace` (`../../projects/brochure-marketplace`) is a public website, not an embedded OS app.** It's the marketplace front at marketplace.start9.com and **auto-deploys on merge to `master`** (`.github/workflows/deploy-brochure.yml`) — `ui` and `setup-wizard` ship inside the OS image; `start-tunnel` ships inside `tunnelbox`, and `start-wrt` ships embedded in the `startwrt` binary. brochure consumes the same source `shared`/`marketplace` libs as the other apps.
 
@@ -67,6 +67,10 @@ cp shared-libs/ts-modules/proxy.conf-sample.json proxy.conf.json
 ```sh
 npm run start:ui:proxy
 ```
+
+### Inspecting RPC traffic
+
+Browser RPC is encrypted inside a WebSocket session, so the network tab shows only ciphertext. In the browser console, run `rpcLog.enable()` to print each decrypted request, reply and stream frame. The setting persists in local storage across reloads for 30 minutes (`rpcLog.enable(minutes)` sets another duration) or until `rpcLog.disable()`. Logged parameters include secrets such as passwords.
 
 ## Translations
 

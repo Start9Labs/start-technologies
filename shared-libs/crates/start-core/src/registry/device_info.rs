@@ -226,6 +226,7 @@ pub struct WireCompatibility {
     legacy_pem: bool,
     inline_icons: bool,
     legacy_os_notes: bool,
+    legacy_os_headlines: bool,
 }
 
 impl WireCompatibility {
@@ -243,6 +244,7 @@ impl WireCompatibility {
             wire.legacy_signatures |= reads_legacy_signatures(version)?;
             wire.legacy_pem = startwrt || predates_0_4_0_5(version)?;
             wire.legacy_os_notes = wire.legacy_pem;
+            wire.legacy_os_headlines = startwrt || requires_os_headline(version)?;
             wire.inline_icons = reads_inline_icons(version)?;
         }
         Ok(wire)
@@ -261,6 +263,7 @@ impl WireCompatibility {
         if self.legacy_os_notes {
             project_legacy_os_notes(method, res)?;
         }
+        project_os_headlines(method, res, self.legacy_os_headlines);
         if self.legacy_signatures {
             crate::sign::compat::downgrade_signatures(res);
         }
@@ -331,18 +334,39 @@ fn predates_0_4_0_5(version: &Version) -> Result<bool, Error> {
     Ok(version < &"0.4.0.5".parse::<Version>()?)
 }
 
-fn project_legacy_os_notes(method: &str, res: &mut Value) -> Result<(), Error> {
+/// Some StartOS builds through 0.4.3 require `headline` to discover updates.
+fn requires_os_headline(version: &Version) -> Result<bool, Error> {
+    Ok(version <= &"0.4.3".parse::<Version>()?)
+}
+
+fn os_version_infos<'a>(
+    method: &str,
+    res: &'a mut Value,
+) -> impl Iterator<Item = &'a mut (InternedString, Value)> {
     let versions = match method {
-        "os.version.get" => res,
-        "os.index" => &mut res["versions"],
-        "index" => &mut res["os"]["versions"],
-        _ => return Ok(()),
+        "os.version.get" => Some(res),
+        "os.index" => Some(&mut res["versions"]),
+        "index" => Some(&mut res["os"]["versions"]),
+        _ => None,
     };
-    for (_, info) in versions
-        .as_object_mut()
+    versions
+        .and_then(|v| v.as_object_mut())
         .into_iter()
         .flat_map(|o| o.iter_mut())
-    {
+}
+
+fn project_os_headlines(method: &str, res: &mut Value, legacy: bool) {
+    for (version, info) in os_version_infos(method, res) {
+        if legacy {
+            info["headline"] = Value::String(format!("v{version}").into());
+        } else if let Some(info) = info.as_object_mut() {
+            info.remove("headline");
+        }
+    }
+}
+
+fn project_legacy_os_notes(method: &str, res: &mut Value) -> Result<(), Error> {
+    for (_, info) in os_version_infos(method, res) {
         let notes: LocaleString = from_value(info["releaseNotes"].clone())?;
         info["releaseNotes"] = Value::String(notes.localized_for("en_US").into());
     }
@@ -685,6 +709,83 @@ mod tests {
     }
 
     #[test]
+    fn headline_projection_covers_released_clients_and_startwrt() {
+        for (header, source, startwrt, legacy) in [
+            (None, None, false, false),
+            (None, Some("0.4.2.1"), false, true),
+            (None, Some("0.4.3"), false, true),
+            (None, Some("0.4.3.1"), false, false),
+            (
+                Some("os.version=0.4.0.4&os.compat=*&os.platform=x86_64"),
+                None,
+                false,
+                true,
+            ),
+            (
+                Some("os.version=0.4.3.1&os.compat=*&os.platform=x86_64"),
+                Some("0.4.0.4"),
+                false,
+                false,
+            ),
+            (None, None, true, false),
+            (None, Some("1.3.0"), true, true),
+            (
+                Some("os.version=1.3.0&os.compat=*&os.platform=spacemit,k1-x_muse-pi-pro"),
+                None,
+                true,
+                true,
+            ),
+        ] {
+            let mut middleware = DeviceInfoMiddleware::new();
+            middleware.device_info_header = header.map(HeaderValue::from_static);
+            middleware
+                .prepare_request(
+                    startwrt,
+                    Metadata {
+                        get_device_info: true,
+                    },
+                    &mut request("os.version.get", json!({ "sourceVersion": source })),
+                )
+                .unwrap();
+            assert_eq!(
+                middleware.wire.legacy_os_headlines, legacy,
+                "{:?} {:?}",
+                header, source
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_headlines_project_every_os_response() {
+        let stored = json!({ "0.4.0.5": { "releaseNotes": "Notes" } });
+        for method in ["os.version.get", "os.index", "index"] {
+            let mut response = match method {
+                "os.version.get" => stored.clone(),
+                "os.index" => json!({ "versions": stored }),
+                _ => json!({ "os": { "versions": stored }, "package": {} }),
+            };
+            project_os_headlines(method, &mut response, true);
+            let versions = match method {
+                "os.version.get" => &response,
+                "os.index" => &response["versions"],
+                _ => &response["os"]["versions"],
+            };
+            assert_eq!(versions["0.4.0.5"]["headline"].as_str(), Some("v0.4.0.5"));
+            project_os_headlines(method, &mut response, false);
+            let versions = match method {
+                "os.version.get" => &response,
+                "os.index" => &response["versions"],
+                _ => &response["os"]["versions"],
+            };
+            assert_eq!(versions, &stored);
+        }
+        assert!(stored["0.4.0.5"].get("headline").is_none());
+        let mut unrelated = stored.clone();
+        project_os_headlines("package.index", &mut unrelated, true);
+        assert_eq!(unrelated, stored);
+    }
+
+    #[test]
     fn headerless_index_queries_preserve_maps_for_cli_promotion() {
         for startwrt in [false, true] {
             for method in ["index", "os.index", "os.version.get"] {
@@ -699,6 +800,7 @@ mod tests {
                     )
                     .unwrap();
                 assert!(!middleware.wire.legacy_os_notes);
+                assert!(!middleware.wire.legacy_os_headlines);
             }
         }
     }
@@ -708,7 +810,7 @@ mod tests {
         let stored = json!({
             "0.4.0.5": {
                 "releaseNotes": { "pl_PL": "Polskie informacje", "en_US": "English notes" },
-                "headline": "A release",
+                "security": true,
             },
             "0.4.0.4": { "releaseNotes": "Legacy notes" },
         });
@@ -731,7 +833,7 @@ mod tests {
                 versions["0.4.0.5"]["releaseNotes"].as_str(),
                 Some("English notes")
             );
-            assert_eq!(versions["0.4.0.5"]["headline"].as_str(), Some("A release"));
+            assert_eq!(versions["0.4.0.5"]["security"].as_bool(), Some(true));
             assert_eq!(
                 versions["0.4.0.4"]["releaseNotes"].as_str(),
                 Some("Legacy notes")

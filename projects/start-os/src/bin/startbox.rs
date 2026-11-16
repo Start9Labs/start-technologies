@@ -1,5 +1,9 @@
 use start_core::bins::MultiExecutable;
 
+// Rust allocations use mimalloc; musl's allocator serializes them on one lock.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn main() {
     start_core::bins::PRODUCT_VERSION
         .set(start_core::bins::startos_version())
