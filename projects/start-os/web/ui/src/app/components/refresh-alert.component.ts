@@ -31,7 +31,18 @@ import { UiUpdateService } from 'src/app/services/ui-update.service'
       <p role="status" aria-live="polite">
         @switch (phase) {
           @case ('ready') {
-            {{ 'User interface synced. Refresh to continue.' | i18n }}
+            {{
+              (state.status === 'reloading'
+                ? 'Loading'
+                : 'User interface synced. Refresh to continue.'
+              ) | i18n
+            }}
+          }
+          @case ('stalled') {
+            {{
+              'Syncing is taking longer than expected. Refresh to try again.'
+                | i18n
+            }}
           }
           @case ('error') {
             {{
@@ -48,7 +59,7 @@ import { UiUpdateService } from 'src/app/services/ui-update.service'
         <button
           tuiButton
           size="s"
-          [disabled]="phase !== 'ready' || ui.busy()"
+          [disabled]="!ui.canRefresh()"
           (click)="ui.refresh()"
         >
           @if (phase === 'syncing' || ui.busy()) {

@@ -1093,4 +1093,5 @@ export default {
   1296: 'Ver registro personalizado',
   1297: 'Personalizado',
   1298: 'Introduce un dominio o una URL',
+  1299: 'La sincronización está tardando más de lo esperado. Actualiza la página para volver a intentarlo.',
 } satisfies i18n

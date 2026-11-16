@@ -1093,4 +1093,5 @@ export default {
   1296: 'Benutzerdefiniertes Register anzeigen',
   1297: 'Benutzerdefiniert',
   1298: 'Domain oder URL eingeben',
+  1299: 'Die Synchronisierung dauert länger als erwartet. Aktualisieren Sie die Seite, um es erneut zu versuchen.',
 } satisfies i18n

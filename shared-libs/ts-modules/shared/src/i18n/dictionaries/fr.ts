@@ -1093,4 +1093,5 @@ export default {
   1296: 'Afficher une bibliothèque personnalisée',
   1297: 'Personnalisée',
   1298: 'Saisissez un domaine ou une URL',
+  1299: 'La synchronisation prend plus de temps que prévu. Rafraîchissez la page pour réessayer.',
 } satisfies i18n
