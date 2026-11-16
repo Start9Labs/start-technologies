@@ -229,29 +229,31 @@ jobs:
           } >> "$GITHUB_OUTPUT"
         shell: bash
 
-      # Compose the GitHub-release body. When S3 is configured, include direct
-      # S3 URLs for every s9pk so users can grab packages that exceeded GitHub's
-      # 2 GiB asset cap (and were therefore omitted from the release assets).
-      # The URL layout mirrors start-cli s9pk publish:
+      # Links only the s9pks too large to attach: S3 copies of attached ones are
+      # garbage-collected once superseded. The URL layout mirrors start-cli s9pk publish:
       #   {S3_S9PKS_BASE_URL}/{package_id}/{version-without-#}/{filename}
       - name: Generate changelog
         run: |
           FIRST_S9PK=$(ls *.s9pk | head -1)
           RELEASE_NOTES=$(start-cli s9pk inspect "$FIRST_S9PK" manifest | jq -r '.releaseNotes | if type == "object" then (.en_US // first(.[]) // "") else . end')
+          S3_ONLY=()
+          for s9pk in *.s9pk; do
+            grep -qxF "$s9pk" .gh_release_files 2>/dev/null || S3_ONLY+=("$s9pk")
+          done
           {
             echo "## What's Changed"
             echo ""
             echo "${RELEASE_NOTES}"
             echo ""
             S3_BASE="${{ inputs.S3_S9PKS_BASE_URL }}"
-            if [ -n "$S3_BASE" ]; then
+            if [ -n "$S3_BASE" ] && [ ${#S3_ONLY[@]} -gt 0 ]; then
               S3_BASE="${S3_BASE%/}"
               PKG_ID="${{ steps.version.outputs.package_id }}"
               PKG_VER="${{ steps.version.outputs.version }}"
               PKG_VER="${PKG_VER#\#}"
               echo "## Downloads"
               echo ""
-              for s9pk in *.s9pk; do
+              for s9pk in "${S3_ONLY[@]}"; do
                 echo "- [${s9pk}](${S3_BASE}/${PKG_ID}/${PKG_VER}/${s9pk})"
               done
               echo ""
