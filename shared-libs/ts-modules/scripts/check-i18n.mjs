@@ -58,7 +58,14 @@ if (errors.length) {
   console.error()
 }
 
-const numericKeys = new Set(english.values())
+const numericKeys = new Set()
+const duplicateIds = new Set()
+for (const id of english.values()) {
+  if (numericKeys.has(id)) duplicateIds.add(id)
+  numericKeys.add(id)
+}
+if (duplicateIds.size)
+  console.error(`Duplicate i18n IDs: ${[...duplicateIds].join(', ')}`)
 const dictErrors = []
 for (const lang of ['de', 'es', 'fr', 'pl']) {
   const entries = dictionaryEntries(
@@ -79,5 +86,5 @@ if (dictErrors.length) {
     console.error(`  ${lang}.ts is missing keys: ${missing.join(', ')}`)
   console.error()
 }
-if (errors.length || dictErrors.length) process.exit(1)
+if (errors.length || dictErrors.length || duplicateIds.size) process.exit(1)
 console.log('All i18n keys are valid.')
