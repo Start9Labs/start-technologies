@@ -27,6 +27,11 @@ export const long = {
 }
 ```
 
+When a reader's language is missing, StartOS and registries show the package's
+default locale: the default language given to `setupI18n` in `startos/i18n`
+(`DEFAULT_LANG`). Set `defaultLocale` in `setupManifest()` to choose a different
+one.
+
 ### How long each one may be
 
 |         | limit           |

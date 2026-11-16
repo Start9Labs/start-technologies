@@ -356,7 +356,7 @@ pub fn display_version_info<T>(params: WithIoFormat<T>, info: Value) -> Result<(
     for (version, info) in &info {
         table.add_row(row![
             &version.to_string(),
-            &info.release_notes.clone().localized(),
+            &info.release_notes.clone().localized(None),
             info.git_hash.as_deref().unwrap_or("N/A"),
             info.security,
             &info.iso.keys().into_iter().join(", "),

@@ -349,11 +349,13 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
     let fixture = fixture().await;
     let mut state = fixture.main.peek().await.into_value();
     state["index"]["description"] = translated("Registry", "Rejestr");
+    state["index"]["defaultLocale"] = json!("pl_PL");
     state["index"]["package"]["categories"] =
         json!({ "tools": { "name": translated("Tools", "Narzędzia") } });
     let public = &mut state["index"]["package"]["packages"]["public"]["versions"]["1.0.0:0"];
     public["description"] = json!({ "short": translated("Short", "Krótki"), "long": "Long" });
     public["releaseNotes"] = translated("Notes", "Notatki");
+    public["defaultLocale"] = json!("en_US");
     public["preDownloadAlert"] = json!({
         "message": translated("Back up", "Zrób kopię"),
         "when": { "sourceVersion": "*" },
@@ -398,9 +400,15 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
     }
     let canonical = mirror(current, None).await.unwrap();
     let english = mirror(current, Some("en_US")).await.unwrap();
-    for absent in ["", "zz_ZZ", "de_DE", "ja_JP"] {
+    assert!(Arc::ptr_eq(
+        &english,
+        &mirror(current, Some("en_GB")).await.unwrap()
+    ));
+    let default_view = mirror(current, Some("zz_ZZ")).await.unwrap();
+    assert!(!Arc::ptr_eq(&english, &default_view));
+    for absent in ["", "de_DE", "ja_JP"] {
         assert!(Arc::ptr_eq(
-            &english,
+            &default_view,
             &mirror(current, Some(absent)).await.unwrap()
         ));
     }
@@ -418,10 +426,10 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
     );
     drop((japanese, reader_english));
     let legacy_polish = mirror(wire("0.4.0.2"), Some("pl_PL")).await.unwrap();
-    for other in [&canonical, &english, &legacy_polish] {
+    for other in [&canonical, &english, &default_view, &legacy_polish] {
         assert!(!Arc::ptr_eq(&polish, other));
     }
-    assert_eq!(mirrors.lock().await.len(), 4);
+    assert_eq!(mirrors.lock().await.len(), 5);
 
     let pointer: JsonPointer = "/index".parse().unwrap();
     let (dump, mut sub) = polish.db.dump_and_sub(pointer.clone()).await;
@@ -449,6 +457,20 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
     assert_eq!(
         english_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
         json!("English")
+    );
+    assert_eq!(
+        english_view["package"]["packages"]["public"]["versions"]["1.0.0:0"]["releaseNotes"],
+        json!("Notes")
+    );
+    let default_view = default_view.db.dump(&pointer).await.value;
+    assert_eq!(default_view["description"], json!("Rejestr"));
+    assert_eq!(
+        default_view["package"]["categories"]["tools"]["name"],
+        json!("Narzędzia")
+    );
+    assert_eq!(
+        default_view["package"]["packages"]["public"]["versions"]["1.0.0:0"]["releaseNotes"],
+        json!("Notes")
     );
     let legacy_view = legacy_polish.db.dump(&pointer).await.value;
     assert_eq!(

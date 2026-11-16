@@ -22,12 +22,20 @@ pub type IndexMirrors =
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IndexView {
     pub wire: WireCompatibility,
-    /// Locale every `LocaleString` is resolved to. Unset keeps every translation.
-    language: Option<InternedString>,
+    /// Unset keeps every translation.
+    language: Option<ViewLanguage>,
+}
+
+/// Translation each `LocaleString` in a view resolves to.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum ViewLanguage {
+    Locale(InternedString),
+    /// Each owner's declared default, for a language matching none in the index.
+    Default,
 }
 
 impl IndexView {
-    /// A language absent from the reader's visible locales resolves to `FALLBACK_LOCALE`.
+    /// A language matching none of the reader's visible locales shares the default view.
     pub fn localized(
         db: &Model<RegistryDatabase>,
         locales: &IndexLocales,
@@ -37,10 +45,13 @@ impl IndexView {
     ) -> Result<Self, Error> {
         let reader = Reader::resolve(db, key)?;
         let visible = locales.visible_to(db, reader.as_ref())?;
-        let language = crate::best_locale(language, visible).unwrap_or(crate::FALLBACK_LOCALE);
+        let language = match crate::best_locale(language, visible) {
+            Some(locale) => ViewLanguage::Locale(InternedString::intern(locale)),
+            None => ViewLanguage::Default,
+        };
         Ok(Self {
             wire,
-            language: Some(InternedString::intern(language)),
+            language: Some(language),
         })
     }
 }
@@ -158,8 +169,10 @@ async fn projected_root(
     icons: &Path,
 ) -> Result<Value, Error> {
     let mut index = visible_index(root.clone().into(), key)?;
-    if let Some(language) = view.language.as_deref() {
-        index.localize_for(language)?;
+    match &view.language {
+        Some(ViewLanguage::Locale(locale)) => index.localize_for(Some(locale))?,
+        Some(ViewLanguage::Default) => index.localize_for(None)?,
+        None => (),
     }
     let mut visible = imbl_value::json!({ "index": index.into_value() });
     view.wire

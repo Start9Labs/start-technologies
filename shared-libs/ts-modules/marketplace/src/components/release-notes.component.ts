@@ -9,7 +9,12 @@ import { MarketplacePkgBase } from '../types'
   template: `
     <header tuiHeader>New in {{ pkg().version }}</header>
     <div
-      [innerHTML]="pkg().releaseNotes | localize | markdown | dompurify"
+      [innerHTML]="
+        pkg().releaseNotes
+          | localize: pkg().defaultLocale
+          | markdown
+          | dompurify
+      "
     ></div>
   `,
   styles: `

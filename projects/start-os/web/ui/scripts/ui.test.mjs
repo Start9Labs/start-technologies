@@ -298,8 +298,8 @@ const catalog = {
   '0.4.0.3': { releaseNotes: 'newer', squashfs },
 }
 const candidates = [
-  { version: '0.4.0.4', notes: 'newest', squashfs },
-  { version: '0.4.0.3', notes: 'newer', squashfs },
+  { version: '0.4.0.4', notes: 'newest', squashfs, defaultLocale: 'pl_PL' },
+  { version: '0.4.0.3', notes: 'newer', squashfs, defaultLocale: 'pl_PL' },
 ]
 const state = version => ({
   registryCache: {},
@@ -485,7 +485,7 @@ function fixture(t, cachedVersion, providers = []) {
       versions = catalog,
       { registry = 'https://registry.test/', status = 'connected' } = {},
     ) {
-      osUpdateCache = { registry, versions, status }
+      osUpdateCache = { registry, versions, defaultLocale: 'pl_PL', status }
       source.next([
         {
           id: ++revision,
@@ -1078,7 +1078,12 @@ test('a slower load cannot replace the running hash or catalog after a registry 
   firstHash.resolve('outdated-response')
   await first
   assert.deepEqual(f.os.updateCandidates(), [
-    { version: '0.4.0.3', notes: 'second registry', squashfs },
+    {
+      version: '0.4.0.3',
+      notes: 'second registry',
+      squashfs,
+      defaultLocale: 'pl_PL',
+    },
   ])
   assert.deepEqual(f.requests, [])
 })
@@ -1143,7 +1148,12 @@ test('strictly newer candidates sort descending; offline cache remains readable;
   assert.equal(f.requests.length, 0)
   await f.load({ '0.4.0.5': { releaseNotes: 'refreshed', squashfs } })
   assert.deepEqual(f.os.updateCandidates(), [
-    { version: '0.4.0.5', notes: 'refreshed', squashfs },
+    {
+      version: '0.4.0.5',
+      notes: 'refreshed',
+      squashfs,
+      defaultLocale: 'pl_PL',
+    },
   ])
 })
 
@@ -1156,7 +1166,12 @@ test('a different image at the installed version is offered and submitted', asyn
   })
   assert.deepEqual(f.os.updateCandidates(), [
     ...candidates,
-    { version: '0.4.0.2', notes: 'next image', squashfs },
+    {
+      version: '0.4.0.2',
+      notes: 'next image',
+      squashfs,
+      defaultLocale: 'pl_PL',
+    },
   ])
 
   await f.load({

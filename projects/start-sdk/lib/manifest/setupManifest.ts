@@ -9,6 +9,7 @@ import { OSVersion } from '../StartSdk'
 import { Dependencies } from '../dependencies'
 import { VersionGraph } from '../version/VersionGraph'
 import sdkPackage from '@start9labs/start-sdk/package.json'
+import { declaredDefaultLang } from '../i18n'
 
 /**
  * Retypes every key the SDK does not define, so declaring one is a compile
@@ -95,6 +96,7 @@ export function buildManifest<
   )
   return {
     ...manifest,
+    defaultLocale: manifest.defaultLocale ?? declaredDefaultLang(),
     dependencies: dependencies.manifestDependencies(),
     gitHash: null,
     osVersion: manifestOsVersion(manifest),

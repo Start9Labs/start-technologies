@@ -5,9 +5,6 @@ use const_format::formatcp;
 
 rust_i18n::i18n!("locales", fallback = ["en_US"]);
 
-/// Locale `t!` resolves a missing translation to; matches the `i18n!` fallback.
-pub const FALLBACK_LOCALE: &str = "en_US";
-
 /// The candidate serving a language: an exact match, else the first with its language code.
 pub fn best_locale<'a>(
     lang: &str,

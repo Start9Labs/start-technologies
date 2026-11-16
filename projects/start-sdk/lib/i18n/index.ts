@@ -14,6 +14,13 @@
 
 type ParamValue = string | number | Date
 
+let i18nDefaultLang: string | undefined
+
+/** The default language given to `setupI18n`, if the package called it. */
+export function declaredDefaultLang(): string | undefined {
+  return i18nDefaultLang
+}
+
 /**
  * The first candidate `Intl` will construct with, or `undefined` for the
  * runtime default — which is always valid. POSIX locale names (`C`, `POSIX`)
@@ -41,6 +48,7 @@ export function setupI18n<
   Dict extends Record<string, number>,
   Translations extends Record<string, Record<number, string>>,
 >(defaultDict: Dict, translations: Translations, defaultLang: string) {
+  i18nDefaultLang = defaultLang
   const lang = process.env.LANG?.replace(/\.UTF-8$/, '') || defaultLang
 
   // Convert locale format from en_US to en-US for Intl APIs, and settle on one

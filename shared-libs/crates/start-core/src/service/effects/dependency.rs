@@ -538,7 +538,7 @@ pub async fn check_dependencies(
                 .collect();
             results.push(CheckDependenciesResult {
                 package_id,
-                title: title.map(|t| t.localized()),
+                title: title.map(|t| t.localized(None)),
                 installed_version: None,
                 satisfies: BTreeSet::new(),
                 is_running: false,
@@ -550,6 +550,7 @@ pub async fn check_dependencies(
         let manifest = package.as_state_info().as_manifest(ManifestPreference::New);
         let installed_version = manifest.as_version().de()?.into_version();
         let satisfies = manifest.as_metadata().as_satisfies().de()?;
+        let default_locale = manifest.as_metadata().as_default_locale().de()?;
         let installed_version = Some(installed_version.clone().into());
         let is_running = package
             .as_status_info()
@@ -564,7 +565,7 @@ pub async fn check_dependencies(
             .collect();
         results.push(CheckDependenciesResult {
             package_id,
-            title: title.map(|t| t.localized()),
+            title: title.map(|t| t.localized(default_locale.as_deref())),
             installed_version,
             satisfies,
             is_running,

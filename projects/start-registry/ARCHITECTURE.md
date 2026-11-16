@@ -64,10 +64,14 @@ may select `/index` or any descendant; omitting it or passing `null` selects `/i
 `guid`. Connecting to `/rpc/v2/<guid>` streams revisions relative to the selected subtree. This
 contract also applies to ordinary calls on the shared WebSocket.
 
-`language` resolves every `LocaleString` in the view to one translation, with
-`LocaleString::localize_for`'s fallback. It selects a locale that appears in the
-reader's visible index (`best_locale`); any other language receives the `en_US`
-view, so requests cannot create views beyond the index's own languages.
+`language` resolves every `LocaleString` in the view with `LocaleString::localize_for`:
+the exact or same-language translation, else the owner's declared default locale
+(`PackageMetadata::default_locale` for package text, `FullIndex::default_locale` for
+registry text, set by `info set-default-locale`), else an arbitrary stored one. The
+requested language is first matched against the locales in the reader's visible index
+(`best_locale`); a language matching none of them shares the default view, where
+every string resolves to its owner's default, so requests cannot create views beyond
+the index's own languages.
 `IndexLocaleTracker` (`registry/locales.rs`) holds those locales per package. It
 captures the database and locale metadata together, recomputing the locales when
 `/index` changes. A subscription with `language` waits for a snapshot at or after its initiating

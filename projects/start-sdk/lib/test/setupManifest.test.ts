@@ -2,6 +2,7 @@ import { buildManifest, setupManifest } from '../manifest/setupManifest'
 import { Dependencies, Dependency } from '../dependencies'
 import { VersionGraph } from '../version/VersionGraph'
 import { VersionInfo } from '../version/VersionInfo'
+import { setupI18n } from '../i18n'
 
 const versions = VersionGraph.of({
   current: VersionInfo.of<'1.0.0:0'>({
@@ -124,4 +125,21 @@ test('an explicit compatibility override cannot understate shared-volume support
       Dependencies.of(),
     ).osVersion,
   ).toBe('0.4.3')
+})
+
+test('the default locale follows setupI18n unless the manifest declares one', () => {
+  expect(
+    buildManifest(versions, manifest(), Dependencies.of()).defaultLocale,
+  ).toBeUndefined()
+  setupI18n({}, {}, 'de_DE')
+  expect(
+    buildManifest(versions, manifest(), Dependencies.of()).defaultLocale,
+  ).toBe('de_DE')
+  expect(
+    buildManifest(
+      versions,
+      setupManifest({ ...manifest(), defaultLocale: 'fr_FR' }),
+      Dependencies.of(),
+    ).defaultLocale,
+  ).toBe('fr_FR')
 })

@@ -63,6 +63,9 @@ rpc_toolkit::reflect_ts!(RegistryCache);
 pub struct OsUpdateCache {
     pub registry: Url,
     pub versions: BTreeMap<exver::Version, OsVersionInfo>,
+    /// `RegistryInfo::default_locale`, known when the source is also a package registry.
+    #[serde(default)]
+    pub default_locale: Option<InternedString>,
     #[serde(default)]
     pub status: RegistryStatus,
     /// Failure of the latest synchronization attempt; absent while connecting or connected.
@@ -405,6 +408,7 @@ fn set_status(
                         *cache = Some(OsUpdateCache {
                             registry: url.clone(),
                             versions: BTreeMap::new(),
+                            default_locale: None,
                             status,
                             error: error.map(str::to_owned),
                         });
@@ -481,19 +485,21 @@ fn publish_snapshot(
                 None,
                 Some(&device.os.platform),
             )?)?;
-            let name = db
+            let info = db
                 .as_public()
                 .as_registry_cache()
                 .as_idx(url)
-                .map(|cache| cache.as_info().de().map(|info| info.name))
-                .transpose()?
-                .flatten();
+                .map(|cache| cache.as_info().de())
+                .transpose()?;
+            let (name, default_locale) =
+                info.map_or((None, None), |info| (info.name, info.default_locale));
             crate::update::security::notify_updates(db, url, name, index.de()?)?;
             db.as_public_mut()
                 .as_os_update_cache_mut()
                 .ser(&Some(OsUpdateCache {
                     registry: url.clone(),
                     versions,
+                    default_locale,
                     status: RegistryStatus::Connected,
                     error: None,
                 }))?;
