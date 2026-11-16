@@ -1316,6 +1316,13 @@ pub async fn add_forward(
         )
     })?;
     let source = ForwardAddress::from(SocketAddrV4::new(external_ip, external_port));
+    let transport = if sni.is_empty() {
+        Transport::default()
+    } else {
+        Transport::tcp()
+    };
+    ctx.check_host_ports(source.address, count, &transport)
+        .await?;
 
     let covers_80 =
         external_port <= 80 && 80 <= external_port.saturating_add(count.saturating_sub(1));
@@ -1705,6 +1712,19 @@ async fn set_forward_enabled_at(
     hostname: Option<String>,
 ) -> Result<(), Error> {
     let _guard = ctx.forward_write_lock.lock().await;
+    if enabled {
+        let span = ctx
+            .db
+            .peek()
+            .await
+            .as_port_forwards()
+            .de()?
+            .0
+            .get(&source)
+            .map_or(1, |forward| forward.port_span());
+        ctx.check_host_ports(source.address, span, &source.transport)
+            .await?;
+    }
     let toggle = ctx
         .db
         .mutate(|db| update_forward_enabled(db, source.clone(), enabled, hostname.as_deref()))

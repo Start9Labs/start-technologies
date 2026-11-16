@@ -55,6 +55,13 @@ pub struct TunnelConfig {
     pub tunnel_listen: Option<SocketAddr>,
     #[arg(short = 'd', long = "datadir", help = "help.arg.data-directory")]
     pub datadir: Option<PathBuf>,
+    #[arg(
+        long = "reserved-ports",
+        value_delimiter = ',',
+        help = "help.arg.tunnel-reserved-ports"
+    )]
+    #[serde(default)]
+    pub reserved_ports: Vec<u16>,
 }
 impl ContextConfig for TunnelConfig {
     fn next(&mut self) -> Option<PathBuf> {
@@ -63,6 +70,9 @@ impl ContextConfig for TunnelConfig {
     fn merge_with(&mut self, other: Self) {
         self.tunnel_listen = self.tunnel_listen.take().or(other.tunnel_listen);
         self.datadir = self.datadir.take().or(other.datadir);
+        if self.reserved_ports.is_empty() {
+            self.reserved_ports = other.reserved_ports;
+        }
     }
 }
 
@@ -173,6 +183,7 @@ async fn neigh_proxy(add: bool, addr: Ipv6Addr, iface: &str) {
 
 pub struct TunnelContextSeed {
     pub listen: SocketAddr,
+    pub reserved_ports: BTreeSet<u16>,
     pub db: TypedPatchDb<TunnelDatabase>,
     pub datadir: PathBuf,
     pub rpc_continuations: RpcContinuations,
@@ -434,6 +445,7 @@ impl TunnelContext {
         let ctx = Self(
             Arc::new(TunnelContextSeed {
                 listen,
+                reserved_ports: config.reserved_ports.iter().copied().collect(),
                 db,
                 datadir,
                 rpc_continuations: RpcContinuations::new(),

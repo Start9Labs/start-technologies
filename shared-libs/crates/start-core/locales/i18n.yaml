@@ -4265,6 +4265,13 @@ tunnel.api.invalid-endpoint:
   fr_FR: 'Saisissez une adresse IPv4, IPv6 ou un nom DNS sans schéma, port ni chemin'
   pl_PL: 'Wprowadź adres IPv4, IPv6 lub nazwę DNS bez schematu, portu ani ścieżki'
 
+tunnel.forward.host-port-reserved:
+  en_US: "This port range includes the WireGuard port, the API listen port, or a port listed in reserved-ports."
+  de_DE: "Dieser Portbereich enthält den WireGuard-Port, den API-Port oder einen in reserved-ports aufgeführten Port."
+  es_ES: "Este rango incluye el puerto de WireGuard, el puerto de la API o un puerto indicado en reserved-ports."
+  fr_FR: "Cette plage inclut le port WireGuard, le port de l'API ou un port indiqué dans reserved-ports."
+  pl_PL: "Ten zakres obejmuje port WireGuard, port API lub port wymieniony w reserved-ports."
+
 util.crypto.invalid-backup-key:
   en_US: "The wrapped backup key is invalid or could not be authenticated."
   de_DE: "Der verschlüsselte Sicherungsschlüssel ist ungültig oder konnte nicht authentifiziert werden."
@@ -5462,6 +5469,13 @@ help.arg.tunnel-listen-address:
   es_ES: "Dirección en la que escucha el túnel"
   fr_FR: "Adresse d'écoute du tunnel"
   pl_PL: "Adres nasłuchiwania tunelu"
+
+help.arg.tunnel-reserved-ports:
+  en_US: "Ports that published ports may not use"
+  de_DE: "Ports, die veröffentlichte Ports nicht verwenden dürfen"
+  es_ES: "Puertos que los puertos publicados no pueden usar"
+  fr_FR: "Ports que les ports publiés ne peuvent pas utiliser"
+  pl_PL: "Porty, których opublikowane porty nie mogą używać"
 
 help.arg.update-target-version:
   en_US: "Target version for update"

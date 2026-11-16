@@ -28,6 +28,22 @@ Transport-specific IPv4 rows use `tcp@IP:PORT` or `udp@IP:PORT` as their CLI sou
 
 Deleting a device or demoting it to a client clears all of its published ports (manual and automatic, IPv4 and IPv6). Turning off **auto-publish** for a device clears its automatic ports but leaves any you added by hand.
 
+## Reserved ports
+
+StartTunnel never publishes its own WireGuard port (UDP `51820`) over IPv4. A manual port that includes it is rejected, and a device's automatic request for it is refused.
+
+To keep other ports on the host from being published — the one your SSH server listens on, for example — list them under `reserved-ports` in `/etc/start-tunneld`, creating the file if it does not exist:
+
+```json
+{
+  "reserved-ports": [22, 2222]
+}
+```
+
+Then restart the `start-tunneld` service (`systemctl restart start-tunneld`). A reserved port is refused for both TCP and UDP on every public IPv4, whether you add it by hand, a device requests it, or it is an SNI hostname's port. IPv6 pinholes are unaffected, since they open a port on the device's own address.
+
+A manual port already published on a newly reserved port stays until you disable or remove it, and cannot be enabled again. An automatic one is refused at its next renewal and expires.
+
 ## Add a port manually
 
 1. In StartTunnel, navigate to `Published Ports` and click "Add".

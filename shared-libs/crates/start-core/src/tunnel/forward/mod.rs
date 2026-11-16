@@ -11,12 +11,57 @@ pub mod pinhole;
 pub mod sni;
 
 use std::collections::BTreeSet;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
 
+use crate::net::transport::{Transport, TransportProtocol};
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::PortForward;
+use crate::tunnel::web::listener_holds;
 use crate::tunnel::wg6::host_v6;
+
+/// Whether `count` ports from `source` include one kept for the host.
+fn host_holds(
+    rpc: SocketAddr,
+    reserved: &BTreeSet<u16>,
+    wg_port: u16,
+    source: SocketAddrV4,
+    count: u16,
+    transport: &Transport,
+) -> bool {
+    let span = source.port()..=source.port().saturating_add(count.saturating_sub(1));
+    let protocols = transport.protocols();
+    reserved.range(span.clone()).next().is_some()
+        || protocols.contains(&TransportProtocol::Udp) && span.contains(&wg_port)
+        || protocols.contains(&TransportProtocol::Tcp) && listener_holds(rpc, source, count)
+}
+
+impl TunnelContext {
+    /// Rejects a published port that would take the WireGuard port, the API
+    /// listener, or a configured reserved port.
+    pub(crate) async fn check_host_ports(
+        &self,
+        source: SocketAddrV4,
+        count: u16,
+        transport: &Transport,
+    ) -> Result<(), Error> {
+        let wg_port = self.db.peek().await.as_wg().as_port().de()?;
+        if host_holds(
+            self.listen,
+            &self.reserved_ports,
+            wg_port,
+            source,
+            count,
+            transport,
+        ) {
+            return Err(Error::new(
+                eyre!(t!("tunnel.forward.host-port-reserved")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        Ok(())
+    }
+}
 
 /// Tear down a device's inbound exposure — v4 DNAT forwards, SNI routes, and v6
 /// pinholes — when it loses the right to it: a device deleted, demoted to a
@@ -124,6 +169,33 @@ mod tests {
 
     use super::*;
     use crate::tunnel::db::SniRoute;
+
+    #[test]
+    fn host_ports_are_kept_from_forwards() {
+        let reserved = BTreeSet::from([22]);
+        let holds = |rpc: &str, source: &str, count, transport: &Transport| {
+            host_holds(
+                rpc.parse().unwrap(),
+                &reserved,
+                51820,
+                source.parse().unwrap(),
+                count,
+                transport,
+            )
+        };
+        let public = "0.0.0.0:5960";
+        let both = Transport::default();
+        assert!(holds(public, "203.0.113.4:22", 1, &Transport::tcp()));
+        assert!(holds(public, "203.0.113.4:22", 1, &Transport::udp()));
+        assert!(holds(public, "203.0.113.4:20", 3, &both));
+        assert!(!holds(public, "203.0.113.4:20", 2, &both));
+        assert!(holds(public, "203.0.113.4:51820", 1, &both));
+        assert!(holds(public, "203.0.113.4:51820", 1, &Transport::udp()));
+        assert!(!holds(public, "203.0.113.4:51820", 1, &Transport::tcp()));
+        assert!(holds(public, "203.0.113.4:5960", 1, &Transport::tcp()));
+        assert!(!holds(public, "203.0.113.4:5960", 1, &Transport::udp()));
+        assert!(!holds("127.0.59.60:5960", "203.0.113.4:5960", 1, &both));
+    }
 
     fn dnat(target: &str, auto: bool) -> PortForward {
         PortForward::Dnat {

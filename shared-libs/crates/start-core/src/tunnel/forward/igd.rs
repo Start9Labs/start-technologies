@@ -34,7 +34,6 @@ use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::{PortForward, PortForwards};
 use crate::tunnel::forward::address::ForwardAddress;
 use crate::tunnel::forward::lease::{self, LeaseKey};
-use crate::tunnel::web::{WebserverInfo, listener_holds};
 use crate::tunnel::wg::WIREGUARD_INTERFACE_NAME;
 
 /// Run the IGD server (SSDP responder + HTTP control server) for the life of
@@ -303,10 +302,21 @@ pub(super) async fn apply_peer_forward_range(
     {
         return Err(718); // ConflictInMappingEntry — port 80 owned by the redirect
     }
-    let peek = ctx.db.peek().await;
-    let web = peek.as_webserver().de().map_err(|_| 501u16)?;
-    let wg_port = peek.as_wg().as_port().de().map_err(|_| 501u16)?;
-    if own_listener_holds(&web, ctx.listen, wg_port, source.address, count, transport) {
+    let web = ctx
+        .db
+        .peek()
+        .await
+        .as_webserver()
+        .de()
+        .map_err(|_| 501u16)?;
+    if transport == TransportProtocol::Tcp && web.reserves_plain_forward(source.address, count) {
+        return Err(718);
+    }
+    if ctx
+        .check_host_ports(source.address, count, &source.transport)
+        .await
+        .is_err()
+    {
         return Err(718);
     }
     let existing = current_forward(ctx, source.clone()).await;
@@ -459,25 +469,6 @@ pub(super) async fn apply_peer_forward_range(
     Ok(())
 }
 
-/// Whether `count` ports from `source` include one this tunnel listens on.
-fn own_listener_holds(
-    web: &WebserverInfo,
-    rpc: SocketAddr,
-    wg_port: u16,
-    source: SocketAddrV4,
-    count: u16,
-    transport: TransportProtocol,
-) -> bool {
-    match transport {
-        TransportProtocol::Tcp => {
-            web.reserves_plain_forward(source, count) || listener_holds(rpc, source, count)
-        }
-        TransportProtocol::Udp => {
-            listener_holds((Ipv4Addr::UNSPECIFIED, wg_port).into(), source, count)
-        }
-    }
-}
-
 pub(super) async fn current_forward(
     ctx: &TunnelContext,
     source: ForwardAddress,
@@ -571,31 +562,6 @@ pub(in crate::tunnel) async fn prefix_for(ctx: &TunnelContext, target_ip: &Ipv4A
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn automatic_forwards_leave_the_tunnel_listeners() {
-        let web = WebserverInfo::default();
-        let rpc: SocketAddr = "0.0.0.0:5960".parse().unwrap();
-        let holds = |source: &str, count, transport| {
-            own_listener_holds(&web, rpc, 51820, source.parse().unwrap(), count, transport)
-        };
-        assert!(holds("203.0.113.4:51820", 1, TransportProtocol::Udp));
-        assert!(holds("203.0.113.4:51800", 21, TransportProtocol::Udp));
-        assert!(!holds("203.0.113.4:51800", 20, TransportProtocol::Udp));
-        assert!(!holds("203.0.113.4:51820", 1, TransportProtocol::Tcp));
-        assert!(holds("203.0.113.4:5960", 1, TransportProtocol::Tcp));
-        assert!(!holds("203.0.113.4:5960", 1, TransportProtocol::Udp));
-
-        let loopback = crate::tunnel::TUNNEL_DEFAULT_LISTEN;
-        assert!(!own_listener_holds(
-            &web,
-            loopback,
-            51820,
-            "203.0.113.4:5960".parse().unwrap(),
-            1,
-            TransportProtocol::Tcp,
-        ));
-    }
 
     fn forwards(entries: &[(&str, &str, bool)]) -> PortForwards {
         let mut forwards = PortForwards(Default::default());

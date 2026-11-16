@@ -263,6 +263,9 @@ impl GatewayBackend for TunnelContext {
         hostnames: &[String],
         lifetime: Option<u32>,
     ) -> Result<(), u8> {
+        self.check_host_ports(source, 1, &Transport::tcp())
+            .await
+            .map_err(|_| crate::net::port_map::pcp::RESULT_NO_RESOURCES)?;
         self.persist_sni_forward(source, target, hostnames, lifetime, true, None)
             .await
     }
