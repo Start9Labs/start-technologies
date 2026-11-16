@@ -3068,6 +3068,8 @@ const { MarketplaceControlsComponent: Controls } =
   await import('src/app/routes/portal/routes/marketplace/components/controls.component')
 const { MarketplaceService } =
   await import('src/app/services/marketplace.service')
+const { ConnectionService } =
+  await import('src/app/services/connection.service')
 
 const pkg = {
   id: 'hello-world',
@@ -4045,6 +4047,7 @@ test('a late registry cache update cannot restore a removed registry', async t =
       { provide: StorageService, useValue: { get: () => null } },
       { provide: PackageIconService, useValue: {} },
       { provide: ErrorService, useValue: { handleError: assert.fail } },
+      { provide: ConnectionService, useValue: of(true) },
       {
         provide: ApiService,
         useValue: {
@@ -4091,6 +4094,53 @@ test('a late registry cache update cannot restore a removed registry', async t =
   await new Promise(setImmediate)
   assert.deepEqual(await firstValueFrom(service.registries$), [])
   assert.deepEqual(writes, [])
+})
+
+test('cached registry errors read as connecting until the server connects', async t => {
+  const { Exver } = await import('@start9labs/shared')
+  const { StorageService } = await import('src/app/services/storage.service')
+  const { PackageIconService } =
+    await import('src/app/services/package-icon.service')
+  const connected = new BehaviorSubject(false)
+  const cache = new BehaviorSubject({
+    'https://registry.test/': {
+      status: 'error',
+      error: 'connection timed out',
+      info: { name: 'Test' },
+      packages: {},
+    },
+  })
+  const registries = of({ 'https://registry.test': 'Test' })
+  const injector = createEnvironmentInjector(
+    [
+      {
+        provide: PatchDB,
+        useValue: {
+          watch$: (...path) =>
+            path[0] === 'registryCache' ? cache : registries,
+        },
+      },
+      { provide: Exver, useValue: {} },
+      { provide: StorageService, useValue: { get: () => null } },
+      { provide: PackageIconService, useValue: {} },
+      { provide: ApiService, useValue: {} },
+      { provide: ConnectionService, useValue: connected },
+    ],
+    null,
+  )
+  t.after(() => injector.destroy())
+  const service = runInInjectionContext(
+    injector,
+    () => new MarketplaceService(),
+  )
+  const [registry] = await firstValueFrom(service.registries$)
+  assert.equal(registry.status, 'connecting')
+  assert.equal(registry.error, null)
+  assert.deepEqual(await firstValueFrom(service.requestErrors$), [])
+  connected.next(true)
+  assert.deepEqual(await firstValueFrom(service.requestErrors$), [
+    'https://registry.test/',
+  ])
 })
 
 test('registry removal uses the authoritative endpoint, clears a matching selected registry, and reports unoffered keys', async () => {
@@ -4319,6 +4369,7 @@ function marketplaceFixture(t, entries = {}) {
       provide: PackageIconService,
       useFactory: () => new ProductionPackageIconService(),
     },
+    { provide: ConnectionService, useValue: of(true) },
     { provide: MarketplaceService, useFactory: () => new MarketplaceService() },
     {
       provide: ApiService,

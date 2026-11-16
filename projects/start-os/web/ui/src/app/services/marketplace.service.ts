@@ -36,6 +36,7 @@ import {
   switchMap,
 } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { ConnectionService } from 'src/app/services/connection.service'
 import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { StorageService } from 'src/app/services/storage.service'
@@ -50,7 +51,21 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
 
-  private readonly registryCache$ = this.patch.watch$('registryCache')
+  private readonly registryCache$ = combineLatest([
+    this.patch.watch$('registryCache'),
+    inject(ConnectionService),
+  ]).pipe(
+    map(([cache, connected]) =>
+      connected
+        ? cache
+        : Object.fromEntries(
+            Object.entries(cache).map(([url, entry]) => [
+              url,
+              { ...entry, status: 'connecting' as const, error: null },
+            ]),
+          ),
+    ),
+  )
 
   /** Lists defaults in `defaultRegistries` order, then custom registries in saved order. */
   readonly registries$: Observable<
