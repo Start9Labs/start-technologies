@@ -48,8 +48,9 @@ boundary(
     'ExverComparesPipe',
     'LeafProgressPipe',
   ],
-  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const convertBytes = value => String(value); export const getErrorMessage = error => error.message; export const leafProgress = progress => progress; ' +
+  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const isDefaultRegistry = url => Object.values(defaultRegistries).some(known => defaultUrl(known, url)); export const convertBytes = value => String(value); export const getErrorMessage = error => error.message; export const leafProgress = progress => progress; ' +
     `export { sameUrl, registryUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
+    `import { sameUrl as defaultUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
     `export { legacyDatabaseSubscription } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/services/database-subscription.ts', import.meta.url).href)};` +
     `export { withAbortSignal } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/with-abort.ts', import.meta.url).href)};`,
 )
@@ -4446,6 +4447,21 @@ test('registry availability distinguishes first sync, empty success and cached r
   assert.equal(rows.at(-1)[0].status, 'connecting')
   assert.deepEqual(errors.at(-1), [])
   assert.deepEqual(f.queries, [])
+})
+
+test('saved registries list the defaults first, in their declared order', t => {
+  const f = marketplaceFixture(t)
+  const rows = f.watch(f.service.registries$)
+  f.replace('/serverInfo/registries', {
+    'https://alpha.test/': 'Alpha',
+    'https://community.test/': 'Community',
+    'https://custom.test/': 'Custom',
+    'https://registry.test/': 'Start9',
+  })
+  assert.deepEqual(
+    rows.at(-1).map(row => row.name),
+    ['Start9', 'Community', 'Alpha', 'Custom'],
+  )
 })
 
 test('registry failures project exact details to both the current catalog and management rows', t => {
