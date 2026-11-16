@@ -103,7 +103,7 @@ impl<Fs: FileSystem> FileSystem for IdMapped<Fs> {
             return self.filesystem.mount(mp, mount_type).await;
         }
 
-        tokio::fs::create_dir_all(mp).await?;
+        self.filesystem.pre_mount(mp, mount_type).await?;
 
         let staging = TmpMountGuard::mount(&self.filesystem, mount_type).await?;
 

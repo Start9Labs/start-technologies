@@ -29,6 +29,35 @@ async fn recursive_bind_cache_preserves_tree_and_access_policy() {
 }
 
 #[tokio::test]
+async fn target_preparation_replaces_the_previous_leaf_kind() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("source-file");
+    let folder = directory.path().join("source-directory");
+    let target = directory.path().join("target");
+    std::fs::write(&file, b"source").unwrap();
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::create_dir(&target).unwrap();
+    Bind::new(&file)
+        .with_type(FileType::File)
+        .pre_mount(&target, ReadOnly)
+        .await
+        .unwrap();
+    assert!(target.is_file());
+    Bind::new(&folder)
+        .pre_mount(&target, ReadOnly)
+        .await
+        .unwrap();
+    assert!(target.is_dir());
+    Bind::new(&file)
+        .with_type(FileType::Infer)
+        .pre_mount(&target, ReadOnly)
+        .await
+        .unwrap();
+    assert!(target.is_file());
+    assert_eq!(std::fs::read(&file).unwrap(), b"source");
+}
+
+#[tokio::test]
 #[ignore = "requires exclusive managed guest with native mount/namespace privileges"]
 async fn recursive_readonly_bind_preserves_source_and_retires_nested_mounts() {
     let directory = tempfile::tempdir().unwrap();

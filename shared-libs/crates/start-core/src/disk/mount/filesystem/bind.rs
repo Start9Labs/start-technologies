@@ -67,13 +67,14 @@ impl<Src: AsRef<Path> + Send + Sync> FileSystem for Bind<Src> {
     }
     async fn pre_mount(&self, mountpoint: &Path, mount_type: MountType) -> Result<(), Error> {
         let from_meta = tokio::fs::metadata(&self.src).await.ok();
-        let to_meta = tokio::fs::metadata(&mountpoint).await.ok();
+        let mut to_meta = tokio::fs::metadata(&mountpoint).await.ok();
         if matches!(self.filetype, FileType::File)
             || (matches!(self.filetype, FileType::Infer)
                 && from_meta.as_ref().map_or(false, |m| m.is_file()))
         {
             if to_meta.as_ref().map_or(false, |m| m.is_dir()) {
                 tokio::fs::remove_dir(mountpoint).await?;
+                to_meta = None;
             }
             if from_meta.is_none() && mount_type != MountType::ReadOnly {
                 create_file(self.src.as_ref()).await?.sync_all().await?;
@@ -84,6 +85,7 @@ impl<Src: AsRef<Path> + Send + Sync> FileSystem for Bind<Src> {
         } else {
             if to_meta.as_ref().map_or(false, |m| m.is_file()) {
                 tokio::fs::remove_file(mountpoint).await?;
+                to_meta = None;
             }
             if from_meta.is_none() && mount_type != MountType::ReadOnly {
                 tokio::fs::create_dir_all(self.src.as_ref()).await?;

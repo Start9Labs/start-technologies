@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "unmount_tests.rs"]
+mod tests;
+
 use std::path::Path;
 
 use tracing::instrument;
@@ -78,6 +82,8 @@ pub async fn sync_directory<P: AsRef<Path>>(path: P) -> Result<(), Error> {
     Ok(())
 }
 
+/// Preserves source peers while retiring the owned attachment.
+/// The caller excludes replacement mounts through retirement.
 #[instrument(skip_all)]
 pub async fn unmount<P: AsRef<Path>>(mountpoint: P, lazy: bool) -> Result<(), Error> {
     unmount_command(mountpoint.as_ref(), unmount_options(lazy)).await
@@ -88,9 +94,6 @@ pub async fn unmount<P: AsRef<Path>>(mountpoint: P, lazy: bool) -> Result<(), Er
 #[instrument(skip_all)]
 pub async fn unmount_tree<P: AsRef<Path>>(mountpoint: P, lazy: bool) -> Result<(), Error> {
     let mountpoint = mountpoint.as_ref();
-    if is_mountpoint(mountpoint).await? {
-        super::filesystem::syscall::make_tree_private(mountpoint)?;
-    }
     let mut command = unmount_options(lazy);
     command.arg("--recursive");
     unmount_command(mountpoint, command).await
@@ -110,6 +113,9 @@ async fn unmount_command(
     mut command: tokio::process::Command,
 ) -> Result<(), Error> {
     tracing::debug!("Unmounting {}.", mountpoint.display());
+    if is_mountpoint(mountpoint).await? {
+        super::filesystem::syscall::make_tree_private(mountpoint)?;
+    }
     match command
         .arg("--")
         .arg(mountpoint)

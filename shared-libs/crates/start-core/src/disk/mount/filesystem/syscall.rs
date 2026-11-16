@@ -76,11 +76,15 @@ fn check(ret: i64, what: &'static str) -> Result<(), Error> {
 /// — a detached clone of the mount at `path` (its submounts too when
 /// `recursive`).
 pub fn open_tree_clone(path: &Path, recursive: bool) -> Result<OwnedFd, Error> {
-    let p = cstr_path(path)?;
     let mut flags = OPEN_TREE_CLOEXEC | OPEN_TREE_CLONE;
     if recursive {
         flags |= AT_RECURSIVE as libc::c_uint;
     }
+    open_tree(path, flags)
+}
+
+fn open_tree(path: &Path, flags: libc::c_uint) -> Result<OwnedFd, Error> {
+    let p = cstr_path(path)?;
     let r = unsafe { libc::syscall(libc::SYS_open_tree, AT_FDCWD, p.as_ptr(), flags) };
     fd_from_raw(r, "open_tree")
 }
@@ -285,7 +289,7 @@ fn set_private(fd: BorrowedFd) -> Result<(), Error> {
 
 /// Isolates an owned attached tree before retirement.
 pub fn make_tree_private(path: &Path) -> Result<(), Error> {
-    let mount = open_beneath(path, Path::new(""))?;
+    let mount = open_tree(path, OPEN_TREE_CLOEXEC)?;
     set_private(mount.as_fd())
 }
 
