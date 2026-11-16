@@ -1,4 +1,4 @@
-import { computed, inject, Service, signal } from '@angular/core'
+import { computed, DestroyRef, inject, Service, signal } from '@angular/core'
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop'
 import { SwUpdate } from '@angular/service-worker'
 import { WA_WINDOW } from '@ng-web-apis/common'
@@ -30,6 +30,9 @@ type UiUpdateState =
     }
   | { status: 'error'; error: string | null }
 
+/** The worker can be stopped mid-operation, losing the event that would settle a sync. */
+const SYNC_DEADLINE_MS = 60_000
+
 @Service()
 export class UiUpdateService {
   private readonly updates = inject(SwUpdate)
@@ -46,6 +49,10 @@ export class UiUpdateService {
     shareReplay({ bufferSize: 1, refCount: true }),
   )
   private readonly current = signal<UiUpdateState>({ status: 'idle' })
+  private deadline?: ReturnType<typeof setTimeout>
+  private readonly cleanup = inject(DestroyRef).onDestroy(() =>
+    clearTimeout(this.deadline),
+  )
 
   readonly state = this.current.asReadonly()
   readonly busy = computed(() =>
@@ -157,10 +164,17 @@ export class UiUpdateService {
 
   private transition(state: UiUpdateState): void {
     if (this.state().status === 'reloading') return
+    clearTimeout(this.deadline)
     this.current.set(state)
+    if (state.status === 'checking' || state.status === 'updating')
+      this.deadline = setTimeout(
+        () => this.transition({ status: 'ready' }),
+        SYNC_DEADLINE_MS,
+      )
   }
 
   private reloadPage(): void {
+    clearTimeout(this.deadline)
     this.current.set({ status: 'reloading' })
     this.win.location.reload()
   }

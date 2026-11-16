@@ -809,6 +809,38 @@ test('a retry syncs matching server/UI versions without reloading on no-new-vers
   assert.equal(f.reloads, 1)
 })
 
+for (const stalled of ['checking', 'updating']) {
+  test(`a sync the worker never settles offers Refresh after its deadline: ${stalled}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const f = uiFixture(t)
+    await f.rebuild()
+    if (stalled === 'updating') {
+      t.mock.timers.tick(30_000)
+      f.events.next(detected)
+    }
+    t.mock.timers.tick(59_999)
+    assert.equal(f.ui.state().status, stalled)
+    f.ui.refresh()
+    assert.equal(f.reloads, 0)
+    t.mock.timers.tick(1)
+    assert.equal(f.ui.state().status, 'ready')
+    f.ui.refresh()
+    assert.equal(f.reloads, 1)
+  })
+}
+
+test('a worker report after the sync deadline still decides the outcome', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = uiFixture(t)
+  await f.rebuild()
+  t.mock.timers.tick(60_000)
+  assert.equal(f.ui.state().status, 'ready')
+  f.events.next(failed)
+  assert.equal(f.ui.state().status, 'error')
+  f.ui.refresh()
+  assert.equal(f.reloads, 0)
+})
+
 test('Refresh before sync completion never queues a reload', async t => {
   const f = uiFixture(t)
   f.ui.refresh()
