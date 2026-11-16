@@ -10,7 +10,7 @@ import {
   RegistryStatePipe,
   isRegistryLoading,
 } from '@start9labs/marketplace'
-import { i18nPipe } from '@start9labs/shared'
+import { i18nPipe, isDefaultRegistry } from '@start9labs/shared'
 import {
   TuiButton,
   TuiCell,
@@ -70,46 +70,47 @@ interface UpdatesData {
       }
     </ng-container>
     <aside class="g-aside">
-      @if ((data()?.hosts || []).length > 2) {
-        <h4 tuiTitle>{{ 'Default Registries' | i18n }}</h4>
-      }
-      @for (registry of data()?.hosts; track registry.url) {
-        @if ($index === 2 && (data()?.hosts || []).length > 2) {
-          <h4 tuiTitle>{{ 'Custom Registries' | i18n }}</h4>
+      @for (group of groups(); track group.title) {
+        @if (group.title) {
+          <h4 tuiTitle>{{ group.title | i18n }}</h4>
         }
-        <button
-          tuiCell
-          [class.g-secondary]="current()?.url !== registry.url"
-          (click)="selectedRegistry.set(registry.url)"
-        >
-          <span tuiAvatar appearance="action-grayscale">
-            <img [storeIcon]="registry.url" />
-          </span>
-          <span tuiTitle>
-            <b tuiFade>{{ registry.name }}</b>
-            <span tuiSubtitle tuiFade>{{ clear(registry.url) }}</span>
-          </span>
-          @if (
-            (
-              data()?.marketplace?.[registry.url]?.packages || []
-              | filterUpdates: data()?.localPkgs : data()?.hidden
-            ).length;
-            as length
-          ) {
-            <tui-badge-notification appUpdatesCount>
-              {{ length }}
-            </tui-badge-notification>
-          }
-          @if (registry.status === 'error') {
-            <tui-icon
-              icon="@tui.triangle-alert"
-              class="g-warning"
-              role="img"
-              [attr.aria-label]="(registry.status | registryState).label | i18n"
-              [attr.aria-hidden]="false"
-            />
-          }
-        </button>
+        @for (registry of group.hosts; track registry.url) {
+          <button
+            tuiCell
+            [class.g-secondary]="current()?.url !== registry.url"
+            (click)="selectedRegistry.set(registry.url)"
+          >
+            <span tuiAvatar appearance="action-grayscale">
+              <img [storeIcon]="registry.url" />
+            </span>
+            <span tuiTitle>
+              <b tuiFade>{{ registry.name }}</b>
+              <span tuiSubtitle tuiFade>{{ clear(registry.url) }}</span>
+            </span>
+            @if (
+              (
+                data()?.marketplace?.[registry.url]?.packages || []
+                | filterUpdates: data()?.localPkgs : data()?.hidden
+              ).length;
+              as length
+            ) {
+              <tui-badge-notification appUpdatesCount>
+                {{ length }}
+              </tui-badge-notification>
+            }
+            @if (registry.status === 'error') {
+              <tui-icon
+                icon="@tui.triangle-alert"
+                class="g-warning"
+                role="img"
+                [attr.aria-label]="
+                  (registry.status | registryState).label | i18n
+                "
+                [attr.aria-hidden]="false"
+              />
+            }
+          </button>
+        }
       }
     </aside>
     <section class="g-subpage">
@@ -290,6 +291,17 @@ export default class UpdatesComponent {
 
   protected readonly isRegistryLoading = isRegistryLoading
   protected readonly selectedRegistry = signal('')
+  protected readonly groups = computed(() => {
+    const hosts = this.data()?.hosts || []
+    const standard = hosts.filter(({ url }) => isDefaultRegistry(url))
+    const custom = hosts.filter(({ url }) => !isDefaultRegistry(url))
+    return standard.length && custom.length
+      ? [
+          { title: 'Default Registries' as const, hosts: standard },
+          { title: 'Custom Registries' as const, hosts: custom },
+        ]
+      : [{ title: null, hosts }]
+  })
   readonly current = computed(() => {
     const hosts = this.data()?.hosts || []
     return (
