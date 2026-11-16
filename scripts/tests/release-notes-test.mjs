@@ -196,8 +196,8 @@ test('sparse deploy canonical versions and notes', t => {
     '[package]\nname = "ctrl"\nversion = "1.2.3"\n',
   )
   const cases = [
-    ['start-os', 'startos-iso.yaml', '0.4.0.3', '0403'],
-    ['start-wrt', 'start-wrt.yaml', VERSION, '123'],
+    ['start-os', 'startos-iso.yaml', '0.4.0.3', '0403', 'deploy-prepare'],
+    ['start-wrt', 'start-wrt.yaml', VERSION, '123', 'deploy'],
   ]
   for (const [project, , version] of cases) {
     write(`projects/${project}/release-notes/${version}.md`, FRAMING)
@@ -218,9 +218,9 @@ test('sparse deploy canonical versions and notes', t => {
   commit()
   const ref = git('rev-parse', 'HEAD').trim()
   env.CHANGELOG_REF = ref
-  for (const [project, workflow, version, anchor] of cases) {
+  for (const [project, workflow, version, anchor, job] of cases) {
     const deploy = text(join(REPO, '.github/workflows', workflow)).split(
-      '\n  deploy:\n',
+      `\n  ${job}:\n`,
     )[1]
     const sparse = deploy.match(
       /          sparse-checkout: \|\n((?:            .+\n)+)/,
@@ -272,7 +272,11 @@ test('sparse deploy canonical versions and notes', t => {
     assert.ok(compose)
     assert.ok(
       deploy.indexOf('Compile release notes') <
-        deploy.indexOf('Drop the previous alpha build'),
+        deploy.indexOf(
+          project === 'start-os'
+            ? 'Register OS version'
+            : 'Drop the previous alpha build',
+        ),
     )
     const composeShell = compose
       .split('\n')
@@ -294,7 +298,7 @@ test('sparse deploy canonical versions and notes', t => {
     })
     if (project === 'start-os') {
       assert.equal(text(join(runnerTemp, 'release-security')), 'true\n')
-      contains(deploy, '--git-hash "${{ github.sha }}" "${SECURITY_ARGS[@]}"')
+      contains(deploy, '--git-hash "$GITHUB_SHA" "${SECURITY_ARGS[@]}"')
     }
     const fragmentPath = `checkout-${project}/projects/${project}/changelog/patch-fixed-feature.md`
     write(fragmentPath, '---\nrelease-notes: invalid\n---\n\n- Invalid.\n')
@@ -1324,9 +1328,20 @@ start-cli() {
       [
         '-e',
         '-c',
-        `start-cli() { printf '%s\\0' "$@" > "${capture}"; }\n${shell}`,
+        `start-cli() {
+  if [ "$3 $4" = 'os index' ]; then printf '{"versions":{}}'; return; fi
+  printf '%s\\0' "$@" > "${capture}"
+}\n${shell}`,
       ],
-      { encoding: 'utf8', env: { ...env, RUNNER_TEMP: runnerTemp } },
+      {
+        encoding: 'utf8',
+        env: {
+          ...env,
+          RUNNER_TEMP: runnerTemp,
+          REGISTRY: 'fixture-registry',
+          GITHUB_SHA: 'fixture-sha',
+        },
+      },
     )
     assert.equal(result.status, 0, result.stderr)
     const args = text(capture).split('\0').slice(0, -1)

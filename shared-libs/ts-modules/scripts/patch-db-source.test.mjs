@@ -65,6 +65,22 @@ async function fixture(t, product) {
   const { PatchDbSource, PATCH_CACHE } = await import(
     path('patch-db/patch-db-source')
   )
+  const patchCache =
+    product === 'os'
+      ? [
+          {
+            provide: (await import(path('patch-db/patch-db-cache')))
+              .PatchDbCache,
+            useValue: {
+              read: async () => ({
+                id: 7,
+                value: { serverInfo: { hostname: 'cached' } },
+              }),
+              clear() {},
+            },
+          },
+        ]
+      : []
   const { Router } = await import('@angular/router')
   const cache = new BehaviorSubject({ id: 0, value: {} })
   const state = new BehaviorSubject('running')
@@ -112,13 +128,8 @@ async function fixture(t, product) {
     { provide: DOCUMENT, useValue: { defaultView: {} } },
     { provide: NgZone, useValue: { run: task => task() } },
     { provide: Router, useValue: { navigate: async () => true } },
-    {
-      provide: StorageService,
-      useValue: {
-        get: () => ({ serverInfo: { hostname: 'cached' } }),
-        clear() {},
-      },
-    },
+    { provide: StorageService, useValue: { clear() {} } },
+    ...patchCache,
     { provide: AuthKeyService, useValue: keys },
     { provide: HttpService, useValue: {} },
     { provide: RpcSocketService, useValue: sockets },
@@ -136,6 +147,7 @@ async function fixture(t, product) {
   await auth.init()
   effects.flush()
   db.start()
+  await flush()
   t.after(() => {
     db.stop()
     injector.destroy()
@@ -219,9 +231,8 @@ for (const product of ['os', 'tunnel']) {
     const f = await fixture(t, product)
     assert.equal(f.calls.length, 0)
     if (product === 'os') {
-      assert.equal(f.cache.value.id, 1)
-      assert.deepEqual(f.cache.value.value.registryCache, {})
-      assert.equal(f.cache.value.value.osUpdateCache, null)
+      assert.equal(f.cache.value.id, 7)
+      assert.equal(f.cache.value.value.serverInfo.hostname, 'cached')
     } else assert.equal(f.cache.value.id, 0)
     f.verify()
     await flush()

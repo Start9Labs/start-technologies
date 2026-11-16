@@ -6,13 +6,12 @@ import { test } from 'node:test'
 import yaml from 'js-yaml'
 import { fixture } from '../../../scripts/tests/fixtures.mjs'
 
-const workflow = yaml.load(
-  readFileSync(
-    new URL('../../workflows/startos-iso.yaml', import.meta.url),
-    'utf8',
-  ),
-)
-const image = workflow.jobs.image
+const load = name =>
+  yaml.load(
+    readFileSync(new URL(`../../workflows/${name}`, import.meta.url), 'utf8'),
+  )
+const workflow = load('startos-iso.yaml')
+const image = load('startos-image.yaml').jobs.build
 const [standard, fast] = Array.from(
   image['runs-on'].matchAll(/fromJson\('([\s\S]*?)'\)/g),
   match => yaml.load(match[1]),
@@ -37,7 +36,15 @@ test('the native runtime bootstrap precedes every JavaScript action', () => {
   assert.ok(image.steps.indexOf(bootstrap) < image.steps.findIndex(s => s.uses))
   assert.equal(
     bootstrap.if,
-    "${{ env.ARCH == 'riscv64' && github.event.inputs.runner != 'fast' }}",
+    "${{ env.ARCH == 'riscv64' && !inputs.fast-runner }}",
+  )
+  assert.equal(
+    workflow.jobs.image.with['fast-runner'],
+    "${{ github.event.inputs.runner == 'fast' }}",
+  )
+  assert.equal(
+    workflow.jobs.image.with['nodejs-version'],
+    workflow.env.NODEJS_VERSION,
   )
 })
 
