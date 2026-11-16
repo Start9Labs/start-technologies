@@ -6,7 +6,9 @@ shift
 if [ "$#" = 0 ]; then
     set -- \
         disk::fde::tests::real_luks_keyslots_and_header_backups_retire_using_only_new_password \
-        disk::fde::tests::real_luks_account_changes_resume_install_and_committed_retirement
+        disk::fde::tests::real_luks_account_changes_resume_install_and_committed_retirement \
+        disk::fde::tests::real_default_authority_luks1_survives_password_changes_and_partial_retirement \
+        disk::fde::tests::real_default_authority_luks2_survives_password_changes_and_partial_retirement
 fi
 directory=$(cd "$(dirname "$0")" && pwd)
 workspace=$(mktemp -d)

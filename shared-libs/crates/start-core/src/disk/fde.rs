@@ -46,6 +46,14 @@ pub struct AdminKeyslots {
     volumes: [VolumeSlots; 2],
 }
 
+/// Original DEFAULT authority survives administrator-slot replacement until compatible EFI activation.
+/// The enable owner persists this before mutation and serializes each native slot operation.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DefaultKeyslots {
+    volumes: [VolumeSlots; 2],
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct VolumeSlots {
@@ -206,10 +214,20 @@ impl LuksPool {
     /// Identifies matching administrator slots while the unlock password is available.
     pub async fn identify_admin_slots(&self, password: &str) -> Result<AdminKeyslots, Error> {
         let (key, _cleanup) = self.password_file(password)?;
-        self.identify_key_slots(&key).await
+        Ok(AdminKeyslots {
+            volumes: self.identify_key_slots(&key).await?,
+        })
     }
 
-    async fn identify_key_slots(&self, key: &Path) -> Result<AdminKeyslots, Error> {
+    /// Captures DEFAULT authority independently of every future administrator installation.
+    pub async fn identify_default_slots(&self) -> Result<DefaultKeyslots, Error> {
+        let (key, _cleanup) = self.password_file(DEFAULT_PASSWORD)?;
+        Ok(DefaultKeyslots {
+            volumes: self.identify_key_slots(&key).await?,
+        })
+    }
+
+    async fn identify_key_slots(&self, key: &Path) -> Result<[VolumeSlots; 2], Error> {
         let mut volumes = Vec::new();
         for (i, device) in self.devices.iter().enumerate() {
             let metadata = self.metadata(device).await?;
@@ -225,9 +243,7 @@ impl LuksPool {
                 slots,
             });
         }
-        Ok(AdminKeyslots {
-            volumes: volumes.try_into().ok().unwrap(),
-        })
+        Ok(volumes.try_into().ok().unwrap())
     }
 
     /// Tests every owned administrator slot without trying unrelated slots.
@@ -261,7 +277,9 @@ impl LuksPool {
         password: &str,
     ) -> Result<(AdminKeyslots, VolumeKeys), Error> {
         let (password, _cleanup) = self.password_file(password)?;
-        let admin = self.identify_key_slots(&password).await?;
+        let admin = AdminKeyslots {
+            volumes: self.identify_key_slots(&password).await?,
+        };
         let mut volumes = Vec::new();
         for (i, device) in self.devices.iter().enumerate() {
             let (output, _cleanup) = self.secret_file(&[])?;
@@ -568,12 +586,8 @@ impl LuksPool {
         keys: [&Path; 2],
         option: &str,
     ) -> Result<(), Error> {
-        for (index, volume) in metadata.iter().enumerate() {
-            for slot in plan.admin.volumes[index].slots.intersection(&volume.slots) {
-                self.kill_slot(&self.devices[index], *slot, keys[index], option)
-                    .await?;
-            }
-        }
+        self.remove_slots(&plan.admin.volumes, metadata, keys, option)
+            .await?;
         for (i, metadata) in self.change_metadata(plan).await?.iter().enumerate() {
             let mut expected: BTreeSet<_> = plan.base_slots[i]
                 .difference(&plan.admin.volumes[i].slots)
@@ -585,6 +599,92 @@ impl LuksPool {
             }
         }
         Ok(())
+    }
+
+    async fn remove_slots(
+        &self,
+        authority: &[VolumeSlots; 2],
+        metadata: &[LuksMetadata; 2],
+        keys: [&Path; 2],
+        option: &str,
+    ) -> Result<(), Error> {
+        for (index, volume) in metadata.iter().enumerate() {
+            for slot in authority[index].slots.intersection(&volume.slots) {
+                self.kill_slot(&self.devices[index], *slot, keys[index], option)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Requires durable compatible EFI activation and verified current administrator authority.
+    /// Reused slot IDs never authorize deletion of replacement administrator or manual keys.
+    /// Retries use current authority, not the first installation's targets.
+    pub async fn retire_default_slots(
+        &self,
+        original: &DefaultKeyslots,
+        admin: &AdminKeyslots,
+        keys: &VolumeKeys,
+    ) -> Result<(), Error> {
+        let (default_key, _cleanup) = self.password_file(DEFAULT_PASSWORD)?;
+        let credential = KeyCredential::VolumeKeys(keys);
+        let mut metadata = Vec::new();
+        let mut authenticated = Vec::new();
+        let mut remaining = original.volumes.clone();
+        for (index, original_volume) in original.volumes.iter().enumerate() {
+            let volume = self.bound_metadata(index, &original_volume.id).await?;
+            let current = &admin.volumes[index];
+            if original_volume.slots.is_empty()
+                || current.id != original_volume.id
+                || current.slots.is_empty()
+                || !current.slots.is_subset(&volume.slots)
+            {
+                return Err(metadata_error());
+            }
+            remaining[index].slots.clear();
+            for slot in original_volume.slots.intersection(&volume.slots) {
+                if self
+                    .accepts(&self.devices[index], &default_key, Some(*slot))
+                    .await?
+                {
+                    if current.slots.contains(slot) {
+                        return Err(metadata_error());
+                    }
+                    remaining[index].slots.insert(*slot);
+                }
+            }
+            authenticated.push(
+                self.authenticate_credential(index, &current.id, &credential)
+                    .await?,
+            );
+            metadata.push(volume);
+        }
+        let metadata: [LuksMetadata; 2] = metadata.try_into().ok().unwrap();
+        self.remove_slots(
+            &remaining,
+            &metadata,
+            [&authenticated[0].0, &authenticated[1].0],
+            credential.option(),
+        )
+        .await?;
+        for (index, previous) in metadata.iter().enumerate() {
+            let after = self
+                .bound_metadata(index, &original.volumes[index].id)
+                .await?;
+            let expected = previous
+                .slots
+                .difference(&remaining[index].slots)
+                .copied()
+                .collect();
+            if after.slots != expected
+                || self
+                    .accepts(&self.devices[index], &default_key, None)
+                    .await?
+            {
+                return Err(metadata_error());
+            }
+        }
+        self.publish_headers().await
     }
 
     async fn authenticate_credential(
@@ -1508,9 +1608,13 @@ esac
     }
 
     async fn format_real_pool(root: &Path, format: &str) -> LuksPool {
+        format_real_pool_with_password(root, format, OLD).await
+    }
+
+    async fn format_real_pool_with_password(root: &Path, format: &str, password: &str) -> LuksPool {
         std::fs::create_dir(root.join("config")).unwrap();
         let pool = real_pool(root);
-        let (old_key, _old_cleanup) = pool.password_file(OLD).unwrap();
+        let (old_key, _old_cleanup) = pool.password_file(password).unwrap();
         let (manual_key, _manual_cleanup) = pool.password_file(MANUAL).unwrap();
         for device in &pool.devices {
             std::fs::File::create(device)
@@ -1875,6 +1979,113 @@ esac
             assert!(pool.verify_password(OLD).await.is_err());
             assert!(pool.verify_password(OTHER).await.is_err());
             memory.check().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires cryptsetup; regular-file devices use a stub for fstrim"]
+    async fn real_default_authority_luks1_survives_password_changes_and_partial_retirement() {
+        default_authority_survives_password_changes("luks1").await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires cryptsetup; regular-file devices use a stub for fstrim"]
+    async fn real_default_authority_luks2_survives_password_changes_and_partial_retirement() {
+        default_authority_survives_password_changes("luks2").await;
+    }
+
+    async fn default_authority_survives_password_changes(format: &str) {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let mut pool = format_real_pool_with_password(root, format, DEFAULT_PASSWORD).await;
+        let original = pool.identify_default_slots().await.unwrap();
+        let encoded = serde_json::to_vec(&original).unwrap();
+        let (_, keys) = pool.capture_unlock_keys(DEFAULT_PASSWORD).await.unwrap();
+        let fingerprints = keys.volumes.each_ref().map(|key| blake3::hash(&key.bytes));
+        let (default_file, _default_cleanup) = pool.password_file(DEFAULT_PASSWORD).unwrap();
+        let (admin_file, _admin_cleanup) = pool.password_file(NEW).unwrap();
+        for device in &pool.devices {
+            pool.add_and_verify(device, 1, &admin_file, &default_file, "--key-file")
+                .await
+                .unwrap();
+        }
+        let first_admin = pool.identify_admin_slots(NEW).await.unwrap();
+        let change = pool.plan_password_change(&first_admin).await.unwrap();
+        pool.install_password(&change, OTHER, KeyCredential::VolumeKeys(&keys))
+            .await
+            .unwrap();
+        pool.retire_password(&change, OTHER).await.unwrap();
+        let current = change.new_admin_slots();
+        pool.verify_password(DEFAULT_PASSWORD).await.unwrap();
+        let original: DefaultKeyslots = serde_json::from_slice(&encoded).unwrap();
+        let wrapper = root.join("cryptsetup-fixture");
+        std::fs::write(&wrapper, format!("#!/bin/sh\ncase \"$*\" in *package-data*) if [ \"$1\" = luksKillSlot ] && [ -e '{0}/fail-kill' ]; then exit 5; fi;; esac\nexec /usr/sbin/cryptsetup \"$@\"\n", root.display())).unwrap();
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        pool.cryptsetup = wrapper;
+        std::fs::write(root.join("fail-kill"), "").unwrap();
+        assert!(
+            pool.retire_default_slots(&original, &current, &keys)
+                .await
+                .is_err()
+        );
+        assert!(
+            !pool
+                .metadata(&pool.devices[0])
+                .await
+                .unwrap()
+                .slots
+                .contains(&0)
+        );
+        assert!(
+            pool.metadata(&pool.devices[1])
+                .await
+                .unwrap()
+                .slots
+                .contains(&0)
+        );
+        pool.verify_password(OTHER).await.unwrap();
+        pool.verify_password(MANUAL).await.unwrap();
+        std::fs::remove_file(root.join("fail-kill")).unwrap();
+        let change = pool.plan_password_change(&current).await.unwrap();
+        assert_eq!(change.target_slots, [0, 1]);
+        pool.install_password(&change, NEW, KeyCredential::VolumeKeys(&keys))
+            .await
+            .unwrap();
+        pool.retire_password(&change, NEW).await.unwrap();
+        let current = change.new_admin_slots();
+        pool.retire_default_slots(&original, &current, &keys)
+            .await
+            .unwrap();
+        pool.retire_default_slots(&original, &current, &keys)
+            .await
+            .unwrap();
+        assert!(pool.verify_password(DEFAULT_PASSWORD).await.is_err());
+        pool.verify_password(NEW).await.unwrap();
+        pool.verify_password(MANUAL).await.unwrap();
+        let (_, recaptured) = pool.capture_unlock_keys(NEW).await.unwrap();
+        assert!(
+            recaptured
+                .volumes
+                .iter()
+                .zip(fingerprints)
+                .all(|(key, before)| blake3::hash(&key.bytes) == before)
+        );
+        for (device, name) in pool.devices.iter().zip(&pool.mapper_names) {
+            let header = pool.config_dir.join(format!("luks/{name}.luks.bak"));
+            for (password, accepted) in [(DEFAULT_PASSWORD, false), (NEW, true), (MANUAL, true)] {
+                let (key, _cleanup) = pool.password_file(password).unwrap();
+                let status = cryptsetup_status(
+                    Command::new("cryptsetup")
+                        .args(["open", "--test-passphrase", "--batch-mode", "--header"])
+                        .arg(&header)
+                        .arg("--key-file")
+                        .arg(key)
+                        .arg(device),
+                )
+                .await
+                .unwrap();
+                assert_eq!(status.success(), accepted, "{format}: {name}");
+            }
         }
     }
 
