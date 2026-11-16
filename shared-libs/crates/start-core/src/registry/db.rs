@@ -30,7 +30,7 @@ use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
 
 lazy_static::lazy_static! {
-    static ref INDEX: JsonPointer = "/index".parse().unwrap();
+    pub(super) static ref INDEX: JsonPointer = "/index".parse().unwrap();
 }
 
 pub fn db_api<C: Context>() -> ParentHandler<C> {
@@ -172,7 +172,13 @@ async fn visible_subscription(
         .map(WireCompatibility::for_startos)
         .transpose()?
         .unwrap_or_default();
-    let view = IndexView::resolve(&db, key.as_ref(), wire, language.as_deref())?;
+    let view = IndexView::resolve(
+        &db,
+        &ctx.index_locales.current(),
+        key.as_ref(),
+        wire,
+        language.as_deref(),
+    )?;
     let mirror = index_mirror(&ctx.index_mirrors, &ctx.db, key, view, &ctx.datadir).await?;
     let (dump, sub) = subscription(&mirror.db, Some(pointer)).await?;
     Ok((mirror, dump, sub))

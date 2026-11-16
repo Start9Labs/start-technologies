@@ -8,6 +8,7 @@ use tokio::sync::watch;
 
 use crate::prelude::*;
 use crate::registry::device_info::WireCompatibility;
+use crate::registry::locales::IndexLocales;
 use crate::registry::package::icon::icons_dir;
 use crate::registry::package::index::Reader;
 use crate::registry::{FullIndex, RegistryDatabase};
@@ -26,19 +27,20 @@ pub struct IndexView {
 }
 
 impl IndexView {
-    /// A language absent from the reader's visible index resolves to `FALLBACK_LOCALE`.
+    /// A language absent from the reader's visible locales resolves to `FALLBACK_LOCALE`.
     pub fn resolve(
         db: &Model<RegistryDatabase>,
+        locales: &IndexLocales,
         key: Option<&AnyVerifyingKey>,
         wire: WireCompatibility,
         language: Option<&str>,
     ) -> Result<Self, Error> {
         let language = match language {
             Some(requested) => {
-                let languages = visible_index(db.clone(), key)?.languages()?;
+                let reader = Reader::resolve(db, key)?;
+                let visible = locales.visible_to(db, reader.as_ref())?;
                 Some(InternedString::intern(
-                    crate::best_locale(requested, languages.iter().map(|l| &**l))
-                        .unwrap_or(crate::FALLBACK_LOCALE),
+                    crate::best_locale(requested, visible).unwrap_or(crate::FALLBACK_LOCALE),
                 ))
             }
             None => None,

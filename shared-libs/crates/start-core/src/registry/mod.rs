@@ -34,6 +34,7 @@ pub mod context;
 pub mod db;
 pub mod device_info;
 pub mod info;
+pub mod locales;
 pub mod metrics;
 mod migrations;
 pub mod mirror;
@@ -98,30 +99,23 @@ impl Model<FullIndex> {
 
     /// Replaces every `LocaleString` with its translation for the locale.
     pub fn localize_for(&mut self, locale: &str) -> Result<(), Error> {
-        self.for_each_locale_string(&mut |s| s.localize_for(locale))
+        let f = &mut |s: &mut LocaleString| s.localize_for(locale);
+        self.for_each_unpackaged_locale_string(f)?;
+        for (_, package) in self.as_package_mut().as_packages_mut().as_entries_mut()? {
+            package.for_each_locale_string(f)?;
+        }
+        Ok(())
     }
 
-    /// Locales any `LocaleString` in the index is translated into.
-    pub fn languages(&mut self) -> Result<BTreeSet<InternedString>, Error> {
-        let mut languages = BTreeSet::new();
-        self.for_each_locale_string(&mut |s| languages.extend(s.languages().cloned()))?;
-        Ok(languages)
-    }
-
-    fn for_each_locale_string(
+    /// Visits every `LocaleString` outside `PackageIndex.packages`.
+    pub(crate) fn for_each_unpackaged_locale_string(
         &mut self,
         f: &mut impl FnMut(&mut LocaleString),
     ) -> Result<(), Error> {
         self.as_description_mut()
             .mutate(|d| Ok(d.iter_mut().for_each(&mut *f)))?;
-        let packages = self.as_package_mut();
-        for (_, category) in packages.as_categories_mut().as_entries_mut()? {
+        for (_, category) in self.as_package_mut().as_categories_mut().as_entries_mut()? {
             category.as_name_mut().mutate(|n| Ok(f(n)))?;
-        }
-        for (_, package) in packages.as_packages_mut().as_entries_mut()? {
-            for (_, version) in package.as_versions_mut().as_entries_mut()? {
-                version.for_each_locale_string(f)?;
-            }
         }
         for (_, version) in self.as_os_mut().as_versions_mut().as_entries_mut()? {
             version.as_release_notes_mut().mutate(|n| Ok(f(n)))?;

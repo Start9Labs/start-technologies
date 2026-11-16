@@ -116,6 +116,18 @@ impl Model<PackageInfo> {
     }
 }
 
+impl Model<PackageInfo> {
+    pub(crate) fn for_each_locale_string(
+        &mut self,
+        f: &mut impl FnMut(&mut LocaleString),
+    ) -> Result<(), Error> {
+        for (_, version) in self.as_versions_mut().as_entries_mut()? {
+            version.for_each_locale_string(f)?;
+        }
+        Ok(())
+    }
+}
+
 impl Model<PackageIndex> {
     pub fn visible_package(
         &self,

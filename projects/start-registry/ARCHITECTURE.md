@@ -67,7 +67,10 @@ contract also applies to ordinary calls on the shared WebSocket.
 `language` resolves every `LocaleString` in the view to one translation, with
 `LocaleString::localize_for`'s fallback. It selects a locale that appears in the
 reader's visible index (`best_locale`); any other language receives the `en_US`
-view, so requests cannot create views beyond the index's own languages. Each distinct reader, `osVersion`
+view, so requests cannot create views beyond the index's own languages.
+`IndexLocaleTracker` (`registry/locales.rs`) holds those locales per package. It
+loads them at startup and recomputes them after each `/index` revision, so a
+subscription resolves its language without walking the index. Each distinct reader, `osVersion`
 compatibility and `language` combination is an `IndexView` served by a lazily
 created in-memory PatchDB mirror (`registry/mirror.rs`), shared by its
 subscribers and dropped with the last of them.
