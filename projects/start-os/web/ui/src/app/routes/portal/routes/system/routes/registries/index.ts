@@ -12,6 +12,7 @@ import {
   DocsLinkDirective,
   i18nKey,
   i18nPipe,
+  isDefaultRegistry,
   registryUrl,
   sameUrl,
   TaskService,
@@ -233,9 +234,7 @@ export default class Registries {
       status,
       error,
       os: sameUrl(url, this.osRegistry()),
-      builtin: Object.values(defaultRegistries).some(known =>
-        sameUrl(url, known),
-      ),
+      builtin: isDefaultRegistry(url),
     })),
   )
 
