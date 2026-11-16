@@ -7,15 +7,32 @@ use patch_db::{ModelExt, PatchDb};
 use tokio::sync::watch;
 
 use crate::prelude::*;
-use crate::registry::RegistryDatabase;
 use crate::registry::device_info::WireCompatibility;
 use crate::registry::package::icon::icons_dir;
 use crate::registry::package::index::Reader;
+use crate::registry::{FullIndex, RegistryDatabase};
 use crate::sign::AnyVerifyingKey;
 use crate::util::future::NonDetachingJoinHandle;
 
 pub type IndexMirrors =
-    tokio::sync::Mutex<BTreeMap<(Option<InternedString>, WireCompatibility), Weak<IndexMirror>>>;
+    tokio::sync::Mutex<BTreeMap<(Option<InternedString>, IndexView), Weak<IndexMirror>>>;
+
+/// Client-specific presentation of the index; equal views share one mirror.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct IndexView {
+    pub wire: WireCompatibility,
+    /// Locale every `LocaleString` is resolved to. Unset keeps every translation.
+    pub language: Option<InternedString>,
+}
+
+impl From<WireCompatibility> for IndexView {
+    fn from(wire: WireCompatibility) -> Self {
+        Self {
+            wire,
+            language: None,
+        }
+    }
+}
 
 pub struct IndexMirror {
     pub db: PatchDb,
@@ -27,13 +44,13 @@ impl IndexMirror {
     async fn spawn(
         main: &TypedPatchDb<RegistryDatabase>,
         key: Option<AnyVerifyingKey>,
-        wire: WireCompatibility,
+        view: IndexView,
         datadir: &Path,
     ) -> Result<Arc<Self>, Error> {
         let (dump, mut sub) = main.dump_and_sub(JsonPointer::default()).await;
         let mut root = dump.value;
         let icons = icons_dir(datadir);
-        let visible = projected_root(&root, key.as_ref(), wire, &icons).await?;
+        let visible = projected_root(&root, key.as_ref(), &view, &icons).await?;
         let db = PatchDb::in_memory();
         db.put(&JsonPointer::<&str>::default(), &visible).await?;
         let mirror = db.clone();
@@ -43,7 +60,7 @@ impl IndexMirror {
                 let res = async {
                     patch_db::json_patch::patch(&mut root, &rev.patch)
                         .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Database))?;
-                    let next = projected_root(&root, key.as_ref(), wire, &icons).await?;
+                    let next = projected_root(&root, key.as_ref(), &view, &icons).await?;
                     mirror.put(&JsonPointer::<&str>::default(), &next).await?;
                     Ok::<_, Error>(())
                 }
@@ -96,10 +113,10 @@ pub async fn index_mirror(
     mirrors: &IndexMirrors,
     main: &TypedPatchDb<RegistryDatabase>,
     key: Option<AnyVerifyingKey>,
-    wire: WireCompatibility,
+    view: IndexView,
     datadir: &Path,
 ) -> Result<Arc<IndexMirror>, Error> {
-    let identity = (key.as_ref().map(|key| key.interned_der64()), wire);
+    let identity = (key.as_ref().map(|key| key.interned_der64()), view.clone());
     let mut mirrors = mirrors.lock().await;
     if let Some(mirror) = mirrors
         .get(&identity)
@@ -108,7 +125,7 @@ pub async fn index_mirror(
     {
         return Ok(mirror);
     }
-    let mirror = IndexMirror::spawn(main, key, wire, datadir).await?;
+    let mirror = IndexMirror::spawn(main, key, view, datadir).await?;
     mirrors.retain(|_, m| m.strong_count() > 0);
     mirrors.insert(identity, Arc::downgrade(&mirror));
     Ok(mirror)
@@ -117,21 +134,26 @@ pub async fn index_mirror(
 async fn projected_root(
     root: &Value,
     key: Option<&AnyVerifyingKey>,
-    wire: WireCompatibility,
+    view: &IndexView,
     icons: &Path,
 ) -> Result<Value, Error> {
-    let mut visible = visible_root(root, key)?;
-    wire.project(icons, "index", &Value::Null, &mut visible["index"])
+    let mut index = visible_index(root, key)?;
+    if let Some(language) = view.language.as_deref() {
+        index.localize_for(language)?;
+    }
+    let mut visible = imbl_value::json!({ "index": index.into_value() });
+    view.wire
+        .project(icons, "index", &Value::Null, &mut visible["index"])
         .await?;
     Ok(visible)
 }
 
-fn visible_root(root: &Value, key: Option<&AnyVerifyingKey>) -> Result<Value, Error> {
+fn visible_index(root: &Value, key: Option<&AnyVerifyingKey>) -> Result<Model<FullIndex>, Error> {
     let db: Model<RegistryDatabase> = root.clone().into();
     let reader = Reader::resolve(&db, key)?;
     let mut index = db.into_index();
     index.as_package_mut().retain_visible(reader.as_ref())?;
-    Ok(imbl_value::json!({ "index": index.into_value() }))
+    Ok(index)
 }
 
 #[cfg(test)]
@@ -190,34 +212,32 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn visible_root_hides_private_packages_from_everyone_else() {
+    async fn visible_root(root: &Value, key: Option<&AnyVerifyingKey>) -> Value {
+        projected_root(root, key, &IndexView::default(), Path::new(""))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn visible_root_hides_private_packages_from_everyone_else() {
         let reader = Guid::new();
         let private = root(true, &reader, &[]);
-        let visible = visible_root(&private, None).unwrap();
+        let visible = visible_root(&private, None).await;
         assert_eq!(packages(&visible), ["public"]);
         assert!(visible.get("admins").is_none());
+        let stranger =
+            crate::sign::AnySigningKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(&[8; 32]))
+                .verifying_key();
         assert_eq!(
-            packages(
-                &visible_root(
-                    &private,
-                    Some(
-                        &crate::sign::AnySigningKey::Ed25519(
-                            ed25519_dalek::SigningKey::from_bytes(&[8; 32])
-                        )
-                        .verifying_key()
-                    )
-                )
-                .unwrap()
-            ),
+            packages(&visible_root(&private, Some(&stranger)).await),
             ["public"]
         );
         assert_eq!(
-            packages(&visible_root(&private, Some(&key())).unwrap()),
+            packages(&visible_root(&private, Some(&key())).await),
             ["public", "secret"]
         );
         assert_eq!(
-            packages(&visible_root(&root(false, &reader, &[]), None).unwrap()),
+            packages(&visible_root(&root(false, &reader, &[]), None).await),
             ["public", "secret"]
         );
     }
@@ -266,7 +286,7 @@ mod tests {
             &mirrors,
             &main,
             Some(key()),
-            WireCompatibility::default(),
+            IndexView::default(),
             Path::new(""),
         )
         .await
@@ -306,30 +326,18 @@ mod tests {
             .await
             .unwrap();
         let mirrors = IndexMirrors::default();
-        let public = index_mirror(
-            &mirrors,
-            &main,
-            None,
-            WireCompatibility::default(),
-            Path::new(""),
-        )
-        .await
-        .unwrap();
-        let shared = index_mirror(
-            &mirrors,
-            &main,
-            None,
-            WireCompatibility::default(),
-            Path::new(""),
-        )
-        .await
-        .unwrap();
+        let public = index_mirror(&mirrors, &main, None, IndexView::default(), Path::new(""))
+            .await
+            .unwrap();
+        let shared = index_mirror(&mirrors, &main, None, IndexView::default(), Path::new(""))
+            .await
+            .unwrap();
         assert!(Arc::ptr_eq(&public, &shared));
         let own = index_mirror(
             &mirrors,
             &main,
             Some(key()),
-            WireCompatibility::default(),
+            IndexView::default(),
             Path::new(""),
         )
         .await
@@ -361,15 +369,9 @@ mod tests {
         );
 
         drop((public, shared));
-        let fresh = index_mirror(
-            &mirrors,
-            &main,
-            None,
-            WireCompatibility::default(),
-            Path::new(""),
-        )
-        .await
-        .unwrap();
+        let fresh = index_mirror(&mirrors, &main, None, IndexView::default(), Path::new(""))
+            .await
+            .unwrap();
         assert_eq!(mirrors.lock().await.len(), 2);
         drop(fresh);
     }

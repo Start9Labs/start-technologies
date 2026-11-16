@@ -56,7 +56,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.0.2"),
+        wire("0.4.0.2").into(),
         fixture.dir.path(),
     )
     .await
@@ -65,7 +65,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.0.1"),
+        wire("0.4.0.1").into(),
         fixture.dir.path(),
     )
     .await
@@ -75,7 +75,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.3.1"),
+        wire("0.4.3.1").into(),
         fixture.dir.path(),
     )
     .await
@@ -84,7 +84,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        WireCompatibility::default(),
+        IndexView::default(),
         fixture.dir.path(),
     )
     .await
@@ -95,7 +95,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.3"),
+        wire("0.4.3").into(),
         fixture.dir.path(),
     )
     .await
@@ -105,7 +105,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.1.3"),
+        wire("0.4.1.3").into(),
         fixture.dir.path(),
     )
     .await
@@ -115,7 +115,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         Some(key()),
-        wire("0.4.0.2"),
+        wire("0.4.0.2").into(),
         fixture.dir.path(),
     )
     .await
@@ -125,7 +125,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.0.4"),
+        wire("0.4.0.4").into(),
         fixture.dir.path(),
     )
     .await
@@ -264,7 +264,7 @@ async fn inaccessible_private_icons_are_not_loaded_by_legacy_replicas() {
         &IndexMirrors::default(),
         &fixture.main,
         None,
-        wire("0.4.0.2"),
+        wire("0.4.0.2").into(),
         fixture.dir.path(),
     )
     .await
@@ -283,7 +283,7 @@ async fn collected_icon_in_an_older_revision_terminates_and_rebuilds_the_replica
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.0.2"),
+        wire("0.4.0.2").into(),
         fixture.dir.path(),
     )
     .await
@@ -292,7 +292,7 @@ async fn collected_icon_in_an_older_revision_terminates_and_rebuilds_the_replica
         &mirrors,
         &fixture.main,
         None,
-        WireCompatibility::default(),
+        IndexView::default(),
         fixture.dir.path(),
     )
     .await
@@ -325,7 +325,7 @@ async fn collected_icon_in_an_older_revision_terminates_and_rebuilds_the_replica
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.0.2"),
+        wire("0.4.0.2").into(),
         fixture.dir.path(),
     )
     .await
@@ -336,5 +336,115 @@ async fn collected_icon_in_an_older_revision_terminates_and_rebuilds_the_replica
     assert_eq!(
         view["index"]["package"]["packages"]["public"]["versions"]["1.0.0:0"]["icon"],
         json!("data:image/png;base64,bmV4dA==")
+    );
+}
+
+fn translated(en: &str, pl: &str) -> Value {
+    json!({ "en_US": en, "pl_PL": pl })
+}
+
+#[tokio::test]
+async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
+    let fixture = fixture().await;
+    let mut state = fixture.main.peek().await.into_value();
+    state["index"]["description"] = translated("Registry", "Rejestr");
+    state["index"]["package"]["categories"] =
+        json!({ "tools": { "name": translated("Tools", "Narzędzia") } });
+    let public = &mut state["index"]["package"]["packages"]["public"]["versions"]["1.0.0:0"];
+    public["description"] = json!({ "short": translated("Short", "Krótki"), "long": "Long" });
+    public["releaseNotes"] = translated("Notes", "Notatki");
+    public["preDownloadAlert"] = json!({
+        "message": translated("Back up", "Zrób kopię"),
+        "when": { "sourceVersion": "*" },
+    });
+    public["dependencyMetadata"]["dep"]["title"] = translated("Dependency", "Zależność");
+    public["dependencyMetadata"]["dep"]["description"] = json!(null);
+    public["dependencyMetadata"]["dep"]["optional"] = json!(false);
+    fixture
+        .main
+        .put(&JsonPointer::<&str>::default(), &state)
+        .await
+        .unwrap();
+
+    let view = |wire: WireCompatibility, language: Option<&str>| IndexView {
+        wire,
+        language: language.map(InternedString::intern),
+    };
+    let mirrors = IndexMirrors::default();
+    let mirror =
+        |view: IndexView| index_mirror(&mirrors, &fixture.main, None, view, fixture.dir.path());
+    let polish = mirror(view(WireCompatibility::default(), Some("pl_PL")))
+        .await
+        .unwrap();
+    let same = mirror(view(WireCompatibility::default(), Some("pl_PL")))
+        .await
+        .unwrap();
+    assert!(Arc::ptr_eq(&polish, &same));
+    let canonical = mirror(IndexView::default()).await.unwrap();
+    let english = mirror(view(WireCompatibility::default(), Some("en_US")))
+        .await
+        .unwrap();
+    let legacy_polish = mirror(view(wire("0.4.0.2"), Some("pl_PL"))).await.unwrap();
+    for other in [&canonical, &english, &legacy_polish] {
+        assert!(!Arc::ptr_eq(&polish, other));
+    }
+    assert_eq!(mirrors.lock().await.len(), 4);
+
+    let pointer: JsonPointer = "/index".parse().unwrap();
+    let (dump, mut sub) = polish.db.dump_and_sub(pointer.clone()).await;
+    let mut polish_view = dump.value;
+    assert_eq!(polish_view["description"], json!("Rejestr"));
+    assert_eq!(
+        polish_view["package"]["categories"]["tools"]["name"],
+        json!("Narzędzia")
+    );
+    let version = &polish_view["package"]["packages"]["public"]["versions"]["1.0.0:0"];
+    assert_eq!(version["description"]["short"], json!("Krótki"));
+    assert_eq!(version["description"]["long"], json!("Long"));
+    assert_eq!(version["releaseNotes"], json!("Notatki"));
+    assert_eq!(version["preDownloadAlert"]["message"], json!("Zrób kopię"));
+    assert_eq!(
+        version["dependencyMetadata"]["dep"]["title"],
+        json!("Zależność")
+    );
+    assert_eq!(
+        polish_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
+        json!("Polski")
+    );
+    let english_view = english.db.dump(&pointer).await.value;
+    assert_eq!(english_view["description"], json!("Registry"));
+    let legacy_view = legacy_polish.db.dump(&pointer).await.value;
+    assert_eq!(
+        legacy_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
+        json!("Polski")
+    );
+    assert_eq!(
+        legacy_view["package"]["packages"]["public"]["versions"]["1.0.0:0"]["icon"],
+        json!("data:image/png;base64,cHVibGlj")
+    );
+    let canonical_view = canonical.db.dump(&pointer).await.value;
+    assert_eq!(
+        canonical_view["description"],
+        translated("Registry", "Rejestr")
+    );
+
+    state["index"]["os"]["versions"]["0.4.0.6"]["releaseNotes"] = translated("Updated", "Nowe");
+    fixture
+        .main
+        .put(&JsonPointer::<&str>::default(), &state)
+        .await
+        .unwrap();
+    let revision = tokio::time::timeout(std::time::Duration::from_secs(5), sub.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    patch_db::json_patch::patch(&mut polish_view, &revision.patch).unwrap();
+    assert_eq!(
+        polish_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
+        json!("Nowe")
+    );
+    assert_eq!(
+        fixture.main.peek().await.into_value()["index"]["description"],
+        translated("Registry", "Rejestr")
     );
 }

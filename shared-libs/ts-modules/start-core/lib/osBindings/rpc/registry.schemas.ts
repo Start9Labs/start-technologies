@@ -1378,6 +1378,13 @@ export const SubscribeIndexParams: z.ZodIntersection<
       z.ZodOptional<z.ZodNullable<z.ZodString>>,
       z.ZodNullable<z.ZodString>
     >
+    /**
+     * Locale to resolve localized text to. Omission keeps every translation.
+     */
+    language: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
   }>,
   typeof ReaderParams
 > = /* @__PURE__ */ z
@@ -1393,6 +1400,16 @@ export const SubscribeIndexParams: z.ZodIntersection<
       ).meta({
         description:
           'Client StartOS version. Omission preserves the canonical index format.',
+      }),
+      /**
+       * Locale to resolve localized text to. Omission keeps every translation.
+       */
+      language: wire(
+        z.string().nullable().optional(),
+        z.string().nullable(),
+      ).meta({
+        description:
+          'Locale to resolve localized text to. Omission keeps every translation.',
       }),
     }),
     ReaderParams,

@@ -445,28 +445,32 @@ impl Model<PackageVersionInfo> {
             }
 
             if let Some(locale) = device_info.os.language.as_deref() {
-                self.as_dependency_metadata_mut()
-                    .as_entries_mut()?
-                    .into_iter()
-                    .try_for_each(|(_, d)| d.mutate(|d| Ok(d.localize_for(locale))))?;
-                self.as_metadata_mut()
-                    .as_description_mut()
-                    .mutate(|d| Ok(d.localize_for(locale)))?;
-                self.as_metadata_mut()
-                    .as_release_notes_mut()
-                    .mutate(|r| Ok(r.localize_for(locale)))?;
-                self.as_metadata_mut()
-                    .as_pre_download_alert_mut()
-                    .mutate(|alert| {
-                        if let Some(alert) = alert {
-                            alert.message.localize_for(locale);
-                        }
-                        Ok(())
-                    })?;
+                self.localize_for(locale)?;
             }
         }
 
         Ok(true)
+    }
+
+    /// Replaces every `LocaleString` with its translation for the locale.
+    pub fn localize_for(&mut self, locale: &str) -> Result<(), Error> {
+        self.as_dependency_metadata_mut()
+            .as_entries_mut()?
+            .into_iter()
+            .try_for_each(|(_, d)| d.mutate(|d| Ok(d.localize_for(locale))))?;
+        let metadata = self.as_metadata_mut();
+        metadata
+            .as_description_mut()
+            .mutate(|d| Ok(d.localize_for(locale)))?;
+        metadata
+            .as_release_notes_mut()
+            .mutate(|r| Ok(r.localize_for(locale)))?;
+        metadata.as_pre_download_alert_mut().mutate(|alert| {
+            if let Some(alert) = alert {
+                alert.message.localize_for(locale);
+            }
+            Ok(())
+        })
     }
 }
 

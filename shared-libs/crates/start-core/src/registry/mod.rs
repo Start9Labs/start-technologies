@@ -95,6 +95,33 @@ impl Model<FullIndex> {
             Ok(())
         })
     }
+
+    /// Replaces every `LocaleString` with its translation for the locale.
+    pub fn localize_for(&mut self, locale: &str) -> Result<(), Error> {
+        self.as_description_mut().mutate(|d| {
+            if let Some(d) = d {
+                d.localize_for(locale);
+            }
+            Ok(())
+        })?;
+        let packages = self.as_package_mut();
+        for (_, category) in packages.as_categories_mut().as_entries_mut()? {
+            category
+                .as_name_mut()
+                .mutate(|n| Ok(n.localize_for(locale)))?;
+        }
+        for (_, package) in packages.as_packages_mut().as_entries_mut()? {
+            for (_, version) in package.as_versions_mut().as_entries_mut()? {
+                version.localize_for(locale)?;
+            }
+        }
+        for (_, version) in self.as_os_mut().as_versions_mut().as_entries_mut()? {
+            version
+                .as_release_notes_mut()
+                .mutate(|n| Ok(n.localize_for(locale)))?;
+        }
+        Ok(())
+    }
 }
 
 pub async fn get_full_index(

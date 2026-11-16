@@ -23,7 +23,7 @@ use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::WireCompatibility;
-use crate::registry::mirror::{IndexMirror, index_mirror, mirror_key};
+use crate::registry::mirror::{IndexMirror, IndexView, index_mirror, mirror_key};
 use crate::registry::package::index::ReaderParams;
 use crate::registry::upstream::WRITES_INDEX;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
@@ -147,6 +147,8 @@ pub struct SubscribeIndexParams {
     pub pointer: Option<JsonPointer>,
     /// Client StartOS version. Omission preserves the canonical index format.
     pub os_version: Option<Version>,
+    /// Locale to resolve localized text to. Omission keeps every translation.
+    pub language: Option<InternedString>,
     #[serde(flatten)]
     pub reader: ReaderParams,
 }
@@ -158,6 +160,7 @@ async fn visible_subscription(
     SubscribeIndexParams {
         pointer,
         os_version,
+        language,
         reader,
     }: SubscribeIndexParams,
 ) -> Result<(Arc<IndexMirror>, Dump, JsonSubscriber), Error> {
@@ -168,7 +171,8 @@ async fn visible_subscription(
         .map(WireCompatibility::for_startos)
         .transpose()?
         .unwrap_or_default();
-    let mirror = index_mirror(&ctx.index_mirrors, &ctx.db, key, wire, &ctx.datadir).await?;
+    let view = IndexView { wire, language };
+    let mirror = index_mirror(&ctx.index_mirrors, &ctx.db, key, view, &ctx.datadir).await?;
     let (dump, sub) = subscription(&mirror.db, Some(pointer)).await?;
     Ok((mirror, dump, sub))
 }
@@ -338,7 +342,11 @@ mod tests {
         ] {
             let params: SubscribeIndexParams = serde_json::from_value(params).unwrap();
             assert!(params.pointer.is_none());
+            assert!(params.language.is_none());
         }
+        let params: SubscribeIndexParams =
+            serde_json::from_value(serde_json::json!({ "language": "pl_PL" })).unwrap();
+        assert_eq!(params.language.as_deref(), Some("pl_PL"));
     }
 
     #[test]
