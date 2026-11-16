@@ -4096,12 +4096,12 @@ test('a late registry cache update cannot restore a removed registry', async t =
   assert.deepEqual(writes, [])
 })
 
-test('cached registry errors read as connecting until the server connects', async t => {
+test('registry status reads as connecting while the server is disconnected, without re-emitting the catalog', async t => {
   const { Exver } = await import('@start9labs/shared')
   const { StorageService } = await import('src/app/services/storage.service')
   const { PackageIconService } =
     await import('src/app/services/package-icon.service')
-  const connected = new BehaviorSubject(false)
+  const connected = new BehaviorSubject(true)
   const cache = new BehaviorSubject({
     'https://registry.test/': {
       status: 'error',
@@ -4133,14 +4133,31 @@ test('cached registry errors read as connecting until the server connects', asyn
     injector,
     () => new MarketplaceService(),
   )
+  service.currentRegistryUrl$.next('https://registry.test/')
+  const catalogs = []
+  const subscription = service.marketplace$.subscribe(m => catalogs.push(m))
+  t.after(() => subscription.unsubscribe())
+  const current = async () => firstValueFrom(service.currentRegistry$)
+
+  assert.deepEqual(await firstValueFrom(service.requestErrors$), [
+    'https://registry.test/',
+  ])
+  assert.equal((await current()).status, 'error')
+
+  connected.next(false)
   const [registry] = await firstValueFrom(service.registries$)
   assert.equal(registry.status, 'connecting')
   assert.equal(registry.error, null)
   assert.deepEqual(await firstValueFrom(service.requestErrors$), [])
+  assert.equal((await current()).status, 'connecting')
+  assert.equal((await current()).error, null)
+
   connected.next(true)
   assert.deepEqual(await firstValueFrom(service.requestErrors$), [
     'https://registry.test/',
   ])
+  assert.equal((await current()).error, 'connection timed out')
+  assert.equal(catalogs.length, 1)
 })
 
 test('registry removal uses the authoritative endpoint, clears a matching selected registry, and reports unoffered keys', async () => {
@@ -4320,6 +4337,7 @@ const registryEntry = (version = '1.0.0:0', status = 'connected') => ({
 
 function marketplaceFixture(t, entries = {}) {
   const source = new Subject()
+  const connection = new BehaviorSubject(true)
   const cache = new BehaviorSubject({
     id: 1,
     value: {
@@ -4369,7 +4387,7 @@ function marketplaceFixture(t, entries = {}) {
       provide: PackageIconService,
       useFactory: () => new ProductionPackageIconService(),
     },
-    { provide: ConnectionService, useValue: of(true) },
+    { provide: ConnectionService, useValue: connection },
     { provide: MarketplaceService, useFactory: () => new MarketplaceService() },
     {
       provide: ApiService,
@@ -4417,6 +4435,7 @@ function marketplaceFixture(t, entries = {}) {
   })
   return {
     service,
+    connection,
     queries,
     responses,
     refreshes,
@@ -4702,6 +4721,27 @@ test('marketplace lists and metadata stream from canonical cache keys without na
   f.replace('/serverInfo/registries', {})
   assert.deepEqual(stores.at(-1), {})
   assert.deepEqual(f.queries, [])
+})
+
+test('connection changes do not refetch an unchanged exact package query', async t => {
+  const entry = registryEntry()
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  const values = f.watch(
+    f.service.fetchPackage$(
+      'https://registry.test/',
+      'example',
+      '1.0.0:0',
+      null,
+    ),
+  )
+  assert.equal(f.queries.length, 1)
+  f.responses[0].resolve(entry.packages.example)
+  await tick()
+  assert.equal(values.at(-1).version, '1.0.0:0')
+  f.connection.next(false)
+  assert.equal(f.queries.length, 1)
+  f.connection.next(true)
+  assert.equal(f.queries.length, 1)
 })
 
 test('exact/source package queries wait for and track their registry cache, ignoring other registry changes and stale responses', async t => {

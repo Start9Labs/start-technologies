@@ -51,26 +51,10 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
 
-  private readonly registryCache$ = combineLatest([
-    this.patch.watch$('registryCache'),
-    inject(ConnectionService),
-  ]).pipe(
-    map(([cache, connected]) =>
-      connected
-        ? cache
-        : Object.fromEntries(
-            Object.entries(cache).map(([url, entry]) => [
-              url,
-              { ...entry, status: 'connecting' as const, error: null },
-            ]),
-          ),
-    ),
-  )
+  private readonly connected$ = inject(ConnectionService)
+  private readonly registryCache$ = this.patch.watch$('registryCache')
 
-  /** Lists defaults in `defaultRegistries` order, then custom registries in saved order. */
-  readonly registries$: Observable<
-    (StoreIdentity & { status: T.RegistryStatus })[]
-  > = combineLatest([
+  private readonly savedRegistries$ = combineLatest([
     this.patch.watch$('serverInfo', 'registries'),
     this.registryCache$,
   ]).pipe(
@@ -94,6 +78,15 @@ export class MarketplaceService extends AbstractMarketplaceService {
     ),
   )
 
+  /** Lists defaults in `defaultRegistries` order, then custom registries in saved order. */
+  readonly registries$: Observable<
+    (StoreIdentity & { status: T.RegistryStatus })[]
+  > = combineLatest([this.savedRegistries$, this.connected$]).pipe(
+    map(([registries, connected]) =>
+      connected ? registries : registries.map(unconfirmed),
+    ),
+  )
+
   private watchRegistry$(url: string) {
     return this.registryCache$.pipe(
       map(cache => findRegistryCache(cache, url)),
@@ -112,7 +105,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
   )
 
   readonly marketplace$: Observable<Marketplace> = combineLatest([
-    this.registries$,
+    this.savedRegistries$,
     this.registryCache$,
   ]).pipe(
     map(([registries, cache]) =>
@@ -130,9 +123,14 @@ export class MarketplaceService extends AbstractMarketplaceService {
     this.currentRegistryUrl$.pipe(
       distinctUntilChanged(),
       switchMap(url =>
-        this.watchRegistry$(url).pipe(
-          filter(entry => !!entry),
-          map(entry => this.toStore(url, entry)),
+        combineLatest([
+          this.watchRegistry$(url).pipe(
+            filter(entry => !!entry),
+            map(entry => this.toStore(url, entry)),
+          ),
+          this.connected$,
+        ]).pipe(
+          map(([store, connected]) => (connected ? store : unconfirmed(store))),
         ),
       ),
       shareReplay(1),
@@ -364,6 +362,12 @@ function registryReady(
       Object.keys(entry.packages).length,
     )
   )
+}
+
+function unconfirmed<
+  O extends Partial<Pick<T.RegistryCache, 'status' | 'error'>>,
+>(observation: O): O {
+  return { ...observation, status: 'connecting', error: null }
 }
 
 function findRegistryCache(cache: DataModel['registryCache'], url: string) {

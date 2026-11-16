@@ -47,7 +47,11 @@ const { rpcResponseStream } = await import(
 const flush = () => new Promise(setImmediate)
 const root = new URL('../../../projects/', import.meta.url)
 
-async function fixture(t, product) {
+async function fixture(
+  t,
+  product,
+  cachedValue = { serverInfo: { hostname: 'cached' } },
+) {
   t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'], now: Date.now() })
   const scope = product === 'os' ? 'start-os/web/ui' : 'start-tunnel/web'
   const path = file => new URL(`${scope}/src/app/services/${file}.ts`, root)
@@ -74,7 +78,7 @@ async function fixture(t, product) {
             useValue: {
               read: async () => ({
                 id: 7,
-                value: { serverInfo: { hostname: 'cached' } },
+                value: cachedValue,
               }),
               clear() {},
             },
@@ -170,10 +174,14 @@ async function fixture(t, product) {
       bytes: Buffer.byteLength(JSON.stringify(message)),
     })
   }
-  const dump = async (index, id) => {
+  const dump = async (
+    index,
+    id,
+    value = { serverInfo: { hostname: `dump-${id}` } },
+  ) => {
     frame(index, {
       jsonrpc: '2.0',
-      result: { id, value: { serverInfo: { hostname: `dump-${id}` } } },
+      result: { id, value },
       meta: { patchSequence: 999 },
     })
     await flush()
@@ -224,6 +232,51 @@ async function fixture(t, product) {
     },
     currentLease: () => ({ key: key.key, signal: lifetime.signal }),
   }
+}
+
+for (const status of ['connected', 'error']) {
+  test(`os restored registry errors stay unconfirmed until a live ${status} dump, even with running startup state`, async t => {
+    const url = 'https://registry.test/'
+    const entry = {
+      status: 'error',
+      error: 'cached registry failure',
+      info: { name: 'Cached registry' },
+      packages: {
+        example: { best: { '1.0.0:0': { title: 'Example' } } },
+      },
+    }
+    const cachedValue = {
+      serverInfo: { hostname: 'cached' },
+      registryCache: { [url]: entry },
+    }
+    const f = await fixture(t, 'os', cachedValue)
+    const registries = []
+    const subscription = f.db
+      .watch$('registryCache')
+      .subscribe(cache => registries.push(cache[url]))
+    t.after(() => subscription.unsubscribe())
+    f.verify()
+    await flush()
+    assert.equal(f.state.value, 'running')
+    assert.equal(f.calls.length, 1)
+    assert.equal(registries.at(-1).status, 'connecting')
+    assert.equal(registries.at(-1).error, null)
+    assert.deepEqual(registries.at(-1).packages, entry.packages)
+    assert.deepEqual(registries.at(-1).info, entry.info)
+    assert.equal(entry.status, 'error')
+    assert.equal(entry.error, 'cached registry failure')
+
+    const live = {
+      ...entry,
+      status,
+      error: status === 'error' ? 'live registry failure' : null,
+    }
+    await f.dump(0, 10, {
+      ...cachedValue,
+      registryCache: { [url]: live },
+    })
+    assert.deepEqual(registries.at(-1), live)
+  })
 }
 
 for (const product of ['os', 'tunnel']) {

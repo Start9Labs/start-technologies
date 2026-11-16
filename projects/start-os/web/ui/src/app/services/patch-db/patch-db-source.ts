@@ -5,6 +5,7 @@ import { BehaviorSubject, defer, EMPTY, Observable } from 'rxjs'
 import {
   catchError,
   filter,
+  map,
   skip,
   startWith,
   switchMap,
@@ -46,7 +47,22 @@ export class PatchDbSource extends Observable<Update<DataModel>[]> {
       )
     }),
   )
+  // Browser-restored registry availability stays unconfirmed until the first live dump.
   private readonly stream$ = defer(() => this.cache.read()).pipe(
+    map(cached => ({
+      ...cached,
+      value: {
+        ...cached.value,
+        registryCache: Object.fromEntries(
+          Object.entries(cached.value.registryCache ?? {}).map(
+            ([url, entry]) => [
+              url,
+              { ...entry, status: 'connecting' as const, error: null },
+            ],
+          ),
+        ),
+      },
+    })),
     switchMap(cached => this.live$.pipe(startWith([cached]))),
   )
 
