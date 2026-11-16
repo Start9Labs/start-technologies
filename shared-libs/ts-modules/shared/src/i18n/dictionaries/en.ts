@@ -358,7 +358,6 @@ export const ENGLISH: Record<string, number> = {
   'View details': 419,
   'Services that depend on': 421,
   'will no longer work properly and may crash.': 422,
-  'Request failed': 423,
   'All services are up to date!': 424,
   'Run': 425, // as in, run a piece of software
   'Action can only be executed when service is': 426,

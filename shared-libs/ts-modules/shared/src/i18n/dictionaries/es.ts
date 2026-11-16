@@ -359,7 +359,6 @@ export default {
   419: 'Ver detalles',
   421: 'Servicios que dependen de',
   422: 'ya no funcionarán correctamente y podrían fallar.',
-  423: 'Solicitud fallida',
   424: '¡Todos los servicios están actualizados!',
   425: 'Ejecutar',
   426: 'La acción solo se puede ejecutar cuando el servicio está',

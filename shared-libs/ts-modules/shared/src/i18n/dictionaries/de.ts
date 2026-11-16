@@ -359,7 +359,6 @@ export default {
   419: 'Details anzeigen',
   421: 'Dienste, die von folgendem abhängen:',
   422: 'werden nicht mehr ordnungsgemäß funktionieren und könnten abstürzen.',
-  423: 'Anfrage fehlgeschlagen',
   424: 'Alle Dienste sind auf dem neuesten Stand!',
   425: 'Ausführen',
   426: 'Aktion kann nur ausgeführt werden, wenn der Dienst',

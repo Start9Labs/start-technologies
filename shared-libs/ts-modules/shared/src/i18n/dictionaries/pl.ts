@@ -359,7 +359,6 @@ export default {
   419: 'Zobacz szczegóły',
   421: 'Serwisy zależne od',
   422: 'przestaną działać poprawnie i mogą ulec awarii.',
-  423: 'Żądanie nie powiodło się',
   424: 'Wszystkie serwisy są aktualne!',
   425: 'Uruchom',
   426: 'Akcja może być wykonana tylko gdy serwis jest',

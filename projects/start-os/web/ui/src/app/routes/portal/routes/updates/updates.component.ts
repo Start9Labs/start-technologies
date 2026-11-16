@@ -11,13 +11,7 @@ import {
   isRegistryLoading,
 } from '@start9labs/marketplace'
 import { i18nPipe, isDefaultRegistry } from '@start9labs/shared'
-import {
-  TuiButton,
-  TuiCell,
-  TuiIcon,
-  TuiNotification,
-  TuiTitle,
-} from '@taiga-ui/core'
+import { TuiButton, TuiCell, TuiIcon, TuiTitle } from '@taiga-ui/core'
 import {
   TuiAvatar,
   TuiBadgeNotification,
@@ -49,7 +43,6 @@ interface UpdatesData {
   hosts: StoreIdentity[]
   marketplace: Marketplace
   localPkgs: Record<string, PackageDataEntry<InstalledState | UpdatingState>>
-  errors: string[]
   hidden: Record<string, string[]>
   pending: Set<string>
 }
@@ -114,15 +107,6 @@ interface UpdatesData {
       }
     </aside>
     <section class="g-subpage">
-      @if (data()?.errors?.includes(current()?.url || '')) {
-        <div
-          tuiNotification
-          appearance="negative"
-          [style.margin-block-end.rem]="1"
-        >
-          {{ 'Request failed' | i18n }}
-        </div>
-      }
       <section class="g-card">
         <header>
           @if (current(); as registry) {
@@ -264,7 +248,6 @@ interface UpdatesData {
     TuiCell,
     TuiAvatar,
     TuiTitle,
-    TuiNotification,
     TuiSkeleton,
     TuiBadgeNotification,
     UpdatesCount,
@@ -322,15 +305,13 @@ export default class UpdatesComponent {
       hosts: this.marketplaceService.registries$,
       refined: this.refinementService.refined$,
       localPkgs: inject(LocalPackagesService),
-      errors: this.marketplaceService.requestErrors$,
       hidden: this.hiddenUpdatesService.effective$,
     }).pipe(
-      map(({ hosts, refined, localPkgs, errors, hidden }) => ({
+      map(({ hosts, refined, localPkgs, hidden }) => ({
         hosts,
         marketplace: refined.marketplace,
         pending: refined.pending,
         localPkgs,
-        errors,
         hidden,
       })),
     ),

@@ -359,7 +359,6 @@ export default {
   419: 'Voir les détails',
   421: 'Services dépendants de',
   422: 'ne fonctionneront plus correctement et pourraient planter.',
-  423: 'Échec de la requête',
   424: 'Tous les services sont à jour !',
   425: 'Exécuter',
   426: 'Action possible uniquement lorsque le service est',
