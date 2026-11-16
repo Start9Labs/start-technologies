@@ -27,6 +27,9 @@ preferred-dark-theme = "ayu"
 sidebar-header-nav = true
 site-url = "/support/"
 
+[output.html.redirect]
+"/dux-and-helix.html" = "dux.html"
+
 [output.html.fold]
 enable = true
 level = 0
