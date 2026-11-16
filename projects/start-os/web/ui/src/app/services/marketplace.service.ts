@@ -52,6 +52,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   private readonly registryCache$ = this.patch.watch$('registryCache')
 
+  /** Lists defaults in `defaultRegistries` order, then custom registries in saved order. */
   readonly registries$: Observable<
     (StoreIdentity & { status: T.RegistryStatus })[]
   > = combineLatest([
