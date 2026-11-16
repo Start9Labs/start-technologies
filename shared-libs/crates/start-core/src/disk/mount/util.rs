@@ -1,4 +1,7 @@
 #[cfg(test)]
+#[path = "namespace_tests.rs"]
+mod namespace_tests;
+#[cfg(test)]
 #[path = "unmount_tests.rs"]
 mod tests;
 
@@ -82,15 +85,14 @@ pub async fn sync_directory<P: AsRef<Path>>(path: P) -> Result<(), Error> {
     Ok(())
 }
 
-/// Preserves source peers while retiring the owned attachment.
-/// The caller excludes replacement mounts through retirement.
+/// Native propagation releases copies held by other mount namespaces.
 #[instrument(skip_all)]
 pub async fn unmount<P: AsRef<Path>>(mountpoint: P, lazy: bool) -> Result<(), Error> {
     unmount_command(mountpoint.as_ref(), unmount_options(lazy)).await
 }
 
-/// Preserves source peers while retiring the owned tree.
-/// The caller excludes new users and mount-tree mutations through retirement.
+/// Retires every cloned child with native namespace-copy propagation.
+/// The caller excludes new users and uses source-isolating bind propagation.
 #[instrument(skip_all)]
 pub async fn unmount_tree<P: AsRef<Path>>(mountpoint: P, lazy: bool) -> Result<(), Error> {
     let mountpoint = mountpoint.as_ref();
@@ -113,9 +115,6 @@ async fn unmount_command(
     mut command: tokio::process::Command,
 ) -> Result<(), Error> {
     tracing::debug!("Unmounting {}.", mountpoint.display());
-    if is_mountpoint(mountpoint).await? {
-        super::filesystem::syscall::make_tree_private(mountpoint)?;
-    }
     match command
         .arg("--")
         .arg(mountpoint)

@@ -80,10 +80,6 @@ pub fn open_tree_clone(path: &Path, recursive: bool) -> Result<OwnedFd, Error> {
     if recursive {
         flags |= AT_RECURSIVE as libc::c_uint;
     }
-    open_tree(path, flags)
-}
-
-fn open_tree(path: &Path, flags: libc::c_uint) -> Result<OwnedFd, Error> {
     let p = cstr_path(path)?;
     let r = unsafe { libc::syscall(libc::SYS_open_tree, AT_FDCWD, p.as_ptr(), flags) };
     fd_from_raw(r, "open_tree")
@@ -277,20 +273,14 @@ fn mount_setattr(fd: BorrowedFd, attr: &MountAttr) -> Result<(), Error> {
     check(r, "mount_setattr")
 }
 
-fn set_private(fd: BorrowedFd) -> Result<(), Error> {
+fn set_propagation(fd: BorrowedFd, propagation: libc::c_ulong) -> Result<(), Error> {
     mount_setattr(
         fd,
         &MountAttr {
-            propagation: libc::MS_PRIVATE as u64,
+            propagation: propagation as u64,
             ..Default::default()
         },
     )
-}
-
-/// Isolates an owned attached tree before retirement.
-pub fn make_tree_private(path: &Path) -> Result<(), Error> {
-    let mount = open_tree(path, OPEN_TREE_CLOEXEC)?;
-    set_private(mount.as_fd())
 }
 
 /// A detached mount fd (from `open_tree`/`open_tree_attr`). Not visible at any
@@ -316,7 +306,11 @@ impl DetachedMount {
     }
     /// Isolates the detached tree from its source's propagation peer groups.
     pub fn set_private(&self) -> Result<(), Error> {
-        set_private(self.fd.as_fd())
+        set_propagation(self.fd.as_fd(), libc::MS_PRIVATE)
+    }
+    /// Receives the source's propagation without propagating back to it.
+    pub fn set_slave(&self) -> Result<(), Error> {
+        set_propagation(self.fd.as_fd(), libc::MS_SLAVE)
     }
     /// Attach the detached mount at the requested path.
     pub fn attach(self, mountpoint: &Path) -> Result<(), Error> {

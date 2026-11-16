@@ -52,7 +52,7 @@ impl<Src: AsRef<Path>> Bind<Src> {
         self
     }
     /// Cloned submounts share the attachment guard's lifetime and read-only policy.
-    /// Read-only clones are private; writable clones retain source propagation until retirement.
+    /// Read-only clones are private; writable clones are slaves of their source.
     pub fn recursive(mut self, recursive: bool) -> Self {
         self.recursive = recursive;
         self
@@ -104,11 +104,15 @@ impl<Src: AsRef<Path> + Send + Sync> FileSystem for Bind<Src> {
         mountpoint: P,
         mount_type: MountType,
     ) -> Result<(), Error> {
-        if self.recursive && mount_type == MountType::ReadOnly {
+        if self.recursive {
             self.pre_mount(mountpoint.as_ref(), mount_type).await?;
             let detached = DetachedMount::from_fd(open_tree_clone(self.src.as_ref(), true)?);
-            detached.set_private()?;
-            detached.set_readonly(true)?;
+            if mount_type == MountType::ReadOnly {
+                detached.set_private()?;
+                detached.set_readonly(true)?;
+            } else {
+                detached.set_slave()?;
+            }
             detached.attach(mountpoint.as_ref())
         } else {
             super::default_mount_impl(self, mountpoint, mount_type).await
