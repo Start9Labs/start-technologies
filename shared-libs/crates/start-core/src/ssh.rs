@@ -26,12 +26,17 @@ pub(crate) fn is_installer_host_key(name: &std::ffi::OsStr) -> bool {
     name.starts_with(b"ssh_host_") && name.ends_with(b"_key")
 }
 
-/// Includes resolve in the caller's mount namespace, not beside the configuration file.
+/// Includes and NSS expansion use the caller's actual prospective namespace.
+/// The caller authenticates stable executable, library and runtime configuration inputs.
+/// OpenSSL initializes before configuration output and can load configured providers.
 pub(crate) async fn host_key_files(configuration: &Path) -> Result<Vec<std::path::PathBuf>, Error> {
-    let output = Command::new("sshd")
+    let output = Command::new("/usr/sbin/sshd")
         .args(["-G", "-f"])
         .arg(configuration)
         .current_dir("/")
+        .env_clear()
+        .env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
+        .env("LC_ALL", "C")
         .kill_on_drop(true)
         .invoke(ErrorKind::Filesystem)
         .await?;
@@ -372,6 +377,67 @@ pub async fn sync_pubkeys<P: AsRef<Path>>(pubkeys: &SshKeys, ssh_dir: P) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "requires native OpenSSH/OpenSSL and start9 identity"]
+    async fn real_host_key_query_excludes_inherited_runtime_overrides() {
+        use std::os::unix::ffi::OsStringExt;
+        use std::path::PathBuf;
+
+        const CHILD_CONFIG: &str = "STARTOS_TEST_SSH_QUERY_CONFIG";
+        if let Some(configuration) = std::env::var_os(CHILD_CONFIG) {
+            assert_eq!(
+                host_key_files(Path::new(&configuration)).await.unwrap(),
+                vec![
+                    PathBuf::from("/home/start9/native-key"),
+                    PathBuf::from("/private/with space"),
+                    std::ffi::OsString::from_vec(b"/private/\xff".to_vec()).into(),
+                ]
+            );
+            return;
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let configuration = root.path().join("sshd_config");
+        let included = root.path().join("included.conf");
+        tokio::fs::write(&included, b"HostKey ~start9/native-key\n")
+            .await
+            .unwrap();
+        let mut settings = format!(
+            "Include {}\nHostKey \"/private/with space\"\n",
+            included.display()
+        )
+        .into_bytes();
+        settings.extend_from_slice(b"HostKey /private/\xff\n");
+        tokio::fs::write(&configuration, settings).await.unwrap();
+        let overrides = root.path().join("openssl.cnf");
+        tokio::fs::write(&overrides, "config_diagnostics = 1\nopenssl_conf = init\n[init]\nalg_section = algorithms\n[algorithms]\ndefault_properties = fips=yes\n").await.unwrap();
+        let control = Command::new("/usr/sbin/sshd")
+            .args(["-G", "-f"])
+            .arg(&configuration)
+            .env("OPENSSL_CONF", &overrides)
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            !control.status.success(),
+            "native OpenSSL override must distinguish the boundary"
+        );
+        Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "ssh::tests::real_host_key_query_excludes_inherited_runtime_overrides",
+                "--nocapture",
+            ])
+            .env(CHILD_CONFIG, &configuration)
+            .env("OPENSSL_CONF", &overrides)
+            .env("OPENSSL_MODULES", root.path().join("missing-modules"))
+            .env("PATH", root.path().join("missing-commands"))
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+    }
 
     #[tokio::test]
     #[ignore = "requires native start9/startos system identities"]
