@@ -12,7 +12,12 @@ import {
   registryStatus,
   isRegistryLoading,
 } from '@start9labs/marketplace'
-import { Exver, registryUrl, sameUrl } from '@start9labs/shared'
+import {
+  defaultRegistries,
+  Exver,
+  registryUrl,
+  sameUrl,
+} from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
@@ -54,20 +59,22 @@ export class MarketplaceService extends AbstractMarketplaceService {
     this.registryCache$,
   ]).pipe(
     map(([registries, cache]) =>
-      Object.entries(registries).flatMap(([url, name]) => {
-        try {
-          const entry = findRegistryCache(cache, url)
-          return [
-            {
-              ...toStoreIdentity(url, name),
-              status: registryStatus(entry),
-              error: entry?.error,
-            },
-          ]
-        } catch {
-          return []
-        }
-      }),
+      Object.entries(registries)
+        .sort(([a], [b]) => defaultRank(a) - defaultRank(b))
+        .flatMap(([url, name]) => {
+          try {
+            const entry = findRegistryCache(cache, url)
+            return [
+              {
+                ...toStoreIdentity(url, name),
+                status: registryStatus(entry),
+                error: entry?.error,
+              },
+            ]
+          } catch {
+            return []
+          }
+        }),
     ),
   )
 
@@ -345,4 +352,10 @@ function registryReady(
 
 function findRegistryCache(cache: DataModel['registryCache'], url: string) {
   return Object.entries(cache).find(([saved]) => sameUrl(saved, url))?.[1]
+}
+
+function defaultRank(url: string): number {
+  const defaults = Object.values(defaultRegistries)
+  const rank = defaults.findIndex(known => sameUrl(known, url))
+  return rank < 0 ? defaults.length : rank
 }
