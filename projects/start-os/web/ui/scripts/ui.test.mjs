@@ -4702,7 +4702,11 @@ function fakeIndexedDb() {
       const staged = { values: new Map(data.values), meta: new Map(data.meta) }
       const tx = {
         objectStore: name => ({
-          get: key => ({ result: staged[name].get(key) }),
+          get: key => {
+            const request = { result: staged[name].get(key) }
+            queueMicrotask(() => request.onsuccess?.())
+            return request
+          },
           getAll: () => ({ result: [...staged[name].values()] }),
           getAllKeys: () => ({ result: [...staged[name].keys()] }),
           put: (value, key) => {
@@ -4714,14 +4718,16 @@ function fakeIndexedDb() {
         }),
       }
       queueMicrotask(() => {
-        if (mode === 'readwrite' && control.fail) {
-          control.fail = false
-          tx.error = new Error('quota')
-          tx.onerror()
-        } else {
-          if (mode === 'readwrite') data = staged
-          tx.oncomplete()
-        }
+        queueMicrotask(() => {
+          if (mode === 'readwrite' && control.fail) {
+            control.fail = false
+            tx.error = new Error('quota')
+            tx.onerror()
+          } else {
+            if (mode === 'readwrite') data = staged
+            tx.oncomplete()
+          }
+        })
       })
       return tx
     },
@@ -4776,6 +4782,36 @@ test('patch cache rewrites only replaced top-level values', async t => {
     id: 5,
     value: { ui: { a: 1 } },
   })
+})
+
+test('patch cache keeps a complete snapshot when another tab advances the stored revision', async t => {
+  const { win } = fakeIndexedDb()
+  const fast = await patchDbCache(t, win)
+  const slow = await patchDbCache(t, win)
+  await fast.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
+  const cached = await slow.read()
+  await fast.write({
+    id: 5,
+    value: { ui: { a: 3 }, packageData: { x: 1 } },
+  })
+  const delayed = {
+    id: 4,
+    value: { ui: { a: 2 }, packageData: cached.value.packageData },
+  }
+  await slow.write(delayed)
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), delayed)
+})
+
+test('patch cache restores every key after another tab clears the snapshot', async t => {
+  const { win } = fakeIndexedDb()
+  const active = await patchDbCache(t, win)
+  const other = await patchDbCache(t, win)
+  const value = { ui: { a: 1 }, packageData: { x: 1 } }
+  await active.write({ id: 3, value })
+  await other.clear()
+  const next = { id: 4, value: { ...value, ui: { a: 2 } } }
+  await active.write(next)
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), next)
 })
 
 test('patch cache discards its snapshot after a failed write and clears on demand', async t => {
