@@ -43,12 +43,7 @@ impl WebserverInfo {
         self.enabled
             && self
                 .listen
-                .and_then(ipv4_listener_addr)
-                .is_some_and(|listen| {
-                    (listen.ip().is_unspecified() || listen.ip() == source.ip())
-                        && source.port() <= listen.port()
-                        && listen.port() <= source.port().saturating_add(count.saturating_sub(1))
-                })
+                .is_some_and(|listen| listener_holds(listen, source, count))
     }
 
     pub(crate) fn check_plain_forward(
@@ -83,6 +78,15 @@ impl WebserverInfo {
         }
         Ok(())
     }
+}
+
+/// Whether a listener on `listen` receives one of `count` ports from `source`.
+pub(crate) fn listener_holds(listen: SocketAddr, source: SocketAddrV4, count: u16) -> bool {
+    ipv4_listener_addr(listen).is_some_and(|listen| {
+        (listen.ip().is_unspecified() || listen.ip() == source.ip())
+            && source.port() <= listen.port()
+            && listen.port() <= source.port().saturating_add(count.saturating_sub(1))
+    })
 }
 
 fn ipv4_listener_addr(listen: SocketAddr) -> Option<SocketAddrV4> {
