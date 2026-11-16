@@ -308,8 +308,9 @@ async fn legacy_replacement_is_retryable_and_existing_projection_keeps_live_data
     let backing = backing_file(&data, target(&first, "etc/shadow"))
         .await
         .unwrap();
-    first.replace_legacy(&raw).await.unwrap();
-    first.replace_legacy(&raw).await.unwrap();
+    let legacy = first.legacy_replacements();
+    legacy.replace_legacy(&raw).await.unwrap();
+    legacy.replace_legacy(&raw).await.unwrap();
     assert_eq!(
         tokio::fs::read_link(raw.join("etc/shadow")).await.unwrap(),
         target(&first, "etc/shadow")
@@ -325,7 +326,11 @@ async fn legacy_replacement_is_retryable_and_existing_projection_keeps_live_data
             .unwrap(),
         backing
     );
-    second.replace_legacy(&raw).await.unwrap();
+    second
+        .legacy_replacements()
+        .replace_legacy(&raw)
+        .await
+        .unwrap();
     assert_eq!(
         tokio::fs::read(backing).await.unwrap(),
         b"committed-new-password"
@@ -353,7 +358,8 @@ async fn interrupted_legacy_replacement_recovers_native_byte_names_without_follo
     let target = target.clone();
     let survivor = raw.join("unrelated-public-file");
     tokio::fs::write(&survivor, b"unchanged").await.unwrap();
-    let temporary = raw.join(projected.legacy_temporary(&relative, &target).unwrap());
+    let legacy = projected.legacy_replacements();
+    let temporary = raw.join(legacy.legacy_temporary(&relative, &target).unwrap());
     tokio::fs::symlink(&survivor, &temporary).await.unwrap();
     open_file(temporary.parent().unwrap())
         .await
@@ -361,8 +367,8 @@ async fn interrupted_legacy_replacement_recovers_native_byte_names_without_follo
         .sync_all()
         .await
         .unwrap();
-    projected.replace_legacy(&raw).await.unwrap();
-    projected.replace_legacy(&raw).await.unwrap();
+    legacy.replace_legacy(&raw).await.unwrap();
+    legacy.replace_legacy(&raw).await.unwrap();
     assert_eq!(tokio::fs::read_link(&path).await.unwrap(), target);
     assert!(tokio::fs::symlink_metadata(temporary).await.is_err());
     assert_eq!(tokio::fs::read(&survivor).await.unwrap(), b"unchanged");
@@ -392,7 +398,13 @@ async fn legacy_parent_redirection_cannot_replace_unrelated_files() {
         tokio::fs::symlink(&target, raw.join("root/hostkeys"))
             .await
             .unwrap();
-        assert!(projected.replace_legacy(&raw).await.is_err());
+        assert!(
+            projected
+                .legacy_replacements()
+                .replace_legacy(&raw)
+                .await
+                .is_err()
+        );
         assert_eq!(
             tokio::fs::read(target.join("admin")).await.unwrap(),
             b"unrelated-file"
@@ -431,7 +443,11 @@ async fn credential_sibling_names_do_not_alias_staging_files() {
             .collect::<Vec<_>>(),
     )
     .await;
-    projected.replace_legacy(&raw).await.unwrap();
+    projected
+        .legacy_replacements()
+        .replace_legacy(&raw)
+        .await
+        .unwrap();
     for (index, path) in paths.iter().enumerate() {
         let target = tokio::fs::read_link(raw.join(path)).await.unwrap();
         assert_eq!(
@@ -452,7 +468,11 @@ async fn real_maximum_native_credential_name_uses_bounded_temporary_names() {
         .await
         .unwrap();
     let projected = project(&raw, &data, &[Path::new("/").join(&relative)]).await;
-    projected.replace_legacy(&raw).await.unwrap();
+    projected
+        .legacy_replacements()
+        .replace_legacy(&raw)
+        .await
+        .unwrap();
     let target = tokio::fs::read_link(raw.join(&relative)).await.unwrap();
     assert_eq!(
         tokio::fs::read(backing_file(&data, &target).await.unwrap())
@@ -479,7 +499,11 @@ async fn resumed_projection_retires_stale_legacy_without_overwriting_live_creden
         tokio::fs::read(raw.join("etc/shadow")).await.unwrap(),
         b"private-shadow"
     );
-    resumed.replace_legacy(&raw).await.unwrap();
+    resumed
+        .legacy_replacements()
+        .replace_legacy(&raw)
+        .await
+        .unwrap();
     assert!(
         tokio::fs::symlink_metadata(raw.join("etc/shadow"))
             .await
@@ -669,7 +693,11 @@ async fn real_private_view_preserves_group_access_restart_and_strict_scoped_tear
             .unwrap()
             .is_file()
     );
-    projected.replace_legacy(&raw).await.unwrap();
+    projected
+        .legacy_replacements()
+        .replace_legacy(&raw)
+        .await
+        .unwrap();
     assert!(
         !crate::disk::mount::util::is_mountpoint(RUNTIME)
             .await

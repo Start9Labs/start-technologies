@@ -1,12 +1,13 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use super::namespace::mountpoint as source_mountpoint;
+use super::namespace::{confined_path as verified_path, invalid_source};
 use super::root::VerifiedMounts;
-use crate::disk::mount::filesystem::bind::{Bind, FileType};
+use crate::disk::mount::filesystem::ReadOnly;
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
 use crate::disk::mount::filesystem::overlayfs::OverlayFs;
-use crate::disk::mount::filesystem::private_tmpfs::PrivateTmpfs;
-use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::os_overlay::VerityMount;
 use crate::prelude::*;
@@ -20,36 +21,12 @@ pub struct BuildSource {
     path: PathBuf,
 }
 
-fn invalid_source() -> Error {
-    Error::new(
-        eyre!("{}", t!("fde.boot.invalid-descriptor")),
-        ErrorKind::InvalidSignature,
-    )
-}
-
-async fn verified_path(public: &Path, relative: &Path) -> Result<PathBuf, Error> {
-    let public = crate::util::io::canonicalize(public, true).await?;
-    let path = crate::util::io::canonicalize(public.join(relative), true).await?;
-    if !path.starts_with(&public) {
-        return Err(invalid_source());
-    }
-    Ok(path)
-}
-
 async fn runtime_image(public: &Path) -> Result<PathBuf, Error> {
     verified_path(
         public,
         Path::new("usr/lib/startos/container-runtime/rootfs.squashfs"),
     )
     .await
-}
-
-async fn source_mountpoint(root: &Path, relative: &Path) -> Result<PathBuf, Error> {
-    let target = root.join(relative);
-    if verified_path(root, relative).await? != target {
-        return Err(invalid_source());
-    }
-    Ok(target)
 }
 
 async fn script_path(root: &Path, script: &Path) -> Result<PathBuf, Error> {
@@ -138,45 +115,13 @@ impl BuildSource {
     ) -> Result<Vec<u8>, Error> {
         let root = crate::util::io::canonicalize(&self.path, true).await?;
         let script = script_path(&root, script).await?;
-        let scratch = ["dev", "run", "tmp", "var/tmp"];
-        for path in scratch.into_iter().chain(["proc"]) {
-            source_mountpoint(&root, Path::new(path)).await?;
-        }
-        for path in scratch {
-            self.layers.push(
-                MountGuard::mount(&PrivateTmpfs::new(), self.path.join(path), ReadWrite).await?,
-            );
-        }
-        for device in ["null", "zero", "random", "urandom"] {
-            self.layers.push(
-                MountGuard::mount(
-                    &Bind::new(Path::new("/dev").join(device)).with_type(FileType::File),
-                    self.path.join("dev").join(device),
-                    ReadOnly,
-                )
-                .await?,
-            );
-        }
+        super::namespace::prepare(&mut self.layers, &root).await?;
         let mut input = std::io::Cursor::new(input);
-        tokio::process::Command::new("/usr/bin/unshare")
-            .args([
-                "--mount",
-                "--pid",
-                "--fork",
-                "--kill-child=SIGKILL",
-                "--net",
-                "--ipc",
-                "--uts",
-                "--propagation=private",
-                "--mount-proc",
-            ])
-            .arg("--root")
-            .arg(&root)
-            .arg("--wd=/")
+        super::namespace::command(&root)
+            .arg("--net")
             .args(["--", "/usr/bin/node", "--"])
             .arg(script)
             .args(arguments)
-            .env_clear()
             .env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
             .env("HOME", "/var/tmp")
             .env("TMPDIR", "/tmp")

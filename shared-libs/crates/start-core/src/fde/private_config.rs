@@ -33,7 +33,7 @@ use crate::util::squashfs::{
     snapshot_entries,
 };
 
-const DIRECTORY: &str = "fde-private-config";
+pub(super) const DIRECTORY: &str = "fde-private-config";
 pub(crate) const RUNTIME: &str = "/run/startos-private-config";
 
 /// Preserves shadow-group traversal; `disk::main::unmount_fs` releases the view.
@@ -344,6 +344,23 @@ impl ProjectedConfig {
         PreparedGeneration::prepare_snapshot(self.snapshot.clone(), rootfs, store, key).await
     }
 
+    pub(crate) fn legacy_replacements(&self) -> LegacyReplacements {
+        LegacyReplacements {
+            paths: snapshot_entries(&self.snapshot)
+                .into_iter()
+                .map(|(path, _)| path)
+                .collect(),
+            replacements: self.replacements.clone(),
+        }
+    }
+}
+
+pub(crate) struct LegacyReplacements {
+    paths: BTreeSet<PathBuf>,
+    replacements: BTreeMap<PathBuf, PathBuf>,
+}
+
+impl LegacyReplacements {
     fn legacy_temporary(&self, path: &Path, target: &Path) -> Result<PathBuf, Error> {
         use std::os::unix::ffi::OsStrExt;
 
@@ -358,13 +375,7 @@ impl ProjectedConfig {
                 .parent()
                 .expect("credential parent")
                 .join(format!(".fde-{}.tmp", hash.finalize().to_hex()));
-            if self
-                .snapshot
-                .contents()
-                .get_path_checked(&temporary)
-                .map_err(|_| invalid_layout(path))?
-                .is_none()
-            {
+            if !self.paths.contains(&temporary) {
                 return Ok(temporary);
             }
             attempt += 1;

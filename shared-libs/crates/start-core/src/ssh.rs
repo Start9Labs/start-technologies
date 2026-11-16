@@ -30,20 +30,26 @@ pub(crate) fn is_installer_host_key(name: &std::ffi::OsStr) -> bool {
 /// The caller authenticates stable executable, library and runtime configuration inputs.
 /// OpenSSL initializes before configuration output and can load configured providers.
 pub(crate) async fn host_key_files(configuration: &Path) -> Result<Vec<std::path::PathBuf>, Error> {
-    let output = Command::new("/usr/sbin/sshd")
+    let output = host_key_command(configuration)
+        .invoke(ErrorKind::Filesystem)
+        .await?;
+    Ok(parse_host_key_files(&output))
+}
+
+pub(crate) fn host_key_command(configuration: &Path) -> Command {
+    let mut command = Command::new("/usr/sbin/sshd");
+    command
         .args(["-G", "-f"])
         .arg(configuration)
         .current_dir("/")
         .env_clear()
         .env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
         .env("LC_ALL", "C")
-        .kill_on_drop(true)
-        .invoke(ErrorKind::Filesystem)
-        .await?;
-    Ok(parse_host_key_files(&output))
+        .kill_on_drop(true);
+    command
 }
 
-fn parse_host_key_files(output: &[u8]) -> Vec<std::path::PathBuf> {
+pub(crate) fn parse_host_key_files(output: &[u8]) -> Vec<std::path::PathBuf> {
     use std::os::unix::ffi::OsStringExt;
     output
         .split(|byte| *byte == b'\n')

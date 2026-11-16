@@ -244,6 +244,7 @@ impl VerityImage {
                 Ok(mount) => Ok(VerityMount {
                     mount: mount.with_strict_unmount(),
                     mapping: Some(mapping),
+                    image: data,
                 }),
                 Err(error) => {
                     mapping.close_inner().await.log_err();
@@ -330,9 +331,15 @@ impl FileSystem for SquashfsDevice {
 pub struct VerityMount {
     mount: MountGuard,
     mapping: Option<VerityMapping>,
+    image: PathBuf,
 }
 
 impl VerityMount {
+    /// The caller excludes writes to the backing image through publication.
+    pub(crate) fn image_path(&self) -> &Path {
+        &self.image
+    }
+
     /// Transfers mount and mapping lifetime to the caller without removing protection.
     pub fn persist(mut self) -> PathBuf {
         self.mapping.take().unwrap().persist();
