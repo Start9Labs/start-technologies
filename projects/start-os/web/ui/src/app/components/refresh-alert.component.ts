@@ -34,7 +34,8 @@ import { UiUpdateService } from 'src/app/services/ui-update.service'
             {{
               (state.status === 'reloading'
                 ? 'Loading'
-                : 'User interface synced. Refresh to continue.') | i18n
+                : 'User interface synced. Refresh to continue.'
+              ) | i18n
             }}
           }
           @case ('stalled') {
