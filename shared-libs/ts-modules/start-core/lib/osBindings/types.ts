@@ -796,6 +796,16 @@ export type EditGatewayParams = z.output<typeof schemas.EditGatewayParams>
 export type EditGatewayParamsInput = z.input<typeof schemas.EditGatewayParams>
 export type EditSignerParams = z.output<typeof schemas.EditSignerParams>
 export type EditSignerParamsInput = z.input<typeof schemas.EditSignerParams>
+
+/**
+ * Edits an existing release; omitted fields, assets and authorized signers remain unchanged.
+ */
+export type EditVersionParams = z.output<typeof schemas.EditVersionParams>
+
+/**
+ * Edits an existing release; omitted fields, assets and authorized signers remain unchanged.
+ */
+export type EditVersionParamsInput = z.input<typeof schemas.EditVersionParams>
 export type EffectsRunActionParams = z.output<
   typeof schemas.EffectsRunActionParams
 >

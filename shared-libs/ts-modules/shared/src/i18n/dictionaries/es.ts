@@ -1093,7 +1093,8 @@ export default {
   1296: 'Ver registro personalizado',
   1297: 'Personalizado',
   1298: 'Introduce un dominio o una URL',
-  1299: 'Forzar detención',
-  1300: 'Forzando detención',
-  1301: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
+  1299: 'La sincronización está tardando más de lo esperado. Actualiza la página para volver a intentarlo.',
+  1300: 'Forzar detención',
+  1301: 'Forzando detención',
+  1302: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
 } satisfies i18n

@@ -1093,7 +1093,8 @@ export default {
   1296: 'Benutzerdefiniertes Register anzeigen',
   1297: 'Benutzerdefiniert',
   1298: 'Domain oder URL eingeben',
-  1299: 'Stopp erzwingen',
-  1300: 'Stopp wird erzwungen',
-  1301: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
+  1299: 'Die Synchronisierung dauert länger als erwartet. Aktualisieren Sie die Seite, um es erneut zu versuchen.',
+  1300: 'Stopp erzwingen',
+  1301: 'Stopp wird erzwungen',
+  1302: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
 } satisfies i18n

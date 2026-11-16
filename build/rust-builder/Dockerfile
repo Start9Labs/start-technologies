@@ -33,8 +33,9 @@ FROM toolchain AS builder
 WORKDIR /build/cargo-zigbuild
 ADD --checksum=sha256:62239c71c4cb36c47fe000efebfcf6fe63dc7c0feb2346434e950b124220b2e8 https://codeload.github.com/rust-cross/cargo-zigbuild/tar.gz/2ffd80658c96b5ff971085dd509e58e5b441f1c8 /tmp/cargo-zigbuild.tar.gz
 RUN tar -xzf /tmp/cargo-zigbuild.tar.gz --strip-components=1 -C .
-COPY rva23.patch /tmp/rva23.patch
-RUN patch --fuzz=0 -p1 < /tmp/rva23.patch
+COPY rva23.patch zig-libc.patch /tmp/
+RUN patch --fuzz=0 -p1 < /tmp/rva23.patch && \
+    patch --fuzz=0 -p1 < /tmp/zig-libc.patch
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/cargo-zigbuild/target \
     cargo test --locked --lib && \
@@ -61,6 +62,20 @@ COPY --from=builder /build/bindgen-cli/LICENSE /usr/local/share/licenses/bindgen
 COPY --from=sysroot_amd64 / /opt/sysroot/x86_64/
 COPY --from=sysroot_arm64 / /opt/sysroot/aarch64/
 COPY --from=sysroot_riscv64 / /opt/sysroot/riscv64/
+RUN for arch in x86_64 aarch64 riscv64; do \
+      printf '%s\n' \
+        "include_dir=/opt/sysroot/$arch/usr/include" \
+        "sys_include_dir=/opt/sysroot/$arch/usr/include" \
+        "crt_dir=/opt/sysroot/$arch/usr/lib" \
+        msvc_lib_dir= kernel32_lib_dir= gcc_dir= \
+        > "/opt/sysroot/$arch/zig-libc.txt"; \
+    done
+# Musl targets link the sysroots' musl, not Zig's bundled libc, whose malloc never returns freed memory.
+# Per-revision wrapper paths make Cargo rebuild native code after an image change.
+ENV ZIG_LIBC_x86_64_linux_musl=/opt/sysroot/x86_64/zig-libc.txt \
+    ZIG_LIBC_aarch64_linux_musl=/opt/sysroot/aarch64/zig-libc.txt \
+    ZIG_LIBC_riscv64_linux_musl=/opt/sysroot/riscv64/zig-libc.txt \
+    CARGO_ZIGBUILD_CACHE_DIR=/root/.cache/cargo-zigbuild/${SOURCE_REVISION}
 COPY verify.sh /usr/local/libexec/start9/verify-rust-builder
 COPY --chmod=755 entrypoint.sh /usr/local/libexec/start9/rust-builder-entrypoint
 ENTRYPOINT ["/usr/local/libexec/start9/rust-builder-entrypoint"]

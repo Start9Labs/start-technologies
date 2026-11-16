@@ -14,18 +14,18 @@ Keep chats on Start9's products and the technologies around them. The [Terms of 
 
 ## In a Chat
 
-- **Attach files** with the paperclip in the message field: screenshots and other images, audio recordings, text files and logs (StartOS's log exports included), and PDFs, up to 10 MB each.
-- **Answer Dux's questions** from the card above the message field. See [Dux and Helix](dux-and-helix.md#answering-duxs-questions).
-- **Request a human** from **Actions**, the **…** in the message field. See [Dux and Helix](dux-and-helix.md#reaching-a-person).
+- **Attach files** with the paperclip in the message field: screenshots and other images, audio recordings, text files and logs (StartOS's log exports included), PDFs, and archives of logs (`.zip`, `.tar`, `.tar.gz`, `.tgz`, `.gz`), up to 10 MB each. Dux reads what is inside an archive.
+- **Answer Dux's questions** from the card above the message field. See [Dux](dux.md#answering-duxs-questions).
+- **Request a human** from **Actions**, the **…** in the message field. See [Dux](dux.md#reaching-a-person).
 - **Close the chat** from **Actions**, once you have what you came for. See [Closing a Chat](#closing-a-chat).
 - **Reply to, react to or copy** a message from the toolbar that appears when you hover over it, or by long-pressing it on a phone. The same menu lets you **Edit** your own messages, or **Hide from others** to keep one from other customers.
 - **See who reacted** by hovering over a reaction, or pressing and holding it on a phone.
 - **Search** the chat from the search icon in its header.
 - **Write privately** in the chat's private thread once a person from Start9 has opened one: choose the line in the chat saying they opened it, or the lock in its header. See [Privacy](privacy.md#sharing-privately).
 
-While Dux works on a reply, or someone at Start9 is typing one, the chat says so. You can keep writing in the meantime; Dux answers everything you sent together.
+While Dux works on a reply, the chat shows its latest steps; while someone at Start9 is typing one, the chat says so. You can keep writing in the meantime; Dux answers everything you sent together.
 
-**Chat info**, from the info icon in the header, shows the chat's topic, its status, who is in it, and Dux's notes on the case. **Download as a zip**, under **Export**, saves the whole chat. See [Exporting a Chat](#exporting-a-chat).
+**Chat info**, from the info icon in the header, shows the chat's topic, its status and who is in it. **Download as a zip**, under **Export**, saves the whole chat. See [Exporting a Chat](#exporting-a-chat).
 
 ## Your Chats
 
@@ -35,7 +35,7 @@ While Dux works on a reply, or someone at Start9 is typing one, the chat says so
 
 **All chats**, the globe at the top of the chat list, lists the topics; open one to read its chats, newest first, or search every chat. Someone may already have asked your question.
 
-Another customer's chat is read-only. You see its messages and Dux's notes with secrets masked, and how many files its customer attached, never the files themselves or its private thread. To ask about it, choose **New chat** at the bottom, which starts one in the same topic. Start9 can hide a chat from other customers.
+Another customer's chat is read-only. You see its messages with secrets masked, and how many files its customer attached, never the files themselves or its private thread. To ask about it, choose **New chat** at the bottom, which starts one in the same topic. Start9 can hide a chat from other customers.
 
 ## Open and Closed Chats
 
@@ -50,12 +50,12 @@ A chat closes when:
 
 - **You close it**, with **Close chat** in **Actions** or in **Chat info**.
 - **Start9 closes it**, usually once the problem is solved. Dux may close a chat it has handled alone, with a final reply.
-- **Nobody writes in it for a while.** An inactive chat closes on its own, but never while you are waiting on a person or Helix is investigating. The chat says it closed due to inactivity.
+- **Nobody writes in it for a while.** An inactive chat closes on its own, but never while you are waiting on a person. The chat says it closed due to inactivity.
 
-To pick a closed chat back up, choose **Continue in a new chat** at the bottom of it and write your first message. The new chat is linked to the old one, and Dux starts from its notes on the case. A chat can be continued once; after that, its link takes you to the newer chat.
+To pick a closed chat back up, choose **Continue in a new chat** at the bottom of it and write your first message. The new chat is linked to the old one, and Dux opens it with a short summary of the earlier chat, under the line linking back to it. A chat can be continued once; after that, its link takes you to the newer chat.
 
 ## Exporting a Chat
 
-**Download as a zip**, under **Export** in **Chat info**, saves the whole chat: a `chat.md` file with every message in order and Dux's notes on the case, and an `attachments` folder with the files. If the chat continues an earlier one, that chat comes along too.
+**Download as a zip**, under **Export** in **Chat info**, saves the whole chat: a `chat.md` file with every message in order, and an `attachments` folder with the files. If the chat continues an earlier one, that chat comes along too.
 
 Your name, your email address and the chat's private thread are in a separate `private` folder; everywhere else, you appear as Customer. Delete that folder before you pass the zip on to anyone. Anything you wrote in the chat itself stays in `chat.md`.

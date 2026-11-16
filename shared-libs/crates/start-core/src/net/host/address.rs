@@ -928,6 +928,9 @@ mod test {
                 sibling
                     .disabled
                     .remove(&(InternedString::intern(FQDN), 43000));
+                for range in ranges.values_mut() {
+                    range.addresses.refresh_effective();
+                }
                 Ok(())
             })
             .unwrap();
