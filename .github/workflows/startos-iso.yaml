@@ -73,6 +73,7 @@ on:
       - 'debian/**'
       - 'apt/**'
       - '.github/workflows/startos-iso.yaml'
+      - '.github/workflows/startos-image.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
@@ -103,6 +104,7 @@ on:
       - 'debian/**'
       - 'apt/**'
       - '.github/workflows/startos-iso.yaml'
+      - '.github/workflows/startos-image.yaml'
       - '.github/actions/setup-build/**'
       # Doc-only edits under the allowlisted project trees (e.g.
       # projects/start-os/docs/**) shouldn't trigger a build.
@@ -110,12 +112,12 @@ on:
       - 'projects/start-os/release-notes/**'
       - 'projects/start-os/changelog/**'
 
-# The group is scoped by event so a master push can't cancel an in-flight
-# dispatched release build. Only pull requests cancel: a push to master
-# publishes to alpha, so master pushes queue behind each other rather than
-# aborting a publish half-done.
+# A run that publishes joins its channel's group, so registering the version and
+# indexing each platform never overlap another run publishing to that registry.
+# A newer run in a group replaces one still pending. Other runs group by event
+# and ref, and only pull requests cancel a run in progress.
 concurrency:
-  group: startos-iso-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  group: startos-iso-${{ (github.event_name == 'push' && github.ref == 'refs/heads/master' && 'publish-alpha') || (github.event_name == 'workflow_dispatch' && contains(fromJson('["alpha", "beta"]'), github.event.inputs.deploy) && format('publish-{0}', github.event.inputs.deploy)) || format('{0}-{1}', github.event_name, github.head_ref || github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -239,7 +241,7 @@ jobs:
           files="$(gh api --paginate \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
             --jq '.[].filename')"
-          matched="$(printf '%s\n' "$files" | grep -E '^(build/|debian/|apt/|projects/start-os/build/|projects/start-os/build\.mk$|projects/start-os/debian/|projects/start-os/(release-notes|changelog)/|scripts/changelog[^/]*\.mjs$|shared-libs/crates/start-core/locales/release-notes\.json$|\.prettierrc\.json$|package\.json$|projects/start-os/[^/]+\.(service|slice)$|\.github/workflows/startos-iso\.yaml$|\.github/actions/setup-build/)' || true)"
+          matched="$(printf '%s\n' "$files" | grep -E '^(build/|debian/|apt/|projects/start-os/build/|projects/start-os/build\.mk$|projects/start-os/debian/|projects/start-os/(release-notes|changelog)/|scripts/changelog[^/]*\.mjs$|shared-libs/crates/start-core/locales/release-notes\.json$|\.prettierrc\.json$|package\.json$|projects/start-os/[^/]+\.(service|slice)$|\.github/workflows/startos-(iso|image)\.yaml$|\.github/actions/setup-build/)' || true)"
           if [ -n "$matched" ]; then
             echo "Image-affecting files changed:"; printf '  %s\n' "$matched"
             echo "image=true" >> "$GITHUB_OUTPUT"
@@ -259,7 +261,8 @@ jobs:
     # dispatch naming a channel.
     # Allowlist the channels rather than excluding NONE: a `!= 'NONE'` gate also admits
     # an empty deploy input, which uploaded a branch build to the public bucket and then
-    # died on the empty REGISTRY below. Keep in sync with the REGISTRY map.
+    # died on the empty REGISTRY below. Keep in sync with the REGISTRY map and the
+    # workflow's concurrency group.
     if: >-
       !cancelled() && needs.compile.result == 'success'
       && (

@@ -205,9 +205,9 @@ jobs:
     needs: [build]
     if: inputs.channel != ''
     runs-on: ubuntu-latest
-    # One group per platform for every channel: alpha and beta deploys of one
-    # commit write the same S3 keys, and the index step's cleanup relies on no
-    # other run writing this platform's assets.
+    # One group per platform across channels: alpha and beta deploys of one
+    # commit write the same S3 keys. Each channel publishes one run at a time,
+    # so no group holds a second pending leg for GitHub to cancel.
     concurrency:
       group: startos-deploy-${{ inputs.platform }}
       cancel-in-progress: false
@@ -305,16 +305,20 @@ jobs:
         working-directory: artifacts
         run: |
           set -uo pipefail
+          # The commit an index records for this version; empty when it records none.
           registered_commit() {
-            start-cli --registry="$REGISTRY" registry os index \
-              | jq -er --arg version "$VERSION" '.versions | objects | .[$version].gitHash // ""'
+            jq -er --arg version "$VERSION" '.versions | objects | .[$version].gitHash // ""' <<<"$1"
           }
           files=()
           for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img; do
             [ -f "$file" ] && files+=("$file")
           done
 
-          commit="$(registered_commit)" || { echo "::error::could not read v$VERSION from $REGISTRY"; exit 1; }
+          if ! index_json="$(start-cli --registry="$REGISTRY" registry os index)" \
+            || ! commit="$(registered_commit "$index_json")"; then
+            echo "::error::could not read v$VERSION from $REGISTRY"
+            exit 1
+          fi
           if [ "$commit" != "$GITHUB_SHA" ]; then
             echo "::error::v$VERSION in $REGISTRY is registered for ${commit:-no commit}, not $GITHUB_SHA; leaving $PLATFORM unindexed."
             exit 1
@@ -345,15 +349,24 @@ jobs:
           status=0
           for pid in "${pids[@]}"; do wait "$pid" || status=1; done
 
-          # `asset add` does not check the commit; a deploy that re-registers
-          # this version mid-index lists these assets under its commit.
-          commit="$(registered_commit)" || { echo "::error::could not confirm v$VERSION in $REGISTRY still belongs to $GITHUB_SHA"; exit 1; }
+          # `asset add` does not check the commit, so an entry another publisher
+          # replaces mid-index can list these images under its commit. Only slots
+          # holding this leg's upload are withdrawn.
+          if ! index_json="$(start-cli --registry="$REGISTRY" registry os index)" \
+            || ! commit="$(registered_commit "$index_json")"; then
+            echo "::error::could not confirm v$VERSION in $REGISTRY still belongs to $GITHUB_SHA"
+            exit 1
+          fi
           if [ "$commit" != "$GITHUB_SHA" ]; then
             for file in "${files[@]}"; do
+              jq -e --arg version "$VERSION" --arg kind "${file##*.}" --arg platform "$PLATFORM" \
+                --arg url "$S3_CDN/v$VERSION/$file" \
+                '.versions[$version][$kind][$platform].urls // [] | any(.[]; . == $url)' \
+                <<<"$index_json" > /dev/null || continue
               start-cli --registry="$REGISTRY" registry os asset remove "${file##*.}" "$VERSION" "$PLATFORM" \
                 || echo "::error::could not remove $file from v$VERSION in $REGISTRY"
             done
-            echo "::error::v$VERSION in $REGISTRY was registered for ${commit:-no commit} while $PLATFORM indexed; its $PLATFORM assets were removed."
+            echo "::error::v$VERSION in $REGISTRY was registered for ${commit:-no commit} while $PLATFORM indexed; this leg's images were withdrawn."
             exit 1
           fi
           exit "$status"

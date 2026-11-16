@@ -261,6 +261,59 @@ for (const [file, product, job, gate] of [
   })
 }
 
+test('StartOS publishing runs serialize per channel across events and refs', () => {
+  const iso = workflow('startos-iso.yaml')
+  const prepare = iso.jobs['deploy-prepare']
+  const group = ctx =>
+    evaluate(iso.concurrency.group.replace(/^startos-iso-/, ''), ctx)
+  for (const [ctx, channel] of [
+    [context('push'), 'alpha'],
+    [context('workflow_dispatch', { deploy: 'alpha' }), 'alpha'],
+    [
+      context(
+        'workflow_dispatch',
+        { deploy: 'alpha' },
+        'refs/heads/release/example',
+      ),
+      'alpha',
+    ],
+    [
+      context(
+        'workflow_dispatch',
+        { deploy: 'beta' },
+        'refs/heads/release/example',
+      ),
+      'beta',
+    ],
+    [context('pull_request', {}, 'refs/pull/1/merge'), undefined],
+    [context('push', {}, 'refs/heads/integration/example'), undefined],
+    [context('workflow_dispatch', { deploy: 'NONE' }), undefined],
+    [context('workflow_dispatch'), undefined],
+  ]) {
+    const { event_name, ref } = ctx.github
+    assert.equal(
+      evaluate(prepare.if, {
+        ...ctx,
+        needs: { compile: { result: 'success' } },
+      }),
+      channel !== undefined,
+    )
+    assert.equal(
+      group(ctx),
+      channel ? `publish-${channel}` : `${event_name}-${ref}`,
+    )
+    if (channel) assert.equal(evaluate(prepare.env.CHANNEL, ctx), channel)
+    assert.equal(
+      evaluate(iso.concurrency['cancel-in-progress'], ctx),
+      event_name === 'pull_request',
+    )
+  }
+  assert.deepEqual(workflow('startos-image.yaml').jobs.deploy.concurrency, {
+    group: 'startos-deploy-${{ inputs.platform }}',
+    'cancel-in-progress': false,
+  })
+})
+
 test('start-os images deploy per platform only once deploy-prepare registered the version', () => {
   const iso = workflow('startos-iso.yaml')
   const leg = workflow('startos-image.yaml').jobs.deploy
@@ -295,7 +348,7 @@ test('start-os images deploy per platform only once deploy-prepare registered th
   for (const step of writes) assert.ok(install < leg.steps.indexOf(step))
 })
 
-test('release-note catalog changes trigger image assembly without rebuilding images for binary-only paths', t => {
+test('image assembly inputs trigger images without rebuilding them for binary-only paths', t => {
   const { env, write, run } = fixture(t)
   const filter = workflow('startos-iso.yaml').jobs.changes.steps.find(
     step => step.id === 'filter',
@@ -307,6 +360,8 @@ test('release-note catalog changes trigger image assembly without rebuilding ima
     ['shared-libs/crates/start-core/locales/release-notes.json', true],
     ['shared-libs/crates/start-core/locales/i18n.yaml', false],
     ['projects/start-os/changelog/patch-security-fix.md', true],
+    ['.github/workflows/startos-iso.yaml', true],
+    ['.github/workflows/startos-image.yaml', true],
   ]) {
     const output = write('output', '')
     const result = run(
@@ -345,6 +400,10 @@ test('image workflows track shared inputs without CLI-only rebuilds', () => {
       assert.equal(
         source.on[event].paths.includes('projects/start-cli/**'),
         file === 'start-cli.yaml',
+      )
+      assert.equal(
+        source.on[event].paths.includes('.github/workflows/startos-image.yaml'),
+        file === 'startos-iso.yaml',
       )
       assert.ok(source.on[event].paths.includes(`.github/workflows/${file}`))
       assert.ok(

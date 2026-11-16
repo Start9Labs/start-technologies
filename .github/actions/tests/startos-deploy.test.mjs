@@ -77,14 +77,25 @@ try {
   } else if (command === 'registry os asset add') {
     const failures = Number(readFileSync(root + '/add-failures', 'utf8'))
     const version = state.versions[option('version')]
+    const [file, url] = args.slice(4).filter(arg => !arg.startsWith('--'))
+    const kind = file.split('.').pop()
+    const platform = option('platform')
+    if (version && process.env.PROMOTED_DURING_ADD) {
+      // Another publisher replaces the entry, images included, while this leg indexes.
+      version.gitHash = process.env.PROMOTED_DURING_ADD
+      for (const slot of ['squashfs', 'iso'])
+        version[slot][platform] = { urls: ['https://cdn.example/promoted.' + slot] }
+      save()
+    }
+    // A slot holding other bytes rejects the write, like a commitment mismatch.
+    const held = version?.[kind]?.[platform]?.urls
     if (failures > 0) {
       writeFileSync(root + '/add-failures', String(failures - 1))
       status = 1
-    } else if (!version) {
+    } else if (!version || (held && !held.includes(url))) {
       status = 1
     } else {
-      const [file, url] = args.slice(4).filter(arg => !arg.startsWith('--'))
-      version[file.split('.').pop()][option('platform')] = { urls: [url] }
+      version[kind][platform] = { urls: [url] }
       if (process.env.REREGISTER_DURING_ADD) version.gitHash = process.env.REREGISTER_DURING_ADD
       save()
     }
@@ -302,6 +313,26 @@ test('deploy leg withdraws its images when the version is re-registered mid-inde
     iso: undefined,
   })
   assert.equal(f.registry().versions[VERSION].gitHash, OTHER)
+})
+
+test('deploy leg leaves another publisher’s images in place when the entry changes mid-index', t => {
+  const f = deployFixture(t, index({ [VERSION]: entry(SHA) }))
+  const result = f.run(
+    indexAssets,
+    { PROMOTED_DURING_ADD: OTHER },
+    join(f.root, 'artifacts'),
+  )
+  assert.equal(result.status, 1)
+  assert.deepEqual(indexed(f.registry()), {
+    squashfs: ['https://cdn.example/promoted.squashfs'],
+    iso: ['https://cdn.example/promoted.iso'],
+  })
+  assert.equal(
+    f
+      .calls()
+      .some(call => call.slice(0, 4).join(' ') === 'registry os asset remove'),
+    false,
+  )
 })
 
 test('deploy leg replaces its own commitments under force-overwrite', t => {
