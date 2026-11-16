@@ -3,8 +3,10 @@ set -euo pipefail
 
 binary=$(realpath "${1:?path to the start-core unit-test executable}")
 directory=$(cd "$(dirname "$0")" && pwd)
-image=startos-fde-tpm-test
-docker build --load -t "$image" -f "$directory/fde-tpm.Dockerfile" "$directory"
+image_id=$(mktemp)
+trap 'rm -f "$image_id"' EXIT
+bash "$directory/fde-tpm-build-image.sh" "$image_id"
+image=$(<"$image_id")
 for test in \
     fde::tpm::tests::software_tpm_unseals_only_the_authorized_boot_state \
     fde::tpm::tests::software_tpm_rejects_external_stub_parameters \

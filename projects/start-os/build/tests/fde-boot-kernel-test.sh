@@ -3,8 +3,10 @@ set -euo pipefail
 
 binary=$(realpath "${1:?path to the start-core unit-test executable}")
 directory=$(cd "$(dirname "$0")" && pwd)
-image=startos-fde-tpm-test
-docker build --load -t "$image" -f "$directory/fde-tpm.Dockerfile" "$directory"
+image_id=$(mktemp)
+trap 'rm -f "$image_id"' EXIT
+bash "$directory/fde-tpm-build-image.sh" "$image_id"
+image=$(<"$image_id")
 for test in \
     fde::boot::tests::software_tpm_mounted_generation_measures_before_unseal_and_closes \
     fde::boot::tests::software_tpm_mounted_generation_rejects_boot_change_before_measurement \
