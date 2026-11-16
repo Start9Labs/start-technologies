@@ -234,21 +234,21 @@ target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(CORE_SRC) $(EN
 compiled-$(ARCH).tar: $(COMPILED_TARGETS) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE)
 	tar -cvf $@ $^
 
-target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs: $(call ls-files, projects/start-os/backup-fs) $(BACKUP_PROTOCOL_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE)
+target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs: $(call ls-files, projects/start-os/backup-fs) $(BACKUP_PROTOCOL_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE) $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=$(ARCH) PROFILE=release ./projects/start-os/backup-fs/build-backup-fs.sh
 	touch $@
 
 # --- pi-beep: first-party crate, built like the other in-repo bins ---
-target/aarch64-unknown-linux-musl/release/pi-beep: $(call ls-files, shared-libs/crates/pi-beep) $(ENVIRONMENT_FILE)
+target/aarch64-unknown-linux-musl/release/pi-beep: $(call ls-files, shared-libs/crates/pi-beep) $(ENVIRONMENT_FILE) $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=aarch64 PROFILE=release ./shared-libs/crates/pi-beep/build-pi-beep.sh
 	touch $@
 
 # --- external cargo dev tools (crates.io) bundled into unstable/console images ---
-target/$(RUST_ARCH)-unknown-linux-musl/release/tokio-console: ./build/build-cargo-dep.sh
+target/$(RUST_ARCH)-unknown-linux-musl/release/tokio-console: ./build/build-cargo-dep.sh $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=$(ARCH) ./build/build-cargo-dep.sh tokio-console
 	touch $@
 
-target/$(RUST_ARCH)-unknown-linux-musl/release/flamegraph: ./build/build-cargo-dep.sh
+target/$(RUST_ARCH)-unknown-linux-musl/release/flamegraph: ./build/build-cargo-dep.sh $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=$(ARCH) ./build/build-cargo-dep.sh flamegraph
 	touch $@
 
