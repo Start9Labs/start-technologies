@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'fs'
 import { join, relative, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { uniqueDictionaryIds } from '../../../../shared-libs/ts-modules/scripts/i18n-ids.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -8,7 +9,6 @@ const root = join(__dirname, '..') // web/
 
 const dictDir = join(root, 'src/app/i18n/dictionaries')
 
-// Extract dictionary keys from en.ts (the source of truth)
 const enPath = join(dictDir, 'en.ts')
 const enSource = readFileSync(enPath, 'utf-8')
 const validKeys = new Set()
@@ -84,10 +84,9 @@ if (errors.length > 0) {
 // dictionary is allowed (the pipe falls back to English). But once a language
 // has ANY entry it must cover every id in en.ts — this forces a language, once
 // started, to be finished rather than left half-translated.
-const enNumericKeys = new Set()
-for (const match of enSource.matchAll(EN_KEY_RE)) {
-  enNumericKeys.add(Number(match[3]))
-}
+const enNumericKeys = uniqueDictionaryIds(
+  [...enSource.matchAll(EN_KEY_RE)].map(match => Number(match[3])),
+)
 
 const otherLangs = ['de', 'es', 'fr', 'pl']
 const dictErrors = []

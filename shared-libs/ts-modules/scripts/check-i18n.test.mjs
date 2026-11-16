@@ -28,10 +28,11 @@ function fixture(t) {
   ])
     mkdirSync(join(modules, directory), { recursive: true })
   copyFileSync(new URL('./check-i18n.mjs', import.meta.url), script)
-  symlinkSync(
-    new URL('./i18n-dictionary.mjs', import.meta.url),
-    join(modules, 'scripts/i18n-dictionary.mjs'),
-  )
+  for (const helper of ['i18n-dictionary.mjs', 'i18n-ids.mjs'])
+    symlinkSync(
+      new URL(`./${helper}`, import.meta.url),
+      join(modules, 'scripts', helper),
+    )
   writeFileSync(
     join(dictionaries, 'en.ts'),
     `export const ENGLISH = {
@@ -49,6 +50,7 @@ function fixture(t) {
     )
   }
   return {
+    root,
     dictionaries,
     template: join(modules, 'shared/probe.html'),
     run: () => spawnSync(process.execPath, [script], { encoding: 'utf8' }),
@@ -77,6 +79,40 @@ test('rejects English keys sharing an ID even when all translations exist', t =>
   assert.equal(result.status, 1)
   assert.match(result.stderr, /Duplicate i18n IDs: 1/)
 })
+
+for (const app of ['start-tunnel', 'start-wrt']) {
+  test(`${app} rejects colliding English IDs with complete translations`, t => {
+    const f = fixture(t)
+    const web = join(f.root, 'projects', app, 'web')
+    const dictionaries = join(web, 'src/app/i18n/dictionaries')
+    mkdirSync(join(web, 'scripts'), { recursive: true })
+    mkdirSync(dictionaries, { recursive: true })
+    const script = join(web, 'scripts/check-i18n.mjs')
+    copyFileSync(
+      new URL(
+        `../../../projects/${app}/web/scripts/check-i18n.mjs`,
+        import.meta.url,
+      ),
+      script,
+    )
+    for (const locale of ['en', 'de', 'es', 'fr', 'pl'])
+      copyFileSync(
+        join(f.dictionaries, `${locale}.ts`),
+        join(dictionaries, `${locale}.ts`),
+      )
+    const run = () =>
+      spawnSync(process.execPath, [script], { encoding: 'utf8' })
+    const valid = run()
+    assert.equal(valid.status, 0, valid.stderr)
+    writeFileSync(
+      join(dictionaries, 'en.ts'),
+      `export const ENGLISH = {\n  'Simple key': 1,\n  'Different key': 1,\n}\n`,
+    )
+    const invalid = run()
+    assert.equal(invalid.status, 1, invalid.stderr)
+    assert.match(invalid.stderr, /Duplicate i18n IDs: 1/)
+  })
+}
 
 test('requires translations for double-quoted English entries even when unused', t => {
   const f = fixture(t)
