@@ -121,6 +121,7 @@ export type ApplyParamsInput = z.input<typeof schemas.ApplyParams>
  * JSON Patch 'copy' operation representation
  */
 export type CopyOperation = z.output<typeof schemas.CopyOperation>
+export type DbCursorInput = z.input<typeof schemas.DbCursor>
 
 /**
  * Per-subnet DNS proxy configuration. WireGuard clients on a subnet are pointed
@@ -200,7 +201,6 @@ export type SetSubnetIpv6ParamsInput = z.input<
 export type SetSubnetWanParamsInput = z.input<typeof schemas.SetSubnetWanParams>
 export type ShowConfigParamsInput = z.input<typeof schemas.ShowConfigParams>
 export type SubnetParamsInput = z.input<typeof schemas.SubnetParams>
-export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 
 /**
  * JSON Patch 'test' operation representation
@@ -253,6 +253,7 @@ export type SetPortForwardEnabledParamsInput = z.input<
   typeof schemas.SetPortForwardEnabledParams
 >
 export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
+export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type TransportWireInput = z.input<typeof schemas.TransportWire>
 export type UpdatePortForwardLabelParamsInput = z.input<
@@ -269,11 +270,6 @@ export type Patch = z.output<typeof schemas.Patch>
  * The server's sessions, by credential type.
  */
 export type Sessions = z.output<typeof schemas.Sessions>
-
-/**
- * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
- */
-export type SubscribeResult = z.output<typeof schemas.SubscribeResult>
 
 /**
  * Non-empty selected transports, serialized as a sorted, deduplicated array.
@@ -298,4 +294,16 @@ export type UpdatePinholeLabelParamsInput = z.input<
 >
 export type WgSubnetConfig = z.output<typeof schemas.WgSubnetConfig>
 export type Revision = z.output<typeof schemas.Revision>
+
+/**
+ * A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
+ */
+export type SubscribeStream = z.output<typeof schemas.SubscribeStream>
+
+/**
+ * Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
+ */
+export type SubscribeStreamResult = z.output<
+  typeof schemas.SubscribeStreamResult
+>
 export type Api = RpcSchemaTree<typeof schemas.Api>
