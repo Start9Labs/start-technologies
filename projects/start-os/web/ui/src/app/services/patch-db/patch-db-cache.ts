@@ -11,7 +11,7 @@ const REVISION = 'revision'
 export class PatchDbCache {
   private readonly win = inject(WA_WINDOW)
   private db?: Promise<IDBDatabase>
-  private saved: Partial<DataModel> = {}
+  private saved?: Dump<DataModel>
 
   async read(): Promise<Dump<DataModel>> {
     try {
@@ -20,35 +20,52 @@ export class PatchDbCache {
         values: tx.objectStore(VALUES).getAll(),
         id: tx.objectStore(META).get(REVISION),
       }))
-      if (!id.result) return { id: 0, value: {} as DataModel }
-      this.saved = Object.fromEntries(
+      if (!id.result) {
+        this.saved = undefined
+        return { id: 0, value: {} as DataModel }
+      }
+      const value = Object.fromEntries(
         keys.result.map((key, i) => [key, values.result[i]]),
-      )
-      return { id: id.result, value: { ...this.saved } as DataModel }
+      ) as DataModel
+      this.saved = { id: id.result, value }
+      return { id: id.result, value: { ...value } }
     } catch (e) {
       console.error(e)
+      this.saved = undefined
       return { id: 0, value: {} as DataModel }
     }
   }
 
-  /** Skips top-level values that are the same objects as the last write's. */
+  /** Stored revisions describe complete snapshots across browser tabs. */
   async write({ id, value }: Dump<DataModel>): Promise<void> {
     const previous = this.saved
-    this.saved = { ...value }
+    this.saved = { id, value: { ...value } }
     try {
       await this.transaction('readwrite', tx => {
-        const store = tx.objectStore(VALUES)
-        Object.entries(value).forEach(([key, v]) => {
-          if (previous[key as keyof DataModel] !== v) store.put(v, key)
-        })
-        Object.keys(previous).forEach(key => {
-          if (!(key in value)) store.delete(key)
-        })
-        tx.objectStore(META).put(id, REVISION)
+        const meta = tx.objectStore(META)
+        const revision = meta.get(REVISION)
+        revision.onsuccess = () => {
+          const baseline =
+            previous && revision.result === previous.id
+              ? previous.value
+              : undefined
+          const store = tx.objectStore(VALUES)
+          if (!baseline) store.clear()
+          Object.entries(value).forEach(([key, v]) => {
+            if (!baseline || baseline[key as keyof DataModel] !== v)
+              store.put(v, key)
+          })
+          if (baseline) {
+            Object.keys(baseline).forEach(key => {
+              if (!(key in value)) store.delete(key)
+            })
+          }
+          meta.put(id, REVISION)
+        }
       })
     } catch (e) {
       console.error(e)
-      this.saved = {}
+      this.saved = undefined
       await this.transaction('readwrite', tx =>
         tx.objectStore(META).delete(REVISION),
       ).catch(console.error)
@@ -56,7 +73,7 @@ export class PatchDbCache {
   }
 
   async clear(): Promise<void> {
-    this.saved = {}
+    this.saved = undefined
     await this.transaction('readwrite', tx => {
       tx.objectStore(VALUES).clear()
       tx.objectStore(META).clear()
