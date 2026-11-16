@@ -469,6 +469,137 @@ describe('generated effects RPC boundary', () => {
     )
   })
 
+  test('shared-volume listing preserves grants and registers payload-free invalidation', async () => {
+    const callbacks = new CallbackHolder()
+    const callback = jest.fn()
+    const effects = makeEffects({ eventId: 'event', callbacks })
+    const volumes = [
+      {
+        id: 'e680a57e-5066-4dfd-bbab-06361bfceec2',
+        name: 'Music',
+        readonly: true,
+        availability: 'unknown',
+      },
+    ]
+    reply = { result: volumes }
+    await expect(effects.getSharedVolumes({ callback })).resolves.toEqual(
+      volumes,
+    )
+    expect(requests[0]).toEqual({
+      id: expect.any(Number),
+      method: 'get-shared-volumes',
+      params: { callback: expect.any(Number), eventId: 'event' },
+    })
+    await callbacks.callCallback(requests[0].params.callback as number, [])
+    expect(callback).toHaveBeenCalledWith()
+    await effects.getSharedVolumes({})
+    expect(requests[1].params.callback).toBeNull()
+  })
+
+  test.each([
+    { kind: 'mounted' },
+    { kind: 'unavailable', reason: 'sourceUnavailable' },
+    { kind: 'unavailable', reason: 'timeout' },
+  ])(
+    'preserves shared-volume mount outcome %j and original fields',
+    async outcome => {
+      const effects = makeEffects({ eventId: null })
+      const options = Object.freeze({
+        id: 'e680a57e-5066-4dfd-bbab-06361bfceec2',
+        subcontainer: 'guid',
+        mountpoint: '/music',
+        subpath: 'albums',
+        readonly: true,
+      })
+      reply = { result: outcome }
+      await expect(effects.mountSharedVolume(options)).resolves.toEqual(outcome)
+      expect(requests).toEqual([
+        {
+          id: expect.any(Number),
+          method: 'mount-shared-volume',
+          params: options,
+        },
+      ])
+    },
+  )
+
+  test.each(['Authorization', 'InvalidRequest'])(
+    'shared-volume %s failures reject rather than becoming unavailable',
+    async message => {
+      const error = jest.spyOn(console, 'error').mockImplementation(() => {})
+      reply = { error: { code: 59, message, data: { details: 'denied' } } }
+      try {
+        await expect(
+          makeEffects({ eventId: null }).mountSharedVolume({
+            id: 'e680a57e-5066-4dfd-bbab-06361bfceec2',
+            subcontainer: 'guid',
+            mountpoint: '/music',
+            readonly: false,
+          }),
+        ).rejects.toThrow(`${message}: denied@mount-shared-volume`)
+      } finally {
+        error.mockRestore()
+      }
+    },
+  )
+
+  test('file effects preserve their options and the action event', async () => {
+    const effects = makeEffects({ eventId: 'file-event' })
+    const upload = {
+      volume: 'data',
+      path: 'import.pem',
+      mode: 0o600,
+      maxSize: 1024,
+      uid: 1000,
+      gid: 1000,
+    }
+    const download = {
+      volume: 'data',
+      path: 'report.txt',
+      mime: 'text/plain',
+      filename: 'report.txt',
+    }
+    reply = { result: 'prepared-id' }
+    await expect(effects.prepareUpload(upload)).resolves.toBe('prepared-id')
+    await expect(effects.prepareDownload(download)).resolves.toBe('prepared-id')
+    reply = { result: { maxSize: 1024 } }
+    await expect(
+      effects.getUploadLimits({ id: 'prepared-id' }),
+    ).resolves.toEqual({ maxSize: 1024 })
+    const metadata = {
+      name: 'import.pem',
+      path: 'import.pem',
+      mime: null,
+      commitment: { hash: 'hash', size: 4 },
+    }
+    reply = { result: metadata }
+    await expect(effects.resolveUpload({ id: 'prepared-id' })).resolves.toEqual(
+      metadata,
+    )
+    expect(requests).toEqual([
+      {
+        id: expect.any(Number),
+        method: 'prepare-upload',
+        params: { ...upload, eventId: 'file-event' },
+      },
+      {
+        id: expect.any(Number),
+        method: 'prepare-download',
+        params: { ...download, eventId: 'file-event' },
+      },
+      {
+        id: expect.any(Number),
+        method: 'get-upload-limits',
+        params: { id: 'prepared-id', eventId: 'file-event' },
+      },
+      {
+        id: expect.any(Number),
+        method: 'resolve-upload',
+        params: { id: 'prepared-id', eventId: 'file-event' },
+      },
+    ])
+  })
+
   test('retains host error details and method attribution', async () => {
     const error = jest.spyOn(console, 'error').mockImplementation(() => {})
     reply = {

@@ -321,7 +321,7 @@ impl VersionT for Version {
             value["torMigration"] = Value::Array(tor_migration);
             value["password"] = to_value(&account.password)?;
             value["compatS9pkKey"] =
-                to_value(&crate::db::model::private::generate_developer_key())?;
+                to_value(&crate::db::model::private::generate_server_identity_key())?;
             value["sshPrivkey"] = to_value(Pem::new_ref(&account.ssh_key))?;
             value["sshPubkeys"] = to_value(&ssh_keys)?;
             value["availablePorts"] = to_value(&AvailablePorts::new())?;
@@ -535,7 +535,12 @@ impl VersionT for Version {
                     let converted = async {
                         let package_s9pk = tokio::fs::File::open(path).await?;
                         let file = MultiCursorFile::open(&package_s9pk).await?;
-                        let key = ctx.db.peek().await.into_private().into_developer_key();
+                        let key = ctx
+                            .db
+                            .peek()
+                            .await
+                            .into_private()
+                            .into_server_identity_key();
                         crate::s9pk::load(file, || Ok(key.de()?.0), None).await
                     }
                     .await;
@@ -731,7 +736,7 @@ async fn previous_account_info(pg: &sqlx::Pool<sqlx::Postgres>) -> Result<Accoun
                     .as_bytes(),
             )
             .with_ctx(|_| (ErrorKind::Database, "X509::from_pem"))?,
-            developer_key: SigningKey::generate(&mut crate::util::crypto::os_rng()),
+            server_identity_key: SigningKey::generate(&mut crate::util::crypto::os_rng()),
             ssh_key: ssh_key::PrivateKey::random(
                 &mut crate::util::crypto::os_rng(),
                 ssh_key::Algorithm::Ed25519,

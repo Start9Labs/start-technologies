@@ -101,7 +101,11 @@ export class CommandController<
           env: exec.env,
           user: exec.user,
           cwd: exec.cwd,
-          stdio: exec.onStdout || exec.onStderr ? 'pipe' : 'inherit',
+          stdio: [
+            'inherit',
+            exec.onStdout ? 'pipe' : 'inherit',
+            exec.onStderr ? 'pipe' : 'inherit',
+          ],
         })
       }
 

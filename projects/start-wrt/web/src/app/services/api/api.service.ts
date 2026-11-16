@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core'
+import type { RpcStreamClient, RpcStreamOptions } from '@start9labs/start-core'
 import type * as Bindings from './bindings'
 import type * as Events from './events'
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
@@ -15,8 +16,13 @@ export abstract class ApiService {
   abstract getUci(params: GetUciReq): Promise<GetUciRes>
   abstract setUci(params: SetUciReq): Promise<SetUciRes>
   abstract systemInfo(timeout?: number): Promise<SystemInfoRes>
+  abstract configCheck(): Promise<ConfigCheck>
   abstract systemNewerVersions(): Promise<VersionInfo[]>
-  abstract systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes>
+  /** Cancels observation, never an accepted update. A successful terminal precedes the reboot. */
+  abstract systemUpdate(
+    params: SystemUpdateReq,
+    options?: RpcStreamOptions,
+  ): Promise<SystemUpdateStream>
   abstract systemRestart(): Promise<null>
   abstract setPassword(params: SetPasswordReq): Promise<null>
   abstract setPreferences(
@@ -45,7 +51,9 @@ export abstract class ApiService {
   abstract profileGet(params: ProfileIdOpt): Promise<SecurityProfile>
   abstract profileCreate(params: ProfileCreateInput): Promise<ProfileId>
   abstract profileUpdate(params: ProfileUpdateInput): Promise<ProfileId>
-  abstract profileDelete(params: ProfileIdOpt): Promise<null>
+  abstract profileDelete(
+    params: ProfileDeleteParams,
+  ): Promise<ProfileDeleteResult>
   abstract profileScheduleGet(params: {
     interface: string
   }): Promise<ScheduleWindow[]>
@@ -60,9 +68,14 @@ export abstract class ApiService {
     params: SetInitialPasswordReq,
   ): Promise<RpcReturnType<Api, 'auth.set-initial-password'>>
   abstract setupStatus(): Promise<SetupStatusRes>
+  /** Cancels observation, never accepted flashing. Successful termination confirms provisioning. */
+  abstract setupFlash(
+    params: SetupFlashReq,
+    options?: RpcStreamOptions,
+  ): Promise<SetupFlashStream>
   abstract systemFactoryReset(): Promise<null>
   abstract systemLogs(): Promise<LogsResponse>
-  abstract followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>>
+  abstract followLogs(options?: RpcStreamOptions): Promise<LogsFollowStream>
   abstract devicesList(): Promise<DeviceFromApi[]>
   abstract devicesUpdate(params: DeviceUpdateReq): Promise<null>
   abstract devicesSetAutoForward(params: {
@@ -112,14 +125,21 @@ export abstract class ApiService {
   abstract sshKeysAdd(params: SshKeysAddRequest): Promise<SshKeyFromApi>
   abstract ethernetGet(): Promise<EthernetConfig>
   abstract ethernetSet(params: EthernetSetConfig): Promise<EthernetSetResult>
+  abstract ethernetRemoveUsbPort(
+    params: RpcParamType<Api, 'ethernet.remove-usb-port'>,
+  ): Promise<null>
   abstract sshKeysDelete(params: SshKeysDeleteRequest): Promise<null>
   abstract activityList(
     params?: ActivityListParams,
   ): Promise<ActivityListResponse>
   abstract activityDelete(params: { id: number }): Promise<null>
   abstract activityClear(): Promise<null>
-  abstract backupCreate(): Promise<BackupCreateRes>
-  abstract backupRestore(): Promise<BackupRestoreRes>
+  abstract backupCreate(
+    params: RpcParamType<Api, 'backup.create'>,
+  ): Promise<BackupCreateRes>
+  abstract backupRestore(
+    params: RpcParamType<Api, 'backup.restore'>,
+  ): Promise<BackupRestoreRes>
   abstract diagnosticsCreate(): Promise<DiagnosticsCreateRes>
 }
 
@@ -133,11 +153,13 @@ export type EthernetPort = RpcReturnType<Api, 'ethernet.get'>['ports'][string]
 
 export type EthernetConfig = RpcReturnType<Api, 'ethernet.get'>
 
+export type UsbPortStatus = EthernetConfig['usb_ports'][string]
+
 export type EthernetSetPort = RpcParamType<Api, 'ethernet.set'>['ports'][string]
 
 export type EthernetSetConfig = RpcParamType<Api, 'ethernet.set'>
 
-export type AffectedPublishedPort = Bindings.AffectedPublishedPort
+export type DeviceLeavingProfile = Bindings.DeviceLeavingProfile
 
 export type EthernetSetResult = RpcReturnType<Api, 'ethernet.set'>
 
@@ -158,6 +180,10 @@ export type LanIpv6SetRequest = RpcParamType<Api, 'lan.ipv6-set'>
 export type LogEntry = Bindings.LogEntry
 
 export type LogsResponse = RpcReturnType<Api, 'system.logs'>
+
+export type LogsFollowStream = Awaited<
+  ReturnType<RpcStreamClient<Api>['system']['logsFollow']>
+>
 
 export type LoginReq = RpcParamType<Api, 'auth.login'>
 
@@ -181,11 +207,19 @@ export type SetUciRes = RpcReturnType<Api, 'uci.set'>
 
 export type SystemInfoRes = RpcReturnType<Api, 'system.info'>
 
+export type ConfigCheck = RpcReturnType<Api, 'config.check'>
+
+export type ConfigFinding = ConfigCheck['findings'][number]
+
+export type ConfigView = ConfigFinding['views'][number]
+
 export type VersionInfo = RpcReturnType<Api, 'system.newer-versions'>[number]
 
 export type SystemUpdateReq = RpcParamType<Api, 'system.update'>
 
-export type SystemUpdateRes = RpcReturnType<Api, 'system.update'>
+export type SystemUpdateStream = Awaited<
+  ReturnType<RpcStreamClient<Api>['system']['update']>
+>
 
 export type FullProgress = Events.FullProgress
 
@@ -197,7 +231,7 @@ export type SetPasswordReq = RpcParamType<Api, 'auth.set-password'>
 
 export type Theme = 'dark' | 'light' | 'system'
 
-export type RemoteAccess = 'default' | 'never' | 'always'
+export type RemoteAccess = 'never' | 'behind-nat' | 'always'
 
 export type SetPreferencesReq = Partial<{
   language: string
@@ -243,7 +277,7 @@ export type WifiPassword = RpcReturnType<Api, 'wifi.get'>['passwords'][number]
 export type WifiProfileId = Bindings.ProfileId
 
 export type WifiConfig = RpcReturnType<Api, 'wifi.get'> &
-  Pick<RpcParamType<Api, 'wifi.set'>, 'confirmPublishedPortDeletion'>
+  Pick<RpcParamType<Api, 'wifi.set'>, 'preview'>
 
 export type WifiSetResult = RpcReturnType<Api, 'wifi.set'>
 
@@ -261,6 +295,10 @@ export type WifiBlackoutSetResult = RpcReturnType<Api, 'wifi.blackout-set'>
 export type ProfileId = RpcReturnType<Api, 'profiles.set'>
 
 export type ProfileIdOpt = Bindings.ProfileIdOptInput
+
+export type ProfileDeleteParams = RpcParamType<Api, 'profiles.delete'>
+
+export type ProfileDeleteResult = RpcReturnType<Api, 'profiles.delete'>
 
 export type SecurityProfile = RpcReturnType<Api, 'profiles.get'>
 
@@ -282,7 +320,10 @@ export type SetInitialPasswordReq = RpcParamType<
 
 export type SetupStatusRes = RpcReturnType<Api, 'setup.status'>
 
-export type SetupFlashReq = Events.FlashParamsInput
+export type SetupFlashReq = RpcParamType<Api, 'setup.flash'>
+export type SetupFlashStream = Awaited<
+  ReturnType<RpcStreamClient<Api>['setup']['flash']>
+>
 
 export type SetupFlashEvent = Events.SetupEvent
 
@@ -342,6 +383,7 @@ export type PublishedPortStatusValue =
   | 'active'
   | 'partial'
   | 'paused'
+  | 'inactive'
   | 'error'
   | 'disabled'
 

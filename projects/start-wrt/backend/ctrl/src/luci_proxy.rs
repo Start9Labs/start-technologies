@@ -3,6 +3,8 @@ use axum::extract::{OriginalUri, Request};
 use axum::http::{HeaderMap, Response, StatusCode};
 use axum::Extension;
 
+use crate::bins::daemon::WebserverListener;
+
 /// Shared reqwest client for proxying requests to uhttpd.
 #[derive(Clone)]
 pub struct ProxyClient(pub reqwest::Client);
@@ -11,12 +13,15 @@ pub struct ProxyClient(pub reqwest::Client);
 /// Follows redirects internally (up to 5 hops), collecting Set-Cookie headers
 /// and forwarding them on subsequent requests. This avoids browser cookie issues
 /// where SameSite=strict cookies set during a 302 response aren't sent on the
-/// redirected GET.
+/// redirected GET. Plain HTTP is redirected to HTTPS.
 pub async fn handler(
     Extension(ProxyClient(client)): Extension<ProxyClient>,
     OriginalUri(original_uri): OriginalUri,
     req: Request,
 ) -> Response<Body> {
+    if req.extensions().get::<WebserverListener>() == Some(&WebserverListener::Http) {
+        return crate::http_redirect::redirect(&req);
+    }
     let method = req.method().clone();
     let path_and_query = original_uri
         .path_and_query()
@@ -230,4 +235,34 @@ fn reqwest_headers(headers: &HeaderMap) -> reqwest::header::HeaderMap {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::header::{HOST, LOCATION};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn plain_http_redirects_to_https() {
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/cgi-bin/luci/?x=1")
+            .header(HOST, "router.lan")
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(WebserverListener::Http);
+        let uri = req.uri().clone();
+        let res = handler(
+            Extension(ProxyClient(reqwest::Client::new())),
+            OriginalUri(uri),
+            req,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(
+            res.headers()[LOCATION],
+            "https://router.lan/cgi-bin/luci/?x=1"
+        );
+    }
 }

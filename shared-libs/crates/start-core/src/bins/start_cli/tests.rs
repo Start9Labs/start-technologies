@@ -9,6 +9,45 @@ use crate::prelude::*;
 const CHILD_ARGS: &str = "START_CLI_OUTPUT_ARGS";
 const BROKEN_STREAM: &str = "START_CLI_BROKEN_STREAM";
 
+#[test]
+fn binding_reassign_port_accepts_server_and_package_targets() {
+    for prefix in [
+        vec!["start-cli", "server", "host", "binding"],
+        vec!["start-cli", "package", "host", "example", "binding", "main"],
+    ] {
+        for ssl in [false, true] {
+            let mut args = prefix.clone();
+            args.extend(["reassign-port", "8000", "9000"]);
+            if ssl {
+                args.push("--ssl");
+            }
+            let matches = super::app()
+                .into_command()
+                .try_get_matches_from(args)
+                .unwrap();
+            let mut matches = &matches;
+            while let Some((_, child)) = matches.subcommand() {
+                matches = child;
+            }
+            assert_eq!(matches.get_one::<u16>("internal_port"), Some(&8000));
+            assert_eq!(matches.get_one::<u16>("external_port"), Some(&9000));
+            assert_eq!(matches.get_flag("ssl"), ssl);
+        }
+        for args in [
+            vec!["reassign-port", "8000"],
+            vec!["reassign-port", "8000", "0"],
+            vec!["reassign-port", "8000", "65536"],
+        ] {
+            assert!(
+                super::app()
+                    .into_command()
+                    .try_get_matches_from(prefix.iter().copied().chain(args))
+                    .is_err()
+            );
+        }
+    }
+}
+
 fn child(directory: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command

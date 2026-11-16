@@ -274,7 +274,11 @@ async fn image_save_validates_exit_status_and_drains_large_trailing_padding() {
     let dest = workspace.join("export.squashfs");
     tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        image_from_command(Command::new("cat").arg(&archive), "--platform=linux/amd64"),
+        image_from_command(
+            Command::new("cat").arg(&archive),
+            "--platform=linux/amd64",
+            false,
+        ),
     )
     .await
     .unwrap()
@@ -290,14 +294,19 @@ async fn image_save_validates_exit_status_and_drains_large_trailing_padding() {
             .arg("sh")
             .arg(&archive),
         "--platform=linux/amd64",
+        true,
     )
     .await;
     assert!(format!("{:?}", failed.err().unwrap()).contains("export-failed-after-tar"));
     tokio::fs::write(&archive, b"truncated tar").await.unwrap();
     assert!(
-        image_from_command(Command::new("cat").arg(&archive), "--platform=linux/amd64",)
-            .await
-            .is_err()
+        image_from_command(
+            Command::new("cat").arg(&archive),
+            "--platform=linux/amd64",
+            false
+        )
+        .await
+        .is_err()
     );
     workspace.delete().await.unwrap();
 }

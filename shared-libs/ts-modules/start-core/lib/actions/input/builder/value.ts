@@ -2,11 +2,14 @@ import { InputSpec, LazyBuild } from './inputSpec'
 import { List } from './list'
 import { UnionRes, UnionResStaticValidatedAs, Variants } from './variants'
 import {
+  matchesFileExtensions,
   Pattern,
   RandomString,
   ValueSpec,
   ValueSpecDatetime,
+  ValueSpecFile,
   ValueSpecHidden,
+  ValueSpecNumber,
   ValueSpecText,
   ValueSpecTextarea,
 } from '../inputSpecTypes'
@@ -15,8 +18,9 @@ import { _, once } from '../../../util'
 import { withPatterns } from './patternCheck'
 import * as z from '../../../z'
 import { DeepPartial } from '../../../types'
+import { Effects } from '../../../Effects'
+import { UploadedFile } from '../../../osBindings/types.schemas'
 
-/** Build a union-of-literals validator from object keys, falling back to z.string() when empty */
 function literalKeysValidator(
   values: Record<string, unknown>,
 ): z.ZodType<string> {
@@ -31,13 +35,74 @@ function literalKeysValidator(
   )
 }
 
-/** Zod schema for a file upload result — validates `{ path, commitment: { hash, size } }`. */
-export const fileInfoParser = z.looseObject({
-  path: z.string(),
-  commitment: z.looseObject({ hash: z.string(), size: z.number() }),
-})
-/** The parsed result of a file upload, containing the file path and its content commitment (hash + size). */
+/** Metadata supplied by StartOS after a completed volume upload. */
+export const fileInfoParser = UploadedFile
+/** The uploaded name, MIME hint, destination and content commitment supplied by StartOS. */
 export type FileInfo = z.infer<typeof fileInfoParser>
+
+const fileDefaults = {
+  type: 'file' as const,
+  description: null,
+  warning: null,
+  uploadId: null,
+  maxSize: null,
+}
+
+/** @internal Options for a browser-only file picker. */
+export type FilePickerOptions<Required extends boolean> = Pick<
+  ValueSpecFile,
+  'name' | 'extensions'
+> &
+  Partial<Pick<ValueSpecFile, 'description' | 'warning'>> & {
+    required: Required
+  }
+
+/** Options for a prepared volume upload field. */
+export type FileInputOptions<Required extends boolean> =
+  FilePickerOptions<Required> & { uploadId: string }
+
+function uploadedFileParser(
+  spec: Pick<ValueSpecFile, 'extensions'> & { uploadId: string },
+  effects: Effects,
+) {
+  return z
+    .literal(spec.uploadId)
+    .transform(id => effects.resolveUpload({ id }))
+    .refine(file => matchesFileExtensions(file.name, spec.extensions), {
+      message: 'Invalid file format',
+    })
+}
+
+async function buildFileInput<Required extends boolean>(
+  effects: Effects,
+  spec: Omit<ValueSpecFile, 'maxSize' | 'required' | 'uploadId'> & {
+    required: Required
+    uploadId: string
+  },
+) {
+  const limits = await effects.getUploadLimits({ id: spec.uploadId })
+  return {
+    spec: { ...spec, ...limits },
+    validator: asRequiredParser(uploadedFileParser(spec, effects), spec),
+  }
+}
+
+/** Validates whole-number and inclusive bounds declared by a number field. */
+export function numberParser(
+  spec: Partial<Pick<ValueSpecNumber, 'min' | 'max' | 'integer'>>,
+) {
+  let parser = z.number()
+  if (spec.integer) parser = parser.int({ message: 'Must be an integer' })
+  if (spec.min != null)
+    parser = parser.min(spec.min, {
+      message: `Number must be greater than or equal to ${spec.min}`,
+    })
+  if (spec.max != null)
+    parser = parser.max(spec.max, {
+      message: `Number must be less than or equal to ${spec.max}`,
+    })
+  return parser
+}
 
 /** Conditional type: returns `T` if `Required` is `true`, otherwise `T | null`. */
 export type AsRequired<T, Required extends boolean> = Required extends true
@@ -590,7 +655,7 @@ export class Value<
      */
     immutable?: boolean
   }) {
-    const validator = asRequiredParser(z.number(), a)
+    const validator = asRequiredParser(numberParser(a), a)
     return new Value<AsRequired<number, Required>>(
       () => ({
         spec: {
@@ -651,7 +716,7 @@ export class Value<
             immutable: false,
             ...a,
           },
-          validator: asRequiredParser(z.number(), a),
+          validator: asRequiredParser(numberParser(a), a),
         }
       },
       z.number().nullable(),
@@ -1124,60 +1189,38 @@ export class Value<
   /**
    * Displays a file upload input field.
    *
+   * @param a.uploadId - Capability returned by `effects.prepareUpload` while building this form.
    * @param a.extensions - Allowed file extensions (e.g. `[".pem", ".crt"]`)
    * @param a.required - Whether a file must be selected
    */
-  static file<Required extends boolean>(a: {
-    name: string
-    description?: string | null
-    warning?: string | null
-    extensions: string[]
-    required: Required
-  }) {
-    const buildValue = {
-      type: 'file' as const,
-      description: null,
-      warning: null,
-      ...a,
-    }
+  static file<Required extends boolean>(a: FileInputOptions<Required>) {
+    const buildValue = { ...fileDefaults, ...a }
     return new Value<AsRequired<FileInfo, Required>>(
-      () => ({
-        spec: {
-          ...buildValue,
-        },
-        validator: asRequiredParser(fileInfoParser, a),
-      }),
+      ({ effects }) => buildFileInput(effects, buildValue),
       asRequiredParser(fileInfoParser, a),
+    )
+  }
+  /** @internal A browser File value, without a prepared host upload. */
+  static browserFile<Required extends boolean>(
+    a: FilePickerOptions<Required> & { maxSize?: ValueSpecFile['maxSize'] },
+  ) {
+    const parser = asRequiredParser(z.instanceof(File), a)
+    return new Value<AsRequired<File, Required>>(
+      () => ({ spec: { ...fileDefaults, ...a }, validator: parser }),
+      parser,
     )
   }
   /** Like {@link Value.file} but options are resolved lazily at runtime via a builder function. */
   static dynamicFile<Required extends boolean, OuterType = unknown>(
-    a: LazyBuild<
-      {
-        name: string
-        description?: string | null
-        warning?: string | null
-        extensions: string[]
-        required: Required
-      },
-      OuterType
-    >,
+    a: LazyBuild<FileInputOptions<Required>, OuterType>,
   ) {
     return new Value<
       AsRequired<FileInfo, Required>,
       FileInfo | null,
       OuterType
     >(async options => {
-      const spec = {
-        type: 'file' as const,
-        description: null,
-        warning: null,
-        ...(await a(options)),
-      }
-      return {
-        spec,
-        validator: asRequiredParser(fileInfoParser, spec),
-      }
+      const spec = { ...fileDefaults, ...(await a(options)) }
+      return buildFileInput(options.effects, spec)
     }, fileInfoParser.nullable())
   }
   /**

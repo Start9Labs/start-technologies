@@ -210,7 +210,6 @@ cat > "${FILES_DIR}/lib/upgrade/keep.d/startwrt" << 'KEEPEOF'
 /etc/nlbwmon/data/
 /etc/startwrt/pending-update
 /etc/startwrt/migrations
-# Enrolled sign-in keys. Without this every sysupgrade signs every browser out.
 /etc/startwrt/auth.db
 # Persistent device-identity cache (hostnames + DHCP fingerprints). Written
 # atomically (temp + rename), so a live `sysupgrade --create-backup` always

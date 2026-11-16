@@ -14,12 +14,14 @@ pub mod callbacks;
 pub mod context;
 mod control;
 pub(super) mod dependency;
+mod files;
 mod health;
 mod init;
 mod net;
 pub mod notification;
 pub mod plugin;
 mod prelude;
+mod shared_volumes;
 pub mod subcontainer;
 mod system;
 mod version;
@@ -30,6 +32,22 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "echo",
             from_fn(echo::<EffectContext>).with_call_remote::<ContainerCliContext>(),
+        )
+        .subcommand(
+            "prepare-upload",
+            from_fn_async(files::prepare_upload).no_cli(),
+        )
+        .subcommand(
+            "prepare-download",
+            from_fn_async(files::prepare_download).no_cli(),
+        )
+        .subcommand(
+            "resolve-upload",
+            from_fn_async(files::resolve_upload).no_cli(),
+        )
+        .subcommand(
+            "get-upload-limits",
+            from_fn_async(files::get_upload_limits).no_cli(),
         )
         // action
         .subcommand("action", action::action_api::<C>())
@@ -87,6 +105,14 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
             from_fn_async(dependency::check_dependencies)
                 .no_display()
                 .with_call_remote::<ContainerCliContext>(),
+        )
+        .subcommand(
+            "get-shared-volumes",
+            from_fn_async(shared_volumes::get_shared_volumes).no_cli(),
+        )
+        .subcommand(
+            "mount-shared-volume",
+            from_fn_async(shared_volumes::mount_shared_volume).no_cli(),
         )
         .subcommand("mount", from_fn_async(dependency::mount).no_cli())
         .subcommand(

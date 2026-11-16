@@ -1,6 +1,7 @@
 use std::ffi::{OsStr, OsString, c_int};
 use std::fs::File;
 use std::io::{BufRead, BufReader, IsTerminal, Read};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
@@ -93,6 +94,63 @@ impl procfs::FromBufRead for NSPid {
             }
         }
         Err(procfs::ProcError::Incomplete(None))
+    }
+}
+
+fn open_pidfd(pid: Pid) -> std::io::Result<OwnedFd> {
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid.as_raw(), 0) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(unsafe { OwnedFd::from_raw_fd(fd as c_int) })
+}
+
+fn kill_on_parent_death() -> std::io::Result<()> {
+    nix::sys::prctl::set_pdeathsig(nix::sys::signal::SIGKILL)
+        .map_err(|e| std::io::Error::from_raw_os_error(e as i32))
+}
+
+// Namespace init dies with its launcher, even before signal handlers exist.
+fn kill_with_launcher(parent: BorrowedFd<'_>) -> std::io::Result<()> {
+    kill_on_parent_death()?;
+    let mut fd = libc::pollfd {
+        fd: parent.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let ready = unsafe { libc::poll(&mut fd, 1, 0) };
+    if ready < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if ready > 0 {
+        unsafe { libc::_exit(128 + SIGKILL) };
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod parent_death_tests {
+    use super::*;
+
+    #[test]
+    fn live_launcher_allows_exec() {
+        let parent = open_pidfd(nix::unistd::getpid()).unwrap();
+        let mut command = StdCommand::new("/bin/sh");
+        command.args(["-c", "exit 42"]);
+        unsafe { command.pre_exec(move || kill_with_launcher(parent.as_fd())) };
+        assert_eq!(command.status().unwrap().code(), Some(42));
+    }
+
+    #[test]
+    fn exited_launcher_prevents_exec() {
+        let mut launcher = StdCommand::new("/bin/sleep").arg("300").spawn().unwrap();
+        let parent = open_pidfd(Pid::from_raw(launcher.id() as i32)).unwrap();
+        launcher.kill().unwrap();
+        launcher.wait().unwrap();
+        let mut command = StdCommand::new("/bin/sh");
+        command.args(["-c", "exit 42"]);
+        unsafe { command.pre_exec(move || kill_with_launcher(parent.as_fd())) };
+        assert_eq!(command.status().unwrap().code(), Some(128 + SIGKILL));
     }
 }
 
@@ -210,10 +268,7 @@ impl ExecParams {
                 // setuid clears dumpability and changes /proc/self/fd ownership.
                 libc::prctl(libc::PR_SET_DUMPABLE, 1, 0, 0, 0);
                 // Credential changes clear the parent-death signal.
-                if libc::prctl(libc::PR_SET_PDEATHSIG, SIGKILL) < 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
+                kill_on_parent_death()
             });
         }
         cmd.args(args);
@@ -725,6 +780,7 @@ pub fn launch(
     } else {
         None
     };
+    let parent = open_pidfd(nix::unistd::getpid())?;
     nix::sched::unshare(CloneFlags::CLONE_NEWPID)
         .with_ctx(|_| (ErrorKind::Filesystem, "unshare pid ns"))?;
     nix::sched::unshare(CloneFlags::CLONE_NEWCGROUP)
@@ -737,6 +793,7 @@ pub fn launch(
         let (pty, pts) = pty_process::open().with_kind(ErrorKind::Filesystem)?;
         let mut cmd = pty_process::Command::new("/usr/bin/start-container");
         cmd = cmd.arg("subcontainer").arg("launch-init");
+        cmd = unsafe { cmd.pre_exec(move || kill_with_launcher(parent.as_fd())) };
         for env in env {
             cmd = cmd.arg("-e").arg(env)
         }
@@ -795,6 +852,7 @@ pub fn launch(
     } else {
         let mut cmd = StdCommand::new("/usr/bin/start-container");
         cmd.arg("subcontainer").arg("launch-init");
+        unsafe { cmd.pre_exec(move || kill_with_launcher(parent.as_fd())) };
         for env in env {
             cmd.arg("-e").arg(env);
         }
@@ -1091,8 +1149,6 @@ pub fn pipe_wrap(
     _: ContainerCliContext,
     PipeWrapParams { command }: PipeWrapParams,
 ) -> Result<(), Error> {
-    use std::os::fd::AsRawFd;
-
     let Some(([program], args)) = command.split_at_checked(1) else {
         return Err(Error::new(
             eyre!("pipe-wrap: command cannot be empty"),

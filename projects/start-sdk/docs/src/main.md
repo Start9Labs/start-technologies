@@ -442,7 +442,7 @@ Which rule applies — every address on the outbound gateway, or the outbound ga
 
 Every health status accepts a `message` string that the UI displays verbatim. Empty or absent messages use the localized status label. A `starting` or `loading` result can also set `waiting: true` to show a clock instead of a spinner while waiting for an external condition; omitting it defaults to `false`. Readiness still follows `result`, not the waiting flag.
 
-By default, health checks poll every 1 s while `starting` or `failure`, and every 30 s while `success`, `loading`, `disabled`, or `starting` with `waiting: true`. A daemon's `ready` check reporting `loading` or `waiting: true` before its first `success` is the exception: it backs off from 1 s, doubling to 30 s, so a daemon that `requires` it starts soon after it becomes ready. Override this with the `trigger` option on `ready`:
+By default, health checks poll every 1 s while `starting` or `failure`, and every 30 s while `success`, `loading`, `disabled`, or `starting` with `waiting: true`. A check reporting `loading` or `waiting: true` before its first `success` is the exception: it backs off from 1 s, doubling to 30 s, so a daemon that `requires` it starts soon after it becomes ready. Override this with the `trigger` option on `ready`:
 
 ```typescript
 ready: {
@@ -469,6 +469,8 @@ trigger: sdk.trigger.statusTrigger(30_000, {
 
 ## Volume Mounts
 
+User-managed local folders, attached drives and CIFS shares use a separate [Shared Volumes API](shared-volumes.md), with explicit user grants and optional mount outcomes. The declarations below concern package-owned storage and assets.
+
 Volume mounts declared `readonly: true` and all asset mounts are read-only; writes through them fail with `EROFS`. Copy assets that need modification into a writable volume and mount that copy. `type: 'infer'` detects existing regular files; use `type: 'file'` when the file may need to be created.
 
 ```typescript
@@ -491,7 +493,7 @@ sdk.Mounts.of()
 ```
 
 > [!WARNING]
-> `sdk.Mounts` is an immutable builder. Every `mountVolume` / `mountAssets` / `mountDependency` call returns a **new** `Mounts` instance — the original is unchanged. Discarded return values silently drop the mount.
+> `sdk.Mounts` is an immutable builder. Every `mountVolume` / `mountAssets` / `mountDependency` / `mountSharedVolume` call returns a **new** `Mounts` instance — the original is unchanged. Discarded return values silently drop the mount.
 >
 > ```typescript
 > // BROKEN — conditional mount is lost

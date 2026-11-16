@@ -3,6 +3,19 @@ const wire = <A extends z.ZodType, B extends z.ZodType>(input: A, output: B) =>
   z.codec(input, output, { decode: v => v as never, encode: v => v as never })
 const object = <Shape extends z.core.$ZodLooseShape>(shape: Shape) =>
   z.object(shape).meta({ additionalProperties: true })
+export const EncryptedWire: z.ZodObject<{ encrypted: z.ZodUnknown }> =
+  /* @__PURE__ */ object({ encrypted: z.unknown() }).meta({
+    id: 'EncryptedWire',
+  })
+
+/**
+ * Firmware build identity attached to each RPC reply.
+ */
+export const FirmwareMetadata: z.ZodObject<{ gitHash: z.ZodString }> =
+  /* @__PURE__ */ object({ gitHash: z.string() }).meta({
+    id: 'FirmwareMetadata',
+    description: 'Firmware build identity attached to each RPC reply.',
+  })
 export const FlashMode: z.ZodEnum<{
   update: 'update'
   'fresh-start': 'fresh-start'
@@ -15,7 +28,7 @@ export const ProgressUnits: z.ZodEnum<{ bytes: 'bytes'; steps: 'steps' }> =
   })
 
 /**
- * Streaming event sent to the frontend during flash.
+ * Legacy NDJSON adds Complete/Error; typed RPC carries completion in its terminal.
  */
 export const SetupEvent: z.ZodUnion<
   readonly [
@@ -65,34 +78,13 @@ export const SetupEvent: z.ZodUnion<
   ])
   .meta({
     id: 'SetupEvent',
-    description: 'Streaming event sent to the frontend during flash.',
-  })
-export const FlashParams: z.ZodObject<{
-  mode: typeof FlashMode
-  password: z.ZodString
-  /**
-   * Browser IANA timezone (e.g. "America/New_York") captured by the wizard.
-   * Carried into the fresh eMMC config since the wizard's live set-timezone
-   * only reaches the throwaway microSD overlay. Optional for older clients.
-   */
-  timezone: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  mode: FlashMode,
-  password: z.string(),
-  /**
-   * Browser IANA timezone (e.g. "America/New_York") captured by the wizard.
-   * Carried into the fresh eMMC config since the wizard's live set-timezone
-   * only reaches the throwaway microSD overlay. Optional for older clients.
-   */
-  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
     description:
-      'Browser IANA timezone (e.g. "America/New_York") captured by the wizard.\nCarried into the fresh eMMC config since the wizard\'s live set-timezone\nonly reaches the throwaway microSD overlay. Optional for older clients.',
-  }),
-}).meta({
-  id: 'FlashParams',
+      'Legacy NDJSON adds Complete/Error; typed RPC carries completion in its terminal.',
+  })
+export const PasswordType: z.ZodUnion<
+  readonly [typeof EncryptedWire, z.ZodString]
+> = /* @__PURE__ */ z.union([EncryptedWire, z.string()]).meta({
+  id: 'PasswordType',
 })
 
 /**
@@ -140,6 +132,29 @@ export const Progress: z.ZodUnion<
     description:
       "Progress state for a single phase or overall operation.\nWire-compatible with start-os's `Progress` (serialized as untagged).",
   })
+export const FlashParams: z.ZodObject<{
+  mode: typeof FlashMode
+  password: typeof PasswordType
+  /**
+   * IANA timezone name. An unknown name leaves the default unchanged.
+   */
+  timezone: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  mode: FlashMode,
+  password: PasswordType,
+  /**
+   * IANA timezone name. An unknown name leaves the default unchanged.
+   */
+  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'IANA timezone name. An unknown name leaves the default unchanged.',
+  }),
+}).meta({
+  id: 'FlashParams',
+})
 export const NamedProgress: z.ZodObject<{
   name: z.ZodString
   progress: typeof Progress

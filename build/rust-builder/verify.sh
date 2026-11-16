@@ -63,19 +63,26 @@ printf '%s\n' \
   '    let out = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("probe.o");' \
   '    assert!(Command::new(cc).args(["-c", "probe.c", "-o"]).arg(&out).status().unwrap().success());' \
   '    let toolchain = env::var(format!("CMAKE_TOOLCHAIN_FILE_{target}")).unwrap();' \
+  '    std::fs::write(out.parent().unwrap().join("cmake-toolchain.path"), &toolchain).unwrap();' \
   '    let build = out.parent().unwrap().join("cmake");' \
   '    assert!(Command::new("cmake").args(["-S", ".", "-B"]).arg(&build).arg(format!("-DCMAKE_TOOLCHAIN_FILE={toolchain}")).status().unwrap().success());' \
   '    assert!(Command::new("cmake").arg("--build").arg(build).status().unwrap().success());' \
   '}' > build.rs
 cargo generate-lockfile --offline
 
+verify_rva23_profile() {
+  readelf -A "$1" > "$scratch/isa"
+  for feature in v1p0 zvbb1p0 zicond1p0 supm1p0; do
+    grep -q "_$feature" "$scratch/isa"
+  done
+}
+
 env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
   -u CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS \
   cargo zigbuild --locked --target riscv64gc-unknown-linux-musl --target-dir "$scratch/rva23"
-readelf -A "$scratch"/rva23/riscv64gc-unknown-linux-musl/debug/build/builder-probe-*/out/probe.o > "$scratch/isa"
-for feature in v1p0 zvbb1p0 zicond1p0 supm1p0; do
-  grep -q "_$feature" "$scratch/isa"
-done
+verify_rva23_profile "$scratch"/rva23/riscv64gc-unknown-linux-musl/debug/build/builder-probe-*/out/probe.o
+rva23_toolchain=$(< "$scratch"/rva23/riscv64gc-unknown-linux-musl/debug/build/builder-probe-*/out/cmake-toolchain.path)
+cp "$rva23_toolchain" "$scratch/rva23-toolchain.cmake"
 
 env -u CARGO_ENCODED_RUSTFLAGS -u CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS \
   RUSTFLAGS='-C target-cpu=sifive-u74' \
@@ -86,6 +93,60 @@ if grep -q '_v[0-9]' "$scratch/isa"; then
   exit 1
 fi
 
+entrypoint=/usr/local/libexec/start9/rust-builder-entrypoint
+env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+  -u CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS -u DISABLE_RVA23 \
+  "$entrypoint" cargo zigbuild --locked --target riscv64gc-unknown-linux-musl --target-dir "$scratch/rust-default"
+for object in \
+  "$scratch/rust-default/riscv64gc-unknown-linux-musl/debug/builder-probe" \
+  "$scratch"/rust-default/riscv64gc-unknown-linux-musl/debug/build/builder-probe-*/out/probe.o \
+  "$scratch"/rust-default/riscv64gc-unknown-linux-musl/debug/build/builder-probe-*/out/cmake/CMakeFiles/cmake_probe.dir/probe.c.o; do
+  verify_rva23_profile "$object"
+done
+
+env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+  -u CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS DISABLE_RVA23=1 \
+  "$entrypoint" cargo zigbuild --locked --target riscv64gc-unknown-linux-musl --target-dir "$scratch/no-rva23"
+for object in \
+  "$scratch/no-rva23/riscv64gc-unknown-linux-musl/debug/builder-probe" \
+  "$scratch"/no-rva23/riscv64gc-unknown-linux-musl/debug/build/builder-probe-*/out/probe.o \
+  "$scratch"/no-rva23/riscv64gc-unknown-linux-musl/debug/build/builder-probe-*/out/cmake/CMakeFiles/cmake_probe.dir/probe.c.o; do
+  readelf -A "$object" > "$scratch/isa"
+  if grep -Eq '_v[0-9]|_zicond[0-9]|_supm[0-9]' "$scratch/isa"; then
+    printf 'RVA23 opt-out unexpectedly enables RVA23/vector features in %s\n' "$object" >&2
+    exit 1
+  fi
+done
+
+cmp "$rva23_toolchain" "$scratch/rva23-toolchain.cmake"
+
 host_target="$host_arch-unknown-linux-musl"
 cargo zigbuild --locked --target "$host_target" --target-dir "$scratch/native"
 "$scratch/native/$host_target/debug/builder-probe" | grep -Fx 'builder probe passed'
+
+probe_symbols() {
+  readelf --wide --symbols "$1/$2/debug/builder-probe"
+}
+
+env -u "ZIG_LIBC_${host_arch}_linux_musl" -u CARGO_ZIGBUILD_CACHE_DIR \
+  cargo zigbuild --locked --target "$host_target" --target-dir "$scratch/libc"
+if ! grep -q SmpAllocator <<< "$(probe_symbols "$scratch/libc" "$host_target")"; then
+  printf '%s baseline does not link Zig SmpAllocator\n' "$host_target" >&2
+  exit 1
+fi
+for arch in x86_64 aarch64 riscv64; do
+  target="${arch/riscv64/riscv64gc}-unknown-linux-musl"
+  cargo zigbuild --locked --target "$target" --target-dir "$scratch/libc"
+  symbols=$(probe_symbols "$scratch/libc" "$target")
+  for symbol in __libc_malloc_impl alloc_slot; do
+    if ! grep -q " $symbol\$" <<< "$symbols"; then
+      printf '%s does not link musl mallocng (%s missing)\n' "$target" "$symbol" >&2
+      exit 1
+    fi
+  done
+  if grep -q SmpAllocator <<< "$symbols"; then
+    printf '%s links Zig SmpAllocator\n' "$target" >&2
+    exit 1
+  fi
+  printf '%s links musl mallocng\n' "$target"
+done

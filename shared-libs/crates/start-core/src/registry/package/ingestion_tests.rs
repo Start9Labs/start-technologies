@@ -8,6 +8,7 @@ use axum::routing::get;
 use ed25519_dalek::SigningKey;
 use serde_json::Value;
 
+use super::test_utils::{context, registry_server};
 use super::*;
 use crate::registry::package::add::{AddMirrorParams, AddPackageParams, add_mirror, add_package};
 use crate::rpc_continuations::Guid;
@@ -41,40 +42,6 @@ fn larger_bound_fixture() -> (Vec<u8>, MerkleArchiveCommitment) {
     bytes[35..99].copy_from_slice(&signature.to_bytes());
     bytes[131..139].copy_from_slice(&commitment.root_maxsize.to_be_bytes());
     (bytes, commitment)
-}
-
-async fn context(datadir: PathBuf, uploader: AnyVerifyingKey) -> RegistryContext {
-    tokio::fs::create_dir_all(&datadir).await.unwrap();
-    let db =
-        TypedPatchDb::load_unchecked(PatchDb::open(datadir.join("registry.db")).await.unwrap());
-    let mut database = RegistryDatabase::init();
-    let guid = Guid::new();
-    database.admins.insert(guid.clone());
-    database.index.trust_signers.insert(guid.clone());
-    database.index.signers.insert(
-        guid,
-        SignerInfo {
-            name: "Uploader".into(),
-            contact: vec![],
-            keys: [uploader].into(),
-            gpg_exports: Default::default(),
-        },
-    );
-    db.put(&ROOT, &database).await.unwrap();
-    RegistryContext(Arc::new(RegistryContextSeed {
-        hostnames: vec!["localhost".into(), "127.0.0.1".into()],
-        listen: "127.0.0.1:0".parse().unwrap(),
-        db,
-        datadir,
-        startwrt: false,
-        rpc_continuations: RpcContinuations::new(),
-        open_authed_continuations: OpenAuthedContinuations::new(),
-        auth_sig_nonce_cache: SyncMutex::new(Default::default()),
-        client: Client::new(),
-        shutdown: tokio::sync::broadcast::channel(1).0,
-        metrics_db: SyncMutex::new(Connection::open_in_memory().unwrap()),
-        security_feed: None,
-    }))
 }
 
 type Requests = Arc<Mutex<Vec<Option<(usize, usize)>>>>;
@@ -159,25 +126,9 @@ async fn local_package() -> S9pk {
     S9pk::from_file(file).await.unwrap()
 }
 
-async fn registry_server(
-    ctx: RegistryContext,
-) -> (Url, crate::util::future::NonDetachingJoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/", listener.local_addr().unwrap())
-        .parse()
-        .unwrap();
-    let task = tokio::spawn(async move {
-        axum::serve(listener, crate::registry::registry_router(ctx))
-            .await
-            .unwrap();
-    });
-    (url, task.into())
-}
-
 #[tokio::test]
-async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserves_mirror_and_promotion()
- {
-    use crate::context::config::ClientConfig;
+async fn registry_cli_filters_signatures_on_upload_mirror_and_promotion() {
+    use crate::context::config::{ClientConfig, Profiles};
     use crate::developer::write_signing_key;
     use crate::registry::package::add::cli_add_package_impl;
     use crate::registry::package::promote::{CliPromoteParams, cli_promote};
@@ -186,6 +137,28 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     let uploader = AnyVerifyingKey::Ed25519(uploader_key.verifying_key());
     let temp = tempfile::tempdir().unwrap();
     let ctx = context(temp.path().join("first"), uploader.clone()).await;
+    let target = context(temp.path().join("second"), uploader.clone()).await;
+    let embedded: AnyVerifyingKey = serde_json::from_value(vectors()["embedded"].clone()).unwrap();
+    let publisher: AnyVerifyingKey =
+        serde_json::from_value(vectors()["endorsements"][0]["signer"].clone()).unwrap();
+    for (registry, keys) in [
+        (&ctx, BTreeSet::from([embedded.clone(), publisher.clone()])),
+        (&target, BTreeSet::from([publisher.clone()])),
+    ] {
+        registry
+            .db
+            .mutate(|db| {
+                db.as_index_mut().as_signers_mut().add_signer(&SignerInfo {
+                    name: "Publisher".into(),
+                    contact: vec![],
+                    keys,
+                    gpg_exports: Default::default(),
+                })
+            })
+            .await
+            .result
+            .unwrap();
+    }
     let before = ctx.db.peek().await.as_index().de().unwrap();
     let (host, requests, host_task) = server(
         [
@@ -196,11 +169,16 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     )
     .await;
     let (registry, registry_task) = registry_server(ctx.clone()).await;
+    let (destination, destination_task) = registry_server(target.clone()).await;
     let key_path = temp.path().join("identity.pem");
     write_signing_key(&uploader_key, &key_path).await.unwrap();
     let cli = CliContext::init(ClientConfig {
         id_key_path: Some(key_path.clone()),
-        registry: Some(registry.to_string().parse().unwrap()),
+        registry: Some(Profiles(BTreeMap::from([
+            ("default".into(), registry.to_string()),
+            ("source".into(), registry.to_string()),
+            ("destination".into(), destination.to_string()),
+        ]))),
         ..Default::default()
     })
     .unwrap();
@@ -217,7 +195,10 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     assert_eq!(before.trust_signers, after.trust_signers);
     let version: crate::util::VersionString = "1.0.0:0".parse().unwrap();
     let asset = &after.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
-    assert_eq!(asset.signatures.len(), 5);
+    assert_eq!(
+        asset.signatures.keys().collect::<BTreeSet<_>>(),
+        [&uploader, &embedded, &publisher].into()
+    );
     for (key, signature) in &asset.signatures {
         key.verify_commitment(&asset.commitment, "s9pk", signature)
             .unwrap();
@@ -244,13 +225,11 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     assert_eq!(mirrored.signatures, asset.signatures);
     assert_eq!(mirrored.urls.len(), 2);
 
-    let target = context(temp.path().join("second"), uploader.clone()).await;
-    let (destination, destination_task) = registry_server(target.clone()).await;
     cli_promote(
         cli.clone(),
         CliPromoteParams {
-            from: Some(registry),
-            to: Some(destination),
+            from: Some("source".into()),
+            to: Some("destination".into()),
             id: "trust-fixture".parse().unwrap(),
             version: version.clone(),
         },
@@ -259,7 +238,13 @@ async fn registry_cli_transports_local_endorsements_to_stripped_host_and_preserv
     .unwrap();
     let promoted = target.db.peek().await.as_index().de().unwrap();
     let promoted = &promoted.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
-    assert_eq!(promoted.signatures, asset.signatures);
+    assert_eq!(
+        promoted.signatures.keys().collect::<BTreeSet<_>>(),
+        [&uploader, &publisher].into()
+    );
+    for (key, signature) in &promoted.signatures {
+        assert_eq!(Some(signature), asset.signatures.get(key));
+    }
     assert_eq!(promoted.urls, mirrored.urls);
 
     ctx.db
@@ -343,7 +328,7 @@ async fn registry_rejects_submitted_invalid_signatures_atomically_and_defaults_o
         serde_json::to_value(ctx.db.peek().await.as_index().de().unwrap()).unwrap(),
         after
     );
-    assert_ne!(before, after);
+    assert_eq!(before, after);
     assert!(requests.lock().unwrap().iter().all(Option::is_none));
     task.abort();
 }
@@ -460,7 +445,7 @@ async fn registry_validates_every_package_url_without_importing_remote_endorseme
         ctx.clone(),
         AddPackageParams {
             urls: urls.clone(),
-            uploader,
+            uploader: uploader.clone(),
             commitment,
             signature,
             signatures: Default::default(),
@@ -472,9 +457,82 @@ async fn registry_validates_every_package_url_without_importing_remote_endorseme
     let version: crate::util::VersionString = "1.0.0:0".parse().unwrap();
     let asset = &index.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
     assert_eq!(asset.urls, urls);
-    assert_eq!(asset.signatures.len(), 2);
+    assert_eq!(
+        asset.signatures.keys().collect::<BTreeSet<_>>(),
+        [&uploader].into()
+    );
     assert!(requests.lock().unwrap().iter().all(Option::is_none));
     task.abort();
+}
+
+#[tokio::test]
+async fn removing_registry_signers_or_keys_prunes_stored_package_signatures() {
+    use crate::registry::admin::{
+        EditSignerParams, RemoveSignerParams, edit_signer, remove_signer,
+    };
+    use crate::registry::package::index::tests::version_info_signed_by;
+
+    let (publisher, mut info) = version_info_signed_by(1);
+    let (retired, retired_info) = version_info_signed_by(2);
+    let (removed, removed_info) = version_info_signed_by(3);
+    info.merge_with(retired_info, true).unwrap();
+    info.merge_with(removed_info, true).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let ctx = context(temp.path().into(), publisher.clone()).await;
+    let id: crate::PackageId = "test".parse().unwrap();
+    let version: crate::util::VersionString = "1.0.0:0".parse().unwrap();
+    let signer = ctx
+        .db
+        .mutate(|db| {
+            let signer = db.as_index_mut().as_signers_mut().add_signer(&SignerInfo {
+                name: "Retiring publisher".into(),
+                contact: vec![],
+                keys: [retired.clone(), removed.clone()].into(),
+                gpg_exports: Default::default(),
+            })?;
+            db.as_index_mut()
+                .as_package_mut()
+                .as_packages_mut()
+                .upsert(&id, || Ok(Default::default()))?
+                .as_versions_mut()
+                .insert(&version, &info)?;
+            Ok(signer)
+        })
+        .await
+        .result
+        .unwrap();
+
+    let edit: EditSignerParams = serde_json::from_value(serde_json::json!({
+        "id": signer,
+        "addContact": [],
+        "addKey": [],
+        "removeContact": [],
+        "removeKey": [retired],
+    }))
+    .unwrap();
+    edit_signer(ctx.clone(), edit).await.unwrap();
+    let index = ctx.db.peek().await.as_index().de().unwrap();
+    assert_eq!(
+        index.package.packages[&id].versions[&version].s9pks[0]
+            .1
+            .signatures
+            .keys()
+            .collect::<BTreeSet<_>>(),
+        [&publisher, &removed].into()
+    );
+
+    remove_signer(ctx.clone(), RemoveSignerParams { id: signer })
+        .await
+        .unwrap();
+    let index = ctx.db.peek().await.as_index().de().unwrap();
+    assert_eq!(
+        index.package.packages[&id].versions[&version].s9pks[0]
+            .1
+            .signatures
+            .keys()
+            .collect::<BTreeSet<_>>(),
+        [&publisher].into()
+    );
 }
 
 #[tokio::test]

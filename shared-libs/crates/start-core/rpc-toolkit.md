@@ -132,6 +132,12 @@ Metadata tags are processed by different middleware. Group them logically:
 | ------------ | ------- | ------------------------------------------------------- |
 | `get_signer` | `false` | Inject signer public key into params as `__Auth_signer` |
 
+`SignatureAuth` reads the peer from completed signed-DH admission and applies current enrollment,
+permissions and hooks on each call. HTTP compatibility uses `X-Start-Auth-Sig` over the
+captured body, including the original MCP HTTP body, with the existing clock and nonce checks.
+`SignatureHeader::sign` and TypeScript `auth.signRequest` produce those headers. WebSocket
+calls derive their authenticated identity from admission, not the HTTP upgrade body.
+
 ### Registry Auth (extends Signature Auth)
 
 | Metadata          | Default | Description                                             |
@@ -141,9 +147,16 @@ Metadata tags are processed by different middleware. Group them logically:
 
 ### Database Middleware (`middleware/db.rs`)
 
-| Metadata  | Default | Description                                                 |
-| --------- | ------- | ----------------------------------------------------------- |
-| `sync_db` | `false` | Sync database after mutation, add `X-Patch-Sequence` header |
+| Metadata  | Default | Description                                     |
+| --------- | ------- | ----------------------------------------------- |
+| `sync_db` | `false` | Publish the database sequence after an RPC call |
+
+`SyncDb` writes `meta.patchSequence` and advances StartOS's filtered database subscribers in
+RPC response middleware, including when a handler returns an error after committing changes.
+HTTP and WebSocket initiating replies use the same metadata; MCP projects it to tool-result
+`_meta`. `SyncDbHeaderCompat` projects the greatest sequence in an HTTP batch into
+`X-Patch-Sequence` for older clients. The shared frontend HTTP adapter accepts that header from
+older servers; StartOS and StartTunnel clients wait on the typed JSON metadata.
 
 ## Context Types
 

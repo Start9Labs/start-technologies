@@ -4,7 +4,7 @@ Trusted Keys lists the individual public keys whose signatures your server accep
 
 ## Viewing Keys
 
-Open **System → Trusted Keys**. Each row shows a key's label and first identity, its type (GPG or PEM), whether it is trusted for **Packages** and for **StartOS updates**, and its **Linked registries**, the connected registries that offer it. An identity is a GPG user ID, or for a PEM key the email address its registry publishes.
+Open **System → Trusted Keys**. Each row shows a key's label and first identity, its type (GPG or PEM), whether it is trusted for **Packages** and for **StartOS updates**, and its **Linked registries**, the connected registries that offer it. Identities include GPG user IDs and the contact email addresses registries publish for the key.
 
 Choose **View details** from a key's menu to see every identity, who added it and when, its linked registries, its fingerprint, and its full public key, which you can copy, with separate **Enabled for service packages** and **Enabled for StartOS updates** toggle rows. The same details open from the **Signed by** list of a package or StartOS update, and from a key notification. GPG keys show their complete OpenPGP fingerprints; PEM keys show a SHA-256 fingerprint of their canonical public-key encoding. A registry's **Manage keys** action in **System → Registries** opens Trusted Keys filtered to the keys that registry offers.
 
@@ -47,14 +47,13 @@ start-cli server update https://registry.start9.com --trust
 
 Diagnostic updates use PEM keys in `/etc/startos/os-signers`, seeded with the drbonez, matthill, and Start9 keys. Changes to StartOS-update trust save the selected keys in the config overlay, where diagnostic mode can read them without the data drive. The saved selection replaces the defaults. To accept an untrusted signer in diagnostic mode, run `start-cli diagnostic update --trust` locally on the server as root or a member of the `startos` group. The server authorizes that override through its protected local authentication cookie; ordinary remote login credentials do not authorize it.
 
-The existing OS-signer CLI commands continue to manage StartOS-update trust:
+`start-cli server trusted-keys` manages the same keys from the command line:
 
 ```sh
-start-cli server update-signers list
-start-cli server update-signers add "$(cat signer.pem)" --label "My release signer"
-start-cli server update-signers get "$(cat signer.pem)"
-start-cli server update-signers update "$(cat signer.pem)" --label "Renamed signer"
-start-cli server update-signers remove "$(cat signer.pem)"
+start-cli server trusted-keys list
+start-cli server trusted-keys add --name "My release signer" --trust-for os -- "$(cat signer.pem)"
+start-cli server trusted-keys update <ID> --name "Renamed signer" --marketplace true --os true
+start-cli server trusted-keys remove <ID>
 ```
 
-Keys accept PEM or Der64 (padded standard Base64 DER); `list` returns Der64. Use Trusted Keys to change package trust independently.
+A key's ID is its key in `list`'s output, the key in Der64 (padded standard Base64 DER). `add` accepts PEM and armored GPG exports. `update` sets the name and both trust selections at once. Keys a connected registry offers can't be removed; distrust them with `update` instead. See the [CLI reference](cli-reference.md#start-cli-server-trusted-keys-list).

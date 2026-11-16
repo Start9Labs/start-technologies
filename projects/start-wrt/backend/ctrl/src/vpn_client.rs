@@ -1308,7 +1308,7 @@ fn reset_profiles_using_vpn(
         .filter_map(|s| {
             let name = s.name()?.to_string();
             let ni = s.get::<uciedit::openwrt::NetworkInterface>().ok()?;
-            let ip = ni.ipaddr?;
+            let ip = ni.ipv4()?;
             Some((name, ip))
         })
         .collect();

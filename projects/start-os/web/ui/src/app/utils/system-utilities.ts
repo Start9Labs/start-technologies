@@ -23,11 +23,6 @@ export const SYSTEM_UTILITIES: Record<
     icon: '@tui.globe',
     title: 'Updates',
   },
-  // @TODO 041
-  // backups: {
-  //   icon: '@tui.save',
-  //   title: 'Backups',
-  // },
   metrics: {
     icon: '@tui.activity',
     title: 'Metrics',
@@ -50,5 +45,6 @@ export function getMenu() {
     icon: SYSTEM_UTILITIES[key]?.icon || '',
     routerLink: key,
     badge: toSignal(badge.getCount(key), { initialValue: 0 }),
+    warning: toSignal(badge.getWarning(key), { initialValue: false }),
   }))
 }

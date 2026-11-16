@@ -1,4 +1,5 @@
 import { Pipe, Signal } from '@angular/core'
+import { i18nKey } from '@start9labs/shared'
 import { auth, T } from '@start9labs/start-core'
 import { MarketplacePkgBase } from './types'
 import { signingKeyIdentity } from './key-identity'
@@ -60,6 +61,12 @@ export function packageSignerPolicy(
 }
 
 export type SignerStatus = 'trusted' | 'untrusted' | 'unknown'
+
+export const SIGNER_STATUS_LABELS: Record<SignerStatus, i18nKey> = {
+  trusted: 'Trusted',
+  untrusted: 'Not trusted',
+  unknown: 'Unknown key',
+}
 
 export type Signer = ReturnType<typeof signingKeyIdentity> & {
   id: string

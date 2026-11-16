@@ -4,20 +4,20 @@ Rust crates powering the StartWRT router daemon and CLI. Three crates: `ctrl` (R
 
 ## Transport
 
-HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 at `POST /rpc/v1` via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). Request-signature and local-token authentication from `start-core` (see [auth.rs](#authrs--authentication)).
+HTTP server on ports 80 (HTTP) and 443 (HTTPS, if TLS setup succeeds). JSON-RPC 2.0 requires signed-DH admission at `/rpc/v2`, with `POST /rpc/v1` compatibility, via [rpc-toolkit](../../../shared-libs/crates/rpc-toolkit). `rpc.rs` composes one dispatch/middleware stack, adds typed firmware metadata to replies and retains the CORS-exposed HTTP firmware header. Live authorization uses the verified connection peer; request-signature/local-token compatibility stays in `start-core` (see [auth.rs](#authrs--authentication)).
 
 Additional routes:
 
-| Route                                     | Purpose                                                           |
-| ----------------------------------------- | ----------------------------------------------------------------- |
-| `POST /api/setup/flash`                   | NDJSON streaming for setup wizard                                 |
-| `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (10MB limit) |
-| `GET /ws/rpc/{guid}`                      | WebSocket continuation endpoint (update progress, live logs)      |
-| `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                           |
-| `GET /static/local-root-ca.crt`           | Root CA certificate download (no auth)                            |
-| `GET /static/local-root-ca.mobileconfig`  | Root CA as an Apple configuration profile (no auth)               |
-| `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080)                               |
-| Fallback                                  | Serves embedded web UI via `include_dir`                          |
+| Route                                     | Purpose                                                                                                 |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `POST /api/setup/flash`                   | Legacy NDJSON flash observation                                                                         |
+| `GET\|POST /rest/rpc/{guid}`              | Continuation endpoint for backup/restore/diagnostics (64 MiB limit)                                     |
+| `GET /rpc/v2/{guid}`                      | WebSocket continuation endpoint (update progress, live logs); `/ws/rpc/{guid}` is a compatibility alias |
+| `GET /luci`                               | Convenience redirect to `/cgi-bin/luci`                                                                 |
+| `GET /static/local-root-ca.crt`           | Root CA certificate download (no auth)                                                                  |
+| `GET /static/local-root-ca.mobileconfig`  | Root CA as an Apple configuration profile (no auth)                                                     |
+| `/cgi-bin/*`, `/luci-static/*`, `/ubus/*` | LuCI reverse proxy (localhost:8080), HTTPS only                                                         |
+| Fallback                                  | Serves embedded web UI via `include_dir`                                                                |
 
 Beside the wildcard listeners, port control binds the SNI demux to the WAN IPv4 on 443 while hostname routes hold it (SO_REUSEPORT; the kernel delivers a connection to the most specific bound socket).
 
@@ -35,8 +35,8 @@ pub trait CtrlContext: Context + Clone {
 }
 ```
 
-- **`ServerContext`**: always reads `/etc/config/`, always reloads services. Holds `start-core`'s `RpcContinuations` for long-running operations and the auth state (enrolled keys, nonce cache). `ServerContext::default()` carries an in-memory auth state that enrolls nothing; only the daemon opens `/etc/startwrt/auth.db`.
-- **`CliContext`**: configurable root (`--config-root`), calls server via HTTP when needed. Signs each request with the identity key at `~/.startwrt/id.key.pem` once one exists, and sends the local auth token from `/run/startwrt/rpc.authcookie` as `Authorization: Bearer` to loopback hosts only.
+- **`ServerContext`**: always reads `/etc/config/`, always reloads services. Holds `start-core`'s `RpcContinuations` for long-running operations and the auth state (enrolled keys, nonce cache). `ServerContext::default()` carries an in-memory auth state that enrolls nothing; only the daemon opens `/etc/startwrt/auth.db`. The daemon loads its separate server identity from `serverIdentityKey` in `/etc/startwrt/auth.db` through `start-core`'s instance-key loader; sysupgrade keeps that database. In-memory contexts generate an ephemeral server identity. The daemon-local setup flash gate is shared by typed RPC and legacy NDJSON. Its owned mutex guard stays with accepted work on start-core's `make_send` runtime; observer cancellation cannot release it or abort provisioning. Actual worker results supply typed terminals or legacy Complete/Error events. Shared blocking work participates in the daemon's existing 60-second runtime shutdown grace; forced termination or reboot can still interrupt writes. Optional immutable `SecureSession` provenance belongs to each context clone rather than the shared auth state; WebSocket continuation creators capture it independently of revocation and resource policy.
+- **`CliContext`**: configurable root (`--config-root`), calls the daemon when needed. The identity at `~/.startwrt/id.key.pem` signs a fresh ephemeral-DH hello through the shared opaque signer before transport deadlines. Local tokens take precedence, restricted to loopback hosts; token and missing-key calls use the existing SessionClient's unpersisted proof identity without enrollment. Malformed keys fail closed. The ordinary HTTP client retains its network policy; an HTTP/1-only, nonredirecting upgrade client uses the shared encrypted transport. Login retry and command output stay in the CLI owner. Log/update commands return their existing GUID values rather than consuming the streams; browser continuation owners redeem secure-origin GUIDs through fresh same-peer exchanges.
 
 The single binary `startwrt` uses `MultiExecutable` to dispatch based on the symlink name (`startwrt-ctrld` or `startwrt-cli`) or the first argument.
 
@@ -45,7 +45,8 @@ The single binary `startwrt` uses `MultiExecutable` to dispatch based on the sym
 ```
 --config-root PATH   UCI config directory (default: /etc/config)
 --configs-only       Skip service reloads (write configs only)
---host URL           Server URL (default: http://127.0.0.1/rpc/v1 on the router, else http://router.lan/rpc/v1)
+--host URL           Server URL (default: http://127.0.0.1/rpc/v1 on the router, else https://router.lan/rpc/v1)
+--root-ca PEM_PATH   Certificate authority to trust, such as the router's from /static/local-root-ca.crt (repeatable)
 ```
 
 ### Local-Only Subcommands
@@ -95,7 +96,9 @@ vpn-client              # Outbound WireGuard VPN
   └─ set-enabled
 
 setup
-  └─ status             # Setup mode detection, disk state
+  ├─ status             # Setup mode detection, disk state
+  ├─ flash              # Typed progress and actual provisioning terminal
+  └─ get-pubkey         # Ephemeral key the setup password is encrypted to
 
 system                  # System settings, remote access, restart, factory reset,
                         # OTA update (newer-versions / update)
@@ -118,6 +121,9 @@ activity                # Activity log (list, delete, clear)
 backup                  # Backup create/restore (via continuations)
 
 diagnostics             # Diagnostic bundle creation
+
+config
+  └─ check              # Configuration a page cannot represent, with its pages
 
 uci                     # Generic UCI get/set/edit (legacy)
   ├─ get
@@ -156,7 +162,7 @@ Creates `WifiStation` (password entries) and `WifiVlan` (VLAN mapping) sections 
 
 ### ethernet.rs — Ethernet Port Assignment
 
-Maps physical ports to profiles via bridge VLAN assignments on the LAN bridge (`br-lan`). Also manages WAN port designation (which port is the uplink). Reads/writes `NetworkBridgeVlan` and `NetworkVlanPort` in the `network` UCI config.
+Maps physical ports to profiles via bridge VLAN assignments on the LAN bridge (`br-lan`). Also manages WAN port designation (which port is the uplink). Reads/writes `NetworkBridgeVlan` and `NetworkVlanPort` in the `network` UCI config. USB ports reach the bridge through `usb_ports.rs`, and a request that omits a recorded USB port keeps its profile.
 
 ### vpn_server.rs / vpn_client.rs — VPN Management
 
@@ -181,7 +187,7 @@ Handler metadata:
 - `login: true` — enroll the signing key by password; reject enrollment when a valid local auth token is supplied
 - `get_signer: true` — inject the signing key as `__Auth_signer`
 
-Every other call needs a valid signature or the local token; the peer address grants nothing.
+Every other call needs an enrolled encrypted peer, a valid compatibility signature or the local token; the peer address grants nothing. A secure-origin GUID requires fresh same-peer encrypted admission signed for that GUID, independently of live revocation and resource budgets.
 
 Returns RPC error code 34 on auth failure (frontend auto-logs out).
 
@@ -196,6 +202,7 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 | `system.rs`                       | System settings, timezone, remote access rules, logs, OTA entry points, restart, factory reset                                                                                                                                                               |
 | `devices.rs`                      | Device enumeration from ARP/DHCP, rename, forget (flush ARP + lease)                                                                                                                                                                                         |
 | `wan.rs` / `lan.rs`               | WAN/LAN interface configuration                                                                                                                                                                                                                              |
+| `usb_ports.rs`                    | USB ports as LAN ports: records each physical USB port an adapter is plugged into, bridges the adapter into `br-usb_eth<N>`, joined to `br-lan` by the `usb_eth<N>` veth, and removes an empty port on request                                               |
 | `published_ports.rs`              | Port forwarding rules (firewall redirects)                                                                                                                                                                                                                   |
 | `port_control.rs`                 | Automatic port forwarding: PCP + UPnP IGD servers on the shared `start-core` protocol cores, mapping device-requested forwards onto auto-tagged UCI redirects with in-memory lease expiry; also owns the SNI demux and the port-80 redirect's admission rule |
 | `http_redirect.rs`                | HTTP→HTTPS redirect on port 80 while 443 is published: a request layer keyed on the client's subnet and the dialed address                                                                                                                                   |
@@ -205,6 +212,7 @@ Low-level UCI, file, and shell access. These are vestigial — all features now 
 | `dns_inject.rs`                   | RFC 2136 DNS UPDATE ingress: records published by permitted devices and inbound VPN peers, served through per-profile dnsmasq (`dns.injected-list`)                                                                                                          |
 | `activity.rs`                     | Activity logging via SQLite                                                                                                                                                                                                                                  |
 | `backup.rs` / `diagnostics.rs`    | Backup/restore and diagnostic bundles (via continuations)                                                                                                                                                                                                    |
+| `config_check.rs`                 | Finds configuration, typically from LuCI or a hand edit, that a page cannot represent (`config.check`)                                                                                                                                                       |
 | `logs.rs`                         | Log snapshot and `system.logs-follow` streaming                                                                                                                                                                                                              |
 | `ssl.rs`                          | Root CA and intermediate CA, their files under `/etc/ssl`, and the Root CA download                                                                                                                                                                          |
 | `tls.rs`                          | HTTPS certificates: a local-CA leaf per name served (`start-core` `CertStore`)                                                                                                                                                                               |
@@ -243,7 +251,7 @@ traverses `main_api()` for the RPC tree.
 
 ### Parsing
 
-Arena-based zero-copy parser. `Config::parse()` reads a UCI file into a tree of `Section`s, each containing `Line`s (option, list, comment, empty). Preserves all formatting and comments.
+Arena-based zero-copy parser. `Config::parse()` reads a UCI file into a tree of `Section`s, each containing `Line`s (package, option, list, comment, empty). Preserves all formatting and comments. It accepts libuci's syntax and decodes each value the way libuci's `parse_str` does; new values are written in libuci's quoting (`'…'`, with `'` as `'\''`).
 
 ```rust
 let arena = Arena::new();
@@ -284,6 +292,8 @@ Macro attributes:
 - `#[uci(default)]` — use `Default::default()` if option missing
 - `#[uci(default_value = expr)]` — custom default value
 - `#[uci(inpt)]` — use `inpt` parser instead of `FromStr`
+- `#[uci(accept_list)]` — a single-valued field also reads `list` lines of that name, as libuci does: its value is the last `option`, else the first item. A write replaces that value, keeps the items after it, and drops the lines it overrides
+- A `Vec` field also reads an `option` line of that name as its whitespace-separated words, the way OpenWrt's own scripts do
 
 Shared, OpenWrt-native typed sections live in `uciedit/src/openwrt.rs`; feature-owned sections (`UciPreferences`, `UciWifiBlackout`, `UciProfile`, the VPN sections, …) are defined in `ctrl` beside their handlers. The sections in `openwrt.rs`:
 

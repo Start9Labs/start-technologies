@@ -25,6 +25,7 @@ import {
   Manifest,
   HostnameInfo,
   Progress,
+  UploadedFile,
 } from './osBindings'
 import {
   PackageId,
@@ -69,6 +70,21 @@ export type Effects = {
     ): Promise<null>
   }
 
+  /** Prepares a one-shot upload into a service volume for a File input. */
+  prepareUpload(
+    options: RPC.RpcParamType<RPC.Effects, 'prepare-upload'>,
+  ): Promise<string>
+  /** Prepares a volume file to return as a File action result. */
+  prepareDownload(
+    options: RPC.RpcParamType<RPC.Effects, 'prepare-download'>,
+  ): Promise<string>
+  /** @internal Reads host-owned limits while building a prepared File input. */
+  getUploadLimits(options: {
+    id: string
+  }): Promise<RPC.RpcReturnType<RPC.Effects, 'get-upload-limits'>>
+  /** @internal Resolves a completed File input in its originating action event. */
+  resolveUpload(options: { id: string }): Promise<UploadedFile>
+
   // control
   /** restart this service's main function */
   restart(): Promise<null>
@@ -100,6 +116,15 @@ export type Effects = {
     packageId: PackageId
     callback?: () => void
   }): Promise<Manifest | null>
+
+  /** User-granted shared volumes. Changes invalidate the subscription without a payload. */
+  getSharedVolumes(options: {
+    callback?: () => void
+  }): Promise<RPC.RpcReturnType<RPC.Effects, 'get-shared-volumes'>>
+  /** Mount a granted shared volume. Authorization and invalid-path failures reject. */
+  mountSharedVolume(
+    options: RPC.RpcParamType<RPC.Effects, 'mount-shared-volume'>,
+  ): Promise<RPC.RpcReturnType<RPC.Effects, 'mount-shared-volume'>>
 
   // backup
   /**
@@ -213,8 +238,10 @@ export type Effects = {
    * Resolves `false` if nothing was bound at `internalPort`.
    */
   retireBinding(options: RetireBindingParams): Promise<boolean>
-  // host
-  /** Returns information about the specified host, if it exists */
+  /**
+   * Returns the host, with disabled insecure candidates hidden from service readers.
+   * Administrator binding-list APIs retain the complete candidate list.
+   */
   getHostInfo(options: {
     packageId?: PackageId
     hostId: HostId

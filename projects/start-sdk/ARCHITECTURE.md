@@ -87,6 +87,7 @@ Effects are organized by subsystem:
 | ---------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
 | **Action**       | `export`, `clear`, `getInput`, `run`, `createTask`, `clearTasks`                                                   | Register and invoke user actions    |
 | **Control**      | `restart`, `shutdown`, `getStatus`, `setMainStatus`                                                                | Service lifecycle control           |
+| **Files**        | `prepareUpload`, `prepareDownload`                                                                                 | Prepare volume file transfers       |
 | **Dependency**   | `setDependencies`, `getDependencies`, `checkDependencies`, `mount`, `getInstalledPackages`, `getServiceManifest`   | Inter-service dependency management |
 | **Health**       | `setHealth`                                                                                                        | Report health check results         |
 | **Subcontainer** | `createFs`, `destroyFs`                                                                                            | Container filesystem management     |
@@ -132,7 +133,10 @@ Supported field types via `Value`:
 - `list` — Repeatable array of sub-values
 - `color`, `datetime` — Specialized pickers
 - `object` — Nested sub-form
+- `file` / `dynamicFile` — Prepared volume uploads with nullable or required selection
 - `union` / `dynamicUnion` — Conditional fields based on a discriminator
+
+Built validators run asynchronously before the action handler. A File field reads host-owned byte limits through the internal `getUploadLimits` effect, then validates its prepared capability and resolves OS-authored `UploadedFile` metadata through `resolveUpload`. Filename extension filters belong to the field; the SDK and browser form share their suffix matcher. The form submission carries a string capability; the handler receives metadata after the host has installed the file. `FileInfo` aliases the generated metadata schema rather than defining a second wire shape.
 
 ### Dependencies
 
@@ -195,7 +199,7 @@ Utility modules including:
 
 ## SDK Layer (`projects/start-sdk/lib/`)
 
-The SDK layer provides the developer-facing API. It re-exports everything from `@start9labs/start-core` and adds higher-level abstractions.
+The SDK layer provides the developer-facing API. Its `lib/index.ts` re-exports selected `@start9labs/start-core` types and builders alongside higher-level abstractions.
 
 ### StartSdk Facade (`lib/StartSdk.ts`)
 
@@ -288,7 +292,9 @@ export const main = sdk.setupMain(async ({ effects }) => {
 })
 ```
 
-Diff semantics per id: absent→present **start**, present→absent **stop**, same `configHash` **leave alone**, different `configHash` **restart**. Dependents of any restarted/stopped daemon are also restarted. `configHash` is a canonical-JSON hash over the subcontainer descriptor (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec, `requires`, `uses`, and the structural parts of `ready` — closures (`ready.fn`, `ready.trigger`) are excluded so a watched-file touch with unchanged content doesn't bounce every daemon. Captured values that must trigger a restart belong in the entry's `uses`. Lazy `SubContainer`s (`SubContainer.of`) are required under `Daemons.dynamic`; eager handles produced inside the builder would defeat the "leave alone" guarantee and the reconciler throws if it sees one.
+Diff semantics per id: absent→present **start**, present→absent **stop**, unchanged structural configuration and shared-container membership **leave alone**, changed configuration or membership **restart**. A container's processes restart together, followed by their dependents. `configHash` is a canonical-JSON hash over the subcontainer descriptor (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec, `requires`, `uses`, and the structural parts of `ready` — closures (`ready.fn`, `ready.trigger`) are excluded so a watched-file touch with unchanged content doesn't bounce every daemon. Captured values that must trigger a restart belong in the entry's `uses`. Create fresh lazy `SubContainer`s (`SubContainer.of`) inside each builder evaluation; stopped handles are terminal. Eager handles materialize before diffing and are rejected.
+
+Builder effects and their descendants share one reconciliation callback. The existing shared-volume catalog callback also advances a private reconciler revision; running entries record the revision at their start. A mismatch refreshes containers with declared or attempted shared-volume dependencies, including unsuccessful optional attempts. The callback identifies the granted catalog rather than an individual source, so its shared-volume consumers refresh together while unrelated containers remain running. In-flight callbacks leave newer revisions pending, and failed builders do not acknowledge them. This uses the existing callback and mount-intent owners without new wire fields or a callback registry.
 
 **SubContainers** come in two flavors:
 
@@ -316,8 +322,7 @@ health/
 
 Health checks are paired with **triggers** that control polling behavior:
 
-- `defaultTrigger` — 1 s while `starting` or `failure`, 30 s otherwise (including `starting` with `waiting: true`)
-- `daemonReadyTrigger` — a daemon's `ready` check without its own trigger: `defaultTrigger`, except that `loading` or `waiting: true` before the first `success` backs off from 1 s, doubling to 30 s (selected in `HealthDaemon`, not exported on `sdk.trigger`)
+- `defaultTrigger` — 1 s while `starting` or `failure`, 30 s otherwise (including `starting` with `waiting: true`), except that `loading` or `waiting: true` before the first `success` backs off from 1 s, doubling to 30 s
 - `cooldownTrigger` — Fixed interval between checks
 - `statusTrigger` — Per-status polling intervals with a default fallback
 - `onceTrigger` — One check at start

@@ -3,6 +3,8 @@ import type * as schemas from './start-os.schemas'
 export type RpcHandler = {
   _PARAMS: unknown
   _RETURN?: unknown
+  _ITEM?: unknown
+  _FINAL?: unknown
   _CHILDREN?: { [name: string]: RpcHandler }
 }
 
@@ -20,47 +22,71 @@ export type RpcMethod<Root extends RpcHandler> =
         }[keyof Children & string]
       : never)
 
-export type RpcParamType<
+export type RpcEndpointType<
   Root extends RpcHandler,
   Method extends string,
 > = Method extends ''
   ? Root extends { _RETURN: unknown }
-    ? Root['_PARAMS']
+    ? Root
     : never
   : Root extends { _CHILDREN: infer Children }
     ? Method extends `${infer Head}.${infer Tail}`
       ? Head extends keyof Children
         ? Children[Head] extends RpcHandler
-          ? RpcParamType<Children[Head], Tail>
+          ? RpcEndpointType<Children[Head], Tail>
           : never
         : never
       : Method extends keyof Children
         ? Children[Method] extends RpcHandler
-          ? RpcParamType<Children[Method], ''>
+          ? RpcEndpointType<Children[Method], ''>
           : never
         : never
     : never
 
+export type RpcEndpointField<
+  Endpoint,
+  Field extends PropertyKey,
+> = Endpoint extends { _RETURN: unknown }
+  ? Field extends keyof Endpoint
+    ? Endpoint[Field]
+    : unknown
+  : never
+
+export type RpcParamType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_PARAMS'>
+
 export type RpcReturnType<
   Root extends RpcHandler,
   Method extends string,
-> = Method extends ''
-  ? Root extends { _RETURN: infer Return }
-    ? Return
-    : never
-  : Root extends { _CHILDREN: infer Children }
-    ? Method extends `${infer Head}.${infer Tail}`
-      ? Head extends keyof Children
-        ? Children[Head] extends RpcHandler
-          ? RpcReturnType<Children[Head], Tail>
-          : never
-        : never
-      : Method extends keyof Children
-        ? Children[Method] extends RpcHandler
-          ? RpcReturnType<Children[Method], ''>
-          : never
-        : never
-    : never
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_RETURN'>
+
+export type RpcStreamItemType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_ITEM'>
+
+export type RpcStreamFinalType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_FINAL'>
+
+export type RpcIsStreaming<Root extends RpcHandler, Method extends string> = [
+  RpcEndpointType<Root, Method>,
+] extends [never]
+  ? never
+  : unknown extends RpcStreamItemType<Root, Method>
+    ? boolean
+    : [RpcStreamItemType<Root, Method>] extends [never]
+      ? false
+      : true
+
+export type RpcStreamingMethod<Root extends RpcHandler> = {
+  [Method in RpcMethod<Root>]: RpcIsStreaming<Root, Method> extends false
+    ? never
+    : Method
+}[RpcMethod<Root>]
 
 export type RpcSchemaTree<Schema> = {
   [Key in keyof Schema as Key extends '_OPAQUE'
@@ -69,7 +95,7 @@ export type RpcSchemaTree<Schema> = {
     ? Schema[Key] extends z.ZodType
       ? z.input<Schema[Key]>
       : never
-    : Key extends '_RETURN'
+    : Key extends '_RETURN' | '_ITEM' | '_FINAL'
       ? Schema[Key] extends z.ZodType
         ? z.output<Schema[Key]>
         : never
@@ -82,7 +108,11 @@ export type AcmeProviderInput = z.input<typeof schemas.AcmeProvider>
 export type ActionId = z.output<typeof schemas.ActionId>
 export type ActionIdInput = z.input<typeof schemas.ActionId>
 export type ActionResultV0 = z.output<typeof schemas.ActionResultV0>
-export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
+
+/**
+ * JSON Patch 'add' operation representation
+ */
+export type AddOperation = z.output<typeof schemas.AddOperation>
 
 /**
  * Keys an import added, and keys it found already present.
@@ -94,6 +124,15 @@ export type AnyVerifyingKey = z.output<typeof schemas.AnyVerifyingKey>
 export type AnyVerifyingKeyInput = z.input<typeof schemas.AnyVerifyingKey>
 export type ApiState = z.output<typeof schemas.ApiState>
 export type ApplyParamsInput = z.input<typeof schemas.ApplyParams>
+
+/**
+ * A registered-target identity; migrated CIFS targets retain their existing IDs.
+ */
+export type BackupTargetId = z.output<typeof schemas.BackupTargetId>
+
+/**
+ * A registered-target identity; migrated CIFS targets retain their existing IDs.
+ */
 export type BackupTargetIdInput = z.input<typeof schemas.BackupTargetId>
 export type BasicCredential = z.output<typeof schemas.BasicCredential>
 export type Blake3Commitment = z.output<typeof schemas.Blake3Commitment>
@@ -108,6 +147,7 @@ export type CheckPortRes = z.output<typeof schemas.CheckPortRes>
  * [`CheckPortRes`] so the IPv4 and IPv6 checks can run independently.
  */
 export type CheckPortV6Res = z.output<typeof schemas.CheckPortV6Res>
+export type CifsInput = z.input<typeof schemas.Cifs>
 export type CifsAddParamsInput = z.input<typeof schemas.CifsAddParams>
 export type ConnectRegistryParamsInput = z.input<
   typeof schemas.ConnectRegistryParams
@@ -115,6 +155,11 @@ export type ConnectRegistryParamsInput = z.input<
 export type ContactInfo = z.output<typeof schemas.ContactInfo>
 export type ContactInfoInput = z.input<typeof schemas.ContactInfo>
 export type ContainerId = z.output<typeof schemas.ContainerId>
+
+/**
+ * JSON Patch 'copy' operation representation
+ */
+export type CopyOperation = z.output<typeof schemas.CopyOperation>
 export type CountEntry = z.output<typeof schemas.CountEntry>
 export type CreateTokenParamsInput = z.input<typeof schemas.CreateTokenParams>
 export type CreatedToken = z.output<typeof schemas.CreatedToken>
@@ -180,11 +225,12 @@ export type GuidInput = z.input<typeof schemas.Guid>
 /**
  * Proof that a set of auth keys was unenrolled — removed from the persisted
  * and ephemeral signer stores with any continuations they opened killed.
- * Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
+ * Obtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]
  * from inside a db transaction.
  */
 export type HasUnenrolledKeys = z.output<typeof schemas.HasUnenrolledKeys>
 export type HealthCheckId = z.output<typeof schemas.HealthCheckId>
+export type HistoryParamsInput = z.input<typeof schemas.HistoryParams>
 export type HostId = z.output<typeof schemas.HostId>
 export type HostIdInput = z.input<typeof schemas.HostId>
 export type ImageIdInput = z.input<typeof schemas.ImageId>
@@ -193,6 +239,11 @@ export type KeyboardOptionsInput = z.input<typeof schemas.KeyboardOptions>
 export type ListNotificationParamsInput = z.input<
   typeof schemas.ListNotificationParams
 >
+
+/**
+ * Address of the NUT server to list UPS devices from.
+ */
+export type ListNutUpsParamsInput = z.input<typeof schemas.ListNutUpsParams>
 export type ListParamsInput = z.input<typeof schemas.ListParams>
 export type ListVersionSignersParamsInput = z.input<
   typeof schemas.ListVersionSignersParams
@@ -200,6 +251,11 @@ export type ListVersionSignersParamsInput = z.input<
 export type LocaleString = z.output<typeof schemas.LocaleString>
 export type LocaleStringInput = z.input<typeof schemas.LocaleString>
 export type LogEntry = z.output<typeof schemas.LogEntry>
+
+/**
+ * Verbosity accepted by the server's runtime logging control.
+ */
+export type LogLevelInput = z.input<typeof schemas.LogLevel>
 export type LogoutParamsInput = z.input<typeof schemas.LogoutParams>
 export type LshwDisplay = z.output<typeof schemas.LshwDisplay>
 export type LshwProcessor = z.output<typeof schemas.LshwProcessor>
@@ -221,23 +277,50 @@ export type ModifyNotificationBeforeParamsInput = z.input<
 export type ModifyNotificationParamsInput = z.input<
   typeof schemas.ModifyNotificationParams
 >
+
+/**
+ * JSON Patch 'move' operation representation
+ */
+export type MoveOperation = z.output<typeof schemas.MoveOperation>
+export type NamedProgress = z.output<typeof schemas.NamedProgress>
 export type NetInfo = z.output<typeof schemas.NetInfo>
 export type NetworkInterfaceType = z.output<typeof schemas.NetworkInterfaceType>
 export type NotificationLevel = z.output<typeof schemas.NotificationLevel>
 export type NotificationLevelInput = z.input<typeof schemas.NotificationLevel>
 
 /**
+ * A UPS detected on USB, with the driver settings that address it.
+ */
+export type NutDevice = z.output<typeof schemas.NutDevice>
+
+/**
+ * A UPS detected on USB, with the driver settings that address it.
+ */
+export type NutDeviceInput = z.input<typeof schemas.NutDevice>
+
+/**
+ * A UPS served by a NUT server, as `LIST UPS` reports it.
+ */
+export type NutRemoteUps = z.output<typeof schemas.NutRemoteUps>
+
+/**
+ * Current variables reported by the configured UPS.
+ */
+export type NutStatus = z.output<typeof schemas.NutStatus>
+
+/**
  * An absent update preserves DNS intent; null servers select gateway DNS.
  */
 export type OutboundDnsUpdateInput = z.input<typeof schemas.OutboundDnsUpdate>
+export type PackageBackupReport = z.output<typeof schemas.PackageBackupReport>
 export type PackageDetailLevelInput = z.input<typeof schemas.PackageDetailLevel>
 export type PackageId = z.output<typeof schemas.PackageId>
 export type PackageIdInput = z.input<typeof schemas.PackageId>
 export type PackageVersionCount = z.output<typeof schemas.PackageVersionCount>
-export type PartitionTable = z.output<typeof schemas.PartitionTable>
 export type Percentage = z.output<typeof schemas.Percentage>
 export type PluginId = z.output<typeof schemas.PluginId>
 export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
+export type ProgressUnits = z.output<typeof schemas.ProgressUnits>
 export type PushKeys = z.output<typeof schemas.PushKeys>
 export type PushKeysInput = z.input<typeof schemas.PushKeys>
 export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
@@ -248,6 +331,8 @@ export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
  * IPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.
  */
 export type QueryDnsRes = z.output<typeof schemas.QueryDnsRes>
+export type ReaderParamsInput = z.input<typeof schemas.ReaderParams>
+export type ReassignPortParamsInput = z.input<typeof schemas.ReassignPortParams>
 
 /**
  * A registry asset with a caller-selected commitment representation.
@@ -261,6 +346,11 @@ export type RemoveCategoryParamsInput = z.input<
   typeof schemas.RemoveCategoryParams
 >
 export type RemoveDomainParamsInput = z.input<typeof schemas.RemoveDomainParams>
+
+/**
+ * JSON Patch 'remove' operation representation
+ */
+export type RemoveOperation = z.output<typeof schemas.RemoveOperation>
 export type RemovePassthroughParamsInput = z.input<
   typeof schemas.RemovePassthroughParams
 >
@@ -273,9 +363,15 @@ export type RemoveTrustedKeysParamsInput = z.input<
 export type RemoveVersionParamsInput = z.input<
   typeof schemas.RemoveVersionParams
 >
+
+/**
+ * JSON Patch 'replace' operation representation
+ */
+export type ReplaceOperation = z.output<typeof schemas.ReplaceOperation>
 export type ReplayIdInput = z.input<typeof schemas.ReplayId>
 export type RequiresReboot = z.output<typeof schemas.RequiresReboot>
 export type Security = z.output<typeof schemas.Security>
+export type ServerBackupReport = z.output<typeof schemas.ServerBackupReport>
 export type ServerHostname = z.output<typeof schemas.ServerHostname>
 export type ServiceInterfaceId = z.output<typeof schemas.ServiceInterfaceId>
 export type ServiceInterfaceType = z.output<typeof schemas.ServiceInterfaceType>
@@ -292,6 +388,24 @@ export type SetServerHostnameParamsInput = z.input<
 export type SetWifiEnabledParamsInput = z.input<
   typeof schemas.SetWifiEnabledParams
 >
+export type SharedVolumeAvailability = z.output<
+  typeof schemas.SharedVolumeAvailability
+>
+export type SharedVolumeBackupInfo = z.output<
+  typeof schemas.SharedVolumeBackupInfo
+>
+export type SharedVolumeDrive = z.output<typeof schemas.SharedVolumeDrive>
+export type SharedVolumeGrantInput = z.input<typeof schemas.SharedVolumeGrant>
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export type SharedVolumeId = z.output<typeof schemas.SharedVolumeId>
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export type SharedVolumeIdInput = z.input<typeof schemas.SharedVolumeId>
 export type ShutdownParamsInput = z.input<typeof schemas.ShutdownParams>
 
 /**
@@ -309,13 +423,16 @@ export type SshPubKeyInput = z.input<typeof schemas.SshPubKey>
 export type Ssid = z.output<typeof schemas.Ssid>
 export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type TermSizeInput = z.input<typeof schemas.TermSize>
+
+/**
+ * JSON Patch 'test' operation representation
+ */
+export type TestOperation = z.output<typeof schemas.TestOperation>
 export type TimeInfo = z.output<typeof schemas.TimeInfo>
+export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
 export type TrustCaParamsInput = z.input<typeof schemas.TrustCaParams>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
 export type TrustedCa = z.output<typeof schemas.TrustedCa>
-export type TrustedOsUpdateSigner = z.output<
-  typeof schemas.TrustedOsUpdateSigner
->
 export type TrustedRegistryParamsInput = z.input<
   typeof schemas.TrustedRegistryParams
 >
@@ -345,8 +462,7 @@ export type WifiSsidParamsInput = z.input<typeof schemas.WifiSsidParams>
 export type ZramParamsInput = z.input<typeof schemas.ZramParams>
 export type AcceptSignersInput = z.input<typeof schemas.AcceptSigners>
 export type ActionInput = z.output<typeof schemas.ActionInput>
-export type ActionResultMember = z.output<typeof schemas.ActionResultMember>
-export type ActionResultV1 = z.output<typeof schemas.ActionResultV1>
+export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
 export type AddAdminParamsInput = z.input<typeof schemas.AddAdminParams>
 export type AddAssetParamsInput = z.input<typeof schemas.AddAssetParams>
 export type AddCategoryParamsInput = z.input<typeof schemas.AddCategoryParams>
@@ -408,6 +524,9 @@ export type CifsUpdateParamsInput = z.input<typeof schemas.CifsUpdateParams>
 export type ClearTaskParamsInput = z.input<typeof schemas.ClearTaskParams>
 export type ControlParamsInput = z.input<typeof schemas.ControlParams>
 export type CreateParamsInput = z.input<typeof schemas.CreateParams>
+export type CreateSharedVolumeSourceInput = z.input<
+  typeof schemas.CreateSharedVolumeSource
+>
 export type CurrentDependencyKind = z.output<
   typeof schemas.CurrentDependencyKind
 >
@@ -423,6 +542,11 @@ export type DnsSettings = z.output<typeof schemas.DnsSettings>
 export type DownloadsResponse = z.output<typeof schemas.DownloadsResponse>
 export type EditGatewayParamsInput = z.input<typeof schemas.EditGatewayParams>
 export type EditSignerParamsInput = z.input<typeof schemas.EditSignerParams>
+
+/**
+ * Edits an existing release; omitted fields, assets and authorized signers remain unchanged.
+ */
+export type EditVersionParamsInput = z.input<typeof schemas.EditVersionParams>
 export type EppInfo = z.output<typeof schemas.EppInfo>
 export type EppParamsInput = z.input<typeof schemas.EppParams>
 export type ExecParamsInput = z.input<typeof schemas.ExecParams>
@@ -430,6 +554,7 @@ export type ForgetGatewayParamsInput = z.input<
   typeof schemas.ForgetGatewayParams
 >
 export type ForwardTable = z.output<typeof schemas.ForwardTable>
+export type FullProgress = z.output<typeof schemas.FullProgress>
 
 /**
  * Whether the gateway reachable via this interface speaks each port-mapping
@@ -443,6 +568,9 @@ export type GatewayPortMapCapabilities = z.output<
 >
 export type GetActionInputParamsInput = z.input<
   typeof schemas.GetActionInputParams
+>
+export type GetPackageAccessParamsInput = z.input<
+  typeof schemas.GetPackageAccessParams
 >
 export type GetPackageParamsInput = z.input<typeof schemas.GetPackageParams>
 export type GovernorInfo = z.output<typeof schemas.GovernorInfo>
@@ -472,11 +600,14 @@ export type MetricsMemory = z.output<typeof schemas.MetricsMemory>
 export type MetricsSummary = z.output<typeof schemas.MetricsSummary>
 export type MountParamsInput = z.input<typeof schemas.MountParams>
 export type Notification = z.output<typeof schemas.Notification>
+
+/**
+ * Directly connected UPS server settings or remote NUT client settings.
+ */
+export type NutSettingsInput = z.input<typeof schemas.NutSettings>
 export type OsInfo = z.output<typeof schemas.OsInfo>
-export type OsUpdateSignerKeyParamsInput = z.input<
-  typeof schemas.OsUpdateSignerKeyParams
->
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
+export type PackageAccessControl = z.output<typeof schemas.PackageAccessControl>
 export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
 
 /**
@@ -485,8 +616,16 @@ export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
 export type PackageIcon = z.output<typeof schemas.PackageIcon>
 export type PackageIdParamsInput = z.input<typeof schemas.PackageIdParams>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
+export type PackageReaderParamsInput = z.input<
+  typeof schemas.PackageReaderParams
+>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
 export type PasswordTypeInput = z.input<typeof schemas.PasswordType>
+
+/**
+ * JSON Patch single patch operation
+ */
+export type PatchOperation = z.output<typeof schemas.PatchOperation>
 export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
 
 /**
@@ -508,6 +647,7 @@ export type PublicDomainConfig = z.output<typeof schemas.PublicDomainConfig>
 export type PushSubscription = z.output<typeof schemas.PushSubscription>
 export type PushSubscriptionInput = z.input<typeof schemas.PushSubscription>
 export type RebuildParamsInput = z.input<typeof schemas.RebuildParams>
+export type RegistryIdentity = z.output<typeof schemas.RegistryIdentity>
 export type RemoveAcmeParamsInput = z.input<typeof schemas.RemoveAcmeParams>
 export type RemoveAdminParamsInput = z.input<typeof schemas.RemoveAdminParams>
 export type RemoveMirrorParamsInput = z.input<typeof schemas.RemoveMirrorParams>
@@ -525,11 +665,19 @@ export type RemoveTunnelParamsInput = z.input<typeof schemas.RemoveTunnelParams>
 export type RenameGatewayParamsInput = z.input<
   typeof schemas.RenameGatewayParams
 >
+export type RenameSharedVolumeParamsInput = z.input<
+  typeof schemas.RenameSharedVolumeParams
+>
+export type RenameTargetParamsInput = z.input<typeof schemas.RenameTargetParams>
 export type RequiresHostIdInput = z.input<typeof schemas.RequiresHostId>
 export type RequiresPackageIdInput = z.input<typeof schemas.RequiresPackageId>
 export type RestorePackageParamsInput = z.input<
   typeof schemas.RestorePackageParams
 >
+export type RestoreVolumeParamsInput = z.input<
+  typeof schemas.RestoreVolumeParams
+>
+export type RestoreVolumeResult = z.output<typeof schemas.RestoreVolumeResult>
 export type RunActionParamsInput = z.input<typeof schemas.RunActionParams>
 export type ServiceStats = z.output<typeof schemas.ServiceStats>
 export type SetDefaultOutboundParamsInput = z.input<
@@ -542,16 +690,29 @@ export type SetGatewaySecureParamsInput = z.input<
   typeof schemas.SetGatewaySecureParams
 >
 export type SetIconParamsInput = z.input<typeof schemas.SetIconParams>
-export type SetOsUpdateSignerParamsInput = z.input<
-  typeof schemas.SetOsUpdateSignerParams
->
+
+/**
+ * Sets verbosity for StartOS backend code in the running daemon.
+ */
+export type SetLogLevelParamsInput = z.input<typeof schemas.SetLogLevelParams>
 export type SetOutboundGatewayParamsInput = z.input<
   typeof schemas.SetOutboundGatewayParams
+>
+export type SetPackagePrivateParamsInput = z.input<
+  typeof schemas.SetPackagePrivateParams
+>
+export type SetSharedVolumeGrantParamsInput = z.input<
+  typeof schemas.SetSharedVolumeGrantParams
 >
 export type SetStaticDnsParamsInput = z.input<typeof schemas.SetStaticDnsParams>
 export type SetTrustSignersParamsInput = z.input<
   typeof schemas.SetTrustSignersParams
 >
+export type SharedVolumeInspection = z.output<
+  typeof schemas.SharedVolumeInspection
+>
+export type SharedVolumeParamsInput = z.input<typeof schemas.SharedVolumeParams>
+export type SharedVolumeSource = z.output<typeof schemas.SharedVolumeSource>
 export type SideloadResponse = z.output<typeof schemas.SideloadResponse>
 export type SignAssetParamsInput = z.input<typeof schemas.SignAssetParams>
 export type SignPackageParamsInput = z.input<typeof schemas.SignPackageParams>
@@ -564,30 +725,51 @@ export type SshAddParamsInput = z.input<typeof schemas.SshAddParams>
  * [`BackupUnencryptedMetadata`]'s key material.
  */
 export type StartOsRecoveryInfo = z.output<typeof schemas.StartOsRecoveryInfo>
+export type SubscribeIndexParamsInput = z.input<
+  typeof schemas.SubscribeIndexParams
+>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
+export type TargetParamsInput = z.input<typeof schemas.TargetParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
+export type TransportWire = z.output<typeof schemas.TransportWire>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
 export type UninstallParamsInput = z.input<typeof schemas.UninstallParams>
 export type UnsetGatewaySecureParamsInput = z.input<
   typeof schemas.UnsetGatewaySecureParams
+>
+export type UpdateCifsSharedVolumeParamsInput = z.input<
+  typeof schemas.UpdateCifsSharedVolumeParams
+>
+export type UpdateCifsTargetParamsInput = z.input<
+  typeof schemas.UpdateCifsTargetParams
 >
 export type UpdateSystemRes = z.output<typeof schemas.UpdateSystemRes>
 export type UpdateTunnelParamsInput = z.input<typeof schemas.UpdateTunnelParams>
 export type VersionSignerParamsInput = z.input<
   typeof schemas.VersionSignerParams
 >
+export type VolumeBackupReport = z.output<typeof schemas.VolumeBackupReport>
 export type WifiListOut = z.output<typeof schemas.WifiListOut>
-export type ActionResult = z.output<typeof schemas.ActionResult>
+export type ActionResultMember = z.output<typeof schemas.ActionResultMember>
+export type ActionResultV1 = z.output<typeof schemas.ActionResultV1>
 export type AddPublicDomainRes = z.output<typeof schemas.AddPublicDomainRes>
 export type BackupInfo = z.output<typeof schemas.BackupInfo>
 export type BackupParamsInput = z.input<typeof schemas.BackupParams>
-export type CifsBackupTarget = z.output<typeof schemas.CifsBackupTarget>
+export type BackupReport = z.output<typeof schemas.BackupReport>
+
+/**
+ * A registered backup destination and its last source observation.
+ */
+export type BackupTarget = z.output<typeof schemas.BackupTarget>
 export type CompatibleAlpnInfo = z.output<typeof schemas.CompatibleAlpnInfo>
 
 /**
  * Selects an existing server backup and its unlocking credential.
  */
 export type ConvertParamsInput = z.input<typeof schemas.ConvertParams>
+export type CreateSharedVolumeParamsInput = z.input<
+  typeof schemas.CreateSharedVolumeParams
+>
 export type DependencyMetadata = z.output<typeof schemas.DependencyMetadata>
 export type HardwareInfo = z.output<typeof schemas.HardwareInfo>
 export type HostAddress = z.output<typeof schemas.HostAddress>
@@ -597,9 +779,20 @@ export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 export type Metrics = z.output<typeof schemas.Metrics>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
 export type NotificationWithId = z.output<typeof schemas.NotificationWithId>
+
+/**
+ * Stored NUT configuration and its independent enabled state.
+ */
+export type NutConfigInput = z.input<typeof schemas.NutConfig>
 export type OsVersionInfoMap = z.output<typeof schemas.OsVersionInfoMap>
+export type PackageAccess = z.output<typeof schemas.PackageAccess>
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
-export type PartitionInfo = z.output<typeof schemas.PartitionInfo>
+
+/**
+ * Representation of JSON Patch (list of patch operations)
+ */
+export type Patch = z.output<typeof schemas.Patch>
+export type Progress = z.output<typeof schemas.Progress>
 export type ProxyOptions = z.output<typeof schemas.ProxyOptions>
 export type RegistryInfo = z.output<typeof schemas.RegistryInfo>
 export type ResetPasswordParamsInput = z.input<
@@ -612,10 +805,31 @@ export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
  */
 export type Sessions = z.output<typeof schemas.Sessions>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
+
+/**
+ * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
+ */
+export type SubscribeResult = z.output<typeof schemas.SubscribeResult>
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export type Transport = z.output<typeof schemas.Transport>
+
+/**
+ * Signing-key material and independent package and OS-update trust.
+ */
+export type TrustedKey = z.output<typeof schemas.TrustedKey>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type WifiListInfo = z.output<typeof schemas.WifiListInfo>
+export type ActionResult = z.output<typeof schemas.ActionResult>
 export type AddSslOptions = z.output<typeof schemas.AddSslOptions>
-export type BackupTarget = z.output<typeof schemas.BackupTarget>
+
+/**
+ * A completed background backup with its original target name and final report.
+ */
+export type BackupRun = z.output<typeof schemas.BackupRun>
 export type BindingSetAddressEnabledParamsInput = z.input<
   typeof schemas.BindingSetAddressEnabledParams
 >
@@ -624,7 +838,11 @@ export type BindingSetGuaWanParamsInput = z.input<
 >
 export type DerivedAddressInfo = z.output<typeof schemas.DerivedAddressInfo>
 export type DeviceInfo = z.output<typeof schemas.DeviceInfo>
-export type DiskInfo = z.output<typeof schemas.DiskInfo>
+
+/**
+ * Database-generated patches contain only add, remove and replace operations.
+ */
+export type DiffPatch = z.output<typeof schemas.DiffPatch>
 export type MetricsFollowResponse = z.output<
   typeof schemas.MetricsFollowResponse
 >
@@ -632,6 +850,12 @@ export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type SessionList = z.output<typeof schemas.SessionList>
+
+/**
+ * Parameters for replacing the stored NUT configuration.
+ */
+export type SetNutParamsInput = z.input<typeof schemas.SetNutParams>
+export type BackupHistory = z.output<typeof schemas.BackupHistory>
 
 /**
  * Active DNS authority and its bootstrap gateway.
@@ -645,6 +869,7 @@ export type LegacyProxySslOptions = z.output<
   typeof schemas.LegacyProxySslOptions
 >
 export type PackageInfo = z.output<typeof schemas.PackageInfo>
+export type Revision = z.output<typeof schemas.Revision>
 export type CompatibleBindOptions = z.output<
   typeof schemas.CompatibleBindOptions
 >

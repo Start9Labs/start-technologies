@@ -8,9 +8,11 @@ Back up your router's configuration so you can restore it after an update, facto
 
 1. Click "Download Backup".
 
-1. A backup file will be downloaded to your computer.
+1. Enter your admin password and click "Download Backup".
 
-Store the backup file in a safe location, such as a password manager or encrypted drive.
+1. A backup file ending in `.swbk` will be downloaded to your computer.
+
+The backup is encrypted with your admin password. Restoring it requires the password you entered here, even if you change the admin password later.
 
 > [!TIP]
 > Create a backup before performing firmware updates. While the "Keep settings" path preserves settings, having a backup provides an extra safety net.
@@ -23,9 +25,9 @@ Store the backup file in a safe location, such as a password manager or encrypte
 
 1. Click "Restore".
 
-1. A confirmation dialog explains that all current settings will be overwritten and the router will reboot. Click "Restore & Reboot" to proceed.
+1. A dialog explains that all current settings will be overwritten and the router will reboot. Enter the admin password in effect when the backup was created, then click "Restore & Reboot".
 
-The router will apply the configuration and restart.
+The router will apply the configuration and restart, with the admin password you entered. A backup from an earlier version of StartWRT is not encrypted and restores without a password.
 
 > [!WARNING]
 > Restoring a backup overwrites your current configuration entirely. Any changes made since the backup was created will be lost.

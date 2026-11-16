@@ -1,0 +1,644 @@
+use super::*;
+
+#[test]
+fn local_filesystem_uses_persisted_package_data_partition() {
+    let id = SharedVolumeId::new();
+    let definition = SourceDefinition::new(SharedVolumeSource::Local, None);
+    let PreparedFilesystem::Local(path) = definition.filesystem(&id) else {
+        panic!("local filesystem")
+    };
+    assert!(path.starts_with(crate::PACKAGE_DATA));
+    assert!(path.ends_with(Path::new("shared-volumes").join(id.as_ref())));
+}
+
+#[tokio::test]
+async fn failed_publications_remove_new_directories_and_successful_ones_preserve_contents() {
+    let root = tempfile::tempdir().unwrap();
+    let failed = root.path().join("failed");
+    tokio::fs::create_dir(&failed).await.unwrap();
+    let error = finish_directory_publication(
+        &failed,
+        Err(Error::new(
+            eyre!("database unavailable"),
+            ErrorKind::Database,
+        )),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Database);
+    assert!(!failed.exists());
+    let published = root.path().join("published");
+    tokio::fs::create_dir(&published).await.unwrap();
+    tokio::fs::write(published.join("data"), b"preserved")
+        .await
+        .unwrap();
+    finish_directory_publication(&published, Ok(()))
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::fs::read(published.join("data")).await.unwrap(),
+        b"preserved"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires BTRFS_TEST_VOLUMES_DIR and UID/GID 100000 mapped"]
+async fn local_creation_uses_service_owned_subvolumes_and_rolls_back_failed_publication() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let fixture = crate::util::btrfs::tests::directory();
+    let path = fixture.path().join("volume");
+    create_local_directory(&path).await.unwrap();
+    assert!(crate::util::btrfs::is_subvolume(&path).await);
+    let metadata = std::fs::metadata(&path).unwrap();
+    assert_eq!(
+        (metadata.uid(), metadata.gid()),
+        (crate::lxc::BASE_IDMAP.to_id, crate::lxc::BASE_IDMAP.to_id)
+    );
+    assert_eq!(metadata.permissions().mode() & 0o777, 0o777);
+    tokio::fs::write(path.join("sentinel"), b"allocated data")
+        .await
+        .unwrap();
+    finish_directory_publication(
+        &path,
+        Err(Error::new(eyre!("publication failed"), ErrorKind::Database)),
+    )
+    .await
+    .unwrap_err();
+    assert!(!path.exists());
+    create_local_directory(&path).await.unwrap();
+    finish_directory_publication(&path, Ok(())).await.unwrap();
+    assert!(crate::util::btrfs::is_subvolume(&path).await);
+    crate::util::btrfs::delete_volume_root(&path).await.unwrap();
+}
+
+#[test]
+fn public_observations_hide_private_cache_identity_without_losing_failure_details() {
+    let private = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let error = format!("mount: /media/startos/tmp/{private}: permission denied (13)");
+    let public = public_error_message(error);
+    assert!(public.contains("[source]"));
+    assert!(public.contains("permission denied (13)"));
+    assert!(!public.contains(private));
+    assert_eq!(
+        public_error_message("DNS could not resolve nas.local"),
+        "DNS could not resolve nas.local"
+    );
+}
+
+#[test]
+fn cifs_preparation_separates_private_password_and_preserves_connection_details() {
+    for path in ["share/photos", "/share/photos"] {
+        let (source, credentials) = prepare_cifs_source(Cifs {
+            hostname: "nas.local".into(),
+            path: path.into(),
+            username: "family".into(),
+            password: Some("private-password".into()),
+        })
+        .unwrap();
+        let public = serde_json::to_value(&source).unwrap();
+        assert_eq!(public["path"], "/share/photos");
+        assert_eq!(public["username"], "family");
+        assert!(!public.to_string().contains("private-password"));
+        let definition = SourceDefinition::new(source, Some(credentials));
+        let cifs = definition.cifs().unwrap();
+        assert_eq!(cifs.hostname, "nas.local");
+        assert_eq!(cifs.username, "family");
+        assert_eq!(cifs.password.as_deref(), Some("private-password"));
+    }
+    assert!(
+        prepare_cifs_source(Cifs {
+            hostname: "nas.local".into(),
+            path: "share/../escape".into(),
+            username: "family".into(),
+            password: None,
+        })
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn shared_cifs_mounts_delegate_their_cache_policy() {
+    let (source, credentials) = prepare_cifs_source(Cifs {
+        hostname: "nas.local".into(),
+        path: "/shared".into(),
+        username: "owner".into(),
+        password: None,
+    })
+    .unwrap();
+    let source =
+        SourceDefinition::new(source, Some(credentials)).filesystem(&SharedVolumeId::new());
+    assert_eq!(
+        source.mount_hash(ReadOnly).await.unwrap(),
+        source.mount_hash(ReadWrite).await.unwrap()
+    );
+    assert_ne!(
+        source.mount_hash(ReadWrite).await.unwrap(),
+        source
+            .mount_hash(crate::disk::mount::filesystem::BackupWrite)
+            .await
+            .unwrap()
+    );
+}
+
+#[test]
+fn mounted_sources_stay_available_when_capacity_fails_or_times_out() {
+    for kind in [ErrorKind::Filesystem, ErrorKind::Timeout] {
+        let error = Error::new(eyre!("capacity unavailable"), kind);
+        let inspection =
+            SharedVolumeInspection::available_capacity(Err(public_error_message(error)));
+        assert_eq!(
+            inspection.availability,
+            super::super::SharedVolumeAvailability::Available
+        );
+        assert_eq!(inspection.available, None);
+        assert!(inspection.error.unwrap().contains("capacity unavailable"));
+        assert!(inspection.checked_at.is_some());
+    }
+    let measured = SharedVolumeInspection::available_capacity(Ok(0));
+    assert_eq!(measured.available, Some(0));
+    assert_eq!(measured.error, None);
+}
+
+#[test]
+fn password_edits_preserve_omissions_and_clear_explicit_empty_values() {
+    let mut credentials = SharedVolumeCredentials {
+        password: Some("original".into()),
+    };
+    credentials.update_password(None);
+    assert_eq!(credentials.password.as_deref(), Some("original"));
+    credentials.update_password(Some("replacement".into()));
+    assert_eq!(credentials.password.as_deref(), Some("replacement"));
+    credentials.update_password(Some(String::new()));
+    assert_eq!(credentials.password, None);
+    credentials.update_password(None);
+    assert_eq!(credentials.password, None);
+}
+
+#[test]
+fn observations_are_flattened_and_preserve_the_volume_definition() {
+    let id = SharedVolumeId::new();
+    let mut db = crate::db::model::DatabaseModel::from(
+        to_value(&serde_json::json!({
+            "public": { "sharedVolumes": {
+                id.to_string(): {
+                    "name": "Photos",
+                    "source": {"kind": "local"},
+                    "grants": {"consumer": {"readonly": true}},
+                    "availability": "unknown"
+                }
+            }}
+        }))
+        .unwrap(),
+    );
+    let before = db
+        .as_public()
+        .as_shared_volumes()
+        .as_idx(&id)
+        .unwrap()
+        .de()
+        .unwrap();
+    assert_eq!(before.inspection, SharedVolumeInspection::default());
+    let inspection = SharedVolumeInspection::available(Some(1234));
+    write_inspection(&mut db, &id, inspection.clone()).unwrap();
+    let after = db
+        .as_public()
+        .as_shared_volumes()
+        .as_idx(&id)
+        .unwrap()
+        .de()
+        .unwrap();
+    assert_eq!(after.name, before.name);
+    assert_eq!(after.source, before.source);
+    assert_eq!(after.grants, before.grants);
+    assert_eq!(after.inspection, inspection);
+    let encoded = serde_json::to_value(after).unwrap();
+    assert_eq!(encoded["available"], 1234);
+    assert!(encoded["error"].is_null());
+    assert!(encoded["checkedAt"].is_string());
+    assert!(encoded.get("inspection").is_none());
+    let unavailable = SharedVolumeInspection::unavailable("source disconnected".into());
+    write_inspection(&mut db, &id, unavailable.clone()).unwrap();
+    assert_eq!(
+        db.as_public()
+            .as_shared_volumes()
+            .as_idx(&id)
+            .unwrap()
+            .as_inspection()
+            .de()
+            .unwrap(),
+        unavailable
+    );
+}
+
+#[test]
+fn a_finished_check_does_not_resurrect_a_removed_volume() {
+    let mut db = crate::db::model::DatabaseModel::from(
+        to_value(&serde_json::json!({
+            "public": {"sharedVolumes": {}}
+        }))
+        .unwrap(),
+    );
+    write_inspection(
+        &mut db,
+        &SharedVolumeId::new(),
+        SharedVolumeInspection::available(None),
+    )
+    .unwrap();
+    assert!(db.as_public().as_shared_volumes().de().unwrap().is_empty());
+}
+
+#[test]
+fn credential_changes_reject_checks_of_the_previous_source() {
+    let id = SharedVolumeId::new();
+    let mut db = crate::db::model::DatabaseModel::from(to_value(&serde_json::json!({
+        "public": {"sharedVolumes": { id.to_string(): {
+            "name": "Remote", "source": {"kind": "cifs", "hostname": "nas.local", "path": "/share", "username": "user"},
+            "grants": {}, "availability": "unknown"
+        }}},
+        "private": {"sharedVolumeCredentials": { id.to_string(): {
+            "password": "old-password"
+        }}}
+    })).unwrap());
+    let old = SourceDefinition::read(&db, &id).unwrap();
+    db.as_private_mut()
+        .as_shared_volume_credentials_mut()
+        .as_idx_mut(&id)
+        .unwrap()
+        .mutate(|credentials| {
+            credentials.password = Some("new-password".into());
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        !write_checked(
+            &mut db,
+            &id,
+            &old,
+            None,
+            SharedVolumeInspection::available(Some(42))
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        db.as_public()
+            .as_shared_volumes()
+            .as_idx(&id)
+            .unwrap()
+            .as_inspection()
+            .de()
+            .unwrap(),
+        SharedVolumeInspection::default()
+    );
+    let current = SourceDefinition::read(&db, &id).unwrap();
+    assert!(
+        write_checked(
+            &mut db,
+            &id,
+            &current,
+            None,
+            SharedVolumeInspection::available(Some(42))
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        db.as_public()
+            .as_shared_volumes()
+            .as_idx(&id)
+            .unwrap()
+            .as_inspection()
+            .de()
+            .unwrap()
+            .available,
+        Some(42)
+    );
+}
+
+#[tokio::test]
+async fn checking_a_missing_local_directory_does_not_recreate_it() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("removed");
+    let target = root.path().join("mountpoint");
+    assert!(
+        SourceFilesystem::Local(path.clone())
+            .mount(&target, ReadWrite)
+            .await
+            .is_err()
+    );
+    assert!(!path.exists());
+    assert!(!target.exists());
+}
+
+#[test]
+fn source_failures_keep_their_reason_kind_and_metadata() {
+    for (kind, reason) in [
+        (ErrorKind::Network, "DNS could not resolve the server"),
+        (ErrorKind::Filesystem, "mount error(13): Permission denied"),
+        (ErrorKind::Timeout, "mount deadline elapsed"),
+    ] {
+        let info = imbl_value::json!({ "operation": "source" });
+        let error = source_result::<PreparedSource>(Err(
+            Error::new(eyre!(reason), kind).with_info(info.clone())
+        ))
+        .unwrap_err();
+        assert_eq!(error.kind, kind);
+        assert_eq!(error.info, info);
+        assert!(error.to_string().contains(reason));
+        assert!(
+            error
+                .to_string()
+                .contains(&*t!("shared-volumes.source-unavailable"))
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stored_folder_failures_are_source_errors_without_recreating_paths() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("photos")).unwrap();
+    std::fs::rename(root.path().join("photos"), root.path().join("renamed")).unwrap();
+    std::fs::write(root.path().join("file"), b"not a directory").unwrap();
+    symlink(outside.path(), root.path().join("escape")).unwrap();
+    symlink("cycle", root.path().join("cycle")).unwrap();
+    for path in ["photos", "file/child", "escape", "cycle"] {
+        let error = open_beneath(root.path(), Path::new(path)).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+        let cause = error.source.downcast_ref::<std::io::Error>().unwrap();
+        let reason = cause.to_string();
+        let errno = cause.raw_os_error();
+        let error = source_result::<PreparedSource>(Err(error)).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Filesystem);
+        assert!(error.to_string().contains(&reason));
+        assert_eq!(
+            error
+                .source
+                .downcast_ref::<std::io::Error>()
+                .unwrap()
+                .raw_os_error(),
+            errno
+        );
+    }
+    assert!(!root.path().join("photos").exists());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn folder_creation_is_confined_and_preserves_existing_contents() {
+    use std::os::unix::fs::symlink;
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    create_directory_beneath(root.path(), Path::new("/library/photos")).unwrap();
+    let sentinel = root.path().join("library/photos/sentinel");
+    std::fs::write(&sentinel, b"preserved").unwrap();
+    create_directory_beneath(root.path(), Path::new("library/photos")).unwrap();
+    assert_eq!(std::fs::read(sentinel).unwrap(), b"preserved");
+    symlink(outside.path(), root.path().join("escape")).unwrap();
+    for path in ["../outside", "escape/new", "library/photos/sentinel/child"] {
+        assert!(create_directory_beneath(root.path(), Path::new(path)).is_err());
+    }
+    assert!(!outside.path().join("new").exists());
+    symlink("library", root.path().join("inside")).unwrap();
+    create_directory_beneath(root.path(), Path::new("inside/allowed")).unwrap();
+    assert!(root.path().join("library/allowed").is_dir());
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires root, STARTOS_TEST_EXTERNAL_PARTITION and STARTOS_TEST_USERNS_HELPER"]
+async fn external_folder_is_created_pinned_and_limits_consumer_subpaths() {
+    use crate::disk::mount::filesystem::bind::Bind;
+    use crate::disk::mount::guard::MountGuard;
+    use crate::util::Invoke;
+    let device = PathBuf::from(std::env::var_os("STARTOS_TEST_EXTERNAL_PARTITION").unwrap());
+    let chosen =
+        prepare_external_source(device.clone(), PathBuf::from("/created-folder/view"), None)
+            .await
+            .unwrap();
+    let SharedVolumeSource::Disk {
+        logicalname, path, ..
+    } = chosen
+    else {
+        panic!("disk source")
+    };
+    assert_eq!(path, Path::new("created-folder/view"));
+    prepare_external_source(device.clone(), path.clone(), None)
+        .await
+        .unwrap();
+    let source = PreparedSource::open(
+        open_external(&logicalname, ReadWrite).await.unwrap(),
+        Some(path.clone()),
+    )
+    .await
+    .unwrap();
+    assert!(!source.path().join("external-sentinel").exists());
+    let consumer_root = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(consumer_root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let consumer_path = consumer_root.path().join("volume");
+    let consumer = MountGuard::mount(&Bind::new(source.path()), &consumer_path, ReadWrite)
+        .await
+        .unwrap();
+    let uid = crate::lxc::BASE_IDMAP.to_id.to_string();
+    tokio::process::Command::new("setpriv")
+        .args([
+            "--reuid",
+            &uid,
+            "--regid",
+            &uid,
+            "--clear-groups",
+            "sh",
+            "-c",
+        ])
+        .arg("mkdir -p \"$1/child\"; printf 'selected-only\\n' > \"$1/child/file\"")
+        .arg("_")
+        .arg(&consumer_path)
+        .invoke(ErrorKind::Filesystem)
+        .await
+        .unwrap();
+    consumer.unmount(true).await.unwrap();
+    let raw = TmpMountGuard::mount(&BlockDev::new(&device), ReadWrite)
+        .await
+        .unwrap();
+    std::fs::rename(
+        raw.path().join(&path),
+        raw.path().join("created-folder/renamed"),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read(source.path().join("child/file")).unwrap(),
+        b"selected-only\n"
+    );
+    let child = source
+        .into_subpath(Some(PathBuf::from("child")))
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read(child.path().join("file")).unwrap(),
+        b"selected-only\n"
+    );
+    assert!(
+        child
+            .into_subpath(Some(PathBuf::from("../..")))
+            .await
+            .is_err()
+    );
+    std::fs::rename(
+        raw.path().join("created-folder/renamed"),
+        raw.path().join(&path),
+    )
+    .unwrap();
+    raw.unmount().await.unwrap();
+    let readonly = PreparedSource::open(
+        open_external(&logicalname, ReadOnly).await.unwrap(),
+        Some(path),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        std::fs::read(readonly.path().join("child/file")).unwrap(),
+        b"selected-only\n"
+    );
+    assert_eq!(
+        std::fs::write(readonly.path().join("forbidden"), b"no")
+            .unwrap_err()
+            .raw_os_error(),
+        Some(libc::EROFS)
+    );
+    readonly.unmount().await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires root, STARTOS_TEST_EXTERNAL_PARTITION and STARTOS_TEST_USERNS_HELPER"]
+async fn external_partition_maps_service_ownership_without_changing_disk_owners() {
+    use std::os::unix::fs::MetadataExt;
+
+    use crate::disk::mount::filesystem::bind::Bind;
+    use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
+    use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
+    use crate::util::Invoke;
+
+    let device = PathBuf::from(std::env::var_os("STARTOS_TEST_EXTERNAL_PARTITION").unwrap());
+    let persistent = BlockDev::new(&device).persistent_path().await.unwrap();
+    assert_eq!(std::fs::canonicalize(&persistent).unwrap(), device);
+    let mapped = open_external(&persistent, ReadWrite).await.unwrap();
+    assert_eq!(
+        std::fs::read(mapped.path().join("external-sentinel")).unwrap(),
+        b"external-preserved\n"
+    );
+    let metadata = std::fs::metadata(mapped.path()).unwrap();
+    assert_eq!(metadata.uid(), crate::lxc::BASE_IDMAP.to_id);
+    assert_eq!(metadata.gid(), crate::lxc::BASE_IDMAP.to_id);
+    let consumer_root = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(consumer_root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let consumer_path = consumer_root.path().join("volume");
+    let consumer = MountGuard::mount(&Bind::new(mapped.path()), &consumer_path, ReadWrite)
+        .await
+        .unwrap();
+    let uid = crate::lxc::BASE_IDMAP.to_id.to_string();
+    tokio::process::Command::new("setpriv")
+        .args([
+            "--reuid",
+            &uid,
+            "--regid",
+            &uid,
+            "--clear-groups",
+            "sh",
+            "-c",
+        ])
+        .arg("cat \"$1/external-sentinel\"; printf 'service-write\\n' > \"$1/service-created\"")
+        .arg("_")
+        .arg(&consumer_path)
+        .invoke(ErrorKind::Filesystem)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read(mapped.path().join("service-created")).unwrap(),
+        b"service-write\n"
+    );
+    consumer.unmount(true).await.unwrap();
+    mapped.unmount().await.unwrap();
+
+    let raw = TmpMountGuard::mount(&BlockDev::new(&persistent), ReadOnly)
+        .await
+        .unwrap();
+    for name in ["external-sentinel", "service-created"] {
+        let metadata = std::fs::metadata(raw.path().join(name)).unwrap();
+        assert_eq!(metadata.uid(), 0);
+        assert_eq!(metadata.gid(), 0);
+    }
+    raw.unmount().await.unwrap();
+
+    let readonly = open_external(&persistent, ReadOnly).await.unwrap();
+    assert_eq!(
+        std::fs::read(readonly.path().join("service-created")).unwrap(),
+        b"service-write\n"
+    );
+    assert_eq!(
+        std::fs::write(readonly.path().join("forbidden"), b"no")
+            .unwrap_err()
+            .raw_os_error(),
+        Some(libc::EROFS)
+    );
+    readonly.unmount().await.unwrap();
+}
+
+#[test]
+fn only_partitions_from_backup_discovery_can_be_registered() {
+    let disks = serde_json::from_value::<Vec<crate::disk::util::DiskInfo>>(serde_json::json!([{
+        "logicalname": "/dev/sdz",
+        "stablePath": "/dev/disk/by-path/external",
+        "partitionTable": "gpt",
+        "vendor": "Samsung",
+        "model": "T7",
+        "capacity": 4096,
+        "guid": null,
+        "filesystem": null,
+        "partitions": [{
+            "logicalname": "/dev/sdz1",
+            "stablePath": "/dev/disk/by-path/external-part1",
+            "label": "Photos",
+            "capacity": 4096,
+            "used": null,
+            "available": null,
+            "startOs": {},
+            "legacyBackup": false,
+            "guid": null,
+            "filesystem": null
+        }, {
+            "logicalname": "/dev/sdz2",
+            "stablePath": "/dev/disk/by-path/external-part2",
+            "label": null,
+            "capacity": 4096,
+            "used": null,
+            "available": null,
+            "startOs": {},
+            "legacyBackup": false,
+            "guid": null,
+            "filesystem": null
+        }]
+    }]))
+    .unwrap();
+    for path in ["/dev/sdz1", "/dev/disk/by-path/external-part1"] {
+        assert_eq!(
+            external_partition(&disks, Path::new(path)).unwrap(),
+            (
+                PathBuf::from("/dev/sdz1"),
+                SharedVolumeDrive {
+                    vendor: Some("Samsung".to_owned()),
+                    model: Some("T7".to_owned()),
+                    label: Some("Photos".to_owned()),
+                    capacity: 4096,
+                }
+            )
+        );
+    }
+    let (partition, drive) = external_partition(&disks, Path::new("/dev/sdz2")).unwrap();
+    assert_eq!(partition, PathBuf::from("/dev/sdz2"));
+    assert_eq!(drive.display_name(), Some("Samsung T7".to_owned()));
+    for path in ["/", "/dev/sdz", "/dev/system-root", "/dev/missing"] {
+        assert!(external_partition(&disks, Path::new(path)).is_err());
+    }
+}

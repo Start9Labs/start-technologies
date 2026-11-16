@@ -1,7 +1,6 @@
 
 config uhttpd 'main'
-	list listen_http '0.0.0.0:8080'
-	list listen_http '[::]:8080'
+	list listen_http '127.0.0.1:8080'
 	list listen_https '0.0.0.0:8443'
 	list listen_https '[::]:8443'
 	option redirect_https '0'

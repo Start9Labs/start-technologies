@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common'
 import { Component, inject } from '@angular/core'
 import { RouterLink } from '@angular/router'
 import {
@@ -18,14 +19,19 @@ import { filter } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { AuthService } from 'src/app/services/auth.service'
 import { STATUS } from 'src/app/services/status.service'
+import { TitleService } from 'src/app/services/title.service'
 import { ABOUT } from './about.component'
 
 @Component({
   selector: 'header-menu',
   template: `
+    @if (corner(); as corner) {
+      <div class="corner"><ng-container *ngTemplateOutlet="corner" /></div>
+    }
     <button
       tuiIconButton
       appearance=""
+      class="logo"
       tuiHintDirection="bottom"
       [tuiHint]="open ? '' : ('Start Menu' | i18n)"
       [tuiHintShowDelay]="750"
@@ -61,13 +67,6 @@ import { ABOUT } from './about.component'
           href="https://start9.com/contact"
         >
           {{ 'Contact support' | i18n }}
-        </a>
-        <a
-          tuiOption
-          iconStart="@tui.dollar-sign"
-          href="https://donate.start9.com"
-        >
-          {{ 'Donate to Start9' | i18n }}
         </a>
         <hr />
         <a tuiOption iconStart="@tui.settings" routerLink="/system">
@@ -111,7 +110,19 @@ import { ABOUT } from './about.component'
       opacity: 0.5;
     }
 
+    .corner {
+      display: none;
+    }
+
     :host-context(tui-root._mobile) {
+      .corner {
+        display: contents;
+
+        + .logo {
+          display: none;
+        }
+      }
+
       [tuiIconButton] {
         box-shadow: inset -1.25rem 0 0 -1rem var(--status);
       }
@@ -119,6 +130,7 @@ import { ABOUT } from './about.component'
   `,
   host: { '[class._open]': 'open' },
   imports: [
+    NgTemplateOutlet,
     TuiDropdown,
     TuiDataList,
     TuiButton,
@@ -131,6 +143,7 @@ import { ABOUT } from './about.component'
   ],
 })
 export class HeaderMenuComponent {
+  protected readonly corner = inject(TitleService).corner
   private readonly api = inject(ApiService)
   private readonly auth = inject(AuthService)
   private readonly tasks = inject(TaskService)

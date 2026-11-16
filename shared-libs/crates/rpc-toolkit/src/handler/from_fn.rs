@@ -87,6 +87,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
@@ -98,6 +99,7 @@ where
                 params,
                 inherited_params,
                 raw_params,
+                rpc_stream,
             },
             result,
         )
@@ -197,6 +199,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
@@ -208,6 +211,7 @@ where
                 params,
                 inherited_params,
                 raw_params,
+                rpc_stream,
             },
             result,
         )
@@ -294,6 +298,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
@@ -305,6 +310,7 @@ where
                 params,
                 inherited_params,
                 raw_params,
+                rpc_stream,
             },
             result,
         )
@@ -322,10 +328,10 @@ where
     }
 }
 
-impl<F, T, E, Context, Params, InheritedParams> HandlerTypes
-    for FromFn<F, T, E, HandlerArgs<Context, Params, InheritedParams>>
+impl<F, T, E, Context, Params, InheritedParams, Item, Final> HandlerTypes
+    for FromFn<F, T, E, HandlerArgs<Context, Params, InheritedParams, Item, Final>>
 where
-    F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Result<T, E>
+    F: Fn(HandlerArgs<Context, Params, InheritedParams, Item, Final>) -> Result<T, E>
         + Send
         + Sync
         + Clone
@@ -340,18 +346,22 @@ where
     type InheritedParams = InheritedParams;
     type Ok = T;
     type Err = E;
+    type Item = Item;
+    type Final = Final;
 }
 
-impl<F, T, E, Context, Params, InheritedParams> HandlerFor<Context>
-    for FromFn<F, T, E, HandlerArgs<Context, Params, InheritedParams>>
+impl<F, T, E, Context, Params, InheritedParams, Item, Final> HandlerFor<Context>
+    for FromFn<F, T, E, HandlerArgs<Context, Params, InheritedParams, Item, Final>>
 where
     Self: crate::handler::HandlerRequires<
         Params = Params,
         InheritedParams = InheritedParams,
         Ok = T,
         Err = E,
+        Item = Item,
+        Final = Final,
     >,
-    F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Result<T, E>
+    F: Fn(HandlerArgs<Context, Params, InheritedParams, Item, Final>) -> Result<T, E>
         + Send
         + Sync
         + Clone
@@ -382,10 +392,14 @@ where
         self.metadata.clone()
     }
 }
-impl<F, Fut, T, E, Context, Params, InheritedParams> HandlerTypes
-    for FromFnAsync<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams>>
+impl<F, Fut, T, E, Context, Params, InheritedParams, Item, Final> HandlerTypes
+    for FromFnAsync<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams, Item, Final>>
 where
-    F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Fut + Send + Sync + Clone + 'static,
+    F: Fn(HandlerArgs<Context, Params, InheritedParams, Item, Final>) -> Fut
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
@@ -397,18 +411,26 @@ where
     type InheritedParams = InheritedParams;
     type Ok = T;
     type Err = E;
+    type Item = Item;
+    type Final = Final;
 }
 
-impl<F, Fut, T, E, Context, Params, InheritedParams> HandlerFor<Context>
-    for FromFnAsync<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams>>
+impl<F, Fut, T, E, Context, Params, InheritedParams, Item, Final> HandlerFor<Context>
+    for FromFnAsync<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams, Item, Final>>
 where
     Self: crate::handler::HandlerRequires<
         Params = Params,
         InheritedParams = InheritedParams,
         Ok = T,
         Err = E,
+        Item = Item,
+        Final = Final,
     >,
-    F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Fut + Send + Sync + Clone + 'static,
+    F: Fn(HandlerArgs<Context, Params, InheritedParams, Item, Final>) -> Fut
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     Fut: Future<Output = Result<T, E>> + Send + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
@@ -437,6 +459,8 @@ where
     type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
+    type Item = crate::Never;
+    type Final = ();
 }
 
 impl<Context, F, T, E> HandlerFor<Context> for FromFn<F, T, E, ()>
@@ -475,6 +499,8 @@ where
     type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
+    type Item = crate::Never;
+    type Final = ();
 }
 
 impl<Context, F, Fut, T, E> HandlerFor<Context> for FromFnAsync<F, Fut, T, E, ()>
@@ -505,6 +531,8 @@ where
     type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
+    type Item = crate::Never;
+    type Final = ();
 }
 
 impl<Context, F, T, E> HandlerFor<Context> for FromFn<F, T, E, (Context,)>
@@ -547,6 +575,8 @@ where
     type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
+    type Item = crate::Never;
+    type Final = ();
 }
 
 impl<Context, F, Fut, T, E> HandlerFor<Context> for FromFnAsync<F, Fut, T, E, (Context,)>
@@ -581,6 +611,8 @@ where
     type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
+    type Item = crate::Never;
+    type Final = ();
 }
 
 impl<Context, F, T, E, Params> HandlerFor<Context> for FromFn<F, T, E, (Context, Params)>
@@ -628,6 +660,8 @@ where
     type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
+    type Item = crate::Never;
+    type Final = ();
 }
 
 impl<Context, F, Fut, T, E, Params> HandlerFor<Context>
@@ -669,6 +703,8 @@ where
     type InheritedParams = InheritedParams;
     type Ok = T;
     type Err = E;
+    type Item = crate::Never;
+    type Final = ();
 }
 
 impl<Context, F, T, E, Params, InheritedParams> HandlerFor<Context>
@@ -728,6 +764,8 @@ where
     type InheritedParams = InheritedParams;
     type Ok = T;
     type Err = E;
+    type Item = crate::Never;
+    type Final = ();
 }
 
 impl<Context, F, Fut, T, E, Params, InheritedParams> HandlerFor<Context>
@@ -764,10 +802,14 @@ where
     }
 }
 
-impl<F, Fut, T, E, Context, Params, InheritedParams> HandlerTypes
-    for FromFnAsyncLocal<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams>>
+impl<F, Fut, T, E, Context, Params, InheritedParams, Item, Final> HandlerTypes
+    for FromFnAsyncLocal<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams, Item, Final>>
 where
-    F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Fut + Send + Sync + Clone + 'static,
+    F: Fn(HandlerArgs<Context, Params, InheritedParams, Item, Final>) -> Fut
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     Fut: Future<Output = Result<T, E>> + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
@@ -779,18 +821,26 @@ where
     type InheritedParams = InheritedParams;
     type Ok = T;
     type Err = E;
+    type Item = Item;
+    type Final = Final;
 }
 
-impl<F, Fut, T, E, Context, Params, InheritedParams> HandlerFor<Context>
-    for FromFnAsyncLocal<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams>>
+impl<F, Fut, T, E, Context, Params, InheritedParams, Item, Final> HandlerFor<Context>
+    for FromFnAsyncLocal<F, Fut, T, E, HandlerArgs<Context, Params, InheritedParams, Item, Final>>
 where
     Self: crate::handler::HandlerRequires<
         Params = Params,
         InheritedParams = InheritedParams,
         Ok = T,
         Err = E,
+        Item = Item,
+        Final = Final,
     >,
-    F: Fn(HandlerArgs<Context, Params, InheritedParams>) -> Fut + Send + Sync + Clone + 'static,
+    F: Fn(HandlerArgs<Context, Params, InheritedParams, Item, Final>) -> Fut
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     Fut: Future<Output = Result<T, E>> + 'static,
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
@@ -832,6 +882,8 @@ where
     type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
+    type Item = crate::Never;
+    type Final = ();
 }
 
 impl<Context, F, Fut, T, E> HandlerFor<Context> for FromFnAsyncLocal<F, Fut, T, E, ()>
@@ -877,6 +929,8 @@ where
     type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
+    type Item = crate::Never;
+    type Final = ();
 }
 
 impl<Context, F, Fut, T, E> HandlerFor<Context> for FromFnAsyncLocal<F, Fut, T, E, (Context,)>
@@ -925,6 +979,8 @@ where
     type InheritedParams = Empty;
     type Ok = T;
     type Err = E;
+    type Item = crate::Never;
+    type Final = ();
 }
 
 impl<Context, F, Fut, T, E, Params> HandlerFor<Context>
@@ -979,6 +1035,8 @@ where
     type InheritedParams = InheritedParams;
     type Ok = T;
     type Err = E;
+    type Item = crate::Never;
+    type Final = ();
 }
 
 impl<Context, F, Fut, T, E, Params, InheritedParams> HandlerFor<Context>

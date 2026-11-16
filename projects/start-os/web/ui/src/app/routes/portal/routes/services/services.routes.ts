@@ -32,6 +32,10 @@ export const ROUTES: Routes = [
         loadComponent: () => import('./routes/outbound-traffic'),
       },
       {
+        path: 'volumes',
+        loadComponent: () => import('./routes/volumes'),
+      },
+      {
         path: 'actions',
         loadComponent: () => import('./routes/actions.component'),
       },

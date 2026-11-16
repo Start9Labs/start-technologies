@@ -70,7 +70,7 @@ export interface Action<
   }): Promise<T.ActionInput>
   run(options: {
     effects: T.Effects
-    input: Type
+    input: unknown
     caller?: ActionCaller
   }): Promise<T.ActionResult | null>
 }
@@ -141,10 +141,11 @@ class ActionImpl<
   }
   async run(options: {
     effects: T.Effects
-    input: Type
+    input: unknown
     caller?: ActionCaller
   }): Promise<T.ActionResult | null> {
     let spec = {}
+    let input: Type
     if (this.inputSpec) {
       const prevInputSpec = this.prevInputSpec[options.effects.eventId!]
       if (!prevInputSpec) {
@@ -152,13 +153,15 @@ class ActionImpl<
           `getActionInput has not been called for EventID ${options.effects.eventId}`,
         )
       }
-      options.input = prevInputSpec.validator.parse(options.input)
+      input = await prevInputSpec.validator.parseAsync(options.input)
       spec = prevInputSpec.spec
+    } else {
+      input = options.input as Type
     }
     return (
       (await this.runFn({
         effects: options.effects,
-        input: options.input,
+        input,
         spec,
         caller: options.caller ?? null,
       })) ?? null

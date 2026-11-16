@@ -1,13 +1,12 @@
 use std::ops::Deref;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::ws;
 use clap::builder::ValueParserFactory;
 use clap::{CommandFactory, FromArgMatches, Parser, value_parser};
 use color_eyre::eyre::eyre;
 use exver::VersionRange;
-use futures::{FutureExt, StreamExt};
 use imbl_value::{InternedString, json};
 use itertools::Itertools;
 use reqwest::Url;
@@ -15,19 +14,20 @@ use reqwest::header::{CONTENT_LENGTH, HeaderMap};
 use rpc_toolkit::HandlerArgs;
 use rpc_toolkit::yajrc::RpcError;
 use serde::{Deserialize, Serialize};
-use tokio::sync::oneshot;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::package::{ManifestPreference, PackageStateMatchModelRef};
 use crate::prelude::*;
-use crate::progress::{FullProgress, FullProgressTracker, PhasedProgressBar};
+use crate::progress::{
+    FullProgress, FullProgressTracker, forward_progress, progress_until_complete, with_cli_progress,
+};
 use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::registry::package::get::GetPackageResponse;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::s9pk::manifest::PackageId;
 use crate::s9pk::v2::SIG_CONTEXT;
+use crate::sign::SignatureMap;
 use crate::trusted_keys::{self, TrustContext};
 use crate::upload::upload;
 use crate::util::io::open_file;
@@ -35,13 +35,14 @@ use crate::util::tui::choose;
 use crate::util::{FromStrParser, Never, VersionString};
 
 #[cfg(test)]
+mod progress_tests;
+#[cfg(test)]
 mod trust_tests;
 
 pub const PKG_ARCHIVE_DIR: &str = "package-data/archive";
 pub const PKG_PUBLIC_DIR: &str = "package-data/public";
 pub const PKG_WASM_DIR: &str = "package-data/wasm";
 
-// #[command(display(display_serializable))]
 pub async fn list(ctx: RpcContext) -> Result<Vec<Value>, Error> {
     Ok(ctx
         .db
@@ -93,7 +94,7 @@ impl std::str::FromStr for MinMax {
             "min" => Ok(MinMax::Min),
             "max" => Ok(MinMax::Max),
             _ => Err(Error::new(
-                eyre!("Must be one of \"min\", \"max\"."),
+                eyre!("{}", t!("install.invalid-min-max")),
                 crate::ErrorKind::ParseVersion,
             )),
         }
@@ -164,7 +165,15 @@ pub async fn install(
         .and_then(|i| i.s9pks.first())
         .ok_or_else(|| {
             Error::new(
-                eyre!("{id}@{version} not found on {registry}"),
+                eyre!(
+                    "{}",
+                    t!(
+                        "install.version-not-found-on-registry",
+                        id = id,
+                        version = version,
+                        registry = registry
+                    )
+                ),
                 ErrorKind::NotFound,
             )
         })?;
@@ -198,6 +207,9 @@ pub async fn install(
 #[serde(rename_all = "camelCase")]
 pub struct SideloadParams {
     pub accept_signers: Option<crate::registry::signer::AcceptSigners>,
+    /// DER64 supplemental signatures for the uploaded archive.
+    #[serde(default)]
+    pub signatures: SignatureMap,
     /// Accepts an untrusted signer without skipping signature or integrity verification.
     #[serde(default)]
     trust: bool,
@@ -213,25 +225,30 @@ rpc_toolkit::ts_export!(SideloadParams, namespaces = [""]);
 #[serde(rename_all = "camelCase")]
 pub struct SideloadResponse {
     pub upload: Guid,
-    pub progress: Guid,
+    /// Legacy progress continuation, absent for rpcstream observers.
+    pub progress: Option<Guid>,
 }
 
 rpc_toolkit::reflect_ts!(SideloadResponse);
 rpc_toolkit::ts_export!(SideloadResponse, namespaces = [""]);
 
+/// Completion includes installation finalization and uploaded-archive cleanup.
+/// Dropping progress does not cancel an accepted sideload.
 #[instrument(skip_all)]
 pub async fn sideload(
-    ctx: RpcContext,
-    SideloadParams {
-        signer,
-        trust,
-        accept_signers,
-    }: SideloadParams,
+    HandlerArgs {
+        context: ctx,
+        params:
+            SideloadParams {
+                signer,
+                trust,
+                accept_signers,
+                signatures,
+            },
+        rpc_stream,
+        ..
+    }: HandlerArgs<RpcContext, SideloadParams, rpc_toolkit::Empty, FullProgress>,
 ) -> Result<SideloadResponse, Error> {
-    let (err_send, err_recv) = oneshot::channel::<Error>();
-    // fused: the select! loop below re-polls this, which panics on a bare oneshot once resolved
-    let mut err_recv = err_recv.fuse();
-    let progress = Guid::new();
     let progress_tracker = FullProgressTracker::new();
     let (upload, file) = upload(
         &ctx,
@@ -239,100 +256,86 @@ pub async fn sideload(
         progress_tracker.add_phase("Uploading".into(), Some(100)),
     )
     .await?;
-    let mut progress_listener = progress_tracker.stream(Some(Duration::from_millis(200)));
-    ctx.rpc_continuations
-        .add(
-            progress.clone(),
-            RpcContinuation::ws_authed(
-                &ctx,
-                signer,
-                |mut ws| async move {
-                    if let Err(e) = async {
-                        loop {
-                            tokio::select! {
-                                progress = progress_listener.next() => {
-                                    if let Some(progress) = progress {
-                                        ws.send(ws::Message::Text(
-                                            serde_json::to_string(&progress)
-                                                .with_kind(ErrorKind::Serialization)?
-                                                .into(),
-                                        ))
-                                        .await
-                                        .with_kind(ErrorKind::Network)?;
-                                        if progress.overall.is_complete() {
-                                            return ws.normal_close("complete").await;
-                                        }
-                                    } else {
-                                        return ws.normal_close("complete").await;
-                                    }
-                                }
-                                msg = ws.recv() => {
-                                    if msg.transpose().with_kind(ErrorKind::Network)?.is_none() {
-                                        return Ok(())
-                                    }
-                                }
-                                err = (&mut err_recv) => {
-                                    if let Ok(e) = err {
-                                        ws.close_result(Err::<&str, _>(e.clone_output())).await?;
-                                        return Err(e)
-                                    }
-                                    // Err = sender dropped, install succeeded; keep streaming
-                                }
-                            }
-                        }
-                    }
+    let done = tokio::spawn({
+        let ctx = ctx.clone();
+        let progress_tracker = progress_tracker.clone();
+        async move {
+            let result: Result<(), Error> = async {
+                let key = ctx
+                    .db
+                    .peek()
                     .await
-                    {
-                        tracing::error!("Error tracking sideload progress: {e}");
-                        tracing::debug!("{e:?}");
+                    .into_private()
+                    .into_server_identity_key();
+                let server_policy = trusted_keys::signer_policy(
+                    trusted_keys::required(&ctx, TrustContext::Marketplace, trust).await?,
+                );
+                let accepted = match (server_policy, accept_signers) {
+                    (Some(server), Some(client)) => {
+                        Some(crate::registry::signer::AcceptSigners::All(vec![
+                            server, client,
+                        ]))
                     }
-                },
-                Duration::from_secs(600),
-            ),
-        )
-        .await;
-    tokio::spawn(async move {
-        if let Err(e) = async {
-            let key = ctx.db.peek().await.into_private().into_developer_key();
-            let server_policy = trusted_keys::signer_policy(
-                trusted_keys::required(&ctx, TrustContext::Marketplace, trust).await?,
-            );
-            let accepted = match (server_policy, accept_signers) {
-                (Some(server), Some(client)) => {
-                    Some(crate::registry::signer::AcceptSigners::All(vec![
-                        server, client,
-                    ]))
-                }
-                (server, client) => server.or(client),
-            };
+                    (server, client) => server.or(client),
+                };
 
-            ctx.services
-                .install(
-                    ctx.clone(),
-                    || {
-                        crate::s9pk::load_with_signers(
-                            file.clone(),
-                            || Ok(key.de()?.0),
-                            Some(&progress_tracker),
-                            accepted,
-                        )
-                    },
-                    None,
-                    None::<Never>,
-                    Some(progress_tracker.clone()),
-                )
-                .await?
-                .await?
-                .await?;
-            file.delete().await
-        }
-        .await
-        {
-            tracing::error!("Error sideloading package: {e}");
-            tracing::debug!("{e:?}");
-            let _ = err_send.send(e);
+                ctx.services
+                    .install(
+                        ctx.clone(),
+                        || {
+                            crate::s9pk::load_for_sideload(
+                                file.clone(),
+                                || Ok(key.de()?.0),
+                                Some(&progress_tracker),
+                                &signatures,
+                                accepted,
+                            )
+                        },
+                        None,
+                        None::<Never>,
+                        Some(progress_tracker.clone()),
+                    )
+                    .await?
+                    .await?
+                    .await?;
+                file.delete().await
+            }
+            .await;
+            if let Err(error) = &result {
+                tracing::error!("Error sideloading package: {error}");
+                tracing::debug!("{error:?}");
+            }
+            result
         }
     });
+    let source = progress_until_complete(progress_tracker, async move {
+        done.await.with_kind(ErrorKind::Cancelled)?
+    });
+    let progress = if let Some(stream) = rpc_stream {
+        crate::auth::continuation_subscription(&ctx, signer)
+            .await?
+            .forward_stream(stream, source);
+        None
+    } else {
+        let progress = Guid::new();
+        ctx.rpc_continuations
+            .add(
+                progress.clone(),
+                RpcContinuation::ws_authed(
+                    crate::auth::continuation_subscription(&ctx, signer).await?,
+                    WebSocketPolicy::Authenticated,
+                    ctx.secure_session().cloned(),
+                    move |socket| async move {
+                        if let Err(error) = forward_progress(socket, source).await {
+                            tracing::error!("Error tracking sideload progress: {error}");
+                        }
+                    },
+                    Duration::from_secs(600),
+                ),
+            )
+            .await;
+        Some(progress)
+    };
     Ok(SideloadResponse { upload, progress })
 }
 
@@ -482,19 +485,19 @@ pub async fn cli_install(
     let method = parent_method.into_iter().chain(method).collect_vec();
     match params {
         CliInstallParams::Sideload { path, trust } => {
-            let accept_signers = local_sideload_policy(&path).await?;
+            let params = local_sideload_params(&path, trust).await?;
             let file = open_file(path).await?;
 
-            let SideloadResponse { upload, progress } = from_value::<SideloadResponse>(
-                ctx.call_remote::<RpcContext>(
+            let response = ctx
+                .call_remote_stream::<FullProgress, ()>(
                     &method[..method.len() - 1]
-                        .into_iter()
+                        .iter()
                         .chain(std::iter::once(&"sideload"))
                         .join("."),
-                    imbl_value::json!({ "trust": trust, "acceptSigners": accept_signers }),
+                    to_value(&params)?,
                 )
-                .await?,
-            )?;
+                .await?;
+            let SideloadResponse { upload, .. } = from_value(response.initial)?;
 
             let upload = async {
                 let content_length = file.metadata().await?.len();
@@ -513,47 +516,8 @@ pub async fn cli_install(
                 Ok::<_, Error>(())
             };
 
-            let progress = async {
-                use tokio_tungstenite::tungstenite::Message;
-
-                let mut bar = PhasedProgressBar::new("Sideloading");
-
-                let mut ws = ctx.ws_continuation(progress).await?;
-
-                let mut progress = FullProgress::new();
-
-                loop {
-                    tokio::select! {
-                        msg = ws.next() => {
-                            if let Some(msg) = msg {
-                                match msg.with_kind(ErrorKind::Network)? {
-                                    Message::Text(t) => {
-                                        progress =
-                                            serde_json::from_str::<FullProgress>(&t)
-                                                .with_kind(ErrorKind::Deserialization)?;
-                                        bar.update(&progress);
-                                    }
-                                    Message::Close(Some(c)) if c.code != CloseCode::Normal => {
-                                        return Err(Error::new(eyre!("{}", c.reason), ErrorKind::Network))
-                                    }
-                                    _ => (),
-                                }
-                            } else {
-                                break;
-                            }
-                        }
-                        _ = tokio::time::sleep(Duration::from_millis(100)) => {
-                            bar.update(&progress);
-                        },
-                    }
-                }
-
-                Ok::<_, Error>(())
-            };
-
-            let (upload, progress) = tokio::join!(upload, progress);
-            progress?;
-            upload?;
+            let label = t!("install.sideloading");
+            tokio::try_join!(upload, with_cli_progress(response.items, &label))?;
         }
         CliInstallParams::Marketplace {
             package: QueryPackageParams { id, version },
@@ -595,17 +559,7 @@ pub async fn cli_install(
                 1 => packages.best.pop_first().map(|(k, _)| k).unwrap(),
                 _ => {
                     let versions = packages.best.keys().collect::<Vec<_>>();
-                    let version = choose(
-                        &format!(
-                            concat!(
-                                "Multiple flavors of {id} found. ",
-                                "Please select one of the following versions to install:"
-                            ),
-                            id = id
-                        ),
-                        &versions,
-                    )
-                    .await?;
+                    let version = choose(&t!("install.select-version", id = id), &versions).await?;
                     (*version).clone()
                 }
             };
@@ -625,26 +579,31 @@ pub async fn cli_install(
     Ok(())
 }
 
-async fn local_sideload_policy(
-    path: &PathBuf,
-) -> Result<Option<crate::registry::signer::AcceptSigners>, Error> {
-    use tokio::io::AsyncReadExt;
-
+async fn local_sideload_params(path: &PathBuf, trust: bool) -> Result<SideloadParams, Error> {
     use crate::registry::signer::AcceptSigners;
-    let mut magic = [0; 3];
-    open_file(path).await?.read_exact(&mut magic).await?;
-    if magic == crate::s9pk::v2::compat::MAGIC_AND_VERSION {
-        return Ok(None);
+    use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
+
+    let mut params = SideloadParams {
+        accept_signers: None,
+        signatures: SignatureMap::new(),
+        trust,
+        signer: None,
+    };
+    let source = Arc::new(MultiCursorFile::from(open_file(path).await?));
+    if crate::s9pk::is_v1(&source).await? {
+        return Ok(params);
     }
-    let package = crate::s9pk::S9pk::open(path, None).await?;
-    Ok(Some(AcceptSigners::Any(
-        package
-            .signatures()
-            .await?
-            .into_keys()
+    let package = crate::s9pk::S9pk::deserialize_local(&source, None).await?;
+    let signatures = package.signatures().await?;
+    params.accept_signers = Some(AcceptSigners::Any(
+        signatures
+            .keys()
+            .cloned()
             .map(AcceptSigners::Signer)
             .collect(),
-    )))
+    ));
+    params.signatures = signatures;
+    Ok(params)
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]

@@ -1,20 +1,18 @@
 import { Component, inject, input } from '@angular/core'
-import { i18nKey, i18nPipe } from '@start9labs/shared'
+import { i18nPipe } from '@start9labs/shared'
 import { TuiCell, TuiCellStretch, TuiIcon, TuiTitle } from '@taiga-ui/core'
 import {
   MarketplaceTrust,
+  SIGNER_STATUS_LABELS,
   SignerStatus,
   SignerStatusesPipe,
   TrustContext,
 } from '../trust'
 
-const STATUSES: Record<
-  SignerStatus,
-  { icon: string; class: string; label: i18nKey }
-> = {
-  trusted: { icon: '@tui.check', class: 'g-positive', label: 'Trusted' },
-  untrusted: { icon: '@tui.minus', class: 'g-secondary', label: 'Not trusted' },
-  unknown: { icon: '@tui.minus', class: 'g-secondary', label: 'Unknown key' },
+const STATUSES: Record<SignerStatus, { icon: string; class: string }> = {
+  trusted: { icon: '@tui.check', class: 'g-positive' },
+  untrusted: { icon: '@tui.minus', class: 'g-secondary' },
+  unknown: { icon: '@tui.minus', class: 'g-secondary' },
 }
 
 @Component({
@@ -33,7 +31,7 @@ const STATUSES: Record<
         <tui-icon
           [icon]="statuses[signer.status].icon"
           [class]="statuses[signer.status].class"
-          [attr.aria-label]="statuses[signer.status].label | i18n"
+          [attr.aria-label]="statusLabels[signer.status] | i18n"
         />
         <span tuiTitle>
           {{ signer.name || ('Unknown key' | i18n) }}
@@ -71,6 +69,7 @@ const STATUSES: Record<
 export class MarketplaceSignersComponent {
   protected readonly trust = inject(MarketplaceTrust)
   protected readonly statuses = STATUSES
+  protected readonly statusLabels = SIGNER_STATUS_LABELS
 
   readonly keys = input.required<readonly string[]>()
   readonly context = input<TrustContext>('marketplace')

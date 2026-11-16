@@ -44,7 +44,7 @@ import { T } from '@start9labs/start-core'
               iconStart="@tui.trash"
               (click)="deleteSelected.emit()"
             >
-              {{ 'Delete' | i18n }}
+              {{ 'Remove' | i18n }}
             </button>
             <span class="count">{{ count }} {{ 'selected' | i18n }}</span>
           </span>

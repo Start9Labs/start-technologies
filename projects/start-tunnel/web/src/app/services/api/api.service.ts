@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core'
 import { RPC, RpcClient } from '@start9labs/start-core'
-import { Dump } from 'patch-db-client'
+import { legacyDatabaseSubscription } from '@start9labs/shared'
+import { Update, Revision } from 'patch-db-client'
 import { Observable } from 'rxjs'
 import { TunnelData } from '../patch-db/data-model'
 
@@ -20,9 +21,12 @@ export abstract class ApiService {
   /** The server's RPC methods, as generated from its bindings. */
   abstract readonly rpc: ApiClient
 
-  abstract openWebsocket$<T>(guid: string): Observable<T>
-}
+  watchDb$(): Observable<Update<TunnelData>> {
+    return legacyDatabaseSubscription<TunnelData>(
+      () => this.rpc.db.subscribe({}),
+      guid => this.openWebsocket$<Revision>(guid),
+    )
+  }
 
-export type SubscribeRes = Omit<Result<'db.subscribe'>, 'dump'> & {
-  dump: Dump<TunnelData>
+  abstract openWebsocket$<T>(guid: string): Observable<T>
 }

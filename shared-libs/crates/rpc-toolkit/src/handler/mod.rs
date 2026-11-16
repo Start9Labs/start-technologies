@@ -32,6 +32,7 @@ pub(crate) struct HandleAnyArgs<Context, Inherited> {
     pub(crate) method: VecDeque<&'static str>,
     pub(crate) params: Value,
     pub(crate) inherited: Inherited,
+    pub(crate) rpc_stream: Option<crate::RpcStream>,
 }
 impl<Context: crate::Context, Inherited: Send + Sync> HandleAnyArgs<Context, Inherited> {
     fn downcast<H>(self) -> Result<HandlerArgsFor<Context, H>, imbl_value::Error>
@@ -46,6 +47,7 @@ impl<Context: crate::Context, Inherited: Send + Sync> HandleAnyArgs<Context, Inh
             method,
             params,
             inherited,
+            rpc_stream,
         } = self;
         Ok(HandlerArgs {
             context,
@@ -54,6 +56,7 @@ impl<Context: crate::Context, Inherited: Send + Sync> HandleAnyArgs<Context, Inh
             params: imbl_value::from_value(params.clone())?,
             inherited_params: OrEmpty::from_t(inherited),
             raw_params: params,
+            rpc_stream: rpc_stream.map(crate::RpcStream::typed),
         })
     }
 }
@@ -191,13 +194,18 @@ impl<Context: crate::Context, Inherited: Send> HandleAny<Context>
 
 #[allow(type_alias_bounds)]
 pub type HandlerArgsFor<Context: crate::Context, H: HandlerTypes + ?Sized> =
-    HandlerArgs<Context, H::Params, H::InheritedParams>;
+    HandlerArgs<Context, H::Params, H::InheritedParams, H::Item, H::Final>;
 
-#[derive(Debug, Clone)]
+/// Per-call arguments with an optional single-owner response producer.
+///
+/// Move the producer into its task; clone context and parameters separately.
+#[derive(Debug)]
 pub struct HandlerArgs<
     Context: crate::Context,
     Params: Send + Sync = Empty,
     InheritedParams: Send + Sync = Empty,
+    Item = Never,
+    Final = (),
 > {
     pub context: Context,
     pub parent_method: VecDeque<&'static str>,
@@ -205,6 +213,8 @@ pub struct HandlerArgs<
     pub params: Params,
     pub inherited_params: InheritedParams,
     pub raw_params: Value,
+    /// Event producer, present when the transport and client opt into response streaming.
+    pub rpc_stream: Option<crate::RpcStream<Item, Final>>,
 }
 
 pub trait HandlerTypes {
@@ -212,6 +222,10 @@ pub trait HandlerTypes {
     type InheritedParams: Send + Sync;
     type Ok: Send + Sync;
     type Err: Send + Sync;
+    /// `Never` marks a non-streaming endpoint.
+    type Item;
+    /// The successful terminal value, independent of the initiating result.
+    type Final;
 }
 
 pub trait PassthroughHandlerTypes: Adapter {}
@@ -224,6 +238,8 @@ where
     type InheritedParams = <T::Inner as HandlerTypes>::InheritedParams;
     type Ok = <T::Inner as HandlerTypes>::Ok;
     type Err = <T::Inner as HandlerTypes>::Err;
+    type Item = <T::Inner as HandlerTypes>::Item;
+    type Final = <T::Inner as HandlerTypes>::Final;
 }
 
 pub trait LeafHandler {}

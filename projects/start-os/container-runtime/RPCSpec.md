@@ -21,6 +21,22 @@ Initialize the runtime and system.
 
 `null`
 
+### init-backup
+
+Load the package ABI for an isolated backup procedure without running initialization hooks. The host uses a fresh container with shared volume mounts disabled. This runtime does not run main or exit hooks.
+
+#### params
+
+```ts
+{
+  id: string,
+}
+```
+
+#### response
+
+`null`
+
 ### exit
 
 Shutdown runtime and optionally run exit hooks for a target version.

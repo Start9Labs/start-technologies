@@ -52,24 +52,30 @@ async fn inner_main(
         let init_ctx = InitContext::init(config, dns.clone()).await?;
         let handle = init_ctx.progress.clone();
         let rpc_ctx_phases = InitRpcContextPhases::new(&handle);
-        server.serve_ui_for(init_ctx);
+        server.serve_ui_for(init_ctx.clone());
 
-        let ctx = RpcContext::init(
-            &server.acceptor_setter(),
-            dns.clone(),
-            config,
-            InternedString::intern(
-                tokio::fs::read_to_string("/media/startos/config/disk.guid")
-                    .await?
-                    .trim(),
-            ),
-            None,
-            rpc_ctx_phases,
-        )
-        .await?;
+        let result = async {
+            RpcContext::init(
+                &server.acceptor_setter(),
+                dns.clone(),
+                config,
+                InternedString::intern(
+                    tokio::fs::read_to_string("/media/startos/config/disk.guid")
+                        .await?
+                        .trim(),
+                ),
+                None,
+                rpc_ctx_phases,
+            )
+            .await
+        }
+        .await;
+        init_ctx
+            .complete_and_retire(result.as_ref().map(|_| ()).map_err(Error::clone_output))
+            .await;
+        let ctx = result?;
 
         server.serve_ui_for(ctx.clone());
-        handle.complete();
 
         ctx
     };

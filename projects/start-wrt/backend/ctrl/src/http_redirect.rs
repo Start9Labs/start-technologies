@@ -218,8 +218,8 @@ fn respond(gate: &Gate, req: &Request) -> Option<Response> {
     .then(|| redirect(req))
 }
 
-/// Never falls through.
-fn redirect(req: &Request) -> Response {
+/// The same URI over HTTPS, or 400 without a Host header.
+pub(crate) fn redirect(req: &Request) -> Response {
     match request_authority(req).and_then(|authority| https_redirect_uri(req.uri(), authority).ok())
     {
         Some(target) => (

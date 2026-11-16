@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 
 use serde::Serialize;
@@ -7,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
-use crate::sign::{AnySignature, AnyVerifyingKey};
+use crate::sign::{AnySignature, AnyVerifyingKey, SignatureMap};
 use crate::util::io::{AtomicFile, open_file};
 use crate::util::serde::der64::DerEncoding;
 
@@ -23,7 +22,7 @@ pub struct Diagnostic {
 
 #[derive(Clone, Default)]
 pub struct Trailer {
-    pub(crate) signatures: HashMap<AnyVerifyingKey, AnySignature>,
+    pub(crate) signatures: SignatureMap,
     pub(crate) diagnostics: Vec<Diagnostic>,
     start: Option<u64>,
     raw: Vec<u8>,

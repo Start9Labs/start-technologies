@@ -79,12 +79,13 @@ jobs:
           for product in $products; do
             node scripts/changelog.mjs check-version "projects/${product#projects/}"
           done
+      - uses: ./.github/actions/setup-release-tests
       - name: Check changelog and release tooling
         run: make release-notes-test
 
   # On pull requests, the expensive jobs below only run when a non-docs file
   # changed. Markdown-only PRs run formatting and changelog validation, skipping
-  # make test / the rustfmt container / the artifact regen here. Every
+  # the test suites / the rustfmt container / the artifact regen here. Every
   # live-docs PR is limited to the published books by its separate guard and
   # only needs the prettier gate. On push/dispatch this guard is bypassed and
   # the expensive jobs always run.
@@ -114,8 +115,9 @@ jobs:
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
 
-  test:
-    name: Run Automated Tests
+  # Each suite `make test` runs belongs to one of these jobs or to `changelog`.
+  start-core:
+    name: start-core Tests & Man Pages
     needs: [prettier, changes]
     if: >-
       !cancelled() && needs.prettier.result == 'success'
@@ -127,7 +129,77 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
-          free-space: 'false'
+          setup-docker: 'false'
+          setup-sccache: 'false'
+
+      - name: Run start-core tests
+        run: make start-core-test
+      # Reuses the test harness compiled by the step above.
+      - name: Check man pages
+        if: '!cancelled()'
+        run: make manpages-check
+      - name: Upload regenerated man pages
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: generated-man-pages
+          path: |
+            projects/start-cli/man
+            projects/start-registry/man
+            projects/start-tunnel/man
+            projects/start-os/man
+
+  start-wrt:
+    name: StartWRT Tests
+    needs: [prettier, changes]
+    if: >-
+      !cancelled() && needs.prettier.result == 'success'
+      && github.event.pull_request.draft != true
+      && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-build
+        with:
+          nodejs-version: ${{ env.NODEJS_VERSION }}
+          setup-docker: 'false'
+          setup-sccache: 'false'
+
+      - name: Run StartWRT tests
+        run: make start-wrt-test
+
+  rust-crates:
+    name: rpc-toolkit, visit-rs & backup-fs Tests
+    needs: [prettier, changes]
+    if: >-
+      !cancelled() && needs.prettier.result == 'success'
+      && github.event.pull_request.draft != true
+      && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-build
+        with:
+          nodejs-version: ${{ env.NODEJS_VERSION }}
+          setup-docker: 'false'
+          setup-sccache: 'false'
+
+      - name: Run rpc-toolkit, visit-rs and backup-fs tests
+        run: make rpc-toolkit-test backup-fs-test
+
+  scripts:
+    name: SDK, Runtime & Script Tests
+    needs: [prettier, changes]
+    if: >-
+      !cancelled() && needs.prettier.result == 'success'
+      && github.event.pull_request.draft != true
+      && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-build
+        with:
+          nodejs-version: ${{ env.NODEJS_VERSION }}
           setup-docker: 'false'
           setup-sccache: 'false'
 
@@ -138,11 +210,11 @@ jobs:
           npm --prefix .github/actions/upload-each run build
           test -z "$(git status --porcelain --untracked-files=all -- .github/actions/upload-each/dist)"
 
-      - name: Install Bash completion test dependency
-        run: sudo apt-get install -y bash-completion
+      - name: Install shell test dependencies
+        run: sudo apt-get install -y bash-completion grub-common
 
-      - name: Build And Run Tests
-        run: make test
+      - name: Run SDK, runtime and script tests
+        run: make start-sdk-test container-runtime-test start-os-scripts-test bash-completion-test
 
   format:
     name: Formatting & Lockfiles
@@ -196,7 +268,7 @@ jobs:
           command: check licenses
 
   generated:
-    name: Generated Artifacts
+    name: Generated Bindings & MCP Catalog
     needs: [prettier, changes]
     if: >-
       !cancelled() && needs.prettier.result == 'success'
@@ -214,8 +286,8 @@ jobs:
       # The bindings regen prettifies generated .ts via start-core's node deps.
       - name: Install start-core node deps
         run: npm --prefix shared-libs/ts-modules/start-core ci
-      - name: Check generated artifacts
-        run: make -k generated-artifacts-check
+      - name: Check generated bindings and MCP catalog
+        run: make -k start-core-ts-bindings-check start-core-mcp-tools-check
       # A failed gate leaves its regenerated files in the working tree.
       - name: Upload regenerated artifacts
         if: failure()
@@ -225,10 +297,6 @@ jobs:
           path: |
             shared-libs/ts-modules/start-core/lib/osBindings
             shared-libs/crates/start-core/mcp-tools.json
-            projects/start-cli/man
-            projects/start-registry/man
-            projects/start-tunnel/man
-            projects/start-os/man
 
   complexity:
     name: Complexity

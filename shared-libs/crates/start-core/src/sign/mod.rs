@@ -17,8 +17,16 @@ use crate::util::serde::{Der64, DerEncoding, deserialize_from_str};
 pub mod commitment;
 pub mod compat;
 pub mod ed25519;
+pub mod fingerprint;
 pub(crate) mod gpg;
 pub mod gpg_agent;
+pub mod instance;
+mod profile;
+pub mod session;
+pub use profile::browser_profile;
+
+/// Signatures serialized in signer order.
+pub type SignatureMap = std::collections::BTreeMap<AnyVerifyingKey, AnySignature>;
 
 pub fn canonicalize_verifying_keys<T>(
     keys: std::collections::BTreeMap<InternedString, T>,
@@ -115,6 +123,13 @@ pub enum AnySigningKey {
 rpc_toolkit::reflect_ts!(AnySigningKey);
 rpc_toolkit::ts_export!(AnySigningKey, namespaces = [""]);
 impl AnySigningKey {
+    /// Generates an Ed25519 identity using OS randomness.
+    pub fn generate() -> Self {
+        Self::Ed25519(ed25519_dalek::SigningKey::generate(
+            &mut crate::util::crypto::os_rng(),
+        ))
+    }
+
     pub fn verifying_key(&self) -> AnyVerifyingKey {
         match self {
             Self::Ed25519(k) => AnyVerifyingKey::Ed25519(k.into()),
@@ -484,6 +499,24 @@ mod tests {
         assert_eq!(a, alias);
         assert_eq!(a.cmp(&alias), Equal);
         assert_eq!(a.partial_cmp(&alias), Some(Equal));
+        let signature = AnySignature::Ed25519ph(ed25519_dalek::Signature::from_bytes(&[4; 64]));
+        let signatures = SignatureMap::from([
+            (c.clone(), signature.clone()),
+            (a.clone(), signature.clone()),
+            (b.clone(), signature),
+        ]);
+        assert_eq!(signatures.keys().collect::<Vec<_>>(), [&a, &b, &c]);
+        let wire = serde_json::to_string(&signatures).unwrap();
+        assert!(
+            wire.find(&*a.interned_der64()).unwrap() < wire.find(&*b.interned_der64()).unwrap()
+        );
+        assert!(
+            wire.find(&*b.interned_der64()).unwrap() < wire.find(&*c.interned_der64()).unwrap()
+        );
+        assert_eq!(
+            serde_json::from_str::<SignatureMap>(&wire).unwrap(),
+            signatures
+        );
         let keys = BTreeSet::from([c.clone(), alias, b.clone(), a.clone()]);
         assert_eq!(keys.into_iter().collect::<Vec<_>>(), [a, b, c]);
     }

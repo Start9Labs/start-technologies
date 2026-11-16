@@ -6,6 +6,7 @@ use url::Url;
 
 use crate::PackageId;
 use crate::context::CliContext;
+use crate::context::config::resolve_profile;
 use crate::prelude::*;
 use crate::registry::package::get::{GetPackageResponseFull, PackageDetailLevel};
 use crate::s9pk::v2::SIG_CONTEXT;
@@ -17,9 +18,9 @@ use crate::util::VersionString;
 #[serde(rename_all = "camelCase")]
 pub struct CliPromoteParams {
     #[arg(long, help = "help.arg.from-registry-url")]
-    pub from: Option<Url>,
+    pub from: Option<String>,
     #[arg(long, help = "help.arg.to-registry-url")]
-    pub to: Option<Url>,
+    pub to: Option<String>,
     #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
     #[arg(help = "help.arg.package-version")]
@@ -27,18 +28,12 @@ pub struct CliPromoteParams {
 }
 
 pub fn registry_rpc_url(url: &Url) -> Result<Url, Error> {
-    let mut url = url.clone();
-    url.path_segments_mut()
-        .map_err(|_| eyre!("Url cannot be base"))
-        .with_kind(ErrorKind::ParseUrl)?
-        .push("rpc")
-        .push("v0");
-    Ok(url)
+    crate::util::net::rpc_url(url, 0)
 }
 
-pub fn resolve_registry_url(explicit: Option<&Url>, ctx: &CliContext) -> Result<Url, Error> {
-    if let Some(url) = explicit {
-        registry_rpc_url(url)
+pub fn resolve_registry_url(explicit: Option<&str>, ctx: &CliContext) -> Result<Url, Error> {
+    if let Some(target) = explicit {
+        registry_rpc_url(&resolve_profile(ctx.registry_profiles.as_ref(), target)?)
     } else if let Some(url) = &ctx.registry_url {
         Ok(url.get()?.clone())
     } else {
@@ -53,15 +48,14 @@ pub async fn call_registry(
     ctx: &CliContext,
     url: Url,
     method: &str,
-    mut params: Value,
+    params: Value,
 ) -> Result<Value, Error> {
-    crate::registry::compat::pem_wire(&mut params);
     let sig_context = url.host().as_ref().map(InternedString::from_display);
-    crate::middleware::auth::signature::call_remote(
+    crate::registry::context::call_cli(
         ctx,
         url,
         HeaderMap::new(),
-        sig_context.as_deref(),
+        sig_context.as_deref().or_not_found("registry hostname")?,
         method,
         params,
     )
@@ -85,8 +79,8 @@ pub async fn cli_promote(
         ));
     }
 
-    let from_url = resolve_registry_url(from.as_ref(), &ctx)?;
-    let to_url = resolve_registry_url(to.as_ref(), &ctx)?;
+    let from_url = resolve_registry_url(from.as_deref(), &ctx)?;
+    let to_url = resolve_registry_url(to.as_deref(), &ctx)?;
 
     let res: Value = call_registry(
         &ctx,
@@ -142,4 +136,96 @@ pub async fn cli_promote(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::config::ClientConfig;
+    use crate::registry::os::promote::CliOsPromoteParams;
+    use crate::util::serde::IoFormat;
+
+    fn context(yaml: &str) -> CliContext {
+        CliContext::init(
+            IoFormat::Yaml
+                .from_reader::<_, ClientConfig>(yaml.as_bytes())
+                .unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn both_promote_commands_accept_registry_profiles() {
+        let ctx = context(
+            "host:\n  alpha: https://server/\nregistry:\n  default: https://fallback/\n  alpha: source\n  source: https://alpha/registry\n  production: https://production/registry",
+        );
+        let package = CliPromoteParams::try_parse_from([
+            "promote",
+            "--from",
+            "alpha",
+            "--to",
+            "production",
+            "example",
+            "1.0.0:0",
+        ])
+        .unwrap();
+        let os = CliOsPromoteParams::try_parse_from([
+            "promote",
+            "--from",
+            "alpha",
+            "--to",
+            "production",
+            "0.4.1",
+        ])
+        .unwrap();
+        for (from, to) in [(package.from, package.to), (os.from, os.to)] {
+            assert_eq!(
+                resolve_registry_url(from.as_deref(), &ctx)
+                    .unwrap()
+                    .as_str(),
+                "https://alpha/registry/rpc/v0",
+            );
+            assert_eq!(
+                resolve_registry_url(to.as_deref(), &ctx).unwrap().as_str(),
+                "https://production/registry/rpc/v0",
+            );
+        }
+        assert_eq!(
+            resolve_registry_url(None, &ctx).unwrap().as_str(),
+            "https://fallback/rpc/v0",
+        );
+    }
+
+    #[test]
+    fn explicit_registry_targets_work_without_a_default() {
+        let ctx = context("registry:\n  alpha: https://alpha/");
+        assert_eq!(
+            resolve_registry_url(Some("alpha"), &ctx).unwrap().as_str(),
+            "https://alpha/rpc/v0",
+        );
+        assert_eq!(
+            resolve_registry_url(Some("https://literal/base"), &ctx)
+                .unwrap()
+                .as_str(),
+            "https://literal/base/rpc/v0",
+        );
+        assert!(resolve_registry_url(None, &ctx).is_err());
+        assert_eq!(
+            resolve_registry_url(Some("https://literal/"), &context("{}"))
+                .unwrap()
+                .as_str(),
+            "https://literal/rpc/v0",
+        );
+    }
+
+    #[test]
+    fn invalid_explicit_registry_targets_do_not_fall_back() {
+        let ctx = context(
+            "registry:\n  default: https://fallback/\n  broken: unknown\n  cycle: other\n  other: cycle",
+        );
+        for target in ["missing", "broken", "cycle", "not a url"] {
+            let error = resolve_registry_url(Some(target), &ctx).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::InvalidRequest);
+        }
+    }
 }

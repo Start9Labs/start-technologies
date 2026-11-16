@@ -30,6 +30,7 @@ export const mockDhcpHosts: DhcpHostSection[] = [
     name: 'host_ipad',
     options: {
       mac: 'DE:AD:BE:EF:CA:FE',
+      ip: '192.168.1.102', // Admin reservation, inactive while it is on Kids
       name: 'iPad',
       dns: '1',
     },

@@ -87,29 +87,24 @@ pub struct Wifi<Id: Ord = ProfileId> {
 }
 rpc_toolkit::reflect_ts!(impl [Id: Ord] for Wifi<Id> where [BTreeSet<Password<Id>>: rpc_toolkit::ts::TS]);
 
-/// `wifi.set` request: the desired WiFi config plus a confirmation flag.
-/// When a profile loses its last WiFi password its devices can no longer reach
-/// that subnet — disconnected if the password was removed, or moved to another
-/// profile if it was reassigned — which breaks any published ports forwarding to
-/// them. When the flag is false and such ports exist, `set` applies nothing and
-/// returns them in `WifiSetResult` for a confirmation dialog; with the flag true
-/// it deletes those published ports as part of the change.
+/// `wifi.set` request: the desired WiFi config. With `preview`, nothing is
+/// applied and the result lists the Wi-Fi devices that keep settings for a
+/// profile losing its last password.
 #[derive(Debug, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiSetRequest {
     #[serde(flatten)]
     pub wifi: Wifi<ProfileIdOpt>,
     #[serde(default)]
-    pub confirm_published_port_deletion: bool,
+    pub preview: bool,
 }
 rpc_toolkit::reflect_ts!(WifiSetRequest);
 
 #[derive(Debug, Serialize, Deserialize, Default, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiSetResult {
-    /// Non-empty (and nothing applied) when published ports would be deleted and
-    /// the caller hasn't confirmed yet. Empty once the change is applied.
-    pub pending_published_port_deletions: Vec<crate::published_ports::AffectedPublishedPort>,
+    /// Filled by a preview only.
+    pub leaving_profile: Vec<crate::published_ports::DeviceLeavingProfile>,
 }
 rpc_toolkit::reflect_ts!(WifiSetResult);
 
@@ -1017,15 +1012,70 @@ fn set_config(
     }
 }
 
+/// Wi-Fi devices on a profile that loses its last password, with the settings
+/// they keep for it.
+async fn wifi_devices_leaving_profile<C: CtrlContext>(
+    ctx: &C,
+    wifi: &Wifi<ProfileIdOpt>,
+) -> Result<Vec<crate::published_ports::DeviceLeavingProfile>, Error> {
+    let old_profiles: HashSet<String> = get(ctx.clone())
+        .await
+        .ok()
+        .map(|w| {
+            w.passwords
+                .iter()
+                .filter_map(|p| p.profile.as_ref().map(|pr| pr.fullname.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let arena = Arena::new();
+    let cfgs = parse_all(
+        ctx.uci_root(),
+        &arena,
+        &["wireless", "startwrt", "network", "firewall", "dhcp"],
+    )
+    .await?;
+    let lookup = profiles::Lookup::parse(ctx.clone(), &cfgs)?;
+    let mut new_profiles: HashSet<String> = HashSet::new();
+    for p in &wifi.passwords {
+        if let Some(pr) = &p.profile {
+            new_profiles.insert(lookup.resolve(pr)?.fullname.clone());
+        }
+    }
+    let vacated: HashSet<String> = old_profiles.difference(&new_profiles).cloned().collect();
+    if vacated.is_empty() {
+        return Ok(Vec::new());
+    }
+    let devices = crate::devices::list(crate::ServerContext::default())
+        .await
+        .unwrap_or_default();
+    let names: HashMap<String, String> = devices
+        .iter()
+        .filter_map(|d| Some((d.mac.as_ref()?.to_uppercase(), d.name.clone())))
+        .collect();
+    let leaving: HashMap<String, String> = devices
+        .iter()
+        .filter(|d| {
+            d.connection
+                .as_deref()
+                .is_some_and(|c| c.starts_with("Wi-Fi"))
+        })
+        .filter_map(|d| {
+            let profile = d.security_profile.clone().filter(|p| vacated.contains(p))?;
+            Some((d.mac.as_ref()?.to_uppercase(), profile))
+        })
+        .collect();
+    Ok(crate::published_ports::devices_leaving_profile(
+        &cfgs, &lookup, &leaving, &names,
+    ))
+}
+
 #[instrument(skip_all)]
 pub async fn set<C: CtrlContext>(
     ctx: C,
     DeserializeStdin(req): DeserializeStdin<WifiSetRequest>,
 ) -> Result<WifiSetResult, Error> {
-    let WifiSetRequest {
-        wifi,
-        confirm_published_port_deletion: confirm,
-    } = req;
+    let WifiSetRequest { wifi, preview } = req;
 
     if let Some(country) = &wifi.country {
         let known = if ctx.effectful() {
@@ -1048,93 +1098,13 @@ pub async fn set<C: CtrlContext>(
         }
     }
 
-    // A profile that loses its last WiFi password is "vacated": its WiFi devices
-    // can no longer reach that subnet — disconnected if the password was removed,
-    // or moved to another profile if it was reassigned — breaking their published
-    // ports. We attribute each device's profile by its static DHCP reservation
-    // subnet (config-derived, reliable) rather than a live ARP VLAN tag, and keep
-    // only WiFi-connected devices (Ethernet devices on the vacated profile keep
-    // their IP, so their port forward still works). Resolve the affected MACs and
-    // ports up front.
-    let (affected_macs, affected_ports): (
-        HashSet<String>,
-        Vec<crate::published_ports::AffectedPublishedPort>,
-    ) = if ctx.effectful() {
-        let old_profiles: HashSet<String> = get(ctx.clone())
-            .await
-            .ok()
-            .map(|w| {
-                w.passwords
-                    .iter()
-                    .filter_map(|p| p.profile.as_ref().map(|pr| pr.fullname.clone()))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let mut new_profiles: HashSet<String> = HashSet::new();
-        {
-            let arena = Arena::new();
-            let cfgs = parse_all(
-                ctx.uci_root(),
-                &arena,
-                &["wireless", "startwrt", "network", "firewall"],
-            )
-            .await?;
-            let lookup = profiles::Lookup::parse(ctx.clone(), &cfgs)?;
-            for p in &wifi.passwords {
-                if let Some(pr) = &p.profile {
-                    new_profiles.insert(lookup.resolve(pr)?.fullname.clone());
-                }
-            }
-        }
-
-        let vacated: HashSet<String> = old_profiles.difference(&new_profiles).cloned().collect();
-        if vacated.is_empty() {
-            (HashSet::new(), Vec::new())
+    if preview {
+        let leaving_profile = if ctx.effectful() {
+            wifi_devices_leaving_profile(&ctx, &wifi).await?
         } else {
-            let devices = crate::devices::list(crate::ServerContext::default())
-                .await
-                .unwrap_or_default();
-            let device_names: HashMap<String, String> = devices
-                .iter()
-                .filter_map(|d| d.mac.as_ref().map(|m| (m.to_uppercase(), d.name.clone())))
-                .collect();
-            // MAC → live security profile, the attribution source for IPv6-only
-            // ports (which have no IPv4 reservation subnet to consult).
-            let device_profiles: HashMap<String, String> = devices
-                .iter()
-                .filter_map(|d| Some((d.mac.as_ref()?.to_uppercase(), d.security_profile.clone()?)))
-                .collect();
-            let wifi_macs: HashSet<String> = devices
-                .iter()
-                .filter(|d| {
-                    d.connection
-                        .as_deref()
-                        .map_or(false, |c| c.starts_with("Wi-Fi"))
-                })
-                .filter_map(|d| d.mac.as_ref().map(|m| m.to_uppercase()))
-                .collect();
-            crate::published_ports::affected_wifi_ports_for_vacated_profiles(
-                &ctx,
-                &vacated,
-                &wifi_macs,
-                &device_names,
-                &device_profiles,
-            )
-            .await?
-        }
-    } else {
-        (HashSet::new(), Vec::new())
-    };
-
-    if ctx.effectful() && !confirm {
-        // Dry run: report what would be deleted and apply nothing. The UI calls
-        // again with `confirmPublishedPortDeletion: true` to actually apply.
-        // The list may be empty, which just tells the caller there's nothing
-        // to confirm.
-        return Ok(WifiSetResult {
-            pending_published_port_deletions: affected_ports,
-        });
+            Vec::new()
+        };
+        return Ok(WifiSetResult { leaving_profile });
     }
 
     let bands = if ctx.effectful() {
@@ -1291,12 +1261,6 @@ pub async fn set<C: CtrlContext>(
             }
             Ok(v) => v,
         };
-        // Confirmed path: delete the published ports (and stale reservations) for
-        // devices that can no longer reach their subnet, atomically with the WiFi
-        // change.
-        if !affected_macs.is_empty() {
-            crate::published_ports::remove_ports_for_macs(&mut cfgs, &affected_macs);
-        }
         let dump_result = dump_all(ctx.uci_root(), cfgs).await;
         drop(arena);
         match dump_result {
@@ -1333,21 +1297,6 @@ pub async fn set<C: CtrlContext>(
                     .await?;
                     if country_changed {
                         await_regdomain(wifi.country.as_deref().unwrap_or("00")).await;
-                    }
-                    // Removing published-port firewall sections needs a firewall
-                    // reload (the wifi restart above doesn't touch fw4), and
-                    // dropping their static DHCP reservations needs a dnsmasq
-                    // reload so the device actually releases the pinned IP.
-                    if !affected_macs.is_empty() {
-                        crate::published_ports::sync_v6_mac_bind_logged(ctx.uci_root()).await;
-                        let _ = crate::run_quiet_async(
-                            tokio::process::Command::new("/etc/init.d/firewall").arg("reload"),
-                        )
-                        .await;
-                        crate::published_ports::reload_dnsmasq();
-                        // odhcpd owns IPv6 leases/hostids; reload so a cleared or
-                        // preserved reservation takes runtime effect.
-                        crate::published_ports::reload_odhcpd();
                     }
                 }
                 match restart {
@@ -1395,12 +1344,11 @@ pub async fn edit<C: CtrlContext + Clone>(ctx: C) -> Result<(), Error> {
             .collect(),
     };
     let modified_wifi = crate::utils::edit_in_editor(&current_wifi)?;
-    // CLI editor path has no dialog: confirm published-port cleanup implicitly.
     set(
         ctx,
         DeserializeStdin(WifiSetRequest {
             wifi: modified_wifi,
-            confirm_published_port_deletion: true,
+            preview: false,
         }),
     )
     .await
@@ -2105,7 +2053,7 @@ mod tests {
             ctx,
             DeserializeStdin(super::WifiSetRequest {
                 wifi: w.0,
-                confirm_published_port_deletion: false,
+                preview: false,
             }),
         )
         .await

@@ -1,0 +1,32 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-set-log-level 1  "set-log-level "
+.SH NAME
+start\-cli\-server\-set\-log\-level \- Set the running daemon\*(Aqs StartOS backend log level
+.SH SYNOPSIS
+\fBstart\-cli server set\-log\-level\fR [\fB\-h\fR|\fB\-\-help\fR] <\fILEVEL\fR>
+.SH DESCRIPTION
+Set the running daemon\*(Aqs StartOS backend log level
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fILEVEL\fR>
+Verbosity for start\-core/start\-os until the daemon restarts
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+error
+.IP \(bu 2
+warn
+.IP \(bu 2
+info
+.IP \(bu 2
+debug
+.IP \(bu 2
+trace
+.RE

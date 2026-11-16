@@ -18,7 +18,10 @@ import {
   tuiTextfieldOptionsProvider,
   TuiTitle,
 } from '@taiga-ui/core'
-import { provideTranslatedValidationErrors } from 'src/app/i18n/validation-errors'
+import {
+  fill,
+  provideTranslatedValidationErrors,
+} from 'src/app/i18n/validation-errors'
 import { tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
 import {
   TUI_CONFIRM,
@@ -86,7 +89,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
       <section>
         <div>
           <tui-textfield tuiChevron [stringify]="stringifyTarget">
-            <label tuiLabel>{{ 'Connects to' | i18n }}</label>
+            <label tuiLabel>{{ 'Connects via' | i18n }}</label>
             <input tuiSelect formControlName="target" />
             <tui-data-list-wrapper *tuiDropdown [items]="targetOptions()" />
           </tui-textfield>
@@ -142,25 +145,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             appearance="secondary-destructive"
             class="g-delete"
             [disabled]="dependentVpns().length"
-            [tuiHint]="
-              dependentVpns().length
-                ? ('Cannot delete:' | i18n) +
-                  ' ' +
-                  dependentVpns().join(', ') +
-                  ' ' +
-                  (dependentVpns().length === 1
-                    ? ('uses' | i18n)
-                    : ('use' | i18n)) +
-                  ' ' +
-                  ('this VPN as a target. Change' | i18n) +
-                  ' ' +
-                  (dependentVpns().length === 1
-                    ? ('its' | i18n)
-                    : ('their' | i18n)) +
-                  ' ' +
-                  ('target first.' | i18n)
-                : null
-            "
+            [tuiHint]="deleteHint()"
             (click)="onDelete()"
           >
             {{ 'Delete' | i18n }}
@@ -222,6 +207,18 @@ export default class OutboundVPN {
     const thisLabel = this.data()?.label
     if (!thisLabel) return []
     return allVpns.filter(v => v.target === thisLabel).map(v => v.label)
+  })
+
+  readonly deleteHint = computed(() => {
+    const vpns = this.dependentVpns()
+    return vpns.length
+      ? fill(
+          this.i18n.transform(
+            'To delete this VPN, first change {vpns} to connect via something else.',
+          ),
+          { vpns: vpns.join(', ') },
+        )
+      : null
   })
 
   readonly targetOptions = computed(() => {

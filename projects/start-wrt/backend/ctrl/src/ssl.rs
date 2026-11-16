@@ -30,15 +30,15 @@ pub fn ca_cert_path() -> PathBuf {
     Path::new(SSL_CERT_DIR).join(CA_CERT_FILENAME)
 }
 
-fn ca_key_path() -> PathBuf {
+pub(crate) fn ca_key_path() -> PathBuf {
     Path::new(SSL_KEY_DIR).join(CA_KEY_FILENAME)
 }
 
-fn int_cert_path() -> PathBuf {
+pub(crate) fn int_cert_path() -> PathBuf {
     Path::new(SSL_CERT_DIR).join(INT_CERT_FILENAME)
 }
 
-fn int_key_path() -> PathBuf {
+pub(crate) fn int_key_path() -> PathBuf {
     Path::new(SSL_KEY_DIR).join(INT_KEY_FILENAME)
 }
 
@@ -150,7 +150,11 @@ fn generate_intermediate_ca(
 }
 
 /// Write a PEM file atomically, with the given permissions.
-async fn write_pem(path: &Path, content: &str, mode: u32) -> Result<(), Error> {
+pub(crate) async fn write_pem(
+    path: &Path,
+    content: impl AsRef<[u8]>,
+    mode: u32,
+) -> Result<(), Error> {
     use std::os::unix::fs::PermissionsExt;
 
     use tokio::io::AsyncWriteExt;
@@ -168,7 +172,7 @@ async fn write_pem(path: &Path, content: &str, mode: u32) -> Result<(), Error> {
         )
     })?;
 
-    file.write_all(content.as_bytes())
+    file.write_all(content.as_ref())
         .await
         .map_err(|e| Error::new(eyre!("failed to write cert: {e}"), ErrorKind::Filesystem))?;
 

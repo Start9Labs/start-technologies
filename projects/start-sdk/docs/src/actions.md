@@ -159,13 +159,14 @@ Restart the service once the rebuild finishes.`,
 }
 ```
 
-`result` holds the values the user acts on — copies, scans, or saves. It takes one of three types:
+`result` holds the values the user acts on — copies, scans, or saves. It takes one of four types:
 
 | `type`      | Renders as                                                         | Takes                                             |
 | ----------- | ------------------------------------------------------------------ | ------------------------------------------------- |
 | `single`    | a one-line field                                                   | `value`, `copyable`, `qr`, `masked`, `launchable` |
 | `multiline` | a read-only monospace box that keeps its line breaks               | `value`, `copyable`, `qr`, `masked`, `filename`   |
-| `group`     | an accordion of named members, each of which is any of these three | `value`, the array of members                     |
+| `file`      | a download button for a file in a service volume                   | `value`, the prepared download ID; `delete`       |
+| `group`     | an accordion of named members, each of which is any of these types | `value`, the array of members                     |
 
 A newline in a `single` value is not rendered — the browser strips it from the field — so anything with its own line structure is a `multiline` value. `filename` is what separates "here is some text" from "here is a file": set it and the value is also offered as a download under that name; set it to `null` for no download button.
 
@@ -212,6 +213,31 @@ result: {
   filename: 'vikunja-doctor.txt',
 }
 ```
+
+### File Download
+
+Use `prepareDownload` for a file already in a service volume. It streams the file without loading it into the action result or the browser's JavaScript memory:
+
+```typescript
+const id = await sdk.prepareDownload(effects, {
+  volume: 'main',
+  path: 'reports/diagnostics.zip',
+  mime: 'application/zip',
+  filename: 'diagnostics.zip',
+})
+return {
+  version: '1',
+  title: i18n('Diagnostics'),
+  message: null,
+  result: { type: 'file', value: id, delete: true },
+}
+```
+
+`mime` defaults to `application/octet-stream`; `filename` defaults to the path's last component. A File result also works inside a group. `delete: true` removes the prepared file after delivery to the HTTP stack, a failed or cancelled transfer, or expiry without a download. It does not prove the browser saved the file. Use a unique export path and keep it stable until cleanup; conditional deletion is not atomic against concurrent renames. `delete: false` leaves the file in the service volume.
+
+Deletion starts being owned by StartOS when the action returns the File result. If the action fails before returning it, the service still owns the file. Download IDs are one-shot bearer capabilities: keep them private. They expire after 30 minutes without a request, and an active transfer times out after one hour. Downloads do not support resuming or range requests; run the action again for another download.
+
+Volume paths are relative, require an existing parent directory, and must not contain symlinks or parent traversal. Transfers accept regular files only.
 
 ### Group of Values
 
@@ -329,9 +355,58 @@ export const configure = sdk.Action.withInput(
 
 The five arguments to `withInput` are: action ID, metadata (static object or async function), input spec, prefill function, and handler.
 
+### File Upload
+
+Prepare the destination while building the form, then pass its ID to `Value.file`:
+
+```typescript
+import { types as T } from '@start9labs/start-sdk'
+
+const inputSpec = async ({ effects }: { effects: T.Effects }) =>
+  InputSpec.of({
+    certificate: Value.file({
+      name: i18n('Certificate'),
+      uploadId: await sdk.prepareUpload(effects, {
+        volume: 'main',
+        path: 'certificates/import.pem',
+        maxSize: 1024 * 1024,
+        mode: 0o600,
+        uid: 1000,
+        gid: 1000,
+      }),
+      extensions: ['.pem', '.crt'],
+      required: false,
+    }),
+  })
+```
+
+`required: false` gives the handler `null` when no file is selected; `required: true` requires a file. `Value.dynamicFile` accepts the same options. Each selected file needs its own prepared ID; a repeatable list cannot upload multiple files through one ID.
+
+`maxSize` belongs to `prepareUpload` and is an inclusive byte limit, enforced against both a declared length and the actual received stream. Omit it for no byte limit; `0` permits only an empty file. The File field reads that prepared limit for its picker and validation.
+
+`extensions` belongs to `Value.file`, not the upload effect. It filters the uploaded filename case-insensitively, including compound suffixes such as `.tar.gz`; `[]` permits any filename. It does not inspect the contents or establish a MIME type.
+
+After submission, per-file upload progress replaces the form. Once all uploads finish, the dialog closes and the standard action spinner appears while the handler runs. The handler receives OS-authored metadata, not a browser `File`:
+
+```typescript
+input.certificate // null, or:
+// {
+//   name: 'uploaded-name.pem',
+//   path: 'certificates/import.pem',
+//   mime: 'application/x-pem-file',
+//   commitment: { hash: '<base64 BLAKE3 digest>', size: 1234 },
+// }
+```
+
+The file is already at the prepared volume path when the handler receives this value. For a file target, StartOS uses the exact name in `path`, regardless of the uploaded name. If `path` is an existing directory, StartOS places the file inside it using the uploaded basename: `path: 'certificates'` and name `uploaded-name.pem` produce metadata path `certificates/uploaded-name.pem`. Use `'.'` for the volume root. The uploaded name and MIME type are untrusted hints; StartOS computes the byte count and content commitment. File input validation resolves the prepared ID with the host, rejecting forged metadata, another form's ID, and unfinished or expired uploads.
+
+Uploads atomically replace an existing destination only after the complete file is written and synced. A failed upload leaves the previous file intact. Parents must already exist; paths are volume-relative and cannot contain symlinks or parent traversal. Keep the selected directory or file parent stable during upload and coordinate service writers around the destination. Omitted permissions default to mode `0600`, UID `0`, GID `0`; ownership uses the IDs visible to the service. A successfully installed upload remains service-owned even if the action later fails or is cancelled.
+
+Prepared IDs expire after 30 minutes, and an active upload times out after one hour. Completed upload receipts remain available for 90 minutes after installation, allowing sibling uploads to finish before action validation. On an upload error, the UI obtains a fresh form and preserves the selected files for another submission. Action failures show the standard error alert without reopening the form. Custom clients submit the prepared ID string (or `null`) as the field value after POSTing the bytes to `/rest/rpc/<id>`, with a percent-encoded `X-File-Name` header and optional `Content-Type`. IDs are one-shot bearer capabilities, not reusable upload URLs.
+
 ### Validating Input
 
-`InputSpec` builds a Zod validator that the SDK runs before calling your handler. Rely on that validator for field types, required values, and text patterns rather than repeating those checks in the handler.
+`InputSpec` builds a Zod validator that the SDK runs before calling your handler. Rely on that validator for field types, required values, numeric bounds and integer constraints, and text patterns rather than repeating those checks in the handler.
 
 A text field's `patterns` are checked before your handler runs, on **every** path into the action — the form, `start-cli package action run`, and a direct RPC call alike. A value that fails one is rejected with that pattern's `description`, so the caller sees the same message wherever they came from.
 

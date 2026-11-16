@@ -1,19 +1,18 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use itertools::Itertools;
-use lazy_format::lazy_format;
-use rpc_toolkit::{CallRemoteHandler, Context, Empty, HandlerExt, ParentHandler, from_fn_async};
+use rpc_toolkit::{CallRemoteHandler, Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 use crate::context::{CliContext, RpcContext};
-use crate::disk::util::{DiskInfo, get_mount_source};
+use crate::disk::util::get_mount_source;
 use crate::prelude::*;
 use crate::util::Invoke;
-use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
+use crate::util::serde::HandlerExtSerde;
 use crate::{Error, ErrorKind};
 
+pub(crate) mod discovery;
 pub mod format;
 pub mod fsck;
 pub mod main;
@@ -207,14 +206,6 @@ async fn resolve_fstab_source(source: &str) -> Result<PathBuf, Error> {
 
 pub fn disk<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand(
-            "list",
-            from_fn_async(list)
-                .with_display_serializable()
-                .with_custom_display_fn(|handle, result| display_disk_info(handle.params, result))
-                .with_about("about.list-disk-info")
-                .with_call_remote::<CliContext>(),
-        )
         .subcommand("repair", from_fn_async(|_: C| repair()).no_cli())
         .subcommand(
             "repair",
@@ -234,81 +225,6 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
                 .with_about("about.format-disk")
                 .with_call_remote::<CliContext>(),
         )
-}
-
-fn display_disk_info(params: WithIoFormat<Empty>, args: Vec<DiskInfo>) -> Result<(), Error> {
-    use prettytable::*;
-
-    if let Some(format) = params.format {
-        return display_serializable(format, args);
-    }
-
-    let mut table = Table::new();
-    table.add_row(row![bc =>
-        "LOGICALNAME",
-        "LABEL",
-        "CAPACITY",
-        "USED",
-        "STARTOS VERSION"
-    ]);
-    for disk in args {
-        let row = row![
-            disk.logicalname.display(),
-            "N/A",
-            &format!("{:.2} GiB", disk.capacity as f64 / 1024.0 / 1024.0 / 1024.0),
-            "N/A",
-            "N/A",
-        ];
-        table.add_row(row);
-        for part in disk.partitions {
-            let row = row![
-                part.logicalname.display(),
-                if let Some(label) = part.label.as_ref() {
-                    label
-                } else {
-                    "N/A"
-                },
-                &format!("{:.2} GiB", part.capacity as f64 / 1024.0 / 1024.0 / 1024.0),
-                &if let Some(used) = part
-                    .used
-                    .map(|u| format!("{:.2} GiB", u as f64 / 1024.0 / 1024.0 / 1024.0))
-                {
-                    used
-                } else {
-                    "N/A".to_owned()
-                },
-                &if part.start_os.is_empty() {
-                    "N/A".to_owned()
-                } else if part.start_os.len() == 1 {
-                    part.start_os
-                        .first_key_value()
-                        .map(|(_, info)| info.version.to_string())
-                        .unwrap()
-                } else {
-                    part.start_os
-                        .iter()
-                        .map(|(id, info)| lazy_format!("{} ({})", info.version, id))
-                        .join(", ")
-                },
-            ];
-            table.add_row(row);
-        }
-    }
-    print_table(&table)?;
-    Ok(())
-}
-
-// #[command(display(display_disk_info))]
-pub async fn list(ctx: RpcContext, _: Empty) -> Result<Vec<DiskInfo>, Error> {
-    let server_id = ctx
-        .db
-        .peek()
-        .await
-        .as_public()
-        .as_server_info()
-        .as_id()
-        .de()?;
-    crate::disk::util::list(&ctx.os_partitions, Some(server_id.as_str())).await
 }
 
 pub async fn repair() -> Result<(), Error> {

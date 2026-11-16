@@ -105,12 +105,8 @@ pub async fn restore_packages_rpc(
         Some(id) => id,
         None => peek.as_public().as_server_info().as_id().de()?,
     };
-    let backup_guard = BackupMountGuard::mount(
-        TmpMountGuard::mount(&fs, ReadWrite).await?,
-        &server_id,
-        &password,
-    )
-    .await?;
+    let backup_guard =
+        BackupMountGuard::mount(fs.mount(ReadWrite).await?, &server_id, &password).await?;
 
     let tasks = restore_packages(&ctx, backup_guard, ids).await?;
 
@@ -222,9 +218,25 @@ pub async fn recover_full_server(
         .keys()
         .cloned()
         .collect();
-    let tasks = restore_packages(&rpc_ctx, backup_guard, ids).await?;
-    restore_phase.set_total(tasks.len() as u64);
+    let volume_ids: Vec<_> = backup_guard
+        .metadata
+        .shared_volume_backups
+        .keys()
+        .cloned()
+        .collect();
+    restore_phase.set_total((ids.len() + volume_ids.len()) as u64);
     restore_phase.set_units(Some(ProgressUnits::Steps));
+    for id in volume_ids {
+        if let Err(error) = super::volume::restore_volume(&rpc_ctx, &backup_guard, &id).await {
+            tracing::error!(
+                "{}",
+                t!("backup.volume.restore-error", id = id, error = error)
+            );
+            tracing::debug!(?error);
+        }
+        restore_phase += 1;
+    }
+    let tasks = restore_packages(&rpc_ctx, backup_guard, ids).await?;
     let restore_phase = Arc::new(Mutex::new(restore_phase));
     stream::iter(tasks)
         .for_each_concurrent(5, |(id, res)| {
@@ -257,9 +269,9 @@ pub async fn recover_full_server(
 }
 
 #[instrument(skip(ctx, backup_guard))]
-async fn restore_packages(
+async fn restore_packages<G: GenericMountGuard>(
     ctx: &RpcContext,
-    backup_guard: BackupMountGuard<TmpMountGuard>,
+    backup_guard: BackupMountGuard<G>,
     ids: Vec<PackageId>,
 ) -> Result<BTreeMap<PackageId, DownloadInstallFuture>, Error> {
     let backup_guard = Arc::new(backup_guard);

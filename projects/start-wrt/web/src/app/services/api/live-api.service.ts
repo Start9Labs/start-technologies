@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core'
 import {
   ApiService,
+  ConfigCheck,
   ExecReq,
   ExecRes,
   GetFileReq,
@@ -14,7 +15,7 @@ import {
   SetUciRes,
   VersionInfo,
   SystemUpdateReq,
-  SystemUpdateRes,
+  SystemUpdateStream,
   SetPasswordReq,
   SetPreferencesReq,
   VpnServerDeleteArgs,
@@ -29,6 +30,8 @@ import {
   WifiBlackoutSetResult,
   ScheduleWindow,
   ProfileId,
+  ProfileDeleteParams,
+  ProfileDeleteResult,
   ProfileIdOpt,
   SecurityProfile,
   ProfileCreateInput,
@@ -36,7 +39,10 @@ import {
   CheckInitializedRes,
   SetInitialPasswordReq,
   SetupStatusRes,
+  SetupFlashReq,
+  SetupFlashStream,
   LogsResponse,
+  LogsFollowStream,
   DeviceFromApi,
   DeviceUpdateReq,
   InjectedDnsRecordFromApi,
@@ -80,6 +86,7 @@ import {
   BackupRestoreRes,
   DiagnosticsCreateRes,
 } from './api.service'
+import type { RpcStreamOptions } from '@start9labs/start-core'
 import { RpcService } from '../rpc.service'
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
 
@@ -129,12 +136,19 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'system.info', params: {}, timeout })
   }
 
+  async configCheck(): Promise<ConfigCheck> {
+    return this.rpc.request({ method: 'config.check', params: {} })
+  }
+
   async systemNewerVersions(): Promise<VersionInfo[]> {
     return this.rpc.request({ method: 'system.newer-versions', params: {} })
   }
 
-  async systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes> {
-    return this.rpc.request({ method: 'system.update', params })
+  async systemUpdate(
+    params: SystemUpdateReq,
+    options?: RpcStreamOptions,
+  ): Promise<SystemUpdateStream> {
+    return this.rpc.streams.system.update(params, options)
   }
 
   async systemRestart(): Promise<null> {
@@ -228,7 +242,9 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'profiles.set', params })
   }
 
-  async profileDelete(params: ProfileIdOpt): Promise<null> {
+  async profileDelete(
+    params: ProfileDeleteParams,
+  ): Promise<ProfileDeleteResult> {
     return this.rpc.request({ method: 'profiles.delete', params })
   }
 
@@ -268,6 +284,13 @@ export class LiveApiService extends ApiService {
     })
   }
 
+  async setupFlash(
+    params: SetupFlashReq,
+    options?: RpcStreamOptions,
+  ): Promise<SetupFlashStream> {
+    return this.rpc.streams.setup.flash(params, options)
+  }
+
   async systemFactoryReset(): Promise<null> {
     return this.rpc.request({
       method: 'system.factory-reset',
@@ -279,8 +302,8 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'system.logs', params: {} })
   }
 
-  async followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>> {
-    return this.rpc.request({ method: 'system.logs-follow', params: {} })
+  async followLogs(options?: RpcStreamOptions): Promise<LogsFollowStream> {
+    return this.rpc.streams.system.logsFollow({}, options)
   }
 
   async devicesList(): Promise<DeviceFromApi[]> {
@@ -432,6 +455,12 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'ethernet.set', params })
   }
 
+  async ethernetRemoveUsbPort(
+    params: RpcParamType<Api, 'ethernet.remove-usb-port'>,
+  ): Promise<null> {
+    return this.rpc.request({ method: 'ethernet.remove-usb-port', params })
+  }
+
   async sshKeysList(): Promise<SshKeyFromApi[]> {
     return this.rpc.request({ method: 'ssh-keys.list', params: {} })
   }
@@ -458,12 +487,16 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'activity.clear', params: {} })
   }
 
-  async backupCreate(): Promise<BackupCreateRes> {
-    return this.rpc.request({ method: 'backup.create', params: {} })
+  async backupCreate(
+    params: RpcParamType<Api, 'backup.create'>,
+  ): Promise<BackupCreateRes> {
+    return this.rpc.request({ method: 'backup.create', params })
   }
 
-  async backupRestore(): Promise<BackupRestoreRes> {
-    return this.rpc.request({ method: 'backup.restore', params: {} })
+  async backupRestore(
+    params: RpcParamType<Api, 'backup.restore'>,
+  ): Promise<BackupRestoreRes> {
+    return this.rpc.request({ method: 'backup.restore', params })
   }
 
   async diagnosticsCreate(): Promise<DiagnosticsCreateRes> {

@@ -94,6 +94,7 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
             method: method.clone(),
             params: params.clone(),
             inherited: crate::Empty {},
+            rpc_stream: None,
         })?;
         root_handler.cli_display(
             HandleAnyArgs {
@@ -102,6 +103,7 @@ impl<Context: crate::Context + Clone, Config: CommandFactory + FromArgMatches>
                 method,
                 params,
                 inherited: crate::Empty {},
+                rpc_stream: None,
             },
             res,
         )?;
@@ -243,6 +245,8 @@ where
     type InheritedParams = RemoteHandler::InheritedParams;
     type Ok = RemoteHandler::Ok;
     type Err = RemoteHandler::Err;
+    type Item = RemoteHandler::Item;
+    type Final = RemoteHandler::Final;
 }
 
 impl<Context, RemoteContext, RemoteHandler, Extra> Adapter
@@ -327,6 +331,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
@@ -338,6 +343,7 @@ where
                 params: params.0,
                 inherited_params,
                 raw_params,
+                rpc_stream,
             },
             result,
         )
@@ -371,6 +377,7 @@ where
             params,
             inherited_params,
             raw_params,
+            rpc_stream,
         }: HandlerArgsFor<Context, Self>,
         result: Self::Ok,
     ) -> Result<(), Self::Err> {
@@ -382,6 +389,7 @@ where
                 params: params.0,
                 inherited_params,
                 raw_params,
+                rpc_stream,
             },
             result,
         )

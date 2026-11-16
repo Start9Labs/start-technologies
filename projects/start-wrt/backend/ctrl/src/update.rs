@@ -3,18 +3,27 @@ use std::path::Path;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use imbl_value::InternedString;
+use rpc_toolkit::{Empty, HandlerArgs, RpcStream};
 use serde::{Deserialize, Serialize};
+use startos::middleware::auth::session::{SecureSession, SessionContext};
+use startos::registry::asset::RegistryAsset;
+use startos::rpc_continuations::RevocationSubscription;
+use startos::sign::commitment::blake3::Blake3Commitment;
+use startos::util::io::create_file;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use crate::continuations::{Guid, RpcContinuation};
+use crate::continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::error::Error;
-use crate::progress::{FullProgressTracker, ProgressUnits};
+use crate::progress::{FullProgress, FullProgressTracker, ProgressUnits};
 use crate::registry::device_info::DeviceInfo;
-use crate::registry::os::{OsVersionInfo, SIG_CONTEXT};
+use crate::registry::os::{asset_for_platform, OsVersionInfo, SIG_CONTEXT};
 use crate::registry::{self};
 use crate::ServerContext;
 
-// ── Request / Response types ─────────────────────────────────────────
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, Deserialize, Serialize, clap::Parser, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +34,10 @@ pub struct UpdateSystemParams {
     pub registry: Option<String>,
     #[arg(long)]
     pub target_version: Option<String>,
+    #[arg(skip)]
+    #[visit(ts(skip))]
+    #[serde(rename = "__Auth_signer")]
+    pub signer: Option<InternedString>,
 }
 rpc_toolkit::reflect_ts!(UpdateSystemParams);
 
@@ -36,13 +49,8 @@ pub struct UpdateSystemRes {
 }
 rpc_toolkit::reflect_ts!(UpdateSystemRes);
 
-// ── Handlers ─────────────────────────────────────────────────────────
-
-/// Check the registry for newer OS versions.
-/// Used by both `system.newer-versions` and `system.update`.
-pub async fn fetch_newer_versions(
-    registry_url: &str,
-) -> Result<BTreeMap<String, OsVersionInfo>, Error> {
+/// Uses the router's device identity for registry compatibility.
+pub async fn fetch_versions(registry_url: &str) -> Result<BTreeMap<String, OsVersionInfo>, Error> {
     let device_info = DeviceInfo::load()?;
     let device_info_header = device_info.to_header_value()?;
     let client = reqwest::Client::new();
@@ -67,33 +75,42 @@ pub async fn fetch_newer_versions(
     Ok(versions)
 }
 
-/// Main update handler: fetch, validate, download, verify, sysupgrade.
+/// Revoking the requesting key ends observation on both transports.
+/// Canceling observation does not cancel an accepted update.
 pub async fn update_system(
-    ctx: ServerContext,
-    UpdateSystemParams {
-        registry,
-        target_version,
-    }: UpdateSystemParams,
+    HandlerArgs {
+        context: ctx,
+        params:
+            UpdateSystemParams {
+                registry,
+                target_version,
+                signer,
+            },
+        rpc_stream,
+        ..
+    }: HandlerArgs<ServerContext, UpdateSystemParams, Empty, FullProgress>,
 ) -> Result<UpdateSystemRes, Error> {
+    let none = |rpc_stream: Option<RpcStream<FullProgress>>| {
+        if let Some(stream) = rpc_stream {
+            let _ = stream.close(Ok::<_, Error>(()));
+        }
+        Ok(UpdateSystemRes {
+            target: None,
+            progress: None,
+        })
+    };
     let platform = DeviceInfo::load()?.os.platform;
     let registry = registry.unwrap_or_else(|| {
         crate::system::read_registry_url()
             .unwrap_or_else(|| crate::system::DEFAULT_REGISTRY_URL.to_string())
     });
 
-    // 1. Fetch available versions
-    let versions = fetch_newer_versions(&registry).await?;
+    let versions = fetch_versions(&registry).await?;
 
     if versions.is_empty() {
-        return Ok(UpdateSystemRes {
-            target: None,
-            progress: None,
-        });
+        return none(rpc_stream);
     }
 
-    // 2. Select target version. Note: BTreeMap keys sort lexicographically,
-    // which is wrong for semver (e.g. "9.0.0" > "10.0.0"). Select the max via
-    // numeric comparison instead.
     let (target_ver, version_info) = if let Some(ref target) = target_version {
         let info = versions
             .get(target)
@@ -104,17 +121,12 @@ pub async fn update_system(
             .iter()
             .max_by(|(a, _), (b, _)| crate::system::cmp_versions(a, b))
         else {
-            return Ok(UpdateSystemRes {
-                target: None,
-                progress: None,
-            });
+            return none(rpc_stream);
         };
         (ver.clone(), info)
     };
 
-    // 3. Find asset for our platform
-    let asset = version_info
-        .asset_for_platform(&platform)
+    let asset = asset_for_platform(version_info, &platform)
         .ok_or_else(|| {
             Error::other(format!(
                 "no asset for platform '{platform}' in version {target_ver}"
@@ -122,62 +134,22 @@ pub async fn update_system(
         })?
         .clone();
 
-    // 4. Validate signatures
-    asset.validate(SIG_CONTEXT, asset.all_signers())?;
-
-    // 5. Create progress tracker
+    asset.validate_all(SIG_CONTEXT, None)?;
     let tracker = FullProgressTracker::new();
     let mut download_phase = tracker.add_phase("Downloading firmware".into(), Some(100));
-    // start() must precede set_units/set_total: those only mutate an
-    // already-started Progress::Progress, so on a NotStarted phase they are
-    // silent no-ops and start() would then reset total/units back to None.
+    // Configure totals and units after starting the phase.
     download_phase.start();
     download_phase.set_units(Some(ProgressUnits::Bytes));
     download_phase.set_total(asset.commitment.size);
     let mut verify_phase = tracker.add_phase("Verifying integrity".into(), Some(10));
     let mut apply_phase = tracker.add_phase("Applying update".into(), Some(1));
 
-    // 6. Register WebSocket continuation for progress streaming.
-    // The WS handler creates its own stream from the tracker clone, so the
-    // tracker must outlive both the handler and the background update task.
-    let guid = Guid::new();
-    let guid_str = guid.to_string();
-    let tracker_for_ws = tracker.clone();
-
-    ctx.continuations
-        .add(
-            guid.clone(),
-            RpcContinuation::ws(
-                move |mut ws| async move {
-                    let stream = tracker_for_ws.stream(Some(Duration::from_millis(300)));
-                    tokio::pin!(stream);
-                    while let Some(progress) = stream.next().await {
-                        let json = match serde_json::to_string(&progress) {
-                            Ok(j) => j,
-                            Err(_) => break,
-                        };
-                        if ws
-                            .send(axum::extract::ws::Message::Text(json.into()))
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                        if progress.overall.is_complete() {
-                            break;
-                        }
-                    }
-                    let _ = ws.send(axum::extract::ws::Message::Close(None)).await;
-                },
-                Duration::from_secs(600),
-            ),
-        )
-        .await;
-
-    // 7. Spawn background update task (owns tracker + phase handles)
+    let subscription = startos::auth::continuation_subscription(&ctx, signer).await?;
     let client = reqwest::Client::new();
     let target_ver_for_task = target_ver.clone();
-    tokio::spawn(async move {
+    let tracker_for_task = tracker.clone();
+    let done = tokio::spawn(async move {
+        let tracker = tracker_for_task;
         let target_ver = target_ver_for_task;
         let result = do_update(
             &client,
@@ -189,7 +161,7 @@ pub async fn update_system(
         )
         .await;
 
-        match result {
+        match &result {
             Ok(()) => {
                 tracing::info!("Update to {target_ver} initiated successfully");
                 tracker.complete();
@@ -206,25 +178,86 @@ pub async fn update_system(
                 tracker.fail();
             }
         }
+        result
     });
+
+    let progress = if let Some(stream) = rpc_stream {
+        subscription.forward_stream(
+            stream,
+            progress_until_done(tracker, done).map(|item| item.map_err(startos::Error::from)),
+        );
+        None
+    } else {
+        let guid = Guid::new();
+        ctx.continuations
+            .add(
+                guid.clone(),
+                legacy_progress_continuation(subscription, ctx.secure_session().cloned(), tracker),
+            )
+            .await;
+        Some(guid.to_string())
+    };
 
     Ok(UpdateSystemRes {
         target: Some(target_ver),
-        progress: Some(guid_str),
+        progress,
     })
 }
 
-// ── Pending-update marker ────────────────────────────────────────────
-//
-// `do_update` writes this file (the target version) just before invoking
-// `sysupgrade`. A successful sysupgrade reboots, leaving the marker for the
-// freshly-booted firmware to confirm; a failed sysupgrade returns and the
-// marker is cleared. `keep.d/startwrt` lists this path so it survives the
-// sysupgrade overlay wipe.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(300);
+
+fn legacy_progress_continuation(
+    subscription: RevocationSubscription,
+    secure: Option<SecureSession>,
+    tracker: FullProgressTracker,
+) -> RpcContinuation {
+    RpcContinuation::ws_authed(
+        subscription,
+        WebSocketPolicy::Authenticated,
+        secure,
+        move |mut ws| async move {
+            let stream = tracker.stream(Some(PROGRESS_INTERVAL));
+            tokio::pin!(stream);
+            while let Some(progress) = stream.next().await {
+                let json = match serde_json::to_string(&progress) {
+                    Ok(j) => j,
+                    Err(_) => break,
+                };
+                if ws
+                    .send(axum::extract::ws::Message::Text(json.into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+                if progress.overall.is_complete() {
+                    break;
+                }
+            }
+            let _ = ws.send(axum::extract::ws::Message::Close(None)).await;
+        },
+        Duration::from_secs(600),
+    )
+}
+
+/// Yields snapshots through the final one, then the update's failure, if any.
+fn progress_until_done(
+    tracker: FullProgressTracker,
+    done: tokio::task::JoinHandle<Result<(), Error>>,
+) -> impl futures::Stream<Item = Result<FullProgress, Error>> + Send + 'static {
+    tracker.stream(Some(PROGRESS_INTERVAL)).map(Ok).chain(
+        futures::stream::once(async move {
+            done.await
+                .map_err(|e| Error::other(format!("update task failed: {e}")))
+                .and_then(std::convert::identity)
+        })
+        .filter_map(|result| async move { result.err().map(Err) }),
+    )
+}
+
+// Must match `keep.d/startwrt` in `build/stage-files.sh`.
 const PENDING_UPDATE_MARKER: &str = "/etc/startwrt/pending-update";
 
-/// Record the in-flight update target so the next boot can confirm it.
-/// Best-effort — a marker failure must not abort the update.
 fn write_pending_marker(target_ver: &str) {
     if let Some(dir) = Path::new(PENDING_UPDATE_MARKER).parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -234,17 +267,21 @@ fn write_pending_marker(target_ver: &str) {
     }
 }
 
-/// Remove the pending-update marker (the update did not reach a reboot).
 fn clear_pending_marker() {
     let _ = std::fs::remove_file(PENDING_UPDATE_MARKER);
 }
 
-/// On boot, confirm the outcome of a pending update in the Activity log.
-/// Called once from the daemon's normal-mode startup.
+/// Whether this boot follows an update [`check_pending_update_marker`] has
+/// yet to confirm.
+pub fn update_pending() -> bool {
+    Path::new(PENDING_UPDATE_MARKER).exists()
+}
+
+/// Logs a pending update's boot outcome in Activity during daemon startup.
 pub fn check_pending_update_marker() {
     let target = match std::fs::read_to_string(PENDING_UPDATE_MARKER) {
         Ok(s) => s.trim().to_string(),
-        Err(_) => return, // no marker — an ordinary boot
+        Err(_) => return,
     };
     let current = env!("CARGO_PKG_VERSION");
     if target == current {
@@ -267,10 +304,47 @@ pub fn check_pending_update_marker() {
     clear_pending_marker();
 }
 
-/// Execute the actual update: download, verify, sysupgrade.
+async fn download_firmware(
+    client: &reqwest::Client,
+    asset: &RegistryAsset<Blake3Commitment>,
+    path: &Path,
+    mut on_progress: impl FnMut(u64),
+) -> Result<(), Error> {
+    let mut last_error = None;
+    for url in &asset.urls {
+        let mut response = match client.get(url.clone()).send().await {
+            Ok(response) if response.status().is_success() => response,
+            Ok(response) => {
+                last_error = Some(format!("HTTP {} from {}", response.status(), url));
+                continue;
+            }
+            Err(error) => {
+                last_error = Some(format!("request to {} failed: {}", url, error));
+                continue;
+            }
+        };
+        let file = create_file(path).await?;
+        let mut writer = asset.commitment.verifying_writer(file);
+        let mut written = 0;
+        while let Some(chunk) = response.chunk().await? {
+            writer.write_all(&chunk).await?;
+            written += chunk.len() as u64;
+            on_progress(written);
+        }
+        let mut file = writer.verify().await?;
+        file.flush().await?;
+        file.sync_all().await?;
+        return Ok(());
+    }
+    Err(Error::other(format!(
+        "all asset URLs failed; last error: {}",
+        last_error.unwrap_or_else(|| "no URLs".to_string())
+    )))
+}
+
 async fn do_update(
     client: &reqwest::Client,
-    asset: crate::registry::asset::RegistryAsset<crate::sign::commitment::Blake3Commitment>,
+    asset: RegistryAsset<Blake3Commitment>,
     target_ver: &str,
     download_phase: &mut crate::progress::PhaseProgressTrackerHandle,
     verify_phase: &mut crate::progress::PhaseProgressTrackerHandle,
@@ -278,20 +352,16 @@ async fn do_update(
 ) -> Result<(), Error> {
     let firmware_path = Path::new("/tmp/firmware.bin");
 
-    // Phase 1: Download
-    asset
-        .download(client, firmware_path, |bytes_written| {
-            download_phase.set_done(bytes_written);
-        })
-        .await?;
+    download_firmware(client, &asset, firmware_path, |bytes_written| {
+        download_phase.set_done(bytes_written);
+    })
+    .await?;
     download_phase.complete();
 
-    // Phase 2: Verify (re-read and check blake3)
     verify_phase.start();
     asset.commitment.verify_file(firmware_path).await?;
     verify_phase.complete();
 
-    // Phase 3: Apply via sysupgrade
     apply_phase.start();
     crate::activity::log(
         "system",
@@ -301,14 +371,10 @@ async fn do_update(
         None,
     );
     write_pending_marker(target_ver);
-    let status = Command::new("sysupgrade")
-        .arg("/tmp/firmware.bin")
-        .status()
-        .await;
-    // Reached only if sysupgrade did not reboot us — i.e. it failed.
+    // `sysupgrade` must survive cancellation of the daemon's update task.
+    let status = Command::new("sysupgrade").arg(firmware_path).status().await;
     clear_pending_marker();
     let status = status.map_err(|e| Error::other(format!("spawning sysupgrade: {e}")))?;
-
     if !status.success() {
         return Err(Error::other(format!(
             "sysupgrade exited with code {}",
@@ -317,6 +383,5 @@ async fn do_update(
     }
     apply_phase.complete();
 
-    // Device reboots — this point is likely unreachable
     Ok(())
 }

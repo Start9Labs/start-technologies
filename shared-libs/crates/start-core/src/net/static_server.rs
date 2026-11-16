@@ -9,7 +9,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::{self as x, Request};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get};
+use axum::routing::{MethodRouter, any, get};
 use base64::Engine;
 use base64::display::Base64Display;
 use digest::Digest;
@@ -33,27 +33,34 @@ use url::Url;
 use crate::context::{DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::hostname::ServerHostname;
 use crate::middleware::auth::Auth;
-use crate::middleware::auth::signature::verify_request_signature;
-use crate::middleware::cors::Cors;
-use crate::middleware::db::SyncDb;
+use crate::middleware::auth::signature::{
+    LoginMetadata, SignatureAuthContext, SignatureAuthorizationContext, SigningContext,
+    verify_request_signature,
+};
+use crate::middleware::cors;
+use crate::middleware::db::{SyncDb, SyncDbHeaderCompat};
 use crate::middleware::json::RequireJson;
 use crate::net::http::request_authority;
 use crate::prelude::*;
+use crate::registry::package::icon::{is_icon_url, request_icon};
 use crate::rpc_continuations::{Guid, RpcContinuations};
 use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::file_contents::FileContents;
 use crate::s9pk::merkle_archive::source::FileSource;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
+use crate::sign::Signer;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
+use crate::trusted_keys::Registries;
+use crate::trusted_keys::connection::connected_registry_urls;
 use crate::util::io::{maybe_open_file, open_file};
 use crate::util::serde::BASE64;
 use crate::{PackageId, main_api};
 
-const NOT_FOUND: &[u8] = b"Not Found";
+const NOT_FOUND: &str = "Not Found";
 const METHOD_NOT_ALLOWED: &[u8] = b"Method Not Allowed";
 const NOT_AUTHORIZED: &[u8] = b"Not Authorized";
-const INTERNAL_SERVER_ERROR: &[u8] = b"Internal Server Error";
+const INTERNAL_SERVER_ERROR: &str = "Internal Server Error";
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL: &str = "no-cache";
 const PRIVATE_IMMUTABLE_CACHE_CONTROL: &str = "private, max-age=31536000, immutable";
@@ -61,17 +68,16 @@ const IMMUTABLE_ASSETS_MANIFEST: &str = "immutable-assets.txt";
 
 pub const EMPTY_DIR: Dir<'_> = Dir::new("", &[]);
 
-pub trait UiContext: Context + AsRef<RpcContinuations> + Clone + Sized {
+pub trait UiContext: SignatureAuthContext + AsRef<RpcContinuations> + Clone + Sized {
     fn ui_dir() -> &'static Dir<'static>;
     fn api() -> ParentHandler<Self>;
     fn middleware(server: Server<Self>) -> HttpServer<Self>;
     fn extend_router(self, router: Router) -> Router {
         router
     }
-    /// Routes served by the context's RPC server.
-    #[allow(unused_variables)]
+    /// RPC, continuation, and optional protocol routes, before UI resources.
     fn rpc_server_routes(self, server: HttpServer<Self>) -> Router {
-        Router::new()
+        session_rpc_router(self, server.clone(), any(server))
     }
     /// Applies layers after the UI fallback is installed.
     fn apply_outer_layers(self, router: Router) -> Router {
@@ -90,7 +96,6 @@ impl UiContext for RpcContext {
     }
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
         server
-            .middleware(Cors::new())
             .middleware(
                 Auth::new()
                     .with_local_auth()
@@ -98,13 +103,17 @@ impl UiContext for RpcContext {
                     .with_signature_auth(),
             )
             .middleware(SyncDb::new())
+            .middleware(SyncDbHeaderCompat::default())
     }
     fn rpc_server_routes(self, server: HttpServer<Self>) -> Router {
-        crate::mcp::router(self, server).unwrap_or_else(|e| {
-            tracing::error!("MCP endpoint unavailable: {e}");
-            tracing::debug!("{e:?}");
-            Router::new()
-        })
+        let mcp = crate::mcp::router(self.clone(), server.clone())
+            .unwrap_or_else(|e| {
+                tracing::error!("MCP endpoint unavailable: {e}");
+                tracing::debug!("{e:?}");
+                Router::new()
+            })
+            .layer(cors::layer());
+        session_rpc_router(self, server.clone(), any(server).layer(cors::layer())).merge(mcp)
     }
     fn extend_router(self, router: Router) -> Router {
         router
@@ -113,7 +122,20 @@ impl UiContext for RpcContext {
                 let ctx = self.clone();
                 get(|x::Path(url): x::Path<Url>, request: Request| async move {
                     if_authorized(&ctx, request, |_| async {
-                        registry_icon_response(ctx.client.get(), url).await
+                        let registries = ctx
+                            .db
+                            .peek()
+                            .await
+                            .as_public()
+                            .as_server_info()
+                            .as_registries()
+                            .de()?;
+                        let (client, signer) = if is_registry_icon(&registries, &url) {
+                            (ctx.client.get_without_redirects(), Some(ctx.signing_key()?))
+                        } else {
+                            (ctx.client.get(), None)
+                        };
+                        registry_icon_response(client, url, signer.as_ref()).await
                     })
                     .await
                     .unwrap_or_else(server_error)
@@ -205,12 +227,33 @@ impl UiContext for SetupContext {
     }
 }
 
+#[derive(Clone)]
+struct LocalUiHost(InternedString);
+
+/// The bootstrap proof name must match the validated request authority.
+pub(crate) fn local_ui_identity(extensions: &http::Extensions) -> Result<InternedString, Error> {
+    extensions
+        .get::<LocalUiHost>()
+        .map(|name| name.0.clone())
+        .ok_or_else(|| {
+            Error::new(
+                eyre!("{}", t!("net.static-server.unrecognized-host")),
+                ErrorKind::InvalidSignature,
+            )
+        })
+}
+
 /// Serves requests addressed to an IP address, `localhost`, or a `.local` name.
-fn local_hosts_only(router: Router) -> Router {
+pub(crate) fn local_hosts_only(router: Router) -> Router {
     router.layer(axum::middleware::from_fn(
-        |request: Request, next: axum::middleware::Next| async move {
-            if request_authority(&request).is_some_and(|authority| is_local_host(authority.host()))
-            {
+        |mut request: Request, next: axum::middleware::Next| async move {
+            let name = request_authority(&request)
+                .map(|authority| authority.host().to_owned())
+                .filter(|host| is_local_host(host));
+            if let Some(name) = name {
+                request
+                    .extensions_mut()
+                    .insert(LocalUiHost(InternedString::intern(&name)));
                 next.run(request).await
             } else {
                 (
@@ -237,33 +280,56 @@ fn is_local_host(host: &str) -> bool {
             .is_some_and(|(_, tld)| tld.eq_ignore_ascii_case("local"))
 }
 
+/// Encrypted RPC and legacy-compatible continuation routes.
+pub fn session_rpc_router<C>(ctx: C, server: HttpServer<C>, rpc: MethodRouter) -> Router
+where
+    C: crate::middleware::auth::signature::SignatureAuthContext + Clone + AsRef<RpcContinuations>,
+{
+    use crate::middleware::auth::session::RpcSessionUpgrader;
+
+    rpc_router(ctx, rpc).route(RpcSessionUpgrader::PATH, RpcSessionUpgrader::route(server))
+}
+
 pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
     ctx: C,
-    server: HttpServer<C>,
+    rpc: MethodRouter,
 ) -> Router {
+    let continuation = any({
+        let ctx = ctx.clone();
+        move |x::Path(guid): x::Path<Guid>, ws: axum::extract::ws::WebSocketUpgrade| async move {
+            match AsRef::<RpcContinuations>::as_ref(&ctx)
+                .get_ws_handler(&guid)
+                .await
+            {
+                Some(cont) => cont.on_upgrade(ws, guid),
+                _ => not_found(),
+            }
+        }
+    });
     Router::new()
-        .route("/rpc/{*path}", any(server))
+        .route("/rpc/{*path}", rpc)
         .route(
-            "/ws/rpc/{guid}",
-            any({
-                let ctx = ctx.clone();
-                move |x::Path(guid): x::Path<Guid>,
-                      ws: axum::extract::ws::WebSocketUpgrade| async move {
-                    match AsRef::<RpcContinuations>::as_ref(&ctx).get_ws_handler(&guid).await {
-                        Some(cont) => ws.on_upgrade(cont),
-                        _ => not_found(),
-                    }
-                }
-            }),
+            &format!(
+                "{}/{{guid}}",
+                crate::middleware::auth::session::RpcSessionUpgrader::PATH,
+            ),
+            continuation.clone(),
+        )
+        .route(
+            &format!("{}/{{guid}}", RpcContinuations::LEGACY_WS_PATH),
+            continuation,
         )
         .route(
             "/rest/rpc/{guid}",
             any({
                 let ctx = ctx.clone();
                 move |x::Path(guid): x::Path<Guid>, request: x::Request| async move {
-                    match AsRef::<RpcContinuations>::as_ref(&ctx).get_rest_handler(&guid).await {
+                    match AsRef::<RpcContinuations>::as_ref(&ctx)
+                        .get_rest_handler(&guid)
+                        .await
+                    {
                         None => not_found(),
-                        Some(cont) => cont(request).await.unwrap_or_else(server_error),
+                        Some(cont) => cont(request).await.unwrap_or_else(rest_continuation_error),
                     }
                 }
             }),
@@ -346,8 +412,7 @@ pub fn ui_router<C: UiContext>(ctx: C) -> Router {
     ));
     let router = ctx
         .clone()
-        .extend_router(rpc_router(ctx.clone(), server.clone()))
-        .merge(ctx.clone().rpc_server_routes(server))
+        .extend_router(ctx.clone().rpc_server_routes(server))
         .fallback(any(|request: Request| async move {
             serve_ui(request, C::ui_dir()).unwrap_or_else(server_error)
         }));
@@ -524,8 +589,18 @@ fn installed_file_cache_control(installed: &Path, query: Option<&str>) -> &'stat
     }
 }
 
-async fn registry_icon_response(client: reqwest::Client, url: Url) -> Result<Response, Error> {
-    let upstream = client.get(url).send().await.with_kind(ErrorKind::Network)?;
+fn is_registry_icon(registries: &Registries, target: &Url) -> bool {
+    connected_registry_urls(registries)
+        .filter_map(Result::ok)
+        .any(|registry| is_icon_url(&registry, target))
+}
+
+async fn registry_icon_response(
+    client: reqwest::Client,
+    url: Url,
+    signer: Option<&Signer>,
+) -> Result<Response, Error> {
+    let upstream = request_icon(&client, url, signer).await?;
     let mut response = Response::builder().status(upstream.status());
     for name in [CONTENT_TYPE, CACHE_CONTROL] {
         if let Some(value) = upstream.headers().get(&name) {
@@ -538,35 +613,22 @@ async fn registry_icon_response(client: reqwest::Client, url: Url) -> Result<Res
 }
 
 async fn if_authorized<
+    C: SignatureAuthorizationContext<AdditionalMetadata = LoginMetadata>,
     F: FnOnce(Request) -> Fut,
     Fut: Future<Output = Result<Response, Error>> + Send,
 >(
-    ctx: &RpcContext,
+    ctx: &C,
     mut request: Request,
     f: F,
 ) -> Result<Response, Error> {
     let path = request.uri().path().to_owned();
     match async {
         let signer = verify_request_signature(ctx, &mut request).await?;
-        let key = signer.interned_der64();
-        let enrolled = ctx
-            .ephemeral_auth_keys
-            .peek(|keys| keys.0.contains_key(&*key))
-            || ctx
-                .db
-                .peek()
-                .await
-                .as_private()
-                .as_sessions()
-                .as_pubkeys()
-                .as_idx(&key)
-                .is_some();
-        if !enrolled {
-            return Err(Error::new(
-                eyre!("{}", t!("middleware.auth.unauthorized")),
-                ErrorKind::Authorization,
-            ));
-        }
+        ctx.check_pubkey(
+            &ctx.db().peek().await,
+            Some(&signer),
+            LoginMetadata { login: false },
+        )?;
         Ok(signer)
     }
     .await
@@ -587,10 +649,7 @@ pub fn unauthorized(err: Error, path: &str) -> Response {
 
 /// HTTP status code 404
 pub fn not_found() -> Response {
-    Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .body(NOT_FOUND.into())
-        .unwrap()
+    (StatusCode::NOT_FOUND, NOT_FOUND).into_response()
 }
 
 /// HTTP status code 405
@@ -604,10 +663,15 @@ pub fn method_not_allowed() -> Response {
 pub fn server_error(err: Error) -> Response {
     tracing::error!("internal server error: {}", err);
     tracing::debug!("{:?}", err);
-    Response::builder()
-        .status(StatusCode::INTERNAL_SERVER_ERROR)
-        .body(INTERNAL_SERVER_ERROR.into())
-        .unwrap()
+    (StatusCode::INTERNAL_SERVER_ERROR, INTERNAL_SERVER_ERROR).into_response()
+}
+
+fn rest_continuation_error(err: Error) -> Response {
+    if matches!(err.kind, ErrorKind::InvalidRequest) {
+        (StatusCode::BAD_REQUEST, err.source.to_string()).into_response()
+    } else {
+        server_error(err)
+    }
 }
 
 pub fn bad_request() -> Response {
@@ -1048,6 +1112,14 @@ fn e_tag(path: &Path, modified: SystemTime, encoding: Option<&str>) -> String {
 }
 
 #[cfg(test)]
+mod icon_tests;
+
+#[cfg(test)]
+mod session_tests;
+#[cfg(test)]
+mod startup_tests;
+
+#[cfg(test)]
 mod tests {
     use std::time::Duration;
 
@@ -1184,7 +1256,9 @@ mod tests {
                     .await
                     .unwrap();
             });
-            let response = registry_icon_response(client.clone(), url).await.unwrap();
+            let response = registry_icon_response(client.clone(), url, None)
+                .await
+                .unwrap();
             assert_eq!(response.status().as_u16().to_string(), &status[..3]);
             assert_eq!(header(&response, CONTENT_TYPE), content_type);
             assert_eq!(header(&response, CACHE_CONTROL), cache_control);
@@ -1551,6 +1625,118 @@ mod tests {
 
         assert!(get("dependencies/lnd/icon").await.unwrap().is_none());
         assert!(get("LICENSE.md").await.unwrap().is_some());
+    }
+
+    #[derive(Clone)]
+    struct ContinuationTestContext(Arc<RpcContinuations>);
+
+    impl Context for ContinuationTestContext {}
+
+    impl AsRef<RpcContinuations> for ContinuationTestContext {
+        fn as_ref(&self) -> &RpcContinuations {
+            &self.0
+        }
+    }
+
+    fn continuation_test_router() -> (Arc<RpcContinuations>, Router) {
+        let continuations = Arc::new(RpcContinuations::new());
+        let context = ContinuationTestContext(continuations.clone());
+        let factory_context = context.clone();
+        let server = Server::new(
+            move || ready(Ok(factory_context.clone())),
+            ParentHandler::new(),
+        )
+        .for_http();
+        (continuations, rpc_router(context, any(server)))
+    }
+
+    #[tokio::test]
+    async fn rest_continuation_errors_expose_only_invalid_request_messages() {
+        use tower_service::Service;
+
+        use crate::rpc_continuations::RpcContinuation;
+
+        let (continuations, mut router) = continuation_test_router();
+        for (kind, status) in [
+            (ErrorKind::InvalidRequest, StatusCode::BAD_REQUEST),
+            (ErrorKind::Filesystem, StatusCode::INTERNAL_SERVER_ERROR),
+            (ErrorKind::Network, StatusCode::INTERNAL_SERVER_ERROR),
+            (ErrorKind::Authorization, StatusCode::INTERNAL_SERVER_ERROR),
+        ] {
+            let guid = Guid::new();
+            let message = t!("service.action-files.size-limit", max = 3).into_owned();
+            let error_message = message.clone();
+            continuations
+                .add(
+                    guid.clone(),
+                    RpcContinuation::rest(
+                        move |_| ready(Err(Error::new(eyre!(error_message), kind))),
+                        Duration::from_secs(30),
+                    ),
+                )
+                .await;
+            let request = || {
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/rest/rpc/{guid}"))
+                    .body(Body::empty())
+                    .unwrap()
+            };
+            let response = router.call(request()).await.unwrap();
+            assert_eq!(response.status(), status);
+            assert_eq!(
+                response.headers()[CONTENT_TYPE],
+                "text/plain; charset=utf-8"
+            );
+            let expected = if status == StatusCode::BAD_REQUEST {
+                message.as_str()
+            } else {
+                INTERNAL_SERVER_ERROR
+            };
+            assert_eq!(body(response).await, expected);
+            let replay = router.call(request()).await.unwrap();
+            assert_eq!(replay.status(), StatusCode::NOT_FOUND);
+            assert_eq!(replay.headers()[CONTENT_TYPE], "text/plain; charset=utf-8");
+            assert_eq!(body(replay).await, NOT_FOUND);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expired_rest_continuations_return_a_plaintext_not_found() {
+        use tower_service::Service;
+
+        use crate::rpc_continuations::RpcContinuation;
+
+        let (continuations, mut router) = continuation_test_router();
+        let guid = Guid::new();
+        continuations
+            .add(
+                guid.clone(),
+                RpcContinuation::rest(
+                    |_| ready(Ok(StatusCode::NO_CONTENT.into_response())),
+                    Duration::from_secs(30),
+                ),
+            )
+            .await;
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::task::yield_now().await;
+        let response = router
+            .call(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/rest/rpc/{guid}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            response.headers()[CONTENT_TYPE],
+            "text/plain; charset=utf-8"
+        );
+        assert_eq!(body(response).await, NOT_FOUND);
     }
 
     async fn status_for_host(host: &str) -> StatusCode {

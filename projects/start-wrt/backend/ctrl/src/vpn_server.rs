@@ -506,7 +506,7 @@ fn get_gateway_ip(cfgs: &Configs, interface_name: &str) -> Result<Ipv4Addr, Erro
         };
         let Some(name) = section.name() else { continue };
         if name == interface_name {
-            return iface.ipaddr.ok_or_else(|| {
+            return iface.ipv4().ok_or_else(|| {
                 Error::new(
                     eyre!("No IP address configured for interface {}", interface_name),
                     ErrorKind::Network,
@@ -752,7 +752,7 @@ fn profile_subnet_cidr(cfgs: &Configs, interface: &str) -> Option<String> {
             return None;
         }
         let ni = s.get::<NetworkInterface>().ok()?;
-        ni.ipaddr.map(subnet_cidr_of_ip)
+        ni.ipv4().map(subnet_cidr_of_ip)
     })
 }
 

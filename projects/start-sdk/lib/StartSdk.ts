@@ -60,6 +60,7 @@ import {
   GetSystemSmtp,
   getRootCa,
   getServiceManifest,
+  getSharedVolumes,
   nullIfEmpty,
   splitCommand,
 } from './util'
@@ -74,7 +75,7 @@ import { createVolumes } from './util/Volume'
 import { getDataVersion, setDataVersion } from './version'
 
 /** The minimum StartOS version required by this SDK release */
-export const OSVersion = testTypeVersion('0.4.1')
+export const OSVersion = testTypeVersion('0.4.3')
 
 // prettier-ignore
 type AnyNeverCond<T extends any[], Then, Else> = 
@@ -160,6 +161,11 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       | 'getDataVersion'
       | 'setDataVersion'
       | 'getServiceManifest'
+      | 'getSharedVolumes'
+      | 'prepareUpload'
+      | 'prepareDownload'
+      | 'resolveUpload'
+      | 'getUploadLimits'
 
     // prettier-ignore
     type StartSdkEffectWrapper = {
@@ -171,6 +177,8 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       checkDependencies: (effects, ...args) =>
         effects.checkDependencies(...args),
       mount: (effects, ...args) => effects.mount(...args),
+      mountSharedVolume: (effects, ...args) =>
+        effects.mountSharedVolume(...args),
       getInstalledPackages: (effects, ...args) =>
         effects.getInstalledPackages(...args),
       getServicePortForward: (effects, ...args) =>
@@ -194,6 +202,20 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       /** Volume path helpers derived from the manifest volume definitions */
       volumes: createVolumes(this.manifest),
       ...startSdkEffectWrapper,
+      /** Prepares an upload destination for a File action input. */
+      prepareUpload: (
+        effects: Effects,
+        options: Omit<Parameters<Effects['prepareUpload']>[0], 'volume'> & {
+          volume: Manifest['volumes'][number]
+        },
+      ) => effects.prepareUpload(options),
+      /** Prepares a volume file for a File action result. */
+      prepareDownload: (
+        effects: Effects,
+        options: Omit<Parameters<Effects['prepareDownload']>[0], 'volume'> & {
+          volume: Manifest['volumes'][number]
+        },
+      ) => effects.prepareDownload(options),
       /** Persist the current data version to the StartOS effect system */
       setDataVersion,
       /** Retrieve the current data version from the StartOS effect system */
@@ -242,7 +264,7 @@ export class StartSdk<Manifest extends T.SDKManifest> {
         /**
          * @description Create a notification attributed to this service. The
          *   notification appears in the StartOS notifications panel just like
-         *   the ones StartOS itself generates (e.g. on backup completion).
+         *   the ones StartOS itself generates (e.g. on an install failure).
          *
          *   Omit `data` for a plain notification — the panel row shows
          *   `title` and `message` only.
@@ -631,6 +653,10 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       getRootCa,
       /** Retrieve the manifest of any installed service package by its ID */
       getServiceManifest,
+      /** User-granted shared volumes, including names, access mode, and availability. */
+      getSharedVolumes: (
+        effects: Manifest extends { sharedVolumes: true } ? Effects : never,
+      ) => getSharedVolumes(effects),
       /**
        * Built-in health check functions for use in `ready.fn`.
        *
@@ -859,14 +885,14 @@ export class StartSdk<Manifest extends T.SDKManifest> {
        * Built-in trigger strategies that control how often a health check polls.
        *
        * Pass any of these to the `trigger` field on a {@link Ready} config.
-       * If omitted, health checks use `defaultTrigger`, except that a daemon's
-       * `loading` or `waiting: true` before its first `success` backs off from 1 s,
-       * doubling to 30 s.
+       * If omitted, health checks use `defaultTrigger`.
        */
       trigger: {
         /**
          * Every 1 s while `starting` or `failure`; every 30 s while `success`,
-         * `loading`, `disabled`, or `starting` with `waiting: true`.
+         * `loading`, `disabled`, or `starting` with `waiting: true`, except that
+         * `loading` or `waiting: true` before the first `success` backs off from
+         * 1 s, doubling to 30 s.
          */
         defaultTrigger,
         /** Fixed interval between checks. Use for a simple, constant polling rate. */

@@ -134,17 +134,28 @@ const getTheme = (theme: string): Theme =>
       </tui-textfield>
       <fieldset>
         <legend>{{ 'Remote Access' | i18n }}</legend>
-        @for (value of ['default', 'never', 'always']; track $index) {
-          <label tuiLabel>
-            <input
-              type="radio"
-              tuiRadio
-              formControlName="remote"
-              [value]="value"
-            />
-            {{ $index ? (value | i18n) : ('When behind NAT (Default)' | i18n) }}
-          </label>
-        }
+        <label tuiLabel>
+          <input type="radio" tuiRadio formControlName="remote" value="never" />
+          {{ 'Never (Default)' | i18n }}
+        </label>
+        <label tuiLabel>
+          <input
+            type="radio"
+            tuiRadio
+            formControlName="remote"
+            value="behind-nat"
+          />
+          {{ 'When behind NAT' | i18n }}
+        </label>
+        <label tuiLabel>
+          <input
+            type="radio"
+            tuiRadio
+            formControlName="remote"
+            value="always"
+          />
+          {{ 'always' | i18n }}
+        </label>
       </fieldset>
       <tui-elastic-container>
         @if (form.value.remote === 'always') {
@@ -306,7 +317,7 @@ export default class General {
         ? 'dark'
         : 'light') as Theme,
     language: 'en_US' as Language,
-    remote: 'default',
+    remote: 'never',
     timezone: 'UTC',
   })
 
@@ -320,7 +331,7 @@ export default class General {
         this.form.reset({
           theme: getTheme(info.theme),
           language: info.language as Language,
-          remote: info.remoteAccess ?? 'default',
+          remote: info.remoteAccess ?? 'never',
           // Show the actual device zone; default to UTC when unset (mirrors
           // LuCI). No browser fallback — that masked an unset device as set.
           timezone: (info.timezone || 'UTC').replaceAll(' ', '_'),
@@ -373,7 +384,7 @@ export default class General {
       this.form.reset({
         theme: getTheme(info.theme),
         language: info.language as Language,
-        remote: info.remoteAccess ?? 'default',
+        remote: info.remoteAccess ?? 'never',
         timezone: (info.timezone || 'UTC').replaceAll(' ', '_'),
       })
       this.onTheme(info.theme)

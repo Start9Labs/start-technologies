@@ -3,7 +3,7 @@
 use crate::prelude::*;
 use crate::sign::commitment::SignedCommitment;
 use crate::sign::ed25519::Ed25519ph;
-use crate::sign::{AnySignature, AnyVerifyingKey, SignatureScheme};
+use crate::sign::{AnySignature, AnyVerifyingKey, SignatureMap, SignatureScheme};
 
 /// Returns a verified signature with its canonical algorithm tag.
 pub fn verify_commitment<C: SignedCommitment>(
@@ -21,6 +21,26 @@ pub fn verify_commitment<C: SignedCommitment>(
                 .map_err(|_| e),
             _ => Err(e),
         })
+}
+
+/// Returns canonical verified endorsements, preferring the uploader's signature for its key.
+pub fn verify_signatures<C: SignedCommitment>(
+    commitment: &C,
+    context: &str,
+    signatures: &SignatureMap,
+    uploader: &AnyVerifyingKey,
+    signature: &AnySignature,
+) -> Result<SignatureMap, Error> {
+    signatures
+        .iter()
+        .chain(std::iter::once((uploader, signature)))
+        .map(|(key, signature)| {
+            Ok((
+                key.clone(),
+                verify_commitment(key, commitment, context, signature)?,
+            ))
+        })
+        .collect()
 }
 
 /// Relabels stored `id-Ed25519` registry signatures as Ed25519ph.

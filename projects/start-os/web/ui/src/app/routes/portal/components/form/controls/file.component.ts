@@ -15,6 +15,7 @@ import { Control } from './control'
         tuiInputFiles
         [invalid]="control.invalid()"
         [accept]="spec.extensions.join(',')"
+        [maxFileSize]="spec.maxSize ?? unlimited"
         [(ngModel)]="value"
         (blur)="control.onTouched()"
       />
@@ -112,7 +113,6 @@ import { Control } from './control'
     i18nPipe,
   ],
 })
-export class FormFileComponent extends Control<
-  IST.ValueSpecFile,
-  TuiFileLike
-> {}
+export class FormFileComponent extends Control<IST.ValueSpecFile, TuiFileLike> {
+  protected readonly unlimited = Infinity
+}

@@ -96,25 +96,6 @@ fn number(
     }
 }
 
-fn percent_decode(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
-    let mut decoded = Vec::new();
-    let mut bytes = bytes.iter().copied();
-    while let Some(byte) = bytes.next() {
-        if byte == b'%' {
-            let high = bytes.next().and_then(|b| (b as char).to_digit(16));
-            let low = bytes.next().and_then(|b| (b as char).to_digit(16));
-            decoded.push(
-                ((high.ok_or_else(|| invalid("invalid xattr name escape"))? << 4)
-                    | low.ok_or_else(|| invalid("invalid xattr name escape"))?)
-                    as u8,
-            );
-        } else {
-            decoded.push(byte);
-        }
-    }
-    Ok(decoded)
-}
-
 fn metadata(header: &Header, pax: &Pax) -> std::io::Result<Metadata> {
     let mode = header.mode()? & 0o7777;
     let mtime = match pax.get(b"mtime".as_slice()) {
@@ -138,7 +119,8 @@ fn metadata(header: &Header, pax: &Pax) -> std::io::Result<Metadata> {
         }
         if let Some(name) = key.strip_prefix(b"LIBARCHIVE.xattr.") {
             use base64::Engine;
-            let name = percent_decode(name)?;
+            let name = crate::util::percent_encoding::decode(name)
+                .ok_or_else(|| invalid("invalid xattr name escape"))?;
             let value = crate::util::serde::BASE64
                 .decode(value)
                 .map_err(|_| invalid("invalid LIBARCHIVE xattr encoding"))?;

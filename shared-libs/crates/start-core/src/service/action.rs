@@ -238,6 +238,12 @@ impl Handler<RunAction> for ServiceActor {
             })
             .await
             .result?;
+        if let Some(result) = &result {
+            self.0
+                .action_files
+                .publish(&self.0.ctx.rpc_continuations, &event_id, result)
+                .await?;
+        }
         Ok(result)
     }
 }

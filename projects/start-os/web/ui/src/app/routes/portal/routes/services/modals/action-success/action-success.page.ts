@@ -11,6 +11,7 @@ import { injectContext } from '@taiga-ui/polymorpheus'
 import { ActionSuccessGroupComponent } from './action-success-group.component'
 import { ActionSuccessMultilineComponent } from './action-success-multiline.component'
 import { ActionSuccessSingleComponent } from './action-success-single.component'
+import { ActionSuccessFile } from './file'
 import { ActionResponse } from './types'
 
 @Component({
@@ -31,6 +32,9 @@ import { ActionResponse } from './types'
     @if (group) {
       <app-action-success-group [group]="group" />
     }
+    @if (file) {
+      <app-action-success-file [file]="file" />
+    }
   `,
   styles: `
     :host {
@@ -43,6 +47,7 @@ import { ActionResponse } from './types'
     ActionSuccessGroupComponent,
     ActionSuccessMultilineComponent,
     ActionSuccessSingleComponent,
+    ActionSuccessFile,
     NgDompurifyPipe,
     MarkdownPipe,
     SafeLinksDirective,
@@ -58,6 +63,7 @@ export class ActionSuccessPage {
   readonly multiline =
     this.data.result?.type === 'multiline' ? this.data.result : null
   readonly group = this.data.result?.type === 'group' ? this.data.result : null
+  readonly file = this.data.result?.type === 'file' ? this.data.result : null
 
   readonly options = { breaks: true }
 }

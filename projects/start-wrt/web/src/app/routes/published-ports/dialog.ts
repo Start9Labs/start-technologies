@@ -298,13 +298,20 @@ export class PublishPortDialog implements OnInit {
     { initialValue: 'both' as const },
   )
 
-  // Compute if IPv4 reservation is needed
+  // A new IPv4 forward reserves the device's address on its profile; an
+  // existing one keeps the profile it forwards into.
   protected readonly reserveIpv4 = computed(() => {
     const mac = this.selectedDeviceMac()
     const ipVersion = this.selectedIpVersion()
     const device = this.deviceMap().get(mac)
+    const existing = this.context.data.existing
 
     if (!device) return false
+    if (
+      existing?.ipv4 &&
+      existing.deviceMac.toUpperCase() === mac.toUpperCase()
+    )
+      return false
 
     return (ipVersion === 'ipv4' || ipVersion === 'both') && !device.ipv4Static
   })
@@ -559,11 +566,6 @@ export class PublishPortDialog implements OnInit {
           (ipv4PublicPort ?? value.ports),
     }
 
-    const result: PublishedPortDialogResult = {
-      port,
-      reserveIpv4: this.reserveIpv4(),
-    }
-
-    this.context.completeWith(result)
+    this.context.completeWith({ port })
   }
 }

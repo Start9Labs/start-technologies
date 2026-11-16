@@ -32,7 +32,7 @@ Share this password with the people or devices that should receive that profile.
 
 ## Editing a Wi-Fi Password
 
-Select "Edit" from a password's actions menu to change its label or move it to a different Security Profile. If moving the password to another profile would delete any [Published Ports](published-ports.md) rules (its devices move to a new subnet), a confirmation dialog lists them first.
+Select "Edit" from a password's actions menu to change its label, change the password itself, or move it to a different Security Profile. Changing a password may briefly disconnect all Wi-Fi devices. Devices using the old password must reconnect with the new one. If the password was its profile's last, a confirmation dialog first names any devices using it that have a reserved address or [Published Ports](published-ports.md) rule for that profile. Those are kept, and apply again when the devices are back on that profile.
 
 ## Removing a Wi-Fi Password
 
@@ -41,7 +41,7 @@ Select "Edit" from a password's actions menu to change its label or move it to a
 1. Select "Delete" from the password's actions menu.
 
 > [!WARNING]
-> Removing a Wi-Fi password immediately disconnects all devices using it. Those devices will need a different password to reconnect.
+> Removing a Wi-Fi password immediately disconnects all devices using it. Those devices will need a different password to reconnect. If it was its profile's last password, the confirmation names any of those devices that have a reserved address or [Published Ports](published-ports.md) rule for that profile. Those are kept, and apply again when the devices are back on that profile.
 
 ## Settings
 

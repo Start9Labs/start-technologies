@@ -1,0 +1,15 @@
+--- a/src/zig/mod.rs
++++ b/src/zig/mod.rs
+@@ -216,6 +216,12 @@
+         {
+             command.env("SDKROOT", sdkroot);
+         }
++        // A target's libc paths file replaces Zig's bundled libc.
++        if let Some(libc) = target.and_then(|target| {
++            env::var_os(format!("ZIG_LIBC_{}", target.replace(['-', '.'], "_")))
++        }) {
++            command.env("ZIG_LIBC", libc);
++        }
+ 
+         let mut child = command
+             .arg(cmd)

@@ -1,0 +1,26 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-registries 1  "registries "
+.SH NAME
+start\-cli\-server\-registries \- Manage the registries this server\*(Aqs Marketplace is connected to
+.SH SYNOPSIS
+\fBstart\-cli server registries\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Manage the registries this server\*(Aqs Marketplace is connected to
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-server\-registries\-add(1)
+Connect a registry, trusting the keys it offers for packages
+.TP
+start\-cli\-server\-registries\-list(1)
+List connected registries and their names
+.TP
+start\-cli\-server\-registries\-remove(1)
+Disconnect a registry, including the Start9 and Community registries
+.TP
+start\-cli\-server\-registries\-set\-os(1)
+Use a connected registry for StartOS updates

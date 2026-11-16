@@ -1,4 +1,4 @@
-import { IST, RPC, RpcClient, T } from '@start9labs/start-core'
+import { IST, RPC, RpcClient, RpcStreamClient, T } from '@start9labs/start-core'
 import { WebSocketSubjectConfig } from 'rxjs/webSocket'
 import { GetPackageReq, GetPackagesReq } from '@start9labs/marketplace'
 
@@ -12,6 +12,8 @@ export type WebsocketConfig<U> = Omit<WebSocketSubjectConfig<U>, 'url'>
 export type ServerState = Result<'state'>
 export type DiagnosticErrorRes = Result<'diagnostic.error'>
 export type FollowServerLogsReq = Params<'server.logs.follow'>
+export type FollowLogs =
+  RpcStreamClient<RPC.StartOS>['server']['logs']['follow']
 export type ServerBindingSetAddressEnabledReq =
   Params<'server.host.binding.set-address-enabled'>
 export type PkgBindingSetAddressEnabledReq =
@@ -44,8 +46,6 @@ export type GetRegistryPackageReq = GetPackageReq &
 export type GetRegistryPackagesReq = GetPackagesReq &
   Pick<Params<'registry.package.get'>, 'registry'>
 export type CheckDnsRes = Result<'net.gateway.check-dns'>
-export type DiskBackupTarget = Extract<T.BackupTarget, { type: 'disk' }>
-export type CifsBackupTarget = Extract<T.BackupTarget, { type: 'cifs' }>
 export type RecoverySource = DiskRecoverySource | CifsRecoverySource
 export interface DiskRecoverySource {
   type: 'disk'

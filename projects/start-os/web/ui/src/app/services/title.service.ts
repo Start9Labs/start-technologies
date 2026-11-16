@@ -5,6 +5,7 @@ import {
   Injectable,
   OnDestroy,
   OnInit,
+  signal,
   TemplateRef,
   ViewContainerRef,
 } from '@angular/core'
@@ -15,6 +16,8 @@ import { tuiButtonOptionsProvider } from '@taiga-ui/core'
 })
 export class TitleService {
   private vcr?: ViewContainerRef
+
+  readonly corner = signal<TemplateRef<unknown> | null>(null)
 
   register(vcr: ViewContainerRef) {
     this.vcr = vcr
@@ -40,5 +43,19 @@ export class TitleDirective implements OnInit, OnDestroy {
 
   ngOnDestroy() {
     this.view?.destroy()
+  }
+}
+
+@Directive({ selector: 'ng-template[corner]' })
+export class CornerDirective implements OnInit, OnDestroy {
+  private readonly template = inject(TemplateRef)
+  private readonly service = inject(TitleService)
+
+  ngOnInit() {
+    this.service.corner.set(this.template)
+  }
+
+  ngOnDestroy() {
+    if (this.service.corner() === this.template) this.service.corner.set(null)
   }
 }

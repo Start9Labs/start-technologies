@@ -2,15 +2,17 @@ import { inject, Injectable, signal } from '@angular/core'
 import { FormService } from 'src/app/services/form.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import {
-  AffectedPublishedPort,
   ApiService,
+  DeviceLeavingProfile,
   EthernetConfig,
   EthernetSetConfig,
   ProfileId,
+  UsbPortStatus,
 } from 'src/app/services/api/api.service'
 
 export interface EthernetPortView {
   name: string
+  usb: UsbPortStatus | null
   profile: ProfileId | null
   profileName: string
   wan: boolean
@@ -48,25 +50,33 @@ export class EthernetService extends FormService<EthernetPortView[]> {
   }
 
   async store(items: EthernetPortView[]): Promise<void> {
-    // store() is the real apply (via save()'s restart flow) — confirm the
-    // published-port cleanup the preview already surfaced to the user.
-    await this.api.ethernetSet(this.buildConfig(items, true))
+    await this.api.ethernetSet(this.buildConfig(items, false))
   }
 
-  /**
-   * Dry-run: returns the published ports that would be deleted if these port
-   * assignments were applied. Applies nothing (confirm = false).
-   */
+  async removeUsbPort(port: string): Promise<void> {
+    const removed = await this.actions.run(
+      () => this.api.ethernetRemoveUsbPort({ port }),
+      {
+        loading: this.i18n.transform('Restarting network...'),
+        success: this.i18n.transform('USB port removed'),
+        fail: this.i18n.transform('Failed to remove USB port'),
+        restart: true,
+      },
+    )
+    if (removed) this.refresh()
+  }
+
+  /** The devices that keep settings for the profile a port leaves. */
   async previewPorts(
     items: EthernetPortView[],
-  ): Promise<AffectedPublishedPort[]> {
-    const result = await this.api.ethernetSet(this.buildConfig(items, false))
-    return result.pending_published_port_deletions
+  ): Promise<DeviceLeavingProfile[]> {
+    const result = await this.api.ethernetSet(this.buildConfig(items, true))
+    return result.leaving_profile
   }
 
   private buildConfig(
     items: EthernetPortView[],
-    confirm: boolean,
+    preview: boolean,
   ): EthernetSetConfig {
     const wanPort = items.find(p => p.wan)?.name ?? null
     return {
@@ -75,18 +85,24 @@ export class EthernetService extends FormService<EthernetPortView[]> {
       ports: Object.fromEntries(
         items.map(p => [p.name, { profile: p.wan ? null : p.profile }]),
       ),
-      confirm_published_port_deletion: confirm,
+      preview,
     }
   }
 
   private toPortViews(ethernet: EthernetConfig): EthernetPortView[] {
     return Object.entries(ethernet.ports)
-      .map(([name, port]) => ({
-        name,
-        profile: port.profile,
-        profileName: port.profile?.fullname ?? 'Admin',
-        wan: name === ethernet.wan_port,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(([name, port]) => {
+        const usb = ethernet.usb_ports[name] ?? null
+        return {
+          name,
+          usb,
+          profile: port.profile,
+          profileName: port.profile?.fullname ?? 'Admin',
+          wan: name === ethernet.wan_port,
+        }
+      })
+      .sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { numeric: true }),
+      )
   }
 }

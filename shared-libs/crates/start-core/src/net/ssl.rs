@@ -411,7 +411,7 @@ pub fn make_root_cert(
 }
 
 /// Keeps the key, subject and validity; `None` unless the authority key identifier lacks a key ID.
-fn reissue_root_cert(root_key: &PKey<Private>, root: &X509Ref) -> Result<Option<X509>, Error> {
+pub fn reissue_root_cert(root_key: &PKey<Private>, root: &X509Ref) -> Result<Option<X509>, Error> {
     if root.authority_key_id().is_some()
         || (root.authority_issuer().is_none() && root.authority_serial().is_none())
     {

@@ -5,6 +5,97 @@ All notable changes to StartWRT are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0]
+
+### Added
+
+- The Activity log records each time the router starts, with its version and, when known, why it restarted; the settings changes an update made; and every SSH session, with its source address, key, and duration.
+- Sign-ins in the Activity log show the address and profile they came from and whether they came from a browser or another client, and a renamed device's entry names its old name.
+- A device's page notes when the device is trying to publish DNS records without permission, and the system log reports each refused source once instead of on every retry.
+
+- A page whose settings were changed in LuCI or by hand in a way StartWRT cannot show or keep now lists those changes, with their file and line and a link to LuCI, in place of its settings. Previously the page showed an error every few seconds, showed wrong values, or could overwrite the change on save. StartWRT also no longer turns off IPv6 at startup, or adds a second Admin profile, because of LAN settings it cannot read. A change StartWRT reads but does not manage, such as a second address on the LAN, is noted above the page's settings instead. An address written with a prefix length, a list of addresses, a static lease with several MAC addresses, and a firewall rule whose protocols are written as one option are now read.
+
+- A device's page lists the ports the device recently asked to open through automatic port forwarding while that permission was off.
+
+- **USB Ethernet adapters add LAN ports.** An adapter in one of the router's USB-A ports puts that USB port on the Ethernet page the first time a network device is plugged into it. Assign it a Security Profile like any Ethernet port. A new USB port starts in the Admin profile and keeps its profile while unplugged. Each port of a USB hub is a USB port of its own. An unplugged USB port can be removed from the page.
+
+### Changed
+
+- **`startwrt-cli auth session kill` takes `--pubkey <key>` for each sign-in to end**, in place of positional session IDs. The `auth.session.kill` RPC takes `pubkeys` in place of `ids`, and `auth.session.list` returns sessions as `{ pubkeys, tokens }`.
+
+- Changing the Security Profile of an Ethernet port or Wi-Fi password, or removing a profile's last Wi-Fi password, no longer deletes the reservations and published ports of the devices on it. The confirmation names the devices that keep them.
+- Deleting a Security Profile also deletes the reservations and published ports for it. The confirmation lists them.
+- A new reservation must be in the subnet of the profile the device is on and not reserved for another device. Reservations for profiles the device is not on are listed on its detail page as inactive, where they can be removed.
+- A published port for a profile its device is not on shows as Inactive.
+- An automatic port forward no longer stays open at a device's reserved address once the device takes an address on another profile.
+
+- **`startwrt-cli system set-preferences` and the `system.set-preferences` RPC take `behind-nat` for When behind NAT**, in place of `default`, which they reject. `system.info` reports the mode under the same name.
+
+- A device keeps an IPv4 reservation for each Security Profile. When it moves to another profile, its reservation and published ports for the old profile are kept and work again when it returns, whether the device moved itself or you changed the profile of its Ethernet port or Wi-Fi password.
+
+- **Device permission descriptions moved to the help panel.** The device page shows the permission switches alone; the help panel explains each one.
+
+- Changing an Ethernet port's Security Profile now asks for confirmation and explains how to reconnect a device that loses its connection afterwards, such as a device behind a switch.
+
+- Every network now answers Firefox's DNS-over-HTTPS canary domain, so Firefox's default-enabled DoH steps aside on all of them and device names resolve there. DoH a user turned on explicitly is untouched.
+
+- The name of a device with a reserved address no longer resolves from networks whose Security Profile cannot reach it.
+
+- Firmware updates share registry and signature handling with StartOS, retaining compatibility with legacy image signatures.
+
+- **Outbound VPN connection paths are drawn as nested tunnels.** A VPN's page shows where each tunnel in its chain starts and ends, which tunnels run inside which, and which server your traffic leaves from.
+
+- An outbound VPN's **Target** setting (called **Connects to** on its page) is now labelled **Connects via** everywhere. It chooses how the VPN reaches its own server: directly over the Internet, or through another VPN.
+
+- Improved wired throughput by spreading each Ethernet port's work across the router's processor cores.
+
+### Fixed
+
+- A device's name now resolves from every network whose Security Profile can reach it, not only from its own. A name you assign wins over the hostname the device sends, and a network's own device keeps a name another network's device also uses.
+
+- The Devices page no longer labels a device on another security profile as Admin when the router has no current neighbour entry for it, such as after it goes offline. It now shows the profile the bridge or the device's address places it on, or no profile when neither does.
+
+- The Devices page shows each device's IPv6 address consistently. It could disappear and return between refreshes, or never appear for a device that forwards traffic, such as a server running containers or virtual machines, or one that stayed connected while the router restarted.
+- A device with only an IPv6 address shows as online while the router can confirm it holds that address, instead of always offline.
+
+- A factory reset no longer stops short of rebooting after erasing the router's settings.
+
+- iPhones and iPads can install the Root CA of a router set up before StartWRT 1.2.0. Its fingerprint changes on update, and devices that already trust it keep trusting the router.
+
+- **Error and success text is readable in the light theme.** It used the dark theme's colours, which were too faint on a white background.
+
+- **The login page says why a login failed.** It reported an invalid password for every failure. A device clock more than 30 seconds off the router's now shows as a clock error, which you fix by correcting the device's time.
+
+- Saving a Security Profile keeps the firewall rules and forwardings added in LuCI, and the options LuCI added to the profile's own rules, where they were.
+
+- **Published ports save while the router has no global IPv6 address.** Losing the WAN's global IPv6 address blocked every published-port change, including IPv4-only ones, once any IPv6 forward existed. Existing IPv6 forwards keep their rule and show that the router has no global IPv6 address; only adding an IPv6 forward still needs one.
+
+- The web interface's certificate names whatever you opened it by — `router.lan`, `router.local`, the gateway address of any profile, the WAN address, or the DDNS hostname — so a device that trusts your Root CA no longer sees a name warning on any of them.
+- `router.lan` resolves to the asking profile's own IPv4 gateway instead of every profile's gateway.
+
+- StartWRT now reads settings that contain an apostrophe or a backslash the same way OpenWrt does. Previously, a Wi-Fi name like "Rich's Wi-Fi" saved through LuCI, or a profile name with an apostrophe once a WAN schedule had run, left StartWRT unable to read that configuration file.
+
+- Stop blank lines accumulating in router configuration files when settings are saved repeatedly.
+
+- Editing or deleting a Wi-Fi password after sorting the Passwords table now acts on the password you chose. Previously it could change or delete a different password.
+
+- **Editing a Wi-Fi password can change the password itself.** Edit offered only the label and security profile, so changing a password meant deleting and re-creating it. Changing a password may briefly disconnect all Wi-Fi devices; devices using the old password must reconnect with the new one. The dialog's help no longer calls the label the network name devices see. Saving an edit after the password was changed or deleted elsewhere displays an explicit error.
+
+### Security
+
+- **Backups are encrypted with your admin password.** Downloading a backup asks for the admin password, and restoring it asks for the admin password in effect when it was created. Backups from earlier versions still restore without a password.
+
+- The admin password set during setup is encrypted in the browser before it is sent to the router, in both the setup wizard and the Create admin password page.
+- LuCI opens only over HTTPS, so signing in to it no longer sends the admin password unencrypted: plain-HTTP requests to it redirect to HTTPS, and it no longer answers on port 8080.
+
+- **Support diagnostics leave out passwords and personal details.** The downloaded file removes passwords and keys, and replaces MAC addresses, public IP addresses, names and domains with placeholders. The logs kept on the router are unchanged.
+
+- Hostname routes admit WAN connections only when they are addressed to the router's WAN address.
+
+- The router no longer sends mDNS on the WAN: its `router.local` announcement and its lookups of LAN device names stay on the LAN.
+
+- **Remote Access defaults to Never.** Routers on the previous default, When behind NAT, switch to Never with this update. To keep managing the router from its upstream network, choose When behind NAT under Settings > General > Remote Access.
+
 ## [1.3.0]
 
 ### Added

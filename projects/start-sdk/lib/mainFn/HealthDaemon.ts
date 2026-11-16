@@ -1,6 +1,6 @@
 import { HealthCheckResult } from '../health/checkFns'
 import { withGracePeriod } from '../health/isInGracePeriod'
-import { daemonReadyTrigger, defaultTrigger } from '../trigger/defaultTrigger'
+import { defaultTrigger } from '../trigger/defaultTrigger'
 import { Ready } from './Daemons'
 import { Daemon } from './Daemon'
 import { Effects, SDKManifest } from '@start9labs/start-core/types'
@@ -151,9 +151,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
 
   private async runHealthCheckLoop(signal: AbortSignal): Promise<void> {
     if (this.ready === 'EXIT_SUCCESS') return
-    const trigger = (
-      this.ready.trigger ?? (this.daemon ? daemonReadyTrigger : defaultTrigger)
-    )(() => ({
+    const trigger = (this.ready.trigger ?? defaultTrigger)(() => ({
       lastResult: this._health.result,
       lastWaiting: 'waiting' in this._health && this._health.waiting,
     }))

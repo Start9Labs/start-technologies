@@ -37,6 +37,7 @@ type KEYS =
   | 'preDownloadAlert'
   | 's9pks'
   | 'signers'
+  | 'signatures'
 
 @Component({
   selector: 'marketplace-controls',
@@ -227,6 +228,7 @@ export class MarketplaceControlsComponent {
     return this.tasks.run(async () => {
       const res = await this.api.rpc.package.sideload({
         trust,
+        signatures: this.pkg().signatures,
         acceptSigners: packageSignerPolicy(
           this.pkg(),
           this.trust.keys() ?? {},

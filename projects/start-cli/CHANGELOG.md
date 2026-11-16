@@ -9,6 +9,25 @@ Because `start-cli` is a thin client over `start-core`, most user-visible CLI ch
 in `start-core`; record here anything that changes this crate's entrypoint, features, packaging,
 or the CLI's externally observable behavior.
 
+## [2.8.0]
+
+### Added
+
+- Display the download path when a service action returns a File result, including files nested in groups.
+
+- Accept named registry profiles in `--from` and `--to` for package and OS promotion.
+
+- Add `server set-log-level <error|warn|info|debug|trace>` to change verbosity for `start-core`/`start-os` in the running daemon until it restarts. Dependency logs keep their startup filter; saved configuration remains unchanged.
+
+- Remove retained GPG exports from registry signers by primary-key fingerprint with `registry admin signer edit --remove-gpg-export`, preserving their signing keys and publishing permissions.
+
+### Fixed
+
+- Separate grouped action results onto their own lines.
+
+- Carry existing asset signatures when promoting OS versions between registries that support signature ingestion.
+- Preserve all source mirror URLs when promoting OS assets.
+
 ## [2.7.0]
 
 ### Added

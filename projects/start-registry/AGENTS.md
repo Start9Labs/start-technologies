@@ -72,6 +72,8 @@ Every master build is also tagged `sha-<commit>`. Pushing a `start-registry/v<ve
 
 Add subcommands in `registry/mod.rs`; use `with_call_remote::<CliContext>()` for
 CLI exposure and `with_about(...)` for localized help. Tag admin-only commands
-with `with_metadata("admin", true)`. Changes that rewrite persisted registry data
+with `with_metadata("admin", true)`. Tag handlers that write the index with
+`with_metadata(WRITES_INDEX, Value::Bool(true))` (`registry/upstream.rs`) so
+mirrors reject them. Changes that rewrite persisted registry data
 need a migration in `shared-libs/crates/start-core/src/registry/migrations/`.
 Additive fields with serde defaults can deserialize existing records without one.

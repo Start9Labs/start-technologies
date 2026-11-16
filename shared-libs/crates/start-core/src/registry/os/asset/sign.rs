@@ -15,6 +15,7 @@ use crate::progress::FullProgressTracker;
 use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::registry::os::SIG_CONTEXT;
+use crate::registry::os::asset::may_manage_assets;
 use crate::registry::os::index::OsVersionInfo;
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
@@ -76,16 +77,7 @@ async fn sign_asset(
     ctx.db
         .mutate(|db| {
             let guid = db.as_index().as_signers().get_signer(&signer)?;
-            if !db
-                .as_index()
-                .as_os()
-                .as_versions()
-                .as_idx(&version)
-                .or_not_found(&version)?
-                .as_authorized()
-                .de()?
-                .contains(&guid)
-            {
+            if !may_manage_assets(db, &version, &guid)? {
                 return Err(Error::new(
                     eyre!(
                         "{}",

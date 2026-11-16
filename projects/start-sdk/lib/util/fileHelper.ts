@@ -14,6 +14,7 @@ import { asError, deepEqual } from '@start9labs/start-core/util'
 import { MappedWatchable } from '@start9labs/start-core/util/Watchable'
 import { PathBase } from './Volume'
 import {
+  copyFileBackup,
   filePath,
   replaceFile,
   withFileLock,
@@ -212,7 +213,12 @@ export interface FileHelper<A> {
     data: T.AllowReadonly<A> | A,
     options?: { allowWriteAfterConst?: boolean },
   ): Promise<null>
-  /** Deep-merges partial data into the file under the writer lock; arrays are replaced. */
+  /**
+   * Deep-merges partial data under the writer lock; arrays are replaced.
+   * Invalid file syntax falls back to schema defaults, after the file is copied
+   * durably to `<path>.unparseable-<timestamp>`.
+   * Backup or transformer errors reject.
+   */
   merge(
     effects: T.Effects,
     data: T.AllowReadonly<T.DeepPartial<A>>,
@@ -244,9 +250,35 @@ class FileHelperImpl<A> implements FileHelper<A> {
   constructor(
     readonly path: string,
     readonly writeData: (dataIn: A) => string,
-    readonly readData: (stringValue: string) => unknown,
+    private readonly parseData: (stringValue: string) => unknown,
     readonly validate: (value: unknown) => A,
+    private readonly transformRead: (value: unknown) => unknown = value =>
+      value,
   ) {}
+
+  readonly readData = (stringValue: string): unknown =>
+    this.transformRead(this.parseData(stringValue))
+
+  /** Null for an unparseable file, after copying it aside. */
+  private async readMergeData(
+    raw: string | null,
+    path: string,
+    signal: AbortSignal,
+  ): Promise<unknown> {
+    if (raw === null) return null
+    let parsed: unknown
+    try {
+      parsed = this.parseData(raw)
+    } catch (e) {
+      const backup = `${path}.unparseable-${new Date().toISOString()}`
+      await copyFileBackup(path, backup, signal)
+      console.warn(
+        `${this.path} could not be parsed; copied it to ${backup}; rebuilding it from the schema defaults: ${asError(e).message}`,
+      )
+      return null
+    }
+    return this.transformRead(parsed)
+  }
 
   private async writeLocked(
     path: string,
@@ -443,8 +475,8 @@ class FileHelperImpl<A> implements FileHelper<A> {
   ) {
     return this.modify(
       effects,
-      async raw => {
-        let fileData: any = raw === null ? null : this.readData(raw)
+      async (raw, path, signal) => {
+        let fileData: any = await this.readMergeData(raw, path, signal)
         try {
           fileData = this.validate(fileData)
         } catch (_) {}
@@ -479,8 +511,9 @@ class FileHelperImpl<A> implements FileHelper<A> {
     return new FileHelperImpl<A>(
       toPath(path),
       this.writeData,
-      this.readData,
+      this.parseData,
       this.validate,
+      this.transformRead,
     )
   }
 }
@@ -500,13 +533,9 @@ function rawTransformed<A extends Transformed, Raw, Transformed>(
           transformers ? transformers.onWrite(inData) : (inData as any as Raw),
         ),
       ),
-    fileData => {
-      if (transformers) {
-        return transformers.onRead(fromFile(fileData))
-      }
-      return fromFile(fileData)
-    },
+    fromFile,
     validate as (a: unknown) => A,
+    transformers ? value => transformers.onRead(value as Raw) : undefined,
   )
 }
 

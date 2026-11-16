@@ -43,32 +43,6 @@ export const ActivityListParams: z.ZodObject<{
 }).meta({
   id: 'ActivityListParams',
 })
-
-/**
- * A published port that will be removed because the device it forwards to can
- * no longer be reached at its current address — its security profile is changing
- * (ethernet-port or WiFi-password reassignment) or its WiFi password is being
- * deleted (disconnecting it) — so its DNAT rule, bound to the device's old
- * subnet, would otherwise break. Surfaced to the UI to confirm the deletion.
- */
-export const AffectedPublishedPort: z.ZodObject<{
-  id: z.ZodString
-  label: z.ZodString
-  device_mac: z.ZodString
-  device_name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  id: z.string(),
-  label: z.string(),
-  device_mac: z.string(),
-  device_name: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'AffectedPublishedPort',
-  description:
-    "A published port that will be removed because the device it forwards to can\nno longer be reached at its current address — its security profile is changing\n(ethernet-port or WiFi-password reassignment) or its WiFi password is being\ndeleted (disconnecting it) — so its DNAT rule, bound to the device's old\nsubnet, would otherwise break. Surfaced to the UI to confirm the deletion.",
-})
 export const AnyVerifyingKey: typeof literal_0 = /* @__PURE__ */ literal_0.meta(
   {
     id: 'AnyVerifyingKey',
@@ -193,6 +167,20 @@ export const AutomaticPortUse: z.ZodObject<{
   id: 'AutomaticPortUse',
   description: 'One automatic port use for the published-ports UI.',
 })
+export const BackupCreateParams: z.ZodObject<{ password: z.ZodString }> =
+  /* @__PURE__ */ object({ password: z.string() }).meta({
+    id: 'BackupCreateParams',
+  })
+export const BackupRestoreParams: z.ZodObject<{
+  password: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  password: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'BackupRestoreParams',
+})
 export const BlackoutSetResult: z.ZodObject<{
   /**
    * True (and nothing applied) when a window covers the current time and the
@@ -245,6 +233,61 @@ export const CheckInitializedRes: z.ZodObject<{ initialized: z.ZodBoolean }> =
   /* @__PURE__ */ object({ initialized: z.boolean() }).meta({
     id: 'CheckInitializedRes',
   })
+export const ConfigProblem: z.ZodEnum<{
+  syntax: 'syntax'
+  value: 'value'
+  missing: 'missing'
+  unsupported: 'unsupported'
+  unnamed: 'unnamed'
+  absent: 'absent'
+  extra: 'extra'
+  unmanaged: 'unmanaged'
+}> = /* @__PURE__ */ z
+  .enum([
+    'syntax',
+    'value',
+    'missing',
+    'unsupported',
+    'unnamed',
+    'absent',
+    'extra',
+    'unmanaged',
+  ])
+  .meta({
+    id: 'ConfigProblem',
+  })
+
+/**
+ * A page of the StartWRT UI, named by its route. Settings, which holds the recovery tools,
+ * is never one.
+ */
+export const ConfigView: z.ZodEnum<{
+  wan: 'wan'
+  'published-ports': 'published-ports'
+  outbound: 'outbound'
+  lan: 'lan'
+  devices: 'devices'
+  profiles: 'profiles'
+  ethernet: 'ethernet'
+  wifi: 'wifi'
+  inbound: 'inbound'
+}> = /* @__PURE__ */ z
+  .enum([
+    'wan',
+    'published-ports',
+    'outbound',
+    'lan',
+    'devices',
+    'profiles',
+    'ethernet',
+    'wifi',
+    'inbound',
+  ])
+  .meta({
+    id: 'ConfigView',
+    description:
+      'A page of the StartWRT UI, named by its route. Settings, which holds the recovery tools,\nis never one.',
+  })
 export const DataUsagePeriod: z.ZodEnum<{
   week: 'week'
   month: 'month'
@@ -289,6 +332,62 @@ export const DeleteArgs: z.ZodObject<{
 }).meta({
   id: 'DeleteArgs',
 })
+
+/**
+ * A published port deleted with the profile it forwards into.
+ */
+export const DeletedPublishedPort: z.ZodObject<{
+  id: z.ZodString
+  label: z.ZodString
+  mac: z.ZodString
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  id: z.string(),
+  label: z.string(),
+  mac: z.string(),
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'DeletedPublishedPort',
+  description: 'A published port deleted with the profile it forwards into.',
+})
+export const DeletedReservation: z.ZodObject<{
+  mac: z.ZodString
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  ipv4: z.ZodString
+}> = /* @__PURE__ */ object({
+  mac: z.string(),
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  ipv4: z.string(),
+}).meta({
+  id: 'DeletedReservation',
+})
+
+/**
+ * A device that keeps a reservation or published port for the profile it is
+ * leaving. They apply again when it returns.
+ */
+export const DeviceLeavingProfile: z.ZodObject<{
+  mac: z.ZodString
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  profile: z.ZodString
+}> = /* @__PURE__ */ object({
+  mac: z.string(),
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  profile: z.string(),
+}).meta({
+  id: 'DeviceLeavingProfile',
+  description:
+    'A device that keeps a reservation or published port for the profile it is\nleaving. They apply again when it returns.',
+})
 export const DeviceMacReq: z.ZodObject<{ mac: z.ZodString }> =
   /* @__PURE__ */ object({ mac: z.string() }).meta({
     id: 'DeviceMacReq',
@@ -307,8 +406,20 @@ export const DeviceUpdateReq: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * On: `ipv4` becomes the reservation in the profile whose subnet holds it.
+   * Off: the reservation `ipv4` names is deleted; with `ipv4` empty, the one
+   * in the profile the device is on.
+   */
   ipv4_static: z.ZodBoolean
   ipv4: z.ZodString
+  /**
+   * Reservations to delete, by address.
+   */
+  remove_ipv4_reservations: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<z.ZodString>>,
+    z.ZodArray<z.ZodString>
+  >
 }> = /* @__PURE__ */ object({
   mac: z.string(),
   /**
@@ -319,8 +430,25 @@ export const DeviceUpdateReq: z.ZodObject<{
     description:
       'Absent leaves the assigned name untouched; empty clears it. Otherwise\nit must pass [`validate_device_name`].',
   }),
-  ipv4_static: z.boolean(),
+  /**
+   * On: `ipv4` becomes the reservation in the profile whose subnet holds it.
+   * Off: the reservation `ipv4` names is deleted; with `ipv4` empty, the one
+   * in the profile the device is on.
+   */
+  ipv4_static: z.boolean().meta({
+    description:
+      'On: `ipv4` becomes the reservation in the profile whose subnet holds it.\nOff: the reservation `ipv4` names is deleted; with `ipv4` empty, the one\nin the profile the device is on.',
+  }),
   ipv4: z.string(),
+  /**
+   * Reservations to delete, by address.
+   */
+  remove_ipv4_reservations: wire(
+    z.array(z.string()).optional(),
+    z.array(z.string()),
+  ).meta({
+    description: 'Reservations to delete, by address.',
+  }),
 }).meta({
   id: 'DeviceUpdateReq',
 })
@@ -371,6 +499,10 @@ export const DnsServer: z.ZodObject<{
   description:
     'A single DNS server entry with protocol info.\n`ssl: false` = plain UDP on port 53.\n`ssl: true`  = DNS-over-HTTPS via SmartDNS (`server-https`).',
 })
+export const EncryptedWire: z.ZodObject<{ encrypted: z.ZodUnknown }> =
+  /* @__PURE__ */ object({ encrypted: z.unknown() }).meta({
+    id: 'EncryptedWire',
+  })
 export const ExecReq: z.ZodObject<{
   command: z.ZodString
   args: z.ZodArray<z.ZodString>
@@ -431,6 +563,12 @@ export const FileType: z.ZodEnum<{
   .meta({
     id: 'FileType',
   })
+export const FlashMode: z.ZodEnum<{
+  update: 'update'
+  'fresh-start': 'fresh-start'
+}> = /* @__PURE__ */ z.enum(['update', 'fresh-start']).meta({
+  id: 'FlashMode',
+})
 export const FollowLogsParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'FollowLogsParams',
 })
@@ -449,13 +587,13 @@ export const Guid: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 /**
  * Proof that a set of auth keys was unenrolled — removed from the persisted
  * and ephemeral signer stores with any continuations they opened killed.
- * Obtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]
+ * Obtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]
  * from inside a db transaction.
  */
 export const HasUnenrolledKeys: z.ZodNull = /* @__PURE__ */ z.null().meta({
   id: 'HasUnenrolledKeys',
   description:
-    'Proof that a set of auth keys was unenrolled — removed from the persisted\nand ephemeral signer stores with any continuations they opened killed.\nObtained via [`SignatureAuthContext::unenroll`], or [`Self::unenroll`]\nfrom inside a db transaction.',
+    'Proof that a set of auth keys was unenrolled — removed from the persisted\nand ephemeral signer stores with any continuations they opened killed.\nObtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]\nfrom inside a db transaction.',
 })
 export const InjectedDnsRecord: z.ZodObject<{
   name: z.ZodString
@@ -556,6 +694,37 @@ export const IoFormat: z.ZodEnum<{
   .meta({
     id: 'IoFormat',
   })
+export const Ipv4Reservation: z.ZodObject<{
+  ipv4: z.ZodString
+  /**
+   * The profile whose subnet holds it; `None` when no profile's does.
+   */
+  profile: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * DHCP gives it to the device on the profile it is on.
+   */
+  active: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  ipv4: z.string(),
+  /**
+   * The profile whose subnet holds it; `None` when no profile's does.
+   */
+  profile: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      "The profile whose subnet holds it; `None` when no profile's does.",
+  }),
+  /**
+   * DHCP gives it to the device on the profile it is on.
+   */
+  active: z.boolean().meta({
+    description: 'DHCP gives it to the device on the profile it is on.',
+  }),
+}).meta({
+  id: 'Ipv4Reservation',
+})
 export const LanIpv4Response: z.ZodObject<{
   address: z.ZodString
   netmask: z.ZodString
@@ -943,6 +1112,10 @@ export const ProfileIdOpt: z.ZodObject<{
 }).meta({
   id: 'ProfileIdOpt',
 })
+export const ProgressUnits: z.ZodEnum<{ bytes: 'bytes'; steps: 'steps' }> =
+  /* @__PURE__ */ z.enum(['bytes', 'steps']).meta({
+    id: 'ProgressUnits',
+  })
 export const Protocol: z.ZodEnum<{
   tcp: 'tcp'
   udp: 'udp'
@@ -954,13 +1127,29 @@ export const PublishedPortStatus: z.ZodEnum<{
   active: 'active'
   partial: 'partial'
   paused: 'paused'
+  inactive: 'inactive'
   error: 'error'
   disabled: 'disabled'
 }> = /* @__PURE__ */ z
-  .enum(['active', 'partial', 'paused', 'error', 'disabled'])
+  .enum(['active', 'partial', 'paused', 'inactive', 'error', 'disabled'])
   .meta({
     id: 'PublishedPortStatus',
   })
+export const RemoveUsbPortRequest: z.ZodObject<{
+  /**
+   * The port's name among `usb_ports`.
+   */
+  port: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * The port's name among `usb_ports`.
+   */
+  port: z.string().meta({
+    description: "The port's name among `usb_ports`.",
+  }),
+}).meta({
+  id: 'RemoveUsbPortRequest',
+})
 export const ResetPasswordParams: z.ZodObject<{
   oldPassword: z.ZodString
   newPassword: z.ZodString
@@ -1076,27 +1265,6 @@ export const SetFileArgs: z.ZodObject<{
 }).meta({
   id: 'SetFileArgs',
 })
-export const SetInitialPasswordParams: z.ZodObject<{
-  password: z.ZodString
-  /**
-   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
-   */
-  timezone: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  password: z.string(),
-  /**
-   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
-   */
-  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'IANA timezone name, e.g. "America/New_York". An unknown name is skipped.',
-  }),
-}).meta({
-  id: 'SetInitialPasswordParams',
-})
 export const SetPreferencesReq: z.ZodObject<{
   language: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1138,6 +1306,61 @@ export const SetTimezoneParams: z.ZodObject<{
 }).meta({
   id: 'SetTimezoneParams',
 })
+
+/**
+ * Legacy NDJSON adds Complete/Error; typed RPC carries completion in its terminal.
+ */
+export const SetupEvent: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{ phase: z.ZodLiteral<'copying'> }>,
+      z.ZodObject<{
+        copied: z.ZodInt
+        total: z.ZodInt
+        step: z.ZodInt
+        totalSteps: z.ZodInt
+      }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ phase: z.ZodLiteral<'status'> }>,
+      z.ZodObject<{
+        message: z.ZodString
+        step: z.ZodInt
+        totalSteps: z.ZodInt
+      }>
+    >,
+    z.ZodObject<{ phase: z.ZodLiteral<'complete'> }>,
+    z.ZodIntersection<
+      z.ZodObject<{ phase: z.ZodLiteral<'error'> }>,
+      z.ZodObject<{ message: z.ZodString }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(
+      object({ phase: z.literal('copying') }),
+      object({
+        copied: z.int(),
+        total: z.int(),
+        step: z.int(),
+        totalSteps: z.int(),
+      }),
+    ),
+    z.intersection(
+      object({ phase: z.literal('status') }),
+      object({ message: z.string(), step: z.int(), totalSteps: z.int() }),
+    ),
+    object({ phase: z.literal('complete') }),
+    z.intersection(
+      object({ phase: z.literal('error') }),
+      object({ message: z.string() }),
+    ),
+  ])
+  .meta({
+    id: 'SetupEvent',
+    description:
+      'Legacy NDJSON adds Complete/Error; typed RPC carries completion in its terminal.',
+  })
 export const SniPortUse: z.ZodObject<{
   ports: z.ZodString
   hostnames: z.ZodArray<z.ZodString>
@@ -1225,6 +1448,31 @@ export const UpdateSystemRes: z.ZodObject<{
   progress: wire(z.string().nullable().optional(), z.string().nullable()),
 }).meta({
   id: 'UpdateSystemRes',
+})
+export const UsbPortStatus: z.ZodObject<{
+  /**
+   * A network device is plugged into the port.
+   */
+  present: z.ZodBoolean
+  /**
+   * A network device in the port has link.
+   */
+  active: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  /**
+   * A network device is plugged into the port.
+   */
+  present: z.boolean().meta({
+    description: 'A network device is plugged into the port.',
+  }),
+  /**
+   * A network device in the port has link.
+   */
+  active: z.boolean().meta({
+    description: 'A network device in the port has link.',
+  }),
+}).meta({
+  id: 'UsbPortStatus',
 })
 export const VerifyPasswordParams: z.ZodObject<{ password: z.ZodString }> =
   /* @__PURE__ */ object({ password: z.string() }).meta({
@@ -1489,6 +1737,89 @@ export const BlackoutWindows: z.ZodObject<{
 }> = /* @__PURE__ */ object({ windows: z.array(BlackoutWindow) }).meta({
   id: 'BlackoutWindows',
 })
+export const ConfigFinding: z.ZodObject<{
+  /**
+   * Pages that cannot represent it.
+   */
+  views: z.ZodArray<typeof ConfigView>
+  /**
+   * The file's name under `/etc/config`.
+   */
+  config: z.ZodString
+  /**
+   * One-based.
+   */
+  line: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  section: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  sectionType: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  option: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  found: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  problem: typeof ConfigProblem
+  /**
+   * Shown beside the page's settings rather than in their place.
+   */
+  notice: z.ZodBoolean
+  /**
+   * The parser's explanation, in English.
+   */
+  detail: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * Pages that cannot represent it.
+   */
+  views: z.array(ConfigView).meta({
+    description: 'Pages that cannot represent it.',
+  }),
+  /**
+   * The file's name under `/etc/config`.
+   */
+  config: z.string().meta({
+    description: "The file's name under `/etc/config`.",
+  }),
+  /**
+   * One-based.
+   */
+  line: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description: 'One-based.',
+  }),
+  section: wire(z.string().nullable().optional(), z.string().nullable()),
+  sectionType: wire(z.string().nullable().optional(), z.string().nullable()),
+  option: wire(z.string().nullable().optional(), z.string().nullable()),
+  found: wire(z.string().nullable().optional(), z.string().nullable()),
+  problem: ConfigProblem,
+  /**
+   * Shown beside the page's settings rather than in their place.
+   */
+  notice: z.boolean().meta({
+    description: "Shown beside the page's settings rather than in their place.",
+  }),
+  /**
+   * The parser's explanation, in English.
+   */
+  detail: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: "The parser's explanation, in English.",
+  }),
+}).meta({
+  id: 'ConfigFinding',
+})
 export const DataUsageReq: z.ZodObject<{
   mac: z.ZodString
   period: typeof DataUsagePeriod
@@ -1525,6 +1856,9 @@ export const Device: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * The reservation DHCP applies, otherwise the live address.
+   */
   ipv4: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
@@ -1533,18 +1867,42 @@ export const Device: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * `ipv4` is a reservation DHCP applies.
+   */
   ipv4_static: z.ZodBoolean
+  /**
+   * Every IPv4 reservation, at most one per profile.
+   */
+  ipv4_reservations: z.ZodArray<typeof Ipv4Reservation>
+  /**
+   * The router's address on the device's profile, with its prefix length.
+   */
+  profile_network: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   /**
    * Whether this device may auto-create port forwards via PCP/UPnP
    * (default off; set via `devices set-auto-forward`).
    */
   allow_auto_port_forward: z.ZodBoolean
   /**
+   * External ports or ranges (`443`, `5000-5009`) the router refused to
+   * open for this device for lack of that permission in the last half hour.
+   */
+  auto_port_forward_requests: z.ZodArray<z.ZodString>
+  /**
    * Whether this device may publish DNS records into the router's resolver
    * (`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a
    * VPN peer).
    */
   allow_dns_injection: z.ZodBoolean
+  /**
+   * Whether the router refused this device's DNS records for lack of that
+   * permission in the last half hour.
+   */
+  dns_injection_requested: z.ZodBoolean
   /**
    * Whether the router forwards this device's IPv6 router advertisements
    * to the rest of the LAN (`devices set-router-advertisements`). Always
@@ -1594,9 +1952,35 @@ export const Device: z.ZodObject<{
   }),
   status: DeviceStatus,
   connection: wire(z.string().nullable().optional(), z.string().nullable()),
-  ipv4: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * The reservation DHCP applies, otherwise the live address.
+   */
+  ipv4: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description: 'The reservation DHCP applies, otherwise the live address.',
+  }),
   ipv6: wire(z.string().nullable().optional(), z.string().nullable()),
-  ipv4_static: z.boolean(),
+  /**
+   * `ipv4` is a reservation DHCP applies.
+   */
+  ipv4_static: z.boolean().meta({
+    description: '`ipv4` is a reservation DHCP applies.',
+  }),
+  /**
+   * Every IPv4 reservation, at most one per profile.
+   */
+  ipv4_reservations: z.array(Ipv4Reservation).meta({
+    description: 'Every IPv4 reservation, at most one per profile.',
+  }),
+  /**
+   * The router's address on the device's profile, with its prefix length.
+   */
+  profile_network: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description:
+      "The router's address on the device's profile, with its prefix length.",
+  }),
   /**
    * Whether this device may auto-create port forwards via PCP/UPnP
    * (default off; set via `devices set-auto-forward`).
@@ -1606,6 +1990,14 @@ export const Device: z.ZodObject<{
       'Whether this device may auto-create port forwards via PCP/UPnP\n(default off; set via `devices set-auto-forward`).',
   }),
   /**
+   * External ports or ranges (`443`, `5000-5009`) the router refused to
+   * open for this device for lack of that permission in the last half hour.
+   */
+  auto_port_forward_requests: z.array(z.string()).meta({
+    description:
+      'External ports or ranges (`443`, `5000-5009`) the router refused to\nopen for this device for lack of that permission in the last half hour.',
+  }),
+  /**
    * Whether this device may publish DNS records into the router's resolver
    * (`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a
    * VPN peer).
@@ -1613,6 +2005,14 @@ export const Device: z.ZodObject<{
   allow_dns_injection: z.boolean().meta({
     description:
       "Whether this device may publish DNS records into the router's resolver\n(`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a\nVPN peer).",
+  }),
+  /**
+   * Whether the router refused this device's DNS records for lack of that
+   * permission in the last half hour.
+   */
+  dns_injection_requested: z.boolean().meta({
+    description:
+      "Whether the router refused this device's DNS records for lack of that\npermission in the last half hour.",
   }),
   /**
    * Whether the router forwards this device's IPv6 router advertisements
@@ -1680,21 +2080,62 @@ export const EditArgs: z.ZodObject<{
 }> = /* @__PURE__ */ object({ get: ProfileIdOpt, create: z.boolean() }).meta({
   id: 'EditArgs',
 })
+export const EthernetInfo: z.ZodIntersection<
+  z.ZodObject<{
+    /**
+     * The USB ports among `ports`.
+     */
+    usb_ports: z.ZodRecord<z.ZodString, typeof UsbPortStatus>
+  }>,
+  z.ZodObject<{
+    wan_ipv6: z.ZodBoolean
+    wan_port: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+    ports: z.ZodRecord<
+      z.ZodString,
+      z.ZodObject<{
+        profile: z.ZodCodec<
+          z.ZodOptional<z.ZodNullable<typeof ProfileId>>,
+          z.ZodNullable<typeof ProfileId>
+        >
+      }>
+    >
+  }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      /**
+       * The USB ports among `ports`.
+       */
+      usb_ports: z.record(z.string(), UsbPortStatus).meta({
+        description: 'The USB ports among `ports`.',
+      }),
+    }),
+    object({
+      wan_ipv6: z.boolean(),
+      wan_port: wire(z.string().nullable().optional(), z.string().nullable()),
+      ports: z.record(
+        z.string(),
+        object({
+          profile: wire(ProfileId.nullable().optional(), ProfileId.nullable()),
+        }),
+      ),
+    }),
+  )
+  .meta({
+    id: 'EthernetInfo',
+  })
 
 /**
- * `ethernet.set` request: the desired port layout plus a confirmation flag.
- * Reassigning a port to a different profile moves its devices to a new subnet,
- * which breaks any published ports forwarding to them. When the flag is false
- * and such ports exist, `set` applies nothing and returns them in
- * `EthernetSetResult` for a confirmation dialog; with the flag true it deletes
- * those published ports as part of the reassignment.
+ * `ethernet.set` request: the desired port layout. With `preview`, nothing is
+ * applied and the result lists the devices that keep settings for the profile
+ * a reassigned port leaves.
  */
 export const EthernetSetRequest: z.ZodIntersection<
   z.ZodObject<{
-    confirm_published_port_deletion: z.ZodCodec<
-      z.ZodOptional<z.ZodBoolean>,
-      z.ZodBoolean
-    >
+    preview: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   }>,
   z.ZodObject<{
     wan_ipv6: z.ZodBoolean
@@ -1714,12 +2155,7 @@ export const EthernetSetRequest: z.ZodIntersection<
   }>
 > = /* @__PURE__ */ z
   .intersection(
-    object({
-      confirm_published_port_deletion: wire(
-        z.boolean().optional(),
-        z.boolean(),
-      ),
-    }),
+    object({ preview: wire(z.boolean().optional(), z.boolean()) }),
     object({
       wan_ipv6: z.boolean(),
       wan_port: wire(z.string().nullable().optional(), z.string().nullable()),
@@ -1737,37 +2173,40 @@ export const EthernetSetRequest: z.ZodIntersection<
   .meta({
     id: 'EthernetSetRequest',
     description:
-      '`ethernet.set` request: the desired port layout plus a confirmation flag.\nReassigning a port to a different profile moves its devices to a new subnet,\nwhich breaks any published ports forwarding to them. When the flag is false\nand such ports exist, `set` applies nothing and returns them in\n`EthernetSetResult` for a confirmation dialog; with the flag true it deletes\nthose published ports as part of the reassignment.',
+      '`ethernet.set` request: the desired port layout. With `preview`, nothing is\napplied and the result lists the devices that keep settings for the profile\na reassigned port leaves.',
   })
 export const EthernetSetResult: z.ZodObject<{
   /**
-   * Non-empty (and nothing applied) when published ports would be deleted and
-   * the caller hasn't confirmed yet. Empty once the change is applied.
+   * Filled by a preview only.
    */
-  pending_published_port_deletions: z.ZodArray<typeof AffectedPublishedPort>
+  leaving_profile: z.ZodArray<typeof DeviceLeavingProfile>
 }> = /* @__PURE__ */ object({
   /**
-   * Non-empty (and nothing applied) when published ports would be deleted and
-   * the caller hasn't confirmed yet. Empty once the change is applied.
+   * Filled by a preview only.
    */
-  pending_published_port_deletions: z.array(AffectedPublishedPort).meta({
-    description:
-      "Non-empty (and nothing applied) when published ports would be deleted and\nthe caller hasn't confirmed yet. Empty once the change is applied.",
+  leaving_profile: z.array(DeviceLeavingProfile).meta({
+    description: 'Filled by a preview only.',
   }),
 }).meta({
   id: 'EthernetSetResult',
 })
 export const FollowLogsRes: z.ZodObject<{
   /**
-   * Streams each new [`LogEntry`] as JSON from `/ws/rpc/{guid}`.
+   * Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.
+   * Null when the entries arrive on the request's response stream.
    */
-  guid: typeof Guid
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
 }> = /* @__PURE__ */ object({
   /**
-   * Streams each new [`LogEntry`] as JSON from `/ws/rpc/{guid}`.
+   * Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.
+   * Null when the entries arrive on the request's response stream.
    */
-  guid: Guid.meta({
-    description: 'Streams each new [`LogEntry`] as JSON from `/ws/rpc/{guid}`.',
+  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      "Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.\nNull when the entries arrive on the request's response stream.",
   }),
 }).meta({
   id: 'FollowLogsRes',
@@ -1918,6 +2357,11 @@ export const OutboundVpn: z.ZodObject<{
 }).meta({
   id: 'OutboundVpn',
 })
+export const PasswordType: z.ZodUnion<
+  readonly [typeof EncryptedWire, z.ZodString]
+> = /* @__PURE__ */ z.union([EncryptedWire, z.string()]).meta({
+  id: 'PasswordType',
+})
 export const PeerAddArgs: z.ZodObject<{
   /**
    * Profile interface name (e.g., "lan", "guest")
@@ -1942,6 +2386,39 @@ export const PeerAddArgs: z.ZodObject<{
   }),
 }).meta({
   id: 'PeerAddArgs',
+})
+
+/**
+ * `profiles.delete` request. With `preview`, nothing is deleted.
+ */
+export const ProfileDeleteRequest: z.ZodIntersection<
+  z.ZodObject<{
+    preview: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  }>,
+  typeof ProfileIdOpt
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ preview: wire(z.boolean().optional(), z.boolean()) }),
+    ProfileIdOpt,
+  )
+  .meta({
+    id: 'ProfileDeleteRequest',
+    description:
+      '`profiles.delete` request. With `preview`, nothing is deleted.',
+  })
+
+/**
+ * The reservations and published ports deleted with the profile.
+ */
+export const ProfileDeleteResult: z.ZodObject<{
+  reservations: z.ZodArray<typeof DeletedReservation>
+  published_ports: z.ZodArray<typeof DeletedPublishedPort>
+}> = /* @__PURE__ */ object({
+  reservations: z.array(DeletedReservation),
+  published_ports: z.array(DeletedPublishedPort),
+}).meta({
+  id: 'ProfileDeleteResult',
+  description: 'The reservations and published ports deleted with the profile.',
 })
 export const ProfileSetRequest: z.ZodIntersection<
   z.ZodObject<{ force: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean> }>,
@@ -1990,6 +2467,52 @@ export const ProfileSetRequest: z.ZodIntersection<
   )
   .meta({
     id: 'ProfileSetRequest',
+  })
+
+/**
+ * Progress state for a single phase or overall operation.
+ * Wire-compatible with start-os's `Progress` (serialized as untagged).
+ */
+export const Progress: z.ZodUnion<
+  readonly [
+    z.ZodNull,
+    z.ZodBoolean,
+    z.ZodObject<{
+      done: z.ZodInt
+      total: z.ZodCodec<
+        z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+        z.ZodNullable<z.ZodInt>
+      >
+      units: z.ZodCodec<
+        z.ZodOptional<z.ZodNullable<typeof ProgressUnits>>,
+        z.ZodNullable<typeof ProgressUnits>
+      >
+    }>,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.null().meta({
+      description: 'Not started yet — serializes as `null`',
+    }),
+    z.boolean().meta({
+      description:
+        'Complete — serializes as `true` (success) or `false` (failure)',
+    }),
+    object({
+      done: z.int(),
+      total: wire(z.int().nullable().optional(), z.int().nullable()),
+      units: wire(
+        ProgressUnits.nullable().optional(),
+        ProgressUnits.nullable(),
+      ),
+    }).meta({
+      description: 'In progress',
+    }),
+  ])
+  .meta({
+    id: 'Progress',
+    description:
+      "Progress state for a single phase or overall operation.\nWire-compatible with start-os's `Progress` (serialized as untagged).",
   })
 export const PublishedPort: z.ZodObject<{
   id: z.ZodString
@@ -2588,20 +3111,13 @@ export const WanPortCollision: z.ZodObject<{
 })
 
 /**
- * `wifi.set` request: the desired WiFi config plus a confirmation flag.
- * When a profile loses its last WiFi password its devices can no longer reach
- * that subnet — disconnected if the password was removed, or moved to another
- * profile if it was reassigned — which breaks any published ports forwarding to
- * them. When the flag is false and such ports exist, `set` applies nothing and
- * returns them in `WifiSetResult` for a confirmation dialog; with the flag true
- * it deletes those published ports as part of the change.
+ * `wifi.set` request: the desired WiFi config. With `preview`, nothing is
+ * applied and the result lists the Wi-Fi devices that keep settings for a
+ * profile losing its last password.
  */
 export const WifiSetRequest: z.ZodIntersection<
   z.ZodObject<{
-    confirmPublishedPortDeletion: z.ZodCodec<
-      z.ZodOptional<z.ZodBoolean>,
-      z.ZodBoolean
-    >
+    preview: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   }>,
   z.ZodObject<{
     ssid: z.ZodString
@@ -2627,9 +3143,7 @@ export const WifiSetRequest: z.ZodIntersection<
   }>
 > = /* @__PURE__ */ z
   .intersection(
-    object({
-      confirmPublishedPortDeletion: wire(z.boolean().optional(), z.boolean()),
-    }),
+    object({ preview: wire(z.boolean().optional(), z.boolean()) }),
     object({
       ssid: z.string(),
       broadcastSeparately: z.boolean(),
@@ -2658,22 +3172,19 @@ export const WifiSetRequest: z.ZodIntersection<
   .meta({
     id: 'WifiSetRequest',
     description:
-      '`wifi.set` request: the desired WiFi config plus a confirmation flag.\nWhen a profile loses its last WiFi password its devices can no longer reach\nthat subnet — disconnected if the password was removed, or moved to another\nprofile if it was reassigned — which breaks any published ports forwarding to\nthem. When the flag is false and such ports exist, `set` applies nothing and\nreturns them in `WifiSetResult` for a confirmation dialog; with the flag true\nit deletes those published ports as part of the change.',
+      '`wifi.set` request: the desired WiFi config. With `preview`, nothing is\napplied and the result lists the Wi-Fi devices that keep settings for a\nprofile losing its last password.',
   })
 export const WifiSetResult: z.ZodObject<{
   /**
-   * Non-empty (and nothing applied) when published ports would be deleted and
-   * the caller hasn't confirmed yet. Empty once the change is applied.
+   * Filled by a preview only.
    */
-  pendingPublishedPortDeletions: z.ZodArray<typeof AffectedPublishedPort>
+  leavingProfile: z.ZodArray<typeof DeviceLeavingProfile>
 }> = /* @__PURE__ */ object({
   /**
-   * Non-empty (and nothing applied) when published ports would be deleted and
-   * the caller hasn't confirmed yet. Empty once the change is applied.
+   * Filled by a preview only.
    */
-  pendingPublishedPortDeletions: z.array(AffectedPublishedPort).meta({
-    description:
-      "Non-empty (and nothing applied) when published ports would be deleted and\nthe caller hasn't confirmed yet. Empty once the change is applied.",
+  leavingProfile: z.array(DeviceLeavingProfile).meta({
+    description: 'Filled by a preview only.',
   }),
 }).meta({
   id: 'WifiSetResult',
@@ -2706,6 +3217,40 @@ export const BlackoutSetRequest: z.ZodIntersection<
     description:
       "`wifi.blackout-set` request: the blackout windows plus a confirmation flag.\nA window covering the router's current time turns Wi-Fi off as soon as it is\nsaved, for every device on it. When the flag is false, `blackout-set` applies\nnothing and reports that in `BlackoutSetResult` for a confirmation dialog;\nwith the flag true it saves the windows and applies them at once.",
   })
+export const ConfigCheck: z.ZodObject<{
+  findings: z.ZodArray<typeof ConfigFinding>
+}> = /* @__PURE__ */ object({ findings: z.array(ConfigFinding) }).meta({
+  id: 'ConfigCheck',
+})
+export const FlashParams: z.ZodObject<{
+  mode: typeof FlashMode
+  password: typeof PasswordType
+  /**
+   * IANA timezone name. An unknown name leaves the default unchanged.
+   */
+  timezone: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  mode: FlashMode,
+  password: PasswordType,
+  /**
+   * IANA timezone name. An unknown name leaves the default unchanged.
+   */
+  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'IANA timezone name. An unknown name leaves the default unchanged.',
+  }),
+}).meta({
+  id: 'FlashParams',
+})
+export const NamedProgress: z.ZodObject<{
+  name: z.ZodString
+  progress: typeof Progress
+}> = /* @__PURE__ */ object({ name: z.string(), progress: Progress }).meta({
+  id: 'NamedProgress',
+})
 export const PublishedPortsSetRequest: z.ZodObject<{
   ports: z.ZodArray<typeof PublishedPortInput>
 }> = /* @__PURE__ */ object({ ports: z.array(PublishedPortInput) }).meta({
@@ -2738,6 +3283,27 @@ export const Sessions: z.ZodObject<{
 }).meta({
   id: 'Sessions',
   description: "The server's sessions, by credential type.",
+})
+export const SetInitialPasswordParams: z.ZodObject<{
+  password: typeof PasswordType
+  /**
+   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
+   */
+  timezone: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  password: PasswordType,
+  /**
+   * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
+   */
+  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      'IANA timezone name, e.g. "America/New_York". An unknown name is skipped.',
+  }),
+}).meta({
+  id: 'SetInitialPasswordParams',
 })
 
 /**
@@ -2775,6 +3341,20 @@ export const WifiRegulatory: z.ZodObject<{
 }).meta({
   id: 'WifiRegulatory',
 })
+
+/**
+ * Snapshot of overall + per-phase progress, sent over WebSocket.
+ */
+export const FullProgress: z.ZodObject<{
+  overall: typeof Progress
+  phases: z.ZodArray<typeof NamedProgress>
+}> = /* @__PURE__ */ object({
+  overall: Progress,
+  phases: z.array(NamedProgress),
+}).meta({
+  id: 'FullProgress',
+  description: 'Snapshot of overall + per-phase progress, sent over WebSocket.',
+})
 export const SessionList: z.ZodObject<{
   current: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -2796,10 +3376,14 @@ export const Api = {
         clear: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         delete: {
           _PARAMS: /* @__PURE__ */ ActivityDeleteParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -2815,6 +3399,8 @@ export const Api = {
             ActivityListParams,
           ),
           _RETURN: /* @__PURE__ */ ActivityListResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -2824,14 +3410,20 @@ export const Api = {
         'check-initialized': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ CheckInitializedRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         login: {
           _PARAMS: /* @__PURE__ */ LoginParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         logout: {
           _PARAMS: /* @__PURE__ */ LogoutParams,
           _RETURN: /* @__PURE__ */ HasUnenrolledKeys.nullable(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         session: {
           _PARAMS: /* @__PURE__ */ empty,
@@ -2839,6 +3431,8 @@ export const Api = {
             kill: {
               _PARAMS: /* @__PURE__ */ KillParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -2854,20 +3448,28 @@ export const Api = {
                 ListParams,
               ),
               _RETURN: /* @__PURE__ */ SessionList,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
         'set-initial-password': {
           _PARAMS: /* @__PURE__ */ SetInitialPasswordParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-password': {
           _PARAMS: /* @__PURE__ */ ResetPasswordParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'verify-password': {
           _PARAMS: /* @__PURE__ */ VerifyPasswordParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -2875,12 +3477,38 @@ export const Api = {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
         create: {
-          _PARAMS: /* @__PURE__ */ empty,
+          _PARAMS: /* @__PURE__ */ BackupCreateParams,
           _RETURN: /* @__PURE__ */ BackupCreateRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         restore: {
-          _PARAMS: /* @__PURE__ */ empty,
+          _PARAMS: /* @__PURE__ */ BackupRestoreParams,
           _RETURN: /* @__PURE__ */ BackupRestoreRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+      },
+    },
+    config: {
+      _PARAMS: /* @__PURE__ */ empty,
+      _CHILDREN: {
+        check: {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
+          _RETURN: /* @__PURE__ */ ConfigCheck,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -2904,6 +3532,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.array(DataUsagePoint),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         forget: {
           _PARAMS: /* @__PURE__ */ DeviceMacReq.meta({
@@ -2911,6 +3541,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -2926,6 +3558,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(Device),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-auto-forward': {
           _PARAMS: /* @__PURE__ */ SetAutoForwardRequest.meta({
@@ -2933,6 +3567,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-dns-injection': {
           _PARAMS: /* @__PURE__ */ SetDnsInjectionReq.meta({
@@ -2940,6 +3576,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-router-advertisements': {
           _PARAMS: /* @__PURE__ */ SetRouterAdvertisementsReq.meta({
@@ -2947,6 +3585,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         update: {
           _PARAMS: /* @__PURE__ */ DeviceUpdateReq.meta({
@@ -2954,6 +3594,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -2963,6 +3605,8 @@ export const Api = {
         create: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ DiagnosticsCreateRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -2983,6 +3627,8 @@ export const Api = {
             DirGetArgs,
           ),
           _RETURN: /* @__PURE__ */ z.array(DirEntry),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3003,6 +3649,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(InjectedDnsRecord),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3023,6 +3671,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3037,22 +3687,18 @@ export const Api = {
             ),
             empty,
           ),
-          _RETURN: /* @__PURE__ */ object({
-            wan_ipv6: z.boolean(),
-            wan_port: wire(
-              z.string().nullable().optional(),
-              z.string().nullable(),
-            ),
-            ports: z.record(
-              z.string(),
-              object({
-                profile: wire(
-                  ProfileId.nullable().optional(),
-                  ProfileId.nullable(),
-                ),
-              }),
-            ),
+          _RETURN: /* @__PURE__ */ EthernetInfo,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'remove-usb-port': {
+          _PARAMS: /* @__PURE__ */ RemoveUsbPortRequest.meta({
+            description:
+              'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
+          _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3071,6 +3717,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ EthernetSetResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3085,6 +3733,8 @@ export const Api = {
         ExecReq,
       ),
       _RETURN: /* @__PURE__ */ ExecRes,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     file: {
       _PARAMS: /* @__PURE__ */ empty,
@@ -3103,6 +3753,8 @@ export const Api = {
             GetFileArgs,
           ),
           _RETURN: /* @__PURE__ */ FileContents,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3118,6 +3770,8 @@ export const Api = {
             SetFileArgs,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3138,6 +3792,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ LanIpv4Response,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv4-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3156,6 +3812,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv6-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3171,6 +3829,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ LanIpv6Response,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv6-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3189,6 +3849,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3233,10 +3895,25 @@ export const Api = {
               }),
           ),
           _RETURN: /* @__PURE__ */ ProfileId,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         delete: {
-          _PARAMS: /* @__PURE__ */ ProfileIdOpt,
-          _RETURN: /* @__PURE__ */ z.null(),
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            ProfileDeleteRequest,
+          ),
+          _RETURN: /* @__PURE__ */ ProfileDeleteResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         edit: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3252,6 +3929,8 @@ export const Api = {
             EditArgs,
           ),
           _RETURN: /* @__PURE__ */ ProfileId,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3286,6 +3965,8 @@ export const Api = {
             }),
             ProfileId,
           ),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3301,6 +3982,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(ProfileId),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'schedule-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3319,6 +4002,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.array(ScheduleWindow),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'schedule-set': {
           _PARAMS: /* @__PURE__ */ ScheduleWindows.meta({
@@ -3326,6 +4011,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3344,6 +4031,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ ProfileId,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3364,6 +4053,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(AutomaticPortUse),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3379,10 +4070,14 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(PublishedPort),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         reconcile: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.unknown(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ PublishedPortsSetRequest.meta({
@@ -3390,23 +4085,43 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ PublishedPortsSetResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'sync-hairpin': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.unknown(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'wan-changed': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.unknown(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
     setup: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        flash: {
+          _PARAMS: /* @__PURE__ */ FlashParams,
+          _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ SetupEvent,
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'get-pubkey': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _RETURN: /* @__PURE__ */ z.record(z.string(), z.unknown()),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
         status: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ SetupStatusRes,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3427,10 +4142,14 @@ export const Api = {
             SshKeyAddParams,
           ),
           _RETURN: /* @__PURE__ */ SshKeyResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         delete: {
           _PARAMS: /* @__PURE__ */ SshKeyDeleteParams,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3446,6 +4165,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(SshKeyResponse),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3455,10 +4176,14 @@ export const Api = {
         'apply-remote-access': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.unknown(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'factory-reset': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'get-timezones': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3474,6 +4199,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(z.string()),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         info: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3489,6 +4216,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ SystemInfoResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         logs: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3504,10 +4233,14 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ LogsResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'logs-follow': {
           _PARAMS: /* @__PURE__ */ FollowLogsParams,
           _RETURN: /* @__PURE__ */ FollowLogsRes,
+          _ITEM: /* @__PURE__ */ LogEntry,
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'newer-versions': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3523,10 +4256,14 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(VersionInfo),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         restart: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-preferences': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3545,6 +4282,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.unknown(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-timezone': {
           _PARAMS: /* @__PURE__ */ SetTimezoneParams.meta({
@@ -3552,6 +4291,8 @@ export const Api = {
               'A clap-compatible wrapper that reads the inner value as JSON from stdin\ninstead of from CLI args. Used for commands that take complex structured\ninput (entire profile objects, etc.).\n\nThis is a thin wrapper around `startos::util::serde::StdinDeserializable`\nthat adds a `CommandFactory` impl so it can be used directly as a handler\n`Params` type (rather than flattened inside a `#[derive(Parser)]` struct,\nwhich is how startos uses its version).',
           }),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         update: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3567,6 +4308,8 @@ export const Api = {
             UpdateSystemParams,
           ),
           _RETURN: /* @__PURE__ */ UpdateSystemRes,
+          _ITEM: /* @__PURE__ */ FullProgress,
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3587,6 +4330,8 @@ export const Api = {
             GetArgs,
           ),
           _RETURN: /* @__PURE__ */ z.record(z.string(), z.string()),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3602,6 +4347,8 @@ export const Api = {
             GetArgs,
           ),
           _RETURN: /* @__PURE__ */ z.record(z.string(), UciFile),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3620,6 +4367,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.record(z.string(), z.string()),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3643,6 +4392,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ OutboundVpnCreateResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         delete: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3658,6 +4409,8 @@ export const Api = {
             OutboundVpnDeleteRequest,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3673,6 +4426,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(OutboundVpn),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-enabled': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3691,6 +4446,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         update: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3709,6 +4466,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3729,6 +4488,8 @@ export const Api = {
             DeleteArgs,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3744,6 +4505,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ VpnServers,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'peer-add': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3762,6 +4525,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ PeerAddResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'peer-delete': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3777,6 +4542,8 @@ export const Api = {
             PeerDeleteArgs,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'peer-rename': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3792,10 +4559,14 @@ export const Api = {
             PeerRenameArgs,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'peer-set-dns-injection': {
           _PARAMS: /* @__PURE__ */ PeerSetDnsInjectionArgs,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3814,6 +4585,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -3834,6 +4607,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ WanDdnsResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ddns-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3852,6 +4627,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'dns-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3867,6 +4644,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ WanDnsResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'dns-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3885,6 +4664,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv4-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3900,6 +4681,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ WanIpv4Response,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv4-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3918,6 +4701,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv6-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3933,6 +4718,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ WanIpv6Response,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'ipv6-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3951,6 +4738,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'mac-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3966,6 +4755,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ WanMacResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'mac-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -3984,6 +4775,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -4009,6 +4802,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(BlackoutWindow),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'blackout-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4027,6 +4822,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ BlackoutSetResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         edit: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4042,6 +4839,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'generate-password': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4057,6 +4856,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.string(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4095,6 +4896,8 @@ export const Api = {
               }),
             ),
           }),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         regulatory: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4110,6 +4913,8 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ WifiRegulatory,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -4128,6 +4933,8 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ WifiSetResult,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },

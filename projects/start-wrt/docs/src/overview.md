@@ -2,7 +2,7 @@
 
 StartWRT is a router operating system built on OpenWrt, with Start9's own backend and web interface, and you administer it from your browser. Its central idea is the [security profile](security-profiles.md). Every device on your network belongs to one profile, and the profile decides what the device can reach (devices on your local network, the internet, DNS servers, VPN tunnels) and when. StartWRT comes with profiles such as Admin, Children, Guest and Smart Devices, and you can create others. Each profile is its own isolated network, so a device can reach devices in another profile only as its own profile allows.
 
-A device gets its profile from its [point of entry](points-of-entry.md), the way it connects: the Wi-Fi password it joins with (every profile shares one network name, and the password decides the profile), the router's Ethernet port it plugs into, or the inbound VPN it connects through.
+A device gets its profile from its [point of entry](points-of-entry.md), the way it connects: the Wi-Fi password it joins with (every profile shares one network name, and the password decides the profile), the router's Ethernet port it plugs into (or the USB port of a USB Ethernet adapter), or the inbound VPN it connects through.
 
 - [Inbound VPNs](inbound-vpn.md) are WireGuard servers on your router for reaching your home network from anywhere. Each one belongs to a profile, and a device connected through it gets that profile.
 - [Outbound VPNs](outbound-vpn.md) send a profile's internet traffic out through one or more WireGuard VPN providers, chained. When a tunnel goes down, its traffic stops rather than leaving over your home connection.

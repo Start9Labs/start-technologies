@@ -16,6 +16,7 @@ use crate::s9pk::merkle_archive::source::{
 };
 use crate::s9pk::merkle_archive::{Entry, MerkleArchive};
 use crate::s9pk::v2::pack::{ImageSource, PackSource};
+use crate::sign::SignatureMap;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::util::io::{TmpDir, open_file};
 use crate::util::serde::IoFormat;
@@ -82,13 +83,8 @@ impl<S> S9pk<S> {
 
 impl<S: FileSource + Clone> S9pk<S> {
     /// Verified endorsements keyed by canonical identity; the embedded signature wins collisions.
-    pub async fn signatures(
-        &self,
-    ) -> Result<
-        std::collections::HashMap<crate::sign::AnyVerifyingKey, crate::sign::AnySignature>,
-        Error,
-    > {
-        let mut signatures = std::collections::HashMap::from([(
+    pub async fn signatures(&self) -> Result<SignatureMap, Error> {
+        let mut signatures = SignatureMap::from([(
             crate::sign::AnyVerifyingKey::Ed25519(self.archive.signer()),
             crate::sign::AnySignature::Ed25519ph(self.archive.signature().await?),
         )]);

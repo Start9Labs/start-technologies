@@ -1,5 +1,9 @@
 use start_core::bins::MultiExecutable;
 
+// Rust allocations use mimalloc; musl's allocator serializes them on one lock.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn main() {
     start_core::bins::PRODUCT_VERSION
         .set(start_core::bins::startos_version())
@@ -14,18 +18,10 @@ fn main() {
             "$CARGO_MANIFEST_DIR/web/dist/static/setup-wizard"
         ))
         .ok();
-    #[cfg(not(feature = "beta"))]
     start_core::db::model::public::DB_UI_SEED_CELL
         .set(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/web/patchdb-ui-seed.json"
-        )))
-        .ok();
-    #[cfg(feature = "beta")]
-    start_core::db::model::public::DB_UI_SEED_CELL
-        .set(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/web/patchdb-ui-seed.beta.json"
         )))
         .ok();
     MultiExecutable::default()

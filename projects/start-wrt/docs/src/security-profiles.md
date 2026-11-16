@@ -69,7 +69,7 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
 
 1. Navigate to `Security Profiles` and select "Delete" from the profile's actions menu.
 
-1. Confirm the deletion.
+1. Confirm the deletion. The confirmation lists the IPv4 reservations and [published ports](published-ports.md) for the profile, which are deleted with it.
 
 > [!WARNING]
 > Deleting a profile disconnects all devices assigned to it. Associated points of entry (Wi-Fi passwords, Ethernet port assignments, VPN servers) are automatically removed.

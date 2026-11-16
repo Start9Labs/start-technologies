@@ -1,6 +1,8 @@
 export {
   addressHostToUrl,
   isAddressEnabled,
+  isAddressInsecure,
+  getEnabledAddresses,
   filledAddress,
   filterNonLocal,
 } from './filledAddress'
@@ -12,6 +14,7 @@ export type {
   FilledBindInfo,
   FilledServiceInterface,
 } from './filledAddress'
+export { addressTransport, transportLabel } from './addressTransport'
 export { getDefaultString } from './getDefaultString'
 export * from './ip'
 
@@ -26,6 +29,7 @@ export { GetHostInfo, GetBridgeAddress } from './GetHostInfo'
 export { GetOutboundGateway } from './GetOutboundGateway'
 export { getRootCa } from './getRootCa'
 export { GetServiceManifest, getServiceManifest } from './GetServiceManifest'
+export { GetSharedVolumes, getSharedVolumes } from './GetSharedVolumes'
 export { GetSslCertificate } from './GetSslCertificate'
 export { GetStatus } from './GetStatus'
 export { GetSystemSmtp } from './GetSystemSmtp'

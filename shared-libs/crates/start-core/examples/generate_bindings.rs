@@ -5,7 +5,6 @@ use start_core::context::{DiagnosticContext, InitContext, RpcContext, SetupConte
 use start_core::registry::context::RegistryContext;
 use start_core::tunnel::context::TunnelContext;
 
-/// Writes `<name>.ts` (types only) beside `<name>.schemas.ts` (runtime zod).
 fn write_pair(
     directory: &Path,
     name: &str,
@@ -36,6 +35,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let directory = Path::new(&directory);
     std::fs::create_dir_all(directory.join("rpc"))?;
     let rpc = directory.join("rpc");
+    std::fs::write(
+        directory.join("session-profile.ts"),
+        format!(
+            "export const SESSION_PROFILE = {} as const\n",
+            serde_json::to_string_pretty(&start_core::middleware::auth::session::browser_profile())?,
+        ),
+    )?;
+    let mut signature_profile = start_core::sign::browser_profile();
+    signature_profile["http"] = start_core::middleware::auth::signature::wire_profile();
+    std::fs::write(
+        directory.join("signature-profile.ts"),
+        format!(
+            "export const SIGNATURE_PROFILE = {} as const\n",
+            serde_json::to_string_pretty(&signature_profile)?,
+        ),
+    )?;
+    write_pair(
+        directory,
+        "session",
+        export_namespace("start_core", "session", "./session.schemas")?,
+    )?;
     write_api(&rpc, "start-os", start_core::main_api::<RpcContext>())?;
     write_api(&rpc, "setup", start_core::main_api::<SetupContext>())?;
     write_api(&rpc, "init", start_core::main_api::<InitContext>())?;
@@ -75,9 +95,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         directory.join("tunnel/index.ts"),
         "export * from './types'\n",
     )?;
+    let storage = serde_json::json!({
+        "sharedVolumes": start_core::shared_volumes::local_directory(start_core::PACKAGE_DATA),
+        "backupTargets": start_core::backup::target::local_directory(start_core::PACKAGE_DATA),
+    });
+    std::fs::write(
+        directory.join("storage.ts"),
+        format!(
+            "/** Host storage directories; each managed ID names a child directory. */\nexport const managedStorage = {storage} as const\n"
+        ),
+    )?;
     std::fs::write(
         directory.join("index.ts"),
-        "export * from './types'\nexport * as Tunnel from './tunnel'\n",
+        "export * from './types'\nexport { managedStorage } from './storage'\nexport * as Tunnel from './tunnel'\n",
     )?;
     std::fs::write(
         directory.join("schemas.ts"),
@@ -89,7 +119,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     std::fs::write(
         directory.join("rpc/index.ts"),
-        "export type { Api as StartOS } from './start-os'\nexport type { Api as Setup } from './setup'\nexport type { Api as Init } from './init'\nexport type { Api as Diagnostic } from './diagnostic'\nexport type { Api as Registry } from './registry'\nexport type { Api as Tunnel } from './tunnel'\nexport type { Api as Effects } from './effects'\nexport type { RpcMethod, RpcParamType, RpcReturnType } from './start-os'\n",
+        format!(
+            "{}export type {{ {} }} from './start-os'\n",
+            "export type { Api as StartOS } from './start-os'\nexport type { Api as Setup } from './setup'\nexport type { Api as Init } from './init'\nexport type { Api as Diagnostic } from './diagnostic'\nexport type { Api as Registry } from './registry'\nexport type { Api as Tunnel } from './tunnel'\nexport type { Api as Effects } from './effects'\n",
+            rpc_toolkit::ts::type_helper_names()
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
     )?;
     Ok(())
 }

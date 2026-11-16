@@ -169,6 +169,18 @@ export function makeEffects(context: EffectContext): Effects {
         })
       },
     },
+    prepareUpload(...[options]: Parameters<T.Effects['prepareUpload']>) {
+      return rpcRound('prepare-upload', options)
+    },
+    prepareDownload(...[options]: Parameters<T.Effects['prepareDownload']>) {
+      return rpcRound('prepare-download', options)
+    },
+    getUploadLimits(...[options]: Parameters<T.Effects['getUploadLimits']>) {
+      return rpcRound('get-upload-limits', options)
+    },
+    resolveUpload(...[options]: Parameters<T.Effects['resolveUpload']>) {
+      return rpcRound('resolve-upload', options)
+    },
     bind(...[options]: Parameters<T.Effects['bind']>) {
       return rpcRound('bind', { ...options })
     },
@@ -199,6 +211,17 @@ export function makeEffects(context: EffectContext): Effects {
         ...options,
         callback: context.callbacks?.addCallback(options.callback) || null,
       })
+    },
+    getSharedVolumes(...[options]: Parameters<T.Effects['getSharedVolumes']>) {
+      return rpcRound('get-shared-volumes', {
+        ...options,
+        callback: context.callbacks?.addCallback(options.callback) || null,
+      })
+    },
+    mountSharedVolume(
+      ...[options]: Parameters<T.Effects['mountSharedVolume']>
+    ) {
+      return rpcRound('mount-shared-volume', options)
     },
     subcontainer: {
       createFs(options: { imageId: string; name: string }) {

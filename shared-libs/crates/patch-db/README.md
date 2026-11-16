@@ -92,7 +92,8 @@ db.watch$('settings', 'theme').subscribe(theme => {
 ## Rust reflection
 
 The core crate's optional `reflect` feature enables `visit_rs::VisitFields`
-for the `Dump` struct, providing raw declaration facts and static field traversal. RPC's `ts` + `patch-db` integration enables it and owns TypeScript
+for snapshot, revision and patch structs, plus `VisitVariants` for patch operations,
+providing raw declaration facts and static traversal. RPC's `ts` + `patch-db` integration enables it and owns TypeScript
 rendering and bridges. Dependency edges point from RPC to patch-db, not back to RPC.
 
 ## Further reading

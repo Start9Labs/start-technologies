@@ -22,6 +22,8 @@ use crate::util::Invoke;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 use crate::{Error, ErrorKind, GatewayId};
 
+const SAVED_PROFILE_DIRECTORY: &str = "/etc/NetworkManager/system-connections";
+
 impl RpcContext {
     async fn read_wifi_manager(&self) -> Result<RwLockReadGuard<'_, WpaCli>, Error> {
         let err = || {
@@ -887,7 +889,7 @@ impl WpaCli {
         Ok(())
     }
     pub async fn remove_all_connections(&mut self) -> Result<(), Error> {
-        let location_connections = Path::new("/etc/NetworkManager/system-connections");
+        let location_connections = Path::new(SAVED_PROFILE_DIRECTORY);
         let mut connections = tokio::fs::read_dir(&location_connections).await?;
         while let Some(connection) = connections.next_entry().await? {
             let path = connection.path();
@@ -1071,14 +1073,14 @@ impl TypedValueParser for CountryCodeParser {
 pub async fn synchronize_network_manager<P: AsRef<Path>>(
     main_datadir: P,
     wifi: &WifiInfo,
+    system_product_name: Option<&str>,
 ) -> Result<(), Error> {
     let persistent = main_datadir.as_ref().join("system-connections");
 
     if tokio::fs::metadata(&persistent).await.is_err() {
         tokio::fs::create_dir_all(&persistent).await?;
     }
-    crate::disk::mount::util::bind(&persistent, "/etc/NetworkManager/system-connections", false)
-        .await?;
+    crate::disk::mount::util::bind(&persistent, SAVED_PROFILE_DIRECTORY, false).await?;
 
     if !wifi.enabled {
         Command::new("rfkill")
@@ -1117,7 +1119,12 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
         }
     }
 
-    force_ipv6_addr_gen_eui64().await;
+    prepare_physical_profiles(
+        Path::new("/run/NetworkManager/system-connections"),
+        Path::new(SAVED_PROFILE_DIRECTORY),
+        system_product_name,
+    )
+    .await;
 
     Command::new("systemctl")
         .arg("restart")
@@ -1154,11 +1161,102 @@ pub async fn synchronize_network_manager<P: AsRef<Path>>(
     Ok(())
 }
 
-/// Force EUI-64 IPv6 addressing (privacy extensions off) onto existing physical
-/// NetworkManager connections. Connection defaults in NetworkManager.conf only
-/// fill in unset properties, so a profile created before those defaults existed
-/// keeps its stable-privacy addressing and draws a new address every boot.
-async fn force_ipv6_addr_gen_eui64() {
+struct WiredProfile {
+    uuid: uuid::Uuid,
+    auto_default: bool,
+}
+
+fn parse_wired_profile(contents: &str) -> Option<WiredProfile> {
+    let mut section = "";
+    let mut wired = false;
+    let mut uuid = None;
+    let mut generated = false;
+    let mut external = false;
+    let mut volatile = false;
+    for line in contents.lines().map(str::trim) {
+        if line.starts_with('[') {
+            section = line;
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match (section, key.trim()) {
+            ("[connection]", "type") => wired = value.trim() == "ethernet",
+            ("[connection]", "uuid") => uuid = value.trim().parse().ok(),
+            ("[.nmmeta]", "nm-generated") => generated = value.trim() == "true",
+            ("[.nmmeta]", "external") => external = value.trim() == "true",
+            ("[.nmmeta]", "volatile") => volatile = value.trim() == "true",
+            _ => {}
+        }
+    }
+    wired.then_some(WiredProfile {
+        uuid: uuid?,
+        auto_default: generated && !external && !volatile,
+    })
+}
+
+async fn read_wired_profile(entry: &tokio::fs::DirEntry) -> Result<Option<WiredProfile>, Error> {
+    if entry
+        .path()
+        .extension()
+        .is_none_or(|extension| extension != "nmconnection")
+        || !entry.file_type().await?.is_file()
+    {
+        return Ok(None);
+    }
+    let contents = crate::util::io::read_file_to_string(entry.path()).await?;
+    Ok(parse_wired_profile(&contents))
+}
+
+async fn remove_shadowing_wired_profiles(runtime: &Path, saved: &Path) -> Result<(), Error> {
+    let mut entries = match tokio::fs::read_dir(runtime).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut saved_entries = tokio::fs::read_dir(saved).await?;
+    let mut saved_uuids = BTreeSet::new();
+    while let Some(entry) = saved_entries.next_entry().await? {
+        if let Some(profile) = read_wired_profile(&entry).await? {
+            saved_uuids.insert(profile.uuid);
+        }
+    }
+    while let Some(entry) = entries.next_entry().await? {
+        if let Some(profile) = read_wired_profile(&entry).await?
+            && profile.auto_default
+            && saved_uuids.contains(&profile.uuid)
+        {
+            crate::util::io::delete_file(entry.path()).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Connection defaults cannot override older profiles' explicit IPv6 privacy settings.
+async fn prepare_physical_profiles(
+    runtime_profiles: &Path,
+    saved_profiles: &Path,
+    system_product_name: Option<&str>,
+) {
+    // Generated runtime profiles outrank saved profiles, even after reload.
+    if remove_shadowing_wired_profiles(runtime_profiles, saved_profiles)
+        .await
+        .log_err()
+        .is_none()
+    {
+        return;
+    }
+    if Command::new("nmcli")
+        .arg("connection")
+        .arg("reload")
+        .invoke(ErrorKind::Network)
+        .await
+        .log_err()
+        .is_none()
+    {
+        return;
+    }
     let Ok(out) = Command::new("nmcli")
         .arg("-t")
         .arg("-f")
@@ -1170,51 +1268,43 @@ async fn force_ipv6_addr_gen_eui64() {
     else {
         return;
     };
+    let default_eee_off = system_product_name == Some(crate::firmware::LIBREM_MINI_V2);
     for line in String::from_utf8_lossy(&out).lines() {
         let mut fields = split_nmcli_terse_line(line).into_iter();
         let (Some(uuid), Some(kind)) = (fields.next(), fields.next()) else {
             continue;
         };
-        if kind == "802-3-ethernet" || kind == "802-11-wireless" {
-            Command::new("nmcli")
+        let ethernet = kind == "802-3-ethernet";
+        if ethernet || kind == "802-11-wireless" {
+            let mut command = Command::new("nmcli");
+            command
                 .arg("connection")
                 .arg("modify")
                 .arg(&uuid)
                 .arg("ipv6.addr-gen-mode")
                 .arg("eui64")
                 .arg("ipv6.ip6-privacy")
-                .arg("0")
-                .invoke(ErrorKind::Network)
-                .await
-                .log_err();
+                .arg("0");
+            if ethernet
+                && default_eee_off
+                && let Some(eee) = Command::new("nmcli")
+                    .arg("-g")
+                    .arg("ethtool.eee-enabled")
+                    .arg("connection")
+                    .arg("show")
+                    .arg("uuid")
+                    .arg(&uuid)
+                    .invoke(ErrorKind::Network)
+                    .await
+                    .log_err()
+                && eee.iter().all(u8::is_ascii_whitespace)
+            {
+                command.arg("ethtool.eee-enabled").arg("off");
+            }
+            command.invoke(ErrorKind::Network).await.log_err();
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::split_nmcli_terse_line;
-
-    #[test]
-    fn terse_line_unescapes_colon_and_backslash() {
-        // nmcli `-t` escapes `:` as `\:` and `\` as `\\` within a field.
-        let line = r"my\:wifi\\x:61f7f9e2:802-11-wireless:";
-        assert_eq!(
-            split_nmcli_terse_line(line),
-            vec![
-                "my:wifi\\x".to_owned(),
-                "61f7f9e2".to_owned(),
-                "802-11-wireless".to_owned(),
-                String::new(),
-            ],
-        );
-    }
-
-    #[test]
-    fn terse_line_plain_fields() {
-        assert_eq!(
-            split_nmcli_terse_line("café:90:WPA2 WPA3"),
-            vec!["café".to_owned(), "90".to_owned(), "WPA2 WPA3".to_owned()],
-        );
-    }
-}
+mod tests;

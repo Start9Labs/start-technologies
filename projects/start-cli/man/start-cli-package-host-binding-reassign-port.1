@@ -1,0 +1,22 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-package-host-binding-reassign-port 1  "reassign-port "
+.SH NAME
+start\-cli\-package\-host\-binding\-reassign\-port \- Change a binding\*(Aqs assigned external port
+.SH SYNOPSIS
+\fBstart\-cli package host binding reassign\-port\fR [\fB\-\-ssl\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIINTERNAL_PORT\fR> <\fIEXTERNAL_PORT\fR>
+.SH DESCRIPTION
+Change a binding\*(Aqs assigned external port
+.SH OPTIONS
+.TP
+\fB\-\-ssl\fR
+Reassign the SSL port instead of the non\-SSL port
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIINTERNAL_PORT\fR>
+Internal port number
+.TP
+<\fIEXTERNAL_PORT\fR>
+Port number

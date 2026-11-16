@@ -69,7 +69,7 @@ import {
       }
       <tui-error formControlName="config" />
       <tui-textfield tuiChevron [stringify]="stringifyTarget">
-        <label tuiLabel>{{ 'Target' | i18n }}</label>
+        <label tuiLabel>{{ 'Connects via' | i18n }}</label>
         <input tuiSelect formControlName="target" />
         <tui-data-list-wrapper *tuiDropdown [items]="targets()" />
       </tui-textfield>

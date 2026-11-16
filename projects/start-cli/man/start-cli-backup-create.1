@@ -4,7 +4,7 @@
 .SH NAME
 start\-cli\-backup\-create \- Create a backup for all packages
 .SH SYNOPSIS
-\fBstart\-cli backup create\fR [\fB\-\-old\-password\fR] [\fB\-\-package\-ids\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET_ID\fR> <\fIPASSWORD\fR>
+\fBstart\-cli backup create\fR [\fB\-\-old\-password\fR] [\fB\-\-package\-ids\fR] [\fB\-\-shared\-volume\-ids\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET_ID\fR> <\fIPASSWORD\fR>
 .SH DESCRIPTION
 Create a backup for all packages
 .SH OPTIONS
@@ -14,6 +14,9 @@ Previous backup password
 .TP
 \fB\-\-package\-ids\fR \fI<PACKAGE_IDS>\fR
 Package IDs to include in backup
+.TP
+\fB\-\-shared\-volume\-ids\fR \fI<SHARED_VOLUME_IDS>\fR
+Volume IDs to back up; omitted selects all volumes
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

@@ -86,9 +86,7 @@ impl OsBackupV0 {
                     &mut crate::util::crypto::os_rng(),
                     ssh_key::Algorithm::Ed25519,
                 )?,
-                developer_key: ed25519_dalek::SigningKey::generate(
-                    &mut crate::util::crypto::os_rng(),
-                ),
+                server_identity_key: crate::db::model::private::generate_server_identity_key().0,
             },
             ui: self.ui,
         })
@@ -116,7 +114,7 @@ impl OsBackupV1 {
                 root_ca_key: self.root_ca_key.0,
                 root_ca_cert: self.root_ca_cert.0,
                 ssh_key: ssh_key::PrivateKey::from(Ed25519Keypair::from_seed(&self.net_key.0)),
-                developer_key: ed25519_dalek::SigningKey::from_bytes(&self.net_key),
+                server_identity_key: ed25519_dalek::SigningKey::from_bytes(&self.net_key),
             },
             ui: self.ui,
         })
@@ -146,7 +144,7 @@ impl OsBackupV2 {
                 root_ca_key: self.root_ca_key.0,
                 root_ca_cert: self.root_ca_cert.0,
                 ssh_key: self.ssh_key.0,
-                developer_key: self.compat_s9pk_key.0,
+                server_identity_key: self.compat_s9pk_key.0,
             },
             ui: self.ui,
         })
@@ -158,7 +156,7 @@ impl OsBackupV2 {
             root_ca_key: Pem(backup.account.root_ca_key.clone()),
             root_ca_cert: Pem(backup.account.root_ca_cert.clone()),
             ssh_key: Pem(backup.account.ssh_key.clone()),
-            compat_s9pk_key: Pem(backup.account.developer_key.clone()),
+            compat_s9pk_key: Pem(backup.account.server_identity_key.clone()),
             ui: backup.ui.clone(),
         }
     }

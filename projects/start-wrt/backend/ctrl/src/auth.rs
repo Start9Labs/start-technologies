@@ -8,16 +8,18 @@ use clap::Parser;
 use imbl_value::imbl::OrdMap;
 use imbl_value::{json, InternedString, Value};
 use itertools::Itertools;
+use josekit::jwk::Jwk;
 use patch_db::value::index::Index;
 use patch_db::{HasModel, ModelExt, PatchDb};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{from_fn_async, CallRemote, Empty, HandlerArgs, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
-use startos::auth::{AuthKeys, LoginContext, Session};
+use startos::auth::{AuthKeys, LoginAttempt, LoginContext, PasswordType, Session};
+use startos::context::setup::CURRENT_SECRET;
 use startos::middleware::auth::local::LocalAuthContext;
 use startos::middleware::auth::signature::{
     check_enrolled, url_host_str, HasUnenrolledKeys, LoginMetadata, NonceCache,
-    SignatureAuthContext,
+    SignatureAuthContext, SignatureAuthorizationContext,
 };
 use startos::middleware::auth::DbContext;
 use startos::prelude::{Model, TypedPatchDb};
@@ -56,6 +58,8 @@ fn sign_in_ended(logged_in: DateTime<Utc>, now: DateTime<Utc>, clock_trusted: bo
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthDatabase {
+    #[serde(default)]
+    pub server_identity_key: startos::sign::instance::StoredIdentityKey,
     #[serde(default)]
     pub session_pubkeys: AuthKeys,
 }
@@ -116,6 +120,10 @@ impl AuthState {
         ))
     }
 
+    pub(crate) async fn server_identity(&self) -> Result<startos::sign::Signer, Error> {
+        Ok(startos::sign::instance::load(&self.db).await?)
+    }
+
     fn new(db: TypedPatchDb<AuthDatabase>) -> Self {
         Self {
             db,
@@ -155,6 +163,21 @@ impl ServerContext {
     }
 }
 
+impl AsRef<Jwk> for ServerContext {
+    fn as_ref(&self) -> &Jwk {
+        &CURRENT_SECRET
+    }
+}
+
+pub(crate) fn decrypt_password(
+    ctx: &ServerContext,
+    password: PasswordType,
+) -> Result<String, Error> {
+    password
+        .decrypt_in_session(ctx, ctx)
+        .map_err(|error| Error::new(error.source, ErrorKind::InvalidRequest))
+}
+
 impl AsRef<OpenAuthedContinuations<Option<InternedString>>> for ServerContext {
     fn as_ref(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
         &self.auth.open_authed_continuations
@@ -169,16 +192,38 @@ impl DbContext for ServerContext {
 }
 
 impl SignatureAuthContext for ServerContext {
-    type AdditionalMetadata = LoginMetadata;
-    type CheckPubkeyRes = Option<InternedString>;
-    /// Routine requests never write to flash.
-    const LAST_ACTIVE_RESOLUTION: TimeDelta = TimeDelta::hours(1);
+    fn server_identity(&self) -> Result<startos::sign::Signer, startos::Error> {
+        ServerContext::server_identity(self)
+    }
+    fn replay_check(&self) -> startos::middleware::auth::signature::RequestReplayCheck {
+        ServerContext::replay_check(self)
+    }
+    fn with_secure_session(
+        self,
+        session: startos::middleware::auth::session::SecureSession,
+    ) -> Self {
+        ServerContext::with_secure_session(self, session)
+    }
     fn mutate_nonce_cache<F: FnOnce(&mut NonceCache) -> T, T>(&self, f: F) -> T {
         self.auth.nonce_cache.mutate(f)
     }
     async fn clock_synced(&self) -> bool {
         tokio::fs::metadata(TIME_VALID_PATH).await.is_ok()
     }
+    async fn sig_context(
+        &self,
+        _: &http::Extensions,
+    ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, startos::Error>> + Send {
+        signing_identities(interface_addresses(), self.ddns_identity().await)
+            .into_iter()
+            .map(Ok)
+    }
+}
+impl SignatureAuthorizationContext for ServerContext {
+    type AdditionalMetadata = LoginMetadata;
+    type CheckPubkeyRes = Option<InternedString>;
+    /// Routine requests never write to flash.
+    const LAST_ACTIVE_RESOLUTION: TimeDelta = TimeDelta::hours(1);
     fn open_authed_continuations(&self) -> &OpenAuthedContinuations<Option<InternedString>> {
         &self.auth.open_authed_continuations
     }
@@ -192,29 +237,14 @@ impl SignatureAuthContext for ServerContext {
         }
         Ok(())
     }
-    async fn sig_context(
-        &self,
-        _: &http::Extensions,
-    ) -> impl IntoIterator<Item = Result<impl AsRef<str> + Send, startos::Error>> + Send {
-        signing_identities(interface_addresses(), self.ddns_identity().await)
-            .into_iter()
-            .map(Ok)
-    }
     fn check_pubkey(
         &self,
         db: &Model<Self::Database>,
         pubkey: Option<&AnyVerifyingKey>,
         metadata: Self::AdditionalMetadata,
     ) -> Result<Self::CheckPubkeyRes, startos::Error> {
-        let now = Utc::now();
-        let clock_trusted = Path::new(TIME_VALID_PATH).exists();
         check_enrolled(pubkey, metadata.login, |key| {
-            Ok(db
-                .as_session_pubkeys()
-                .de()?
-                .0
-                .get(&**key)
-                .is_some_and(|session| !sign_in_ended(session.logged_in, now, clock_trusted)))
+            self.auth_key_is_enrolled(db, key)
         })
     }
     async fn post_auth_hook(
@@ -235,21 +265,64 @@ impl LocalAuthContext for ServerContext {
 }
 
 impl LoginContext for ServerContext {
+    fn auth_key_is_enrolled(
+        &self,
+        db: &Model<Self::Database>,
+        key: &InternedString,
+    ) -> Result<bool, startos::Error> {
+        let now = Utc::now();
+        let clock_trusted = Path::new(TIME_VALID_PATH).exists();
+        Ok(Self::access_auth_keys(&mut db.clone())
+            .de()?
+            .0
+            .get(&**key)
+            .is_some_and(|session| !sign_in_ended(session.logged_in, now, clock_trusted)))
+    }
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys> {
         db.as_session_pubkeys_mut()
     }
     fn check_password(_: &Model<Self::Database>, password: &str) -> Result<(), startos::Error> {
-        check_password_sync(Path::new(SHADOW_PATH), password).map_err(|e| {
-            crate::activity::log("auth", "login", false, "Login failed", Some(&e.to_string()));
-            e.into()
-        })
+        Ok(check_password_sync(Path::new(SHADOW_PATH), password)?)
     }
     fn sign_in_expired(session: &Session, now: DateTime<Utc>) -> bool {
         sign_in_ended(session.logged_in, now, true)
     }
-    async fn post_login_hook(&self, _: &str) -> Result<(), startos::Error> {
-        crate::activity::log("auth", "login", true, "Logged in", None);
-        Ok(())
+    async fn login_attempt_hook(
+        &self,
+        attempt: &LoginAttempt,
+        result: Result<(), &startos::Error>,
+    ) {
+        let mut source = String::new();
+        if let Some(peer) = attempt.peer {
+            source = format!(" from {}", crate::peer::describe(peer).await);
+        }
+        let client = describe_client(attempt.user_agent.as_deref());
+        match result {
+            Ok(()) => crate::activity::log(
+                "auth",
+                "login",
+                true,
+                &format!("Logged in{source} {client}"),
+                None,
+            ),
+            Err(e) => crate::activity::log(
+                "auth",
+                "login",
+                false,
+                &format!("Login failed{source} {client}"),
+                Some(&e.to_string()),
+            ),
+        }
+    }
+}
+
+/// Every mainstream browser's user agent starts `Mozilla/`; other clients are
+/// named by their first product token.
+fn describe_client(user_agent: Option<&str>) -> String {
+    match user_agent.and_then(|ua| ua.split_whitespace().next()) {
+        Some(product) if product.starts_with("Mozilla/") => "using a browser".into(),
+        Some(product) => format!("using {}", product.chars().take(64).collect::<String>()),
+        None => "with no user agent".into(),
     }
 }
 
@@ -381,6 +454,10 @@ pub async fn check_password(shadow: &Path, password: &str) -> Result<(), Error> 
     tokio::task::spawn_blocking(move || check_password_sync(&shadow, &password)).await?
 }
 
+pub async fn check_admin_password(password: &str) -> Result<(), Error> {
+    check_password(Path::new(SHADOW_PATH), password).await
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifyPasswordParams {
@@ -393,7 +470,7 @@ pub async fn verify_password_impl(
     _ctx: ServerContext,
     VerifyPasswordParams { password }: VerifyPasswordParams,
 ) -> Result<(), Error> {
-    check_password(Path::new(SHADOW_PATH), &password).await
+    check_admin_password(&password).await
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
@@ -601,10 +678,10 @@ pub async fn check_initialized_impl(_ctx: ServerContext) -> Result<CheckInitiali
     })
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Parser, visit_rs::VisitFields)]
+#[derive(Debug, Clone, Deserialize, Serialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SetInitialPasswordParams {
-    pub password: String,
+    pub password: PasswordType,
     /// IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
     #[serde(default)]
     pub timezone: Option<String>,
@@ -616,6 +693,7 @@ pub async fn set_initial_password_impl(
     ctx: ServerContext,
     SetInitialPasswordParams { password, timezone }: SetInitialPasswordParams,
 ) -> Result<(), Error> {
+    let password = decrypt_password(&ctx, password)?;
     set_initial_password(&ctx, Path::new(SHADOW_PATH), &password).await?;
 
     if let Some(timezone) = timezone {
@@ -695,7 +773,23 @@ mod tests {
     use super::*;
 
     const LAST_ACTIVE_RESOLUTION: TimeDelta =
-        <ServerContext as SignatureAuthContext>::LAST_ACTIVE_RESOLUTION;
+        <ServerContext as SignatureAuthorizationContext>::LAST_ACTIVE_RESOLUTION;
+
+    #[test]
+    fn login_clients_are_named_by_user_agent() {
+        for (user_agent, expected) in [
+            (
+                Some("Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0"),
+                "using a browser",
+            ),
+            (Some("curl/8.5.0"), "using curl/8.5.0"),
+            (Some("node"), "using node"),
+            (Some("   "), "with no user agent"),
+            (None, "with no user agent"),
+        ] {
+            assert_eq!(describe_client(user_agent), expected, "{user_agent:?}");
+        }
+    }
 
     #[test]
     fn validate_password_length_rejects_short() {
@@ -707,6 +801,27 @@ mod tests {
     fn validate_password_length_accepts_min_and_above() {
         assert!(validate_password_length("exactly12chr").is_ok());
         assert!(validate_password_length("a-longer-passphrase").is_ok());
+    }
+
+    #[test]
+    fn initial_password_requires_admission_for_unwrapped_input() {
+        let plaintext = json!({ "password": "initial-admin-password" });
+        let params = imbl_value::from_value::<SetInitialPasswordParams>(plaintext).unwrap();
+        let error = decrypt_password(&ServerContext::default(), params.password).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+    }
+
+    #[tokio::test]
+    async fn passwords_encrypted_to_another_key_are_rejected() {
+        let other = Jwk::generate_ec_key(josekit::jwk::alg::ec::EcCurve::P256).unwrap();
+        let wire = startos::util::crypto::EncryptedWire::encrypt(
+            "initial-admin-password",
+            &other.to_public_key().unwrap(),
+        )
+        .unwrap();
+        let error = decrypt_password(&ServerContext::default(), PasswordType::EncryptedWire(wire))
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
     }
 
     #[test]
@@ -758,6 +873,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn auth_database_preserves_the_server_identity_key_across_normalization() {
+        let temp = tempfile::tempdir().unwrap();
+        let raw = PatchDb::open(temp.path().join("auth.db")).await.unwrap();
+        raw.put(&patch_db::json_ptr::ROOT, &json!({ "sessionPubkeys": {} }))
+            .await
+            .unwrap();
+        let db = TypedPatchDb::<AuthDatabase>::load(raw).await.unwrap();
+        let expected = startos::sign::instance::load(&db)
+            .await
+            .unwrap()
+            .verifying_key()
+            .await
+            .unwrap();
+        let db = TypedPatchDb::<AuthDatabase>::load((*db).clone())
+            .await
+            .unwrap();
+        let auth = AuthState::new(db);
+        assert_eq!(
+            auth.server_identity()
+                .await
+                .unwrap()
+                .verifying_key()
+                .await
+                .unwrap(),
+            expected
+        );
+        assert!(auth
+            .db
+            .peek()
+            .await
+            .as_session_pubkeys()
+            .de()
+            .unwrap()
+            .0
+            .is_empty());
+    }
+
+    #[tokio::test]
     async fn logout_requires_a_signing_key() {
         let ctx = ServerContext::default();
         let key = key_id("key");
@@ -771,6 +924,7 @@ mod tests {
                             .into_iter()
                             .collect(),
                     ),
+                    ..Default::default()
                 },
             )
             .await
@@ -816,6 +970,7 @@ mod tests {
                 &patch_db::json_ptr::ROOT,
                 &AuthDatabase {
                     session_pubkeys: AuthKeys(keys),
+                    ..Default::default()
                 },
             )
             .await

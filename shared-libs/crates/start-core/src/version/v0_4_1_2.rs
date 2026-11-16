@@ -8,7 +8,9 @@ use super::{VersionT, v0_4_1_1};
 use crate::prelude::*;
 use crate::sign::AnyVerifyingKey;
 use crate::trusted_keys::legacy::{decode_keys, grouped_keys};
-use crate::trusted_keys::{TrustedKeys, initial_signer_certificates, protect_registry_keys};
+use crate::trusted_keys::{
+    TrustedKeys, initial_signer_certificates, protect_registry_keys, ui_registries,
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;
@@ -60,16 +62,16 @@ fn migrate(db: &mut Value, now: DateTime<Utc>) -> Result<(), Error> {
         .map(from_value)
         .transpose()?
         .unwrap_or_default();
-    let ui = db
+    let registries = db
         .get("public")
         .and_then(|public| public.get("ui"))
-        .cloned()
+        .map(ui_registries)
         .unwrap_or_default();
     let stored = stored_keys(db)?;
     let mut keys = decode_keys(stored.clone(), now)?;
     replace_stored_drbonez_certificates(&mut keys);
     remove_seeded_alpha_keys(&mut keys);
-    protect_registry_keys(&mut keys, &snapshots, &ui);
+    protect_registry_keys(&mut keys, &snapshots, &registries);
     *stored = to_value(&keys)?;
     Ok(())
 }
@@ -268,6 +270,7 @@ mod tests {
         let historical =
             legacy::individual_keys(&legacy::historical_keyrings(), Utc::now()).unwrap();
         fixture["public"]["serverInfo"]["trustedKeys"] = to_value(&historical).unwrap();
+        fixture["public"]["serverInfo"]["version"] = to_value(&Version.semver()).unwrap();
         fixture["public"]["serverInfo"]["latestMigrationRevision"] = imbl_value::json!(1);
         let db = patch_db::PatchDb::in_memory();
         db.put(&patch_db::json_ptr::ROOT, &fixture).await.unwrap();
@@ -284,7 +287,7 @@ mod tests {
         }
         assert_eq!(
             migrated["public"]["serverInfo"]["latestMigrationRevision"],
-            imbl_value::json!(Version.migration_revision())
+            imbl_value::json!(super::super::Current::default().migration_revision())
         );
     }
 

@@ -14,6 +14,7 @@ import { TuiIcon } from '@taiga-ui/core'
 import { TuiBadgeNotification } from '@taiga-ui/kit'
 import { BadgeService } from 'src/app/services/badge.service'
 import { getMenu } from 'src/app/utils/system-utilities'
+import { UpdatesCount } from './updates-count'
 
 const FILTER = ['services', 'system', 'marketplace']
 
@@ -67,7 +68,19 @@ const FILTER = ['services', 'system', 'marketplace']
               <tui-icon [icon]="item.icon" />
               {{ item.name }}
               @if (item.badge(); as badge) {
-                <tui-badge-notification>{{ badge }}</tui-badge-notification>
+                <tui-badge-notification
+                  [appUpdatesCount]="item.routerLink === 'updates'"
+                >
+                  {{ badge }}
+                </tui-badge-notification>
+              } @else if (item.warning()) {
+                <tui-icon
+                  icon="@tui.triangle-alert"
+                  class="g-warning"
+                  role="img"
+                  [attr.aria-label]="'Warning' | i18n"
+                  [attr.aria-hidden]="false"
+                />
               }
             </a>
           }
@@ -81,7 +94,6 @@ const FILTER = ['services', 'system', 'marketplace']
     :host {
       display: none;
       backdrop-filter: blur(1rem);
-      // TODO Theme
       --tui-background-elevation-1: #333;
       --tui-background-base: #fff;
       --tui-border-normal: var(--tui-background-neutral-1);
@@ -114,6 +126,7 @@ const FILTER = ['services', 'system', 'marketplace']
     RouterLinkActive,
     TuiTabBar,
     TuiBadgeNotification,
+    UpdatesCount,
     TuiIcon,
     i18nPipe,
   ],

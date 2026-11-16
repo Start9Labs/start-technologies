@@ -8,16 +8,13 @@ import { NetworkService } from 'src/app/services/network.service'
 import { StaleUiService } from 'src/app/services/stale-ui.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { IS_MOCK } from 'src/app/utils/workspace-config'
+import { isNetworkError, RpcSocketService } from '@start9labs/shared'
+
+export { isNetworkError }
 
 const POLL_INTERVAL_MS = 3000
-// Per-probe timeout. Crucially this CANCELS the in-flight request (the RxJS
-// `timeout` operator unsubscribes, which makes Angular abort the underlying
-// XHR) so a wedged HTTP/2 connection — left dead after the router flushes
-// conntrack mid-restart — gets torn down and the next probe opens a fresh one.
-// A bare Promise.race would stop awaiting but leave the dead socket pooled, so
-// every subsequent probe would multiplex onto it and stall for the browser's
-// full TCP timeout.
-const PROBE_TIMEOUT_MS = 5000
+/** Bounds recovery probes before their owner discards a stalled transport. */
+export const PROBE_TIMEOUT_MS = 5000
 // How long a declared disruption's context (message / recovery intent) stays
 // armed waiting for the connection to actually drop.
 const CONTEXT_TTL_MS = 30_000
@@ -85,7 +82,7 @@ class DisconnectedToast {
  * RECONNECTING_DIALOG / ReconnectDialog modals and the old
  * NetworkRestartService.suppress() plumbing.
  *
- * Any network-level error (HttpError code 0) anywhere funnels here via
+ * Any network-level error (transport code 0) anywhere funnels here via
  * {@link reportUnreachable}; the first caller shows ONE sticky toast and starts
  * ONE cancelling poll loop, and concurrent callers (the ~15 background form
  * pollers) collapse into it. On recovery it dismisses the toast, confirms with
@@ -98,6 +95,7 @@ export class ConnectionService {
   private readonly i18n = inject(i18nPipe)
   private readonly isMock = inject(IS_MOCK)
   private readonly staleUi = inject(StaleUiService)
+  private readonly sockets = inject(RpcSocketService)
 
   /** True while the sticky "Reconnecting" indicator is shown. */
   readonly unreachable = signal(false)
@@ -195,6 +193,7 @@ export class ConnectionService {
 
     if (this.unreachable()) return
     this.unreachable.set(true)
+    this.sockets.disconnect()
 
     this.toast = this.alerts
       .open(new PolymorpheusComponent(DisconnectedToast), {
@@ -263,14 +262,17 @@ export class ConnectionService {
       // updates (a sysupgrade reboot lands here once a request fails), and
       // system.info is no_auth so the check works even when the update wiped
       // the session. It is only a fallback: primary detection is the
-      // x-startwrt-git-hash header HttpService checks on every RPC response —
+      // firmware metadata/header checked on every RPC response —
       // a quick daemon restart (CLI deploy) never drops a request, so this
       // path alone would miss it.
       this.staleUi.check(await this.api.systemInfo(PROBE_TIMEOUT_MS))
     } catch (e) {
       // Still unreachable only on a network-level failure; any RPC/HTTP
       // response (even an error) means the router is answering again.
-      if (isNetworkError(e)) return
+      if (isNetworkError(e)) {
+        this.sockets.disconnect()
+        return
+      }
     }
     this.recover()
   }
@@ -348,11 +350,4 @@ export class ConnectionService {
       })
       .subscribe()
   }
-}
-
-/** A network-level failure (no HTTP response): HttpError.status / code 0. */
-export function isNetworkError(e: unknown): boolean {
-  return (
-    e != null && typeof e === 'object' && 'code' in e && (e as any).code === 0
-  )
 }

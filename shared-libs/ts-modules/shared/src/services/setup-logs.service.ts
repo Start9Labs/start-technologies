@@ -5,6 +5,7 @@ import {
   defer,
   delay,
   filter,
+  from,
   map,
   Observable,
   repeatWhen,
@@ -12,45 +13,47 @@ import {
   switchMap,
   timer,
 } from 'rxjs'
-import { T } from '@start9labs/start-core'
+import type {
+  RpcResponseStream,
+  RpcStreamOptions,
+  T,
+} from '@start9labs/start-core'
 import { Constructor } from '../types/constructor'
 import { convertAnsi } from '../util/convert-ansi'
+import { withAbortSignal } from '../util/with-abort'
 
-interface LogsApi {
-  openWebsocket$: (guid: string) => Observable<T.LogEntry>
-}
+type FollowLogs = (
+  options: RpcStreamOptions,
+) => Promise<RpcResponseStream<T.LogFollowResponse, T.LogEntry, null>>
 
-/** `follow` opens the server's log stream for the app's current state. */
-export function provideSetupLogsService<Api extends LogsApi>(
+export function provideSetupLogsService<Api>(
   api: Constructor<Api>,
-  follow: (api: Api) => Promise<T.LogFollowResponse>,
+  follow: (api: Api, options: RpcStreamOptions) => ReturnType<FollowLogs>,
 ): FactoryProvider {
   return {
     provide: SetupLogsService,
     deps: [api],
     useFactory: (instance: Api) =>
-      new SetupLogsService(
-        () => follow(instance),
-        guid => instance.openWebsocket$(guid),
-      ),
+      new SetupLogsService(options => follow(instance, options)),
   }
 }
 
+/** Disposal prevents late adoption and cancels observation and read-only recovery. */
 export class SetupLogsService extends Observable<readonly string[]> {
-  private readonly log$ = defer(() => this.follow()).pipe(
-    switchMap(({ guid }) => this.websocket(guid)),
-    bufferTime(500),
-    filter(logs => !!logs.length),
-    map(convertAnsi),
-    scan((logs: readonly string[], log) => [...logs, log], []),
+  private readonly log$ = withAbortSignal(signal =>
+    defer(() => this.follow({ signal })).pipe(
+      switchMap(({ items }) => from(items)),
+      bufferTime(500),
+      filter(logs => !!logs.length),
+      map(convertAnsi),
+      scan((logs: readonly string[], log) => [...logs, log], []),
+    ),
+  ).pipe(
     repeatWhen(obs => obs.pipe(delay(500))),
     catchError((_, watch$) => timer(500).pipe(switchMap(() => watch$))),
   )
 
-  constructor(
-    private readonly follow: () => Promise<T.LogFollowResponse>,
-    private readonly websocket: (guid: string) => Observable<T.LogEntry>,
-  ) {
+  constructor(private readonly follow: FollowLogs) {
     super(subscriber => this.log$.subscribe(subscriber))
   }
 }

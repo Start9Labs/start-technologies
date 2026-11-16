@@ -1,14 +1,22 @@
-import { HttpClient } from '@angular/common/http'
+import {
+  HttpClient,
+  HttpEventType,
+  HttpErrorResponse,
+  HttpResponse,
+  HttpXhrBackend,
+} from '@angular/common/http'
 import { DOCUMENT, inject, Service } from '@angular/core'
 import {
+  filter,
   firstValueFrom,
-  from,
+  fromEvent,
   interval,
-  lastValueFrom,
   map,
   Observable,
   race,
   take,
+  takeUntil,
+  tap,
 } from 'rxjs'
 
 import { HttpError } from '../classes/http-error'
@@ -19,30 +27,46 @@ import {
   LocalHttpResponse,
 } from '../types/http.types'
 import { RPCOptions, RPCResponse } from '../types/rpc.types'
+import { rpcRequestBody, rpcRequestHeaders } from './rpc-request'
+import { withLegacyPatchSequence } from './rpc-response'
 
 @Service()
 export class HttpService {
   private readonly relativeUrl = inject(RELATIVE_URL)
   private readonly http = inject(HttpClient)
+  private readonly xhr = new HttpClient(inject(HttpXhrBackend))
   private readonly fullUrl = inject(DOCUMENT).location.origin
 
   async rpcRequest<T>(
     opts: RPCOptions,
     fullUrl?: string,
   ): Promise<LocalHttpResponse<RPCResponse<T>>> {
-    const { method, headers, params, timeout } = opts
+    return this.rpcMessage<T>(rpcRequestBody(opts), opts, fullUrl)
+  }
 
-    return this.httpRequest<RPCResponse<T>>({
+  async rpcMessage<T>(
+    body: string,
+    { headers, timeout }: Pick<RPCOptions, 'headers' | 'timeout'>,
+    fullUrl?: string,
+  ): Promise<LocalHttpResponse<RPCResponse<T>>> {
+    const response = await this.httpRequest<RPCResponse<T>>({
       method: 'POST',
       url: fullUrl || this.relativeUrl,
-      headers,
-      body: { method, params },
+      headers: rpcRequestHeaders(headers),
+      body,
       timeout,
     })
+    return response.clone({
+      body: withLegacyPatchSequence(
+        response.body,
+        response.headers.get('x-patch-sequence'),
+      ),
+    }) as LocalHttpResponse<RPCResponse<T>>
   }
 
   async httpRequest<T>(opts: HttpOptions): Promise<LocalHttpResponse<T>> {
     let { method, url, headers, body, responseType, timeout } = opts
+    opts.signal?.throwIfAborted()
 
     url = opts.url.startsWith('/') ? this.fullUrl + url : url
 
@@ -62,16 +86,39 @@ export class HttpService {
       responseType: responseType || 'json',
     }
 
-    let req: Observable<LocalHttpResponse<T>>
-    if (method === 'GET') {
-      req = this.http.get(url, options as any) as any
-    } else {
-      req = this.http.post(url, body, options as any) as any
+    const client = opts.uploadProgress ? this.xhr : this.http
+    let req = client
+      .request<T>(method, url, {
+        ...options,
+        body,
+        observe: 'events',
+        reportProgress: !!opts.uploadProgress,
+        responseType: options.responseType as 'json',
+      })
+      .pipe(
+        tap(event => {
+          if (event.type === HttpEventType.UploadProgress) {
+            opts.uploadProgress?.(event.loaded, event.total)
+          }
+        }),
+        filter(event => event instanceof HttpResponse),
+      ) as Observable<LocalHttpResponse<T>>
+
+    if (opts.signal) {
+      req = req.pipe(
+        takeUntil(
+          fromEvent(opts.signal, 'abort').pipe(
+            map(() => {
+              throw opts.signal!.reason
+            }),
+          ),
+        ),
+      )
     }
 
     return firstValueFrom(timeout ? withTimeout(req, timeout) : req).catch(
-      e => {
-        throw new HttpError(e)
+      (error: unknown) => {
+        throw error instanceof HttpErrorResponse ? new HttpError(error) : error
       },
     )
   }
@@ -83,9 +130,13 @@ function hasParams(
   return !!params
 }
 
-function withTimeout<U>(req: Observable<U>, timeout: number): Observable<U> {
+/** Unsubscribes the source when the response deadline wins. */
+export function withTimeout<U>(
+  req: Observable<U>,
+  timeout: number,
+): Observable<U> {
   return race(
-    from(lastValueFrom(req)), // this guarantees it only emits on completion, intermediary emissions are suppressed.
+    req,
     interval(timeout).pipe(
       take(1),
       map(() => {

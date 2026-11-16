@@ -136,16 +136,15 @@ async fn setup_or_init(
     } else {
         let init_ctx = InitContext::init(config, dns.clone()).await?;
         let handle = init_ctx.progress.clone();
-        let err_channel = init_ctx.error.clone();
 
         let mut disk_phase =
             handle.add_phase(t!("bins.start-init.opening-data-drive").into(), Some(10));
         let init_phases = InitPhases::new(&handle);
         let rpc_ctx_phases = InitRpcContextPhases::new(&handle);
 
-        server.serve_ui_for(init_ctx);
+        server.serve_ui_for(init_ctx.clone());
 
-        async {
+        let result = async {
             disk_phase.start();
             let guid_string = tokio::fs::read_to_string("/media/startos/config/disk.guid").await?;
             let disk_guid = InternedString::intern(guid_string.trim());
@@ -200,11 +199,17 @@ async fn setup_or_init(
 
             Ok::<_, Error>(Ok((rpc_ctx, handle)))
         }
-        .await
-        .map_err(|e| {
-            err_channel.send_replace(Some(e.clone_output()));
-            e
-        })
+        .await;
+        match &result {
+            Ok(Ok(_)) => init_ctx.complete_and_retire(Ok(())).await,
+            Err(error) => {
+                init_ctx
+                    .complete_and_retire(Err(error.clone_output()))
+                    .await
+            }
+            Ok(Err(_)) => (),
+        }
+        result
     }
 }
 

@@ -32,6 +32,7 @@ export class DevicesApiService {
       name: data.name,
       ipv4_static: data.ipv4Static,
       ipv4: data.ipv4,
+      remove_ipv4_reservations: data.removeIpv4Reservations,
     })
   }
 
@@ -69,8 +70,16 @@ export class DevicesApiService {
       ipv4: d.ipv4 || undefined,
       ipv6: d.ipv6 || undefined,
       ipv4Static: d.ipv4_static,
+      ipv4Reservations: d.ipv4_reservations.map(r => ({
+        ipv4: r.ipv4,
+        profile: r.profile || undefined,
+        active: r.active,
+      })),
+      profileNetwork: d.profile_network || undefined,
       allowAutoPortForward: d.allow_auto_port_forward,
+      autoPortForwardRequests: d.auto_port_forward_requests,
       allowDnsInjection: d.allow_dns_injection,
+      dnsInjectionRequested: d.dns_injection_requested,
       allowRouterAdvertisements: d.allow_router_advertisements,
       securityProfile: d.security_profile || undefined,
       speed: d.speed || undefined,
