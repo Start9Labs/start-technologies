@@ -84,12 +84,12 @@ impl IndexLocaleTracker {
                 match next {
                     Ok(locales) => {
                         snapshot = Arc::new(IndexLocaleSnapshot { source, locales });
-                        send.send_replace(Ok(snapshot.clone()));
+                        send.send_modify(|current| *current = Ok(snapshot.clone()));
                     }
                     Err(e) => {
                         tracing::error!("Error tracking registry index locales: {e}");
                         tracing::debug!("{e:?}");
-                        send.send_replace(Err(Arc::new(e)));
+                        send.send_modify(|current| *current = Err(Arc::new(e)));
                         break;
                     }
                 }
@@ -195,12 +195,12 @@ mod tests {
             ["en_US", "ja_JP"]
         );
         let database: Model<RegistryDatabase> = added.source.value.clone().into();
-        let view = IndexView::resolve(
+        let view = IndexView::localized(
             &database,
             &added.locales,
             None,
             WireCompatibility::default(),
-            Some("ja_JP"),
+            "ja_JP",
         )
         .unwrap();
         let mirror = index_mirror(&IndexMirrors::default(), &db, None, view, Path::new(""))

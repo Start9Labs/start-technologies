@@ -70,7 +70,7 @@ reader's visible index (`best_locale`); any other language receives the `en_US`
 view, so requests cannot create views beyond the index's own languages.
 `IndexLocaleTracker` (`registry/locales.rs`) holds those locales per package. It
 captures the database and locale metadata together, recomputing the locales when
-`/index` changes. A subscription waits for a snapshot at or after its initiating
+`/index` changes. A subscription with `language` waits for a snapshot at or after its initiating
 database revision and resolves both reader access and language against that snapshot,
 without walking the index. Root revisions also advance snapshot freshness when
 permissions outside `/index` change. Each distinct reader, `osVersion`

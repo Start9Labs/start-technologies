@@ -165,21 +165,24 @@ async fn visible_subscription(
     }: SubscribeIndexParams,
 ) -> Result<(Arc<IndexMirror>, Dump, JsonSubscriber), Error> {
     let pointer = subscription_pointer(pointer)?;
-    let snapshot = ctx.index_locales.snapshot(ctx.db.sequence().await).await?;
-    let db: Model<RegistryDatabase> = snapshot.source.value.clone().into();
-    let key = mirror_key(&db, reader.signer)?;
     let wire = os_version
         .as_ref()
         .map(WireCompatibility::for_startos)
         .transpose()?
         .unwrap_or_default();
-    let view = IndexView::resolve(
-        &db,
-        &snapshot.locales,
-        key.as_ref(),
-        wire,
-        language.as_deref(),
-    )?;
+    let (key, view) = match language.as_deref() {
+        None => (
+            mirror_key(&ctx.db.peek().await, reader.signer)?,
+            IndexView::from(wire),
+        ),
+        Some(language) => {
+            let snapshot = ctx.index_locales.snapshot(ctx.db.sequence().await).await?;
+            let db: Model<RegistryDatabase> = snapshot.source.value.clone().into();
+            let key = mirror_key(&db, reader.signer)?;
+            let view = IndexView::localized(&db, &snapshot.locales, key.as_ref(), wire, language)?;
+            (key, view)
+        }
+    };
     let mirror = index_mirror(&ctx.index_mirrors, &ctx.db, key, view, &ctx.datadir).await?;
     let (dump, sub) = subscription(&mirror.db, Some(pointer)).await?;
     Ok((mirror, dump, sub))

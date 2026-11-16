@@ -376,12 +376,16 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
     let snapshot = fixture.main.peek().await;
     let locales = IndexLocales::of(snapshot.as_index()).unwrap();
     let mirrors = IndexMirrors::default();
-    let reader_mirror = |key: Option<AnyVerifyingKey>,
-                         wire: WireCompatibility,
-                         language: Option<&str>| {
-        let view = IndexView::resolve(&snapshot, &locales, key.as_ref(), wire, language).unwrap();
-        index_mirror(&mirrors, &fixture.main, key, view, fixture.dir.path())
-    };
+    let reader_mirror =
+        |key: Option<AnyVerifyingKey>, wire: WireCompatibility, language: Option<&str>| {
+            let view = match language {
+                Some(language) => {
+                    IndexView::localized(&snapshot, &locales, key.as_ref(), wire, language).unwrap()
+                }
+                None => IndexView::from(wire),
+            };
+            index_mirror(&mirrors, &fixture.main, key, view, fixture.dir.path())
+        };
     let mirror =
         |wire: WireCompatibility, language: Option<&str>| reader_mirror(None, wire, language);
     let current = WireCompatibility::default();

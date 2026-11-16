@@ -28,24 +28,20 @@ pub struct IndexView {
 
 impl IndexView {
     /// A language absent from the reader's visible locales resolves to `FALLBACK_LOCALE`.
-    pub fn resolve(
+    pub fn localized(
         db: &Model<RegistryDatabase>,
         locales: &IndexLocales,
         key: Option<&AnyVerifyingKey>,
         wire: WireCompatibility,
-        language: Option<&str>,
+        language: &str,
     ) -> Result<Self, Error> {
-        let language = match language {
-            Some(requested) => {
-                let reader = Reader::resolve(db, key)?;
-                let visible = locales.visible_to(db, reader.as_ref())?;
-                Some(InternedString::intern(
-                    crate::best_locale(requested, visible).unwrap_or(crate::FALLBACK_LOCALE),
-                ))
-            }
-            None => None,
-        };
-        Ok(Self { wire, language })
+        let reader = Reader::resolve(db, key)?;
+        let visible = locales.visible_to(db, reader.as_ref())?;
+        let language = crate::best_locale(language, visible).unwrap_or(crate::FALLBACK_LOCALE);
+        Ok(Self {
+            wire,
+            language: Some(InternedString::intern(language)),
+        })
     }
 }
 
