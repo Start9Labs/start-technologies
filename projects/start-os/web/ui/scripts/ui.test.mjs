@@ -4694,26 +4694,108 @@ test('exact/source package queries wait for and track their registry cache, igno
   assert.equal(values.at(-1).version, '1.0.0:0')
 })
 
-test('browser bootstrap accepts snapshots saved before registry caches existed', async t => {
-  const { LocalStorageBootstrap } =
-    await import('src/app/services/patch-db/local-storage-bootstrap')
-  const stored = {
-    ui: { registries: {} },
-    serverInfo: { version: '0.4.0.2' },
-    packageData: {},
+function fakeIndexedDb() {
+  let data = { values: new Map(), meta: new Map() }
+  const control = { fail: false, puts: [] }
+  const db = {
+    transaction(_, mode) {
+      const staged = { values: new Map(data.values), meta: new Map(data.meta) }
+      const tx = {
+        objectStore: name => ({
+          get: key => ({ result: staged[name].get(key) }),
+          getAll: () => ({ result: [...staged[name].values()] }),
+          getAllKeys: () => ({ result: [...staged[name].keys()] }),
+          put: (value, key) => {
+            if (name === 'values') control.puts.push(key)
+            staged[name].set(key, structuredClone(value))
+          },
+          delete: key => staged[name].delete(key),
+          clear: () => staged[name].clear(),
+        }),
+      }
+      queueMicrotask(() => {
+        if (mode === 'readwrite' && control.fail) {
+          control.fail = false
+          tx.error = new Error('quota')
+          tx.onerror()
+        } else {
+          if (mode === 'readwrite') data = staged
+          tx.oncomplete()
+        }
+      })
+      return tx
+    },
   }
+  const win = {
+    indexedDB: {
+      open: () => {
+        const request = {}
+        queueMicrotask(() => {
+          request.result = db
+          request.onsuccess()
+        })
+        return request
+      },
+    },
+  }
+  return { win, control }
+}
+
+async function patchDbCache(t, win) {
+  const { PatchDbCache } =
+    await import('src/app/services/patch-db/patch-db-cache')
   const injector = createEnvironmentInjector([
-    { provide: StorageService, useValue: { get: () => stored } },
+    { provide: WA_WINDOW, useValue: win },
   ])
   t.after(() => injector.destroy())
-  const bootstrap = runInInjectionContext(
-    injector,
-    () => new LocalStorageBootstrap(),
-  )
-  assert.deepEqual(bootstrap.init().value, {
-    ...stored,
-    registryCache: {},
-    osUpdateCache: null,
+  return runInInjectionContext(injector, () => new PatchDbCache())
+}
+
+test('patch cache rewrites only replaced top-level values', async t => {
+  const { win, control } = fakeIndexedDb()
+  t.mock.method(console, 'error', () => {})
+  const writer = await patchDbCache(t, win)
+  assert.deepEqual(await writer.read(), { id: 0, value: {} })
+  await writer.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
+  assert.deepEqual(control.puts, ['ui', 'packageData'])
+
+  const reader = await patchDbCache(t, win)
+  const cached = await reader.read()
+  assert.deepEqual(cached, {
+    id: 3,
+    value: { ui: { a: 1 }, packageData: {} },
   })
-  assert.equal('registryCache' in stored, false)
+  control.puts = []
+  await reader.write({
+    id: 4,
+    value: { ...cached.value, packageData: { x: 1 } },
+  })
+  assert.deepEqual(control.puts, ['packageData'])
+  await reader.write({ id: 5, value: { ui: cached.value.ui } })
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 5,
+    value: { ui: { a: 1 } },
+  })
+})
+
+test('patch cache discards its snapshot after a failed write and clears on demand', async t => {
+  const { win, control } = fakeIndexedDb()
+  t.mock.method(console, 'error', () => {})
+  const cache = await patchDbCache(t, win)
+  const value = { ui: { a: 1 }, packageData: {} }
+  await cache.write({ id: 3, value })
+  control.fail = true
+  await cache.write({ id: 4, value: { ...value, ui: { a: 2 } } })
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 0,
+    value: {},
+  })
+  control.puts = []
+  await cache.write({ id: 5, value })
+  assert.deepEqual(control.puts, ['ui', 'packageData'])
+  await cache.clear()
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 0,
+    value: {},
+  })
 })

@@ -151,7 +151,7 @@ export const APP_CONFIG: ApplicationConfig = {
       const router = inject(Router)
       const auth = inject(AuthService)
 
-      inject(StorageService).migrate036()
+      inject(StorageService).migrate()
       // Initial navigation waits for the IndexedDB key check.
       return auth.init().then(() => {
         clientStorage.init()
