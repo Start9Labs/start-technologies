@@ -1094,4 +1094,5 @@ export const ENGLISH: Record<string, number> = {
   'Custom': 1297, // as in, a custom registry
   'Enter a domain or URL': 1298,
   'Syncing is taking longer than expected. Refresh to try again.': 1299,
+  "Can't reach server": 1300,
 }

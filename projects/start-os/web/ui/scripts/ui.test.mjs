@@ -4155,7 +4155,7 @@ test('registry status keeps its last known observation while the server is disco
   assert.equal(catalogs.length, 1)
 })
 
-test('header status separates offline, unreachable, connecting, restarting and live', async t => {
+test('header status separates offline, unreachable server, connecting, restarting and live', async t => {
   const { STATUS } = await import('src/app/services/status.service')
   const { NetworkService } = await import('src/app/services/network.service')
   const { PATCH_LIVE } =
@@ -4191,7 +4191,7 @@ test('header status separates offline, unreachable, connecting, restarting and l
 
   assert.equal(status().message, 'Connecting')
   reachable.next(false)
-  assert.equal(status().message, 'Unreachable')
+  assert.equal(status().message, "Can't reach server")
   reachable.next(true)
   assert.equal(status().message, 'Connecting')
   live.next(true)
@@ -4200,7 +4200,7 @@ test('header status separates offline, unreachable, connecting, restarting and l
   assert.equal(state.value, 'running')
   assert.equal(status().message, 'Connecting')
   reachable.next(false)
-  assert.equal(status().message, 'Unreachable')
+  assert.equal(status().message, "Can't reach server")
   statusInfo.next({ restarting: true, shuttingDown: false })
   assert.equal(status().message, 'Restarting')
   statusInfo.next({ restarting: false, shuttingDown: true })

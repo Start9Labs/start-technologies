@@ -1093,4 +1093,5 @@ export default {
   1297: 'Personnalisée',
   1298: 'Saisissez un domaine ou une URL',
   1299: 'La synchronisation prend plus de temps que prévu. Rafraîchissez la page pour réessayer.',
+  1300: 'Serveur injoignable',
 } satisfies i18n

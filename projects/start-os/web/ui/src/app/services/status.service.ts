@@ -45,7 +45,7 @@ const CONNECTING: ServerStatus = {
   status: 'warning',
 }
 const UNREACHABLE: ServerStatus = {
-  message: 'Unreachable',
+  message: "Can't reach server",
   color: 'var(--tui-status-negative)',
   icon: '@tui.cloud-off',
   status: 'error',
