@@ -1,0 +1,371 @@
+name: StartOS Image
+
+# One platform's image, and its deploy when a channel is given. startos-iso.yaml
+# calls this once per platform, so each platform publishes as soon as its own
+# image is built rather than waiting for the slowest one.
+on:
+  workflow_call:
+    inputs:
+      platform:
+        type: string
+        required: true
+      environment:
+        type: string
+        default: ''
+      nodejs-version:
+        type: string
+        required: true
+      fast-runner:
+        type: boolean
+        default: false
+      channel:
+        description: Deploy channel; empty builds without deploying
+        type: string
+        default: ''
+      registry:
+        type: string
+        default: ''
+      version:
+        type: string
+        default: ''
+      s3-bucket:
+        type: string
+        default: ''
+      s3-cdn:
+        type: string
+        default: ''
+      force-overwrite:
+        type: boolean
+        default: false
+
+env:
+  NODEJS_VERSION: ${{ inputs.nodejs-version }}
+  ENVIRONMENT: ${{ inputs.environment }}
+
+jobs:
+  build:
+    name: Build
+    # RISC-V image assembly stays native; full emulation is too slow.
+    runs-on: >-
+      ${{
+        fromJson(
+          format(
+            '["{0}", "{1}"]',
+            fromJson('{
+              "x86_64": "ubuntu-latest",
+              "x86_64-nonfree": "ubuntu-latest",
+              "x86_64-nvidia": "ubuntu-latest",
+              "aarch64": "ubuntu-24.04-arm",
+              "aarch64-nonfree": "ubuntu-24.04-arm",
+              "aarch64-nvidia": "ubuntu-24.04-arm",
+              "raspberrypi": "ubuntu-24.04-arm",
+              "riscv64": "ubuntu-24.04-riscv",
+              "riscv64-nonfree": "ubuntu-24.04-riscv"
+            }')[inputs.platform],
+            fromJson('{
+              "x86_64": "amd64-fast",
+              "x86_64-nonfree": "amd64-fast",
+              "x86_64-nvidia": "amd64-fast",
+              "aarch64": "aarch64-fast",
+              "aarch64-nonfree": "aarch64-fast",
+              "aarch64-nvidia": "aarch64-fast",
+              "raspberrypi": "aarch64-fast",
+              "riscv64": "amd64-fast",
+              "riscv64-nonfree": "amd64-fast"
+            }')[inputs.platform]
+          )
+        )[inputs.fast-runner]
+      }}
+    env:
+      ARCH: >-
+        ${{
+          fromJson('{
+            "x86_64": "x86_64",
+            "x86_64-nonfree": "x86_64",
+            "x86_64-nvidia": "x86_64",
+            "aarch64": "aarch64",
+            "aarch64-nonfree": "aarch64",
+            "aarch64-nvidia": "aarch64",
+            "raspberrypi": "aarch64",
+            "riscv64": "riscv64",
+            "riscv64-nonfree": "riscv64"
+          }')[inputs.platform]
+        }}
+      PLATFORM: ${{ inputs.platform }}
+    steps:
+      # Some runners lack /opt/hostedtoolcache, which setup-qemu expects
+      - name: Ensure hostedtoolcache exists
+        run: sudo mkdir -p /opt/hostedtoolcache && sudo chown "$USER:$USER" /opt/hostedtoolcache
+
+      # Actions use the runner's bundled Node, not the Node on GITHUB_PATH.
+      # V8's background GC threads corrupt the heap on these runners during
+      # large artifact transfers, so the action host runs `--single-threaded`.
+      # Its wrapper is bash; dash drops hyphenated `INPUT_*` variables.
+      - name: Update RISC-V action runtime
+        if: ${{ env.ARCH == 'riscv64' && !inputs.fast-runner }}
+        run: |
+          set -euo pipefail
+          worker="$(readlink -f "/proc/$PPID/exe")"
+          test "$(basename "$worker")" = Runner.Worker
+          runner_node="$(dirname "$worker")/../externals/node24/bin/node"
+          echo "Bundled action runtime: $("$runner_node" --version)"
+          base="https://unofficial-builds.nodejs.org/download/release/v${NODEJS_VERSION}"
+          tarball="node-v${NODEJS_VERSION}-linux-riscv64.tar.xz"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/$tarball"
+          curl -fsSL "$base/SHASUMS256.txt" | grep " $tarball\$" | sha256sum -c -
+          tar -xJf "$tarball"
+          node_dir="$RUNNER_TEMP/${tarball%.tar.xz}"
+          test "$("$node_dir/bin/node" --version)" = "v${NODEJS_VERSION}"
+          "$node_dir/bin/node" --single-threaded -e 'require("node:crypto").createHash("sha256").update("action-runtime").digest(); console.log(process.versions)'
+          install -m 755 "$node_dir/bin/node" "$runner_node.real.next"
+          mv -f "$runner_node.real.next" "$runner_node.real"
+          printf '#!/bin/bash\nexec "%s" --single-threaded "$@"\n' "$runner_node.real" > "$runner_node.next"
+          chmod 755 "$runner_node.next"
+          mv -f "$runner_node.next" "$runner_node"
+          echo "Updated action runtime: $("$runner_node" --version)"
+          echo "$node_dir/bin" >> "$GITHUB_PATH"
+
+      - name: Set up docker QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Free space
+        if: ${{ !inputs.fast-runner }}
+        run: .github/actions/setup-build/free-disk-space.sh
+
+      - name: Download compiled artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: compiled-${{ env.ARCH }}.tar
+
+      - name: Extract compiled artifacts
+        run: tar -xvf compiled-${{ env.ARCH }}.tar
+
+      - name: Prevent rebuild of compiled artifacts
+        run: |
+          mkdir -p node_modules
+          mkdir -p projects/start-os/web/dist/raw
+          mkdir -p projects/start-tunnel/web/dist/raw
+          mkdir -p shared-libs/crates/start-core/bindings
+          mkdir -p shared-libs/ts-modules/start-core/lib/osBindings
+          mkdir -p projects/start-os/container-runtime/node_modules
+          mkdir -p projects/start-os/container-runtime/dist
+          mkdir -p projects/start-os/container-runtime/dist/node_modules
+          mkdir -p projects/start-sdk/dist
+          mkdir -p shared-libs/ts-modules/start-core/dist
+          mkdir -p shared-libs/crates/patch-db/client/node_modules
+          mkdir -p shared-libs/crates/patch-db/client/dist
+          mkdir -p .angular
+          mkdir -p projects/start-os/web/dist/raw/ui
+          mkdir -p projects/start-os/web/dist/raw/setup-wizard
+          mkdir -p projects/start-os/web/dist/static/ui
+          mkdir -p projects/start-os/web/dist/static/setup-wizard
+          make -t compiled-${{ env.ARCH }}.tar
+
+      - run: git status
+
+      - name: Run iso build
+        run: make start-os-iso
+        if: ${{ inputs.platform != 'raspberrypi' }}
+
+      - name: Run img build
+        run: make start-os-img
+        if: ${{ inputs.platform == 'raspberrypi' }}
+
+      # Images are already compressed, so the artifacts are stored as-is.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.platform }}.squashfs
+          path: results/*.squashfs
+          retention-days: 14
+          compression-level: 0
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.platform }}.iso
+          path: results/*.iso
+          retention-days: 14
+          compression-level: 0
+        if: ${{ inputs.platform != 'raspberrypi' }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.platform }}.img
+          path: results/*.img
+          retention-days: 14
+          compression-level: 0
+        if: ${{ inputs.platform == 'raspberrypi' }}
+
+  deploy:
+    name: Deploy
+    needs: [build]
+    if: inputs.channel != ''
+    runs-on: ubuntu-latest
+    # One group per platform for every channel: alpha and beta deploys of one
+    # commit write the same S3 keys, and the index step's cleanup relies on no
+    # other run writing this platform's assets.
+    concurrency:
+      group: startos-deploy-${{ inputs.platform }}
+      cancel-in-progress: false
+    env:
+      PLATFORM: ${{ inputs.platform }}
+      VERSION: ${{ inputs.version }}
+      REGISTRY: ${{ inputs.registry }}
+      S3_BUCKET: ${{ inputs.s3-bucket }}
+      S3_CDN: ${{ inputs.s3-cdn }}
+      FORCE_OVERWRITE: ${{ inputs.force-overwrite }}
+    steps:
+      - name: Download squashfs
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.platform }}.squashfs
+          path: artifacts/
+
+      - name: Download ISO
+        if: ${{ inputs.platform != 'raspberrypi' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.platform }}.iso
+          path: artifacts/
+
+      - name: Download IMG
+        if: ${{ inputs.platform == 'raspberrypi' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.platform }}.img
+          path: artifacts/
+
+      - name: Install start-cli
+        uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master
+        with:
+          channel: alpha
+
+      - name: Configure S3
+        run: |
+          sudo apt-get install -y -qq s3cmd > /dev/null
+          cat > ~/.s3cfg <<EOF
+          [default]
+          access_key = ${{ secrets.S3_ACCESS_KEY }}
+          secret_key = ${{ secrets.S3_SECRET_KEY }}
+          host_base = nyc3.digitaloceanspaces.com
+          host_bucket = %(bucket)s.nyc3.digitaloceanspaces.com
+          use_https = True
+          EOF
+
+      - name: Set up developer key
+        run: |
+          mkdir -p ~/.startos
+          printf '%s' "${{ secrets.DEV_KEY }}" > ~/.startos/developer.key.pem
+
+      # An existing object under one of these keys is a hard stop unless it
+      # already holds these bytes. Basenames are commit-derived, so a key that
+      # already exists means this commit was already published — and since
+      # `os promote` copies asset URLs through verbatim, beta or production
+      # commitments may already point at those exact bytes. Replacing them would
+      # leave those signatures validating against content that no longer
+      # matches. Re-dispatch with force-overwrite when replacing is genuinely
+      # what you want.
+      - name: Upload to S3
+        working-directory: artifacts
+        run: |
+          set -uo pipefail
+          upload() {
+            local key="$S3_BUCKET/v$VERSION/$1"
+            if [ "$FORCE_OVERWRITE" != true ] && [ -n "$(s3cmd ls "$key")" ]; then
+              # `s3cmd put` records the MD5 that `s3cmd info` reports.
+              if [ "$(s3cmd info "$key" | sed -n 's/^ *MD5 sum: *//p')" = "$(md5sum "$1" | cut -d' ' -f1)" ]; then
+                echo "$key already holds $1."
+                return 0
+              fi
+              echo "::error::$key already exists — this commit has been published before. Overwriting it would invalidate any beta or production commitment pointing at that URL. Re-dispatch with force-overwrite to replace it deliberately."
+              return 1
+            fi
+            echo "Uploading $1..."
+            s3cmd put -P "$1" "$key"
+          }
+          pids=()
+          for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img; do
+            [ -f "$file" ] || continue
+            upload "$file" &
+            pids+=("$!")
+          done
+          # Report every conflict before failing, rather than one per re-run.
+          status=0
+          for pid in "${pids[@]}"; do wait "$pid" || status=1; done
+          exit "$status"
+
+      # deploy-prepare registered this commit before the images were built. An
+      # entry naming another commit belongs to another deploy; these assets stay
+      # out of it rather than being listed under its hash.
+      - name: Index assets in registry
+        working-directory: artifacts
+        run: |
+          set -uo pipefail
+          registered_commit() {
+            start-cli --registry="$REGISTRY" registry os index \
+              | jq -er --arg version "$VERSION" '.versions | objects | .[$version].gitHash // ""'
+          }
+          files=()
+          for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img; do
+            [ -f "$file" ] && files+=("$file")
+          done
+
+          commit="$(registered_commit)" || { echo "::error::could not read v$VERSION from $REGISTRY"; exit 1; }
+          if [ "$commit" != "$GITHUB_SHA" ]; then
+            echo "::error::v$VERSION in $REGISTRY is registered for ${commit:-no commit}, not $GITHUB_SHA; leaving $PLATFORM unindexed."
+            exit 1
+          fi
+
+          index() {
+            if [ "$FORCE_OVERWRITE" = true ]; then
+              start-cli --registry="$REGISTRY" registry os asset remove "${1##*.}" "$VERSION" "$PLATFORM" || return 1
+            fi
+            # Adding a file that is already indexed is a no-op, so a failure retries.
+            local attempt
+            for attempt in 1 2 3; do
+              echo "Indexing $1 for platform $PLATFORM (attempt $attempt)..."
+              start-cli --registry="$REGISTRY" registry os asset add \
+                --platform="$PLATFORM" \
+                --version="$VERSION" \
+                "$1" \
+                "$S3_CDN/v$VERSION/$1" && return 0
+              [ "$attempt" -eq 3 ] || sleep $((attempt * 30))
+            done
+            return 1
+          }
+          pids=()
+          for file in "${files[@]}"; do
+            index "$file" &
+            pids+=("$!")
+          done
+          status=0
+          for pid in "${pids[@]}"; do wait "$pid" || status=1; done
+
+          # `asset add` does not check the commit; a deploy that re-registers
+          # this version mid-index lists these assets under its commit.
+          commit="$(registered_commit)" || { echo "::error::could not confirm v$VERSION in $REGISTRY still belongs to $GITHUB_SHA"; exit 1; }
+          if [ "$commit" != "$GITHUB_SHA" ]; then
+            for file in "${files[@]}"; do
+              start-cli --registry="$REGISTRY" registry os asset remove "${file##*.}" "$VERSION" "$PLATFORM" \
+                || echo "::error::could not remove $file from v$VERSION in $REGISTRY"
+            done
+            echo "::error::v$VERSION in $REGISTRY was registered for ${commit:-no commit} while $PLATFORM indexed; its $PLATFORM assets were removed."
+            exit 1
+          fi
+          exit "$status"
+
+      - name: Record published images
+        working-directory: artifacts
+        run: |
+          shopt -s nullglob
+          printf '%s\n' *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img > "$RUNNER_TEMP/published-$PLATFORM.txt"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: startos-published-${{ inputs.platform }}
+          path: ${{ runner.temp }}/published-${{ inputs.platform }}.txt
+          retention-days: 1
