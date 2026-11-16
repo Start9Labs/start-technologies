@@ -127,19 +127,15 @@ test('an explicit compatibility override cannot understate shared-volume support
   ).toBe('0.4.3')
 })
 
-test('the default locale follows setupI18n unless the manifest declares one', () => {
-  expect(
-    buildManifest(versions, manifest(), Dependencies.of()).defaultLocale,
-  ).toBeUndefined()
-  setupI18n({}, {}, 'de_DE')
-  expect(
-    buildManifest(versions, manifest(), Dependencies.of()).defaultLocale,
-  ).toBe('de_DE')
-  expect(
-    buildManifest(
-      versions,
-      setupManifest({ ...manifest(), defaultLocale: 'fr_FR' }),
-      Dependencies.of(),
-    ).defaultLocale,
-  ).toBe('fr_FR')
+test('manifest defaults remain package-owned across independent i18n setups', () => {
+  const french = setupManifest({ ...manifest(), defaultLocale: 'fr_FR' })
+  for (const foreignLocale of ['de_DE', 'pl_PL']) {
+    setupI18n({}, {}, foreignLocale)
+    expect(
+      buildManifest(versions, manifest(), Dependencies.of()).defaultLocale,
+    ).toBeUndefined()
+    expect(
+      buildManifest(versions, french, Dependencies.of()).defaultLocale,
+    ).toBe('fr_FR')
+  }
 })

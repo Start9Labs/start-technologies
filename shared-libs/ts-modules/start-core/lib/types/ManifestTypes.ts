@@ -57,8 +57,8 @@ export type SDKManifest = {
     readonly long: T.LocaleString
   }
   /**
-   * Locale this package's translations fall back to when a requested one is
-   * missing. Defaults to the default language given to `setupI18n`.
+   * Fallback locale for this package's translated metadata. Use this package's
+   * `DEFAULT_LANG`.
    * @example en_US
    */
   readonly defaultLocale?: string

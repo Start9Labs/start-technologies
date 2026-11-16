@@ -63,7 +63,7 @@ rpc_toolkit::reflect_ts!(RegistryCache);
 pub struct OsUpdateCache {
     pub registry: Url,
     pub versions: BTreeMap<exver::Version, OsVersionInfo>,
-    /// `RegistryInfo::default_locale`, known when the source is also a package registry.
+    /// Tracks the source registry's cached `RegistryInfo::default_locale`.
     #[serde(default)]
     pub default_locale: Option<InternedString>,
     #[serde(default)]
@@ -293,7 +293,8 @@ fn reconcile(
         .transpose()?
         .unwrap_or_default();
     indexes.retain(|url, _| desired.contains(&Subscription::Index(url.clone())));
-    db.as_private_mut().as_registry_indexes_mut().ser(&indexes)
+    db.as_private_mut().as_registry_indexes_mut().ser(&indexes)?;
+    sync_os_default_locale(db)
 }
 
 async fn watch_registry(
@@ -375,6 +376,26 @@ pub(crate) fn next_retry(backoff: &mut u64) -> Duration {
     delay
 }
 
+fn sync_os_default_locale(db: &mut DatabaseModel) -> Result<(), Error> {
+    let public = db.as_public();
+    let Some(cache) = public.as_os_update_cache().transpose_ref() else {
+        return Ok(());
+    };
+    let registry = cache.as_registry().de()?;
+    let default_locale = public
+        .as_registry_cache()
+        .as_idx(&registry)
+        .map(|cache| cache.as_info().de().map(|info| info.default_locale))
+        .transpose()?
+        .flatten();
+    db.as_public_mut()
+        .as_os_update_cache_mut()
+        .transpose_mut()
+        .unwrap()
+        .as_default_locale_mut()
+        .ser(&default_locale)
+}
+
 fn set_status(
     db: &mut DatabaseModel,
     subscription: &Subscription,
@@ -420,7 +441,7 @@ fn set_status(
                 })?;
         }
     }
-    Ok(())
+    sync_os_default_locale(db)
 }
 
 async fn publish(
@@ -485,27 +506,26 @@ fn publish_snapshot(
                 None,
                 Some(&device.os.platform),
             )?)?;
-            let info = db
+            let name = db
                 .as_public()
                 .as_registry_cache()
                 .as_idx(url)
-                .map(|cache| cache.as_info().de())
-                .transpose()?;
-            let (name, default_locale) =
-                info.map_or((None, None), |info| (info.name, info.default_locale));
+                .map(|cache| cache.as_info().de().map(|info| info.name))
+                .transpose()?
+                .flatten();
             crate::update::security::notify_updates(db, url, name, index.de()?)?;
             db.as_public_mut()
                 .as_os_update_cache_mut()
                 .ser(&Some(OsUpdateCache {
                     registry: url.clone(),
                     versions,
-                    default_locale,
+                    default_locale: None,
                     status: RegistryStatus::Connected,
                     error: None,
                 }))?;
         }
     }
-    Ok(())
+    sync_os_default_locale(db)
 }
 
 pub(crate) async fn cached_call(

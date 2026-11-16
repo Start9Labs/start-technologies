@@ -27,10 +27,12 @@ export const long = {
 }
 ```
 
-When a reader's language is missing, StartOS and registries show the package's
-default locale: the default language given to `setupI18n` in `startos/i18n`
-(`DEFAULT_LANG`). Set `defaultLocale` in `setupManifest()` to choose a different
-one.
+If neither the requested locale nor a same-language translation is available,
+StartOS and registries use the package's `defaultLocale`. Set it in
+`setupManifest()`, using the package's `DEFAULT_LANG` from
+`startos/i18n/dictionaries/default.ts` or another locale it publishes. The package
+template imports `DEFAULT_LANG` into the manifest. An unset default uses an
+arbitrary stored translation.
 
 ### How long each one may be
 
