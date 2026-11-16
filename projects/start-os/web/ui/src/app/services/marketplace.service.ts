@@ -36,7 +36,6 @@ import {
   switchMap,
 } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
-import { ConnectionService } from 'src/app/services/connection.service'
 import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { StorageService } from 'src/app/services/storage.service'
@@ -51,10 +50,12 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
 
-  private readonly connected$ = inject(ConnectionService)
   private readonly registryCache$ = this.patch.watch$('registryCache')
 
-  private readonly savedRegistries$ = combineLatest([
+  /** Lists defaults in `defaultRegistries` order, then custom registries in saved order. */
+  readonly registries$: Observable<
+    (StoreIdentity & { status: T.RegistryStatus })[]
+  > = combineLatest([
     this.patch.watch$('serverInfo', 'registries'),
     this.registryCache$,
   ]).pipe(
@@ -78,15 +79,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
     ),
   )
 
-  /** Lists defaults in `defaultRegistries` order, then custom registries in saved order. */
-  readonly registries$: Observable<
-    (StoreIdentity & { status: T.RegistryStatus })[]
-  > = combineLatest([this.savedRegistries$, this.connected$]).pipe(
-    map(([registries, connected]) =>
-      connected ? registries : registries.map(unconfirmed),
-    ),
-  )
-
   private watchRegistry$(url: string) {
     return this.registryCache$.pipe(
       map(cache => findRegistryCache(cache, url)),
@@ -105,7 +97,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
   )
 
   readonly marketplace$: Observable<Marketplace> = combineLatest([
-    this.savedRegistries$,
+    this.registries$,
     this.registryCache$,
   ]).pipe(
     map(([registries, cache]) =>
@@ -123,14 +115,9 @@ export class MarketplaceService extends AbstractMarketplaceService {
     this.currentRegistryUrl$.pipe(
       distinctUntilChanged(),
       switchMap(url =>
-        combineLatest([
-          this.watchRegistry$(url).pipe(
-            filter(entry => !!entry),
-            map(entry => this.toStore(url, entry)),
-          ),
-          this.connected$,
-        ]).pipe(
-          map(([store, connected]) => (connected ? store : unconfirmed(store))),
+        this.watchRegistry$(url).pipe(
+          filter(entry => !!entry),
+          map(entry => this.toStore(url, entry)),
         ),
       ),
       shareReplay(1),
@@ -362,12 +349,6 @@ function registryReady(
       Object.keys(entry.packages).length,
     )
   )
-}
-
-function unconfirmed<
-  O extends Partial<Pick<T.RegistryCache, 'status' | 'error'>>,
->(observation: O): O {
-  return { ...observation, status: 'connecting', error: null }
 }
 
 function findRegistryCache(cache: DataModel['registryCache'], url: string) {

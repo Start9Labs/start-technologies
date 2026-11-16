@@ -4096,7 +4096,7 @@ test('a late registry cache update cannot restore a removed registry', async t =
   assert.deepEqual(writes, [])
 })
 
-test('registry status reads as connecting while the server is disconnected, without re-emitting the catalog', async t => {
+test('registry status keeps its last known observation while the server is disconnected', async t => {
   const { Exver } = await import('@start9labs/shared')
   const { StorageService } = await import('src/app/services/storage.service')
   const { PackageIconService } =
@@ -4146,17 +4146,12 @@ test('registry status reads as connecting while the server is disconnected, with
 
   connected.next(false)
   const [registry] = await firstValueFrom(service.registries$)
-  assert.equal(registry.status, 'connecting')
-  assert.equal(registry.error, null)
-  assert.deepEqual(await firstValueFrom(service.requestErrors$), [])
-  assert.equal((await current()).status, 'connecting')
-  assert.equal((await current()).error, null)
-
-  connected.next(true)
+  assert.equal(registry.status, 'error')
+  assert.equal(registry.error, 'connection timed out')
   assert.deepEqual(await firstValueFrom(service.requestErrors$), [
     'https://registry.test/',
   ])
-  assert.equal((await current()).error, 'connection timed out')
+  assert.equal((await current()).status, 'error')
   assert.equal(catalogs.length, 1)
 })
 

@@ -236,7 +236,7 @@ async function fixture(
 }
 
 for (const status of ['connected', 'error']) {
-  test(`os registry availability follows live ${status} dumps and stream loss while startup state stays running`, async t => {
+  test(`os registry status shows the last known observation from restore through a live ${status} dump and stream loss`, async t => {
     const url = 'https://registry.test/'
     const entry = {
       status: 'error',
@@ -287,6 +287,7 @@ for (const status of ['connected', 'error']) {
     assert.equal(f.state.value, 'running')
     assert.equal(f.connection.value, false)
     assert.equal(registries.length, emissions)
+    assert.deepEqual(registries.at(-1), live)
     await f.recover()
     assert.equal(f.calls.length, 2)
     assert.equal(f.connection.value, false)
