@@ -21,12 +21,10 @@ export class StorageService {
     this.storage?.clear()
   }
 
-  migrate036() {
-    const oldPrefix = '_embassystorage/_embassykv/'
-    if (this.storage?.getItem(`${oldPrefix}loggedInKey`)) {
-      const cache = this.storage.getItem(`${oldPrefix}patch-db-cache`)
+  migrate() {
+    if (this.storage?.getItem('_embassystorage/_embassykv/loggedInKey')) {
       this.clear()
-      this.set('patchDB', cache)
     }
+    this.storage?.removeItem(`${PREFIX}patchDB`)
   }
 }
