@@ -4152,6 +4152,20 @@ shared-volumes.source-unavailable:
   fr_FR: "La source du volume est indisponible. Vérifiez la source, le réseau et les identifiants."
   pl_PL: "Źródło woluminu jest niedostępne. Sprawdź źródło, sieć i dane uwierzytelniające."
 
+shutdown.already-restarting:
+  en_US: "Server is already restarting"
+  de_DE: "Der Server wird bereits neu gestartet"
+  es_ES: "El servidor ya se está reiniciando"
+  fr_FR: "Le serveur est déjà en cours de redémarrage"
+  pl_PL: "Serwer jest już uruchamiany ponownie"
+
+shutdown.already-shutting-down:
+  en_US: "Server is already shutting down"
+  de_DE: "Der Server wird bereits heruntergefahren"
+  es_ES: "El servidor ya se está apagando"
+  fr_FR: "Le serveur est déjà en cours d'arrêt"
+  pl_PL: "Serwer jest już wyłączany"
+
 shutdown.beginning-restart:
   en_US: "Beginning server restart"
   de_DE: "Server-Neustart wird begonnen"

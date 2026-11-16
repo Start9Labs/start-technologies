@@ -4,6 +4,7 @@ use tokio::sync::broadcast;
 
 use crate::PLATFORM;
 use crate::context::RpcContext;
+use crate::db::model::{Database, DatabaseModel};
 use crate::disk::main::export;
 use crate::init::{STANDBY_MODE_PATH, SYSTEM_REBUILD_PATH};
 use crate::prelude::*;
@@ -136,51 +137,57 @@ pub struct ShutdownParams {
 rpc_toolkit::reflect_ts!(ShutdownParams);
 rpc_toolkit::ts_export!(ShutdownParams, namespaces = [""]);
 
-/// Receives the next shutdown request. A request superseded before it was read
-/// is skipped.
-pub async fn recv_request(
-    requests: &mut broadcast::Receiver<Option<Shutdown>>,
-) -> Result<Option<Shutdown>, Error> {
-    loop {
-        match requests.recv().await {
-            Err(broadcast::error::RecvError::Lagged(_)) => (),
-            res => return res.with_kind(ErrorKind::Unknown),
-        }
-    }
+/// A new RPC context accepts a new shutdown request.
+pub(crate) fn reset_shutdown(db: &mut DatabaseModel) -> Result<(), Error> {
+    let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
+    status.as_shutting_down_mut().ser(&false)?;
+    status.as_restarting_mut().ser(&false)
 }
 
-/// The power action to execute once nothing can submit requests.
-/// A later explicit request supersedes the received one.
-pub fn final_request(
-    mut request: Option<Shutdown>,
-    mut requests: broadcast::Receiver<Option<Shutdown>>,
-) -> Option<Shutdown> {
-    use broadcast::error::TryRecvError;
-    loop {
-        match requests.try_recv() {
-            Ok(Some(later)) => request = Some(later),
-            Ok(None) | Err(TryRecvError::Lagged(_)) => (),
-            Err(TryRecvError::Empty | TryRecvError::Closed) => return request,
+/// The first request fixes the action; later requests leave it unchanged and fail.
+/// `None` stops startd without powering off.
+pub(crate) async fn request_shutdown(
+    db: &TypedPatchDb<Database>,
+    sender: &broadcast::Sender<Option<Shutdown>>,
+    request: Option<Shutdown>,
+) -> Result<(), Error> {
+    let restart = request.as_ref().is_some_and(|request| request.restart);
+    db.mutate(|db| {
+        let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
+        if status.as_shutting_down().de()? {
+            return Err(Error::new(
+                eyre!(t!("shutdown.already-shutting-down")),
+                ErrorKind::InvalidRequest,
+            ));
         }
-    }
+        if status.as_restarting().de()? {
+            return Err(Error::new(
+                eyre!(t!("shutdown.already-restarting")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        status.as_shutting_down_mut().ser(&!restart)?;
+        status.as_restarting_mut().ser(&restart)
+    })
+    .await
+    .result?;
+    sender
+        .send(request)
+        .map_err(|_| eyre!("receiver dropped"))
+        .log_err();
+    Ok(())
 }
 
 async fn begin_shutdown(ctx: &RpcContext, restart: bool, wait: bool) -> Result<(), Error> {
-    ctx.db
-        .mutate(|db| {
-            let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
-            status.as_shutting_down_mut().ser(&!restart)?;
-            status.as_restarting_mut().ser(&restart)
-        })
-        .await
-        .result?;
-    ctx.shutdown
-        .send(Some(Shutdown {
+    request_shutdown(
+        &ctx.db,
+        &ctx.shutdown,
+        Some(Shutdown {
             disk_guid: Some(ctx.disk_guid.clone()),
             restart,
-        }))
-        .map_err(|_| eyre!("receiver dropped"))
-        .log_err();
+        }),
+    )
+    .await?;
     if wait {
         ctx.wait_closed().await;
     }
@@ -208,9 +215,21 @@ pub async fn rebuild(ctx: RpcContext) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use tokio::sync::broadcast;
+    use super::*;
+    use crate::db::model::public::ServerStatus;
 
-    use super::{Shutdown, final_request, recv_request};
+    async fn database() -> TypedPatchDb<Database> {
+        let db = TypedPatchDb::load_unchecked(PatchDb::in_memory());
+        db.put(
+            &patch_db::json_ptr::ROOT,
+            &imbl_value::json!({
+                "public": {"serverInfo": {"statusInfo": ServerStatus::default()}}
+            }),
+        )
+        .await
+        .unwrap();
+        db
+    }
 
     fn request(restart: bool) -> Option<Shutdown> {
         Some(Shutdown {
@@ -219,70 +238,105 @@ mod tests {
         })
     }
 
-    fn restart_of(request: Option<Shutdown>) -> Option<bool> {
-        request.map(|s| s.restart)
+    #[tokio::test]
+    async fn shutdown_rejects_repeated_and_conflicting_requests_during_teardown() {
+        for restart in [false, true] {
+            let db = database().await;
+            let (send, mut requests) = broadcast::channel(1);
+            request_shutdown(&db, &send, request(restart))
+                .await
+                .unwrap();
+            assert_eq!(requests.recv().await.unwrap().unwrap().restart, restart);
+            drop(requests);
+            let before = db.dump(&patch_db::json_ptr::ROOT).await;
+
+            for later in [request(false), request(true), None] {
+                let error = request_shutdown(&db, &send, later).await.unwrap_err();
+                assert!(matches!(error.kind, ErrorKind::InvalidRequest));
+                assert_eq!(
+                    error.source.to_string(),
+                    if restart {
+                        t!("shutdown.already-restarting")
+                    } else {
+                        t!("shutdown.already-shutting-down")
+                    }
+                );
+            }
+
+            let after = db.dump(&patch_db::json_ptr::ROOT).await;
+            assert_eq!(after.value, before.value);
+            assert_eq!(after.id, before.id);
+            let status = db
+                .peek()
+                .await
+                .as_public()
+                .as_server_info()
+                .as_status_info()
+                .de()
+                .unwrap();
+            assert_eq!(status.shutting_down, !restart);
+            assert_eq!(status.restarting, restart);
+        }
     }
 
     #[tokio::test]
-    async fn recv_request_returns_the_latest_of_unread_requests() {
+    async fn signal_initiated_shutdown_rejects_later_power_requests() {
+        let db = database().await;
         let (send, mut requests) = broadcast::channel(1);
-        send.send(request(false)).unwrap();
-        send.send(request(true)).unwrap();
-
-        let received = recv_request(&mut requests).await.unwrap();
-
-        assert_eq!(restart_of(received), Some(true));
+        request_shutdown(&db, &send, None).await.unwrap();
+        for restart in [false, true] {
+            let error = request_shutdown(&db, &send, request(restart))
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.source.to_string(),
+                t!("shutdown.already-shutting-down")
+            );
+        }
+        assert!(requests.recv().await.unwrap().is_none());
+        assert!(matches!(
+            requests.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
     }
 
-    #[test]
-    fn final_request_keeps_the_received_request_without_later_ones() {
-        let (_send, requests) = broadcast::channel(1);
-
-        assert_eq!(
-            restart_of(final_request(request(false), requests)),
-            Some(false)
-        );
-    }
-
-    #[test]
-    fn final_request_honors_a_request_accepted_during_teardown() {
+    #[tokio::test]
+    async fn shutdown_admission_resets_with_the_rpc_context() {
+        let db = database().await;
         let (send, requests) = broadcast::channel(1);
-        send.send(request(true)).unwrap();
+        request_shutdown(&db, &send, request(false)).await.unwrap();
+        drop((send, requests));
 
-        assert_eq!(
-            restart_of(final_request(request(false), requests)),
-            Some(true)
-        );
+        db.mutate(reset_shutdown).await.result.unwrap();
+        let (send, mut requests) = broadcast::channel(1);
+        request_shutdown(&db, &send, request(true)).await.unwrap();
+        assert!(requests.recv().await.unwrap().unwrap().restart);
     }
 
-    #[test]
-    fn final_request_honors_an_explicit_request_after_a_signal() {
-        let (send, requests) = broadcast::channel(1);
-        send.send(request(false)).unwrap();
-
-        assert_eq!(restart_of(final_request(None, requests)), Some(false));
-    }
-
-    #[test]
-    fn final_request_keeps_the_latest_of_several_later_requests() {
-        let (send, requests) = broadcast::channel(1);
-        send.send(request(true)).unwrap();
-        send.send(request(false)).unwrap();
-
-        assert_eq!(
-            restart_of(final_request(request(true), requests)),
-            Some(false)
+    #[tokio::test]
+    async fn simultaneous_shutdown_and_restart_publish_exactly_one_request() {
+        let db = database().await;
+        let (send, mut requests) = broadcast::channel(1);
+        let (shutdown, restart) = tokio::join!(
+            request_shutdown(&db, &send, request(false)),
+            request_shutdown(&db, &send, request(true)),
         );
-    }
-
-    #[test]
-    fn final_request_ignores_a_later_signal() {
-        let (send, requests) = broadcast::channel(1);
-        send.send(None).unwrap();
-
-        assert_eq!(
-            restart_of(final_request(request(true), requests)),
-            Some(true)
-        );
+        assert_ne!(shutdown.is_ok(), restart.is_ok());
+        let chosen = requests.recv().await.unwrap().unwrap();
+        assert_eq!(chosen.restart, restart.is_ok());
+        assert!(matches!(
+            requests.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+        let status = db
+            .peek()
+            .await
+            .as_public()
+            .as_server_info()
+            .as_status_info()
+            .de()
+            .unwrap();
+        assert_eq!(status.shutting_down, !chosen.restart);
+        assert_eq!(status.restarting, chosen.restart);
     }
 }

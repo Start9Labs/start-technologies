@@ -19,19 +19,17 @@ use crate::net::gateway::WildcardListener;
 use crate::net::static_server::refresher;
 use crate::net::web_server::{Acceptor, WebServer};
 use crate::prelude::*;
-use crate::shutdown::{Shutdown, final_request, recv_request};
+use crate::shutdown::{Shutdown, request_shutdown};
 use crate::system::launch_metrics_task;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::append_file;
 use crate::util::logger::LOGGER;
 
-type ShutdownRequests = broadcast::Receiver<Option<Shutdown>>;
-
-/// Serves the context with a receiver for every shutdown request it accepts.
-///
-/// The caller must hold the receiver until the web server shuts down, then pass
-/// it to [`final_request`]. Otherwise an accepted request is dropped.
-fn serve_rpc(server: &mut WebServer<WildcardListener>, ctx: &RpcContext) -> ShutdownRequests {
+/// Holds requests accepted before startup finishes.
+fn serve_rpc(
+    server: &mut WebServer<WildcardListener>,
+    ctx: &RpcContext,
+) -> broadcast::Receiver<Option<Shutdown>> {
     let requests = ctx.shutdown.subscribe();
     server.serve_ui_for(ctx.clone());
     requests
@@ -39,7 +37,7 @@ fn serve_rpc(server: &mut WebServer<WildcardListener>, ctx: &RpcContext) -> Shut
 
 /// Shutdown requests preempt metrics initialization and polling.
 async fn wait_for_shutdown(
-    requests: &mut ShutdownRequests,
+    mut requests: broadcast::Receiver<Option<Shutdown>>,
     metrics_task: NonDetachingJoinHandle<()>,
 ) -> Result<Option<Shutdown>, Error> {
     let metrics_task = metrics_task
@@ -53,23 +51,22 @@ async fn wait_for_shutdown(
     tokio::pin!(metrics_task);
 
     tokio::select! {
-        shutdown = recv_request(requests) => shutdown,
+        shutdown = requests.recv() => shutdown,
         result = &mut metrics_task => {
             result?;
-            recv_request(requests).await
+            requests.recv().await
         }
     }
+    .with_kind(ErrorKind::Unknown)
 }
 
-/// The requested power action, and the receiver for requests the served
-/// `RpcContext` may still accept until the web server shuts down.
 #[instrument(skip_all)]
 async fn inner_main(
     server: &mut WebServer<WildcardListener>,
     dns: &Arc<DnsController>,
     config: &ServerConfig,
-) -> Result<(Option<Shutdown>, Option<ShutdownRequests>), Error> {
-    let (rpc_ctx, mut requests) = if !tokio::fs::metadata("/run/startos/initialized")
+) -> Result<Option<Shutdown>, Error> {
+    let (rpc_ctx, requests) = if !tokio::fs::metadata("/run/startos/initialized")
         .await
         .is_ok()
     {
@@ -77,7 +74,7 @@ async fn inner_main(
             append_file("/run/startos/init.log").await?.into_std().await,
         ));
         let (ctx, handle) = match super::start_init::main(server, dns.clone(), &config).await? {
-            Err(s) => return Ok((Some(s), None)),
+            Err(s) => return Ok(Some(s)),
             Ok(ctx) => ctx,
         };
         tokio::fs::write("/run/startos/initialized", "").await?;
@@ -119,54 +116,48 @@ async fn inner_main(
         (ctx, requests)
     };
 
-    let (rpc_ctx, shutdown) = async {
-        crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.clone())).await?;
+    crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.clone())).await?;
 
-        let shutdown_send = rpc_ctx.shutdown.clone();
-        let sig_handler = NonDetachingJoinHandle::from(tokio::spawn(async move {
-            use tokio::signal::unix::SignalKind;
-            futures::future::select_all(
-                [
-                    SignalKind::interrupt(),
-                    SignalKind::quit(),
-                    SignalKind::terminate(),
-                ]
-                .iter()
-                .map(|s| {
-                    async move {
-                        signal(*s)
-                            .unwrap_or_else(|_| panic!("register {:?} handler", s))
-                            .recv()
-                            .await
-                    }
-                    .boxed()
-                }),
-            )
-            .await;
-            shutdown_send
-                .send(None)
-                .map_err(|_| ())
-                .expect("send shutdown signal");
-        }));
-
-        let metrics_ctx = rpc_ctx.clone();
-        let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(async move {
-            launch_metrics_task(&metrics_ctx.metrics_cache, &metrics_ctx.db, || {
-                metrics_ctx.shutdown.subscribe()
-            })
+    let shutdown_db = rpc_ctx.db.clone();
+    let shutdown_send = rpc_ctx.shutdown.clone();
+    let sig_handler = NonDetachingJoinHandle::from(tokio::spawn(async move {
+        use tokio::signal::unix::SignalKind;
+        futures::future::select_all(
+            [
+                SignalKind::interrupt(),
+                SignalKind::quit(),
+                SignalKind::terminate(),
+            ]
+            .iter()
+            .map(|s| {
+                async move {
+                    signal(*s)
+                        .unwrap_or_else(|_| panic!("register {:?} handler", s))
+                        .recv()
+                        .await
+                }
+                .boxed()
+            }),
+        )
+        .await;
+        request_shutdown(&shutdown_db, &shutdown_send, None)
             .await
-        }));
+            .log_err();
+    }));
 
-        let shutdown = wait_for_shutdown(&mut requests, metrics_task).await?;
+    let metrics_ctx = rpc_ctx.clone();
+    let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(async move {
+        launch_metrics_task(&metrics_ctx.metrics_cache, &metrics_ctx.db, || {
+            metrics_ctx.shutdown.subscribe()
+        })
+        .await
+    }));
 
-        drop(sig_handler);
-
-        Ok::<_, Error>((rpc_ctx, shutdown))
-    }
-    .await?;
+    let shutdown = wait_for_shutdown(requests, metrics_task).await?;
+    drop(sig_handler);
     rpc_ctx.shutdown().await?;
 
-    Ok((shutdown, Some(requests)))
+    Ok(shutdown)
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {
@@ -196,12 +187,9 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
             let dns = Arc::new(DnsController::new(listener.subscribe()));
             let mut server = WebServer::new(Acceptor::new(listener), refresher());
             match inner_main(&mut server, &dns, &config).await {
-                Ok((shutdown, requests)) => {
+                Ok(shutdown) => {
                     server.shutdown().await;
-                    Ok(match requests {
-                        Some(requests) => final_request(shutdown, requests),
-                        None => shutdown,
-                    })
+                    Ok(shutdown)
                 }
                 Err(e) => {
                     async {
@@ -264,7 +252,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_does_not_wait_for_metrics_to_observe_the_request() {
-        let (send, mut requests) = broadcast::channel(1);
+        let (send, requests) = broadcast::channel(1);
         send.send(Some(Shutdown {
             disk_guid: None,
             restart: true,
@@ -274,7 +262,7 @@ mod tests {
         let mut metrics_stopped = metrics.subscribe();
         let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(metrics));
 
-        let shutdown = wait_for_shutdown(&mut requests, metrics_task)
+        let shutdown = wait_for_shutdown(requests, metrics_task)
             .now_or_never()
             .expect("shutdown waited for metrics")
             .unwrap()
@@ -286,14 +274,12 @@ mod tests {
 
     #[tokio::test]
     async fn metrics_panics_still_fail_the_shutdown_wait() {
-        let (_send, mut requests) = broadcast::channel(1);
+        let (_send, requests) = broadcast::channel(1);
         let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(async {
             panic!("metrics task failed");
         }));
 
-        let error = wait_for_shutdown(&mut requests, metrics_task)
-            .await
-            .unwrap_err();
+        let error = wait_for_shutdown(requests, metrics_task).await.unwrap_err();
 
         assert!(matches!(error.kind, ErrorKind::Unknown));
     }

@@ -289,6 +289,7 @@ impl RpcContext {
             TypedPatchDb::<Database>::load(config.db().await?).await?
         };
         db.mutate(|db| {
+            crate::shutdown::reset_shutdown(db)?;
             db.as_public_mut().as_disks_mut().ser(&Vec::new())?;
             for (_, volume) in db
                 .as_public_mut()
