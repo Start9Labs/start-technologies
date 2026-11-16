@@ -1021,7 +1021,7 @@ export const ENGLISH: Record<string, number> = {
   'Wait for backup to complete': 1301,
   'Shut down now': 1302,
   'A backup is running. Your server will restart when it finishes.': 1303,
-  'A backup is running. Your server will shut down when it finishes.': 1299,
+  'A backup is running. Your server will shut down when it finishes.': 1304,
   'UPS Monitor': 1222,
   'NUT server': 1223,
   'Shut down safely when a UPS battery is low': 1224,

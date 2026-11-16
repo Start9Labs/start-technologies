@@ -1020,7 +1020,7 @@ export default {
   1301: 'Attendre la fin de la sauvegarde',
   1302: 'Éteindre maintenant',
   1303: 'Une sauvegarde est en cours. Votre serveur redémarrera une fois celle-ci terminée.',
-  1299: 'Une sauvegarde est en cours. Votre serveur s’éteindra une fois celle-ci terminée.',
+  1304: 'Une sauvegarde est en cours. Votre serveur s’éteindra une fois celle-ci terminée.',
   1222: 'Surveillance de l’onduleur',
   1223: 'Serveur NUT',
   1224: 'Arrêter en sécurité lorsque la batterie d’un onduleur est faible',

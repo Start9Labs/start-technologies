@@ -1020,7 +1020,7 @@ export default {
   1301: 'Poczekaj na zakończenie kopii zapasowej',
   1302: 'Wyłącz teraz',
   1303: 'Trwa tworzenie kopii zapasowej. Serwer zostanie ponownie uruchomiony po jej zakończeniu.',
-  1299: 'Trwa tworzenie kopii zapasowej. Serwer zostanie wyłączony po jej zakończeniu.',
+  1304: 'Trwa tworzenie kopii zapasowej. Serwer zostanie wyłączony po jej zakończeniu.',
   1222: 'Monitor UPS',
   1223: 'Serwer NUT',
   1224: 'Bezpieczne wyłączenie przy niskim poziomie baterii UPS',

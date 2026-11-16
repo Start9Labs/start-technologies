@@ -1020,7 +1020,7 @@ export default {
   1301: 'Auf Abschluss der Sicherung warten',
   1302: 'Jetzt herunterfahren',
   1303: 'Eine Sicherung läuft. Ihr Server wird nach deren Abschluss neu gestartet.',
-  1299: 'Eine Sicherung läuft. Ihr Server wird nach deren Abschluss heruntergefahren.',
+  1304: 'Eine Sicherung läuft. Ihr Server wird nach deren Abschluss heruntergefahren.',
   1222: 'USV-Überwachung',
   1223: 'NUT-Server',
   1224: 'Sicher herunterfahren, wenn der Akku einer USV schwach ist',

@@ -1020,7 +1020,7 @@ export default {
   1301: 'Esperar a que termine la copia de seguridad',
   1302: 'Apagar ahora',
   1303: 'Hay una copia de seguridad en curso. Su servidor se reiniciará cuando termine.',
-  1299: 'Hay una copia de seguridad en curso. Su servidor se apagará cuando termine.',
+  1304: 'Hay una copia de seguridad en curso. Su servidor se apagará cuando termine.',
   1222: 'Monitor de SAI',
   1223: 'Servidor NUT',
   1224: 'Apagar de forma segura cuando la batería del SAI esté baja',
