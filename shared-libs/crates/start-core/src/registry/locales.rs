@@ -1,5 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
+use patch_db::Dump;
+use patch_db::json_ptr::ROOT;
 use tokio::sync::watch;
 
 use crate::PackageId;
@@ -47,31 +50,47 @@ impl IndexLocales {
     }
 }
 
-/// `IndexLocales` loaded at startup and recomputed after each index revision.
+/// Database and locale metadata from one revision.
+pub struct IndexLocaleSnapshot {
+    pub source: Dump,
+    pub locales: IndexLocales,
+}
+
+/// Subscription snapshots pair locale metadata with the same source revision.
 pub struct IndexLocaleTracker {
-    locales: watch::Receiver<IndexLocales>,
+    locales: watch::Receiver<Result<Arc<IndexLocaleSnapshot>, Arc<Error>>>,
     _task: NonDetachingJoinHandle<()>,
 }
 
 impl IndexLocaleTracker {
     pub async fn spawn(db: TypedPatchDb<RegistryDatabase>) -> Result<Self, Error> {
-        let mut sub = db.subscribe(super::db::INDEX.clone()).await;
-        let initial = IndexLocales::of(db.peek().await.as_index())?;
-        let (send, locales) = watch::channel(initial);
+        let (source, mut sub) = db.dump_and_sub(ROOT.to_owned()).await;
+        let database: Model<RegistryDatabase> = source.value.clone().into();
+        let mut snapshot = Arc::new(IndexLocaleSnapshot {
+            locales: IndexLocales::of(database.as_index())?,
+            source,
+        });
+        let (send, locales) = watch::channel(Ok(snapshot.clone()));
         let task = tokio::spawn(async move {
             while sub.recv().await.is_some() {
                 while sub.try_recv().is_ok() {}
-                match IndexLocales::of(db.peek().await.as_index()) {
-                    Ok(next) => {
-                        send.send_if_modified(|current| {
-                            let changed = *current != next;
-                            *current = next;
-                            changed
-                        });
+                let source = db.dump(&ROOT).await;
+                let next = if source.value["index"] == snapshot.source.value["index"] {
+                    Ok(snapshot.locales.clone())
+                } else {
+                    let database: Model<RegistryDatabase> = source.value.clone().into();
+                    IndexLocales::of(database.as_index())
+                };
+                match next {
+                    Ok(locales) => {
+                        snapshot = Arc::new(IndexLocaleSnapshot { source, locales });
+                        send.send_replace(Ok(snapshot.clone()));
                     }
                     Err(e) => {
                         tracing::error!("Error tracking registry index locales: {e}");
                         tracing::debug!("{e:?}");
+                        send.send_replace(Err(Arc::new(e)));
+                        break;
                     }
                 }
             }
@@ -82,13 +101,26 @@ impl IndexLocaleTracker {
         })
     }
 
-    pub fn current(&self) -> watch::Ref<'_, IndexLocales> {
-        self.locales.borrow()
+    /// Returns matching database and locale snapshots at or after the requested revision.
+    pub async fn snapshot(&self, sequence: u64) -> Result<Arc<IndexLocaleSnapshot>, Error> {
+        let mut locales = self.locales.clone();
+        let snapshot = locales
+            .wait_for(|snapshot| match snapshot {
+                Ok(snapshot) => snapshot.source.id >= sequence,
+                Err(_) => true,
+            })
+            .await
+            .with_kind(ErrorKind::Database)?;
+        match &*snapshot {
+            Ok(snapshot) => Ok(snapshot.clone()),
+            Err(error) => Err(error.clone_output()),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::time::Duration;
 
     use imbl_value::json;
@@ -96,6 +128,8 @@ mod tests {
     use patch_db::json_ptr::JsonPointer;
 
     use super::*;
+    use crate::registry::device_info::WireCompatibility;
+    use crate::registry::mirror::{IndexMirrors, IndexView, index_mirror};
 
     fn version(notes: Value) -> Value {
         json!({
@@ -123,13 +157,13 @@ mod tests {
         .await
         .unwrap();
         let tracker = IndexLocaleTracker::spawn(db.clone()).await.unwrap();
-        let languages = |tracker: &IndexLocaleTracker| {
-            let current = tracker.current();
-            let mut all = current.unpackaged.clone();
-            all.extend(current.packages.values().flatten().cloned());
+        let languages = |snapshot: &IndexLocaleSnapshot| {
+            let mut all = snapshot.locales.unpackaged.clone();
+            all.extend(snapshot.locales.packages.values().flatten().cloned());
             all.into_iter().map(|l| l.to_string()).collect::<Vec<_>>()
         };
-        assert_eq!(languages(&tracker), ["en_US", "pl_PL"]);
+        let initial = tracker.snapshot(db.sequence().await).await.unwrap();
+        assert_eq!(languages(&initial), ["en_US", "pl_PL"]);
 
         db.put(
             &"/index/package/packages/pkg"
@@ -145,20 +179,59 @@ mod tests {
         )
         .await
         .unwrap();
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while languages(&tracker) != ["en_US", "ja_JP", "pl_PL"] {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
+        let added = tokio::time::timeout(
+            Duration::from_secs(5),
+            tracker.snapshot(db.sequence().await),
+        )
         .await
+        .unwrap()
         .unwrap();
+        assert_eq!(languages(&added), ["en_US", "ja_JP", "pl_PL"]);
         assert_eq!(
-            tracker.current().packages[&"pkg".parse::<PackageId>().unwrap()]
+            added.locales.packages[&"pkg".parse::<PackageId>().unwrap()]
                 .iter()
                 .map(|l| &**l)
                 .collect::<Vec<_>>(),
             ["en_US", "ja_JP"]
         );
+        let database: Model<RegistryDatabase> = added.source.value.clone().into();
+        let view = IndexView::resolve(
+            &database,
+            &added.locales,
+            None,
+            WireCompatibility::default(),
+            Some("ja_JP"),
+        )
+        .unwrap();
+        let mirror = index_mirror(&IndexMirrors::default(), &db, None, view, Path::new(""))
+            .await
+            .unwrap();
+        assert_eq!(
+            mirror
+                .db
+                .dump(
+                    &"/index/package/packages/pkg/versions/1.0.0:0/releaseNotes"
+                        .parse::<JsonPointer>()
+                        .unwrap(),
+                )
+                .await
+                .value,
+            json!("ノート")
+        );
+
+        let admins = json!([crate::rpc_continuations::Guid::new()]);
+        db.put(&"/admins".parse::<JsonPointer>().unwrap(), &admins)
+            .await
+            .unwrap();
+        let permissions = tokio::time::timeout(
+            Duration::from_secs(5),
+            tracker.snapshot(db.sequence().await),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(permissions.source.value["admins"], admins);
+        assert_eq!(languages(&permissions), ["en_US", "ja_JP", "pl_PL"]);
 
         db.put(
             &"/index/package/packages".parse::<JsonPointer>().unwrap(),
@@ -166,12 +239,19 @@ mod tests {
         )
         .await
         .unwrap();
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while languages(&tracker) != ["en_US", "pl_PL"] {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
+        let removed = tokio::time::timeout(
+            Duration::from_secs(5),
+            tracker.snapshot(db.sequence().await),
+        )
         .await
+        .unwrap()
         .unwrap();
+        assert_eq!(languages(&removed), ["en_US", "pl_PL"]);
+        assert!(
+            removed.source.value["index"]["package"]["packages"]
+                .as_object()
+                .unwrap()
+                .is_empty()
+        );
     }
 }

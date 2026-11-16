@@ -69,8 +69,11 @@ contract also applies to ordinary calls on the shared WebSocket.
 reader's visible index (`best_locale`); any other language receives the `en_US`
 view, so requests cannot create views beyond the index's own languages.
 `IndexLocaleTracker` (`registry/locales.rs`) holds those locales per package. It
-loads them at startup and recomputes them after each `/index` revision, so a
-subscription resolves its language without walking the index. Each distinct reader, `osVersion`
+captures the database and locale metadata together, recomputing the locales when
+`/index` changes. A subscription waits for a snapshot at or after its initiating
+database revision and resolves both reader access and language against that snapshot,
+without walking the index. Root revisions also advance snapshot freshness when
+permissions outside `/index` change. Each distinct reader, `osVersion`
 compatibility and `language` combination is an `IndexView` served by a lazily
 created in-memory PatchDB mirror (`registry/mirror.rs`), shared by its
 subscribers and dropped with the last of them.
