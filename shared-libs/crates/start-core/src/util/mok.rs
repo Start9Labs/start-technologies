@@ -4,7 +4,7 @@ use std::process::Output;
 use tokio::process::Command;
 
 use crate::prelude::*;
-use crate::util::io::{maybe_open_file, write_file_private_atomic};
+use crate::util::io::{maybe_open_file, open_file, read_secret_file, write_file_private_atomic};
 use crate::util::{GeneralBoxedGuard, Invoke, new_guid};
 
 pub const DKMS_MOK_KEY: &str = "/var/lib/dkms/mok.key";
@@ -48,14 +48,15 @@ pub async fn sign_unsigned_modules(root: &Path) -> Result<(), Error> {
 }
 
 /// The start9 user's password hash without shadow lock markers.
-async fn start9_shadow_hash(root: &Path) -> Result<Option<String>, Error> {
-    let shadow = tokio::fs::read_to_string(root.join("etc/shadow")).await?;
+async fn start9_shadow_hash(root: &Path) -> Result<Option<zeroize::Zeroizing<String>>, Error> {
+    let bytes = read_secret_file(open_file(root.join("etc/shadow")).await?).await?;
+    let shadow = std::str::from_utf8(&bytes).with_kind(ErrorKind::ParseSysInfo)?;
     for line in shadow.lines() {
         if let Some(("start9", rest)) = line.split_once(':') {
             if let Some((hash, _)) = rest.split_once(':') {
                 let hash = hash.trim_start_matches("!");
                 if hash.starts_with('$') {
-                    return Ok(Some(hash.to_owned()));
+                    return Ok(Some(zeroize::Zeroizing::new(hash.to_owned())));
                 }
                 return Ok(None);
             }

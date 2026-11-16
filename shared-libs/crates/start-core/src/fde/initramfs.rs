@@ -4,7 +4,6 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncReadExt;
 use zeroize::Zeroizing;
 
 use super::boot::Descriptor;
@@ -15,7 +14,7 @@ use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::private_tmpfs::PrivateTmpfs;
 use crate::disk::mount::guard::MountGuard;
 use crate::prelude::*;
-use crate::util::io::{TmpDir, read_file_to_string, write_file_private_atomic};
+use crate::util::io::{TmpDir, read_file_to_string, read_secret_file, write_file_private_atomic};
 
 pub const DESCRIPTOR_FILE: &str = "/etc/startos/fde-boot.json";
 pub const RUNTIME: &str = "/run/startos-fde";
@@ -68,13 +67,12 @@ pub(crate) fn invalid_handoff() -> Error {
 
 pub(crate) async fn load_handoff() -> Result<BootHandoff, Error> {
     let memory = InitramfsMemory::protect(Path::new(RUNTIME))?;
-    let mut file = crate::os_overlay::regular_file(&Path::new(RUNTIME).join(HANDOFF_FILE)).await?;
+    let file = crate::os_overlay::regular_file(&Path::new(RUNTIME).join(HANDOFF_FILE)).await?;
     let metadata = file.metadata().await?;
     if metadata.uid() != 0 || metadata.mode() & 0o077 != 0 {
         return Err(invalid_handoff());
     }
-    let mut bytes = Zeroizing::new(Vec::new());
-    file.read_to_end(&mut bytes).await?;
+    let bytes = read_secret_file(file).await?;
     let handoff = serde_json::from_slice(&bytes).with_kind(ErrorKind::Deserialization)?;
     memory.check(Path::new(RUNTIME))?;
     Ok(handoff)

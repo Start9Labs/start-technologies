@@ -139,7 +139,58 @@ async fn staging_redacts_credentials_and_preserves_native_metadata_and_hardlinks
         }
     }
     let (_, node) = resolved(&public, Path::new("etc/shadow")).unwrap();
-    assert!(node.metadata.xattrs.is_empty());
+    assert_eq!(node.metadata, Metadata::new(0o777));
+}
+
+#[tokio::test]
+async fn public_references_drop_private_metadata_in_fresh_and_resumed_snapshots() {
+    let (_root, raw, data) = fixture().await;
+    let mut snapshot = Squashfs::from_directory(&raw).await.unwrap().into_dyn();
+    let (_, node) = resolved(&snapshot, Path::new("etc/shadow")).unwrap();
+    let mut entry = node.clone();
+    entry.metadata.uid = nix::unistd::geteuid().as_raw();
+    entry.metadata.gid = nix::unistd::getegid().as_raw();
+    entry.metadata.modification_time = 123456;
+    snapshot
+        .contents_mut()
+        .insert_path("etc/shadow", Entry::Node(entry))
+        .unwrap();
+    let projected = ProjectedConfig::stage(snapshot, &data, &[]).await.unwrap();
+    let (_, node) = resolved(&projected.snapshot, Path::new("etc/shadow")).unwrap();
+    assert_eq!(node.metadata, Metadata::new(0o777));
+    let backing = backing_file(&data, target(&projected, "etc/shadow"))
+        .await
+        .unwrap();
+    let metadata = tokio::fs::metadata(&backing).await.unwrap();
+    assert_eq!(
+        (metadata.uid(), metadata.gid(), metadata.mtime()),
+        (
+            nix::unistd::geteuid().as_raw(),
+            nix::unistd::getegid().as_raw(),
+            123456
+        )
+    );
+    let mut snapshot = projected.snapshot.clone();
+    let (_, node) = resolved(&snapshot, Path::new("etc/shadow")).unwrap();
+    let mut entry = node.clone();
+    entry.metadata.uid = nix::unistd::geteuid().as_raw();
+    entry.metadata.modification_time = 123456;
+    snapshot
+        .contents_mut()
+        .insert_path("etc/shadow", Entry::Node(entry))
+        .unwrap();
+    let resumed = ProjectedConfig::stage(snapshot, &data, &[]).await.unwrap();
+    assert_eq!(
+        resolved(&resumed.snapshot, Path::new("etc/shadow"))
+            .unwrap()
+            .1
+            .metadata,
+        Metadata::new(0o777)
+    );
+    assert_eq!(
+        tokio::fs::metadata(&backing).await.unwrap().uid(),
+        nix::unistd::geteuid().as_raw()
+    );
 }
 
 #[tokio::test]
@@ -280,6 +331,135 @@ async fn legacy_replacement_is_retryable_and_existing_projection_keeps_live_data
         b"committed-new-password"
     );
     assert_eq!(std::fs::read_dir(data.join(DIRECTORY)).unwrap().count(), 1);
+}
+
+#[tokio::test]
+async fn interrupted_legacy_replacement_recovers_native_byte_names_without_following_temporary_links()
+ {
+    use std::os::unix::ffi::OsStringExt;
+
+    let (_root, raw, data) = fixture().await;
+    let name = std::ffi::OsString::from_vec(b"key-\xff with spaces".to_vec());
+    let relative = Path::new("root/hostkeys").join(name);
+    let path = raw.join(&relative);
+    tokio::fs::write(&path, b"private-native-key")
+        .await
+        .unwrap();
+    let projected = project(&raw, &data, &[Path::new("/").join(&relative)]).await;
+    let (_, node) = resolved(&projected.snapshot, &relative).unwrap();
+    let NodeContents::Symlink(target) = &node.contents else {
+        panic!("unprojected native key")
+    };
+    let target = target.clone();
+    let survivor = raw.join("unrelated-public-file");
+    tokio::fs::write(&survivor, b"unchanged").await.unwrap();
+    let temporary = raw.join(projected.legacy_temporary(&relative, &target).unwrap());
+    tokio::fs::symlink(&survivor, &temporary).await.unwrap();
+    open_file(temporary.parent().unwrap())
+        .await
+        .unwrap()
+        .sync_all()
+        .await
+        .unwrap();
+    projected.replace_legacy(&raw).await.unwrap();
+    projected.replace_legacy(&raw).await.unwrap();
+    assert_eq!(tokio::fs::read_link(&path).await.unwrap(), target);
+    assert!(tokio::fs::symlink_metadata(temporary).await.is_err());
+    assert_eq!(tokio::fs::read(&survivor).await.unwrap(), b"unchanged");
+    assert_eq!(
+        tokio::fs::read(backing_file(&data, &target).await.unwrap())
+            .await
+            .unwrap(),
+        b"private-native-key"
+    );
+}
+
+#[tokio::test]
+async fn legacy_parent_redirection_cannot_replace_unrelated_files() {
+    let (_root, raw, data) = fixture().await;
+    tokio::fs::write(raw.join("root/hostkeys/admin"), b"selected-private-key")
+        .await
+        .unwrap();
+    let projected = project(&raw, &data, &[PathBuf::from("/root/hostkeys/admin")]).await;
+    tokio::fs::rename(raw.join("root/hostkeys"), raw.join("root/original-keys"))
+        .await
+        .unwrap();
+    for target in [raw.join("unrelated"), data.join("unrelated")] {
+        tokio::fs::create_dir(&target).await.unwrap();
+        tokio::fs::write(target.join("admin"), b"unrelated-file")
+            .await
+            .unwrap();
+        tokio::fs::symlink(&target, raw.join("root/hostkeys"))
+            .await
+            .unwrap();
+        assert!(projected.replace_legacy(&raw).await.is_err());
+        assert_eq!(
+            tokio::fs::read(target.join("admin")).await.unwrap(),
+            b"unrelated-file"
+        );
+        assert_eq!(
+            tokio::fs::read(raw.join("root/original-keys/admin"))
+                .await
+                .unwrap(),
+            b"selected-private-key"
+        );
+        tokio::fs::remove_file(raw.join("root/hostkeys"))
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn credential_sibling_names_do_not_alias_staging_files() {
+    let (_root, raw, data) = fixture().await;
+    let names = ["key".to_owned(), ".key.tmp".to_owned()];
+    let paths: Vec<_> = names
+        .iter()
+        .map(|name| Path::new("root/hostkeys").join(name))
+        .collect();
+    for (index, path) in paths.iter().enumerate() {
+        tokio::fs::write(raw.join(path), format!("private-key-{index}"))
+            .await
+            .unwrap();
+    }
+    let projected = project(
+        &raw,
+        &data,
+        &paths
+            .iter()
+            .map(|path| Path::new("/").join(path))
+            .collect::<Vec<_>>(),
+    )
+    .await;
+    projected.replace_legacy(&raw).await.unwrap();
+    for (index, path) in paths.iter().enumerate() {
+        let target = tokio::fs::read_link(raw.join(path)).await.unwrap();
+        assert_eq!(
+            tokio::fs::read(backing_file(&data, &target).await.unwrap())
+                .await
+                .unwrap(),
+            format!("private-key-{index}").as_bytes()
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires native filesystem support for 255-byte filenames"]
+async fn real_maximum_native_credential_name_uses_bounded_temporary_names() {
+    let (_root, raw, data) = fixture().await;
+    let relative = Path::new("root/hostkeys").join("k".repeat(255));
+    tokio::fs::write(raw.join(&relative), b"private-long-name-key")
+        .await
+        .unwrap();
+    let projected = project(&raw, &data, &[Path::new("/").join(&relative)]).await;
+    projected.replace_legacy(&raw).await.unwrap();
+    let target = tokio::fs::read_link(raw.join(&relative)).await.unwrap();
+    assert_eq!(
+        tokio::fs::read(backing_file(&data, &target).await.unwrap())
+            .await
+            .unwrap(),
+        b"private-long-name-key"
+    );
 }
 
 #[tokio::test]

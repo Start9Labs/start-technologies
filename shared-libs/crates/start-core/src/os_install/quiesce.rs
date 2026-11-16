@@ -19,23 +19,23 @@ pub async fn list_partitions(disk_path: &Path) -> Result<Vec<PathBuf>, Error> {
             ErrorKind::BlockDevice,
         )
     })?;
-    let sys_block = Path::new("/sys/block").join(disk_name);
+    let sys_block = Path::new("/sys/class/block").join(disk_name);
     let mut out = Vec::new();
-    let mut entries = match tokio::fs::read_dir(&sys_block).await {
-        Ok(e) => e,
-        Err(_) => return Ok(out),
-    };
+    let mut entries = tokio::fs::read_dir(&sys_block).await?;
     while let Some(entry) = entries.next_entry().await.map_err(|e| {
         Error::new(
             eyre!("reading {}: {e}", sys_block.display()),
             ErrorKind::Filesystem,
         )
     })? {
-        if tokio::fs::metadata(entry.path().join("partition"))
-            .await
-            .is_ok()
-        {
-            out.push(Path::new("/dev").join(entry.file_name()));
+        match tokio::fs::metadata(entry.path().join("partition")).await {
+            Ok(_) => out.push(Path::new("/dev").join(entry.file_name())),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) => {}
+            Err(error) => return Err(error.into()),
         }
     }
     Ok(out)
@@ -77,10 +77,14 @@ async fn dm_name(dev: &Path) -> Result<Option<String>, Error> {
         .filter(|name| !name.is_empty()))
 }
 
-/// Target-backed holders, deepest first; unrelated block devices are excluded.
-async fn stacked_holders(partitions: &[PathBuf]) -> Result<Vec<PathBuf>, Error> {
+/// Holders of selected devices and their partitions, deepest first.
+async fn stacked_holders(devices: &[PathBuf]) -> Result<Vec<PathBuf>, Error> {
     let mut depth: BTreeMap<PathBuf, usize> = BTreeMap::new();
-    let mut frontier: Vec<PathBuf> = partitions.to_vec();
+    let mut frontier = Vec::new();
+    for device in devices {
+        frontier.push(device.clone());
+        frontier.extend(list_partitions(device).await?);
+    }
     let mut d = 0usize;
     while !frontier.is_empty() && d < 64 {
         let mut next = Vec::new();
@@ -134,30 +138,27 @@ async fn target_vgs(target_devs: &BTreeSet<PathBuf>) -> Vec<String> {
     vgs.into_iter().collect()
 }
 
-/// Best-effort teardown of OS-level claims (mounts, swap, LVM, dm, btrfs scan
-/// cache) on `disk_path` **and only `disk_path`**. Every step is scoped to the
-/// target disk's own partitions and the devices stacked on them, so a live boot
-/// medium on another disk — notably a Ventoy `/dev/mapper` device the running OS
-/// reads from — is never torn down (it doesn't build on the target disk, so it
-/// never enters any of these sets). Doesn't touch on-disk bytes, so `protect`ed
-/// partitions stay intact. Failures are logged and ignored — the subsequent
-/// `partx --update` is the source of truth.
+/// Best-effort target-only claim teardown; leaves on-disk bytes unchanged.
+/// Failures are logged; `update_partition_table` establishes kernel partition availability.
 pub async fn quiesce_disk(disk_path: &Path) -> Result<(), Error> {
-    let partitions = list_partitions(disk_path).await?;
-
-    let dm_devices = stacked_holders(&partitions).await.unwrap_or_else(|error| {
-        tracing::warn!(?error, "could not inspect target block holders");
+    let partitions = list_partitions(disk_path).await.unwrap_or_else(|error| {
+        tracing::warn!(?error, "could not inspect target partitions");
         Vec::new()
     });
 
-    // Canonical set of every block device that belongs to the target disk.
-    let mut target_devs: BTreeSet<PathBuf> = BTreeSet::new();
+    let dm_devices = stacked_holders(&[disk_path.to_owned()])
+        .await
+        .unwrap_or_else(|error| {
+            tracing::warn!(?error, "could not inspect target block holders");
+            Vec::new()
+        });
+
+    let mut target_devs = BTreeSet::from([canonical(disk_path).await]);
     for part in &partitions {
         target_devs.insert(canonical(part).await);
     }
     target_devs.extend(dm_devices.iter().cloned());
 
-    // swapoff only the target's own devices.
     for dev in &target_devs {
         if let Err(e) = Command::new("swapoff")
             .arg(dev)
@@ -168,7 +169,6 @@ pub async fn quiesce_disk(disk_path: &Path) -> Result<(), Error> {
         }
     }
 
-    // umount -A every mountpoint on the target's devices; lazy-unmount on busy.
     for dev in &target_devs {
         if Command::new("umount")
             .arg("-A")
@@ -189,7 +189,6 @@ pub async fn quiesce_disk(disk_path: &Path) -> Result<(), Error> {
         }
     }
 
-    // Deactivate only VGs whose PVs sit on the target disk.
     for vg in target_vgs(&target_devs).await {
         if let Err(e) = Command::new("vgchange")
             .arg("-an")
@@ -201,7 +200,6 @@ pub async fn quiesce_disk(disk_path: &Path) -> Result<(), Error> {
         }
     }
 
-    // Remove only the dm devices stacked on the target, top-of-stack first.
     for dev in &dm_devices {
         let Some(name) = dm_name(dev).await.log_err().flatten() else {
             continue;
@@ -217,21 +215,21 @@ pub async fn quiesce_disk(disk_path: &Path) -> Result<(), Error> {
         }
     }
 
-    // Drop btrfs scan cache for the target's partitions only, so a later mount
-    // doesn't race with a pending re-scan.
     for part in &partitions {
-        if let Err(e) = Command::new("btrfs")
-            .arg("device")
-            .arg("scan")
-            .arg("--forget")
-            .arg(part)
-            .invoke(ErrorKind::DiskManagement)
-            .await
-        {
+        if let Err(e) = forget_btrfs_scan(part).await {
             tracing::debug!("btrfs forget {} skipped: {e}", part.display());
         }
     }
 
+    Ok(())
+}
+
+async fn forget_btrfs_scan(partition: &Path) -> Result<(), Error> {
+    Command::new("btrfs")
+        .args(["device", "scan", "--forget"])
+        .arg(partition)
+        .invoke(ErrorKind::DiskManagement)
+        .await?;
     Ok(())
 }
 
@@ -244,17 +242,9 @@ pub async fn update_partition_table(disk_path: &Path) -> Result<(), Error> {
         .invoke(ErrorKind::DiskManagement)
         .await?;
     crate::disk::util::settle_udev().await?;
-    // Forget any btrfs scan refs udev just re-installed for the target's
-    // partitions only, for the same reason as in quiesce_disk.
+    // Udev may reinstall Btrfs scan references during partition updates.
     for part in list_partitions(disk_path).await.unwrap_or_default() {
-        if let Err(e) = Command::new("btrfs")
-            .arg("device")
-            .arg("scan")
-            .arg("--forget")
-            .arg(&part)
-            .invoke(ErrorKind::DiskManagement)
-            .await
-        {
+        if let Err(e) = forget_btrfs_scan(&part).await {
             tracing::warn!(
                 "btrfs device scan --forget {} after partx failed: {e}",
                 part.display()

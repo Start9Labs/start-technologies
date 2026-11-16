@@ -1,4 +1,5 @@
 //! Private configuration remains on unlocked data; signed snapshots contain references.
+//! Reference inodes retain no private-file ownership, timestamps or xattrs.
 //!
 //! Callers retain the encrypted data mount, quiesce configuration writers and
 //! protect transient credentials through preparation and publication.
@@ -16,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use openssl::pkey::{PKeyRef, Private};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use zeroize::Zeroizing;
 
 use crate::os_overlay::{PreparedGeneration, sync_tree};
@@ -24,7 +25,8 @@ use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::merkle_archive::source::{DynFileSource, FileSource};
 use crate::util::io::{
-    AtomicFile, confined_relative, create_directory_beneath, open_file, to_tmp_path,
+    AtomicFile, confined_relative, create_directory_beneath, delete_file, open_file,
+    write_secret_file,
 };
 use crate::util::squashfs::{
     Entry, Metadata, Node, NodeContents, Squashfs, overlay_whiteout, resolve_hardlink,
@@ -120,6 +122,10 @@ async fn backing_file(data: &Path, target: &Path) -> Result<PathBuf, Error> {
     Ok(file)
 }
 
+fn private_reference(target: PathBuf) -> Entry<DynFileSource> {
+    Entry::new(Metadata::new(0o777), NodeContents::Symlink(target))
+}
+
 fn resolved<'a>(
     image: &'a Squashfs<DynFileSource>,
     path: &Path,
@@ -157,7 +163,7 @@ impl ProjectedConfig {
     /// Requires an unlocked encrypted data mount and quiescent source paths.
     /// Supply both native default and prospective HostKey paths from the admitted root.
     pub(crate) async fn stage(
-        snapshot: Squashfs<DynFileSource>,
+        mut snapshot: Squashfs<DynFileSource>,
         data: &Path,
         host_keys: &[PathBuf],
     ) -> Result<Self, Error> {
@@ -231,6 +237,9 @@ impl ProjectedConfig {
                     .sync_all()
                     .await?;
                 replacements.insert(path.clone(), target.clone());
+                snapshot
+                    .contents_mut()
+                    .insert_path(&path, private_reference(target.clone()))?;
             }
             if matches!(
                 entry,
@@ -288,25 +297,22 @@ impl ProjectedConfig {
             let mut secret = Zeroizing::new(vec![0; size]);
             source.reader().await?.read_exact(&mut secret).await?;
             let destination = backing.join(&canonical);
-            let mut file = AtomicFile::new(&destination, None::<&Path>).await?;
+            let temporary = backing.join(format!(".{}.tmp", Guid::new()));
+            let file = AtomicFile::new(&destination, Some(&temporary)).await?;
             file.set_permissions(std::fs::Permissions::from_mode(0o600))
                 .await?;
-            file.write_all(&secret).await?;
-            file.flush().await?;
+            write_secret_file(&file, secret).await?;
             apply_metadata(&file, &node.metadata).await?;
             file.save().await?;
-            let mut metadata = node.metadata.clone();
-            metadata.mode = 0o777;
-            metadata.xattrs.clear();
             for path in paths {
                 if path != canonical {
                     tokio::fs::hard_link(&destination, backing.join(&path)).await?;
                 }
                 let target = Path::new(RUNTIME).join(&id).join(&path);
-                projected.snapshot.contents_mut().insert_path(
-                    &path,
-                    Entry::new(metadata.clone(), NodeContents::Symlink(target.clone())),
-                )?;
+                projected
+                    .snapshot
+                    .contents_mut()
+                    .insert_path(&path, private_reference(target.clone()))?;
                 projected.replacements.insert(path, target);
             }
         }
@@ -338,11 +344,49 @@ impl ProjectedConfig {
         PreparedGeneration::prepare_snapshot(self.snapshot.clone(), rootfs, store, key).await
     }
 
-    /// Requires durable compatible protected EFI, the runtime view and excluded legacy writers.
+    fn legacy_temporary(&self, path: &Path, target: &Path) -> Result<PathBuf, Error> {
+        use std::os::unix::ffi::OsStrExt;
+
+        let mut attempt = 0u64;
+        loop {
+            let mut hash = blake3::Hasher::new();
+            hash.update(path.as_os_str().as_bytes());
+            hash.update(&[0]);
+            hash.update(target.as_os_str().as_bytes());
+            hash.update(&attempt.to_le_bytes());
+            let temporary = path
+                .parent()
+                .expect("credential parent")
+                .join(format!(".fde-{}.tmp", hash.finalize().to_hex()));
+            if self
+                .snapshot
+                .contents()
+                .get_path_checked(&temporary)
+                .map_err(|_| invalid_layout(path))?
+                .is_none()
+            {
+                return Ok(temporary);
+            }
+            attempt += 1;
+        }
+    }
+
+    /// Requires durable compatible protected EFI and the runtime view.
+    /// The caller retains the raw mount and excludes path mutation.
+    /// Retry from the durable projected generation, not a new legacy snapshot.
     /// Obsolete public extent reclamation remains the activation owner's obligation.
     pub(crate) async fn replace_legacy(&self, raw: &Path) -> Result<(), Error> {
         for (path, target) in &self.replacements {
             let destination = raw.join(path);
+            let parent = path.parent().expect("credential parent");
+            let canonical_parent = match tokio::fs::canonicalize(raw.join(parent)).await {
+                Ok(parent) => parent,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if canonical_parent != tokio::fs::canonicalize(raw).await?.join(parent) {
+                return Err(invalid_layout(path));
+            }
             match tokio::fs::symlink_metadata(&destination).await {
                 Ok(metadata) if metadata.is_symlink() => {
                     if tokio::fs::read_link(&destination).await? == *target {
@@ -355,7 +399,8 @@ impl ProjectedConfig {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error.into()),
             }
-            let temporary = to_tmp_path(&destination)?;
+            let temporary = raw.join(self.legacy_temporary(path, target)?);
+            delete_file(&temporary).await?;
             tokio::fs::symlink(target, &temporary).await?;
             if let Err(error) = tokio::fs::rename(&temporary, &destination).await {
                 tokio::fs::remove_file(&temporary).await.log_err();

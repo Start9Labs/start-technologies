@@ -11,7 +11,7 @@
 //! storage, backups, PatchDB, bootstrap state, logs, or an additional management keyslot.
 
 use std::collections::BTreeSet;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
@@ -281,11 +281,9 @@ impl LuksPool {
             )
             .await?;
             require_success("luksDump --dump-volume-key", status)?;
-            let mut bytes = Zeroizing::new(Vec::new());
-            std::fs::File::open(&output)
-                .with_kind(ErrorKind::Filesystem)?
-                .read_to_end(&mut bytes)
-                .with_kind(ErrorKind::Filesystem)?;
+            let bytes =
+                crate::util::io::read_secret_file(crate::util::io::open_file(&output).await?)
+                    .await?;
             if bytes.is_empty() {
                 return Err(metadata_error());
             }

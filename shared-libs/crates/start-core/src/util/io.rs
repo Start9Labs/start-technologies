@@ -27,6 +27,7 @@ use tokio::io::{
 use tokio::net::TcpStream;
 use tokio::sync::{Notify, OwnedMutexGuard};
 use tokio::time::{Instant, Sleep};
+use zeroize::Zeroizing;
 
 use crate::prelude::*;
 use crate::util::FromStrParser;
@@ -1069,6 +1070,42 @@ pub async fn open_file(path: impl AsRef<Path>) -> Result<File, Error> {
         .or_not_found(path.as_ref().display())
 }
 
+/// Consumes zeroizing bytes without Tokio's intermediate write buffer.
+/// The caller excludes concurrent cursor access.
+pub(crate) async fn write_secret_file(
+    file: &File,
+    contents: Zeroizing<Vec<u8>>,
+) -> Result<(), Error> {
+    let mut file = file.try_clone().await?.into_std().await;
+    tokio::task::spawn_blocking(move || -> Result<(), Error> {
+        std::io::Write::write_all(&mut file, &contents)?;
+        Ok(())
+    })
+    .await
+    .with_kind(ErrorKind::Unknown)?
+}
+
+/// Requires stable contents; avoids reallocations and intermediate file-read buffers.
+pub(crate) async fn read_secret_file(file: File) -> Result<Zeroizing<Vec<u8>>, Error> {
+    let file = file.into_std().await;
+    tokio::task::spawn_blocking(move || -> Result<_, Error> {
+        use std::os::unix::fs::FileExt;
+
+        let metadata = file.metadata()?;
+        ensure_code!(
+            metadata.is_file(),
+            ErrorKind::Filesystem,
+            "expected a regular credential file"
+        );
+        let size = usize::try_from(metadata.len()).with_kind(ErrorKind::Filesystem)?;
+        let mut bytes = Zeroizing::new(vec![0; size]);
+        file.read_exact_at(&mut bytes, 0)?;
+        Ok(bytes)
+    })
+    .await
+    .with_kind(ErrorKind::Unknown)?
+}
+
 #[instrument(skip_all)]
 pub async fn maybe_read_file_to_string(path: impl AsRef<Path>) -> Result<Option<String>, Error> {
     let Some(mut file) = maybe_open_file(path).await? else {
@@ -1214,13 +1251,13 @@ pub async fn write_file_private_atomic(
             .await
             .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}")))?;
     }
-    let mut file = AtomicFile::new(path, None::<&Path>)
+    let file = AtomicFile::new(path, None::<&Path>)
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("create {path:?}")))?;
     file.set_permissions(std::fs::Permissions::from_mode(0o600))
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("chmod 600 {path:?}")))?;
-    file.write_all(contents.as_ref())
+    write_secret_file(&file, Zeroizing::new(contents.as_ref().to_vec()))
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("write {path:?}")))?;
     file.save()
@@ -1242,11 +1279,11 @@ pub async fn write_file_owned_atomic(
             .await
             .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}")))?;
     }
-    let mut file = AtomicFile::new(path, None::<&Path>)
+    let file = AtomicFile::new(path, None::<&Path>)
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("create {path:?}")))?;
     fchown(&*file, Some(uid.into()), Some(gid.into())).with_kind(ErrorKind::Filesystem)?;
-    file.write_all(contents.as_ref())
+    write_secret_file(&file, Zeroizing::new(contents.as_ref().to_vec()))
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("write {path:?}")))?;
     file.save()
@@ -1830,10 +1867,11 @@ impl<R: AsyncRead> AsyncRead for ByteReplacementReader<R> {
 
 pub fn to_tmp_path(path: impl AsRef<Path>) -> Result<PathBuf, Error> {
     let path = path.as_ref();
-    if let (Some(parent), Some(file_name)) =
-        (path.parent(), path.file_name().and_then(|f| f.to_str()))
-    {
-        Ok(parent.join(format!(".{}.tmp", file_name)))
+    if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) {
+        let mut temporary = std::ffi::OsString::from(".");
+        temporary.push(file_name);
+        temporary.push(".tmp");
+        Ok(parent.join(temporary))
     } else {
         Err(Error::new(
             eyre!("invalid path: {}", path.display()),
@@ -2091,6 +2129,52 @@ impl Drop for AtomicFile {
 
 #[cfg(test)]
 mod test {
+    #[tokio::test]
+    async fn native_byte_temporary_paths_support_atomic_secret_io() {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+        let root = tempfile::tempdir().unwrap();
+        let name = std::ffi::OsString::from_vec(b"credential-\xff".to_vec());
+        let path = root.path().join(name);
+        let temporary = super::to_tmp_path(&path).unwrap();
+        assert_eq!(temporary.parent(), Some(root.path()));
+        assert_eq!(
+            temporary.file_name().unwrap().as_bytes(),
+            b".credential-\xff.tmp"
+        );
+        let bytes: Vec<_> = (0..32768).map(|n| (n % 251) as u8).collect();
+        let file = super::AtomicFile::new(&path, None::<&std::path::Path>)
+            .await
+            .unwrap();
+        super::write_secret_file(&file, zeroize::Zeroizing::new(bytes.clone()))
+            .await
+            .unwrap();
+        file.save().await.unwrap();
+        assert_eq!(
+            &*super::read_secret_file(super::open_file(&path).await.unwrap())
+                .await
+                .unwrap(),
+            &bytes
+        );
+        assert!(!temporary.exists());
+        super::write_file_private_atomic(&path, b"replacement")
+            .await
+            .unwrap();
+        assert_eq!(
+            &*super::read_secret_file(super::open_file(&path).await.unwrap())
+                .await
+                .unwrap(),
+            b"replacement"
+        );
+        super::write_file_private_atomic(&path, b"").await.unwrap();
+        assert!(
+            super::read_secret_file(super::open_file(&path).await.unwrap())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
     #[tokio::test]
     async fn copying_file_aliases_preserves_contents_and_distinct_copies_still_work() {
         let root = tempfile::tempdir().unwrap();

@@ -300,9 +300,15 @@ pub async fn sync_keys<P: AsRef<Path>>(
     };
 
     let privkey_path = ssh_dir.join(id_alg);
-    let mut f = OpenOptions::new()
+    let encoded = zeroize::Zeroizing::new(
+        crate::util::serde::PemEncoding::to_pem::<serde_json::Error>(&privkey.0)
+            .with_kind(ErrorKind::OpenSsh)?,
+    );
+    let bytes = zeroize::Zeroizing::new([encoded.as_bytes(), b"\n"].concat());
+    let file = OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(true)
         .mode(0o600)
         .open(&privkey_path)
         .await
@@ -312,9 +318,8 @@ pub async fn sync_keys<P: AsRef<Path>>(
                 lazy_format!("create {privkey_path:?}"),
             )
         })?;
-    f.write_all(privkey.to_string().as_bytes()).await?;
-    f.write_all(b"\n").await?;
-    f.sync_all().await?;
+    crate::util::io::write_secret_file(&file, bytes).await?;
+    file.sync_all().await?;
     let mut f = create_file(ssh_dir.join(id_alg).with_extension("pub")).await?;
     f.write_all(
         (privkey
@@ -367,6 +372,55 @@ pub async fn sync_pubkeys<P: AsRef<Path>>(pubkeys: &SshKeys, ssh_dir: P) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "requires native start9/startos system identities"]
+    async fn real_private_key_sync_replaces_longer_contents_and_preserves_native_attributes() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("id_ed25519");
+        tokio::fs::write(&path, vec![b'x'; 16384]).await.unwrap();
+        tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .await
+            .unwrap();
+        xattr::set(&path, "user.startos-fixture", b"native-attributes").unwrap();
+        let inode = tokio::fs::metadata(&path).await.unwrap().ino();
+        let key = Pem(ssh_key::PrivateKey::random(
+            &mut crate::util::crypto::os_rng(),
+            ssh_key::Algorithm::Ed25519,
+        )
+        .unwrap());
+        sync_keys(
+            &ServerHostname::new("native-test".into()).unwrap(),
+            &key,
+            &SshKeys(BTreeMap::new()),
+            root.path(),
+        )
+        .await
+        .unwrap();
+        let encoded = crate::util::serde::PemEncoding::to_pem::<serde_json::Error>(&key.0).unwrap();
+        assert_eq!(
+            tokio::fs::read(&path).await.unwrap(),
+            [encoded.as_bytes(), b"\n"].concat()
+        );
+        assert_eq!(
+            tokio::fs::metadata(&path)
+                .await
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(tokio::fs::metadata(&path).await.unwrap().ino(), inode);
+        assert_eq!(
+            xattr::get(&path, "user.startos-fixture")
+                .unwrap()
+                .as_deref(),
+            Some(b"native-attributes".as_slice())
+        );
+    }
 
     #[test]
     fn host_key_output_retains_spaces_and_non_utf8_paths() {

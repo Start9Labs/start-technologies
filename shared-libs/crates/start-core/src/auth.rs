@@ -17,7 +17,6 @@ use rpc_toolkit::{
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
@@ -223,9 +222,11 @@ async fn shadow_overlay_exists() -> bool {
 }
 
 pub async fn write_shadow(password: &str) -> Result<(), Error> {
-    let hash = crate::util::crypto::shadow_password_hash(password)?;
-    let shadow_contents = tokio::fs::read_to_string(SHADOW_PATH).await?;
-    let mut shadow_file = create_file_mod(SAVED_SHADOW_PATH, 0o640).await?;
+    let hash = zeroize::Zeroizing::new(crate::util::crypto::shadow_password_hash(password)?);
+    let shadow_bytes =
+        crate::util::io::read_secret_file(crate::util::io::open_file(SHADOW_PATH).await?).await?;
+    let shadow_contents = std::str::from_utf8(&shadow_bytes).with_kind(ErrorKind::ParseSysInfo)?;
+    let shadow_file = create_file_mod(SAVED_SHADOW_PATH, 0o640).await?;
     for line in shadow_contents.lines() {
         match line.split_once(":") {
             Some((user, rest)) if user == "start9" || user == "kiosk" => {
@@ -235,13 +236,28 @@ pub async fn write_shadow(password: &str) -> Result<(), Error> {
                         ErrorKind::ParseSysInfo,
                     )
                 })?;
-                shadow_file
-                    .write_all(format!("{user}:{hash}:{rest}\n").as_bytes())
-                    .await?;
+                crate::util::io::write_secret_file(
+                    &shadow_file,
+                    zeroize::Zeroizing::new(
+                        [
+                            user.as_bytes(),
+                            b":",
+                            hash.as_bytes(),
+                            b":",
+                            rest.as_bytes(),
+                            b"\n",
+                        ]
+                        .concat(),
+                    ),
+                )
+                .await?;
             }
             _ => {
-                shadow_file.write_all(line.as_bytes()).await?;
-                shadow_file.write_all(b"\n").await?;
+                crate::util::io::write_secret_file(
+                    &shadow_file,
+                    zeroize::Zeroizing::new([line.as_bytes(), b"\n"].concat()),
+                )
+                .await?;
             }
         }
     }

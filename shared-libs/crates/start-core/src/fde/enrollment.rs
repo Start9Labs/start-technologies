@@ -16,7 +16,10 @@ use crate::context::RpcContext;
 use crate::prelude::*;
 use crate::util::crypto::gen_nistp256;
 use crate::util::future::complete_owned_operation;
-use crate::util::io::{TmpDir, delete_file, read_file_to_string, write_file_private_atomic};
+use crate::util::io::{
+    TmpDir, delete_file, open_file, read_file_to_string, read_secret_file,
+    write_file_private_atomic,
+};
 use crate::util::mok::{DKMS_MOK_PUB, MokEnrollment, enrollment_status, request_enrollment};
 use crate::util::serde::Pem;
 use crate::util::{GeneralBoxedGuard, Invoke, new_guid};
@@ -108,8 +111,8 @@ impl Enrollment {
             ))
             .invoke(ErrorKind::OpenSsl)
             .await?;
-        let encoded_key = Zeroizing::new(read_file_to_string(&key).await?);
-        let image_key = PKey::private_key_from_pem(encoded_key.as_bytes())?;
+        let encoded_key = read_secret_file(open_file(&key).await?).await?;
+        let image_key = PKey::private_key_from_pem(&encoded_key)?;
         let image_certificate =
             X509::from_pem(read_file_to_string(&certificate).await?.as_bytes())?;
         image_key.rsa()?;

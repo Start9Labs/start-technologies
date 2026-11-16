@@ -11,7 +11,7 @@ use zeroize::Zeroizing;
 
 use crate::prelude::*;
 use crate::util::Invoke;
-use crate::util::io::{TmpDir, write_file_private_atomic};
+use crate::util::io::{TmpDir, open_file, read_secret_file, write_file_private_atomic};
 
 fn pcr_selection() -> String {
     format!(
@@ -532,7 +532,8 @@ pub async fn unseal(
                 ],
             )
             .await?;
-        let bytes = Zeroizing::new(workspace.read("unsealed.key").await?);
+        let bytes =
+            read_secret_file(open_file(workspace.path().join("unsealed.key")).await?).await?;
         tokio::fs::remove_file(workspace.path().join("unsealed.key")).await?;
         let mut key = Zeroizing::new([0; 32]);
         if bytes.len() != key.len() {

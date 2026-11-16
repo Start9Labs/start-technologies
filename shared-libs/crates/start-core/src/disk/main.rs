@@ -135,10 +135,7 @@ pub async fn create_fs<P: AsRef<Path>>(
         .await?;
     let mut blockdev_path = Path::new("/dev").join(guid).join(name);
     if let Some(password) = password {
-        if let Some(parent) = Path::new(PASSWORD_PATH).parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        tokio::fs::write(PASSWORD_PATH, password)
+        crate::util::io::write_file_private_atomic(PASSWORD_PATH, password.as_bytes())
             .await
             .with_ctx(|_| (crate::ErrorKind::Filesystem, PASSWORD_PATH))?;
         Command::new("cryptsetup")
