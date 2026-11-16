@@ -16,7 +16,7 @@ use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{CallRemote, Context, Empty};
 use tokio::net::TcpStream;
 use tokio::process::Command;
-use tokio::sync::{RwLock, broadcast, mpsc, oneshot, watch};
+use tokio::sync::{RwLock, mpsc, oneshot, watch};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
@@ -52,7 +52,7 @@ use crate::s9pk::merkle_archive::source::DynFileSource;
 use crate::service::ServiceMap;
 use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::service::effects::subcontainer::NVIDIA_OVERLAY_PATH;
-use crate::shutdown::Shutdown;
+use crate::shutdown::ShutdownRequests;
 use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::{TmpDir, delete_file};
@@ -79,7 +79,7 @@ pub struct RpcContextSeed {
     pub cancellable_installs: SyncMutex<BTreeMap<PackageId, oneshot::Sender<()>>>,
     pub installing_s9pks: SyncMutex<BTreeMap<PackageId, S9pk<DynFileSource>>>,
     pub metrics_cache: Watch<Option<crate::system::Metrics>>,
-    pub shutdown: broadcast::Sender<Option<Shutdown>>,
+    pub shutdown: Arc<ShutdownRequests>,
     pub lxc_manager: Arc<LxcManager>,
     pub open_authed_continuations: OpenAuthedContinuations<Option<InternedString>>,
     pub rpc_continuations: RpcContinuations,
@@ -280,7 +280,7 @@ impl RpcContext {
         }: InitRpcContextPhases,
     ) -> Result<Self, Error> {
         let socks_proxy = config.socks_listen.unwrap_or(DEFAULT_SOCKS_LISTEN);
-        let (shutdown, _) = tokio::sync::broadcast::channel(1);
+        let shutdown = Arc::new(ShutdownRequests::default());
 
         load_db.start();
         let db = if let Some(InitResult { net_ctrl, .. }) = &init_result {
@@ -289,7 +289,6 @@ impl RpcContext {
             TypedPatchDb::<Database>::load(config.db().await?).await?
         };
         db.mutate(|db| {
-            crate::shutdown::reset_shutdown(db)?;
             db.as_public_mut().as_disks_mut().ser(&Vec::new())?;
             for (_, volume) in db
                 .as_public_mut()
@@ -305,6 +304,7 @@ impl RpcContext {
         })
         .await
         .result?;
+        crate::shutdown::publish_shutdown_status(&db, &shutdown).await;
         let peek = db.peek().await;
         let account = AccountInfo::load(&peek)?;
         load_db.complete();

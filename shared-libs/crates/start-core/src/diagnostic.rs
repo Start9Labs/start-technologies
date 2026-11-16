@@ -7,7 +7,6 @@ use rpc_toolkit::{
 
 use crate::context::{CliContext, DiagnosticContext, RpcContext};
 use crate::disk::repair;
-use crate::init::SYSTEM_REBUILD_PATH;
 use crate::prelude::*;
 use crate::shutdown::Shutdown;
 use crate::update::diagnostic as update;
@@ -61,13 +60,6 @@ pub fn diagnostic<C: Context>() -> ParentHandler<C> {
             disk::<C>().with_about("about.command-remove-disk-filesystem"),
         )
         .subcommand(
-            "rebuild",
-            from_fn_async(rebuild)
-                .no_display()
-                .with_about("about.teardown-rebuild-containers")
-                .with_call_remote::<CliContext>(),
-        )
-        .subcommand(
             "update",
             from_fn_async(update::update_system)
                 .with_metadata("get_local_auth", Value::Bool(true))
@@ -94,10 +86,6 @@ pub fn restart(ctx: DiagnosticContext) -> Result<(), Error> {
         .map_err(|_| eyre!("receiver dropped"))
         .log_err();
     Ok(())
-}
-pub async fn rebuild(ctx: DiagnosticContext) -> Result<(), Error> {
-    tokio::fs::write(SYSTEM_REBUILD_PATH, b"").await?;
-    restart(ctx)
 }
 
 pub fn disk<C: Context>() -> ParentHandler<C> {

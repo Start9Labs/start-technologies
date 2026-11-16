@@ -126,10 +126,6 @@ Display hardware and device information.
 
 - `--format` — Output format
 
-### `start-cli server rebuild`
-
-Tear down and rebuild all service containers.
-
 ### `start-cli server trust-ca --cert <PEM>`
 
 Add a PEM-encoded CA root to the StartOS host trust store. Pass the certificate text with `--cert`.
@@ -820,10 +816,6 @@ Display the current diagnostic error.
 ### `start-cli diagnostic restart`
 
 Restart the server from diagnostic mode.
-
-### `start-cli diagnostic rebuild`
-
-Rebuild all containers from diagnostic mode.
 
 ### `start-cli diagnostic disk forget <GUID>`
 

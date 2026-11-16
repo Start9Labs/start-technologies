@@ -19,7 +19,7 @@ use crate::net::gateway::WildcardListener;
 use crate::net::static_server::refresher;
 use crate::net::web_server::{Acceptor, WebServer};
 use crate::prelude::*;
-use crate::shutdown::{Shutdown, request_shutdown};
+use crate::shutdown::Shutdown;
 use crate::system::launch_metrics_task;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::append_file;
@@ -118,7 +118,6 @@ async fn inner_main(
 
     crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.clone())).await?;
 
-    let shutdown_db = rpc_ctx.db.clone();
     let shutdown_send = rpc_ctx.shutdown.clone();
     let sig_handler = NonDetachingJoinHandle::from(tokio::spawn(async move {
         use tokio::signal::unix::SignalKind;
@@ -140,9 +139,7 @@ async fn inner_main(
             }),
         )
         .await;
-        request_shutdown(&shutdown_db, &shutdown_send, None)
-            .await
-            .log_err();
+        shutdown_send.request(None).log_err();
     }));
 
     let metrics_ctx = rpc_ctx.clone();

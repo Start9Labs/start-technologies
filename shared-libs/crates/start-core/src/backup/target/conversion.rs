@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -146,7 +147,9 @@ pub async fn start(
         password,
     }: ConvertParams,
 ) -> Result<(), Error> {
-    let shutdown = ctx.shutdown.subscribe();
+    // The database mutation only reads the shutdown latch.
+    let shutdown_requests = AssertUnwindSafe(ctx.shutdown.clone());
+    let shutdown = shutdown_requests.subscribe();
     let password = Zeroizing::new(password.decrypt(&ctx)?);
     let fs = target_id.clone().load(&ctx.db.peek().await)?;
     let label = fs.name.clone();
@@ -168,8 +171,7 @@ pub async fn start(
     let reservation = ctx
         .db
         .mutate(|db| {
-            let status = db.as_public().as_server_info().as_status_info();
-            if status.as_shutting_down().de()? || status.as_restarting().de()? {
+            if shutdown_requests.is_requested() {
                 return Err(Error::new(
                     eyre!("{}", t!("backup.conversion.interrupted")),
                     ErrorKind::InvalidRequest,

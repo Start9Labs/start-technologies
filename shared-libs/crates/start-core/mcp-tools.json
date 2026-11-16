@@ -12381,15 +12381,6 @@
     }
   },
   {
-    "name": "server.rebuild",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {},
-      "additionalProperties": true
-    }
-  },
-  {
     "name": "server.registries.add",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

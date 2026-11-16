@@ -8317,13 +8317,6 @@ about.ssl-generate-certificate:
   fr_FR: "Générer un certificat SSL depuis l'autorité racine du système"
   pl_PL: "Wygeneruj certyfikat SSL z głównego CA systemu"
 
-about.teardown-rebuild-containers:
-  en_US: "Teardown and rebuild containers"
-  de_DE: "Container abbauen und neu erstellen"
-  es_ES: "Desmontar y reconstruir contenedores"
-  fr_FR: "Démonter et reconstruire les conteneurs"
-  pl_PL: "Rozmontuj i przebuduj kontenery"
-
 about.terminate-auth-sessions:
   en_US: "Terminate auth sessions"
   de_DE: "Authentifizierungssitzungen beenden"

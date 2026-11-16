@@ -34,7 +34,6 @@ use crate::util::lshw::lshw;
 use crate::util::{Invoke, cpupower};
 use crate::{Error, MAIN_DATA, PACKAGE_DATA, ResultExt};
 
-pub const SYSTEM_REBUILD_PATH: &str = "/media/startos/config/system-rebuild";
 pub const STANDBY_MODE_PATH: &str = "/media/startos/config/standby";
 
 /// Observes systemd-compatible clock synchronization without subprocesses on Linux.
