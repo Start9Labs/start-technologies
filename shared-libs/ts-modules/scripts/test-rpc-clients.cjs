@@ -2310,7 +2310,7 @@ test('Brochure reports malformed registry URLs and can load the next selection',
       .ApiService,
     api,
   )
-  dependencies.set(storage, { getItem: () => null })
+  dependencies.set(storage, { getItem: () => null, setItem: () => {} })
   dependencies.set(shared.Exver, {})
   dependencies.set(shared.i18nPipe, { transform: value => value })
   dependencies.set(shared.i18nService, { localize: value => value })
@@ -2335,6 +2335,8 @@ test('Brochure reports malformed registry URLs and can load the next selection',
     assert.equal(subscription.closed, false)
     service.currentRegistryUrl$.next('https://registry.test/')
     await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(errors, [])
+    assert.equal(subscription.closed, false)
     assert.equal(registries.length, 1)
     assert.equal(registries[0].url, 'https://registry.test/')
     assert.equal(registries[0].info.name, info.name)
