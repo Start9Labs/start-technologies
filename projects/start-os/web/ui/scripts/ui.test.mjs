@@ -823,7 +823,10 @@ for (const stalled of ['checking', 'updating']) {
     f.ui.refresh()
     assert.equal(f.reloads, 0)
     t.mock.timers.tick(1)
-    assert.equal(f.ui.state().status, 'ready')
+    assert.equal(f.ui.state().status, 'stalled')
+    assert.equal(f.ui.phase(), 'stalled')
+    assert.equal(f.ui.canRefresh(), true)
+    assert.equal(f.reloads, 0)
     f.ui.refresh()
     assert.equal(f.reloads, 1)
   })
@@ -834,11 +837,68 @@ test('a worker report after the sync deadline still decides the outcome', async 
   const f = uiFixture(t)
   await f.rebuild()
   t.mock.timers.tick(60_000)
-  assert.equal(f.ui.state().status, 'ready')
+  assert.equal(f.ui.state().status, 'stalled')
   f.events.next(failed)
   assert.equal(f.ui.state().status, 'error')
   f.ui.refresh()
   assert.equal(f.reloads, 0)
+})
+
+for (const found of [true, false]) {
+  test(`a check completing after its deadline still decides the outcome: ${found}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const f = uiFixture(t)
+    await f.rebuild()
+    t.mock.timers.tick(60_000)
+    f.checks[0].resolve(found)
+    await tick()
+    assert.equal(f.ui.state().status, found ? 'ready' : 'error')
+    assert.equal(f.ui.canRefresh(), found)
+    assert.equal(f.reloads, 0)
+    f.ui.refresh()
+    assert.equal(f.reloads, found ? 1 : 0)
+  })
+}
+
+test('a cached-update report after the deadline wins over its false check result', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = uiFixture(t)
+  await f.rebuild()
+  t.mock.timers.tick(60_000)
+  f.events.next(noUpdate)
+  f.checks[0].resolve(false)
+  await tick()
+  assert.equal(f.ui.state().status, 'ready')
+  assert.equal(f.ui.phase(), 'ready')
+  assert.equal(f.reloads, 0)
+})
+
+test('an installation failure cancels the sync deadline', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = uiFixture(t)
+  await f.rebuild()
+  f.events.next(detected)
+  f.events.next(failed)
+  t.mock.timers.tick(60_000)
+  assert.equal(f.ui.state().status, 'error')
+  assert.equal(f.ui.canRefresh(), false)
+  assert.equal(f.reloads, 0)
+})
+
+test('a stalled sync retains cache-reset recovery without claiming completion', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = uiFixture(t)
+  await f.rebuild()
+  t.mock.timers.tick(60_000)
+  assert.equal(f.ui.phase(), 'stalled')
+  assert.equal(f.ui.busy(), false)
+  await f.ui.resetCache()
+  assert.equal(f.ui.state().status, 'reloading')
+  assert.equal(f.reloads, 1)
+  assert.deepEqual(
+    [...f.caches.keys()],
+    ['ngsw:/other/:db:control', 'other-cache'],
+  )
 })
 
 test('Refresh before sync completion never queues a reload', async t => {
@@ -925,7 +985,7 @@ test('cache-reset failure preserves the UI and exposes the error without an auto
   assert.equal(f.caches.size, 5)
 })
 
-test('syncing remains dismissible; only a completed sync can start non-dismissible navigation', async t => {
+test('syncing remains dismissible; explicit navigation blocks dismissal', async t => {
   const f = uiFixture(t)
   const component = f.make(RefreshAlertComponent)
   await f.rebuild()

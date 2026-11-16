@@ -18,19 +18,21 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { ConfigService } from 'src/app/services/config.service'
 import { StateService } from 'src/app/services/state.service'
 
+// A stalled sync permits reload without confirming successful synchronization.
 type UiUpdateState =
   | {
       status:
         | 'idle'
         | 'checking'
         | 'updating'
+        | 'stalled'
         | 'ready'
         | 'resetting'
         | 'reloading'
     }
   | { status: 'error'; error: string | null }
 
-/** The worker can be stopped mid-operation, losing the event that would settle a sync. */
+// A stopped worker can lose the event settling a sync.
 const SYNC_DEADLINE_MS = 60_000
 
 @Service()
@@ -55,6 +57,9 @@ export class UiUpdateService {
   )
 
   readonly state = this.current.asReadonly()
+  readonly canRefresh = computed(() =>
+    ['ready', 'stalled'].includes(this.state().status),
+  )
   readonly busy = computed(() =>
     ['resetting', 'reloading'].includes(this.state().status),
   )
@@ -63,6 +68,8 @@ export class UiUpdateService {
       case 'ready':
       case 'reloading':
         return 'ready'
+      case 'stalled':
+        return 'stalled'
       case 'error':
         return 'error'
       default:
@@ -86,10 +93,10 @@ export class UiUpdateService {
           this.transition({ status: 'ready' })
           break
         case 'NO_NEW_VERSION_DETECTED':
-          if (['idle', 'checking'].includes(this.state().status))
+          if (['idle', 'checking', 'stalled'].includes(this.state().status))
             this.transition({
               status:
-                this.outdated() || this.state().status === 'checking'
+                this.outdated() || this.state().status !== 'idle'
                   ? 'ready'
                   : 'idle',
             })
@@ -126,7 +133,7 @@ export class UiUpdateService {
     this.transition({ status: 'checking' })
     try {
       const found = await this.updates.checkForUpdate()
-      if (this.state().status === 'checking')
+      if (['checking', 'stalled'].includes(this.state().status))
         this.transition(
           found ? { status: 'ready' } : { status: 'error', error: null },
         )
@@ -136,7 +143,7 @@ export class UiUpdateService {
   }
 
   refresh(): void {
-    if (this.state().status === 'ready') this.reloadPage()
+    if (this.canRefresh()) this.reloadPage()
   }
 
   async resetCache(): Promise<void> {
@@ -168,7 +175,7 @@ export class UiUpdateService {
     this.current.set(state)
     if (state.status === 'checking' || state.status === 'updating')
       this.deadline = setTimeout(
-        () => this.transition({ status: 'ready' }),
+        () => this.transition({ status: 'stalled' }),
         SYNC_DEADLINE_MS,
       )
   }

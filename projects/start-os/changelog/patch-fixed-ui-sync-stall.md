@@ -2,4 +2,4 @@
 release-notes: false
 ---
 
-- Offer Refresh in the Refresh Needed dialog once syncing the interface stops making progress.
+- Offer Refresh and cache reset when interface syncing takes longer than expected.

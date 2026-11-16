@@ -1093,4 +1093,5 @@ export default {
   1296: 'Wyświetl niestandardowy katalog',
   1297: 'Niestandardowy',
   1298: 'Wpisz domenę lub adres URL',
+  1299: 'Synchronizacja trwa dłużej niż oczekiwano. Odśwież stronę, aby spróbować ponownie.',
 } satisfies i18n
