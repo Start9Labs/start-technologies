@@ -1,4 +1,7 @@
 #[cfg(test)]
+#[path = "shared_tree_tests.rs"]
+mod shared_tree_tests;
+#[cfg(test)]
 #[path = "bind_tests.rs"]
 mod tests;
 
@@ -49,6 +52,7 @@ impl<Src: AsRef<Path>> Bind<Src> {
         self
     }
     /// Cloned submounts share the attachment guard's lifetime and read-only policy.
+    /// Read-only clones are private; writable clones retain source propagation until retirement.
     pub fn recursive(mut self, recursive: bool) -> Self {
         self.recursive = recursive;
         self

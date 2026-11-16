@@ -83,12 +83,17 @@ pub async fn unmount<P: AsRef<Path>>(mountpoint: P, lazy: bool) -> Result<(), Er
     unmount_command(mountpoint.as_ref(), unmount_options(lazy)).await
 }
 
-/// Retires the owned attachment and its cloned submounts.
+/// Preserves source peers while retiring the owned tree.
+/// The caller excludes new users and mount-tree mutations through retirement.
 #[instrument(skip_all)]
 pub async fn unmount_tree<P: AsRef<Path>>(mountpoint: P, lazy: bool) -> Result<(), Error> {
+    let mountpoint = mountpoint.as_ref();
+    if is_mountpoint(mountpoint).await? {
+        super::filesystem::syscall::make_tree_private(mountpoint)?;
+    }
     let mut command = unmount_options(lazy);
     command.arg("--recursive");
-    unmount_command(mountpoint.as_ref(), command).await
+    unmount_command(mountpoint, command).await
 }
 
 fn unmount_options(lazy: bool) -> tokio::process::Command {

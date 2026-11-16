@@ -56,6 +56,10 @@ pub fn open_tree_attr_idmap(
     unsupported()
 }
 
+pub fn make_tree_private(_path: &Path) -> Result<(), Error> {
+    unsupported()
+}
+
 pub struct DetachedMount;
 impl DetachedMount {
     pub fn from_fd(_fd: OwnedFd) -> Self {

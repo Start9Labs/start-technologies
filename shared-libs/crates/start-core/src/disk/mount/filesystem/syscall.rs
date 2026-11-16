@@ -273,6 +273,22 @@ fn mount_setattr(fd: BorrowedFd, attr: &MountAttr) -> Result<(), Error> {
     check(r, "mount_setattr")
 }
 
+fn set_private(fd: BorrowedFd) -> Result<(), Error> {
+    mount_setattr(
+        fd,
+        &MountAttr {
+            propagation: libc::MS_PRIVATE as u64,
+            ..Default::default()
+        },
+    )
+}
+
+/// Isolates an owned attached tree before retirement.
+pub fn make_tree_private(path: &Path) -> Result<(), Error> {
+    let mount = open_beneath(path, Path::new(""))?;
+    set_private(mount.as_fd())
+}
+
 /// A detached mount fd (from `open_tree`/`open_tree_attr`). Not visible at any
 /// path until [`DetachedMount::attach`]; dropping the fd discards it.
 #[derive(Debug)]
@@ -296,13 +312,7 @@ impl DetachedMount {
     }
     /// Isolates the detached tree from its source's propagation peer groups.
     pub fn set_private(&self) -> Result<(), Error> {
-        mount_setattr(
-            self.fd.as_fd(),
-            &MountAttr {
-                propagation: libc::MS_PRIVATE as u64,
-                ..Default::default()
-            },
-        )
+        set_private(self.fd.as_fd())
     }
     /// Attach the detached mount at the requested path.
     pub fn attach(self, mountpoint: &Path) -> Result<(), Error> {
