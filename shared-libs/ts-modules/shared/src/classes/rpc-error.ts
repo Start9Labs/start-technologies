@@ -8,5 +8,11 @@ export class RpcError {
   ) {}
 
   readonly code = this.error.code
+  readonly info: unknown =
+    this.error.data &&
+    typeof this.error.data === 'object' &&
+    'info' in this.error.data
+      ? this.error.data.info
+      : undefined
   readonly message = `RPC ERROR: ${getRpcErrorMessage(this.error)}`
 }

@@ -1,10 +1,11 @@
 import { CommonModule } from '@angular/common'
-import { Component, inject, viewChild } from '@angular/core'
+import { Component, inject, TemplateRef, viewChild } from '@angular/core'
 import { RouterLink } from '@angular/router'
 import {
   DialogService,
   DocsLinkDirective,
   i18nPipe,
+  RpcError,
   TaskService,
 } from '@start9labs/shared'
 import { ISB, T } from '@start9labs/start-core'
@@ -73,6 +74,19 @@ import { SSHTableComponent } from './table.component'
       </header>
       <div #table [keys]="keys" (deleteSelected)="remove(keys || [])"></div>
     </section>
+    <ng-template #duplicate let-key="data">
+      {{ 'This SSH key has already been added. It matches this key:' | i18n }}
+      <dl>
+        <dt>{{ 'Hostname' | i18n }}</dt>
+        <dd>{{ key.hostname }}</dd>
+        <dt>{{ 'Algorithm' | i18n }}</dt>
+        <dd>{{ key.alg }}</dd>
+        <dt>{{ 'Fingerprint' | i18n }}</dt>
+        <dd>{{ key.fingerprint }}</dd>
+        <dt>{{ 'Created At' | i18n }}</dt>
+        <dd>{{ key.createdAt | date: 'medium' }}</dd>
+      </dl>
+    </ng-template>
   `,
   styles: `
     :host {
@@ -81,6 +95,15 @@ import { SSHTableComponent } from './table.component'
 
     :host-context(tui-root:not(._mobile)) .delete {
       display: none;
+    }
+
+    dt {
+      font-weight: bold;
+    }
+
+    dd {
+      margin: 0 0 0.5rem;
+      word-break: break-all;
     }
   `,
   imports: [
@@ -105,6 +128,8 @@ export default class SystemSSHComponent {
   readonly keys$ = merge(from(this.api.rpc.ssh.list({})), this.local$)
 
   protected tableKeys = viewChild<SSHTableComponent<T.SshKeyResponse>>('table')
+  private readonly duplicate =
+    viewChild.required<TemplateRef<unknown>>('duplicate')
 
   async add(all: readonly T.SshKeyResponse[]) {
     const spec = ISB.InputSpec.of({
@@ -131,8 +156,22 @@ export default class SystemSSHComponent {
             text: this.i18n.transform('Save'),
             handler: async ({ key }: typeof spec._TYPE) =>
               this.tasks.run(async () => {
-                const newKey = await this.api.rpc.ssh.add({ key })
-                this.local$.next([newKey, ...all])
+                try {
+                  this.local$.next([
+                    await this.api.rpc.ssh.add({ key }),
+                    ...all,
+                  ])
+                } catch (e) {
+                  if (!(e instanceof RpcError) || e.code !== 53) throw e
+
+                  this.dialogs
+                    .openComponent(this.duplicate(), {
+                      label: 'Duplicate SSH key',
+                      size: 's',
+                      data: e.info,
+                    })
+                    .subscribe()
+                }
               }, 'Saving'),
           },
         ],

@@ -1094,4 +1094,6 @@ export default {
   1297: 'Niestandardowy',
   1298: 'Wpisz domenę lub adres URL',
   1299: 'Synchronizacja trwa dłużej niż oczekiwano. Odśwież stronę, aby spróbować ponownie.',
+  1300: 'Zduplikowany klucz SSH',
+  1301: 'Ten klucz SSH został już dodany. Pasuje do tego klucza:',
 } satisfies i18n

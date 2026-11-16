@@ -70,6 +70,16 @@ pub struct SshKeyResponse {
 
 rpc_toolkit::reflect_ts!(SshKeyResponse);
 rpc_toolkit::ts_export!(SshKeyResponse, namespaces = [""]);
+impl SshKeyResponse {
+    fn new(fingerprint: InternedString, mut key: WithTimeData<SshPubKey>) -> Self {
+        Self {
+            alg: key.0.keytype().to_owned(),
+            fingerprint,
+            hostname: key.0.comment.take().unwrap_or_default(),
+            created_at: key.created_at.to_rfc3339(),
+        }
+    }
+}
 impl std::fmt::Display for SshKeyResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
@@ -135,24 +145,25 @@ pub async fn add(
     ctx: RpcContext,
     SshAddParams { key }: SshAddParams,
 ) -> Result<SshKeyResponse, Error> {
-    let mut key = WithTimeData::new(key);
+    let key = WithTimeData::new(key);
     let fingerprint = InternedString::intern(key.0.fingerprint_md5());
     let (keys, res) = ctx
         .db
         .mutate(move |m| {
-            m.as_private_mut()
-                .as_ssh_pubkeys_mut()
-                .insert(&fingerprint, &key)?;
-
-            Ok((
-                m.as_private().as_ssh_pubkeys().de()?,
-                SshKeyResponse {
-                    alg: key.0.keytype().to_owned(),
-                    fingerprint,
-                    hostname: key.0.comment.take().unwrap_or_default(),
-                    created_at: key.created_at.to_rfc3339(),
-                },
-            ))
+            let keys = m.as_private_mut().as_ssh_pubkeys_mut();
+            if let Some(existing) = keys.as_idx(&fingerprint) {
+                let existing = SshKeyResponse::new(fingerprint, existing.de()?);
+                return Err(Error::new(
+                    eyre!(
+                        "{}",
+                        t!("ssh.key-already-added", fingerprint = existing.fingerprint)
+                    ),
+                    ErrorKind::Duplicate,
+                )
+                .with_info(to_value(&existing)?));
+            }
+            keys.insert(&fingerprint, &key)?;
+            Ok((keys.de()?, SshKeyResponse::new(fingerprint, key)))
         })
         .await
         .result?;
@@ -235,15 +246,7 @@ pub async fn list(ctx: RpcContext) -> Result<Vec<SshKeyResponse>, Error> {
         .into_ssh_pubkeys()
         .into_entries()?
         .into_iter()
-        .map(|(fingerprint, key)| {
-            let mut key = key.de()?;
-            Ok(SshKeyResponse {
-                alg: key.0.keytype().to_owned(),
-                fingerprint,
-                hostname: key.0.comment.take().unwrap_or_default(),
-                created_at: key.created_at.to_rfc3339(),
-            })
-        })
+        .map(|(fingerprint, key)| Ok(SshKeyResponse::new(fingerprint, key.de()?)))
         .collect()
 }
 
