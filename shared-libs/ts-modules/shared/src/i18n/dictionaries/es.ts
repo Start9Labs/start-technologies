@@ -1094,4 +1094,6 @@ export default {
   1298: 'Introduce un dominio o una URL',
   1299: 'La sincronización está tardando más de lo esperado. Actualiza la página para volver a intentarlo.',
   1300: 'Servidor inaccesible',
+  1301: 'Es posible que los listados estén desactualizados',
+  1302: 'StartOS no puede conectar con este registro en este momento.',
 } satisfies i18n

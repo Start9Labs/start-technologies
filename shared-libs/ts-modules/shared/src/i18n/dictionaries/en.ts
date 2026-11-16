@@ -1095,4 +1095,6 @@ export const ENGLISH: Record<string, number> = {
   'Enter a domain or URL': 1298,
   'Syncing is taking longer than expected. Refresh to try again.': 1299,
   "Can't reach server": 1300,
+  'Listings may be out of date': 1301,
+  "StartOS can't reach this registry right now.": 1302,
 }

@@ -4405,6 +4405,7 @@ function marketplaceFixture(t, entries = {}) {
   const iconRequests = []
   const iconResponses = []
   const storage = new Map()
+  const routes = []
   const routeParams = new BehaviorSubject(
     convertToParamMap({ registry: 'https://registry.test' }),
   )
@@ -4422,7 +4423,10 @@ function marketplaceFixture(t, entries = {}) {
       provide: ConfigService,
       useValue: { defaultRegistry: 'https://registry.test' },
     },
-    { provide: Router, useValue: { navigate: () => {} } },
+    {
+      provide: Router,
+      useValue: { navigate: (_, extras) => routes.push(extras?.queryParams) },
+    },
     { provide: ActivatedRoute, useValue: { queryParamMap: routeParams } },
     {
       provide: TaskService,
@@ -4493,6 +4497,7 @@ function marketplaceFixture(t, entries = {}) {
     iconRequests,
     iconResponses,
     storage,
+    routes,
     routeParams,
     makePage: () =>
       runInInjectionContext(injector, () => new MarketplacePage()),
@@ -4733,6 +4738,22 @@ test('unsaved registry navigation requires explicit connection and malformed URL
   assert.equal(page.invalidRegistry(), false)
   assert.equal(page.isRegistrySaved(), true)
   assert.equal(f.connections.length, 1)
+})
+
+test('a remembered registry the server no longer saves falls back to the default', async t => {
+  const f = marketplaceFixture(t)
+  f.storage.set('selectedRegistry', 'https://removed.test/')
+  f.routeParams.next(convertToParamMap({}))
+  f.makePage()
+  await tick()
+  assert.deepEqual(f.routes.at(-1), { registry: 'https://registry.test' })
+  assert.equal(f.storage.get('selectedRegistry'), null)
+
+  f.storage.set('selectedRegistry', 'https://registry.test/')
+  f.routeParams.next(convertToParamMap({}))
+  await tick()
+  assert.deepEqual(f.routes.at(-1), { registry: 'https://registry.test/' })
+  assert.equal(f.storage.get('selectedRegistry'), 'https://registry.test/')
 })
 
 test('marketplace lists and metadata stream from canonical cache keys without navigation fetches', async t => {

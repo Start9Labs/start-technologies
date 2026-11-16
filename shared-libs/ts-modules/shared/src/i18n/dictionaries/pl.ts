@@ -1094,4 +1094,6 @@ export default {
   1298: 'Wpisz domenę lub adres URL',
   1299: 'Synchronizacja trwa dłużej niż oczekiwano. Odśwież stronę, aby spróbować ponownie.',
   1300: 'Serwer nieosiągalny',
+  1301: 'Listy mogą być nieaktualne',
+  1302: 'StartOS nie może teraz połączyć się z tym rejestrem.',
 } satisfies i18n

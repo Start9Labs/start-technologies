@@ -10,68 +10,77 @@ import {
 import { i18nPipe, registryUrl, sameUrl, TaskService } from '@start9labs/shared'
 import { TuiButton } from '@taiga-ui/core'
 import { TuiBlockStatus } from '@taiga-ui/layout'
-import { tap } from 'rxjs'
+import { firstValueFrom, tap } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { StorageService } from 'src/app/services/storage.service'
 import { TitleDirective } from 'src/app/services/title.service'
-import { RegistryRetry } from 'src/app/routes/portal/components/registry-retry'
+import { RegistryNotice } from 'src/app/routes/portal/components/registry-notice'
 
 import { MarketplaceControlsComponent } from './components/controls.component'
 
 @Component({
   template: `
     <ng-container *title>{{ 'Marketplace' | i18n }}</ng-container>
-    @if (invalidRegistry()) {
-      <tui-block-status>
-        <h2>{{ 'Invalid registry URL' | i18n }}</h2>
-        <p>
-          {{
-            'Registry URLs must use HTTP or HTTPS and cannot contain credentials, a query, or a fragment.'
-              | i18n
-          }}
-        </p>
-        <a tuiButton routerLink="/system/registries">
-          {{ 'Manage Registries' | i18n }}
-        </a>
-      </tui-block-status>
-    } @else if (isRegistrySaved() === false) {
-      <tui-block-status>
-        <h2>{{ 'Connect' | i18n }}</h2>
-        <p>{{ selectedRegistry() }}</p>
-        <p>
-          {{
-            'Connect this registry to browse its catalog. New signing keys from this registry will be trusted for packages.'
-              | i18n
-          }}
-        </p>
-        <button tuiButton (click)="connectRegistry()">
-          {{ 'Connect' | i18n }}
+    <marketplace
+      [registry]="registry()"
+      [blocked]="invalidRegistry() || isRegistrySaved() === false"
+      [(category)]="category"
+      [(query)]="query"
+    >
+      <marketplace-registry-select manageRegistriesLink="/system/registries" />
+      <a marketplacePackageLink actions></a>
+      <ng-template let-pkg>
+        <button [marketplaceTile]="pkg">
+          <ng-template let-resolved>
+            <marketplace-controls [pkg]="resolved" />
+          </ng-template>
         </button>
-      </tui-block-status>
-    } @else {
-      <marketplace
-        [registry]="registry()"
-        [(category)]="category"
-        [(query)]="query"
-      >
-        <marketplace-registry-select
-          manageRegistriesLink="/system/registries"
-        />
-        <a marketplacePackageLink actions></a>
-        <ng-template let-pkg>
-          <button [marketplaceTile]="pkg">
-            <ng-template let-resolved>
-              <marketplace-controls [pkg]="resolved" />
-            </ng-template>
+      </ng-template>
+      @if (invalidRegistry()) {
+        <tui-block-status marketplaceBlocked>
+          <h2>{{ 'Invalid registry URL' | i18n }}</h2>
+          <p>
+            {{
+              'Registry URLs must use HTTP or HTTPS and cannot contain credentials, a query, or a fragment.'
+                | i18n
+            }}
+          </p>
+          <a tuiButton routerLink="/system/registries">
+            {{ 'Manage Registries' | i18n }}
+          </a>
+        </tui-block-status>
+      }
+      @if (!invalidRegistry() && isRegistrySaved() === false) {
+        <tui-block-status marketplaceBlocked>
+          <h2>{{ 'Connect' | i18n }}</h2>
+          <p>{{ selectedRegistry() }}</p>
+          <p>
+            {{
+              'Connect this registry to browse its catalog. New signing keys from this registry will be trusted for packages.'
+                | i18n
+            }}
+          </p>
+          <button tuiButton (click)="connectRegistry()">
+            {{ 'Connect' | i18n }}
           </button>
-        </ng-template>
-        <button [registryRetry]="selectedRegistry()!" size="xs"></button>
-      </marketplace>
-    }
+        </tui-block-status>
+      }
+      @if (registry()?.status === 'error') {
+        <registry-notice marketplaceNotice [url]="selectedRegistry()!" />
+      }
+    </marketplace>
   `,
   host: { class: 'g-page' },
   styles: `
+    registry-notice {
+      margin: 1rem 2rem 0;
+    }
+
+    :host-context(tui-root._mobile) registry-notice {
+      margin-inline: 1rem;
+    }
+
     :host {
       display: flex;
       overflow: hidden;
@@ -90,7 +99,7 @@ import { MarketplaceControlsComponent } from './components/controls.component'
     MarketplacePackageLinkComponent,
     MarketplaceRegistrySelectComponent,
     MarketplaceTileComponent,
-    RegistryRetry,
+    RegistryNotice,
   ],
 })
 export default class Marketplace {
@@ -129,14 +138,7 @@ export default class Marketplace {
 
         if (!registry) {
           this.invalidRegistry.set(false)
-          this.router.navigate([], {
-            queryParams: {
-              registry:
-                this.storage.get('selectedRegistry') ||
-                this.configService.defaultRegistry,
-            },
-            queryParamsHandling: 'merge',
-          })
+          this.selectSaved()
         } else {
           try {
             const url = registryUrl(registry)
@@ -153,6 +155,23 @@ export default class Marketplace {
   protected readonly registry = toSignal(
     this.marketplaceService.currentRegistry$,
   )
+
+  /** A remembered registry the server no longer saves gives way to the default. */
+  private async selectSaved(): Promise<void> {
+    const saved = await firstValueFrom(this.marketplaceService.registries$)
+    const remembered = this.storage.get<string>('selectedRegistry')
+    const registry =
+      remembered && saved.some(({ url }) => sameUrl(url, remembered))
+        ? remembered
+        : this.configService.defaultRegistry
+    if (remembered && registry !== remembered) {
+      this.storage.set('selectedRegistry', null)
+    }
+    this.router.navigate([], {
+      queryParams: { registry },
+      queryParamsHandling: 'merge',
+    })
+  }
 
   protected async connectRegistry(): Promise<void> {
     const url = this.selectedRegistry()!

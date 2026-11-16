@@ -66,19 +66,24 @@ export class BadgeService {
   )
 
   getWarning(id: string): Observable<boolean> {
-    if (id === 'updates') return this.registryErrors$
-    return id === 'system' || id === 'backup-targets'
-      ? this.backups$
-      : of(false)
+    switch (id) {
+      case 'system':
+        return combineLatest([this.backups$, this.registryErrors$]).pipe(
+          map(([backups, registries]) => backups || registries),
+        )
+      case 'backup-targets':
+        return this.backups$
+      case 'registries':
+        return this.registryErrors$
+      default:
+        return of(false)
+    }
   }
 
   getCount(id: string): Observable<number> {
     switch (id) {
       case 'updates':
-        // Registry errors replace the navigation count, not cached update rows.
-        return combineLatest([this.updates$, this.registryErrors$]).pipe(
-          map(([count, error]) => (error ? 0 : count)),
-        )
+        return this.updates$
       case 'system':
         return this.system$
       case 'metrics':

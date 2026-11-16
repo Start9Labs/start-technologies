@@ -1094,4 +1094,6 @@ export default {
   1298: 'Domain oder URL eingeben',
   1299: 'Die Synchronisierung dauert länger als erwartet. Aktualisieren Sie die Seite, um es erneut zu versuchen.',
   1300: 'Server nicht erreichbar',
+  1301: 'Einträge sind möglicherweise veraltet',
+  1302: 'StartOS kann diese Registry gerade nicht erreichen.',
 } satisfies i18n
