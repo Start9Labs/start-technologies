@@ -6317,6 +6317,10 @@
                 "osVersion": {
                   "description": "Client StartOS version. Omission preserves the canonical index format.",
                   "type": ["string", "null"]
+                },
+                "language": {
+                  "description": "Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.",
+                  "type": ["string", "null"]
                 }
               },
               "additionalProperties": true
