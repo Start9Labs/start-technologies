@@ -85,17 +85,19 @@ async fn test_detach_inside_own_task() {
     assert!(!survives(false).await);
 }
 
-#[pin_project::pin_project(PinnedDrop)]
+/// Notifies observers after the inner future is fully dropped.
+#[pin_project::pin_project]
 pub struct DropSignaling<F> {
+    // Field order keeps notification after future destruction.
     #[pin]
     fut: F,
-    on_drop: watch::Sender<bool>,
+    on_drop: watch::Sender<()>,
 }
 impl<F> DropSignaling<F> {
     pub fn new(fut: F) -> Self {
         Self {
             fut,
-            on_drop: watch::channel(false).0,
+            on_drop: watch::channel(()).0,
         }
     }
     pub fn subscribe(&self) -> DropHandle {
@@ -112,18 +114,11 @@ where
         this.fut.poll(cx)
     }
 }
-#[pin_project::pinned_drop]
-impl<F> PinnedDrop for DropSignaling<F> {
-    fn drop(self: Pin<&mut Self>) {
-        let _ = self.on_drop.send(true);
-    }
-}
-
 #[derive(Clone)]
-pub struct DropHandle(watch::Receiver<bool>);
+pub struct DropHandle(watch::Receiver<()>);
 impl DropHandle {
     pub async fn wait(&mut self) {
-        let _ = self.0.wait_for(|a| *a).await;
+        let _ = self.0.changed().await;
     }
 }
 
@@ -173,7 +168,7 @@ pub struct CancellationHandle {
 impl CancellationHandle {
     /// True after the future is dropped, not when cancellation is requested.
     pub fn is_finished(&self) -> bool {
-        *self.on_drop.0.borrow()
+        self.on_drop.0.has_changed().is_err()
     }
 
     pub fn cancel(&mut self) {
@@ -265,6 +260,28 @@ where
     })?
 }
 
+#[test]
+fn drop_observers_wait_for_inner_resources() {
+    struct Probe(Option<DropHandle>);
+    impl Future for Probe {
+        type Output = ();
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
+            Poll::Pending
+        }
+    }
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            assert!(!self.0.as_ref().unwrap().0.has_changed().unwrap());
+        }
+    }
+
+    let mut future = DropSignaling::new(Probe(None));
+    let dropped = future.subscribe();
+    future.fut.0 = Some(dropped.clone());
+    drop(future);
+    assert!(dropped.0.has_changed().is_err());
+}
+
 #[tokio::test]
 async fn test_cancellable() {
     use std::sync::Arc;
@@ -277,7 +294,10 @@ async fn test_cancellable() {
     });
     let mut handle = cancellable.cancellation_handle();
     tokio::spawn(cancellable);
+    handle.cancel();
+    assert!(!handle.is_finished());
     handle.cancel_and_wait().await;
+    assert!(handle.is_finished());
     assert!(weak.strong_count() == 0);
 }
 
