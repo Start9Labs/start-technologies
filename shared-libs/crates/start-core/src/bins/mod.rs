@@ -51,18 +51,7 @@ pub fn set_locale_from_env() {
 }
 
 pub fn set_locale(lang: &str) {
-    let mut best = None;
-    let prefix = lang.split_inclusive("_").next().unwrap();
-    for l in rust_i18n::available_locales!() {
-        if l == lang {
-            best = Some(l);
-            break;
-        }
-        if best.is_none() && l.starts_with(prefix) {
-            best = Some(l);
-        }
-    }
-    rust_i18n::set_locale(best.unwrap_or(lang));
+    rust_i18n::set_locale(crate::supported_locale(lang).unwrap_or(lang));
 }
 
 /// Help text that is not a locale key stays as written.

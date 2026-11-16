@@ -65,7 +65,9 @@ may select `/index` or any descendant; omitting it or passing `null` selects `/i
 contract also applies to ordinary calls on the shared WebSocket.
 
 `language` resolves every `LocaleString` in the view to one translation, with
-`LocaleString::localize_for`'s fallback. Each distinct reader, `osVersion`
+`LocaleString::localize_for`'s fallback. It selects one of the bundled locales
+(`supported_locale`); an unsupported language receives the `en_US` view, so
+requests cannot create views beyond that set. Each distinct reader, `osVersion`
 compatibility and `language` combination is an `IndexView` served by a lazily
 created in-memory PatchDB mirror (`registry/mirror.rs`), shared by its
 subscribers and dropped with the last of them.

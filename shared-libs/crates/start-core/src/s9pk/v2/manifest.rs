@@ -211,13 +211,14 @@ impl std::str::FromStr for LocaleString {
     }
 }
 impl LocaleString {
+    /// Accepts any locale, falling back to a related translation or the first entry.
     pub fn localize_for(&mut self, locale: &str) {
         if let Self::LanguageMap(map) = self {
             if let Some(translated) = map.remove(locale) {
                 *self = Self::Translated(translated);
                 return;
             }
-            let prefix = locale.split_inclusive("_").next().unwrap();
+            let prefix = locale.split_inclusive("_").next().unwrap_or_default();
             let mut first = None;
             for (lang, translated) in std::mem::take(map) {
                 if lang.starts_with(prefix) {
@@ -455,6 +456,28 @@ impl Description {
         }
         Ok(())
     }
+}
+
+#[test]
+fn locale_resolution_accepts_empty_locales_and_preserves_fallbacks() {
+    for (locale, expected) in [
+        ("", "English"),
+        ("pl_PL", "Polski"),
+        ("en_GB", "English"),
+        ("zz_ZZ", "English"),
+    ] {
+        let text: LocaleString =
+            serde_json::from_str(r#"{"en_US":"English","pl_PL":"Polski"}"#).unwrap();
+        assert_eq!(text.localized_for(locale), expected);
+    }
+    assert_eq!(
+        LocaleString::LanguageMap(InOMap::default()).localized_for(""),
+        ""
+    );
+    assert_eq!(
+        LocaleString::Translated("Plain".into()).localized_for(""),
+        "Plain"
+    );
 }
 
 #[test]

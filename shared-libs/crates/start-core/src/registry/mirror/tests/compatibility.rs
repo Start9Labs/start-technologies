@@ -366,25 +366,33 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
         .await
         .unwrap();
 
-    let view = |wire: WireCompatibility, language: Option<&str>| IndexView {
-        wire,
-        language: language.map(InternedString::intern),
-    };
     let mirrors = IndexMirrors::default();
-    let mirror =
-        |view: IndexView| index_mirror(&mirrors, &fixture.main, None, view, fixture.dir.path());
-    let polish = mirror(view(WireCompatibility::default(), Some("pl_PL")))
-        .await
-        .unwrap();
-    let same = mirror(view(WireCompatibility::default(), Some("pl_PL")))
-        .await
-        .unwrap();
-    assert!(Arc::ptr_eq(&polish, &same));
-    let canonical = mirror(IndexView::default()).await.unwrap();
-    let english = mirror(view(WireCompatibility::default(), Some("en_US")))
-        .await
-        .unwrap();
-    let legacy_polish = mirror(view(wire("0.4.0.2"), Some("pl_PL"))).await.unwrap();
+    let mirror = |wire: WireCompatibility, language: Option<&str>| {
+        index_mirror(
+            &mirrors,
+            &fixture.main,
+            None,
+            IndexView::new(wire, language),
+            fixture.dir.path(),
+        )
+    };
+    let current = WireCompatibility::default();
+    let polish = mirror(current, Some("pl_PL")).await.unwrap();
+    for related in ["pl_PL", "pl", "pl_XX"] {
+        assert!(Arc::ptr_eq(
+            &polish,
+            &mirror(current, Some(related)).await.unwrap()
+        ));
+    }
+    let canonical = mirror(current, None).await.unwrap();
+    let english = mirror(current, Some("en_US")).await.unwrap();
+    for unsupported in ["", "zz_ZZ", "zz_YY", "ja_JP"] {
+        assert!(Arc::ptr_eq(
+            &english,
+            &mirror(current, Some(unsupported)).await.unwrap()
+        ));
+    }
+    let legacy_polish = mirror(wire("0.4.0.2"), Some("pl_PL")).await.unwrap();
     for other in [&canonical, &english, &legacy_polish] {
         assert!(!Arc::ptr_eq(&polish, other));
     }
@@ -413,6 +421,10 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
     );
     let english_view = english.db.dump(&pointer).await.value;
     assert_eq!(english_view["description"], json!("Registry"));
+    assert_eq!(
+        english_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
+        json!("English")
+    );
     let legacy_view = legacy_polish.db.dump(&pointer).await.value;
     assert_eq!(
         legacy_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],

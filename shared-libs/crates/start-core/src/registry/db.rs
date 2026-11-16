@@ -147,7 +147,7 @@ pub struct SubscribeIndexParams {
     pub pointer: Option<JsonPointer>,
     /// Client StartOS version. Omission preserves the canonical index format.
     pub os_version: Option<Version>,
-    /// Locale to resolve localized text to. Omission keeps every translation.
+    /// Locale to resolve localized text to; unsupported ones get the fallback. Omission keeps every translation.
     pub language: Option<InternedString>,
     #[serde(flatten)]
     pub reader: ReaderParams,
@@ -171,7 +171,7 @@ async fn visible_subscription(
         .map(WireCompatibility::for_startos)
         .transpose()?
         .unwrap_or_default();
-    let view = IndexView { wire, language };
+    let view = IndexView::new(wire, language.as_deref());
     let mirror = index_mirror(&ctx.index_mirrors, &ctx.db, key, view, &ctx.datadir).await?;
     let (dump, sub) = subscription(&mirror.db, Some(pointer)).await?;
     Ok((mirror, dump, sub))
