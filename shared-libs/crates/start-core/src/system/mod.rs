@@ -38,6 +38,8 @@ pub(crate) mod trust_ca;
 
 #[cfg(test)]
 mod metrics_tests;
+#[cfg(test)]
+mod smtp_tests;
 
 pub fn experimental<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
@@ -1346,32 +1348,37 @@ pub async fn test_smtp(
         .body("This is a test email sent from your StartOS Server".to_owned())?;
 
     let tls_parameters = TlsParameters::new(host.clone())?;
-    let transport =
-        AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(reachable_ip(&host, port).await?)
-            .port(port)
-            .tls(match security {
-                SmtpSecurity::Starttls => Tls::Required(tls_parameters),
-                SmtpSecurity::Tls => Tls::Wrapper(tls_parameters),
-            })
-            .credentials(creds)
-            .build();
+    let ip = reachable_ip(tokio::net::lookup_host((host.as_str(), port))).await?;
+    let transport = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(ip)
+        .port(port)
+        .tls(match security {
+            SmtpSecurity::Starttls => Tls::Required(tls_parameters),
+            SmtpSecurity::Tls => Tls::Wrapper(tls_parameters),
+        })
+        .credentials(creds)
+        .build();
 
     transport.send(message).await?;
     Ok(())
 }
 
-/// The first of the host's addresses to accept a TCP connection, all tried at once.
-async fn reachable_ip(host: &str, port: u16) -> Result<String, Error> {
-    let mut attempts: futures::stream::FuturesUnordered<_> = tokio::net::lookup_host((host, port))
-        .await
-        .with_kind(ErrorKind::Network)?
-        .map(|addr| async move {
-            tokio::net::TcpStream::connect(addr)
-                .await
-                .map(|_| addr.ip().to_string())
-        })
-        .collect();
+/// Name resolution and concurrent TCP probes share a 30-second deadline.
+async fn reachable_ip<I>(
+    lookup: impl std::future::Future<Output = std::io::Result<I>>,
+) -> Result<String, Error>
+where
+    I: Iterator<Item = std::net::SocketAddr>,
+{
     tokio::time::timeout(Duration::from_secs(30), async {
+        let mut attempts: futures::stream::FuturesUnordered<_> = lookup
+            .await
+            .with_kind(ErrorKind::Network)?
+            .map(|addr| async move {
+                tokio::net::TcpStream::connect(addr)
+                    .await
+                    .map(|_| addr.ip().to_string())
+            })
+            .collect();
         let mut failure = std::io::Error::from(std::io::ErrorKind::AddrNotAvailable);
         while let Some(attempt) = attempts.next().await {
             match attempt {
