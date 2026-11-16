@@ -121,10 +121,10 @@ pub trait GatewayBackend: Send + Sync {
         async {}
     }
 
-    /// Whether `gua` is a global IPv6 address this gateway has delegated to a
-    /// client — the authorization check for a v6 pinhole. Default: no v6 support.
-    fn is_known_gua(&self, _gua: Ipv6Addr) -> impl Future<Output = bool> + Send {
-        async { false }
+    /// The client holding delegated global address `gua`. A pinhole is granted
+    /// when [`GatewayBackend::is_known_client`] accepts that client.
+    fn pinhole_owner(&self, _gua: Ipv6Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
+        async { None }
     }
 
     /// Open or refresh a firewall pinhole for `count` contiguous ports at
@@ -718,7 +718,11 @@ pub async fn handle6<B: GatewayBackend + ?Sized>(
         return Some(error_response(opcode, MALFORMED_REQUEST, epoch));
     }
 
-    if !backend.is_known_gua(peer).await {
+    let authorized = match backend.pinhole_owner(peer).await {
+        Some(owner) => backend.is_known_client(owner).await,
+        None => false,
+    };
+    if !authorized {
         return Some(map_response6(
             NOT_AUTHORIZED,
             req,
@@ -1222,15 +1226,17 @@ mod tests {
 
     struct V6Stub {
         sni: Arc<SniDemux>,
-        known: bool,
+        owner: Option<Ipv4Addr>,
+        allowed: bool,
         pinholes: std::sync::Mutex<Vec<(Ipv6Addr, u16, u16, u16)>>,
         removed: std::sync::Mutex<Vec<(Ipv6Addr, u16)>>,
     }
     impl V6Stub {
-        fn new(known: bool) -> Self {
+        fn new(owner: Option<Ipv4Addr>, allowed: bool) -> Self {
             Self {
                 sni: SniDemux::new(),
-                known,
+                owner,
+                allowed,
                 pinholes: std::sync::Mutex::new(Vec::new()),
                 removed: std::sync::Mutex::new(Vec::new()),
             }
@@ -1267,12 +1273,13 @@ mod tests {
         fn external_ipv4(&self, _: Ipv4Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
             async { None }
         }
-        fn is_known_client(&self, _: Ipv4Addr) -> impl Future<Output = bool> + Send {
-            async { false }
+        fn is_known_client(&self, peer: Ipv4Addr) -> impl Future<Output = bool> + Send {
+            let allowed = self.allowed && self.owner == Some(peer);
+            async move { allowed }
         }
-        fn is_known_gua(&self, _: Ipv6Addr) -> impl Future<Output = bool> + Send {
-            let known = self.known;
-            async move { known }
+        fn pinhole_owner(&self, _: Ipv6Addr) -> impl Future<Output = Option<Ipv4Addr>> + Send {
+            let owner = self.owner;
+            async move { owner }
         }
         fn add_pinhole(
             &self,
@@ -1304,11 +1311,12 @@ mod tests {
     }
 
     const TEST_GUA: Ipv6Addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x50);
+    const TEST_OWNER: Ipv4Addr = Ipv4Addr::new(10, 59, 0, 80);
 
     // A pure pinhole: no suggested external port → external == internal, no NAT.
     #[tokio::test]
     async fn handle6_opens_pinhole_for_known_gua() {
-        let stub = V6Stub::new(true);
+        let stub = V6Stub::new(Some(TEST_OWNER), true);
         let req = map_request([9u8; 12], 3600, 8443, 0);
         let resp = handle6(&stub, TEST_GUA, &req, 1).await.expect("answered");
         assert_eq!(resp[3], SUCCESS);
@@ -1324,7 +1332,7 @@ mod tests {
     // A suggested external port different from internal → the 80→443 redirect.
     #[tokio::test]
     async fn handle6_honors_suggested_external_port() {
-        let stub = V6Stub::new(true);
+        let stub = V6Stub::new(Some(TEST_OWNER), true);
         let req = map_request([9u8; 12], 3600, 443, 80);
         let resp = handle6(&stub, TEST_GUA, &req, 1).await.expect("answered");
         assert_eq!(resp[3], SUCCESS);
@@ -1335,7 +1343,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle6_rejects_unknown_gua() {
-        let stub = V6Stub::new(false);
+        let stub = V6Stub::new(None, true);
         let req = map_request([9u8; 12], 3600, 8443, 0);
         let resp = handle6(&stub, TEST_GUA, &req, 1).await.expect("answered");
         assert_eq!(resp[3], NOT_AUTHORIZED);
@@ -1343,8 +1351,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn handle6_rejects_owner_without_permission() {
+        let stub = V6Stub::new(Some(TEST_OWNER), false);
+        let req = map_request([9u8; 12], 3600, 8443, 0);
+        let resp = handle6(&stub, TEST_GUA, &req, 1).await.expect("answered");
+        assert_eq!(resp[3], NOT_AUTHORIZED);
+        assert!(stub.pinholes.lock().unwrap().is_empty());
+
+        let req = map_request([9u8; 12], 0, 8443, 0);
+        let resp = handle6(&stub, TEST_GUA, &req, 1).await.expect("answered");
+        assert_eq!(resp[3], NOT_AUTHORIZED);
+        assert!(stub.removed.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn handle6_lifetime_zero_removes() {
-        let stub = V6Stub::new(true);
+        let stub = V6Stub::new(Some(TEST_OWNER), true);
         let req = map_request([9u8; 12], 0, 443, 80);
         let resp = handle6(&stub, TEST_GUA, &req, 1).await.expect("answered");
         assert_eq!(resp[3], SUCCESS);

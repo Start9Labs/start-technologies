@@ -1815,7 +1815,7 @@ pub async fn add_pinhole(
             ErrorKind::InvalidRequest,
         ));
     }
-    if !pinhole::is_known_gua(&ctx, gua).await {
+    if pinhole::gua_owner(&ctx, gua).await.is_none() {
         return Err(Error::new(
             eyre!("{gua} is not a client address on any IPv6-enabled subnet"),
             ErrorKind::InvalidRequest,

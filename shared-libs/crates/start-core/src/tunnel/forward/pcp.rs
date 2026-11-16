@@ -178,8 +178,8 @@ impl GatewayBackend for TunnelContext {
         is_known_client(self, peer).await
     }
 
-    async fn is_known_gua(&self, gua: Ipv6Addr) -> bool {
-        crate::tunnel::forward::pinhole::is_known_gua(self, gua).await
+    async fn pinhole_owner(&self, gua: Ipv6Addr) -> Option<Ipv4Addr> {
+        crate::tunnel::forward::pinhole::gua_owner(self, gua).await
     }
 
     async fn add_pinhole(

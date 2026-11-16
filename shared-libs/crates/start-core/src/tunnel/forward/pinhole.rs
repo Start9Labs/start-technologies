@@ -5,7 +5,7 @@
 //! `table ip6 startos`, mirroring the v4 forward path — the destination is
 //! always the client's own GUA, so a client can only ever expose itself.
 
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
 
 use crate::net::forward::nft_rule_v6;
 use crate::net::transport::Transport;
@@ -89,14 +89,10 @@ pub async fn remove_pinhole_rules(
     Ok(())
 }
 
-/// Whether `gua` is the `/128` this tunnel delegates to some client — the
-/// authorization check for a v6 pinhole. Matches a client's [`host_v6`] on any
-/// subnet carrying an IPv6 prefix. The server's own address is never a target.
-pub async fn is_known_gua(ctx: &TunnelContext, gua: Ipv6Addr) -> bool {
+/// The client whose delegated `/128` is `gua`.
+pub async fn gua_owner(ctx: &TunnelContext, gua: Ipv6Addr) -> Option<Ipv4Addr> {
     let peek = ctx.db.peek().await;
-    let Ok(subnets) = peek.as_wg().as_subnets().as_entries() else {
-        return false;
-    };
+    let subnets = peek.as_wg().as_subnets().as_entries().ok()?;
     for (_, cfg) in subnets {
         let Ok(Some(prefix)) = cfg.as_ipv6().de() else {
             continue;
@@ -107,11 +103,11 @@ pub async fn is_known_gua(ctx: &TunnelContext, gua: Ipv6Addr) -> bool {
         let Ok(clients) = cfg.as_clients().keys() else {
             continue;
         };
-        if clients.into_iter().any(|v4| host_v6(prefix, v4) == gua) {
-            return true;
+        if let Some(owner) = clients.into_iter().find(|v4| host_v6(prefix, *v4) == gua) {
+            return Some(owner);
         }
     }
-    false
+    None
 }
 
 /// Returns whether the pinhole is enabled. An existing entry keeps its owner
