@@ -11,7 +11,10 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 
 import { requireNativeHookFunctions } from './fde-initramfs-producer.mjs'
-import { publicSourcePath } from './fde-initramfs-providers.mjs'
+import {
+  admitCopiedProviders,
+  publicSourcePath,
+} from './fde-initramfs-providers.mjs'
 import { runSource } from './fde-reviewed-source.mjs'
 
 async function isElf(source) {
@@ -46,6 +49,11 @@ export async function inspectSourceElf(source) {
   return [
     ...stdout.matchAll(/\[Requesting program interpreter: ([^\]\n]+)\]/g),
   ].map(match => match[1])
+}
+
+export async function admitNativeProviders(root, readNativeAliases) {
+  const sources = await admitCopiedProviders(root, readNativeAliases)
+  await admitNativeDependencies(root, sources)
 }
 
 /**

@@ -13,7 +13,10 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { admitModuleConfiguration } from './fde-initramfs-control.mjs'
+import {
+  admitModuleConfiguration,
+  bootModules,
+} from './fde-initramfs-control.mjs'
 import {
   copyRootAliases,
   filesUnder,
@@ -81,6 +84,21 @@ export async function collectSourceBuiltinFirmwareInputs(destination, version) {
     destination,
     version,
   ])
+}
+
+/** Module/index admission precedes this native dry-run; inputs remain stable. */
+export async function admitRequiredBootModules(root) {
+  root = await realpath(root)
+  const { version } = await kernelDirectory(root)
+  const configuration = await admitModuleConfiguration(root)
+  for (const module of bootModules)
+    await nativeQuery(configuration.executable, [
+      '--show-depends',
+      `--dirname=${root}`,
+      `--set-version=${version}`,
+      ...configuration.paths.flatMap(path => ['--config', path]),
+      module,
+    ])
 }
 
 /**

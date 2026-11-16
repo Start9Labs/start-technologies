@@ -17,8 +17,7 @@ import {
   resolve,
 } from 'node:path'
 
-import { admitNativeDependencies } from './fde-initramfs-dependencies.mjs'
-import { admitCopiedProviders } from './fde-initramfs-providers.mjs'
+import { admitNativeProviders } from './fde-initramfs-dependencies.mjs'
 import {
   replaceOnce,
   requireReviewedContext,
@@ -87,6 +86,14 @@ function reviewedHook(name, bytes) {
     context = replaceOnce(context, timestamps[0][0], 'CHANGELOG_TS=0')
   }
   requireReviewedContext(Buffer.from(context), hooks[name][0], `hook ${name}`)
+  if (name === 'udev') {
+    // Empty unmatched rules mask no vendor rule.
+    return replaceOnce(
+      original,
+      'if [ ! -e "$rules" ]; then',
+      'if [ ! -s "$rules" ]; then',
+    )
+  }
   if (name === 'zz-busybox') {
     const start = original.indexOf('for alias in $($BB_BIN --list-long); do')
     const end = original.indexOf('\n  [ -e "$DESTDIR/$alias" ]', start)
@@ -231,8 +238,7 @@ export async function prepareNativeHooks(sourceRoot, targetDirectory) {
   return Object.freeze({
     providerAliases,
     async admitProviders(root) {
-      const sources = await admitCopiedProviders(root, providerAliases)
-      await admitNativeDependencies(root, sources)
+      await admitNativeProviders(root, providerAliases)
     },
   })
 }

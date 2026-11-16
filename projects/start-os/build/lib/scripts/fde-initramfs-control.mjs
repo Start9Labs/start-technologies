@@ -177,6 +177,7 @@ const sourceHookConfigurations = {
     '52278458942c4e152127b687dba7bf1ca96b03d8fa692fa4f479a4ff0d87bdb1',
 }
 
+/** The generation owner requires this set before password admission. */
 export const bootModules = ['overlay', 'btrfs', 'dm_verity', 'loop', 'squashfs']
 
 function requireReviewedInput(path, bytes) {
