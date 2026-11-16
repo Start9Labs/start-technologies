@@ -55,7 +55,7 @@ async fn stream_start_dumps_without_a_cursor_and_replays_with_one() {
     )
     .await
     .unwrap();
-    let (start, _) = subscribe_stream(&db, PUBLIC.clone(), None).await;
+    let (start, _) = subscribe_start(&db, PUBLIC.clone(), None).await;
     assert_eq!(
         serde_json::to_value(&start).unwrap(),
         serde_json::json!({
@@ -75,7 +75,7 @@ async fn stream_start_dumps_without_a_cursor_and_replays_with_one() {
         epoch: start.epoch.clone(),
         id: start.id,
     };
-    let (resumed, _) = subscribe_stream(&db, PUBLIC.clone(), Some(&cursor)).await;
+    let (resumed, _) = subscribe_start(&db, PUBLIC.clone(), Some(&cursor)).await;
     assert_eq!(
         serde_json::to_value(&resumed).unwrap(),
         serde_json::json!({

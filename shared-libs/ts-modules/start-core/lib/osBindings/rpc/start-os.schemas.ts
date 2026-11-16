@@ -6237,7 +6237,7 @@ export const PackageIndex: z.ZodObject<{
 /**
  * A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
  */
-export const SubscribeStream: z.ZodObject<{
+export const SubscribeStart: z.ZodObject<{
   epoch: z.ZodString
   id: z.ZodInt
   value: z.ZodCodec<
@@ -6257,7 +6257,7 @@ export const SubscribeStream: z.ZodObject<{
     z.array(Revision).nullable(),
   ),
 }).meta({
-  id: 'SubscribeStream',
+  id: 'SubscribeStart',
   description:
     'A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.',
 })
@@ -6338,10 +6338,10 @@ export const FullIndex: z.ZodObject<{
 /**
  * Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
  */
-export const SubscribeStreamResult: z.ZodUnion<
-  readonly [typeof SubscribeRes, typeof SubscribeStream]
-> = /* @__PURE__ */ z.union([SubscribeRes, SubscribeStream]).meta({
-  id: 'SubscribeStreamResult',
+export const SubscribeStartResult: z.ZodUnion<
+  readonly [typeof SubscribeRes, typeof SubscribeStart]
+> = /* @__PURE__ */ z.union([SubscribeRes, SubscribeStart]).meta({
+  id: 'SubscribeStartResult',
   description:
     'Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.',
 })
@@ -6670,7 +6670,7 @@ export const Api = {
         },
         subscribe: {
           _PARAMS: /* @__PURE__ */ SubscribeParams,
-          _RETURN: /* @__PURE__ */ SubscribeStreamResult,
+          _RETURN: /* @__PURE__ */ SubscribeStartResult,
           _ITEM: /* @__PURE__ */ Revision,
           _FINAL: /* @__PURE__ */ z.null(),
         },

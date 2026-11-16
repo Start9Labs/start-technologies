@@ -298,12 +298,10 @@ export type Revision = z.output<typeof schemas.Revision>
 /**
  * A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
  */
-export type SubscribeStream = z.output<typeof schemas.SubscribeStream>
+export type SubscribeStart = z.output<typeof schemas.SubscribeStart>
 
 /**
  * Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
  */
-export type SubscribeStreamResult = z.output<
-  typeof schemas.SubscribeStreamResult
->
+export type SubscribeStartResult = z.output<typeof schemas.SubscribeStartResult>
 export type Api = RpcSchemaTree<typeof schemas.Api>

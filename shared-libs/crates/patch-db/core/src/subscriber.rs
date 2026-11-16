@@ -117,7 +117,7 @@ impl Broadcast {
     }
 
     pub fn send(&mut self, value: &Arc<Revision>) {
-        if self.history.len() == HISTORY_LEN {
+        while self.history.len() >= HISTORY_LEN {
             self.history.pop_front();
         }
         self.history.push_back(value.clone());

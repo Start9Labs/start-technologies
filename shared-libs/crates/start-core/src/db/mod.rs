@@ -183,31 +183,31 @@ rpc_toolkit::reflect_ts!(SubscribeRes);
 /// A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-pub struct SubscribeStream {
+pub struct SubscribeStart {
     pub epoch: InternedString,
     pub id: u64,
     pub value: Option<Value>,
     pub revisions: Option<Vec<Revision>>,
 }
 
-rpc_toolkit::reflect_ts!(SubscribeStream);
+rpc_toolkit::reflect_ts!(SubscribeStart);
 
-pub(crate) async fn subscribe_stream(
+pub(crate) async fn subscribe_start(
     db: &PatchDb,
     pointer: JsonPointer,
     since: Option<&DbCursor>,
-) -> (SubscribeStream, Subscriber) {
+) -> (SubscribeStart, Subscriber) {
     let (epoch, catchup, sub) = db
         .catch_up_and_sub(pointer, since.map(|since| (&*since.epoch, since.id)))
         .await;
     let start = match catchup {
-        Catchup::Dump(Dump { id, value }) => SubscribeStream {
+        Catchup::Dump(Dump { id, value }) => SubscribeStart {
             epoch,
             id,
             value: Some(value),
             revisions: None,
         },
-        Catchup::Replay { id, revisions } => SubscribeStream {
+        Catchup::Replay { id, revisions } => SubscribeStart {
             epoch,
             id,
             value: None,
@@ -230,12 +230,12 @@ rpc_toolkit::reflect_ts!(SubscribeResult);
 /// Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
 #[derive(Deserialize, Serialize, VisitVariants)]
 #[serde(untagged)]
-pub enum SubscribeStreamResult {
+pub enum SubscribeStartResult {
     Continuation(SubscribeRes),
-    Stream(SubscribeStream),
+    Stream(SubscribeStart),
 }
 
-rpc_toolkit::reflect_ts!(SubscribeStreamResult);
+rpc_toolkit::reflect_ts!(SubscribeStartResult);
 
 struct DbSubscriber {
     rev: u64,
@@ -289,10 +289,10 @@ pub async fn subscribe(
         rpc_stream,
         ..
     }: HandlerArgs<RpcContext, SubscribeParams, rpc_toolkit::Empty, Revision>,
-) -> Result<SubscribeStreamResult, Error> {
+) -> Result<SubscribeStartResult, Error> {
     let pointer = pointer.unwrap_or_else(|| PUBLIC.clone());
     if let Some(stream) = rpc_stream {
-        let (start, sub) = subscribe_stream(&ctx.db, pointer, since.as_ref()).await;
+        let (start, sub) = subscribe_start(&ctx.db, pointer, since.as_ref()).await;
         let sub = DbSubscriber {
             rev: start.id,
             sub,
@@ -306,7 +306,7 @@ pub async fn subscribe(
                     sub.recv().await.map(|revision| (Ok(revision), sub))
                 }),
             );
-        return Ok(SubscribeStreamResult::Stream(start));
+        return Ok(SubscribeStartResult::Stream(start));
     }
     let (dump, sub) = ctx.db.dump_and_sub(pointer).await;
     let mut sub = DbSubscriber {
@@ -360,7 +360,7 @@ pub async fn subscribe(
         )
         .await;
 
-    Ok(SubscribeStreamResult::Continuation(SubscribeRes {
+    Ok(SubscribeStartResult::Continuation(SubscribeRes {
         dump,
         guid,
     }))

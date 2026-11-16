@@ -880,16 +880,14 @@ export type PackageIndex = z.output<typeof schemas.PackageIndex>
 /**
  * A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
  */
-export type SubscribeStream = z.output<typeof schemas.SubscribeStream>
+export type SubscribeStart = z.output<typeof schemas.SubscribeStart>
 export type BindOptions = z.output<typeof schemas.BindOptions>
 export type FullIndex = z.output<typeof schemas.FullIndex>
 
 /**
  * Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
  */
-export type SubscribeStreamResult = z.output<
-  typeof schemas.SubscribeStreamResult
->
+export type SubscribeStartResult = z.output<typeof schemas.SubscribeStartResult>
 export type BindInfo = z.output<typeof schemas.BindInfo>
 export type Bindings = z.output<typeof schemas.Bindings>
 export type Api = RpcSchemaTree<typeof schemas.Api>
