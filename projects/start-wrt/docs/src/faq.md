@@ -20,7 +20,7 @@ Extending coverage with your own access points, mesh system, or range extender i
 
 ## Can devices plugged into the same switch be on different profiles?
 
-Yes, if the switch is a managed switch. Behind an ordinary switch, every device shares the profile of the router port the switch is plugged into. Set that router port to **Managed switch** instead, and the switch's own settings decide which profile each of its ports belongs to. See [Connecting a Managed Switch](managed-switch.md).
+Yes, if the switch is a managed switch. Behind an ordinary switch, every device shares the profile of the router port the switch is plugged into. Choose **Delegate** for that router port instead, and the switch's own settings decide which profile each of its ports belongs to. See [Connecting a Managed Switch](managed-switch.md).
 
 ## Which switches work with a Managed switch port?
 

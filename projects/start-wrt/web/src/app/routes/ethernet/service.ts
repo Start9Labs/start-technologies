@@ -43,7 +43,7 @@ export class EthernetService extends FormService<EthernetPortView[]> {
   }
 
   override async save(data: EthernetPortView[]): Promise<boolean> {
-    return this.actions.run(() => this.store(data), {
+    return this.actions.run(() => this.store(data).then(() => this.refresh()), {
       loading: this.i18n.transform('Restarting network...'),
       success: this.i18n.transform('Ethernet settings saved'),
       restart: true,

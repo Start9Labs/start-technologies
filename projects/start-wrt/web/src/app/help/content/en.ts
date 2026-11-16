@@ -57,30 +57,34 @@ Reserve an IP address to assign a fixed IPv4 address that won't change between r
 Removes an offline device from your device list. Any custom name or reserved IP settings will be lost. If the device reconnects, it will appear as a new device.`,
   '/ethernet': `## Ethernet
 
+Each port puts the devices plugged into it on a security profile, or delegates that choice to a managed switch.
+
 ### Port
 
-The physical port: an Ethernet port (e.g., eth0, eth1), or a USB port with a USB Ethernet adapter (e.g., usb_eth0). A USB port appears the first time a network device is plugged into it, and keeps its profile while nothing is plugged in. Each port of a USB hub is a USB port of its own. A USB port with no adapter plugged in can be removed.
+The physical port: an Ethernet port (e.g., eth0, eth1), or a USB port with a USB Ethernet adapter (e.g., usb_eth0). A USB port appears the first time a network device is plugged into it, and keeps its profile while nothing is plugged in. Each port of a USB hub is a USB port of its own.
+
+**WAN** marks the port that connects to your modem or upstream network. It has no security profile. Only one port can be WAN at a time, and it must be an Ethernet port.
+
+**Not connected** marks a USB port with no adapter plugged in. Remove it with the trash button; it appears again, in the Admin profile, the next time an adapter is plugged into it.
 
 ### Security Profile
 
-The default security profile assigned to devices connected via the specified Ethernet port.
+The security profile that devices plugged into the port join. Changing it briefly disconnects the port, and most of its devices rejoin on the new profile within a few seconds. **Manage Profiles** opens the Profiles page to add or edit profiles.
 
-### Managed switch
+### Delegate
 
-Instead of a profile, a port can feed a managed switch. The port then carries every security profile as a tagged VLAN, and the switch's own configuration decides which profile each of its ports belongs to, so the switch and whoever administers it are trusted. The VLAN ID of each profile is listed under the port; Admin is always VLAN 1. Traffic that reaches the port without a VLAN tag gets no access.
+Hands the choice of profile to a managed switch plugged into the port. The port carries every security profile as a tagged VLAN, and the switch's own settings decide which profile each of its ports belongs to, so anyone who can log in to the switch can reach every profile. Traffic that reaches the port without a VLAN tag gets no access. Not available on USB ports.
 
-### WAN
-
-The Wide Area Network (WAN) port connects to your ISP modem or upstream network. Only one Ethernet port can be designated as WAN at a time. The WAN port must be an Ethernet port.
+A delegated port shows **Managed switch**, and its **VLAN IDs** button lists each profile's VLAN ID. Set up the switch with these IDs; Admin is always VLAN 1.
 
 ### Change WAN Port
 
-Use the "Change WAN Port" button to reassign the WAN designation to a different Ethernet port. This will interrupt your internet connection and restart the router. Ensure your modem is connected to the new WAN port before confirming.`,
+Moves WAN to a different Ethernet port. This interrupts your internet connection and briefly restarts the network. Connect your modem to the new WAN port before confirming.`,
   '/ethernet/dialog': `## Change WAN Port
 
 Select a new Ethernet port to serve as the WAN (internet) connection. The current WAN port is preselected.
 
-Changing the WAN port will immediately interrupt your internet connection and restart the router. Ensure your modem or upstream network cable is connected to the new port before confirming.`,
+Changing the WAN port immediately interrupts your internet connection and briefly restarts the network. Ensure your modem or upstream network cable is connected to the new port before confirming.`,
   '/inbound': `## Inbound VPNs
 
 VPN servers are software applications that provide secure and encrypted access to internal network resources, allowing clients to create an inbound connection to the network securely over the internet from anywhere in the world.

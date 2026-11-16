@@ -57,30 +57,34 @@ Réservez une adresse IP pour attribuer une adresse IPv4 fixe qui ne changera pa
 Retire un appareil hors ligne de votre liste d’appareils. Tout nom personnalisé ou paramètre d’IP réservée sera perdu. Si l’appareil se reconnecte, il apparaîtra comme un nouvel appareil.`,
   '/ethernet': `## Ethernet
 
+Chaque port attribue un profil de sécurité aux appareils qui y sont branchés, ou délègue ce choix à un switch administrable.
+
 ### Port
 
-Le port physique : un port Ethernet (par ex. eth0, eth1) ou un port USB équipé d’un adaptateur Ethernet USB (par ex. usb_eth0). Un port USB apparaît la première fois qu’un appareil réseau y est branché et conserve son profil quand rien n’y est branché. Chaque port d’un hub USB est un port USB à part entière. Un port USB sans adaptateur branché peut être supprimé.
+Le port physique : un port Ethernet (par ex. eth0, eth1) ou un port USB équipé d’un adaptateur Ethernet USB (par ex. usb_eth0). Un port USB apparaît la première fois qu’un appareil réseau y est branché et conserve son profil quand rien n’y est branché. Chaque port d’un hub USB est un port USB à part entière.
+
+**WAN** indique le port relié à votre modem ou au réseau en amont. Il n’a pas de profil de sécurité. Un seul port peut être WAN à la fois, et ce doit être un port Ethernet.
+
+**Non connecté** indique un port USB sans adaptateur branché. Supprimez-le avec le bouton corbeille ; il réapparaît, dans le profil Admin, la prochaine fois qu’un adaptateur y est branché.
 
 ### Profil de sécurité
 
-Le profil de sécurité par défaut attribué aux appareils connectés via le port Ethernet spécifié.
+Le profil de sécurité que rejoignent les appareils branchés sur le port. Le changer déconnecte brièvement le port, et la plupart de ses appareils se reconnectent dans le nouveau profil en quelques secondes. **Gérer les profils** ouvre la page Profils pour ajouter ou modifier des profils.
 
-### Switch administrable
+### Déléguer
 
-Au lieu d’un profil, un port peut alimenter un switch administrable. Le port transporte alors chaque profil de sécurité sous forme de VLAN étiqueté, et la configuration du switch décide à quel profil appartient chacun de ses ports : le switch et ceux qui l’administrent sont donc de confiance. L’ID de VLAN de chaque profil est indiqué sous le port ; Admin est toujours le VLAN 1. Le trafic qui atteint le port sans étiquette VLAN n’obtient aucun accès.
+Confie le choix du profil à un switch administrable branché sur le port. Le port transporte chaque profil de sécurité sous forme de VLAN étiqueté, et la configuration du switch décide à quel profil appartient chacun de ses ports : quiconque peut se connecter au switch peut donc atteindre tous les profils. Le trafic qui atteint le port sans étiquette VLAN n’obtient aucun accès. Non disponible sur les ports USB.
 
-### WAN
-
-Le port WAN (Wide Area Network) se connecte au modem de votre ISP ou au réseau en amont. Un seul port Ethernet peut être désigné comme WAN à la fois. Le port WAN doit être un port Ethernet.
+Un port délégué affiche **Switch administrable**, et son bouton **ID de VLAN** liste l’ID de VLAN de chaque profil. Configurez le switch avec ces ID ; Admin est toujours le VLAN 1.
 
 ### Changer le port WAN
 
-Utilisez le bouton « Changer le port WAN » pour réattribuer la désignation WAN à un autre port Ethernet. Cela interrompra votre connexion Internet et redémarrera le routeur. Assurez-vous que votre modem est branché sur le nouveau port WAN avant de confirmer.`,
+Déplace le WAN vers un autre port Ethernet. Cela interrompt votre connexion Internet et redémarre brièvement le réseau. Branchez votre modem sur le nouveau port WAN avant de confirmer.`,
   '/ethernet/dialog': `## Changer le port WAN
 
 Sélectionnez un nouveau port Ethernet pour servir de connexion WAN (Internet). Le port WAN actuel est présélectionné.
 
-Changer le port WAN interrompra immédiatement votre connexion Internet et redémarrera le routeur. Assurez-vous que votre modem ou le câble du réseau en amont est branché sur le nouveau port avant de confirmer.`,
+Changer le port WAN interrompra immédiatement votre connexion Internet et redémarrera brièvement le réseau. Assurez-vous que votre modem ou le câble du réseau en amont est branché sur le nouveau port avant de confirmer.`,
   '/inbound': `## VPN entrants
 
 Les serveurs VPN sont des applications logicielles qui fournissent un accès sécurisé et chiffré aux ressources du réseau interne, permettant aux clients d’établir une connexion entrante vers le réseau en toute sécurité via Internet depuis n’importe où dans le monde.

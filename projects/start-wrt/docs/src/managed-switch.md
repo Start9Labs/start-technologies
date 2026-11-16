@@ -60,9 +60,9 @@ Other brands ask for the same three things on their VLAN pages: which VLANs a po
 
 ## The Router Side
 
-1. Navigate to `Points of Entry > Ethernet` and set the port the switch will use to **Managed switch**. Read the confirmation and choose **Trust this switch**. Nothing is connected to the port yet, so this changes nothing for your devices.
+1. Navigate to `Points of Entry > Ethernet` and choose **Delegate** for the port the switch will use. Read the confirmation and choose **Delegate** again. Nothing is connected to the port yet, so this changes nothing for your devices.
 
-1. The port now lists each profile with its VLAN ID. Admin is always VLAN 1. These numbers go into your plan in the next section.
+1. StartWRT lists each profile's VLAN ID, and the port now shows **Managed switch**. Its **VLAN IDs** button shows the list again. Admin is always VLAN 1. These numbers go into your plan in the next section.
 
 Leave the cable to the switch unplugged until the switch is configured.
 
@@ -70,13 +70,13 @@ Leave the cable to the switch unplugged until the switch is configured.
 
 Decide everything in advance before you open the switch's settings. The example used through the rest of this guide is a router with three profiles and an eight-port switch in a living room, with a desktop and a laptop on Admin, a StartOS server on Admin, a games console on a "Family" profile and a smart TV on a "Guests" profile.
 
-1. Navigate to `Points of Entry > Ethernet` and write down the VLAN ID listed under the managed-switch port for each profile:
+1. Navigate to `Points of Entry > Ethernet`, click **VLAN IDs** on the managed-switch port, and write down the profile each VLAN ID carries:
 
-   | Profile | VLAN ID |
+   | VLAN ID | Profile |
    | ------- | ------- |
-   | Admin   | 1       |
-   | Guests  | 101     |
-   | Family  | 102     |
+   | 1       | Admin   |
+   | 101     | Guests  |
+   | 102     | Family  |
 
 1. Give every switch port a job. Each port is either the **uplink** (the one cable to the router), a **device port** on exactly one profile, or **unused**:
 

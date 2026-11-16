@@ -600,8 +600,10 @@ export const ENGLISH: Record<string, number> = {
   'Never (Default)': 643,
   'When behind NAT': 644,
   'Managed switch': 645,
-  'Connect a managed switch': 646,
-  'Every security profile is sent to this port as a tagged VLAN, and the switch decides which profile each of its own ports belongs to. Anyone who can log in to the switch can reach every profile, so protect its password and finish its VLAN setup before connecting it.': 647,
-  'Trust this switch': 648,
+  'Delegate {port}?': 646,
+  'Every security profile will be sent to {port} as a tagged VLAN, and a managed switch connected to it decides which profile each of its own ports belongs to. Anyone who can log in to the switch can reach every profile, so protect its password and finish its VLAN setup before connecting it.': 647,
+  'Delegate': 648,
   'VLAN IDs': 649,
+  'VLAN ID': 650,
+  "{port} sends each security profile to the switch tagged with its VLAN ID. Set up the switch's VLANs with these IDs.": 651,
 }

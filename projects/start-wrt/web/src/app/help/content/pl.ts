@@ -57,30 +57,34 @@ Zarezerwuj adres IP, aby przypisać stały adres IPv4, który nie zmieni się mi
 Usuwa urządzenie offline z listy urządzeń. Wszelkie niestandardowe nazwy lub ustawienia zarezerwowanego IP zostaną utracone. Jeśli urządzenie połączy się ponownie, pojawi się jako nowe urządzenie.`,
   '/ethernet': `## Ethernet
 
+Każdy port przypisuje podłączonym do niego urządzeniom profil bezpieczeństwa albo deleguje ten wybór do przełącznika zarządzalnego.
+
 ### Port
 
-Fizyczny port: port Ethernet (np. eth0, eth1) lub port USB z adapterem USB–Ethernet (np. usb_eth0). Port USB pojawia się, gdy po raz pierwszy zostanie do niego podłączone urządzenie sieciowe, i zachowuje swój profil, gdy nic nie jest podłączone. Każdy port koncentratora USB jest osobnym portem USB. Port USB bez podłączonego adaptera można usunąć.
+Fizyczny port: port Ethernet (np. eth0, eth1) lub port USB z adapterem USB–Ethernet (np. usb_eth0). Port USB pojawia się, gdy po raz pierwszy zostanie do niego podłączone urządzenie sieciowe, i zachowuje swój profil, gdy nic nie jest podłączone. Każdy port koncentratora USB jest osobnym portem USB.
+
+**WAN** oznacza port połączony z modemem lub siecią nadrzędną. Nie ma on profilu bezpieczeństwa. Tylko jeden port może być jednocześnie portem WAN i musi to być port Ethernet.
+
+**Nie połączono** oznacza port USB bez podłączonego adaptera. Usuń go przyciskiem kosza; pojawi się ponownie, w profilu Admin, gdy następnym razem zostanie do niego podłączony adapter.
 
 ### Profil bezpieczeństwa
 
-Domyślny profil bezpieczeństwa przypisany do urządzeń połączonych za pośrednictwem określonego portu Ethernet.
+Profil bezpieczeństwa, do którego dołączają urządzenia podłączone do portu. Jego zmiana na chwilę rozłącza port, a większość podłączonych urządzeń łączy się ponownie w nowym profilu w ciągu kilku sekund. **Zarządzaj profilami** otwiera stronę profili, aby je dodać lub edytować.
 
-### Przełącznik zarządzalny
+### Deleguj
 
-Zamiast profilu port może zasilać przełącznik zarządzalny. Port przenosi wtedy każdy profil bezpieczeństwa jako tagowany VLAN, a o tym, do którego profilu należy każdy z portów przełącznika, decyduje jego własna konfiguracja – przełącznik i osoby nim zarządzające są więc obdarzone zaufaniem. Identyfikator VLAN każdego profilu jest wyświetlany pod portem; Admin to zawsze VLAN 1. Ruch docierający do portu bez tagu VLAN nie uzyskuje dostępu.
+Przekazuje wybór profilu przełącznikowi zarządzalnemu podłączonemu do portu. Port przenosi każdy profil bezpieczeństwa jako tagowany VLAN, a o tym, do którego profilu należy każdy z portów przełącznika, decydują jego własne ustawienia – każdy, kto może zalogować się do przełącznika, ma więc dostęp do wszystkich profili. Ruch docierający do portu bez tagu VLAN nie uzyskuje dostępu. Niedostępne dla portów USB.
 
-### WAN
-
-Port sieci rozległej (WAN) łączy się z modemem ISP lub siecią nadrzędną. Tylko jeden port Ethernet może być w danym momencie wyznaczony jako WAN. Port WAN musi być portem Ethernet.
+Port delegowany wyświetla **Przełącznik zarządzalny**, a jego przycisk **Identyfikatory VLAN** pokazuje identyfikator VLAN każdego profilu. Skonfiguruj przełącznik z użyciem tych identyfikatorów; Admin to zawsze VLAN 1.
 
 ### Zmień port WAN
 
-Użyj przycisku „Zmień port WAN”, aby przypisać oznaczenie WAN do innego portu Ethernet. Spowoduje to przerwanie połączenia internetowego i ponowne uruchomienie routera. Upewnij się, że modem jest podłączony do nowego portu WAN przed potwierdzeniem.`,
+Przenosi WAN na inny port Ethernet. Powoduje to przerwanie połączenia internetowego i chwilowy restart sieci. Podłącz modem do nowego portu WAN przed potwierdzeniem.`,
   '/ethernet/dialog': `## Zmień port WAN
 
 Wybierz nowy port Ethernet, który będzie pełnił rolę połączenia WAN (internetowego). Bieżący port WAN jest wstępnie zaznaczony.
 
-Zmiana portu WAN natychmiast przerwie połączenie internetowe i uruchomi ponownie router. Upewnij się, że modem lub kabel sieci nadrzędnej jest podłączony do nowego portu przed potwierdzeniem.`,
+Zmiana portu WAN natychmiast przerwie połączenie internetowe i na chwilę zrestartuje sieć. Upewnij się, że modem lub kabel sieci nadrzędnej jest podłączony do nowego portu przed potwierdzeniem.`,
   '/inbound': `## Przychodzące VPN
 
 Serwery VPN to aplikacje, które zapewniają bezpieczny i szyfrowany dostęp do wewnętrznych zasobów sieciowych, umożliwiając klientom tworzenie przychodzącego połączenia z siecią w bezpieczny sposób przez internet z dowolnego miejsca na świecie.

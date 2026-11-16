@@ -16,7 +16,7 @@ One Ethernet port is designated as the WAN port, which connects to your ISP mode
 
 1. Navigate to `Points of Entry > Ethernet`.
 
-1. For each non-WAN port, select the desired Security Profile from the dropdown. For an Ethernet port, the last entry, **Managed switch**, hands the choice of profile to a switch connected to that port; see [Connecting a Managed Switch](managed-switch.md).
+1. For each non-WAN port, select the desired Security Profile from the dropdown. For an Ethernet port, the last entry, **Delegate**, hands the choice of profile to a switch connected to that port; see [Connecting a Managed Switch](managed-switch.md).
 
 1. Confirm the change. The confirmation names any devices on the port that have a reserved address or [Published Ports](published-ports.md) rule for the port's old profile. Those are kept, and apply again if the devices return to that profile. Canceling leaves the port unchanged.
 
@@ -63,4 +63,4 @@ If you need to use a different physical port for your ISP connection:
 | eth1 | _(WAN)_ | Connected to ISP modem                                                                                  |
 | eth0 | Admin   | The included switch, with a desktop computer and a StartOS server that get full LAN and Internet access |
 
-To put devices behind the included switch on different profiles, set eth0 to **Managed switch** and connect a VLAN-capable switch instead; each of its ports then carries its own profile. See [Connecting a Managed Switch](managed-switch.md).
+To put devices behind the included switch on different profiles, choose **Delegate** for eth0 and connect a VLAN-capable switch instead; each of its ports then carries its own profile. See [Connecting a Managed Switch](managed-switch.md).
