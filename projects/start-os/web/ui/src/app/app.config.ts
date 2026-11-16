@@ -72,7 +72,6 @@ import {
   StartupLiveApiService,
 } from 'src/app/services/api/startup-api.service'
 import { AuthService } from 'src/app/services/auth.service'
-import { ClientStorageService } from 'src/app/services/client-storage.service'
 import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import {
@@ -147,14 +146,12 @@ export const APP_CONFIG: ApplicationConfig = {
     tuiProvide(MarketplaceTrust, TrustedKeysService),
     provideAppInitializer(() => {
       const i18n = inject(i18nService)
-      const clientStorage = inject(ClientStorageService)
       const router = inject(Router)
       const auth = inject(AuthService)
 
       inject(StorageService).migrate()
       // Initial navigation waits for the IndexedDB key check.
       return auth.init().then(() => {
-        clientStorage.init()
         router.initialNavigation()
         i18n.setLanguage(i18n.language || 'english')
       })
