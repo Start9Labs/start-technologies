@@ -1093,8 +1093,9 @@ export default {
   1296: 'Benutzerdefiniertes Register anzeigen',
   1297: 'Benutzerdefiniert',
   1298: 'Domain oder URL eingeben',
-  1299: 'Bereitgestellt von',
-  1300: 'Abhängigkeitsanbieter auswählen',
-  1301: 'Anbieter fixieren',
-  1302: 'Fixierung aufheben',
+  1299: 'Die Synchronisierung dauert länger als erwartet. Aktualisieren Sie die Seite, um es erneut zu versuchen.',
+  1300: 'Bereitgestellt von',
+  1301: 'Abhängigkeitsanbieter auswählen',
+  1302: 'Anbieter fixieren',
+  1303: 'Fixierung aufheben',
 } satisfies i18n

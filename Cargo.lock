@@ -8529,6 +8529,7 @@ name = "start-os"
 version = "0.4.3"
 dependencies = [
  "include_dir",
+ "mimalloc",
  "start-core",
 ]
 
@@ -8536,6 +8537,7 @@ dependencies = [
 name = "start-registry"
 version = "1.6.0"
 dependencies = [
+ "mimalloc",
  "start-core",
 ]
 
@@ -8544,6 +8546,7 @@ name = "start-tunnel"
 version = "1.5.2"
 dependencies = [
  "include_dir",
+ "mimalloc",
  "start-core",
 ]
 

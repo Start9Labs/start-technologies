@@ -269,6 +269,8 @@ jobs:
 
       - name: Install start-cli
         uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master
+        with:
+          channel: alpha
 
       - name: Check start-cli registry notes support
         run: ./scripts/manage-release.sh check-registry-notes-cli start-wrt
