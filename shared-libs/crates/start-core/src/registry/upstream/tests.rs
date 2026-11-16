@@ -217,6 +217,16 @@ async fn mirror_replaces_the_index_when_an_icon_body_stalls() {
 #[tokio::test]
 async fn mirror_rejects_index_writes_but_serves_reads_and_local_admin_changes() {
     let (_temp, ctx, admin, reader, _) = fixture().await;
+    ctx.db
+        .mutate(|db| {
+            db.as_index_mut().as_os_mut().as_versions_mut().insert(
+                &"0.4.0.5".parse().unwrap(),
+                &crate::registry::os::index::OsVersionInfo::default(),
+            )
+        })
+        .await
+        .result
+        .unwrap();
     let ctx = ctx.with_upstream(Upstream::spawn(
         mirror_db().await,
         PathBuf::new(),
@@ -232,6 +242,10 @@ async fn mirror_rejects_index_writes_but_serves_reads_and_local_admin_changes() 
         (
             "package.access.set-private",
             json!({ "id": "public", "private": true }),
+        ),
+        (
+            "os.version.edit",
+            json!({ "version": "0.4.0.5", "releaseNotes": "Must not persist" }),
         ),
         ("os.asset.sign.iso", json!({})),
         ("db.apply", json!({ "expr": "." })),

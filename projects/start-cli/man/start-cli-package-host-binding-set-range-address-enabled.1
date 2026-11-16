@@ -4,7 +4,7 @@
 .SH NAME
 start\-cli\-package\-host\-binding\-set\-range\-address\-enabled \- Set a gateway address enabled for a port\-range binding
 .SH SYNOPSIS
-\fBstart\-cli package host binding set\-range\-address\-enabled\fR <\fB\-\-address\fR> [\fB\-\-enabled\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIINTERNAL_PORT\fR>
+\fBstart\-cli package host binding set\-range\-address\-enabled\fR <\fB\-\-address\fR> [\fB\-\-enabled\fR] [\fB\-\-allow\-insecure\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIINTERNAL_PORT\fR>
 .SH DESCRIPTION
 Set a gateway address enabled for a port\-range binding
 .SH OPTIONS
@@ -24,6 +24,9 @@ true
 .IP \(bu 2
 false
 .RE
+.TP
+\fB\-\-allow\-insecure\fR
+Accept plaintext traffic that devices on this network, or private networks routed to it over IPv4, can read and alter, including passwords
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

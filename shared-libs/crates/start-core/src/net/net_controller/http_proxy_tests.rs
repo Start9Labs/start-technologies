@@ -54,7 +54,7 @@ fn row(host: &str, port: u16, ssl: bool, public: bool, metadata: HostnameMetadat
 }
 
 #[test]
-fn plaintext_http_exposure_keeps_internal_addresses_and_gateway_security() {
+fn plaintext_http_exposure_keeps_internal_and_explicit_private_addresses() {
     let gateway: GatewayId = "eth0".parse().unwrap();
     let ip: IpAddr = "192.0.2.10".parse().unwrap();
     let bridge = row(
@@ -136,13 +136,11 @@ fn plaintext_http_exposure_keeps_internal_addresses_and_gateway_security() {
             &interfaces,
             &requirements,
         );
-        let mut expected = BTreeSet::from([
+        let expected = BTreeSet::from([
             "10.0.3.1".parse::<IpAddr>().unwrap(),
             "127.0.0.1".parse().unwrap(),
+            ip,
         ]);
-        if trusted {
-            expected.insert(ip);
-        }
         assert_eq!(target.private, expected);
         assert!(target.public_v4.is_empty());
         assert!(target.public_v6.is_empty());

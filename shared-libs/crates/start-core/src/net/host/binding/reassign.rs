@@ -110,6 +110,7 @@ fn reassign<Kind: HostApiKind>(
                         }
                     }
                 }
+                binding.addresses.refresh_effective();
             }
             Ok(())
         })?;

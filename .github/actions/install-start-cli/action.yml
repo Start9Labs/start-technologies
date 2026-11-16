@@ -1,12 +1,32 @@
 name: 'Install start-cli'
-description: 'Installs the newest released start-cli for the runner into /usr/local/bin'
+description: 'Installs start-cli for the runner: the newest release into /usr/local/bin, or the alpha apt build'
+inputs:
+  channel:
+    description: '`release` (newest GitHub release) or `alpha` (the alpha apt suite, built from master)'
+    required: false
+    default: release
 runs:
   using: 'composite'
   steps:
     - name: Install start-cli
       env:
         INSTALL_GITHUB_TOKEN: ${{ github.server_url == 'https://github.com' && github.token || '' }}
+        INSTALL_CHANNEL: ${{ inputs.channel }}
       run: |
+        INSTALL_CHANNEL=${INSTALL_CHANNEL:-release}
+        if [ "$INSTALL_CHANNEL" = alpha ]; then
+          sudo install -m 644 "$GITHUB_ACTION_PATH/../../../apt/start9-alpha.gpg" /usr/share/keyrings/start9-alpha.gpg
+          echo "deb [signed-by=/usr/share/keyrings/start9-alpha.gpg] https://start9-debs.nyc3.digitaloceanspaces.com alpha main" \
+            | sudo tee /etc/apt/sources.list.d/start9-alpha.list > /dev/null
+          sudo apt-get update -qq -o Acquire::https::No-Cache=true \
+            -o Dir::Etc::sourcelist=sources.list.d/start9-alpha.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq start-cli > /dev/null
+          echo "start-cli: $(start-cli --version) ($(dpkg-query -W -f='${Git-Hash}' start-cli))"
+          exit 0
+        elif [ "$INSTALL_CHANNEL" != release ]; then
+          echo "Error: unknown start-cli channel '$INSTALL_CHANNEL'"
+          exit 1
+        fi
         headers=()
         if [ -n "$INSTALL_GITHUB_TOKEN" ]; then
           headers=(-H "Authorization: token $INSTALL_GITHUB_TOKEN")

@@ -226,6 +226,11 @@ export type CurrentDependencyKind = z.output<
 export type Description = z.output<typeof schemas.Description>
 export type DownloadsResponse = z.output<typeof schemas.DownloadsResponse>
 export type EditSignerParamsInput = z.input<typeof schemas.EditSignerParams>
+
+/**
+ * Edits an existing release; omitted fields, assets and authorized signers remain unchanged.
+ */
+export type EditVersionParamsInput = z.input<typeof schemas.EditVersionParams>
 export type GetPackageAccessParamsInput = z.input<
   typeof schemas.GetPackageAccessParams
 >
