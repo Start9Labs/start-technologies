@@ -5,7 +5,6 @@ import { BehaviorSubject, defer, EMPTY, Observable } from 'rxjs'
 import {
   catchError,
   filter,
-  map,
   skip,
   startWith,
   switchMap,
@@ -25,6 +24,10 @@ export const PATCH_CACHE = new InjectionToken('', {
     }),
 })
 
+export const PATCH_LIVE = new InjectionToken('', {
+  factory: () => new BehaviorSubject(false),
+})
+
 @Injectable({
   providedIn: 'root',
 })
@@ -32,10 +35,9 @@ export class PatchDbSource extends Observable<Update<DataModel>[]> {
   private readonly api = inject(ApiService)
   private readonly state = inject(StateService)
   private readonly cache = inject(PatchDbCache)
+  private readonly isLive = inject(PATCH_LIVE)
   private readonly live$ = inject(AuthService).isVerified$.pipe(
-    switchMap(verified =>
-      verified ? databaseSource(this.api.watchDb$()) : EMPTY,
-    ),
+    switchMap(verified => (verified ? this.watchLive$() : EMPTY)),
     catchError((_, original$) => {
       this.state.retrigger(false, 2000)
 
@@ -47,26 +49,27 @@ export class PatchDbSource extends Observable<Update<DataModel>[]> {
       )
     }),
   )
-  // Browser-restored registry availability stays unconfirmed until the first live dump.
   private readonly stream$ = defer(() => this.cache.read()).pipe(
-    map(cached => ({
-      ...cached,
-      value: {
-        ...cached.value,
-        registryCache: Object.fromEntries(
-          Object.entries(cached.value.registryCache ?? {}).map(
-            ([url, entry]) => [
-              url,
-              { ...entry, status: 'connecting' as const, error: null },
-            ],
-          ),
-        ),
-      },
-    })),
     switchMap(cached => this.live$.pipe(startWith([cached]))),
   )
 
   constructor() {
     super(subscriber => this.stream$.subscribe(subscriber))
+  }
+
+  private watchLive$() {
+    return new Observable<Update<DataModel>[]>(subscriber => {
+      const subscription = databaseSource(this.api.watchDb$()).subscribe({
+        next: updates => {
+          subscriber.next(updates)
+          if (!subscriber.closed) this.isLive.next(true)
+        },
+        error: error => subscriber.error(error),
+      })
+      return () => {
+        subscription.unsubscribe()
+        this.isLive.next(false)
+      }
+    })
   }
 }

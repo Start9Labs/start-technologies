@@ -167,7 +167,7 @@ boundary('src/app/routes/portal/components/table.component', ['TableComponent'])
 boundary(
   'src/app/services/patch-db/patch-db-source',
   [],
-  'export const PATCH_CACHE = Symbol("patch cache");',
+  'export const PATCH_CACHE = Symbol("patch cache"); export const PATCH_LIVE = Symbol("patch live");',
 )
 boundary('src/app/services/config.service', ['ConfigService'])
 boundary('src/app/services/state.service', ['StateService'])
@@ -4158,6 +4158,61 @@ test('registry status reads as connecting while the server is disconnected, with
   ])
   assert.equal((await current()).error, 'connection timed out')
   assert.equal(catalogs.length, 1)
+})
+
+test('header status separates offline, unreachable, connecting, restarting and live', async t => {
+  const { STATUS } = await import('src/app/services/status.service')
+  const { NetworkService } = await import('src/app/services/network.service')
+  const { PATCH_LIVE } =
+    await import('src/app/services/patch-db/patch-db-source')
+  const network = new BehaviorSubject(true)
+  const reachable = new BehaviorSubject(null)
+  const state = Object.assign(new BehaviorSubject('running'), {
+    reachable$: reachable,
+  })
+  const live = new BehaviorSubject(false)
+  const statusInfo = new BehaviorSubject({
+    restarting: false,
+    shuttingDown: false,
+  })
+  const { ɵINJECTOR_SCOPE } = await import('@angular/core')
+  const injector = createEnvironmentInjector(
+    [
+      { provide: ɵINJECTOR_SCOPE, useValue: 'root' },
+      { provide: NetworkService, useValue: network },
+      { provide: StateService, useValue: state },
+      { provide: PATCH_LIVE, useValue: live },
+      { provide: PatchDB, useValue: { watch$: () => statusInfo } },
+    ],
+    null,
+  )
+  t.after(() => injector.destroy())
+  const status = injector.get(STATUS)
+  const connected = []
+  const subscription = injector
+    .get(ConnectionService)
+    .subscribe(value => connected.push(value))
+  t.after(() => subscription.unsubscribe())
+
+  assert.equal(status().message, 'Connecting')
+  reachable.next(false)
+  assert.equal(status().message, 'Unreachable')
+  reachable.next(true)
+  assert.equal(status().message, 'Connecting')
+  live.next(true)
+  assert.equal(status().message, 'Connected')
+  live.next(false)
+  assert.equal(state.value, 'running')
+  assert.equal(status().message, 'Connecting')
+  reachable.next(false)
+  assert.equal(status().message, 'Unreachable')
+  statusInfo.next({ restarting: true, shuttingDown: false })
+  assert.equal(status().message, 'Restarting')
+  statusInfo.next({ restarting: false, shuttingDown: true })
+  assert.equal(status().message, 'Shutting down')
+  network.next(false)
+  assert.equal(status().message, 'No Internet')
+  assert.deepEqual(connected, [false, true, false])
 })
 
 test('registry removal uses the authoritative endpoint, clears a matching selected registry, and reports unoffered keys', async () => {

@@ -66,7 +66,7 @@ async function fixture(
         : 'api/live-api.service',
     )
   )
-  const { PatchDbSource, PATCH_CACHE } = await import(
+  const { PatchDbSource, PATCH_CACHE, PATCH_LIVE } = await import(
     path('patch-db/patch-db-source')
   )
   const patchCache =
@@ -212,6 +212,7 @@ async function fixture(
   return {
     db,
     source,
+    connection: product === 'os' ? injector.get(PATCH_LIVE) : undefined,
     auth,
     effects,
     cache,
@@ -235,7 +236,7 @@ async function fixture(
 }
 
 for (const status of ['connected', 'error']) {
-  test(`os restored registry errors stay unconfirmed until a live ${status} dump, even with running startup state`, async t => {
+  test(`os registry availability follows live ${status} dumps and stream loss while startup state stays running`, async t => {
     const url = 'https://registry.test/'
     const entry = {
       status: 'error',
@@ -251,31 +252,57 @@ for (const status of ['connected', 'error']) {
     }
     const f = await fixture(t, 'os', cachedValue)
     const registries = []
+    const confirmations = []
     const subscription = f.db
       .watch$('registryCache')
       .subscribe(cache => registries.push(cache[url]))
-    t.after(() => subscription.unsubscribe())
+    const connection = f.connection.subscribe(connected => {
+      if (connected) confirmations.push(f.cache.value.id)
+    })
+    t.after(() => {
+      subscription.unsubscribe()
+      connection.unsubscribe()
+    })
     f.verify()
     await flush()
     assert.equal(f.state.value, 'running')
     assert.equal(f.calls.length, 1)
-    assert.equal(registries.at(-1).status, 'connecting')
-    assert.equal(registries.at(-1).error, null)
-    assert.deepEqual(registries.at(-1).packages, entry.packages)
-    assert.deepEqual(registries.at(-1).info, entry.info)
-    assert.equal(entry.status, 'error')
-    assert.equal(entry.error, 'cached registry failure')
+    assert.equal(f.connection.value, false)
+    assert.deepEqual(registries.at(-1), entry)
 
     const live = {
       ...entry,
       status,
       error: status === 'error' ? 'live registry failure' : null,
     }
-    await f.dump(0, 10, {
-      ...cachedValue,
-      registryCache: { [url]: live },
-    })
+    const dump = { ...cachedValue, registryCache: { [url]: live } }
+    await f.dump(0, 10, dump)
     assert.deepEqual(registries.at(-1), live)
+    assert.equal(f.connection.value, true)
+    assert.deepEqual(confirmations, [10])
+
+    const emissions = registries.length
+    f.calls[0].frames.error({ code: 0, message: 'server lost' })
+    await flush()
+    assert.equal(f.state.value, 'running')
+    assert.equal(f.connection.value, false)
+    assert.equal(registries.length, emissions)
+    await f.recover()
+    assert.equal(f.calls.length, 2)
+    assert.equal(f.connection.value, false)
+    await f.dump(1, 20, dump)
+    assert.equal(f.connection.value, true)
+    assert.deepEqual(confirmations, [10, 20])
+    f.logout()
+    assert.equal(f.connection.value, false)
+    f.verify()
+    await flush()
+    assert.equal(f.connection.value, false)
+    await f.dump(2, 30, dump)
+    assert.equal(f.connection.value, true)
+    assert.deepEqual(confirmations, [10, 20, 30])
+    f.db.stop()
+    assert.equal(f.connection.value, false)
   })
 }
 
