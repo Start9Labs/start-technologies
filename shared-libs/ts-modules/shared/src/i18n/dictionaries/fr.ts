@@ -359,7 +359,6 @@ export default {
   419: 'Voir les détails',
   421: 'Services dépendants de',
   422: 'ne fonctionneront plus correctement et pourraient planter.',
-  423: 'Échec de la requête',
   424: 'Tous les services sont à jour !',
   425: 'Exécuter',
   426: 'Action possible uniquement lorsque le service est',
@@ -1094,4 +1093,7 @@ export default {
   1297: 'Personnalisée',
   1298: 'Saisissez un domaine ou une URL',
   1299: 'La synchronisation prend plus de temps que prévu. Rafraîchissez la page pour réessayer.',
+  1300: 'Serveur injoignable',
+  1301: 'Les listes peuvent ne pas être à jour',
+  1302: 'StartOS ne parvient pas à joindre ce registre pour le moment.',
 } satisfies i18n

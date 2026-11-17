@@ -22,7 +22,7 @@ use tokio::fs::File;
 use tokio::io::AsyncSeekExt;
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
-use crate::patch::{diff, DiffPatch, Dump, Revision};
+use crate::patch::{diff, Catchup, DiffPatch, Dump, Revision};
 use crate::subscriber::Broadcast;
 use crate::{DbWatch, Error, HasModel, JsonSubscriber, Subscriber};
 
@@ -423,6 +423,28 @@ impl PatchDb {
     pub async fn dump_and_sub(&self, ptr: JsonPointer) -> (Dump, Subscriber) {
         let mut store = self.store.write().await;
         (store.dump(&ptr), store.broadcast.subscribe(ptr))
+    }
+    /// Atomically captures what a subscriber holding revision `since` lacks,
+    /// plus a revision stream. `since` resumes only within the returned epoch;
+    /// any other epoch, or a revision older than the retained history, dumps.
+    pub async fn catch_up_and_sub(
+        &self,
+        ptr: JsonPointer,
+        since: Option<(&str, u64)>,
+    ) -> (InternedString, Catchup, Subscriber) {
+        let mut store = self.store.write().await;
+        let epoch = store.broadcast.epoch().clone();
+        let catchup = since
+            .filter(|(since_epoch, _)| *since_epoch == &*epoch)
+            .and_then(|(_, id)| store.broadcast.replay(&ptr, id, store.revision))
+            .map_or_else(
+                || Catchup::Dump(store.dump(&ptr)),
+                |revisions| Catchup::Replay {
+                    id: store.revision,
+                    revisions,
+                },
+            );
+        (epoch, catchup, store.broadcast.subscribe(ptr))
     }
     /// Atomically captures a shared JSON dump and a bounded JSON revision stream.
     ///

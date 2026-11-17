@@ -165,6 +165,7 @@ export type CreateTokenParamsInput = z.input<typeof schemas.CreateTokenParams>
 export type CreatedToken = z.output<typeof schemas.CreatedToken>
 export type DataUrl = z.output<typeof schemas.DataUrl>
 export type DataUrlInput = z.input<typeof schemas.DataUrl>
+export type DbCursorInput = z.input<typeof schemas.DbCursor>
 export type DeviceFilter = z.output<typeof schemas.DeviceFilter>
 export type DnsSource = z.output<typeof schemas.DnsSource>
 export type Dump = z.output<typeof schemas.Dump>
@@ -424,7 +425,6 @@ export type SshPubKeyInput = z.input<typeof schemas.SshPubKey>
  * Ssid are the names of the wifis, usually human readable.
  */
 export type Ssid = z.output<typeof schemas.Ssid>
-export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type TermSizeInput = z.input<typeof schemas.TermSize>
 
 /**
@@ -731,6 +731,7 @@ export type StartOsRecoveryInfo = z.output<typeof schemas.StartOsRecoveryInfo>
 export type SubscribeIndexParamsInput = z.input<
   typeof schemas.SubscribeIndexParams
 >
+export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type TargetParamsInput = z.input<typeof schemas.TargetParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
@@ -878,8 +879,18 @@ export type CompatibleBindOptions = z.output<
 >
 export type GetPackageResult = z.output<typeof schemas.GetPackageResult>
 export type PackageIndex = z.output<typeof schemas.PackageIndex>
+
+/**
+ * A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
+ */
+export type SubscribeStart = z.output<typeof schemas.SubscribeStart>
 export type BindOptions = z.output<typeof schemas.BindOptions>
 export type FullIndex = z.output<typeof schemas.FullIndex>
+
+/**
+ * Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
+ */
+export type SubscribeStartResult = z.output<typeof schemas.SubscribeStartResult>
 export type BindInfo = z.output<typeof schemas.BindInfo>
 export type Bindings = z.output<typeof schemas.Bindings>
 export type Api = RpcSchemaTree<typeof schemas.Api>

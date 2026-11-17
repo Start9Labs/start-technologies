@@ -311,6 +311,10 @@ mod tests {
         crate::sign::instance::load(&db).await.unwrap();
         let (dump, mut sub) = subscription(&db, None).await.unwrap();
         assert_eq!(dump.value, imbl_value::json!({"name": "registry"}));
+        assert_eq!(
+            serde_json::to_value(SubscribeIndexResult::Stream(dump.clone())).unwrap(),
+            serde_json::json!({"id": dump.id, "value": {"name": "registry"}})
+        );
         db.put(&"/index/name".parse::<JsonPointer>().unwrap(), &"renamed")
             .await
             .unwrap();
