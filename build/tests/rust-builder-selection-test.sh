@@ -44,6 +44,16 @@ assert_log_contains() {
     fi
 }
 
+assert_profile_warning() {
+    local warning="Unknown profile $1: falling back to debug..."
+    if [[ "$1" == unknown-profile ]]; then
+        test "$(grep -cFx -- "$warning" "$2")" = 1
+    elif grep -Fq 'Unknown profile' "$2"; then
+        printf 'Unexpected profile warning for profile %s\n' "$1" >&2
+        exit 1
+    fi
+}
+
 entrypoint="$repo_root/build/rust-builder/entrypoint.sh"
 profile_flags=CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS
 default_flags=$(env -u DISABLE_RVA23 -u "$profile_flags" bash "$entrypoint" printenv "$profile_flags")
@@ -125,7 +135,8 @@ for builder in \
     'build/build-rust-bins.sh start-os:startbox' \
     projects/start-cli/build/build-cli.sh \
     projects/start-os/backup-fs/build-backup-fs.sh \
-    shared-libs/crates/pi-beep/build-pi-beep.sh; do
+    shared-libs/crates/pi-beep/build-pi-beep.sh \
+    projects/start-wrt/build/build-rust.sh; do
     read -ra command <<<"$builder"
     for profile in '' release debug unknown-profile; do
         : > "$DOCKER_LOG"
@@ -143,12 +154,28 @@ for builder in \
             fi
             assert_log_contains 'Parent profile: debug'
         fi
-        if [[ "$profile" == unknown-profile ]]; then
-            test "$(<"$scratch/build.stderr")" = 'Unknown profile unknown-profile: falling back to debug...'
-        else
-            test ! -s "$scratch/build.stderr"
-        fi
+        assert_profile_warning "$profile" "$scratch/build.stderr"
     done
+done
+
+for profile in '' unit-test release dev debug unknown-profile; do
+    : > "$DOCKER_LOG"
+    PROFILE="$profile" BUILD_FLAGS=--release bash projects/start-wrt/build/run-tests.sh \
+        > "$scratch/test.stdout" 2> "$scratch/test.stderr"
+    case "$profile" in
+        '' | unit-test)
+            assert_log_contains --profile
+            assert_log_contains unit-test
+            ;;
+        release) assert_log_contains --release ;;
+        *)
+            if grep -Fxq -e --release -e --profile "$DOCKER_LOG"; then
+                printf 'Unexpected profile flag for StartWRT tests (profile %s)\n' "$profile" >&2
+                exit 1
+            fi
+            ;;
+    esac
+    assert_profile_warning "$profile" "$scratch/test.stderr"
 done
 
 : > "$DOCKER_LOG"

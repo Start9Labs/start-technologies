@@ -14,19 +14,10 @@ if [ "${RUST_BUILDER_IMAGE:-start9/start-core-testenv}" = "start9/start-core-tes
 fi
 
 source ./build/builder-alias.sh
+source ./build/rust-build-profile.sh
 shopt -s expand_aliases
 
-PROFILE=${PROFILE:-unit-test}
-case "$PROFILE" in
-  release) BUILD_FLAGS=(--release) ;;
-  unit-test) BUILD_FLAGS=(--profile unit-test) ;;
-  dev|debug) BUILD_FLAGS=() ;;
-  *)
-    >&2 echo "Unknown profile $PROFILE: falling back to debug..."
-    PROFILE=debug
-    BUILD_FLAGS=()
-    ;;
-esac
+set_test_profile
 
 ARCH=${ARCH:-$(uname -m)}
 if [ "$ARCH" = "arm64" ]; then
