@@ -33,12 +33,9 @@ components on semantic elements** (`<header appHeader></header> <main><router-ou
 In a `TuiNavigation` shell the scroll area must end exactly at `main[tuiNavigationMain]`'s
 content box: its `tui-scrollbar` is `100%` tall less its own block padding
 (`block-size: calc(100% - 1.5rem)` beside `padding-block-start: 1.5rem`). Any taller and the
-section scrolls instead, dropping the sticky aside below the header and its footer off-screen,
-and the last card sits flush with the bottom rather than above main's 1.5rem bottom border.
-On mobile, where main's thin border replaces the scrollbar's end padding, translate
-`tui-scroll-controls` until the thumb's painted 0.25rem (it sits inside a 0.25rem transparent
-border) lands in that border — `translateX(0.625rem)` for start-tunnel's 0.375rem — rather than
-widening the margin; with no translate the bar covers the cards. A dual-theme app sets
+section scrolls instead, dropping the sticky aside below the header and its footer off-screen.
+On mobile, move `tui-scroll-controls` into main's thin border with a `translateX` rather than
+widening the margin, or the bar covers the cards. A dual-theme app sets
 `--tui-theme-color` on the header and aside themselves, not on the shell: Taiga renders them as
 dark subtrees in the light theme too, so a value set higher up resolves the light token and
 leaves white chrome under white text.
@@ -61,7 +58,7 @@ export const appConfig: ApplicationConfig = {
     tuiValidationErrorsProvider({
       required: 'This field is required',
       email: 'Please provide valid email address',
-      minlength: (e: any) => `Minimum length is ${e.requiredLength} chars`,
+      minlength: ({ requiredLength }: { requiredLength: number }) => `Minimum length is ${requiredLength} chars`,
     }),
     // App wiring:
     provideAppInitializer(() => inject(AuthService).whenReady()),
@@ -77,7 +74,7 @@ Notes, all load-bearing:
   attributes + manual `TUI_VALIDATION_ERRORS`-era wiring. Theme is DI (`mode`), not markup.
 - Option providers with **signals as option values** are normal
   (`tuiTextfieldOptionsProvider({ size: signal('m') })`).
-- `polyfills: []` in `angular.json` is the zoneless tell; zone-based apps list `"zone.js"`.
+- A zone-based app lists `"zone.js"` in its `angular.json` `polyfills`; a zoneless one doesn't.
 - Monorepo apps read the gitignored workspace `config.json` **synchronously via `require`**:
   `const { useMocks, gitHash } = require('../../config.json') as WorkspaceConfig` — this feeds
   the Live/Mock DI swap and value tokens (`IS_MOCK`, `GIT_HASH`, `RELATIVE_URL`).
@@ -118,9 +115,8 @@ Icons are Lucide via `@tui.<name>` (`iconStart="@tui.plus"`, `<tui-icon icon="@t
 | **Inline registry**      | start-wrt                 | bundle-size-critical (UI embedded in the Rust binary): `angular.json` `loader: { ".svg": "text" }` + `app.icons.ts` importing the used icons from `@taiga-ui/icons/src/*.svg`, registered via `tuiIconsProvider(ICONS)` |
 
 The failure mode: a **hand-curated partial registry** breaks the icons Taiga components draw
-_internally_ (select chevrons, dropdown arrows) — exactly such a registry was deleted from
-start9-store for this reason. If you inline-register (wrt style), you own keeping the set complete; everywhere
-else, serve the whole directory and stop thinking about it. Non-Taiga SVGs ship as plain assets
+_internally_ (select chevrons, dropdown arrows). If you inline-register (wrt style), you own
+keeping the set complete; everywhere else, serve the whole directory. Non-Taiga SVGs ship as plain assets
 and are referenced by path, including in icon slots (`iconStart="/x-logo.svg"`) — that renders
 the file as a `currentColor` mask, so it suits a monochrome logo only. A full-colour raster or
 SVG (a package icon from `icon_url`) goes through the same slot as `iconStart="@img.<url>"`,
@@ -143,10 +139,8 @@ All branding is a **`--tui-*` design-token override sheet**, nothing else:
 
 Hex colors live **only** in the theme sheet. Components use `var(--tui-...)` exclusively —
 `--tui-text-secondary`, `--tui-status-negative`, `--tui-background-neutral-1`,
-`--tui-border-normal`, `font: var(--tui-typography-body-l)`, `var(--tui-radius-m)`. A hex
-literal in a component is a review comment waiting to happen. The exception is a hex that is
-itself content: a brand swatch printing its value binds it from that data,
-`[style.background]="color.hex"`, rather than mirroring each one as a theme token.
+`--tui-border-normal`, `var(--tui-radius-m)`. A hex literal in a component is a review
+comment waiting to happen.
 
 A piece that sits on a dark or light ground — a logo tile, a card on a page — takes
 `tuiTheme` (`[attr.tuiTheme]="mark.ground"`, `<business-hire tuiTheme="dark">`) and Taiga's own
