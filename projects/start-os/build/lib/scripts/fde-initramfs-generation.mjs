@@ -26,10 +26,13 @@ import {
  * The caller owns the read-only source namespace and consumes the archive before return.
  * Complete runtime/plugin/configuration/EARLY admission remains a signing obligation.
  */
-export async function withAssembledInitramfs(parent, consume) {
+export async function withAssembledInitramfs(parent, descriptor, consume) {
+  if (!descriptor.length) throw Error('Missing boot descriptor')
   return withPrivateInitramfs(
     parent,
     async ({ directory, archive, captures }) => {
+      const bootDescriptor = join(directory, 'boot-descriptor')
+      await writeFile(bootDescriptor, descriptor, { flag: 'wx', mode: 0o600 })
       const configuration = join(directory, 'configuration')
       await admitInitramfsSources('/', '/etc/initramfs-tools')
       try {
@@ -89,6 +92,7 @@ manual_add_modules ${bootModules.join(' ')}
           TMPDIR: directory,
           FDE_NATIVE_HOOKS: hooks,
           FDE_PROVIDER_ALIASES: aliases,
+          FDE_BOOT_DESCRIPTOR: bootDescriptor,
           FDE_ADMIT_SOURCES: fileURLToPath(
             new URL('./fde-admit-initramfs-sources.mjs', import.meta.url),
           ),

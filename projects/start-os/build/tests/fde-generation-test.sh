@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
-if [ "$#" -ne 3 ] || [ "$(id -u)" -ne 0 ]; then
-    printf 'Usage in an exclusive managed guest: sudo unshare --mount --propagation private -- %s <genuine-os-squashfs> <current-scripts-directory> <output-directory>\n' "$0" >&2
+if [ "$#" -ne 4 ] || [ "$(id -u)" -ne 0 ]; then
+    printf 'Usage in an exclusive managed guest: sudo unshare --mount --propagation private -- %s <genuine-os-squashfs> <current-scripts-directory> <output-directory> <public-boot-descriptor>\n' "$0" >&2
     exit 1
 fi
 if [ "$(readlink /proc/self/ns/mnt)" = "$(readlink /proc/1/ns/mnt)" ]; then
@@ -11,6 +11,7 @@ fi
 image=$(realpath "$1")
 scripts=$(realpath "$2")
 output=$(realpath "$3")
+descriptor=$(realpath "$4")
 work=$(mktemp -d)
 mounts=()
 cleanup() {
@@ -44,8 +45,11 @@ mount_view "$root/proc" -t proc -o ro,nosuid,nodev,noexec proc
 mkdir "$root/tmp/current-fde-scripts"
 mount_view "$root/tmp/current-fde-scripts" --bind "$scripts"
 mount -o remount,bind,ro "$root/tmp/current-fde-scripts"
+touch "$root/run/boot-descriptor"
+mount_view "$root/run/boot-descriptor" --bind "$descriptor"
+mount -o remount,bind,ro "$root/run/boot-descriptor"
 chroot "$root" /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C TMPDIR=/var/tmp HOME=/var/tmp \
-    /usr/bin/node /tmp/current-fde-scripts/fde-assemble-initramfs.mjs /run/candidate
+    /usr/bin/node /tmp/current-fde-scripts/fde-assemble-initramfs.mjs /run/candidate /run/boot-descriptor
 cp "$root/run/candidate" "$output/initrd"
 chroot "$root" /usr/bin/unmkinitramfs /run/candidate /var/tmp/inspected
 candidate="$root/var/tmp/inspected"
@@ -55,6 +59,8 @@ fi
 for path in usr/bin/startbox usr/bin/tpm2 usr/sbin/veritysetup scripts/fde-fail scripts/startos-fde; do
     test -f "$candidate/$path"
 done
+descriptor_file=$(< "$scripts/fde-descriptor-file")
+cmp "$descriptor" "$candidate$descriptor_file"
 test ! -e "$candidate/scripts/startos"
 test ! -e "$candidate/scripts/live"
 test ! -e "$candidate/usr/lib/udev/rules.d/70-persistent-cd.rules"

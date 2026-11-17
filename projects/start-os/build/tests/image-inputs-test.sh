@@ -9,6 +9,7 @@ required := projects/start-os/build/lib/scripts/os-image-lock-name \
  projects/start-os/build/lib/scripts/os-public-source-prune-name \
  projects/start-os/build/lib/scripts/fde-boot-mode \
  projects/start-os/build/lib/scripts/fde-boot-input-files \
+ projects/start-os/build/lib/scripts/fde-descriptor-file \
  projects/start-os/build/dpkg-deps/uefi.platforms
 missing := $(filter-out $(CORE_SRC),$(required))
 ifneq ($(strip $(missing)),)

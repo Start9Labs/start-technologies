@@ -17,7 +17,11 @@ use crate::disk::mount::guard::MountGuard;
 use crate::prelude::*;
 use crate::util::io::{TmpDir, read_file_to_string, read_secret_file, write_file_private_atomic};
 
-pub const DESCRIPTOR_FILE: &str = "/etc/startos/fde-boot.json";
+pub const DESCRIPTOR_FILE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../projects/start-os/build/lib/scripts/fde-descriptor-file"
+))
+.trim_ascii();
 pub const RUNTIME: &str = "/run/startos-fde";
 pub const HANDOFF_FILE: &str = "handoff.json";
 pub(crate) const CONFIGURATION_FILE: &str = "configuration.json";

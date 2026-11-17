@@ -49,6 +49,22 @@ pub fn generation_store(config: &Path) -> PathBuf {
 }
 
 impl Descriptor {
+    pub(crate) fn for_generation(
+        generation: &PreparedGeneration,
+        policy_key: PKey<Public>,
+    ) -> Result<Self, Error> {
+        Self::new(
+            generation
+                .rootfs()
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(invalid)?
+                .to_owned(),
+            generation.verification_key().clone(),
+            policy_key,
+        )
+    }
+
     pub fn new(
         rootfs: String,
         overlay_key: PKey<Public>,
@@ -398,6 +414,56 @@ mod tests {
         PreparedGeneration::import_raw(raw.path(), rootfs, &store, key)
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn prepared_descriptor_pins_the_actual_rootfs_manifest_authority_and_public_policy_key() {
+        let temp = tempfile::tempdir().unwrap();
+        let rootfs = temp.path().join("actual.rootfs");
+        tokio::fs::write(&rootfs, vec![0x42; 8192]).await.unwrap();
+        let raw = temp.path().join("raw");
+        let store = temp.path().join("store");
+        tokio::fs::create_dir(&raw).await.unwrap();
+        tokio::fs::create_dir(&store).await.unwrap();
+        tokio::fs::write(raw.join("configuration"), b"captured configuration")
+            .await
+            .unwrap();
+        let manifest_key = os_overlay::generate_signing_key().unwrap();
+        let policy_key = os_overlay::generate_signing_key().unwrap();
+        let generation = PreparedGeneration::import_raw(&raw, &rootfs, &store, &manifest_key)
+            .await
+            .unwrap();
+        let descriptor =
+            Descriptor::for_generation(&generation, tpm::public_key(&policy_key).unwrap()).unwrap();
+        assert_eq!(descriptor.rootfs_path(temp.path()).unwrap(), rootfs);
+        assert!(descriptor.overlay_key.public_eq(&manifest_key));
+        assert!(descriptor.policy_key.public_eq(&policy_key));
+        assert!(!descriptor.policy_key.public_eq(&manifest_key));
+        assert_eq!(
+            os_overlay::read_manifest(generation.staging_path(), &descriptor.overlay_key)
+                .await
+                .unwrap(),
+            *generation.manifest()
+        );
+        let bytes = serde_json::to_vec(&descriptor).unwrap();
+        let decoded: Descriptor = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.rootfs_path(temp.path()).unwrap(), rootfs);
+        assert!(decoded.overlay_key.public_eq(&manifest_key));
+        assert!(decoded.policy_key.public_eq(&policy_key));
+    }
+
+    #[tokio::test]
+    async fn native_initramfs_descriptor_installation_uses_the_shared_writer_and_archive_tools() {
+        use crate::util::Invoke;
+        tokio::process::Command::new("node")
+            .arg("--test")
+            .arg(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../../projects/start-os/build/tests/fde-descriptor-test.mjs"),
+            )
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
     }
 
     fn timestamp(path: &Path, value: u64) {

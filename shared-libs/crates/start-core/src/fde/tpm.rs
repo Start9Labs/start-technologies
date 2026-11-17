@@ -268,7 +268,7 @@ impl Workspace {
     }
 }
 
-fn public_key(key: &PKey<Private>) -> Result<PKey<Public>, Error> {
+pub(super) fn public_key(key: &PKey<Private>) -> Result<PKey<Public>, Error> {
     Ok(PKey::public_key_from_der(&key.public_key_to_der()?)?)
 }
 

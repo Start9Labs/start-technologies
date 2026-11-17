@@ -24,12 +24,17 @@ const FILES: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../projects/start-os/build/lib/scripts/fde-boot-input-files"
 ));
-const ASSEMBLER: &str = "/usr/lib/startos/scripts/fde-assemble-boot-inputs.mjs";
+const ASSEMBLER: &str = "/usr/lib/startos/scripts/fde-assemble-boot-inputs-v2.mjs";
 
 /// The caller retains the image-store lease and fresh configuration authorization.
 /// Cached and downloaded sources require existing accepted OS signers.
-/// This stages public boot inputs only; closure, bootstrap and UKI activation remain separate.
-pub(super) async fn stage(ctx: &RpcContext, generation: &PreparedGeneration) -> Result<(), Error> {
+/// The descriptor is public boot data, not authority to execute source providers.
+/// Complete configured-runtime closure and UKI activation remain separate.
+pub(super) async fn stage(
+    ctx: &RpcContext,
+    generation: &PreparedGeneration,
+    descriptor: &super::boot::Descriptor,
+) -> Result<(), Error> {
     let expected = Release::read(Path::new("/media/startos/current")).await?;
     let policy =
         trusted_keys::signer_policy(trusted_keys::required(ctx, TrustContext::Os, false).await?)
@@ -107,7 +112,11 @@ pub(super) async fn stage(ctx: &RpcContext, generation: &PreparedGeneration) -> 
             return Err(error);
         }
         let bundle = source
-            .run_script(ASSEMBLER.into(), Vec::new(), Vec::new())
+            .run_script(
+                ASSEMBLER.into(),
+                Vec::new(),
+                serde_json::to_vec(descriptor).with_kind(ErrorKind::Serialization)?,
+            )
             .await?;
         stage_bundle(&bundle, generation.staging_path()).await
     }

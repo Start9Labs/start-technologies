@@ -682,6 +682,14 @@ impl PreparedGeneration {
         &self.manifest
     }
 
+    pub(crate) fn rootfs(&self) -> &Path {
+        &self.rootfs
+    }
+
+    pub(crate) fn verification_key(&self) -> &PKey<Public> {
+        &self.public_key
+    }
+
     pub(crate) fn name(&self) -> &str {
         self.destination.file_name().unwrap().to_str().unwrap()
     }
