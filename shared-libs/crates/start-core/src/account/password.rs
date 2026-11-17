@@ -68,7 +68,7 @@ pub(crate) async fn finish_password_change(
     result
 }
 
-async fn commit_password(
+pub(crate) async fn commit_password(
     db: &TypedPatchDb<Database>,
     account: &SyncRwLock<AccountInfo>,
     hash: &str,

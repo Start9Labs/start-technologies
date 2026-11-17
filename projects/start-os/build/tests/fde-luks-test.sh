@@ -13,7 +13,7 @@ fi
 directory=$(cd "$(dirname "$0")" && pwd)
 workspace=$(mktemp -d)
 trap 'rm -rf "$workspace"' EXIT
-docker build --load --iidfile "$workspace/image-id" -f "$directory/fde-luks.Dockerfile" "$directory"
+bash "$directory/fde-luks-build-image.sh" "$workspace/image-id"
 image=$(<"$workspace/image-id")
 docker run --rm --network none --tmpfs /dev/shm:exec,nosuid,nodev,size=256m --tmpfs /tmp:exec,nosuid,nodev --tmpfs /run --tmpfs /media/startos/config \
     --mount "type=bind,source=$binary,target=/fde-tests,readonly" \

@@ -5,7 +5,7 @@
 //! durable intent and exclusive keyslot ownership from planning until completion or abort. Persist
 //! intent and target hash before installation; commit the new account hash and administrator slots
 //! after both target slots verify; retire old slots afterward. Abort precedes that account commit.
-//! A different target requires completed abort and a fresh plan. Enrolled callers never retry the
+//! A different target requires completed abort and a fresh plan. Protected unlock never retries the
 //! default password. Captured volume keys belong exclusively to a protected volatile OS-boot-lifetime
 //! cache that survives daemon restarts, is unavailable after reboot, and never enters persistent
 //! storage, backups, PatchDB, bootstrap state, logs, or an additional management keyslot.
@@ -67,8 +67,47 @@ struct VolumeSlots {
 #[serde(rename_all = "camelCase")]
 pub struct PasswordChangePlan {
     admin: AdminKeyslots,
+    #[serde(flatten)]
+    allocation: SlotAllocation,
+}
+
+/// Initial administrator installation preserves original DEFAULT authority through activation.
+/// Persist before mutation; abort is valid before administrator-authority commit.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdministratorInstallationPlan {
+    defaults: DefaultKeyslots,
+    #[serde(flatten)]
+    allocation: SlotAllocation,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SlotAllocation {
     base_slots: [BTreeSet<u32>; 2],
     target_slots: [u32; 2],
+}
+
+impl SlotAllocation {
+    fn admin_slots(&self, authority: &[VolumeSlots; 2]) -> AdminKeyslots {
+        AdminKeyslots {
+            volumes: std::array::from_fn(|i| VolumeSlots {
+                id: authority[i].id.clone(),
+                slots: BTreeSet::from([self.target_slots[i]]),
+            }),
+        }
+    }
+}
+
+impl AdministratorInstallationPlan {
+    pub fn original_default_slots(&self) -> DefaultKeyslots {
+        self.defaults.clone()
+    }
+
+    /// Administrator authority after both targets verify; DEFAULT remains independently owned.
+    pub fn new_admin_slots(&self) -> AdminKeyslots {
+        self.allocation.admin_slots(&self.defaults.volumes)
+    }
 }
 
 impl PasswordChangePlan {
@@ -79,12 +118,7 @@ impl PasswordChangePlan {
 
     /// Account authority to commit after installation verifies both target slots.
     pub fn new_admin_slots(&self) -> AdminKeyslots {
-        AdminKeyslots {
-            volumes: std::array::from_fn(|i| VolumeSlots {
-                id: self.admin.volumes[i].id.clone(),
-                slots: BTreeSet::from([self.target_slots[i]]),
-            }),
-        }
+        self.allocation.admin_slots(&self.admin.volumes)
     }
 }
 
@@ -252,8 +286,16 @@ impl LuksPool {
         admin: &AdminKeyslots,
         password: &str,
     ) -> Result<bool, Error> {
+        self.accepts_owned_password(&admin.volumes, password).await
+    }
+
+    async fn accepts_owned_password(
+        &self,
+        volumes: &[VolumeSlots; 2],
+        password: &str,
+    ) -> Result<bool, Error> {
         let (key, _cleanup) = self.password_file(password)?;
-        for (index, volume) in admin.volumes.iter().enumerate() {
+        for (index, volume) in volumes.iter().enumerate() {
             let metadata = self.bound_metadata(index, &volume.id).await?;
             if volume.slots.is_empty() || !volume.slots.is_subset(&metadata.slots) {
                 return Err(metadata_error());
@@ -280,6 +322,29 @@ impl LuksPool {
         let admin = AdminKeyslots {
             volumes: self.identify_key_slots(&password).await?,
         };
+        let keys = self.capture_keys(&admin.volumes, &password).await?;
+        Ok((admin, keys))
+    }
+
+    /// Captures keys from persisted pending-enable authority.
+    /// The caller excludes protected boots and protects transient keys.
+    pub async fn capture_default_keys(
+        &self,
+        defaults: &DefaultKeyslots,
+    ) -> Result<VolumeKeys, Error> {
+        require_password(
+            self.accepts_owned_password(&defaults.volumes, DEFAULT_PASSWORD)
+                .await?,
+        )?;
+        let (password, _cleanup) = self.password_file(DEFAULT_PASSWORD)?;
+        self.capture_keys(&defaults.volumes, &password).await
+    }
+
+    async fn capture_keys(
+        &self,
+        authority: &[VolumeSlots; 2],
+        password: &Path,
+    ) -> Result<VolumeKeys, Error> {
         let mut volumes = Vec::new();
         for (i, device) in self.devices.iter().enumerate() {
             let (output, _cleanup) = self.secret_file(&[])?;
@@ -306,16 +371,13 @@ impl LuksPool {
                 return Err(metadata_error());
             }
             volumes.push(VolumeKey {
-                id: admin.volumes[i].id.clone(),
+                id: authority[i].id.clone(),
                 bytes,
             });
         }
-        Ok((
-            admin,
-            VolumeKeys {
-                volumes: volumes.try_into().ok().unwrap(),
-            },
-        ))
+        Ok(VolumeKeys {
+            volumes: volumes.try_into().ok().unwrap(),
+        })
     }
 
     pub(crate) fn protect_secret_handling(
@@ -383,9 +445,27 @@ impl LuksPool {
         &self,
         admin: &AdminKeyslots,
     ) -> Result<PasswordChangePlan, Error> {
+        Ok(PasswordChangePlan {
+            admin: admin.clone(),
+            allocation: self.allocate_slots(&admin.volumes).await?,
+        })
+    }
+
+    /// Reserves initial administrator targets without changing either volume.
+    pub async fn plan_administrator_installation(
+        &self,
+        defaults: &DefaultKeyslots,
+    ) -> Result<AdministratorInstallationPlan, Error> {
+        Ok(AdministratorInstallationPlan {
+            defaults: defaults.clone(),
+            allocation: self.allocate_slots(&defaults.volumes).await?,
+        })
+    }
+
+    async fn allocate_slots(&self, authority: &[VolumeSlots; 2]) -> Result<SlotAllocation, Error> {
         let mut base_slots = [BTreeSet::new(), BTreeSet::new()];
         let mut target_slots = [0; 2];
-        for (i, volume) in admin.volumes.iter().enumerate() {
+        for (i, volume) in authority.iter().enumerate() {
             let metadata = self.bound_metadata(i, &volume.id).await?;
             if volume.slots.is_empty() || !volume.slots.is_subset(&metadata.slots) {
                 return Err(metadata_error());
@@ -395,8 +475,7 @@ impl LuksPool {
                 .ok_or_else(metadata_error)?;
             base_slots[i] = metadata.slots;
         }
-        Ok(PasswordChangePlan {
-            admin: admin.clone(),
+        Ok(SlotAllocation {
             base_slots,
             target_slots,
         })
@@ -410,21 +489,49 @@ impl LuksPool {
         new: &str,
         credential: KeyCredential<'_>,
     ) -> Result<(), Error> {
+        self.install_slots(&plan.admin.volumes, &plan.allocation, new, credential)
+            .await
+    }
+
+    /// Installs administrator targets and recovery headers, retaining every original DEFAULT slot.
+    pub async fn install_administrator(
+        &self,
+        plan: &AdministratorInstallationPlan,
+        password: &str,
+        keys: &VolumeKeys,
+    ) -> Result<(), Error> {
+        self.install_slots(
+            &plan.defaults.volumes,
+            &plan.allocation,
+            password,
+            KeyCredential::VolumeKeys(keys),
+        )
+        .await?;
+        self.publish_headers().await
+    }
+
+    async fn install_slots(
+        &self,
+        authority: &[VolumeSlots; 2],
+        allocation: &SlotAllocation,
+        new: &str,
+        credential: KeyCredential<'_>,
+    ) -> Result<(), Error> {
         validate_new_password(new)?;
         if let KeyCredential::Password(old) = &credential {
             validate_change(old, new)?;
         }
         let (new_key, _cleanup) = self.password_file(new)?;
-        let metadata = self.change_metadata(plan).await?;
+        let metadata = self.installation_metadata(authority, allocation).await?;
         let mut credentials = Vec::new();
         for (i, metadata) in metadata.iter().enumerate() {
-            if !plan.base_slots[i].is_subset(&metadata.slots) {
+            if !allocation.base_slots[i].is_subset(&metadata.slots) {
                 return Err(metadata_error());
             }
             let key = self
-                .authenticate_credential(i, &plan.admin.volumes[i].id, &credential)
+                .authenticate_credential(i, &authority[i].id, &credential)
                 .await?;
-            for slot in &plan.admin.volumes[i].slots {
+            for slot in &authority[i].slots {
                 if self
                     .accepts(&self.devices[i], &new_key, Some(*slot))
                     .await?
@@ -432,19 +539,19 @@ impl LuksPool {
                     return Err(metadata_error());
                 }
             }
-            if metadata.slots.contains(&plan.target_slots[i]) {
+            if metadata.slots.contains(&allocation.target_slots[i]) {
                 require_password(
-                    self.accepts(&self.devices[i], &new_key, Some(plan.target_slots[i]))
+                    self.accepts(&self.devices[i], &new_key, Some(allocation.target_slots[i]))
                         .await?,
                 )?;
             }
             credentials.push(key);
         }
         for (i, metadata) in metadata.iter().enumerate() {
-            if !metadata.slots.contains(&plan.target_slots[i]) {
+            if !metadata.slots.contains(&allocation.target_slots[i]) {
                 self.add_and_verify(
                     &self.devices[i],
-                    plan.target_slots[i],
+                    allocation.target_slots[i],
                     &new_key,
                     &credentials[i].0,
                     credential.option(),
@@ -452,7 +559,7 @@ impl LuksPool {
                 .await?;
             }
         }
-        self.verify_targets(plan, &new_key).await
+        self.verify_slot_targets(allocation, &new_key).await
     }
 
     async fn add_and_verify(
@@ -484,31 +591,56 @@ impl LuksPool {
         plan: &PasswordChangePlan,
         keys: &VolumeKeys,
     ) -> Result<(), Error> {
+        self.abort_installation(&plan.admin.volumes, &plan.allocation, keys)
+            .await
+    }
+
+    /// Aborts before administrator-authority commit, preserving DEFAULT and unrelated slots.
+    pub async fn abort_administrator_installation(
+        &self,
+        plan: &AdministratorInstallationPlan,
+        keys: &VolumeKeys,
+    ) -> Result<(), Error> {
+        self.abort_installation(&plan.defaults.volumes, &plan.allocation, keys)
+            .await
+    }
+
+    async fn abort_installation(
+        &self,
+        authority: &[VolumeSlots; 2],
+        allocation: &SlotAllocation,
+        keys: &VolumeKeys,
+    ) -> Result<(), Error> {
         let credential = KeyCredential::VolumeKeys(keys);
-        let metadata = self.change_metadata(plan).await?;
+        let metadata = self.installation_metadata(authority, allocation).await?;
         let mut credentials = Vec::new();
         for (i, metadata) in metadata.iter().enumerate() {
-            if !plan.base_slots[i].is_subset(&metadata.slots) {
+            if !allocation.base_slots[i].is_subset(&metadata.slots) {
                 return Err(metadata_error());
             }
             credentials.push(
-                self.authenticate_credential(i, &plan.admin.volumes[i].id, &credential)
+                self.authenticate_credential(i, &authority[i].id, &credential)
                     .await?,
             );
         }
         for (i, metadata) in metadata.iter().enumerate() {
-            if metadata.slots.contains(&plan.target_slots[i]) {
+            if metadata.slots.contains(&allocation.target_slots[i]) {
                 self.kill_slot(
                     &self.devices[i],
-                    plan.target_slots[i],
+                    allocation.target_slots[i],
                     &credentials[i].0,
                     credential.option(),
                 )
                 .await?;
             }
         }
-        for (i, metadata) in self.change_metadata(plan).await?.iter().enumerate() {
-            if metadata.slots != plan.base_slots[i] {
+        for (i, metadata) in self
+            .installation_metadata(authority, allocation)
+            .await?
+            .iter()
+            .enumerate()
+        {
+            if metadata.slots != allocation.base_slots[i] {
                 return Err(metadata_error());
             }
         }
@@ -567,11 +699,12 @@ impl LuksPool {
     ) -> Result<[LuksMetadata; 2], Error> {
         let metadata = self.change_metadata(plan).await?;
         for (index, volume) in metadata.iter().enumerate() {
-            let manual: BTreeSet<_> = plan.base_slots[index]
+            let manual: BTreeSet<_> = plan.allocation.base_slots[index]
                 .difference(&plan.admin.volumes[index].slots)
                 .copied()
                 .collect();
-            if !manual.is_subset(&volume.slots) || !volume.slots.contains(&plan.target_slots[index])
+            if !manual.is_subset(&volume.slots)
+                || !volume.slots.contains(&plan.allocation.target_slots[index])
             {
                 return Err(metadata_error());
             }
@@ -589,11 +722,11 @@ impl LuksPool {
         self.remove_slots(&plan.admin.volumes, metadata, keys, option)
             .await?;
         for (i, metadata) in self.change_metadata(plan).await?.iter().enumerate() {
-            let mut expected: BTreeSet<_> = plan.base_slots[i]
+            let mut expected: BTreeSet<_> = plan.allocation.base_slots[i]
                 .difference(&plan.admin.volumes[i].slots)
                 .copied()
                 .collect();
-            expected.insert(plan.target_slots[i]);
+            expected.insert(plan.allocation.target_slots[i]);
             if metadata.slots != expected {
                 return Err(metadata_error());
             }
@@ -721,9 +854,17 @@ impl LuksPool {
     }
 
     async fn verify_targets(&self, plan: &PasswordChangePlan, key: &Path) -> Result<(), Error> {
+        self.verify_slot_targets(&plan.allocation, key).await
+    }
+
+    async fn verify_slot_targets(
+        &self,
+        allocation: &SlotAllocation,
+        key: &Path,
+    ) -> Result<(), Error> {
         for (i, device) in self.devices.iter().enumerate() {
             require_password(
-                self.accepts(device, key, Some(plan.target_slots[i]))
+                self.accepts(device, key, Some(allocation.target_slots[i]))
                     .await?,
             )?;
         }
@@ -731,18 +872,27 @@ impl LuksPool {
     }
 
     async fn change_metadata(&self, plan: &PasswordChangePlan) -> Result<[LuksMetadata; 2], Error> {
+        self.installation_metadata(&plan.admin.volumes, &plan.allocation)
+            .await
+    }
+
+    async fn installation_metadata(
+        &self,
+        authority: &[VolumeSlots; 2],
+        allocation: &SlotAllocation,
+    ) -> Result<[LuksMetadata; 2], Error> {
         let mut result = Vec::new();
-        for (i, volume) in plan.admin.volumes.iter().enumerate() {
+        for (i, volume) in authority.iter().enumerate() {
             let metadata = self.bound_metadata(i, &volume.id).await?;
             if volume.slots.is_empty()
-                || !volume.slots.is_subset(&plan.base_slots[i])
-                || plan.base_slots[i].contains(&plan.target_slots[i])
-                || plan.target_slots[i] >= metadata.slot_count
+                || !volume.slots.is_subset(&allocation.base_slots[i])
+                || allocation.base_slots[i].contains(&allocation.target_slots[i])
+                || allocation.target_slots[i] >= metadata.slot_count
             {
                 return Err(metadata_error());
             }
-            let mut allowed = plan.base_slots[i].clone();
-            allowed.insert(plan.target_slots[i]);
+            let mut allowed = allocation.base_slots[i].clone();
+            allowed.insert(allocation.target_slots[i]);
             if !metadata.slots.is_subset(&allowed) {
                 return Err(metadata_error());
             }
@@ -1053,6 +1203,11 @@ mod tests {
 
     use super::*;
 
+    #[cfg(target_os = "linux")]
+    mod enable_tests {
+        include!("fde_enable_tests.rs");
+    }
+
     const OLD: &str = DEFAULT_PASSWORD;
     const NEW: &str = "administrator\ncredential-🔒";
     const OTHER: &str = "different-administrator-credential";
@@ -1273,15 +1428,20 @@ esac
         fixture.write("main.version", "1");
         let plan = fixture.plan().await;
         assert_eq!(
-            plan.base_slots,
+            plan.allocation.base_slots,
             [BTreeSet::from([0, 5]), BTreeSet::from([0, 5])]
         );
-        assert_eq!(plan.target_slots, [1, 1]);
+        assert_eq!(plan.allocation.target_slots, [1, 1]);
         let json = serde_json::to_string(&plan).unwrap();
         for secret in [OLD, NEW, "volume-key-sensitive"] {
             assert!(!json.contains(secret));
         }
         assert_eq!(plan, serde_json::from_str(&json).unwrap());
+        let stored: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(stored.as_object().unwrap().len(), 3);
+        for field in ["admin", "baseSlots", "targetSlots"] {
+            assert!(stored.get(field).is_some(), "legacy plan field {field}");
+        }
         fixture.assert_no_mutation();
     }
 
@@ -1441,7 +1601,7 @@ esac
         assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
         fixture.assert_no_mutation();
         fixture.write("package-data.new", "1\n");
-        plan.target_slots[0] = 0;
+        plan.allocation.target_slots[0] = 0;
         assert!(fixture.pool.retire_password(&plan, NEW).await.is_err());
         fixture.assert_no_mutation();
     }
@@ -2047,7 +2207,7 @@ esac
         pool.verify_password(MANUAL).await.unwrap();
         std::fs::remove_file(root.join("fail-kill")).unwrap();
         let change = pool.plan_password_change(&current).await.unwrap();
-        assert_eq!(change.target_slots, [0, 1]);
+        assert_eq!(change.allocation.target_slots, [0, 1]);
         pool.install_password(&change, NEW, KeyCredential::VolumeKeys(&keys))
             .await
             .unwrap();

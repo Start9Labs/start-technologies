@@ -216,6 +216,10 @@ pub async fn init(
     load_database.start();
     let db = TypedPatchDb::<Database>::load_unchecked(cfg.db().await?);
     let secret_memory = crate::fde::memory::protect_authorities(&db.peek().await)?;
+    if secret_memory.is_some() {
+        let guid = crate::util::io::read_file_to_string("/media/startos/config/disk.guid").await?;
+        crate::fde::enable::restore_pending_keys(&db, guid.trim()).await?;
+    }
     crate::version::Current::default().pre_init(&db).await?;
     db.mutate(crate::net::ssl::repair_root_cert).await.result?;
     let peek = db.peek().await;

@@ -9,6 +9,7 @@ pub mod boot;
 pub(crate) mod boot_services;
 pub mod bootstrap;
 pub mod credentials;
+pub(crate) mod enable;
 pub mod enrollment;
 pub(crate) mod generation;
 pub mod initramfs;

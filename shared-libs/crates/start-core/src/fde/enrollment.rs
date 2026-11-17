@@ -34,6 +34,8 @@ pub struct Enrollment {
     pub(crate) manifest_key: Pem<PKey<Private>>,
     pub(crate) policy_key: Pem<PKey<Private>>,
     approval_code: Option<String>,
+    #[serde(default)]
+    pub(crate) administrator: Option<super::enable::AdministratorSetup>,
 }
 
 impl fmt::Debug for Enrollment {
@@ -89,7 +91,7 @@ async fn request_marker(path: &Path) -> Result<bool, Error> {
 }
 
 impl Enrollment {
-    async fn generate(runtime: &Path) -> Result<Self, Error> {
+    pub(crate) async fn generate(runtime: &Path) -> Result<Self, Error> {
         super::memory::require_tmpfs(runtime)?;
         let memory = super::memory::ProcessSecretMemory::protect()?;
         let directory = runtime.join(format!("startos-fde-enrollment-{}", new_guid()));
@@ -129,6 +131,7 @@ impl Enrollment {
             manifest_key: Pem(gen_nistp256()?),
             policy_key: Pem(gen_nistp256()?),
             approval_code: Some(new_guid().chars().take(16).collect()),
+            administrator: None,
         })
     }
 }
@@ -174,8 +177,8 @@ async fn reserve_request<'a>(
     Ok(code)
 }
 
-/// Begins firmware enrollment inside an acknowledged enable request.
-/// Restricts enrollment to generic UEFI targets; activation is separate.
+/// Begins enrollment and prepares administrator authority after firmware approval.
+/// Requires an acknowledged generic-UEFI enable request; activation remains separate.
 pub async fn begin(
     ctx: RpcContext,
     password: Zeroizing<String>,
@@ -189,7 +192,8 @@ pub async fn begin(
         }
         let snapshot = ctx.db.peek().await;
         crate::auth::check_password(&snapshot.as_private().as_password().de()?, &password)?;
-        crate::disk::fde::LuksPool::new(&ctx.disk_guid, "/media/startos/config")?;
+        crate::disk::fde::validate_new_password(&password)?;
+        let pool = crate::disk::fde::LuksPool::new(&ctx.disk_guid, "/media/startos/config")?;
         require_hardware(
             crate::util::mok::is_secure_boot_enabled().await,
             crate::util::io::maybe_read_file_to_string("/sys/class/tpm/tpm0/tpm_version_major")
@@ -199,7 +203,12 @@ pub async fn begin(
         let zram_was_active = crate::system::zram_active().await?;
         let result = async {
             crate::system::disable_zram().await?;
-            enroll(&ctx).await
+            let progress = enroll(&ctx).await?;
+            if progress.firmware_enrolled {
+                super::enable::prepare_administrator(&ctx.db, &ctx.account, &pool, &password)
+                    .await?;
+            }
+            Ok(progress)
         }
         .await;
         if result.is_err() {
