@@ -5,8 +5,8 @@ Before writing a utility or component in a monorepo app, check these libraries f
 `@start9labs/shared` (monorepo apps):
 
 - **Transport and auth** — `HttpService`, `RpcSocketService`, `AuthKeyService`,
-  `ServerIdentityService`, `localRpcRequest`, `databaseSource`. Only API services use them;
-  their contracts are in `shared-libs/ts-modules/ARCHITECTURE.md`.
+  `ServerIdentityService`, `localRpcRequest`, `databaseSource`. Their contracts are in
+  `shared-libs/ts-modules/ARCHITECTURE.md`.
 - **Actions and errors** — **`TaskService.run`** (the async-action wrapper, state.md),
   `ErrorService` + `getErrorMessage` / `isNetworkError`, `HttpError`/`RpcError`.
 - **Overlays** — **`DialogService`** (responsive + i18n prompt/confirm/alert/component,
