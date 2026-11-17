@@ -498,18 +498,34 @@ async fn shell_space_admission_prunes_public_sources_with_the_native_owner_and_l
     tokio::fs::rename(root.path().join("running"), volume.join("current"))
         .await
         .unwrap();
+    let selected = volume.join("images/selected.rootfs");
+    let other = volume.join("images/other.rootfs");
+    for (source, path, seconds) in [(&sources[1], &selected, 0), (&sources[2], &other, 1)] {
+        tokio::fs::hard_link(source, path).await.unwrap();
+        std::fs::File::open(path)
+            .unwrap()
+            .set_times(
+                std::fs::FileTimes::new()
+                    .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds)),
+            )
+            .unwrap();
+    }
+    let scripts =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../projects/start-os/build/lib/scripts");
+    Command::new("/bin/bash").args(["-euc", "source \"$1/os-image-store\"; [[ $(startos_oldest_unselected_image \"$2\" \"$3\") == \"$4\" ]]", "selected-image-path"])
+        .arg(scripts).arg(volume.join("images")).arg(&selected).arg(&other)
+        .invoke(ErrorKind::Filesystem).await.unwrap();
     let pending = tokio::fs::read_link(volume.join("config/current.rootfs"))
         .await
         .unwrap();
     tokio::fs::remove_file(volume.join("config/current.rootfs"))
         .await
         .unwrap();
-    tokio::fs::symlink(
-        root.path().join("missing.rootfs"),
-        volume.join("config/current.rootfs"),
-    )
-    .await
-    .unwrap();
+    let unknown = root.path().join("unknown-root");
+    tokio::fs::create_dir(&unknown).await.unwrap();
+    tokio::fs::symlink(&unknown, volume.join("config/current.rootfs"))
+        .await
+        .unwrap();
     assert!(shell_prune(&lease, &volume, &binary).await.is_err());
     assert!(sources.iter().all(|path| path.is_file()));
     tokio::fs::remove_file(volume.join("config/current.rootfs"))

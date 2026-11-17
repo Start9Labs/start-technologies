@@ -25,6 +25,11 @@ startos_prune_public_sources() {
     fi
 }
 
+startos_oldest_unselected_image() {
+    local images=$1 current=$2
+    ls -t1 "$images"/*.rootfs "$images"/*.squashfs 2> /dev/null | grep -Fvx -- "$current" | tail -n1
+}
+
 startos_prune_images() {
     local volume=$1 needed=$2 margin=$3 newest current to_prune
     local target=$((needed + margin))
@@ -44,7 +49,7 @@ startos_prune_images() {
         echo 'Pruning...'
         current="$(readlink -f "$volume/config/current.rootfs")" || return
         while [[ "$(df -B1 --output=avail --sync "$volume/images" | tail -n1)" -lt "$target" ]]; do
-            to_prune="$(ls -t1 "$volume"/images/*.rootfs "$volume"/images/*.squashfs 2> /dev/null | grep -Fvx -- "$current" | tail -n1)"
+            to_prune="$(startos_oldest_unselected_image "$volume/images" "$current")"
             if [ -e "$to_prune" ]; then
                 echo "  Pruning $to_prune"
                 rm -rf "$to_prune" || return
