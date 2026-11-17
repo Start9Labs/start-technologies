@@ -144,7 +144,15 @@ All branding is a **`--tui-*` design-token override sheet**, nothing else:
 Hex colors live **only** in the theme sheet. Components use `var(--tui-...)` exclusively —
 `--tui-text-secondary`, `--tui-status-negative`, `--tui-background-neutral-1`,
 `--tui-border-normal`, `font: var(--tui-typography-body-l)`, `var(--tui-radius-m)`. A hex
-literal in a component is a review comment waiting to happen.
+literal in a component is a review comment waiting to happen. The exception is a hex that is
+itself content: a brand swatch printing its value binds it from that data,
+`[style.background]="color.hex"`, rather than mirroring each one as a theme token.
+
+A piece that sits on a dark or light ground — a logo tile, a card on a page — takes
+`tuiTheme` (`[attr.tuiTheme]="mark.ground"`, `<business-hire tuiTheme="dark">`) and Taiga's own
+tokens (`background: var(--tui-background-base-alt)`), not a `data-ground` attribute mapped to
+brand colours. Taiga's palette ships `[tuiTheme='dark']` whatever `provideTaiga`'s `mode`, so
+this works in light-only apps too.
 
 Each theme defines its own status text colours. In a dual-theme sheet, the light block must not
 reuse the dark block's `--tui-text-negative`, `-positive` or `-warning` values. Those colours

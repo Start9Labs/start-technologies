@@ -45,12 +45,16 @@ flat-grayscale | outline-grayscale | action-grayscale | …"` on buttons/badges/
    `color-mix()`, `clamp()`, container queries, `dvh`. Fluid sizing via `min(36rem, 90vw)`.
    Taiga SCSS utils import into inline styles: `@use '@taiga-ui/styles/utils' as taiga` +
    `@include taiga.transition(...)`. A state class nests under its element
-   (`.search { …; &._open { … } }`).
+   (`.search { …; &._open { … } }`). A class names a state, never a part: a card's trailing
+   row is a `<footer>` styled as `footer {}`, a number over its caption is a `tuiTitle`, not
+   `._rules`, `._percent` or `li > span:last-child`.
 
 **`tuiCardLarge` owns its stack.** Its column `gap` and `align-items: stretch` sit at specificity
 0,3,0, so a component's `[tuiCardLarge] { gap; align-items: center }` silently loses. A card that
 is one row carries the row primitive on itself, `<div tuiCardLarge="compact" tuiHeader="body-s">`,
-which the stack rule skips; content that must centre keeps a plain `:host` box.
+which the stack rule skips; content that must centre keeps a plain `:host` box. The stack also
+pushes its last child to the bottom (`margin-block-start: auto`) and spaces a `> footer`, so a
+card's closing row is a `<footer>` that takes both, never a `margin: 0 !important` against them.
 
 **Floating cards in the light theme pool their shadows.** Large cards close together
 (`appearance="floating"`, `--tui-shadow-medium`) blur into a grey wash between them. Where cards
