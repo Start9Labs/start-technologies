@@ -128,13 +128,30 @@ async fn password_hash_file(
     Ok((path, cleanup))
 }
 
-/// Appends certificates to the shared native enrollment request.
-/// Already-pending certificates do not refresh its authentication value.
+/// Appends certificates and refreshes the shared native request authentication.
+/// A failed firmware write requires retry; pending membership does not confirm authentication.
 pub async fn request_enrollment(certificates: &[PathBuf], hash: &str) -> Result<(), Error> {
+    let help = Command::new("mokutil")
+        .arg("--help")
+        .env("LC_ALL", "C")
+        .invoke(ErrorKind::Bios)
+        .await?;
+    if !String::from_utf8_lossy(&help).contains("--refresh-import-auth") {
+        return Err(Error::new(
+            eyre!("{}", t!("util.mok.unsupported-auth-refresh")),
+            ErrorKind::Bios,
+        ));
+    }
     let (hash_file, _cleanup) = password_hash_file(Path::new("/run"), hash).await?;
     Command::new("mokutil")
         .arg("--import")
         .args(certificates)
+        .arg("--hash-file")
+        .arg(&hash_file)
+        .invoke(ErrorKind::Bios)
+        .await?;
+    Command::new("mokutil")
+        .arg("--refresh-import-auth")
         .arg("--hash-file")
         .arg(&hash_file)
         .invoke(ErrorKind::Bios)
@@ -170,12 +187,6 @@ pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
         tracing::info!("enroll_mok: start9 user password not set, skipping");
         return Ok(false);
     };
-
-    // Pending imports share one `MokAuth` value.
-    let _ = Command::new("mokutil")
-        .arg("--revoke-import")
-        .invoke(ErrorKind::Bios)
-        .await;
 
     tracing::info!("Enrolling DKMS MOK certificate");
     request_enrollment(&[mok_pub.to_owned()], &hash).await?;
@@ -225,6 +236,75 @@ mod enrollment_tests {
         ] {
             assert!(parse_enrollment(certificate, output(code, message)).is_err());
         }
+    }
+
+    fn native_fixture() -> (PathBuf, PathBuf, PathBuf, PathBuf, String) {
+        let root = PathBuf::from(std::env::var_os("FDE_MOK_NATIVE_ROOT").unwrap());
+        let variables = root.join("efivars");
+        let certificate = root.join("certificate.der");
+        let request = variables.join("MokNew-605dab50-e046-4300-abb6-3dd810dd8b23");
+        let auth = variables.join("MokAuth-605dab50-e046-4300-abb6-3dd810dd8b23");
+        let hash = std::fs::read_to_string(root.join("new.hash")).unwrap();
+        (root, certificate, request, auth, hash.trim().to_owned())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the native mokutil component fixture"]
+    async fn native_pending_refresh_preserves_subjects_and_changes_authentication() {
+        let (_, certificate, request, auth, hash) = native_fixture();
+        let original_request = std::fs::read(&request).unwrap();
+        let original_auth = std::fs::read(&auth).unwrap();
+        assert_eq!(
+            enrollment_status(&certificate).await.unwrap(),
+            MokEnrollment::Pending
+        );
+        request_enrollment(&[certificate.clone()], &hash)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&request).unwrap(), original_request);
+        let changed_auth = std::fs::read(&auth).unwrap();
+        assert_ne!(changed_auth, original_auth);
+        request_enrollment(&[certificate], &hash).await.unwrap();
+        assert_eq!(std::fs::read(&request).unwrap(), original_request);
+        assert_eq!(std::fs::read(&auth).unwrap(), changed_auth);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the unpatched native mokutil component fixture"]
+    async fn native_unpatched_tool_rejects_before_request_mutation() {
+        let (_, certificate, request, auth, hash) = native_fixture();
+        let original_request = std::fs::read(&request).unwrap();
+        let original_auth = std::fs::read(&auth).unwrap();
+        assert!(request_enrollment(&[certificate], &hash).await.is_err());
+        assert_eq!(std::fs::read(&request).unwrap(), original_request);
+        assert_eq!(std::fs::read(&auth).unwrap(), original_auth);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the native mokutil component fixture"]
+    async fn native_auth_failure_preserves_other_subjects_and_retry_finishes() {
+        let (_, certificate, request, auth, hash) = native_fixture();
+        let original_request = std::fs::read(&request).unwrap();
+        let original_auth = std::fs::read(&auth).unwrap();
+        std::fs::remove_file(&auth).unwrap();
+        std::fs::create_dir(&auth).unwrap();
+        let other = certificate.with_file_name("other.der");
+        assert!(request_enrollment(&[other.clone()], &hash).await.is_err());
+        let pending = std::fs::read(&request).unwrap();
+        assert!(pending.len() > original_request.len());
+        assert!(pending.ends_with(&original_request[4..]));
+        assert_eq!(
+            enrollment_status(&other).await.unwrap(),
+            MokEnrollment::Pending
+        );
+        std::fs::remove_dir(&auth).unwrap();
+        std::fs::write(&auth, original_auth).unwrap();
+        request_enrollment(&[other], &hash).await.unwrap();
+        assert_eq!(std::fs::read(&request).unwrap(), pending);
+        assert_eq!(
+            enrollment_status(&certificate).await.unwrap(),
+            MokEnrollment::Pending
+        );
     }
 
     #[tokio::test]

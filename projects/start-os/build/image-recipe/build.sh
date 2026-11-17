@@ -241,10 +241,16 @@ fi
 
 # Hooks
 
+mkdir -p config/includes.chroot/usr/src/startos-mokutil
+cp -a "$SOURCE_DIR/mokutil/." config/includes.chroot/usr/src/startos-mokutil/
+
 cat > config/hooks/normal/9000-install-startos.hook.chroot << EOF
 #!/bin/bash
 
 set -e
+
+/usr/src/startos-mokutil/install
+rm -rf /usr/src/startos-mokutil
 
 if [ "${IB_TARGET_PLATFORM}" != "raspberrypi" ]; then
     /usr/lib/startos/scripts/enable-kiosk

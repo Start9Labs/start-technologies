@@ -18,6 +18,16 @@ contributors. Sixteen carry an explicit `SPDX-License-Identifier` header. Full
 text: [`projects/start-wrt/openwrt-overlay/COPYING`](projects/start-wrt/openwrt-overlay/COPYING).
 Details: [`projects/start-wrt/openwrt-overlay/README.md`](projects/start-wrt/openwrt-overlay/README.md).
 
+### `projects/start-os/build/image-recipe/mokutil/shared-auth.patch`
+
+GPL-3.0-or-later, with mokutil's upstream OpenSSL linking exception retained.
+Derived from mokutil: copyright 2012–2020 Gary Lin and 2012 Matthew Garrett;
+modifications copyright 2026 Start9 Labs. Full text:
+[`COPYING`](projects/start-os/build/image-recipe/mokutil/COPYING). The image
+rebuilds the installed Debian source package as a separate native executable;
+its corresponding modified source ships in
+`/usr/share/doc/mokutil/startos-source.tar.gz`.
+
 ### `projects/start-os/docs/src/assets/firmware/binaries/Intel_ATJSLCPX-AT0043.cap`
 
 Proprietary. Intel's final BIOS release for the NUC11ATKC4, redistributed so

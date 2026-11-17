@@ -5,3 +5,9 @@ util.mok.invalid-status:
   es_ES: 'Estado de inscripción MOK inesperado'
   fr_FR: 'État d’inscription MOK inattendu'
   pl_PL: 'Nieoczekiwany stan rejestracji MOK'
+util.mok.unsupported-auth-refresh:
+  en_US: 'MOK enrollment requires the matching StartOS system image'
+  de_DE: 'Die MOK-Registrierung erfordert das passende StartOS-Systemabbild'
+  es_ES: 'La inscripción MOK requiere la imagen de sistema StartOS correspondiente'
+  fr_FR: 'L’inscription MOK nécessite l’image système StartOS correspondante'
+  pl_PL: 'Rejestracja MOK wymaga zgodnego obrazu systemu StartOS'

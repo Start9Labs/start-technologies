@@ -1,0 +1,53 @@
+#!/bin/bash
+set -euo pipefail
+
+resources=$(cd "$(dirname "$0")" && pwd)
+scratch=$(mktemp -d)
+source_files=(sources.list.d)
+if [[ -e /etc/apt/sources.list ]]; then
+    source_files+=(sources.list)
+fi
+tar -C /etc/apt -cpf "$scratch/apt-sources.tar" "${source_files[@]}"
+cleanup() {
+    rm -rf /etc/apt/sources.list.d /etc/apt/sources.list
+    tar -C /etc/apt -xpf "$scratch/apt-sources.tar"
+    rm -rf "$scratch"
+}
+trap cleanup EXIT
+
+# The caller supplies an exclusive, disposable Debian image-build root.
+version=$(dpkg-query -W -f='${source:Version}' mokutil)
+dpkg-query -W -f='${binary:Package}\n' | sort > "$scratch/packages.before"
+apt-get update
+apt-get install --no-install-recommends -y dpkg-dev
+apt --yes modernize-sources
+for source in /etc/apt/sources.list.d/*.sources; do
+    sed -i '/^Types:[[:space:]]*deb[[:space:]]*$/s/$/ deb-src/' "$source"
+done
+apt-get update
+apt-get build-dep --no-install-recommends -y "mokutil=$version"
+cd "$scratch"
+apt-get source --download-only "mokutil=$version"
+dpkg-source -x ./*.dsc source
+mkdir -p source/debian/patches
+cp "$resources/shared-auth.patch" source/debian/patches/startos-shared-auth.patch
+printf '\nstartos-shared-auth.patch\n' >> source/debian/patches/series
+dpkg-source --before-build source
+release_date=$(dpkg-parsechangelog -l source/debian/changelog -SDate)
+{
+    printf 'mokutil (%s+start9.1) unstable; urgency=medium\n\n' "$version"
+    printf '  * Preserve shared requests during authentication refresh and write failure.\n\n'
+    printf ' -- Start9 Labs <support@start9.com>  %s\n\n' "$release_date"
+    cat source/debian/changelog
+} > "$scratch/changelog"
+mv "$scratch/changelog" source/debian/changelog
+tar -czf "$scratch/startos-source.tar.gz" -C source .
+(cd source && dpkg-buildpackage --build=binary --no-sign --jobs=auto)
+dpkg -i ./mokutil_*.deb
+install -m 644 "$scratch/startos-source.tar.gz" /usr/share/doc/mokutil/startos-source.tar.gz
+
+dpkg-query -W -f='${binary:Package}\n' | sort > "$scratch/packages.after"
+mapfile -t build_packages < <(comm -13 "$scratch/packages.before" "$scratch/packages.after")
+if ((${#build_packages[@]})); then
+    apt-get purge -y -- "${build_packages[@]}"
+fi

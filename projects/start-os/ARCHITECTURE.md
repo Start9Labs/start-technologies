@@ -102,6 +102,8 @@ defaults through `/media/startos/root/config`, available in the installation and
 update chroots as well as the running OS. The NVMe isolation helper owns only
 `90-nvme-isolation.cfg`; see [Kernel Arguments](docs/src/kernel-arguments.md).
 
+The image hook rebuilds the installed Debian mokutil source with `build/image-recipe/mokutil/shared-auth.patch`, using its signed APT source metadata and native Debian build recipe. Its authentication-only refresh retains opaque pending-request bytes; failed authentication writes retain the request for retry. The modified package replaces the distro binary and carries its corresponding source under `/usr/share/doc/mokutil/startos-source.tar.gz`; no GPL code links into StartOS's Rust binaries. This image component is required by enrollment and is not supplied by a binary-only deployment.
+
 The `uefi` dependency feature supplies UKI signing and TPM tooling on x86_64 and generic aarch64 images. Raspberry Pi and Rockchip images are aarch64 but are not FDE targets; they omit it. `build/lib/scripts/fde-build-uki` uses systemd's UKI builder and measurement tool to produce a signed native-architecture UKI and its raw SHA-256 PCR11 prediction before initrd phase events. Its output directory belongs to a private generation under construction, not the FAT ESP; the generation owner publishes the image and prediction together. See [the FDE contract](FDE.md).
 
 ## Build pipeline (cross-layer)
