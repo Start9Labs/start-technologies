@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { REPO, fixture } from './fixtures.mjs'
+import { REPO } from './fixtures.mjs'
+import { artifactFixture } from './gha-artifact-fixture.mjs'
 
-// A higher id is a newer run, within artifact retention.
 const run = (id, artifacts, overrides = {}) => ({
   id,
   created_at: new Date(Date.now() - (10 - id) * 3600e3)
@@ -11,32 +11,19 @@ const run = (id, artifacts, overrides = {}) => ({
     .replace(/\.\d+Z$/, 'Z'),
   head_branch: 'master',
   conclusion: 'success',
-  artifacts: artifacts.map(name => ({ name, expired: false })),
+  artifacts,
   ...overrides,
 })
 const IMAGE = 'x86_64.squashfs'
 
 function select(t, workflows) {
-  const f = fixture(t)
-  f.write('workflows.json', JSON.stringify(workflows))
-  f.nodeExecutable(
-    'gh',
-    `import { readFileSync } from 'node:fs'
-const workflows = JSON.parse(readFileSync(${JSON.stringify(join(f.root, 'workflows.json'))}))
-const args = process.argv.slice(2)
-const url = args.find(arg => arg.startsWith('repos/'))
-const workflow = url.match(/workflows\\/([^/]+)\\/runs/)
-if (workflow) {
-  const page = Number(new URL('https://x/' + url).searchParams.get('page'))
-  const runs = workflows[workflow[1]]?.[page - 1] ?? []
-  console.log(JSON.stringify({ workflow_runs: runs.map(({ artifacts, ...run }) => run) }))
-} else {
-  const id = Number(url.match(/runs\\/(\\d+)\\/artifacts/)[1])
-  const run = Object.values(workflows).flat(2).find(run => run.id === id)
-  console.log(JSON.stringify([{ artifacts: run.artifacts }]))
-}
-`,
+  const runs = Object.entries(workflows).flatMap(([workflow, pages]) =>
+    pages.flat().map(run => ({
+      path: `.github/workflows/${workflow}`,
+      ...run,
+    })),
   )
+  const f = artifactFixture(t, runs)
   return f.run(
     'bash',
     [
@@ -46,7 +33,7 @@ if (workflow) {
       'x86_64',
     ],
     {
-      env: { ...f.env, PATH: `${f.root}:${f.env.PATH}` },
+      env: f.env,
       encoding: 'utf8',
     },
   )
@@ -81,12 +68,20 @@ for (const [name, workflows, expected] of [
     '1',
   ],
   [
-    'continues beyond a page with no successful builds for the branch',
+    'images from other branches do not hide the requested branch',
     {
       'build-products.yaml': [
         [run(3, [IMAGE], { head_branch: 'integration/other' })],
         [run(2, [IMAGE])],
       ],
+    },
+    '2',
+  ],
+  [
+    'unrelated workflows cannot supply a StartOS image',
+    {
+      'other.yaml': [[run(3, [IMAGE])]],
+      'build-products.yaml': [[run(2, [IMAGE])]],
     },
     '2',
   ],
@@ -106,15 +101,17 @@ for (const [name, workflows, expected] of [
   })
 }
 
-test('image run selection: runs past artifact retention end the search', t => {
+test('image run selection: an older rerun can hold an unexpired image', t => {
   const result = select(t, {
     'build-products.yaml': [
       [
         run(1, [IMAGE], {
           created_at: new Date(Date.now() - 20 * 86400e3).toISOString(),
+          run_attempt: 2,
         }),
       ],
     ],
   })
-  assert.notEqual(result.status, 0)
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.equal(result.stdout.trim(), '1')
 })

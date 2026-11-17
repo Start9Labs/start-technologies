@@ -60,44 +60,36 @@ jobs:
           products=(start-cli start-tunnel start-registry)
           arches=(x86_64 aarch64 riscv64)
           declare -A chosen=()
-          # A product's latest build is the newest completed master push run
-          # holding its debs for every arch; a run that did not touch the product,
-          # or failed packaging it, holds none.
-          # Filter and order client-side: with branch/event/status query
-          # filters, the runs API answers this job's token with months-old
-          # runs instead of the newest one.
-          # event == "push" is load-bearing, not a tidiness filter. A master
-          # head branch alone matches a pull_request run from a fork branch of
-          # that name — this job would then collect and sign attacker-built
-          # .debs into alpha. It also excludes workflow_dispatch builds, which
-          # may be dev-flavoured or partial-arch.
-          # The listing is newest first, and debs expire after 14 days: a page
-          # with no newer run ends the search.
-          cutoff=$(jq -nr 'now - 15 * 86400 | todate')
-          page=1
-          while :; do
-            response=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/build-products.yaml/runs?per_page=100&page=$page")
-            jq -e --arg cutoff "$cutoff" 'any(.workflow_runs[]; .created_at >= $cutoff)' \
-              <<< "$response" > /dev/null || break
-            runs=$(jq -r '[.workflow_runs[]
-              | select(.event == "push" and .head_branch == "master"
-                  and .status == "completed"
-                  and .head_repository.full_name == env.GITHUB_REPOSITORY)]
-              | sort_by(.created_at) | reverse | .[].id' <<< "$response")
-            for run_id in $runs; do
-              names=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
-                --jq '.artifacts[] | select(.expired | not) | .name')
-              for product in "${products[@]}"; do
-                [ -z "${chosen[$product]:-}" ] || continue
-                complete=1
-                for arch in "${arches[@]}"; do
-                  grep -qx "${product}_${arch}.deb" <<< "$names" || complete=0
-                done
-                [ "$complete" = 0 ] || chosen[$product]=$run_id
-              done
-              [ "${#chosen[@]}" -lt "${#products[@]}" ] || break 2
+          candidate_ids=$(
+            for product in "${products[@]}"; do
+              ./scripts/gha-artifact-run-ids.sh "$GITHUB_REPOSITORY" "${product}_${arches[0]}.deb" master || exit 1
+            done | sort -nu
+          )
+          run_metadata=$(
+            for run_id in $candidate_ids; do
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" || exit 1
             done
-            page=$((page + 1))
+          )
+          # event == "push" excludes fork PRs, which can report master as their
+          # head branch, and dispatched builds, which may be dev-flavoured or
+          # partial-arch.
+          runs=$(jq -sr '[.[]
+            | select(.path == ".github/workflows/build-products.yaml"
+                and .event == "push" and .status == "completed"
+                and .head_repository.full_name == env.GITHUB_REPOSITORY)]
+            | sort_by(.created_at) | reverse | .[].id' <<< "$run_metadata")
+          for run_id in $runs; do
+            names=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.expired | not) | .name')
+            for product in "${products[@]}"; do
+              [ -z "${chosen[$product]:-}" ] || continue
+              complete=1
+              for arch in "${arches[@]}"; do
+                grep -qx "${product}_${arch}.deb" <<< "$names" || complete=0
+              done
+              [ "$complete" = 0 ] || chosen[$product]=$run_id
+            done
+            [ "${#chosen[@]}" -lt "${#products[@]}" ] || break
           done
           collected=0
           for product in "${products[@]}"; do
