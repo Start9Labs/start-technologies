@@ -246,12 +246,12 @@ target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(START_CONTAINE
 compiled-$(ARCH).tar: $(COMPILED_TARGETS) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE)
 	tar -cvf $@ $^
 
-target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs: $(call ls-files, projects/start-os/backup-fs) $(BACKUP_PROTOCOL_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE) $(RUST_ZIG_BUILDER_INPUTS)
+target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs: $(call ls-files, projects/start-os/backup-fs) $(BACKUP_PROTOCOL_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE) $(RUST_ZIG_BUILDER_INPUTS) build/rust-build-profile.sh
 	ARCH=$(ARCH) PROFILE=release ./projects/start-os/backup-fs/build-backup-fs.sh
 	touch $@
 
 # --- pi-beep: first-party crate, built like the other in-repo bins ---
-target/aarch64-unknown-linux-musl/release/pi-beep: $(call ls-files, shared-libs/crates/pi-beep) $(ENVIRONMENT_FILE) $(RUST_ZIG_BUILDER_INPUTS)
+target/aarch64-unknown-linux-musl/release/pi-beep: $(call ls-files, shared-libs/crates/pi-beep) $(ENVIRONMENT_FILE) $(RUST_ZIG_BUILDER_INPUTS) build/rust-build-profile.sh
 	ARCH=aarch64 PROFILE=release ./shared-libs/crates/pi-beep/build-pi-beep.sh
 	touch $@
 
