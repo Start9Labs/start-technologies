@@ -20,15 +20,7 @@ import { UpdatesCount } from '../updates-count'
         [tuiHint]="rla.isActive ? '' : (item.name | i18n)"
       >
         <tui-badged-content [style.--tui-radius.%]="50">
-          @if (item.badge(); as badge) {
-            <tui-badge-notification
-              tuiSlot="top"
-              size="s"
-              [appUpdatesCount]="item.routerLink === 'updates'"
-            >
-              {{ badge }}
-            </tui-badge-notification>
-          } @else if (item.warning()) {
+          @if (item.warning()) {
             <tui-icon
               tuiSlot="top"
               icon="@tui.triangle-alert"
@@ -37,6 +29,14 @@ import { UpdatesCount } from '../updates-count'
               [attr.aria-label]="'Warning' | i18n"
               [attr.aria-hidden]="false"
             />
+          } @else if (item.badge(); as badge) {
+            <tui-badge-notification
+              tuiSlot="top"
+              size="s"
+              [appUpdatesCount]="item.routerLink === 'updates'"
+            >
+              {{ badge }}
+            </tui-badge-notification>
           }
           <tui-icon [icon]="item.icon" />
         </tui-badged-content>
