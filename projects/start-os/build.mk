@@ -222,11 +222,17 @@ projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts: $(ENV
 $(FIRMWARE_ROMS): projects/start-os/build/lib/firmware.json ./projects/start-os/build/download-firmware.sh $(PLATFORM_FILE)
 	./projects/start-os/build/download-firmware.sh $(PLATFORM)
 
-STARTBOX_INPUTS := $(CORE_SRC) $(COMPRESSED_WEB_UIS) projects/start-os/web/patchdb-ui-seed.json $(ENVIRONMENT_FILE) build/build-rust-bins.sh
-START_CONTAINER_INPUTS := $(CORE_SRC) $(ENVIRONMENT_FILE) build/build-rust-bins.sh
-RUST_BINS_start-os := start-os:startbox start-os:start-container
+STARTBOX_INPUTS := $(CORE_SRC) $(COMPRESSED_WEB_UIS) projects/start-os/web/patchdb-ui-seed.json $(ENVIRONMENT_FILE) $(RUST_BIN_BUILDER_INPUTS)
+START_CONTAINER_INPUTS := $(CORE_SRC) $(ENVIRONMENT_FILE) $(RUST_BIN_BUILDER_INPUTS)
+RUST_BINS_start-os := start-os:startbox
 RUST_OUTPUTS_start-os := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
 RUST_INPUTS_start-os := $(sort $(STARTBOX_INPUTS) $(START_CONTAINER_INPUTS))
+# start-container ships in the release profile, independent of startbox's profile.
+ifeq ($(PROFILE),release)
+RUST_BINS_start-os += start-os:start-container
+else
+RUST_INPUTS_start-os += target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
+endif
 
 target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox: $(STARTBOX_INPUTS)
 	ARCH=$(ARCH) PROFILE=$(PROFILE) ./build/build-rust-bins.sh start-os:startbox

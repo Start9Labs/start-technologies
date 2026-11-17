@@ -28,7 +28,7 @@ start-tunnel-install: $(TUNNEL_TARGETS) build/bash-completion
 
 RUST_BINS_start-tunnel := start-tunnel:tunnelbox
 RUST_OUTPUTS_start-tunnel := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/tunnelbox
-RUST_INPUTS_start-tunnel := $(CORE_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) projects/start-tunnel/web/dist/static/start-tunnel/immutable-assets.txt build/build-rust-bins.sh
+RUST_INPUTS_start-tunnel := $(CORE_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) projects/start-tunnel/web/dist/static/start-tunnel/immutable-assets.txt $(RUST_BIN_BUILDER_INPUTS)
 
 $(RUST_OUTPUTS_start-tunnel): $(RUST_INPUTS_start-tunnel)
 	ARCH=$(ARCH) PROFILE=$(PROFILE) ./build/build-rust-bins.sh $(RUST_BINS_start-tunnel)

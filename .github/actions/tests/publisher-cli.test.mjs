@@ -74,28 +74,70 @@ const ALL_PLATFORMS = [
   'riscv64-nonfree',
 ]
 
-// Runs a workflow step's script in a fixture with `gh` and `git` stubbed.
-function runStep(t, script, env, { files = [], fetches = true } = {}) {
+function successfulPush(overrides = {}) {
+  return {
+    id: 1,
+    run_number: 1,
+    event: 'push',
+    head_branch: 'master',
+    head_sha: 'd'.repeat(40),
+    head_repository: { full_name: 'Start9Labs/start-technologies' },
+    status: 'completed',
+    conclusion: 'success',
+    ...overrides,
+  }
+}
+
+function runStep(
+  t,
+  script,
+  env,
+  { files = [], fetches = true, pages = [[successfulPush()]], diffs = {} } = {},
+) {
   const f = fixture(t)
   f.write(
     '.github/scripts/changed-products.mjs',
     readFileSync(join(REPO, '.github/scripts/changed-products.mjs')),
   )
-  f.write('files.txt', files.join('\n') + '\n')
+  f.write(
+    'files.json',
+    JSON.stringify(
+      files.map(file => (typeof file === 'string' ? { filename: file } : file)),
+    ),
+  )
+  f.write('pages.json', JSON.stringify(pages))
+  f.write('diffs.json', JSON.stringify(diffs))
   f.write('gh.log', '')
   f.nodeExecutable(
     'gh',
     `import { appendFileSync, readFileSync } from 'node:fs'
-appendFileSync(${JSON.stringify(join(f.root, 'gh.log'))}, JSON.stringify(process.argv.slice(2)) + '\\n')
-if (process.argv[2] === 'api') process.stdout.write(readFileSync(${JSON.stringify(join(f.root, 'files.txt'))}))
+import { spawnSync } from 'node:child_process'
+const args = process.argv.slice(2)
+appendFileSync(${JSON.stringify(join(f.root, 'gh.log'))}, JSON.stringify(args) + '\\n')
+if (args[0] === 'api') {
+  let response
+  if (args[1].includes('/workflows/build-products.yaml/runs')) {
+    const page = Number(new URL('https://x/' + args[1]).searchParams.get('page'))
+    const pages = JSON.parse(readFileSync(${JSON.stringify(join(f.root, 'pages.json'))}))
+    response = { workflow_runs: pages[page - 1] ?? [] }
+  } else response = JSON.parse(readFileSync(${JSON.stringify(join(f.root, 'files.json'))}))
+  const result = spawnSync('jq', ['-r', args[args.indexOf('--jq') + 1]], { input: JSON.stringify(response), encoding: 'utf8' })
+  process.stdout.write(result.stdout)
+  process.stderr.write(result.stderr)
+  process.exit(result.status)
+}
 `,
   )
   f.nodeExecutable(
     'git',
     `import { readFileSync } from 'node:fs'
-const [command] = process.argv.slice(2)
-if (command === 'fetch') process.exit(${fetches ? 0 : 1})
-if (command === 'diff') process.stdout.write(readFileSync(${JSON.stringify(join(f.root, 'files.txt'))}))
+const args = process.argv.slice(2)
+if (args[0] === 'fetch') process.exit(${fetches ? 0 : 1})
+if (args[0] === 'diff') {
+  const diffs = JSON.parse(readFileSync(${JSON.stringify(join(f.root, 'diffs.json'))}))
+  const files = JSON.parse(readFileSync(${JSON.stringify(join(f.root, 'files.json'))}))
+  process.stdout.write((diffs[args.at(-2)] ?? files.map(file => file.filename)).join('\\n') + '\\n')
+}
 `,
   )
   const output = f.write('output', '')
@@ -106,6 +148,8 @@ if (command === 'diff') process.stdout.write(readFileSync(${JSON.stringify(join(
       GITHUB_OUTPUT: output,
       GITHUB_REPOSITORY: 'Start9Labs/start-technologies',
       GITHUB_SHA: SHA,
+      GITHUB_RUN_ID: '42',
+      GITHUB_REF_NAME: 'master',
       ...env,
     },
     encoding: 'utf8',
@@ -174,7 +218,7 @@ for (const [name, env, options, expected] of [
   [
     'a new branch rebuilds everything',
     { EVENT: 'push', BEFORE: '0'.repeat(40) },
-    { files: ['projects/start-tunnel/src/main.rs'] },
+    { files: ['projects/start-tunnel/src/main.rs'], pages: [] },
     { products: 'start-os start-cli start-registry start-tunnel' },
   ],
   [
@@ -182,6 +226,47 @@ for (const [name, env, options, expected] of [
     { EVENT: 'push', BEFORE: 'd'.repeat(40) },
     { files: ['projects/start-tunnel/src/main.rs'], fetches: false },
     { products: 'start-os start-cli start-registry start-tunnel' },
+  ],
+  [
+    'a surviving push rebuilds a product touched only by a superseded push',
+    { EVENT: 'push', BEFORE: 'e'.repeat(40) },
+    {
+      files: ['AGENTS.md'],
+      diffs: {
+        ['d'.repeat(40)]: ['projects/start-cli/src/main.rs', 'AGENTS.md'],
+      },
+    },
+    { products: 'start-cli' },
+  ],
+  [
+    'a page without successful pushes does not hide the preceding build',
+    { EVENT: 'push' },
+    {
+      files: ['projects/start-cli/src/main.rs'],
+      pages: [
+        [
+          successfulPush({ event: 'pull_request' }),
+          successfulPush({ conclusion: 'failure' }),
+          successfulPush({ id: 100 }),
+          successfulPush({ head_branch: 'integration/other' }),
+        ],
+        [successfulPush()],
+      ],
+    },
+    { products: 'start-cli' },
+  ],
+  [
+    'moving a file out of a product still rebuilds its former owner',
+    { EVENT: 'pull_request', PR_NUMBER: '7' },
+    {
+      files: [
+        {
+          filename: 'archive/cli.rs',
+          previous_filename: 'projects/start-cli/src/cli.rs',
+        },
+      ],
+    },
+    { products: 'start-cli' },
   ],
   [
     'a dispatch rebuilds everything',

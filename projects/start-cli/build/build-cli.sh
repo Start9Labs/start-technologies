@@ -35,8 +35,9 @@ if [ -z "${TARGET:-}" ]; then
   esac
 fi
 
-TARGET=$TARGET ./build/build-rust-bins.sh start-cli:start-cli
+PROFILE=$(./build/rust-build-profile.sh "${PROFILE:-}")
+PROFILE=$PROFILE TARGET=$TARGET ./build/build-rust-bins.sh start-cli:start-cli
 
 if [ "$INSTALL" = "true" ]; then
-  cp "target/$TARGET/${PROFILE:-release}/start-cli" ~/.cargo/bin/start-cli
+  cp "target/$TARGET/$PROFILE/start-cli" ~/.cargo/bin/start-cli
 fi

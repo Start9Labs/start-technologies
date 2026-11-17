@@ -16,7 +16,7 @@ start-registry-install: $(REGISTRY_TARGETS)
 
 RUST_BINS_start-registry := start-registry:registrybox
 RUST_OUTPUTS_start-registry := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/registrybox
-RUST_INPUTS_start-registry := $(CORE_SRC) $(ENVIRONMENT_FILE) build/build-rust-bins.sh
+RUST_INPUTS_start-registry := $(CORE_SRC) $(ENVIRONMENT_FILE) $(RUST_BIN_BUILDER_INPUTS)
 
 $(RUST_OUTPUTS_start-registry): $(RUST_INPUTS_start-registry)
 	ARCH=$(ARCH) PROFILE=$(PROFILE) ./build/build-rust-bins.sh $(RUST_BINS_start-registry)

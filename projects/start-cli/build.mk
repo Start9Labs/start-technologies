@@ -8,7 +8,7 @@ start-cli: $(GIT_HASH_FILE)
 
 RUST_BINS_start-cli := start-cli:start-cli
 RUST_OUTPUTS_start-cli := $(CLI_TARGETS)
-RUST_INPUTS_start-cli := $(CORE_SRC) $(ENVIRONMENT_FILE) build/build-rust-bins.sh
+RUST_INPUTS_start-cli := $(CORE_SRC) $(ENVIRONMENT_FILE) $(RUST_BIN_BUILDER_INPUTS)
 
 # Build into a workspace-relative path for packaging (musl release).
 $(CLI_TARGETS): $(RUST_INPUTS_start-cli)

@@ -15,13 +15,10 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
-PROFILE=${PROFILE:-release}
+PROFILE=$(./build/rust-build-profile.sh "${PROFILE:-}")
 BUILD_FLAGS=()
 if [ "$PROFILE" = release ]; then
   BUILD_FLAGS=(--release)
-elif [ "$PROFILE" != debug ]; then
-  >&2 echo "Unknown profile $PROFILE: falling back to debug..."
-  PROFILE=debug
 fi
 
 ARCH=${ARCH:-$(uname -m)}

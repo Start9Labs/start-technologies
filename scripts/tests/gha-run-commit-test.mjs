@@ -11,6 +11,7 @@ for (const [name, run, expected] of [
     'a build run reports its head commit',
     {
       path: '.github/workflows/build-products.yaml',
+      name: 'Build Products',
       head_sha: SHA,
       display_title: 'fix: x',
     },
@@ -20,6 +21,7 @@ for (const [name, run, expected] of [
     'a StartOS publish run reports the build commit its title names',
     {
       path: '.github/workflows/startos-iso.yaml',
+      name: 'StartOS Publish',
       head_sha: HEAD,
       display_title: `StartOS alpha publish of ${SHA}`,
     },
@@ -29,10 +31,21 @@ for (const [name, run, expected] of [
     'a publish run without a commit in its title is refused',
     {
       path: '.github/workflows/startos-iso.yaml',
+      name: 'StartOS Publish',
       head_sha: HEAD,
-      display_title: 'Debian-based ISO and SquashFS',
+      display_title: 'StartOS Publish',
     },
     null,
+  ],
+  [
+    'an image build preceding the dispatch split reports its head commit',
+    {
+      path: '.github/workflows/startos-iso.yaml',
+      name: 'Debian-based ISO and SquashFS',
+      head_sha: SHA,
+      display_title: 'fix: preserve earlier image runs',
+    },
+    SHA,
   ],
 ]) {
   test(`gha-run-commit: ${name}`, t => {

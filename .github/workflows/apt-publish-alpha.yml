@@ -71,15 +71,19 @@ jobs:
           # that name — this job would then collect and sign attacker-built
           # .debs into alpha. It also excludes workflow_dispatch builds, which
           # may be dev-flavoured or partial-arch.
-          # Artifacts expire after 14 days, well inside three pages of runs.
-          for page in 1 2 3; do
-            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/build-products.yaml/runs?per_page=100&page=$page" \
-              --jq '[.workflow_runs[]
-                | select(.event == "push" and .head_branch == "master"
-                    and .status == "completed"
-                    and .head_repository.full_name == env.GITHUB_REPOSITORY)]
-                | sort_by(.created_at) | reverse | .[].id')
-            [ -n "$runs" ] || break
+          # The listing is newest first, and debs expire after 14 days: a page
+          # with no newer run ends the search.
+          cutoff=$(jq -nr 'now - 15 * 86400 | todate')
+          page=1
+          while :; do
+            response=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/build-products.yaml/runs?per_page=100&page=$page")
+            jq -e --arg cutoff "$cutoff" 'any(.workflow_runs[]; .created_at >= $cutoff)' \
+              <<< "$response" > /dev/null || break
+            runs=$(jq -r '[.workflow_runs[]
+              | select(.event == "push" and .head_branch == "master"
+                  and .status == "completed"
+                  and .head_repository.full_name == env.GITHUB_REPOSITORY)]
+              | sort_by(.created_at) | reverse | .[].id' <<< "$response")
             for run_id in $runs; do
               names=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
                 --jq '.artifacts[] | select(.expired | not) | .name')
@@ -93,6 +97,7 @@ jobs:
               done
               [ "${#chosen[@]}" -lt "${#products[@]}" ] || break 2
             done
+            page=$((page + 1))
           done
           collected=0
           for product in "${products[@]}"; do
