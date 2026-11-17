@@ -12,7 +12,7 @@ release-notes: false
 - Send setup and recovery secrets inside encrypted RPC without duplicate password encryption; retain legacy encrypted-password compatibility.
 - Preserve HTTP resource/header, foreign-origin and legacy-client contracts, including consecutive browser RPC calls as prior connections finish closing.
 - Reject unsupported parameter shapes without dropping an authenticated connection.
-- Remember the browser's verified normal-server identity and warn on changes without blocking the connection, with fingerprint details for verification; startup peers do not enter that history.
+- Remember the browser's verified normal-server identity and warn on changes without blocking the connection, with fingerprint details for verification. Restarts, initialization and diagnostics keep the persisted server identity; temporary recovery identities neither enter that history nor receive normal requests.
 - Cancel pending device-key acquisition and enrollment across logout, replacement and rollback.
 - Bound replay-cache memory when clock synchronization is unavailable.
 - Preserve request IDs on middleware errors.

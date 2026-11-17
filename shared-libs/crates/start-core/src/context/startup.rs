@@ -14,10 +14,6 @@ use crate::util::sync::SyncMutex;
 
 pub(crate) const IDENTITY_PATH: &str = "/media/startos/config/id.key.pem";
 
-pub(crate) fn setup_identity_path() -> PathBuf {
-    setup_identity_path_at(Path::new(IDENTITY_PATH))
-}
-
 fn setup_identity_path_at(identity: &Path) -> PathBuf {
     identity.with_file_name("setup.key.pem")
 }
@@ -98,8 +94,13 @@ async fn diagnostic_identity_at(path: &Path) -> DiagnosticIdentity {
     }
 }
 
+/// Carries the live session's admitted identity, replacing preserved setup keys.
 pub(crate) async fn persist_setup_identity(key: &SigningKey) -> Result<(), Error> {
-    persist_identity_at(&setup_identity_path(), key).await
+    persist_setup_identity_at(Path::new(IDENTITY_PATH), key).await
+}
+
+async fn persist_setup_identity_at(path: &Path, key: &SigningKey) -> Result<(), Error> {
+    persist_identity_at(&setup_identity_path_at(path), key).await
 }
 
 pub(crate) async fn mirror_configured_identity(key: &SigningKey) -> Result<(), Error> {

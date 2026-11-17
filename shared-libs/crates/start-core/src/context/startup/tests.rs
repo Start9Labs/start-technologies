@@ -60,7 +60,7 @@ async fn setup_keeps_its_identity_when_installation_replaces_the_config_mount() 
     std::fs::remove_file(&setup_path).unwrap();
     let carried = startup.key_at(&path).unwrap();
     assert_eq!(carried.to_bytes(), key.to_bytes());
-    persist_identity_at(&setup_path, &carried).await.unwrap();
+    persist_setup_identity_at(&path, &carried).await.unwrap();
     assert_eq!(
         startup_identity_at(config.path())
             .await
@@ -68,6 +68,47 @@ async fn setup_keeps_its_identity_when_installation_replaces_the_config_mount() 
             .unwrap()
             .to_bytes(),
         key.to_bytes()
+    );
+}
+
+#[tokio::test]
+async fn preserve_reinstall_replaces_a_stale_setup_key_without_changing_the_saved_account_key() {
+    let live_config = tempfile::tempdir().unwrap();
+    let live_key = startup_identity_at(live_config.path())
+        .await
+        .unwrap()
+        .unwrap();
+    let startup = StartupRpc::new(Some(live_key.clone()));
+    let installed_config = tempfile::tempdir().unwrap();
+    let path = installed_config.path().join("id.key.pem");
+    let old_account = AccountInfo::new("password", SystemTime::now(), None).unwrap();
+    persist_identity_at(&path, &old_account.server_identity_key)
+        .await
+        .unwrap();
+    persist_identity_at(
+        &setup_identity_path_at(&path),
+        &old_account.server_identity_key,
+    )
+    .await
+    .unwrap();
+
+    persist_setup_identity_at(&path, &startup.key_at(&path).unwrap())
+        .await
+        .unwrap();
+    let installed = startup_identity_at(installed_config.path())
+        .await
+        .unwrap()
+        .unwrap();
+    let fresh =
+        AccountInfo::new_with_identity("password", SystemTime::now(), None, installed).unwrap();
+    assert_eq!(fresh.server_identity_key.to_bytes(), live_key.to_bytes());
+    assert_ne!(
+        fresh.server_identity_key.to_bytes(),
+        old_account.server_identity_key.to_bytes()
+    );
+    assert_eq!(
+        load_signing_key(&path).unwrap().to_bytes(),
+        old_account.server_identity_key.to_bytes()
     );
 }
 

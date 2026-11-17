@@ -24,7 +24,8 @@ attach/restore retain the selected account's key. Common initialization mirrors 
 only for a configured server. Completion durably publishes the account copy, atomically writes
 `disk.guid`, then removes the setup key. Interruption before that marker leaves the separate
 setup key active; an imported account key can never seed a later fresh account. The installer
-carries the setup key across config-mount replacement. Forgetting a data drive and emulated
+carries the live session's admitted identity across config-mount replacement, replacing preserved
+setup keys. Forgetting a data drive and emulated
 reflash share `forget-server-identity`, which durably removes both keys before deleting the
 marker.
 
