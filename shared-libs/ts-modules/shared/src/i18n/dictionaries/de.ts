@@ -1333,4 +1333,5 @@ export default {
   1537: 'Zeitpläne verwalten',
   1538: 'Automatische Prüfpunkte enthalten dienstbezogene Daten. Sichern Sie gemeinsam genutzte Volumes separat unter Sicherungen.',
   1539: 'Ein Teil des Sicherungsverlaufs konnte nicht geladen werden. Versuchen Sie es erneut, um ältere Sicherungen und ausführliche Berichte einzubeziehen.',
+  1540: 'Die Synchronisierung dauert länger als erwartet. Aktualisieren Sie die Seite, um es erneut zu versuchen.',
 } satisfies i18n

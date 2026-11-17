@@ -1333,4 +1333,5 @@ export default {
   1537: 'Gestionar programaciones',
   1538: 'Los puntos de control automáticos incluyen los datos propios de los servicios. Haga copias de los volúmenes compartidos por separado desde Copias de seguridad.',
   1539: 'No se pudo cargar parte del historial de copias de seguridad. Vuelva a intentarlo para incluir las copias anteriores y los informes detallados.',
+  1540: 'La sincronización está tardando más de lo esperado. Actualiza la página para volver a intentarlo.',
 } satisfies i18n

@@ -28,26 +28,7 @@ runs:
     - name: Free disk space
       if: inputs.free-space == 'true'
       shell: bash
-      run: |
-        df -h /
-        sudo apt-get remove --purge -y azure-cli || true
-        sudo apt-get remove --purge -y firefox || true
-        sudo apt-get remove --purge -y ghc-* || true
-        sudo apt-get remove --purge -y google-cloud-sdk || true
-        sudo apt-get remove --purge -y google-chrome-stable || true
-        sudo apt-get remove --purge -y powershell || true
-        sudo apt-get remove --purge -y php* || true
-        sudo apt-get remove --purge -y ruby* || true
-        sudo apt-get remove --purge -y mono-* || true
-        sudo apt-get autoremove -y
-        sudo apt-get clean
-        sudo rm -rf /usr/lib/jvm
-        sudo rm -rf /usr/local/.ghcup
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /usr/share/swift
-        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-        df -h /
+      run: '"$GITHUB_ACTION_PATH/free-disk-space.sh"'
 
     # Some runners lack /opt/hostedtoolcache, which setup-python and setup-qemu expect
     - name: Ensure hostedtoolcache exists

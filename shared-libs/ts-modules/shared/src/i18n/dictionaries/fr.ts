@@ -1333,4 +1333,5 @@ export default {
   1537: 'Gérer les planifications',
   1538: 'Les points de contrôle automatiques incluent les données propres aux services. Sauvegardez les volumes partagés séparément depuis Sauvegardes.',
   1539: 'Une partie de l’historique des sauvegardes n’a pas pu être chargée. Réessayez pour inclure les anciennes sauvegardes et les rapports détaillés.',
+  1540: 'La synchronisation prend plus de temps que prévu. Rafraîchissez la page pour réessayer.',
 } satisfies i18n

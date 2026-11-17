@@ -598,7 +598,7 @@ class JobEditor
             }
           </div>
 
-          <fieldset>
+          <fieldset class="capacity-estimates">
             <div class="heading estimate-heading">
               <legend>{{ 'Capacity estimates' | i18n }}</legend>
               <button
@@ -1134,6 +1134,10 @@ class JobEditor
 
     .estimate-heading {
       margin: 0 0 0.5rem;
+    }
+
+    .capacity-estimates {
+      grid-template-columns: minmax(0, 1fr);
     }
 
     .capacity-list,

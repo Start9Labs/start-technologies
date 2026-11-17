@@ -1334,4 +1334,5 @@ export const ENGLISH: Record<string, number> = {
   "Manage schedules": 1537,
   "Automatic checkpoints include service-owned data. Back up shared volumes separately from Backups.": 1538,
   'Some backup history could not be loaded. Retry to include older backups and detailed reports.': 1539,
+  'Syncing is taking longer than expected. Refresh to try again.': 1540,
 }

@@ -47,7 +47,7 @@ const { rpcResponseStream } = await import(
 const flush = () => new Promise(setImmediate)
 const root = new URL('../../../projects/', import.meta.url)
 
-async function fixture(t, product) {
+async function fixture(t, product, { epoch } = {}) {
   t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'], now: Date.now() })
   const scope = product === 'os' ? 'start-os/web/ui' : 'start-tunnel/web'
   const path = file => new URL(`${scope}/src/app/services/${file}.ts`, root)
@@ -65,6 +65,24 @@ async function fixture(t, product) {
   const { PatchDbSource, PATCH_CACHE } = await import(
     path('patch-db/patch-db-source')
   )
+  const patchCache = {
+    epoch,
+    read: async () => ({
+      id: 7,
+      value: { serverInfo: { hostname: 'cached' } },
+    }),
+    clear() {},
+  }
+  const patchCacheProvider =
+    product === 'os'
+      ? [
+          {
+            provide: (await import(path('patch-db/patch-db-cache')))
+              .PatchDbCache,
+            useValue: patchCache,
+          },
+        ]
+      : []
   const { Router } = await import('@angular/router')
   const cache = new BehaviorSubject({ id: 0, value: {} })
   const state = new BehaviorSubject('running')
@@ -98,11 +116,12 @@ async function fixture(t, product) {
   const identity = { openObserver: { next() {} } }
   const sockets = {
     stream: (body, lease, options) => {
-      assert.deepEqual(JSON.parse(body), { method: 'db.subscribe', params: {} })
+      const { method, params } = JSON.parse(body)
+      assert.equal(method, 'db.subscribe')
       assert.equal(options.openObserver, identity.openObserver)
       const frames = new Subject()
       const signal = AbortSignal.any([options.signal, lease.signal])
-      calls.push({ frames, signal })
+      calls.push({ frames, signal, params })
       return rpcResponseStream(frames, { ...options, signal })
     },
   }
@@ -112,13 +131,8 @@ async function fixture(t, product) {
     { provide: DOCUMENT, useValue: { defaultView: {} } },
     { provide: NgZone, useValue: { run: task => task() } },
     { provide: Router, useValue: { navigate: async () => true } },
-    {
-      provide: StorageService,
-      useValue: {
-        get: () => ({ serverInfo: { hostname: 'cached' } }),
-        clear() {},
-      },
-    },
+    { provide: StorageService, useValue: { clear() {} } },
+    ...patchCacheProvider,
     { provide: AuthKeyService, useValue: keys },
     { provide: HttpService, useValue: {} },
     { provide: RpcSocketService, useValue: sockets },
@@ -136,6 +150,7 @@ async function fixture(t, product) {
   await auth.init()
   effects.flush()
   db.start()
+  await flush()
   t.after(() => {
     db.stop()
     injector.destroy()
@@ -191,6 +206,7 @@ async function fixture(t, product) {
   }
   return {
     db,
+    patchCache,
     source,
     auth,
     effects,
@@ -219,12 +235,12 @@ for (const product of ['os', 'tunnel']) {
     const f = await fixture(t, product)
     assert.equal(f.calls.length, 0)
     if (product === 'os') {
-      assert.equal(f.cache.value.id, 1)
-      assert.deepEqual(f.cache.value.value.registryCache, {})
-      assert.equal(f.cache.value.value.osUpdateCache, null)
+      assert.equal(f.cache.value.id, 7)
+      assert.equal(f.cache.value.value.serverInfo.hostname, 'cached')
     } else assert.equal(f.cache.value.id, 0)
     f.verify()
     await flush()
+    assert.deepEqual(f.calls[0].params, {})
     await f.dump(0, 10)
     assert.equal(f.cache.value.id, 10)
     f.revision(0, 11)
@@ -385,3 +401,48 @@ for (const product of ['os', 'tunnel']) {
     })
   }
 }
+
+test('os resumes from its snapshot, then from its live revision after loss', async t => {
+  const f = await fixture(t, 'os', { epoch: 'boot-1' })
+  f.verify()
+  await flush()
+  assert.deepEqual(f.calls[0].params, { since: { epoch: 'boot-1', id: 7 } })
+  f.frame(0, {
+    jsonrpc: '2.0',
+    result: {
+      epoch: 'boot-1',
+      id: 9,
+      value: null,
+      revisions: [
+        {
+          id: 8,
+          patch: [
+            { op: 'replace', path: '/serverInfo/hostname', value: 'resumed' },
+          ],
+        },
+      ],
+    },
+    meta: { patchSequence: 9 },
+  })
+  await flush()
+  assert.equal(f.cache.value.id, 9)
+  assert.equal(f.cache.value.value.serverInfo.hostname, 'resumed')
+  f.calls[0].frames.error({ code: 0, message: 'lost' })
+  await flush()
+  await f.recover()
+  assert.deepEqual(f.calls[1].params, { since: { epoch: 'boot-1', id: 9 } })
+  f.frame(1, {
+    jsonrpc: '2.0',
+    result: {
+      epoch: 'boot-2',
+      id: 3,
+      value: { serverInfo: { hostname: 'rebooted' } },
+      revisions: null,
+    },
+    meta: { patchSequence: 3 },
+  })
+  await flush()
+  assert.equal(f.patchCache.epoch, 'boot-2')
+  assert.equal(f.cache.value.id, 3)
+  assert.equal(f.cache.value.value.serverInfo.hostname, 'rebooted')
+})

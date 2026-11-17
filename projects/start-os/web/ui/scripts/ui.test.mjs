@@ -49,8 +49,9 @@ boundary(
     'ExverComparesPipe',
     'LeafProgressPipe',
   ],
-  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const convertBytes = value => String(value); export const getErrorMessage = error => error.message; export const leafProgress = progress => progress; ' +
+  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const isDefaultRegistry = url => Object.values(defaultRegistries).some(known => defaultUrl(known, url)); export const convertBytes = value => String(value); export const getErrorMessage = error => error.message; export const leafProgress = progress => progress; ' +
     `export { sameUrl, registryUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
+    `import { sameUrl as defaultUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
     `export { legacyDatabaseSubscription } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/services/database-subscription.ts', import.meta.url).href)};` +
     `export { withAbortSignal } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/with-abort.ts', import.meta.url).href)};`,
 )
@@ -813,6 +814,98 @@ test('a retry syncs matching server/UI versions without reloading on no-new-vers
   assert.equal(f.reloads, 1)
 })
 
+for (const stalled of ['checking', 'updating']) {
+  test(`a sync the worker never settles offers Refresh after its deadline: ${stalled}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const f = uiFixture(t)
+    await f.rebuild()
+    if (stalled === 'updating') {
+      t.mock.timers.tick(30_000)
+      f.events.next(detected)
+    }
+    t.mock.timers.tick(59_999)
+    assert.equal(f.ui.state().status, stalled)
+    f.ui.refresh()
+    assert.equal(f.reloads, 0)
+    t.mock.timers.tick(1)
+    assert.equal(f.ui.state().status, 'stalled')
+    assert.equal(f.ui.phase(), 'stalled')
+    assert.equal(f.ui.canRefresh(), true)
+    assert.equal(f.reloads, 0)
+    f.ui.refresh()
+    assert.equal(f.reloads, 1)
+  })
+}
+
+test('a worker report after the sync deadline still decides the outcome', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = uiFixture(t)
+  await f.rebuild()
+  t.mock.timers.tick(60_000)
+  assert.equal(f.ui.state().status, 'stalled')
+  f.events.next(failed)
+  assert.equal(f.ui.state().status, 'error')
+  f.ui.refresh()
+  assert.equal(f.reloads, 0)
+})
+
+for (const found of [true, false]) {
+  test(`a check completing after its deadline still decides the outcome: ${found}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const f = uiFixture(t)
+    await f.rebuild()
+    t.mock.timers.tick(60_000)
+    f.checks[0].resolve(found)
+    await tick()
+    assert.equal(f.ui.state().status, found ? 'ready' : 'error')
+    assert.equal(f.ui.canRefresh(), found)
+    assert.equal(f.reloads, 0)
+    f.ui.refresh()
+    assert.equal(f.reloads, found ? 1 : 0)
+  })
+}
+
+test('a cached-update report after the deadline wins over its false check result', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = uiFixture(t)
+  await f.rebuild()
+  t.mock.timers.tick(60_000)
+  f.events.next(noUpdate)
+  f.checks[0].resolve(false)
+  await tick()
+  assert.equal(f.ui.state().status, 'ready')
+  assert.equal(f.ui.phase(), 'ready')
+  assert.equal(f.reloads, 0)
+})
+
+test('an installation failure cancels the sync deadline', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = uiFixture(t)
+  await f.rebuild()
+  f.events.next(detected)
+  f.events.next(failed)
+  t.mock.timers.tick(60_000)
+  assert.equal(f.ui.state().status, 'error')
+  assert.equal(f.ui.canRefresh(), false)
+  assert.equal(f.reloads, 0)
+})
+
+test('a stalled sync retains cache-reset recovery without claiming completion', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = uiFixture(t)
+  await f.rebuild()
+  t.mock.timers.tick(60_000)
+  assert.equal(f.ui.phase(), 'stalled')
+  assert.equal(f.ui.busy(), false)
+  await f.ui.resetCache()
+  assert.equal(f.ui.state().status, 'reloading')
+  assert.equal(f.reloads, 1)
+  assert.deepEqual(
+    [...f.caches.keys()],
+    ['ngsw:/other/:db:control', 'other-cache'],
+  )
+})
+
 test('Refresh before sync completion never queues a reload', async t => {
   const f = uiFixture(t)
   f.ui.refresh()
@@ -897,7 +990,7 @@ test('cache-reset failure preserves the UI and exposes the error without an auto
   assert.equal(f.caches.size, 5)
 })
 
-test('syncing remains dismissible; only a completed sync can start non-dismissible navigation', async t => {
+test('syncing remains dismissible; explicit navigation blocks dismissal', async t => {
   const f = uiFixture(t)
   const component = f.make(RefreshAlertComponent)
   await f.rebuild()
@@ -4336,6 +4429,21 @@ test('registry availability distinguishes first sync, empty success and cached r
   assert.deepEqual(f.queries, [])
 })
 
+test('saved registries list the defaults first, in their declared order', t => {
+  const f = marketplaceFixture(t)
+  const rows = f.watch(f.service.registries$)
+  f.replace('/serverInfo/registries', {
+    'https://alpha.test/': 'Alpha',
+    'https://community.test/': 'Community',
+    'https://custom.test/': 'Custom',
+    'https://registry.test/': 'Start9',
+  })
+  assert.deepEqual(
+    rows.at(-1).map(row => row.name),
+    ['Start9', 'Community', 'Alpha', 'Custom'],
+  )
+})
+
 test('registry failures project exact details to both the current catalog and management rows', t => {
   const f = marketplaceFixture(t)
   f.makePage()
@@ -4566,26 +4674,170 @@ test('exact/source package queries wait for and track their registry cache, igno
   assert.equal(values.at(-1).version, '1.0.0:0')
 })
 
-test('browser bootstrap accepts snapshots saved before registry caches existed', async t => {
-  const { LocalStorageBootstrap } =
-    await import('src/app/services/patch-db/local-storage-bootstrap')
-  const stored = {
-    ui: { registries: {} },
-    serverInfo: { version: '0.4.0.2' },
-    packageData: {},
+function fakeIndexedDb() {
+  let data = { values: new Map(), meta: new Map() }
+  const control = { fail: false, puts: [] }
+  const db = {
+    transaction(_, mode) {
+      const staged = { values: new Map(data.values), meta: new Map(data.meta) }
+      const tx = {
+        objectStore: name => ({
+          get: key => {
+            const request = { result: staged[name].get(key) }
+            queueMicrotask(() => request.onsuccess?.())
+            return request
+          },
+          getAll: () => ({ result: [...staged[name].values()] }),
+          getAllKeys: () => ({ result: [...staged[name].keys()] }),
+          put: (value, key) => {
+            if (name === 'values') control.puts.push(key)
+            staged[name].set(key, structuredClone(value))
+          },
+          delete: key => staged[name].delete(key),
+          clear: () => staged[name].clear(),
+        }),
+      }
+      queueMicrotask(() => {
+        queueMicrotask(() => {
+          if (mode === 'readwrite' && control.fail) {
+            control.fail = false
+            tx.error = new Error('quota')
+            tx.onerror()
+          } else {
+            if (mode === 'readwrite') data = staged
+            tx.oncomplete()
+          }
+        })
+      })
+      return tx
+    },
   }
+  const win = {
+    indexedDB: {
+      open: () => {
+        const request = {}
+        queueMicrotask(() => {
+          request.result = db
+          request.onsuccess()
+        })
+        return request
+      },
+    },
+  }
+  return { win, control }
+}
+
+async function patchDbCache(t, win) {
+  const { PatchDbCache } =
+    await import('src/app/services/patch-db/patch-db-cache')
   const injector = createEnvironmentInjector([
-    { provide: StorageService, useValue: { get: () => stored } },
+    { provide: WA_WINDOW, useValue: win },
   ])
   t.after(() => injector.destroy())
-  const bootstrap = runInInjectionContext(
-    injector,
-    () => new LocalStorageBootstrap(),
-  )
-  assert.deepEqual(bootstrap.init().value, {
-    ...stored,
-    registryCache: {},
-    osUpdateCache: null,
+  return runInInjectionContext(injector, () => new PatchDbCache())
+}
+
+test('patch cache rewrites only replaced top-level values', async t => {
+  const { win, control } = fakeIndexedDb()
+  t.mock.method(console, 'error', () => {})
+  const writer = await patchDbCache(t, win)
+  assert.deepEqual(await writer.read(), { id: 0, value: {} })
+  writer.epoch = 'boot'
+  await writer.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
+  assert.deepEqual(control.puts, ['ui', 'packageData'])
+
+  const reader = await patchDbCache(t, win)
+  const cached = await reader.read()
+  assert.deepEqual(cached, {
+    id: 3,
+    value: { ui: { a: 1 }, packageData: {} },
   })
-  assert.equal('registryCache' in stored, false)
+  assert.equal(reader.epoch, 'boot')
+  control.puts = []
+  await reader.write({
+    id: 4,
+    value: { ...cached.value, packageData: { x: 1 } },
+  })
+  assert.deepEqual(control.puts, ['packageData'])
+  await reader.write({ id: 5, value: { ui: cached.value.ui } })
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 5,
+    value: { ui: { a: 1 } },
+  })
+})
+
+test('patch cache keeps a complete snapshot when another tab advances the stored revision', async t => {
+  const { win } = fakeIndexedDb()
+  const fast = await patchDbCache(t, win)
+  const slow = await patchDbCache(t, win)
+  await fast.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
+  const cached = await slow.read()
+  await fast.write({
+    id: 5,
+    value: { ui: { a: 3 }, packageData: { x: 1 } },
+  })
+  const delayed = {
+    id: 4,
+    value: { ui: { a: 2 }, packageData: cached.value.packageData },
+  }
+  await slow.write(delayed)
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), delayed)
+})
+
+test('patch cache rewrites every key when another tab stored the same revision from another epoch', async t => {
+  const { win } = fakeIndexedDb()
+  const rebooted = await patchDbCache(t, win)
+  const stale = await patchDbCache(t, win)
+  rebooted.epoch = 'boot-1'
+  await rebooted.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
+  const cached = await stale.read()
+  rebooted.epoch = 'boot-2'
+  await rebooted.write({
+    id: 3,
+    value: { ui: { a: 9 }, packageData: { x: 9 } },
+  })
+  const delayed = {
+    id: 4,
+    value: { ui: { a: 2 }, packageData: cached.value.packageData },
+  }
+  await stale.write(delayed)
+  const reader = await patchDbCache(t, win)
+  assert.deepEqual(await reader.read(), delayed)
+  assert.equal(reader.epoch, 'boot-1')
+})
+
+test('patch cache restores every key after another tab clears the snapshot', async t => {
+  const { win } = fakeIndexedDb()
+  const active = await patchDbCache(t, win)
+  const other = await patchDbCache(t, win)
+  const value = { ui: { a: 1 }, packageData: { x: 1 } }
+  await active.write({ id: 3, value })
+  await other.clear()
+  const next = { id: 4, value: { ...value, ui: { a: 2 } } }
+  await active.write(next)
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), next)
+})
+
+test('patch cache discards its snapshot after a failed write and clears on demand', async t => {
+  const { win, control } = fakeIndexedDb()
+  t.mock.method(console, 'error', () => {})
+  const cache = await patchDbCache(t, win)
+  cache.epoch = 'boot'
+  const value = { ui: { a: 1 }, packageData: {} }
+  await cache.write({ id: 3, value })
+  control.fail = true
+  await cache.write({ id: 4, value: { ...value, ui: { a: 2 } } })
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 0,
+    value: {},
+  })
+  control.puts = []
+  await cache.write({ id: 5, value })
+  assert.deepEqual(control.puts, ['ui', 'packageData'])
+  await cache.clear()
+  assert.equal(cache.epoch, null)
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 0,
+    value: {},
+  })
 })
