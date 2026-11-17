@@ -1,4 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::hash_map::RandomState;
+use std::collections::{BTreeMap, VecDeque};
+use std::hash::{BuildHasher, Hasher};
 use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -6,7 +8,7 @@ use std::task::{ready, Poll};
 
 use bytes::Bytes;
 use futures::Stream;
-use imbl_value::Value;
+use imbl_value::{InternedString, Value};
 use json_patch::patch;
 use json_ptr::JsonPointer;
 use serde::de::DeserializeOwned;
@@ -66,16 +68,59 @@ impl ScopedBroadcast {
     }
 }
 
-#[derive(Debug, Default)]
+const HISTORY_LEN: usize = 1024;
+
+#[derive(Debug)]
 pub struct Broadcast {
     listeners: BTreeMap<JsonPointer, ScopedBroadcast>,
+    history: VecDeque<Arc<Revision>>,
+    epoch: InternedString,
+}
+impl Default for Broadcast {
+    fn default() -> Self {
+        Self {
+            listeners: BTreeMap::new(),
+            history: VecDeque::new(),
+            epoch: InternedString::from_display(&format_args!(
+                "{:016x}",
+                RandomState::new().build_hasher().finish()
+            )),
+        }
+    }
 }
 impl Broadcast {
     pub fn new() -> Self {
         Default::default()
     }
 
-    pub fn send(&mut self, value: &Revision) {
+    /// Distinguishes this broadcast's revision history from any other's.
+    pub fn epoch(&self) -> &InternedString {
+        &self.epoch
+    }
+
+    /// Returns the revisions after `since` up to `current`, scoped to `ptr`,
+    /// or `None` once the retained history no longer reaches back to `since`.
+    pub fn replay(&self, ptr: &JsonPointer, since: u64, current: u64) -> Option<Vec<Revision>> {
+        if since > current
+            || since < current && self.history.front().map_or(true, |rev| rev.id > since + 1)
+        {
+            return None;
+        }
+        Some(
+            self.history
+                .iter()
+                .filter(|rev| rev.id > since)
+                .map(|rev| rev.for_path(ptr))
+                .filter(|rev| !rev.patch.is_empty())
+                .collect(),
+        )
+    }
+
+    pub fn send(&mut self, value: &Arc<Revision>) {
+        while self.history.len() >= HISTORY_LEN {
+            self.history.pop_front();
+        }
+        self.history.push_back(value.clone());
         self.listeners.retain(|ptr, listeners| {
             listeners.dump = None;
             listeners.prune_unbounded();

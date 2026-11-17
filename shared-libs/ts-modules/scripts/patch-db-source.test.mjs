@@ -50,7 +50,7 @@ const root = new URL('../../../projects/', import.meta.url)
 async function fixture(
   t,
   product,
-  cachedValue = { serverInfo: { hostname: 'cached' } },
+  { epoch, cachedValue = { serverInfo: { hostname: 'cached' } } } = {},
 ) {
   t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'], now: Date.now() })
   const scope = product === 'os' ? 'start-os/web/ui' : 'start-tunnel/web'
@@ -69,19 +69,18 @@ async function fixture(
   const { PatchDbSource, PATCH_CACHE, PATCH_LIVE } = await import(
     path('patch-db/patch-db-source')
   )
-  const patchCache =
+  const patchCache = {
+    epoch,
+    read: async () => ({ id: 7, value: cachedValue }),
+    clear() {},
+  }
+  const patchCacheProvider =
     product === 'os'
       ? [
           {
             provide: (await import(path('patch-db/patch-db-cache')))
               .PatchDbCache,
-            useValue: {
-              read: async () => ({
-                id: 7,
-                value: cachedValue,
-              }),
-              clear() {},
-            },
+            useValue: patchCache,
           },
         ]
       : []
@@ -118,11 +117,12 @@ async function fixture(
   const identity = { openObserver: { next() {} } }
   const sockets = {
     stream: (body, lease, options) => {
-      assert.deepEqual(JSON.parse(body), { method: 'db.subscribe', params: {} })
+      const { method, params } = JSON.parse(body)
+      assert.equal(method, 'db.subscribe')
       assert.equal(options.openObserver, identity.openObserver)
       const frames = new Subject()
       const signal = AbortSignal.any([options.signal, lease.signal])
-      calls.push({ frames, signal })
+      calls.push({ frames, signal, params })
       return rpcResponseStream(frames, { ...options, signal })
     },
   }
@@ -133,7 +133,7 @@ async function fixture(
     { provide: NgZone, useValue: { run: task => task() } },
     { provide: Router, useValue: { navigate: async () => true } },
     { provide: StorageService, useValue: { clear() {} } },
-    ...patchCache,
+    ...patchCacheProvider,
     { provide: AuthKeyService, useValue: keys },
     { provide: HttpService, useValue: {} },
     { provide: RpcSocketService, useValue: sockets },
@@ -211,6 +211,7 @@ async function fixture(
   }
   return {
     db,
+    patchCache,
     source,
     connection: product === 'os' ? injector.get(PATCH_LIVE) : undefined,
     auth,
@@ -250,7 +251,7 @@ for (const status of ['connected', 'error']) {
       serverInfo: { hostname: 'cached' },
       registryCache: { [url]: entry },
     }
-    const f = await fixture(t, 'os', cachedValue)
+    const f = await fixture(t, 'os', { cachedValue })
     const registries = []
     const confirmations = []
     const subscription = f.db
@@ -317,6 +318,7 @@ for (const product of ['os', 'tunnel']) {
     } else assert.equal(f.cache.value.id, 0)
     f.verify()
     await flush()
+    assert.deepEqual(f.calls[0].params, {})
     await f.dump(0, 10)
     assert.equal(f.cache.value.id, 10)
     f.revision(0, 11)
@@ -477,3 +479,48 @@ for (const product of ['os', 'tunnel']) {
     })
   }
 }
+
+test('os resumes from its snapshot, then from its live revision after loss', async t => {
+  const f = await fixture(t, 'os', { epoch: 'boot-1' })
+  f.verify()
+  await flush()
+  assert.deepEqual(f.calls[0].params, { since: { epoch: 'boot-1', id: 7 } })
+  f.frame(0, {
+    jsonrpc: '2.0',
+    result: {
+      epoch: 'boot-1',
+      id: 9,
+      value: null,
+      revisions: [
+        {
+          id: 8,
+          patch: [
+            { op: 'replace', path: '/serverInfo/hostname', value: 'resumed' },
+          ],
+        },
+      ],
+    },
+    meta: { patchSequence: 9 },
+  })
+  await flush()
+  assert.equal(f.cache.value.id, 9)
+  assert.equal(f.cache.value.value.serverInfo.hostname, 'resumed')
+  f.calls[0].frames.error({ code: 0, message: 'lost' })
+  await flush()
+  await f.recover()
+  assert.deepEqual(f.calls[1].params, { since: { epoch: 'boot-1', id: 9 } })
+  f.frame(1, {
+    jsonrpc: '2.0',
+    result: {
+      epoch: 'boot-2',
+      id: 3,
+      value: { serverInfo: { hostname: 'rebooted' } },
+      revisions: null,
+    },
+    meta: { patchSequence: 3 },
+  })
+  await flush()
+  assert.equal(f.patchCache.epoch, 'boot-2')
+  assert.equal(f.cache.value.id, 3)
+  assert.equal(f.cache.value.value.serverInfo.hostname, 'rebooted')
+})

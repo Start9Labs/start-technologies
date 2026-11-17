@@ -9,6 +9,7 @@ import {
   startWith,
   switchMap,
   take,
+  tap,
 } from 'rxjs/operators'
 import { StateService } from 'src/app/services/state.service'
 import { ApiService } from '../api/embassy-api.service'
@@ -36,6 +37,7 @@ export class PatchDbSource extends Observable<Update<DataModel>[]> {
   private readonly state = inject(StateService)
   private readonly cache = inject(PatchDbCache)
   private readonly isLive = inject(PATCH_LIVE)
+  private readonly current = inject(PATCH_CACHE)
   private readonly live$ = inject(AuthService).isVerified$.pipe(
     switchMap(verified => (verified ? this.watchLive$() : EMPTY)),
     catchError((_, original$) => {
@@ -53,13 +55,28 @@ export class PatchDbSource extends Observable<Update<DataModel>[]> {
     switchMap(cached => this.live$.pipe(startWith([cached]))),
   )
 
+  private cursor() {
+    const { epoch } = this.cache
+    const { id } = this.current.value
+    return epoch && id ? { epoch, id } : null
+  }
+
   constructor() {
     super(subscriber => this.stream$.subscribe(subscriber))
   }
 
   private watchLive$() {
     return new Observable<Update<DataModel>[]>(subscriber => {
-      const subscription = databaseSource(this.api.watchDb$()).subscribe({
+      const subscription = databaseSource(
+        this.api
+          .watchDb$(() => this.cursor())
+          .pipe(
+            tap(update => {
+              if ('epoch' in update && update.epoch)
+                this.cache.epoch = update.epoch
+            }),
+          ),
+      ).subscribe({
         next: updates => {
           subscriber.next(updates)
           if (!subscriber.closed) this.isLive.next(true)

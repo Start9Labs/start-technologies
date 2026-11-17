@@ -36,9 +36,11 @@ You need the router, the Wi-Fi module, the small screwdriver that came in the ro
 
    ![The four screws on the front of the router](assets/wifi-module/step-2-screws.jpg)
 
-1. **Slide the top off.** The top slides off easily. Inside you will see the empty mini PCIe slot and three antenna wires hanging loose from the antenna mounts.
+1. **Slide the top off, then remove the two mounting screws.** The top slides off easily. Inside you will see the empty mini PCIe slot, three antenna wires hanging loose from the antenna mounts, and two small screws in the posts at the end of the slot nearest the Ethernet ports. Unscrew both and put them in your bowl: they hold the module down in step 6.
 
-   ![The open router, showing the empty slot and three antenna wires](assets/wifi-module/step-3-open.jpg)
+   These screws can be tight. Press the screwdriver down firmly so its tip stays seated in the screw head, and turn counter-clockwise. If one won't turn, try a small Phillips screwdriver whose tip fills the screw head; if it still won't move, stop before the head strips and [get help](https://start9.com/help).
+
+   ![The open router, showing the empty slot, its two mounting screws, and three antenna wires](assets/wifi-module/step-3-open.jpg)
 
 1. **Attach the three antenna wires to the module.** This is the fiddliest step, and it is easier with the module in your hand than in the router. Touch bare metal, take the module out of its bag, and hold it by its edges. For each wire, set the connector squarely over one of the module's antenna sockets and press straight down with a fingertip until it clicks. A seated connector sits flat on its socket.
 
@@ -48,11 +50,11 @@ You need the router, the Wi-Fi module, the small screwdriver that came in the ro
 
    ![An antenna connector seated flat on the module's socket](assets/wifi-module/step-4-seated.jpg)
 
-1. **Insert the module into the slot.** Hold the module at a slight angle, with its gold contacts toward the slot, and slide it in until the contacts disappear. Then press the free end down flat against its screw mount. It only fits one way; if it doesn't go in easily, check that the notch in the contacts lines up with the slot.
+1. **Insert the module into the slot.** Hold the module at a slight angle, with its gold contacts toward the slot, and slide it in until the contacts disappear. Then press the free end down flat onto the two empty posts. It only fits one way; if it doesn't go in easily, check that the notch in the contacts lines up with the slot.
 
    ![Sliding the module into the mini PCIe slot](assets/wifi-module/step-5-insert.jpg)
 
-1. **Screw the module down.** Use the same screwdriver. Snug is enough; do not overtighten.
+1. **Screw the module down.** Put the two screws you removed in step 3 back into the posts, through the module's free end. Snug is enough; do not overtighten.
 
    ![Screwing the module down](assets/wifi-module/step-6-screw.jpg)
 
