@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { chmodSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import yaml from 'js-yaml'
@@ -95,10 +95,11 @@ function runStep(
   { files = [], fetches = true, pages = [[successfulPush()]], diffs = {} } = {},
 ) {
   const f = fixture(t)
-  f.write(
+  for (const script of [
     '.github/scripts/changed-products.mjs',
-    readFileSync(join(REPO, '.github/scripts/changed-products.mjs')),
-  )
+    '.github/scripts/classify-event.sh',
+  ])
+    chmodSync(f.write(script, readFileSync(join(REPO, script))), 0o755)
   f.write(
     'files.json',
     JSON.stringify(
@@ -116,7 +117,7 @@ const args = process.argv.slice(2)
 appendFileSync(${JSON.stringify(join(f.root, 'gh.log'))}, JSON.stringify(args) + '\\n')
 if (args[0] === 'api') {
   let response
-  if (args[1].includes('/workflows/build-products.yaml/runs')) {
+  if (args[1].includes('/actions/workflows/') && args[1].includes('/runs?')) {
     const page = Number(new URL('https://x/' + args[1]).searchParams.get('page'))
     const pages = JSON.parse(readFileSync(${JSON.stringify(join(f.root, 'pages.json'))}))
     response = { workflow_runs: pages[page - 1] ?? [] }
@@ -177,7 +178,7 @@ for (const [name, env, options, expected] of [
   [
     'a pull request rebuilds only the products its files feed',
     {
-      EVENT: 'pull_request',
+      GITHUB_EVENT_NAME: 'pull_request',
       PR_NUMBER: '7',
       BASE_REF: 'master',
       HEAD_REF: 'fix/cli',
@@ -188,7 +189,7 @@ for (const [name, env, options, expected] of [
   [
     'an integration branch merging into master builds every StartOS image',
     {
-      EVENT: 'pull_request',
+      GITHUB_EVENT_NAME: 'pull_request',
       PR_NUMBER: '7',
       BASE_REF: 'master',
       HEAD_REF: 'integration/batch',
@@ -200,7 +201,7 @@ for (const [name, env, options, expected] of [
   [
     'a fork branch named integration/* gets no image bypass',
     {
-      EVENT: 'pull_request',
+      GITHUB_EVENT_NAME: 'pull_request',
       PR_NUMBER: '7',
       BASE_REF: 'master',
       HEAD_REF: 'integration/batch',
@@ -211,25 +212,25 @@ for (const [name, env, options, expected] of [
   ],
   [
     'a push rebuilds the products its diff feeds',
-    { EVENT: 'push', BEFORE: 'd'.repeat(40) },
+    { GITHUB_EVENT_NAME: 'push' },
     { files: ['projects/start-tunnel/src/main.rs'] },
     { products: 'start-tunnel', 'start-os': 'false' },
   ],
   [
     'a new branch rebuilds everything',
-    { EVENT: 'push', BEFORE: '0'.repeat(40) },
+    { GITHUB_EVENT_NAME: 'push' },
     { files: ['projects/start-tunnel/src/main.rs'], pages: [] },
     { products: 'start-os start-cli start-registry start-tunnel' },
   ],
   [
     'an unreachable previous commit rebuilds everything',
-    { EVENT: 'push', BEFORE: 'd'.repeat(40) },
+    { GITHUB_EVENT_NAME: 'push' },
     { files: ['projects/start-tunnel/src/main.rs'], fetches: false },
     { products: 'start-os start-cli start-registry start-tunnel' },
   ],
   [
     'a surviving push rebuilds a product touched only by a superseded push',
-    { EVENT: 'push', BEFORE: 'e'.repeat(40) },
+    { GITHUB_EVENT_NAME: 'push' },
     {
       files: ['AGENTS.md'],
       diffs: {
@@ -240,7 +241,7 @@ for (const [name, env, options, expected] of [
   ],
   [
     'a page without successful pushes does not hide the preceding build',
-    { EVENT: 'push' },
+    { GITHUB_EVENT_NAME: 'push' },
     {
       files: ['projects/start-cli/src/main.rs'],
       pages: [
@@ -257,7 +258,7 @@ for (const [name, env, options, expected] of [
   ],
   [
     'moving a file out of a product still rebuilds its former owner',
-    { EVENT: 'pull_request', PR_NUMBER: '7' },
+    { GITHUB_EVENT_NAME: 'pull_request', PR_NUMBER: '7' },
     {
       files: [
         {
@@ -270,7 +271,7 @@ for (const [name, env, options, expected] of [
   ],
   [
     'a dispatch rebuilds everything',
-    { EVENT: 'workflow_dispatch' },
+    { GITHUB_EVENT_NAME: 'workflow_dispatch' },
     {},
     {
       products: 'start-os start-cli start-registry start-tunnel',
@@ -287,6 +288,55 @@ for (const [name, env, options, expected] of [
     )
     for (const [key, value] of Object.entries(expected))
       assert.equal(outputs[key], value, key)
+  })
+}
+
+const wrtClassifyStep = step(
+  workflow('start-wrt.yaml').jobs.changes,
+  'Classify changed paths',
+)
+for (const [name, env, options, expected] of [
+  [
+    'a pull request touching StartWRT builds it',
+    { GITHUB_EVENT_NAME: 'pull_request', PR_NUMBER: '7' },
+    { files: ['projects/start-wrt/backend/ctrl/src/lib.rs'] },
+    'true',
+  ],
+  [
+    'a pull request outside StartWRT skips it',
+    { GITHUB_EVENT_NAME: 'pull_request', PR_NUMBER: '7' },
+    { files: ['projects/start-cli/src/main.rs'] },
+    'false',
+  ],
+  [
+    'a surviving push builds StartWRT changes from a superseded push',
+    { GITHUB_EVENT_NAME: 'push' },
+    {
+      files: ['AGENTS.md'],
+      diffs: {
+        ['d'.repeat(40)]: ['projects/start-wrt/web/src/main.ts', 'AGENTS.md'],
+      },
+    },
+    'true',
+  ],
+  [
+    'a dispatch builds StartWRT',
+    { GITHUB_EVENT_NAME: 'workflow_dispatch' },
+    {},
+    'true',
+  ],
+]) {
+  test(`start-wrt changes: ${name}`, t => {
+    const { outputs, gh } = runStep(
+      t,
+      wrtClassifyStep.run,
+      { ...declared(wrtClassifyStep), ...env },
+      options,
+    )
+    assert.equal(outputs['start-wrt'], expected)
+    assert.equal(outputs.products, expected === 'true' ? 'start-wrt' : '')
+    for (const [, path] of gh.filter(([, path]) => path.includes('/runs')))
+      assert.match(path, /\/actions\/workflows\/start-wrt\.yaml\/runs/)
   })
 }
 
@@ -682,7 +732,7 @@ for (const [file, product, job, gate] of [
     )
     assert.ok(compiler < steps.indexOf(install))
     const writes = steps.filter(step =>
-      /s3cmd (put|del)|registry os (version (add|remove)|asset add)/.test(
+      /s3cmd (put|del)|s3-put-once\.sh|registry os (version (add|remove)|asset add)/.test(
         step.run || '',
       ),
     )
@@ -720,17 +770,25 @@ test('start-os images deploy per platform only once deploy-prepare registered th
     assert.equal(evaluate(leg.if, { inputs: { channel } }), expected)
   const install = leg.steps.findIndex(step => step.name === 'Install start-cli')
   const writes = leg.steps.filter(step =>
-    /s3cmd put|registry os asset (add|remove)/.test(step.run || ''),
+    /s3-put-once\.sh|registry os asset (add|remove)/.test(step.run || ''),
   )
   assert.ok(writes.length >= 2)
   for (const step of writes) assert.ok(install < leg.steps.indexOf(step))
 })
 
 test('product builds trigger on every push and pull request and classify in the changes job', () => {
+  const wrt = workflow('start-wrt.yaml')
   for (const event of ['push', 'pull_request']) {
     assert.equal(products.on[event].paths, undefined)
-    const wrt = workflow('start-wrt.yaml').on[event].paths
-    assert.ok(wrt.includes('.github/workflows/start-wrt.yaml'))
-    assert.ok(wrt.includes('shared-libs/crates/**'))
+    assert.equal(wrt.on[event].paths, undefined)
   }
+  for (const job of ['compile', 'image']) {
+    assert.equal(wrt.jobs[job].needs, 'changes', job)
+    assert.match(
+      wrt.jobs[job].if,
+      /needs\.changes\.outputs\.start-wrt == 'true'/,
+      job,
+    )
+  }
+  assert.deepEqual(wrt.jobs.deploy.needs, ['image'])
 })

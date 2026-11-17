@@ -54,4 +54,6 @@ jobs:
     if: github.event.changes.base
     permissions:
       contents: read
+      pull-requests: read
+      actions: read
     uses: ./.github/workflows/start-wrt.yaml
