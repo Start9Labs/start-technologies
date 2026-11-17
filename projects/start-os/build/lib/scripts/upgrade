@@ -2,6 +2,30 @@
 
 set -e
 
+preserve_server_identity() {
+    local runtime=$1 persistent=$2 identity_source identity_tmp
+    if [ -f "$runtime" ]; then
+        identity_source=$runtime
+    elif [ -f "$persistent" ]; then
+        identity_source=$persistent
+    elif [ -f "$(dirname "$persistent")/disk.guid" ]; then
+        >&2 echo 'Cannot preserve server identity: neither runtime nor config key is available.'
+        return 1
+    else
+        return 0
+    fi
+
+    openssl pkey -in "$identity_source" -check -noout > /dev/null
+    identity_tmp=$(mktemp "${persistent}.tmp.XXXXXX")
+    # EXIT cleanup outlives function locals.
+    trap "$(printf 'rm -f -- %q' "$identity_tmp")" EXIT
+    install -m 600 -- "$identity_source" "$identity_tmp"
+    sync "$identity_tmp"
+    mv -fT -- "$identity_tmp" "$persistent"
+    sync "$(dirname "$persistent")"
+    trap - EXIT
+}
+
 if [ "$UID" -ne 0 ]; then
     >&2 echo 'Must be run as root'
     exit 1
@@ -15,14 +39,14 @@ fi
 echo 'Upgrading...'
 
 hash=$(b3sum "$1" | head -c 32)
-# Gated on CHECKSUM, not on a second positional argument: every caller passes
-# only the image path, so the old `[ -n "$2" ]` guard meant the comparison never
-# ran and a corrupt-but-mountable image installed silently. $2 is still accepted
-# so callers written for the old form keep working.
+# Callers supply CHECKSUM; the optional second argument is compatibility-only.
 if [ -n "${CHECKSUM:-}" ] && [ "$hash" != "$CHECKSUM" ]; then
     >&2 echo "Checksum mismatch: expected $CHECKSUM, got $hash"
     exit 2
 fi
+
+# A configured server retains its identity before image activation.
+preserve_server_identity /run/startos/id.key.pem /media/startos/config/id.key.pem
 
 unsquashfs -n -f -d / "$1" /usr/lib/startos/scripts/normalize-fstab
 if [ -f /media/startos/config/overlay/etc/fstab ]; then

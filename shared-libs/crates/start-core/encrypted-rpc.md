@@ -22,9 +22,13 @@ copy at `/media/startos/config/id.key.pem`. This copy is unencrypted and survive
 The account database remains authoritative: initialization mirrors its key before normal RPC;
 attach/restore mirror the selected account rather than changing its identity. Fresh setup
 persists a key before admission and adopts it into its account. The installer carries that
-setup key across a new config mount without replacing an existing copy. A legacy installation
-without a usable copy cannot complete encrypted startup admission until its database key is
-available; it never advertises a generated replacement. Server identity is separate from
+setup key across a new config mount without replacing an existing copy. OTA executes the new
+image's `upgrade` script on the running old system; before boot changes or activation, that
+script copies the existing `/run/startos/id.key.pem` into config atomically with mode `0600`.
+Diagnostic updates reuse a valid config copy when the runtime export is absent. An installed
+server with neither key refuses the update before activation rather than resetting identity.
+Other legacy installations without a usable copy defer encrypted startup admission until the
+database key is available; they never advertise a generated replacement. Server identity is separate from
 enrollment, authcookies, package/OS trust and TLS keys.
 
 `sign/fingerprint.rs` owns identity fingerprints: SHA-256 of raw Ed25519 public bytes,
