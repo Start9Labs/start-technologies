@@ -993,7 +993,12 @@ impl TmpDir {
     pub const BASE: &'static str = "/var/tmp/startos";
 
     pub async fn new() -> Result<Self, Error> {
-        let path = Path::new(Self::BASE).join(base32::encode(
+        Self::new_in(Self::BASE).await
+    }
+
+    /// Mounts beneath this directory must be retired before drop.
+    pub async fn new_in(parent: impl AsRef<Path>) -> Result<Self, Error> {
+        let path = parent.as_ref().join(base32::encode(
             base32::Alphabet::Rfc4648 { padding: false },
             &rand::random::<[u8; 8]>(),
         ));
@@ -1049,6 +1054,30 @@ impl Drop for TmpDir {
                 tokio::fs::remove_dir_all(&path).await.log_err();
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tmp_dir_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn selected_parent_owns_only_the_temporary_directory() {
+        let parent = tempfile::tempdir().unwrap();
+        tokio::fs::write(parent.path().join("retained"), b"keep")
+            .await
+            .unwrap();
+        let directory = TmpDir::new_in(parent.path()).await.unwrap();
+        assert_eq!(directory.parent(), Some(parent.path()));
+        let path = directory.to_path_buf();
+        directory.delete().await.unwrap();
+        assert!(!path.exists());
+        assert_eq!(
+            tokio::fs::read(parent.path().join("retained"))
+                .await
+                .unwrap(),
+            b"keep"
+        );
     }
 }
 

@@ -522,5 +522,7 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<String, Error> {
         .prepare_generation(&rootfs, &store, &enrollment.manifest_key)
         .await?;
     memory.check()?;
+    super::public_image::stage(ctx, &prepared).await?;
+    memory.check()?;
     Ok(prepared.name().to_owned())
 }
