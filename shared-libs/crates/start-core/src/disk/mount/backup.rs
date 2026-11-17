@@ -7,7 +7,7 @@ use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 use zeroize::Zeroizing;
 
-use super::guard::{GenericMountGuard, TmpMountGuard, spawn_mount_cleanup};
+use super::guard::{GenericMountGuard, TmpMountGuard};
 use super::util::sync_directory;
 use crate::PackageId;
 use crate::auth::check_password;
@@ -18,6 +18,7 @@ use crate::disk::mount::guard::SubPath;
 use crate::disk::util::BackupUnencryptedMetadata;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
+use crate::util::cleanup::spawn_filesystem_cleanup;
 use crate::util::crypto::{unwrap_backup_key, wrap_backup_key};
 use crate::util::io::AtomicFile;
 use crate::util::serde::IoFormat;
@@ -341,7 +342,7 @@ impl<G: GenericMountGuard> Drop for BackupMountGuard<G> {
         if first.is_none() && second.is_none() {
             return;
         }
-        spawn_mount_cleanup(async move {
+        spawn_filesystem_cleanup(async move {
             if let Some(guard) = first {
                 sync_directory(guard.path()).await.log_err();
                 guard.unmount().await.log_err();
@@ -403,7 +404,7 @@ mod tests {
     async fn dropped_backup_cleanup_joins_unmount_and_its_destructor_cleanup() {
         use tokio::sync::oneshot;
 
-        use super::super::guard::{MOUNT_CLEANUP_TEST_LOCK, wait_for_mount_cleanup};
+        use crate::util::cleanup::{FILESYSTEM_CLEANUP_TEST_LOCK, wait_for_filesystem_cleanup};
 
         #[derive(Debug)]
         struct DelayedMount {
@@ -425,7 +426,7 @@ mod tests {
         impl Drop for DelayedMount {
             fn drop(&mut self) {
                 if let Some((started, release)) = self.cleanup.take() {
-                    spawn_mount_cleanup(async move {
+                    spawn_filesystem_cleanup(async move {
                         started.send(()).unwrap();
                         release.await.unwrap();
                     });
@@ -433,8 +434,8 @@ mod tests {
             }
         }
 
-        let _serial = MOUNT_CLEANUP_TEST_LOCK.lock().await;
-        wait_for_mount_cleanup().await;
+        let _serial = FILESYSTEM_CLEANUP_TEST_LOCK.lock().await;
+        wait_for_filesystem_cleanup().await;
         let (started, running) = oneshot::channel();
         let (release, released) = oneshot::channel();
         let (cleanup_started, cleanup_running) = oneshot::channel();
@@ -452,7 +453,7 @@ mod tests {
             unencrypted_metadata: Default::default(),
             metadata: Default::default(),
         });
-        let teardown = wait_for_mount_cleanup();
+        let teardown = wait_for_filesystem_cleanup();
         tokio::pin!(teardown);
         assert!(futures::poll!(&mut teardown).is_pending());
         running.await.unwrap();

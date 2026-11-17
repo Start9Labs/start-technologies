@@ -28,6 +28,7 @@ use crate::disk::mount::util::unmount;
 use crate::prelude::*;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::service::ServiceStats;
+use crate::util::cleanup::spawn_filesystem_cleanup;
 use crate::util::io::{open_file, write_file_owned_atomic};
 use crate::util::rpc_client::UnixRpcClient;
 use crate::util::{FromStrParser, Invoke, new_guid};
@@ -695,7 +696,7 @@ impl Drop for LxcContainer {
             let rootfs = self.rootfs.take();
             let guid = std::mem::take(&mut self.guid);
             if let Some(manager) = self.manager.upgrade() {
-                tokio::spawn(async move {
+                spawn_filesystem_cleanup(async move {
                     if let Err(e) = async {
                         let err_path = rootfs.path().join("var/log/containerRuntime.err");
                         if tokio::fs::metadata(&err_path).await.is_ok() {

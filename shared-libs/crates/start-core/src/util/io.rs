@@ -30,6 +30,7 @@ use tokio::time::{Instant, Sleep};
 
 use crate::prelude::*;
 use crate::util::FromStrParser;
+use crate::util::cleanup::spawn_filesystem_cleanup;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::SyncMutex;
 
@@ -1038,7 +1039,7 @@ impl Drop for TmpDir {
     fn drop(&mut self) {
         if self.path != PathBuf::new() && self.path.exists() {
             let path = std::mem::take(&mut self.path);
-            tokio::spawn(async move {
+            spawn_filesystem_cleanup(async move {
                 tokio::fs::remove_dir_all(&path).await.log_err();
             });
         }
@@ -2027,7 +2028,9 @@ impl Drop for AtomicFile {
         if let Some(file) = self.file.take() {
             drop(file);
             let path = std::mem::take(&mut self.tmp_path);
-            tokio::spawn(async move { tokio::fs::remove_file(path).await.log_err() });
+            spawn_filesystem_cleanup(async move {
+                tokio::fs::remove_file(path).await.log_err();
+            });
         }
     }
 }

@@ -1,21 +1,39 @@
 use std::future::Future;
 
+use lazy_static::lazy_static;
 use tokio::sync::oneshot;
 
 use super::future::NonDetachingJoinHandle;
 use super::sync::SyncMutex;
 use crate::ResultExt;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) type TaskHandles = Vec<NonDetachingJoinHandle<()>>;
 /// Cleanup finishes after its producers stop; teardown does not abort it.
 pub(crate) type CleanupTasks = SyncMutex<TaskHandles>;
 
-pub(crate) fn spawn_owned<F: Future<Output = ()> + Send + 'static>(
-    tasks: &mut TaskHandles,
-    future: F,
-) {
+lazy_static! {
+    /// startd joins destructor-started filesystem cleanup before runtime closure and storage export.
+    static ref FILESYSTEM_CLEANUP: CleanupTasks = SyncMutex::new(Vec::new());
+}
+
+pub(crate) fn spawn_filesystem_cleanup(future: impl Future<Output = ()> + Send + 'static) {
+    let _ = spawn_cleanup(&FILESYSTEM_CLEANUP, future);
+}
+
+pub(crate) async fn wait_for_filesystem_cleanup() {
+    drain_cleanup(&FILESYSTEM_CLEANUP).await;
+}
+
+#[cfg(test)]
+pub(crate) static FILESYSTEM_CLEANUP_TEST_LOCK: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
+
+pub(crate) fn retain_owned_task(tasks: &mut TaskHandles, task: NonDetachingJoinHandle<()>) {
     tasks.retain(|task| !task.is_finished());
-    tasks.push(tokio::spawn(future).into());
+    tasks.push(task);
 }
 
 /// Dropping the completion receiver leaves teardown responsible for the task.
@@ -24,12 +42,13 @@ pub(crate) fn spawn_cleanup<F: Future<Output = ()> + Send + 'static>(
     future: F,
 ) -> oneshot::Receiver<()> {
     let (completed, completion) = oneshot::channel();
-    tasks.mutate(|tasks| {
-        spawn_owned(tasks, async move {
-            future.await;
-            let _ = completed.send(());
-        });
-    });
+    // A closed runtime can synchronously drop the future during spawn.
+    let task = tokio::spawn(async move {
+        future.await;
+        let _ = completed.send(());
+    })
+    .into();
+    tasks.mutate(|tasks| retain_owned_task(tasks, task));
     completion
 }
 

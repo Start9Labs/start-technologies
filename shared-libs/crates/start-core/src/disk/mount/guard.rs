@@ -13,28 +13,12 @@ use tracing::instrument;
 use super::filesystem::{FileSystem, MountType, ReadOnly, ReadWrite};
 use super::util::{is_mountpoint, unmount};
 use crate::prelude::{eyre, t};
-use crate::util::cleanup::{CleanupTasks, drain_cleanup, spawn_cleanup};
+use crate::util::cleanup::spawn_filesystem_cleanup;
 use crate::util::sync::SyncMutex;
 use crate::util::{Invoke, Never};
 use crate::{Error, ErrorKind, ResultExt};
 
 pub const TMP_MOUNTPOINT: &'static str = "/media/startos/tmp";
-
-lazy_static! {
-    /// Mount cleanup outlives RPC contexts; startd drains it before closing its runtime.
-    static ref MOUNT_CLEANUP: CleanupTasks = SyncMutex::new(Vec::new());
-}
-
-pub(super) fn spawn_mount_cleanup(future: impl Future<Output = ()> + Send + 'static) {
-    let _ = spawn_cleanup(&MOUNT_CLEANUP, future);
-}
-
-pub(crate) async fn wait_for_mount_cleanup() {
-    drain_cleanup(&MOUNT_CLEANUP).await;
-}
-
-#[cfg(test)]
-pub(super) static MOUNT_CLEANUP_TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
 pub trait GenericMountGuard: std::fmt::Debug + Send + Sync + 'static {
     fn path(&self) -> &Path;
@@ -234,7 +218,7 @@ impl Drop for MountGuard {
         if self.is_mounted() {
             let mountpoint = std::mem::take(&mut self.mountpoint);
             let slot = self.slot.take();
-            spawn_mount_cleanup(async move {
+            spawn_filesystem_cleanup(async move {
                 unmount_slot(&slot, &mountpoint, true, false)
                     .await
                     .log_err();
@@ -477,6 +461,7 @@ impl<G: GenericMountGuard> GenericMountGuard for SubPath<G> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::cleanup::{FILESYSTEM_CLEANUP_TEST_LOCK, wait_for_filesystem_cleanup};
 
     struct UnmountedFilesystem {
         id: String,
@@ -731,8 +716,8 @@ mod tests {
 
     #[tokio::test]
     async fn dropped_mount_cleanup_waits_for_slot_retirement() {
-        let _serial = MOUNT_CLEANUP_TEST_LOCK.lock().await;
-        wait_for_mount_cleanup().await;
+        let _serial = FILESYSTEM_CLEANUP_TEST_LOCK.lock().await;
+        wait_for_filesystem_cleanup().await;
         let replacement = Arc::new(MountGuard {
             mountpoint: PathBuf::from("/unused-mount"),
             mounted: AtomicBool::new(false),
@@ -747,7 +732,7 @@ mod tests {
             device: None,
             slot: Some(slot.clone()),
         });
-        let teardown = wait_for_mount_cleanup();
+        let teardown = wait_for_filesystem_cleanup();
         tokio::pin!(teardown);
         assert!(futures::poll!(&mut teardown).is_pending());
 

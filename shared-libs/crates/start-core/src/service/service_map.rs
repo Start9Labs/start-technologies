@@ -463,7 +463,7 @@ impl ServiceMap {
         .boxed())
     }
 
-    /// This is ran during the cleanup, so when we are uninstalling the service
+    /// Dropping the returned future schedules rollback, even before its first poll.
     #[instrument(skip_all)]
     pub async fn uninstall(
         &self,
@@ -490,8 +490,10 @@ impl ServiceMap {
             })
             .await
             .result?;
+        let reload_guard =
+            ServiceRefReloadCancelGuard::new(ctx.clone(), id.clone(), "Uninstall", None);
         Ok(async move {
-            ServiceRefReloadCancelGuard::new(ctx.clone(), id.clone(), "Uninstall", None)
+            reload_guard
                 .handle_last(async move {
                     if let Some(service) = guard.take() {
                         let res = service

@@ -34,7 +34,7 @@ use crate::disk::OsPartitionInfo;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::{FileSystem, ReadOnly};
-use crate::disk::mount::guard::{MountGuard, wait_for_mount_cleanup};
+use crate::disk::mount::guard::MountGuard;
 use crate::init::{InitResult, check_time_is_synchronized};
 use crate::install::PKG_ARCHIVE_DIR;
 use crate::lxc::LxcManager;
@@ -56,7 +56,9 @@ use crate::shutdown::{Shutdown, ShutdownSender};
 use crate::util::Invoke;
 #[cfg(test)]
 use crate::util::cleanup::spawn_cleanup;
-use crate::util::cleanup::{CleanupTasks, TaskHandles, drain_cleanup, spawn_owned};
+use crate::util::cleanup::{
+    CleanupTasks, TaskHandles, drain_cleanup, retain_owned_task, wait_for_filesystem_cleanup,
+};
 use crate::util::io::{TmpDir, delete_file};
 use crate::util::lshw::LshwDevice;
 use crate::util::sync::{SyncMutex, SyncRwLock, Watch};
@@ -85,7 +87,7 @@ pub(crate) fn spawn_background<F: Future<Output = ()> + Send + 'static>(
                 ErrorKind::InvalidRequest,
             )
         })?;
-        spawn_owned(tasks, future.take().unwrap());
+        retain_owned_task(tasks, tokio::spawn(future.take().unwrap()).into());
         Ok(())
     })
 }
@@ -647,9 +649,9 @@ impl RpcContext {
     #[instrument(skip_all)]
     pub async fn shutdown(self) -> Result<(), Error> {
         stop_background_tasks(&self.background_tasks, &self.cleanup_tasks).await;
-        wait_for_mount_cleanup().await;
+        wait_for_filesystem_cleanup().await;
         let services = self.services.shutdown_all().await;
-        wait_for_mount_cleanup().await;
+        wait_for_filesystem_cleanup().await;
         services?;
         self.is_closed.store(true, Ordering::SeqCst);
         self.closed.send_replace(true);
@@ -933,9 +935,12 @@ mod tests {
         let cleanup = Arc::new(CleanupTasks::new(Vec::new()));
         let rollback = cleanup.clone();
         let (completed, completion) = oneshot::channel();
+        let (rollback_started, rollback_running) = oneshot::channel();
+        let (release, released) = oneshot::channel();
         let guard = crate::util::GeneralBoxedGuard::new(move || {
             let _ = spawn_cleanup(&rollback, async move {
-                tokio::task::yield_now().await;
+                let _ = rollback_started.send(());
+                released.await.unwrap();
                 let _ = completed.send(());
             });
         });
@@ -945,10 +950,43 @@ mod tests {
         })
         .unwrap();
 
-        stop_background_tasks(&tasks, &cleanup).await;
+        let teardown = stop_background_tasks(&tasks, &cleanup);
+        tokio::pin!(teardown);
+        assert!(futures::poll!(&mut teardown).is_pending());
+        rollback_running.await.unwrap();
+        assert!(futures::poll!(&mut teardown).is_pending());
+
+        release.send(()).unwrap();
+        teardown.await;
 
         assert!(completion.now_or_never().unwrap().is_ok());
         assert!(cleanup.peek(Vec::is_empty));
+    }
+
+    #[tokio::test]
+    async fn background_jobs_outlive_their_result_observers() {
+        let tasks = BackgroundTasks::new(Some(Vec::new()));
+        let (started, running) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        let (completed, completion) = oneshot::channel();
+        let work = crate::util::future::DropSignaling::new(async move {
+            let _ = started.send(());
+            released.await.unwrap();
+            let _ = completed.send(());
+        });
+        let mut resources_dropped = work.subscribe();
+        spawn_background(&tasks, work).unwrap();
+        running.await.unwrap();
+
+        drop(completion);
+        tokio::task::yield_now().await;
+        assert!(resources_dropped.wait().now_or_never().is_none());
+
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), resources_dropped.wait())
+            .await
+            .unwrap();
+        stop_background_tasks(&tasks, &CleanupTasks::new(Vec::new())).await;
     }
 
     #[tokio::test]

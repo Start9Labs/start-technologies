@@ -10,6 +10,7 @@ use crate::disk::mount::filesystem::{FileSystem, MountType, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::disk::mount::util::sync_filesystem;
 use crate::prelude::*;
+use crate::util::cleanup::spawn_filesystem_cleanup;
 use crate::util::io::TmpDir;
 
 pub struct OverlayFs<P0: AsRef<Path>, P1: AsRef<Path>, P2: AsRef<Path>> {
@@ -168,7 +169,7 @@ impl<G: GenericMountGuard> Drop for OverlayGuard<G> {
         let upper = self.upper.take();
         let guard = self.inner_guard.take();
         if lower.is_some() || upper.is_some() || guard.is_mounted() {
-            tokio::spawn(async move {
+            spawn_filesystem_cleanup(async move {
                 if guard.is_mounted() {
                     sync_filesystem(guard.path()).await.log_err();
                 }

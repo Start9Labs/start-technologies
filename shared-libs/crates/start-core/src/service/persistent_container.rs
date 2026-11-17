@@ -33,6 +33,7 @@ use crate::service::rpc::{
 };
 use crate::service::{ProcedureName, Service, rpc};
 use crate::util::Invoke;
+use crate::util::cleanup::spawn_filesystem_cleanup;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::create_file;
 use crate::util::rpc_client::UnixRpcClient;
@@ -95,6 +96,7 @@ pub struct Subcontainer {
 }
 
 /// Service filesystem and JavaScript runtime resources.
+/// `startd` joins destructor-started cleanup before closing its runtime.
 pub struct PersistentContainer {
     pub(super) s9pk: S9pk,
     pub(super) lxc_container: OnceCell<LxcContainer>,
@@ -620,7 +622,9 @@ impl PersistentContainer {
 impl Drop for PersistentContainer {
     fn drop(&mut self) {
         if let Some(destroy) = self.destroy(None, Some(DROP_RPC_SHUTDOWN_TIMEOUT)) {
-            tokio::spawn(async move { destroy.await.log_err() });
+            spawn_filesystem_cleanup(async move {
+                destroy.await.log_err();
+            });
         }
     }
 }

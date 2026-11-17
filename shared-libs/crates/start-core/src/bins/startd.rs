@@ -14,7 +14,6 @@ use tracing::instrument;
 use crate::context::config::ServerConfig;
 use crate::context::rpc::InitRpcContextPhases;
 use crate::context::{DiagnosticContext, InitContext, RpcContext};
-use crate::disk::mount::guard::wait_for_mount_cleanup;
 use crate::net::dns::DnsController;
 use crate::net::gateway::WildcardListener;
 use crate::net::static_server::refresher;
@@ -22,6 +21,7 @@ use crate::net::web_server::{Acceptor, WebServer};
 use crate::prelude::*;
 use crate::shutdown::Shutdown;
 use crate::system::launch_metrics_task;
+use crate::util::cleanup::wait_for_filesystem_cleanup;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::append_file;
 use crate::util::logger::LOGGER;
@@ -223,7 +223,7 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
                 }
             };
             server.shutdown().await;
-            wait_for_mount_cleanup().await;
+            wait_for_filesystem_cleanup().await;
             result
         });
         rt.shutdown_timeout(Duration::from_millis(100));
