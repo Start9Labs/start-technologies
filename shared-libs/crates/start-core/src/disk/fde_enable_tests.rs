@@ -27,6 +27,17 @@ async fn lose_retained_keys(pool: &LuksPool) {
     assert!(pool.cached_unlock_keys().await.unwrap().is_none());
 }
 
+fn block_shadow_writes() -> GeneralBoxedGuard {
+    let directory = PathBuf::from("/media/startos/config/overlay/etc");
+    let backup = directory.with_file_name("unavailable-etc");
+    std::fs::rename(&directory, &backup).unwrap();
+    std::fs::write(&directory, b"blocks the shadow parent").unwrap();
+    GeneralBoxedGuard::new(move || {
+        let _ = std::fs::remove_file(&directory);
+        let _ = std::fs::rename(&backup, &directory);
+    })
+}
+
 async fn pending_enable(format: &str) {
     let directory = tempfile::tempdir_in("/dev/shm").unwrap();
     let root = directory.path();
@@ -46,6 +57,7 @@ async fn pending_enable(format: &str) {
         .await
         .unwrap();
     let cache = SyncRwLock::new(account);
+    crate::auth::write_shadow(NEW).await.unwrap();
     let enrollment = crate::fde::enrollment::Enrollment::generate(Path::new("/run"))
         .await
         .unwrap();
@@ -60,9 +72,10 @@ async fn pending_enable(format: &str) {
     drop(enrollment);
 
     let failure = root.join("cryptsetup-failure");
-    std::fs::write(&failure, "#!/bin/sh\ncase \"$*\" in *luksAddKey*package-data*) exit 1;; esac\nexec /usr/sbin/cryptsetup \"$@\"\n").unwrap();
+    std::fs::write(&failure, format!("#!/bin/sh\ncase \"$*\" in *package-data*) if [ \"$1\" = luksAddKey ] && [ -e '{0}/fail-add' ]; then exit 5; fi; if [ \"$1\" = luksKillSlot ] && [ -e '{0}/fail-kill' ]; then exit 5; fi;; esac\nexec /usr/sbin/cryptsetup \"$@\"\n", root.display())).unwrap();
     std::fs::set_permissions(&failure, std::fs::Permissions::from_mode(0o700)).unwrap();
     pool.cryptsetup = failure;
+    std::fs::write(root.join("fail-add"), b"").unwrap();
     assert!(
         prepare_administrator(&db, &cache, &pool, NEW)
             .await
@@ -105,8 +118,9 @@ async fn pending_enable(format: &str) {
             .contains(&plan.allocation.target_slots[1])
     );
     drop(plan);
-    pool.cryptsetup = "cryptsetup".into();
+    std::fs::remove_file(root.join("fail-add")).unwrap();
     pool.verify_password(DEFAULT_PASSWORD).await.unwrap();
+    assert_shadow(NEW, OTHER);
 
     crate::account::password::commit_password(
         &db,
@@ -141,8 +155,33 @@ async fn pending_enable(format: &str) {
     pool.verify_password(MANUAL).await.unwrap();
     assert!(pool.verify_password(NEW).await.is_err());
 
+    assert_shadow(OTHER, NEW);
     let retained = pool.cached_unlock_keys().await.unwrap().unwrap();
-    crate::account::password::change_encrypted_password(&db, &cache, &pool, &retained, NEW)
+    std::fs::write(root.join("fail-kill"), b"").unwrap();
+    let unavailable = block_shadow_writes();
+    let result =
+        crate::account::password::change_encrypted_password(&db, &cache, &pool, &retained, NEW)
+            .await;
+    let original_error = result.as_ref().err().unwrap().to_string();
+    assert_eq!(
+        crate::account::password::finish_password_change(&db, NEW, result)
+            .await
+            .unwrap_err()
+            .to_string(),
+        original_error
+    );
+    drop(unavailable);
+    assert_shadow(OTHER, NEW);
+    assert_eq!(
+        prepare_administrator(&db, &cache, &pool, NEW)
+            .await
+            .unwrap_err()
+            .to_string(),
+        original_error
+    );
+    assert_shadow(NEW, OTHER);
+    std::fs::remove_file(root.join("fail-kill")).unwrap();
+    prepare_administrator(&db, &cache, &pool, NEW)
         .await
         .unwrap();
     drop(retained);
@@ -188,9 +227,18 @@ async fn pending_enable(format: &str) {
     let retained = crate::fde::enable::pending_keys(&pool, &setup)
         .await
         .unwrap();
-    crate::account::password::change_encrypted_password(&db, &cache, &pool, &retained, OTHER)
-        .await
-        .unwrap();
+    let unavailable = block_shadow_writes();
+    let result =
+        crate::account::password::change_encrypted_password(&db, &cache, &pool, &retained, OTHER)
+            .await;
+    assert!(result.is_ok());
+    assert!(
+        crate::account::password::finish_password_change(&db, OTHER, result)
+            .await
+            .is_err()
+    );
+    drop(unavailable);
+    assert_shadow(NEW, OTHER);
     let before_retry = db
         .peek()
         .await
@@ -201,6 +249,7 @@ async fn pending_enable(format: &str) {
     prepare_administrator(&db, &cache, &pool, OTHER)
         .await
         .unwrap();
+    assert_shadow(OTHER, NEW);
     assert_eq!(
         retained
             .volumes

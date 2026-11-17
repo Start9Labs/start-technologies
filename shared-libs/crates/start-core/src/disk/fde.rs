@@ -1759,6 +1759,23 @@ esac
         assert!(luks2_slots(br#"{"keyslots":{"bad":{}}}"#).is_err());
     }
 
+    fn assert_shadow(password: &str, rejected: &str) {
+        for path in ["/etc/shadow", "/media/startos/config/overlay/etc/shadow"] {
+            let shadow = std::fs::read_to_string(path).unwrap();
+            for user in ["start9", "kiosk"] {
+                let hash = shadow
+                    .lines()
+                    .find_map(|line| {
+                        let mut fields = line.split(':');
+                        (fields.next() == Some(user)).then(|| fields.next().unwrap())
+                    })
+                    .unwrap();
+                sha_crypt::sha512_check(password, hash).unwrap();
+                assert!(sha_crypt::sha512_check(rejected, hash).is_err());
+            }
+        }
+    }
+
     fn real_pool(root: &Path) -> LuksPool {
         let mut pool = LuksPool::new(GUID, root.join("config")).unwrap();
         pool.devices = [root.join("main"), root.join("package-data")];
@@ -2053,22 +2070,6 @@ esac
             std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
             pool.cryptsetup = wrapper;
             crate::auth::write_shadow(OLD).await.unwrap();
-            let assert_shadow = |password: &str, rejected: &str| {
-                for path in ["/etc/shadow", "/media/startos/config/overlay/etc/shadow"] {
-                    let shadow = std::fs::read_to_string(path).unwrap();
-                    for user in ["start9", "kiosk"] {
-                        let hash = shadow
-                            .lines()
-                            .find_map(|line| {
-                                let mut fields = line.split(':');
-                                (fields.next() == Some(user)).then(|| fields.next().unwrap())
-                            })
-                            .unwrap();
-                        sha_crypt::sha512_check(password, hash).unwrap();
-                        assert!(sha_crypt::sha512_check(rejected, hash).is_err());
-                    }
-                }
-            };
             std::fs::write(root.join("fail-add"), "").unwrap();
             let result = change_encrypted_password(&db, &account, &pool, &keys, NEW).await;
             let error = result.as_ref().err().unwrap().to_string();

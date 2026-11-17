@@ -123,10 +123,11 @@ pub(crate) async fn prepare_administrator(
                 .result?;
             }
             AdministratorSetup::Installed { .. } => {
-                crate::account::password::change_encrypted_password(
+                let result = crate::account::password::change_encrypted_password(
                     db, account, pool, &keys, password,
                 )
-                .await?;
+                .await;
+                crate::account::password::finish_password_change(db, password, result).await?;
                 return memory.check();
             }
         }

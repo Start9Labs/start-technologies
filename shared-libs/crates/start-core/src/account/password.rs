@@ -128,6 +128,7 @@ async fn change_password(ctx: &RpcContext, password: &str) -> Result<(), Error> 
 }
 
 /// Resumes persisted intent while the caller owns `password_changes` and protects transient keys.
+/// The caller passes its outcome through `finish_password_change`.
 pub(crate) async fn change_encrypted_password(
     db: &TypedPatchDb<Database>,
     account: &SyncRwLock<AccountInfo>,
