@@ -30,6 +30,14 @@ pub struct Dump {
     pub value: Value,
 }
 
+/// What a subscriber lacks: the whole value, or the revisions since its last one
+/// followed by the current revision id.
+#[derive(Debug, Clone)]
+pub enum Catchup {
+    Dump(Dump),
+    Replay { id: u64, revisions: Vec<Revision> },
+}
+
 /// Database-generated patches contain only add, remove and replace operations.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "reflect", derive(visit_rs::VisitFields))]

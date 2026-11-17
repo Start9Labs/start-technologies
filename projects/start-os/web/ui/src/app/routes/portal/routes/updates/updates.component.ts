@@ -1,23 +1,14 @@
 import { Component, computed, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import {
   Marketplace,
   MarketplacePkg,
   StoreIconDirective,
   StoreIdentity,
-  RegistryConnectionStatus,
-  RegistryStatePipe,
   isRegistryLoading,
 } from '@start9labs/marketplace'
 import { i18nPipe, isDefaultRegistry } from '@start9labs/shared'
-import {
-  TuiButton,
-  TuiCell,
-  TuiIcon,
-  TuiNotification,
-  TuiTitle,
-} from '@taiga-ui/core'
+import { TUI_BREAKPOINT, TuiButton, TuiCell, TuiTitle } from '@taiga-ui/core'
 import {
   TuiAvatar,
   TuiBadgeNotification,
@@ -26,7 +17,7 @@ import {
 } from '@taiga-ui/kit'
 import { combineLatest, map } from 'rxjs'
 import { UpdatesCount } from 'src/app/routes/portal/components/updates-count'
-import { RegistryRetry } from 'src/app/routes/portal/components/registry-retry'
+import { RegistryNotice } from 'src/app/routes/portal/components/registry-notice'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { HiddenUpdatesService } from 'src/app/services/hidden-updates.service'
@@ -49,7 +40,6 @@ interface UpdatesData {
   hosts: StoreIdentity[]
   marketplace: Marketplace
   localPkgs: Record<string, PackageDataEntry<InstalledState | UpdatingState>>
-  errors: string[]
   hidden: Record<string, string[]>
   pending: Set<string>
 }
@@ -98,44 +88,19 @@ interface UpdatesData {
                 {{ length }}
               </tui-badge-notification>
             }
-            @if (registry.status === 'error') {
-              <tui-icon
-                icon="@tui.triangle-alert"
-                class="g-warning"
-                role="img"
-                [attr.aria-label]="
-                  (registry.status | registryState).label | i18n
-                "
-                [attr.aria-hidden]="false"
-              />
-            }
           </button>
         }
       }
     </aside>
     <section class="g-subpage">
-      @if (data()?.errors?.includes(current()?.url || '')) {
-        <div
-          tuiNotification
-          appearance="negative"
-          [style.margin-block-end.rem]="1"
-        >
-          {{ 'Request failed' | i18n }}
-        </div>
+      @if (current(); as registry) {
+        @if (registry.status === 'error') {
+          <registry-notice [url]="registry.url" />
+        }
       }
       <section class="g-card">
         <header>
-          @if (current(); as registry) {
-            {{ registry.name }}
-            @if (registry.status === 'error') {
-              <marketplace-registry-status
-                [status]="registry.status"
-                [url]="registry.url"
-                [error]="registry.error"
-              />
-              <button [registryRetry]="registry.url" size="xs"></button>
-            }
-          }
+          {{ current()?.name }}
         </header>
         <table
           [appTable]="['Name', 'Version', 'Package Hash', 'Published', null]"
@@ -180,6 +145,10 @@ interface UpdatesData {
     :host {
       display: flex;
       padding: 0;
+    }
+
+    registry-notice {
+      margin-block-end: 1rem;
     }
 
     aside {
@@ -264,14 +233,10 @@ interface UpdatesData {
     TuiCell,
     TuiAvatar,
     TuiTitle,
-    TuiNotification,
     TuiSkeleton,
     TuiBadgeNotification,
     UpdatesCount,
-    RegistryConnectionStatus,
-    RegistryStatePipe,
-    RegistryRetry,
-    TuiIcon,
+    RegistryNotice,
     TuiFade,
     TuiButton,
     StoreIconDirective,
@@ -284,7 +249,7 @@ interface UpdatesData {
   ],
 })
 export default class UpdatesComponent {
-  private readonly isMobile = inject(WA_IS_MOBILE)
+  private readonly breakpoint = inject(TUI_BREAKPOINT)
   private readonly marketplaceService = inject(MarketplaceService)
   private readonly hiddenUpdatesService = inject(HiddenUpdatesService)
   private readonly refinementService = inject(UpdatesRefinementService)
@@ -306,7 +271,7 @@ export default class UpdatesComponent {
     const hosts = this.data()?.hosts || []
     return (
       hosts.find(registry => registry.url === this.selectedRegistry()) ||
-      (!this.isMobile ? hosts[0] : null)
+      (this.breakpoint() !== 'mobile' ? hosts[0] : null)
     )
   })
 
@@ -322,15 +287,13 @@ export default class UpdatesComponent {
       hosts: this.marketplaceService.registries$,
       refined: this.refinementService.refined$,
       localPkgs: inject(LocalPackagesService),
-      errors: this.marketplaceService.requestErrors$,
       hidden: this.hiddenUpdatesService.effective$,
     }).pipe(
-      map(({ hosts, refined, localPkgs, errors, hidden }) => ({
+      map(({ hosts, refined, localPkgs, hidden }) => ({
         hosts,
         marketplace: refined.marketplace,
         pending: refined.pending,
         localPkgs,
-        errors,
         hidden,
       })),
     ),

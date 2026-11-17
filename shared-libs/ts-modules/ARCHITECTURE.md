@@ -122,7 +122,7 @@ Form controls live in `ui/src/app/routes/portal/components/form/controls/` — e
 
 Services often extend `Observable` and expose reactive streams via DI:
 
-- **`ConnectionService`** — Combines network status + WebSocket readiness
+- **`ConnectionService`** — True while the browser is online and an applied dump from the live database observation (`PATCH_LIVE`) is in place
 - **`StateService`** — Polls server availability, manages app state (`running`, `initializing`, etc.)
 - **`AuthService`** — Tracks `isVerified$`, triggers PatchDB start/stop
 - **`PatchMonitorService`** — Starts/stops PatchDB based on auth state
