@@ -7,7 +7,9 @@ use crate::db::model::Database;
 use crate::sign::fingerprint::fingerprint;
 
 async fn startup_identity_at(config: &Path) -> Result<Option<SigningKey>, Error> {
-    super::startup_identity_at(&config.join("id.key.pem")).await
+    super::startup_identity_at(&config.join("id.key.pem"))
+        .await
+        .map(|identity| identity.map(|identity| identity.key))
 }
 
 #[tokio::test]
@@ -33,9 +35,11 @@ async fn fresh_setup_keeps_one_private_identity_across_account_creation_completi
         .unwrap();
     assert!(!setup_identity_path_at(&path).exists());
     let rebooted = startup_identity_at(config.path()).await.unwrap().unwrap();
-    let before = StartupRpc::new(Some(first)).identity().unwrap();
-    let after = StartupRpc::new(Some(rebooted)).identity().unwrap();
-    assert!(!before.temporary);
+    let before = StartupRpc::new(Some(StartupIdentity::temporary(first)))
+        .identity()
+        .unwrap();
+    let after = StartupRpc::new(Some(rebooted.into())).identity().unwrap();
+    assert!(before.temporary);
     assert!(!after.temporary);
     let before = before.signer.verifying_key().await.unwrap();
     let after = after.signer.verifying_key().await.unwrap();
@@ -54,7 +58,7 @@ async fn fresh_setup_keeps_one_private_identity_across_account_creation_completi
 async fn setup_keeps_its_identity_when_installation_replaces_the_config_mount() {
     let config = tempfile::tempdir().unwrap();
     let key = startup_identity_at(config.path()).await.unwrap().unwrap();
-    let startup = StartupRpc::new(Some(key.clone()));
+    let startup = StartupRpc::new(Some(StartupIdentity::temporary(key.clone())));
     let path = config.path().join("id.key.pem");
     let setup_path = setup_identity_path_at(&path);
     std::fs::remove_file(&setup_path).unwrap();
@@ -78,7 +82,7 @@ async fn preserve_reinstall_replaces_a_stale_setup_key_without_changing_the_save
         .await
         .unwrap()
         .unwrap();
-    let startup = StartupRpc::new(Some(live_key.clone()));
+    let startup = StartupRpc::new(Some(StartupIdentity::temporary(live_key.clone())));
     let installed_config = tempfile::tempdir().unwrap();
     let path = installed_config.path().join("id.key.pem");
     let old_account = AccountInfo::new("password", SystemTime::now(), None).unwrap();
@@ -113,47 +117,53 @@ async fn preserve_reinstall_replaces_a_stale_setup_key_without_changing_the_save
 }
 
 #[tokio::test]
-async fn init_setup_and_diagnostic_contexts_advertise_the_same_persisted_key() {
+async fn init_setup_and_diagnostic_contexts_preserve_the_selected_key_and_admission_scope() {
     use crate::context::config::ServerConfig;
     use crate::context::{DiagnosticContext, InitContext, SetupContext};
     use crate::middleware::auth::signature::SignatureAuthContext;
     use crate::net::dns::DnsController;
     use crate::util::sync::Watch;
 
-    let config_dir = tempfile::tempdir().unwrap();
-    let key = startup_identity_at(config_dir.path())
+    for temporary in [true, false] {
+        let config_dir = tempfile::tempdir().unwrap();
+        let path = config_dir.path().join("id.key.pem");
+        let provisional = super::startup_identity_at(&path).await.unwrap().unwrap();
+        if !temporary {
+            complete_identity_at(&path, &provisional.key, "installed")
+                .await
+                .unwrap();
+        }
+        let selected = super::startup_identity_at(&path).await.unwrap().unwrap();
+        let expected = selected.key.verifying_key();
+        let (_, server) = crate::setup::test::context();
+        let config = ServerConfig::default();
+        let dns = std::sync::Arc::new(DnsController::new(Watch::new(Default::default())));
+        let init = InitContext::init(&config, dns.clone(), Some(selected.clone()))
+            .await
+            .unwrap();
+        let setup =
+            SetupContext::init(&server, config.clone(), dns.clone(), Some(selected)).unwrap();
+        let diagnostic = DiagnosticContext::init(
+            &config,
+            None,
+            Error::new(eyre!("identity fixture"), ErrorKind::Unknown),
+            dns,
+            diagnostic_identity_at(&path).await,
+        )
         .await
-        .unwrap()
         .unwrap();
-    let expected = key.verifying_key();
-    let (_, server) = crate::setup::test::context();
-    let config = ServerConfig::default();
-    let dns = std::sync::Arc::new(DnsController::new(Watch::new(Default::default())));
-    let init = InitContext::init(&config, dns.clone(), Some(key.clone()))
-        .await
-        .unwrap();
-    let setup =
-        SetupContext::init(&server, config.clone(), dns.clone(), Some(key.clone())).unwrap();
-    let diagnostic = DiagnosticContext::init(
-        &config,
-        None,
-        Error::new(eyre!("identity fixture"), ErrorKind::Unknown),
-        dns,
-        key.into(),
-    )
-    .await
-    .unwrap();
-    for identity in [
-        init.server_identity(),
-        setup.server_identity(),
-        diagnostic.server_identity(),
-    ] {
-        let identity = identity.unwrap();
-        assert!(!identity.temporary);
-        assert_eq!(
-            identity.signer.verifying_key().await.unwrap(),
-            crate::sign::AnyVerifyingKey::Ed25519(expected)
-        );
+        for identity in [
+            init.server_identity(),
+            setup.server_identity(),
+            diagnostic.server_identity(),
+        ] {
+            let identity = identity.unwrap();
+            assert_eq!(identity.temporary, temporary);
+            assert_eq!(
+                identity.signer.verifying_key().await.unwrap(),
+                crate::sign::AnyVerifyingKey::Ed25519(expected)
+            );
+        }
     }
 }
 
@@ -163,7 +173,7 @@ async fn migration_waits_for_the_existing_account_key_instead_of_advertising_a_r
     std::fs::write(config.path().join("disk.guid"), "installed").unwrap();
     let pending = startup_identity_at(config.path()).await.unwrap();
     assert!(pending.is_none());
-    let startup = StartupRpc::new(pending);
+    let startup = StartupRpc::new(pending.map(Into::into));
     let path = config.path().join("id.key.pem");
     assert!(startup.key_at(&path).is_err());
     assert!(!path.exists());
@@ -222,6 +232,47 @@ async fn interrupted_restore_cannot_lend_an_imported_account_key_to_fresh_setup(
 }
 
 #[tokio::test]
+async fn attach_and_restore_do_not_admit_the_provisional_key_as_the_restored_account_identity() {
+    let config = tempfile::tempdir().unwrap();
+    let path = config.path().join("id.key.pem");
+    let provisional = super::startup_identity_at(&path).await.unwrap().unwrap();
+    let startup = StartupRpc::new(Some(provisional));
+    let account = AccountInfo::new("password", SystemTime::now(), None).unwrap();
+    let expected = AnySigningKey::Ed25519(account.server_identity_key.clone()).verifying_key();
+    assert!(startup.identity().unwrap().temporary);
+    assert_ne!(
+        startup
+            .identity()
+            .unwrap()
+            .signer
+            .verifying_key()
+            .await
+            .unwrap(),
+        expected
+    );
+    mirror_configured_identity_at(&path, &account.server_identity_key)
+        .await
+        .unwrap();
+    assert!(
+        super::startup_identity_at(&path)
+            .await
+            .unwrap()
+            .unwrap()
+            .temporary
+    );
+
+    complete_identity_at(&path, &account.server_identity_key, "restored")
+        .await
+        .unwrap();
+    assert!(startup.identity().unwrap().temporary);
+    let restored = StartupRpc::new(super::startup_identity_at(&path).await.unwrap())
+        .identity()
+        .unwrap();
+    assert!(!restored.temporary);
+    assert_eq!(restored.signer.verifying_key().await.unwrap(), expected);
+}
+
+#[tokio::test]
 async fn forgetting_the_data_drive_drops_both_identity_scopes_before_fresh_setup() {
     let config = tempfile::tempdir().unwrap();
     let first = startup_identity_at(config.path()).await.unwrap().unwrap();
@@ -255,7 +306,7 @@ async fn unavailable_diagnostic_keys_are_marked_temporary_and_never_persisted_or
     std::fs::write(config.path().join("disk.guid"), "installed").unwrap();
     let fallback = diagnostic_identity_at(&path).await;
     assert!(fallback.temporary);
-    let peer = StartupRpc::diagnostic(fallback).identity().unwrap();
+    let peer = StartupRpc::new(Some(fallback)).identity().unwrap();
     assert!(peer.temporary);
     assert!(!path.exists());
     assert!(!setup_identity_path_at(&path).exists());

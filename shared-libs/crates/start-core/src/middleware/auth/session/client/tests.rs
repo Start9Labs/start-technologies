@@ -329,7 +329,11 @@ async fn all_startup_contexts_ignore_an_unavailable_stored_signer() {
     let startup = InitContext::init(
         &crate::context::config::ServerConfig::default(),
         dns,
-        Some(crate::db::model::private::generate_server_identity_key().0),
+        Some(
+            crate::db::model::private::generate_server_identity_key()
+                .0
+                .into(),
+        ),
     )
     .await
     .unwrap();
@@ -391,7 +395,7 @@ async fn diagnostic_recovery_without_a_persistent_key_is_encrypted_and_advertise
             crate::ErrorKind::Filesystem,
         ),
         dns,
-        crate::context::startup::DiagnosticIdentity::temporary(key),
+        crate::context::StartupIdentity::temporary(key),
     )
     .await
     .unwrap();
@@ -877,7 +881,11 @@ async fn actual_gpg_cli_authenticates_without_exporting_the_identity() {
     let startup = crate::context::InitContext::init(
         &crate::context::config::ServerConfig::default(),
         dns,
-        Some(crate::db::model::private::generate_server_identity_key().0),
+        Some(
+            crate::db::model::private::generate_server_identity_key()
+                .0
+                .into(),
+        ),
     )
     .await
     .unwrap();

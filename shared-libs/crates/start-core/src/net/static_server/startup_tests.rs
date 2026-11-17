@@ -23,7 +23,11 @@ async fn context() -> InitContext {
     InitContext::init(
         &ServerConfig::default(),
         dns,
-        Some(crate::db::model::private::generate_server_identity_key().0),
+        Some(
+            crate::db::model::private::generate_server_identity_key()
+                .0
+                .into(),
+        ),
     )
     .await
     .unwrap()

@@ -131,7 +131,7 @@ fn transcript(client: &[u8], server: &[u8]) -> [u8; 32] {
     digest.finalize().into()
 }
 
-/// The server's proof identity and its persistence scope.
+/// The server's proof identity and its admission scope.
 #[derive(Clone)]
 pub struct ServerIdentity {
     pub signer: Signer,

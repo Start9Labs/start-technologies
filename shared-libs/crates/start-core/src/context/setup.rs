@@ -112,7 +112,7 @@ impl SetupContext {
         webserver: &WebServer<WildcardListener>,
         config: ServerConfig,
         dns: Arc<crate::net::dns::DnsController>,
-        identity: Option<ed25519_dalek::SigningKey>,
+        identity: Option<crate::context::StartupIdentity>,
     ) -> Result<Self, Error> {
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
         let mut progress = FullProgressTracker::new();

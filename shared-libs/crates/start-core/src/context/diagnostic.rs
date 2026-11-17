@@ -65,7 +65,7 @@ impl DiagnosticContext {
         disk_guid: Option<InternedString>,
         error: Error,
         dns: Arc<crate::net::dns::DnsController>,
-        identity: crate::context::startup::DiagnosticIdentity,
+        identity: crate::context::startup::StartupIdentity,
     ) -> Result<Self, Error> {
         tracing::error!(
             "{}",
@@ -78,7 +78,7 @@ impl DiagnosticContext {
 
         Ok(Self(
             Arc::new(DiagnosticContextSeed {
-                startup_rpc: StartupRpc::diagnostic(identity),
+                startup_rpc: StartupRpc::new(Some(identity)),
                 dns,
                 shutdown,
                 disk_guid,

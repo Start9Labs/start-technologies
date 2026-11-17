@@ -94,7 +94,11 @@ async fn startup_rpc_and_guid_keep_logical_authority_after_dial_pinning() {
     let startup = InitContext::init(
         &crate::context::config::ServerConfig::default(),
         dns,
-        Some(crate::db::model::private::generate_server_identity_key().0),
+        Some(
+            crate::db::model::private::generate_server_identity_key()
+                .0
+                .into(),
+        ),
     )
     .await
     .unwrap();

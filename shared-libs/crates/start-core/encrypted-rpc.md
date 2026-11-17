@@ -19,8 +19,11 @@ revoking a session does not revoke a copied server key. Normal StartOS signs wit
 account `server_identity_key`; its persisted `developerKey` field and historical backup
 formats retain their names. A configured server shares its account identity through a root-only,
 mode-0600 copy at `/media/startos/config/id.key.pem`. Setup uses a separate `setup.key.pem` in
-that directory until completion. Both are unencrypted. Fresh setup adopts its setup key;
-attach/restore retain the selected account's key. Common initialization mirrors an account key
+that directory until completion. Both are unencrypted. Setup proofs are temporary despite
+persistence and never enter normal-client fingerprint history; each context retains that scope
+until retirement. Fresh setup adopts its setup key; attach/restore retain the selected account's
+key. Reattaching or restoring the same account preserves its remembered fingerprint without a
+setup-induced notice; a genuinely different account key retains the rotation warning. Common initialization mirrors an account key
 only for a configured server. Completion durably publishes the account copy, atomically writes
 `disk.guid`, then removes the setup key. Interruption before that marker leaves the separate
 setup key active; an imported account key can never seed a later fresh account. The installer
@@ -34,13 +37,13 @@ or activation, it copies an existing `/run/startos/id.key.pem` into config atomi
 `0600`. Without that runtime export it leaves config untouched, including during legacy
 diagnostic updates. Initialization without a usable account copy defers admission until the
 database supplies it. Diagnostics never fail solely for lack of an identity: they use the
-available persisted key, otherwise a signed `temporary: true` identity held only by that
-context. Browser normal-product encrypted RPC and continuations reject temporary peers before
+available startup key with its admission scope, otherwise a signed `temporary: true` identity
+held only by that context. Browser normal-product encrypted RPC and continuations reject temporary peers before
 sending application payloads, including reuse of a startup probe's session. Explicit setup,
 init and diagnostic clients may admit them; temporary peers never enter fingerprint history
 or identity-change notices. Registry CLI administration also rejects temporary peers before
 sending requests or observing fingerprints. Older clients reject the unfamiliar temporary
-field; persistent handshakes keep their existing shape. Server identity is separate from
+field, including provisional setup proofs; committed-account handshakes keep their existing shape. Server identity is separate from
 enrollment, authcookies, package/OS trust and TLS keys.
 
 `sign/fingerprint.rs` owns identity fingerprints: SHA-256 of raw Ed25519 public bytes,

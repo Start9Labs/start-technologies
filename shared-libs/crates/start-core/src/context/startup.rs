@@ -28,11 +28,11 @@ fn configured(identity: &Path) -> Result<bool, Error> {
 /// The database owns an installed server's identity; config exposes the same key before data import.
 /// Setup keys remain separate until completion; imported account keys cannot seed fresh accounts.
 /// Both config copies are unencrypted and root-only.
-pub(crate) async fn startup_identity() -> Result<Option<SigningKey>, Error> {
+pub(crate) async fn startup_identity() -> Result<Option<StartupIdentity>, Error> {
     startup_identity_at(Path::new(IDENTITY_PATH)).await
 }
 
-async fn startup_identity_at(identity: &Path) -> Result<Option<SigningKey>, Error> {
+async fn startup_identity_at(identity: &Path) -> Result<Option<StartupIdentity>, Error> {
     let configured = configured(identity)?;
     let path = if configured {
         identity.to_owned()
@@ -41,7 +41,11 @@ async fn startup_identity_at(identity: &Path) -> Result<Option<SigningKey>, Erro
     };
     if path.try_exists().with_kind(ErrorKind::Filesystem)? {
         return match load_signing_key(&path) {
-            Ok(key) => Ok(Some(key)),
+            Ok(key) => Ok(Some(if configured {
+                key.into()
+            } else {
+                StartupIdentity::temporary(key)
+            })),
             Err(error) if configured => {
                 tracing::warn!("Boot identity unavailable until data import: {error}");
                 Ok(None)
@@ -54,16 +58,20 @@ async fn startup_identity_at(identity: &Path) -> Result<Option<SigningKey>, Erro
     }
     let key = crate::db::model::private::generate_server_identity_key().0;
     persist_identity_at(&path, &key).await?;
-    Ok(Some(key))
+    Ok(Some(StartupIdentity::temporary(key)))
 }
 
-pub(crate) struct DiagnosticIdentity {
+/// A startup proof identity with its admission scope.
+/// Provisional setup keys remain temporary even when persisted.
+/// Conversion from `SigningKey` represents a committed account key.
+#[derive(Clone)]
+pub struct StartupIdentity {
     key: SigningKey,
     temporary: bool,
 }
 
-impl DiagnosticIdentity {
-    pub(crate) fn temporary(key: SigningKey) -> Self {
+impl StartupIdentity {
+    pub fn temporary(key: SigningKey) -> Self {
         Self {
             key,
             temporary: true,
@@ -71,7 +79,7 @@ impl DiagnosticIdentity {
     }
 }
 
-impl From<SigningKey> for DiagnosticIdentity {
+impl From<SigningKey> for StartupIdentity {
     fn from(key: SigningKey) -> Self {
         Self {
             key,
@@ -81,16 +89,16 @@ impl From<SigningKey> for DiagnosticIdentity {
 }
 
 /// An unavailable persistent key permits only a marked, unpersisted recovery identity.
-pub(crate) async fn diagnostic_identity() -> DiagnosticIdentity {
+pub(crate) async fn diagnostic_identity() -> StartupIdentity {
     diagnostic_identity_at(Path::new(IDENTITY_PATH)).await
 }
 
-async fn diagnostic_identity_at(path: &Path) -> DiagnosticIdentity {
+async fn diagnostic_identity_at(path: &Path) -> StartupIdentity {
     match startup_identity_at(path).await.log_err().flatten() {
-        Some(key) => key.into(),
-        None => DiagnosticIdentity::temporary(
-            crate::db::model::private::generate_server_identity_key().0,
-        ),
+        Some(identity) => identity,
+        None => {
+            StartupIdentity::temporary(crate::db::model::private::generate_server_identity_key().0)
+        }
     }
 }
 
@@ -151,24 +159,15 @@ async fn sync_config(path: &Path) -> Result<(), Error> {
 /// Possession admission for a startup context without an enrolled-key database.
 pub(crate) struct StartupRpc {
     // Setup retains its admitted identity across config-mount replacement.
-    identity: Option<SigningKey>,
-    temporary: bool,
+    identity: Option<StartupIdentity>,
     pub nonces: SyncMutex<NonceCache>,
 }
 
 impl StartupRpc {
-    pub fn new(identity: Option<SigningKey>) -> Self {
+    pub fn new(identity: Option<StartupIdentity>) -> Self {
         Self {
             identity,
-            temporary: false,
             nonces: SyncMutex::new(NonceCache::default()),
-        }
-    }
-
-    pub fn diagnostic(identity: DiagnosticIdentity) -> Self {
-        Self {
-            temporary: identity.temporary,
-            ..Self::new(Some(identity.key))
         }
     }
 
@@ -178,8 +177,8 @@ impl StartupRpc {
 
     fn key_at(&self, path: &Path) -> Result<SigningKey, Error> {
         self.identity
-            .clone()
-            .map(Ok)
+            .as_ref()
+            .map(|identity| Ok(identity.key.clone()))
             .unwrap_or_else(|| load_signing_key(path))
     }
 
@@ -189,7 +188,10 @@ impl StartupRpc {
             .map(|key| Signer::from(AnySigningKey::Ed25519(key)))?;
         Ok(ServerIdentity {
             signer,
-            temporary: self.temporary,
+            temporary: self
+                .identity
+                .as_ref()
+                .is_some_and(|identity| identity.temporary),
         })
     }
 

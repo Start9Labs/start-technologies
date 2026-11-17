@@ -718,7 +718,9 @@ pub(crate) mod test {
             &server,
             crate::context::config::ServerConfig::default(),
             dns,
-            Some(crate::db::model::private::generate_server_identity_key().0),
+            Some(crate::context::StartupIdentity::temporary(
+                crate::db::model::private::generate_server_identity_key().0,
+            )),
         )
         .unwrap();
         (context, server)

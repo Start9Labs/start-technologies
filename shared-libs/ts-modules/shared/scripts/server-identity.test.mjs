@@ -132,7 +132,7 @@ test('own-server first contact is silent; rotation is remembered across service 
   b.injector.destroy()
 })
 
-test('temporary startup peers neither establish nor replace history through normal open observers', async () => {
+test('provisional setup and recovery preserve the remembered account without a notice after attach/restore', async () => {
   const db = database()
   const f = fixture(db)
   const temporary = { ...second, temporary: true }
