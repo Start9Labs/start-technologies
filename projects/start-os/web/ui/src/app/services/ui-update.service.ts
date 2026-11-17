@@ -2,21 +2,19 @@ import { computed, DestroyRef, inject, Service, signal } from '@angular/core'
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop'
 import { SwUpdate } from '@angular/service-worker'
 import { WA_WINDOW } from '@ng-web-apis/common'
+import { PatchDB } from 'patch-db-client'
 import {
-  catchError,
   distinctUntilChanged,
-  EMPTY,
   filter,
-  from,
   map,
   merge,
   shareReplay,
   switchMap,
 } from 'rxjs'
 
-import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { ConfigService } from 'src/app/services/config.service'
-import { StateService } from 'src/app/services/state.service'
+import { ConnectionService } from 'src/app/services/connection.service'
+import { DataModel } from 'src/app/services/patch-db/data-model'
 
 // A stalled sync permits reload without confirming successful synchronization.
 type UiUpdateState =
@@ -39,14 +37,12 @@ const SYNC_DEADLINE_MS = 60_000
 export class UiUpdateService {
   private readonly updates = inject(SwUpdate)
   private readonly win = inject(WA_WINDOW)
-  private readonly api = inject(ApiService)
+  private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly gitHash = inject(ConfigService).gitHash
-  private readonly outdated$ = inject(StateService).pipe(
-    filter(state => state === 'running'),
-    switchMap(() =>
-      from(this.api.rpc.gitInfo({})).pipe(catchError(() => EMPTY)),
-    ),
-    map(hash => hash.trim() !== this.gitHash),
+  private readonly outdated$ = inject(ConnectionService).pipe(
+    filter(Boolean),
+    switchMap(() => this.patch.watch$('serverInfo', 'gitHash')),
+    map(hash => hash !== this.gitHash),
     distinctUntilChanged(),
     shareReplay({ bufferSize: 1, refCount: true }),
   )

@@ -492,7 +492,7 @@ export default class SystemGeneralComponent {
 
   private async check(): Promise<void> {
     const success = await this.tasks.run(
-      async () => await this.os.loadOS(),
+      async () => await this.os.checkForUpdates(),
       'Checking for updates',
     )
 

@@ -25,6 +25,7 @@ import type { SessionSocketIdentity } from './session-websocket'
 import { withTimeout } from './http.service'
 import {
   SessionOpenEvent,
+  assertServerIdentity,
   sessionWebSocketConstructor,
 } from './session-websocket'
 import { RpcConsoleLog } from './rpc-console-log'
@@ -34,7 +35,9 @@ import type { RpcFrame, SocketResponseStream } from './rpc-stream'
 
 /** Observes verified admission for this operation, including healthy connection reuse. */
 export type RpcSocketOptions = Pick<RPCOptions, 'timeout'> &
-  Pick<WebSocketSubjectConfig<unknown>, 'openObserver'>
+  Pick<WebSocketSubjectConfig<unknown>, 'openObserver'> & {
+    allowTemporaryIdentity?: boolean
+  }
 
 @Service()
 export class RpcSocketService {
@@ -56,7 +59,7 @@ export class RpcSocketService {
     options: RpcSocketOptions,
     lease: SessionSocketIdentity,
   ): Promise<RPCResponse<T>> {
-    let response = this.responses(body, lease, options.openObserver).pipe(
+    let response = this.responses(body, lease, options).pipe(
       map(frame => frame.value),
       filter(
         (value): value is RPCResponse<T> =>
@@ -75,10 +78,10 @@ export class RpcSocketService {
   stream<R, I, F>(
     body: string,
     lease: SessionSocketIdentity,
-    options: RpcStreamOptions & Pick<RpcSocketOptions, 'openObserver'> = {},
+    options: RpcStreamOptions & RpcSocketOptions = {},
   ): Promise<SocketResponseStream<R, I, F>> {
     const request = `{"rpcstream":${JSON.stringify(SESSION_PROFILE.transport.rpcStreamVersion)},${body.slice(1)}`
-    let source = this.responses(request, lease, options.openObserver)
+    let source = this.responses(request, lease, options)
     if (options.timeout)
       source = withTimeout(source, options.timeout).pipe(
         catchError(cause => throwError(() => transportError(cause))),
@@ -89,7 +92,7 @@ export class RpcSocketService {
   private responses(
     body: string,
     lease: SessionSocketIdentity,
-    observer?: RpcSocketOptions['openObserver'],
+    options: RpcSocketOptions,
   ): Observable<RpcFrame> {
     return defer(() => {
       const { socket, opened } = this.sessionFor(lease)
@@ -107,33 +110,46 @@ export class RpcSocketService {
           'id' in frame.value &&
           frame.value.id === id,
       )
+      const logged = this.consoleLog.request(id, request)
       return new Observable<RpcFrame>(subscriber => {
         const subscription = new Subscription()
-        const logged = this.consoleLog.request(id, request)
-        if (observer)
-          subscription.add(
-            opened
-              .pipe(
-                filter(
-                  event =>
-                    (event.target as WebSocket).readyState === WebSocket.OPEN,
-                ),
-                take(1),
-              )
-              .subscribe(observer),
-          )
         subscription.add(
-          responses
+          opened
             .pipe(
-              tap({
-                next: frame => logged.reply(frame.value),
-                error: error => logged.failure(error),
-              }),
+              filter(
+                event =>
+                  (event.target as WebSocket).readyState === WebSocket.OPEN,
+              ),
+              take(1),
             )
-            .subscribe(subscriber),
+            .subscribe(event => {
+              try {
+                assertServerIdentity(
+                  event,
+                  options.allowTemporaryIdentity ?? false,
+                )
+              } catch (error) {
+                subscriber.error(error)
+                return
+              }
+              options.openObserver?.next(event)
+              subscription.add(responses.subscribe(subscriber))
+            }),
         )
+        if (!subscriber.closed)
+          subscription.add(
+            socket.subscribe({
+              error: error => subscriber.error(error),
+              complete: () => subscriber.complete(),
+            }),
+          )
         return subscription
-      })
+      }).pipe(
+        tap({
+          next: frame => logged.reply(frame.value),
+          error: error => logged.failure(error),
+        }),
+      )
     }).pipe(catchError(cause => throwError(() => transportError(cause))))
   }
 
@@ -150,6 +166,8 @@ export class RpcSocketService {
           async () => ({ signer: lease.signer, signal }),
           this.context,
           SESSION_PROFILE.identity.rpcTarget,
+          undefined,
+          true,
         ),
         serializer: value =>
           typeof value === 'string' ? value : JSON.stringify(value),
@@ -186,12 +204,16 @@ export class RpcSocketService {
   /** Redeems a continuation through encrypted admission. */
   open<T>(
     guid: string,
-    config: Omit<WebSocketSubjectConfig<T>, 'url' | 'WebSocketCtor'> = {},
+    {
+      allowTemporaryIdentity = false,
+      ...config
+    }: Omit<WebSocketSubjectConfig<T>, 'url' | 'WebSocketCtor'> &
+      Pick<RpcSocketOptions, 'allowTemporaryIdentity'> = {},
   ): WebSocketSubject<T> {
     return webSocket<T>({
       ...config,
       url: this.url(guid),
-      WebSocketCtor: this.constructorFor(guid),
+      WebSocketCtor: this.constructorFor(guid, allowTemporaryIdentity),
     })
   }
 
@@ -203,11 +225,13 @@ export class RpcSocketService {
     )
   }
 
-  private constructorFor(guid: string) {
+  private constructorFor(guid: string, allowTemporaryIdentity = false) {
     return sessionWebSocketConstructor(
       () => this.authKeys.admissionLease(),
       this.context,
       { continuation: guid },
+      undefined,
+      allowTemporaryIdentity,
     )
   }
 }

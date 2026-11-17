@@ -6,22 +6,16 @@ WORKFLOWS = Path('.github/workflows')
 RETARGET = WORKFLOWS / 'pr-retarget.yml'
 CONFLICT = WORKFLOWS / 'pr-retarget-conflict.yml'
 TARGETS = {
+    'build-products.yaml',
     'rust-builder.yaml',
-    'start-cli.yaml',
-    'start-registry.yaml',
-    'start-tunnel.yaml',
     'start-wrt.yaml',
-    'startos-iso.yaml',
     'test.yaml',
 }
 EXPECTED_PULL_REQUEST_WORKFLOWS = {
+    'build-products.yaml',
     'conflict-markers.yml',
     'rust-builder.yaml',
-    'start-cli.yaml',
-    'start-registry.yaml',
-    'start-tunnel.yaml',
     'start-wrt.yaml',
-    'startos-iso.yaml',
     'test.yaml',
 }
 
@@ -129,21 +123,25 @@ assert len(set(groups.values())) == len(groups), groups
 expected_call_permissions = {
     'test': {('contents', 'read'), ('pull-requests', 'read')},
     'rust-builder': {('contents', 'read'), ('packages', 'write')},
-    'start-cli': {('contents', 'read')},
-    'start-registry': {('contents', 'read'), ('packages', 'write')},
-    'start-tunnel': {('contents', 'read')},
+    'build-products': {
+        ('contents', 'read'),
+        ('pull-requests', 'read'),
+        ('packages', 'write'),
+        ('actions', 'write'),
+    },
     'start-wrt': {('contents', 'read')},
-    'startos-iso': {('contents', 'read'), ('pull-requests', 'read')},
 }
 for job, expected in expected_call_permissions.items():
     assert job_permissions(listener, job) == expected, job
 
-registry = (WORKFLOWS / 'start-registry.yaml').read_text()
-assert job_permissions(registry, 'compile') == {('contents', 'read')}
-assert job_permissions(registry, 'create-image') == {
+products = (WORKFLOWS / 'build-products.yaml').read_text()
+for job in ('build', 'cli-macos'):
+    assert job_permissions(products, job) == {('contents', 'read')}, job
+assert job_permissions(products, 'registry-image') == {
     ('contents', 'read'),
     ('packages', 'write'),
 }
+assert job_permissions(products, 'publish') == {('actions', 'write')}
 
 builder = (WORKFLOWS / 'rust-builder.yaml').read_text()
 for job in ('build', 'publish'):

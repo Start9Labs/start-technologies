@@ -306,6 +306,13 @@ pub(crate) async fn call_cli(
                 headers,
             )
             .await?;
+        if connection.peer.temporary {
+            return Err(Error::new(
+                eyre!("{}", t!("middleware.auth.invalid-request-signature")),
+                ErrorKind::InvalidSignature,
+            )
+            .into());
+        }
         for warning in super::cli_identity::observe(
             &ctx.id_key_path.with_file_name("registry-identities"),
             &url,
@@ -550,8 +557,8 @@ impl LocalAuthContext for RegistryContext {
     const LOCAL_AUTH_COOKIE_OWNERSHIP: &str = "root:root";
 }
 impl SignatureAuthContext for RegistryContext {
-    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
-        RegistryContext::server_identity(self)
+    fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error> {
+        RegistryContext::server_identity(self).map(Into::into)
     }
     fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
         RegistryContext::replay_check(self)
