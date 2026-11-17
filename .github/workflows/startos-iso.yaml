@@ -2,8 +2,8 @@ name: StartOS Publish
 
 # Publishes one StartOS build to a channel: registers its version, then builds and
 # deploys each platform's image as soon as that image is ready. build-products.yaml
-# dispatches it once a publishing build's binaries are compiled; every step uses
-# the build's commit, not the branch head this run was dispatched on.
+# dispatches it once a publishing build's binaries are compiled; images and release
+# metadata use the build's commit, not the dispatched branch head.
 run-name: StartOS ${{ inputs.channel }} publish of ${{ inputs.commit }}
 
 on:

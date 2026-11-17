@@ -776,6 +776,17 @@ test('start-os images deploy per platform only once deploy-prepare registered th
   for (const step of writes) assert.ok(install < leg.steps.indexOf(step))
 })
 
+test('StartOS upload tooling follows the workflow commit when publishing an older build', () => {
+  const source = workflow('startos-image.yaml')
+  const ctx = { inputs: { commit: 'b'.repeat(40) }, github: { sha: SHA } }
+  const checkout = job =>
+    source.jobs[job].steps.find(step => step.uses === 'actions/checkout@v6')
+  assert.equal(evaluate(checkout('build').with.ref, ctx), ctx.inputs.commit)
+  const deploy = checkout('deploy')
+  assert.equal(evaluate(deploy.with.ref, ctx), SHA)
+  assert.equal(deploy.with['sparse-checkout'], 'scripts/s3-put-once.sh')
+})
+
 test('product builds trigger on every push and pull request and classify in the changes job', () => {
   const wrt = workflow('start-wrt.yaml')
   for (const event of ['push', 'pull_request']) {

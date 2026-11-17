@@ -275,10 +275,11 @@ jobs:
       FORCE_OVERWRITE: ${{ inputs.force-overwrite }}
       COMMIT: ${{ inputs.commit || github.sha }}
     steps:
+      # Upload tooling belongs to this workflow, not the published build.
       # Checkout cleans the workspace, deleting any earlier artifact download.
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.commit || github.sha }}
+          ref: ${{ github.sha }}
           sparse-checkout: scripts/s3-put-once.sh
           sparse-checkout-cone-mode: false
 
