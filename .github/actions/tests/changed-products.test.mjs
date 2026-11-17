@@ -1,18 +1,33 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import yaml from 'js-yaml'
 import { REPO } from '../../../scripts/tests/fixtures.mjs'
 import {
   classify,
+  matches,
   PRODUCTS,
 } from '../../../.github/scripts/changed-products.mjs'
 
 const ALL = Object.keys(PRODUCTS)
 const DEBS = ['start-cli', 'start-registry', 'start-tunnel']
+const NATIVE_OS_INPUTS = [
+  'projects/start-os/build/lib/scripts/fde-boot-mode',
+  'projects/start-os/build/lib/scripts/fde-initramfs-control.mjs',
+  'projects/start-os/build/dpkg-deps/uefi.platforms',
+]
 
 for (const [path, push, pullRequest = push, osImage = false] of [
   ['shared-libs/crates/start-core/src/lib.rs', ALL],
+  ...NATIVE_OS_INPUTS.map(path => [path, ALL, ALL, true]),
+  [
+    'projects/start-os/build/dpkg-deps/uefi.depends',
+    ['start-os'],
+    undefined,
+    true,
+  ],
   ['Cargo.lock', ALL],
   ['build/env/check-platform.sh', ALL, ALL, true],
   ['debian/build.sh', ALL, ALL, true],
@@ -55,6 +70,29 @@ for (const [path, push, pullRequest = push, osImage = false] of [
   })
 }
 
+test('StartWRT rebuilds when native OS inputs change', () => {
+  const workflow = yaml.load(
+    readFileSync(join(REPO, '.github/workflows/start-wrt.yaml'), 'utf8'),
+  )
+  for (const event of ['push', 'pull_request']) {
+    for (const path of NATIVE_OS_INPUTS) {
+      assert.equal(
+        matches(workflow.on[event].paths, path),
+        true,
+        `${event}: ${path}`,
+      )
+    }
+    assert.equal(
+      matches(
+        workflow.on[event].paths,
+        'projects/start-os/build/image-recipe/build.sh',
+      ),
+      false,
+      event,
+    )
+  }
+})
+
 test('the script prints step outputs for the changed paths on stdin', () => {
   const script = join(REPO, '.github/scripts/changed-products.mjs')
   const run = (args, input) =>
@@ -73,6 +111,20 @@ test('the script prints step outputs for the changed paths on stdin', () => {
       'start-tunnel=false',
       'os-image=false',
       'products=start-cli start-registry',
+      '',
+    ].join('\n'),
+  )
+  const native = run(['--event', 'push'], NATIVE_OS_INPUTS.join('\n'))
+  assert.equal(native.status, 0, native.stderr)
+  assert.equal(
+    native.stdout,
+    [
+      'start-os=true',
+      'start-cli=true',
+      'start-registry=true',
+      'start-tunnel=true',
+      'os-image=true',
+      'products=start-os start-cli start-registry start-tunnel',
       '',
     ].join('\n'),
   )

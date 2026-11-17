@@ -8,6 +8,13 @@
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
+// Mirrors the source inputs in build/common.mk's CORE_SRC.
+const CORE_SOURCE_PATHS = [
+  'shared-libs/crates/**',
+  'projects/start-os/build/lib/scripts/**',
+  'projects/start-os/build/dpkg-deps/uefi.platforms',
+]
+
 const WORKFLOW_INPUTS = [
   '.github/workflows/build-products.yaml',
   '.github/scripts/changed-products.mjs',
@@ -48,7 +55,7 @@ export const PRODUCTS = {
   'start-cli': {
     paths: [
       'projects/start-cli/**',
-      'shared-libs/crates/**',
+      ...CORE_SOURCE_PATHS,
       'Cargo.toml',
       'Cargo.lock',
       'build/**',
@@ -61,7 +68,7 @@ export const PRODUCTS = {
   'start-registry': {
     paths: [
       'projects/start-registry/**',
-      'shared-libs/crates/**',
+      ...CORE_SOURCE_PATHS,
       'Cargo.toml',
       'Cargo.lock',
       'build/**',
@@ -74,7 +81,7 @@ export const PRODUCTS = {
   'start-tunnel': {
     paths: [
       'projects/start-tunnel/**',
-      'shared-libs/crates/**',
+      ...CORE_SOURCE_PATHS,
       'shared-libs/ts-modules/**',
       'Cargo.toml',
       'Cargo.lock',

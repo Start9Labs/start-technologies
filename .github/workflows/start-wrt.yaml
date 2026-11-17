@@ -29,6 +29,8 @@ on:
     paths:
       - 'projects/start-wrt/**'
       - 'shared-libs/crates/**'
+      - 'projects/start-os/build/lib/scripts/**'
+      - 'projects/start-os/build/dpkg-deps/uefi.platforms'
       - 'shared-libs/ts-modules/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -58,6 +60,8 @@ on:
     paths:
       - 'projects/start-wrt/**'
       - 'shared-libs/crates/**'
+      - 'projects/start-os/build/lib/scripts/**'
+      - 'projects/start-os/build/dpkg-deps/uefi.platforms'
       - 'shared-libs/ts-modules/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
