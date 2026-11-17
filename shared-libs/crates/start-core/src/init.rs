@@ -231,7 +231,7 @@ pub async fn init(
 
     load_ssh_keys.start();
     let identity_key = peek.as_private().as_server_identity_key().de()?.0;
-    crate::context::startup::persist_identity(&identity_key).await?;
+    crate::context::startup::mirror_configured_identity(&identity_key).await?;
     crate::developer::write_signing_key(&identity_key, OS_ID_KEY_PATH).await?;
     Command::new("chown")
         .arg("root:startos")

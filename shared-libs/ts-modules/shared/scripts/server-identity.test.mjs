@@ -93,15 +93,21 @@ function fixture(db, { namespace = 'device', url = '/rpc/v1' } = {}) {
   }
 }
 
-const first = auth.ed25519PublicKeyDer64(
-  Uint8Array.from(
-    Buffer.from(
-      'd54207da194977dcf46adbfec2bc2e75b52d5a8a42184fedfdc00024f0e3e8da',
-      'hex',
+const first = {
+  peer: auth.ed25519PublicKeyDer64(
+    Uint8Array.from(
+      Buffer.from(
+        'd54207da194977dcf46adbfec2bc2e75b52d5a8a42184fedfdc00024f0e3e8da',
+        'hex',
+      ),
     ),
   ),
-)
-const second = auth.ed25519PublicKeyDer64(new Uint8Array(32).fill(19))
+  temporary: false,
+}
+const second = {
+  peer: auth.ed25519PublicKeyDer64(new Uint8Array(32).fill(19)),
+  temporary: false,
+}
 const golden =
   'SHA256:d7e1e084be213b01e506852af8198b9980b43e03749c67d82dcd0903f4001c77'
 
@@ -124,6 +130,23 @@ test('own-server first contact is silent; rotation is remembered across service 
   await b.service.observe(second)
   assert.equal(b.notifications.length, 1)
   b.injector.destroy()
+})
+
+test('temporary startup peers neither establish nor replace history through normal open observers', async () => {
+  const db = database()
+  const f = fixture(db)
+  const temporary = { ...second, temporary: true }
+  await f.service.observe(temporary)
+  assert.equal(db.values.size, 0)
+  await f.service.observe(first)
+  f.service.openObserver.next(temporary)
+  await f.service.observe(first)
+  assert.deepEqual([...db.values.values()], [golden])
+  assert.equal(f.notifications.length, 0)
+  await f.service.observe(second)
+  assert.equal(f.notifications.length, 1)
+  assert.equal(f.notifications[0].data.previous, golden)
+  f.injector.destroy()
 })
 
 test('concurrent RPC and continuation observations report one rotation', async () => {

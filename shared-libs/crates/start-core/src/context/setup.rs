@@ -84,7 +84,7 @@ impl SessionContext for SetupContext {
     }
 }
 impl SignatureAuthContext for SetupContext {
-    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+    fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error> {
         self.startup_rpc.identity()
     }
     fn replay_check(&self) -> RequestReplayCheck {

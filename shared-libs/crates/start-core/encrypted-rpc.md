@@ -15,20 +15,31 @@ PatchDB files use mode `0600`. WRT preserves its authentication database during 
 and WRT session APIs exclude this field. Tunnel's existing authenticated full-database
 feed includes it alongside its WireGuard and TLS secrets. Registry and Tunnel admin root
 `db.dump` results also include it. Copies can bypass advisory fingerprint-change detection;
-revoking a session does not revoke a copied server key. StartOS signs with its existing
+revoking a session does not revoke a copied server key. Normal StartOS signs with its existing
 account `server_identity_key`; its persisted `developerKey` field and historical backup
-formats retain their names. Startup contexts use the same key through a root-only, mode-0600
-copy at `/media/startos/config/id.key.pem`. This copy is unencrypted and survives OS updates.
-The account database remains authoritative: initialization mirrors its key before normal RPC;
-attach/restore mirror the selected account rather than changing its identity. Fresh setup
-persists a key before admission and adopts it into its account. The installer carries that
-setup key across a new config mount without replacing an existing copy. OTA executes the new
-image's `upgrade` script on the running old system; before boot changes or activation, that
-script copies the existing `/run/startos/id.key.pem` into config atomically with mode `0600`.
-Diagnostic updates reuse a valid config copy when the runtime export is absent. An installed
-server with neither key refuses the update before activation rather than resetting identity.
-Other legacy installations without a usable copy defer encrypted startup admission until the
-database key is available; they never advertise a generated replacement. Server identity is separate from
+formats retain their names. A configured server shares its account identity through a root-only,
+mode-0600 copy at `/media/startos/config/id.key.pem`. Setup uses a separate `setup.key.pem` in
+that directory until completion. Both are unencrypted. Fresh setup adopts its setup key;
+attach/restore retain the selected account's key. Common initialization mirrors an account key
+only for a configured server. Completion durably publishes the account copy, atomically writes
+`disk.guid`, then removes the setup key. Interruption before that marker leaves the separate
+setup key active; an imported account key can never seed a later fresh account. The installer
+carries the setup key across config-mount replacement. Forgetting a data drive and emulated
+reflash share `forget-server-identity`, which durably removes both keys before deleting the
+marker.
+
+OTA executes the new image's `upgrade` script on the running old system. Before boot changes
+or activation, it copies an existing `/run/startos/id.key.pem` into config atomically with mode
+`0600`. Without that runtime export it leaves config untouched, including during legacy
+diagnostic updates. Initialization without a usable account copy defers admission until the
+database supplies it. Diagnostics never fail solely for lack of an identity: they use the
+available persisted key, otherwise a signed `temporary: true` identity held only by that
+context. Browser normal-product encrypted RPC and continuations reject temporary peers before
+sending application payloads, including reuse of a startup probe's session. Explicit setup,
+init and diagnostic clients may admit them; temporary peers never enter fingerprint history
+or identity-change notices. Registry CLI administration also rejects temporary peers before
+sending requests or observing fingerprints. Older clients reject the unfamiliar temporary
+field; persistent handshakes keep their existing shape. Server identity is separate from
 enrollment, authcookies, package/OS trust and TLS keys.
 
 `sign/fingerprint.rs` owns identity fingerprints: SHA-256 of raw Ed25519 public bytes,
@@ -64,7 +75,7 @@ A valid unknown key completes admission without roles. `SignatureAuth` checks cu
 enrollment, roles, expiry, revocation and hooks on every RPC, including enrollment or
 revocation on an already-open connection. `auth::continuation_subscription` registers the existing revocation listener before rechecking current key, ephemeral-key or bearer-token membership. Typed, WebSocket and REST bindings consume that same listener; revocation during asynchronous preparation cannot create a fresh unrevoked continuation. `LoginContext` owns shared membership selectors, preserving each context's expiry policy and independently authenticated local credentials. No roles or database snapshot are retained by the listener. Request claims cannot replace the encrypted peer. Local/bearer credentials
 retain their separate precedence. Setup, initialization and diagnostic seeds retain their
-config-backed proof identity and the shared bounded replay policy, with immutable session
+selected proof identity and the shared bounded replay policy, with immutable session
 provenance on context clones. These possession identities grant no enrollment roles. Their proof names
 come from the existing validated local-host ingress policy. HTTP resources retain their own
 authentication policy.

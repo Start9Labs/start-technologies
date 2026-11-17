@@ -263,7 +263,7 @@ pub async fn main(
                     },
                     e,
                     dns,
-                    crate::context::startup::startup_identity().await?,
+                    crate::context::startup::diagnostic_identity().await,
                 )
                 .await?;
 

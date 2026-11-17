@@ -68,6 +68,19 @@ function fixture(t) {
       assert.ok(readdirSync(config).every(name => !name.includes('.tmp.')))
       return result
     },
+    forget(env = {}) {
+      return spawnSync(
+        'bash',
+        [
+          path.join(
+            root,
+            'projects/start-os/build/lib/scripts/forget-server-identity',
+          ),
+          config,
+        ],
+        { encoding: 'utf8', env: { ...process.env, ...env } },
+      )
+    },
     fail(command, body = 'exit 73') {
       const bin = path.join(directory, 'bin')
       mkdirSync(bin)
@@ -106,23 +119,20 @@ test('the running account key replaces a stale copy atomically with private perm
   assert.equal(statSync(f.persistent).mode & 0o777, 0o600)
 })
 
-test('diagnostic updates preserve an existing config key without a runtime export', t => {
+test('an update without a runtime export leaves the saved key untouched', t => {
   const f = fixture(t)
   const expected = key(f.persistent)
-  chmodSync(f.persistent, 0o640)
   writeFileSync(f.marker, 'installed')
   const result = f.run()
   assert.equal(result.status, 0, result.stderr)
   assert.equal(readFileSync(f.persistent, 'utf8'), expected)
-  assert.equal(statSync(f.persistent).mode & 0o777, 0o600)
 })
 
-test('a configured server with neither key refuses activation rather than inventing an identity', t => {
+test('a configured server without a runtime export updates without inventing an identity', t => {
   const f = fixture(t)
   writeFileSync(f.marker, 'installed')
   const result = f.run()
-  assert.notEqual(result.status, 0)
-  assert.match(result.stderr, /Cannot preserve server identity/)
+  assert.equal(result.status, 0, result.stderr)
   assert.equal(existsSync(f.persistent), false)
 })
 
@@ -142,12 +152,12 @@ test('a malformed runtime export cannot replace the saved key', t => {
   assert.equal(readFileSync(f.persistent, 'utf8'), expected)
 })
 
-test('a malformed saved key cannot be used as a diagnostic update source', t => {
+test('a malformed saved key does not block an update without a runtime export', t => {
   const f = fixture(t)
   writeFileSync(f.marker, 'installed')
   writeFileSync(f.persistent, 'not a private key')
   const result = f.run()
-  assert.notEqual(result.status, 0)
+  assert.equal(result.status, 0, result.stderr)
   assert.equal(readFileSync(f.persistent, 'utf8'), 'not a private key')
 })
 
@@ -165,6 +175,32 @@ test('directory sync failure stops the update after publishing the account key',
   assert.equal(result.status, 73, result.stderr)
   assert.equal(readFileSync(f.persistent, 'utf8'), expected)
   assert.equal(statSync(f.persistent).mode & 0o777, 0o600)
+})
+
+test('forgetting a server removes account and setup keys before clearing its marker', t => {
+  const f = fixture(t)
+  key(f.persistent)
+  const provisional = path.join(f.config, 'setup.key.pem')
+  key(provisional)
+  writeFileSync(f.marker, 'installed')
+  const result = f.forget()
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(existsSync(f.persistent), false)
+  assert.equal(existsSync(provisional), false)
+  assert.equal(existsSync(f.marker), false)
+})
+
+test('forgetting cannot clear the marker before key removal is durable', t => {
+  const f = fixture(t)
+  key(f.persistent)
+  const provisional = path.join(f.config, 'setup.key.pem')
+  key(provisional)
+  writeFileSync(f.marker, 'installed')
+  const result = f.forget(f.fail('sync'))
+  assert.equal(result.status, 73, result.stderr)
+  assert.equal(existsSync(f.persistent), false)
+  assert.equal(existsSync(provisional), false)
+  assert.equal(readFileSync(f.marker, 'utf8'), 'installed')
 })
 
 for (const command of ['install', 'sync', 'mv'])

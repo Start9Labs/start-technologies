@@ -56,7 +56,6 @@ export async function decodeFirst(bytes: Uint8Array): Promise<{
         Array.isArray(value) ||
         value === null ||
         value === undefined ||
-        typeof value === 'boolean' ||
         typeof value === 'symbol' ||
         cbor.Simple.isSimple(value)
       )

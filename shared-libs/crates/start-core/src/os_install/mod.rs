@@ -784,11 +784,11 @@ async fn install_os_inner(
         )
         .await?;
 
-        if !Path::new(crate::context::startup::IDENTITY_PATH)
+        if !crate::context::startup::setup_identity_path()
             .try_exists()
             .with_kind(ErrorKind::Filesystem)?
         {
-            crate::context::startup::persist_identity(&identity).await?;
+            crate::context::startup::persist_setup_identity(&identity).await?;
         }
 
         let mut info = SetupInfo::default();

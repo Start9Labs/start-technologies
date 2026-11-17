@@ -31,7 +31,7 @@ container-runtime-test: projects/start-os/container-runtime/node_modules/.packag
 	cd projects/start-os/container-runtime && npm test
 
 .PHONY: start-os-upgrade-identity-test
-start-os-upgrade-identity-test: projects/start-os/build/tests/upgrade-identity.test.mjs projects/start-os/build/lib/scripts/upgrade shared-libs/crates/start-core/src/context/startup.rs shared-libs/crates/start-core/src/developer/mod.rs
+start-os-upgrade-identity-test: projects/start-os/build/tests/upgrade-identity.test.mjs projects/start-os/build/lib/scripts/upgrade projects/start-os/build/lib/scripts/forget-server-identity shared-libs/crates/start-core/src/context/startup.rs shared-libs/crates/start-core/src/developer/mod.rs
 	node --test projects/start-os/build/tests/upgrade-identity.test.mjs
 
 .PHONY: start-os-grub-test
@@ -192,7 +192,8 @@ start-os-emulate-reflash: $(STARTOS_TARGETS)
 	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi
 	$(call ssh,'sudo /usr/lib/startos/scripts/chroot-and-upgrade --create')
 	$(MAKE) start-os-install REMOTE=$(REMOTE) SSHPASS=$(SSHPASS) DESTDIR=/media/startos/next PLATFORM=$(PLATFORM)
-	$(call ssh,'sudo rm -f /media/startos/config/disk.guid /media/startos/config/overlay/etc/hostname')
+	$(call ssh,'sudo /media/startos/next/usr/lib/startos/scripts/forget-server-identity')
+	$(call ssh,'sudo rm -f /media/startos/config/overlay/etc/hostname')
 	$(call ssh,'sudo /media/startos/next/usr/lib/startos/scripts/chroot-and-upgrade --no-sync "apt-get install -y $(shell cat ./projects/start-os/build/lib/depends)"')
 
 projects/start-os/container-runtime/debian.$(ARCH).squashfs: ./projects/start-os/container-runtime/download-base-image.sh
