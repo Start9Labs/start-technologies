@@ -12,11 +12,16 @@ set_generated_profile() {
   select_profile generated release dev debug
 }
 
-# Normalizes PROFILE to one of the given profiles, the first by default and debug when unknown, and
-# sets BUILD_FLAGS to its cargo flags. Every list must include debug.
+# Unknown profiles fall back to debug; every accepted-profile list must include debug.
 select_profile() {
   PROFILE=${PROFILE:-$1}
-  if [[ " $* " != *" $PROFILE "* ]]; then
+  local allowed_profile
+  for allowed_profile in "$@"; do
+    if [[ "$PROFILE" == "$allowed_profile" ]]; then
+      break
+    fi
+  done
+  if [[ "$PROFILE" != "$allowed_profile" ]]; then
     >&2 echo "Unknown profile $PROFILE: falling back to debug..."
     PROFILE=debug
   fi

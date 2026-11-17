@@ -54,6 +54,20 @@ assert_profile_warning() {
     fi
 }
 
+(
+    source ./build/rust-build-profile.sh
+    for rule in set_build_profile set_test_profile set_generated_profile; do
+        for profile in 'release debug' 'release dev'; do
+            PROFILE=$profile
+            BUILD_FLAGS=(--release)
+            "$rule" 2> "$scratch/profile.stderr"
+            test "$PROFILE" = debug
+            test "${#BUILD_FLAGS[@]}" = 0
+            test "$(<"$scratch/profile.stderr")" = "Unknown profile $profile: falling back to debug..."
+        done
+    done
+)
+
 entrypoint="$repo_root/build/rust-builder/entrypoint.sh"
 profile_flags=CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS
 default_flags=$(env -u DISABLE_RVA23 -u "$profile_flags" bash "$entrypoint" printenv "$profile_flags")
