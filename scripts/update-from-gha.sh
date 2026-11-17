@@ -13,8 +13,10 @@
 # Options:
 #   --run <id|url>      GitHub Actions run to take the image from. Accepts a run
 #                       id or a full run URL.
-#   --branch <name>     Use the latest successful startos-iso run on this branch
-#                       instead of --run. Default: master.
+#   --branch <name>     Use the latest successful run on this branch that built
+#                       images instead of --run: a StartOS publish run
+#                       (startos-iso.yaml), else a build-products.yaml run.
+#                       Default: master.
 #   --platform <name>   Image platform (x86_64, aarch64, raspberrypi, ...).
 #                       Default: whatever the server reports.
 #   --keep <dir>        Download into <dir> and leave it in place. Default: a
@@ -29,7 +31,8 @@
 set -euo pipefail
 
 REPO="${REPO:-Start9Labs/start-technologies}"
-WORKFLOW="startos-iso.yaml"
+# Publishing builds make their images in startos-iso.yaml; other builds in build-products.yaml.
+WORKFLOWS="startos-iso.yaml build-products.yaml"
 REMOTE=""
 RUN_ID=""
 BRANCH=""
@@ -93,20 +96,27 @@ if [ -n "$RUN_ID" ]; then
     fi
 else
     BRANCH="${BRANCH:-master}"
-    echo "Finding the latest successful $WORKFLOW run on $BRANCH..."
-    RUN_ID=$(gh run list -R "$REPO" -w "$WORKFLOW" -b "$BRANCH" -s success \
-        -L 1 --json databaseId -q '.[0].databaseId')
-    if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-        >&2 echo "No successful $WORKFLOW run found on $BRANCH"
+    for WORKFLOW in $WORKFLOWS; do
+        echo "Finding the latest successful $WORKFLOW run on $BRANCH..."
+        RUN_ID=$(gh run list -R "$REPO" -w "$WORKFLOW" -b "$BRANCH" -s success \
+            -L 1 --json databaseId -q '.[0].databaseId')
+        if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
+            break
+        fi
+        RUN_ID=""
+    done
+    if [ -z "$RUN_ID" ]; then
+        >&2 echo "No successful image build found on $BRANCH"
         exit 1
     fi
 fi
 
-read -r RUN_SHA RUN_BRANCH RUN_DATE < <(
+read -r RUN_BRANCH RUN_DATE < <(
     gh run view -R "$REPO" "$RUN_ID" \
-        --json headSha,headBranch,createdAt \
-        -q '[.headSha, .headBranch, .createdAt] | @tsv'
+        --json headBranch,createdAt \
+        -q '[.headBranch, .createdAt] | @tsv'
 )
+RUN_SHA=$("$(dirname "${BASH_SOURCE[0]}")/gha-run-commit.sh" "$REPO" "$RUN_ID")
 
 # --- Resolve the platform --------------------------------------------------
 
