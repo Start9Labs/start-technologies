@@ -21,20 +21,35 @@ import { withAbortSignal } from '../util/with-abort'
 
 type LegacySubscription = { dump: Dump<unknown>; guid: string }
 
-/** The initial dump establishes PatchDB fences; callers must not await the cache before emitting it. */
+export type DatabaseCursor = { epoch: string; id: number }
+
+/** A dump, or the revisions a resumed subscriber lacks, current as of `id`. */
+export type DatabaseStart<T> = { epoch?: string } & (
+  | (Dump<T> & { revisions?: null })
+  | { id: number; revisions: Revision[] }
+)
+
+export type DatabaseUpdate<T> = DatabaseStart<T> | Revision
+
+/** The initial start establishes PatchDB fences; callers must not await the cache before emitting it. */
 export function databaseSubscription<T>(
   sockets: RpcSocketService,
   authKeys: AuthKeyService,
   identity: ServerIdentityService,
-): Observable<Update<T>> {
+  since: () => DatabaseCursor | null = () => null,
+): Observable<DatabaseUpdate<T>> {
   return withAbortSignal(signal => {
     const client = createRpcStreamClient<RpcStreamClient<RPC.StartOS>>(
       authenticatedRpcTransport(sockets, authKeys, identity),
     )
     return from(
       (async function* () {
-        const { initial, items } = await client.db.subscribe({}, { signal })
-        yield initial as Dump<T>
+        const cursor = since()
+        const { initial, items } = await client.db.subscribe(
+          cursor ? { since: cursor } : {},
+          { signal },
+        )
+        yield initial as DatabaseStart<T>
         for await (const revision of items) yield revision as Revision
       })(),
     )
@@ -56,7 +71,7 @@ export function legacyDatabaseSubscription<T>(
 
 /** Successful subscription termination still requires source recovery. */
 export function databaseSource<T>(
-  updates: Observable<Update<T>>,
+  updates: Observable<DatabaseUpdate<T>>,
 ): Observable<Update<T>[]> {
   return updates.pipe(
     bufferDatabaseRevisions(),
@@ -64,20 +79,24 @@ export function databaseSource<T>(
   )
 }
 
-/** Delivers initial dumps immediately and batches following revisions. */
+/** Delivers each start immediately and batches following revisions. */
 export function bufferDatabaseRevisions<T>(): OperatorFunction<
-  Update<T>,
+  DatabaseUpdate<T>,
   Update<T>[]
 > {
   return connect(updates =>
     updates.pipe(
-      filter((update): update is Dump<T> => 'value' in update),
-      switchMap(dump =>
+      filter((update): update is DatabaseStart<T> => !('patch' in update)),
+      switchMap(start =>
         updates.pipe(
           filter((update): update is Revision => 'patch' in update),
           bufferTime(250),
           filter(revisions => revisions.length > 0),
-          startWith([dump]),
+          startWith(
+            start.revisions
+              ? [...start.revisions, { id: start.id, patch: [] }]
+              : [start],
+          ),
         ),
       ),
     ),

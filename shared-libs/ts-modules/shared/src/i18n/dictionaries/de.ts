@@ -359,7 +359,6 @@ export default {
   419: 'Details anzeigen',
   421: 'Dienste, die von folgendem abhängen:',
   422: 'werden nicht mehr ordnungsgemäß funktionieren und könnten abstürzen.',
-  423: 'Anfrage fehlgeschlagen',
   424: 'Alle Dienste sind auf dem neuesten Stand!',
   425: 'Ausführen',
   426: 'Aktion kann nur ausgeführt werden, wenn der Dienst',
@@ -1099,4 +1098,7 @@ export default {
   1297: 'Benutzerdefiniert',
   1298: 'Domain oder URL eingeben',
   1299: 'Die Synchronisierung dauert länger als erwartet. Aktualisieren Sie die Seite, um es erneut zu versuchen.',
+  1300: 'Server nicht erreichbar',
+  1301: 'Einträge sind möglicherweise veraltet',
+  1302: 'StartOS kann diese Registry gerade nicht erreichen.',
 } satisfies i18n

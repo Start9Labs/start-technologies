@@ -121,3 +121,20 @@ test('transport loss discards pending revisions rather than publishing a stale b
     ).toBe('a 19ms #', { a: [dump] })
   })
 })
+
+test('a resumed start delivers its replayed revisions and current id immediately', () => {
+  new TestScheduler((actual, expected) =>
+    assert.deepEqual(actual, expected),
+  ).run(({ cold, expectObservable }) => {
+    const replayed = { id: 12, patch: [] }
+    const start = { epoch: 'boot', id: 14, revisions: [replayed] }
+    const later = { id: 15, patch: [] }
+    expectObservable(
+      cold('a 9ms b', { a: start, b: later }).pipe(bufferDatabaseRevisions()),
+      '^ 259ms !',
+    ).toBe('a 249ms b', {
+      a: [replayed, { id: 14, patch: [] }],
+      b: [later],
+    })
+  })
+})
