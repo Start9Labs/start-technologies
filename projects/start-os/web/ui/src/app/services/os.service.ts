@@ -5,7 +5,6 @@ import { registryStatus } from '@start9labs/marketplace'
 import { Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
-  BehaviorSubject,
   combineLatest,
   distinctUntilChanged,
   filter,
@@ -23,7 +22,6 @@ import { DataModel } from './patch-db/data-model'
 export class OSService {
   private readonly api = inject(ApiService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-  private loadSequence = 0
   private readonly registry$ = this.patch
     .watch$('serverInfo', 'osRegistry')
     .pipe(distinctUntilChanged())
@@ -39,8 +37,6 @@ export class OSService {
     shareReplay({ bufferSize: 1, refCount: true }),
   )
 
-  private readonly gitHash$ = new BehaviorSubject<string | null>(null)
-
   readonly registryStatus$ = this.catalog$.pipe(
     map(registryStatus),
     distinctUntilChanged(),
@@ -48,7 +44,7 @@ export class OSService {
 
   readonly updateCandidates$ = combineLatest([
     this.catalog$,
-    this.gitHash$,
+    this.patch.watch$('serverInfo', 'gitHash'),
     this.patch.watch$('serverInfo', 'version'),
   ]).pipe(
     map(([cache, gitHash, installed]) => {
@@ -116,24 +112,19 @@ export class OSService {
     return Object.keys(versions).length > 0
   }
 
-  /** Registry changes supersede pending loads; catalog data comes from the matching cache. */
-  async loadOS(registry?: string): Promise<void> {
-    const sequence = ++this.loadSequence
-    const target = registry ?? (await firstValueFrom(this.registry$))
-    const gitHash = await this.api.rpc.gitInfo({})
-    if (sequence !== this.loadSequence) return
-    this.gitHash$.next(gitHash.trim())
+  /** Settles once the selected registry's cache is published; a registry switch releases it. */
+  async checkForUpdates(): Promise<void> {
+    const target = await firstValueFrom(this.registry$)
     const [cache, selected] = await firstValueFrom(
       combineLatest([this.catalog$, this.registry$]).pipe(
         filter(
           ([cache, selected]) =>
-            sequence !== this.loadSequence ||
             !sameUrl(selected, target) ||
             (!!cache && registryStatus(cache) !== 'connecting'),
         ),
       ),
     )
-    if (sequence !== this.loadSequence || !sameUrl(selected, target)) return
+    if (!sameUrl(selected, target)) return
     if (registryStatus(cache) === 'error')
       throw new Error('registry unavailable')
   }

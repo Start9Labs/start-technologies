@@ -218,6 +218,14 @@ pub async fn init(
     crate::version::Current::default().pre_init(&db).await?;
     let db = TypedPatchDb::<Database>::load_unchecked(db);
     db.mutate(crate::net::ssl::repair_root_cert).await.result?;
+    db.mutate(|d| {
+        d.as_public_mut()
+            .as_server_info_mut()
+            .as_git_hash_mut()
+            .ser(&crate::version::commit_hash().into())
+    })
+    .await
+    .result?;
     let peek = db.peek().await;
     load_database.complete();
 
