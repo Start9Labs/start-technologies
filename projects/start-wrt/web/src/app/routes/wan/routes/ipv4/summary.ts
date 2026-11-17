@@ -12,7 +12,6 @@ const SUMMARY_FIELDS = [
   'mask',
   'gateway',
   'username',
-  'password',
   'device',
 ] as const
 
