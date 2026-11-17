@@ -31,7 +31,7 @@ container-runtime-test: projects/start-os/container-runtime/node_modules/.packag
 	cd projects/start-os/container-runtime && npm test
 
 .PHONY: start-os-mokutil-test start-os-fde-deps-test start-os-fde-uki-test
-start-os-mokutil-test: $(call ls-files,projects/start-os/build/image-recipe/mokutil) projects/start-os/build/tests/mokutil-test.sh projects/start-os/build/tests/mokutil-test.mjs projects/start-os/build/tests/mokutil.Dockerfile
+start-os-mokutil-test: $(call ls-files,projects/start-os/build/image-recipe/mokutil) projects/start-os/build/image-recipe/setup-user projects/start-os/build/tests/mokutil-install-test.sh projects/start-os/build/tests/image-user-test.sh projects/start-os/build/tests/mokutil-test.sh projects/start-os/build/tests/mokutil-test.mjs projects/start-os/build/tests/mokutil.Dockerfile
 	./projects/start-os/build/tests/mokutil-test.sh
 
 start-os-fde-deps-test: projects/start-os/build/tests/fde-deps-test.sh projects/start-os/build/dpkg-deps/uefi.platforms projects/start-os/build/dpkg-deps/generate.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/dpkg-deps/conflicts $(wildcard projects/start-os/build/dpkg-deps/*.depends)

@@ -1,0 +1,15 @@
+#!/bin/bash
+set -euo pipefail
+
+environment=${1:-}
+if ! id -u start9 > /dev/null 2>&1; then
+    useradd --shell /bin/bash -G startos -m start9
+fi
+test -d ~start9
+echo start9:embassy | chpasswd
+usermod -aG sudo start9
+usermod -aG systemd-journal start9
+printf '%s\n' 'start9 ALL=(ALL:ALL) NOPASSWD: ALL' > /etc/sudoers.d/010_start9-nopasswd
+if ! [[ "$environment" =~ (^|-)dev($|-) ]]; then
+    passwd -l start9
+fi
