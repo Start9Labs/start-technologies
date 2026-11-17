@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import '@angular/compiler'
-import { createEnvironmentInjector, runInInjectionContext } from '@angular/core'
+import {
+  createEnvironmentInjector,
+  runInInjectionContext,
+  signal,
+} from '@angular/core'
 import { BehaviorSubject, of } from 'rxjs'
 import { loadTypeScript } from './typescript-loader.mjs'
 
@@ -25,7 +29,7 @@ classes(
 classes(
   '@taiga-ui/core',
   ['TuiButton', 'TuiCell', 'TuiIcon', 'TuiLink', 'TuiNotification', 'TuiTitle'],
-  ';export const TUI_ICON_START=Symbol();export const tuiButtonOptionsProvider=()=>[];',
+  ';export const TUI_ICON_START=Symbol();export const TUI_BREAKPOINT=Symbol();export const tuiButtonOptionsProvider=()=>[];',
 )
 classes('@taiga-ui/kit', [
   'TuiAvatar',
@@ -33,7 +37,6 @@ classes('@taiga-ui/kit', [
   'TuiFade',
   'TuiSkeleton',
 ])
-classes('@ng-web-apis/platform', [], 'export const WA_IS_MOBILE=Symbol();')
 for (const [file, name] of [
   ['hidden-updates', 'HiddenUpdatesService'],
   ['local-packages', 'LocalPackagesService'],
@@ -64,7 +67,7 @@ boundaries.set(
 )
 loadTypeScript(boundaries)
 const { PatchDB } = await import('patch-db-client')
-const { WA_IS_MOBILE } = await import('@ng-web-apis/platform')
+const { TUI_BREAKPOINT } = await import('@taiga-ui/core')
 const { HiddenUpdatesService } =
   await import('src/app/services/hidden-updates.service')
 const { LocalPackagesService } =
@@ -94,7 +97,10 @@ function fixture(t, mobile = false) {
   })
   const local = new BehaviorSubject({})
   const injector = createEnvironmentInjector([
-    { provide: WA_IS_MOBILE, useValue: mobile },
+    {
+      provide: TUI_BREAKPOINT,
+      useValue: signal(mobile ? 'mobile' : 'desktopLarge'),
+    },
     {
       provide: MarketplaceService,
       useValue: { registries$: hosts, requestErrors$: errors },

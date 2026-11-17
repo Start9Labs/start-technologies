@@ -1,6 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import {
   Marketplace,
   MarketplacePkg,
@@ -9,7 +8,7 @@ import {
   isRegistryLoading,
 } from '@start9labs/marketplace'
 import { i18nPipe, isDefaultRegistry } from '@start9labs/shared'
-import { TuiButton, TuiCell, TuiTitle } from '@taiga-ui/core'
+import { TUI_BREAKPOINT, TuiButton, TuiCell, TuiTitle } from '@taiga-ui/core'
 import {
   TuiAvatar,
   TuiBadgeNotification,
@@ -250,7 +249,7 @@ interface UpdatesData {
   ],
 })
 export default class UpdatesComponent {
-  private readonly isMobile = inject(WA_IS_MOBILE)
+  private readonly breakpoint = inject(TUI_BREAKPOINT)
   private readonly marketplaceService = inject(MarketplaceService)
   private readonly hiddenUpdatesService = inject(HiddenUpdatesService)
   private readonly refinementService = inject(UpdatesRefinementService)
@@ -272,7 +271,7 @@ export default class UpdatesComponent {
     const hosts = this.data()?.hosts || []
     return (
       hosts.find(registry => registry.url === this.selectedRegistry()) ||
-      (!this.isMobile ? hosts[0] : null)
+      (this.breakpoint() !== 'mobile' ? hosts[0] : null)
     )
   })
 

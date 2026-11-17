@@ -111,10 +111,12 @@ const ICONS: Record<string, string> = {
     <div class="content">
       <tui-scrollbar>
         <div class="scroll">
-          <ng-content select="[marketplaceNotice]" />
           @if (blocked()) {
             <ng-content select="[marketplaceBlocked]" />
           } @else {
+            @if (current()?.status === 'error') {
+              <ng-content select="[marketplaceNotice]" />
+            }
             @if (description(); as description) {
               <div
                 tuiNotification
@@ -298,7 +300,8 @@ const ICONS: Record<string, string> = {
 })
 export class MarketplaceComponent {
   readonly registry = input<StoreDataWithUrl>()
-  readonly blocked = input(false)
+  /** Replaces catalog content and notices while retaining the registry selector. */
+  public readonly blocked = input(false)
   readonly query = model('')
   readonly category = model('')
 

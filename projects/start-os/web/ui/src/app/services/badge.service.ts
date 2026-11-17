@@ -11,6 +11,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 import { UpdatesRefinementService } from 'src/app/services/updates-refinement.service'
 import { FilterUpdatesPipe } from '../routes/portal/routes/updates/filter-updates.pipe'
 
+/** Counts tally pending items; warnings flag conditions that need attention. */
 @Injectable({
   providedIn: 'root',
 })
@@ -22,7 +23,7 @@ export class BadgeService {
   )
   private readonly metrics$ = this.patch
     .watch$('serverInfo', 'ntpSynced')
-    .pipe(map(synced => Number(!synced)))
+    .pipe(map(synced => !synced))
   private readonly filterUpdatesPipe = inject(FilterUpdatesPipe)
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
   private readonly refinement = inject(UpdatesRefinementService)
@@ -75,6 +76,8 @@ export class BadgeService {
         return this.backups$
       case 'registries':
         return this.registryErrors$
+      case 'metrics':
+        return this.metrics$
       default:
         return of(false)
     }
@@ -86,8 +89,6 @@ export class BadgeService {
         return this.updates$
       case 'system':
         return this.system$
-      case 'metrics':
-        return this.metrics$
       case 'notifications':
         return this.notifications.unreadCount$
       default:

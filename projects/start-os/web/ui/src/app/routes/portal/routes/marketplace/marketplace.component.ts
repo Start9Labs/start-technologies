@@ -6,11 +6,12 @@ import {
   MarketplacePackageLinkComponent,
   MarketplaceRegistrySelectComponent,
   MarketplaceTileComponent,
+  StoreIdentity,
 } from '@start9labs/marketplace'
 import { i18nPipe, registryUrl, sameUrl, TaskService } from '@start9labs/shared'
 import { TuiButton } from '@taiga-ui/core'
 import { TuiBlockStatus } from '@taiga-ui/layout'
-import { firstValueFrom, tap } from 'rxjs'
+import { EMPTY, switchMap, take, tap } from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { StorageService } from 'src/app/services/storage.service'
@@ -66,9 +67,7 @@ import { MarketplaceControlsComponent } from './components/controls.component'
           </button>
         </tui-block-status>
       }
-      @if (registry()?.status === 'error') {
-        <registry-notice marketplaceNotice [url]="selectedRegistry()!" />
-      }
+      <registry-notice marketplaceNotice [url]="selectedRegistry()!" />
     </marketplace>
   `,
   host: { class: 'g-page' },
@@ -126,10 +125,10 @@ export default class Marketplace {
   protected readonly category = signal('all')
   protected readonly query = signal('')
 
+  /** Automatic registry selection must not outlive the requesting route. */
   private readonly route = inject(ActivatedRoute)
     .queryParamMap.pipe(
-      takeUntilDestroyed(),
-      tap(params => {
+      switchMap(params => {
         const registry = params.get('registry')
 
         if (params.has('search')) {
@@ -138,17 +137,22 @@ export default class Marketplace {
 
         if (!registry) {
           this.invalidRegistry.set(false)
-          this.selectSaved()
-        } else {
-          try {
-            const url = registryUrl(registry)
-            this.invalidRegistry.set(false)
-            this.marketplaceService.currentRegistryUrl$.next(url)
-          } catch {
-            this.invalidRegistry.set(true)
-          }
+          return this.marketplaceService.registries$.pipe(
+            take(1),
+            tap(saved => this.selectSaved(saved)),
+          )
         }
+
+        try {
+          const url = registryUrl(registry)
+          this.invalidRegistry.set(false)
+          this.marketplaceService.currentRegistryUrl$.next(url)
+        } catch {
+          this.invalidRegistry.set(true)
+        }
+        return EMPTY
       }),
+      takeUntilDestroyed(),
     )
     .subscribe()
 
@@ -157,8 +161,7 @@ export default class Marketplace {
   )
 
   /** A remembered registry the server no longer saves gives way to the default. */
-  private async selectSaved(): Promise<void> {
-    const saved = await firstValueFrom(this.marketplaceService.registries$)
+  private selectSaved(saved: StoreIdentity[]): void {
     const remembered = this.storage.get<string>('selectedRegistry')
     const registry =
       remembered && saved.some(({ url }) => sameUrl(url, remembered))

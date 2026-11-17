@@ -4489,6 +4489,9 @@ function marketplaceFixture(t, entries = {}) {
   })
   return {
     service,
+    injector,
+    source,
+    cache,
     connection,
     queries,
     responses,
@@ -4754,6 +4757,42 @@ test('a remembered registry the server no longer saves falls back to the default
   await tick()
   assert.deepEqual(f.routes.at(-1), { registry: 'https://registry.test/' })
   assert.equal(f.storage.get('selectedRegistry'), 'https://registry.test/')
+})
+
+test('a pending remembered-registry fallback yields to an explicit route selection', async t => {
+  const f = marketplaceFixture(t)
+  const dump = f.cache.value
+  f.cache.next({ id: 0, value: {} })
+  f.storage.set('selectedRegistry', 'https://removed.test/')
+  f.routeParams.next(convertToParamMap({}))
+  const page = f.makePage()
+  assert.deepEqual(f.routes, [])
+
+  f.routeParams.next(convertToParamMap({ registry: 'https://explicit.test/' }))
+  f.source.next([dump])
+  await tick()
+  assert.equal(page.selectedRegistry(), 'https://explicit.test/')
+  assert.deepEqual(f.routes, [])
+  assert.equal(f.storage.get('selectedRegistry'), 'https://removed.test/')
+})
+
+test('destroying the marketplace page cancels its pending remembered-registry fallback', async t => {
+  const f = marketplaceFixture(t)
+  const dump = f.cache.value
+  f.cache.next({ id: 0, value: {} })
+  f.storage.set('selectedRegistry', 'https://removed.test/')
+  f.routeParams.next(convertToParamMap({}))
+  const pageInjector = createEnvironmentInjector([], f.injector)
+  t.after(() => {
+    if (!pageInjector.destroyed) pageInjector.destroy()
+  })
+  runInInjectionContext(pageInjector, () => new MarketplacePage())
+  pageInjector.destroy()
+
+  f.source.next([dump])
+  await tick()
+  assert.deepEqual(f.routes, [])
+  assert.equal(f.storage.get('selectedRegistry'), 'https://removed.test/')
 })
 
 test('marketplace lists and metadata stream from canonical cache keys without navigation fetches', async t => {
