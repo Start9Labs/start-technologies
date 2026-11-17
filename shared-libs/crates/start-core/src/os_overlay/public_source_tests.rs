@@ -63,9 +63,8 @@ async fn fixture(root: &Path, commit: &str, compression: &str) -> PathBuf {
 }
 
 fn cache(root: &Path) -> SourceCache {
-    SourceCache {
-        directory: root.join("cache"),
-    }
+    std::fs::create_dir_all(root.join("images")).unwrap();
+    SourceCache::new(root)
 }
 
 #[tokio::test]
@@ -200,12 +199,12 @@ async fn pruning_keeps_running_and_pending_then_reclaims_replaced_inputs() {
             .unwrap()
             .is_some()
     );
-    let foreign = cache.directory.join("foreign");
+    let foreign = cache.directory().join("foreign");
     tokio::fs::create_dir(&foreign).await.unwrap();
     tokio::fs::write(foreign.join("keep"), b"not owned")
         .await
         .unwrap();
-    let incomplete = cache.directory.join("f".repeat(64));
+    let incomplete = cache.directory().join("f".repeat(64));
     tokio::fs::create_dir(&incomplete).await.unwrap();
     tokio::fs::write(incomplete.join(IMAGE), b"incomplete")
         .await
@@ -396,7 +395,7 @@ async fn redirected_cache_directories_never_publish_into_foreign_storage() {
     tokio::fs::write(foreign.join(RECORD), b"keep")
         .await
         .unwrap();
-    tokio::fs::symlink(&foreign, &cache.directory)
+    tokio::fs::symlink(&foreign, cache.directory())
         .await
         .unwrap();
     assert!(cache.retain(asset.clone(), &image).await.is_err());
@@ -406,9 +405,9 @@ async fn redirected_cache_directories_never_publish_into_foreign_storage() {
             .await
             .is_err()
     );
-    tokio::fs::remove_file(&cache.directory).await.unwrap();
-    tokio::fs::create_dir(&cache.directory).await.unwrap();
-    tokio::fs::symlink(&foreign, cache.directory.join(asset_key(&asset)))
+    tokio::fs::remove_file(cache.directory()).await.unwrap();
+    tokio::fs::create_dir(cache.directory()).await.unwrap();
+    tokio::fs::symlink(&foreign, cache.directory().join(asset_key(&asset)))
         .await
         .unwrap();
     assert!(cache.retain(asset, &image).await.is_err());
@@ -416,6 +415,162 @@ async fn redirected_cache_directories_never_publish_into_foreign_storage() {
         tokio::fs::read(foreign.join(RECORD)).await.unwrap(),
         b"keep"
     );
+}
+
+async fn shell_prune(
+    lease: &crate::util::FileLock,
+    volume: &Path,
+    binary: &Path,
+) -> Result<Vec<u8>, Error> {
+    let executable = tempfile::tempdir()?;
+    tokio::fs::symlink(binary, executable.path().join("startbox")).await?;
+    let path = std::env::join_paths(
+        std::iter::once(executable.path().to_path_buf())
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let scripts =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../projects/start-os/build/lib/scripts");
+    let variable = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../projects/start-os/build/lib/scripts/os-image-lock-fd-name"
+    ))
+    .trim();
+    let mut command = Command::new("timeout");
+    command
+        .args([
+            "--kill-after=2s",
+            "15s",
+            "/bin/bash",
+            "-euc",
+            "source \"$1/os-image-store\"; startos_prune_images \"$2\" 0 0",
+            "source-cache-prune",
+        ])
+        .arg(scripts)
+        .arg(volume)
+        .env("PATH", path);
+    lease.inherit(&mut command, variable)?;
+    command.invoke(ErrorKind::Filesystem).await
+}
+
+async fn volume_lease(volume: &Path) -> crate::util::FileLock {
+    let configuration = volume.join("config");
+    tokio::fs::create_dir_all(&configuration).await.unwrap();
+    let name = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../projects/start-os/build/lib/scripts/os-image-lock-name"
+    ))
+    .trim();
+    crate::util::FileLock::new(configuration.join(name), true)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires the actual built startbox in FDE_SOURCE_GC_STARTBOX"]
+async fn shell_space_admission_prunes_public_sources_with_the_native_owner_and_lease() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let binary = PathBuf::from(std::env::var_os("FDE_SOURCE_GC_STARTBOX").unwrap());
+    let root = tempfile::tempdir().unwrap();
+    let volume = root
+        .path()
+        .join(std::ffi::OsString::from_vec(b"volume [one] \xff".to_vec()));
+    let cache = cache(&volume);
+    let lease = volume_lease(&volume).await;
+    let key = SigningKey::from_bytes(&[21; 32]);
+    let mut sources = Vec::new();
+    for commit in ["running", "pending", "abandoned"] {
+        let image = fixture(root.path(), commit, "gzip").await;
+        let source = cache
+            .retain(signed_asset(&image, &key).await, &image)
+            .await
+            .unwrap();
+        if commit == "pending" {
+            tokio::fs::symlink(&image, volume.join("config/current.rootfs"))
+                .await
+                .unwrap();
+        } else {
+            tokio::fs::remove_file(&image).await.unwrap();
+        }
+        sources.push(source.path);
+    }
+    tokio::fs::rename(root.path().join("running"), volume.join("current"))
+        .await
+        .unwrap();
+    let pending = tokio::fs::read_link(volume.join("config/current.rootfs"))
+        .await
+        .unwrap();
+    tokio::fs::remove_file(volume.join("config/current.rootfs"))
+        .await
+        .unwrap();
+    tokio::fs::symlink(
+        root.path().join("missing.rootfs"),
+        volume.join("config/current.rootfs"),
+    )
+    .await
+    .unwrap();
+    assert!(shell_prune(&lease, &volume, &binary).await.is_err());
+    assert!(sources.iter().all(|path| path.is_file()));
+    tokio::fs::remove_file(volume.join("config/current.rootfs"))
+        .await
+        .unwrap();
+    tokio::fs::symlink(&pending, volume.join("config/current.rootfs"))
+        .await
+        .unwrap();
+    shell_prune(&lease, &volume, &binary).await.unwrap();
+    assert!(sources[0].is_file());
+    assert!(sources[1].is_file());
+    assert!(!sources[2].exists());
+    assert_eq!(
+        tokio::fs::read_link(volume.join("config/current.rootfs"))
+            .await
+            .unwrap(),
+        pending
+    );
+    assert!(
+        cache
+            .find_approved(&release("running"), policy(&key))
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        cache
+            .find_approved(&release("pending"), policy(&key))
+            .await
+            .unwrap()
+            .is_some()
+    );
+    lease.unlock().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires the actual previous startbox in FDE_SOURCE_GC_OLD_STARTBOX"]
+async fn shell_pruning_keeps_old_tools_without_a_cache_and_rejects_unsupported_cached_state() {
+    let binary = PathBuf::from(std::env::var_os("FDE_SOURCE_GC_OLD_STARTBOX").unwrap());
+    let root = tempfile::tempdir().unwrap();
+    let volume = root.path().join("volume");
+    let cache = cache(&volume);
+    let lease = volume_lease(&volume).await;
+    let image = fixture(root.path(), "running", "gzip").await;
+    tokio::fs::rename(root.path().join("running"), volume.join("current"))
+        .await
+        .unwrap();
+    tokio::fs::symlink(volume.join("current"), volume.join("config/current.rootfs"))
+        .await
+        .unwrap();
+    shell_prune(&lease, &volume, &binary).await.unwrap();
+    assert!(!cache.directory().exists());
+    let key = SigningKey::from_bytes(&[22; 32]);
+    let source = cache
+        .retain(signed_asset(&image, &key).await, &image)
+        .await
+        .unwrap();
+    assert!(shell_prune(&lease, &volume, &binary).await.is_err());
+    assert!(source.path.is_file());
+    assert!(image.is_file());
+    lease.unlock().await.unwrap();
 }
 
 #[tokio::test]

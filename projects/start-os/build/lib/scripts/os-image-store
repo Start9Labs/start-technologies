@@ -14,3 +14,49 @@ startos_reserve_image_store() {
     fi
     flock --exclusive "$descriptor"
 }
+
+startos_prune_public_sources() {
+    local volume=$1 name tool
+    startos_reserve_image_store "$volume/config" || return
+    read -r name < "$(dirname -- "${BASH_SOURCE[0]}")/os-public-source-cache-name" || return
+    if [[ -e "$volume/images/$name" || -L "$volume/images/$name" ]]; then
+        read -r tool < "$(dirname -- "${BASH_SOURCE[0]}")/os-public-source-prune-name" || return
+        startbox "$tool" "$volume" || return
+    fi
+}
+
+startos_prune_images() {
+    local volume=$1 needed=$2 margin=$3 newest current to_prune
+    local target=$((needed + margin))
+    startos_reserve_image_store "$volume/config" || return
+
+    # The initramfs fallback may leave current.rootfs absent.
+    if ! [ -h "$volume/config/current.rootfs" ] || ! [ -e "$volume/config/current.rootfs" ]; then
+        newest="$(ls -t1 "$volume"/images/*.rootfs 2> /dev/null | head -n1)"
+        if [ -f "$newest" ]; then
+            echo "Recreating missing current.rootfs -> $newest"
+            ln -rsf "$newest" "$volume/config/current.rootfs" || return
+        fi
+    fi
+
+    if [ -h "$volume/config/current.rootfs" ] && [ -e "$volume/config/current.rootfs" ]; then
+        startos_prune_public_sources "$volume" || return
+        echo 'Pruning...'
+        current="$(readlink -f "$volume/config/current.rootfs")" || return
+        while [[ "$(df -B1 --output=avail --sync "$volume/images" | tail -n1)" -lt "$target" ]]; do
+            to_prune="$(ls -t1 "$volume"/images/*.rootfs "$volume"/images/*.squashfs 2> /dev/null | grep -Fvx -- "$current" | tail -n1)"
+            if [ -e "$to_prune" ]; then
+                echo "  Pruning $to_prune"
+                rm -rf "$to_prune" || return
+                sync || return
+            else
+                >&2 echo "Not enough space and nothing to prune!"
+                return 1
+            fi
+        done
+        echo 'done.'
+    else
+        >&2 echo 'No current.rootfs, not safe to prune'
+        return 1
+    fi
+}

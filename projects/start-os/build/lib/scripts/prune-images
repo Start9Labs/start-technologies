@@ -32,35 +32,4 @@ if [ -z "$needed" ]; then
     exit 1
 fi
 
-MARGIN=${MARGIN:-1073741824}
-target=$((needed + MARGIN))
-
-# A missing pointer means the box booted the newest image via the initramfs
-# fallback (0.4.0's migration never created one), so relinking it is safe.
-if ! [ -h /media/startos/config/current.rootfs ] || ! [ -e /media/startos/config/current.rootfs ]; then
-    newest="$(ls -t1 /media/startos/images/*.rootfs 2> /dev/null | head -n1)"
-    if [ -f "$newest" ]; then
-        echo "Recreating missing current.rootfs -> $newest"
-        ln -rsf "$newest" /media/startos/config/current.rootfs
-    fi
-fi
-
-if [ -h /media/startos/config/current.rootfs ] && [ -e /media/startos/config/current.rootfs ]; then
-    echo 'Pruning...'
-    current="$(readlink -f /media/startos/config/current.rootfs)"
-    while [[ "$(df -B1 --output=avail --sync /media/startos/images | tail -n1)" -lt "$target" ]]; do
-        to_prune="$(ls -t1 /media/startos/images/*.rootfs /media/startos/images/*.squashfs 2> /dev/null | grep -v "$current" | tail -n1)"
-        if [ -e "$to_prune" ]; then
-            echo "  Pruning $to_prune"
-            rm -rf "$to_prune"
-            sync
-        else
-            >&2 echo "Not enough space and nothing to prune!"
-            exit 1
-        fi
-    done
-    echo 'done.'
-else
-    >&2 echo 'No current.rootfs, not safe to prune'
-    exit 1
-fi
+startos_prune_images /media/startos "$needed" "${MARGIN:-1073741824}"

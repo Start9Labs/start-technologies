@@ -54,6 +54,12 @@ start-os-scripts-test: start-os-mokutil-test start-os-grub-test start-os-fde-dep
 	./projects/start-os/build/tests/btrfsmaintenance-test.sh
 	./projects/start-os/build/tests/runtime-package-upgrade-test.sh
 
+.PHONY: start-os-image-inputs-test
+start-os-image-inputs-test: projects/start-os/build/tests/image-inputs-test.sh build/common.mk
+	bash projects/start-os/build/tests/image-inputs-test.sh
+
+start-os-scripts-test: start-os-image-inputs-test
+
 .PHONY: start-os-forward-transport-test
 start-os-forward-transport-test: build/lib/scripts/forward-port build/lib/scripts/forward-port6 projects/start-os/build/tests/forward-transport-test.sh
 	./projects/start-os/build/tests/forward-transport-test.sh

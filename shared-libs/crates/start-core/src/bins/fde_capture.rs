@@ -2,18 +2,8 @@ use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+use super::native_tool::{finish, path as request_path, runtime};
 use crate::prelude::*;
-
-fn request_path(mut args: VecDeque<OsString>) -> Result<PathBuf, Error> {
-    args.pop_front();
-    match (args.pop_front(), args.pop_front()) {
-        (Some(path), None) => Ok(path.into()),
-        _ => Err(Error::new(
-            eyre!(t!("error.invalid-request")),
-            ErrorKind::InvalidRequest,
-        )),
-    }
-}
 
 fn stop_arguments(mut args: VecDeque<OsString>) -> Result<(PathBuf, String), Error> {
     args.pop_front();
@@ -31,20 +21,6 @@ fn stop_arguments(mut args: VecDeque<OsString>) -> Result<(PathBuf, String), Err
             eyre!(t!("error.invalid-request")),
             ErrorKind::InvalidRequest,
         )),
-    }
-}
-
-fn runtime() -> Result<tokio::runtime::Runtime, Error> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .with_kind(ErrorKind::Unknown)
-}
-
-fn finish(result: Result<(), Error>) {
-    if let Err(error) = result {
-        eprintln!("{error}");
-        std::process::exit(1);
     }
 }
 

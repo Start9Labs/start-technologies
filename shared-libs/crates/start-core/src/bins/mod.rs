@@ -11,6 +11,10 @@ pub mod deprecated;
 #[cfg(target_os = "linux")]
 pub mod fde_capture;
 pub mod fde_prepare;
+#[cfg(target_os = "linux")]
+mod native_tool;
+#[cfg(target_os = "linux")]
+mod os_image;
 pub mod registry;
 pub mod start_cli;
 pub mod start_init;
@@ -186,6 +190,18 @@ impl MultiExecutable {
             self.bins.insert("start-fde-release", fde_capture::release);
             self.bins.insert("start-fde-stop", fde_capture::stop);
         }
+        self
+    }
+    pub fn enable_os_image_tools(&mut self) -> &mut Self {
+        #[cfg(target_os = "linux")]
+        self.bins.insert(
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../projects/start-os/build/lib/scripts/os-public-source-prune-name"
+            ))
+            .trim(),
+            os_image::prune_sources,
+        );
         self
     }
     pub fn enable_unshare_userns(&mut self) -> &mut Self {

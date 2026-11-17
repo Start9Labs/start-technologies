@@ -28,6 +28,7 @@ fn main() {
         .enable_startd()
         .enable_start_cli()
         .enable_fde_prepare()
+        .enable_os_image_tools()
         .enable_unshare_userns()
         .execute()
 }

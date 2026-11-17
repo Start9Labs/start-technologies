@@ -101,24 +101,37 @@ pub(crate) struct SourceImage {
 }
 
 pub(crate) struct SourceCache {
-    directory: PathBuf,
+    os_volume: PathBuf,
 }
 
 impl SourceCache {
-    pub(crate) fn system() -> Self {
+    pub(crate) fn new(os_volume: impl Into<PathBuf>) -> Self {
         Self {
-            directory: "/media/startos/images/fde-sources".into(),
+            os_volume: os_volume.into(),
         }
     }
 
+    pub(crate) fn system() -> Self {
+        Self::new("/media/startos")
+    }
+
+    fn directory(&self) -> PathBuf {
+        let name = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../projects/start-os/build/lib/scripts/os-public-source-cache-name"
+        ));
+        self.os_volume.join("images").join(name.trim())
+    }
+
     async fn entries(&self) -> Result<Vec<PathBuf>, Error> {
-        match tokio::fs::symlink_metadata(&self.directory).await {
+        let directory = self.directory();
+        match tokio::fs::symlink_metadata(&directory).await {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Ok(metadata) if metadata.is_dir() => (),
             Ok(_) => return Err(invalid_source()),
             Err(error) => return Err(error.into()),
         }
-        let mut entries = tokio::fs::read_dir(&self.directory).await?;
+        let mut entries = tokio::fs::read_dir(&directory).await?;
         let mut paths = Vec::new();
         while let Some(entry) = entries.next_entry().await? {
             if entry.file_type().await?.is_dir() && is_digest(&entry.file_name()) {
@@ -195,11 +208,12 @@ impl SourceCache {
             .check(&MultiCursorFile::open(&file).await?)
             .await?;
         let release = Release::read_image(image).await?;
-        tokio::fs::create_dir_all(&self.directory).await?;
-        if !tokio::fs::symlink_metadata(&self.directory).await?.is_dir() {
+        let directory = self.directory();
+        tokio::fs::create_dir_all(&directory).await?;
+        if !tokio::fs::symlink_metadata(&directory).await?.is_dir() {
             return Err(invalid_source());
         }
-        let path = self.directory.join(asset_key(&asset));
+        let path = directory.join(asset_key(&asset));
         let exists = match tokio::fs::symlink_metadata(&path).await {
             Ok(metadata) if metadata.is_dir() => true,
             Ok(_) => return Err(invalid_source()),
@@ -242,15 +256,12 @@ impl SourceCache {
     }
 
     async fn sync(&self) -> Result<(), Error> {
-        open_file(&self.directory).await?.sync_all().await?;
-        open_file(
-            self.directory
-                .parent()
-                .expect("cache directory has a parent"),
-        )
-        .await?
-        .sync_all()
-        .await?;
+        let directory = self.directory();
+        open_file(&directory).await?.sync_all().await?;
+        open_file(directory.parent().expect("cache directory has a parent"))
+            .await?
+            .sync_all()
+            .await?;
         Ok(())
     }
 
@@ -260,8 +271,8 @@ impl SourceCache {
         }
         self.prune(
             &boot_releases(
-                Path::new("/media/startos/current"),
-                Path::new("/media/startos/config/current.rootfs"),
+                &self.os_volume.join("current"),
+                &self.os_volume.join("config/current.rootfs"),
             )
             .await?,
         )
@@ -275,8 +286,9 @@ impl SourceCache {
                 _ => remove_entry(&path).await?,
             }
         }
-        if self.directory.exists() {
-            open_file(&self.directory).await?.sync_all().await?;
+        let directory = self.directory();
+        if directory.exists() {
+            open_file(&directory).await?.sync_all().await?;
         }
         Ok(())
     }
