@@ -1,5 +1,5 @@
-# When this product's build inputs change, mirror them into the `paths:` filter
-# of .github/workflows/start-cli.yaml (see root AGENTS.md "Coupled changes").
+# When this product's build inputs change, mirror them into its entry in
+# .github/scripts/changed-products.mjs (see root AGENTS.md "Coupled changes").
 
 CLI_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/start-cli
 
