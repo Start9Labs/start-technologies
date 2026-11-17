@@ -3,6 +3,8 @@ set -eu
 
 binary=${1:?path to unit-test executable}
 test=${2:?exact unit-test name}
+# Test-harness threads match the native applet's main-thread stack.
+export RUST_MIN_STACK=${RUST_MIN_STACK:-8388608}
 "$binary" --list | grep -Fx "$test: test"
 mkdir -m 700 /tmp/tpm
 swtpm socket --tpm2 --tpmstate dir=/tmp/tpm \

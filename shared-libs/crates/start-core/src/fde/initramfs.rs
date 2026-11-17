@@ -10,6 +10,7 @@ use super::boot::Descriptor;
 use super::credentials::Credentials;
 use super::memory::InitramfsMemory;
 use super::root::RootComposition;
+use super::tpm::MeasurementProfile;
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::filesystem::private_tmpfs::PrivateTmpfs;
 use crate::disk::mount::guard::MountGuard;
@@ -19,6 +20,7 @@ use crate::util::io::{TmpDir, read_file_to_string, read_secret_file, write_file_
 pub const DESCRIPTOR_FILE: &str = "/etc/startos/fde-boot.json";
 pub const RUNTIME: &str = "/run/startos-fde";
 pub const HANDOFF_FILE: &str = "handoff.json";
+pub(crate) const CONFIGURATION_FILE: &str = "configuration.json";
 const BOOT_MODE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../projects/start-os/build/lib/scripts/fde-boot-mode"
@@ -65,38 +67,58 @@ pub(crate) fn invalid_handoff() -> Error {
     )
 }
 
-pub(crate) async fn load_handoff() -> Result<BootHandoff, Error> {
-    let memory = InitramfsMemory::protect(Path::new(RUNTIME))?;
-    let file = crate::os_overlay::regular_file(&Path::new(RUNTIME).join(HANDOFF_FILE)).await?;
+async fn runtime_file(name: &str) -> Result<tokio::fs::File, Error> {
+    let file = crate::os_overlay::regular_file(&Path::new(RUNTIME).join(name)).await?;
     let metadata = file.metadata().await?;
     if metadata.uid() != 0 || metadata.mode() & 0o077 != 0 {
         return Err(invalid_handoff());
     }
-    let bytes = read_secret_file(file).await?;
+    Ok(file)
+}
+
+pub(crate) async fn load_handoff() -> Result<BootHandoff, Error> {
+    let memory = InitramfsMemory::protect(Path::new(RUNTIME))?;
+    let bytes = read_secret_file(runtime_file(HANDOFF_FILE).await?).await?;
     let handoff = serde_json::from_slice(&bytes).with_kind(ErrorKind::Deserialization)?;
     memory.check(Path::new(RUNTIME))?;
     Ok(handoff)
+}
+
+pub(crate) async fn load_configuration() -> Result<BootConfiguration, Error> {
+    super::memory::require_tmpfs(Path::new(RUNTIME))?;
+    let bytes = read_secret_file(runtime_file(CONFIGURATION_FILE).await?).await?;
+    Ok(serde_json::from_slice(&bytes).with_kind(ErrorKind::Deserialization)?)
 }
 
 pub(crate) async fn finish_handoff() -> Result<(), Error> {
     crate::util::io::delete_file(Path::new(RUNTIME).join(HANDOFF_FILE)).await
 }
 
-/// Private, unswappable boot-lifetime state, removed after authoritative data-drive handoff.
+/// Private credentials removed after authoritative data-drive handoff.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BootHandoff {
+    pub credentials: Credentials,
+}
+
+/// Attested boot inputs retained in private RAM across daemon restarts.
+/// These references do not establish durable EFI publication or active protection.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct BootConfiguration {
     pub rootfs: PathBuf,
     pub overlay: PathBuf,
     pub working_upper: PathBuf,
-    pub credentials: Credentials,
+    pub rootfs_sha256: [u8; 32],
+    pub descriptor: Descriptor,
+    pub profile: MeasurementProfile,
 }
 
 async fn prepare_mounted(
     volume: &Path,
     root: &Path,
     runtime: &Path,
-) -> Result<(RootComposition, BootHandoff), Error> {
+) -> Result<(RootComposition, BootHandoff, BootConfiguration), Error> {
     let images = volume.join("images");
     let config = volume.join("config");
     let memory = InitramfsMemory::protect(runtime)?;
@@ -114,13 +136,15 @@ async fn prepare_mounted(
     let mounted = RootComposition::mount(mounted, volume, &images, &config, root, runtime).await?;
     match mounted.verified().release_bootstrap(&memory, runtime).await {
         Ok(credentials) => {
-            let handoff = BootHandoff {
+            let configuration = BootConfiguration {
                 rootfs: mounted.verified().rootfs().to_owned(),
                 overlay: mounted.verified().overlay().to_owned(),
                 working_upper: mounted.working_upper().to_owned(),
-                credentials,
+                rootfs_sha256: mounted.verified().generation().manifest().rootfs_sha256,
+                descriptor,
+                profile: mounted.verified().generation().profile().clone(),
             };
-            Ok((mounted, handoff))
+            Ok((mounted, BootHandoff { credentials }, configuration))
         }
         Err(error) => {
             mounted.unmount().await.log_err();
@@ -145,8 +169,13 @@ pub async fn prepare(volume: &Path, root: &Path) -> Result<(), Error> {
     let prepared = prepare_mounted(volume, root, runtime).await;
     let workspace_result = workspace.unmount(false).await;
     let result = match (prepared, workspace_result) {
-        (Ok((mounted, handoff)), Ok(())) => {
+        (Ok((mounted, handoff, configuration)), Ok(())) => {
             let published = async {
+                write_file_private_atomic(
+                    runtime.join(CONFIGURATION_FILE),
+                    serde_json::to_vec(&configuration).with_kind(ErrorKind::Serialization)?,
+                )
+                .await?;
                 let bytes = Zeroizing::new(
                     serde_json::to_vec(&handoff).with_kind(ErrorKind::Serialization)?,
                 );
@@ -165,7 +194,7 @@ pub async fn prepare(volume: &Path, root: &Path) -> Result<(), Error> {
                 }
             }
         }
-        (Ok((mounted, _)), Err(error)) => {
+        (Ok((mounted, _, _)), Err(error)) => {
             mounted.unmount().await.log_err();
             Err(error)
         }

@@ -68,6 +68,8 @@ rpc_toolkit::reflect_ts!(CertificateProgress);
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct FdeEnrollmentProgress {
+    /// An unpublished configuration candidate, not boot activation or active protection.
+    pub prepared_generation: Option<String>,
     pub firmware_enrolled: bool,
     pub approval_code: Option<String>,
     pub certificates: Vec<CertificateProgress>,
@@ -203,10 +205,14 @@ pub async fn begin(
         let zram_was_active = crate::system::zram_active().await?;
         let result = async {
             crate::system::disable_zram().await?;
-            let progress = enroll(&ctx).await?;
+            let mut progress = enroll(&ctx).await?;
             if progress.firmware_enrolled {
                 super::enable::prepare_administrator(&ctx.db, &ctx.account, &pool, &password)
                     .await?;
+                #[cfg(target_os = "linux")]
+                {
+                    progress.prepared_generation = Some(super::capture::prepare(&ctx).await?);
+                }
             }
             Ok(progress)
         }
@@ -317,6 +323,7 @@ async fn enroll(ctx: &RpcContext) -> Result<FdeEnrollmentProgress, Error> {
     workspace.delete().await?;
     memory.check()?;
     Ok(FdeEnrollmentProgress {
+        prepared_generation: None,
         firmware_enrolled,
         approval_code: enrollment.approval_code,
         certificates,

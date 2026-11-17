@@ -140,6 +140,7 @@ impl RootComposition {
         self.layers.lower()
     }
 
+    /// Snapshot source; edit through the working mount, never its raw upper.
     pub fn working_upper(&self) -> &Path {
         &self.working_upper
     }

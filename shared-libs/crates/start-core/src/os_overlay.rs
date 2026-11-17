@@ -42,6 +42,28 @@ const DOMAIN: &[u8] = b"StartOS configuration overlay\0";
 pub const MANIFEST_VERSION: u32 = 1;
 const MANIFEST_LEN: usize = DOMAIN.len() + 4 + 32 + 32 + 40 + 40;
 const GENERATION_PREFIX: &str = "generation-";
+
+/// Retain through image/boot reads or mutations, including every native subprocess.
+pub(crate) async fn reserve_image_store(wait: bool) -> Result<crate::util::FileLock, Error> {
+    let name = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../projects/start-os/build/lib/scripts/os-image-lock-name"
+    ));
+    crate::util::FileLock::new(Path::new("/media/startos/config").join(name.trim()), wait).await
+}
+
+pub(crate) fn image_store_command(
+    lease: &crate::util::FileLock,
+    program: &str,
+) -> Result<tokio::process::Command, Error> {
+    let variable = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../projects/start-os/build/lib/scripts/os-image-lock-fd-name"
+    ));
+    let mut command = tokio::process::Command::new(program);
+    lease.inherit(&mut command, variable.trim())?;
+    Ok(command)
+}
 pub const OVERLAY_FILE: &str = "overlay.squashfs";
 pub const MANIFEST_FILE: &str = "manifest.bin";
 pub const SIGNATURE_FILE: &str = "manifest.sig";
@@ -490,7 +512,7 @@ pub(crate) async fn read_generation_directory(path: &Path) -> Result<tokio::fs::
         .with_kind(ErrorKind::Filesystem)
 }
 
-async fn digest_file(path: &Path) -> Result<[u8; 32], Error> {
+pub(crate) async fn digest_file(path: &Path) -> Result<[u8; 32], Error> {
     let mut file = regular_file(path).await?;
     let mut writer = HashWriter::new(Sha256::new(), tokio::io::sink());
     tokio::io::copy(&mut file, &mut writer).await?;
@@ -655,6 +677,10 @@ impl PreparedGeneration {
 
     pub fn manifest(&self) -> &Manifest {
         &self.manifest
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        self.destination.file_name().unwrap().to_str().unwrap()
     }
 
     /// Syncs all staged files and atomically publishes the complete generation.

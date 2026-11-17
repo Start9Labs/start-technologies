@@ -159,6 +159,7 @@ new_mime_guess = "4"
 nix = { version = "0.30.1", features = [
   "fs",
   "hostname",
+  "ioctl",
   "mount",
   "net",
   "process",

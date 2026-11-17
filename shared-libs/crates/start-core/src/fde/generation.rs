@@ -21,30 +21,31 @@ use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::os_overlay::{PreparedGeneration, VerityMount};
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::DynFileSource;
+use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::util::future::complete_owned_operation;
 use crate::util::io::{TmpDir, create_file_mod};
 use crate::util::squashfs::Squashfs;
 
 #[derive(Debug)]
-struct ConfigurationRoots<D: GenericMountGuard> {
-    public: VerityMount,
+struct ConfigurationRoots<P: GenericMountGuard, D: GenericMountGuard> {
+    base: P,
     data: D,
     workspace: PathBuf,
 }
 
-impl<D: GenericMountGuard> GenericMountGuard for ConfigurationRoots<D> {
+impl<P: GenericMountGuard, D: GenericMountGuard> GenericMountGuard for ConfigurationRoots<P, D> {
     fn path(&self) -> &Path {
         self.data.path()
     }
 
     async fn unmount(self) -> Result<(), Error> {
-        let public = self.public.unmount().await;
+        let base = self.base.unmount().await;
         let data = self.data.unmount().await;
         // Mount failures can leave live data beneath the workspace.
         let workspace = tokio::fs::remove_dir(self.workspace)
             .await
             .with_kind(ErrorKind::Filesystem);
-        public?;
+        base?;
         data?;
         workspace
     }
@@ -66,36 +67,55 @@ async fn query(root: &Path, configuration: &Path) -> Result<Vec<PathBuf>, Error>
     crate::ssh::query_host_key_files(&mut command).await
 }
 
-/// Requires fresh enable/commit authorization for the whole prospective snapshot.
-/// The caller quiesces configuration, base-image and query-input writers through completion.
-/// Consumes and unmounts a disposable data view, never the live system mount guard.
-/// The retained data tree contains the unlocked encrypted main/package filesystems.
-/// Returns an unpublished signed configuration and a source-independent legacy plan.
-pub(crate) async fn prepare_configuration<D: GenericMountGuard>(
+/// Private immutable inputs; borrowed file sources require these mounts to remain alive.
+/// Capture completion releases no source reservations owned by the caller.
+pub(crate) struct CapturedConfiguration<P: GenericMountGuard, D: GenericMountGuard> {
+    layers: VerifiedMounts<ConfigurationRoots<P, D>>,
+    image: PathBuf,
+    keys: Vec<PathBuf>,
+}
+
+impl<P: GenericMountGuard, D: GenericMountGuard> CapturedConfiguration<P, D> {
+    pub(crate) fn image(&self) -> &Path {
+        &self.image
+    }
+
+    pub(crate) fn host_keys(&self) -> &[PathBuf] {
+        &self.keys
+    }
+
+    pub(crate) async fn unmount(self) -> Result<(), Error> {
+        self.layers.unmount().await
+    }
+}
+
+/// Requires fresh authorization and a trusted running base; read-only mounting grants no authority.
+/// The caller excludes configuration, base-image and native-query input writers until return.
+/// Consumes a disposable unlocked data view, never the live system mount guard.
+/// Performs no writes to data or the generation store.
+pub(crate) async fn capture_configuration<P: GenericMountGuard, D: GenericMountGuard>(
     snapshot: Squashfs<DynFileSource>,
-    public: VerityMount,
+    base: P,
     data: D,
-    store: PathBuf,
-    key: PKey<Private>,
-) -> Result<(PreparedGeneration, LegacyReplacements), Error> {
+) -> Result<CapturedConfiguration<P, D>, Error> {
     complete_owned_operation(async move {
         let memory = super::memory::ProcessSecretMemory::protect()?;
         let workspace = TmpDir::new().await?;
         let directory = workspace.to_path_buf();
         workspace.leak();
         let mut layers = VerifiedMounts::new(ConfigurationRoots {
-            public,
+            base,
             data,
             workspace: directory.clone(),
         });
+        let captured = directory.join("configuration.squashfs");
+        let configuration = directory.join("configuration");
         let result = async {
             layers.push(MountGuard::mount(&PrivateTmpfs::new(), &directory, ReadWrite).await?);
-            let captured = directory.join("configuration.squashfs");
             let mut image = create_file_mod(&captured, 0o600).await?;
             snapshot.serialize(&mut image).await?;
             image.sync_all().await?;
             drop(image);
-            let configuration = directory.join("configuration");
             layers.push(
                 MountGuard::mount(&LoopDev::new(&captured, 0, 0), &configuration, ReadOnly).await?,
             );
@@ -103,10 +123,7 @@ pub(crate) async fn prepare_configuration<D: GenericMountGuard>(
             layers.push(
                 MountGuard::mount(
                     &OverlayFs::new(
-                        vec![
-                            configuration.clone(),
-                            layers.lower().public.path().to_owned(),
-                        ],
+                        vec![configuration.clone(), layers.lower().base.path().to_owned()],
                         directory.join("upper"),
                         directory.join("work"),
                     ),
@@ -128,14 +145,12 @@ pub(crate) async fn prepare_configuration<D: GenericMountGuard>(
                 )
                 .await?,
             );
-            let main = layers.lower().data.path().join(
-                crate::MAIN_DATA
-                    .strip_prefix(crate::DATA_DIR)
-                    .unwrap()
-                    .strip_prefix('/')
-                    .unwrap(),
-            );
-            let private = main.join(super::private_config::DIRECTORY);
+            let private = layers
+                .lower()
+                .data
+                .path()
+                .join(crate::MAIN_FILESYSTEM)
+                .join(super::private_config::DIRECTORY);
             if tokio::fs::try_exists(&private).await? {
                 let runtime = Path::new(super::private_config::RUNTIME)
                     .strip_prefix("/")
@@ -151,17 +166,60 @@ pub(crate) async fn prepare_configuration<D: GenericMountGuard>(
             keys.sort();
             keys.dedup();
             memory.check()?;
-            let snapshot = Squashfs::from_directory(&configuration).await?.into_dyn();
-            let projected = ProjectedConfig::stage(snapshot, &main, &keys).await?;
-            let prepared = projected
-                .prepare_generation(layers.lower().public.image_path(), &store, &key)
-                .await?;
+            Ok(keys)
+        }
+        .await;
+        match result {
+            Ok(keys) => Ok(CapturedConfiguration {
+                layers,
+                image: captured,
+                keys,
+            }),
+            Err(error) => {
+                layers.unmount().await.log_err();
+                Err(error)
+            }
+        }
+    })
+    .await
+}
+
+/// Retains base-image authority through preparation; data writes must be available after capture.
+/// Returns an unpublished signed configuration and a source-independent legacy plan.
+pub(crate) async fn prepare_configuration<D: GenericMountGuard>(
+    snapshot: Squashfs<DynFileSource>,
+    public: VerityMount,
+    data: D,
+    store: PathBuf,
+    key: PKey<Private>,
+) -> Result<(PreparedGeneration, LegacyReplacements), Error> {
+    complete_owned_operation(async move {
+        let memory = super::memory::ProcessSecretMemory::protect()?;
+        let rootfs = public.image_path().to_owned();
+        let capture = capture_configuration(snapshot, public, data).await?;
+        let result = async {
+            let image = crate::util::io::open_file(capture.image()).await?;
+            let snapshot = Squashfs::deserialize(MultiCursorFile::open(&image).await?)
+                .await?
+                .into_dyn();
+            let projected = ProjectedConfig::stage(
+                snapshot,
+                &capture
+                    .layers
+                    .lower()
+                    .data
+                    .path()
+                    .join(crate::MAIN_FILESYSTEM),
+                capture.host_keys(),
+            )
+            .await?;
+            let prepared = projected.prepare_generation(&rootfs, &store, &key).await?;
             let legacy = projected.legacy_replacements();
             memory.check()?;
             Ok((prepared, legacy))
         }
         .await;
-        let cleanup = layers.unmount().await;
+        let cleanup = capture.unmount().await;
         match result {
             Ok(value) => {
                 cleanup?;

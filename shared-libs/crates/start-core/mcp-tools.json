@@ -10549,6 +10549,10 @@
         "FdeEnrollmentProgress": {
           "type": "object",
           "properties": {
+            "preparedGeneration": {
+              "description": "An unpublished configuration candidate, not boot activation or active protection.",
+              "type": ["string", "null"]
+            },
             "firmwareEnrolled": { "type": "boolean" },
             "approvalCode": { "type": ["string", "null"] },
             "certificates": {
@@ -10556,7 +10560,12 @@
               "items": { "$ref": "#/$defs/CertificateProgress" }
             }
           },
-          "required": ["firmwareEnrolled", "approvalCode", "certificates"],
+          "required": [
+            "preparedGeneration",
+            "firmwareEnrolled",
+            "approvalCode",
+            "certificates"
+          ],
           "additionalProperties": true,
           "description": "Firmware enrollment observation, not proof of active disk protection."
         },
@@ -10593,6 +10602,10 @@
       },
       "type": "object",
       "properties": {
+        "preparedGeneration": {
+          "description": "An unpublished configuration candidate, not boot activation or active protection.",
+          "type": ["string", "null"]
+        },
         "firmwareEnrolled": { "type": "boolean" },
         "approvalCode": { "type": ["string", "null"] },
         "certificates": {
@@ -10600,7 +10613,12 @@
           "items": { "$ref": "#/$defs/CertificateProgress" }
         }
       },
-      "required": ["firmwareEnrolled", "approvalCode", "certificates"],
+      "required": [
+        "preparedGeneration",
+        "firmwareEnrolled",
+        "approvalCode",
+        "certificates"
+      ],
       "additionalProperties": true,
       "description": "Firmware enrollment observation, not proof of active disk protection."
     }

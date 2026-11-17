@@ -1,0 +1,16 @@
+#!/bin/bash
+
+startos_reserve_image_store() {
+    local configuration=$1 name variable path descriptor
+    read -r name < "$(dirname -- "${BASH_SOURCE[0]}")/os-image-lock-name"
+    read -r variable < "$(dirname -- "${BASH_SOURCE[0]}")/os-image-lock-fd-name"
+    path="$configuration/$name"
+    descriptor=${!variable-}
+    # An inherited descriptor must name the actual lock file.
+    if ! [[ $descriptor =~ ^[0-9]+$ && /proc/self/fd/$descriptor -ef $path ]]; then
+        exec {descriptor}>"$path"
+        printf -v "$variable" '%s' "$descriptor"
+        export "$variable"
+    fi
+    flock --exclusive "$descriptor"
+}

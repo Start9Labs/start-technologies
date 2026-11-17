@@ -151,6 +151,7 @@ impl Descriptor {
     }
 
     /// Mounts authenticated public build providers independently of live TPM state.
+    /// The caller establishes public-only provenance independently of configuration signing.
     /// Source admission grants neither bootstrap release nor configuration-provider authority.
     /// Cancellation retains setup; the caller reserves mountpoints through abandoned-result cleanup.
     pub async fn mount_source(
@@ -824,12 +825,24 @@ mod tests {
             serde_json::to_value(&handoff.credentials).unwrap(),
             serde_json::to_value(&super::super::credentials::test_credentials()).unwrap()
         );
+        let configuration = super::super::initramfs::load_configuration().await.unwrap();
+        let metadata = serde_json::to_value(&configuration).unwrap();
+        assert_eq!(metadata.as_object().unwrap().len(), 6);
+        assert!(metadata.get("credentials").is_none());
+        assert!(configuration.profile.verify(&_authority).await.unwrap());
+        super::super::initramfs::finish_handoff().await.unwrap();
+        assert!(!handoff_path.exists());
         assert_eq!(
-            std::fs::read(handoff.rootfs.join("setting")).unwrap(),
+            serde_json::to_value(super::super::initramfs::load_configuration().await.unwrap())
+                .unwrap(),
+            metadata
+        );
+        assert_eq!(
+            std::fs::read(configuration.rootfs.join("setting")).unwrap(),
             b"public default"
         );
         assert_eq!(
-            std::fs::read(handoff.overlay.join("setting")).unwrap(),
+            std::fs::read(configuration.overlay.join("setting")).unwrap(),
             b"configuration override"
         );
         let working = root.join("media/startos/config/overlay");
@@ -874,8 +887,8 @@ mod tests {
         assert!(std::fs::write(working.join("new-setting"), b"blocked").is_err());
         let signing_key = crate::util::crypto::gen_nistp256().unwrap();
         let snapshot = PreparedGeneration::prepare_working(
-            &handoff.overlay,
-            &handoff.working_upper,
+            &configuration.overlay,
+            &configuration.working_upper,
             &temp.path().join("images/image.rootfs"),
             &generation_store(&temp.path().join("config")),
             &signing_key,
@@ -908,7 +921,7 @@ mod tests {
         std::fs::write(root.join("setting"), b"running edit").unwrap();
         assert!(!working.join("setting").exists());
         assert_eq!(
-            std::fs::read(handoff.overlay.join("setting")).unwrap(),
+            std::fs::read(configuration.overlay.join("setting")).unwrap(),
             b"configuration override"
         );
         assert_eq!(unsafe { libc::prctl(libc::PR_GET_DUMPABLE, 0, 0, 0, 0) }, 0);
@@ -933,7 +946,7 @@ mod tests {
         crate::disk::mount::util::unmount_all_under(&root, false)
             .await
             .unwrap();
-        for path in [&handoff.overlay, &handoff.rootfs] {
+        for path in [&configuration.overlay, &configuration.rootfs] {
             tokio::process::Command::new("umount")
                 .arg(path)
                 .invoke(ErrorKind::Filesystem)

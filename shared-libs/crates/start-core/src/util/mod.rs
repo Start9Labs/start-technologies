@@ -33,6 +33,8 @@ use crate::{Error, ErrorKind, ResultExt as _};
 
 #[cfg(test)]
 mod command_tests;
+#[cfg(test)]
+mod file_lock_tests;
 
 pub mod actor;
 pub mod btrfs;
@@ -702,6 +704,31 @@ impl Drop for FileLock {
     }
 }
 impl FileLock {
+    /// Shares the native lease with an exec child; retain this guard until the child exits.
+    pub(crate) fn inherit(
+        &self,
+        command: &mut tokio::process::Command,
+        variable: &str,
+    ) -> Result<(), Error> {
+        use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+        let descriptor = nix::fcntl::fcntl(
+            &**self.1.as_ref().unwrap(),
+            nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(3),
+        )
+        .with_kind(ErrorKind::Filesystem)?;
+        let descriptor = unsafe { OwnedFd::from_raw_fd(descriptor) };
+        command.env(variable, descriptor.as_raw_fd().to_string());
+        unsafe {
+            command.pre_exec(move || {
+                if libc::fcntl(descriptor.as_raw_fd(), libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        Ok(())
+    }
+
     #[instrument(skip_all)]
     pub async fn new(path: impl AsRef<Path> + Send + Sync, blocking: bool) -> Result<Self, Error> {
         lazy_static! {

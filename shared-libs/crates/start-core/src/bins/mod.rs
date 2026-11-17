@@ -8,6 +8,8 @@ use rust_i18n::t;
 pub mod completions;
 pub mod container_cli;
 pub mod deprecated;
+#[cfg(target_os = "linux")]
+pub mod fde_capture;
 pub mod fde_prepare;
 pub mod registry;
 pub mod start_cli;
@@ -178,6 +180,12 @@ impl MultiExecutable {
     }
     pub fn enable_fde_prepare(&mut self) -> &mut Self {
         self.bins.insert("start-fde-prepare", fde_prepare::main);
+        #[cfg(target_os = "linux")]
+        {
+            self.bins.insert("start-fde-capture", fde_capture::capture);
+            self.bins.insert("start-fde-release", fde_capture::release);
+            self.bins.insert("start-fde-stop", fde_capture::stop);
+        }
         self
     }
     pub fn enable_unshare_userns(&mut self) -> &mut Self {

@@ -8,6 +8,8 @@ pub mod api;
 pub mod boot;
 pub(crate) mod boot_services;
 pub mod bootstrap;
+#[cfg(target_os = "linux")]
+pub(crate) mod capture;
 pub mod credentials;
 pub(crate) mod enable;
 pub mod enrollment;

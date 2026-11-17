@@ -11,7 +11,6 @@ use itertools::Itertools;
 use reqwest::{Client, Url};
 use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
-use tokio::process::Command;
 use tracing::instrument;
 
 pub mod diagnostic;
@@ -481,12 +480,13 @@ pub(crate) async fn do_update(
         mut finalize_phase,
     }: UpdateProgressHandles,
 ) -> Result<(), Error> {
+    let images = crate::os_overlay::reserve_image_store(true).await?;
     prune_phase.start();
-    Command::new("/usr/lib/startos/scripts/prune-images")
+    crate::os_overlay::image_store_command(&images, "/usr/lib/startos/scripts/prune-images")?
         .arg(asset.commitment.size.to_string())
         .invoke(ErrorKind::Filesystem)
         .await?;
-    Command::new("/usr/lib/startos/scripts/prune-boot")
+    crate::os_overlay::image_store_command(&images, "/usr/lib/startos/scripts/prune-boot")?
         .invoke(ErrorKind::Filesystem)
         .await?;
     prune_phase.complete();
@@ -509,7 +509,7 @@ pub(crate) async fn do_update(
     reverify_phase.complete();
 
     finalize_phase.start();
-    Command::new("unsquashfs")
+    crate::os_overlay::image_store_command(&images, "unsquashfs")?
         .arg("-n")
         .arg("-f")
         .arg("-d")
@@ -521,7 +521,7 @@ pub(crate) async fn do_update(
 
     let checksum = hex::encode(&asset.commitment.hash[..16]);
 
-    Command::new("/usr/lib/startos/scripts/upgrade")
+    crate::os_overlay::image_store_command(&images, "/usr/lib/startos/scripts/upgrade")?
         .env("CHECKSUM", &checksum)
         .arg(&path)
         .invoke(ErrorKind::Grub)
