@@ -47,7 +47,12 @@ import { MarketplaceControlsComponent } from './components/controls.component'
                 | i18n
             }}
           </p>
-          <a tuiButton routerLink="/system/registries">
+          <a
+            tuiButton
+            appearance="primary"
+            size="l"
+            routerLink="/system/registries"
+          >
             {{ 'Manage Registries' | i18n }}
           </a>
         </tui-block-status>
@@ -62,7 +67,12 @@ import { MarketplaceControlsComponent } from './components/controls.component'
                 | i18n
             }}
           </p>
-          <button tuiButton (click)="connectRegistry()">
+          <button
+            tuiButton
+            appearance="primary"
+            size="l"
+            (click)="connectRegistry()"
+          >
             {{ 'Connect' | i18n }}
           </button>
         </tui-block-status>

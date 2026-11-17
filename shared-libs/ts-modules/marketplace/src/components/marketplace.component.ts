@@ -110,7 +110,7 @@ const ICONS: Record<string, string> = {
     </aside>
     <div class="content">
       <tui-scrollbar>
-        <div class="scroll">
+        <div class="scroll" [class._blocked]="blocked()">
           @if (blocked()) {
             <ng-content select="[marketplaceBlocked]" />
           } @else {
@@ -222,7 +222,13 @@ const ICONS: Record<string, string> = {
       margin-block-start: 0.5rem;
     }
 
+    .scroll._blocked {
+      display: grid;
+      min-block-size: 100cqb;
+    }
+
     .content {
+      container-type: size;
       flex: 1;
       min-width: 0;
       display: flex;
