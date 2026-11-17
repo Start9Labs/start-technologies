@@ -4762,6 +4762,7 @@ test('patch cache rewrites only replaced top-level values', async t => {
   t.mock.method(console, 'error', () => {})
   const writer = await patchDbCache(t, win)
   assert.deepEqual(await writer.read(), { id: 0, value: {} })
+  writer.epoch = 'boot'
   await writer.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
   assert.deepEqual(control.puts, ['ui', 'packageData'])
 
@@ -4771,6 +4772,7 @@ test('patch cache rewrites only replaced top-level values', async t => {
     id: 3,
     value: { ui: { a: 1 }, packageData: {} },
   })
+  assert.equal(reader.epoch, 'boot')
   control.puts = []
   await reader.write({
     id: 4,
@@ -4802,6 +4804,28 @@ test('patch cache keeps a complete snapshot when another tab advances the stored
   assert.deepEqual(await (await patchDbCache(t, win)).read(), delayed)
 })
 
+test('patch cache rewrites every key when another tab stored the same revision from another epoch', async t => {
+  const { win } = fakeIndexedDb()
+  const rebooted = await patchDbCache(t, win)
+  const stale = await patchDbCache(t, win)
+  rebooted.epoch = 'boot-1'
+  await rebooted.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
+  const cached = await stale.read()
+  rebooted.epoch = 'boot-2'
+  await rebooted.write({
+    id: 3,
+    value: { ui: { a: 9 }, packageData: { x: 9 } },
+  })
+  const delayed = {
+    id: 4,
+    value: { ui: { a: 2 }, packageData: cached.value.packageData },
+  }
+  await stale.write(delayed)
+  const reader = await patchDbCache(t, win)
+  assert.deepEqual(await reader.read(), delayed)
+  assert.equal(reader.epoch, 'boot-1')
+})
+
 test('patch cache restores every key after another tab clears the snapshot', async t => {
   const { win } = fakeIndexedDb()
   const active = await patchDbCache(t, win)
@@ -4818,6 +4842,7 @@ test('patch cache discards its snapshot after a failed write and clears on deman
   const { win, control } = fakeIndexedDb()
   t.mock.method(console, 'error', () => {})
   const cache = await patchDbCache(t, win)
+  cache.epoch = 'boot'
   const value = { ui: { a: 1 }, packageData: {} }
   await cache.write({ id: 3, value })
   control.fail = true
@@ -4830,6 +4855,7 @@ test('patch cache discards its snapshot after a failed write and clears on deman
   await cache.write({ id: 5, value })
   assert.deepEqual(control.puts, ['ui', 'packageData'])
   await cache.clear()
+  assert.equal(cache.epoch, null)
   assert.deepEqual(await (await patchDbCache(t, win)).read(), {
     id: 0,
     value: {},

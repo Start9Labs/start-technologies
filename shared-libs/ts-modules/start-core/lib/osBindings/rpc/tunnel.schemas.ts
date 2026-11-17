@@ -223,6 +223,10 @@ export const CopyOperation: z.ZodObject<{
   id: 'CopyOperation',
   description: "JSON Patch 'copy' operation representation",
 })
+export const DbCursor: z.ZodObject<{ epoch: z.ZodString; id: z.ZodInt }> =
+  /* @__PURE__ */ object({ epoch: z.string(), id: z.int() }).meta({
+    id: 'DbCursor',
+  })
 
 /**
  * Per-subnet DNS proxy configuration. WireGuard clients on a subnet are pointed
@@ -699,16 +703,6 @@ export const SubnetParams: z.ZodObject<{ subnet: z.ZodString }> =
   /* @__PURE__ */ object({ subnet: z.string() }).meta({
     id: 'SubnetParams',
   })
-export const SubscribeParams: z.ZodObject<{
-  pointer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'SubscribeParams',
-})
 
 /**
  * JSON Patch 'test' operation representation
@@ -1139,6 +1133,30 @@ export const SetSubnetDnsParams: z.ZodObject<{
 }).meta({
   id: 'SetSubnetDnsParams',
 })
+export const SubscribeParams: z.ZodObject<{
+  pointer: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * The subscriber's last revision; resumes only within the epoch that reported it.
+   */
+  since: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof DbCursor>>,
+    z.ZodNullable<typeof DbCursor>
+  >
+}> = /* @__PURE__ */ object({
+  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * The subscriber's last revision; resumes only within the epoch that reported it.
+   */
+  since: wire(DbCursor.nullable().optional(), DbCursor.nullable()).meta({
+    description:
+      "The subscriber's last revision; resumes only within the epoch that reported it.",
+  }),
+}).meta({
+  id: 'SubscribeParams',
+})
 export const SubscribeRes: z.ZodObject<{
   dump: typeof Dump
   guid: typeof Guid
@@ -1276,17 +1294,6 @@ export const Sessions: z.ZodObject<{
 })
 
 /**
- * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
- */
-export const SubscribeResult: z.ZodUnion<
-  readonly [typeof SubscribeRes, typeof Dump]
-> = /* @__PURE__ */ z.union([SubscribeRes, Dump]).meta({
-  id: 'SubscribeResult',
-  description:
-    'Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.',
-})
-
-/**
  * Non-empty selected transports, serialized as a sorted, deduplicated array.
  * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
  */
@@ -1412,6 +1419,45 @@ export const Revision: z.ZodObject<{ id: z.ZodInt; patch: typeof DiffPatch }> =
   /* @__PURE__ */ object({ id: z.int(), patch: DiffPatch }).meta({
     id: 'Revision',
   })
+
+/**
+ * A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
+ */
+export const SubscribeStart: z.ZodObject<{
+  epoch: z.ZodString
+  id: z.ZodInt
+  value: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodUnknown>>,
+    z.ZodNullable<z.ZodUnknown>
+  >
+  revisions: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof Revision>>>,
+    z.ZodNullable<z.ZodArray<typeof Revision>>
+  >
+}> = /* @__PURE__ */ object({
+  epoch: z.string(),
+  id: z.int(),
+  value: wire(z.unknown().nullable().optional(), z.unknown().nullable()),
+  revisions: wire(
+    z.array(Revision).nullable().optional(),
+    z.array(Revision).nullable(),
+  ),
+}).meta({
+  id: 'SubscribeStart',
+  description:
+    'A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.',
+})
+
+/**
+ * Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
+ */
+export const SubscribeStartResult: z.ZodUnion<
+  readonly [typeof SubscribeRes, typeof SubscribeStart]
+> = /* @__PURE__ */ z.union([SubscribeRes, SubscribeStart]).meta({
+  id: 'SubscribeStartResult',
+  description:
+    'Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.',
+})
 export const Api = {
   _PARAMS: /* @__PURE__ */ empty,
   _CHILDREN: {
@@ -1517,7 +1563,7 @@ export const Api = {
         },
         subscribe: {
           _PARAMS: /* @__PURE__ */ SubscribeParams,
-          _RETURN: /* @__PURE__ */ SubscribeResult,
+          _RETURN: /* @__PURE__ */ SubscribeStartResult,
           _ITEM: /* @__PURE__ */ Revision,
           _FINAL: /* @__PURE__ */ z.null(),
         },
