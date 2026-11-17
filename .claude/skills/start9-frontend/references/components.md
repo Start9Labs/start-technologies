@@ -120,14 +120,15 @@ host: {
 }
 ```
 
-`@HostBinding`/`@HostListener`: zero occurrences in target-style code. A static style is
-`:host` CSS, not a `host: { style: '…' }` string.
+`@HostBinding`/`@HostListener`: zero occurrences in target-style code. A component's static
+style is `:host` CSS, not a `host: { style: '…' }` string; only a directive, which has no
+stylesheet, carries one (`formLoading` above).
 
 **A component that is a card takes `hostDirectives: [TuiCardLarge]`** plus
 `tuiCardOptionsProvider({ space: 'compact', appearance: 'outline-grayscale' })`, and a caller
 restyles it from outside (`<business-hire tuiTheme="dark">`, `appearance="…"`) or projects
-extra content into an `<ng-content />` slot. A second page that wants the same card reuses the component
-rather than copying its markup.
+extra content into an `<ng-content />` slot. A second page that wants the same card reuses the
+component rather than copying its markup.
 
 ### Signal APIs
 
@@ -174,16 +175,15 @@ readonly subscription = merge(inject(PatchDataService), inject(PatchMonitorServi
 
 `takeUntilDestroyed()` is called bare in field initializers (injection context — no `DestroyRef`
 argument). `ngOnDestroy` survives only for cleaning up manually created refs. An `ngOnInit`
-doing form-patching is _known debt_, not style (`// TODO @Alex refactor this to declarative
-validation`).
+that patches a form is debt to replace with declarative validation (forms.md), not a pattern to
+copy.
 
 ## Templates
 
 - `@if (data(); as d) { … } @else if (error()) { … } @else { <tui-loader /> }` — the standard
   three-arm async template. `@for (item of items(); track item.id)` — always `track`
-  (`$index` for static lists), `@empty` where useful. Read `$first`, `$index` and the rest of
-  its context directly, not through a `let first = $first` alias. `@let` for local aliases.
-  `@switch` over chained `@if` for enums.
+  (`$index` for static lists), `@empty` where useful. `@let` for local aliases. `@switch` over
+  chained `@if` for enums.
 - Templates read **signals** (`{{ name() }}`). `| async` survives only for service streams that
   are still Observables at the boundary; new code converts with `toSignal` in the class.
 - **Class/style bindings, not directives**: `[class._expanded]="open()"`,

@@ -3,11 +3,11 @@
 The fleet's newest whole apps run on 12–48 lines of global CSS and a few `:host` blocks. The
 ladder from SKILL.md doctrine #3, expanded:
 
-1. **Layout primitives before any CSS**: `tuiCardLarge` (+`appearance="floating"`), `tuiHeader`
-   - `hgroup tuiTitle` + `aside tuiAccessories` for page headers, `tuiCell` rows, `tuiForm="m"`,
-     `tuiTitle`/`tuiSubtitle`, `tuiBadge`, `tuiAvatar` (large icons — not `tui-icon` +
-     `font-size`), `TuiNavigation` shells, `tuiTable`. _"Hand-centering a card's contents means
-     you missed a primitive."_
+1. **Layout primitives before any CSS**: `tuiCardLarge` (with `appearance="floating"`),
+   `tuiHeader` with `hgroup tuiTitle` and `aside tuiAccessories` for page headers, `tuiCell`
+   rows, `tuiForm="m"`, `tuiTitle`/`tuiSubtitle`, `tuiBadge`, `tuiAvatar` (large icons — not
+   `tui-icon` with a `font-size`), `TuiNavigation` shells, `tuiTable`. _"Hand-centering a
+   card's contents means you missed a primitive."_
    - **Illustrations are built from the same primitives.** A mock chat, notification, invoice
      or dashboard drawn for a marketing page is `tuiCardLarge="compact" appearance="floating"`
      around `tuiHeader` / `tuiCell` rows with `tuiAvatar`, `tuiTitle`/`tuiSubtitle`, `tuiBadge`
@@ -18,15 +18,13 @@ ladder from SKILL.md doctrine #3, expanded:
      `tuiHeader`, `tuiChip` and `tuiBadge` set the `font` shorthand on their own
      element, so `<b tuiChip>` loses its bold: nest it, `<code tuiChip><b>…</b></code>`.
      `tuiHeader` also sets `text-align: start`, so a centred heading keeps its own type rule.
-2. **Appearances are the color system**: `appearance="primary | secondary | flat | outline |
-accent | positive | negative | warning | info | icon | floating | primary-destructive |
-flat-grayscale | outline-grayscale | action-grayscale | …"` on buttons/badges/cells/
-   notifications — never color classes on components that have appearances. `appearance=""`
+2. **Appearances are the color system**: `appearance` (the names are in taiga.md) on
+   buttons/badges/cells/notifications — never color classes on components that have appearances. `appearance=""`
    deliberately neutralizes chrome (e.g. accordion/drawer buttons). Custom appearances are
    built with Taiga's SCSS mixins in the theme sheet under
    `[tuiAppearance][data-appearance='…']`, not with bespoke selectors.
-3. **Option providers restyle subtrees** — `providers: [tuiButtonOptionsProvider({ appearance:
-'flat-grayscale', size: 'm' })]` on a header restyles every nav button, zero CSS. This is
+3. **Option providers restyle subtrees** —
+   `providers: [tuiButtonOptionsProvider({ appearance: 'flat-grayscale', size: 'm' })]` on a header restyles every nav button, zero CSS. This is
    _the_ answer to "all the Xs in here should look like Y". A single element takes the
    option as its own attribute instead (`<tui-textfield tuiTextfieldSize="s">`), not a
    component-level provider written for one consumer.

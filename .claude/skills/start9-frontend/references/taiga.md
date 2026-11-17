@@ -67,9 +67,9 @@ nothing may import it. When in doubt: the official MCP
 ```
 
 - **Tokens** (override at any DOM level; this _is_ branding): backgrounds
-  (`--tui-background-base|-neutral-1…|-accent-1…|-elevation-1/2/3`), text (`--tui-text-primary|
--secondary|-tertiary|-action|-primary-on-accent-1`), status (`--tui-status-negative|-positive|
--warning|-info` + `-pale` variants), borders (`--tui-border-normal|-hover|-focus`), shadows
+  (`--tui-background-base`, `-neutral-1…`, `-accent-1…`, `-elevation-1/2/3`), text
+  (`--tui-text-primary`, `-secondary`, `-tertiary`, `-action`, `-primary-on-accent-1`),
+  status (`--tui-status-negative`, `-positive`, `-warning`, `-info` and their `-pale` variants), borders (`--tui-border-normal|-hover|-focus`), shadows
   (`--tui-shadow-small|-medium|-popup`), sizing (`--tui-height-l/m/s/xs`, `--tui-padding-*`,
   `--tui-radius-l/m/s/xs`), typography composites (`font: var(--tui-typography-body-s)`,
   families `--tui-typography-family-display/-text`), charts `--tui-chart-categorical-00…22`.
@@ -87,9 +87,8 @@ nothing may import it. When in doubt: the official MCP
 
 ### Overlay facts
 
-- `tuiDialog(Component, options)` factory (typed data/result inference) is valid v5 API — the
-  fleet standardizes on `TuiResponsiveDialogService`/shared `DialogService` instead; don't mix
-  per app. `TuiDialogOptions`: `label`, `size: 's'|'m'|'l'`, `data`, `closable`, `dismissible`,
+- `tuiDialog(Component, options)` is valid v5 API that the fleet doesn't use (overlays.md).
+  `TuiDialogOptions`: `label`, `size: 's'|'m'|'l'`, `data`, `closable`, `dismissible`,
   `required`, `appearance` (`'fullscreen'` for mobile-style takeover).
 - Declarative twins exist for all three: `[(tuiDialog)]`, `[(tuiNotification)]`, `[(tuiToast)]`
   on `ng-template`, each with an `[…Options]` input — pair with a `signal(false)`.
@@ -118,8 +117,7 @@ deprecated aliases.
 A date input opens a calendar only when its textfield holds one:
 `<tui-calendar *tuiDropdown />` beside `input[tuiInputDate]` (`TuiCalendar` arrives with the
 `TuiInputDate` bundle). Without it the calendar icon does nothing. A size-`s` textfield draws
-its `tuiLabel` outside the box, so in a navigation header the label goes beside the field as
-plain text, `<label>As of <tui-textfield>…</tui-textfield></label>`.
+its `tuiLabel` outside the box.
 
 ### Polymorpheus (`@taiga-ui/polymorpheus`)
 
