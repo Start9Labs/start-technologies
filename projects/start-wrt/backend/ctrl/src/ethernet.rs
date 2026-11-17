@@ -224,7 +224,8 @@ fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Ethernet, Error> 
 
     let mut wan_ipv6 = false;
     let mut wan_port = None;
-    let trunks = crate::trunk::trunk_ports(cfgs, &found_bridge.name)?;
+    let profile_vlans = lookup.list().iter().map(|p| p.vlan_tag).collect();
+    let trunks = crate::trunk::trunk_ports(cfgs, &found_bridge.name, &profile_vlans)?;
     let all_ports: HashSet<String> = found_bridge
         .ports
         .into_iter()
@@ -2325,6 +2326,59 @@ config interface 'guest'
         assert!(result.ports["eth0"].profile.is_none());
         assert!(!result.ports["eth1"].trunk);
         assert_eq!(result.ports["eth1"].profile.as_ref().unwrap().vlan_tag, 1);
+    }
+
+    #[tokio::test]
+    async fn get_reports_trunk_port_untagged_in_a_vlan_of_no_profile() {
+        // VLAN 4000 belongs to no profile, so eth0's untagged membership there
+        // says nothing about which profile it serves: it is still a trunk.
+        let dir = tempfile::tempdir().unwrap();
+        setup_basic(dir.path());
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config device
+\toption name 'br-lan'
+\toption type 'bridge'
+\tlist ports 'eth0'
+\tlist ports 'eth1'
+
+config bridge-vlan
+\toption device 'br-lan'
+\toption vlan '1'
+\tlist ports 'eth0:t'
+\tlist ports 'eth1:u*'
+
+config bridge-vlan
+\toption device 'br-lan'
+\toption vlan '3'
+\tlist ports 'eth0:t'
+
+config bridge-vlan
+\toption device 'br-lan'
+\toption vlan '4000'
+\tlist ports 'eth0:u*'
+
+config interface 'lan'
+\toption device 'br-lan.1'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+\toption netmask '255.255.255.0'
+
+config interface 'guest'
+\toption device 'br-lan.3'
+\toption proto 'static'
+\toption ipaddr '192.168.3.1'
+\toption netmask '255.255.255.0'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let result = get(ctx).await.unwrap();
+        assert!(result.ports["eth0"].trunk);
+        assert!(result.ports["eth0"].profile.is_none());
+        assert!(!result.ports["eth1"].trunk);
     }
 
     #[tokio::test]

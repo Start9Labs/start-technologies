@@ -165,7 +165,7 @@ Maps physical ports to profiles via bridge VLAN assignments on the LAN bridge (`
 
 ### trunk.rs — Trunk Ports
 
-Recognises a trunk (a port whose every VLAN membership is tagged) and builds a port's membership in a profile's VLAN. Shared by `ethernet.rs`, which reads and writes trunks, and `profiles.rs`, which tags trunks into each new profile's VLAN.
+Recognises a trunk (a port tagged in a profile VLAN and untagged in none; VLANs that belong to no profile are ignored) and builds a port's membership in a profile's VLAN. Shared by `ethernet.rs`, which reads and writes trunks, and `profiles.rs`, which tags trunks into each new profile's VLAN.
 
 ### vpn_server.rs / vpn_client.rs — VPN Management
 
