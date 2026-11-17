@@ -34,7 +34,7 @@ async fn transport_loss_never_replays_a_sent_call_and_the_next_call_reconnects_w
         let dropped = drop_seen.clone();
         async move { upgrade.on_upgrade(move |socket| async move {
             let (_, _, mut socket) = EncryptedSocket::accept(
-                Box::new(socket), &key, &["server.test".into()], NonZeroUsize::new(1024 * 1024).unwrap(),
+                Box::new(socket), &key.into(), &["server.test".into()], NonZeroUsize::new(1024 * 1024).unwrap(),
                 &Target::Rpc, None, |_| async { Ok(()) },
             ).await.unwrap();
             let body = socket.next().await.unwrap().unwrap().into_text().unwrap();

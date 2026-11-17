@@ -84,8 +84,8 @@ impl SessionContext for SetupContext {
     }
 }
 impl SignatureAuthContext for SetupContext {
-    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
-        Ok(self.startup_rpc.identity.clone())
+    fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error> {
+        self.startup_rpc.identity()
     }
     fn replay_check(&self) -> RequestReplayCheck {
         RequestReplayCheck::new(&self.0, |seed| Some(Self(seed, None)))
@@ -112,13 +112,14 @@ impl SetupContext {
         webserver: &WebServer<WildcardListener>,
         config: ServerConfig,
         dns: Arc<crate::net::dns::DnsController>,
+        identity: Option<crate::context::StartupIdentity>,
     ) -> Result<Self, Error> {
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
         let mut progress = FullProgressTracker::new();
         progress.enable_logging(true);
         Ok(Self(
             Arc::new(SetupContextSeed {
-                startup_rpc: StartupRpc::new(),
+                startup_rpc: StartupRpc::new(identity),
                 dns,
                 webserver: webserver.acceptor_setter(),
                 disable_encryption: config.disable_encryption.unwrap_or(false),

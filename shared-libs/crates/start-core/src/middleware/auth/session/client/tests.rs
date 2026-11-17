@@ -326,9 +326,17 @@ async fn all_startup_contexts_ignore_an_unavailable_stored_signer() {
     let dns = Arc::new(crate::net::dns::DnsController::new(
         crate::util::sync::Watch::new(Default::default()),
     ));
-    let startup = InitContext::init(&crate::context::config::ServerConfig::default(), dns)
-        .await
-        .unwrap();
+    let startup = InitContext::init(
+        &crate::context::config::ServerConfig::default(),
+        dns,
+        Some(
+            crate::db::model::private::generate_server_identity_key()
+                .0
+                .into(),
+        ),
+    )
+    .await
+    .unwrap();
     let app = crate::net::static_server::ui_router(startup.clone());
     let (url, _server) = server(app).await;
     let ctx = CliContext::init(ClientConfig {
@@ -369,6 +377,64 @@ async fn all_startup_contexts_ignore_an_unavailable_stored_signer() {
     check::<SetupContext>(&ctx).await;
     startup.progress.complete();
     assert!(ctx.id_key.get().is_none());
+}
+
+#[tokio::test]
+async fn diagnostic_recovery_without_a_persistent_key_is_encrypted_and_advertises_temporary_scope()
+{
+    let key = crate::db::model::private::generate_server_identity_key().0;
+    let expected = crate::sign::AnyVerifyingKey::Ed25519(key.verifying_key());
+    let dns = Arc::new(crate::net::dns::DnsController::new(
+        crate::util::sync::Watch::new(Default::default()),
+    ));
+    let diagnostic = crate::context::DiagnosticContext::init(
+        &crate::context::config::ServerConfig::default(),
+        None,
+        crate::Error::new(
+            color_eyre::eyre::eyre!("recovery fixture"),
+            crate::ErrorKind::Filesystem,
+        ),
+        dns,
+        crate::context::StartupIdentity::temporary(key),
+    )
+    .await
+    .unwrap();
+    let (url, _server) = server(crate::net::static_server::ui_router(diagnostic)).await;
+    let signer: Signer = crate::sign::AnySigningKey::generate().into();
+    let (peer, mut socket) = super::connect(
+        &reqwest::Client::new(),
+        &signer,
+        super::RpcSessionUpgrader::url(url.clone()).unwrap(),
+        "127.0.0.1",
+        crate::sign::session::Target::Rpc,
+        HeaderMap::new(),
+    )
+    .await
+    .unwrap();
+    assert!(peer.temporary);
+    assert_eq!(peer.key, expected);
+    assert_eq!(
+        super::request(
+            &mut socket,
+            super::request_body("state", imbl_value::json!({})).unwrap()
+        )
+        .await
+        .unwrap()
+        .as_str(),
+        Some("error")
+    );
+
+    let (ctx, _identity) = cli(&url, signer);
+    let error = ctx
+        .call_remote::<RegistryContext>("state", imbl_value::json!({}))
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, crate::ErrorKind::InvalidSignature);
+    assert!(
+        !ctx.id_key_path
+            .with_file_name("registry-identities")
+            .exists()
+    );
 }
 
 #[tokio::test]
@@ -812,10 +878,17 @@ async fn actual_gpg_cli_authenticates_without_exporting_the_identity() {
     let dns = Arc::new(crate::net::dns::DnsController::new(
         crate::util::sync::Watch::new(Default::default()),
     ));
-    let startup =
-        crate::context::InitContext::init(&crate::context::config::ServerConfig::default(), dns)
-            .await
-            .unwrap();
+    let startup = crate::context::InitContext::init(
+        &crate::context::config::ServerConfig::default(),
+        dns,
+        Some(
+            crate::db::model::private::generate_server_identity_key()
+                .0
+                .into(),
+        ),
+    )
+    .await
+    .unwrap();
     let observed = calls.clone();
     let startup = crate::net::static_server::ui_router(startup).layer(axum::middleware::from_fn(
         move |request: axum::extract::Request, next: axum::middleware::Next| {

@@ -47,7 +47,7 @@ impl WebSocketUpgrader<CancelContext> for EncryptedUpgrader {
         async move {
             let (_, _, socket) = EncryptedSocket::accept(
                 Box::new(socket),
-                &signer,
+                &signer.into(),
                 &["server.test".into()],
                 options.max_message_size,
                 &Target::Rpc,

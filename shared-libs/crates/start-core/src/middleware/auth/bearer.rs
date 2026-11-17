@@ -139,7 +139,7 @@ pub(crate) mod tests {
     impl crate::middleware::auth::session::SessionContext for TestCtx {}
 
     impl SignatureAuthContext for TestCtx {
-        fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
+        fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error> {
             panic!("HTTP-only fixture")
         }
         fn replay_check(&self) -> super::super::signature::RequestReplayCheck {

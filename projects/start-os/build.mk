@@ -30,11 +30,15 @@ backup-fs-test: $(call ls-files, projects/start-os/backup-fs/src) projects/start
 container-runtime-test: projects/start-os/container-runtime/node_modules/.package-lock.json $(call ls-files, projects/start-os/container-runtime/src) projects/start-os/container-runtime/package.json projects/start-os/container-runtime/tsconfig.json
 	cd projects/start-os/container-runtime && npm test
 
+.PHONY: start-os-upgrade-identity-test
+start-os-upgrade-identity-test: projects/start-os/build/tests/upgrade-identity.test.mjs projects/start-os/build/lib/scripts/upgrade projects/start-os/build/lib/scripts/forget-server-identity shared-libs/crates/start-core/src/context/startup.rs shared-libs/crates/start-core/src/developer/mod.rs
+	node --test projects/start-os/build/tests/upgrade-identity.test.mjs
+
 .PHONY: start-os-grub-test
 start-os-grub-test: projects/start-os/build/tests/grub-overrides-test.sh projects/start-os/build/lib/grub-user.cfg projects/start-os/build/lib/scripts/nvme-isolation-test projects/start-os/debian/postinst projects/start-os/build/image-recipe/raspberrypi/squashfs/etc/default/grub.d/raspberrypi.cfg
 	./projects/start-os/build/tests/grub-overrides-test.sh
 
-start-os-scripts-test: start-os-grub-test start-os-forward-transport-test projects/start-os/build/tests/dns-config-test.sh projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/update-image.sh projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh projects/start-os/build/lib/scripts/gather-debug-info projects/start-os/debian/postinst projects/start-os/build/tests/crash-diagnostics-test.sh projects/start-os/build/tests/btrfsmaintenance-test.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/tests/runtime-package-upgrade-test.sh projects/start-os/build/tests/migration-images-test.sh projects/start-os/build/save-migration-images.sh
+start-os-scripts-test: start-os-grub-test start-os-forward-transport-test start-os-upgrade-identity-test projects/start-os/build/tests/dns-config-test.sh projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/update-image.sh projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh projects/start-os/build/lib/scripts/gather-debug-info projects/start-os/debian/postinst projects/start-os/build/tests/crash-diagnostics-test.sh projects/start-os/build/tests/btrfsmaintenance-test.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/tests/runtime-package-upgrade-test.sh projects/start-os/build/tests/migration-images-test.sh projects/start-os/build/save-migration-images.sh
 	./projects/start-os/build/tests/migration-images-test.sh
 	./projects/start-os/build/tests/normalize-fstab-test.sh
 	./projects/start-os/build/tests/init-resize-test.sh
@@ -188,7 +192,8 @@ start-os-emulate-reflash: $(STARTOS_TARGETS)
 	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi
 	$(call ssh,'sudo /usr/lib/startos/scripts/chroot-and-upgrade --create')
 	$(MAKE) start-os-install REMOTE=$(REMOTE) SSHPASS=$(SSHPASS) DESTDIR=/media/startos/next PLATFORM=$(PLATFORM)
-	$(call ssh,'sudo rm -f /media/startos/config/disk.guid /media/startos/config/overlay/etc/hostname')
+	$(call ssh,'sudo /media/startos/next/usr/lib/startos/scripts/forget-server-identity')
+	$(call ssh,'sudo rm -f /media/startos/config/overlay/etc/hostname')
 	$(call ssh,'sudo /media/startos/next/usr/lib/startos/scripts/chroot-and-upgrade --no-sync "apt-get install -y $(shell cat ./projects/start-os/build/lib/depends)"')
 
 projects/start-os/container-runtime/debian.$(ARCH).squashfs: ./projects/start-os/container-runtime/download-base-image.sh
