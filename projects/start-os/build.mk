@@ -1,5 +1,5 @@
-# When this product's build inputs change, mirror them into the `paths:` filter
-# of .github/workflows/startos-iso.yaml (see root AGENTS.md "Coupled changes").
+# When this product's build inputs change, mirror them into its entry in
+# .github/scripts/changed-products.mjs (see root AGENTS.md "Coupled changes").
 
 IMAGE_TYPE=$(shell if [ "$(PLATFORM)" = raspberrypi ]; then echo img; else echo iso; fi)
 FIRMWARE_ROMS := projects/start-os/build/firmware/$(PLATFORM) $(shell jq --raw-output '.[] | select(.platform[] | contains("$(PLATFORM)")) | "./projects/start-os/build/firmware/$(PLATFORM)/" + .id + ".rom.gz"' projects/start-os/build/lib/firmware.json)
@@ -238,12 +238,24 @@ projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts: $(ENV
 $(FIRMWARE_ROMS): projects/start-os/build/lib/firmware.json ./projects/start-os/build/download-firmware.sh $(PLATFORM_FILE)
 	./projects/start-os/build/download-firmware.sh $(PLATFORM)
 
-target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox: $(CORE_SRC) $(COMPRESSED_WEB_UIS) projects/start-os/web/patchdb-ui-seed.json $(ENVIRONMENT_FILE) projects/start-os/build/build-startbox.sh
-	ARCH=$(ARCH) PROFILE=$(PROFILE) ./projects/start-os/build/build-startbox.sh
+STARTBOX_INPUTS := $(CORE_SRC) $(COMPRESSED_WEB_UIS) projects/start-os/web/patchdb-ui-seed.json $(ENVIRONMENT_FILE) $(RUST_BIN_BUILDER_INPUTS)
+START_CONTAINER_INPUTS := $(CORE_SRC) $(ENVIRONMENT_FILE) $(RUST_BIN_BUILDER_INPUTS)
+RUST_BINS_start-os := start-os:startbox
+RUST_OUTPUTS_start-os := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
+RUST_INPUTS_start-os := $(sort $(STARTBOX_INPUTS) $(START_CONTAINER_INPUTS))
+# start-container ships in the release profile, independent of startbox's profile.
+ifeq ($(PROFILE),release)
+RUST_BINS_start-os += start-os:start-container
+else
+RUST_INPUTS_start-os += target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
+endif
+
+target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox: $(STARTBOX_INPUTS)
+	ARCH=$(ARCH) PROFILE=$(PROFILE) ./build/build-rust-bins.sh start-os:startbox
 	touch target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox
 
-target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(CORE_SRC) $(ENVIRONMENT_FILE) projects/start-os/build/build-start-container.sh
-	ARCH=$(ARCH) ./projects/start-os/build/build-start-container.sh
+target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(START_CONTAINER_INPUTS)
+	ARCH=$(ARCH) PROFILE=release ./build/build-rust-bins.sh start-os:start-container
 	touch target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
 
 # used by github actions

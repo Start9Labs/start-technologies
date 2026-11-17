@@ -1,0 +1,438 @@
+name: Build Products
+
+# Builds every product the change touches: StartOS, start-cli, start-registry and
+# start-tunnel. Each target's binaries come from one cargo invocation, so the crates
+# they share compile once. StartOS publishing runs in startos-iso.yaml, which a
+# publishing build dispatches; the debs reach the alpha suite through
+# apt-publish-alpha.yml.
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      # `default:` is not decoration — the UI preselects the first option, but an API
+      # dispatch (`gh workflow run`) that omits an input delivers it as the empty
+      # string, and only a declared default fills it in.
+      environment:
+        type: choice
+        description: Environment
+        default: NONE
+        options:
+          - NONE
+          - dev
+          - unstable
+          - dev-unstable
+      platform:
+        type: choice
+        description: Platform
+        default: ALL
+        options:
+          - ALL
+          - x86_64
+          - x86_64-nonfree
+          - x86_64-nvidia
+          - aarch64
+          - aarch64-nonfree
+          - aarch64-nvidia
+          - raspberrypi
+          - riscv64
+          - riscv64-nonfree
+      deploy:
+        type: choice
+        description: Deploy StartOS
+        default: NONE
+        options:
+          - NONE
+          - alpha
+          - beta
+      force-overwrite:
+        type: boolean
+        description: Replace S3 objects that already exist for this commit
+        default: false
+  # The `changes` job decides which products a push or pull request rebuilds.
+  push:
+    branches:
+      - master
+      - integration/*
+  pull_request:
+    # The jobs below skip drafts, and `ready_for_review` is not a default
+    # activity type, so without it a draft marked ready is never checked.
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - master
+      - integration/*
+
+# Only pull requests cancel: a push to master publishes, so master pushes queue
+# behind each other rather than aborting a publish half-done.
+concurrency:
+  group: build-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODEJS_VERSION: &nodejs-version '24.17.0'
+  # Empty (release-equivalent) on master, `dev` everywhere else a build happens
+  # without an explicit input — PRs and integration/* branches, where password
+  # SSH before setup and uncompressed frontends are what you want.
+  #
+  # master must NOT be dev: alpha is the source registry that beta and then
+  # production are promoted from, and `os promote` copies each asset's URL and
+  # commitment through verbatim. Whatever a master push builds is what ships.
+  ENVIRONMENT: &environment >-
+    ${{
+      fromJson(format('["{0}", ""]', github.event.inputs.environment || 'dev'))[
+        github.event.inputs.environment == 'NONE'
+        || (github.event_name == 'push' && github.ref == 'refs/heads/master')
+      ]
+    }}
+
+jobs:
+  changes:
+    name: Detect affected products
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    outputs:
+      products: ${{ steps.classify.outputs.products }}
+      start-os: ${{ steps.classify.outputs.start-os }}
+      start-cli: ${{ steps.classify.outputs.start-cli }}
+      start-registry: ${{ steps.classify.outputs.start-registry }}
+      start-tunnel: ${{ steps.classify.outputs.start-tunnel }}
+      os-image: ${{ steps.classify.outputs.os-image }}
+      platforms: ${{ steps.targets.outputs.platforms }}
+      arches: ${{ steps.targets.outputs.arches }}
+      macos: ${{ steps.targets.outputs.macos }}
+      channel: ${{ steps.targets.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Classify changed paths
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          classify() { node .github/scripts/changed-products.mjs "$@"; }
+          case "$EVENT" in
+            pull_request)
+              outputs="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+                --jq '.[] | .filename, (.previous_filename // empty)' | classify --event pull_request)"
+              # An integration/* branch merging into master is the last gate before
+              # the batch ships, so it builds every StartOS image. head_ref is only a
+              # branch *name*, which a fork controls freely, so the branch must also
+              # live in this repo.
+              if [ "$BASE_REF" = master ] && [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ] \
+                && [ "${HEAD_REF#integration/}" != "$HEAD_REF" ] \
+                && grep -qx 'start-os=true' <<<"$outputs"; then
+                outputs="${outputs/os-image=false/os-image=true}"
+              fi
+              ;;
+            push)
+              # The diff runs from the branch's last successful push build, so a
+              # superseded queued push's changes still build. Ten pages bound the
+              # search; a branch with no such build rebuilds everything.
+              base=""
+              page=1
+              while [ "$page" -le 10 ]; do
+                selection="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/build-products.yaml/runs?per_page=100&page=$page" \
+                  --jq '[(.workflow_runs | length), ([.workflow_runs[]
+                    | select(.event == "push" and .head_branch == env.GITHUB_REF_NAME
+                        and .head_repository.full_name == env.GITHUB_REPOSITORY
+                        and .status == "completed" and .conclusion == "success"
+                        and .id < (env.GITHUB_RUN_ID | tonumber))]
+                    | max_by(.run_number) | .head_sha)] | @tsv')"
+                read -r run_count base <<< "$selection"
+                if [ -n "$base" ] || [ "$run_count" -eq 0 ]; then
+                  break
+                fi
+                page=$((page + 1))
+              done
+              if [ -n "$base" ] && git fetch -q --no-tags --depth=1 origin "$base"; then
+                outputs="$(git diff --no-renames --name-only "$base" "$GITHUB_SHA" | classify --event push)"
+              else
+                outputs="$(classify --all)"
+              fi
+              ;;
+            *)
+              outputs="$(classify --all)"
+              ;;
+          esac
+          printf '%s\n' "$outputs" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Select targets
+        id: targets
+        env:
+          PLATFORM: ${{ github.event.inputs.platform || 'ALL' }}
+          DEPLOY: ${{ github.event.inputs.deploy }}
+          START_OS: ${{ steps.classify.outputs.start-os }}
+        run: |
+          set -euo pipefail
+          if [ "$PLATFORM" = ALL ]; then
+            platforms='["x86_64","x86_64-nonfree","x86_64-nvidia","aarch64","aarch64-nonfree","aarch64-nvidia","raspberrypi","riscv64","riscv64-nonfree"]'
+          else
+            platforms="[\"$PLATFORM\"]"
+          fi
+          arches="$(jq -c '[.[] | sub("-(nonfree|nvidia)$"; "") | if . == "raspberrypi" then "aarch64" else . end] | unique' <<<"$platforms")"
+          # A push to master continuously deploys to alpha (master is only ever merged
+          # to when a change is already tested and shippable); a dispatch deploys to
+          # the channel it names. Allowlist the channels rather than excluding NONE:
+          # a `!= 'NONE'` gate also admits an empty deploy input.
+          channel=""
+          if [ "$START_OS" = true ]; then
+            if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/master ]; then
+              channel=alpha
+            elif [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [[ "$DEPLOY" =~ ^(alpha|beta)$ ]]; then
+              channel=$DEPLOY
+            fi
+          fi
+          {
+            echo "platforms=$platforms"
+            echo "arches=$arches"
+            echo "macos=$([ "$PLATFORM" = ALL ] && echo true || echo false)"
+            echo "channel=$channel"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.products != '' }}
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: ${{ fromJson(needs.changes.outputs.arches) }}
+    runs-on: >-
+      ${{
+        fromJson('{
+          "x86_64": "ubuntu-latest",
+          "aarch64": "ubuntu-24.04-arm",
+          "riscv64": "ubuntu-latest"
+        }')[matrix.arch]
+      }}
+    permissions:
+      contents: read
+    env:
+      PLATFORM: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-build
+        with:
+          nodejs-version: ${{ env.NODEJS_VERSION }}
+          setup-python: ${{ needs.changes.outputs.start-os }}
+
+      - name: Build product binaries
+        run: make rust-products RUST_PRODUCTS="${{ needs.changes.outputs.products }}"
+
+      - name: Package StartOS
+        if: needs.changes.outputs.start-os == 'true'
+        run: make compiled-${{ matrix.arch }}.tar
+      - if: needs.changes.outputs.start-os == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: compiled-${{ matrix.arch }}.tar
+          path: compiled-${{ matrix.arch }}.tar
+          retention-days: 1
+
+      - name: Package start-cli
+        if: needs.changes.outputs.start-cli == 'true'
+        run: make start-cli-deb
+      - if: needs.changes.outputs.start-cli == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: start-cli_${{ matrix.arch }}.deb
+          path: results/start-cli-*_${{ matrix.arch }}.deb
+          retention-days: 14
+      - if: needs.changes.outputs.start-cli == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: start-cli_${{ matrix.arch == 'riscv64' && 'riscv64gc' || matrix.arch }}-unknown-linux-musl
+          path: target/${{ matrix.arch == 'riscv64' && 'riscv64gc' || matrix.arch }}-unknown-linux-musl/release/start-cli
+          retention-days: 14
+
+      - name: Package start-registry
+        if: needs.changes.outputs.start-registry == 'true'
+        run: make start-registry-deb
+      - if: needs.changes.outputs.start-registry == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: start-registry_${{ matrix.arch }}.deb
+          path: results/start-registry-*_${{ matrix.arch }}.deb
+          retention-days: 14
+
+      - name: Package start-tunnel
+        if: needs.changes.outputs.start-tunnel == 'true'
+        run: make start-tunnel-deb
+      - if: needs.changes.outputs.start-tunnel == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: start-tunnel_${{ matrix.arch }}.deb
+          path: results/start-tunnel-*_${{ matrix.arch }}.deb
+          retention-days: 14
+
+  cli-macos:
+    name: Build start-cli (${{ matrix.triple }})
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.start-cli == 'true' && needs.changes.outputs.macos == 'true' }}
+    strategy:
+      fail-fast: true
+      matrix:
+        triple: [x86_64-apple-darwin, aarch64-apple-darwin]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-build
+        with:
+          nodejs-version: ${{ env.NODEJS_VERSION }}
+
+      - name: Build start-cli
+        run: TARGET=${{ matrix.triple }} make start-cli
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: start-cli_${{ matrix.triple }}
+          path: target/${{ matrix.triple }}/release/start-cli
+          retention-days: 14
+
+  registry-image:
+    name: Create Docker Image
+    needs: [changes, build]
+    if: ${{ !cancelled() && needs.changes.outputs.start-registry == 'true' && needs.build.result == 'success' }}
+    env:
+      PUSH_IMAGE: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up docker QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 'Login to GitHub Container Registry'
+        if: env.PUSH_IMAGE == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{github.actor}}
+          password: ${{secrets.GITHUB_TOKEN}}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/Start9Labs/startos-registry
+          tags: |
+            type=raw,value=${{ github.ref_name }}
+            type=sha,format=long,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+
+      - name: Download debian package
+        uses: actions/download-artifact@v8
+        with:
+          pattern: start-registry_*.deb
+
+      - name: Map matrix.arch to docker platform
+        run: |
+          platforms=""
+          for deb in *.deb; do
+            filename=$(basename "$deb" .deb)
+            arch="${filename#*_}"
+            case "$arch" in
+              x86_64)
+                platform="linux/amd64"
+                ;;
+              aarch64)
+                platform="linux/arm64"
+                ;;
+              riscv64)
+                platform="linux/riscv64"
+                ;;
+              *)
+                echo "Unknown architecture: $arch" >&2
+                exit 1
+                ;;
+            esac
+            if [ -z "$platforms" ]; then
+              platforms="$platform"
+            else
+              platforms="$platforms,$platform"
+            fi
+          done
+          echo "DOCKER_PLATFORM=$platforms" >> "$GITHUB_ENV"
+
+      - env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          tag_args=()
+          while read -r tag; do tag_args+=(-t "$tag"); done <<< "$TAGS"
+          docker buildx build --platform "$DOCKER_PLATFORM" --push="$PUSH_IMAGE" "${tag_args[@]}" -f - . << 'EOF'
+          FROM debian:trixie
+
+          ADD *.deb .
+
+          RUN apt-get update && apt-get install -y ./*_$(uname -m).deb && rm -rf *.deb /var/lib/apt/lists/*
+
+          VOLUME /var/lib/startos
+
+          ENV RUST_LOG=warn,start_core=debug
+
+          ENTRYPOINT ["start-registryd"]
+
+          EOF
+
+  # A build that does not publish checks the images here: every push outside
+  # master, a dispatch without a channel, and a pull request that touches
+  # image assembly. A publishing build's images are built by startos-iso.yaml.
+  image:
+    name: Image (${{ matrix.platform }})
+    needs: [changes, build]
+    if: >-
+      !cancelled() && needs.build.result == 'success'
+      && needs.changes.outputs.start-os == 'true' && needs.changes.outputs.channel == ''
+      && (github.event_name != 'pull_request' || needs.changes.outputs.os-image == 'true')
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(needs.changes.outputs.platforms) }}
+    # Downloading this run's compiled-<arch>.tar by run id needs `actions: read`.
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/startos-image.yaml
+    with:
+      platform: ${{ matrix.platform }}
+      environment: *environment
+      nodejs-version: *nodejs-version
+
+  publish:
+    name: Publish StartOS
+    needs: [changes, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.changes.outputs.channel != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch startos-iso.yaml for this build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ needs.changes.outputs.channel }}
+          PLATFORMS: ${{ needs.changes.outputs.platforms }}
+          FORCE_OVERWRITE: ${{ github.event.inputs.force-overwrite == 'true' }}
+        run: |
+          gh workflow run startos-iso.yaml -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
+            -f build-run-id="$GITHUB_RUN_ID" \
+            -f commit="$GITHUB_SHA" \
+            -f channel="$CHANNEL" \
+            -f platforms="$PLATFORMS" \
+            -f environment="$ENVIRONMENT" \
+            -f force-overwrite="$FORCE_OVERWRITE"

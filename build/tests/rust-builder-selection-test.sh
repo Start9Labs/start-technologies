@@ -122,17 +122,18 @@ fi
 assert_log_contains chown
 
 for builder in \
-    projects/start-os/build/build-startbox.sh \
-    projects/start-os/build/build-start-container.sh \
+    build/build-rust-bins.sh \
     projects/start-os/backup-fs/build-backup-fs.sh \
-    projects/start-cli/build/build-cli.sh \
-    projects/start-registry/build/build-registrybox.sh \
-    projects/start-tunnel/build/build-tunnelbox.sh; do
+    projects/start-cli/build/build-cli.sh; do
+    arguments=()
+    if [ "$builder" = build/build-rust-bins.sh ]; then
+        arguments=(start-os:startbox start-os:start-container start-registry:registrybox start-tunnel:tunnelbox)
+    fi
     for profile in '' release debug unknown-profile; do
         : > "$DOCKER_LOG"
         status=0
         PROFILE="$profile" BUILD_FLAGS=--release ARCH=x86_64 MOCK_CARGO_EXIT=19 \
-            bash "$builder" > "$scratch/build.stdout" 2> "$scratch/build.stderr" || status=$?
+            bash "$builder" "${arguments[@]}" > "$scratch/build.stdout" 2> "$scratch/build.stderr" || status=$?
         test "$status" = 19
         if [[ -z "$profile" || "$profile" == release ]]; then
             assert_log_contains --release

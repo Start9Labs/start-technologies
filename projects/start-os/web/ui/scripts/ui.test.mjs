@@ -248,6 +248,8 @@ const { WA_WINDOW } = await import('@ng-web-apis/common')
 const { UiUpdateService } = await import('src/app/services/ui-update.service')
 const { ConfigService } = await import('src/app/services/config.service')
 const { StateService } = await import('src/app/services/state.service')
+const { ConnectionService } =
+  await import('src/app/services/connection.service')
 const { TrustedKeysService } =
   await import('src/app/services/trusted-keys.service')
 const { TrustedKeysService: ProductionTrustedKeysService } =
@@ -307,6 +309,7 @@ const state = version => ({
   serverInfo: {
     id: 'server-id',
     version,
+    gitHash: runningGitHash,
     statusInfo: {},
     trustedKeys: trustedSigners,
     osRegistry: 'https://registry.test',
@@ -336,9 +339,8 @@ function fixture(t, cachedVersion, providers = []) {
   let completed = 0
   const api = {
     rpc: {
-      async gitInfo(params) {
-        assert.deepEqual(params, {})
-        return `${runningGitHash}\n`
+      gitInfo() {
+        assert.fail('The running build hash comes from PatchDB')
       },
       registry: {
         os: {
@@ -481,6 +483,18 @@ function fixture(t, cachedVersion, providers = []) {
         },
       ])
     },
+    build(gitHash) {
+      source.next([
+        {
+          id: ++revision,
+          patch: [
+            gitHash === undefined
+              ? { op: 'remove', path: '/serverInfo/gitHash' }
+              : { op: 'replace', path: '/serverInfo/gitHash', value: gitHash },
+          ],
+        },
+      ])
+    },
     publish(
       versions = catalog,
       { registry = 'https://registry.test/', status = 'connected' } = {},
@@ -507,14 +521,13 @@ function fixture(t, cachedVersion, providers = []) {
     },
     async load(response = catalog) {
       this.publish(response)
-      await os.loadOS()
+      await os.checkForUpdates()
     },
   }
 }
 
 function uiFixture(t, { enabled = true, controlled = true } = {}) {
-  const serverState = new BehaviorSubject(null)
-  let serverGitHash = runningGitHash
+  const connection = new BehaviorSubject(false)
   const events = new Subject()
   const unrecoverable = new Subject()
   const checks = []
@@ -574,17 +587,16 @@ function uiFixture(t, { enabled = true, controlled = true } = {}) {
       },
     },
     { provide: ConfigService, useValue: { gitHash: runningGitHash } },
-    { provide: StateService, useValue: serverState },
+    { provide: ConnectionService, useValue: connection },
     { provide: WA_WINDOW, useValue: win },
   ])
-  f.api.rpc.gitInfo = async () => `${serverGitHash}\n`
   const ui = f.get(UiUpdateService)
   return {
     ...f,
-    serverState,
-    async rebuild(state = 'running') {
-      serverGitHash = nextGitHash
-      serverState.next(state)
+    connection,
+    async rebuild(live = true) {
+      f.build(nextGitHash)
+      connection.next(live)
       await tick()
     },
     ui,
@@ -708,19 +720,19 @@ test('a matching build is current whatever server version the database reports',
   const f = uiFixture(t)
   const component = f.make(RefreshAlertComponent)
   f.version('0.4.0.5')
-  f.serverState.next('running')
+  f.connection.next(true)
   await tick()
   assert.equal(f.ui.outdated(), false)
   assert.equal(f.checks.length, 0)
   assert.equal(component.show(), false)
 })
 
-test('a different server build is announced only once the server is running', async t => {
+test('a different server build is announced only once the database is live', async t => {
   const f = uiFixture(t)
-  await f.rebuild('initializing')
+  await f.rebuild(false)
   assert.equal(f.ui.outdated(), false)
   assert.equal(f.checks.length, 0)
-  f.serverState.next('running')
+  f.connection.next(true)
   await tick()
   assert.equal(f.ui.outdated(), true)
   assert.equal(f.checks.length, 1)
@@ -1034,7 +1046,7 @@ test('dismissing an update dialog does not hide the next state', async t => {
 for (const liveBeforeResponse of [true, false]) {
   test(`cached older version is replaced by live current ${liveBeforeResponse ? 'before' : 'after'} cache publication`, async t => {
     const f = fixture(t, '0.4.0.1')
-    const loading = f.os.loadOS()
+    const loading = f.os.checkForUpdates()
     await tick()
     assert.deepEqual(f.requests, [])
     if (liveBeforeResponse) f.live('0.4.0.2')
@@ -1051,42 +1063,10 @@ for (const liveBeforeResponse of [true, false]) {
   })
 }
 
-test('a slower load cannot replace the running hash or catalog after a registry switch', async t => {
-  const f = fixture(t, '0.4.0.2')
-  const firstHash = deferred()
-  const secondHash = deferred()
-  let requests = 0
-  f.api.rpc.gitInfo = () =>
-    ++requests === 1 ? firstHash.promise : secondHash.promise
-  f.selectRegistry('https://first.test')
-  const first = f.os.loadOS('https://first.test')
-  f.selectRegistry('https://second.test')
-  const second = f.os.loadOS('https://second.test')
-  f.publish(
-    {
-      '0.4.0.2': {
-        gitHash: runningGitHash,
-        releaseNotes: 'installed',
-        squashfs,
-      },
-      '0.4.0.3': { releaseNotes: 'second registry', squashfs },
-    },
-    { registry: 'https://second.test' },
-  )
-  secondHash.resolve(runningGitHash)
-  await second
-  firstHash.resolve('outdated-response')
-  await first
-  assert.deepEqual(f.os.updateCandidates(), [
-    { version: '0.4.0.3', notes: 'second registry', squashfs },
-  ])
-  assert.deepEqual(f.requests, [])
-})
-
 test('a registry switch releases a load waiting for the previous source without publishing an error', async t => {
   const f = fixture(t, '0.4.0.2')
   f.selectRegistry('https://first.test')
-  const first = f.os.loadOS('https://first.test')
+  const first = f.os.checkForUpdates()
   await tick()
   f.selectRegistry('https://second.test')
   await first
@@ -1095,13 +1075,13 @@ test('a registry switch releases a load waiting for the previous source without 
     { '0.4.0.3': { releaseNotes: 'selected', squashfs } },
     { registry: 'https://second.test' },
   )
-  await f.os.loadOS('https://second.test')
+  await f.os.checkForUpdates()
   assert.equal(f.os.updateCandidates()[0].notes, 'selected')
 })
 
 test('without a cache, load waits for the first live state', async t => {
   const f = fixture(t)
-  const loading = f.os.loadOS()
+  const loading = f.os.checkForUpdates()
   await tick()
   assert.equal(f.requests.length, 0)
   assert.deepEqual(f.os.updateCandidates(), [])
@@ -1134,7 +1114,7 @@ test('strictly newer candidates sort descending; offline cache remains readable;
   assert.equal(f.shown.at(-1), true)
   f.publish(catalog, { status: 'error' })
   assert.equal(await firstValueFrom(f.os.registryStatus$), 'error')
-  await assert.rejects(f.os.loadOS(), /registry unavailable/)
+  await assert.rejects(f.os.checkForUpdates(), /registry unavailable/)
   assert.deepEqual(f.os.updateCandidates(), candidates)
   f.version('0.4.0.3')
   assert.deepEqual(f.os.updateCandidates(), [candidates[0]])
@@ -1200,33 +1180,27 @@ test('a refreshed same-version listing clears availability when its image matche
   assert.deepEqual(f.submissions, [])
 })
 
-test('catalog publication waits for the running build hash', async t => {
+test('a same-version image is offered from the synced catalog without a manual check', async t => {
   const f = fixture(t, '0.4.0.2')
-  const hash = deferred()
-  f.api.rpc.gitInfo = () => hash.promise
-  const loading = f.os.loadOS()
-  await tick()
   f.publish({
-    '0.4.0.2': { releaseNotes: 'installed', squashfs, gitHash: runningGitHash },
+    '0.4.0.2': { releaseNotes: 'next image', squashfs, gitHash: nextGitHash },
   })
-  await tick()
+  assert.deepEqual(f.os.updateCandidates(), [
+    { version: '0.4.0.2', notes: 'next image', squashfs },
+  ])
+  assert.equal(f.availability.at(-1), true)
+  f.build(nextGitHash)
   assert.deepEqual(f.os.updateCandidates(), [])
-  hash.resolve(`${runningGitHash}\n`)
-  await loading
-  assert.deepEqual(f.os.updateCandidates(), [])
-  assert.deepEqual(f.availability, [false])
+  assert.equal(f.availability.at(-1), false)
 })
 
-test('git-info failure preserves the last successful catalog', async t => {
+test('a database without the running build hash offers no same-version image', async t => {
   const f = fixture(t, '0.4.0.2')
-  await f.load()
-  f.api.rpc.gitInfo = async () => {
-    throw new Error('git-info unavailable')
-  }
-  const refresh = f.os.loadOS()
-  const rejected = assert.rejects(refresh, /git-info unavailable/)
-  await tick()
-  await rejected
+  f.build(undefined)
+  f.publish({
+    ...catalog,
+    '0.4.0.2': { releaseNotes: 'next image', squashfs, gitHash: nextGitHash },
+  })
   assert.deepEqual(f.os.updateCandidates(), candidates)
 })
 
@@ -3068,9 +3042,6 @@ const { MarketplaceControlsComponent: Controls } =
   await import('src/app/routes/portal/routes/marketplace/components/controls.component')
 const { MarketplaceService } =
   await import('src/app/services/marketplace.service')
-const { ConnectionService } =
-  await import('src/app/services/connection.service')
-
 const pkg = {
   id: 'hello-world',
   version: '1.0.0:0',
@@ -4304,7 +4275,7 @@ test('OS first sync waits through Connecting and distinguishes empty success fro
   const f = fixture(t, '0.4.0.2')
   f.publish({}, { status: 'connecting' })
   let settled = false
-  const loading = f.os.loadOS().then(() => {
+  const loading = f.os.checkForUpdates().then(() => {
     settled = true
   })
   await tick()
@@ -4315,7 +4286,7 @@ test('OS first sync waits through Connecting and distinguishes empty success fro
   assert.deepEqual(f.os.updateCandidates(), [])
   assert.equal(await firstValueFrom(f.os.registryStatus$), 'connected')
   f.publish(catalog, { status: 'connecting' })
-  const retry = f.os.loadOS()
+  const retry = f.os.checkForUpdates()
   await tick()
   assert.deepEqual(f.os.updateCandidates(), candidates)
   f.publish(catalog, { status: 'error' })
@@ -4329,7 +4300,7 @@ test('switching the OS registry discards the old catalog until the matching cach
   f.selectRegistry('https://other.test')
   assert.deepEqual(f.os.updateCandidates(), [])
   assert.equal(await firstValueFrom(f.os.registryStatus$), 'connecting')
-  const loading = f.os.loadOS()
+  const loading = f.os.checkForUpdates()
   f.publish(catalog)
   assert.deepEqual(f.os.updateCandidates(), [])
   f.publish(

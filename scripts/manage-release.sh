@@ -1247,7 +1247,7 @@ resolve_gha_run() {
 
     # The tag must point at the commit these artifacts were built from.
     local tag_sha
-    RUN_SHA=$(gh run view -R "$REPO" "$RUN_ID" --json headSha -q .headSha)
+    RUN_SHA=$("$SCRIPT_DIR/gha-run-commit.sh" "$REPO" "$RUN_ID") || exit 1
     tag_sha=$(tag_commit_sha)
     if [ "$RUN_SHA" != "$tag_sha" ]; then
         >&2 echo "Run ${RUN_ID} built commit ${RUN_SHA},"

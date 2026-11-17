@@ -39,8 +39,8 @@ page, with no wrapper dialog; the extra key needs the options cast to
 }).subscribe()` fire-and-forget; `autoClose: 0` + `closable: false` for sticky states, content
   can be a `PolymorpheusComponent`). **Blocking loaders — `TuiNotificationMiddleService`**: hold
   the subscription open, `unsubscribe()` in `finally` (that's what `TaskService` does).
-  `TuiAlertService` is not used anywhere; inline banners are `<div tuiNotification
-appearance="…">` (host-directive form, not the element form). A banner that asks for one of
+  Inline banners are `<div tuiNotification appearance="…">` (host-directive form, not the
+  element form). A banner that asks for one of
   two choices is a `form`: the primary action is its default submit button and the alternative
   a `type="reset"` button, handled as `(submit.prevent)` and `(reset)` on the form, with no
   `(click)` or `type="button"` on either.
@@ -52,9 +52,8 @@ appearance="…">` (host-directive form, not the element form). A banner that as
   component, closed once from its host: `<app-menu *tuiDropdown="let close" (click)="close()" />`.
   A trigger at the inline end of its row or bar — row actions, a header menu — sets
   `tuiDropdownAlign="end"`: an anchored dropdown wraps to the room past its aligned edge rather
-  than flipping. Leave `tuiDropdownDirection` unset: its default opens on whichever side has room, and a pinned
-  `top` breaks when there's none. A toolbar shown on hover stays shown while one of its dropdowns
-  is open through `:has([aria-expanded='true'])`, which the dropdown host carries.
+  than flipping. Leave `tuiDropdownDirection` unset: its default opens on whichever side has
+  room, and a pinned `top` breaks when there's none.
 - **Hints**: `[tuiHint]` (template content allowed), tuned globally via `tuiHintOptionsProvider`.
 - **Drawers/sheets**: `<tui-drawer *tuiPopup="open()" (click.self)="toggle(false)">` with
   URL-driven `open` state.

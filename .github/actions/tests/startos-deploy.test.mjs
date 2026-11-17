@@ -145,7 +145,7 @@ if (command === 'ls') {
     VERSION,
     PLATFORM,
     REGISTRY: 'https://registry.example',
-    GITHUB_SHA: SHA,
+    COMMIT: SHA,
     S3_BUCKET: 's3://bucket',
     S3_CDN: 'https://cdn.example',
     FORCE_OVERWRITE: 'false',

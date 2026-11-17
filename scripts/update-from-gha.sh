@@ -13,8 +13,8 @@
 # Options:
 #   --run <id|url>      GitHub Actions run to take the image from. Accepts a run
 #                       id or a full run URL.
-#   --branch <name>     Use the latest successful startos-iso run on this branch
-#                       instead of --run. Default: master.
+#   --branch <name>     Use the latest successful run on this branch holding an
+#                       unexpired image for the requested platform. Default: master.
 #   --platform <name>   Image platform (x86_64, aarch64, raspberrypi, ...).
 #                       Default: whatever the server reports.
 #   --keep <dir>        Download into <dir> and leave it in place. Default: a
@@ -29,7 +29,6 @@
 set -euo pipefail
 
 REPO="${REPO:-Start9Labs/start-technologies}"
-WORKFLOW="startos-iso.yaml"
 REMOTE=""
 RUN_ID=""
 BRANCH=""
@@ -67,7 +66,7 @@ if [ -z "$REMOTE" ]; then
     usage 2
 fi
 
-for bin in gh b3sum; do
+for bin in gh b3sum jq; do
     if ! command -v "$bin" > /dev/null; then
         >&2 echo "Missing required tool: $bin"
         exit 1
@@ -84,32 +83,6 @@ else
     remote_sh() { ssh "$REMOTE" "$@"; }
 fi
 
-# --- Resolve the run -------------------------------------------------------
-
-if [ -n "$RUN_ID" ]; then
-    # Accept a run URL as well as a bare id, matching manage-release.sh.
-    if [[ "$RUN_ID" =~ /actions/runs/([0-9]+) ]]; then
-        RUN_ID="${BASH_REMATCH[1]}"
-    fi
-else
-    BRANCH="${BRANCH:-master}"
-    echo "Finding the latest successful $WORKFLOW run on $BRANCH..."
-    RUN_ID=$(gh run list -R "$REPO" -w "$WORKFLOW" -b "$BRANCH" -s success \
-        -L 1 --json databaseId -q '.[0].databaseId')
-    if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-        >&2 echo "No successful $WORKFLOW run found on $BRANCH"
-        exit 1
-    fi
-fi
-
-read -r RUN_SHA RUN_BRANCH RUN_DATE < <(
-    gh run view -R "$REPO" "$RUN_ID" \
-        --json headSha,headBranch,createdAt \
-        -q '[.headSha, .headBranch, .createdAt] | @tsv'
-)
-
-# --- Resolve the platform --------------------------------------------------
-
 if [ -z "$PLATFORM" ]; then
     echo "Reading the platform from $REMOTE..."
     PLATFORM=$(remote_sh 'cat /usr/lib/startos/PLATFORM.txt' | tr -d '[:space:]')
@@ -118,6 +91,23 @@ if [ -z "$PLATFORM" ]; then
         exit 1
     fi
 fi
+
+if [ -n "$RUN_ID" ]; then
+    if [[ "$RUN_ID" =~ /actions/runs/([0-9]+) ]]; then
+        RUN_ID="${BASH_REMATCH[1]}"
+    fi
+else
+    BRANCH="${BRANCH:-master}"
+    echo "Finding the latest successful image build for $PLATFORM on $BRANCH..."
+    RUN_ID=$("$(dirname "${BASH_SOURCE[0]}")/gha-image-run.sh" "$REPO" "$BRANCH" "$PLATFORM")
+fi
+
+read -r RUN_BRANCH RUN_DATE < <(
+    gh run view -R "$REPO" "$RUN_ID" \
+        --json headBranch,createdAt \
+        -q '[.headBranch, .createdAt] | @tsv'
+)
+RUN_SHA=$("$(dirname "${BASH_SOURCE[0]}")/gha-run-commit.sh" "$REPO" "$RUN_ID")
 
 CURRENT_VERSION=$(remote_sh 'cat /usr/lib/startos/VERSION.txt' 2> /dev/null | tr -d '[:space:]' || true)
 CURRENT_HASH=$(remote_sh 'cat /usr/lib/startos/GIT_HASH.txt' 2> /dev/null | tr -d '[:space:]' || true)

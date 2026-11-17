@@ -844,6 +844,10 @@ pub const ENVIRONMENT: &str = include_str!(concat!(
     "/../../../build/env/ENVIRONMENT.txt"
 ));
 
+pub fn commit_hash() -> &'static str {
+    COMMIT_HASH.trim()
+}
+
 pub fn git_info() -> Result<InternedString, Error> {
     Ok(InternedString::intern(COMMIT_HASH))
 }
