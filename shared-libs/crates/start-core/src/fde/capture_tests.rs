@@ -11,6 +11,69 @@ use crate::disk::mount::guard::GenericMountGuard;
 use crate::os_overlay::OVERLAY_FILE;
 use crate::util::squashfs::NodeContents;
 
+async fn transport(profiles: bool) -> tokio::fs::File {
+    let file = anonymous_file().unwrap();
+    let mut archive = tokio_tar::Builder::new(file);
+    let data = b"private configuration bytes";
+    let mut header = tokio_tar::Header::new_gnu();
+    header.set_mode(0o600);
+    header.set_size(data.len() as u64);
+    header.set_cksum();
+    archive
+        .append_data(&mut header, CAPTURE_FILE, &data[..])
+        .await
+        .unwrap();
+    append_json(
+        &mut archive,
+        KEYS_FILE,
+        &vec![OsString::from_vec(b"/key-\xff".to_vec())],
+    )
+    .await
+    .unwrap();
+    if profiles {
+        append_json(
+            &mut archive,
+            PROFILES_FILE,
+            &std::collections::BTreeMap::from([(
+                "private.nmconnection".to_owned(),
+                Zeroizing::new("private-profile-secret".to_owned()),
+            )]),
+        )
+        .await
+        .unwrap();
+    }
+    archive.into_inner().await.unwrap()
+}
+
+#[tokio::test]
+async fn capture_transport_keeps_private_profiles_and_native_paths_in_owned_memory() {
+    let (mut image, keys, profiles) = receive(transport(true).await).await.unwrap();
+    let mut contents = Zeroizing::new(Vec::new());
+    image.read_to_end(&mut contents).await.unwrap();
+    assert_eq!(&*contents, b"private configuration bytes");
+    assert_eq!(
+        keys,
+        vec![PathBuf::from(OsString::from_vec(b"/key-\xff".to_vec()))]
+    );
+    assert_eq!(
+        profiles.get("private.nmconnection").unwrap().as_str(),
+        "private-profile-secret"
+    );
+    assert_eq!(profiles.len(), 1);
+}
+
+#[tokio::test]
+async fn capture_transport_requires_profiles_and_rejects_bytes_after_the_first_archive() {
+    assert!(receive(transport(false).await).await.is_err());
+    let mut archive = transport(true).await;
+    archive.seek(std::io::SeekFrom::End(0)).await.unwrap();
+    archive
+        .write_all(b"unexpected trailing output")
+        .await
+        .unwrap();
+    assert!(receive(archive).await.is_err());
+}
+
 struct Fixture {
     volume: ManuallyDrop<MountGuard>,
     base: ManuallyDrop<MountGuard>,
@@ -58,6 +121,7 @@ impl Fixture {
             "raw/custom",
             "data/main",
             "data/package-data",
+            "data/main/network-profiles",
             "generations",
         ] {
             tokio::fs::create_dir_all(volume.path().join(relative))
@@ -86,6 +150,14 @@ impl Fixture {
             raw.join("custom")
                 .join(OsString::from_vec(b"key\xff".to_vec())),
             b"captured-native-byte-key",
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(
+            volume
+                .path()
+                .join("data/main/network-profiles/private.nmconnection"),
+            b"[connection]\nid=captured\n[wifi-security]\npsk=captured-bootstrap-password\n",
         )
         .await
         .unwrap();
@@ -122,6 +194,7 @@ impl Fixture {
             },
             self.base.path().to_owned(),
             self.volume.path().join("data"),
+            self.volume.path().join("data/main/network-profiles"),
             &[
                 self.volume.path().to_owned(),
                 self.volume.path().join("data/main"),
@@ -250,9 +323,15 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
     );
     let mut writer = Command::new("/bin/sh")
         .arg("-c")
-        .arg("printf 'started\\n'; printf late-change > \"$1\"")
+        .arg("printf 'started\\n'; printf late-change > \"$1\"; printf post-epoch-profile > \"$2\"")
         .arg("native-source-writer")
         .arg(fixture.volume.path().join("raw/etc/shadow"))
+        .arg(
+            fixture
+                .volume
+                .path()
+                .join("data/main/network-profiles/private.nmconnection"),
+        )
         .stdout(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
@@ -270,8 +349,23 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
         .await
         .unwrap();
     drop(gate);
-    let (image, keys) = capture.await.unwrap();
+    let (image, keys, profiles) = capture.await.unwrap();
+    assert_eq!(
+        profiles.get("private.nmconnection").unwrap().as_str(),
+        "[connection]\nid=captured\n[wifi-security]\npsk=captured-bootstrap-password\n"
+    );
     assert!(writer.wait().await.unwrap().success());
+    assert_eq!(
+        tokio::fs::read(
+            fixture
+                .volume
+                .path()
+                .join("data/main/network-profiles/private.nmconnection")
+        )
+        .await
+        .unwrap(),
+        b"post-epoch-profile"
+    );
     drop(pause);
     write.await.unwrap();
     assert_eq!(
@@ -344,6 +438,43 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
     db.close().await;
     drop(overlay);
     drop(projected);
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+#[ignore = "requires exclusive managed guest, real PID1/Btrfs/loop/overlay privileges, genuine FDE_SOURCE_IMAGE and built FDE_CAPTURE_EXECUTABLE; never on build host"]
+async fn native_profile_capture_failure_thaws_before_returning_without_projection() {
+    let fixture = Fixture::new().await;
+    let mut epoch = fixture.epoch().await;
+    epoch.network_profiles = fixture.volume.path().join("raw/etc/passwd");
+    let (mut gate, mut events) = fixture.gate().await;
+    let executable = executable();
+    let unit = unit();
+    let mut capture = Box::pin(capture_in_unit(&epoch, &executable, &unit));
+    gate_opened(&mut events, &mut capture).await;
+    gate.write_all(b"HostKey \"/custom/key\xff\"\n")
+        .await
+        .unwrap();
+    drop(gate);
+    assert!(
+        tokio::time::timeout(Duration::from_secs(30), capture)
+            .await
+            .unwrap()
+            .is_err()
+    );
+    tokio::fs::write(fixture.working.path().join("restored"), b"writable")
+        .await
+        .unwrap();
+    tokio::fs::write(fixture.volume.path().join("raw/restored"), b"writable")
+        .await
+        .unwrap();
+    assert!(
+        !fixture
+            .volume
+            .path()
+            .join("data/main/fde-private-config")
+            .exists()
+    );
     fixture.cleanup().await;
 }
 

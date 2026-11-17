@@ -22,7 +22,10 @@ use crate::util::Invoke;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 use crate::{Error, ErrorKind, GatewayId};
 
-const SAVED_PROFILE_DIRECTORY: &str = "/etc/NetworkManager/system-connections";
+pub(crate) const SAVED_PROFILE_DIRECTORY: &str = "/etc/NetworkManager/system-connections";
+
+/// Saved NetworkManager profile contents, zeroized when released.
+pub type NetworkProfiles = BTreeMap<String, zeroize::Zeroizing<String>>;
 
 impl RpcContext {
     async fn read_wifi_manager(&self) -> Result<RwLockReadGuard<'_, WpaCli>, Error> {
@@ -1196,18 +1199,25 @@ fn parse_wired_profile(contents: &str) -> Option<WiredProfile> {
     })
 }
 
-async fn read_network_profile(entry: &tokio::fs::DirEntry) -> Result<Option<String>, Error> {
-    if entry
-        .path()
+pub(crate) fn is_network_profile_name(name: &std::ffi::OsStr) -> bool {
+    Path::new(name)
         .extension()
-        .is_none_or(|extension| extension != "nmconnection")
-        || !entry.file_type().await?.is_file()
-    {
+        .is_some_and(|extension| extension == "nmconnection")
+}
+
+async fn read_network_profile(
+    entry: &tokio::fs::DirEntry,
+) -> Result<Option<zeroize::Zeroizing<String>>, Error> {
+    if !is_network_profile_name(&entry.file_name()) || !entry.file_type().await?.is_file() {
         return Ok(None);
     }
-    Ok(Some(
-        crate::util::io::read_file_to_string(entry.path()).await?,
-    ))
+    let bytes =
+        crate::util::io::read_secret_file(crate::util::io::open_file(entry.path()).await?).await?;
+    Ok(Some(zeroize::Zeroizing::new(
+        std::str::from_utf8(&bytes)
+            .with_kind(ErrorKind::Filesystem)?
+            .to_owned(),
+    )))
 }
 
 async fn read_wired_profile(entry: &tokio::fs::DirEntry) -> Result<Option<WiredProfile>, Error> {
@@ -1216,13 +1226,11 @@ async fn read_wired_profile(entry: &tokio::fs::DirEntry) -> Result<Option<WiredP
         .and_then(|contents| parse_wired_profile(&contents)))
 }
 
-pub(crate) async fn capture_network_profiles() -> Result<BTreeMap<String, String>, Error> {
+pub(crate) async fn capture_network_profiles() -> Result<NetworkProfiles, Error> {
     read_network_profiles(Path::new(SAVED_PROFILE_DIRECTORY)).await
 }
 
-pub(crate) async fn read_network_profiles(
-    directory: &Path,
-) -> Result<BTreeMap<String, String>, Error> {
+pub(crate) async fn read_network_profiles(directory: &Path) -> Result<NetworkProfiles, Error> {
     let mut entries = tokio::fs::read_dir(directory).await?;
     let mut profiles = BTreeMap::new();
     while let Some(entry) = entries.next_entry().await? {

@@ -29,8 +29,8 @@ use crate::util::io::{
     write_secret_file,
 };
 use crate::util::squashfs::{
-    Entry, Metadata, Node, NodeContents, Squashfs, overlay_whiteout, resolve_hardlink,
-    snapshot_entries,
+    DirectoryContents, Entry, Metadata, Node, NodeContents, Squashfs, overlay_whiteout,
+    resolve_hardlink, snapshot_entries,
 };
 
 pub(super) const DIRECTORY: &str = "fde-private-config";
@@ -159,6 +159,26 @@ async fn apply_metadata(file: &tokio::fs::File, metadata: &Metadata) -> Result<(
     Ok(())
 }
 
+fn snapshot_directory<'a>(
+    snapshot: &'a Squashfs<DynFileSource>,
+    path: &Path,
+) -> Result<Option<&'a DirectoryContents<DynFileSource>>, Error> {
+    let relative = confined_relative(path)?;
+    if snapshot
+        .contents()
+        .get_path_checked(&relative)
+        .map_err(|_| invalid_layout(path))?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let (_, node) = resolved(snapshot, &relative)?;
+    match &node.contents {
+        NodeContents::Directory(directory) => Ok(Some(directory)),
+        _ => Err(invalid_layout(path)),
+    }
+}
+
 impl ProjectedConfig {
     /// Requires an unlocked encrypted data mount and quiescent source paths.
     /// Supply both native default and prospective HostKey paths from the admitted root.
@@ -168,25 +188,32 @@ impl ProjectedConfig {
         host_keys: &[PathBuf],
     ) -> Result<Self, Error> {
         let key_directory = Path::new(crate::ssh::HOST_KEY_DIRECTORY);
-        let relative_keys = confined_relative(key_directory)?;
         let mut paths = [crate::auth::SHADOW_PATH, crate::util::mok::DKMS_MOK_KEY]
             .into_iter()
             .map(PathBuf::from)
             .chain(host_keys.iter().cloned())
             .collect::<BTreeSet<_>>();
-        if snapshot
-            .contents()
-            .get_path_checked(&relative_keys)
-            .map_err(|_| invalid_layout(key_directory))?
-            .is_some()
-        {
-            let (_, node) = resolved(&snapshot, &relative_keys)?;
-            let NodeContents::Directory(keys) = &node.contents else {
-                return Err(invalid_layout(key_directory));
-            };
+        if let Some(keys) = snapshot_directory(&snapshot, key_directory)? {
             for (name, _) in keys.iter() {
                 if crate::ssh::is_installer_host_key(name) {
                     paths.insert(key_directory.join(name));
+                }
+            }
+        }
+        let profiles = Path::new(crate::net::wifi::SAVED_PROFILE_DIRECTORY);
+        if let Some(entries) = snapshot_directory(&snapshot, profiles)? {
+            for (name, entry) in entries.iter() {
+                if crate::net::wifi::is_network_profile_name(name)
+                    && matches!(
+                        entry,
+                        Entry::Hardlink(_)
+                            | Entry::Node(Node {
+                                contents: NodeContents::File(_),
+                                ..
+                            })
+                    )
+                {
+                    paths.insert(profiles.join(name));
                 }
             }
         }

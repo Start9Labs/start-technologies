@@ -46,6 +46,53 @@ fn target<'a>(projected: &'a ProjectedConfig, path: &str) -> &'a Path {
 }
 
 #[tokio::test]
+async fn saved_network_profiles_and_their_aliases_are_private_without_redacting_other_files() {
+    let (_root, raw, data) = fixture().await;
+    let directory = Path::new(crate::net::wifi::SAVED_PROFILE_DIRECTORY)
+        .strip_prefix("/")
+        .unwrap();
+    let profile = directory.join("private.nmconnection");
+    let public = directory.join("private.nmconnection.pub");
+    tokio::fs::create_dir_all(raw.join(directory))
+        .await
+        .unwrap();
+    tokio::fs::write(raw.join(&profile), b"private-network-password")
+        .await
+        .unwrap();
+    tokio::fs::set_permissions(raw.join(&profile), std::fs::Permissions::from_mode(0o640))
+        .await
+        .unwrap();
+    tokio::fs::write(raw.join(&public), b"public-profile-note")
+        .await
+        .unwrap();
+    tokio::fs::hard_link(raw.join(&profile), raw.join("etc/profile-alias"))
+        .await
+        .unwrap();
+    let before = tokio::fs::metadata(raw.join(&profile)).await.unwrap();
+    let projected = project(&raw, &data, &[]).await;
+    let file = backing_file(&data, target(&projected, profile.to_str().unwrap()))
+        .await
+        .unwrap();
+    let alias = backing_file(&data, target(&projected, "etc/profile-alias"))
+        .await
+        .unwrap();
+    assert!(crate::util::io::same_file(&file, &alias).await.unwrap());
+    assert_eq!(
+        tokio::fs::read(&file).await.unwrap(),
+        b"private-network-password"
+    );
+    let after = tokio::fs::metadata(file).await.unwrap();
+    assert_eq!(
+        (after.uid(), after.gid(), after.mode(), after.mtime()),
+        (before.uid(), before.gid(), before.mode(), before.mtime())
+    );
+    let (_, node) = resolved(&projected.snapshot, &profile).unwrap();
+    assert_eq!(node.metadata, Metadata::new(0o777));
+    let (_, node) = resolved(&projected.snapshot, &public).unwrap();
+    assert!(matches!(&node.contents, NodeContents::File(_)));
+}
+
+#[tokio::test]
 async fn staging_redacts_credentials_and_preserves_native_metadata_and_hardlinks() {
     let (_root, raw, data) = fixture().await;
     tokio::fs::hard_link(raw.join("etc/shadow"), raw.join("etc/shadow-alias"))

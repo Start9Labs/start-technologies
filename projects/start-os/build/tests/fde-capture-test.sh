@@ -51,6 +51,7 @@ chmod 755 "$root/startbox"
 if [ "$#" = 0 ]; then
     set -- \
         fde::capture::tests::native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_thaw \
+        fde::capture::tests::native_profile_capture_failure_thaws_before_returning_without_projection \
         fde::capture::tests::native_capture_helper_death_restores_owned_sources_and_preserves_readonly_intent \
         fde::capture::tests::native_capture_stop_thaws_before_waiting_for_a_blocked_owned_writer \
         fde::capture::tests::native_capture_requester_death_leaves_cleanup_owned_by_pid1

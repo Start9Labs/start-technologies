@@ -16,6 +16,7 @@ use nix::sys::memfd::{MFdFlags, memfd_create};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::process::Command;
+use zeroize::Zeroizing;
 
 use super::generation::capture_configuration;
 use super::initramfs::{BootMode, load_configuration};
@@ -40,6 +41,7 @@ const IMAGES: &str = "/media/startos/images";
 const CONFIGURATION: &str = "/media/startos/config/overlay";
 const CAPTURE_FILE: &str = "configuration.squashfs";
 const KEYS_FILE: &str = "host-keys.json";
+const PROFILES_FILE: &str = "network-profiles.json";
 
 nix::ioctl_readwrite!(freeze_filesystem, b'X', 119, libc::c_int);
 nix::ioctl_readwrite!(thaw_filesystem, b'X', 120, libc::c_int);
@@ -56,6 +58,7 @@ enum ConfigurationSource {
 struct ReadEpoch {
     base_root: PathBuf,
     data_root: PathBuf,
+    network_profiles: PathBuf,
     source: ConfigurationSource,
     frozen_filesystems: Vec<PathBuf>,
     readonly_filesystems: Vec<PathBuf>,
@@ -84,6 +87,7 @@ impl ReadEpoch {
             source,
             PUBLIC.into(),
             crate::DATA_DIR.into(),
+            crate::net::wifi::SAVED_PROFILE_DIRECTORY.into(),
             &[
                 "/media/startos/root".into(),
                 crate::MAIN_DATA.into(),
@@ -98,6 +102,7 @@ impl ReadEpoch {
         source: ConfigurationSource,
         base_root: PathBuf,
         data_root: PathBuf,
+        network_profiles: PathBuf,
         filesystems: &[PathBuf],
         readonly_candidates: &[PathBuf],
     ) -> Result<Self, Error> {
@@ -131,6 +136,7 @@ impl ReadEpoch {
         Ok(Self {
             base_root,
             data_root,
+            network_profiles,
             source,
             frozen_filesystems,
             readonly_filesystems,
@@ -231,6 +237,22 @@ async fn request(path: &Path) -> Result<ReadEpoch, Error> {
         .with_kind(ErrorKind::Deserialization)?)
 }
 
+async fn append_json<T: Serialize + Sync>(
+    archive: &mut tokio_tar::Builder<tokio::fs::File>,
+    name: &str,
+    value: &T,
+) -> Result<(), Error> {
+    let bytes = Zeroizing::new(serde_json::to_vec(value).with_kind(ErrorKind::Serialization)?);
+    let mut header = tokio_tar::Header::new_gnu();
+    header.set_size(bytes.len() as u64);
+    header.set_mode(0o600);
+    header.set_cksum();
+    archive
+        .append_data(&mut header, name, bytes.as_slice())
+        .await?;
+    Ok(())
+}
+
 /// Runs only in the operation unit's private mount namespace.
 /// Its native stop cleanup owns restoration even after helper/requester death.
 pub(crate) async fn run(path: &Path) -> Result<(), Error> {
@@ -242,6 +264,7 @@ pub(crate) async fn run(path: &Path) -> Result<(), Error> {
         let base = disposable_view(&epoch.base_root).await?;
         let data = disposable_view(&epoch.data_root).await?;
         let capture = capture_configuration(epoch.snapshot().await?, base, data).await?;
+        let profiles = crate::net::wifi::read_network_profiles(&epoch.network_profiles).await?;
         epoch.release()?;
         let exported = async {
             let mut archive = tokio_tar::Builder::new(tokio::fs::File::from_std(
@@ -257,14 +280,8 @@ pub(crate) async fn run(path: &Path) -> Result<(), Error> {
                 .iter()
                 .map(|path| path.as_os_str().to_owned())
                 .collect();
-            let bytes = serde_json::to_vec(&keys).with_kind(ErrorKind::Serialization)?;
-            let mut header = tokio_tar::Header::new_gnu();
-            header.set_size(bytes.len() as u64);
-            header.set_mode(0o600);
-            header.set_cksum();
-            archive
-                .append_data(&mut header, KEYS_FILE, bytes.as_slice())
-                .await?;
+            append_json(&mut archive, KEYS_FILE, &keys).await?;
+            append_json(&mut archive, PROFILES_FILE, &profiles).await?;
             archive.into_inner().await?;
             memory.check()?;
             Ok::<_, Error>(())
@@ -374,12 +391,24 @@ async fn loop_backing_image(base: &Path, images: &Path) -> Result<PathBuf, Error
     Err(invalid_source())
 }
 
-async fn receive(mut archive: tokio::fs::File) -> Result<(tokio::fs::File, Vec<PathBuf>), Error> {
+async fn receive(
+    mut archive: tokio::fs::File,
+) -> Result<
+    (
+        tokio::fs::File,
+        Vec<PathBuf>,
+        crate::net::wifi::NetworkProfiles,
+    ),
+    Error,
+> {
     archive.rewind().await?;
-    let mut archive = tokio_tar::Archive::new(archive);
+    let mut archive = tokio_tar::ArchiveBuilder::new(archive)
+        .set_ignore_zeros(true)
+        .build();
     let mut entries = archive.entries()?;
     let mut snapshot = None;
     let mut keys = None;
+    let mut profiles = None;
     while let Some(entry) = entries.next().await {
         let mut entry = entry?;
         if !entry.header().entry_type().is_file() {
@@ -399,12 +428,19 @@ async fn receive(mut archive: tokio::fs::File) -> Result<(tokio::fs::File, Vec<P
                     serde_json::from_slice(&bytes).with_kind(ErrorKind::Deserialization)?;
                 keys = Some(paths.into_iter().map(PathBuf::from).collect());
             }
+            path if path == Path::new(PROFILES_FILE) && profiles.is_none() => {
+                let mut bytes = Zeroizing::new(Vec::new());
+                entry.read_to_end(&mut bytes).await?;
+                profiles =
+                    Some(serde_json::from_slice(&bytes).with_kind(ErrorKind::Deserialization)?);
+            }
             _ => return Err(invalid_source()),
         }
     }
     Ok((
         snapshot.ok_or_else(invalid_source)?,
         keys.ok_or_else(invalid_source)?,
+        profiles.ok_or_else(invalid_source)?,
     ))
 }
 
@@ -413,7 +449,14 @@ async fn capture_in_unit(
     epoch: &ReadEpoch,
     executable: &Path,
     unit: &str,
-) -> Result<(tokio::fs::File, Vec<PathBuf>), Error> {
+) -> Result<
+    (
+        tokio::fs::File,
+        Vec<PathBuf>,
+        crate::net::wifi::NetworkProfiles,
+    ),
+    Error,
+> {
     tokio::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -500,11 +543,14 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<String, Error> {
     let rootfs = running_image().await?;
     let epoch = ReadEpoch::current().await?;
     let pause = ctx.db.pause_mutations().await;
+    let mut credentials =
+        super::credentials::Credentials::capture(&ctx.db.peek().await, ctx.disk_guid.clone())?;
     let unit = format!("startos-fde-capture-{}", Guid::new());
     let captured = capture_in_unit(&epoch, Path::new("/usr/bin/startbox"), &unit).await;
     drop(pause);
-    let (image, keys) = captured?;
-    let snapshot = Squashfs::deserialize(MultiCursorFile::from(image))
+    let (image, keys, profiles) = captured?;
+    credentials.network_profiles = profiles;
+    let mut snapshot = Squashfs::deserialize(MultiCursorFile::from(image))
         .await?
         .into_dyn();
     let enrollment = ctx
@@ -515,6 +561,10 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<String, Error> {
         .as_fde_enrollment()
         .de()?
         .ok_or_else(invalid_source)?;
+    let sealed =
+        super::credentials::SealedCredentials::seal(&credentials, &enrollment.policy_key).await?;
+    drop(credentials);
+    sealed.insert_into(&mut snapshot)?;
     let projected = ProjectedConfig::stage(snapshot, Path::new(crate::MAIN_DATA), &keys).await?;
     let store = super::boot::generation_store(Path::new("/media/startos/config"));
     tokio::fs::create_dir_all(&store).await?;

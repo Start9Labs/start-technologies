@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use openssl::pkey::{PKey, Private, Public};
 use serde::{Deserialize, Serialize};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::db::model::DatabaseModel;
 use crate::hostname::ServerHostname;
@@ -23,6 +23,28 @@ pub struct SealedCredentials {
     envelope: Vec<u8>,
 }
 
+/// The reserved bootstrap file cannot own unrelated hardlink aliases.
+fn admit_bootstrap_path(
+    snapshot: &crate::util::squashfs::Squashfs<crate::s9pk::merkle_archive::source::DynFileSource>,
+) -> Result<(), Error> {
+    use crate::util::squashfs::{Entry, Node, NodeContents, snapshot_entries};
+    let path = Path::new(SEALED_CREDENTIALS_FILE);
+    if !matches!(
+        snapshot.contents().get_path_checked(path)?,
+        None | Some(Entry::Hardlink(_))
+            | Some(Entry::Node(Node {
+                contents: NodeContents::File(_),
+                ..
+            }))
+    ) || snapshot_entries(snapshot)
+        .iter()
+        .any(|(_, entry)| matches!(entry, Entry::Hardlink(target) if target == path))
+    {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into());
+    }
+    Ok(())
+}
+
 impl SealedCredentials {
     /// The caller protects transient key handling and the TPM workspace.
     pub async fn seal(credentials: &Credentials, authority: &PKey<Private>) -> Result<Self, Error> {
@@ -32,6 +54,29 @@ impl SealedCredentials {
             key: super::tpm::seal(&key, authority).await?,
             envelope,
         })
+    }
+
+    pub(crate) fn insert_into(
+        self,
+        snapshot: &mut crate::util::squashfs::Squashfs<
+            crate::s9pk::merkle_archive::source::DynFileSource,
+        >,
+    ) -> Result<(), Error> {
+        use crate::s9pk::merkle_archive::source::DynFileSource;
+        use crate::util::squashfs::{Entry, Metadata, Node, NodeContents};
+
+        admit_bootstrap_path(snapshot)?;
+        let bytes: std::sync::Arc<[u8]> = serde_json::to_vec(&self)
+            .with_kind(ErrorKind::Serialization)?
+            .into();
+        snapshot.contents_mut().insert_path(
+            Path::new(SEALED_CREDENTIALS_FILE),
+            Entry::Node(Node {
+                metadata: Metadata::new(0o600),
+                contents: NodeContents::File(DynFileSource::new(bytes)),
+            }),
+        )?;
+        Ok(())
     }
 
     pub(super) async fn unseal(
@@ -55,11 +100,55 @@ pub struct Credentials {
     pub local_issuer: Option<LocalIssuer>,
     #[serde(default)]
     pub acme: BootstrapAcme,
-    pub network_profiles: BTreeMap<String, String>,
+    pub network_profiles: crate::net::wifi::NetworkProfiles,
     pub network: Option<super::network::BootstrapNetwork>,
 }
 
 impl Credentials {
+    /// Reads bootstrap UI authority and saved intent without issuing certificates or mutating state.
+    pub(crate) fn capture(db: &DatabaseModel, disk_guid: InternedString) -> Result<Self, Error> {
+        let hostname = ServerHostname::load(db.as_public().as_server_info())?;
+        let mut network = super::network::BootstrapNetwork::capture(db)?;
+        let mut host = Model::new(&network.host)?;
+        host.update_addresses(&hostname, &network.gateways, &network.ports)?;
+        network.host = host.de()?;
+        let root: crate::util::serde::Pem<openssl::x509::X509> = db
+            .as_private()
+            .as_key_store()
+            .as_local_certs()
+            .as_root_cert()
+            .de()?;
+        let client = std::sync::Arc::new(crate::net::tls::client_config(
+            std::sync::Arc::new(tokio_rustls::rustls::crypto::ring::default_provider()),
+            [&*root.0],
+        )?);
+        let plan = crate::net::net_controller::plan_host_exposure(
+            &network.host,
+            &network.gateways,
+            std::net::Ipv4Addr::LOCALHOST,
+            None,
+            |_| client.clone(),
+        );
+        let providers = plan
+            .vhosts
+            .into_iter()
+            .filter_map(|((name, _, _), target)| {
+                Some((JsonKey::new(BTreeSet::from([name?])), target.acme?))
+            })
+            .collect();
+        let mut credentials = Self {
+            disk_guid,
+            hostname,
+            identities: BTreeMap::new(),
+            local_issuer: None,
+            acme: BootstrapAcme::default(),
+            network_profiles: BTreeMap::new(),
+            network: Some(network),
+        };
+        credentials.capture_tls(db, providers)?;
+        Ok(credentials)
+    }
+
     /// The caller supplies enabled ACME bindings for the bootstrap host.
     pub fn capture_tls(
         &mut self,
@@ -90,11 +179,7 @@ impl Credentials {
     }
 
     pub async fn capture_network_profiles(&mut self) -> Result<(), Error> {
-        let profiles = crate::net::wifi::capture_network_profiles().await?;
-        for contents in self.network_profiles.values_mut() {
-            contents.zeroize();
-        }
-        self.network_profiles = profiles;
+        self.network_profiles = crate::net::wifi::capture_network_profiles().await?;
         Ok(())
     }
 
@@ -125,14 +210,6 @@ impl Credentials {
     }
 }
 
-impl Drop for Credentials {
-    fn drop(&mut self) {
-        for profile in self.network_profiles.values_mut() {
-            profile.zeroize();
-        }
-    }
-}
-
 fn profile_path(directory: &Path, name: &str) -> PathBuf {
     directory.join(format!(
         "startos-unlock-{}.nmconnection",
@@ -151,7 +228,7 @@ pub(super) fn test_credentials() -> Credentials {
         network: None,
         network_profiles: [(
             "private.nmconnection".to_owned(),
-            "[wireguard]\nprivate-key=test-secret\n".to_owned(),
+            Zeroizing::new("[wireguard]\nprivate-key=test-secret\n".to_owned()),
         )]
         .into_iter()
         .collect(),
@@ -173,8 +250,32 @@ mod tests {
         let sealed = SealedCredentials::seal(&original, &authority)
             .await
             .unwrap();
-        let mut decoded: SealedCredentials =
-            serde_json::from_slice(&serde_json::to_vec(&sealed).unwrap()).unwrap();
+        let bytes = serde_json::to_vec(&sealed).unwrap();
+        let mut snapshot = crate::util::squashfs::Squashfs::default();
+        serde_json::from_slice::<SealedCredentials>(&bytes)
+            .unwrap()
+            .insert_into(&mut snapshot)
+            .unwrap();
+        let entry = snapshot
+            .contents()
+            .get_path(Path::new(SEALED_CREDENTIALS_FILE))
+            .unwrap();
+        let crate::util::squashfs::Entry::Node(node) = entry else {
+            panic!("sealed payload is a regular file")
+        };
+        let crate::util::squashfs::NodeContents::File(file) = &node.contents else {
+            panic!("sealed payload is a regular file")
+        };
+        use crate::s9pk::merkle_archive::source::FileSource;
+        let staged = file.to_vec(None).await.unwrap();
+        assert_eq!(staged, bytes);
+        assert_eq!(node.metadata.mode, 0o600);
+        assert!(
+            !staged
+                .windows(b"test-secret".len())
+                .any(|window| window == b"test-secret")
+        );
+        let mut decoded: SealedCredentials = serde_json::from_slice(&staged).unwrap();
         let authorization = super::super::tpm::authorize(
             &super::super::tpm::read_measurements().await.unwrap(),
             &authority,
@@ -193,6 +294,227 @@ mod tests {
         assert!(serde_json::from_value::<SealedCredentials>(extra).is_err());
     }
 
+    fn snapshot_database() -> crate::db::model::DatabaseModel {
+        use crate::net::forward::AvailablePorts;
+        use crate::net::host::address::PublicDomainConfig;
+        use crate::net::host::binding::BindOptions;
+        use crate::net::service_interface::{AddressInfo, ServiceInterface, ServiceInterfaceType};
+
+        let account = crate::account::AccountInfo::new(
+            "account-only-password",
+            std::time::SystemTime::now(),
+            None,
+        )
+        .unwrap();
+        let mut db =
+            Model::new(&crate::db::model::Database::init(&account, false, None, None).unwrap())
+                .unwrap();
+        let mut ports = AvailablePorts::new();
+        let mut host = Model::new(&crate::net::host::Host::new()).unwrap();
+        host.add_binding(&mut ports, 80, BindOptions::server_ui(), true)
+            .unwrap();
+        host.add_binding(&mut ports, 8080, BindOptions::server_ui(), true)
+            .unwrap();
+        let mut host = host.de().unwrap();
+        let id = "admin-ui".parse().unwrap();
+        host.bindings.get_mut(&80).unwrap().interfaces.insert(
+            id,
+            ServiceInterface {
+                id: "admin-ui".parse().unwrap(),
+                name: "StartOS UI".into(),
+                description: String::new(),
+                masked: false,
+                address_info: AddressInfo {
+                    username: None,
+                    host_id: crate::HostId::admin(),
+                    internal_port: 80,
+                    scheme: Some("http".into()),
+                    ssl_scheme: Some("https".into()),
+                    suffix: String::new(),
+                },
+                interface_type: ServiceInterfaceType::Ui,
+                preferred_launcher_address: None,
+            },
+        );
+        for name in ["enabled.example", "disabled.example"] {
+            host.public_domains.insert(
+                name.into(),
+                PublicDomainConfig {
+                    gateway: "eth0".parse().unwrap(),
+                    acme: Some("letsencrypt".parse().unwrap()),
+                },
+            );
+        }
+        let hostname = ServerHostname::load(db.as_public().as_server_info()).unwrap();
+        let gateways = db
+            .as_public()
+            .as_server_info()
+            .as_network()
+            .as_gateways()
+            .de()
+            .unwrap();
+        let mut derived = Model::new(&host).unwrap();
+        derived
+            .update_addresses(&hostname, &gateways, &ports)
+            .unwrap();
+        host = derived.de().unwrap();
+        let ssl = host.bindings[&80].net.assigned_ssl_port.unwrap();
+        let choices = &mut host.bindings.get_mut(&80).unwrap().addresses.disabled;
+        choices.remove(&("enabled.example".into(), ssl));
+        choices.insert(("disabled.example".into(), ssl));
+        let mut derived = Model::new(&host).unwrap();
+        derived
+            .update_addresses(&hostname, &gateways, &ports)
+            .unwrap();
+        host = derived.de().unwrap();
+        let network = db.as_public_mut().as_server_info_mut().as_network_mut();
+        network.as_host_mut().ser(&host).unwrap();
+        network
+            .as_acme_mut()
+            .insert(
+                &"letsencrypt".parse().unwrap(),
+                &crate::db::model::public::AcmeSettings {
+                    contact: vec!["mailto:bootstrap@example.org".into()],
+                },
+            )
+            .unwrap();
+        db.as_private_mut()
+            .as_available_ports_mut()
+            .ser(&ports)
+            .unwrap();
+        db
+    }
+
+    #[test]
+    fn captured_bootstrap_uses_ui_intent_and_intermediate_authority_without_mutating_database() {
+        let db = snapshot_database();
+        let before = serde_json::to_value(db.de().unwrap()).unwrap();
+        let credentials = Credentials::capture(&db, "bootstrap-disk".into()).unwrap();
+        assert_eq!(&*credentials.disk_guid, "bootstrap-disk");
+        assert_eq!(
+            credentials
+                .acme
+                .providers
+                .keys()
+                .map(|names| names.iter().map(|name| &**name).collect::<Vec<_>>())
+                .collect::<Vec<_>>(),
+            vec![vec!["enabled.example"]]
+        );
+        assert_eq!(credentials.acme.settings.len(), 1);
+        assert_eq!(
+            credentials
+                .network
+                .as_ref()
+                .unwrap()
+                .host
+                .bindings
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![80]
+        );
+        assert!(credentials.network_profiles.is_empty());
+        let captured = serde_json::to_value(&credentials).unwrap();
+        let root_key = serde_json::to_string(
+            &db.as_private()
+                .as_key_store()
+                .as_local_certs()
+                .as_root_key()
+                .de()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !serde_json::to_string(&credentials)
+                .unwrap()
+                .contains(&root_key)
+        );
+        assert!(captured.get("password").is_none());
+        assert!(captured.get("fdeEnrollment").is_none());
+        assert!(captured.get("luksCredentials").is_none());
+        assert!(credentials.local_issuer.is_some());
+        assert_eq!(serde_json::to_value(db.de().unwrap()).unwrap(), before);
+    }
+
+    #[test]
+    fn disabled_bootstrap_ui_does_not_capture_acme_provider_authority() {
+        let mut db = snapshot_database();
+        let mut bindings = db
+            .as_public()
+            .as_server_info()
+            .as_network()
+            .as_host()
+            .as_bindings()
+            .de()
+            .unwrap();
+        bindings.get_mut(&80).unwrap().enabled = false;
+        db.as_public_mut()
+            .as_server_info_mut()
+            .as_network_mut()
+            .as_host_mut()
+            .as_bindings_mut()
+            .ser(&bindings)
+            .unwrap();
+        let credentials = Credentials::capture(&db, "bootstrap-disk".into()).unwrap();
+        assert!(credentials.acme.providers.is_empty());
+        assert!(credentials.acme.settings.is_empty());
+        assert!(credentials.acme.cache.accounts.is_empty());
+    }
+
+    #[test]
+    fn bootstrap_file_admission_preserves_unrelated_nodes_and_hardlink_aliases() {
+        use crate::s9pk::merkle_archive::source::DynFileSource;
+        use crate::util::squashfs::{Entry, Metadata, NodeContents, Squashfs};
+        let mut snapshot = Squashfs::<DynFileSource>::default();
+        assert!(admit_bootstrap_path(&snapshot).is_ok());
+        let file = Entry::new(
+            Metadata::new(0o600),
+            NodeContents::File(DynFileSource::new(std::sync::Arc::<[u8]>::from(
+                &b"previous envelope"[..],
+            ))),
+        );
+        snapshot
+            .contents_mut()
+            .insert_path(SEALED_CREDENTIALS_FILE, file.clone())
+            .unwrap();
+        assert!(admit_bootstrap_path(&snapshot).is_ok());
+        snapshot
+            .contents_mut()
+            .insert_path(
+                "etc/dependent",
+                Entry::Hardlink(SEALED_CREDENTIALS_FILE.into()),
+            )
+            .unwrap();
+        assert!(admit_bootstrap_path(&snapshot).is_err());
+        for contents in [
+            NodeContents::Directory(Default::default()),
+            NodeContents::Symlink("/private/file".into()),
+        ] {
+            let mut snapshot = Squashfs::<DynFileSource>::default();
+            snapshot
+                .contents_mut()
+                .insert_path(
+                    SEALED_CREDENTIALS_FILE,
+                    Entry::new(Metadata::new(0o700), contents),
+                )
+                .unwrap();
+            assert!(admit_bootstrap_path(&snapshot).is_err());
+        }
+        let mut snapshot = Squashfs::<DynFileSource>::default();
+        snapshot
+            .contents_mut()
+            .insert_path("etc/original", file)
+            .unwrap();
+        snapshot
+            .contents_mut()
+            .insert_path(
+                SEALED_CREDENTIALS_FILE,
+                Entry::Hardlink("etc/original".into()),
+            )
+            .unwrap();
+        assert!(admit_bootstrap_path(&snapshot).is_ok());
+    }
+
     #[test]
     fn encrypted_credentials_round_trip_without_a_data_password() {
         let original = credentials();
@@ -201,7 +523,18 @@ mod tests {
         let restored = Credentials::decrypt(&envelope, &key).unwrap();
         assert_eq!(restored.disk_guid, original.disk_guid);
         assert_eq!(restored.hostname.as_ref(), original.hostname.as_ref());
-        assert_eq!(restored.network_profiles, original.network_profiles);
+        assert_eq!(
+            restored
+                .network_profiles
+                .get("private.nmconnection")
+                .unwrap()
+                .as_str(),
+            "[wireguard]\nprivate-key=test-secret\n"
+        );
+        assert_eq!(
+            restored.network_profiles.len(),
+            original.network_profiles.len()
+        );
         assert!(
             !envelope
                 .windows(b"test-secret".len())
@@ -338,6 +671,18 @@ mod tests {
             "keep"
         );
         assert!(saved.join("wired.nmconnection").exists());
+    }
+
+    #[tokio::test]
+    async fn saved_profile_invalid_utf8_preserves_the_native_filesystem_error() {
+        let directory = tempfile::tempdir().unwrap();
+        tokio::fs::write(directory.path().join("invalid.nmconnection"), [0xff])
+            .await
+            .unwrap();
+        let error = crate::net::wifi::read_network_profiles(directory.path())
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Filesystem);
     }
 
     #[test]
