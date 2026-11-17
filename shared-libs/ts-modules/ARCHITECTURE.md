@@ -126,7 +126,7 @@ Services often extend `Observable` and expose reactive streams via DI:
 - **`StateService`** — Polls server availability, manages app state (`running`, `initializing`, etc.)
 - **`AuthService`** — Tracks `isVerified$`, triggers PatchDB start/stop
 - **`PatchMonitorService`** — Starts/stops PatchDB based on auth state
-- **`PatchDataService`** — Watches entire DB, updates localStorage bootstrap
+- **`PatchDataService`** — Writes each live database dump to the IndexedDB snapshot while connected
 
 ## Frontend conventions
 
