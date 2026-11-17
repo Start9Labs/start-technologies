@@ -34,7 +34,7 @@ use crate::disk::OsPartitionInfo;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::{FileSystem, ReadOnly};
-use crate::disk::mount::guard::MountGuard;
+use crate::disk::mount::guard::{MountGuard, wait_for_mount_cleanup};
 use crate::init::{InitResult, check_time_is_synchronized};
 use crate::install::PKG_ARCHIVE_DIR;
 use crate::lxc::LxcManager;
@@ -54,7 +54,9 @@ use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::service::effects::subcontainer::NVIDIA_OVERLAY_PATH;
 use crate::shutdown::{Shutdown, ShutdownSender};
 use crate::util::Invoke;
-use crate::util::future::NonDetachingJoinHandle;
+#[cfg(test)]
+use crate::util::cleanup::spawn_cleanup;
+use crate::util::cleanup::{CleanupTasks, TaskHandles, drain_cleanup, spawn_owned};
 use crate::util::io::{TmpDir, delete_file};
 use crate::util::lshw::LshwDevice;
 use crate::util::sync::{SyncMutex, SyncRwLock, Watch};
@@ -67,24 +69,8 @@ fn reset_backup_status(db: &mut DatabaseModel) -> Result<(), Error> {
     status.as_backup_conversions_mut().ser(&Default::default())
 }
 
-type TaskHandles = Vec<NonDetachingJoinHandle<()>>;
-
 /// Shutdown closes admission and joins every accepted task before service unmounts.
 pub(crate) type BackgroundTasks = SyncMutex<Option<TaskHandles>>;
-/// Teardown joins rollback spawned by cancelled workers before service unmounts.
-pub(crate) type CleanupTasks = SyncMutex<TaskHandles>;
-
-fn spawn_owned<F: Future<Output = ()> + Send + 'static>(tasks: &mut TaskHandles, future: F) {
-    tasks.retain(|task| !task.is_finished());
-    tasks.push(tokio::spawn(future).into());
-}
-
-pub(crate) fn spawn_cleanup<F: Future<Output = ()> + Send + 'static>(
-    tasks: &CleanupTasks,
-    future: F,
-) {
-    tasks.mutate(|tasks| spawn_owned(tasks, future));
-}
 
 pub(crate) fn spawn_background<F: Future<Output = ()> + Send + 'static>(
     tasks: &BackgroundTasks,
@@ -116,9 +102,7 @@ async fn stop_background_tasks(tasks: &BackgroundTasks, cleanup: &CleanupTasks) 
             }
         }
     }
-    for task in cleanup.replace(Vec::new()) {
-        task.await.log_err();
-    }
+    drain_cleanup(cleanup).await;
 }
 
 pub struct RpcContextSeed {
@@ -663,14 +647,17 @@ impl RpcContext {
     #[instrument(skip_all)]
     pub async fn shutdown(self) -> Result<(), Error> {
         stop_background_tasks(&self.background_tasks, &self.cleanup_tasks).await;
-        self.services.shutdown_all().await?;
+        wait_for_mount_cleanup().await;
+        let services = self.services.shutdown_all().await;
+        wait_for_mount_cleanup().await;
+        services?;
         self.is_closed.store(true, Ordering::SeqCst);
         self.closed.send_replace(true);
         tracing::info!("{}", t!("context.rpc.rpc-context-shutdown"));
         Ok(())
     }
 
-    /// Resolves after background jobs and containers stop, before webserver teardown.
+    /// Resolves after background jobs, rollback and containers stop.
     pub async fn wait_closed(&self) {
         let mut rx = self.0.closed.subscribe();
         let _ = rx.wait_for(|closed| *closed).await;
@@ -947,7 +934,7 @@ mod tests {
         let rollback = cleanup.clone();
         let (completed, completion) = oneshot::channel();
         let guard = crate::util::GeneralBoxedGuard::new(move || {
-            spawn_cleanup(&rollback, async move {
+            let _ = spawn_cleanup(&rollback, async move {
                 tokio::task::yield_now().await;
                 let _ = completed.send(());
             });
@@ -962,6 +949,78 @@ mod tests {
 
         assert!(completion.now_or_never().unwrap().is_ok());
         assert!(cleanup.peek(Vec::is_empty));
+    }
+
+    #[tokio::test]
+    async fn cleanup_completion_follows_resource_destruction() {
+        let tasks = BackgroundTasks::new(Some(Vec::new()));
+        let cleanup = CleanupTasks::new(Vec::new());
+        let (started, running) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        let work = crate::util::future::DropSignaling::new(async move {
+            let _ = started.send(());
+            released.await.unwrap();
+        });
+        let mut resources_dropped = work.subscribe();
+        let mut completed = spawn_cleanup(&cleanup, work);
+        running.await.unwrap();
+        assert!(matches!(
+            completed.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+
+        release.send(()).unwrap();
+        completed.await.unwrap();
+
+        assert!(resources_dropped.wait().now_or_never().is_some());
+        stop_background_tasks(&tasks, &cleanup).await;
+    }
+
+    #[tokio::test]
+    async fn dropping_a_cleanup_observer_keeps_the_owned_job() {
+        let tasks = BackgroundTasks::new(Some(Vec::new()));
+        let cleanup = CleanupTasks::new(Vec::new());
+        let (release, released) = oneshot::channel();
+        let (finished, completed) = oneshot::channel();
+        let work = crate::util::future::DropSignaling::new(async move {
+            released.await.unwrap();
+            let _ = finished.send(());
+        });
+        let mut resources_dropped = work.subscribe();
+        drop(spawn_cleanup(&cleanup, work));
+        assert!(resources_dropped.wait().now_or_never().is_none());
+
+        release.send(()).unwrap();
+        stop_background_tasks(&tasks, &cleanup).await;
+
+        assert!(resources_dropped.wait().now_or_never().is_some());
+        assert!(completed.now_or_never().unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn cleanup_observer_preserves_error_wait_completion() {
+        let cleanup = CleanupTasks::new(Vec::new());
+        let (release, released) = oneshot::channel();
+        let work = crate::util::future::DropSignaling::new(async move {
+            released.await.unwrap();
+        });
+        let mut resources_dropped = work.subscribe();
+        let completed = spawn_cleanup(&cleanup, work);
+        let error = Error::new(eyre!("restore failed"), ErrorKind::Restore).with_task(
+            tokio::spawn(async move {
+                let _ = completed.await;
+            }),
+        );
+        let waiting = error.wait();
+        tokio::pin!(waiting);
+        assert!(futures::poll!(&mut waiting).is_pending());
+
+        release.send(()).unwrap();
+        let error = waiting.await;
+
+        assert!(matches!(error.kind, ErrorKind::Restore));
+        assert!(resources_dropped.wait().now_or_never().is_some());
+        drain_cleanup(&cleanup).await;
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::task::{Poll, ready};
 use std::time::Duration;
 
@@ -16,15 +16,18 @@ use http::Extensions;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+use tokio::task::JoinSet;
 use visit_rs::{Visit, VisitFields, Visitor};
 
 use crate::net::static_server::{UiContext, ui_router};
 use crate::net::utils::bind_tokio_listener;
 use crate::prelude::*;
-use crate::util::actor::background::BackgroundJobQueue;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::ReadWriter;
-use crate::util::sync::{SyncRwLock, Watch};
+use crate::util::sync::{SyncMutex, Watch};
+
+#[cfg(test)]
+mod tests;
 
 pub type AcceptStream = Pin<Box<dyn ReadWriter + Send + 'static>>;
 
@@ -383,6 +386,58 @@ impl RouterEpoch {
     }
 }
 
+struct ServerTasks(Arc<SyncMutex<Option<JoinSet<()>>>>);
+
+#[derive(Clone)]
+struct ServerTaskSpawner(Weak<SyncMutex<Option<JoinSet<()>>>>);
+impl ServerTasks {
+    fn new() -> Self {
+        Self(Arc::new(SyncMutex::new(Some(JoinSet::new()))))
+    }
+
+    fn spawner(&self) -> ServerTaskSpawner {
+        ServerTaskSpawner(Arc::downgrade(&self.0))
+    }
+
+    async fn shutdown(&self) {
+        let mut tasks = self.0.replace(None).unwrap();
+        if tokio::time::timeout(Duration::from_millis(100), async {
+            while tasks.join_next().await.is_some() {}
+        })
+        .await
+        .is_err()
+        {
+            tasks.shutdown().await;
+        }
+    }
+}
+impl ServerTaskSpawner {
+    fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
+        let mut future = Some(future);
+        if let Some(tasks) = self.0.upgrade() {
+            tasks.mutate(|tasks| {
+                if let Some(tasks) = tasks {
+                    while tasks.try_join_next().is_some() {}
+                    tasks.spawn(future.take().unwrap());
+                }
+            });
+        }
+        if future.is_some() {
+            tracing::warn!("job queued after shutdown");
+        }
+    }
+}
+impl<Fut> hyper::rt::Executor<Fut> for ServerTaskSpawner
+where
+    Fut: Future + Send + 'static,
+{
+    fn execute(&self, future: Fut) {
+        self.spawn(async move {
+            future.await;
+        });
+    }
+}
+
 pub struct WebServer<A: Accept> {
     shutdown: oneshot::Sender<()>,
     router: tokio::sync::watch::Sender<Router>,
@@ -405,36 +460,10 @@ where
         let (router, service) = tokio::sync::watch::channel(router);
         let (shutdown, shutdown_recv) = oneshot::channel();
         let thread = NonDetachingJoinHandle::from(tokio::spawn(async move {
-            #[derive(Clone)]
-            struct QueueRunner {
-                queue: Arc<SyncRwLock<Option<BackgroundJobQueue>>>,
-            }
-            impl<Fut> hyper::rt::Executor<Fut> for QueueRunner
-            where
-                Fut: Future + Send + 'static,
-            {
-                fn execute(&self, fut: Fut) {
-                    // Run each connection (and hyper's per-stream futures) on its
-                    // own task instead of serializing them all on the runner's
-                    // single poll loop — h2's per-byte framing/flow-control work
-                    // otherwise caps single-stream upload throughput. The handle
-                    // stays in the runner wrapped in NonDetachingJoinHandle, which
-                    // aborts the task on drop, preserving shutdown-cancel.
-                    self.queue.peek(|q| {
-                        if let Some(q) = q {
-                            q.add_job(NonDetachingJoinHandle::from(tokio::spawn(async move {
-                                fut.await;
-                            })));
-                        } else {
-                            tracing::warn!("job queued after shutdown");
-                        }
-                    })
-                }
-            }
-
             struct SwappableRouter<M> {
                 router: tokio::sync::watch::Receiver<Router>,
                 metadata: M,
+                upgrades: rpc_toolkit::WebSocketTaskOwner,
             }
             impl<M: for<'a> Visit<ExtensionVisitor<'a>> + Send + Sync + 'static>
                 hyper::service::Service<hyper::Request<hyper::body::Incoming>>
@@ -459,15 +488,19 @@ where
                     let mut epoch = self.router.clone();
                     let mut router = epoch.borrow_and_update().clone();
                     req.extensions_mut().insert(RouterEpoch(epoch));
+                    req.extensions_mut().insert(self.upgrades.clone());
                     router.call(req)
                 }
             }
 
-            let queue_cell = Arc::new(SyncRwLock::new(None));
-            let graceful = hyper_util::server::graceful::GracefulShutdown::new();
-            let mut server = hyper_util::server::conn::auto::Builder::new(QueueRunner {
-                queue: queue_cell.clone(),
+            let tasks = ServerTasks::new();
+            let spawner = tasks.spawner();
+            let upgrade_spawner = spawner.clone();
+            let upgrades = rpc_toolkit::WebSocketTaskOwner::new(move |future| {
+                upgrade_spawner.spawn(future);
             });
+            let graceful = hyper_util::server::graceful::GracefulShutdown::new();
+            let mut server = hyper_util::server::conn::auto::Builder::new(spawner.clone());
             server
                 .http1()
                 .timer(TokioTimer::new())
@@ -479,9 +512,6 @@ where
                 .adaptive_window(true)
                 .keep_alive_interval(Duration::from_secs(25))
                 .keep_alive_timeout(Duration::from_secs(300));
-            let (queue, mut runner) = BackgroundJobQueue::new();
-            queue_cell.replace(Some(queue.clone()));
-
             let handler = async {
                 loop {
                     let mut err = None;
@@ -495,13 +525,14 @@ where
                                         SwappableRouter {
                                             router: service.clone(),
                                             metadata,
+                                            upgrades: upgrades.clone(),
                                         },
                                     )
                                     .into_owned(),
                             );
-                            queue.add_job(NonDetachingJoinHandle::from(tokio::spawn(async move {
+                            spawner.spawn(async move {
                                 let _ = conn.await;
-                            })));
+                            });
 
                             Ok::<_, Error>(())
                         }
@@ -524,17 +555,9 @@ where
             tokio::select! {
                 _ = shutdown_recv => (),
                 _ = handler => (),
-                _ = &mut runner => (),
             }
 
-            drop(queue);
-            drop(queue_cell.replace(None));
-
-            if !runner.is_empty() {
-                tokio::time::timeout(Duration::from_millis(100), runner)
-                    .await
-                    .log_err();
-            }
+            tasks.shutdown().await;
         }));
         Self {
             shutdown,
@@ -544,9 +567,21 @@ where
         }
     }
 
+    /// Joins connection cancellation before returning.
     pub async fn shutdown(self) {
         self.shutdown.send(()).unwrap_or_default();
         self.thread.await.unwrap()
+    }
+
+    /// Joins old connection cancellation before context-dependent teardown.
+    pub(crate) async fn reset_router(&mut self, router: Router) {
+        let next = Self::new(
+            Acceptor {
+                acceptor: self.acceptor.clone(),
+            },
+            router,
+        );
+        std::mem::replace(self, next).shutdown().await;
     }
 
     pub fn serve_router(&mut self, router: Router) {

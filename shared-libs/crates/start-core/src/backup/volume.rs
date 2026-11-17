@@ -12,7 +12,6 @@ use tokio::process::Command;
 
 use super::target::{BackupTargetId, BackupTargetSource, SharedVolumeBackupInfo, TargetMount};
 use super::{PackageBackupReport, VolumeBackupReport};
-use crate::context::rpc::{CleanupTasks, spawn_cleanup};
 use crate::context::{CliContext, RpcContext};
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
@@ -25,6 +24,7 @@ use crate::shared_volumes::{
     SharedVolume, SharedVolumeAvailability, SharedVolumeId, SharedVolumeSource, local_path, source,
 };
 use crate::util::Invoke;
+use crate::util::cleanup::{CleanupTasks, spawn_cleanup};
 use crate::util::io::delete_dir;
 
 pub(super) fn parse_id(value: &str) -> Result<SharedVolumeId, String> {
@@ -308,7 +308,7 @@ impl IncompleteRestore {
 impl Drop for IncompleteRestore {
     fn drop(&mut self) {
         if let Some(path) = self.path.take() {
-            spawn_cleanup(&self.tasks, async move {
+            let _ = spawn_cleanup(&self.tasks, async move {
                 crate::util::btrfs::delete_tree(path).await.log_err();
             });
         }

@@ -165,7 +165,11 @@ call; response-stream opt-in still requires a non-null ID.
 ## Ownership and limits
 
 One connection task owns all initiating calls, buffered replies, and response
-receivers. The transport creates no per-stream forwarding task. Each opted-in
+receivers. A `WebSocketTaskOwner` HTTP request extension transfers pending upgrade
+and connection futures to the application's task owner before the upgrade response
+returns. The application cancels and joins those tasks during teardown. Custom
+continuation routes use `on_websocket_upgrade` for the same ownership; without an
+extension, Axum retains its ordinary upgrade-task lifecycle. The transport creates no per-stream forwarding task. Each opted-in
 request has one bounded event channel and one reserved terminal slot. Closing or
 losing the socket drops pending handlers and receivers, waking producers.
 Applications must also bound upstream queues such as database subscriptions.

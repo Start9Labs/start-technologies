@@ -37,6 +37,7 @@ mod command_tests;
 pub mod actor;
 pub mod btrfs;
 pub mod clap;
+pub(crate) mod cleanup;
 pub mod clone;
 pub mod collections;
 pub mod cpupower;

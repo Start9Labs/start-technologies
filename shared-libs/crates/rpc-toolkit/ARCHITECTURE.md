@@ -77,7 +77,10 @@ Transports wrap a `Server`:
   close yields a fixed cancellation error after queued events. `HandlerArgs::rpc_stream` carries
   the producer through normal handler adapters; non-opted-in calls and other transports receive
   `None`. `HandlerArgs` is not cloneable. The initiating result is sent before draining events.
-  Cancellation or socket loss drops the corresponding futures and receivers. See
+  Cancellation or socket loss drops the corresponding futures and receivers.
+  The optional `WebSocketTaskOwner` HTTP extension transfers pending upgrades and
+  connection futures to the application's task lifetime through `on_websocket_upgrade`,
+  also reused by custom continuation routes. See
   [the WebSocket guide](docs/websocket.md) for wire and lifecycle semantics.
 - **MCP** (`server/mcp.rs`, opt-in `mcp` feature): `McpServer` offers methods of an `HttpServer`'s
   tree as [MCP](https://modelcontextprotocol.io) tools over streamable HTTP via `rmcp`, served

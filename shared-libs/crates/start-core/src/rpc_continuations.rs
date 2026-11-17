@@ -186,7 +186,12 @@ pub struct WebSocketHandler {
 }
 impl WebSocketHandler {
     /// The redeemed GUID must identify this handler.
-    pub fn on_upgrade(self, ws: WebSocketUpgrade, guid: Guid) -> Response {
+    pub fn on_upgrade(
+        self,
+        ws: WebSocketUpgrade,
+        guid: Guid,
+        owner: Option<rpc_toolkit::WebSocketTaskOwner>,
+    ) -> Response {
         let incoming = std::num::NonZeroUsize::new(match self.policy {
             WebSocketPolicy::Public => 1024,
             WebSocketPolicy::Authenticated => 64 * 1024 * 1024,
@@ -206,7 +211,7 @@ impl WebSocketHandler {
             let wire = crate::util::net::secure::wire_chunk_size(incoming).get();
             ws = ws.max_message_size(wire).max_frame_size(wire);
         }
-        ws.on_upgrade(move |socket: AxumWebSocket| WebSocketFuture {
+        rpc_toolkit::on_websocket_upgrade(ws, owner, move |socket: AxumWebSocket| WebSocketFuture {
             kill: self.kill,
             fut: async move {
                 let socket: rpc_toolkit::BoxWebSocket = match self.secure {
@@ -487,7 +492,7 @@ pub(crate) mod websocket_tests {
                 let guid = guid.clone();
                 async move {
                     match continuations.get_ws_handler(&guid).await {
-                        Some(handler) => handler.on_upgrade(ws, guid),
+                        Some(handler) => handler.on_upgrade(ws, guid, None),
                         None => StatusCode::NOT_FOUND.into_response(),
                     }
                 }

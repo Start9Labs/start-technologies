@@ -14,6 +14,7 @@ use tracing::instrument;
 use crate::context::config::ServerConfig;
 use crate::context::rpc::InitRpcContextPhases;
 use crate::context::{DiagnosticContext, InitContext, RpcContext};
+use crate::disk::mount::guard::wait_for_mount_cleanup;
 use crate::net::dns::DnsController;
 use crate::net::gateway::WildcardListener;
 use crate::net::static_server::refresher;
@@ -144,6 +145,7 @@ async fn inner_main(
         result
     }
     .await;
+    server.reset_router(refresher()).await;
     let teardown = rpc_ctx.shutdown().await;
     match result {
         Ok(shutdown) => {
@@ -183,11 +185,8 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
             let listener = WildcardListener::new(80)?;
             let dns = Arc::new(DnsController::new(listener.subscribe()));
             let mut server = WebServer::new(Acceptor::new(listener), refresher());
-            match inner_main(&mut server, &dns, &config).await {
-                Ok(shutdown) => {
-                    server.shutdown().await;
-                    Ok(shutdown)
-                }
+            let result = match inner_main(&mut server, &dns, &config).await {
+                Ok(shutdown) => Ok(shutdown),
                 Err(e) => {
                     async {
                         tracing::error!("{e}");
@@ -218,13 +217,14 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
                         let shutdown =
                             shutdown.recv().await.with_kind(crate::ErrorKind::Unknown)?;
 
-                        server.shutdown().await;
-
                         Ok::<_, Error>(Some(shutdown))
                     }
                     .await
                 }
-            }
+            };
+            server.shutdown().await;
+            wait_for_mount_cleanup().await;
+            result
         });
         rt.shutdown_timeout(Duration::from_millis(100));
         res

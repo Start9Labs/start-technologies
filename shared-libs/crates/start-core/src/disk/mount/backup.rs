@@ -7,7 +7,7 @@ use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 use zeroize::Zeroizing;
 
-use super::guard::{GenericMountGuard, TmpMountGuard};
+use super::guard::{GenericMountGuard, TmpMountGuard, spawn_mount_cleanup};
 use super::util::sync_directory;
 use crate::PackageId;
 use crate::auth::check_password;
@@ -338,7 +338,10 @@ impl<G: GenericMountGuard> Drop for BackupMountGuard<G> {
     fn drop(&mut self) {
         let first = self.encrypted_guard.take();
         let second = self.backup_disk_mount_guard.take();
-        tokio::spawn(async move {
+        if first.is_none() && second.is_none() {
+            return;
+        }
+        spawn_mount_cleanup(async move {
             if let Some(guard) = first {
                 sync_directory(guard.path()).await.log_err();
                 guard.unmount().await.log_err();
@@ -394,6 +397,74 @@ mod tests {
         };
         save_unencrypted_metadata(path, &metadata).await.unwrap();
         metadata
+    }
+
+    #[tokio::test]
+    async fn dropped_backup_cleanup_joins_unmount_and_its_destructor_cleanup() {
+        use tokio::sync::oneshot;
+
+        use super::super::guard::{MOUNT_CLEANUP_TEST_LOCK, wait_for_mount_cleanup};
+
+        #[derive(Debug)]
+        struct DelayedMount {
+            path: PathBuf,
+            started: Option<oneshot::Sender<()>>,
+            release: Option<oneshot::Receiver<()>>,
+            cleanup: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+        }
+        impl GenericMountGuard for DelayedMount {
+            fn path(&self) -> &Path {
+                &self.path
+            }
+            async fn unmount(mut self) -> Result<(), Error> {
+                self.started.take().unwrap().send(()).unwrap();
+                self.release.take().unwrap().await.unwrap();
+                Ok(())
+            }
+        }
+        impl Drop for DelayedMount {
+            fn drop(&mut self) {
+                if let Some((started, release)) = self.cleanup.take() {
+                    spawn_mount_cleanup(async move {
+                        started.send(()).unwrap();
+                        release.await.unwrap();
+                    });
+                }
+            }
+        }
+
+        let _serial = MOUNT_CLEANUP_TEST_LOCK.lock().await;
+        wait_for_mount_cleanup().await;
+        let (started, running) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        let (cleanup_started, cleanup_running) = oneshot::channel();
+        let (cleanup_release, cleanup_released) = oneshot::channel();
+        drop(BackupMountGuard {
+            backup_disk_mount_guard: Some(DelayedMount {
+                path: PathBuf::from("/unused-backup"),
+                started: Some(started),
+                release: Some(released),
+                cleanup: Some((cleanup_started, cleanup_released)),
+            }),
+            encrypted_guard: None,
+            enc_key: Zeroizing::new(String::new()),
+            unencrypted_metadata_path: PathBuf::new(),
+            unencrypted_metadata: Default::default(),
+            metadata: Default::default(),
+        });
+        let teardown = wait_for_mount_cleanup();
+        tokio::pin!(teardown);
+        assert!(futures::poll!(&mut teardown).is_pending());
+        running.await.unwrap();
+
+        release.send(()).unwrap();
+        cleanup_running.await.unwrap();
+        assert!(futures::poll!(&mut teardown).is_pending());
+
+        cleanup_release.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), teardown)
+            .await
+            .expect("teardown did not join transitive mount cleanup");
     }
 
     #[test]
