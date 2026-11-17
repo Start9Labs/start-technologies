@@ -166,7 +166,7 @@ Some ISPs only give an address to the device they already know, which they ident
 
 ### Why is the router unresponsive with its green light on but not blinking?
 
-The red light shows that the router has power. Within a minute of power-on, the green light normally starts blinking in a heartbeat rhythm, which shows that the Linux kernel is running. Network services finish starting separately; check that the web interface loads to confirm the router is ready. If the green light stays on without blinking and the router is unresponsive, it may be stuck early in boot. This can leave Wi-Fi, address assignment over Ethernet, and `router.lan` unavailable. The Ethernet port lights can stay on regardless: they show a cable link, not that StartWRT is running.
+The red light shows that the router has power. The green light comes on with it and, within a minute, starts blinking in a heartbeat rhythm, which shows that the router's Linux kernel is running. StartWRT starts after that, and the router is ready once the web interface loads. If the green light is still on without blinking after a minute, the router never got past early startup: there is no Wi-Fi, devices connected by Ethernet get no address, and `router.lan` does not load. The Ethernet port lights can stay on regardless: they show a cable link, not that StartWRT is running.
 
 Check these in order, and watch the green light for a minute after each:
 
