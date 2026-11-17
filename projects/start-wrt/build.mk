@@ -106,6 +106,10 @@ start-wrt-test: $(STARTWRT_RUST_SRC) $(ENVIRONMENT_FILE)
 # applies the Start9 delta (openwrt-patches/ + openwrt-overlay/), then runs
 # feeds/config/download. Re-runs whenever the pin, patches, overlay, feeds, or
 # diffconfig change.
+.PHONY: start-wrt-ca-test
+start-wrt-ca-test:
+	./$(STARTWRT_DIR)/build/test-ca-certificates.sh
+
 .PHONY: start-wrt-openwrt-setup
 start-wrt-openwrt-setup: $(STARTWRT_OPENWRT)/.config
 $(STARTWRT_OPENWRT)/.config: $(STARTWRT_DIR)/build/openwrt.diffconfig $(STARTWRT_DIR)/build/feeds.conf \

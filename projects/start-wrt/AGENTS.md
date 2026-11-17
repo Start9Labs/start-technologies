@@ -298,6 +298,11 @@ and retain their selected `PROFILE`.
 | `make start-wrt-update STARTWRT_REMOTE=root@IP` | deploy binary over SSH (default `root@192.168.0.1`)                                |
 | `make start-wrt-clean`                          | remove start-wrt build artifacts                                                   |
 
+`make start-wrt-ca-test` exercises the prepared OpenWrt certificate package's hashed
+store and combined bundle. It requires the OpenWrt tree, GNU Make and OpenSSL;
+image CI runs it after setup. The regression verifies that both stores reject the
+compromised G3 root while preserving unrelated trust.
+
 The OpenWrt image build needs a consistent environment — Docker is recommended; native builds
 on some distros fail silently.
 

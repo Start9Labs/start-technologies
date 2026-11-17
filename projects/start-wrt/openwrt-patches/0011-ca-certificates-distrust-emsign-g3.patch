@@ -1,0 +1,26 @@
+Subject: ca-certificates: distrust the compromised emSign ECC Root CA - G3
+
+CVE-2026-91403. Remove G3 from the shared certificate staging directory;
+both the hashed trust store and the concatenated bundle must omit it.
+
+Applies to: OpenWrt 25.12.6
+
+--- a/package/system/ca-certificates/Makefile
++++ b/package/system/ca-certificates/Makefile
+@@ -8,7 +8,7 @@
+ 
+ PKG_NAME:=ca-certificates
+ PKG_VERSION:=20260816
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ PKG_MAINTAINER:=
+ 
+ PKG_LICENSE:=GPL-2.0-or-later MPL-2.0
+@@ -47,6 +47,7 @@
+ 		$(PKG_INSTALL_DIR)/usr/sbin \
+ 		$(PKG_INSTALL_DIR)/usr/share/ca-certificates
+ 	$(call Build/Install/Default,)
++	rm $(PKG_INSTALL_DIR)/usr/share/ca-certificates/mozilla/emSign_ECC_Root_CA_-_G3.crt
+ endef
+ 
+ define Package/ca-certificates/install
