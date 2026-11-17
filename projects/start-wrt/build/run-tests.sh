@@ -8,15 +8,17 @@ set -ea
 shopt -s expand_aliases
 ARCH=$(native_arch)
 
-PROFILE=${PROFILE:-release}
-if [ "${PROFILE}" = "release" ]; then
-	BUILD_FLAGS="--release"
-else
-	if [ "$PROFILE" != "debug" ]; then
+PROFILE=${PROFILE:-unit-test}
+case "$PROFILE" in
+	release) BUILD_FLAGS="--release" ;;
+	unit-test) BUILD_FLAGS="--profile unit-test" ;;
+	debug) BUILD_FLAGS="" ;;
+	*)
 		>&2 echo "Unknown profile $PROFILE: falling back to debug..."
 		PROFILE=debug
-	fi
-fi
+		BUILD_FLAGS=""
+		;;
+esac
 
 cd ../../..
 
