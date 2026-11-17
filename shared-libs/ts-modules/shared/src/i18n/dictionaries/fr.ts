@@ -1332,4 +1332,5 @@ export default {
   1536: 'Vérifiez l’emplacement de sauvegarde ou réessayez avec le mot de passe utilisé pour chiffrer ces points de restauration.',
   1537: 'Gérer les planifications',
   1538: 'Les points de contrôle automatiques incluent les données propres aux services. Sauvegardez les volumes partagés séparément depuis Sauvegardes.',
+  1539: 'Une partie de l’historique des sauvegardes n’a pas pu être chargée. Réessayez pour inclure les anciennes sauvegardes et les rapports détaillés.',
 } satisfies i18n

@@ -9,14 +9,16 @@ import {
 } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { FormsModule } from '@angular/forms'
-import { convertBytes, i18nPipe } from '@start9labs/shared'
+import { convertBytes, DialogService, i18nPipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import {
   TUI_BREAKPOINT,
+  TuiButton,
   TuiDataList,
   TuiIcon,
   TuiInput,
   TuiLabel,
+  TuiLoader,
   TuiNotification,
   TuiTitle,
 } from '@taiga-ui/core'
@@ -29,8 +31,12 @@ import {
 } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 
+import { REPORT } from 'src/app/components/backup-report.component'
+import { BackupHistoryService } from './history.service'
+import { HistoryEntry } from './history-data'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { getManifest } from 'src/app/utils/get-package-data'
+import { formatDuration } from 'src/app/utils/format-duration'
 import { BackupService } from '../system/routes/backups/backup.service'
 import { SYSTEM_PACKAGE_ID } from '../system/routes/backups/scheduled-utils'
 
@@ -103,6 +109,23 @@ const STATUS_FILTERS: StatusFilter[] = [
       </tui-textfield>
     </section>
 
+    @if (history.reports().error) {
+      <div tuiNotification appearance="warning">
+        {{
+          'Some backup history could not be loaded. Retry to include older backups and detailed reports.'
+            | i18n
+        }}
+        <button
+          tuiButton
+          type="button"
+          size="s"
+          appearance="flat"
+          (click)="history.retry()"
+        >
+          {{ 'Retry' | i18n }}
+        </button>
+      </div>
+    }
     <section class="timeline">
       @for (activity of pagedActivities(); track activity.id) {
         <tui-accordion class="activity">
@@ -121,10 +144,31 @@ const STATUS_FILTERS: StatusFilter[] = [
           </button>
           <tui-expand>
             <div class="activity-details">
+              @if (activity.manualRun; as run) {
+                <button
+                  tuiButton
+                  type="button"
+                  size="s"
+                  appearance="flat-grayscale"
+                  iconStart="@tui.file-text"
+                  (click)="report(run)"
+                >
+                  {{ 'Report' | i18n }}
+                </button>
+              }
               <p>
                 <b>{{ 'Backup location' | i18n }}:</b>
-                {{ backupService.targetName(activity.targetId) }}
+                {{
+                  activity.manualRun?.targetName ||
+                    backupService.targetName(activity.targetId)
+                }}
               </p>
+              @if (activity.completedAt) {
+                <p>
+                  <b>{{ 'Duration' | i18n }}:</b>
+                  {{ duration(activity) }}
+                </p>
+              }
               <p>
                 <b>
                   {{
@@ -201,15 +245,20 @@ const STATUS_FILTERS: StatusFilter[] = [
           </tui-expand>
         </tui-accordion>
       } @empty {
-        <div tuiNotification appearance="info">
-          {{ 'No backup activity yet.' | i18n }}
-        </div>
+        @if (!history.reports().loading && !history.reports().error) {
+          <div tuiNotification appearance="info">
+            {{ 'No backup activity yet.' | i18n }}
+          </div>
+        }
       }
     </section>
+    @if (history.reports().loading) {
+      <tui-loader size="s">{{ 'Loading' | i18n }}</tui-loader>
+    }
     @if (pageCount() > 1) {
       <tui-pagination
         [length]="pageCount()"
-        [index]="page()"
+        [index]="currentPage()"
         [activePadding]="breakpoint() === 'mobile' ? 0 : 1"
         [sidePadding]="breakpoint() === 'mobile' ? 0 : 1"
         (indexChange)="setPage($event)"
@@ -365,6 +414,7 @@ const STATUS_FILTERS: StatusFilter[] = [
     }
   `,
   host: { class: 'g-wrap-content' },
+  providers: [BackupHistoryService],
   imports: [
     DatePipe,
     DecimalPipe,
@@ -373,10 +423,12 @@ const STATUS_FILTERS: StatusFilter[] = [
     TuiBadge,
     TuiAccordion,
     TuiChevron,
+    TuiButton,
     TuiDataList,
     TuiIcon,
     TuiInput,
     TuiLabel,
+    TuiLoader,
     TuiNotification,
     TuiTitle,
     TuiSelect,
@@ -386,6 +438,7 @@ const STATUS_FILTERS: StatusFilter[] = [
 })
 export class BackupHistory {
   private readonly i18n = inject(i18nPipe)
+  private readonly dialogs = inject(DialogService)
   private readonly state = toSignal(
     inject<PatchDB<DataModel>>(PatchDB).watch$('scheduledBackups'),
   )
@@ -454,14 +507,10 @@ export class BackupHistory {
     this.i18n.transform(
       status === 'all' ? 'All statuses' : this.activityStatuses[status].label,
     )
-  protected readonly activities = computed(() =>
-    Object.values(this.state()?.activities || {}).sort((a, b) =>
-      b.startedAt.localeCompare(a.startedAt),
-    ),
-  )
+  protected readonly history = inject(BackupHistoryService)
   protected readonly filteredActivities = computed(() => {
     const query = this.query().trim().toLocaleLowerCase()
-    return this.activities().filter(activity => {
+    return this.history.entries().filter(activity => {
       const kindMatches =
         this.historyFilter() === 'all' || activity.kind === this.historyFilter()
       const statusMatches =
@@ -472,8 +521,11 @@ export class BackupHistory {
   protected readonly pageCount = computed(() =>
     Math.ceil(this.filteredActivities().length / this.pageSize),
   )
+  protected readonly currentPage = computed(() =>
+    Math.min(this.page(), Math.max(0, this.pageCount() - 1)),
+  )
   protected readonly pagedActivities = computed(() => {
-    const page = Math.min(this.page(), Math.max(0, this.pageCount() - 1))
+    const page = this.currentPage()
     return this.filteredActivities().slice(
       page * this.pageSize,
       (page + 1) * this.pageSize,
@@ -487,8 +539,12 @@ export class BackupHistory {
   public readonly filtersChange =
     output<Record<string, string | number | null>>()
 
-  constructor() {
-    void this.backupService.getBackupTargets()
+  protected report(run: T.BackupRun) {
+    this.dialogs
+      .openComponent(REPORT, {
+        data: { content: run.report, createdAt: run.completedAt },
+      })
+      .subscribe()
   }
 
   protected setQuery(query: string) {
@@ -529,6 +585,7 @@ export class BackupHistory {
 
   protected failureSummary(activity: T.BackupActivity): string {
     if (activity.state === 'partiallyFailed') {
+      if (activity.kind === 'manual') return 'Completed with errors'
       return 'Some services did not complete successfully. Review the affected services and try again.'
     }
     return activity.kind === 'restore'
@@ -580,6 +637,12 @@ export class BackupHistory {
     )
   }
 
+  protected duration(activity: T.BackupActivity): string {
+    return formatDuration(
+      Date.parse(activity.completedAt!) - Date.parse(activity.startedAt),
+    )
+  }
+
   protected reportSize(report: T.PackageBackupReport): string {
     const bytes = report.physical_size ?? report.logical_size
     return bytes === null ? '—' : convertBytes(bytes)
@@ -591,7 +654,7 @@ export class BackupHistory {
     return (pkg && getManifest(pkg)?.title) || id
   }
 
-  private matchesQuery(activity: T.BackupActivity, query: string): boolean {
+  private matchesQuery(activity: HistoryEntry, query: string): boolean {
     if (!query) return true
     const terms = [
       activity.startedAt,
@@ -599,6 +662,7 @@ export class BackupHistory {
       this.activityState(activity),
       this.stringifyFilter(activity.kind),
       this.activityLabel(activity),
+      activity.manualRun?.targetName || '',
       this.backupService.targetName(activity.targetId),
       ...activity.intendedServices.flatMap(id => [id, this.packageName(id)]),
     ]

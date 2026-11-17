@@ -467,7 +467,7 @@ Select **Manage schedules** on the **Backups** page to schedule System and servi
 
 ## History
 
-The **Backups** page lists past backups, newest first, with when each started, how long it took, its target and its result: **Succeeded**, **Completed with errors** or **Failed**. Select a backup's report button to see which services and volumes were backed up, and any errors.
+The **Backup history** section on the **Backups** page combines manual backups, automatic runs and restores, newest first. Search by service, schedule or backup location, and filter by activity type or status. Expand an entry to see its target, service results, durations and errors. For a manual backup, select **Report** for the full System, service and shared-volume results. Older manual backup reports remain available in the same history.
 
 ## Restoring Backups
 

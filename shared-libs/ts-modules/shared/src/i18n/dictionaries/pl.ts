@@ -1332,4 +1332,5 @@ export default {
   1536: 'Sprawdź lokalizację kopii zapasowej lub spróbuj ponownie, używając hasła, którym zaszyfrowano te punkty przywracania.',
   1537: 'Zarządzaj harmonogramami',
   1538: 'Automatyczne punkty kontrolne zawierają dane należące do usług. Kopie woluminów współdzielonych twórz osobno na stronie Kopie zapasowe.',
+  1539: 'Nie udało się wczytać części historii kopii zapasowych. Spróbuj ponownie, aby uwzględnić starsze kopie i szczegółowe raporty.',
 } satisfies i18n

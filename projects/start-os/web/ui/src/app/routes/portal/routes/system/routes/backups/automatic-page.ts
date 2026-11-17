@@ -9,7 +9,6 @@ import {
 import { TuiButton, TuiCell, TuiTitle } from '@taiga-ui/core'
 import { filter, switchMap, take } from 'rxjs'
 
-import { BackupHistory } from '../../../backups/history'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { TitleDirective } from 'src/app/services/title.service'
 import { BackupService } from './backup.service'
@@ -54,10 +53,6 @@ import { ScheduledBackups } from './scheduled'
         (createRequestHandled)="handledCreateRequest()"
       ></section>
     </section>
-    <section class="g-card">
-      <header>{{ 'Backup history' | i18n }}</header>
-      <backup-history />
-    </section>
   `,
   host: { class: 'g-wrap-content' },
   imports: [
@@ -68,7 +63,6 @@ import { ScheduledBackups } from './scheduled'
     TitleDirective,
     i18nPipe,
     ScheduledBackups,
-    BackupHistory,
   ],
 })
 export default class AutomaticBackups {

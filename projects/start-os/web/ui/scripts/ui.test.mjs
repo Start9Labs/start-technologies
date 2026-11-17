@@ -72,6 +72,7 @@ boundary(
     'TuiIcon',
     'TuiInput',
     'TuiTitle',
+    'TuiLabel',
     'TuiGroup',
     'TuiCheckbox',
     'TuiHint',
@@ -84,6 +85,8 @@ boundary(
   '@taiga-ui/kit',
   [
     'TuiAvatar',
+    'TuiAccordion',
+    'TuiPagination',
     'TuiBadge',
     'TuiBadgeNotification',
     'TuiButtonLoading',
@@ -2379,48 +2382,24 @@ for (const [page, Page] of [
   })
 }
 
-test('backup history loads its page and pagination writes only non-default query params', async t => {
+test('backup history filters preserve other route query parameters', async t => {
   const f = volumeFixture(t)
   const model = f.make(Backups)
-  assert.equal(model.history(), undefined)
-  await tick()
-  assert.deepEqual(model.history(), { runs: [], total: 0 })
-  f.query.next({ page: '2', size: '25' })
-  await tick()
-  assert.deepEqual(
-    f.requests.filter(r => r.kind === 'history').map(r => r.params),
-    [
-      { offset: 0, limit: 10 },
-      { offset: 50, limit: 25 },
-    ],
-  )
-  model.paginate({ page: 2, size: 25 })
-  model.paginate({ page: 0, size: 10 })
+  model.updateHistoryFilters({ historyKind: 'manual', historyPage: null })
+  model.updateHistoryFilters({ historySearch: 'Photos', historyPage: null })
   assert.deepEqual(
     f.routes.map(r => r.extras),
     [
-      { queryParams: { page: 2, size: 25 }, queryParamsHandling: 'merge' },
-      { queryParams: { page: null, size: null }, queryParamsHandling: 'merge' },
+      {
+        queryParams: { historyKind: 'manual', historyPage: null },
+        queryParamsHandling: 'merge',
+      },
+      {
+        queryParams: { historySearch: 'Photos', historyPage: null },
+        queryParamsHandling: 'merge',
+      },
     ],
   )
-})
-
-test('backup history results distinguish success, item errors and failure', async t => {
-  const f = volumeFixture(t)
-  const model = f.make(Backups)
-  const run = (server, item) => ({
-    report: {
-      server: { attempted: true, error: server },
-      packages: { service: { error: null } },
-      sharedVolumes: { [volumeA]: { error: item } },
-    },
-  })
-  assert.equal(model.toResult(run(null, null)).label, 'Succeeded')
-  assert.equal(
-    model.toResult(run(null, 'disk full')).label,
-    'Completed with errors',
-  )
-  assert.equal(model.toResult(run('target lost', null)).label, 'Failed')
 })
 
 test('local backup target deletion requires the typed-name dialog and external removal a plain confirm', async t => {

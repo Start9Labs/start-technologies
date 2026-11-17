@@ -137,17 +137,17 @@ canceled original-password prompt leaves the schedule and checkpoints intact.
 
 ## History, Restore, and Failures
 
-Backup history records manual backups, automatic runs, and restores, including
+**System → Backups → Backup history** records manual backups, automatic runs, and restores, including
 service-level failures. An unreadable service archive appears as a failed restore
 in history while other selected services continue restoring.
 Search by schedule name, service, backup location, or
 status in your selected language. Schedule names appear as you entered them.
 Server data appears as **System** alongside the individual service reports.
-When the automatic-backup card needs attention, **See more** opens Backup history.
 For a single schedule, the switch and menu on the right pause or resume backups
 and provide schedule actions.
-History retains the newest 1,000 completed entries in addition
-to any backup or restore still in progress. Successful checkpoints remain
+History retains the newest 1,000 completed activity entries in addition
+to any backup or restore still in progress. Older manual backup reports remain
+available in the same history. Successful checkpoints remain
 available when another service in the same run fails. During restore, StartOS
 selects the newest available checkpoint for each service by default, but any
 retained or archived manual or automatic checkpoint can be chosen instead. See

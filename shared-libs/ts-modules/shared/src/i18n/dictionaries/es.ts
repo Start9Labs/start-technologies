@@ -1332,4 +1332,5 @@ export default {
   1536: 'Comprueba la ubicación de la copia de seguridad o vuelve a intentarlo con la contraseña utilizada para cifrar esos puntos de restauración.',
   1537: 'Gestionar programaciones',
   1538: 'Los puntos de control automáticos incluyen los datos propios de los servicios. Haga copias de los volúmenes compartidos por separado desde Copias de seguridad.',
+  1539: 'No se pudo cargar parte del historial de copias de seguridad. Vuelva a intentarlo para incluir las copias anteriores y los informes detallados.',
 } satisfies i18n
