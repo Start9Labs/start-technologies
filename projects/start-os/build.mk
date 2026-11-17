@@ -222,12 +222,18 @@ projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts: $(ENV
 $(FIRMWARE_ROMS): projects/start-os/build/lib/firmware.json ./projects/start-os/build/download-firmware.sh $(PLATFORM_FILE)
 	./projects/start-os/build/download-firmware.sh $(PLATFORM)
 
-target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox: $(CORE_SRC) $(COMPRESSED_WEB_UIS) projects/start-os/web/patchdb-ui-seed.json $(ENVIRONMENT_FILE) projects/start-os/build/build-startbox.sh
-	ARCH=$(ARCH) PROFILE=$(PROFILE) ./projects/start-os/build/build-startbox.sh
+STARTBOX_INPUTS := $(CORE_SRC) $(COMPRESSED_WEB_UIS) projects/start-os/web/patchdb-ui-seed.json $(ENVIRONMENT_FILE) build/build-rust-bins.sh
+START_CONTAINER_INPUTS := $(CORE_SRC) $(ENVIRONMENT_FILE) build/build-rust-bins.sh
+RUST_BINS_start-os := start-os:startbox start-os:start-container
+RUST_OUTPUTS_start-os := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
+RUST_INPUTS_start-os := $(sort $(STARTBOX_INPUTS) $(START_CONTAINER_INPUTS))
+
+target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox: $(STARTBOX_INPUTS)
+	ARCH=$(ARCH) PROFILE=$(PROFILE) ./build/build-rust-bins.sh start-os:startbox
 	touch target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox
 
-target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(CORE_SRC) $(ENVIRONMENT_FILE) projects/start-os/build/build-start-container.sh
-	ARCH=$(ARCH) ./projects/start-os/build/build-start-container.sh
+target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(START_CONTAINER_INPUTS)
+	ARCH=$(ARCH) PROFILE=release ./build/build-rust-bins.sh start-os:start-container
 	touch target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
 
 # used by github actions

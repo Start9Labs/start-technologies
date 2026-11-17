@@ -6,9 +6,13 @@ CLI_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/start-cli
 start-cli: $(GIT_HASH_FILE)
 	./projects/start-cli/build/build-cli.sh
 
+RUST_BINS_start-cli := start-cli:start-cli
+RUST_OUTPUTS_start-cli := $(CLI_TARGETS)
+RUST_INPUTS_start-cli := $(CORE_SRC) $(ENVIRONMENT_FILE) build/build-rust-bins.sh
+
 # Build into a workspace-relative path for packaging (musl release).
-$(CLI_TARGETS): $(CORE_SRC) $(ENVIRONMENT_FILE) projects/start-cli/build/build-cli.sh
-	ARCH=$(ARCH) PROFILE=$(PROFILE) ./projects/start-cli/build/build-cli.sh
+$(CLI_TARGETS): $(RUST_INPUTS_start-cli)
+	ARCH=$(ARCH) PROFILE=$(PROFILE) ./build/build-rust-bins.sh $(RUST_BINS_start-cli)
 	touch $@
 
 start-cli-install: $(CLI_TARGETS) build/bash-completion
