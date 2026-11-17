@@ -396,4 +396,4 @@ To support user-managed local folders, attached drives and network shares, decla
 
 ## Dependencies
 
-Define dependencies in `startos/dependencies.ts` with `sdk.Dependency.required` or `sdk.Dependency.optional`, and pass the resulting `sdk.Dependencies.of()` builder to `buildManifest(versionGraph, sdkManifest, dependencies, i18n)`. See [Dependencies](dependencies.md) for base requirements and runtime narrowing.
+Define dependencies in `startos/dependencies.ts` with `sdk.Dependency.required` or `sdk.Dependency.optional`, and pass the resulting `sdk.Dependencies.of()` builder to `buildManifest({ versionGraph, manifest, dependencies, i18n })`. See [Dependencies](dependencies.md) for base requirements and runtime narrowing.

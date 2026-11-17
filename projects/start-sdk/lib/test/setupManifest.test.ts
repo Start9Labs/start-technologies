@@ -45,14 +45,23 @@ function manifest(emulateMissing?: boolean) {
 
 test('defaults to the binding transport enforcement compatibility floor', () => {
   expect(
-    buildManifest(versions, manifest(), Dependencies.of(), i18n).osVersion,
+    buildManifest({
+      versionGraph: versions,
+      manifest: manifest(),
+      dependencies: Dependencies.of(),
+      i18n,
+    }).osVersion,
   ).toBe('0.4.3')
 })
 
 test('pre-download alert is included in the built manifest', () => {
   expect(
-    buildManifest(versions, manifest(), Dependencies.of(), i18n)
-      .preDownloadAlert,
+    buildManifest({
+      versionGraph: versions,
+      manifest: manifest(),
+      dependencies: Dependencies.of(),
+      i18n,
+    }).preDownloadAlert,
   ).toEqual({
     message: {
       en_US: 'Back up before updating',
@@ -72,7 +81,12 @@ test('the builder publishes its complete base dependency requirements', () => {
       healthChecks: ['bitcoin-rest'],
     }),
   )
-  const built = buildManifest(versions, manifest(), dependencies, i18n)
+  const built = buildManifest({
+    versionGraph: versions,
+    manifest: manifest(),
+    dependencies: dependencies,
+    i18n,
+  })
   expect(built.dependencies.bitcoind).toEqual({
     description: 'Blockchain data',
     optional: false,
@@ -84,19 +98,24 @@ test('the builder publishes its complete base dependency requirements', () => {
 })
 
 test('images emulate missing architectures by default', () => {
-  const built = buildManifest(versions, manifest(), Dependencies.of(), i18n)
+  const built = buildManifest({
+    versionGraph: versions,
+    manifest: manifest(),
+    dependencies: Dependencies.of(),
+    i18n,
+  })
 
   expect(built.images.main.emulateMissing).toBe(true)
   expect(built.hardwareRequirements.arch).toBeNull()
 })
 
 test('images can require a native architecture', () => {
-  const built = buildManifest(
-    versions,
-    manifest(false),
-    Dependencies.of(),
+  const built = buildManifest({
+    versionGraph: versions,
+    manifest: manifest(false),
+    dependencies: Dependencies.of(),
     i18n,
-  )
+  })
 
   expect(built.images.main.emulateMissing).toBe(false)
   expect(built.hardwareRequirements.arch).toEqual(['aarch64'])
@@ -104,10 +123,20 @@ test('images can require a native architecture', () => {
 
 test('shared-volume capability defaults to false and preserves explicit opt-in', () => {
   expect(
-    buildManifest(versions, manifest(), Dependencies.of(), i18n).sharedVolumes,
+    buildManifest({
+      versionGraph: versions,
+      manifest: manifest(),
+      dependencies: Dependencies.of(),
+      i18n,
+    }).sharedVolumes,
   ).toBe(false)
   const optedIn = setupManifest({ ...manifest(), sharedVolumes: true })
-  const built = buildManifest(versions, optedIn, Dependencies.of(), i18n)
+  const built = buildManifest({
+    versionGraph: versions,
+    manifest: optedIn,
+    dependencies: Dependencies.of(),
+    i18n,
+  })
   expect(built.sharedVolumes).toBe(true)
   expect(built.osVersion).toBe('0.4.3')
 })
@@ -115,25 +144,29 @@ test('shared-volume capability defaults to false and preserves explicit opt-in',
 test('an explicit compatibility override cannot understate shared-volume support', () => {
   for (const osVersion of ['0.4.2', '0.4.1.1']) {
     expect(() =>
-      buildManifest(
-        versions,
-        setupManifest({ ...manifest(), sharedVolumes: true, osVersion }),
-        Dependencies.of(),
+      buildManifest({
+        versionGraph: versions,
+        manifest: setupManifest({
+          ...manifest(),
+          sharedVolumes: true,
+          osVersion,
+        }),
+        dependencies: Dependencies.of(),
         i18n,
-      ),
+      }),
     ).toThrow('Shared volumes require StartOS 0.4.3 or later')
   }
   expect(
-    buildManifest(
-      versions,
-      setupManifest({
+    buildManifest({
+      versionGraph: versions,
+      manifest: setupManifest({
         ...manifest(),
         sharedVolumes: true,
         osVersion: '0.4.3',
       }),
-      Dependencies.of(),
+      dependencies: Dependencies.of(),
       i18n,
-    ).osVersion,
+    }).osVersion,
   ).toBe('0.4.3')
 })
 
@@ -141,6 +174,11 @@ test('the default locale is the given package i18n default language', () => {
   const own = setupI18n({}, {}, 'fr_FR')
   setupI18n({}, {}, 'de_DE')
   expect(
-    buildManifest(versions, manifest(), Dependencies.of(), own).defaultLocale,
+    buildManifest({
+      versionGraph: versions,
+      manifest: manifest(),
+      dependencies: Dependencies.of(),
+      i18n: own,
+    }).defaultLocale,
   ).toBe('fr_FR')
 })

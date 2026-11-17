@@ -10,9 +10,9 @@ import { manifest as sdkManifest } from './manifest'
 import { versionGraph } from './versions'
 import { dependencies } from './dependencies'
 import { i18n } from './i18n'
-export const manifest = buildManifest(
+export const manifest = buildManifest({
   versionGraph,
-  sdkManifest,
+  manifest: sdkManifest,
   dependencies,
   i18n,
-)
+})
