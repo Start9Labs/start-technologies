@@ -358,7 +358,6 @@ export const ENGLISH: Record<string, number> = {
   'View details': 419,
   'Services that depend on': 421,
   'will no longer work properly and may crash.': 422,
-  'Request failed': 423,
   'All services are up to date!': 424,
   'Run': 425, // as in, run a piece of software
   'Action can only be executed when service is': 426,
@@ -1095,8 +1094,11 @@ export const ENGLISH: Record<string, number> = {
   'Custom': 1297, // as in, a custom registry
   'Enter a domain or URL': 1298,
   'Syncing is taking longer than expected. Refresh to try again.': 1299,
-  'Provided by': 1300,
-  'Select a dependency provider': 1301,
-  'Lock provider': 1302,
-  'Unlock provider': 1303,
+  "Can't reach server": 1300,
+  'Listings may be out of date': 1301,
+  "StartOS can't reach this registry right now.": 1302,
+  'Provided by': 1303,
+  'Select a dependency provider': 1304,
+  'Lock provider': 1305,
+  'Unlock provider': 1306,
 }

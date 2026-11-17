@@ -38,8 +38,18 @@ opt-level = 3
 
 [profile.generated]
 debug = 0
+incremental = false
 inherits = "dev"
 opt-level = 1
+
+[profile.unit-test]
+debug = 0
+incremental = false
+inherits = "dev"
+opt-level = 0
+
+[profile.unit-test.package."*"]
+opt-level = 3
 
 [profile.bindings]
 debug = 0

@@ -1664,12 +1664,37 @@
       "$defs": {
         "SubscribeParams": {
           "type": "object",
-          "properties": { "pointer": { "type": ["string", "null"] } },
+          "properties": {
+            "pointer": { "type": ["string", "null"] },
+            "since": {
+              "description": "The subscriber's last revision; resumes only within the epoch that reported it.",
+              "anyOf": [{ "$ref": "#/$defs/DbCursor" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        "DbCursor": {
+          "type": "object",
+          "properties": {
+            "epoch": { "type": "string" },
+            "id": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["epoch", "id"],
           "additionalProperties": true
         }
       },
       "type": "object",
-      "properties": { "pointer": { "type": ["string", "null"] } },
+      "properties": {
+        "pointer": { "type": ["string", "null"] },
+        "since": {
+          "description": "The subscriber's last revision; resumes only within the epoch that reported it.",
+          "anyOf": [{ "$ref": "#/$defs/DbCursor" }, { "type": "null" }]
+        }
+      },
       "additionalProperties": true
     }
   },

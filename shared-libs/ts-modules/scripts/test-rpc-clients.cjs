@@ -3634,6 +3634,38 @@ test('StartOS refreshes startup DNS without rerouting and stops polling at runti
   }
 })
 
+test('StartOS reports server reachability only from settled state probes', async () => {
+  const { ticks, create } = startupStateHarness()
+  let reachable = false
+  const service = create({
+    state: async () => {
+      if (!reachable) throw new Error('unreachable')
+      return 'running'
+    },
+    net: { dns: { status: async () => null } },
+  })
+  const observed = []
+  const observation = service.reachable$.subscribe(value =>
+    observed.push(value),
+  )
+  const subscription = service.subscribe()
+  try {
+    assert.deepEqual(observed, [null])
+    ticks.next()
+    await new Promise(setImmediate)
+    ticks.next()
+    await new Promise(setImmediate)
+    assert.deepEqual(observed, [null, false])
+    reachable = true
+    ticks.next()
+    await new Promise(setImmediate)
+    assert.deepEqual(observed, [null, false, true])
+  } finally {
+    subscription.unsubscribe()
+    observation.unsubscribe()
+  }
+})
+
 test('StartOS ignores a superseded startup DNS request', async () => {
   const { ticks, create } = startupStateHarness()
   let finishOldRequest
