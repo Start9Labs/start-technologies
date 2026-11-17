@@ -3,6 +3,7 @@ import { basename, dirname, join } from 'node:path'
 
 import { checkedDirectory } from './fde-initramfs-paths.mjs'
 import { harden } from './fde-initramfs-control.mjs'
+import { admitBootstrapConfiguration } from './fde-initramfs-configuration.mjs'
 import { admitNativeProviders } from './fde-initramfs-dependencies.mjs'
 import { admitLinkerCache } from './fde-initramfs-linker.mjs'
 import {
@@ -36,6 +37,7 @@ export async function prepareGeneratedInitramfs(root, providerAliases) {
   await admitNativeProviders(root, async () => providerAliases)
   await admitKernelModules(root)
   await admitRequiredBootModules(root)
-  await admitLinkerCache(root)
+  const linkerFiles = await admitLinkerCache(root)
+  await admitBootstrapConfiguration(root, linkerFiles)
   await harden(root)
 }

@@ -20,7 +20,9 @@ if [ "${#tests[@]}" -eq 0 ]; then
     tests=(fde-providers-test.mjs fde-modules-test.mjs)
 fi
 docker run --rm --pull=never -i \
+    --env FDE_NODE_TEST_PATTERN \
     --mount "type=bind,src=$source_root/usr,dst=/usr,readonly" \
+    --mount "type=bind,src=$source_root/etc,dst=/etc,readonly" \
     --mount "type=bind,src=$share,dst=/usr/share,readonly" \
     --mount "type=bind,src=$runtime,dst=/node-runtime,readonly" \
     --mount "type=bind,src=$hook_sources,dst=/fde-hook-sources,readonly" \
@@ -32,7 +34,11 @@ docker run --rm --pull=never -i \
     "$image" /bin/bash -se -- "${tests[@]}" <<'SH'
 set -euo pipefail
 source /fde-repo/projects/start-os/build/tests/fde-node-runtime-env.sh
+node_args=()
+if [ -n "${FDE_NODE_TEST_PATTERN:-}" ]; then
+    node_args+=("--test-name-pattern=$FDE_NODE_TEST_PATTERN")
+fi
 for file do
-    node "/fde-repo/projects/start-os/build/tests/$file" /fde-hook-sources
+    node "${node_args[@]}" "/fde-repo/projects/start-os/build/tests/$file" /fde-hook-sources
 done
 SH

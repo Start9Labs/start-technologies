@@ -14,8 +14,10 @@ import {
 } from './fde-initramfs-providers.mjs'
 import { replaceOnce, runSource } from './fde-reviewed-source.mjs'
 
+const cacheFile = 'etc/ld.so.cache'
+
 /**
- * Admits copied native linker configuration and a cache regenerated from admitted providers.
+ * Returns admitted linker configuration and cache paths.
  * Provider identity admission precedes this call; sources and the private candidate remain stable.
  * Source ldconfig parses admitted ELF data without executing or loading candidate code.
  */
@@ -28,7 +30,7 @@ export async function admitLinkerCache(root) {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error
   }
-  if (!(await lstat(join(root, 'etc/ld.so.cache'))).isFile())
+  if (!(await lstat(join(root, cacheFile))).isFile())
     throw Error('Unsupported linker cache file type')
   const producer = await readFile('/usr/sbin/mkinitramfs')
   requireNativeProducer(producer)
@@ -76,10 +78,8 @@ export async function admitLinkerCache(root) {
     const result = await runSource('/usr/sbin/ldconfig', ['-r', image])
     if (result.stderr.trim())
       throw Error(`Native linker cache diagnostics: ${result.stderr}`)
-    await requireSameBytes(
-      join(root, 'etc/ld.so.cache'),
-      join(image, 'etc/ld.so.cache'),
-    )
+    await requireSameBytes(join(root, cacheFile), join(image, cacheFile))
+    return new Set([...expectedFiles, cacheFile])
   } finally {
     await rm(reference, { recursive: true, force: true })
   }

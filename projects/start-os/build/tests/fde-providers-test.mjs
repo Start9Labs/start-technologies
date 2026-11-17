@@ -22,6 +22,7 @@ import { inspectSourceElf } from '../lib/scripts/fde-initramfs-dependencies.mjs'
 import { prepareNativeHooks } from '../lib/scripts/fde-initramfs-hooks.mjs'
 import { kernelDirectory } from '../lib/scripts/fde-initramfs-paths.mjs'
 import { admitLinkerCache } from '../lib/scripts/fde-initramfs-linker.mjs'
+import { admitBootstrapConfiguration } from '../lib/scripts/fde-initramfs-configuration.mjs'
 import { requireNativeHookFunctions } from '../lib/scripts/fde-initramfs-producer.mjs'
 import { runSource } from '../lib/scripts/fde-reviewed-source.mjs'
 
@@ -269,6 +270,9 @@ async function linkerContext(t) {
   )
   assert.equal(result.status, 0, result.stderr)
   await state.admitted.admitProviders(state.root)
+  await writeFile(join(state.root, 'etc/fstab'), '')
+  await chmod(join(state.root, 'etc/fstab'), 0o644)
+  await symlink('/proc/mounts', join(state.root, 'etc/mtab'))
   return state
 }
 
@@ -301,7 +305,8 @@ test('native linker configuration and subset cache admit without candidate execu
       .sort()
   const originalContents = await contents()
   const originalLayout = await layout()
-  await admitLinkerCache(root)
+  const linkerFiles = await admitLinkerCache(root)
+  await admitBootstrapConfiguration(root, linkerFiles)
   assert.deepEqual(await contents(), originalContents)
   assert.deepEqual(await layout(), originalLayout)
   assert.deepEqual(await linkerReferences(), before)
@@ -363,8 +368,11 @@ for (const [name, mutate, pattern] of [
   [
     'stale cache after another admitted library is copied',
     async (root, admitted) => {
+      const multiarch = (
+        await runSource('/usr/bin/gcc', ['-print-multiarch'])
+      ).stdout.trim()
       const result = shell(
-        '. /usr/share/initramfs-tools/hook-functions\ncopy_exec /usr/lib/x86_64-linux-gnu/libsqlite3.so.0\n',
+        `. /usr/share/initramfs-tools/hook-functions\ncopy_exec /usr/lib/${multiarch}/libsqlite3.so.0\n`,
         { DESTDIR: root, verbose: 'n' },
       )
       assert.equal(result.status, 0, result.stderr)

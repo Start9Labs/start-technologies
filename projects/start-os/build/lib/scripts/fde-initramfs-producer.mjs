@@ -64,6 +64,16 @@ export function requireNativeProducer(bytes) {
   )
 }
 
+export function filesystemTableCommands(bytes) {
+  requireNativeProducer(bytes)
+  const source = bytes.toString()
+  const umask = source.match(/^umask [0-7]+$/m)[0]
+  const tables = source.match(
+    /^# fstab and mtab\n([\s\S]*?)\n# module-init-tools$/m,
+  )[1]
+  return `${umask}\n${tables}`
+}
+
 /**
  * Adapts reviewed native ordering/packaging without installing a provider patch.
  * The caller owns stable providers, the generated tree and a private capture directory.
