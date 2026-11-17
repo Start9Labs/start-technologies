@@ -293,7 +293,9 @@ fn reconcile(
         .transpose()?
         .unwrap_or_default();
     indexes.retain(|url, _| desired.contains(&Subscription::Index(url.clone())));
-    db.as_private_mut().as_registry_indexes_mut().ser(&indexes)?;
+    db.as_private_mut()
+        .as_registry_indexes_mut()
+        .ser(&indexes)?;
     sync_os_default_locale(db)
 }
 

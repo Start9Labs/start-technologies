@@ -5687,7 +5687,7 @@ export const OsUpdateCache: z.ZodObject<{
   registry: z.ZodString
   versions: z.ZodRecord<z.ZodString, typeof OsVersionInfo>
   /**
-   * `RegistryInfo::default_locale`, known when the source is also a package registry.
+   * Tracks the source registry's cached `RegistryInfo::default_locale`.
    */
   defaultLocale: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -5705,14 +5705,14 @@ export const OsUpdateCache: z.ZodObject<{
   registry: z.string(),
   versions: z.record(z.string(), OsVersionInfo),
   /**
-   * `RegistryInfo::default_locale`, known when the source is also a package registry.
+   * Tracks the source registry's cached `RegistryInfo::default_locale`.
    */
   defaultLocale: wire(
     z.string().nullable().optional(),
     z.string().nullable(),
   ).meta({
     description:
-      '`RegistryInfo::default_locale`, known when the source is also a package registry.',
+      "Tracks the source registry's cached `RegistryInfo::default_locale`.",
   }),
   status: wire(RegistryStatus.optional(), RegistryStatus),
   /**
