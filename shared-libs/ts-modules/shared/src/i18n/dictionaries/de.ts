@@ -359,7 +359,6 @@ export default {
   419: 'Details anzeigen',
   421: 'Dienste, die von folgendem abhängen:',
   422: 'werden nicht mehr ordnungsgemäß funktionieren und könnten abstürzen.',
-  423: 'Anfrage fehlgeschlagen',
   424: 'Alle Dienste sind auf dem neuesten Stand!',
   425: 'Ausführen',
   426: 'Aktion kann nur ausgeführt werden, wenn der Dienst',
@@ -1334,4 +1333,7 @@ export default {
   1538: 'Automatische Prüfpunkte enthalten dienstbezogene Daten. Sichern Sie gemeinsam genutzte Volumes separat unter Sicherungen.',
   1539: 'Ein Teil des Sicherungsverlaufs konnte nicht geladen werden. Versuchen Sie es erneut, um ältere Sicherungen und ausführliche Berichte einzubeziehen.',
   1540: 'Die Synchronisierung dauert länger als erwartet. Aktualisieren Sie die Seite, um es erneut zu versuchen.',
+  1541: 'Server nicht erreichbar',
+  1542: 'Einträge sind möglicherweise veraltet',
+  1543: 'StartOS kann diese Registry gerade nicht erreichen.',
 } satisfies i18n

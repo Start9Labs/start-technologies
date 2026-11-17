@@ -25,6 +25,10 @@ export const PATCH_CACHE = new InjectionToken('', {
     }),
 })
 
+export const PATCH_LIVE = new InjectionToken('', {
+  factory: () => new BehaviorSubject(false),
+})
+
 @Injectable({
   providedIn: 'root',
 })
@@ -32,22 +36,10 @@ export class PatchDbSource extends Observable<Update<DataModel>[]> {
   private readonly api = inject(ApiService)
   private readonly state = inject(StateService)
   private readonly cache = inject(PatchDbCache)
+  private readonly isLive = inject(PATCH_LIVE)
   private readonly current = inject(PATCH_CACHE)
   private readonly live$ = inject(AuthService).isVerified$.pipe(
-    switchMap(verified =>
-      verified
-        ? databaseSource(
-            this.api
-              .watchDb$(() => this.cursor())
-              .pipe(
-                tap(update => {
-                  if ('epoch' in update && update.epoch)
-                    this.cache.epoch = update.epoch
-                }),
-              ),
-          )
-        : EMPTY,
-    ),
+    switchMap(verified => (verified ? this.watchLive$() : EMPTY)),
     catchError((_, original$) => {
       this.state.retrigger(false, 2000)
 
@@ -71,5 +63,30 @@ export class PatchDbSource extends Observable<Update<DataModel>[]> {
 
   constructor() {
     super(subscriber => this.stream$.subscribe(subscriber))
+  }
+
+  private watchLive$() {
+    return new Observable<Update<DataModel>[]>(subscriber => {
+      const subscription = databaseSource(
+        this.api
+          .watchDb$(() => this.cursor())
+          .pipe(
+            tap(update => {
+              if ('epoch' in update && update.epoch)
+                this.cache.epoch = update.epoch
+            }),
+          ),
+      ).subscribe({
+        next: updates => {
+          subscriber.next(updates)
+          if (!subscriber.closed) this.isLive.next(true)
+        },
+        error: error => subscriber.error(error),
+      })
+      return () => {
+        subscription.unsubscribe()
+        this.isLive.next(false)
+      }
+    })
   }
 }

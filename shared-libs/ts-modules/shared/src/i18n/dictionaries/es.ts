@@ -359,7 +359,6 @@ export default {
   419: 'Ver detalles',
   421: 'Servicios que dependen de',
   422: 'ya no funcionarán correctamente y podrían fallar.',
-  423: 'Solicitud fallida',
   424: '¡Todos los servicios están actualizados!',
   425: 'Ejecutar',
   426: 'La acción solo se puede ejecutar cuando el servicio está',
@@ -1334,4 +1333,7 @@ export default {
   1538: 'Los puntos de control automáticos incluyen los datos propios de los servicios. Haga copias de los volúmenes compartidos por separado desde Copias de seguridad.',
   1539: 'No se pudo cargar parte del historial de copias de seguridad. Vuelva a intentarlo para incluir las copias anteriores y los informes detallados.',
   1540: 'La sincronización está tardando más de lo esperado. Actualiza la página para volver a intentarlo.',
+  1541: 'Servidor inaccesible',
+  1542: 'Es posible que los listados estén desactualizados',
+  1543: 'StartOS no puede conectar con este registro en este momento.',
 } satisfies i18n

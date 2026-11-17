@@ -359,7 +359,6 @@ export default {
   419: 'Zobacz szczegóły',
   421: 'Serwisy zależne od',
   422: 'przestaną działać poprawnie i mogą ulec awarii.',
-  423: 'Żądanie nie powiodło się',
   424: 'Wszystkie serwisy są aktualne!',
   425: 'Uruchom',
   426: 'Akcja może być wykonana tylko gdy serwis jest',
@@ -1334,4 +1333,7 @@ export default {
   1538: 'Automatyczne punkty kontrolne zawierają dane należące do usług. Kopie woluminów współdzielonych twórz osobno na stronie Kopie zapasowe.',
   1539: 'Nie udało się wczytać części historii kopii zapasowych. Spróbuj ponownie, aby uwzględnić starsze kopie i szczegółowe raporty.',
   1540: 'Synchronizacja trwa dłużej niż oczekiwano. Odśwież stronę, aby spróbować ponownie.',
+  1541: 'Serwer nieosiągalny',
+  1542: 'Listy mogą być nieaktualne',
+  1543: 'StartOS nie może teraz połączyć się z tym rejestrem.',
 } satisfies i18n

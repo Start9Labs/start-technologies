@@ -359,7 +359,6 @@ export default {
   419: 'Voir les détails',
   421: 'Services dépendants de',
   422: 'ne fonctionneront plus correctement et pourraient planter.',
-  423: 'Échec de la requête',
   424: 'Tous les services sont à jour !',
   425: 'Exécuter',
   426: 'Action possible uniquement lorsque le service est',
@@ -1334,4 +1333,7 @@ export default {
   1538: 'Les points de contrôle automatiques incluent les données propres aux services. Sauvegardez les volumes partagés séparément depuis Sauvegardes.',
   1539: 'Une partie de l’historique des sauvegardes n’a pas pu être chargée. Réessayez pour inclure les anciennes sauvegardes et les rapports détaillés.',
   1540: 'La synchronisation prend plus de temps que prévu. Rafraîchissez la page pour réessayer.',
+  1541: 'Serveur injoignable',
+  1542: 'Les listes peuvent ne pas être à jour',
+  1543: 'StartOS ne parvient pas à joindre ce registre pour le moment.',
 } satisfies i18n

@@ -24,8 +24,8 @@ const registryStates = {
   },
   error: {
     label: 'Unreachable',
-    appearance: 'negative',
-    color: 'var(--tui-status-negative)',
+    appearance: 'warning',
+    color: 'var(--tui-status-warning)',
   },
 } as const satisfies Record<
   T.RegistryStatus,
