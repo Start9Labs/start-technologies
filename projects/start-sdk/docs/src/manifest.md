@@ -28,11 +28,9 @@ export const long = {
 ```
 
 If neither the requested locale nor a same-language translation is available,
-StartOS and registries use the package's `defaultLocale`. Set it in
-`setupManifest()`, using the package's `DEFAULT_LANG` from
-`startos/i18n/dictionaries/default.ts` or another locale it publishes. The package
-template imports `DEFAULT_LANG` into the manifest. An unset default uses an
-arbitrary stored translation.
+StartOS and registries use the package's default locale: the `DEFAULT_LANG` given
+to `setupI18n` in `startos/i18n`. `buildManifest()` reads it from the `i18n`
+passed in `startos/index.ts`.
 
 ### How long each one may be
 
@@ -398,4 +396,4 @@ To support user-managed local folders, attached drives and network shares, decla
 
 ## Dependencies
 
-Define dependencies in `startos/dependencies.ts` with `sdk.Dependency.required` or `sdk.Dependency.optional`, and pass the resulting `sdk.Dependencies.of()` builder to `buildManifest(versionGraph, sdkManifest, dependencies)`. See [Dependencies](dependencies.md) for base requirements and runtime narrowing.
+Define dependencies in `startos/dependencies.ts` with `sdk.Dependency.required` or `sdk.Dependency.optional`, and pass the resulting `sdk.Dependencies.of()` builder to `buildManifest(versionGraph, sdkManifest, dependencies, i18n)`. See [Dependencies](dependencies.md) for base requirements and runtime narrowing.

@@ -1,12 +1,9 @@
 import { setupManifest } from '@start9labs/start-sdk'
-
-import { DEFAULT_LANG } from '../i18n/dictionaries/default'
 import { long, short } from './i18n'
 
 export const manifest = setupManifest({
   id: '{{id}}',
   title: '{{name}}',
-  defaultLocale: DEFAULT_LANG,
   license: 'MIT', // TODO: match the upstream project's license
   packageRepo: 'https://github.com/REPLACE_ME/{{id}}-startos', // TODO: set the packaging repo URL
   upstreamRepo: 'https://github.com/REPLACE_ME/REPLACE_ME', // TODO: set the upstream project URL

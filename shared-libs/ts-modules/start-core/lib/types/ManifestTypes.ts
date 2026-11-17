@@ -57,12 +57,6 @@ export type SDKManifest = {
     readonly long: T.LocaleString
   }
   /**
-   * Fallback locale for this package's translated metadata. Use this package's
-   * `DEFAULT_LANG`.
-   * @example en_US
-   */
-  readonly defaultLocale?: string
-  /**
    * override the StartOS version this package was made for
    * defaults to the version the SDK was built for
    */

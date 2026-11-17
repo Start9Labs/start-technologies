@@ -4,6 +4,8 @@ import { VersionGraph } from '../version/VersionGraph'
 import { VersionInfo } from '../version/VersionInfo'
 import { setupI18n } from '../i18n'
 
+const i18n = setupI18n({}, {}, 'en_US')
+
 const versions = VersionGraph.of({
   current: VersionInfo.of<'1.0.0:0'>({
     version: '1.0.0:0',
@@ -42,14 +44,15 @@ function manifest(emulateMissing?: boolean) {
 }
 
 test('defaults to the binding transport enforcement compatibility floor', () => {
-  expect(buildManifest(versions, manifest(), Dependencies.of()).osVersion).toBe(
-    '0.4.3',
-  )
+  expect(
+    buildManifest(versions, manifest(), Dependencies.of(), i18n).osVersion,
+  ).toBe('0.4.3')
 })
 
 test('pre-download alert is included in the built manifest', () => {
   expect(
-    buildManifest(versions, manifest(), Dependencies.of()).preDownloadAlert,
+    buildManifest(versions, manifest(), Dependencies.of(), i18n)
+      .preDownloadAlert,
   ).toEqual({
     message: {
       en_US: 'Back up before updating',
@@ -69,7 +72,7 @@ test('the builder publishes its complete base dependency requirements', () => {
       healthChecks: ['bitcoin-rest'],
     }),
   )
-  const built = buildManifest(versions, manifest(), dependencies)
+  const built = buildManifest(versions, manifest(), dependencies, i18n)
   expect(built.dependencies.bitcoind).toEqual({
     description: 'Blockchain data',
     optional: false,
@@ -81,14 +84,19 @@ test('the builder publishes its complete base dependency requirements', () => {
 })
 
 test('images emulate missing architectures by default', () => {
-  const built = buildManifest(versions, manifest(), Dependencies.of())
+  const built = buildManifest(versions, manifest(), Dependencies.of(), i18n)
 
   expect(built.images.main.emulateMissing).toBe(true)
   expect(built.hardwareRequirements.arch).toBeNull()
 })
 
 test('images can require a native architecture', () => {
-  const built = buildManifest(versions, manifest(false), Dependencies.of())
+  const built = buildManifest(
+    versions,
+    manifest(false),
+    Dependencies.of(),
+    i18n,
+  )
 
   expect(built.images.main.emulateMissing).toBe(false)
   expect(built.hardwareRequirements.arch).toEqual(['aarch64'])
@@ -96,10 +104,10 @@ test('images can require a native architecture', () => {
 
 test('shared-volume capability defaults to false and preserves explicit opt-in', () => {
   expect(
-    buildManifest(versions, manifest(), Dependencies.of()).sharedVolumes,
+    buildManifest(versions, manifest(), Dependencies.of(), i18n).sharedVolumes,
   ).toBe(false)
   const optedIn = setupManifest({ ...manifest(), sharedVolumes: true })
-  const built = buildManifest(versions, optedIn, Dependencies.of())
+  const built = buildManifest(versions, optedIn, Dependencies.of(), i18n)
   expect(built.sharedVolumes).toBe(true)
   expect(built.osVersion).toBe('0.4.3')
 })
@@ -111,6 +119,7 @@ test('an explicit compatibility override cannot understate shared-volume support
         versions,
         setupManifest({ ...manifest(), sharedVolumes: true, osVersion }),
         Dependencies.of(),
+        i18n,
       ),
     ).toThrow('Shared volumes require StartOS 0.4.3 or later')
   }
@@ -123,19 +132,15 @@ test('an explicit compatibility override cannot understate shared-volume support
         osVersion: '0.4.3',
       }),
       Dependencies.of(),
+      i18n,
     ).osVersion,
   ).toBe('0.4.3')
 })
 
-test('manifest defaults remain package-owned across independent i18n setups', () => {
-  const french = setupManifest({ ...manifest(), defaultLocale: 'fr_FR' })
-  for (const foreignLocale of ['de_DE', 'pl_PL']) {
-    setupI18n({}, {}, foreignLocale)
-    expect(
-      buildManifest(versions, manifest(), Dependencies.of()).defaultLocale,
-    ).toBeUndefined()
-    expect(
-      buildManifest(versions, french, Dependencies.of()).defaultLocale,
-    ).toBe('fr_FR')
-  }
+test('the default locale is the given package i18n default language', () => {
+  const own = setupI18n({}, {}, 'fr_FR')
+  setupI18n({}, {}, 'de_DE')
+  expect(
+    buildManifest(versions, manifest(), Dependencies.of(), own).defaultLocale,
+  ).toBe('fr_FR')
 })

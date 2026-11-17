@@ -65,6 +65,8 @@ function manifestOsVersion(manifest: SDKManifest): string {
  *
  * @param versions - The service's VersionGraph, used to extract the current version, release notes, and migration ranges
  * @param manifest - The SDK manifest definition (from `setupManifest`)
+ * @param dependencies - The service's `Dependencies` builder
+ * @param i18n - The package's own `setupI18n` result; its default language becomes `defaultLocale`
  * @returns A fully resolved Manifest ready for packaging
  */
 export function buildManifest<
@@ -82,6 +84,7 @@ export function buildManifest<
   versions: VersionGraph<Version>,
   manifest: SDKManifest & Manifest,
   dependencies: Dependencies<DependencyIds>,
+  i18n: { readonly defaultLang: string },
 ): Manifest & T.Manifest {
   const images = Object.entries(manifest.images).reduce(
     (images, [k, v]) => {
@@ -95,6 +98,7 @@ export function buildManifest<
   )
   return {
     ...manifest,
+    defaultLocale: i18n.defaultLang,
     dependencies: dependencies.manifestDependencies(),
     gitHash: null,
     osVersion: manifestOsVersion(manifest),
