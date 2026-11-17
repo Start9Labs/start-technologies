@@ -139,6 +139,12 @@ export class FormService {
       case 'union':
         return this.getUnionObject(spec, currentValue)
       case 'toggle':
+        value = currentValue === undefined ? spec.default : currentValue
+        // packages built against an older SDK send no `required`
+        return this.formBuilder.control(
+          value,
+          spec.required ? [Validators.requiredTrue] : [],
+        )
       case 'triState':
         value = currentValue === undefined ? spec.default : currentValue
         return this.formBuilder.control(value)

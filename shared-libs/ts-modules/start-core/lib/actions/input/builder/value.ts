@@ -121,6 +121,13 @@ function asRequiredParser<Type, Input extends { required: boolean }>(
   return parser.nullish().transform(v => v ?? null) as any
 }
 
+/** A toggle's validator: any boolean, or only `true` when the toggle is required. */
+function toggleValidator(required?: boolean): z.ZodType<boolean> {
+  return required
+    ? z.boolean().refine(v => v, { message: 'Required' })
+    : z.boolean()
+}
+
 /**
  * Core builder class for defining a single form field in a service configuration spec.
  *
@@ -169,6 +176,7 @@ export class Value<
       // optional
       description: null,
       warning: null,
+      required: false,
       immutable: false,
     }),
     * ```
@@ -182,12 +190,19 @@ export class Value<
     footnote?: string | null
     default: boolean
     /**
+     * @description Whether the toggle must be on for the form to be submitted, like a
+     * required checkbox. Use it for an acknowledgement the user has to give; the form
+     * marks the toggle "Required" and does not submit while it is off.
+     * @default false
+     */
+    required?: boolean
+    /**
      * @description Once set, the value can never be changed.
      * @default false
      */
     immutable?: boolean
   }) {
-    const validator = z.boolean()
+    const validator = toggleValidator(a.required)
     return new Value<boolean>(
       async () => ({
         spec: {
@@ -196,12 +211,14 @@ export class Value<
           footnote: null,
           type: 'toggle' as const,
           disabled: false,
-          immutable: a.immutable ?? false,
           ...a,
+          required: a.required ?? false,
+          immutable: a.immutable ?? false,
         },
         validator,
       }),
-      validator,
+      // the static validator also backs partial (prefill) validation, where `false` is valid
+      z.boolean(),
     )
   }
   /** Like {@link Value.toggle} but options are resolved lazily at runtime via a builder function. */
@@ -213,14 +230,15 @@ export class Value<
         warning?: string | null
         footnote?: string | null
         default: boolean
+        required?: boolean
         disabled?: false | string
       },
       OuterType
     >,
   ) {
-    const validator = z.boolean()
-    return new Value<boolean, boolean, OuterType>(
-      async options => ({
+    return new Value<boolean, boolean, OuterType>(async options => {
+      const built = await a(options)
+      return {
         spec: {
           description: null,
           warning: null,
@@ -228,12 +246,12 @@ export class Value<
           type: 'toggle' as const,
           disabled: false,
           immutable: false,
-          ...(await a(options)),
+          ...built,
+          required: built.required ?? false,
         },
-        validator,
-      }),
-      validator,
-    )
+        validator: toggleValidator(built.required),
+      }
+    }, z.boolean())
   }
   /**
    * @description Displays a three-state toggle — a boolean toggle with a neutral middle

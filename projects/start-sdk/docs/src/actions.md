@@ -429,6 +429,16 @@ Two details worth knowing:
 - **A pattern is anchored.** `[a-z]+` matches the whole value, not a substring — write it as though `^` and `$` were there, because they are added if you leave them off.
 - **An empty string skips its patterns.** For `Value.text`, `required: true` rejects a missing field or `null`, but accepts `''`.
 
+A toggle can be required as well. `required: true` means the toggle has to be on, like a required checkbox: the form marks it "Required" and does not submit while it is off, and the validator rejects `false` on every other path. Use it for an acknowledgement the user must give before the action runs. The form enforces it from the StartOS release this SDK version targets; an earlier StartOS ignores the flag in the form, and the validator still rejects the submission.
+
+```typescript
+acknowledged: Value.toggle({
+  name: i18n('I hold the keys of this address'),
+  default: false,
+  required: true,
+}),
+```
+
 Reserve handler guards for additional semantic requirements, such as a cross-field rule, a value that has to exist on disk, or a string that must be non-blank after trimming. A `throw` surfaces the error to the caller.
 
 ### Generating Values in a Form
