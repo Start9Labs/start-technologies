@@ -20,8 +20,10 @@ use crate::GatewayId;
 use crate::auth::AuthKeys;
 use crate::context::CliContext;
 use crate::db::model::public::NetworkInterfaceInfo;
+use crate::db::subscribe_start;
 pub use crate::db::{
-    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes, SubscribeResult,
+    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes,
+    SubscribeStartResult,
 };
 use crate::net::transport::Transport;
 use crate::prelude::*;
@@ -599,16 +601,19 @@ pub async fn apply(
 pub async fn subscribe(
     HandlerArgs {
         context: ctx,
-        params: SubscribeParams { pointer, signer },
+        params:
+            SubscribeParams {
+                pointer,
+                since,
+                signer,
+            },
         rpc_stream,
         ..
     }: HandlerArgs<TunnelContext, SubscribeParams, rpc_toolkit::Empty, patch_db::Revision>,
-) -> Result<SubscribeResult, Error> {
-    let (dump, mut sub) = ctx
-        .db
-        .dump_and_sub(pointer.unwrap_or_else(|| ROOT.to_owned()))
-        .await;
+) -> Result<SubscribeStartResult, Error> {
+    let pointer = pointer.unwrap_or_else(|| ROOT.to_owned());
     if let Some(stream) = rpc_stream {
+        let (start, sub) = subscribe_start(&ctx.db, pointer, since.as_ref()).await;
         crate::auth::continuation_subscription(&ctx, signer)
             .await?
             .forward_stream(
@@ -617,8 +622,9 @@ pub async fn subscribe(
                     sub.recv().await.map(|revision| (Ok(revision), sub))
                 }),
             );
-        return Ok(SubscribeResult::Stream(dump));
+        return Ok(SubscribeStartResult::Stream(start));
     }
+    let (dump, mut sub) = ctx.db.dump_and_sub(pointer).await;
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(
@@ -665,7 +671,10 @@ pub async fn subscribe(
         )
         .await;
 
-    Ok(SubscribeResult::Continuation(SubscribeRes { dump, guid }))
+    Ok(SubscribeStartResult::Continuation(SubscribeRes {
+        dump,
+        guid,
+    }))
 }
 
 #[test]

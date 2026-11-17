@@ -34,20 +34,23 @@ use crate::{GatewayId, HostId, PackageId, ServiceInterfaceId};
 /// A new subscription is created if a handler is registered again.
 pub struct DbWatchedCallbacks<K: Ord> {
     label: &'static str,
-    arguments: fn(Value) -> Vector<Value>,
+    arguments: fn(Value) -> Result<Vector<Value>, Error>,
     inner: SyncMutex<BTreeMap<K, (NonDetachingJoinHandle<()>, Vec<CallbackHandler>)>>,
 }
 
 impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
     pub fn new(label: &'static str) -> Self {
-        Self::with_arguments(label, |value| vector![value])
+        Self::with_arguments(label, |value| Ok(vector![value]))
     }
 
     pub fn invalidation(label: &'static str) -> Self {
-        Self::with_arguments(label, |_| vector![])
+        Self::with_arguments(label, |_| Ok(vector![]))
     }
 
-    fn with_arguments(label: &'static str, arguments: fn(Value) -> Vector<Value>) -> Self {
+    fn with_arguments(
+        label: &'static str,
+        arguments: fn(Value) -> Result<Vector<Value>, Error>,
+    ) -> Self {
         Self {
             label,
             arguments,
@@ -89,7 +92,9 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                                 if let Some(cbs) =
                                     this.remove(&k).and_then(CallbackHandlers::detach_watcher)
                                 {
-                                    if let Err(e) = cbs.call((this.arguments)(value)).await {
+                                    if let Err(e) =
+                                        async { cbs.call((this.arguments)(value)?).await }.await
+                                    {
                                         tracing::error!("Error in {label} callback: {e}");
                                         tracing::debug!("{e:?}");
                                     }
@@ -125,12 +130,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn host_callback_arguments_use_the_service_projection() {
+        use crate::net::forward::AvailablePorts;
+        use crate::net::host::binding::{BindInfo, BindOptions};
+        use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
+
+        let mut binding = BindInfo::new(
+            &mut AvailablePorts::new(),
+            BindOptions {
+                transport: Default::default(),
+                preferred_external_port: 8080,
+                add_ssl: None,
+                secure: None,
+                proxy: None,
+            },
+            false,
+        )
+        .unwrap();
+        binding.addresses.available.insert(HostnameInfo {
+            hostname: "192.0.2.10".into(),
+            port: Some(8080),
+            ssl: false,
+            public: false,
+            metadata: HostnameMetadata::Ipv4 {
+                gateway: "eth0".parse().unwrap(),
+            },
+        });
+        binding
+            .addresses
+            .insecure
+            .insert(("192.0.2.10".into(), 8080, "eth0".parse().unwrap()));
+        let mut host = Host::default();
+        host.bindings.insert(80, binding);
+        let callbacks = ServiceCallbacks::default();
+        let arguments = callbacks.get_host_info.arguments;
+        let values = arguments(imbl_value::to_value(&host).unwrap()).unwrap();
+        assert_eq!(values.len(), 1);
+        let projected: Host = imbl_value::from_value(values[0].clone()).unwrap();
+        assert!(projected.bindings[&80].addresses.available.is_empty());
+        assert_eq!(arguments(Value::Null).unwrap(), vector![Value::Null]);
+    }
+
+    #[test]
     fn invalidation_callbacks_do_not_disclose_the_watched_value() {
         let callbacks = DbWatchedCallbacks::<()>::invalidation("volumes");
-        assert!((callbacks.arguments)(Value::from("private catalog")).is_empty());
+        assert!(
+            (callbacks.arguments)(Value::from("private catalog"))
+                .unwrap()
+                .is_empty()
+        );
         let callbacks = DbWatchedCallbacks::<()>::new("existing reader");
         assert_eq!(
-            (callbacks.arguments)(Value::from("value")),
+            (callbacks.arguments)(Value::from("value")).unwrap(),
             vector![Value::from("value")]
         );
     }
@@ -151,7 +202,9 @@ impl Default for ServiceCallbacks {
     fn default() -> Self {
         Self {
             inner: SyncMutex::new(ServiceCallbackMap::default()),
-            get_host_info: Arc::new(DbWatchedCallbacks::new("host info")),
+            get_host_info: Arc::new(DbWatchedCallbacks::with_arguments("host info", |value| {
+                Ok(vector![super::net::host::project_host_info(value)?])
+            })),
             get_status: Arc::new(DbWatchedCallbacks::new("get_status")),
             get_service_interface: Arc::new(DbWatchedCallbacks::new("get_service_interface")),
             list_service_interfaces: Arc::new(DbWatchedCallbacks::new("list_service_interfaces")),

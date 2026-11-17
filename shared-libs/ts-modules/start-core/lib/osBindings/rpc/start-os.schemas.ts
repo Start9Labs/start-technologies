@@ -355,6 +355,10 @@ export const CreatedToken: z.ZodObject<{
 export const DataUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'DataUrl',
 })
+export const DbCursor: z.ZodObject<{ epoch: z.ZodString; id: z.ZodInt }> =
+  /* @__PURE__ */ object({ epoch: z.string(), id: z.int() }).meta({
+    id: 'DbCursor',
+  })
 export const DeviceFilter: z.ZodObject<{
   description: z.ZodString
   class: typeof literal_5
@@ -1590,16 +1594,6 @@ export const Ssid: z.ZodString = /* @__PURE__ */ z.string().meta({
   id: 'Ssid',
   description: 'Ssid are the names of the wifis, usually human readable.',
 })
-export const SubscribeParams: z.ZodObject<{
-  pointer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'SubscribeParams',
-})
 export const TermSize: z.ZodObject<{
   rows: z.ZodInt
   cols: z.ZodInt
@@ -2674,6 +2668,47 @@ export const EditSignerParams: z.ZodObject<{
   }),
 }).meta({
   id: 'EditSignerParams',
+})
+
+/**
+ * Edits an existing release; omitted fields, assets and authorized signers remain unchanged.
+ */
+export const EditVersionParams: z.ZodObject<{
+  version: z.ZodString
+  releaseNotes: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
+    z.ZodNullable<typeof LocaleString>
+  >
+  sourceVersion: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  expectedGitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  security: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
+    z.ZodNullable<z.ZodBoolean>
+  >
+}> = /* @__PURE__ */ object({
+  version: z.string(),
+  releaseNotes: wire(
+    LocaleString.nullable().optional(),
+    LocaleString.nullable(),
+  ),
+  sourceVersion: wire(z.string().nullable().optional(), z.string().nullable()),
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  expectedGitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  security: wire(z.boolean().nullable().optional(), z.boolean().nullable()),
+}).meta({
+  id: 'EditVersionParams',
+  description:
+    'Edits an existing release; omitted fields, assets and authorized signers remain unchanged.',
 })
 export const EppInfo: z.ZodObject<{
   current: z.ZodCodec<
@@ -4400,6 +4435,30 @@ export const SubscribeIndexParams: z.ZodIntersection<
   .meta({
     id: 'SubscribeIndexParams',
   })
+export const SubscribeParams: z.ZodObject<{
+  pointer: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * The subscriber's last revision; resumes only within the epoch that reported it.
+   */
+  since: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof DbCursor>>,
+    z.ZodNullable<typeof DbCursor>
+  >
+}> = /* @__PURE__ */ object({
+  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * The subscriber's last revision; resumes only within the epoch that reported it.
+   */
+  since: wire(DbCursor.nullable().optional(), DbCursor.nullable()).meta({
+    description:
+      "The subscriber's last revision; resumes only within the epoch that reported it.",
+  }),
+}).meta({
+  id: 'SubscribeParams',
+})
 export const SubscribeRes: z.ZodObject<{
   dump: typeof Dump
   guid: typeof Guid
@@ -5740,10 +5799,21 @@ export const BindingSetAddressEnabledParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
     z.ZodNullable<z.ZodBoolean>
   >
+  /**
+   * Accepts readable and alterable plaintext traffic, including passwords.
+   */
+  allowInsecure: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   internalPort: z.int(),
   address: HostnameInfo,
   enabled: wire(z.boolean().nullable().optional(), z.boolean().nullable()),
+  /**
+   * Accepts readable and alterable plaintext traffic, including passwords.
+   */
+  allowInsecure: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Accepts readable and alterable plaintext traffic, including passwords.',
+  }),
 }).meta({
   id: 'BindingSetAddressEnabledParams',
 })
@@ -5785,9 +5855,35 @@ export const DerivedAddressInfo: z.ZodObject<{
     z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt], null>>
   >
   /**
+   * Plaintext private addresses requiring consent, keyed by hostname, port and gateway.
+   */
+  insecure: z.ZodCodec<
+    z.ZodOptional<
+      z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
+    >,
+    z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
+  >
+  /**
+   * Persisted consent; ordinary address changes must not grant insecure access.
+   * Address removal retains consent; explicit disabling or gateway removal revokes it.
+   */
+  insecureEnabled: z.ZodCodec<
+    z.ZodOptional<
+      z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
+    >,
+    z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
+  >
+  /**
    * COMPUTED: NetServiceData::update — all possible addresses for this binding
    */
   available: z.ZodArray<typeof HostnameInfo>
+  /**
+   * Effective address selections shared by network enforcement and clients.
+   */
+  effective: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof HostnameInfo>>,
+    z.ZodArray<typeof HostnameInfo>
+  >
 }> = /* @__PURE__ */ object({
   /**
    * User override: enable these addresses (only for public IP & port)
@@ -5824,12 +5920,42 @@ export const DerivedAddressInfo: z.ZodObject<{
       'User override: enable these private IPs regardless of their mDNS address.',
   }),
   /**
+   * Plaintext private addresses requiring consent, keyed by hostname, port and gateway.
+   */
+  insecure: wire(
+    z.array(z.tuple([z.string(), z.int(), GatewayId])).optional(),
+    z.array(z.tuple([z.string(), z.int(), GatewayId])),
+  ).meta({
+    description:
+      'Plaintext private addresses requiring consent, keyed by hostname, port and gateway.',
+  }),
+  /**
+   * Persisted consent; ordinary address changes must not grant insecure access.
+   * Address removal retains consent; explicit disabling or gateway removal revokes it.
+   */
+  insecureEnabled: wire(
+    z.array(z.tuple([z.string(), z.int(), GatewayId])).optional(),
+    z.array(z.tuple([z.string(), z.int(), GatewayId])),
+  ).meta({
+    description:
+      'Persisted consent; ordinary address changes must not grant insecure access.\nAddress removal retains consent; explicit disabling or gateway removal revokes it.',
+  }),
+  /**
    * COMPUTED: NetServiceData::update — all possible addresses for this binding
    */
   available: z.array(HostnameInfo).meta({
     description:
       'COMPUTED: NetServiceData::update — all possible addresses for this binding',
   }),
+  /**
+   * Effective address selections shared by network enforcement and clients.
+   */
+  effective: wire(z.array(HostnameInfo).optional(), z.array(HostnameInfo)).meta(
+    {
+      description:
+        'Effective address selections shared by network enforcement and clients.',
+    },
+  ),
 }).meta({
   id: 'DerivedAddressInfo',
 })
@@ -6107,6 +6233,34 @@ export const PackageIndex: z.ZodObject<{
 }).meta({
   id: 'PackageIndex',
 })
+
+/**
+ * A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
+ */
+export const SubscribeStart: z.ZodObject<{
+  epoch: z.ZodString
+  id: z.ZodInt
+  value: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodUnknown>>,
+    z.ZodNullable<z.ZodUnknown>
+  >
+  revisions: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof Revision>>>,
+    z.ZodNullable<z.ZodArray<typeof Revision>>
+  >
+}> = /* @__PURE__ */ object({
+  epoch: z.string(),
+  id: z.int(),
+  value: wire(z.unknown().nullable().optional(), z.unknown().nullable()),
+  revisions: wire(
+    z.array(Revision).nullable().optional(),
+    z.array(Revision).nullable(),
+  ),
+}).meta({
+  id: 'SubscribeStart',
+  description:
+    'A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.',
+})
 export const BindOptions: z.ZodCodec<
   typeof CompatibleBindOptions,
   z.ZodObject<{
@@ -6179,6 +6333,17 @@ export const FullIndex: z.ZodObject<{
   trustSigners: wire(z.array(Guid).optional(), z.array(Guid)),
 }).meta({
   id: 'FullIndex',
+})
+
+/**
+ * Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
+ */
+export const SubscribeStartResult: z.ZodUnion<
+  readonly [typeof SubscribeRes, typeof SubscribeStart]
+> = /* @__PURE__ */ z.union([SubscribeRes, SubscribeStart]).meta({
+  id: 'SubscribeStartResult',
+  description:
+    'Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.',
 })
 export const BindInfo: z.ZodObject<{
   enabled: z.ZodBoolean
@@ -6505,7 +6670,7 @@ export const Api = {
         },
         subscribe: {
           _PARAMS: /* @__PURE__ */ SubscribeParams,
-          _RETURN: /* @__PURE__ */ SubscribeResult,
+          _RETURN: /* @__PURE__ */ SubscribeStartResult,
           _ITEM: /* @__PURE__ */ Revision,
           _FINAL: /* @__PURE__ */ z.null(),
         },
@@ -7910,6 +8075,15 @@ export const Api = {
                   _PARAMS: /* @__PURE__ */ z.intersection(
                     z.intersection(empty, RegistryUrlParams),
                     AddVersionParams,
+                  ),
+                  _RETURN: /* @__PURE__ */ z.null(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
+                },
+                edit: {
+                  _PARAMS: /* @__PURE__ */ z.intersection(
+                    z.intersection(empty, RegistryUrlParams),
+                    EditVersionParams,
                   ),
                   _RETURN: /* @__PURE__ */ z.null(),
                   _ITEM: /* @__PURE__ */ z.never(),

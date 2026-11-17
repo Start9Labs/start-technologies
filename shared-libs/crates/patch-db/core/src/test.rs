@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use imbl_value::{json, Value};
 use json_ptr::{JsonPointer, ROOT};
-use patch_db::{DiffPatch, Error, PatchDb, Revision};
+use patch_db::{Catchup, DiffPatch, Error, PatchDb, Revision};
 use proptest::prelude::*;
 use tokio::fs;
 use tokio::runtime::Builder;
@@ -65,6 +65,70 @@ async fn basic() {
     assert_eq!(get_res.as_str(), Some("hello"));
     db.close().await;
     cleanup_db(&path).await;
+}
+
+#[tokio::test]
+async fn catch_up_replays_scoped_revisions_within_its_epoch() {
+    let db = PatchDb::in_memory();
+    db.put(
+        &ROOT,
+        &json!({ "public": { "a": 1 }, "private": { "b": 1 } }),
+    )
+    .await
+    .unwrap();
+    let public: JsonPointer = "/public".parse().unwrap();
+    let private: JsonPointer = "/private/b".parse().unwrap();
+    let (epoch, catchup, _) = db.catch_up_and_sub(public.clone(), None).await;
+    let Catchup::Dump(dump) = catchup else {
+        panic!("expected a dump")
+    };
+    assert_eq!(dump.id, 1);
+    db.put(&private, &2).await.unwrap();
+    db.put(&"/public/a".parse::<JsonPointer>().unwrap(), &2)
+        .await
+        .unwrap();
+    db.put(&private, &3).await.unwrap();
+
+    let (_, catchup, _) = db
+        .catch_up_and_sub(public.clone(), Some((&epoch, dump.id)))
+        .await;
+    let Catchup::Replay { id, revisions } = catchup else {
+        panic!("expected a replay")
+    };
+    assert_eq!(id, 4);
+    assert_eq!(revisions.iter().map(|rev| rev.id).collect::<Vec<_>>(), [3]);
+    let mut value = dump.value;
+    json_patch::patch(&mut value, &revisions[0].patch).unwrap();
+    assert_eq!(value, json!({ "a": 2 }));
+
+    let (_, catchup, _) = db.catch_up_and_sub(public.clone(), Some((&epoch, 4))).await;
+    assert!(matches!(catchup, Catchup::Replay { id: 4, revisions } if revisions.is_empty()));
+    let other = PatchDb::in_memory()
+        .catch_up_and_sub(ROOT.to_owned(), None)
+        .await
+        .0;
+    assert_ne!(other, epoch);
+    for since in [(&*other, 1), (&*epoch, 5)] {
+        let (_, catchup, _) = db.catch_up_and_sub(public.clone(), Some(since)).await;
+        assert!(matches!(catchup, Catchup::Dump(dump) if dump.id == 4));
+    }
+}
+
+#[tokio::test]
+async fn catch_up_dumps_once_history_no_longer_reaches_back() {
+    let db = PatchDb::in_memory();
+    for i in 0..1100 {
+        db.put(&ROOT, &i).await.unwrap();
+    }
+    let (epoch, _, _) = db.catch_up_and_sub(ROOT.to_owned(), None).await;
+    let (_, oldest, _) = db
+        .catch_up_and_sub(ROOT.to_owned(), Some((&epoch, 76)))
+        .await;
+    assert!(matches!(oldest, Catchup::Replay { revisions, .. } if revisions.len() == 1024));
+    let (_, older, _) = db
+        .catch_up_and_sub(ROOT.to_owned(), Some((&epoch, 75)))
+        .await;
+    assert!(matches!(older, Catchup::Dump(_)));
 }
 
 #[test]

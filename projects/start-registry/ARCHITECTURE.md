@@ -135,7 +135,7 @@ chooses it for StartOS updates.
 
 Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hold versions, dependency `VersionRange`s, and `RegistryAsset`s. Package assets carry Merkle archive commitments; OS assets carry Blake3 commitments.
 
-Package and OS asset ingestion accept a default-empty `signatures` map alongside the authenticated uploader's `signature`. Each submitted signature is verified against the asset commitment and signature context before merging with existing signatures. The fresh uploader signature takes precedence over a submitted signature for the same key; stored signatures remain unchanged. Promotion forwards every source mirror URL and the source signature map, and adds the promoter's signature. Endorsements do not register signers, change trust proposals, or grant publishing authorization; the authenticated uploader must retain permission to publish. Deploy the updated registry before the promoting CLI: older registries ignore the additional map.
+Package and OS asset ingestion accept a default-empty `signatures` map alongside the authenticated uploader's `signature`. Each submitted signature is verified against the asset commitment and signature context before merging with existing signatures. The fresh uploader signature takes precedence over a submitted signature for the same key; merging preserves existing signatures for a matching commitment. Authoritative registries retain package signatures from keys registered in `index.signers`; ingestion, signer/key removal, and each authoritative startup enforce that rule. A `mirror-of` registry preserves its upstream's signatures, including its cached index on restart. Promotion forwards every source mirror URL and the source signature map, and adds the promoter's signature. Endorsements do not register signers, change trust proposals, or grant publishing authorization; the authenticated uploader must retain permission to publish. Deploy the updated registry before the promoting CLI: older registries ignore the additional map.
 
 `PackageInfo` flattens `PackageAccessControl` into its wire record: `private` defaults to false and
 `readers` defaults to an empty signer-ID set. The flattened policy deserializes independently of
@@ -151,7 +151,7 @@ a plain string or a locale-to-Markdown map. The compiler includes `en_US` in tra
 maps. Current clients receive the complete map and select locally with `LocalizePipe`.
 Existing English-only records deserialize unchanged without a migration.
 
-`os.version.add` replaces the entire `LocaleString`; promotion preserves it unchanged.
+`os.version.add` and an explicit `os.version.edit` release-notes value replace the entire `LocaleString`; promotion preserves it unchanged. `os.version.edit` requires an existing version and changes only supplied metadata fields, preserving assets and authorized signers. Its optional `expectedGitHash` check and metadata changes share one database mutation.
 The second positional CLI argument accepts prose or a JSON locale map. Publishers
 require the `<RELEASE_NOTES_OR_JSON>` help marker and reject CLIs requiring `<HEADLINE>`
 before writes.

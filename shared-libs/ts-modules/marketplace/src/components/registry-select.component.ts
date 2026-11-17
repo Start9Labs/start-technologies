@@ -1,9 +1,12 @@
-import { Component, inject, input } from '@angular/core'
+import { NgTemplateOutlet } from '@angular/common'
+import { Component, computed, inject, input } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { Router, RouterLink } from '@angular/router'
 import {
   DialogService,
   i18nPipe,
+  isDefaultRegistry,
+  registryUrl,
   sameUrl,
   TaskService,
 } from '@start9labs/shared'
@@ -16,13 +19,7 @@ import {
   TuiTitle,
 } from '@taiga-ui/core'
 import { TuiAvatar, TuiFade } from '@taiga-ui/kit'
-import {
-  combineLatest,
-  defaultIfEmpty,
-  filter,
-  firstValueFrom,
-  map,
-} from 'rxjs'
+import { combineLatest, defaultIfEmpty, firstValueFrom } from 'rxjs'
 
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreIconDirective } from './store-icon.directive'
@@ -41,16 +38,16 @@ import { StoreIconDirective } from './store-icon.directive'
       [(tuiDropdownOpen)]="open"
     >
       <span tuiAvatar appearance="action-grayscale" size="xs">
-        <img [storeIcon]="data()?.current?.url || data()?.currentUrl" />
+        <img [storeIcon]="data()?.current.url" />
       </span>
       <b tuiFade>
-        {{ data()?.current?.name || fetched()?.info?.name || 'Loading...' }}
+        {{ data()?.current.name || ('Loading' | i18n) }}
       </b>
       @if (data(); as d) {
         <tui-data-list *tuiDropdown size="m">
           <div class="g-title">
-            <small>{{ 'Saved Registries' | i18n }}</small>
             @if (manageRegistriesLink()) {
+              <small>{{ 'Saved Registries' | i18n }}</small>
               <a
                 tuiIconButton
                 size="xs"
@@ -62,70 +59,64 @@ import { StoreIconDirective } from './store-icon.directive'
                 {{ 'Manage Registries' | i18n }}
               </a>
             } @else {
-              <button
-                tuiButton
-                size="xs"
-                appearance="primary"
-                iconStart="@tui.plus"
-                (click)="add()"
-              >
-                {{ 'Add' | i18n }}
-              </button>
+              <small>{{ 'Registries' | i18n }}</small>
             }
           </div>
-          @for (
-            registry of manageRegistriesLink() ? d.registries : d.standard;
-            track registry.url
-          ) {
-            <button tuiOption (click)="connect(registry.url)">
-              <span tuiAvatar><img [storeIcon]="registry.url" /></span>
-              <span tuiTitle>
-                {{ registry.name }}
-                <span tuiSubtitle>{{ registry.url }}</span>
-              </span>
-              @if (registry.selected) {
-                <tui-icon icon="@tui.check" />
+          @for (registry of d.standard; track registry.url) {
+            <ng-container
+              *ngTemplateOutlet="row; context: { $implicit: registry }"
+            />
+          }
+          @if (manageRegistriesLink()) {
+            @for (registry of d.custom; track registry.url) {
+              @if ($first) {
+                <hr />
               }
-            </button>
-          }
-          @if (!manageRegistriesLink() && d.unsaved; as url) {
-            <hr />
-            <button tuiOption (click)="saveCurrent(url)">
-              <span tuiAvatar><img [storeIcon]="url" /></span>
-              <span tuiTitle>
-                {{ fetched()?.info?.name || url }}
-                <span tuiSubtitle>{{ 'Save this registry' | i18n }}</span>
-              </span>
-              <tui-icon icon="@tui.bookmark" />
-            </button>
-          }
-          @for (
-            registry of manageRegistriesLink() ? [] : d.custom;
-            track registry.url
-          ) {
-            @if ($first) {
-              <hr />
+              <ng-container
+                *ngTemplateOutlet="row; context: { $implicit: registry }"
+              />
             }
-            <button
-              tuiOption
-              (click)="connect(registry.url)"
-              (keydown.backspace)="delete(registry.url)"
-              (keydown.delete)="delete(registry.url)"
-            >
-              <span tuiAvatar><img [storeIcon]="registry.url" /></span>
-              <span tuiTitle>
-                {{ registry.name }}
-                <span tuiSubtitle>{{ registry.url }}</span>
-              </span>
-              <tui-icon icon="@tui.trash" (click.stop)="delete(registry.url)" />
-              @if (registry.selected) {
-                <tui-icon icon="@tui.check" />
+          } @else {
+            <hr />
+            <div class="g-title">
+              <small>{{ 'Custom' | i18n }}</small>
+              @if (d.custom[0]; as custom) {
+                <button
+                  tuiButton
+                  size="xs"
+                  appearance="secondary-grayscale"
+                  (click)="viewCustom(custom.url)"
+                >
+                  {{ 'Change' | i18n }}
+                </button>
               }
-            </button>
+            </div>
+            @for (registry of d.custom; track registry.url) {
+              <ng-container
+                *ngTemplateOutlet="row; context: { $implicit: registry }"
+              />
+            } @empty {
+              <button tuiOption (click)="viewCustom()">
+                <tui-icon icon="@tui.search" />
+                {{ 'Enter a domain or URL' | i18n }}
+              </button>
+            }
           }
         </tui-data-list>
       }
     </button>
+    <ng-template #row let-registry>
+      <button tuiOption (click)="connect(registry.url)">
+        <span tuiAvatar><img [storeIcon]="registry.url" /></span>
+        <span tuiTitle>
+          {{ registry.name }}
+          <span tuiSubtitle>{{ registry.url }}</span>
+        </span>
+        @if (registry.selected) {
+          <tui-icon icon="@tui.check" />
+        }
+      </button>
+    </ng-template>
   `,
   styles: `
     :host {
@@ -154,6 +145,7 @@ import { StoreIconDirective } from './store-icon.directive'
     }
   `,
   imports: [
+    NgTemplateOutlet,
     StoreIconDirective,
     RouterLink,
     TuiButton,
@@ -177,93 +169,86 @@ export class MarketplaceRegistrySelectComponent {
   protected open = false
   protected readonly breakpoint = inject(TUI_BREAKPOINT)
 
-  protected readonly fetched = toSignal(this.marketplace.currentRegistry$)
-
-  protected readonly data = toSignal(
+  private readonly selection = toSignal(
     combineLatest([
       this.marketplace.registries$,
       this.marketplace.currentRegistryUrl$,
-    ]).pipe(
-      map(([registries, currentUrl]) => {
-        const withSelected = registries.map(s => ({
-          ...s,
-          selected: sameUrl(s.url, currentUrl),
-        }))
-        const current = withSelected.find(s => s.selected)
-
-        return {
-          currentUrl,
-          current,
-          registries: withSelected,
-          standard: withSelected.slice(0, 2),
-          custom: withSelected.slice(2),
-          unsaved: current ? null : currentUrl,
-        }
-      }),
-    ),
+    ]),
   )
 
-  async connect(url: string): Promise<void> {
+  /**
+   * Identifies the selected URL, including unsaved registries.
+   * StartOS keeps saved registries selectable alongside an unsaved selection.
+   */
+  protected readonly data = computed(() => {
+    const selection = this.selection()
+    if (!selection) return
+
+    const [registries, currentUrl] = selection
+    const withSelected = registries.map(s => ({
+      ...s,
+      selected: sameUrl(s.url, currentUrl),
+    }))
+
+    const saved = withSelected.find(s => s.selected)
+    const current = saved || {
+      url: currentUrl,
+      name: currentUrl,
+      selected: true,
+    }
+    const custom = withSelected.filter(s => !isDefaultRegistry(s.url))
+
+    return {
+      current,
+      standard: withSelected.filter(s => isDefaultRegistry(s.url)),
+      custom: saved
+        ? custom
+        : [...(this.manageRegistriesLink() ? custom : []), current],
+    }
+  })
+
+  /** Reselecting the active registry repairs its URL without reloading the catalog. */
+  async connect(rawUrl: string): Promise<void> {
     this.open = false
 
-    if (sameUrl(url, this.data()?.current?.url)) return
+    const current = this.data()?.current
+    if (current && sameUrl(rawUrl, current.url)) {
+      this.navigateRegistry(current.url)
+      return
+    }
 
     this.tasks.run(async () => {
+      const url = registryUrl(rawUrl)
       await this.marketplace.connect(url)
-      this.router.navigate([], {
-        queryParams: { registry: url },
-        queryParamsHandling: 'merge',
-      })
+      this.navigateRegistry(url)
     }, 'Changing registry')
   }
 
-  async add(): Promise<void> {
+  private navigateRegistry(url: string): void {
+    this.router.navigate([], {
+      queryParams: { registry: url },
+      queryParamsHandling: 'merge',
+    })
+  }
+
+  async viewCustom(initialValue = ''): Promise<void> {
     this.open = false
 
     const rawUrl = await firstValueFrom(
       this.dialog
         .openPrompt<string>({
-          label: 'Add Custom Registry',
+          label: 'View custom registry',
           data: {
             message: 'The domain or URL of the custom registry',
             label: 'URL',
             placeholder: 'e.g. registry.example.com',
-            buttonText: 'Save',
+            buttonText: 'View',
+            initialValue,
           },
         })
         .pipe(defaultIfEmpty('')),
     )
 
-    if (!rawUrl) return
-
-    this.tasks.run(
-      async () => await this.connect(await this.marketplace.add(rawUrl)),
-      'Validating registry',
-    )
-  }
-
-  async saveCurrent(url: string): Promise<void> {
-    this.open = false
-    this.tasks.run(async () => await this.marketplace.add(url), 'Saving')
-  }
-
-  delete(url: string): void {
-    this.dialog
-      .openConfirm({
-        label: 'Confirm',
-        size: 's',
-        data: {
-          content: 'Are you sure you want to delete this registry?',
-          yes: 'Delete',
-          no: 'Cancel',
-        },
-      })
-      .pipe(filter(Boolean))
-      .subscribe(() =>
-        this.tasks.run(
-          async () => await this.marketplace.delete(url),
-          'Deleting',
-        ),
-      )
+    if (rawUrl) this.connect(rawUrl)
   }
 }

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import '@angular/compiler'
-import { createEnvironmentInjector, runInInjectionContext } from '@angular/core'
+import {
+  createEnvironmentInjector,
+  runInInjectionContext,
+  signal,
+} from '@angular/core'
 import { BehaviorSubject, of } from 'rxjs'
 import { loadTypeScript } from './typescript-loader.mjs'
 
@@ -12,7 +16,11 @@ const classes = (path, names, extra = '') =>
     names.map(name => `export class ${name} {}`).join('\n') + extra,
   )
 classes('patch-db-client', ['PatchDB'])
-classes('@start9labs/shared', ['i18nPipe', 'TaskService'])
+classes(
+  '@start9labs/shared',
+  ['i18nPipe', 'TaskService'],
+  `export { isDefaultRegistry } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/types/workspace-config.ts', import.meta.url).href)};`,
+)
 classes(
   '@start9labs/marketplace',
   ['StoreIconDirective', 'RegistryConnectionStatus', 'RegistryStatePipe'],
@@ -20,8 +28,8 @@ classes(
 )
 classes(
   '@taiga-ui/core',
-  ['TuiButton', 'TuiCell', 'TuiIcon', 'TuiNotification', 'TuiTitle'],
-  ';export const TUI_ICON_START=Symbol();export const tuiButtonOptionsProvider=()=>[];',
+  ['TuiButton', 'TuiCell', 'TuiIcon', 'TuiLink', 'TuiNotification', 'TuiTitle'],
+  ';export const TUI_ICON_START=Symbol();export const TUI_BREAKPOINT=Symbol();export const tuiButtonOptionsProvider=()=>[];',
 )
 classes('@taiga-ui/kit', [
   'TuiAvatar',
@@ -29,7 +37,6 @@ classes('@taiga-ui/kit', [
   'TuiFade',
   'TuiSkeleton',
 ])
-classes('@ng-web-apis/platform', [], 'export const WA_IS_MOBILE=Symbol();')
 for (const [file, name] of [
   ['hidden-updates', 'HiddenUpdatesService'],
   ['local-packages', 'LocalPackagesService'],
@@ -60,7 +67,7 @@ boundaries.set(
 )
 loadTypeScript(boundaries)
 const { PatchDB } = await import('patch-db-client')
-const { WA_IS_MOBILE } = await import('@ng-web-apis/platform')
+const { TUI_BREAKPOINT } = await import('@taiga-ui/core')
 const { HiddenUpdatesService } =
   await import('src/app/services/hidden-updates.service')
 const { LocalPackagesService } =
@@ -90,7 +97,10 @@ function fixture(t, mobile = false) {
   })
   const local = new BehaviorSubject({})
   const injector = createEnvironmentInjector([
-    { provide: WA_IS_MOBILE, useValue: mobile },
+    {
+      provide: TUI_BREAKPOINT,
+      useValue: signal(mobile ? 'mobile' : 'desktopLarge'),
+    },
     {
       provide: MarketplaceService,
       useValue: { registries$: hosts, requestErrors$: errors },
@@ -117,33 +127,48 @@ function fixture(t, mobile = false) {
   }
 }
 
-test('registry errors replace the navigation count without dropping retained update rows', t => {
+test('registry errors warn on System and Registries while the Updates count stays', t => {
   const f = fixture(t)
   const badges = f.make(BadgeService)
-  const counts = [],
-    warnings = []
+  const latest = {}
+  const watch = (key, source) =>
+    source.subscribe(value => (latest[key] = value))
   const subscriptions = [
-    badges.getCount('updates').subscribe(value => counts.push(value)),
-    badges.getWarning('updates').subscribe(value => warnings.push(value)),
+    watch('count', badges.getCount('updates')),
+    watch('updates', badges.getWarning('updates')),
+    watch('system', badges.getWarning('system')),
+    watch('registries', badges.getWarning('registries')),
   ]
   t.after(() =>
     subscriptions.forEach(subscription => subscription.unsubscribe()),
   )
-  assert.equal(counts.at(-1), 1)
-  assert.equal(warnings.at(-1), false)
+  assert.deepEqual(latest, {
+    count: 1,
+    updates: false,
+    system: false,
+    registries: false,
+  })
   f.errors.next(['https://two.test/'])
-  assert.equal(counts.at(-1), 0)
-  assert.equal(warnings.at(-1), true)
+  assert.deepEqual(latest, {
+    count: 1,
+    updates: false,
+    system: true,
+    registries: true,
+  })
   f.refined.next({
     marketplace: {
       'https://one.test/': { packages: [{ id: 'one' }, { id: 'two' }] },
     },
     pending: new Set(),
   })
-  assert.equal(counts.at(-1), 0)
+  assert.equal(latest.count, 2)
   f.errors.next([])
-  assert.equal(counts.at(-1), 2)
-  assert.equal(warnings.at(-1), false)
+  assert.deepEqual(latest, {
+    count: 2,
+    updates: false,
+    system: false,
+    registries: false,
+  })
 })
 
 test('registry availability revisions update the selected table without selecting the first registry', t => {
@@ -175,4 +200,24 @@ test('mobile registry selection stays empty until a row is selected and can retu
   assert.equal(page.current().url, 'https://two.test/')
   page.selectedRegistry.set('')
   assert.equal(page.current(), null)
+})
+
+test('the sidebar heads the default registries apart from custom ones', t => {
+  const f = fixture(t)
+  const page = f.make(Updates)
+  const groups = () =>
+    page.groups().map(({ title, hosts }) => [title, hosts.map(h => h.name)])
+  assert.deepEqual(groups(), [[null, ['One', 'Two']]])
+  const row = (url, name) => ({ url, name, status: 'connected' })
+  f.hosts.next([
+    row('https://registry.start9.com/', 'Start9'),
+    row('https://community-registry.start9.com/', 'Community'),
+    row('https://alpha-registry-x.start9.com/', 'Alpha'),
+    row('https://beta-registry.start9.com/', 'Beta'),
+  ])
+  assert.deepEqual(groups(), [
+    ['Default Registries', ['Start9', 'Community']],
+    ['Custom Registries', ['Alpha', 'Beta']],
+  ])
+  assert.equal(page.current().name, 'Start9')
 })

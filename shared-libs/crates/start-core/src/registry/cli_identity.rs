@@ -6,6 +6,7 @@ use url::Url;
 use crate::prelude::*;
 use crate::sign::AnyVerifyingKey;
 use crate::sign::fingerprint::fingerprint;
+use crate::sign::session::PeerIdentity;
 use crate::util::io::{AtomicFile, maybe_read_file_to_string};
 
 fn target(url: &Url, address: &str) -> Result<Url, Error> {
@@ -35,8 +36,12 @@ pub(super) async fn observe(
     directory: &Path,
     url: &Url,
     address: &str,
-    peer: &AnyVerifyingKey,
+    peer: &PeerIdentity,
 ) -> Vec<String> {
+    if peer.temporary {
+        return Vec::new();
+    }
+    let peer = &peer.key;
     let target = match target(url, address) {
         Ok(target) => target,
         Err(error) => {

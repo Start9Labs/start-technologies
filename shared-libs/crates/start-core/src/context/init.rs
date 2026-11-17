@@ -123,8 +123,8 @@ impl SessionContext for InitContext {
     }
 }
 impl SignatureAuthContext for InitContext {
-    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
-        Ok(self.startup_rpc.identity.clone())
+    fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error> {
+        self.startup_rpc.identity()
     }
     fn replay_check(&self) -> RequestReplayCheck {
         RequestReplayCheck::new(&self.0, |seed| Some(Self(seed, None)))
@@ -181,13 +181,17 @@ impl InitContext {
     }
 
     #[instrument(skip_all)]
-    pub async fn init(cfg: &ServerConfig, dns: Arc<DnsController>) -> Result<Self, Error> {
+    pub async fn init(
+        cfg: &ServerConfig,
+        dns: Arc<DnsController>,
+        identity: Option<crate::context::StartupIdentity>,
+    ) -> Result<Self, Error> {
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
         let mut progress = FullProgressTracker::new();
         progress.enable_logging(true);
         Ok(Self(
             Arc::new(InitContextSeed {
-                startup_rpc: StartupRpc::new(),
+                startup_rpc: StartupRpc::new(identity),
                 dns,
                 config: cfg.clone(),
                 result: watch::channel(None).0,

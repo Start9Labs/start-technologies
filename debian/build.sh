@@ -92,7 +92,7 @@ find . -type f -not -path "./DEBIAN/*" -exec md5sum {} \; | sort -k 2 | sed 's/\
 cd ../..
 
 cd dpkg-workdir
-dpkg-deb --root-owner-group -Zzstd -b $BASENAME
+dpkg-deb --root-owner-group -Zzstd -z3 -b $BASENAME
 mkdir -p ../results
 mv $BASENAME.deb ../results/$BASENAME.deb
 rm -rf $BASENAME

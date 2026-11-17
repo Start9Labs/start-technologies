@@ -2,6 +2,45 @@
 
 All notable changes to `start-registry` (the Start Registry server) are documented here. This project is versioned **independently** (starting at `1.0.0`); its version lives in `Cargo.toml`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.6.0]
+
+### Added
+
+- Edit OS release metadata with `os version edit`, preserving omitted fields, assets, and authorized signers.
+
+- Restrict package metadata and icons to admins, publishers, and selected readers, with live subscription revocation and CLI access controls. Reader lists remain admin-only. Public icons remain available when a request signature is rejected. Registry clients can multiplex filtered index subscriptions and ordinary RPC calls on one WebSocket.
+
+- Mirror another registry with `mirror-of`. The mirror follows the upstream index and its package icons live and rejects index changes. Removing the setting promotes it to a writable registry with the synchronized index.
+
+### Changed
+
+- Authoritative registries list package signatures from registered keys and remove other signatures from existing listings on startup. Mirrors preserve the signatures supplied by their upstream.
+
+- Stream OS, package, and signer metadata through opt-in `db.subscribe` streams, with bounded pending revisions and OS-version-compatible views shared across subscribers.
+
+- Reject invalid native encrypted-admission CBOR representations before field interpretation.
+
+- Authenticate client identities through encrypted WebSocket sessions while preserving legacy HTTP request-header authentication.
+- Persist the server's handshake signing key in PatchDB.
+- Reject unsupported parameter shapes without dropping an authenticated connection.
+- Bound replay-cache memory when clock synchronization is unavailable.
+- Preserve request IDs on middleware errors.
+- Keep encrypted browser RPC available over HTTP/2 connections.
+- Cancel timed-out or disposed WebSocket requests without interrupting sibling calls, and release pending handlers when the socket closes.
+
+### Removed
+
+- Remove the unused `headline` field from OS version metadata and publication. Publishers must omit the headline argument when adding versions and use an updated CLI. Older devices continue receiving a synthesized headline for update discovery.
+
+### Fixed
+
+- Preserve floating-point RPC parameter precision when decoding requests.
+
+### Security
+
+- Bound incoming JSON-RPC request bodies to 1 MiB before authentication and decoding to prevent unbounded memory use. Inline registry icons must fit within this budget after encoding. Oversized-request errors remain readable by browser clients.
+- Bound incoming legacy subscription frames and blocked writes while allowing large outgoing indexes.
+
 ## [1.5.0]
 
 ### Added

@@ -45,10 +45,19 @@ const FILTER = ['services', 'system', 'marketplace']
         icon="@tui.settings"
         routerLink="/system"
         routerLinkActive
-        [badge]="badge()"
+        [badge]="warning() ? 0 : badge()"
         (isActiveChange)="update()"
       >
         {{ 'System' | i18n }}
+        @if (warning()) {
+          <tui-icon
+            icon="@tui.triangle-alert"
+            class="warning"
+            role="img"
+            [attr.aria-label]="'Warning' | i18n"
+            [attr.aria-hidden]="false"
+          />
+        }
       </a>
       <button
         tuiTabBarItem
@@ -104,6 +113,16 @@ const FILTER = ['services', 'system', 'marketplace']
       opacity: 0.7;
     }
 
+    /* Occupies the tab badge's position. */
+    .warning {
+      position: absolute;
+      inset-block-start: 0.125rem;
+      inset-inline-start: calc(50% + 1rem);
+      transform: translateX(-50%);
+      font-size: 1.125rem;
+      color: var(--tui-status-warning);
+    }
+
     .item {
       @include taiga.button-clear();
 
@@ -140,6 +159,9 @@ export class TabsComponent {
   readonly menu = getMenu().filter(item => !FILTER.includes(item.routerLink))
   readonly badge = toSignal(inject(BadgeService).getCount('system'), {
     initialValue: 0,
+  })
+  readonly warning = toSignal(inject(BadgeService).getWarning('system'), {
+    initialValue: false,
   })
 
   readonly all = computed(() =>
