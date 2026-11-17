@@ -359,7 +359,6 @@ export default {
   419: 'Ver detalles',
   421: 'Servicios que dependen de',
   422: 'ya no funcionarán correctamente y podrían fallar.',
-  423: 'Solicitud fallida',
   424: '¡Todos los servicios están actualizados!',
   425: 'Ejecutar',
   426: 'La acción solo se puede ejecutar cuando el servicio está',
@@ -1118,4 +1117,7 @@ export default {
   1321: 'Seleccione «Reboot» para completar la inscripción del firmware.',
   1322: 'Desbloquear su servidor',
   1323: 'Abra este servidor mediante su dirección HTTPS de confianza antes de introducir su contraseña.',
+  1324: 'Servidor inaccesible',
+  1325: 'Es posible que los listados estén desactualizados',
+  1326: 'StartOS no puede conectar con este registro en este momento.',
 } satisfies i18n

@@ -359,7 +359,6 @@ export default {
   419: 'Voir les détails',
   421: 'Services dépendants de',
   422: 'ne fonctionneront plus correctement et pourraient planter.',
-  423: 'Échec de la requête',
   424: 'Tous les services sont à jour !',
   425: 'Exécuter',
   426: 'Action possible uniquement lorsque le service est',
@@ -1118,4 +1117,7 @@ export default {
   1321: 'Sélectionnez « Reboot » pour terminer l’inscription du micrologiciel.',
   1322: 'Déverrouiller votre serveur',
   1323: 'Ouvrez ce serveur à son adresse HTTPS de confiance avant de saisir votre mot de passe.',
+  1324: 'Serveur injoignable',
+  1325: 'Les listes peuvent ne pas être à jour',
+  1326: 'StartOS ne parvient pas à joindre ce registre pour le moment.',
 } satisfies i18n

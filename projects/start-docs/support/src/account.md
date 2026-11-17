@@ -13,11 +13,13 @@ If you can't find it, choose **What is an access code, and where do I find mine?
 
 ## Creating an Account
 
-1. Open [support.start9.com](https://support.start9.com) and choose **Create an account**.
-1. Enter your access code and your email, and choose **Email me a sign-up link**.
-1. Open the link in the email, choose a name and a password of at least 12 characters, and choose **Create account**.
+1. Choose **Create your account** in your access code email, which fills in your code. Without the email, open [support.start9.com](https://support.start9.com), choose **Create an account** and enter your access code.
+1. Enter your email and choose the button below it.
+   - **Continue** appears when you came from the access code email. With the address that email was sent to, it takes you straight to the next step; with any other address, it emails that address a sign-up link to open.
+   - **Email me a sign-up link** emails you a link to open.
+1. Choose a name and a password of at least 12 characters, and choose **Create account**.
 
-Creating an account means agreeing to the [Terms of Service](https://support.start9.com/terms) and the [Privacy Policy](https://support.start9.com/privacy). A short welcome follows the first sign-in.
+Creating an account means agreeing to the [Terms of Service](https://support.start9.com/terms) and the [Privacy Policy](https://support.start9.com/privacy). A welcome email follows, and a short welcome after the first sign-in.
 
 ## Signing In and Out
 
@@ -31,7 +33,7 @@ An emailed link works once and expires. If a link says it has expired, was alrea
 
 ## Email
 
-Start9 Support emails you only about your account: sign-up and password links, and a recovered access code. Chats are never emailed.
+Start9 Support emails you only about your account: sign-up and password links, a recovered access code, and a welcome once your account is created. Chats are never emailed.
 
 ## Deleting Your Account
 

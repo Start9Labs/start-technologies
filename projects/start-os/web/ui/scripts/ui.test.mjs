@@ -167,7 +167,7 @@ boundary('src/app/routes/portal/components/table.component', ['TableComponent'])
 boundary(
   'src/app/services/patch-db/patch-db-source',
   [],
-  'export const PATCH_CACHE = Symbol("patch cache");',
+  'export const PATCH_CACHE = Symbol("patch cache"); export const PATCH_LIVE = Symbol("patch live");',
 )
 boundary('src/app/services/config.service', ['ConfigService'])
 boundary('src/app/services/state.service', ['StateService'])
@@ -3068,6 +3068,8 @@ const { MarketplaceControlsComponent: Controls } =
   await import('src/app/routes/portal/routes/marketplace/components/controls.component')
 const { MarketplaceService } =
   await import('src/app/services/marketplace.service')
+const { ConnectionService } =
+  await import('src/app/services/connection.service')
 
 const pkg = {
   id: 'hello-world',
@@ -4045,6 +4047,7 @@ test('a late registry cache update cannot restore a removed registry', async t =
       { provide: StorageService, useValue: { get: () => null } },
       { provide: PackageIconService, useValue: {} },
       { provide: ErrorService, useValue: { handleError: assert.fail } },
+      { provide: ConnectionService, useValue: of(true) },
       {
         provide: ApiService,
         useValue: {
@@ -4091,6 +4094,120 @@ test('a late registry cache update cannot restore a removed registry', async t =
   await new Promise(setImmediate)
   assert.deepEqual(await firstValueFrom(service.registries$), [])
   assert.deepEqual(writes, [])
+})
+
+test('registry status keeps its last known observation while the server is disconnected', async t => {
+  const { Exver } = await import('@start9labs/shared')
+  const { StorageService } = await import('src/app/services/storage.service')
+  const { PackageIconService } =
+    await import('src/app/services/package-icon.service')
+  const connected = new BehaviorSubject(true)
+  const cache = new BehaviorSubject({
+    'https://registry.test/': {
+      status: 'error',
+      error: 'connection timed out',
+      info: { name: 'Test' },
+      packages: {},
+    },
+  })
+  const registries = of({ 'https://registry.test': 'Test' })
+  const injector = createEnvironmentInjector(
+    [
+      {
+        provide: PatchDB,
+        useValue: {
+          watch$: (...path) =>
+            path[0] === 'registryCache' ? cache : registries,
+        },
+      },
+      { provide: Exver, useValue: {} },
+      { provide: StorageService, useValue: { get: () => null } },
+      { provide: PackageIconService, useValue: {} },
+      { provide: ApiService, useValue: {} },
+      { provide: ConnectionService, useValue: connected },
+    ],
+    null,
+  )
+  t.after(() => injector.destroy())
+  const service = runInInjectionContext(
+    injector,
+    () => new MarketplaceService(),
+  )
+  service.currentRegistryUrl$.next('https://registry.test/')
+  const catalogs = []
+  const subscription = service.marketplace$.subscribe(m => catalogs.push(m))
+  t.after(() => subscription.unsubscribe())
+  const current = async () => firstValueFrom(service.currentRegistry$)
+
+  assert.deepEqual(await firstValueFrom(service.requestErrors$), [
+    'https://registry.test/',
+  ])
+  assert.equal((await current()).status, 'error')
+
+  connected.next(false)
+  const [registry] = await firstValueFrom(service.registries$)
+  assert.equal(registry.status, 'error')
+  assert.equal(registry.error, 'connection timed out')
+  assert.deepEqual(await firstValueFrom(service.requestErrors$), [
+    'https://registry.test/',
+  ])
+  assert.equal((await current()).status, 'error')
+  assert.equal(catalogs.length, 1)
+})
+
+test('header status separates offline, unreachable server, connecting, restarting and live', async t => {
+  const { STATUS } = await import('src/app/services/status.service')
+  const { NetworkService } = await import('src/app/services/network.service')
+  const { PATCH_LIVE } =
+    await import('src/app/services/patch-db/patch-db-source')
+  const network = new BehaviorSubject(true)
+  const reachable = new BehaviorSubject(null)
+  const state = Object.assign(new BehaviorSubject('running'), {
+    reachable$: reachable,
+  })
+  const live = new BehaviorSubject(false)
+  const statusInfo = new BehaviorSubject({
+    restarting: false,
+    shuttingDown: false,
+  })
+  const { ɵINJECTOR_SCOPE } = await import('@angular/core')
+  const injector = createEnvironmentInjector(
+    [
+      { provide: ɵINJECTOR_SCOPE, useValue: 'root' },
+      { provide: NetworkService, useValue: network },
+      { provide: StateService, useValue: state },
+      { provide: PATCH_LIVE, useValue: live },
+      { provide: PatchDB, useValue: { watch$: () => statusInfo } },
+    ],
+    null,
+  )
+  t.after(() => injector.destroy())
+  const status = injector.get(STATUS)
+  const connected = []
+  const subscription = injector
+    .get(ConnectionService)
+    .subscribe(value => connected.push(value))
+  t.after(() => subscription.unsubscribe())
+
+  assert.equal(status().message, 'Connecting')
+  reachable.next(false)
+  assert.equal(status().message, "Can't reach server")
+  reachable.next(true)
+  assert.equal(status().message, 'Connecting')
+  live.next(true)
+  assert.equal(status().message, 'Connected')
+  live.next(false)
+  assert.equal(state.value, 'running')
+  assert.equal(status().message, 'Connecting')
+  reachable.next(false)
+  assert.equal(status().message, "Can't reach server")
+  statusInfo.next({ restarting: true, shuttingDown: false })
+  assert.equal(status().message, 'Restarting')
+  statusInfo.next({ restarting: false, shuttingDown: true })
+  assert.equal(status().message, 'Shutting down')
+  network.next(false)
+  assert.equal(status().message, 'No Internet')
+  assert.deepEqual(connected, [false, true, false])
 })
 
 test('registry removal uses the authoritative endpoint, clears a matching selected registry, and reports unoffered keys', async () => {
@@ -4270,6 +4387,7 @@ const registryEntry = (version = '1.0.0:0', status = 'connected') => ({
 
 function marketplaceFixture(t, entries = {}) {
   const source = new Subject()
+  const connection = new BehaviorSubject(true)
   const cache = new BehaviorSubject({
     id: 1,
     value: {
@@ -4287,6 +4405,7 @@ function marketplaceFixture(t, entries = {}) {
   const iconRequests = []
   const iconResponses = []
   const storage = new Map()
+  const routes = []
   const routeParams = new BehaviorSubject(
     convertToParamMap({ registry: 'https://registry.test' }),
   )
@@ -4304,7 +4423,10 @@ function marketplaceFixture(t, entries = {}) {
       provide: ConfigService,
       useValue: { defaultRegistry: 'https://registry.test' },
     },
-    { provide: Router, useValue: { navigate: () => {} } },
+    {
+      provide: Router,
+      useValue: { navigate: (_, extras) => routes.push(extras?.queryParams) },
+    },
     { provide: ActivatedRoute, useValue: { queryParamMap: routeParams } },
     {
       provide: TaskService,
@@ -4319,6 +4441,7 @@ function marketplaceFixture(t, entries = {}) {
       provide: PackageIconService,
       useFactory: () => new ProductionPackageIconService(),
     },
+    { provide: ConnectionService, useValue: connection },
     { provide: MarketplaceService, useFactory: () => new MarketplaceService() },
     {
       provide: ApiService,
@@ -4366,6 +4489,10 @@ function marketplaceFixture(t, entries = {}) {
   })
   return {
     service,
+    injector,
+    source,
+    cache,
+    connection,
     queries,
     responses,
     refreshes,
@@ -4373,6 +4500,7 @@ function marketplaceFixture(t, entries = {}) {
     iconRequests,
     iconResponses,
     storage,
+    routes,
     routeParams,
     makePage: () =>
       runInInjectionContext(injector, () => new MarketplacePage()),
@@ -4615,6 +4743,58 @@ test('unsaved registry navigation requires explicit connection and malformed URL
   assert.equal(f.connections.length, 1)
 })
 
+test('a remembered registry the server no longer saves falls back to the default', async t => {
+  const f = marketplaceFixture(t)
+  f.storage.set('selectedRegistry', 'https://removed.test/')
+  f.routeParams.next(convertToParamMap({}))
+  f.makePage()
+  await tick()
+  assert.deepEqual(f.routes.at(-1), { registry: 'https://registry.test' })
+  assert.equal(f.storage.get('selectedRegistry'), null)
+
+  f.storage.set('selectedRegistry', 'https://registry.test/')
+  f.routeParams.next(convertToParamMap({}))
+  await tick()
+  assert.deepEqual(f.routes.at(-1), { registry: 'https://registry.test/' })
+  assert.equal(f.storage.get('selectedRegistry'), 'https://registry.test/')
+})
+
+test('a pending remembered-registry fallback yields to an explicit route selection', async t => {
+  const f = marketplaceFixture(t)
+  const dump = f.cache.value
+  f.cache.next({ id: 0, value: {} })
+  f.storage.set('selectedRegistry', 'https://removed.test/')
+  f.routeParams.next(convertToParamMap({}))
+  const page = f.makePage()
+  assert.deepEqual(f.routes, [])
+
+  f.routeParams.next(convertToParamMap({ registry: 'https://explicit.test/' }))
+  f.source.next([dump])
+  await tick()
+  assert.equal(page.selectedRegistry(), 'https://explicit.test/')
+  assert.deepEqual(f.routes, [])
+  assert.equal(f.storage.get('selectedRegistry'), 'https://removed.test/')
+})
+
+test('destroying the marketplace page cancels its pending remembered-registry fallback', async t => {
+  const f = marketplaceFixture(t)
+  const dump = f.cache.value
+  f.cache.next({ id: 0, value: {} })
+  f.storage.set('selectedRegistry', 'https://removed.test/')
+  f.routeParams.next(convertToParamMap({}))
+  const pageInjector = createEnvironmentInjector([], f.injector)
+  t.after(() => {
+    if (!pageInjector.destroyed) pageInjector.destroy()
+  })
+  runInInjectionContext(pageInjector, () => new MarketplacePage())
+  pageInjector.destroy()
+
+  f.source.next([dump])
+  await tick()
+  assert.deepEqual(f.routes, [])
+  assert.equal(f.storage.get('selectedRegistry'), 'https://removed.test/')
+})
+
 test('marketplace lists and metadata stream from canonical cache keys without navigation fetches', async t => {
   const f = marketplaceFixture(t)
   const stores = f.watch(f.service.marketplace$)
@@ -4651,6 +4831,27 @@ test('marketplace lists and metadata stream from canonical cache keys without na
   f.replace('/serverInfo/registries', {})
   assert.deepEqual(stores.at(-1), {})
   assert.deepEqual(f.queries, [])
+})
+
+test('connection changes do not refetch an unchanged exact package query', async t => {
+  const entry = registryEntry()
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  const values = f.watch(
+    f.service.fetchPackage$(
+      'https://registry.test/',
+      'example',
+      '1.0.0:0',
+      null,
+    ),
+  )
+  assert.equal(f.queries.length, 1)
+  f.responses[0].resolve(entry.packages.example)
+  await tick()
+  assert.equal(values.at(-1).version, '1.0.0:0')
+  f.connection.next(false)
+  assert.equal(f.queries.length, 1)
+  f.connection.next(true)
+  assert.equal(f.queries.length, 1)
 })
 
 test('exact/source package queries wait for and track their registry cache, ignoring other registry changes and stale responses', async t => {
@@ -4694,26 +4895,170 @@ test('exact/source package queries wait for and track their registry cache, igno
   assert.equal(values.at(-1).version, '1.0.0:0')
 })
 
-test('browser bootstrap accepts snapshots saved before registry caches existed', async t => {
-  const { LocalStorageBootstrap } =
-    await import('src/app/services/patch-db/local-storage-bootstrap')
-  const stored = {
-    ui: { registries: {} },
-    serverInfo: { version: '0.4.0.2' },
-    packageData: {},
+function fakeIndexedDb() {
+  let data = { values: new Map(), meta: new Map() }
+  const control = { fail: false, puts: [] }
+  const db = {
+    transaction(_, mode) {
+      const staged = { values: new Map(data.values), meta: new Map(data.meta) }
+      const tx = {
+        objectStore: name => ({
+          get: key => {
+            const request = { result: staged[name].get(key) }
+            queueMicrotask(() => request.onsuccess?.())
+            return request
+          },
+          getAll: () => ({ result: [...staged[name].values()] }),
+          getAllKeys: () => ({ result: [...staged[name].keys()] }),
+          put: (value, key) => {
+            if (name === 'values') control.puts.push(key)
+            staged[name].set(key, structuredClone(value))
+          },
+          delete: key => staged[name].delete(key),
+          clear: () => staged[name].clear(),
+        }),
+      }
+      queueMicrotask(() => {
+        queueMicrotask(() => {
+          if (mode === 'readwrite' && control.fail) {
+            control.fail = false
+            tx.error = new Error('quota')
+            tx.onerror()
+          } else {
+            if (mode === 'readwrite') data = staged
+            tx.oncomplete()
+          }
+        })
+      })
+      return tx
+    },
   }
+  const win = {
+    indexedDB: {
+      open: () => {
+        const request = {}
+        queueMicrotask(() => {
+          request.result = db
+          request.onsuccess()
+        })
+        return request
+      },
+    },
+  }
+  return { win, control }
+}
+
+async function patchDbCache(t, win) {
+  const { PatchDbCache } =
+    await import('src/app/services/patch-db/patch-db-cache')
   const injector = createEnvironmentInjector([
-    { provide: StorageService, useValue: { get: () => stored } },
+    { provide: WA_WINDOW, useValue: win },
   ])
   t.after(() => injector.destroy())
-  const bootstrap = runInInjectionContext(
-    injector,
-    () => new LocalStorageBootstrap(),
-  )
-  assert.deepEqual(bootstrap.init().value, {
-    ...stored,
-    registryCache: {},
-    osUpdateCache: null,
+  return runInInjectionContext(injector, () => new PatchDbCache())
+}
+
+test('patch cache rewrites only replaced top-level values', async t => {
+  const { win, control } = fakeIndexedDb()
+  t.mock.method(console, 'error', () => {})
+  const writer = await patchDbCache(t, win)
+  assert.deepEqual(await writer.read(), { id: 0, value: {} })
+  writer.epoch = 'boot'
+  await writer.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
+  assert.deepEqual(control.puts, ['ui', 'packageData'])
+
+  const reader = await patchDbCache(t, win)
+  const cached = await reader.read()
+  assert.deepEqual(cached, {
+    id: 3,
+    value: { ui: { a: 1 }, packageData: {} },
   })
-  assert.equal('registryCache' in stored, false)
+  assert.equal(reader.epoch, 'boot')
+  control.puts = []
+  await reader.write({
+    id: 4,
+    value: { ...cached.value, packageData: { x: 1 } },
+  })
+  assert.deepEqual(control.puts, ['packageData'])
+  await reader.write({ id: 5, value: { ui: cached.value.ui } })
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 5,
+    value: { ui: { a: 1 } },
+  })
+})
+
+test('patch cache keeps a complete snapshot when another tab advances the stored revision', async t => {
+  const { win } = fakeIndexedDb()
+  const fast = await patchDbCache(t, win)
+  const slow = await patchDbCache(t, win)
+  await fast.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
+  const cached = await slow.read()
+  await fast.write({
+    id: 5,
+    value: { ui: { a: 3 }, packageData: { x: 1 } },
+  })
+  const delayed = {
+    id: 4,
+    value: { ui: { a: 2 }, packageData: cached.value.packageData },
+  }
+  await slow.write(delayed)
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), delayed)
+})
+
+test('patch cache rewrites every key when another tab stored the same revision from another epoch', async t => {
+  const { win } = fakeIndexedDb()
+  const rebooted = await patchDbCache(t, win)
+  const stale = await patchDbCache(t, win)
+  rebooted.epoch = 'boot-1'
+  await rebooted.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
+  const cached = await stale.read()
+  rebooted.epoch = 'boot-2'
+  await rebooted.write({
+    id: 3,
+    value: { ui: { a: 9 }, packageData: { x: 9 } },
+  })
+  const delayed = {
+    id: 4,
+    value: { ui: { a: 2 }, packageData: cached.value.packageData },
+  }
+  await stale.write(delayed)
+  const reader = await patchDbCache(t, win)
+  assert.deepEqual(await reader.read(), delayed)
+  assert.equal(reader.epoch, 'boot-1')
+})
+
+test('patch cache restores every key after another tab clears the snapshot', async t => {
+  const { win } = fakeIndexedDb()
+  const active = await patchDbCache(t, win)
+  const other = await patchDbCache(t, win)
+  const value = { ui: { a: 1 }, packageData: { x: 1 } }
+  await active.write({ id: 3, value })
+  await other.clear()
+  const next = { id: 4, value: { ...value, ui: { a: 2 } } }
+  await active.write(next)
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), next)
+})
+
+test('patch cache discards its snapshot after a failed write and clears on demand', async t => {
+  const { win, control } = fakeIndexedDb()
+  t.mock.method(console, 'error', () => {})
+  const cache = await patchDbCache(t, win)
+  cache.epoch = 'boot'
+  const value = { ui: { a: 1 }, packageData: {} }
+  await cache.write({ id: 3, value })
+  control.fail = true
+  await cache.write({ id: 4, value: { ...value, ui: { a: 2 } } })
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 0,
+    value: {},
+  })
+  control.puts = []
+  await cache.write({ id: 5, value })
+  assert.deepEqual(control.puts, ['ui', 'packageData'])
+  await cache.clear()
+  assert.equal(cache.epoch, null)
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 0,
+    value: {},
+  })
 })

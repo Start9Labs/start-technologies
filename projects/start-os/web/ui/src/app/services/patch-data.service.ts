@@ -11,7 +11,8 @@ import { PatchDB } from 'patch-db-client'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { ConnectionService } from 'src/app/services/connection.service'
 import { OSService } from 'src/app/services/os.service'
-import { LocalStorageBootstrap } from './patch-db/local-storage-bootstrap'
+import { PatchDbCache } from './patch-db/patch-db-cache'
+import { PATCH_CACHE } from './patch-db/patch-db-source'
 
 @Injectable({
   providedIn: 'root',
@@ -19,12 +20,18 @@ import { LocalStorageBootstrap } from './patch-db/local-storage-bootstrap'
 export class PatchDataService extends Observable<void> {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly os = inject(OSService)
-  private readonly bootstrapper = inject(LocalStorageBootstrap)
+  private readonly cache = inject(PatchDbCache)
+  private readonly dump$ = inject(PATCH_CACHE)
   private readonly stream$ = inject(ConnectionService).pipe(
     filter(Boolean),
     switchMap(() =>
       merge(
-        this.patch.watch$().pipe(map(cache => this.bootstrapper.update(cache))),
+        this.dump$.pipe(
+          filter(({ id }) => !!id),
+          map(dump => {
+            this.cache.write(dump)
+          }),
+        ),
         this.patch.watch$('serverInfo', 'osRegistry').pipe(
           distinctUntilChanged(),
           map(registry => {

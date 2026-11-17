@@ -358,7 +358,6 @@ export const ENGLISH: Record<string, number> = {
   'View details': 419,
   'Services that depend on': 421,
   'will no longer work properly and may crash.': 422,
-  'Request failed': 423,
   'All services are up to date!': 424,
   'Run': 425, // as in, run a piece of software
   'Action can only be executed when service is': 426,
@@ -1119,4 +1118,7 @@ export const ENGLISH: Record<string, number> = {
   'Select "Reboot" to finish firmware enrollment.': 1321,
   'Unlock your server': 1322,
   'Open this server using its trusted HTTPS address before entering your password.': 1323,
+  "Can't reach server": 1324,
+  'Listings may be out of date': 1325,
+  "StartOS can't reach this registry right now.": 1326,
 }
