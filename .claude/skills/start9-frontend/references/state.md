@@ -48,11 +48,12 @@ DI level by workspace config (monorepo) or environment (brochure). Methods are *
 promise-based**; components call `await this.api.method(params)` and never touch HTTP.
 
 - **Monorepo = generated, typed JSON-RPC.** Components and pages call `ApiService` methods typed
-  from the generated `RPC.*` trees (StartWRT: its own `bindings.ts`) and read PatchDB through
-  `toSignal(patch.watch$(…))`. Transport, key admission, PatchDB fences and stream lifetimes
-  belong to `@start9labs/shared` and each app's API service. Their contracts are in
-  `shared-libs/ts-modules/ARCHITECTURE.md` and `projects/start-wrt/web/ARCHITECTURE.md`; read
-  those before touching an API service, and never reach past it from a component. RPC errors
+  from the generated `RPC.*` trees (StartWRT: its own `bindings.ts`); StartOS/Tunnel pages read
+  PatchDB through `toSignal(patch.watch$(…))`. Transport, key admission, PatchDB fences and
+  stream lifetimes belong to shared primitives and product API, auth, data-source and reconnect
+  services. Their contracts are in `shared-libs/ts-modules/ARCHITECTURE.md` and
+  `projects/start-wrt/web/ARCHITECTURE.md`; read those before changing these owners. Components
+  make RPC calls through the product API service, not directly through the transport. RPC errors
   surface as `RpcError` (`isRpcError(body)`), network loss as `{ code: 0 }`.
 - **start9-store = REST + Zod through a BFF**: frontend calls `/api/*` only (SSR server proxies
   it — same relative URLs in dev/prod/SSR); domain types + Zod schemas live in `shared/`;
