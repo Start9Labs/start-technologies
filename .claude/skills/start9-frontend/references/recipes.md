@@ -21,8 +21,13 @@ injectContext<TuiDialogContext<Result, Data>>()`; form via NNFB; footer with fla
 **Add a form** — follow forms.md top to bottom.
 
 **Add a table page** — `table[appX]` component with
-`hostDirectives: [{ directive: TuiTableDirective, inputs: ['sorter'] }]` or plain `<table>` +
-`tuiTh`; `@for (… track item.id)`; `[tuiSkeleton]` while loading; row actions as `tuiDropdown`
+`hostDirectives: [{ directive: TuiTableDirective, inputs: ['sorter'] }]` or `<table tuiTable>`
+with `th[tuiTh]`/`td[tuiTd]` (`@taiga-ui/addon-table`) — never hand-written cell padding,
+borders or fonts. A body `th[tuiTd]` sticks to the inline start on its own, so it is the row
+header of a table that scrolls sideways (pair it with `<th tuiTh [sticky]="true">`); a column
+that shouldn't stick is `td[tuiTd]`. `tuiTable` needs `border-collapse: separate`, so never
+re-collapse it. `@for (… track item.id)`; `[tuiSkeleton]` while loading; row actions as
+`tuiDropdown`
 
 - `<tui-data-list *tuiDropdown="let close">`; mobile via self-labeling cells
   (`[attr.data-label]`) restyled under `:host-context(tui-root._mobile)` — never a second DOM.

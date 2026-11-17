@@ -151,7 +151,7 @@ FormBuilder (not NonNullable)   new FormGroup(            : any
 provideAnimations           TuiAlertService               tuiFieldError
 ngOnInit                    setTimeout                    .subscribe( [outside allowed shapes]
 ::ng-deep                   !important                    letter-spacing / text-transform
-#[0-9a-f]{3,6} [outside the theme sheet]                  @media [outside documented divergences]
+#[0-9a-f]{3,6} [outside the theme sheet and swatch data]  @media [outside documented divergences]
 window. / document. / localStorage [outside infrastructure]
 providers: [ on a route     track $index [on entity lists]
 input<T | null>(null)       display: grid on :host of a wrapper around one child

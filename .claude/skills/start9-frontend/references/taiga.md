@@ -112,6 +112,8 @@ renders the selected value, `[filler]` ghost-texts. Dropdown content attaches wi
 `*tuiDropdown` **inside the textfield**; `tui-data-list-wrapper` takes `[items]` (`null` =
 loading state), `[itemContent]`, `[emptyContent]`; filter with `| tuiFilterByInput`;
 `[stringify]`/`[identityMatcher]` come from `TuiItemsHandlers`. `tuiChevron` adds the arrow.
+A `textarea[tuiTextarea]` grows between `[minRows]` and `[maxRows]`; its `[min]`/`[max]` are
+deprecated aliases.
 
 A date input opens a calendar only when its textfield holds one:
 `<tui-calendar *tuiDropdown />` beside `input[tuiInputDate]` (`TuiCalendar` arrives with the
@@ -185,6 +187,7 @@ Handles paste/drop/autofill/predictive keyboards; SSR-safe. Never keydown-regex 
 | Radio group                                     | `tuiGroup` of `tuiRadio` rows           | `tui-radio-list` + `[items]` + `[itemContent]`                                                                  |
 | Full-width row in a dialog/card/list            | `inline-size: 100%` + padding CSS       | `tuiCell` + `tuiCellStretch`; its gutter is in styling.md                                                       |
 | Copy button, rating, pagination, PIN, carousel… | write it                                | it's in kit — check the docs first                                                                              |
+| Wrapping row of chips/badges                    | `display: flex; flex-wrap: wrap; gap`   | `<div tuiItemGroup>` (layout)                                                                                   |
 | Pill, tag or labelled chip                      | padded span + border-radius CSS         | `tuiChip` / `tuiBadge` with `iconStart`/`iconEnd`; `iconStart="@img.<url>"` for a picture                       |
 | Inline code                                     | global `code { padding; background }`   | `<code tuiChip size="xs">`                                                                                      |
 | Icon in a tinted circle, logo tile              | sized div + `place-items: center`       | `tuiAvatar="@tui.x" appearance="negative"`; `<span tuiAvatar [round]="false"><img …></span>`                    |
