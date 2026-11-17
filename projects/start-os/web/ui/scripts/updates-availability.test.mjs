@@ -109,7 +109,7 @@ function fixture(t, mobile = false) {
     { provide: LocalPackagesService, useValue: local },
     { provide: HiddenUpdatesService, useValue: { effective$: of({}) } },
     { provide: NotificationService, useValue: { unreadCount$: of(0) } },
-    { provide: OSService, useValue: { updateAvailable$: of(false) } },
+    { provide: OSService, useValue: { showUpdate$: of(false) } },
     {
       provide: PatchDB,
       useValue: {

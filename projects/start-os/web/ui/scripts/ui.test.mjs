@@ -427,7 +427,7 @@ function fixture(t, cachedVersion, providers = []) {
   const availability = [],
     shown = []
   const subs = [
-    os.updateAvailable$.subscribe(value => availability.push(value)),
+    os.updateCandidates$.subscribe(value => availability.push(!!value.length)),
     os.showUpdate$.subscribe(value => shown.push(value)),
   ]
   t.after(() => {
@@ -479,6 +479,20 @@ function fixture(t, cachedVersion, providers = []) {
           id: ++revision,
           patch: [
             { op: 'replace', path: '/serverInfo/version', value: version },
+          ],
+        },
+      ])
+    },
+    restartFor(reason) {
+      source.next([
+        {
+          id: ++revision,
+          patch: [
+            {
+              op: 'replace',
+              path: '/serverInfo/statusInfo/restart',
+              value: reason,
+            },
           ],
         },
       ])
@@ -1163,6 +1177,17 @@ for (const gitHash of [runningGitHash, null, undefined]) {
     assert.equal(f.shown.at(-1), false)
   })
 }
+
+test('a downloaded update is no longer offered and blocks another update until restart', async t => {
+  const f = fixture(t, '0.4.0.2')
+  await f.load()
+  assert.equal(f.shown.at(-1), true)
+  assert.equal(await firstValueFrom(f.os.updateDisabled$), false)
+  f.restartFor('update')
+  assert.equal(f.availability.at(-1), true)
+  assert.equal(f.shown.at(-1), false)
+  assert.equal(await firstValueFrom(f.os.updateDisabled$), true)
+})
 
 test('a refreshed same-version listing clears availability when its image matches the running build', async t => {
   const f = fixture(t, '0.4.0.2')
