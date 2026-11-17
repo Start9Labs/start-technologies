@@ -225,6 +225,7 @@ const ICONS: Record<string, string> = {
     .scroll._blocked {
       display: grid;
       min-block-size: 100cqb;
+      padding-inline: 2rem;
     }
 
     .content {
@@ -264,7 +265,7 @@ const ICONS: Record<string, string> = {
         min-inline-size: 20rem;
       }
 
-      :is([tuiHeader], section) {
+      :is([tuiHeader], section, .scroll._blocked) {
         padding-inline: 1rem;
       }
 
