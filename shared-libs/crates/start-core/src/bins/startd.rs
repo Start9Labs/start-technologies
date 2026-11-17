@@ -61,7 +61,12 @@ async fn inner_main(
             let guid = tokio::fs::read_to_string("/media/startos/config/disk.guid").await?;
             crate::fde::unlock::require_cached_unlock(guid.trim()).await?;
         }
-        let init_ctx = InitContext::init(config, dns.clone()).await?;
+        let init_ctx = InitContext::init(
+            config,
+            dns.clone(),
+            crate::context::startup::startup_identity().await?,
+        )
+        .await?;
         let handle = init_ctx.progress.clone();
         let rpc_ctx_phases = InitRpcContextPhases::new(&handle);
         server.serve_ui_for(init_ctx.clone());
@@ -218,6 +223,7 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
                             },
                             e,
                             dns.clone(),
+                            crate::context::startup::diagnostic_identity().await,
                         )
                         .await?;
 

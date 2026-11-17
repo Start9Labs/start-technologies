@@ -40,6 +40,20 @@ impl AccountInfo {
         start_time: SystemTime,
         hostname: Option<ServerHostname>,
     ) -> Result<Self, Error> {
+        Self::new_with_identity(
+            password,
+            start_time,
+            hostname,
+            generate_server_identity_key().0,
+        )
+    }
+
+    pub fn new_with_identity(
+        password: &str,
+        start_time: SystemTime,
+        hostname: Option<ServerHostname>,
+        server_identity_key: ed25519_dalek::SigningKey,
+    ) -> Result<Self, Error> {
         let server_id = generate_id();
         let hostname = hostname.unwrap_or_else(generate_hostname);
         let root_ca_key = gen_nistp256()?;
@@ -48,7 +62,6 @@ impl AccountInfo {
         let ssh_key = ssh_key::PrivateKey::from(ssh_key::private::Ed25519Keypair::random(
             &mut crate::util::crypto::os_rng(),
         ));
-        let server_identity_key = generate_server_identity_key().0;
         Ok(Self {
             server_id,
             hostname,

@@ -16,6 +16,8 @@ The public `config/fde/enrollment.der` file reserves request authentication for 
 
 ## Bootstrap identity
 
+The locked RPC context retains one unpersisted temporary proof identity through its lifetime. Unverified disk configuration cannot select it. Explicit startup callers admit that scope; normal-product callers reject it without recording fingerprint history. The ordinary startup owner's unencrypted account/setup identity mirrors remain part of protected activation's credential-copy reclamation obligation.
+
 Boot attestation gates the private TLS identity used by the password-entry page and the network credentials needed to reach it. It does not release a data-volume password or data-decryption key. A failed attestation cannot silently enroll changed boot state or fall back to presenting the valid unlock identity.
 
 The measured execution chain must authenticate the kernel, initramfs, effective command line, rootfs and persistent overlay before bootstrap credentials are released. The authorized policy must bind the verified loader path: an alternate trusted kernel running an unsigned initramfs must not gain access by replaying public UKI or filesystem measurement events. Filesystem contents must remain integrity-protected after verification. Merely authenticating a filename or measuring a mutable directory does not satisfy this contract.

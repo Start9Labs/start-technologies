@@ -131,6 +131,7 @@ const network = error => assert.equal(error.code, 0)
 
 class LogicalSocket {
   static instances = []
+  static temporary = false
   readyState = 0
   writes = []
   closed = 0
@@ -141,6 +142,7 @@ class LogicalSocket {
       const event = new Event('open')
       Object.defineProperties(event, {
         peer: { value: `peer-${LogicalSocket.instances.indexOf(this)}` },
+        temporary: { value: LogicalSocket.temporary },
         target: { value: this },
       })
       this.onopen?.(event)
@@ -165,6 +167,7 @@ class LogicalSocket {
 async function streamFixture(context, window) {
   const result = await fixture(context, window)
   LogicalSocket.instances = []
+  LogicalSocket.temporary = false
   const opened = new ReplaySubject(1)
   const subject = webSocket({
     url: 'ws://fixture',
@@ -417,6 +420,51 @@ test('verified peer observation belongs to each operation, including reuse and a
   const next = LogicalSocket.instances[1]
   next.receive({ jsonrpc: '2.0', id: next.writes[0].id, result: 'fresh' })
   await fresh
+})
+
+test('normal RPC and streams reject temporary peers before sending any payload', async context => {
+  const { service, lease } = await streamFixture(context)
+  LogicalSocket.temporary = true
+  const observed = []
+  const options = { openObserver: { next: event => observed.push(event) } }
+  const denied = error => {
+    assert.equal(error.code, 0)
+    let cause = error
+    while (cause.cause) cause = cause.cause
+    assert.match(cause.message, /Temporary server identity/)
+    return true
+  }
+  await assert.rejects(service.message(body, options, lease), denied)
+  await assert.rejects(service.stream(body, lease, options), denied)
+  assert.equal(LogicalSocket.instances.length, 2)
+  for (const socket of LogicalSocket.instances) {
+    assert.deepEqual(socket.writes, [])
+    assert.equal(socket.closed, 1)
+  }
+  assert.deepEqual(observed, [])
+})
+
+test('a normal operation cannot adopt the temporary session of an allowed startup sibling', async context => {
+  const { service, lease } = await streamFixture(context)
+  LogicalSocket.temporary = true
+  const startup = service.message(body, { allowTemporaryIdentity: true }, lease)
+  await tick()
+  const socket = LogicalSocket.instances[0]
+  assert.equal(socket.writes.length, 1)
+  await assert.rejects(
+    service.message(body, {}, lease),
+    error => error.code === 0,
+  )
+  await assert.rejects(service.stream(body, lease), error => error.code === 0)
+  assert.equal(socket.writes.length, 1)
+  assert.equal(socket.closed, 0)
+  socket.receive({
+    jsonrpc: '2.0',
+    id: socket.writes[0].id,
+    result: 'initializing',
+  })
+  assert.equal((await startup).result, 'initializing')
+  assert.equal(socket.closed, 1)
 })
 
 test('canceling an operation before admission never observes its later peer', async context => {

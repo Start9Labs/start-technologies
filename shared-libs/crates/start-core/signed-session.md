@@ -39,6 +39,14 @@ Each body has `protocol: "Start-RPC-Session"`, `version: 1` and a `hello` map:
    `{"continuation":"<guid>"}` with its existing GUID.
 2. Server → client: `role: "server"`, its own `ephemeral`, and `clientHello` containing
    SHA-256 of the exact captured client record contents, excluding the length prefix.
+   Provisional setup and diagnostic recovery without an account identity include signed
+   `temporary: true`; committed account identities omit it. Missing `temporary` means false for existing-server compatibility.
+
+Temporary identities must not enter fingerprint history. Normal browser encrypted RPC and
+continuations reject them before sending application payloads; explicit setup/init/diagnostic/unlock
+clients may accept them without warning or recording them. Secure-origin continuations retain
+the server identity's classification. Older clients reject the unfamiliar temporary field;
+committed-account handshakes retain their existing shape.
 
 The proof map contains:
 

@@ -15,10 +15,38 @@ PatchDB files use mode `0600`. WRT preserves its authentication database during 
 and WRT session APIs exclude this field. Tunnel's existing authenticated full-database
 feed includes it alongside its WireGuard and TLS secrets. Registry and Tunnel admin root
 `db.dump` results also include it. Copies can bypass advisory fingerprint-change detection;
-revoking a session does not revoke a copied server key. StartOS signs with its existing
+revoking a session does not revoke a copied server key. Normal StartOS signs with its existing
 account `server_identity_key`; its persisted `developerKey` field and historical backup
-formats retain their names. Startup contexts retain temporary identities. Server identity is
-separate from enrollment, authcookies, package/OS trust and TLS keys.
+formats retain their names. A configured server shares its account identity through a root-only,
+mode-0600 copy at `/media/startos/config/id.key.pem`. Setup uses a separate `setup.key.pem` in
+that directory until completion. Both are unencrypted. Setup proofs are temporary despite
+persistence and never enter normal-client fingerprint history; each context retains that scope
+until retirement. Fresh setup adopts its setup key; attach/restore retain the selected account's
+key. Reattaching or restoring the same account preserves its remembered fingerprint without a
+setup-induced notice; a genuinely different account key retains the rotation warning. Common initialization mirrors an account key
+only for a configured server. Completion durably publishes the account copy, atomically writes
+`disk.guid`, then removes the setup key. Interruption before that marker leaves the separate
+setup key active; an imported account key can never seed a later fresh account. The installer
+carries the live session's admitted identity across config-mount replacement, replacing preserved
+setup keys. Forgetting a data drive and emulated
+reflash share `forget-server-identity`, which durably removes both keys before deleting the
+marker.
+
+OTA executes the new image's `upgrade` script on the running old system. Before boot changes
+or activation, it copies an existing `/run/startos/id.key.pem` into config atomically with mode
+`0600`. Without that runtime export it leaves config untouched, including during legacy
+diagnostic updates. Initialization without a usable account copy defers admission until the
+database supplies it. Diagnostics never fail solely for lack of an identity: they use the
+available startup key with its admission scope, otherwise a signed `temporary: true` identity
+held only by that context. Protected unlock likewise retains an unpersisted temporary identity
+for its locked context; unverified disk configuration cannot select that proof identity.
+Browser normal-product encrypted RPC and continuations reject temporary peers before
+sending application payloads, including reuse of a startup probe's session. Explicit setup,
+init, diagnostic and protected-unlock clients may admit them; temporary peers never enter fingerprint history
+or identity-change notices. Registry CLI administration also rejects temporary peers before
+sending requests or observing fingerprints. Older clients reject the unfamiliar temporary
+field, including provisional setup proofs; committed-account handshakes keep their existing shape. Server identity is separate from
+enrollment, authcookies, package/OS trust and TLS keys.
 
 `sign/fingerprint.rs` owns identity fingerprints: SHA-256 of raw Ed25519 public bytes,
 formatted as `SHA256:` followed by lowercase hexadecimal. Extending key schemes also
@@ -52,9 +80,9 @@ The toolkit's connection-local context carries provenance into handlers.
 A valid unknown key completes admission without roles. `SignatureAuth` checks current
 enrollment, roles, expiry, revocation and hooks on every RPC, including enrollment or
 revocation on an already-open connection. `auth::continuation_subscription` registers the existing revocation listener before rechecking current key, ephemeral-key or bearer-token membership. Typed, WebSocket and REST bindings consume that same listener; revocation during asynchronous preparation cannot create a fresh unrevoked continuation. `LoginContext` owns shared membership selectors, preserving each context's expiry policy and independently authenticated local credentials. No roles or database snapshot are retained by the listener. Request claims cannot replace the encrypted peer. Local/bearer credentials
-retain their separate precedence. Setup, initialization and diagnostic seeds own ephemeral
-proof identities and the shared bounded replay policy, with immutable session provenance
-on context clones. These possession identities grant no enrollment roles. Their proof names
+retain their separate precedence. Setup, initialization and diagnostic seeds retain their
+selected proof identity and the shared bounded replay policy, with immutable session
+provenance on context clones. These possession identities grant no enrollment roles. Their proof names
 come from the existing validated local-host ingress policy. HTTP resources retain their own
 authentication policy.
 
@@ -199,7 +227,7 @@ HKDF-SHA256 and AES-256-GCM on both HTTP and HTTPS. Browser randomness comes fro
 `crypto.getRandomValues`; the existing UUID library supplies correlation IDs without requiring
 secure-context `crypto.randomUUID`. Persisted enrollment keys remain nonextractable WebCrypto
 keys. Missing-key startup admission uses an opaque, unpersisted Ed25519 `RequestSigner`, sharing
-the existing commitment/proof owner rather than an enrolled-key shape. Setup/state/init/diagnostic
+the existing commitment/proof owner rather than an enrolled-key shape. Setup/state/init/diagnostic/unlock
 browser calls and GUIDs use that admission lease; their peers never enter normal-product advisory
 history. Normal product API owners attach verified-open observers, including on healthy reuse
 and authorization rejection. A key/provider lease may persist; each
@@ -222,7 +250,7 @@ that completion owner. Authenticated observers retain the
 signer's revocation lifetime.
 
 Normal keyed browser RPC and secure-origin GUIDs cannot downgrade from unauthenticated
-state replies or failed admission. Startup/state/init/diagnostic callers use
+state replies or failed admission. Startup/state/init/diagnostic/unlock callers use
 their explicitly selected transport contracts, with legacy HTTP callers still supported.
 Resource HTTP headers, MCP and firmware metadata retain
 their separate owners. Application encryption does not protect unrelated HTTP resources.

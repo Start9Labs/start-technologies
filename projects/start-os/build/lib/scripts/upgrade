@@ -2,6 +2,21 @@
 
 set -e
 
+preserve_server_identity() {
+    local runtime=$1 persistent=$2 identity_tmp
+    [ -f "$runtime" ] || return 0
+
+    openssl pkey -in "$runtime" -check -noout > /dev/null
+    identity_tmp=$(mktemp "${persistent}.tmp.XXXXXX")
+    # EXIT cleanup outlives function locals.
+    trap "$(printf 'rm -f -- %q' "$identity_tmp")" EXIT
+    install -m 600 -- "$runtime" "$identity_tmp"
+    sync "$identity_tmp"
+    mv -fT -- "$identity_tmp" "$persistent"
+    sync "$(dirname "$persistent")"
+    trap - EXIT
+}
+
 if [ "$UID" -ne 0 ]; then
     >&2 echo 'Must be run as root'
     exit 1
@@ -32,6 +47,9 @@ if [ ! -f "$SOURCE_DIR/os-image-store" ] || [ ! -f "$SOURCE_DIR/os-public-source
 fi
 source "$SOURCE_DIR/os-image-store"
 startos_reserve_image_store /media/startos/config
+
+# Must precede boot changes and image activation.
+preserve_server_identity /run/startos/id.key.pem /media/startos/config/id.key.pem
 
 unsquashfs -n -f -d / "$1" /usr/lib/startos/scripts/normalize-fstab
 if [ -f /media/startos/config/overlay/etc/fstab ]; then

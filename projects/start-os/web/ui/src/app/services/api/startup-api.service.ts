@@ -37,7 +37,11 @@ export class StartupLiveApiService extends StartupApiService {
         params: params as Record<string, unknown>,
       })
       const lease = await this.authKeys.admissionLease()
-      const body = await this.sockets.message(request, options ?? {}, lease)
+      const body = await this.sockets.message(
+        request,
+        { ...options, allowTemporaryIdentity: true },
+        lease,
+      )
       if (isRpcError(body)) throw new RpcError(body.error)
       return body.result
     },
@@ -53,7 +57,10 @@ export class StartupLiveApiService extends StartupApiService {
       })
       const lease = await this.authKeys.admissionLease()
       options?.signal?.throwIfAborted()
-      return this.sockets.stream(body, lease, options)
+      return this.sockets.stream(body, lease, {
+        ...options,
+        allowTemporaryIdentity: true,
+      })
     },
   })
 
@@ -61,6 +68,9 @@ export class StartupLiveApiService extends StartupApiService {
     guid: string,
     config: WebsocketConfig<T> = {},
   ): Observable<T> {
-    return this.sockets.open<T>(guid, config)
+    return this.sockets.open<T>(guid, {
+      ...config,
+      allowTemporaryIdentity: true,
+    })
   }
 }

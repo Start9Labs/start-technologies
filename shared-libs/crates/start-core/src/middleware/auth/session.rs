@@ -11,8 +11,8 @@ use url::Url;
 use super::signature::{RequestReplayCheck, SignatureAuthContext, request_identities};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
-use crate::sign::session::Target;
-use crate::sign::{AnyVerifyingKey, Signer};
+use crate::sign::AnyVerifyingKey;
+use crate::sign::session::{ServerIdentity, Target};
 use crate::util::net::secure::{EncryptedSocket, wire_message_size};
 
 /// Immutable provenance of a completed encrypted exchange, without cached enrollment or roles.
@@ -20,7 +20,7 @@ use crate::util::net::secure::{EncryptedSocket, wire_message_size};
 pub struct SecureSession {
     peer: AnyVerifyingKey,
     address: InternedString,
-    server_identity: Signer,
+    server_identity: ServerIdentity,
     replay_check: RequestReplayCheck,
     origin: crate::net::request_origin::RequestOrigin,
 }

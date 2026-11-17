@@ -40,6 +40,12 @@ start-os-fde-deps-test: projects/start-os/build/tests/fde-deps-test.sh projects/
 start-os-fde-uki-test: start-os-fde-deps-test projects/start-os/build/lib/scripts/fde-build-uki projects/start-os/build/tests/fde-uki-test.sh projects/start-os/build/tests/fde-uki.Dockerfile
 	./projects/start-os/build/tests/fde-uki-test.sh
 
+.PHONY: start-os-upgrade-identity-test
+start-os-upgrade-identity-test: projects/start-os/build/tests/upgrade-identity.test.mjs projects/start-os/build/lib/scripts/upgrade projects/start-os/build/lib/scripts/forget-server-identity shared-libs/crates/start-core/src/context/startup.rs shared-libs/crates/start-core/src/developer/mod.rs
+	node --test projects/start-os/build/tests/upgrade-identity.test.mjs
+
+start-os-scripts-test: start-os-upgrade-identity-test
+
 .PHONY: start-os-grub-test
 start-os-grub-test: projects/start-os/build/tests/grub-overrides-test.sh projects/start-os/build/lib/grub-user.cfg projects/start-os/build/lib/scripts/nvme-isolation-test projects/start-os/debian/postinst projects/start-os/build/image-recipe/raspberrypi/squashfs/etc/default/grub.d/raspberrypi.cfg
 	./projects/start-os/build/tests/grub-overrides-test.sh

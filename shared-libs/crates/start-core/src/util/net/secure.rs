@@ -13,9 +13,9 @@ use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 
 use super::{MAX_CLOSE_PAYLOAD_BYTES, MAX_CLOSE_REASON_BYTES};
 use crate::prelude::*;
+use crate::sign::AnyVerifyingKey;
 use crate::sign::commitment::request::RequestCommitment;
-use crate::sign::session::{PreparedClient, SessionCipher, Target};
-use crate::sign::{AnyVerifyingKey, Signer};
+use crate::sign::session::{PeerIdentity, PreparedClient, ServerIdentity, SessionCipher, Target};
 
 /// Logical RPC response limit before framing and encryption overhead.
 pub const DEFAULT_RPC_RESPONSE_LIMIT: usize = 64 * 1024 * 1024;
@@ -353,7 +353,7 @@ impl EncryptedSocket {
         mut socket: BoxWebSocket,
         prepared: PreparedClient,
         incoming: NonZeroUsize,
-    ) -> Result<(AnyVerifyingKey, Self), Error> {
+    ) -> Result<(PeerIdentity, Self), Error> {
         tokio::time::timeout(HANDSHAKE_TIMEOUT, async move {
             let mut records = HandshakeRecords::new();
             send_handshake(&mut socket, prepared.message()).await?;
@@ -368,7 +368,7 @@ impl EncryptedSocket {
     /// Completes the responder exchange, optionally restricting the admitted peer identity.
     pub async fn accept<F, Fut>(
         mut socket: BoxWebSocket,
-        signer: &Signer,
+        identity: &ServerIdentity,
         contexts: &[InternedString],
         incoming: NonZeroUsize,
         target: &Target,
@@ -383,7 +383,7 @@ impl EncryptedSocket {
             let mut records = HandshakeRecords::new();
             let request = records.receive(&mut socket).await?;
             let (peer, context, response, state) = crate::sign::session::accept(
-                signer,
+                identity,
                 contexts,
                 &request,
                 target,

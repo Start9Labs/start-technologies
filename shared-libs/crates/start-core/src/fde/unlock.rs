@@ -16,7 +16,7 @@ use crate::auth::PasswordType;
 use crate::context::config::ServerConfig;
 use crate::context::rpc::InitRpcContextPhases;
 use crate::context::setup::CURRENT_SECRET;
-use crate::context::startup::StartupRpc;
+use crate::context::startup::{StartupIdentity, StartupRpc};
 use crate::context::{InitContext, RpcContext};
 use crate::disk::fde::LuksPool;
 use crate::disk::fsck::{RepairStrategy, RequiresReboot};
@@ -60,6 +60,7 @@ impl Deref for UnlockContext {
 }
 impl Context for UnlockContext {}
 impl UnlockContext {
+    /// Unverified disk configuration cannot select the locked context's proof identity.
     fn new(
         host: Watch<Model<Host>>,
         disk_guid: InternedString,
@@ -69,7 +70,9 @@ impl UnlockContext {
         (
             Self(
                 Arc::new(UnlockContextSeed {
-                    startup_rpc: StartupRpc::new(),
+                    startup_rpc: StartupRpc::new(Some(StartupIdentity::temporary(
+                        crate::db::model::private::generate_server_identity_key().0,
+                    ))),
                     host,
                     disk_guid,
                     progress,
@@ -98,8 +101,8 @@ impl SessionContext for UnlockContext {
     }
 }
 impl SignatureAuthContext for UnlockContext {
-    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
-        Ok(self.startup_rpc.identity.clone())
+    fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error> {
+        self.startup_rpc.identity()
     }
     fn replay_check(&self) -> RequestReplayCheck {
         RequestReplayCheck::new(&self.0, |seed| Some(Self(seed, None)))
@@ -300,7 +303,12 @@ pub(crate) async fn initialize(
     let pool = LuksPool::new(&guid, crate::disk::fde::HEADER_BACKUP_DIR)?;
     let memory = pool.protect_secret_handling()?;
     crate::disk::main::activate_pool(&guid).await?;
-    let init_context = InitContext::init(config, dns.clone()).await?;
+    let init_context = InitContext::init(
+        config,
+        dns.clone(),
+        crate::context::startup::startup_identity().await?,
+    )
+    .await?;
     let handle = init_context.progress.clone();
     let init_phases = InitPhases::new(&handle);
     let rpc_phases = InitRpcContextPhases::new(&handle);
@@ -366,6 +374,28 @@ pub(crate) async fn initialize(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn locked_admission_retains_one_temporary_identity_per_context() {
+        let create = || {
+            UnlockContext::new(
+                Watch::new(Model::new(&Host::new()).unwrap()),
+                "STARTOS_NOT_ACTIVATED".into(),
+                FullProgressTracker::new(),
+            )
+            .0
+        };
+        let context = create();
+        let first = context.server_identity().unwrap();
+        let retained = context.clone().server_identity().unwrap();
+        let other = create().server_identity().unwrap();
+        assert!(first.temporary);
+        assert!(retained.temporary);
+        assert!(other.temporary);
+        let first = first.signer.verifying_key().await.unwrap();
+        assert_eq!(first, retained.signer.verifying_key().await.unwrap());
+        assert_ne!(first, other.signer.verifying_key().await.unwrap());
+    }
 
     #[tokio::test]
     async fn plaintext_unlock_rejects_before_accepting_disk_work() {
