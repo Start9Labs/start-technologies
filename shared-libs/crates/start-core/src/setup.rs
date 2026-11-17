@@ -720,6 +720,7 @@ pub(crate) mod test {
             &server,
             crate::context::config::ServerConfig::default(),
             dns,
+            Some(crate::db::model::private::generate_server_identity_key().0),
         )
         .unwrap();
         (context, server)
@@ -1058,7 +1059,12 @@ async fn fresh_setup(
         ..
     }: SetupExecuteProgress,
 ) -> Result<(SetupResult, RpcContext), Error> {
-    let account = AccountInfo::new(password, root_ca_start_time().await, hostname)?;
+    let account = AccountInfo::new_with_identity(
+        password,
+        root_ca_start_time().await,
+        hostname,
+        ctx.startup_rpc.key()?,
+    )?;
 
     let db = ctx.db().await?;
     sync_kiosk(kiosk).await?;

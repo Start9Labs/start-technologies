@@ -37,9 +37,13 @@ async fn serve_protocol_peer(
     Arc<Mutex<Vec<OsString>>>,
 ) {
     let dns = Arc::new(DnsController::new(Watch::new(Default::default())));
-    let context = InitContext::init(&ServerConfig::default(), dns)
-        .await
-        .unwrap();
+    let context = InitContext::init(
+        &ServerConfig::default(),
+        dns,
+        Some(crate::db::model::private::generate_server_identity_key().0),
+    )
+    .await
+    .unwrap();
     let command = Arc::new(Mutex::new(Vec::new()));
     let observed = command.clone();
     let handler = from_fn_async(move |ctx: InitContext, params: AttachParams| {

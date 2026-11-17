@@ -20,9 +20,13 @@ use crate::util::sync::Watch;
 
 async fn context() -> InitContext {
     let dns = Arc::new(DnsController::new(Watch::new(Default::default())));
-    InitContext::init(&ServerConfig::default(), dns)
-        .await
-        .unwrap()
+    InitContext::init(
+        &ServerConfig::default(),
+        dns,
+        Some(crate::db::model::private::generate_server_identity_key().0),
+    )
+    .await
+    .unwrap()
 }
 
 async fn server(router: Router) -> (String, WebServer<tokio::net::TcpListener>) {

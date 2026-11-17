@@ -41,7 +41,12 @@ async fn setup_or_init(
         .ok()
         .and_then(|a| a)
     {
-        let init_ctx = InitContext::init(config, dns.clone()).await?;
+        let init_ctx = InitContext::init(
+            config,
+            dns.clone(),
+            crate::context::startup::startup_identity().await?,
+        )
+        .await?;
         let handle = &init_ctx.progress;
         let mut update_phase =
             handle.add_phase(t!("bins.start-init.updating-firmware").into(), Some(10));
@@ -98,7 +103,12 @@ async fn setup_or_init(
         .await
         .is_err()
     {
-        let ctx = SetupContext::init(server, config.clone(), dns.clone())?;
+        let ctx = SetupContext::init(
+            server,
+            config.clone(),
+            dns.clone(),
+            crate::context::startup::startup_identity().await?,
+        )?;
 
         server.serve_ui_for(ctx.clone());
 
@@ -134,7 +144,12 @@ async fn setup_or_init(
             }
         }))
     } else {
-        let init_ctx = InitContext::init(config, dns.clone()).await?;
+        let init_ctx = InitContext::init(
+            config,
+            dns.clone(),
+            crate::context::startup::startup_identity().await?,
+        )
+        .await?;
         let handle = init_ctx.progress.clone();
 
         let mut disk_phase =
@@ -248,6 +263,7 @@ pub async fn main(
                     },
                     e,
                     dns,
+                    crate::context::startup::startup_identity().await?,
                 )
                 .await?;
 

@@ -17,8 +17,15 @@ feed includes it alongside its WireGuard and TLS secrets. Registry and Tunnel ad
 `db.dump` results also include it. Copies can bypass advisory fingerprint-change detection;
 revoking a session does not revoke a copied server key. StartOS signs with its existing
 account `server_identity_key`; its persisted `developerKey` field and historical backup
-formats retain their names. Startup contexts retain temporary identities. Server identity is
-separate from enrollment, authcookies, package/OS trust and TLS keys.
+formats retain their names. Startup contexts use the same key through a root-only, mode-0600
+copy at `/media/startos/config/id.key.pem`. This copy is unencrypted and survives OS updates.
+The account database remains authoritative: initialization mirrors its key before normal RPC;
+attach/restore mirror the selected account rather than changing its identity. Fresh setup
+persists a key before admission and adopts it into its account. The installer carries that
+setup key across a new config mount without replacing an existing copy. A legacy installation
+without a usable copy cannot complete encrypted startup admission until its database key is
+available; it never advertises a generated replacement. Server identity is separate from
+enrollment, authcookies, package/OS trust and TLS keys.
 
 `sign/fingerprint.rs` owns identity fingerprints: SHA-256 of raw Ed25519 public bytes,
 formatted as `SHA256:` followed by lowercase hexadecimal. Extending key schemes also
@@ -52,9 +59,9 @@ The toolkit's connection-local context carries provenance into handlers.
 A valid unknown key completes admission without roles. `SignatureAuth` checks current
 enrollment, roles, expiry, revocation and hooks on every RPC, including enrollment or
 revocation on an already-open connection. `auth::continuation_subscription` registers the existing revocation listener before rechecking current key, ephemeral-key or bearer-token membership. Typed, WebSocket and REST bindings consume that same listener; revocation during asynchronous preparation cannot create a fresh unrevoked continuation. `LoginContext` owns shared membership selectors, preserving each context's expiry policy and independently authenticated local credentials. No roles or database snapshot are retained by the listener. Request claims cannot replace the encrypted peer. Local/bearer credentials
-retain their separate precedence. Setup, initialization and diagnostic seeds own ephemeral
-proof identities and the shared bounded replay policy, with immutable session provenance
-on context clones. These possession identities grant no enrollment roles. Their proof names
+retain their separate precedence. Setup, initialization and diagnostic seeds retain their
+config-backed proof identity and the shared bounded replay policy, with immutable session
+provenance on context clones. These possession identities grant no enrollment roles. Their proof names
 come from the existing validated local-host ingress policy. HTTP resources retain their own
 authentication policy.
 

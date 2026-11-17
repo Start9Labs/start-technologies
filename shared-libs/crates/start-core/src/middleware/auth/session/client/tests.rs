@@ -326,9 +326,13 @@ async fn all_startup_contexts_ignore_an_unavailable_stored_signer() {
     let dns = Arc::new(crate::net::dns::DnsController::new(
         crate::util::sync::Watch::new(Default::default()),
     ));
-    let startup = InitContext::init(&crate::context::config::ServerConfig::default(), dns)
-        .await
-        .unwrap();
+    let startup = InitContext::init(
+        &crate::context::config::ServerConfig::default(),
+        dns,
+        Some(crate::db::model::private::generate_server_identity_key().0),
+    )
+    .await
+    .unwrap();
     let app = crate::net::static_server::ui_router(startup.clone());
     let (url, _server) = server(app).await;
     let ctx = CliContext::init(ClientConfig {
@@ -812,10 +816,13 @@ async fn actual_gpg_cli_authenticates_without_exporting_the_identity() {
     let dns = Arc::new(crate::net::dns::DnsController::new(
         crate::util::sync::Watch::new(Default::default()),
     ));
-    let startup =
-        crate::context::InitContext::init(&crate::context::config::ServerConfig::default(), dns)
-            .await
-            .unwrap();
+    let startup = crate::context::InitContext::init(
+        &crate::context::config::ServerConfig::default(),
+        dns,
+        Some(crate::db::model::private::generate_server_identity_key().0),
+    )
+    .await
+    .unwrap();
     let observed = calls.clone();
     let startup = crate::net::static_server::ui_router(startup).layer(axum::middleware::from_fn(
         move |request: axum::extract::Request, next: axum::middleware::Next| {

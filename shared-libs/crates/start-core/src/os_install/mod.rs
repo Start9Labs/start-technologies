@@ -729,6 +729,7 @@ async fn install_os_inner(
     // provision the data drive into it. `data_part` is the data partition the
     // installer carved on the OS drive (install path only).
     let (mut setup_info, data_part) = if let Some(disk) = os_disk {
+        let identity = ctx.startup_rpc.key()?;
         // Drop any rootfs/config mounts a prior install left pinned, so a retry
         // doesn't fight itself for the target partition.
         let prior = ctx.install_rootfs.mutate(|s| s.take());
@@ -782,6 +783,13 @@ async fn install_os_inner(
             ReadWrite,
         )
         .await?;
+
+        if !Path::new(crate::context::startup::IDENTITY_PATH)
+            .try_exists()
+            .with_kind(ErrorKind::Filesystem)?
+        {
+            crate::context::startup::persist_identity(&identity).await?;
+        }
 
         let mut info = SetupInfo::default();
         info.mok_enrolled = mok_enrolled;

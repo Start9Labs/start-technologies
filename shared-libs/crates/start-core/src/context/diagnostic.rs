@@ -37,7 +37,7 @@ impl SessionContext for DiagnosticContext {
 }
 impl SignatureAuthContext for DiagnosticContext {
     fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
-        Ok(self.startup_rpc.identity.clone())
+        self.startup_rpc.identity()
     }
     fn replay_check(&self) -> RequestReplayCheck {
         RequestReplayCheck::new(&self.0, |seed| Some(Self(seed, None)))
@@ -65,6 +65,7 @@ impl DiagnosticContext {
         disk_guid: Option<InternedString>,
         error: Error,
         dns: Arc<crate::net::dns::DnsController>,
+        identity: Option<ed25519_dalek::SigningKey>,
     ) -> Result<Self, Error> {
         tracing::error!(
             "{}",
@@ -77,7 +78,7 @@ impl DiagnosticContext {
 
         Ok(Self(
             Arc::new(DiagnosticContextSeed {
-                startup_rpc: StartupRpc::new(),
+                startup_rpc: StartupRpc::new(identity),
                 dns,
                 shutdown,
                 disk_guid,
