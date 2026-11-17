@@ -47,7 +47,11 @@ const { rpcResponseStream } = await import(
 const flush = () => new Promise(setImmediate)
 const root = new URL('../../../projects/', import.meta.url)
 
-async function fixture(t, product, { epoch } = {}) {
+async function fixture(
+  t,
+  product,
+  { epoch, cachedValue = { serverInfo: { hostname: 'cached' } } } = {},
+) {
   t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'], now: Date.now() })
   const scope = product === 'os' ? 'start-os/web/ui' : 'start-tunnel/web'
   const path = file => new URL(`${scope}/src/app/services/${file}.ts`, root)
@@ -62,15 +66,12 @@ async function fixture(t, product, { epoch } = {}) {
         : 'api/live-api.service',
     )
   )
-  const { PatchDbSource, PATCH_CACHE } = await import(
+  const { PatchDbSource, PATCH_CACHE, PATCH_LIVE } = await import(
     path('patch-db/patch-db-source')
   )
   const patchCache = {
     epoch,
-    read: async () => ({
-      id: 7,
-      value: { serverInfo: { hostname: 'cached' } },
-    }),
+    read: async () => ({ id: 7, value: cachedValue }),
     clear() {},
   }
   const patchCacheProvider =
@@ -173,10 +174,14 @@ async function fixture(t, product, { epoch } = {}) {
       bytes: Buffer.byteLength(JSON.stringify(message)),
     })
   }
-  const dump = async (index, id) => {
+  const dump = async (
+    index,
+    id,
+    value = { serverInfo: { hostname: `dump-${id}` } },
+  ) => {
     frame(index, {
       jsonrpc: '2.0',
-      result: { id, value: { serverInfo: { hostname: `dump-${id}` } } },
+      result: { id, value },
       meta: { patchSequence: 999 },
     })
     await flush()
@@ -208,6 +213,7 @@ async function fixture(t, product, { epoch } = {}) {
     db,
     patchCache,
     source,
+    connection: product === 'os' ? injector.get(PATCH_LIVE) : undefined,
     auth,
     effects,
     cache,
@@ -228,6 +234,78 @@ async function fixture(t, product, { epoch } = {}) {
     },
     currentLease: () => ({ key: key.key, signal: lifetime.signal }),
   }
+}
+
+for (const status of ['connected', 'error']) {
+  test(`os registry status shows the last known observation from restore through a live ${status} dump and stream loss`, async t => {
+    const url = 'https://registry.test/'
+    const entry = {
+      status: 'error',
+      error: 'cached registry failure',
+      info: { name: 'Cached registry' },
+      packages: {
+        example: { best: { '1.0.0:0': { title: 'Example' } } },
+      },
+    }
+    const cachedValue = {
+      serverInfo: { hostname: 'cached' },
+      registryCache: { [url]: entry },
+    }
+    const f = await fixture(t, 'os', { cachedValue })
+    const registries = []
+    const confirmations = []
+    const subscription = f.db
+      .watch$('registryCache')
+      .subscribe(cache => registries.push(cache[url]))
+    const connection = f.connection.subscribe(connected => {
+      if (connected) confirmations.push(f.cache.value.id)
+    })
+    t.after(() => {
+      subscription.unsubscribe()
+      connection.unsubscribe()
+    })
+    f.verify()
+    await flush()
+    assert.equal(f.state.value, 'running')
+    assert.equal(f.calls.length, 1)
+    assert.equal(f.connection.value, false)
+    assert.deepEqual(registries.at(-1), entry)
+
+    const live = {
+      ...entry,
+      status,
+      error: status === 'error' ? 'live registry failure' : null,
+    }
+    const dump = { ...cachedValue, registryCache: { [url]: live } }
+    await f.dump(0, 10, dump)
+    assert.deepEqual(registries.at(-1), live)
+    assert.equal(f.connection.value, true)
+    assert.deepEqual(confirmations, [10])
+
+    const emissions = registries.length
+    f.calls[0].frames.error({ code: 0, message: 'server lost' })
+    await flush()
+    assert.equal(f.state.value, 'running')
+    assert.equal(f.connection.value, false)
+    assert.equal(registries.length, emissions)
+    assert.deepEqual(registries.at(-1), live)
+    await f.recover()
+    assert.equal(f.calls.length, 2)
+    assert.equal(f.connection.value, false)
+    await f.dump(1, 20, dump)
+    assert.equal(f.connection.value, true)
+    assert.deepEqual(confirmations, [10, 20])
+    f.logout()
+    assert.equal(f.connection.value, false)
+    f.verify()
+    await flush()
+    assert.equal(f.connection.value, false)
+    await f.dump(2, 30, dump)
+    assert.equal(f.connection.value, true)
+    assert.deepEqual(confirmations, [10, 20, 30])
+    f.db.stop()
+    assert.equal(f.connection.value, false)
+  })
 }
 
 for (const product of ['os', 'tunnel']) {

@@ -359,7 +359,6 @@ export default {
   419: 'Ver detalles',
   421: 'Servicios que dependen de',
   422: 'ya no funcionarán correctamente y podrían fallar.',
-  423: 'Solicitud fallida',
   424: '¡Todos los servicios están actualizados!',
   425: 'Ejecutar',
   426: 'La acción solo se puede ejecutar cuando el servicio está',
@@ -1094,4 +1093,7 @@ export default {
   1297: 'Personalizado',
   1298: 'Introduce un dominio o una URL',
   1299: 'La sincronización está tardando más de lo esperado. Actualiza la página para volver a intentarlo.',
+  1300: 'Servidor inaccesible',
+  1301: 'Es posible que los listados estén desactualizados',
+  1302: 'StartOS no puede conectar con este registro en este momento.',
 } satisfies i18n
