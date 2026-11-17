@@ -19,6 +19,7 @@ TUNNEL_BASENAME := $(shell PROJECT=start-tunnel PLATFORM=$(ARCH) ./build/env/bas
 CLI_BASENAME := $(shell PROJECT=start-cli PLATFORM=$(ARCH) ./build/env/basename.sh)
 RUST_BUILDER_INPUTS := build/rust-builder/image.sh build/rust-builder/repository build/rust-builder/reference
 RUST_ZIG_BUILDER_INPUTS := build/builder-alias.sh $(RUST_BUILDER_INPUTS)
+RUST_BIN_BUILDER_INPUTS := build/build-rust-bins.sh build/rust-build-profile.sh
 
 # Every Rust binary tracks its transitive path dependencies.
 BACKUP_PROTOCOL_SRC := $(call ls-files, shared-libs/crates/backup-fs-protocol)

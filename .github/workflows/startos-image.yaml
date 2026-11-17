@@ -1,8 +1,9 @@
 name: StartOS Image
 
-# One platform's image, and its deploy when a channel is given. startos-iso.yaml
-# calls this once per platform, so each platform publishes as soon as its own
-# image is built rather than waiting for the slowest one.
+# One platform's image, its migration payload where one exists, and its deploy
+# when a channel is given. build-products.yaml (checks) and startos-iso.yaml
+# (publishing) call this once per platform, so each platform publishes as soon as
+# its own image is built rather than waiting for the slowest one.
 on:
   workflow_call:
     inputs:
@@ -15,9 +16,14 @@ on:
       nodejs-version:
         type: string
         required: true
-      fast-runner:
-        type: boolean
-        default: false
+      compiled-run-id:
+        description: Run holding compiled-<arch>.tar; empty for this run
+        type: string
+        default: ''
+      commit:
+        description: Commit the image is built from; empty for this run's
+        type: string
+        default: ''
       channel:
         description: Deploy channel; empty builds without deploying
         type: string
@@ -48,33 +54,17 @@ jobs:
     # RISC-V image assembly stays native; full emulation is too slow.
     runs-on: >-
       ${{
-        fromJson(
-          format(
-            '["{0}", "{1}"]',
-            fromJson('{
-              "x86_64": "ubuntu-latest",
-              "x86_64-nonfree": "ubuntu-latest",
-              "x86_64-nvidia": "ubuntu-latest",
-              "aarch64": "ubuntu-24.04-arm",
-              "aarch64-nonfree": "ubuntu-24.04-arm",
-              "aarch64-nvidia": "ubuntu-24.04-arm",
-              "raspberrypi": "ubuntu-24.04-arm",
-              "riscv64": "ubuntu-24.04-riscv",
-              "riscv64-nonfree": "ubuntu-24.04-riscv"
-            }')[inputs.platform],
-            fromJson('{
-              "x86_64": "amd64-fast",
-              "x86_64-nonfree": "amd64-fast",
-              "x86_64-nvidia": "amd64-fast",
-              "aarch64": "aarch64-fast",
-              "aarch64-nonfree": "aarch64-fast",
-              "aarch64-nvidia": "aarch64-fast",
-              "raspberrypi": "aarch64-fast",
-              "riscv64": "amd64-fast",
-              "riscv64-nonfree": "amd64-fast"
-            }')[inputs.platform]
-          )
-        )[inputs.fast-runner]
+        fromJson('{
+          "x86_64": "ubuntu-latest",
+          "x86_64-nonfree": "ubuntu-latest",
+          "x86_64-nvidia": "ubuntu-latest",
+          "aarch64": "ubuntu-24.04-arm",
+          "aarch64-nonfree": "ubuntu-24.04-arm",
+          "aarch64-nvidia": "ubuntu-24.04-arm",
+          "raspberrypi": "ubuntu-24.04-arm",
+          "riscv64": "ubuntu-24.04-riscv",
+          "riscv64-nonfree": "ubuntu-24.04-riscv"
+        }')[inputs.platform]
       }}
     env:
       ARCH: >-
@@ -102,7 +92,7 @@ jobs:
       # large artifact transfers, so the action host runs `--single-threaded`.
       # Its wrapper is bash; dash drops hyphenated `INPUT_*` variables.
       - name: Update RISC-V action runtime
-        if: ${{ env.ARCH == 'riscv64' && !inputs.fast-runner }}
+        if: ${{ env.ARCH == 'riscv64' }}
         run: |
           set -euo pipefail
           worker="$(readlink -f "/proc/$PPID/exe")"
@@ -131,16 +121,18 @@ jobs:
 
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.commit || github.sha }}
           fetch-depth: 0
 
       - name: Free space
-        if: ${{ !inputs.fast-runner }}
         run: .github/actions/setup-build/free-disk-space.sh
 
       - name: Download compiled artifacts
         uses: actions/download-artifact@v8
         with:
           name: compiled-${{ env.ARCH }}.tar
+          run-id: ${{ inputs.compiled-run-id || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Extract compiled artifacts
         run: tar -xvf compiled-${{ env.ARCH }}.tar
@@ -200,6 +192,69 @@ jobs:
           compression-level: 0
         if: ${{ inputs.platform == 'raspberrypi' }}
 
+  # The OTA payload legacy (0.3.5.1) boxes pull via their frozen rsync updater:
+  # the 0.4.0 base squashfs (built just above) repackaged onto the published
+  # 0.3.5.1 rootfs. Pure repackaging (no OS compile), so it runs on x86_64 for
+  # every platform. Only platforms that shipped in 0.3.5.1 (no nvidia/riscv);
+  # raspberrypi requires a reflash (#3443). The <platform>.migration.squashfs
+  # artifact is what ops publishes to the frozen registry as the version's OTA
+  # image. See projects/start-os/build/assemble-migration-payload.sh and PR #3399.
+  migration:
+    name: Migration Image
+    needs: [build]
+    if: contains(fromJson('["x86_64", "x86_64-nonfree", "aarch64", "aarch64-nonfree"]'), inputs.platform)
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MIGRATION_FROM_TAG: v0.3.5.1
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+
+      - uses: ./.github/actions/free-disk-space
+
+      - name: Fetch the 0.4.0 base squashfs
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.platform }}.squashfs
+          path: base-new
+
+      - name: Fetch the legacy (0.3.5.1) base image
+        run: |
+          mkdir -p base-old
+          gh release download "$MIGRATION_FROM_TAG" --repo "${{ github.repository }}" \
+            --pattern "startos-*_${{ inputs.platform }}.iso" --dir base-old
+
+      # Runs in start9/build-env (the canonical Start9 build image — already has
+      # the squashfs toolchain + b3sum) so unsquashfs/mksquashfs can restore the
+      # rootfs's ownership + device nodes. Only xorriso (to crack the squashfs out
+      # of the 0.3.5.1 ISO) is missing, so we add just that. Not --privileged:
+      # creating device nodes needs only CAP_MKNOD, in docker's default caps.
+      - name: Assemble migration payload
+        run: |
+          ARCH=$(printf '%s' "${{ inputs.platform }}" | sed 's/-nonfree$//')
+          NEW=$(ls base-new/*.squashfs | head -n1)
+          OLD=$(ls base-old/startos-*_${{ inputs.platform }}.iso | head -n1)
+          mkdir -p results
+          OUT="results/$(basename "${NEW%.squashfs}").migration.squashfs"
+          docker run --rm -v "$PWD":/w -w /w \
+            -e ARCH="$ARCH" -e NEW="$NEW" -e OLD="$OLD" -e OUT="$OUT" \
+            -e OWNER_UID="$(id -u)" -e OWNER_GID="$(id -g)" \
+            start9/build-env bash -euc '
+              apt-get update -qq
+              apt-get install -yq --no-install-recommends xorriso
+              projects/start-os/build/assemble-migration-payload.sh \
+                --arch "$ARCH" --new-squashfs "$NEW" --old-image "$OLD" --out "$OUT"
+            '
+          echo "Built $OUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.platform }}.migration.squashfs
+          path: results/*.migration.squashfs
+          retention-days: 14
+
   deploy:
     name: Deploy
     needs: [build]
@@ -218,6 +273,7 @@ jobs:
       S3_BUCKET: ${{ inputs.s3-bucket }}
       S3_CDN: ${{ inputs.s3-cdn }}
       FORCE_OVERWRITE: ${{ inputs.force-overwrite }}
+      COMMIT: ${{ inputs.commit || github.sha }}
     steps:
       - name: Download squashfs
         uses: actions/download-artifact@v8
@@ -319,8 +375,8 @@ jobs:
             echo "::error::could not read v$VERSION from $REGISTRY"
             exit 1
           fi
-          if [ "$commit" != "$GITHUB_SHA" ]; then
-            echo "::error::v$VERSION in $REGISTRY is registered for ${commit:-no commit}, not $GITHUB_SHA; leaving $PLATFORM unindexed."
+          if [ "$commit" != "$COMMIT" ]; then
+            echo "::error::v$VERSION in $REGISTRY is registered for ${commit:-no commit}, not $COMMIT; leaving $PLATFORM unindexed."
             exit 1
           fi
 
@@ -354,10 +410,10 @@ jobs:
           # holding this leg's upload are withdrawn.
           if ! index_json="$(start-cli --registry="$REGISTRY" registry os index)" \
             || ! commit="$(registered_commit "$index_json")"; then
-            echo "::error::could not confirm v$VERSION in $REGISTRY still belongs to $GITHUB_SHA"
+            echo "::error::could not confirm v$VERSION in $REGISTRY still belongs to $COMMIT"
             exit 1
           fi
-          if [ "$commit" != "$GITHUB_SHA" ]; then
+          if [ "$commit" != "$COMMIT" ]; then
             for file in "${files[@]}"; do
               jq -e --arg version "$VERSION" --arg kind "${file##*.}" --arg platform "$PLATFORM" \
                 --arg url "$S3_CDN/v$VERSION/$file" \

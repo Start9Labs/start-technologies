@@ -2,9 +2,7 @@
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
 
-source ./build/builder-alias.sh
-
-set -ea
+set -e
 
 INSTALL=false
 while [[ $# -gt 0 ]]; do
@@ -20,66 +18,25 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-shopt -s expand_aliases
-
-PROFILE=${PROFILE:-release}
-if [ "${PROFILE}" = "release" ]; then
-	BUILD_FLAGS="--release"
-else
-  if [ "$PROFILE" != "debug" ]; then
-    >&2 echo "Unknown profile $PROFILE: falling back to debug..."
-    PROFILE=debug
-  fi
+ARCH=${ARCH:-$(uname -m)}
+if [ "$ARCH" = arm64 ]; then
+  ARCH=aarch64
 fi
-
-if [ -z "${ARCH:-}" ]; then
-  ARCH=$(uname -m)
-fi
-
-if [ "$ARCH" = "arm64" ]; then
-  ARCH="aarch64"
-fi
-
-RUST_ARCH="$ARCH"
-if [ "$ARCH" = "riscv64" ]; then
-  RUST_ARCH="riscv64gc"
-fi
-
-if [ -z "${KERNEL_NAME:-}" ]; then
-  KERNEL_NAME=$(uname -s)
-fi
+RUST_ARCH=${ARCH/riscv64/riscv64gc}
 
 if [ -z "${TARGET:-}" ]; then
-  if [ "$KERNEL_NAME" = "Linux" ]; then
-    TARGET="$RUST_ARCH-unknown-linux-musl"
-  elif [ "$KERNEL_NAME" = "Darwin" ]; then
-    TARGET="$RUST_ARCH-apple-darwin"
-  else
-    >&2 echo "unknown kernel $KERNEL_NAME"
-    exit 1
-  fi
+  case "${KERNEL_NAME:-$(uname -s)}" in
+    Linux) TARGET="$RUST_ARCH-unknown-linux-musl" ;;
+    Darwin) TARGET="$RUST_ARCH-apple-darwin" ;;
+    *)
+      >&2 echo "unknown kernel ${KERNEL_NAME:-$(uname -s)}"
+      exit 1
+      ;;
+  esac
 fi
 
-# The builder alias selects its sysroot from ARCH.
-ARCH=${TARGET%%-*}
-ARCH=${ARCH/riscv64gc/riscv64}
-
-FEATURES="$(echo "${ENVIRONMENT:-}" | sed 's/-/,/g')"
-RUSTFLAGS=""
-if [[ "${ENVIRONMENT:-}" =~ (^|-)console($|-) ]]; then
-  RUSTFLAGS="--cfg tokio_unstable"
-fi
-
-if [[ "${ENVIRONMENT:-}" =~ (^|-)unstable($|-) ]]; then
-  RUSTFLAGS="$RUSTFLAGS -C debuginfo=1"
-fi
-
-echo "FEATURES=\"$FEATURES\""
-echo "RUSTFLAGS=\"$RUSTFLAGS\""
-rust-zig-builder cargo zigbuild --manifest-path=./Cargo.toml $BUILD_FLAGS --features=$FEATURES --locked -p start-cli --bin start-cli --target=$TARGET
-if [ "$(ls -nd "target/$TARGET/$PROFILE/start-cli" | awk '{ print $3 }')" != "$UID" ]; then
-  rust-zig-builder sh -c "chown -R $UID:$UID target && chown -R $UID:$UID  /usr/local/cargo"
-fi
+PROFILE=$(./build/rust-build-profile.sh "${PROFILE:-}")
+PROFILE=$PROFILE TARGET=$TARGET ./build/build-rust-bins.sh start-cli:start-cli
 
 if [ "$INSTALL" = "true" ]; then
   cp "target/$TARGET/$PROFILE/start-cli" ~/.cargo/bin/start-cli
