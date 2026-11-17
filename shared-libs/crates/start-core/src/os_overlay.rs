@@ -38,6 +38,9 @@ use crate::util::io::{create_file_mod, open_file};
 use crate::util::squashfs::Squashfs;
 use crate::util::{HashWriter, Invoke};
 
+#[cfg(target_os = "linux")]
+pub(crate) mod public_source;
+
 const DOMAIN: &[u8] = b"StartOS configuration overlay\0";
 pub const MANIFEST_VERSION: u32 = 1;
 const MANIFEST_LEN: usize = DOMAIN.len() + 4 + 32 + 32 + 40 + 40;

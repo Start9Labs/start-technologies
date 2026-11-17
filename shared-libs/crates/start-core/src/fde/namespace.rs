@@ -14,7 +14,7 @@ pub(super) fn invalid_source() -> Error {
     )
 }
 
-pub(super) async fn confined_path(root: &Path, relative: &Path) -> Result<PathBuf, Error> {
+pub(crate) async fn confined_path(root: &Path, relative: &Path) -> Result<PathBuf, Error> {
     let root = crate::util::io::canonicalize(root, true).await?;
     let path = crate::util::io::canonicalize(root.join(relative), true).await?;
     if !path.starts_with(&root) {

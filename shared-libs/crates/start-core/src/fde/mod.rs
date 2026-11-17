@@ -17,7 +17,7 @@ pub(crate) mod generation;
 pub mod initramfs;
 pub mod loader;
 pub mod memory;
-mod namespace;
+pub(crate) mod namespace;
 pub mod network;
 pub(crate) mod private_config;
 #[cfg(target_os = "linux")]

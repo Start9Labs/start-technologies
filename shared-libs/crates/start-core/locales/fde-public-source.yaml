@@ -1,7 +1,0 @@
-_version: 2
-fde.public-source.unavailable:
-  en_US: 'An authenticated public build source matching the running OS is unavailable'
-  de_DE: 'Eine authentifizierte öffentliche Build-Quelle für das laufende Betriebssystem ist nicht verfügbar'
-  es_ES: 'No hay una fuente pública autenticada de compilación que coincida con el sistema operativo en ejecución'
-  fr_FR: 'Aucune source publique de compilation authentifiée correspondant au système en cours d’exécution n’est disponible'
-  pl_PL: 'Uwierzytelnione publiczne źródło kompilacji zgodne z działającym systemem jest niedostępne'

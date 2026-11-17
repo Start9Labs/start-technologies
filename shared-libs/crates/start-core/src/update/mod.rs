@@ -481,6 +481,10 @@ pub(crate) async fn do_update(
     }: UpdateProgressHandles,
 ) -> Result<(), Error> {
     let images = crate::os_overlay::reserve_image_store(true).await?;
+    #[cfg(target_os = "linux")]
+    let sources = crate::os_overlay::public_source::SourceCache::system();
+    #[cfg(target_os = "linux")]
+    sources.prune_boot_sources().await.log_err();
     prune_phase.start();
     crate::os_overlay::image_store_command(&images, "/usr/lib/startos/scripts/prune-images")?
         .arg(asset.commitment.size.to_string())
@@ -506,6 +510,8 @@ pub(crate) async fn do_update(
         .check(&MultiCursorFile::open(&*dst).await?)
         .await?;
     dst.save().await?;
+    #[cfg(target_os = "linux")]
+    sources.retain(asset.clone(), path).await?;
     reverify_phase.complete();
 
     finalize_phase.start();
@@ -526,6 +532,8 @@ pub(crate) async fn do_update(
         .arg(&path)
         .invoke(ErrorKind::Grub)
         .await?;
+    #[cfg(target_os = "linux")]
+    sources.prune_boot_sources().await.log_err();
     save_update_notes(&notes).await.log_err();
     finalize_phase.complete();
 

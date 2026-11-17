@@ -3,42 +3,6 @@ use tokio::process::Command;
 use super::*;
 use crate::util::Invoke;
 
-fn release() -> Release {
-    Release {
-        version: "0.4.3".parse().unwrap(),
-        commit: "build-a".into(),
-        platform: "x86_64".into(),
-    }
-}
-
-#[tokio::test]
-async fn source_release_metadata_is_confined_and_includes_commit_identity() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("root");
-    let metadata = root.join("usr/lib/startos");
-    tokio::fs::create_dir_all(&metadata).await.unwrap();
-    for (name, bytes) in [
-        ("VERSION.txt", "0.4.3\n"),
-        ("GIT_HASH.txt", "build-a\n"),
-        ("PLATFORM.txt", "x86_64\n"),
-    ] {
-        tokio::fs::write(metadata.join(name), bytes).await.unwrap();
-    }
-    assert_eq!(Release::read(&root).await.unwrap(), release());
-    tokio::fs::write(metadata.join("GIT_HASH.txt"), "build-b")
-        .await
-        .unwrap();
-    assert_ne!(Release::read(&root).await.unwrap(), release());
-    tokio::fs::remove_file(metadata.join("GIT_HASH.txt"))
-        .await
-        .unwrap();
-    tokio::fs::write(dir.path().join("outside"), "build-a")
-        .await
-        .unwrap();
-    std::os::unix::fs::symlink(dir.path().join("outside"), metadata.join("GIT_HASH.txt")).unwrap();
-    assert!(Release::read(&root).await.is_err());
-}
-
 #[tokio::test]
 async fn native_public_bundle_contains_only_the_three_nonempty_roles() {
     let dir = tempfile::tempdir().unwrap();
