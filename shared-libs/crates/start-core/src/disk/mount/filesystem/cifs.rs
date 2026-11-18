@@ -691,6 +691,7 @@ impl FileSystem for Cifs {
     }
 }
 
+/// CIFS lacks `FS_ALLOW_IDMAP`; service ownership comes from mount options.
 pub struct SharedCifs(pub Cifs);
 
 impl FileSystem for SharedCifs {

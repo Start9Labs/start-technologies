@@ -156,16 +156,13 @@ pub(crate) type SourceFilesystem =
 impl SourceFilesystem {
     // Local files retain unshifted owners on disk; service views apply BASE_IDMAP.
     pub(crate) fn local(path: PathBuf) -> Self {
-        Self::Local(IdMapped::new(
-            LocalSubvolume(path),
-            vec![crate::lxc::BASE_IDMAP],
-        ))
+        Self::Local(crate::lxc::service_filesystem(LocalSubvolume(path), &[]))
     }
 
     fn external(device: &Path) -> Self {
-        Self::Disk(IdMapped::new(
+        Self::Disk(crate::lxc::service_filesystem(
             BlockDev::new(device.to_owned()),
-            vec![crate::lxc::BASE_IDMAP],
+            &[],
         ))
     }
 }

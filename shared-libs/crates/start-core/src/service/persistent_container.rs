@@ -15,12 +15,11 @@ use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
-use crate::disk::mount::filesystem::idmapped::IdMapped;
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
 use crate::disk::mount::filesystem::overlayfs::OverlayGuard;
 use crate::disk::mount::filesystem::{MountType, ReadOnly};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
-use crate::lxc::{BASE_IDMAP, HOST_RPC_SERVER_SOCKET, LxcConfig, LxcContainer};
+use crate::lxc::{BASE_IDMAP, HOST_RPC_SERVER_SOCKET, LxcConfig, LxcContainer, service_filesystem};
 use crate::net::net_controller::NetService;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -191,9 +190,9 @@ impl PersistentContainer {
                 .join("media/startos/volumes")
                 .join(volume);
             let mount = MountGuard::mount(
-                &IdMapped::new(
+                &service_filesystem(
                     Bind::new(data_dir(DATA_DIR, &s9pk.as_manifest().id, volume)),
-                    vec![BASE_IDMAP],
+                    &[],
                 ),
                 mountpoint,
                 MountType::ReadWrite,
@@ -211,7 +210,7 @@ impl PersistentContainer {
         {
             vec![
                 MountGuard::mount(
-                    &IdMapped::new(LoopDev::from(&**sqfs), vec![BASE_IDMAP]),
+                    &service_filesystem(LoopDev::from(&**sqfs), &[]),
                     mountpoint,
                     MountType::ReadWrite,
                 )
@@ -235,7 +234,7 @@ impl PersistentContainer {
                 };
                 assets.push(
                     MountGuard::mount(
-                        &IdMapped::new(LoopDev::from(&**sqfs), vec![BASE_IDMAP]),
+                        &service_filesystem(LoopDev::from(&**sqfs), &[]),
                         mountpoint,
                         MountType::ReadWrite,
                     )
@@ -269,7 +268,7 @@ impl PersistentContainer {
                 image.clone(),
                 Arc::new(
                     MountGuard::mount(
-                        &IdMapped::new(LoopDev::from(&**sqfs), vec![BASE_IDMAP]),
+                        &service_filesystem(LoopDev::from(&**sqfs), &[]),
                         &mountpoint,
                         ReadOnly,
                     )
@@ -335,7 +334,7 @@ impl PersistentContainer {
             .join("media/startos/backup");
         tokio::fs::create_dir_all(&mountpoint).await?;
         tokio::fs::create_dir_all(backup_path).await?;
-        let bind = IdMapped::new(Bind::new(backup_path), vec![BASE_IDMAP]);
+        let bind = service_filesystem(Bind::new(backup_path), &[]);
         MountGuard::mount(&bind, &mountpoint, mount_type).await
     }
 

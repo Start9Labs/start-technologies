@@ -20,7 +20,6 @@ use tokio::time::Instant;
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
-use crate::disk::mount::filesystem::idmapped::{IdMap, IdMapped};
 use crate::disk::mount::filesystem::overlayfs::OverlayGuard;
 use crate::disk::mount::filesystem::{MountType, ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard, TmpMountGuard};
@@ -33,11 +32,9 @@ use crate::util::rpc_client::UnixRpcClient;
 use crate::util::{FromStrParser, Invoke, new_guid};
 use crate::{InvalidId, PackageId};
 
-pub(crate) const BASE_IDMAP: IdMap = IdMap {
-    from_id: 0,
-    to_id: 100000,
-    range: 65536,
-};
+mod filesystem;
+
+pub(crate) use filesystem::{BASE_IDMAP, service_filesystem};
 
 fn config_text(guid: &str, lang: &str) -> String {
     format!(
@@ -261,9 +258,9 @@ impl LxcContainer {
         let rootfs_dir = container_dir.join("rootfs");
         let rootfs = OverlayGuard::mount(
             TmpMountGuard::mount(
-                &IdMapped::new(
+                &service_filesystem(
                     BlockDev::new("/usr/lib/startos/container-runtime/rootfs.squashfs"),
-                    vec![BASE_IDMAP],
+                    &[],
                 ),
                 ReadOnly,
             )

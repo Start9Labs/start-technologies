@@ -107,6 +107,7 @@ pub(super) async fn measure_backup(
     )
 }
 
+/// Copies the service view of the volume, retaining host-visible owners.
 pub(super) async fn backup_volume(
     ctx: &RpcContext,
     backup: &BackupMountGuard<TargetMount>,

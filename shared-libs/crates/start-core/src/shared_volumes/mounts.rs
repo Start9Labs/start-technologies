@@ -172,6 +172,8 @@ struct AttachmentSlot {
     placeholder: AttachedMount,
 }
 
+/// Owns final consumer mounts for synchronous grant revocation.
+/// Unmounting a source leaves independently bound consumer mounts attached.
 #[derive(Default)]
 pub struct SharedVolumeMounts {
     blocked: bool,
