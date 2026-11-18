@@ -30,7 +30,6 @@ use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::service_interface::{
     AddressInfo, HostnameInfo, HostnameMetadata, ServiceInterface, ServiceInterfaceType,
 };
-use crate::net::socks::SocksController;
 use crate::net::transport::Transport;
 use crate::net::vhost::{DynVHostTarget, PlainHttpProxy, ProxyTarget, VHostController, VHostKey};
 use crate::net::web_server::WebServerAcceptorSetter;
@@ -70,7 +69,6 @@ pub struct NetController {
     _mdns_injection: NonDetachingJoinHandle<()>,
     pub(super) forward: InterfacePortForwardController,
     pub(crate) port_map: PortMapController,
-    pub(super) _socks: SocksController,
     pub(crate) callbacks: Arc<ServiceCallbacks>,
 }
 
@@ -79,13 +77,11 @@ impl NetController {
         db: TypedPatchDb<Database>,
         dns: Arc<DnsController>,
         webserver: &WebServerAcceptorSetter<WildcardListener>,
-        socks_listen: SocketAddr,
         max_proxy_conns_per_target: usize,
     ) -> Result<Self, Error> {
         let net_iface = Arc::new(NetworkInterfaceController::new(db.clone()));
         dns.activate(net_iface.clone());
         webserver.send_modify(|listener| listener.set_ip_info(net_iface.watcher.subscribe()));
-        let socks = SocksController::new(socks_listen)?;
         let crypto_provider = Arc::new(tokio_rustls::rustls::crypto::ring::default_provider());
         let tls_client_config = Arc::new(crate::net::tls::client_config(
             crypto_provider.clone(),
@@ -174,7 +170,6 @@ impl NetController {
             ),
             port_map,
             net_iface,
-            _socks: socks,
             callbacks: Arc::new(ServiceCallbacks::default()),
         })
     }

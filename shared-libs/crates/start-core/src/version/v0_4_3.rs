@@ -28,6 +28,9 @@ impl VersionT for Version {
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
     }
+    fn migration_revision(self) -> usize {
+        1
+    }
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         assign_container_slots(db)?;
         Ok(Value::Null)
@@ -65,15 +68,23 @@ fn package_data(db: &mut Value) -> Option<&mut imbl_value::InOMap<InternedString
         .as_object_mut()
 }
 
-/// Gives every installed package a slot, in package-id order.
+/// Gives each package without a slot the lowest free one, in package-id order.
 fn assign_container_slots(db: &mut Value) -> Result<(), Error> {
     let Some(packages) = package_data(db) else {
         return Ok(());
     };
-    let mut ids = packages.keys().cloned().collect::<Vec<_>>();
-    ids.sort();
-    for (index, id) in ids.into_iter().enumerate() {
-        let slot = ContainerSlot::new(u16::try_from(index).unwrap_or(u16::MAX))?;
+    let mut held = Vec::new();
+    let mut unassigned = Vec::new();
+    for (id, package) in packages.iter() {
+        match package.get("containerSlot") {
+            Some(slot) => held.push(from_value::<ContainerSlot>(slot.clone())?),
+            None => unassigned.push(id.clone()),
+        }
+    }
+    unassigned.sort();
+    for id in unassigned {
+        let slot = ContainerSlot::lowest_free(held.iter().copied())?;
+        held.push(slot);
         packages
             .get_mut(&id)
             .and_then(Value::as_object_mut)
@@ -99,5 +110,24 @@ mod tests {
         assert_eq!(slot("lnd"), imbl_value::json!(2));
         Version.down(&mut db).unwrap();
         assert_eq!(db["public"]["packageData"]["lnd"], imbl_value::json!({}));
+    }
+
+    #[test]
+    fn a_rerun_keeps_assigned_slots_and_fills_only_the_missing() {
+        let mut db = imbl_value::json!({
+            "public": { "packageData": {
+                "bitcoind": { "containerSlot": 1 },
+                "electrs": {},
+                "lnd": { "containerSlot": 0 },
+                "mempool": {}
+            } }
+        });
+        Version.up(&mut db, ()).unwrap();
+        Version.up(&mut db, ()).unwrap();
+        let slot = |id: &str| db["public"]["packageData"][id]["containerSlot"].clone();
+        assert_eq!(slot("lnd"), imbl_value::json!(0));
+        assert_eq!(slot("bitcoind"), imbl_value::json!(1));
+        assert_eq!(slot("electrs"), imbl_value::json!(2));
+        assert_eq!(slot("mempool"), imbl_value::json!(3));
     }
 }

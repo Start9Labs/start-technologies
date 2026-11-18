@@ -1,6 +1,7 @@
 use rpc_toolkit::{Context, HandlerExt, ParentHandler};
 
 pub mod acme;
+pub mod dial;
 pub mod dns;
 pub mod dns_update;
 pub mod domain_redirect;
@@ -14,7 +15,6 @@ pub mod net_controller;
 pub mod port_map;
 pub(crate) mod request_origin;
 pub mod service_interface;
-pub mod socks;
 pub mod ssl;
 pub mod static_server;
 pub mod tls;

@@ -39,9 +39,9 @@ use crate::init::{InitResult, check_time_is_synchronized};
 use crate::install::PKG_ARCHIVE_DIR;
 use crate::lxc::LxcManager;
 use crate::middleware::auth::signature::NonceCache;
+use crate::net::dial::{OsResolver, TOR_SOCKS, dial, is_onion};
 use crate::net::gateway::WildcardListener;
 use crate::net::net_controller::{NetController, NetService};
-use crate::net::socks::DEFAULT_SOCKS_LISTEN;
 use crate::net::web_server::WebServerAcceptorSetter;
 use crate::net::wifi::WpaCli;
 use crate::prelude::*;
@@ -167,7 +167,7 @@ impl RpcContext {
 /// Clients acquired before a reload retain their previous trust configuration.
 pub struct ReloadableHttpClient {
     clients: SyncRwLock<HttpClients>,
-    socks_proxy_url: String,
+    route: ProxyRoute,
 }
 
 #[derive(Clone)]
@@ -175,34 +175,63 @@ struct HttpClients {
     redirecting: Client,
     without_redirects: Client,
 }
+
+/// The SOCKS proxy a connection goes through, if any.
+#[derive(Clone, Debug)]
+enum ProxyRoute {
+    /// Onions through Tor; everything else directly.
+    Tor,
+    #[cfg(test)]
+    All(Url),
+}
+impl ProxyRoute {
+    fn proxy_for(&self, host: &str) -> Option<Url> {
+        match self {
+            Self::Tor => is_onion(host).then(|| {
+                format!("socks5h://{TOR_SOCKS}")
+                    .parse()
+                    .expect("valid Tor proxy URL")
+            }),
+            #[cfg(test)]
+            Self::All(proxy) => Some(proxy.clone()),
+        }
+    }
+}
+
 impl ReloadableHttpClient {
-    pub(crate) fn new(socks_proxy_url: String) -> Result<Self, Error> {
-        let clients = Self::build_clients(&socks_proxy_url)?;
+    pub(crate) fn new() -> Result<Self, Error> {
+        Self::with_route(ProxyRoute::Tor)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn through_proxy(proxy: &str) -> Result<Self, Error> {
+        Self::with_route(ProxyRoute::All(proxy.parse()?))
+    }
+
+    fn with_route(route: ProxyRoute) -> Result<Self, Error> {
         Ok(Self {
-            clients: SyncRwLock::new(clients),
-            socks_proxy_url,
+            clients: SyncRwLock::new(Self::build_clients(&route)?),
+            route,
         })
     }
 
-    fn build_clients(socks_proxy_url: &str) -> Result<HttpClients, Error> {
+    fn build_clients(route: &ProxyRoute) -> Result<HttpClients, Error> {
         Ok(HttpClients {
-            redirecting: Self::build_for_proxy(
-                socks_proxy_url,
-                reqwest::redirect::Policy::default(),
-            )?,
-            without_redirects: Self::build_for_proxy(
-                socks_proxy_url,
-                reqwest::redirect::Policy::none(),
-            )?,
+            redirecting: Self::build_for_route(route, reqwest::redirect::Policy::default())?,
+            without_redirects: Self::build_for_route(route, reqwest::redirect::Policy::none())?,
         })
     }
 
-    fn build_for_proxy(
-        socks_proxy_url: &str,
+    fn build_for_route(
+        route: &ProxyRoute,
         redirects: reqwest::redirect::Policy,
     ) -> Result<Client, Error> {
+        let route = route.clone();
         Client::builder()
-            .proxy(Proxy::all(socks_proxy_url)?)
+            .proxy(Proxy::custom(move |url| {
+                url.host_str().and_then(|host| route.proxy_for(host))
+            }))
+            .dns_resolver(Arc::new(OsResolver))
             .redirect(redirects)
             .build()
             .with_kind(ErrorKind::ParseUrl)
@@ -220,23 +249,28 @@ impl ReloadableHttpClient {
         &self,
         request: impl IntoClientRequest + Send,
         config: WebSocketConfig,
-    ) -> Result<WebSocketStream<MaybeTlsStream<Socks5Stream<TcpStream>>>, Error> {
+    ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Error> {
         let request = request
             .into_client_request()
             .with_kind(ErrorKind::Network)?;
         let url: Url = request.uri().to_string().parse()?;
-        let proxy: Url = self.socks_proxy_url.parse()?;
-        let stream = Socks5Stream::connect(
-            (
-                proxy.host_str().or_not_found("SOCKS proxy host")?,
-                proxy.port().or_not_found("SOCKS proxy port")?,
-            ),
-            url.host_str().or_not_found("WebSocket host")?.to_owned(),
-            url.port_or_known_default().or_not_found("WebSocket port")?,
-            SocksConfig::default(),
-        )
-        .await
-        .with_kind(ErrorKind::Network)?;
+        let host = url.host_str().or_not_found("WebSocket host")?;
+        let port = url.port_or_known_default().or_not_found("WebSocket port")?;
+        let stream = match self.route.proxy_for(host) {
+            Some(proxy) => Socks5Stream::connect(
+                (
+                    proxy.host_str().or_not_found("SOCKS proxy host")?,
+                    proxy.port().or_not_found("SOCKS proxy port")?,
+                ),
+                host.to_owned(),
+                port,
+                SocksConfig::default(),
+            )
+            .await
+            .with_kind(ErrorKind::Network)?
+            .get_socket(),
+            None => dial(host, port).await?,
+        };
         let (socket, _) =
             tokio_tungstenite::client_async_tls_with_config(request, stream, Some(config), None)
                 .await
@@ -245,7 +279,7 @@ impl ReloadableHttpClient {
     }
 
     pub fn reload(&self) -> Result<(), Error> {
-        let clients = Self::build_clients(&self.socks_proxy_url)?;
+        let clients = Self::build_clients(&self.route)?;
         self.clients.replace(clients);
         Ok(())
     }
@@ -279,7 +313,6 @@ impl RpcContext {
             run_migrations,
         }: InitRpcContextPhases,
     ) -> Result<Self, Error> {
-        let socks_proxy = config.socks_listen.unwrap_or(DEFAULT_SOCKS_LISTEN);
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
 
         load_db.start();
@@ -322,7 +355,6 @@ impl RpcContext {
                     db.clone(),
                     dns,
                     webserver,
-                    socks_proxy,
                     config
                         .max_proxy_conns_per_target
                         .unwrap_or(crate::net::vhost::MAX_PROXY_CONNS_PER_TARGET),
@@ -456,7 +488,6 @@ impl RpcContext {
 
         let services = ServiceMap::default();
         let metrics_cache = Watch::<Option<crate::system::Metrics>>::new(None);
-        let socks_proxy_url = format!("socks5h://{socks_proxy}");
 
         let crons = SyncMutex::new(BTreeMap::new());
 
@@ -537,7 +568,7 @@ impl RpcContext {
                     )
                 })?,
             ),
-            client: ReloadableHttpClient::new(socks_proxy_url)?,
+            client: ReloadableHttpClient::new()?,
             start_time: Instant::now(),
             crons,
         });
@@ -844,7 +875,7 @@ mod tests {
         });
         let http = ReloadableHttpClient {
             clients: SyncRwLock::new(clients_with_generation("old")),
-            socks_proxy_url: proxy_url,
+            route: ProxyRoute::All(proxy_url.parse().unwrap()),
         };
         let old = http.get();
         http.reload().unwrap();
@@ -871,9 +902,11 @@ mod tests {
         use tokio_tungstenite::tungstenite::Message;
 
         let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let client =
-            ReloadableHttpClient::new(format!("socks5h://{}", proxy.local_addr().unwrap()))
-                .unwrap();
+        let client = ReloadableHttpClient::through_proxy(&format!(
+            "socks5h://{}",
+            proxy.local_addr().unwrap()
+        ))
+        .unwrap();
         let server = tokio::spawn(async move {
             let (stream, _) = proxy.accept().await.unwrap();
             let (protocol, _, target) = Socks5ServerProtocol::accept_no_auth(stream)
@@ -914,7 +947,8 @@ mod tests {
     async fn scoped_http_clients_do_not_forward_redirect_credentials_after_reload() {
         let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let http =
-            ReloadableHttpClient::new(format!("http://{}", proxy.local_addr().unwrap())).unwrap();
+            ReloadableHttpClient::through_proxy(&format!("http://{}", proxy.local_addr().unwrap()))
+                .unwrap();
         let server = tokio::spawn(async move {
             let mut forwarded = 0;
             for _ in 0..4 {
@@ -969,16 +1003,22 @@ mod tests {
         assert_eq!(server.await.unwrap(), 1);
     }
 
-    #[tokio::test]
-    async fn reloadable_http_client_keeps_client_when_rebuild_fails() {
-        let http = ReloadableHttpClient {
-            clients: SyncRwLock::new(clients_with_generation("old")),
-            socks_proxy_url: "http://[::1".to_owned(),
-        };
-
-        assert!(http.reload().is_err());
-        assert_client_generation(http.get(), "old").await;
-        assert_client_generation(http.get_without_redirects(), "old").await;
+    #[test]
+    fn only_onions_go_through_tor() {
+        let tor = format!("socks5h://{TOR_SOCKS}").parse::<Url>().unwrap();
+        assert_eq!(
+            ProxyRoute::Tor
+                .proxy_for("registryxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.onion"),
+            Some(tor)
+        );
+        for host in [
+            "registry.start9.com",
+            "server.local",
+            "192.168.1.5",
+            "[::1]",
+        ] {
+            assert_eq!(ProxyRoute::Tor.proxy_for(host), None);
+        }
     }
 
     async fn assert_client_generation(client: Client, generation: &str) {

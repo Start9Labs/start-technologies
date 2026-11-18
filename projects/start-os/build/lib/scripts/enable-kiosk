@@ -64,7 +64,7 @@ user_pref("messaging-system.rsexperimentloader.enabled", false);
 user_pref("network.allow-experiments", false);
 user_pref("network.captive-portal-service.enabled", false);
 user_pref("network.connectivity-service.enabled", false);
-user_pref("network.proxy.socks", "10.0.3.1");
+user_pref("network.proxy.socks", "172.16.0.1");
 user_pref("network.proxy.socks_port", 9050);
 user_pref("network.proxy.socks_version", 5);
 user_pref("network.proxy.socks_remote_dns", true);

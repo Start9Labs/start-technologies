@@ -5330,13 +5330,6 @@ help.arg.socket-path:
   fr_FR: "Chemin vers le socket Unix"
   pl_PL: "Ścieżka do gniazda Unix"
 
-help.arg.socks-listen-address:
-  en_US: "SOCKS proxy listen address"
-  de_DE: "SOCKS-Proxy-Lausch-Adresse"
-  es_ES: "Dirección de escucha del proxy SOCKS"
-  fr_FR: "Adresse d'écoute du proxy SOCKS"
-  pl_PL: "Adres nasłuchiwania proxy SOCKS"
-
 help.arg.soft-uninstall:
   en_US: "Uninstall without deleting service data"
   de_DE: "Deinstallieren ohne Service-Daten zu löschen"

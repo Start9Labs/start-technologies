@@ -20,7 +20,6 @@ use crate::hostname::ServerHostname;
 use crate::middleware::auth::local::LocalAuthContext;
 use crate::net::gateway::WildcardListener;
 use crate::net::net_controller::{NetController, NetService};
-use crate::net::socks::DEFAULT_SOCKS_LISTEN;
 use crate::net::web_server::WebServerAcceptorSetter;
 use crate::prelude::*;
 use crate::progress::{
@@ -263,7 +262,6 @@ pub async fn init(
             db.clone(),
             dns,
             webserver,
-            cfg.socks_listen.unwrap_or(DEFAULT_SOCKS_LISTEN),
             cfg.max_proxy_conns_per_target
                 .unwrap_or(crate::net::vhost::MAX_PROXY_CONNS_PER_TARGET),
         )
