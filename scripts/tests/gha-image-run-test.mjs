@@ -14,7 +14,7 @@ const run = (id, artifacts, overrides = {}) => ({
   artifacts,
   ...overrides,
 })
-const IMAGE = 'x86_64.squashfs'
+const IMAGE = 'startos-0.4.0-aaaaaaa_x86_64.squashfs'
 
 function select(t, workflows) {
   const runs = Object.entries(workflows).flatMap(([workflow, pages]) =>
@@ -44,7 +44,7 @@ for (const [name, workflows, expected] of [
     'skips a newer successful product-only build',
     {
       'build-products.yaml': [
-        [run(3, ['start-cli_x86_64.deb']), run(2, [IMAGE])],
+        [run(3, ['start-cli-0.4.0-aaaaaaa_x86_64.deb']), run(2, [IMAGE])],
       ],
     },
     '2',
@@ -61,11 +61,21 @@ for (const [name, workflows, expected] of [
     'ignores expired and other-platform images',
     {
       'startos-iso.yaml': [
-        [run(3, [], { artifacts: [{ name: IMAGE, expired: true }] })],
+        [run(1, [], { artifacts: [{ name: IMAGE, expired: true }] })],
       ],
-      'build-products.yaml': [[run(2, ['aarch64.squashfs']), run(1, [IMAGE])]],
+      'build-products.yaml': [
+        [
+          run(4, [
+            'startos-0.4.0-aaaaaaa_aarch64.squashfs',
+            'startos-0.4.0-aaaaaaa_x86_64-nonfree.squashfs',
+            'startos-0.4.0-aaaaaaa_x86_64.migration.squashfs',
+          ]),
+          run(3, [IMAGE]),
+          run(2, [IMAGE], { conclusion: 'failure' }),
+        ],
+      ],
     },
-    '1',
+    '3',
   ],
   [
     'images from other branches do not hide the requested branch',
@@ -87,7 +97,9 @@ for (const [name, workflows, expected] of [
   ],
   [
     'fails when no requested image remains',
-    { 'build-products.yaml': [[run(1, ['start-cli_x86_64.deb'])]] },
+    {
+      'build-products.yaml': [[run(1, ['start-cli-0.4.0-aaaaaaa_x86_64.deb'])]],
+    },
     null,
   ],
 ]) {

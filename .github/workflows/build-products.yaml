@@ -211,8 +211,8 @@ jobs:
       - if: needs.changes.outputs.start-cli == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: start-cli_${{ matrix.arch }}.deb
           path: results/start-cli-*_${{ matrix.arch }}.deb
+          archive: false
           retention-days: 14
       - if: needs.changes.outputs.start-cli == 'true'
         uses: actions/upload-artifact@v7
@@ -227,8 +227,8 @@ jobs:
       - if: needs.changes.outputs.start-registry == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: start-registry_${{ matrix.arch }}.deb
           path: results/start-registry-*_${{ matrix.arch }}.deb
+          archive: false
           retention-days: 14
 
       - name: Package start-tunnel
@@ -237,8 +237,8 @@ jobs:
       - if: needs.changes.outputs.start-tunnel == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: start-tunnel_${{ matrix.arch }}.deb
           path: results/start-tunnel-*_${{ matrix.arch }}.deb
+          archive: false
           retention-days: 14
 
   cli-macos:
@@ -304,14 +304,15 @@ jobs:
       - name: Download debian package
         uses: actions/download-artifact@v8
         with:
-          pattern: start-registry_*.deb
+          pattern: start-registry-*.deb
+          merge-multiple: true
 
       - name: Map matrix.arch to docker platform
         run: |
           platforms=""
           for deb in *.deb; do
             filename=$(basename "$deb" .deb)
-            arch="${filename#*_}"
+            arch="${filename##*_}"
             case "$arch" in
               x86_64)
                 platform="linux/amd64"

@@ -483,7 +483,7 @@ test('the CLI binaries cover every triple a release attaches', () => {
   const linux = products.jobs.build.steps.find(
     step =>
       step.uses === 'actions/upload-artifact@v7' &&
-      step.with.name.endsWith('-unknown-linux-musl'),
+      step.with.name?.endsWith('-unknown-linux-musl'),
   )
   const built = [
     ...['x86_64', 'aarch64', 'riscv64'].map(arch =>

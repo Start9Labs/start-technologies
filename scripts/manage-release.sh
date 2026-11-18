@@ -820,8 +820,8 @@ promote_alpha_debs() {
 pull_gha_debs() {
     local arch
     for arch in $DEB_ARCHES; do
-        echo "  ${PROJECT}_${arch}.deb"
-        gh run download -R "$REPO" "$RUN_ID" -n "${PROJECT}_${arch}.deb" -D "$(pwd)"
+        echo "  ${PROJECT}-*_${arch}.deb"
+        "$SCRIPT_DIR/gha-artifact-download.sh" "$REPO" "$RUN_ID" "${PROJECT}-*_${arch}.deb" "$(pwd)"
     done
 }
 
@@ -1283,8 +1283,8 @@ cmd_pull_gha() {
         os)
             for platform in $OS_PLATFORMS; do
                 for ext in $(os_image_exts "$platform"); do
-                    echo "  ${platform}.${ext}"
-                    gh run download -R "$REPO" "$RUN_ID" -n "${platform}.${ext}" -D "$(pwd)"
+                    echo "  startos-*_${platform}.${ext}"
+                    "$SCRIPT_DIR/gha-artifact-download.sh" "$REPO" "$RUN_ID" "startos-*_${platform}.${ext}" "$(pwd)"
                 done
             done
             ensure_img_gz
