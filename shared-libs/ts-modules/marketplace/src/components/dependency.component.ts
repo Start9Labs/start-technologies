@@ -31,7 +31,9 @@ import { MarketplaceIconDirective } from './icon.directive'
         ({{ 'Required' | i18n }})
       }
       @if (dep().value.description; as description) {
-        <span tuiSubtitle>{{ description | localize }}</span>
+        <span tuiSubtitle>
+          {{ description | localize: pkg().defaultLocale }}
+        </span>
       }
     </span>
   `,
@@ -54,6 +56,8 @@ export class MarketplaceDependencyComponent {
 
   getTitle(key: string): string {
     const title = this.pkg().dependencyMetadata[key]?.title
-    return title ? this.i18nService.localize(title) : key
+    return title
+      ? this.i18nService.localize(title, this.pkg().defaultLocale)
+      : key
   }
 }

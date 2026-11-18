@@ -338,6 +338,65 @@ async fn dropping_a_plaintext_proxy_cancels_existing_streams_and_releases_its_li
 }
 
 #[tokio::test]
+async fn retargeting_a_plaintext_proxy_keeps_only_the_streams_it_still_accepts() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        for options in [
+            ProxyOptions::Http {
+                add_x_forwarded_headers: false,
+                auth: None,
+            },
+            ProxyOptions::Tcp,
+        ] {
+            let (upstream, mut requests, _backend) = backend().await;
+            let (addr, server) = proxy("127.0.0.1".parse().unwrap(), upstream, options, 4).await;
+            let (mut established, _connection) = client(addr).await;
+            assert_eq!(
+                established
+                    .send_request(request(None))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::OK
+            );
+            requests.recv().await.unwrap();
+
+            let mut widened = server.target.read();
+            widened.private.insert("127.0.0.3".parse().unwrap());
+            assert!(server.retarget(&widened));
+            assert_eq!(
+                established
+                    .send_request(request(None))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::OK,
+                "a stream the new target accepts survives"
+            );
+            requests.recv().await.unwrap();
+            assert_eq!(server.requirements.read().private_ips, widened.private);
+            let (mut fresh, _fresh_connection) = client(addr).await;
+            assert_eq!(
+                fresh.send_request(request(None)).await.unwrap().status(),
+                StatusCode::OK
+            );
+            requests.recv().await.unwrap();
+
+            let mut rerouted = widened.clone();
+            rerouted.addr = "127.0.0.1:1".parse().unwrap();
+            assert!(!server.retarget(&rerouted));
+
+            let mut narrowed = widened;
+            narrowed.private.remove(&addr.ip());
+            assert!(server.retarget(&narrowed));
+            assert!(established.send_request(request(None)).await.is_err());
+            assert!(fresh.send_request(request(None)).await.is_err());
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn plaintext_connection_cap_evicts_an_idle_connection() {
     tokio::time::timeout(Duration::from_secs(10), async {
         let (upstream, mut requests, _backend) = backend().await;

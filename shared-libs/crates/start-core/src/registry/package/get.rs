@@ -60,6 +60,9 @@ impl Default for PackageDetailLevel {
 #[serde(rename_all = "camelCase")]
 pub struct PackageInfoShort {
     pub release_notes: LocaleString,
+    /// `PackageMetadata::default_locale`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_locale: Option<InternedString>,
 }
 
 rpc_toolkit::reflect_ts!(PackageInfoShort);
@@ -206,7 +209,7 @@ impl GetPackageResponse {
                 for (version, info) in lesser_versions {
                     table.add_row(row![
                         AsRef::<str>::as_ref(&version),
-                        &info.release_notes.localized()
+                        &info.release_notes.localized(info.default_locale.as_deref())
                     ]);
                 }
             }
@@ -1030,6 +1033,7 @@ fn fixture_info() -> PackageVersionInfo {
     PackageVersionInfo {
         metadata: PackageMetadata {
             title: "Test Package".into(),
+            default_locale: None,
             description: Description {
                 short: lang_map("A short description"),
                 long: lang_map("A longer description of the test package"),

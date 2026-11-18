@@ -116,6 +116,18 @@ impl Model<PackageInfo> {
     }
 }
 
+impl Model<PackageInfo> {
+    pub(crate) fn for_each_locale_string(
+        &mut self,
+        f: &mut impl FnMut(&mut LocaleString),
+    ) -> Result<(), Error> {
+        for (_, version) in self.as_versions_mut().as_entries_mut()? {
+            version.for_each_locale_string(f)?;
+        }
+        Ok(())
+    }
+}
+
 impl Model<PackageIndex> {
     pub fn visible_package(
         &self,
@@ -203,13 +215,6 @@ pub struct DependencyMetadata {
 rpc_toolkit::reflect_ts!(DependencyMetadata);
 rpc_toolkit::ts_export!(DependencyMetadata, namespaces = [""]);
 
-impl DependencyMetadata {
-    pub fn localize_for(&mut self, locale: &str) {
-        self.title.as_mut().map(|t| t.localize_for(locale));
-        self.description.as_mut().map(|d| d.localize_for(locale));
-    }
-}
-
 fn placeholder_url() -> Url {
     "https://example.com".parse().unwrap()
 }
@@ -238,6 +243,9 @@ rpc_toolkit::ts_export!(PreDownloadAlert, namespaces = [""]);
 #[model = "Model<Self>"]
 pub struct PackageMetadata {
     pub title: InternedString,
+    /// Locale this package's `LocaleString`s fall back to when a requested one is missing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_locale: Option<InternedString>,
     pub description: Description,
     pub release_notes: LocaleString,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -395,13 +403,13 @@ impl PackageVersionInfo {
 
         table.add_row(row![bc => &self.metadata.title]);
         table.add_row(row![br -> "VERSION", AsRef::<str>::as_ref(version)]);
-        table.add_row(row![br -> "RELEASE NOTES", &self.metadata.release_notes.localized()]);
+        table.add_row(row![br -> "RELEASE NOTES", &self.metadata.release_notes.localized(self.metadata.default_locale.as_deref())]);
         table.add_row(
-            row![br -> "ABOUT", &textwrap::wrap(&self.metadata.description.short.localized(), 80).join("\n")],
+            row![br -> "ABOUT", &textwrap::wrap(&self.metadata.description.short.localized(self.metadata.default_locale.as_deref()), 80).join("\n")],
         );
         table.add_row(row![
             br -> "DESCRIPTION",
-            &textwrap::wrap(&self.metadata.description.long.localized(), 80).join("\n")
+            &textwrap::wrap(&self.metadata.description.long.localized(self.metadata.default_locale.as_deref()), 80).join("\n")
         ]);
         table.add_row(row![br -> "GIT HASH", self.metadata.git_hash.as_deref().unwrap_or("N/A")]);
         table.add_row(row![br -> "LICENSE", &self.metadata.license]);
@@ -447,28 +455,45 @@ impl Model<PackageVersionInfo> {
             }
 
             if let Some(locale) = device_info.os.language.as_deref() {
-                self.as_dependency_metadata_mut()
-                    .as_entries_mut()?
-                    .into_iter()
-                    .try_for_each(|(_, d)| d.mutate(|d| Ok(d.localize_for(locale))))?;
-                self.as_metadata_mut()
-                    .as_description_mut()
-                    .mutate(|d| Ok(d.localize_for(locale)))?;
-                self.as_metadata_mut()
-                    .as_release_notes_mut()
-                    .mutate(|r| Ok(r.localize_for(locale)))?;
-                self.as_metadata_mut()
-                    .as_pre_download_alert_mut()
-                    .mutate(|alert| {
-                        if let Some(alert) = alert {
-                            alert.message.localize_for(locale);
-                        }
-                        Ok(())
-                    })?;
+                self.localize_for(Some(locale))?;
             }
         }
 
         Ok(true)
+    }
+
+    /// Resolves every `LocaleString` with `LocaleString::localize_for` and the declared default.
+    pub fn localize_for(&mut self, locale: Option<&str>) -> Result<(), Error> {
+        let default = self.as_metadata().as_default_locale().de()?;
+        self.for_each_locale_string(&mut |s| s.localize_for(locale, default.as_deref()))
+    }
+
+    pub(crate) fn for_each_locale_string(
+        &mut self,
+        f: &mut impl FnMut(&mut LocaleString),
+    ) -> Result<(), Error> {
+        for (_, dependency) in self.as_dependency_metadata_mut().as_entries_mut()? {
+            dependency.mutate(|d| {
+                d.title
+                    .iter_mut()
+                    .chain(&mut d.description)
+                    .for_each(&mut *f);
+                Ok(())
+            })?;
+        }
+        let metadata = self.as_metadata_mut();
+        metadata.as_description_mut().mutate(|d| {
+            f(&mut d.short);
+            f(&mut d.long);
+            Ok(())
+        })?;
+        metadata.as_release_notes_mut().mutate(|r| Ok(f(r)))?;
+        metadata.as_pre_download_alert_mut().mutate(|alert| {
+            if let Some(alert) = alert {
+                f(&mut alert.message);
+            }
+            Ok(())
+        })
     }
 }
 
@@ -669,6 +694,7 @@ pub(crate) mod tests {
     fn old_manifest_defaults_hardware_virtualization_to_false() {
         let metadata = PackageMetadata {
             title: "Test Package".into(),
+            default_locale: None,
             description: Description {
                 short: LocaleString::Translated("Short".into()),
                 long: LocaleString::Translated("Long".into()),
@@ -738,7 +764,7 @@ pub(crate) mod tests {
         );
         let mut localized = serde_json::from_value::<PreDownloadAlert>(encoded).unwrap();
         assert_eq!(localized, alert);
-        localized.message.localize_for("fr_FR");
+        localized.message.localize_for(Some("fr_FR"), None);
         assert_eq!(
             localized.message,
             LocaleString::Translated("Sauvegardez avant la mise à jour".into())

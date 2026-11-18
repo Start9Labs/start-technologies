@@ -6394,6 +6394,10 @@
                 "osVersion": {
                   "description": "Client StartOS version. Omission preserves the canonical index format.",
                   "type": ["string", "null"]
+                },
+                "language": {
+                  "description": "Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.",
+                  "type": ["string", "null"]
                 }
               },
               "additionalProperties": true
@@ -6461,6 +6465,10 @@
             "description": {
               "anyOf": [{ "$ref": "#/$defs/LocaleString" }, { "type": "null" }]
             },
+            "defaultLocale": {
+              "description": "Locale registry-owned `LocaleString`s fall back to when a requested one is missing.",
+              "type": ["string", "null"]
+            },
             "package": { "$ref": "#/$defs/PackageIndex" },
             "os": { "$ref": "#/$defs/OsIndex" },
             "signers": {
@@ -6477,6 +6485,7 @@
             "name",
             "icon",
             "description",
+            "defaultLocale",
             "package",
             "os",
             "signers",
@@ -6757,6 +6766,10 @@
           "type": "object",
           "properties": {
             "title": { "type": "string" },
+            "defaultLocale": {
+              "description": "Locale this package's `LocaleString`s fall back to when a requested one is missing.",
+              "type": ["string", "null"]
+            },
             "description": { "$ref": "#/$defs/Description" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "preDownloadAlert": {
@@ -7068,6 +7081,10 @@
         "description": {
           "anyOf": [{ "$ref": "#/$defs/LocaleString" }, { "type": "null" }]
         },
+        "defaultLocale": {
+          "description": "Locale registry-owned `LocaleString`s fall back to when a requested one is missing.",
+          "type": ["string", "null"]
+        },
         "package": { "$ref": "#/$defs/PackageIndex" },
         "os": { "$ref": "#/$defs/OsIndex" },
         "signers": {
@@ -7081,6 +7098,7 @@
         "name",
         "icon",
         "description",
+        "defaultLocale",
         "package",
         "os",
         "signers",
@@ -7135,6 +7153,10 @@
               "description": "Markdown, shown above the registry's services.",
               "anyOf": [{ "$ref": "#/$defs/LocaleString" }, { "type": "null" }]
             },
+            "defaultLocale": {
+              "description": "`FullIndex::default_locale`.",
+              "type": ["string", "null"]
+            },
             "categories": {
               "type": "object",
               "propertyNames": { "type": "string" },
@@ -7151,6 +7173,7 @@
             "name",
             "icon",
             "description",
+            "defaultLocale",
             "categories",
             "trustSigners"
           ],
@@ -7273,6 +7296,10 @@
           "description": "Markdown, shown above the registry's services.",
           "anyOf": [{ "$ref": "#/$defs/LocaleString" }, { "type": "null" }]
         },
+        "defaultLocale": {
+          "description": "`FullIndex::default_locale`.",
+          "type": ["string", "null"]
+        },
         "categories": {
           "type": "object",
           "propertyNames": { "type": "string" },
@@ -7285,8 +7312,55 @@
           "additionalProperties": { "$ref": "#/$defs/SignerInfo" }
         }
       },
-      "required": ["name", "icon", "description", "categories", "trustSigners"],
+      "required": [
+        "name",
+        "icon",
+        "description",
+        "defaultLocale",
+        "categories",
+        "trustSigners"
+      ],
       "additionalProperties": true
+    }
+  },
+  {
+    "name": "registry.info.set-default-locale",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RegistryUrlParams" },
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/SetDefaultLocaleParams" }
+      ],
+      "$defs": {
+        "RegistryUrlParams": {
+          "type": "object",
+          "properties": { "registry": { "type": "string" } },
+          "required": ["registry"],
+          "additionalProperties": true
+        },
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "SetDefaultLocaleParams": {
+          "type": "object",
+          "properties": { "defaultLocale": { "type": ["string", "null"] } },
+          "required": ["defaultLocale"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object"
     }
   },
   {
@@ -9920,6 +9994,10 @@
           "type": "object",
           "properties": {
             "title": { "type": "string" },
+            "defaultLocale": {
+              "description": "Locale this package's `LocaleString`s fall back to when a requested one is missing.",
+              "type": ["string", "null"]
+            },
             "description": { "$ref": "#/$defs/Description" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
             "preDownloadAlert": {

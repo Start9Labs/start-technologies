@@ -82,7 +82,10 @@ async fn registry_metadata_accepts_current_and_legacy_signature_encodings() {
         let mut unsigned = asset.clone();
         unsigned.signatures.clear();
         assert!(unsigned.validate_all(SIG_CONTEXT, None).is_err());
-        assert_eq!(info.release_notes.localized_for("en_US"), "Release notes");
+        assert_eq!(
+            info.release_notes.localized_for(Some("en_US"), None),
+            "Release notes"
+        );
     }
 }
 

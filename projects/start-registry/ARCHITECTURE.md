@@ -58,11 +58,29 @@ Subcommands (same module), each available over RPC and to the `start-registry` C
 
 ### Registry index subscriptions
 
-The public `db.subscribe` RPC accepts optional `pointer` and `osVersion` parameters. The pointer
+The public `db.subscribe` RPC accepts optional `pointer`, `osVersion` and `language` parameters. The pointer
 may select `/index` or any descendant; omitting it or passing `null` selects `/index`. Without
 `rpcstream` opt-in, the response contains an initial `{ id, value }` dump and a continuation
 `guid`. Connecting to `/rpc/v2/<guid>` streams revisions relative to the selected subtree. This
 contract also applies to ordinary calls on the shared WebSocket.
+
+`language` resolves every `LocaleString` in the view with `LocaleString::localize_for`:
+the exact or same-language translation, else the owner's declared default locale
+(`PackageMetadata::default_locale` for package text, `FullIndex::default_locale` for
+registry text, set by `info set-default-locale`), else an arbitrary stored one. The
+requested language is first matched against the locales in the reader's visible index
+(`best_locale`); a language matching none of them shares the default view, where
+every string resolves to its owner's default, so requests cannot create views beyond
+the index's own languages.
+`IndexLocaleTracker` (`registry/locales.rs`) holds those locales per package. It
+captures the database and locale metadata together, recomputing the locales when
+`/index` changes. A subscription with `language` waits for a snapshot at or after its initiating
+database revision and resolves both reader access and language against that snapshot,
+without walking the index. Root revisions also advance snapshot freshness when
+permissions outside `/index` change. Each distinct reader, `osVersion`
+compatibility and `language` combination is an `IndexView` served by a lazily
+created in-memory PatchDB mirror (`registry/mirror.rs`), shared by its
+subscribers and dropped with the last of them.
 
 With `rpcstream: "1.0"` on `/rpc/v2`, the same method returns the dump directly as its initiating
 result and sends subsequent `Revision` events under that request ID. Closing a stream releases
