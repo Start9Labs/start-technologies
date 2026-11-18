@@ -567,10 +567,11 @@ async fn delete_local_volume(
     package_data: &Path,
 ) -> Result<(), Error> {
     use crate::disk::mount::filesystem::ReadOnly;
-    use crate::disk::mount::filesystem::bind::Bind;
     use crate::disk::mount::guard::TmpMountGuard;
     let path = local_path(package_data, id);
-    let _unused = TmpMountGuard::reserve_unmounted(&Bind::new(&path), ReadOnly).await?;
+    let _unused =
+        TmpMountGuard::reserve_unmounted(&source::SourceFilesystem::local(path.clone()), ReadOnly)
+            .await?;
     crate::util::btrfs::delete_volume_root(&path).await?;
     database.mutate(|db| remove_definition(db, id)).await.result
 }
@@ -883,7 +884,7 @@ mod tests {
         tokio::fs::write(path.join("sentinel"), b"managed contents")
             .await
             .unwrap();
-        let filesystem = source::SourceFilesystem::Local(path.clone());
+        let filesystem = source::SourceFilesystem::local(path.clone());
         let held = TmpMountGuard::mount(&filesystem, ReadOnly).await.unwrap();
         database
             .mutate(|db| prepare_removal(db, &id))
