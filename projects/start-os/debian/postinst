@@ -303,14 +303,24 @@ ln -sf /usr/lib/startos/motd /etc/update-motd.d/00-startos
 chmod -x /etc/update-motd.d/*
 chmod +x /etc/update-motd.d/00-startos
 
-# LXC: every service container's id range (lxc/slot.rs). startd writes each container's own map.
-cat /etc/subuid | grep -v '^root:' > /etc/subuid.tmp || true
-echo "root:65536:67108864" >> /etc/subuid.tmp
-mv /etc/subuid.tmp /etc/subuid
-
-cat /etc/subgid | grep -v '^root:' > /etc/subgid.tmp || true
-echo "root:65536:67108864" >> /etc/subgid.tmp
-mv /etc/subgid.tmp /etc/subgid
+# LXC: root owns every service container's id range (`lxc/slot.rs`); other users' ranges sit above it.
+SLOT_IDS_START=65536
+SLOT_IDS_END=67174400
+for ids in /etc/subuid /etc/subgid; do
+	awk -F: -v OFS=: -v start=$SLOT_IDS_START -v end=$SLOT_IDS_END '
+		NR == FNR { if ($1 != "root" && $2 + $3 > top) top = $2 + $3; next }
+		FNR == 1 { if (top < end) top = end }
+		$1 == "root" { next }
+		$2 < end && $2 + $3 > start { $2 = top; top += $3 }
+		{ print }
+		END { print "root", start, end - start }
+	' "$ids" "$ids" > "$ids.tmp"
+	mv "$ids.tmp" "$ids"
+done
+for key in SUB_UID_MIN SUB_GID_MIN; do
+	sed -i "/^#\?\s*$key\s/d" /etc/login.defs
+	echo "$key $SLOT_IDS_END" >> /etc/login.defs
+done
 
 cat /etc/lxc/default.conf | grep -v '^lxc\.idmap = [ug]' > /etc/lxc/default.conf.tmp || true
 mv /etc/lxc/default.conf.tmp /etc/lxc/default.conf
