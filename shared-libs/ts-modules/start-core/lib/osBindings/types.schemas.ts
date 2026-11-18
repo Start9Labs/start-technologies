@@ -1574,6 +1574,11 @@ export const SetDataVersionParams: z.ZodObject<{
 }).meta({
   id: 'SetDataVersionParams',
 })
+export const SetDefaultLocaleParams: z.ZodObject<{
+  defaultLocale: z.ZodNullable<z.ZodString>
+}> = /* @__PURE__ */ object({ defaultLocale: z.string().nullable() }).meta({
+  id: 'SetDefaultLocaleParams',
+})
 export const SetLanguageParams: z.ZodObject<{ language: z.ZodString }> =
   /* @__PURE__ */ object({ language: z.string() }).meta({
     id: 'SetLanguageParams',
@@ -4032,7 +4037,19 @@ export const PackageIcon: z.ZodUnion<readonly [typeof DataUrl, z.ZodString]> =
     })
 export const PackageInfoShort: z.ZodObject<{
   releaseNotes: typeof LocaleString
-}> = /* @__PURE__ */ object({ releaseNotes: LocaleString }).meta({
+  /**
+   * `PackageMetadata::default_locale`.
+   */
+  defaultLocale: z.ZodOptional<z.ZodNullable<z.ZodString>>
+}> = /* @__PURE__ */ object({
+  releaseNotes: LocaleString,
+  /**
+   * `PackageMetadata::default_locale`.
+   */
+  defaultLocale: z.string().nullable().optional().meta({
+    description: '`PackageMetadata::default_locale`.',
+  }),
+}).meta({
   id: 'PackageInfoShort',
 })
 export const PackageReaderParams: z.ZodObject<{
@@ -5669,6 +5686,13 @@ export const NutConfig: z.ZodObject<{
 export const OsUpdateCache: z.ZodObject<{
   registry: z.ZodString
   versions: z.ZodRecord<z.ZodString, typeof OsVersionInfo>
+  /**
+   * Tracks the source registry's cached `RegistryInfo::default_locale`.
+   */
+  defaultLocale: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   status: z.ZodCodec<
     z.ZodOptional<typeof RegistryStatus>,
     typeof RegistryStatus
@@ -5680,6 +5704,16 @@ export const OsUpdateCache: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   registry: z.string(),
   versions: z.record(z.string(), OsVersionInfo),
+  /**
+   * Tracks the source registry's cached `RegistryInfo::default_locale`.
+   */
+  defaultLocale: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description:
+      "Tracks the source registry's cached `RegistryInfo::default_locale`.",
+  }),
   status: wire(RegistryStatus.optional(), RegistryStatus),
   /**
    * Failure of the latest synchronization attempt; absent while connecting or connected.
@@ -5707,6 +5741,10 @@ export const PackageAccess: z.ZodObject<{
 })
 export const PackageMetadata: z.ZodObject<{
   title: z.ZodString
+  /**
+   * Locale this package's `LocaleString`s fall back to when a requested one is missing.
+   */
+  defaultLocale: z.ZodOptional<z.ZodNullable<z.ZodString>>
   description: typeof Description
   releaseNotes: typeof LocaleString
   preDownloadAlert: z.ZodOptional<z.ZodNullable<typeof PreDownloadAlert>>
@@ -5753,6 +5791,13 @@ export const PackageMetadata: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   title: z.string(),
+  /**
+   * Locale this package's `LocaleString`s fall back to when a requested one is missing.
+   */
+  defaultLocale: z.string().nullable().optional().meta({
+    description:
+      "Locale this package's `LocaleString`s fall back to when a requested one is missing.",
+  }),
   description: Description,
   releaseNotes: LocaleString,
   preDownloadAlert: PreDownloadAlert.nullable().optional(),
@@ -5935,6 +5980,13 @@ export const RegistryInfo: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
     z.ZodNullable<typeof LocaleString>
   >
+  /**
+   * `FullIndex::default_locale`.
+   */
+  defaultLocale: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   categories: z.ZodRecord<z.ZodString, typeof Category>
   /**
    * Registry-selected signers, not an assertion of trust.
@@ -5954,6 +6006,15 @@ export const RegistryInfo: z.ZodObject<{
     LocaleString.nullable(),
   ).meta({
     description: "Markdown, shown above the registry's services.",
+  }),
+  /**
+   * `FullIndex::default_locale`.
+   */
+  defaultLocale: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description: '`FullIndex::default_locale`.',
   }),
   categories: z.record(z.string(), Category),
   /**
@@ -7345,6 +7406,13 @@ export const FullIndex: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
     z.ZodNullable<typeof LocaleString>
   >
+  /**
+   * Locale registry-owned `LocaleString`s fall back to when a requested one is missing.
+   */
+  defaultLocale: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   package: typeof PackageIndex
   os: typeof OsIndex
   signers: z.ZodRecord<z.ZodString, typeof SignerInfo>
@@ -7359,6 +7427,16 @@ export const FullIndex: z.ZodObject<{
     LocaleString.nullable().optional(),
     LocaleString.nullable(),
   ),
+  /**
+   * Locale registry-owned `LocaleString`s fall back to when a requested one is missing.
+   */
+  defaultLocale: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description:
+      'Locale registry-owned `LocaleString`s fall back to when a requested one is missing.',
+  }),
   package: PackageIndex,
   os: OsIndex,
   signers: z.record(z.string(), SignerInfo),

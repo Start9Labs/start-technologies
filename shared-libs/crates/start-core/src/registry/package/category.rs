@@ -210,7 +210,7 @@ pub fn display_categories<T>(
         "NAME",
     ]);
     for (id, info) in categories {
-        table.add_row(row![&*id, &info.name.localized()]);
+        table.add_row(row![&*id, &info.name.localized(None)]);
     }
     print_table(&table)?;
     Ok(())

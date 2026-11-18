@@ -59,8 +59,8 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   // Collapse LocaleString metadata to the active locale as it enters the app —
   // see localize.ts for why this static site must do it client-side.
-  private readonly localize: Localize = value =>
-    this.i18nService.localize(value)
+  private readonly localize: Localize = (value, defaultLocale) =>
+    this.i18nService.localize(value, defaultLocale)
 
   // Emits the url of a registry that failed to load (unreachable / CORS).
   readonly registryError$ = new Subject<string>()
