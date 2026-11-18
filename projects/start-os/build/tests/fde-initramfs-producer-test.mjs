@@ -272,6 +272,50 @@ for (const failure of ['producer', 'verification', 'consumer']) {
   })
 }
 
+test(
+  'native producer output cannot precede the boot-input archive',
+  { skip: process.env.FDE_KERNEL_PROCESS_TEST !== '1' },
+  async t => {
+    const f = await fixture(t)
+    for (const name of ['linux', 'initrd', 'os-release'])
+      await writeFile(join(f.root, name), name)
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        String.raw`
+import { spawnSync } from 'node:child_process'
+const { runNativeProducer } = await import(process.argv[1])
+await runNativeProducer('/bin/sh', ['-c', 'printf "producer chatter\\n"; printf "producer error\\n" >&2'], process.env)
+const archive = spawnSync('tar', ['-c', '--format=ustar', '--', 'linux', 'initrd', 'os-release'], {
+  cwd: process.argv[2], stdio: ['ignore', 'inherit', 'inherit'],
+})
+if (archive.error) throw archive.error
+process.exitCode = archive.status
+`,
+        new URL('../lib/scripts/fde-initramfs-producer.mjs', import.meta.url)
+          .href,
+        f.root,
+      ],
+      { timeout: 20000 },
+    )
+    assert.equal(result.status, 0, result.stderr?.toString())
+    assert.match(result.stderr.toString(), /producer chatter/)
+    assert.match(result.stderr.toString(), /producer error/)
+    const archive = spawnSync('tar', ['-tf', '-'], {
+      input: result.stdout,
+      encoding: 'utf8',
+    })
+    assert.equal(archive.status, 0, archive.stderr)
+    assert.deepEqual(archive.stdout.trim().split('\n'), [
+      'linux',
+      'initrd',
+      'os-release',
+    ])
+  },
+)
+
 for (const fail of [false, true]) {
   test(
     `native producer namespace ends detached writers before ${fail ? 'failure cleanup' : 'archive consumption'}`,
