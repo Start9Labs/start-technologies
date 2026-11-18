@@ -50,8 +50,8 @@ test('discovery includes matching artifacts beyond the first page', t => {
   assert.equal(result.stdout.trim(), '1')
 })
 
-test('the first expired match ends discovery', t => {
-  const { result, calls } = discover(t, [
+test('expired matches do not hide unexpired artifacts on later pages', t => {
+  const { result } = discover(t, [
     run(1, 'master', [image('aaaaaaa')]),
     ...Array.from({ length: 150 }, (_, index) =>
       run(index + 2, 'integration/other', ['start-cli_x86_64.deb']),
@@ -60,8 +60,7 @@ test('the first expired match ends discovery', t => {
     run(201, 'master', [image('ccccccc')]),
   ])
   assert.equal(result.status, 0, result.stdout + result.stderr)
-  assert.equal(result.stdout.trim(), '201')
-  assert.equal(calls.length, 1)
+  assert.deepEqual(result.stdout.trim().split('\n'), ['201', '1'])
 })
 
 test('artifact discovery propagates API failures', t => {
