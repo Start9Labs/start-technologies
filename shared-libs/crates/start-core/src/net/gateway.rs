@@ -248,8 +248,6 @@ pub(crate) async fn wireguard_psk(interface: &str) -> Result<Option<[u8; 32]>, E
 /// Update2 flag: persist the change to disk (NM_SETTINGS_UPDATE2_FLAG_TO_DISK).
 const NM_UPDATE2_TO_DISK: u32 = 0x1;
 const WG_DNS_PRIORITY: i32 = 10;
-/// The kernel's WireGuard link MTU, which NetworkManager keeps for `wireguard.mtu` 0.
-const WG_KERNEL_DEFAULT_MTU: u32 = 1420;
 const IPV4_MIN_MTU: u32 = 68;
 const IPV6_MIN_MTU: u32 = 1280;
 
@@ -287,18 +285,6 @@ fn settings_wireguard_mtu(
     };
     let mtu = mtu.downcast_ref::<u32>().with_kind(ErrorKind::Network)?;
     Ok((mtu != 0).then_some(mtu))
-}
-
-/// None leaves NetworkManager's automatic MTU.
-fn set_settings_wireguard_mtu(
-    settings: &mut HashMap<String, HashMap<String, OwnedValue>>,
-    mtu: Option<u32>,
-) {
-    let wg = settings.entry("wireguard".into()).or_default();
-    match mtu {
-        Some(mtu) => wg.insert("mtu".into(), mtu.into()),
-        None => wg.remove("mtu"),
-    };
 }
 
 fn settings_endpoint_domains(
@@ -482,6 +468,9 @@ impl WgConfig {
         if let Some(port) = self.listen_port {
             wg.insert("listen-port".into(), ov(port.into())?);
         }
+        if let Some(mtu) = self.mtu {
+            wg.insert("mtu".into(), ov(mtu.into())?);
+        }
         let peers: Vec<HashMap<String, ZValue>> = self
             .peers
             .iter()
@@ -513,7 +502,6 @@ impl WgConfig {
             .collect();
         wg.insert("peers".into(), ov(peers.into())?);
         settings.insert("wireguard".into(), wg);
-        set_settings_wireguard_mtu(&mut settings, self.mtu);
 
         for (proto, is_v4) in [("ipv4", true), ("ipv6", false)] {
             let addrs: Vec<_> = self
@@ -569,13 +557,23 @@ impl WgConfig {
 
         Ok(settings)
     }
+
+    /// Whether applying this config to a device running the applied settings
+    /// needs a reactivation. NetworkManager rejects a Reapply that changes
+    /// `wireguard.mtu`.
+    fn needs_reactivation(
+        &self,
+        applied: &HashMap<String, HashMap<String, OwnedValue>>,
+    ) -> Result<bool, Error> {
+        Ok(settings_wireguard_mtu(applied)? != self.mtu)
+    }
 }
 
-/// Apply a re-issued WireGuard config to `interface`'s existing NM connection in
-/// place via D-Bus Update2 + Device.Reapply. The wg device is never deleted, so
-/// the tunnel — and the request that triggered the update, when it rides this
-/// same tunnel — is not torn down. Reapply applies the change to the live device
-/// without bringing the interface down (NM supports this for WireGuard).
+/// Apply a re-issued WireGuard config to `interface`'s existing NM connection
+/// via D-Bus Update2 + Device.Reapply, which keeps the tunnel — and the request
+/// that triggered the update, when it rides this same tunnel — up. A config
+/// that changes the MTU reactivates the connection instead, briefly taking the
+/// tunnel down.
 pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Result<(), Error> {
     let parsed = WgConfig::parse(config)?;
 
@@ -588,7 +586,7 @@ pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Re
             ErrorKind::NotFound,
         ));
     }
-    let device_proxy = DeviceProxy::new(&connection, device).await?;
+    let device_proxy = DeviceProxy::new(&connection, device.clone()).await?;
     let ac = device_proxy.active_connection().await?;
     if &*ac == "/" {
         return Err(Error::new(
@@ -597,7 +595,8 @@ pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Re
         ));
     }
     let ac_proxy = active_connection::ActiveConnectionProxy::new(&connection, ac).await?;
-    let settings = ConnectionSettingsProxy::new(&connection, ac_proxy.connection().await?).await?;
+    let settings_path = ac_proxy.connection().await?;
+    let settings = ConnectionSettingsProxy::new(&connection, settings_path.clone()).await?;
 
     // Preserve the connection's uuid so this updates the existing profile rather
     // than defining a new one.
@@ -622,23 +621,17 @@ pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Re
         )
         .await?;
     let (applied, _) = device_proxy.get_applied_connection(0).await?;
-    let applied_mtu = settings_wireguard_mtu(&applied)?;
-    // Full settings so Reapply doesn't strip the connection's other peer fields.
-    let mut reapply = parsed.to_nm_settings(interface, Some(uuid.as_str()))?;
-    // NM rejects a Reapply that changes `wireguard.mtu`; the link MTU is set below.
-    set_settings_wireguard_mtu(&mut reapply, applied_mtu);
-    device_proxy.reapply(reapply, 0, 0).await?;
-    if parsed.mtu != applied_mtu {
-        Command::new("ip")
-            .arg("link")
-            .arg("set")
-            .arg("dev")
-            .arg(interface)
-            .arg("mtu")
-            .arg(parsed.mtu.unwrap_or(WG_KERNEL_DEFAULT_MTU).to_string())
-            .invoke(ErrorKind::Network)
+    if parsed.needs_reactivation(&applied)? {
+        let root = zbus::zvariant::ObjectPath::try_from("/").with_kind(ErrorKind::Network)?;
+        netman
+            .activate_connection(&settings_path, &device, &root)
             .await?;
+        return Ok(());
     }
+    // Full settings so Reapply doesn't strip the connection's other peer fields.
+    device_proxy
+        .reapply(parsed.to_nm_settings(interface, Some(uuid.as_str()))?, 0, 0)
+        .await?;
     // NM (<=1.52) drops WG peer PSKs on Reapply even when passed explicitly;
     // restore them on the kernel device directly (PSK over stdin, never argv).
     for peer in &parsed.peers {
@@ -1272,6 +1265,14 @@ trait NetworkManager {
         device: &zbus::zvariant::ObjectPath<'_>,
         specific_object: &zbus::zvariant::ObjectPath<'_>,
     ) -> Result<(OwnedObjectPath, OwnedObjectPath), Error>;
+
+    /// Activate a saved connection, deactivating it first when it is already active.
+    fn activate_connection(
+        &self,
+        connection: &zbus::zvariant::ObjectPath<'_>,
+        device: &zbus::zvariant::ObjectPath<'_>,
+        specific_object: &zbus::zvariant::ObjectPath<'_>,
+    ) -> Result<OwnedObjectPath, Error>;
 
     #[zbus(property)]
     fn all_devices(&self) -> Result<Vec<OwnedObjectPath>, Error>;
@@ -4589,14 +4590,27 @@ mod wg_config_tests {
     }
 
     #[test]
-    fn reapply_settings_keep_the_applied_mtu() {
-        let parsed = WgConfig::parse("[Interface]\nPrivateKey = k=\nMTU = 1320\n").unwrap();
-        let mut settings = parsed.to_nm_settings("wg0", None).unwrap();
-        set_settings_wireguard_mtu(&mut settings, None);
-        assert_eq!(settings_wireguard_mtu(&settings).unwrap(), None);
-        set_settings_wireguard_mtu(&mut settings, Some(1400));
-        assert_eq!(settings_wireguard_mtu(&settings).unwrap(), Some(1400));
-        assert_eq!(as_str(&settings["wireguard"]["private-key"]), "k=");
+    fn mtu_changes_reactivate_and_other_updates_reapply() {
+        let config = |mtu: &str| {
+            WgConfig::parse(&format!(
+                "[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24\n{mtu}"
+            ))
+            .unwrap()
+        };
+        let auto = config("");
+        let explicit = config("MTU = 1320\n");
+        let applied_auto = auto.to_nm_settings("wg0", None).unwrap();
+        let applied_explicit = explicit.to_nm_settings("wg0", None).unwrap();
+
+        assert!(!auto.needs_reactivation(&applied_auto).unwrap());
+        assert!(explicit.needs_reactivation(&applied_auto).unwrap());
+        assert!(!explicit.needs_reactivation(&applied_explicit).unwrap());
+        assert!(
+            config("MTU = 1400\n")
+                .needs_reactivation(&applied_explicit)
+                .unwrap()
+        );
+        assert!(auto.needs_reactivation(&applied_explicit).unwrap());
     }
 
     #[test]

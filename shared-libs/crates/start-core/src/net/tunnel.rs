@@ -402,7 +402,6 @@ pub async fn update_tunnel(
         ));
     }
 
-    // Reapply keeps the device carrying this RPC alive.
     crate::net::gateway::update_wireguard_config(id.as_str(), &config).await
 }
 
