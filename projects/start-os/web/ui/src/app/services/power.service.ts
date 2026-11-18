@@ -28,11 +28,7 @@ export class PowerService {
     if (!this.backingUp()) return this.run(action, false)
 
     return this.dialog
-      .openComponent<boolean>(POWER, {
-        label: action === 'restart' ? 'Restart' : 'Warning',
-        size: 's',
-        data: action,
-      })
+      .openComponent<boolean>(POWER, { size: 's', data: action })
       .pipe(switchMap(force => this.run(action, force)))
   }
 

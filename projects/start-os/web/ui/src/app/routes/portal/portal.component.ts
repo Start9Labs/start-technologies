@@ -211,8 +211,7 @@ export class PortalComponent {
   }
 
   restart() {
-    // Only stop offering the restart once one is actually under way — a
-    // deferred or dismissed one leaves the reason for this bar in place.
+    // A deferred or dismissed restart keeps the bar.
     this.power.power('restart').subscribe(deferred => {
       if (!deferred) this.bar.set(false)
     })

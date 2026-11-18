@@ -159,8 +159,7 @@ export class HeaderMenuComponent {
   }
 
   async promptPower(action: T.PowerAction) {
-    // During a backup the choice on offer is a different one, and asking it is
-    // confirmation enough.
+    // The backup prompt replaces this confirmation.
     if (this.power.backingUp()) return this.power.power(action).subscribe()
 
     this.dialog
