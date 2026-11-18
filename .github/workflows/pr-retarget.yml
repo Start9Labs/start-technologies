@@ -41,34 +41,19 @@ jobs:
       packages: write
     uses: ./.github/workflows/rust-builder.yaml
 
-  start-cli:
+  build-products:
     if: github.event.changes.base
     permissions:
       contents: read
-    uses: ./.github/workflows/start-cli.yaml
-
-  start-registry:
-    if: github.event.changes.base
-    permissions:
-      contents: read
+      pull-requests: read
       packages: write
-    uses: ./.github/workflows/start-registry.yaml
-
-  start-tunnel:
-    if: github.event.changes.base
-    permissions:
-      contents: read
-    uses: ./.github/workflows/start-tunnel.yaml
+      actions: write
+    uses: ./.github/workflows/build-products.yaml
 
   start-wrt:
     if: github.event.changes.base
     permissions:
       contents: read
-    uses: ./.github/workflows/start-wrt.yaml
-
-  startos-iso:
-    if: github.event.changes.base
-    permissions:
-      contents: read
       pull-requests: read
-    uses: ./.github/workflows/startos-iso.yaml
+      actions: read
+    uses: ./.github/workflows/start-wrt.yaml

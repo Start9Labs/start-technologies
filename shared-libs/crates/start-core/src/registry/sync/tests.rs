@@ -13,6 +13,7 @@ use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::Guid;
 use crate::util::future::NonDetachingJoinHandle;
 
+mod default_locale;
 mod error_details;
 mod live;
 mod live_legacy;

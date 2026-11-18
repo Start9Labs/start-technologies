@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { chmodSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import yaml from 'js-yaml'
@@ -136,16 +136,24 @@ if (command === 'ls') {
 `,
   )
   f.nodeExecutable('sleep', '')
+  chmodSync(
+    f.write(
+      'scripts/s3-put-once.sh',
+      readFileSync(join(REPO, 'scripts/s3-put-once.sh')),
+    ),
+    0o755,
+  )
   f.write('bucket/.keep', '')
   f.write('puts.log', '')
   for (const file of FILES) f.write(`artifacts/${file}`, `${file} built\n`)
   const env = {
     ...f.env,
     PATH: `${f.root}:${f.env.PATH}`,
+    GITHUB_WORKSPACE: f.root,
     VERSION,
     PLATFORM,
     REGISTRY: 'https://registry.example',
-    GITHUB_SHA: SHA,
+    COMMIT: SHA,
     S3_BUCKET: 's3://bucket',
     S3_CDN: 'https://cdn.example',
     FORCE_OVERWRITE: 'false',
@@ -271,6 +279,29 @@ for (const [name, existing, force, status, uploaded] of [
     assert.deepEqual(f.puts().sort(), uploaded.map(f.key).sort())
   })
 }
+
+const wrtUpload = step(
+  load('start-wrt.yaml').jobs.deploy,
+  'Upload images to S3',
+)
+const WRT_IMAGES = [
+  'startwrt-1.3.0-aaaaaaa_spacemit-k1-sdcard.img.gz',
+  'startwrt-1.3.0-aaaaaaa_spacemit-k1-sysupgrade.img.gz',
+]
+
+test('start-wrt deploy upload skips images an earlier attempt uploaded and refuses different bytes', t => {
+  const f = deployFixture(t, index({}))
+  for (const image of WRT_IMAGES)
+    f.write(`artifacts/${image}`, `${image} built\n`)
+  f.object(WRT_IMAGES[0], `${WRT_IMAGES[0]} built\n`)
+  const rerun = f.run(wrtUpload)
+  assert.equal(rerun.status, 0, rerun.stdout + rerun.stderr)
+  assert.deepEqual(f.puts(), [f.key(WRT_IMAGES[1])])
+  f.object(WRT_IMAGES[1], 'another build\n')
+  const conflict = f.run(wrtUpload)
+  assert.equal(conflict.status, 1, conflict.stdout + conflict.stderr)
+  assert.deepEqual(f.puts(), [f.key(WRT_IMAGES[1])])
+})
 
 const indexAssets = step(leg, 'Index assets in registry')
 const indexed = registry =>

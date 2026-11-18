@@ -16,7 +16,7 @@ async fn client(key: &Signer) -> PreparedClient {
 
 async fn accept_rpc(key: &Signer, wire: &[u8]) -> (AnyVerifyingKey, Vec<u8>, SessionCipher) {
     let (peer, context, response, cipher) = accept(
-        key,
+        &key.clone().into(),
         &["server.test".into()],
         wire,
         &Target::Rpc,
@@ -32,7 +32,7 @@ async fn accept_rpc(key: &Signer, wire: &[u8]) -> (AnyVerifyingKey, Vec<u8>, Ses
 async fn reject_before_nonce(wire: &[u8], context: &str, peer: Option<&AnyVerifyingKey>) {
     assert!(
         accept(
-            &signer(2),
+            &signer(2).into(),
             &[context.into()],
             wire,
             &Target::Rpc,
@@ -80,6 +80,56 @@ fn cbor_field<'a>(value: &'a mut serde_cbor::Value, name: &str) -> &'a mut serde
         .find(|(key, _)| key == &serde_cbor::Value::Text(name.into()))
         .unwrap()
         .1
+}
+
+#[tokio::test]
+async fn temporary_identity_scope_is_authenticated_for_rpc_and_continuations() {
+    let key = signer(2);
+    for temporary in [false, true] {
+        for target in [Target::Rpc, Target::Continuation(Guid::new())] {
+            let client = PreparedClient::new(&signer(1), "server.test", target.clone())
+                .await
+                .unwrap();
+            let identity = if temporary {
+                ServerIdentity::temporary(key.clone())
+            } else {
+                key.clone().into()
+            };
+            let (_, _, response, _) = accept(
+                &identity,
+                &["server.test".into()],
+                client.message(),
+                &target,
+                None,
+                |_| async { Ok(()) },
+            )
+            .await
+            .unwrap();
+            let (body, proof) = split_proof(&response);
+            let mut raw: serde_cbor::Value = serde_cbor::de::from_reader(body).unwrap();
+            let serde_cbor::Value::Map(fields) = cbor_field(&mut raw, "hello") else {
+                panic!("expected hello map")
+            };
+            let marker = fields
+                .iter()
+                .find(|(name, _)| name == &serde_cbor::Value::Text("temporary".into()));
+            assert_eq!(
+                marker.map(|(_, value)| value),
+                temporary.then_some(&serde_cbor::Value::Bool(true))
+            );
+            let (peer, _) = client.finish(&response).await.unwrap();
+            assert_eq!(peer.key, key.verifying_key().await.unwrap());
+            assert_eq!(peer.temporary, temporary);
+            if temporary {
+                *cbor_field(cbor_field(&mut raw, "hello"), "temporary") =
+                    serde_cbor::Value::Bool(false);
+                let mut changed = Vec::new();
+                serde_cbor::ser::into_writer(&raw, &mut changed).unwrap();
+                let tampered = with_proof(&changed, &proof);
+                assert!(decode(&tampered, &["server.test".into()]).await.is_err());
+            }
+        }
+    }
 }
 
 #[tokio::test]
@@ -145,7 +195,7 @@ async fn strict_admission_kinds_reject_signed_alternative_representations() {
             .unwrap();
         assert!(
             accept(
-                &signer(2),
+                &signer(2).into(),
                 &["server.test".into()],
                 &with_proof(&wire_body, &proof),
                 &Target::Rpc,
@@ -213,7 +263,7 @@ async fn two_messages_authenticate_both_identities_and_both_record_directions() 
     let client = client(&client_key).await;
     let called = AtomicBool::new(false);
     let (peer, context, response, mut server) = accept(
-        &server_key,
+        &server_key.clone().into(),
         &["other.test".into(), "server.test".into()],
         client.message(),
         &Target::Rpc,
@@ -231,7 +281,8 @@ async fn two_messages_authenticate_both_identities_and_both_record_directions() 
     assert!(client.message().len() <= MAX_HANDSHAKE_BYTES);
     assert!(response.len() <= MAX_HANDSHAKE_BYTES);
     let (peer, mut client) = client.finish(&response).await.unwrap();
-    assert_eq!(peer, server_key.verifying_key().await.unwrap());
+    assert_eq!(peer.key, server_key.verifying_key().await.unwrap());
+    assert!(!peer.temporary);
     let mut plain = [0; 64];
     let n = server
         .read_message(&encrypted(&mut client, b"client RPC"), &mut plain)
@@ -249,7 +300,7 @@ async fn missing_or_unconfigured_ingress_identities_fail_before_nonce_consumptio
     for contexts in [vec![], vec!["other.test".into()]] {
         assert!(
             accept(
-                &signer(26),
+                &signer(26).into(),
                 &contexts,
                 client.message(),
                 &Target::Rpc,
@@ -336,7 +387,7 @@ async fn full_width_nonce_reaches_the_existing_replay_policy_without_precision_l
         .unwrap();
     client.message = with_proof(body, &proof);
     let (_, _, response, _) = accept(
-        &signer(7),
+        &signer(7).into(),
         &["server.test".into()],
         client.message(),
         &Target::Rpc,
@@ -375,6 +426,7 @@ async fn context_role_and_protocol_are_authenticated() {
             message.hello = Hello::Server {
                 ephemeral: ByteString([1; 32]),
                 client_hello: ByteString([0; 32]),
+                temporary: false,
             }
         })
         .await,
@@ -419,7 +471,7 @@ async fn signed_intent_cannot_be_redirected_between_rpc_and_continuations_or_bet
             .unwrap();
         assert!(
             accept(
-                &signer(23),
+                &signer(23).into(),
                 &["server.test".into()],
                 client.message(),
                 &actual,
@@ -434,7 +486,7 @@ async fn signed_intent_cannot_be_redirected_between_rpc_and_continuations_or_bet
         .await
         .unwrap();
     let (_, _, response, mut server) = accept(
-        &signer(23),
+        &signer(23).into(),
         &["server.test".into()],
         client.message(),
         &a,
@@ -459,7 +511,7 @@ async fn replay_policy_rejection_cannot_produce_a_session() {
     let client = client(&signer(15)).await;
     assert!(
         accept(
-            &signer(16),
+            &signer(16).into(),
             &["server.test".into()],
             client.message(),
             &Target::Rpc,
@@ -570,7 +622,8 @@ async fn independent_webcrypto_proofs_dh_hkdf_and_aes_gcm_match_in_both_directio
         .finish(&fixture.server)
         .await
         .unwrap();
-    assert_eq!(peer, fixture.server_identity);
+    assert_eq!(peer.key, fixture.server_identity);
+    assert!(!peer.temporary);
     assert_eq!(
         encrypted(&mut cipher, fixture.client_record.plaintext.as_bytes()),
         fixture.client_record.ciphertext.0
@@ -586,7 +639,7 @@ async fn independent_webcrypto_proofs_dh_hkdf_and_aes_gcm_match_in_both_directio
 async fn native_server_accepts_webcrypto_identity_and_request_commitment() {
     let fixture = fixture();
     let (peer, _, response, mut server) = accept(
-        &signer(21),
+        &signer(21).into(),
         &[fixture.context.as_str().into()],
         &fixture.client,
         &Target::Rpc,

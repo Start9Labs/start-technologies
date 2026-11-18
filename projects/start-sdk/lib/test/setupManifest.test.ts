@@ -2,6 +2,9 @@ import { buildManifest, setupManifest } from '../manifest/setupManifest'
 import { Dependencies, Dependency } from '../dependencies'
 import { VersionGraph } from '../version/VersionGraph'
 import { VersionInfo } from '../version/VersionInfo'
+import { setupI18n } from '../i18n'
+
+const i18n = setupI18n({}, {}, 'en_US')
 
 const versions = VersionGraph.of({
   current: VersionInfo.of<'1.0.0:0'>({
@@ -41,14 +44,24 @@ function manifest(emulateMissing?: boolean) {
 }
 
 test('defaults to the binding transport enforcement compatibility floor', () => {
-  expect(buildManifest(versions, manifest(), Dependencies.of()).osVersion).toBe(
-    '0.4.3',
-  )
+  expect(
+    buildManifest({
+      versionGraph: versions,
+      manifest: manifest(),
+      dependencies: Dependencies.of(),
+      i18n,
+    }).osVersion,
+  ).toBe('0.4.3')
 })
 
 test('pre-download alert is included in the built manifest', () => {
   expect(
-    buildManifest(versions, manifest(), Dependencies.of()).preDownloadAlert,
+    buildManifest({
+      versionGraph: versions,
+      manifest: manifest(),
+      dependencies: Dependencies.of(),
+      i18n,
+    }).preDownloadAlert,
   ).toEqual({
     message: {
       en_US: 'Back up before updating',
@@ -68,7 +81,12 @@ test('the builder publishes its complete base dependency requirements', () => {
       healthChecks: ['bitcoin-rest'],
     }),
   )
-  const built = buildManifest(versions, manifest(), dependencies)
+  const built = buildManifest({
+    versionGraph: versions,
+    manifest: manifest(),
+    dependencies: dependencies,
+    i18n,
+  })
   expect(built.dependencies.bitcoind).toEqual({
     description: 'Blockchain data',
     optional: false,
@@ -80,7 +98,12 @@ test('the builder publishes its complete base dependency requirements', () => {
 })
 
 test('compatibility metadata defaults to empty claims', () => {
-  const built = buildManifest(versions, manifest(), Dependencies.of())
+  const built = buildManifest({
+    versionGraph: versions,
+    manifest: manifest(),
+    dependencies: Dependencies.of(),
+    i18n,
+  })
 
   expect(built.satisfies).toEqual([])
   expect(built.satisfiesPackages).toEqual({})
@@ -100,24 +123,32 @@ test('the manifest publishes current compatibility claims, not historical claims
       }).satisfies('historical-provider', '1.0.0:0'),
     ],
   })
-  const built = buildManifest(graph, manifest(), Dependencies.of())
+  const built = buildManifest({
+    versionGraph: graph,
+    manifest: manifest(),
+    dependencies: Dependencies.of(),
+    i18n: setupI18n({}, {}, 'fr_FR'),
+  })
 
+  expect(built.defaultLocale).toBe('fr_FR')
   expect(built.satisfies).toEqual(['#fork:1.0.0:0'])
   expect(built.satisfiesPackages).toEqual({ bitcoind: ['28.0:0', '29.0:0'] })
   expect(built.osVersion).toBe('0.4.3')
   expect(
-    buildManifest(
-      graph,
-      { ...manifest(), osVersion: '0.4.0' },
-      Dependencies.of(),
-    ).osVersion,
+    buildManifest({
+      versionGraph: graph,
+      manifest: { ...manifest(), osVersion: '0.4.0' },
+      dependencies: Dependencies.of(),
+      i18n,
+    }).osVersion,
   ).toBe('0.4.3')
   expect(
-    buildManifest(
-      graph,
-      { ...manifest(), osVersion: '0.5.0' },
-      Dependencies.of(),
-    ).osVersion,
+    buildManifest({
+      versionGraph: graph,
+      manifest: { ...manifest(), osVersion: '0.5.0' },
+      dependencies: Dependencies.of(),
+      i18n,
+    }).osVersion,
   ).toBe('0.5.0')
 })
 
@@ -126,27 +157,47 @@ test('package-qualified claims reject the manifest own ID', () => {
     current: versions.current.satisfies('test', '2.0.0:0'),
     other: [],
   })
-  expect(() => buildManifest(graph, manifest(), Dependencies.of())).toThrow(
-    'Use .satisfies(version)',
-  )
+  expect(() =>
+    buildManifest({
+      versionGraph: graph,
+      manifest: manifest(),
+      dependencies: Dependencies.of(),
+      i18n,
+    }),
+  ).toThrow('Use .satisfies(version)')
   const samePackage = VersionGraph.of({
     current: versions.current.satisfies('2.0.0:0'),
     other: [],
   })
   expect(
-    buildManifest(samePackage, manifest(), Dependencies.of()).satisfies,
+    buildManifest({
+      versionGraph: samePackage,
+      manifest: manifest(),
+      dependencies: Dependencies.of(),
+      i18n,
+    }).satisfies,
   ).toEqual(['2.0.0:0'])
 })
 
 test('images emulate missing architectures by default', () => {
-  const built = buildManifest(versions, manifest(), Dependencies.of())
+  const built = buildManifest({
+    versionGraph: versions,
+    manifest: manifest(),
+    dependencies: Dependencies.of(),
+    i18n,
+  })
 
   expect(built.images.main.emulateMissing).toBe(true)
   expect(built.hardwareRequirements.arch).toBeNull()
 })
 
 test('images can require a native architecture', () => {
-  const built = buildManifest(versions, manifest(false), Dependencies.of())
+  const built = buildManifest({
+    versionGraph: versions,
+    manifest: manifest(false),
+    dependencies: Dependencies.of(),
+    i18n,
+  })
 
   expect(built.images.main.emulateMissing).toBe(false)
   expect(built.hardwareRequirements.arch).toEqual(['aarch64'])
@@ -158,24 +209,48 @@ test('shared-volume and provider compatibility floors compose', () => {
     other: [],
   })
   const capable = { ...manifest(), sharedVolumes: true }
-  expect(buildManifest(graph, capable, Dependencies.of()).osVersion).toBe(
-    '0.4.3',
-  )
+  expect(
+    buildManifest({
+      versionGraph: graph,
+      manifest: capable,
+      dependencies: Dependencies.of(),
+      i18n,
+    }).osVersion,
+  ).toBe('0.4.3')
   expect(() =>
-    buildManifest(graph, { ...capable, osVersion: '0.4.2' }, Dependencies.of()),
+    buildManifest({
+      versionGraph: graph,
+      manifest: { ...capable, osVersion: '0.4.2' },
+      dependencies: Dependencies.of(),
+      i18n,
+    }),
   ).toThrow('Shared volumes require StartOS 0.4.3 or later')
   expect(
-    buildManifest(graph, { ...capable, osVersion: '0.5.0' }, Dependencies.of())
-      .osVersion,
+    buildManifest({
+      versionGraph: graph,
+      manifest: { ...capable, osVersion: '0.5.0' },
+      dependencies: Dependencies.of(),
+      i18n,
+    }).osVersion,
   ).toBe('0.5.0')
 })
 
 test('shared-volume capability defaults to false and preserves explicit opt-in', () => {
   expect(
-    buildManifest(versions, manifest(), Dependencies.of()).sharedVolumes,
+    buildManifest({
+      versionGraph: versions,
+      manifest: manifest(),
+      dependencies: Dependencies.of(),
+      i18n,
+    }).sharedVolumes,
   ).toBe(false)
   const optedIn = setupManifest({ ...manifest(), sharedVolumes: true })
-  const built = buildManifest(versions, optedIn, Dependencies.of())
+  const built = buildManifest({
+    versionGraph: versions,
+    manifest: optedIn,
+    dependencies: Dependencies.of(),
+    i18n,
+  })
   expect(built.sharedVolumes).toBe(true)
   expect(built.osVersion).toBe('0.4.3')
 })
@@ -183,22 +258,41 @@ test('shared-volume capability defaults to false and preserves explicit opt-in',
 test('an explicit compatibility override cannot understate shared-volume support', () => {
   for (const osVersion of ['0.4.2', '0.4.1.1']) {
     expect(() =>
-      buildManifest(
-        versions,
-        setupManifest({ ...manifest(), sharedVolumes: true, osVersion }),
-        Dependencies.of(),
-      ),
+      buildManifest({
+        versionGraph: versions,
+        manifest: setupManifest({
+          ...manifest(),
+          sharedVolumes: true,
+          osVersion,
+        }),
+        dependencies: Dependencies.of(),
+        i18n,
+      }),
     ).toThrow('Shared volumes require StartOS 0.4.3 or later')
   }
   expect(
-    buildManifest(
-      versions,
-      setupManifest({
+    buildManifest({
+      versionGraph: versions,
+      manifest: setupManifest({
         ...manifest(),
         sharedVolumes: true,
         osVersion: '0.4.3',
       }),
-      Dependencies.of(),
-    ).osVersion,
+      dependencies: Dependencies.of(),
+      i18n,
+    }).osVersion,
   ).toBe('0.4.3')
+})
+
+test('the default locale is the given package i18n default language', () => {
+  const own = setupI18n({}, {}, 'fr_FR')
+  setupI18n({}, {}, 'de_DE')
+  expect(
+    buildManifest({
+      versionGraph: versions,
+      manifest: manifest(),
+      dependencies: Dependencies.of(),
+      i18n: own,
+    }).defaultLocale,
+  ).toBe('fr_FR')
 })

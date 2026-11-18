@@ -169,6 +169,7 @@ test('startup typed updates capture input and cancel pending acquisition without
   const call = f.calls.find(call => call.transport === 'encrypted-stream')
   assert.equal(JSON.parse(call.body).params.targetVersion, '0.4.2.1')
   assert.equal(call.options.timeout, 1200)
+  assert.equal(call.options.allowTemporaryIdentity, true)
   assert.equal(call.options.openObserver, undefined)
   assert.equal(call.identity, f.lease)
   assert.deepEqual(f.observed, [])
@@ -201,6 +202,7 @@ test('startup probes use encrypted possession without enrolled authorization or 
   )
   assert.deepEqual(JSON.parse(f.calls[1].body), { method: 'state', params: {} })
   assert.equal(f.calls[1].options.timeout, 10000)
+  assert.equal(f.calls[1].options.allowTemporaryIdentity, true)
   assert.deepEqual(f.observed, [])
 })
 
@@ -217,6 +219,7 @@ test('an untrusted startup-mode reply cannot downgrade a private login', async c
       JSON.parse(call.body).method === 'auth.login',
   )
   assert.equal(message.identity, f.lease)
+  assert.notEqual(message.options.allowTemporaryIdentity, true)
   assert.deepEqual(JSON.parse(message.body), {
     method: 'auth.login',
     params: { password: 'fixture', pubkey: 'public' },
@@ -242,6 +245,7 @@ for (const method of ['init.subscribe', 'diagnostic.error', 'net.dns.status'])
       ['admission', 'encrypted'],
     )
     assert.equal(JSON.parse(f.calls[1].body).method, method)
+    assert.equal(f.calls[1].options.allowTemporaryIdentity, true)
     assert.deepEqual(f.observed, [])
   })
 
@@ -256,7 +260,7 @@ test('startup GUIDs use shared encrypted admission and preserve callbacks and bi
   const call = f.calls.at(-1)
   assert.equal(call.transport, 'encrypted-guid')
   assert.equal(call.guid, 'startup-guid')
-  assert.equal(call.config, config)
+  assert.deepEqual(call.config, { ...config, allowTemporaryIdentity: true })
   assert.equal(socket, call.socket)
   assert.equal(call.config.openObserver, undefined)
   assert.deepEqual(f.observed, [])

@@ -100,6 +100,7 @@ export function mockOsUpdateCache(
     versions: sameUrl(registry, defaultRegistries.community)
       ? {}
       : Mock.RegistryOSUpdate,
+    defaultLocale: 'en_US',
     status: 'connected',
   }
 }
@@ -386,6 +387,7 @@ export const mockPatchData: DataModel = {
         ),
     },
     version,
+    gitHash: '',
     lastBackup: new Date(new Date().valueOf() - 604800001).toISOString(),
     network: {
       wifi: {

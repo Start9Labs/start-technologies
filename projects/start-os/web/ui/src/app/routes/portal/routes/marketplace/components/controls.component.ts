@@ -159,7 +159,7 @@ export class MarketplaceControlsComponent {
     if (
       !this.file() &&
       !(await this.alerts.alertPreDownload(
-        this.pkg().preDownloadAlert,
+        this.pkg(),
         localPkg ? getManifest(localPkg).version : null,
       ))
     )

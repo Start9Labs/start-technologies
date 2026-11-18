@@ -16,9 +16,17 @@ use crate::util::sync::Watch;
 
 async fn serve(script: String) -> (String, WebServer<tokio::net::TcpListener>, Arc<AtomicU32>) {
     let dns = Arc::new(DnsController::new(Watch::new(Default::default())));
-    let context = InitContext::init(&ServerConfig::default(), dns)
-        .await
-        .unwrap();
+    let context = InitContext::init(
+        &ServerConfig::default(),
+        dns,
+        Some(
+            crate::db::model::private::generate_server_identity_key()
+                .0
+                .into(),
+        ),
+    )
+    .await
+    .unwrap();
     let pid = Arc::new(AtomicU32::new(0));
     let process_id = pid.clone();
     let handler = from_fn_async(

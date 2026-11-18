@@ -5645,6 +5645,20 @@ help.arg.cifs-username:
   fr_FR: "Nom d'utilisateur d'authentification CIFS"
   pl_PL: "Nazwa użytkownika uwierzytelniania CIFS"
 
+help.arg.registry-default-locale:
+  en_US: "Locale the registry's own text falls back to, such as en_US"
+  de_DE: "Gebietsschema, auf das die eigenen Texte des Registrys zurückfallen, z. B. en_US"
+  es_ES: "Configuración regional a la que recurren los textos propios del registro, como en_US"
+  fr_FR: "Paramètre régional de repli pour les textes propres au registre, par exemple en_US"
+  pl_PL: "Ustawienia regionalne, do których wracają własne teksty rejestru, np. en_US"
+
+help.arg.clear-registry-default-locale:
+  en_US: "Remove the registry default locale"
+  de_DE: "Das Standard-Gebietsschema des Registrys entfernen"
+  es_ES: "Eliminar la configuración regional predeterminada del registro"
+  fr_FR: "Supprimer le paramètre régional par défaut du registre"
+  pl_PL: "Usuń domyślne ustawienia regionalne rejestru"
+
 help.arg.clear-registry-description:
   en_US: "Remove the registry description"
   de_DE: "Die Registry-Beschreibung entfernen"
@@ -8113,6 +8127,13 @@ about.set-registry-description:
   es_ES: "Establecer la descripción del registro"
   fr_FR: "Définir la description du registre"
   pl_PL: "Ustaw opis rejestru"
+
+about.set-registry-default-locale:
+  en_US: "Set the locale the registry's own text falls back to"
+  de_DE: "Das Gebietsschema festlegen, auf das die eigenen Texte des Registrys zurückfallen"
+  es_ES: "Establecer la configuración regional a la que recurren los textos propios del registro"
+  fr_FR: "Définir le paramètre régional de repli pour les textes propres au registre"
+  pl_PL: "Ustaw ustawienia regionalne, do których wracają własne teksty rejestru"
 
 about.set-registry-name:
   en_US: "Set the registry name"

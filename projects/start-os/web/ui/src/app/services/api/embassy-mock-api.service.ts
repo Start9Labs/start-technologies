@@ -228,6 +228,7 @@ export class MockApiService extends ApiService implements StartupApiService {
           mockRegistryCache(url, this.mockRegistryInfo(url)),
         ]),
       )
+      mockPatchData.serverInfo.gitHash = this.gitHash
       mockPatchData.osUpdateCache = mockOsUpdateCache(
         mockPatchData.serverInfo.osRegistry,
       )

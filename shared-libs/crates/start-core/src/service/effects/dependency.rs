@@ -534,17 +534,22 @@ pub async fn check_dependencies(
     CheckDependenciesParam { package_ids }: CheckDependenciesParam,
 ) -> Result<Vec<CheckDependenciesResult>, Error> {
     let context = context.deref()?;
+    let db = context.seed.ctx.db.peek().await;
+    let manifest = context.seed.persistent_container.s9pk.as_manifest();
     check_dependency_results(
-        &context.seed.ctx.db.peek().await,
+        &db,
         &context.seed.id,
+        manifest.metadata.default_locale.as_deref(),
         package_ids,
     )
 }
 
-/// Includes incompatible same-ID versions for diagnostics, never resource resolution.
+/// Titles use the declaring package's default locale.
+/// Incompatible same-ID versions are diagnostics, never resource access.
 fn check_dependency_results(
     db: &DatabaseModel,
     owner: &PackageId,
+    default_locale: Option<&str>,
     package_ids: Option<Vec<PackageId>>,
 ) -> Result<Vec<CheckDependenciesResult>, Error> {
     let pde = db
@@ -566,7 +571,10 @@ fn check_dependency_results(
     let mut results = Vec::with_capacity(package_dependency_info.len());
 
     for (package_id, dependency_info) in package_dependency_info {
-        let title = dependency_info.title.clone().map(|t| t.localized());
+        let title = dependency_info
+            .title
+            .clone()
+            .map(|title| title.localized(default_locale));
         let tasks = tasks
             .iter()
             .filter(|(_, v)| v.task.package_id == package_id)
@@ -726,7 +734,7 @@ mod test {
             "alternate":{"stateInfo":{"state":"installed","manifest":{"id":"alternate","version":"99.0.0:0","satisfies":[],"satisfiesPackages":{"target":["2.0.0:0"]}}},"statusInfo":{"started":null,"health":{}}},
             "other":{"stateInfo":{"state":"installed","manifest":{"id":"other","version":"99.0.0:0","satisfies":[],"satisfiesPackages":{"target":["2.0.0:0"]}}},"statusInfo":{"started":null,"health":{}}}
         }}}));
-        let result = check_dependency_results(&db, &owner, None)
+        let result = check_dependency_results(&db, &owner, None, None)
             .unwrap()
             .pop()
             .unwrap();
@@ -753,7 +761,7 @@ mod test {
             .ser(&binding)
             .unwrap();
         assert!(
-            check_dependency_results(&db, &owner, None).unwrap()[0]
+            check_dependency_results(&db, &owner, None, None).unwrap()[0]
                 .installed_version
                 .is_none()
         );
@@ -768,7 +776,7 @@ mod test {
             .unwrap()
             .ser(&binding)
             .unwrap();
-        let result = check_dependency_results(&db, &owner, None)
+        let result = check_dependency_results(&db, &owner, None, None)
             .unwrap()
             .pop()
             .unwrap();
@@ -816,7 +824,7 @@ mod test {
             )
             .unwrap();
         assert_eq!(
-            check_dependency_results(&db, &owner, None).unwrap()[0].installed_version,
+            check_dependency_results(&db, &owner, None, None).unwrap()[0].installed_version,
             Some("2.0.0:0".parse().unwrap())
         );
         db.as_public_mut()
@@ -824,7 +832,7 @@ mod test {
             .remove(&"alternate".parse().unwrap())
             .unwrap();
         assert!(
-            check_dependency_results(&db, &owner, None).unwrap()[0]
+            check_dependency_results(&db, &owner, None, None).unwrap()[0]
                 .installed_version
                 .is_none()
         );
@@ -833,7 +841,7 @@ mod test {
             .remove(&target)
             .unwrap();
         assert!(
-            check_dependency_results(&db, &owner, None).unwrap()[0]
+            check_dependency_results(&db, &owner, None, None).unwrap()[0]
                 .installed_version
                 .is_none()
         );
@@ -851,6 +859,52 @@ mod test {
             dependency_release_versions(BTreeSet::new()),
             (None, BTreeSet::new())
         );
+    }
+
+    #[test]
+    fn dependency_titles_use_the_declaring_package_default_with_or_without_the_dependency() {
+        let db = Model::from_value(imbl_value::json!({
+            "public": { "packageData": {
+                "caller": {
+                    "currentDependencies": {
+                        "installed": {
+                            "title": { "de_DE": "Deutsch", "pl_PL": "Polski" },
+                            "kind": "exists", "versionRange": "*",
+                        },
+                        "missing": {
+                            "title": { "de_DE": "Deutsch", "pl_PL": "Polski" },
+                            "kind": "exists", "versionRange": "*",
+                        },
+                    },
+                    "tasks": {},
+                    "dependencySelections": {},
+                    "dependencyBindings": {
+                        "installed": { "providerId": "alternate", "versions": ["1.0.0:0"], "candidates": { "alternate": ["1.0.0:0"] } },
+                        "missing": { "providerId": null, "versions": [], "candidates": {} },
+                    },
+                },
+                "alternate": {
+                    "stateInfo": {
+                        "state": "installed",
+                        "manifest": {
+                            "id": "alternate", "version": "99.0.0:0", "satisfies": [], "defaultLocale": "pl_PL",
+                            "satisfiesPackages": { "installed": ["1.0.0:0"] },
+                        },
+                    },
+                    "statusInfo": { "started": null, "health": {} },
+                },
+            }},
+        }));
+        let caller = "caller".parse().unwrap();
+        let results = check_dependency_results(&db, &caller, Some("de_DE"), None).unwrap();
+        assert_eq!(results.len(), 2);
+        for result in results {
+            assert_eq!(result.title.as_deref(), Some("Deutsch"));
+            assert_eq!(
+                result.installed_version.is_some(),
+                &*result.package_id == "installed"
+            );
+        }
     }
 
     #[test]

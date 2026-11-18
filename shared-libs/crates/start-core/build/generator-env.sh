@@ -1,20 +1,12 @@
 #!/bin/bash
 
 source ./build/builder-alias.sh
+source ./build/rust-build-profile.sh
 
 set -ea
 shopt -s expand_aliases
 
-PROFILE=${PROFILE:-generated}
-case "$PROFILE" in
-  debug) PROFILE=dev ;;
-  dev|release|generated) ;;
-  *)
-    >&2 echo "Unknown profile $PROFILE: falling back to debug..."
-    PROFILE=dev
-    ;;
-esac
-BUILD_FLAGS=(--profile "$PROFILE")
+set_generated_profile
 
 ARCH=${ARCH:-$(uname -m)}
 if [ "$ARCH" = "arm64" ]; then

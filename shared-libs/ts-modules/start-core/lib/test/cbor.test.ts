@@ -13,7 +13,7 @@ test.each([
   ['nested array', [0xa1, 0x61, 0x61, 0x81, 1]],
   ['indefinite bytes', [0xa1, 0x61, 0x61, 0x5f, 0x41, 1, 0xff]],
   ['integral float', [0xf9, 0x3c, 0]],
-  ['boolean', [0xf4]],
+  ['boolean map key', [0xa1, 0xf4, 1]],
   ['null', [0xf6]],
   ['undefined', [0xf7]],
   ['simple value', [0xf8, 24]],
@@ -37,6 +37,15 @@ test('first-object length preserves field order and leaves trailing data to its 
     length: 4,
   })
 })
+
+test.each([false, true])(
+  'temporary identity booleans retain their wire value: %s',
+  async temporary => {
+    expect((await decodeFirst(encode({ temporary }))).value).toEqual({
+      temporary,
+    })
+  },
+)
 
 test('full-width integers and definite bytes remain lossless', async () => {
   const value = {

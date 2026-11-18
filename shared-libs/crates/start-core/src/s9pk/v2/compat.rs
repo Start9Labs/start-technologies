@@ -255,6 +255,7 @@ impl TryFrom<ManifestV1> for Manifest {
             can_migrate_to: VersionRange::none(),
             metadata: PackageMetadata {
                 title: format!("{} (Legacy)", value.title).into(),
+                default_locale: None,
                 release_notes: LocaleString::Translated(value.release_notes),
                 pre_download_alert: None,
                 license: value.license.into(),

@@ -1,9 +1,11 @@
 use super::*;
 use crate::sign::AnySigningKey;
 
-fn key() -> AnyVerifyingKey {
-    match AnySigningKey::generate() {
-        AnySigningKey::Ed25519(key) => AnyVerifyingKey::Ed25519(key.verifying_key()),
+fn key() -> PeerIdentity {
+    let AnySigningKey::Ed25519(key) = AnySigningKey::generate();
+    PeerIdentity {
+        key: AnyVerifyingKey::Ed25519(key.verifying_key()),
+        temporary: false,
     }
 }
 
@@ -26,8 +28,8 @@ async fn first_contact_is_silent_and_rotations_are_remembered_without_a_prompt()
     let warnings = observe(temp.path(), &url, "registry.test", &second).await;
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].contains(url.as_str()));
-    assert!(warnings[0].contains(&fingerprint(&first)));
-    assert!(warnings[0].contains(&fingerprint(&second)));
+    assert!(warnings[0].contains(&fingerprint(&first.key)));
+    assert!(warnings[0].contains(&fingerprint(&second.key)));
     assert!(warnings[0].contains("trusted channel"));
     assert_eq!(
         crate::util::io::read_file_to_string(identity_file(temp.path(), &url))
@@ -35,13 +37,47 @@ async fn first_contact_is_silent_and_rotations_are_remembered_without_a_prompt()
             .unwrap()
             .parse::<AnyVerifyingKey>()
             .unwrap(),
-        second
+        second.key
     );
     assert!(
         observe(temp.path(), &url, "registry.test", &second)
             .await
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn temporary_identities_neither_create_nor_replace_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let directory = temp.path().join("identities");
+    let url: Url = "https://registry.test/rpc/v0".parse().unwrap();
+    let mut temporary = key();
+    temporary.temporary = true;
+    assert!(
+        observe(&directory, &url, "registry.test", &temporary)
+            .await
+            .is_empty()
+    );
+    assert!(!directory.exists());
+    let persistent = key();
+    assert!(
+        observe(&directory, &url, "registry.test", &persistent)
+            .await
+            .is_empty()
+    );
+    assert!(
+        observe(&directory, &url, "registry.test", &temporary)
+            .await
+            .is_empty()
+    );
+    assert!(
+        observe(&directory, &url, "registry.test", &persistent)
+            .await
+            .is_empty()
+    );
+    let warnings = observe(&directory, &url, "registry.test", &key()).await;
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains(&fingerprint(&persistent.key)));
 }
 
 #[tokio::test]

@@ -75,7 +75,10 @@ import {
                 }
           "
         >
-          {{ d.value.title || d.key | localize }}
+          {{
+            d.value.title || d.key
+              | localize: (pkg() | toManifest).defaultLocale
+          }}
           <span tuiSubtitle>{{ d.value.versionRange }}</span>
           @if (manifest || pinned) {
             <span tuiSubtitle>

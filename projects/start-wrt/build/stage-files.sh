@@ -3,10 +3,11 @@ set -eo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 PROJECT_DIR=projects/start-wrt
+source ./build/rust-build-profile.sh
 
 ARCH=${ARCH:-riscv64}
 RUST_ARCH=${RUST_ARCH:-riscv64gc}
-PROFILE=${PROFILE:-release}
+set_build_profile
 # The Rust crates are members of the monorepo workspace, so the binary lands in
 # the workspace-root target/ (not the old backend/target/).
 RUST_TARGET_DIR="target/${RUST_ARCH}-unknown-linux-musl/${PROFILE}"

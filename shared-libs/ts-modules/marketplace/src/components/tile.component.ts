@@ -30,7 +30,9 @@ import { MarketplacePreviewComponent } from './preview.component'
         <span tuiSubtitle>{{ pkg().version }}</span>
       </span>
     </span>
-    <span tuiDescription>{{ pkg().description.short | localize }}</span>
+    <span tuiDescription>
+      {{ pkg().description.short | localize: pkg().defaultLocale }}
+    </span>
     <tui-drawer
       *tuiPopup="open()"
       [overlay]="true"
