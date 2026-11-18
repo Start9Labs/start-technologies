@@ -40,7 +40,7 @@ import {
   PrimaryRendering,
   renderPkgStatus,
 } from 'src/app/services/pkg-status-rendering.service'
-import { getManifest } from 'src/app/utils/get-package-data'
+import { getCurrentManifest } from 'src/app/utils/get-package-data'
 
 /** Installed manifests gate chain controls; running state and profile publication do not. */
 export const HTTP_PROXY_PLUGINS = new InjectionToken('HTTP proxy plugins', {
@@ -155,7 +155,10 @@ export class HttpProxyChainButton {
           <span tuiTitle>
             <b>{{ profile?.packageName ?? stage.packageId }}</b>
             <span tuiSubtitle>
-              {{ profile?.name ?? stage.profileId | localize }}
+              {{
+                profile?.name ?? stage.profileId
+                  | localize: profile?.defaultLocale
+              }}
             </span>
           </span>
           <span tuiBadge [appearance]="profile ? 'neutral' : 'negative'">
@@ -205,7 +208,8 @@ export class HttpProxyChainButton {
         <tui-data-list *tuiDropdown="let close" (click)="close()">
           @for (profile of available(); track key(profile)) {
             <button tuiOption (click)="add(profile)">
-              {{ profile.packageName }} — {{ profile.name | localize }}
+              {{ profile.packageName }} —
+              {{ profile.name | localize: profile.defaultLocale }}
             </button>
           }
         </tui-data-list>
@@ -300,17 +304,19 @@ class HttpProxyChainDialog {
       string,
       T.HttpProxyStage & {
         name: T.LocaleString
+        defaultLocale?: string | null
         packageName: string
         status: i18nKey
       }
     >()
     for (const [packageId, pkg] of this.plugins()) {
-      const manifest = getManifest(pkg)
+      const manifest = getCurrentManifest(pkg)
       for (const profile of pkg.plugin.httpProxy?.profiles ?? []) {
         const choice = {
           packageId,
           profileId: profile.id,
           name: profile.name,
+          defaultLocale: manifest.defaultLocale,
           packageName: manifest.title,
           status: PrimaryRendering[renderPkgStatus(pkg).primary].display,
         }
