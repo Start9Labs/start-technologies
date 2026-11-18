@@ -57,19 +57,19 @@ describe('values', () => {
     const validator = value.validator
     validator.parse(false)
     testOutput<typeof validator._output, boolean>()(null)
-    expect(value.spec).toMatchObject({ required: false })
+    expect(value.spec).toMatchObject({ mustBeTrue: false })
   })
-  test('required toggle', async () => {
+  test('mustBeTrue toggle', async () => {
     const value = await Value.toggle({
       name: 'I understand',
       default: false,
-      required: true,
+      mustBeTrue: true,
     }).build({} as any)
     const validator = value.validator
     validator.parse(true)
     expect(() => validator.parse(false)).toThrow()
     testOutput<typeof validator._output, boolean>()(null)
-    expect(value.spec).toMatchObject({ required: true, default: false })
+    expect(value.spec).toMatchObject({ mustBeTrue: true, default: false })
   })
   test('triState', async () => {
     const value = await Value.triState({
@@ -370,19 +370,19 @@ describe('values', () => {
         description: null,
         warning: null,
         default: false,
-        required: false,
+        mustBeTrue: false,
       })
     })
-    test('required toggle', async () => {
+    test('mustBeTrue toggle', async () => {
       const value = await Value.dynamicToggle(async () => ({
         name: 'I understand',
         default: false,
-        required: true,
+        mustBeTrue: true,
       })).build({} as any)
       const validator = value.validator
       validator.parse(true)
       expect(() => validator.parse(false)).toThrow()
-      expect(value.spec).toMatchObject({ required: true })
+      expect(value.spec).toMatchObject({ mustBeTrue: true })
     })
     test('triState', async () => {
       const value = await Value.dynamicTriState(async () => ({

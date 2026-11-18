@@ -45,7 +45,7 @@ export interface BoundValue<OuterType> {
         warning?: string | null
         footnote?: string | null
         default: boolean
-        required?: boolean
+        mustBeTrue?: boolean
         disabled?: false | string
       },
       OuterType

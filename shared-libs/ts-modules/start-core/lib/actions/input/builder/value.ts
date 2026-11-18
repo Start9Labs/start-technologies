@@ -121,10 +121,10 @@ function asRequiredParser<Type, Input extends { required: boolean }>(
   return parser.nullish().transform(v => v ?? null) as any
 }
 
-/** A toggle's validator: any boolean, or only `true` when the toggle is required. */
-function toggleValidator(required?: boolean): z.ZodType<boolean> {
-  return required
-    ? z.boolean().refine(v => v, { message: 'Required' })
+/** A toggle's validator: any boolean, or only `true` when the toggle must be on. */
+function toggleValidator(mustBeTrue?: boolean): z.ZodType<boolean> {
+  return mustBeTrue
+    ? z.boolean().refine(v => v, { message: 'Must be on' })
     : z.boolean()
 }
 
@@ -176,7 +176,7 @@ export class Value<
       // optional
       description: null,
       warning: null,
-      required: false,
+      mustBeTrue: false,
       immutable: false,
     }),
     * ```
@@ -191,18 +191,18 @@ export class Value<
     default: boolean
     /**
      * @description Whether the toggle must be on for the form to be submitted, like a
-     * required checkbox. Use it for an acknowledgement the user has to give; the form
-     * marks the toggle "Required" and does not submit while it is off.
+     * checkbox that has to be ticked. Use it for an acknowledgement the user has to give;
+     * the form marks the toggle and does not submit while it is off.
      * @default false
      */
-    required?: boolean
+    mustBeTrue?: boolean
     /**
      * @description Once set, the value can never be changed.
      * @default false
      */
     immutable?: boolean
   }) {
-    const validator = toggleValidator(a.required)
+    const validator = toggleValidator(a.mustBeTrue)
     return new Value<boolean>(
       async () => ({
         spec: {
@@ -212,7 +212,7 @@ export class Value<
           type: 'toggle' as const,
           disabled: false,
           ...a,
-          required: a.required ?? false,
+          mustBeTrue: a.mustBeTrue ?? false,
           immutable: a.immutable ?? false,
         },
         validator,
@@ -230,7 +230,7 @@ export class Value<
         warning?: string | null
         footnote?: string | null
         default: boolean
-        required?: boolean
+        mustBeTrue?: boolean
         disabled?: false | string
       },
       OuterType
@@ -247,9 +247,9 @@ export class Value<
           disabled: false,
           immutable: false,
           ...built,
-          required: built.required ?? false,
+          mustBeTrue: built.mustBeTrue ?? false,
         },
-        validator: toggleValidator(built.required),
+        validator: toggleValidator(built.mustBeTrue),
       }
     }, z.boolean())
   }

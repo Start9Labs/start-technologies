@@ -211,8 +211,8 @@ export type ValueSpecToggle = {
 
   type: 'toggle'
   default: boolean | null
-  /** Whether the toggle must be on for the form to be submitted, like a required checkbox. */
-  required: boolean
+  /** Whether the toggle must be on for the form to be submitted, like a checkbox that has to be ticked. */
+  mustBeTrue: boolean
   disabled: false | string
   immutable: boolean
 }
