@@ -1,5 +1,13 @@
 import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'fs'
 import { readdir } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -71,6 +79,44 @@ describe('pruneBackupVolumes', () => {
   it('keeps every volume when a backup path is the volumes directory', async () => {
     await pruneBackupVolumes(volumes, [`${volumes}/`])
     expect((await readdir(volumes)).sort()).toEqual(['db', 'main', 'removed'])
+  })
+
+  it('keeps every volume when a sync targets the backup root', async () => {
+    await pruneBackupVolumes(volumes, [join(volumes, '..')])
+    expect((await readdir(volumes)).sort()).toEqual(['db', 'main', 'removed'])
+    expect(readFileSync(join(volumes, 'main', 'file'), 'utf8')).toBe('x')
+  })
+
+  it('keeps a custom volume target whose name starts with two dots', async () => {
+    const custom = join(volumes, '..cache')
+    mkdirSync(custom)
+    writeFileSync(join(custom, 'file'), 'current')
+
+    await pruneBackupVolumes(volumes, [`${custom}/`])
+
+    expect(await readdir(volumes)).toEqual(['..cache'])
+    expect(readFileSync(join(custom, 'file'), 'utf8')).toBe('current')
+  })
+
+  it('prunes every volume when a sync targets a sibling directory', async () => {
+    await pruneBackupVolumes(volumes, [`${volumes}-archive/`])
+    expect(await readdir(volumes)).toEqual([])
+  })
+
+  it('prunes every volume when no sync selects one', async () => {
+    await pruneBackupVolumes(volumes, [])
+    expect(await readdir(volumes)).toEqual([])
+  })
+
+  it('leaves a symlink volumes root and its target untouched', async () => {
+    const liveData = join(volumes, '..', 'live-data')
+    mkdirSync(liveData)
+    writeFileSync(join(liveData, 'file'), 'keep')
+    rmSync(volumes, { recursive: true, force: true })
+    symlinkSync(liveData, volumes, 'dir')
+
+    await pruneBackupVolumes(volumes, [])
+    expect(readFileSync(join(liveData, 'file'), 'utf8')).toBe('keep')
   })
 
   it('tolerates a backup with no volumes directory', async () => {

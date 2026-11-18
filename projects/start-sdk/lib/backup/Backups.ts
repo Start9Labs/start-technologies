@@ -1112,22 +1112,27 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
   }
 }
 
-/** Removes entries of the backup's volumes directory that no backup path lies within. */
+/**
+ * Removes entries of the backup's volumes directory disjoint from every backup path.
+ * Leaves a volumes root that is not a real directory untouched.
+ */
 export async function pruneBackupVolumes(
   volumesDir: string,
   backupPaths: string[],
 ) {
   const kept = new Set<string>()
   for (const backupPath of backupPaths) {
-    const rel = path.posix.relative(volumesDir, backupPath)
-    if (rel === '') return
-    if (rel.startsWith('..') || path.posix.isAbsolute(rel)) continue
-    kept.add(rel.split('/')[0]!)
+    const parts = path.posix.relative(volumesDir, backupPath).split('/')
+    const volume = parts[0]!
+    if (volume === '' || parts.every(part => part === '..')) return
+    if (volume !== '..') kept.add(volume)
   }
-  const entries = await fs.readdir(volumesDir).catch(e => {
-    if (e?.code === 'ENOENT') return []
+  const metadata = await fs.lstat(volumesDir).catch(e => {
+    if (e?.code === 'ENOENT') return undefined
     throw e
   })
+  if (!metadata?.isDirectory()) return
+  const entries = await fs.readdir(volumesDir)
   for (const entry of entries) {
     if (!kept.has(entry)) {
       await fs.rm(path.posix.join(volumesDir, entry), {
