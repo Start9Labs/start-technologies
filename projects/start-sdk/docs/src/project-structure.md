@@ -193,6 +193,7 @@ jobs:
       REFERENCE_REGISTRY: ${{ vars.REFERENCE_REGISTRY }}
       RELEASE_REGISTRY: ${{ vars.RELEASE_REGISTRY }}
       S3_S9PKS_BASE_URL: ${{ vars.S3_S9PKS_BASE_URL }}
+      REGISTRY_PROXY: ${{ vars.REGISTRY_PROXY }}
     secrets:
       DEV_KEY: ${{ secrets.DEV_KEY }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
@@ -217,6 +218,7 @@ jobs:
     with:
       RELEASE_REGISTRY: ${{ vars.RELEASE_REGISTRY }}
       S3_S9PKS_BASE_URL: ${{ vars.S3_S9PKS_BASE_URL }}
+      REGISTRY_PROXY: ${{ vars.REGISTRY_PROXY }}
     secrets:
       DEV_KEY: ${{ secrets.DEV_KEY }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
@@ -224,6 +226,8 @@ jobs:
     permissions:
       contents: write
 ```
+
+To publish to registries served over Tor, set the `REGISTRY_PROXY` variable to a proxy URL such as `socks5h://127.0.0.1:9050`. Both workflows route every `start-cli` registry request through it; `.onion` registries need the `socks5h` scheme, which resolves names through the proxy. When the proxy's address is on the runner's loopback and nothing listens there, the workflow starts Tor on that address. Leave the variable unset to reach registries directly.
 
 **syncNext.yml** -- carries every change that lands on the base branch onto the paired `next` iteration branch, so `next` never falls behind what has already shipped:
 

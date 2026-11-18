@@ -17,6 +17,10 @@ name: Release
       S3_S9PKS_BASE_URL:
         description: S3 base URL for package uploads (e.g. https://bucket.region.digitaloceanspaces.com)
         type: string
+      REGISTRY_PROXY:
+        description: Proxy URL start-cli uses to reach the registries, e.g. socks5h://127.0.0.1:9050 for .onion registries. A loopback proxy with nothing listening starts Tor on the runner.
+        type: string
+        default: ''
     secrets:
       DEV_KEY:
         description: Developer signing key
@@ -109,6 +113,10 @@ jobs:
     steps:
       - name: Setup publish environment
         uses: https://github.com/Start9Labs/start-technologies/.forgejo/actions/setup-publish-env@master
+      - name: Configure registry proxy
+        uses: https://github.com/Start9Labs/start-technologies/.github/actions/configure-registry-proxy@master
+        with:
+          proxy: ${{ inputs.REGISTRY_PROXY }}
       - name: Checkout services repository
         uses: https://github.com/actions/checkout@v6
         with:
