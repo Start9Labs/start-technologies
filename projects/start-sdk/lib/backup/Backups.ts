@@ -1,6 +1,7 @@
 import * as T from '@start9labs/start-core/types'
 import * as child_process from 'child_process'
 import * as fs from 'fs/promises'
+import * as path from 'path'
 import { Affine, asError } from '../util'
 import { InitKind, InitScript } from '@start9labs/start-core/inits'
 import { CommandOptions, SubContainer, execFile } from '../util/SubContainer'
@@ -11,6 +12,7 @@ import {
 } from '@start9labs/start-core/util/FullProgressTracker'
 
 const BACKUP_HOST_PATH = '/media/startos/backup'
+const BACKUP_VOLUMES_PATH = `${BACKUP_HOST_PATH}/volumes`
 const BACKUP_CONTAINER_MOUNT = '/backup-target'
 const MARIADB_SHUTDOWN_TIMEOUT = 120_000
 
@@ -173,7 +175,6 @@ export async function mountBackupTarget(
 export const DEFAULT_OPTIONS: T.SyncOptions = {
   delete: true,
   exclude: [],
-  deleteExcluded: false,
 }
 /**
  * Default progress weight of each rsync sync phase. rsync dominates a backup's
@@ -1006,6 +1007,11 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       phase.complete()
     }
 
+    await pruneBackupVolumes(
+      BACKUP_VOLUMES_PATH,
+      this.backupSet.map(s => s.backupPath),
+    )
+
     const dataVersion = await effects.getDataVersion()
     if (dataVersion)
       await fs.writeFile('/media/startos/backup/dataVersion.txt', dataVersion, {
@@ -1106,14 +1112,39 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
   }
 }
 
+/** Removes entries of the backup's volumes directory that no backup path lies within. */
+export async function pruneBackupVolumes(
+  volumesDir: string,
+  backupPaths: string[],
+) {
+  const kept = new Set<string>()
+  for (const backupPath of backupPaths) {
+    const rel = path.posix.relative(volumesDir, backupPath)
+    if (rel === '') return
+    if (rel.startsWith('..') || path.posix.isAbsolute(rel)) continue
+    kept.add(rel.split('/')[0]!)
+  }
+  const entries = await fs.readdir(volumesDir).catch(e => {
+    if (e?.code === 'ENOENT') return []
+    throw e
+  })
+  for (const entry of entries) {
+    if (!kept.has(entry)) {
+      await fs.rm(path.posix.join(volumesDir, entry), {
+        recursive: true,
+        force: true,
+      })
+    }
+  }
+}
+
 export function rsyncArgs(
   srcPath: string,
   dstPath: string,
   options: T.SyncOptions,
 ) {
   return [
-    ...(options.delete ? ['--delete'] : []),
-    ...(options.deleteExcluded ? ['--delete-excluded'] : []),
+    ...(options.delete ? ['--delete', '--delete-excluded'] : []),
     ...options.exclude.map(x => `--exclude=${x}`),
     '-rlptgoAXH',
     '--partial',
