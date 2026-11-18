@@ -168,35 +168,32 @@ jobs:
         run: make start-os-img
         if: ${{ inputs.platform == 'raspberrypi' }}
 
-      # Images are already compressed, so the artifacts are stored as-is.
+      # Release tooling in scripts/ finds these artifacts by file name.
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.platform }}.squashfs
           path: results/*.squashfs
+          archive: false
           retention-days: 14
-          compression-level: 0
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.platform }}.iso
           path: results/*.iso
+          archive: false
           retention-days: 14
-          compression-level: 0
         if: ${{ inputs.platform != 'raspberrypi' }}
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.platform }}.img
           path: results/*.img
+          archive: false
           retention-days: 14
-          compression-level: 0
         if: ${{ inputs.platform == 'raspberrypi' }}
 
   # The OTA payload legacy (0.3.5.1) boxes pull via their frozen rsync updater:
   # the 0.4.0 base squashfs (built just above) repackaged onto the published
   # 0.3.5.1 rootfs. Pure repackaging (no OS compile), so it runs on x86_64 for
   # every platform. Only platforms that shipped in 0.3.5.1 (no nvidia/riscv);
-  # raspberrypi requires a reflash (#3443). The <platform>.migration.squashfs
+  # raspberrypi requires a reflash (#3443). The startos-*_<platform>.migration.squashfs
   # artifact is what ops publishes to the frozen registry as the version's OTA
   # image. See projects/start-os/build/assemble-migration-payload.sh and PR #3399.
   migration:
@@ -217,7 +214,8 @@ jobs:
       - name: Fetch the 0.4.0 base squashfs
         uses: actions/download-artifact@v8
         with:
-          name: ${{ inputs.platform }}.squashfs
+          pattern: startos-*_${{ inputs.platform }}.squashfs
+          merge-multiple: true
           path: base-new
 
       - name: Fetch the legacy (0.3.5.1) base image
@@ -251,8 +249,8 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.platform }}.migration.squashfs
           path: results/*.migration.squashfs
+          archive: false
           retention-days: 14
 
   deploy:
@@ -283,25 +281,20 @@ jobs:
           sparse-checkout: scripts/s3-put-once.sh
           sparse-checkout-cone-mode: false
 
-      - name: Download squashfs
+      - name: Download images
         uses: actions/download-artifact@v8
         with:
-          name: ${{ inputs.platform }}.squashfs
+          pattern: startos-*_${{ inputs.platform }}.{squashfs,iso,img}
+          merge-multiple: true
           path: artifacts/
 
-      - name: Download ISO
-        if: ${{ inputs.platform != 'raspberrypi' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ inputs.platform }}.iso
-          path: artifacts/
-
-      - name: Download IMG
-        if: ${{ inputs.platform == 'raspberrypi' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ inputs.platform }}.img
-          path: artifacts/
+      - name: Check downloaded images
+        working-directory: artifacts
+        run: |
+          image=$([ "$PLATFORM" = raspberrypi ] && echo img || echo iso)
+          for file in startos-*_"$PLATFORM".squashfs startos-*_"$PLATFORM".$image; do
+            [ -f "$file" ] || { echo "::error::No $file artifact in this run"; exit 1; }
+          done
 
       - name: Install start-cli
         uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master

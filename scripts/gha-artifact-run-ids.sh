@@ -1,12 +1,26 @@
 #!/bin/bash
-# Prints the ids of runs on a branch holding an unexpired artifact:
-# <repo> <artifact-name> <branch>.
+# Prints the ids of runs on a branch holding an unexpired artifact whose name
+# matches a glob, newest artifact first: <repo> <name-glob> <branch>.
+# Artifacts matching one glob must share a retention period: the first expired
+# match ends the search.
 
 set -euo pipefail
 
-# Reruns preserve run creation time; artifact expiry determines availability.
-GHA_ARTIFACT_BRANCH="$3" gh api --method GET --paginate "repos/$1/actions/artifacts" \
-    -f name="$2" -F per_page=100 \
-    --jq '.artifacts[]
-      | select((.expired | not) and .workflow_run.head_branch == env.GHA_ARTIFACT_BRANCH)
-      | .workflow_run.id' | sort -nu
+repo=$1
+glob=$2
+branch=$3
+declare -A seen=()
+for ((page = 1; ; page++)); do
+    rows=$(gh api "repos/$repo/actions/artifacts?per_page=100&page=$page" \
+        --jq '.artifacts[] | [.name, .expired, .workflow_run.head_branch, .workflow_run.id] | @tsv')
+    [ -n "$rows" ] || break
+    while IFS=$'\t' read -r name expired head_branch run_id; do
+        # shellcheck disable=SC2053
+        [[ $name == $glob ]] || continue
+        [ "$expired" = false ] || exit 0
+        if [ "$head_branch" = "$branch" ] && [ -z "${seen[$run_id]:-}" ]; then
+            seen[$run_id]=1
+            echo "$run_id"
+        fi
+    done <<< "$rows"
+done

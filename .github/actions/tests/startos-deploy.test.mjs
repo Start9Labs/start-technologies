@@ -457,3 +457,38 @@ for (const [name, deployed, published, status, warning] of [
     assert.equal(f.run('test -e deleted.log').status, 1)
   })
 }
+
+test('a deploy leg missing one of its images fails before uploading', t => {
+  const check = step(leg, 'Check downloaded images')
+  for (const [platform, files, ok] of [
+    [PLATFORM, FILES, true],
+    [PLATFORM, [FILES[0]], false],
+    [
+      PLATFORM,
+      [`startos-${VERSION}-aaaaaaa_${PLATFORM}-nonfree.iso`, FILES[0]],
+      false,
+    ],
+    [
+      'raspberrypi',
+      [
+        `startos-${VERSION}-aaaaaaa_raspberrypi.squashfs`,
+        `startos-${VERSION}-aaaaaaa_raspberrypi.img`,
+      ],
+      true,
+    ],
+    ['raspberrypi', [`startos-${VERSION}-aaaaaaa_raspberrypi.squashfs`], false],
+  ]) {
+    const f = fixture(t)
+    for (const file of files) f.write(`artifacts/${file}`, '')
+    const result = f.run('bash', ['-e', '-c', check], {
+      cwd: join(f.root, 'artifacts'),
+      env: { ...f.env, PLATFORM: platform },
+      encoding: 'utf8',
+    })
+    assert.equal(
+      result.status === 0,
+      ok,
+      `${platform} ${files}: ${result.stdout}`,
+    )
+  }
+})

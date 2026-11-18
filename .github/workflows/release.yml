@@ -137,16 +137,13 @@ jobs:
         with:
           target: ${{ matrix.target }}
 
-      - name: Upload s9pks for Publish stage
-        uses: actions/upload-artifact@v7
+      - name: Upload each s9pk as its own artifact
+        uses: Start9Labs/start-technologies/.github/actions/upload-each@master
         with:
-          # `default` covers the fallback single-entry case where matrix.target
-          # is empty (package not yet on the new s9pk.mk).
-          name: build-${{ matrix.target || 'default' }}
-          path: ./*.s9pk
+          pattern: '*.s9pk'
+          archive: false
           if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
+          retention-days: 14
 
   Publish:
     needs: BuildMatrix
@@ -172,10 +169,10 @@ jobs:
           printf '%s' "${{ secrets.DEV_KEY }}" > ~/.startos/developer.key.pem
         shell: bash
 
+      # BuildMatrix's s9pks are the run's only artifacts.
       - name: Collect s9pks from BuildMatrix
         uses: actions/download-artifact@v8
         with:
-          pattern: build-*
           merge-multiple: true
           path: .
 
@@ -368,10 +365,3 @@ jobs:
             start-cli --registry "$REGISTRY" registry package add "$s9pk" --url "${GH_URL}/${s9pk}"
           done
         shell: bash
-
-      - name: Upload each s9pk as its own artifact
-        uses: Start9Labs/start-technologies/.github/actions/upload-each@master
-        with:
-          pattern: '*.s9pk'
-          retention-days: 14
-          compression-level: 0

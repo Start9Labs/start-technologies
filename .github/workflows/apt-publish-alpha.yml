@@ -62,7 +62,7 @@ jobs:
           declare -A chosen=()
           candidate_ids=$(
             for product in "${products[@]}"; do
-              ./scripts/gha-artifact-run-ids.sh "$GITHUB_REPOSITORY" "${product}_${arches[0]}.deb" master || exit 1
+              ./scripts/gha-artifact-run-ids.sh "$GITHUB_REPOSITORY" "${product}-*_${arches[0]}.deb" master || exit 1
             done | sort -nu
           )
           run_metadata=$(
@@ -85,7 +85,11 @@ jobs:
               [ -z "${chosen[$product]:-}" ] || continue
               complete=1
               for arch in "${arches[@]}"; do
-                grep -qx "${product}_${arch}.deb" <<< "$names" || complete=0
+                has_deb=0
+                while read -r name; do
+                  [[ $name != ${product}-*_${arch}.deb ]] || has_deb=1
+                done <<< "$names"
+                [ "$has_deb" = 1 ] || complete=0
               done
               [ "$complete" = 0 ] || chosen[$product]=$run_id
             done
@@ -98,7 +102,7 @@ jobs:
               echo "::warning::$product has no complete master build left; the suite keeps whatever version it already holds."
               continue
             fi
-            gh run download -R "$GITHUB_REPOSITORY" "$run_id" -p "${product}_*.deb" -D debs
+            ./scripts/gha-artifact-download.sh "$GITHUB_REPOSITORY" "$run_id" "${product}-*.deb" debs
             echo "$product: collected from run $run_id ($(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq .head_sha))"
             collected=1
           done
