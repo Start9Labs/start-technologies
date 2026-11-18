@@ -3493,6 +3493,7 @@ mod upstream_alpn_tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn injected_vhost_runtime_serves_trusted_tls_tracks_interfaces_and_cleans_up_targets() {
         use tokio_rustls::rustls::pki_types::CertificateDer;
@@ -3590,6 +3591,22 @@ mod upstream_alpn_tests {
             assert_eq!(origin.peer_ip, Some(Ipv4Addr::LOCALHOST.into()));
             assert!(!origin.public);
 
+            let mut replacement = target.clone();
+            replacement.private.insert("127.0.0.3".parse().unwrap());
+            let owner = runtime
+                .replace(
+                    None,
+                    old_addr.port(),
+                    &DynVHostTarget::new(target),
+                    owner,
+                    DynVHostTarget::new(replacement),
+                )
+                .unwrap();
+            client.write_all(b"b").await.unwrap();
+            client.flush().await.unwrap();
+            upstream.read_exact(&mut byte).await.unwrap();
+            assert_eq!(&byte, b"b");
+
             interfaces.send_replace(OrdMap::from(vec![(
                 gateway_id,
                 iface("127.0.0.2/8".parse().unwrap()),
@@ -3624,6 +3641,7 @@ mod upstream_alpn_tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn disabling_an_address_disconnects_only_its_streams_and_gates_new_arrivals() {
         tokio::time::timeout(Duration::from_secs(10), async {
