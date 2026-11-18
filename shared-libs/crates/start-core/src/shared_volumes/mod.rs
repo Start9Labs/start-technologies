@@ -167,7 +167,7 @@ impl SharedVolume {
     }
 }
 
-pub(crate) fn managed_local_paths(
+pub(crate) fn local_volume_paths(
     database: &crate::db::model::DatabaseModel,
 ) -> Result<Vec<PathBuf>, Error> {
     let mut paths = Vec::new();
@@ -176,6 +176,13 @@ pub(crate) fn managed_local_paths(
             paths.push(local_path(crate::PACKAGE_DATA, &id));
         }
     }
+    Ok(paths)
+}
+
+pub(crate) fn managed_local_paths(
+    database: &crate::db::model::DatabaseModel,
+) -> Result<Vec<PathBuf>, Error> {
+    let mut paths = local_volume_paths(database)?;
     for (id, target) in database.as_public().as_backup_targets().as_entries()? {
         if matches!(target.as_source().de()?, SharedVolumeSource::Local) {
             paths.push(crate::backup::target::catalog::local_path(
@@ -758,6 +765,10 @@ mod tests {
                 }
             }
         }));
+        assert_eq!(
+            local_volume_paths(&database).unwrap(),
+            vec![local_path(crate::PACKAGE_DATA, &volume)]
+        );
         let paths: BTreeSet<_> = managed_local_paths(&database)
             .unwrap()
             .into_iter()

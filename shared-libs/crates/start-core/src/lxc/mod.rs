@@ -34,7 +34,7 @@ use crate::{InvalidId, PackageId};
 
 mod filesystem;
 
-pub(crate) use filesystem::{BASE_IDMAP, service_filesystem};
+pub(crate) use filesystem::{BASE_IDMAP, service_filesystem, unshifted_filesystem};
 
 fn config_text(guid: &str, lang: &str) -> String {
     format!(

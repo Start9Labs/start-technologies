@@ -13,6 +13,18 @@ pub(crate) fn service_filesystem<F: FileSystem>(filesystem: F, custom: &[IdMap])
     IdMapped::new(filesystem, service_idmap(custom))
 }
 
+/// Removes the LXC offset from a service-owned filesystem view.
+pub(crate) fn unshifted_filesystem<F: FileSystem>(filesystem: F) -> IdMapped<F> {
+    IdMapped::new(
+        filesystem,
+        vec![IdMap {
+            from_id: BASE_IDMAP.to_id,
+            to_id: BASE_IDMAP.from_id,
+            range: BASE_IDMAP.range,
+        }],
+    )
+}
+
 // Re-idmapping replaces the source map; layered remaps require one composed map.
 // Explicit remaps win collisions; ties preserve the lowest on-disk ID.
 fn service_idmap(custom: &[IdMap]) -> Vec<IdMap> {

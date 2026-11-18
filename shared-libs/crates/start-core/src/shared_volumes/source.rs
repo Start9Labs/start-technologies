@@ -16,6 +16,9 @@ use crate::shared_volumes::{
     SharedVolumeSource, local_path,
 };
 
+mod ownership;
+pub(crate) use ownership::migrate_local_ownership;
+
 pub async fn create_local_directory(path: &Path) -> Result<(), Error> {
     tokio::fs::create_dir_all(path.parent().expect("managed volume root")).await?;
     crate::util::btrfs::create_subvolume(path).await?;

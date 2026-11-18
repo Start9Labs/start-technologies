@@ -685,6 +685,9 @@ impl RpcContext {
             &mut optimize_storage,
         )
         .await?;
+        for path in crate::shared_volumes::local_volume_paths(&peek)? {
+            crate::shared_volumes::source::migrate_local_ownership(&path).await?;
+        }
         optimize_storage.complete();
 
         init_services.start();

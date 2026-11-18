@@ -165,9 +165,9 @@ mod linux {
                 self.ctr.add(len);
                 offset += len;
             }
-            copy_xattrs(&src_f, &dst_f)?;
             fchown(&dst_f, Some(meta.uid()), Some(meta.gid()))?;
             dst_f.set_permissions(PermissionsExt::from_mode(meta.mode() & 0o7777))?;
+            copy_xattrs(&src_f, &dst_f)?;
             set_times(&dst_f, meta)
         }
     }
@@ -476,6 +476,32 @@ mod linux {
                 Some(&b"present"[..])
             );
             assert_eq!(progress.load(), 5);
+        }
+
+        #[tokio::test]
+        #[ignore = "requires root and BTRFS_TEST_VOLUMES_DIR"]
+        async fn clones_capabilities_after_restoring_file_ownership() {
+            let fixture = crate::util::btrfs::tests::directory();
+            let src = fixture.path().join("src");
+            let dst = fixture.path().join("dst");
+            std::fs::create_dir(&src).unwrap();
+            let file = src.join("file");
+            std::fs::write(&file, b"executable").unwrap();
+            std::os::unix::fs::chown(&file, Some(1000), Some(2000)).unwrap();
+            ::xattr::set(
+                &file,
+                "security.capabilities",
+                &[1, 0, 0, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            )
+            .unwrap();
+            let capabilities = xattr(&file, "security.capabilities").unwrap();
+            clone_tree(&src, &dst, ctr()).await.unwrap();
+            assert_eq!(
+                xattr(&dst.join("file"), "security.capabilities"),
+                Some(capabilities)
+            );
+            let metadata = std::fs::metadata(dst.join("file")).unwrap();
+            assert_eq!((metadata.uid(), metadata.gid()), (1000, 2000));
         }
 
         #[tokio::test]

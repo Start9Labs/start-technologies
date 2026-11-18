@@ -15,7 +15,6 @@ use crate::context::{CliContext, RpcContext};
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
-use crate::disk::mount::filesystem::idmapped::{IdMap, IdMapped};
 use crate::disk::mount::filesystem::{FileSystem, ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::disk::mount::util::sync_directory;
@@ -332,16 +331,8 @@ async fn restore_local_copy<F: Future<Output = Result<(), Error>>>(
     let result = async {
         source::set_local_permissions(&path).await?;
         // Volume backups retain host-visible owners, including the LXC offset.
-        let base = crate::lxc::BASE_IDMAP;
         let unshifted = TmpMountGuard::mount(
-            &IdMapped::new(
-                Bind::new(source),
-                vec![IdMap {
-                    from_id: base.to_id,
-                    to_id: base.from_id,
-                    range: base.range,
-                }],
-            ),
+            &crate::lxc::unshifted_filesystem(Bind::new(source)),
             ReadOnly,
         )
         .await
