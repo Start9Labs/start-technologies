@@ -278,7 +278,8 @@ async fn enroll(ctx: &RpcContext) -> Result<FdeEnrollmentProgress, Error> {
             }
         }
     }
-    if needs_import {
+    // A failed authentication write leaves imports pending without MokAuth.
+    if needs_import || (!pending.is_empty() && enrollment.approval_code.is_some()) {
         let code = reserve_request(
             Path::new(REQUEST_CERTIFICATE),
             &certificate,

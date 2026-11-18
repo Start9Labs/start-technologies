@@ -26,6 +26,7 @@ export function capturedStreams(directory) {
  * The caller retains admitted sources and the private workspace until this settles.
  * The source root must be a mountpoint; mount propagation stays private.
  * Launcher death is an error, not proof of completed production.
+ * The producer's stdout is the launcher's stderr.
  */
 export async function runNativeProducer(producer, args, environment) {
   const child = spawn(
@@ -41,7 +42,7 @@ export async function runNativeProducer(producer, args, environment) {
       producer,
       ...args,
     ],
-    { env: environment, stdio: ['ignore', 'inherit', 'inherit'] },
+    { env: environment, stdio: ['ignore', 2, 'inherit'] },
   )
   const [code, signal] = await once(child, 'close')
   if (signal) throw Error(`Native producer launcher terminated by ${signal}`)

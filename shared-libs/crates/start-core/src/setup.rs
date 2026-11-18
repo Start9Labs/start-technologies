@@ -175,6 +175,7 @@ fn setup_hostname(existing: ServerHostname, requested: Option<ServerHostname>) -
 #[instrument(skip_all)]
 async fn setup_init(
     ctx: &SetupContext,
+    disk_guid: &str,
     password: Option<String>,
     kiosk: bool,
     hostname: Option<ServerHostname>,
@@ -184,6 +185,7 @@ async fn setup_init(
         &ctx.webserver,
         ctx.dns.clone(),
         &ctx.config.peek(|c| c.clone()),
+        disk_guid,
         init_phases,
     )
     .await?;
@@ -316,7 +318,7 @@ pub async fn attach(
         disk_phase.complete();
 
         let (account, net_ctrl) =
-            setup_init(&setup_ctx, password, kiosk, None, init_phases).await?;
+            setup_init(&setup_ctx, &disk_guid, password, kiosk, None, init_phases).await?;
 
         let rpc_ctx = RpcContext::init(
             &setup_ctx.webserver,
@@ -1089,7 +1091,7 @@ async fn fresh_setup(
 
     let config = ctx.config.peek(|c| c.clone());
 
-    let init_result = init(&ctx.webserver, ctx.dns.clone(), &config, init_phases).await?;
+    let init_result = init(&ctx.webserver, ctx.dns.clone(), &config, &guid, init_phases).await?;
 
     let rpc_ctx = RpcContext::init(
         &ctx.webserver,
@@ -1241,7 +1243,8 @@ async fn migrate(
     deactivate_result?;
     restore_phase.complete();
 
-    let (account, net_ctrl) = setup_init(&ctx, password, kiosk, hostname, init_phases).await?;
+    let (account, net_ctrl) =
+        setup_init(&ctx, &guid, password, kiosk, hostname, init_phases).await?;
 
     let rpc_ctx = RpcContext::init(
         &ctx.webserver,
