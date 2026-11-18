@@ -3489,11 +3489,16 @@ pub(crate) mod upstream_alpn_tests {
         let addr = listener.local_addr().unwrap();
         let mut vhost = TlsListener::new(listener, handler);
 
-        let accepted = tokio::spawn(async move {
-            futures::future::poll_fn(|cx| vhost.poll_accept(cx))
-                .await
-                .map(|(metadata, _stream)| metadata.tls_info.alpn)
-        });
+        use tracing::instrument::WithSubscriber;
+
+        let accepted = tokio::spawn(
+            async move {
+                futures::future::poll_fn(|cx| vhost.poll_accept(cx))
+                    .await
+                    .map(|(metadata, _stream)| metadata.tls_info.alpn)
+            }
+            .with_current_subscriber(),
+        );
 
         let mut client = client_config_no_verify(provider()).unwrap();
         client.alpn_protocols = client_alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
