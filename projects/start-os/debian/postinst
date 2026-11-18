@@ -143,10 +143,12 @@ rm -f "$resolv_conf"
 echo "nameserver 127.0.0.1" > "$resolv_conf"
 
 echo "#" > /etc/network/interfaces
+# The StartOS resolver is the only host DNS path; NetworkManager publishes no resolver config.
 cat << EOF > /etc/NetworkManager/NetworkManager.conf
 [main]
 plugins=ifupdown,keyfile
 dns=none
+systemd-resolved=false
 
 [ifupdown]
 managed=true
