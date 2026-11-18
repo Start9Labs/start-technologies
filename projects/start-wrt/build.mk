@@ -99,17 +99,7 @@ $(STARTWRT_WEB_CONFIG): $(STARTWRT_GIT_HASH_FILE) $(STARTWRT_DIR)/web/config-sam
 start-wrt-test: $(STARTWRT_RUST_SRC) $(ENVIRONMENT_FILE)
 	./$(STARTWRT_DIR)/build/run-tests.sh
 
-# --- OpenWrt image (HEAVY) ---
-# Tree prep + feeds/config/download. openwrt/ is a disposable, gitignored
-# build workspace (no submodule, no git repo inside): openwrt-setup.sh rebuilds
-# it from the sha256-pinned upstream release tarball (build/openwrt-version),
-# applies the Start9 delta (openwrt-patches/ + openwrt-overlay/), then runs
-# feeds/config/download. Re-runs whenever the pin, patches, overlay, feeds, or
-# diffconfig change.
-.PHONY: start-wrt-ca-test
-start-wrt-ca-test:
-	./$(STARTWRT_DIR)/build/test-ca-certificates.sh
-
+# Setup rebuilds pinned sources while preserving generated build state.
 .PHONY: start-wrt-openwrt-setup
 start-wrt-openwrt-setup: $(STARTWRT_OPENWRT)/.config
 $(STARTWRT_OPENWRT)/.config: $(STARTWRT_DIR)/build/openwrt.diffconfig $(STARTWRT_DIR)/build/feeds.conf \
@@ -136,6 +126,10 @@ $(STARTWRT_IMAGES) &: $(STARTWRT_OPENWRT)/.config $(STARTWRT_OPENWRT)/files/.sta
 	mkdir -p results
 	gzip -9nc $(STARTWRT_IMAGE_DIR)/$(STARTWRT_SDCARD_SRC) > results/$(STARTWRT_SDCARD_NAME)
 	cp $(STARTWRT_IMAGE_DIR)/$(STARTWRT_SYSUPGRADE_SRC) results/$(STARTWRT_SYSUPGRADE_NAME)
+
+.PHONY: start-wrt-ca-test
+start-wrt-ca-test:
+	./$(STARTWRT_DIR)/build/test-ca-certificates.sh
 
 # Deploy binary + restart daemon over SSH (atomic temp -> sync -> rename).
 .PHONY: start-wrt-update

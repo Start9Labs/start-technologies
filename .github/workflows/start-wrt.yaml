@@ -162,11 +162,11 @@ jobs:
       - name: Setup OpenWrt (fetch pinned upstream, patch, feeds, config, download)
         run: make start-wrt-openwrt-setup
 
-      - name: Verify both CA trust-store outputs
-        run: make start-wrt-ca-test
-
       - name: Build image
         run: make start-wrt-image
+
+      - name: Verify the image trust store
+        run: make start-wrt-ca-test
 
       - uses: actions/upload-artifact@v7
         with:

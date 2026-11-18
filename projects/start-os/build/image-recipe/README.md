@@ -15,4 +15,4 @@ container wrapper and accepts the prepared StartOS `.deb` path.
 Generic images use Debian-signed backports kernels. Raspberry Pi uses versioned
 vendor packages; both its `rpi-v8` and `rpi-2712` kernels must remain available.
 The [kernel security release assessment](../../../../AGENTS.md#releases) governs
-updates; NVIDIA compatibility must not freeze a vulnerable kernel.
+kernel updates.

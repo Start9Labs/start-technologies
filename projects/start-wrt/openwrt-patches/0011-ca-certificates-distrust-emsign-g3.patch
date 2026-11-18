@@ -1,14 +1,21 @@
-Subject: ca-certificates: distrust the compromised emSign ECC Root CA - G3
+Subject: ca-certificates: blacklist "emSign ECC Root CA - G3"
 
-CVE-2026-91403. Remove G3 from the shared certificate staging directory;
-both the hashed trust store and the concatenated bundle must omit it.
+Backport of openwrt/openwrt 4a686570eb6495635279273f034caa2a0f37f36e
+from openwrt-25.12, with its package patch in
+openwrt-overlay/package/system/ca-certificates/patches/. Drop both once
+the pinned release includes that commit.
 
-Applies to: OpenWrt 25.12.6
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: openwrt v25.12.6
 
 --- a/package/system/ca-certificates/Makefile
 +++ b/package/system/ca-certificates/Makefile
-@@ -11 +11 @@
+@@ -8,7 +8,7 @@
+ 
+ PKG_NAME:=ca-certificates
+ PKG_VERSION:=20260816
 -PKG_RELEASE:=1
 +PKG_RELEASE:=2
-@@ -49,0 +50 @@
-+	rm $(PKG_INSTALL_DIR)/usr/share/ca-certificates/mozilla/emSign_ECC_Root_CA_-_G3.crt
+ PKG_MAINTAINER:=
+ 
+ PKG_LICENSE:=GPL-2.0-or-later MPL-2.0
