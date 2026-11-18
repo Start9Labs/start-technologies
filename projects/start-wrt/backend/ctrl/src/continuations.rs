@@ -5,7 +5,7 @@ use axum::body::Body;
 use axum::extract::Path;
 use axum::http::{Request, Response, StatusCode};
 use axum::response::IntoResponse;
-pub use startos::rpc_continuations::{Guid, RpcContinuation, RpcContinuations};
+pub use startos::rpc_continuations::{Guid, RpcContinuation, RpcContinuations, WebSocketPolicy};
 
 pub const DEFAULT_TTL: Duration = Duration::from_secs(60);
 pub const MAX_UPLOAD_BYTES: usize = 64 * 1024 * 1024;

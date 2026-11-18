@@ -5,10 +5,10 @@
 # `table ip6 startos`. Used to route a non-SSL LAN+WAN GUA to its container —
 # unlike SSL, the host has no terminator, so inbound v6 is DNAT'd to the
 # container's (SLAAC ULA) v6. Invoked once per (sip, sport -> dip:dport,
-# src_subnet) tuple by shared-libs/crates/start-core/src/net/forward.rs.
+# src_subnet, transport) tuple by shared-libs/crates/start-core/src/net/forward.rs.
 #
-# All rules for one forward share a comment tag so the whole forward tears down
-# by handle without disturbing others. Single-port only (GUA forwards are never
+# Each protocol owns a comment tag for independent teardown by handle.
+# Single-port only (GUA forwards are never
 # ranges — port ranges are IPv4-only in the model).
 #
 # src_subnet, when set, restricts inbound to that LAN v6 subnet: a LAN-only GUA
@@ -19,8 +19,13 @@ if [ -z "$sip" ] || [ -z "$dip" ] || [ -z "$dprefix" ] || [ -z "$sport" ] || [ -
     exit 1
 fi
 
-TAG="F6-$(echo "$sip:$sport -> $dip/$dprefix:$dport ${src_subnet:-any}" | sha256sum | head -c 16)"
-PROTO='meta l4proto { tcp, udp }'
+IFS=, read -r -a protocols <<< "${transport:-tcp,udp}"
+for protocol in "${protocols[@]}"; do
+    case "$protocol" in
+        tcp | udp) ;;
+        *) echo "invalid transport: $protocol" >&2; exit 1 ;;
+    esac
+done
 # Bracketed for IPv6 dnat target.
 dnat="th dport $sport dnat to [$dip]:$dport"
 
@@ -43,28 +48,32 @@ delete_tagged() {
     done
 }
 
-{
-    delete_tagged
-    if [ "${UNDO:-0}" != 1 ]; then
-        # DNAT inbound. With src_subnet, restrict to that subnet (LAN-only GUA)
-        # plus the container bridge; otherwise (LAN+WAN) forward from anywhere.
-        if [ -n "${src_subnet:-}" ]; then
-            echo "add rule ip6 startos prerouting ip6 saddr $src_subnet ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
-            if [ -n "${bridge_subnet:-}" ]; then
-                echo "add rule ip6 startos prerouting ip6 saddr $bridge_subnet ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
+for protocol in "${protocols[@]}"; do
+    TAG="F6-$(echo "$sip:$sport -> $dip/$dprefix:$dport ${src_subnet:-any} $protocol" | sha256sum | head -c 16)"
+    PROTO="meta l4proto $protocol"
+    {
+        delete_tagged
+        if [ "${UNDO:-0}" != 1 ]; then
+            # DNAT inbound. With src_subnet, restrict to that subnet (LAN-only GUA)
+            # plus the container bridge; otherwise (LAN+WAN) forward from anywhere.
+            if [ -n "${src_subnet:-}" ]; then
+                echo "add rule ip6 startos prerouting ip6 saddr $src_subnet ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
+                if [ -n "${bridge_subnet:-}" ]; then
+                    echo "add rule ip6 startos prerouting ip6 saddr $bridge_subnet ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
+                fi
+            else
+                echo "add rule ip6 startos prerouting ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
             fi
-        else
-            echo "add rule ip6 startos prerouting ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
+            # DNAT for locally-originated (hairpin from the host itself).
+            echo "add rule ip6 startos output ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
+            # Allow new forwarded connections to the container.
+            echo "add rule ip6 startos forward ip6 daddr $dip $PROTO th dport $dport ct state new accept comment \"$TAG\""
+            # Masquerade hairpin replies so they reverse through this host.
+            echo "add rule ip6 startos postrouting fib saddr type local ct original ip6 daddr $sip ip6 daddr $dip $PROTO th dport $dport masquerade comment \"$TAG\""
+            echo "add rule ip6 startos postrouting ip6 saddr $dip/$dprefix ip6 daddr $dip $PROTO th dport $dport masquerade comment \"$TAG\""
         fi
-        # DNAT for locally-originated (hairpin from the host itself).
-        echo "add rule ip6 startos output ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
-        # Allow new forwarded connections to the container.
-        echo "add rule ip6 startos forward ip6 daddr $dip $PROTO th dport $dport ct state new accept comment \"$TAG\""
-        # Masquerade hairpin replies so they reverse through this host.
-        echo "add rule ip6 startos postrouting fib saddr type local ct original ip6 daddr $sip ip6 daddr $dip $PROTO th dport $dport masquerade comment \"$TAG\""
-        echo "add rule ip6 startos postrouting ip6 saddr $dip/$dprefix ip6 daddr $dip $PROTO th dport $dport masquerade comment \"$TAG\""
-    fi
-} | nft -f -
+    } | nft -f - || exit $?
+done
 
 # Tracked flows keep the NAT they started with.
 # A daemon restart reinstalls forwards whose flows are still live.
@@ -75,5 +84,6 @@ else
     match=(-r "$sip" --reply-port-src "$sport")
 fi
 # conntrack -D exits 1 when nothing matches.
-conntrack -D -f ipv6 -p tcp "${match[@]}" 2> /dev/null || true
-conntrack -D -f ipv6 -p udp "${match[@]}" 2> /dev/null || true
+for protocol in "${protocols[@]}"; do
+    conntrack -D -f ipv6 -p "$protocol" "${match[@]}" 2> /dev/null || true
+done

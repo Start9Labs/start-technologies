@@ -123,3 +123,30 @@ cmp "$rva23_toolchain" "$scratch/rva23-toolchain.cmake"
 host_target="$host_arch-unknown-linux-musl"
 cargo zigbuild --locked --target "$host_target" --target-dir "$scratch/native"
 "$scratch/native/$host_target/debug/builder-probe" | grep -Fx 'builder probe passed'
+
+probe_symbols() {
+  readelf --wide --symbols "$1/$2/debug/builder-probe"
+}
+
+env -u "ZIG_LIBC_${host_arch}_linux_musl" -u CARGO_ZIGBUILD_CACHE_DIR \
+  cargo zigbuild --locked --target "$host_target" --target-dir "$scratch/libc"
+if ! grep -q SmpAllocator <<< "$(probe_symbols "$scratch/libc" "$host_target")"; then
+  printf '%s baseline does not link Zig SmpAllocator\n' "$host_target" >&2
+  exit 1
+fi
+for arch in x86_64 aarch64 riscv64; do
+  target="${arch/riscv64/riscv64gc}-unknown-linux-musl"
+  cargo zigbuild --locked --target "$target" --target-dir "$scratch/libc"
+  symbols=$(probe_symbols "$scratch/libc" "$target")
+  for symbol in __libc_malloc_impl alloc_slot; do
+    if ! grep -q " $symbol\$" <<< "$symbols"; then
+      printf '%s does not link musl mallocng (%s missing)\n' "$target" "$symbol" >&2
+      exit 1
+    fi
+  done
+  if grep -q SmpAllocator <<< "$symbols"; then
+    printf '%s links Zig SmpAllocator\n' "$target" >&2
+    exit 1
+  fi
+  printf '%s links musl mallocng\n' "$target"
+done

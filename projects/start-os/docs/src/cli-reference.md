@@ -306,6 +306,7 @@ Enable or disable a specific address binding.
 
 - `--address <ADDRESS>` — Address to modify (required)
 - `--enabled <true|false>` — Enable or disable
+- `--allow-insecure` — Accept readable and alterable plaintext traffic, including passwords; required to enable a [plain-HTTP private address](interfaces.md#plain-http-private-addresses) on an insecure gateway
 
 ## Services
 
@@ -465,6 +466,7 @@ Enable or disable a specific address binding for a service.
 
 - `--address <ADDRESS>` — Address to modify (required)
 - `--enabled <true|false>` — Enable or disable
+- `--allow-insecure` — Accept readable and alterable plaintext traffic, including passwords; required to enable a [plain-HTTP private address](interfaces.md#plain-http-private-addresses) on an insecure gateway
 
 ## Backups
 
@@ -974,6 +976,14 @@ Set the registry's description (markdown), shown above its services in the marke
 
 Over RPC, pass `null` in the setter's `description` field to clear it; a value sets it.
 
+### `start-cli registry info set-default-locale [DEFAULT_LOCALE] [--clear]`
+
+Set the locale, such as `en_US`, that the registry's own description, category names and OS release notes fall back to when a reader's language is missing. Supply either `DEFAULT_LOCALE` or `--clear`, but not both.
+
+- `--clear` — Remove the registry's default locale
+
+Over RPC, pass `null` in the setter's `defaultLocale` field to clear it; a value sets it.
+
 ### `start-cli registry info set-trust-signers [SIGNER...]`
 
 Select which existing signers the registry offers to StartOS servers for package trust. Run it without signer IDs to clear the selection. See [Trusted Keys](trusted-keys.md#keys-from-registries) for how StartOS treats offered keys.
@@ -1137,7 +1147,7 @@ List all OS versions.
 
 - `--format` — Output format
 
-### `start-cli registry os version add <VERSION> <HEADLINE> <RELEASE_NOTES> <SOURCE_VERSION>`
+### `start-cli registry os version add <VERSION> <RELEASE_NOTES> <SOURCE_VERSION>`
 
 Register a new OS version.
 

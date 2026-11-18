@@ -4,7 +4,7 @@ import { i18nPipe } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { TuiButton } from '@taiga-ui/core'
 import { LogsComponent } from 'src/app/routes/portal/components/logs/logs.component'
-import { FollowServerLogsReq } from 'src/app/services/api/api.types'
+import { FollowLogs } from 'src/app/services/api/api.types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { TitleDirective } from 'src/app/services/title.service'
 
@@ -29,8 +29,8 @@ import { TitleDirective } from 'src/app/services/title.service'
 export default class SystemKernelComponent {
   private readonly api = inject(ApiService)
 
-  protected readonly follow = (params: FollowServerLogsReq) =>
-    this.api.rpc.server.kernelLogs.follow(params)
+  protected readonly follow: FollowLogs = (params, options) =>
+    this.api.streams.server.kernelLogs.follow(params, options)
 
   protected readonly fetch = (params: T.LogsParamsInput) =>
     this.api.rpc.server.kernelLogs(params)

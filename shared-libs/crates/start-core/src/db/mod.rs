@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use axum::extract::ws;
 use clap::Parser;
-use imbl_value::InternedString;
+use imbl_value::{InternedString, Value};
 use itertools::Itertools;
 use patch_db::json_ptr::{JsonPointer, ROOT};
-use patch_db::{DiffPatch, Dump, Revision};
+use patch_db::{Catchup, DiffPatch, Dump, PatchDb, Revision, Subscriber};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
 
 lazy_static::lazy_static! {
@@ -151,8 +151,19 @@ pub async fn dump(ctx: RpcContext, DumpParams { pointer }: DumpParams) -> Result
 
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
+pub struct DbCursor {
+    pub epoch: InternedString,
+    pub id: u64,
+}
+
+rpc_toolkit::reflect_ts!(DbCursor);
+
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
 pub struct SubscribeParams {
     pub pointer: Option<JsonPointer>,
+    /// The subscriber's last revision; resumes only within the epoch that reported it.
+    pub since: Option<DbCursor>,
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
     pub signer: Option<InternedString>,
@@ -169,6 +180,63 @@ pub struct SubscribeRes {
 
 rpc_toolkit::reflect_ts!(SubscribeRes);
 
+/// A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscribeStart {
+    pub epoch: InternedString,
+    pub id: u64,
+    pub value: Option<Value>,
+    pub revisions: Option<Vec<Revision>>,
+}
+
+rpc_toolkit::reflect_ts!(SubscribeStart);
+
+pub(crate) async fn subscribe_start(
+    db: &PatchDb,
+    pointer: JsonPointer,
+    since: Option<&DbCursor>,
+) -> (SubscribeStart, Subscriber) {
+    let (epoch, catchup, sub) = db
+        .catch_up_and_sub(pointer, since.map(|since| (&*since.epoch, since.id)))
+        .await;
+    let start = match catchup {
+        Catchup::Dump(Dump { id, value }) => SubscribeStart {
+            epoch,
+            id,
+            value: Some(value),
+            revisions: None,
+        },
+        Catchup::Replay { id, revisions } => SubscribeStart {
+            epoch,
+            id,
+            value: None,
+            revisions: Some(revisions),
+        },
+    };
+    (start, sub)
+}
+
+/// Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
+#[derive(Deserialize, Serialize, VisitVariants)]
+#[serde(untagged)]
+pub enum SubscribeResult {
+    Continuation(SubscribeRes),
+    Stream(Dump),
+}
+
+rpc_toolkit::reflect_ts!(SubscribeResult);
+
+/// Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
+#[derive(Deserialize, Serialize, VisitVariants)]
+#[serde(untagged)]
+pub enum SubscribeStartResult {
+    Continuation(SubscribeRes),
+    Stream(SubscribeStart),
+}
+
+rpc_toolkit::reflect_ts!(SubscribeStartResult);
+
 struct DbSubscriber {
     rev: u64,
     sub: UnboundedReceiver<Revision>,
@@ -184,7 +252,10 @@ impl DbSubscriber {
                     }
                     return rev
                 }
-                _ = self.sync_db.changed() => {
+                changed = self.sync_db.changed() => {
+                    if changed.is_err() {
+                        return self.sub.recv().await;
+                    }
                     let id = *self.sync_db.borrow();
                     if id > self.rev {
                         match self.sub.try_recv() {
@@ -207,13 +278,37 @@ impl DbSubscriber {
 }
 
 pub async fn subscribe(
-    ctx: RpcContext,
-    SubscribeParams { pointer, signer }: SubscribeParams,
-) -> Result<SubscribeRes, Error> {
-    let (dump, sub) = ctx
-        .db
-        .dump_and_sub(pointer.unwrap_or_else(|| PUBLIC.clone()))
-        .await;
+    HandlerArgs {
+        context: ctx,
+        params:
+            SubscribeParams {
+                pointer,
+                since,
+                signer,
+            },
+        rpc_stream,
+        ..
+    }: HandlerArgs<RpcContext, SubscribeParams, rpc_toolkit::Empty, Revision>,
+) -> Result<SubscribeStartResult, Error> {
+    let pointer = pointer.unwrap_or_else(|| PUBLIC.clone());
+    if let Some(stream) = rpc_stream {
+        let (start, sub) = subscribe_start(&ctx.db, pointer, since.as_ref()).await;
+        let sub = DbSubscriber {
+            rev: start.id,
+            sub,
+            sync_db: ctx.sync_db.subscribe(),
+        };
+        crate::auth::continuation_subscription(&ctx, signer)
+            .await?
+            .forward_stream(
+                stream,
+                futures::stream::unfold(sub, |mut sub| async move {
+                    sub.recv().await.map(|revision| (Ok(revision), sub))
+                }),
+            );
+        return Ok(SubscribeStartResult::Stream(start));
+    }
+    let (dump, sub) = ctx.db.dump_and_sub(pointer).await;
     let mut sub = DbSubscriber {
         rev: dump.id,
         sub,
@@ -224,8 +319,9 @@ pub async fn subscribe(
         .add(
             guid.clone(),
             RpcContinuation::ws_authed(
-                &ctx,
-                signer,
+                crate::auth::continuation_subscription(&ctx, signer).await?,
+                WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
                 |mut ws| async move {
                     if let Err(e) = async {
                         loop {
@@ -264,7 +360,10 @@ pub async fn subscribe(
         )
         .await;
 
-    Ok(SubscribeRes { dump, guid })
+    Ok(SubscribeStartResult::Continuation(SubscribeRes {
+        dump,
+        guid,
+    }))
 }
 
 #[derive(Deserialize, Serialize, Parser)]
@@ -405,7 +504,9 @@ pub struct UiParams {
 
 rpc_toolkit::reflect_ts!(UiParams);
 
-// #[command(display(display_serializable))]
+#[cfg(test)]
+mod subscription_tests;
+
 #[instrument(skip_all)]
 pub async fn ui(ctx: RpcContext, UiParams { pointer, value, .. }: UiParams) -> Result<(), Error> {
     let mut ptr = "/public/ui"

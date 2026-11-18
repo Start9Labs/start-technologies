@@ -8,7 +8,7 @@
 - [Your Account](account.md)
 - [Installing the App](installing-the-app.md)
 - [Chats](chats.md)
-- [Dux and Helix](dux-and-helix.md)
+- [Dux](dux.md)
 - [Privacy](privacy.md)
 - [Notifications](notifications.md)
 - [Settings](settings.md)

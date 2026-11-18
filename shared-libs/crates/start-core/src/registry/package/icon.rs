@@ -2,18 +2,25 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use axum::body::Body;
+use axum::extract::Request;
 use axum::response::Response;
 use http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use imbl_value::InternedString;
 use new_mime_guess::MimeGuess;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
+use crate::middleware::auth::signature::{
+    AUTH_SIG_HEADER, SignatureHeader, verify_request_signature,
+};
 use crate::net::static_server::{bad_request, not_found, server_error};
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
-use crate::registry::package::index::PackageIndex;
+use crate::registry::package::index::{PackageIndex, PackageInfo, Reader};
+use crate::sign::Signer;
 use crate::util::DataUrl;
 
+pub(crate) const ICON_PATH: &str = "icons";
 const ICON_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const BLAKE3_DIR: &str = "blake3";
 const HASH_LEN: usize = 52;
@@ -49,6 +56,96 @@ fn is_stored_path(path: &str) -> bool {
         .is_some_and(|(scheme, name)| scheme == BLAKE3_DIR && is_blake3_file_name(name))
 }
 
+fn icons_url(registry: &Url) -> Option<Url> {
+    let mut prefix = registry.clone();
+    prefix
+        .path_segments_mut()
+        .ok()?
+        .pop_if_empty()
+        .push(ICON_PATH)
+        .push("");
+    Some(prefix)
+}
+
+pub(crate) fn is_icon_url(registry: &Url, target: &Url) -> bool {
+    icons_url(registry).is_some_and(|prefix| {
+        target
+            .as_str()
+            .strip_prefix(prefix.as_str())
+            .is_some_and(is_stored_path)
+    })
+}
+
+/// Requests an icon with an empty-body signature header when a signer is given.
+/// Signed requests require a non-redirecting client.
+pub(crate) async fn request_icon(
+    client: &reqwest::Client,
+    url: Url,
+    signer: Option<&Signer>,
+) -> Result<reqwest::Response, Error> {
+    let mut request = client.get(url.clone());
+    if let Some(signer) = signer {
+        request = request.header(
+            AUTH_SIG_HEADER,
+            SignatureHeader::sign(
+                signer,
+                b"",
+                url.host_str().or_not_found("registry hostname")?,
+            )
+            .await?
+            .to_header(),
+        );
+    }
+    request.send().await.with_kind(ErrorKind::Network)
+}
+
+/// Copies a stored icon from another registry unless the store already has it.
+/// Bytes whose blake3 differs from the path are rejected.
+pub(crate) async fn copy_icon(
+    client: &reqwest::Client,
+    signer: &Signer,
+    registry: &Url,
+    dir: &Path,
+    path: &str,
+) -> Result<(), Error> {
+    let Some(name) = path
+        .strip_prefix(BLAKE3_DIR)
+        .and_then(|name| name.strip_prefix('/'))
+        .filter(|_| is_stored_path(path))
+    else {
+        return Err(Error::new(
+            eyre!("{}", t!("registry.package.icon.invalid-name", name = path)),
+            ErrorKind::InvalidRequest,
+        ));
+    };
+    if tokio::fs::try_exists(dir.join(path)).await.unwrap_or(false) {
+        return Ok(());
+    }
+    let url = icons_url(registry)
+        .or_not_found("registry icon URL")?
+        .join(path)
+        .with_kind(ErrorKind::ParseUrl)?;
+    let data = request_icon(client, url, Some(signer))
+        .await?
+        .error_for_status()
+        .with_kind(ErrorKind::Network)?
+        .bytes()
+        .await
+        .with_kind(ErrorKind::Network)?;
+    ensure_code!(
+        name.split_once('.')
+            .is_some_and(|(hash, _)| hash == icon_hash(&data)),
+        ErrorKind::Incoherent,
+        "{}",
+        t!("registry.package.icon.hash-mismatch", name = path)
+    );
+    let dir = dir.to_owned();
+    let name = name.to_owned();
+    tokio::task::spawn_blocking(move || write_icon(&dir, &name, &data))
+        .await
+        .with_kind(ErrorKind::Unknown)?
+}
+
 fn icon_mime(path: &str) -> String {
     MimeGuess::from_path(path)
         .first_or_octet_stream()
@@ -56,20 +153,17 @@ fn icon_mime(path: &str) -> String {
         .to_owned()
 }
 
-/// Writes the icon into the store unless it is already there.
-pub fn store_icon(dir: &Path, icon: &DataUrl<'_>) -> Result<InternedString, Error> {
-    let hash = base32::encode(
+fn icon_hash(data: &[u8]) -> String {
+    base32::encode(
         base32::Alphabet::Rfc4648 { padding: false },
-        blake3::hash(&icon.data).as_bytes(),
+        blake3::hash(data).as_bytes(),
     )
-    .to_lowercase();
-    let ext = new_mime_guess::get_mime_extensions_str(&icon.mime)
-        .and_then(|exts| exts.first())
-        .copied()
-        .unwrap_or("bin");
-    let name = format!("{hash}.{ext}");
+    .to_lowercase()
+}
+
+fn write_icon(dir: &Path, name: &str, data: &[u8]) -> Result<(), Error> {
     let blake3_dir = &dir.join(BLAKE3_DIR);
-    let file = &blake3_dir.join(&name);
+    let file = &blake3_dir.join(name);
     if !file.exists() {
         std::fs::create_dir_all(blake3_dir).with_ctx(|_| {
             (
@@ -78,7 +172,7 @@ pub fn store_icon(dir: &Path, icon: &DataUrl<'_>) -> Result<InternedString, Erro
             )
         })?;
         let tmp = &blake3_dir.join(format!(".{name}.{:016x}", rand::random::<u64>()));
-        std::fs::write(tmp, &icon.data)
+        std::fs::write(tmp, data)
             .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("write {tmp:?}")))?;
         std::fs::rename(tmp, file).with_ctx(|_| {
             (
@@ -87,6 +181,17 @@ pub fn store_icon(dir: &Path, icon: &DataUrl<'_>) -> Result<InternedString, Erro
             )
         })?;
     }
+    Ok(())
+}
+
+/// Writes the icon into the store unless it is already there.
+pub fn store_icon(dir: &Path, icon: &DataUrl<'_>) -> Result<InternedString, Error> {
+    let ext = new_mime_guess::get_mime_extensions_str(&icon.mime)
+        .and_then(|exts| exts.first())
+        .copied()
+        .unwrap_or("bin");
+    let name = format!("{}.{ext}", icon_hash(&icon.data));
+    write_icon(dir, &name, &icon.data)?;
     Ok(InternedString::from_display(&lazy_format!(
         "{BLAKE3_DIR}/{name}"
     )))
@@ -115,15 +220,31 @@ pub async fn load_icon(dir: &Path, path: &str) -> Result<String, Error> {
     Ok(DataUrl::from_vec(&icon_mime(path), data).to_string())
 }
 
-/// Serves a stored icon by its path under `/icons/`.
-pub async fn stored_icon(ctx: &RegistryContext, path: &str) -> Response {
+pub async fn stored_icon(ctx: &RegistryContext, path: &str, mut request: Request) -> Response {
     if !is_stored_path(path) {
         return bad_request();
     }
+    // Public icons remain available when signature verification fails.
+    let key = if request.headers().contains_key(AUTH_SIG_HEADER) {
+        verify_request_signature(ctx, &mut request).await.ok()
+    } else {
+        None
+    };
+    let cache_control = async {
+        let db = ctx.db.peek().await;
+        let reader = Reader::resolve(&db, key.as_ref())?;
+        icon_cache_control(db.as_index().as_package(), path, reader.as_ref())
+    }
+    .await;
+    let cache_control = match cache_control {
+        Ok(Some(cache_control)) => cache_control,
+        Ok(None) => return not_found(),
+        Err(e) => return server_error(e),
+    };
     match tokio::fs::read(icons_dir(&ctx.datadir).join(path)).await {
         Ok(data) => Response::builder()
             .header(CONTENT_TYPE, icon_mime(path))
-            .header(CACHE_CONTROL, ICON_CACHE_CONTROL)
+            .header(CACHE_CONTROL, cache_control)
             .body(Body::from(data))
             .unwrap(),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => not_found(),
@@ -131,22 +252,50 @@ pub async fn stored_icon(ctx: &RegistryContext, path: &str) -> Response {
     }
 }
 
-/// Every stored icon path the package index refers to.
-pub fn referenced_icons(index: &PackageIndex) -> BTreeSet<InternedString> {
-    index
-        .packages
-        .values()
-        .flat_map(|p| p.versions.values())
-        .flat_map(|v| {
-            v.icon
-                .iter()
-                .chain(v.dependency_metadata.values().flat_map(|d| d.icon.iter()))
-        })
-        .filter_map(|icon| match icon {
-            PackageIcon::Stored(path) => Some(path.clone()),
-            PackageIcon::Inline(_) => None,
-        })
-        .collect()
+fn package_icons(package: &Model<PackageInfo>) -> Result<BTreeSet<InternedString>, Error> {
+    let mut paths = BTreeSet::new();
+    for (_, version) in package.as_versions().as_entries()? {
+        let dependencies = version
+            .as_dependency_metadata()
+            .as_entries()?
+            .into_iter()
+            .map(|(_, dependency)| dependency.as_icon().de())
+            .collect::<Result<Vec<_>, _>>()?;
+        for icon in std::iter::once(version.as_icon().de()?)
+            .chain(dependencies)
+            .flatten()
+        {
+            if let PackageIcon::Stored(path) = icon {
+                paths.insert(path);
+            }
+        }
+    }
+    Ok(paths)
+}
+
+fn icon_cache_control(
+    index: &Model<PackageIndex>,
+    path: &str,
+    reader: Option<&Reader>,
+) -> Result<Option<&'static str>, Error> {
+    let mut private_access = false;
+    for (_, package) in index.as_packages().as_entries()? {
+        if package_icons(package)?.contains(path) {
+            if package.is_visible_to(None)? {
+                return Ok(Some(ICON_CACHE_CONTROL));
+            }
+            private_access |= package.is_visible_to(reader)?;
+        }
+    }
+    Ok(private_access.then_some("private, no-store"))
+}
+
+pub fn referenced_icons(index: &Model<PackageIndex>) -> Result<BTreeSet<InternedString>, Error> {
+    let mut paths = BTreeSet::new();
+    for (_, package) in index.as_packages().as_entries()? {
+        paths.extend(package_icons(package)?);
+    }
+    Ok(paths)
 }
 
 /// Deletes stored icons and interrupted writes that the index no longer refers to.
@@ -188,6 +337,51 @@ pub async fn sweep_icons(dir: &Path, referenced: &BTreeSet<InternedString>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn icon_references_share_visibility_and_sweep_ownership() {
+        let reader = Reader {
+            signer: crate::rpc_continuations::Guid::new(),
+            admin: false,
+        };
+        let public_version =
+            imbl_value::json!({"icon": "blake3/shared.png", "dependencyMetadata": {}});
+        let private_version = imbl_value::json!({
+            "icon": "blake3/secret.png", "dependencyMetadata": {
+                "dependency": {"icon": "blake3/dependency.png"},
+                "shared": {"icon": "blake3/shared.png"}
+            }
+        });
+        let index: Model<PackageIndex> = imbl_value::json!({"categories": {}, "packages": {
+            "public": {"authorized": {}, "versions": {"1.0.0:0": public_version}},
+            "secret": {"private": true, "readers": [reader.signer], "authorized": {},
+                "versions": {"1.0.0:0": private_version}}
+        }})
+        .into();
+        assert_eq!(
+            referenced_icons(&index).unwrap(),
+            BTreeSet::from([
+                "blake3/shared.png".into(),
+                "blake3/secret.png".into(),
+                "blake3/dependency.png".into()
+            ])
+        );
+        for path in ["blake3/secret.png", "blake3/dependency.png"] {
+            assert_eq!(icon_cache_control(&index, path, None).unwrap(), None);
+            assert_eq!(
+                icon_cache_control(&index, path, Some(&reader)).unwrap(),
+                Some("private, no-store")
+            );
+        }
+        assert_eq!(
+            icon_cache_control(&index, "blake3/shared.png", None).unwrap(),
+            Some(ICON_CACHE_CONTROL)
+        );
+        assert_eq!(
+            icon_cache_control(&index, "blake3/missing.png", Some(&reader)).unwrap(),
+            None
+        );
+    }
 
     fn png(data: &[u8]) -> DataUrl<'static> {
         DataUrl::from_vec("image/png", data.to_vec())

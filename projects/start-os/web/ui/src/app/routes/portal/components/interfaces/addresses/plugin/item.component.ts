@@ -14,7 +14,7 @@ import { PluginActionsComponent } from './actions.component'
     <td>
       {{
         address().scheme?.toUpperCase() ??
-          (address().hostnameInfo.ssl ? 'SSL' : 'TCP/UDP')
+          (address().hostnameInfo.ssl ? 'SSL' : '—')
       }}
     </td>
     <td [style.grid-area]="'2 / 1 / 2 / 2'">

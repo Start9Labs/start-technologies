@@ -13,7 +13,10 @@ import { T } from '@start9labs/start-core'
  * the guarantee even if a component forgets to localize, and is the hook a
  * future in-app language selector re-runs to re-localize without re-fetching.
  */
-export type Localize = (value: T.LocaleString) => string
+export type Localize = (
+  value: T.LocaleString,
+  defaultLocale?: string | null,
+) => string
 
 export function localizeRegistryInfo(
   info: T.RegistryInfo,
@@ -23,7 +26,7 @@ export function localizeRegistryInfo(
     ...info,
     categories: mapValues(info.categories, c => ({
       ...c,
-      name: localize(c.name),
+      name: localize(c.name, info.defaultLocale),
     })),
   }
 }
@@ -39,7 +42,7 @@ export function localizePackageRes(
       res.otherVersions &&
       mapValues(res.otherVersions, v => ({
         ...v,
-        releaseNotes: localize(v.releaseNotes),
+        releaseNotes: localize(v.releaseNotes, v.defaultLocale),
       })),
   }
 }
@@ -51,15 +54,17 @@ function localizeVersionInfo(
   return {
     ...v,
     description: {
-      short: localize(v.description.short),
-      long: localize(v.description.long),
+      short: localize(v.description.short, v.defaultLocale),
+      long: localize(v.description.long, v.defaultLocale),
     },
-    releaseNotes: localize(v.releaseNotes),
+    releaseNotes: localize(v.releaseNotes, v.defaultLocale),
     dependencyMetadata: mapValues(v.dependencyMetadata, d => ({
       ...d,
-      title: d.title == null ? d.title : localize(d.title),
+      title: d.title == null ? d.title : localize(d.title, v.defaultLocale),
       description:
-        d.description == null ? d.description : localize(d.description),
+        d.description == null
+          ? d.description
+          : localize(d.description, v.defaultLocale),
     })),
   }
 }

@@ -129,7 +129,7 @@ Puertos que un servidor publica por sí mismo automáticamente (PCP/UPnP). Son d
 
 ### Columnas
 
-Etiqueta, el **servidor** de destino, un **nombre de host** TLS opcional (SNI), los puertos externo e interno, el protocolo (siempre TCP/UDP) y la **IP** pública en la que es accesible.
+Etiqueta, el **servidor** de destino, un **nombre de host** TLS opcional (SNI), los puertos externo e interno, el protocolo que reenvía cada fila (TCP, UDP o TCP/UDP) y la **IP** pública en la que es accesible.
 
 <a href="https://docs.start9.com/start-tunnel/published-ports.html" target="_blank" rel="noreferrer">Más información →</a>`,
 

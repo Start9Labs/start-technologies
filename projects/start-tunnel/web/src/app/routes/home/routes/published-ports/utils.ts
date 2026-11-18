@@ -1,5 +1,5 @@
-import { Signal } from '@angular/core'
-import { T } from '@start9labs/start-core'
+import type { Signal } from '@angular/core'
+import type { T } from '@start9labs/start-core'
 
 export interface MappedDevice {
   readonly ip: string
@@ -8,9 +8,46 @@ export interface MappedDevice {
   readonly ipv6?: string | null
 }
 
+export function parseForwardKey(key: string): {
+  address: string
+  transport: T.Transport
+} {
+  const separator = key.indexOf('@')
+  return separator < 0
+    ? { address: key, transport: ['tcp', 'udp'] }
+    : {
+        address: key.slice(separator + 1),
+        transport: [key.slice(0, separator) as T.Transport[number]],
+      }
+}
+
+function forwardTransport(
+  forward: T.Tunnel.PortForward,
+  declared: T.Transport,
+): T.Transport {
+  return forward.kind === 'sni' ? ['tcp'] : declared
+}
+
+export function portEightyForwarded(
+  forwards: T.Tunnel.PortForwards,
+  ip: string,
+): boolean {
+  return Object.entries(forwards).some(([key, forward]) => {
+    const { address, transport } = parseForwardKey(key)
+    if (!forwardTransport(forward, transport).includes('tcp')) return false
+    const separator = address.lastIndexOf(':')
+    if (address.slice(0, separator) !== ip) return false
+    const start = Number(address.slice(separator + 1))
+    const count = forward.kind === 'dnat' ? forward.count : 1
+    return start <= 80 && 80 <= start + count - 1
+  })
+}
+
 export type IpVersion = 'ipv4' | 'ipv6'
 
 export interface MappedForward {
+  readonly source: string
+  readonly transport: T.Transport
   // For a v4 forward this is the WAN IP; for a v6 pinhole it's the client's GUA.
   readonly externalip: string
   // Start port of the forward; `externalport`/`internalport` stay the raw start
@@ -89,10 +126,13 @@ export function mapForwards(
     hostname: string | null,
     count: number,
   ): MappedForward {
-    const [externalip, externalport] = source.split(':')
+    const { address, transport } = parseForwardKey(source)
+    const [externalip, externalport] = address.split(':')
     const [targetip, internalport] = target.split(':')
 
     return {
+      source,
+      transport: forwardTransport(portForwards[source]!, transport),
       externalip: externalip!,
       externalport: externalport!,
       // Fall back to the raw target IP when it isn't a named device (e.g. a
@@ -115,20 +155,21 @@ export function mapForwards(
   }
 }
 
-// v6 GUA pinholes keyed by `[gua]:port`. A pure pinhole has `internalPort` null
-// (internal == external); a remap (e.g. 80→443) carries a distinct internal.
 export function mapPinholes(
   pinholes: T.Tunnel.Pinholes6,
   devices: readonly MappedDevice[],
 ): MappedForward[] {
   return Object.entries(pinholes).map(([key, ph]) => {
-    const match = key.match(/^\[(.+)\]:(\d+)$/)
+    const { address, transport } = parseForwardKey(key)
+    const match = address.match(/^\[(.+)\]:(\d+)$/)
     const gua = match?.[1] ?? key
     const externalport = match?.[2] ?? ''
     const internalport =
       ph.internalPort != null ? String(ph.internalPort) : externalport
 
     return {
+      source: key,
+      transport,
       externalip: gua,
       externalport,
       device: devices.find(d => d.ipv6 === gua) ?? {

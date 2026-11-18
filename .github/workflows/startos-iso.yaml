@@ -1,563 +1,103 @@
-name: Debian-based ISO and SquashFS
+name: StartOS Publish
+
+# Publishes one StartOS build to a channel: registers its version, then builds and
+# deploys each platform's image as soon as that image is ready. build-products.yaml
+# dispatches it once a publishing build's binaries are compiled; images and release
+# metadata use the build's commit, not the dispatched branch head.
+run-name: StartOS ${{ inputs.channel }} publish of ${{ inputs.commit }}
 
 on:
-  workflow_call:
   workflow_dispatch:
     inputs:
-      # `default:` is not decoration — the UI preselects the first option, but an API
-      # dispatch (`gh workflow run`) that omits an input delivers it as the empty
-      # string, and only a declared default fills it in.
-      environment:
+      build-run-id:
+        description: build-products.yaml run whose compiled-<arch>.tar artifacts to publish
+        type: string
+        required: true
+      commit:
+        description: Commit that run built
+        type: string
+        required: true
+      channel:
         type: choice
-        description: Environment
-        default: NONE
+        description: Channel
         options:
-          - NONE
-          - dev
-          - unstable
-          - dev-unstable
-      runner:
-        type: choice
-        description: Runner
-        default: standard
-        options:
-          - standard
-          - fast
-      platform:
-        type: choice
-        description: Platform
-        default: ALL
-        options:
-          - ALL
-          - x86_64
-          - x86_64-nonfree
-          - x86_64-nvidia
-          - aarch64
-          - aarch64-nonfree
-          - aarch64-nvidia
-          - raspberrypi
-          - riscv64
-          - riscv64-nonfree
-      deploy:
-        type: choice
-        description: Deploy
-        default: NONE
-        options:
-          - NONE
           - alpha
           - beta
+      platforms:
+        description: JSON list of platforms to build and deploy
+        type: string
+        required: true
+      environment:
+        description: ENVIRONMENT the binaries were built with
+        type: string
+        default: ''
       force-overwrite:
         type: boolean
         description: Replace S3 objects that already exist for this commit
         default: false
-  # `paths:` below mirror projects/start-os/build.mk's build inputs — keep both
-  # in sync (see root AGENTS.md "Coupled changes").
-  push:
-    branches:
-      - master
-      - integration/*
-    paths:
-      - 'scripts/changelog*.mjs'
-      - '.prettierrc.json'
-      - 'projects/start-os/**'
-      - 'shared-libs/**'
-      - 'projects/start-sdk/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'angular.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tsconfig.json'
-      - 'tsconfig.lib.json'
-      - 'build/**'
-      - 'debian/**'
-      - 'apt/**'
-      - '.github/workflows/startos-iso.yaml'
-      - '.github/actions/setup-build/**'
-      # Doc-only edits under the allowlisted project trees (e.g.
-      # projects/start-os/docs/**) shouldn't trigger a build.
-      - '!**/*.md'
-      - 'projects/start-os/release-notes/**'
-      - 'projects/start-os/changelog/**'
-  pull_request:
-    # The jobs below skip drafts, and `ready_for_review` is not a default
-    # activity type, so without it a draft marked ready is never checked.
-    types: [opened, synchronize, reopened, ready_for_review]
-    branches:
-      - master
-      - integration/*
-    paths:
-      - 'scripts/changelog*.mjs'
-      - '.prettierrc.json'
-      - 'projects/start-os/**'
-      - 'shared-libs/**'
-      - 'projects/start-sdk/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'angular.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tsconfig.json'
-      - 'tsconfig.lib.json'
-      - 'build/**'
-      - 'debian/**'
-      - 'apt/**'
-      - '.github/workflows/startos-iso.yaml'
-      - '.github/actions/setup-build/**'
-      # Doc-only edits under the allowlisted project trees (e.g.
-      # projects/start-os/docs/**) shouldn't trigger a build.
-      - '!**/*.md'
-      - 'projects/start-os/release-notes/**'
-      - 'projects/start-os/changelog/**'
 
-# The group is scoped by event so a master push can't cancel an in-flight
-# dispatched release build. Only pull requests cancel: a push to master
-# publishes to alpha, so master pushes queue behind each other rather than
-# aborting a publish half-done.
+# One publishing run per channel at a time: registering the version and indexing
+# each platform never overlap another run publishing to that registry. A newer run
+# replaces one still pending.
 concurrency:
-  group: startos-iso-${{ github.event_name }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: startos-iso-publish-${{ inputs.channel }}
+  cancel-in-progress: false
+
+# Reading the build run, and downloading its artifacts, needs `actions: read`.
+permissions:
+  contents: read
+  actions: read
 
 env:
-  NODEJS_VERSION: '24.17.0'
-  # Empty (release-equivalent) on master, `dev` everywhere else a build happens
-  # without an explicit input — PRs and integration/* branches, where password
-  # SSH before setup and uncompressed frontends are what you want.
-  #
-  # master must NOT be dev: alpha is the source registry that beta and then
-  # production are promoted from, and `os promote` copies each asset's URL and
-  # commitment through verbatim. Whatever a master push builds is what ships.
-  ENVIRONMENT: >-
-    ${{
-      fromJson(format('["{0}", ""]', github.event.inputs.environment || 'dev'))[
-        github.event.inputs.environment == 'NONE'
-        || (github.event_name == 'push' && github.ref == 'refs/heads/master')
-      ]
-    }}
+  NODEJS_VERSION: &nodejs-version '24.17.0'
 
 jobs:
-  compile:
-    name: Compile Base Binaries
-    if: github.event.pull_request.draft != true
-    strategy:
-      fail-fast: true
-      matrix:
-        arch: >-
-          ${{
-            fromJson('{
-              "x86_64": ["x86_64"],
-              "x86_64-nonfree": ["x86_64"],
-              "x86_64-nvidia": ["x86_64"],
-              "aarch64": ["aarch64"],
-              "aarch64-nonfree": ["aarch64"],
-              "aarch64-nvidia": ["aarch64"],
-              "raspberrypi": ["aarch64"],
-              "riscv64": ["riscv64"],
-              "riscv64-nonfree": ["riscv64"],
-              "ALL": ["x86_64", "aarch64", "riscv64"]
-            }')[github.event.inputs.platform || 'ALL']
-          }}
-    runs-on: >-
-      ${{
-        fromJson(
-          format(
-            '["{0}", "{1}"]',
-            fromJson('{
-              "x86_64": "ubuntu-latest",
-              "aarch64": "ubuntu-24.04-arm",
-              "riscv64": "ubuntu-latest"
-            }')[matrix.arch],
-            fromJson('{
-              "x86_64": "amd64-fast",
-              "aarch64": "aarch64-fast",
-              "riscv64": "amd64-fast"
-            }')[matrix.arch]
-          )
-        )[github.event.inputs.runner == 'fast']
-      }}
-    steps:
-      - name: Mount tmpfs
-        if: ${{ github.event.inputs.runner == 'fast' }}
-        run: sudo mount -t tmpfs tmpfs .
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-build
-        with:
-          nodejs-version: ${{ env.NODEJS_VERSION }}
-          setup-python: 'true'
-
-      - name: Make
-        run: make ARCH=${{ matrix.arch }} compiled-${{ matrix.arch }}.tar
-        env:
-          SCCACHE_GHA_ENABLED: on
-          SCCACHE_GHA_VERSION: 0
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: compiled-${{ matrix.arch }}.tar
-          path: compiled-${{ matrix.arch }}.tar
-          retention-days: 1
-
-  # On pull requests, only build the (expensive) image
-  # matrix when the change actually affects image assembly — packaging, image
-  # recipe, systemd units, apt, or shared build infra. Pure code/web/docs PRs are
-  # already covered by `compile` (the binaries) and the Automated Tests workflow,
-  # so they skip images here and get full image coverage on the push to master.
-  # The exception is an integration/* branch merging into master: that PR is the
-  # gate before the batch ships, so it always gets the full testable image set.
-  # On push/dispatch the guard below is bypassed and images always build.
-  changes:
-    name: Detect image-affecting changes
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft != true
+  # Registers the build's version in the channel's registry before any image is
+  # built. The images then deploy one platform at a time as each finishes
+  # (startos-image.yaml).
+  deploy-prepare:
+    name: Prepare Deploy
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
-    outputs:
-      image: ${{ steps.filter.outputs.image }}
-    steps:
-      - name: Check changed paths
-        id: filter
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_REF: ${{ github.head_ref }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-        run: |
-          # An integration/* branch merging into master is the last gate before
-          # the batch ships — build every platform image so reviewers can flash
-          # and test it, whatever paths it happens to touch.
-          #
-          # head_ref is only a branch *name*, which a fork controls freely, so
-          # the branch must also live in this repo. Otherwise anyone could spend
-          # the full image matrix by naming a fork branch integration/anything.
-          if [ "$BASE_REF" = master ] \
-            && [ "$HEAD_REPO" = "${{ github.repository }}" ] \
-            && [ "${HEAD_REF#integration/}" != "$HEAD_REF" ]; then
-            echo "$HEAD_REF -> master: building the full image matrix."
-            echo "image=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          files="$(gh api --paginate \
-            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            --jq '.[].filename')"
-          matched="$(printf '%s\n' "$files" | grep -E '^(build/|debian/|apt/|projects/start-os/build/|projects/start-os/build\.mk$|projects/start-os/debian/|projects/start-os/(release-notes|changelog)/|scripts/changelog[^/]*\.mjs$|shared-libs/crates/start-core/locales/release-notes\.json$|\.prettierrc\.json$|package\.json$|projects/start-os/[^/]+\.(service|slice)$|\.github/workflows/startos-iso\.yaml$|\.github/actions/setup-build/)' || true)"
-          if [ -n "$matched" ]; then
-            echo "Image-affecting files changed:"; printf '  %s\n' "$matched"
-            echo "image=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No image-affecting files changed; skipping image build on this PR."
-            echo "image=false" >> "$GITHUB_OUTPUT"
-          fi
-
-  image:
-    name: Build Image
-    needs: [compile, changes]
-    # Build on push/dispatch always; on PRs only when packaging/image inputs changed.
-    if: >-
-      !cancelled() && needs.compile.result == 'success'
-      && (github.event_name != 'pull_request' || needs.changes.outputs.image == 'true')
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: >-
-          ${{
-            fromJson(
-              format(
-                '[
-                  ["{0}"],
-                  ["x86_64", "x86_64-nonfree", "x86_64-nvidia", "aarch64", "aarch64-nonfree", "aarch64-nvidia", "raspberrypi", "riscv64", "riscv64-nonfree"]
-                ]',
-                github.event.inputs.platform || 'ALL'
-              )
-            )[(github.event.inputs.platform || 'ALL') == 'ALL']
-          }}
-    # RISC-V image assembly stays native; full emulation is too slow.
-    runs-on: >-
-      ${{
-        fromJson(
-          format(
-            '["{0}", "{1}"]',
-            fromJson('{
-              "x86_64": "ubuntu-latest",
-              "x86_64-nonfree": "ubuntu-latest",
-              "x86_64-nvidia": "ubuntu-latest",
-              "aarch64": "ubuntu-24.04-arm",
-              "aarch64-nonfree": "ubuntu-24.04-arm",
-              "aarch64-nvidia": "ubuntu-24.04-arm",
-              "raspberrypi": "ubuntu-24.04-arm",
-              "riscv64": "ubuntu-24.04-riscv",
-              "riscv64-nonfree": "ubuntu-24.04-riscv",
-            }')[matrix.platform],
-            fromJson('{
-              "x86_64": "amd64-fast",
-              "x86_64-nonfree": "amd64-fast",
-              "x86_64-nvidia": "amd64-fast",
-              "aarch64": "aarch64-fast",
-              "aarch64-nonfree": "aarch64-fast",
-              "aarch64-nvidia": "aarch64-fast",
-              "raspberrypi": "aarch64-fast",
-              "riscv64": "amd64-fast",
-              "riscv64-nonfree": "amd64-fast",
-            }')[matrix.platform]
-          )
-        )[github.event.inputs.runner == 'fast']
-      }}
     env:
-      ARCH: >-
-        ${{
-          fromJson('{
-            "x86_64": "x86_64",
-            "x86_64-nonfree": "x86_64",
-            "x86_64-nvidia": "x86_64",
-            "aarch64": "aarch64",
-            "aarch64-nonfree": "aarch64",
-            "aarch64-nvidia": "aarch64",
-            "raspberrypi": "aarch64",
-            "riscv64": "riscv64",
-            "riscv64-nonfree": "riscv64",
-          }')[matrix.platform]
-        }}
-    steps:
-      - name: Free space
-        run: |
-          sudo apt-get remove --purge -y azure-cli || true
-          sudo apt-get remove --purge -y firefox || true
-          sudo apt-get remove --purge -y ghc-* || true
-          sudo apt-get remove --purge -y google-cloud-sdk || true
-          sudo apt-get remove --purge -y google-chrome-stable || true
-          sudo apt-get remove --purge -y powershell || true
-          sudo apt-get remove --purge -y php* || true
-          sudo apt-get remove --purge -y ruby* || true
-          sudo apt-get remove --purge -y mono-* || true
-          sudo apt-get autoremove -y
-          sudo apt-get clean
-          sudo rm -rf /usr/lib/jvm               # All JDKs
-          sudo rm -rf /usr/local/.ghcup          # Haskell toolchain
-          sudo rm -rf /usr/local/lib/android     # Android SDK/NDK, emulator
-          sudo rm -rf /usr/share/dotnet          # .NET SDKs
-          sudo rm -rf /usr/share/swift           # Swift toolchain (if present)
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"    # Pre-cached tool cache (Go, Node, etc.)
-        if: ${{ github.event.inputs.runner != 'fast' }}
-
-      # Some runners lack /opt/hostedtoolcache, which setup-qemu expects
-      - name: Ensure hostedtoolcache exists
-        run: sudo mkdir -p /opt/hostedtoolcache && sudo chown $USER:$USER /opt/hostedtoolcache
-
-      # Actions use the runner's bundled Node, not the Node on GITHUB_PATH.
-      - name: Update RISC-V action runtime
-        if: ${{ env.ARCH == 'riscv64' && github.event.inputs.runner != 'fast' }}
-        run: |
-          set -euo pipefail
-          worker="$(readlink -f "/proc/$PPID/exe")"
-          test "$(basename "$worker")" = Runner.Worker
-          runner_node="$(dirname "$worker")/../externals/node24/bin/node"
-          echo "Bundled action runtime: $("$runner_node" --version)"
-          base="https://unofficial-builds.nodejs.org/download/release/v${NODEJS_VERSION}"
-          tarball="node-v${NODEJS_VERSION}-linux-riscv64.tar.xz"
-          cd "$RUNNER_TEMP"
-          curl -fsSLO "$base/$tarball"
-          curl -fsSL "$base/SHASUMS256.txt" | grep " $tarball\$" | sha256sum -c -
-          tar -xJf "$tarball"
-          node_dir="$RUNNER_TEMP/${tarball%.tar.xz}"
-          test "$("$node_dir/bin/node" --version)" = "v${NODEJS_VERSION}"
-          "$node_dir/bin/node" -e 'require("node:crypto").createHash("sha256").update("action-runtime").digest(); console.log(process.versions)'
-          install -m 755 "$node_dir/bin/node" "$runner_node.next"
-          mv -f "$runner_node.next" "$runner_node"
-          echo "Updated action runtime: $("$runner_node" --version)"
-          echo "$node_dir/bin" >> "$GITHUB_PATH"
-
-      - name: Set up docker QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Download compiled artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: compiled-${{ env.ARCH }}.tar
-
-      - name: Extract compiled artifacts
-        run: tar -xvf compiled-${{ env.ARCH }}.tar
-
-      - name: Prevent rebuild of compiled artifacts
-        run: |
-          mkdir -p node_modules
-          mkdir -p projects/start-os/web/dist/raw
-          mkdir -p projects/start-tunnel/web/dist/raw
-          mkdir -p shared-libs/crates/start-core/bindings
-          mkdir -p shared-libs/ts-modules/start-core/lib/osBindings
-          mkdir -p projects/start-os/container-runtime/node_modules
-          mkdir -p projects/start-os/container-runtime/dist
-          mkdir -p projects/start-os/container-runtime/dist/node_modules
-          mkdir -p projects/start-sdk/dist
-          mkdir -p shared-libs/ts-modules/start-core/dist
-          mkdir -p shared-libs/crates/patch-db/client/node_modules
-          mkdir -p shared-libs/crates/patch-db/client/dist
-          mkdir -p .angular
-          mkdir -p projects/start-os/web/dist/raw/ui
-          mkdir -p projects/start-os/web/dist/raw/setup-wizard
-          mkdir -p projects/start-os/web/dist/static/ui
-          mkdir -p projects/start-os/web/dist/static/setup-wizard
-          PLATFORM=${{ matrix.platform }} make -t compiled-${{ env.ARCH }}.tar
-
-      - run: git status
-
-      - name: Run iso build
-        run: PLATFORM=${{ matrix.platform }} make start-os-iso
-        if: ${{ matrix.platform != 'raspberrypi' }}
-
-      - name: Run img build
-        run: PLATFORM=${{ matrix.platform }} make start-os-img
-        if: ${{ matrix.platform == 'raspberrypi' }}
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.platform }}.squashfs
-          path: results/*.squashfs
-          retention-days: 14
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.platform }}.iso
-          path: results/*.iso
-          retention-days: 14
-        if: ${{ matrix.platform != 'raspberrypi' }}
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.platform }}.img
-          path: results/*.img
-          retention-days: 14
-        if: ${{ matrix.platform == 'raspberrypi' }}
-
-  # The OTA payload legacy (0.3.5.1) boxes pull via their frozen rsync updater:
-  # the 0.4.0 base squashfs (built just above) repackaged onto the published
-  # 0.3.5.1 rootfs. Runs automatically after every image build, in the same run,
-  # consuming that run's <platform>.squashfs artifact. Pure repackaging (no OS
-  # compile), so it runs on x86_64 for every platform. Only platforms that
-  # shipped in 0.3.5.1 (no nvidia/riscv); raspberrypi requires a reflash (#3443).
-  # The <platform>.migration.squashfs artifact is what ops publishes to the
-  # frozen registry as the version's OTA image. See
-  # projects/start-os/build/assemble-migration-payload.sh and PR #3399.
-  migration-image:
-    name: Migration Image
-    needs: [image]
-    if: ${{ !cancelled() && needs.image.result == 'success' }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [x86_64, x86_64-nonfree, aarch64, aarch64-nonfree]
-    env:
-      GH_TOKEN: ${{ github.token }}
-      MIGRATION_FROM_TAG: v0.3.5.1
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: ./.github/actions/free-disk-space
-
-      - name: Fetch the 0.4.0 base squashfs (this run's image build)
-        id: base
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ matrix.platform }}.squashfs
-          path: base-new
-
-      - name: Skip platforms not built this run
-        id: check
-        run: |
-          if ls base-new/*.squashfs >/dev/null 2>&1; then
-            echo "found=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::No ${{ matrix.platform }}.squashfs built this run — skipping."
-            echo "found=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Fetch the legacy (0.3.5.1) base image
-        if: steps.check.outputs.found == 'true'
-        run: |
-          mkdir -p base-old
-          gh release download "$MIGRATION_FROM_TAG" --repo "${{ github.repository }}" \
-            --pattern "startos-*_${{ matrix.platform }}.iso" --dir base-old
-
-      # Runs in start9/build-env (the canonical Start9 build image — already has
-      # the squashfs toolchain + b3sum) so unsquashfs/mksquashfs can restore the
-      # rootfs's ownership + device nodes. Only xorriso (to crack the squashfs out
-      # of the 0.3.5.1 ISO) is missing, so we add just that. Not --privileged:
-      # creating device nodes needs only CAP_MKNOD, in docker's default caps.
-      - name: Assemble migration payload
-        if: steps.check.outputs.found == 'true'
-        run: |
-          ARCH=$(printf '%s' "${{ matrix.platform }}" | sed 's/-nonfree$//')
-          NEW=$(ls base-new/*.squashfs | head -n1)
-          OLD=$(ls base-old/startos-*_${{ matrix.platform }}.iso | head -n1)
-          mkdir -p results
-          OUT="results/$(basename "${NEW%.squashfs}").migration.squashfs"
-          docker run --rm -v "$PWD":/w -w /w \
-            -e ARCH="$ARCH" -e NEW="$NEW" -e OLD="$OLD" -e OUT="$OUT" \
-            -e OWNER_UID="$(id -u)" -e OWNER_GID="$(id -g)" \
-            start9/build-env bash -euc '
-              apt-get update -qq
-              apt-get install -yq --no-install-recommends xorriso
-              projects/start-os/build/assemble-migration-payload.sh \
-                --arch "$ARCH" --new-squashfs "$NEW" --old-image "$OLD" --out "$OUT"
-            '
-          echo "Built $OUT"
-
-      - uses: actions/upload-artifact@v7
-        if: steps.check.outputs.found == 'true'
-        with:
-          name: ${{ matrix.platform }}.migration.squashfs
-          path: results/*.migration.squashfs
-          retention-days: 14
-
-  deploy:
-    name: Deploy
-    needs: [image]
-    # Explicit status check so the skipped PR-only `changes` job can't poison
-    # the implicit success() through the needs chain (actions/runner#2205).
-    # Two ways in: a push to master, which continuously deploys to alpha (master
-    # is only ever merged to when a change is already tested and shippable), or a
-    # dispatch naming a channel.
-    # Allowlist the channels rather than excluding NONE: a `!= 'NONE'` gate also admits
-    # an empty deploy input, which uploaded a branch build to the public bucket and then
-    # died on the empty REGISTRY below. Keep in sync with the REGISTRY map.
-    if: >-
-      !cancelled() && needs.image.result == 'success'
-      && (
-        (github.event_name == 'push' && github.ref == 'refs/heads/master')
-        || (
-          github.event_name == 'workflow_dispatch'
-          && contains(fromJson('["alpha", "beta"]'), github.event.inputs.deploy)
-        )
-      )
-    runs-on: ubuntu-latest
-    # One lock for every deploy, not one per channel. The workflow-level group is
-    # scoped by event, so a dispatch could otherwise run alongside a master-push
-    # deploy; and alpha and beta are not independent either — both write the same
-    # `v$VERSION/` S3 keys for a given commit, so two channels deploying it at
-    # once could both pass the overwrite check below and then race the same
-    # object.
-    concurrency:
-      group: startos-deploy
-      cancel-in-progress: false
-    env:
-      # A master push is always alpha; a dispatch deploys to the channel it named.
-      CHANNEL: ${{ github.event_name == 'push' && 'alpha' || github.event.inputs.deploy }}
+      CHANNEL: ${{ inputs.channel }}
+      COMMIT: ${{ inputs.commit }}
+      BUILD_RUN_ID: ${{ inputs.build-run-id }}
+      # Keep in sync with the channel options above.
       REGISTRY: >-
         ${{
           fromJson('{
             "alpha": "https://alpha-registry-x.start9.com",
             "beta": "https://beta-registry.start9.com"
-          }')[github.event_name == 'push' && 'alpha' || github.event.inputs.deploy]
+          }')[inputs.channel]
         }}
       S3_BUCKET: s3://startos-images
       S3_CDN: https://startos-images.nyc3.cdn.digitaloceanspaces.com
+    # Empty unless the version is registered, so no image deploys without it.
+    outputs:
+      channel: ${{ steps.registered.outputs.channel }}
+      registry: ${{ steps.registered.outputs.registry }}
+      version: ${{ steps.version.outputs.version }}
+      s3-bucket: ${{ steps.registered.outputs.s3-bucket }}
+      s3-cdn: ${{ steps.registered.outputs.s3-cdn }}
     steps:
+      # Only a push or dispatch build of this commit publishes.
+      - name: Check the build run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID" | jq -e --arg sha "$COMMIT" --arg repo "$GITHUB_REPOSITORY" '
+            .head_sha == $sha and .head_repository.full_name == $repo
+            and .path == ".github/workflows/build-products.yaml"
+            and (.event == "push" or .event == "workflow_dispatch")
+          ' > /dev/null || {
+            echo "::error::run $BUILD_RUN_ID is not a push or dispatch build of $COMMIT in $GITHUB_REPOSITORY"
+            exit 1
+          }
+
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.commit }}
           fetch-depth: 0
           sparse-checkout: |
             scripts
@@ -567,7 +107,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '24.17.0'
+          node-version: ${{ env.NODEJS_VERSION }}
 
       - name: Determine version
         id: version
@@ -580,49 +120,98 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh registry-notes start-os > "$RUNNER_TEMP/release-notes.json"
-          node scripts/changelog.mjs security projects/start-os "$VERSION" --ref "${{ github.sha }}" > "$RUNNER_TEMP/release-security"
-
-      - name: Determine platforms
-        id: platforms
-        run: |
-          echo "Deploying to ${{ env.CHANNEL }} (${{ env.REGISTRY }})"
-          # A push carries no inputs; the image matrix defaults to ALL there too.
-          INPUT="${{ github.event.inputs.platform || 'ALL' }}"
-          if [ "$INPUT" = "ALL" ]; then
-            PLATFORMS="x86_64 x86_64-nonfree x86_64-nvidia aarch64 aarch64-nonfree aarch64-nvidia raspberrypi riscv64 riscv64-nonfree"
-          else
-            PLATFORMS="$INPUT"
-          fi
-          echo "list=$PLATFORMS" >> "$GITHUB_OUTPUT"
-          echo "Platforms: $PLATFORMS"
-
-      - name: Download squashfs artifacts
-        uses: actions/download-artifact@v8
-        with:
-          pattern: '*.squashfs'
-          path: artifacts/
-          merge-multiple: true
-
-      - name: Download ISO artifacts
-        uses: actions/download-artifact@v8
-        with:
-          pattern: '*.iso'
-          path: artifacts/
-          merge-multiple: true
-
-      - name: Download IMG artifacts
-        uses: actions/download-artifact@v8
-        with:
-          pattern: '*.img'
-          path: artifacts/
-          merge-multiple: true
+          CHANGELOG_REF="$COMMIT" ./scripts/manage-release.sh registry-notes start-os > "$RUNNER_TEMP/release-notes.json"
+          node scripts/changelog.mjs security projects/start-os "$VERSION" --ref "$COMMIT" > "$RUNNER_TEMP/release-security"
 
       - name: Install start-cli
         uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master
+        with:
+          channel: alpha
 
       - name: Check start-cli registry notes support
         run: ./scripts/manage-release.sh check-registry-notes-cli start-os
+
+      - name: Set up developer key
+        run: |
+          mkdir -p ~/.startos
+          printf '%s' "${{ secrets.DEV_KEY }}" > ~/.startos/developer.key.pem
+
+      # A version entry lists only assets built from the commit it records. An
+      # entry for another commit is removed, not relabeled: `version add` keeps
+      # assets. Its platforms stay missing until this commit's images deploy.
+      - name: Register OS version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          registered="$(
+            start-cli --registry="$REGISTRY" registry os index | jq -er --arg version "$VERSION" '
+              .versions | objects | .[$version] | if . == null then "absent" else (.gitHash // "") end
+            '
+          )"
+          if [ "$registered" != absent ] && [ "$registered" != "$COMMIT" ]; then
+            echo "v$VERSION is registered for ${registered:-an unrecorded commit}; removing it before registering $COMMIT."
+            start-cli --registry="$REGISTRY" registry os version remove "$VERSION"
+          fi
+          NOTES=$(jq -r '.releaseNotes' "$RUNNER_TEMP/release-notes.json")
+          SECURITY_ARGS=()
+          if [ "$(cat "$RUNNER_TEMP/release-security")" = true ]; then SECURITY_ARGS+=(--security); fi
+          start-cli --registry="$REGISTRY" registry os version add \
+            --git-hash "$COMMIT" "${SECURITY_ARGS[@]}" \
+            "$VERSION" "$NOTES" ">=0.3.5 <=${VERSION}"
+
+      - name: Hand off to the image deploys
+        id: registered
+        run: |
+          {
+            echo "channel=$CHANNEL"
+            echo "registry=$REGISTRY"
+            echo "s3-bucket=$S3_BUCKET"
+            echo "s3-cdn=$S3_CDN"
+          } >> "$GITHUB_OUTPUT"
+
+  image:
+    name: Image (${{ matrix.platform }})
+    needs: [deploy-prepare]
+    if: ${{ !cancelled() && needs.deploy-prepare.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(inputs.platforms) }}
+    uses: ./.github/workflows/startos-image.yaml
+    with:
+      platform: ${{ matrix.platform }}
+      environment: ${{ inputs.environment }}
+      nodejs-version: *nodejs-version
+      compiled-run-id: ${{ inputs.build-run-id }}
+      commit: ${{ inputs.commit }}
+      channel: ${{ needs.deploy-prepare.outputs.channel }}
+      registry: ${{ needs.deploy-prepare.outputs.registry }}
+      version: ${{ needs.deploy-prepare.outputs.version }}
+      s3-bucket: ${{ needs.deploy-prepare.outputs.s3-bucket }}
+      s3-cdn: ${{ needs.deploy-prepare.outputs.s3-cdn }}
+      force-overwrite: ${{ inputs.force-overwrite }}
+    secrets: inherit
+
+  deploy-prune:
+    name: Prune Superseded Images
+    needs: [deploy-prepare, image]
+    if: ${{ !cancelled() && needs.deploy-prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ${{ needs.deploy-prepare.outputs.registry }}
+      VERSION: ${{ needs.deploy-prepare.outputs.version }}
+      S3_BUCKET: ${{ needs.deploy-prepare.outputs.s3-bucket }}
+      COMMIT: ${{ inputs.commit }}
+    steps:
+      - name: Download published image lists
+        id: published
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: startos-published-*
+          path: published/
+          merge-multiple: true
 
       - name: Configure S3
         run: |
@@ -636,90 +225,8 @@ jobs:
           use_https = True
           EOF
 
-      - name: Set up developer key
-        run: |
-          mkdir -p ~/.startos
-          printf '%s' "${{ secrets.DEV_KEY }}" > ~/.startos/developer.key.pem
-
-      # An existing object under one of these keys is a hard stop. Basenames are
-      # commit-derived, so a key that already exists means this commit was
-      # already published — and since `os promote` copies asset URLs through
-      # verbatim, beta or production commitments may already point at those
-      # exact bytes. Replacing them would leave those signatures validating
-      # against content that no longer matches. Re-dispatch with
-      # force-overwrite when replacing is genuinely what you want, such as
-      # re-running a deploy that failed partway through.
-      - name: Upload to S3
-        env:
-          FORCE_OVERWRITE: ${{ github.event.inputs.force-overwrite == 'true' }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          cd artifacts
-          conflicts=0
-          for PLATFORM in ${{ steps.platforms.outputs.list }}; do
-            for file in *_${PLATFORM}.squashfs *_${PLATFORM}.iso *_${PLATFORM}.img; do
-              [ -f "$file" ] || continue
-              key="${{ env.S3_BUCKET }}/v${VERSION}/$file"
-              if [ "$FORCE_OVERWRITE" != true ] && [ -n "$(s3cmd ls "$key")" ]; then
-                echo "::error::$key already exists — this commit has been published before. Overwriting it would invalidate any beta or production commitment pointing at that URL. Re-dispatch with force-overwrite to replace it deliberately."
-                conflicts=$((conflicts + 1))
-                continue
-              fi
-              echo "Uploading $file..."
-              s3cmd put -P "$file" "$key"
-            done
-          done
-          # Report every conflict before failing, rather than one per re-run.
-          [ "$conflicts" -eq 0 ] || exit 1
-
-      # `registry os asset add` upserts the platform slot but rejects a second
-      # write whose blake3 differs from the one already committed there
-      # (asset/add.rs "commitment-mismatch"), so re-indexing a version that
-      # already holds a build fails. Alpha deliberately rolls the same version
-      # number on every master push, so the version entry has to be dropped
-      # first. manage-release.sh pre-release replaces beta separately.
-      #
-      # Removing the version drops *every* platform indexed under it, so this is
-      # gated to full-matrix deploys — which every master push is. A dispatch
-      # naming a single platform deliberately skips it rather than silently
-      # wiping the other eight; if that version already holds a build, the index
-      # step below fails on the commitment mismatch, which is the honest outcome.
-      - name: Drop the previous alpha build of this version
-        if: ${{ env.CHANNEL == 'alpha' && (github.event.inputs.platform || 'ALL') == 'ALL' }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          start-cli --registry="${{ env.REGISTRY }}" registry os version remove "$VERSION" \
-            || echo "::notice::v${VERSION} was not indexed in ${{ env.REGISTRY }} yet."
-
-      - name: Register OS version
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          NOTES=$(jq -r '.releaseNotes' "$RUNNER_TEMP/release-notes.json")
-          SECURITY_ARGS=()
-          if [ "$(cat "$RUNNER_TEMP/release-security")" = true ]; then SECURITY_ARGS+=(--security); fi
-          start-cli --registry="${{ env.REGISTRY }}" registry os version add \
-            --git-hash "${{ github.sha }}" "${SECURITY_ARGS[@]}" \
-            "$VERSION" "v${VERSION}" "$NOTES" ">=0.3.5 <=${VERSION}"
-
-      - name: Index assets in registry
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          cd artifacts
-          for PLATFORM in ${{ steps.platforms.outputs.list }}; do
-            for file in *_${PLATFORM}.squashfs *_${PLATFORM}.iso *_${PLATFORM}.img; do
-              [ -f "$file" ] || continue
-              echo "Indexing $file for platform $PLATFORM..."
-              start-cli --registry="${{ env.REGISTRY }}" registry os asset add \
-                --platform="$PLATFORM" \
-                --version="$VERSION" \
-                "$file" \
-                "${{ env.S3_CDN }}/v${VERSION}/$file"
-            done
-          done
-
       # Alpha rolls the same version number on every master push, and dropping
-      # the previous build from the index (above) leaves its objects in the
+      # the previous build from the index (deploy-prepare) leaves its objects in the
       # bucket forever — nothing in the registry crate touches object storage.
       # So reclaim them here, keyed on what the registries still reference.
       #
@@ -730,10 +237,10 @@ jobs:
       # Reading it the other way round makes every one of those failures a
       # no-op, which is why the whole step is a series of refusals.
       #
-      # Runs last so this build is already indexed, and inside the deploy job's
-      # `startos-deploy` lock so no other channel can be mid-upload.
+      # Runs after every platform's deploy, so this build is already indexed.
       - name: Prune superseded images
         env:
+          PUBLISHED_LISTS: ${{ steps.published.outcome }}
           # Every registry that can reference this bucket, not just the channels
           # this workflow deploys to — production included, because `os promote`
           # copies asset URLs through verbatim, so a beta or production
@@ -744,13 +251,12 @@ jobs:
             https://registry.start9.com
             https://beta-registry.start9.com
             https://alpha-registry-x.start9.com
-          # CI's own upload-to-index gap is covered by the startos-deploy lock.
-          # This gate is for the one writer outside it: a hand upload into a
-          # version directory that is already indexed — manage-release.sh's
-          # push-gz, or the per-platform hotfix that leaves one version
-          # legitimately referencing two commits. That is an interactive
-          # operation, so give it days. Orphans are permanent; waiting only
-          # costs storage.
+          # Spares every upload that is not indexed yet: another run's deploy
+          # between its upload and its index, and a hand upload into a version
+          # directory that is already indexed — manage-release.sh's push-gz, or
+          # the per-platform hotfix that leaves one version legitimately
+          # referencing two commits. Hand uploads are interactive, so give it
+          # days. Orphans are permanent; waiting only costs storage.
           MIN_AGE_DAYS: 14
         run: |
           set -euo pipefail
@@ -761,9 +267,8 @@ jobs:
           # that stops us reading a trustworthy keep set skips this run rather
           # than failing it: by the time this step runs the images are uploaded
           # and indexed, and painting that red over someone else's outage
-          # costs a re-run that `force-overwrite: false` will refuse anyway.
-          # Only the assertions below, which mean this step itself is wrong,
-          # still fail.
+          # costs a re-run for nothing. Only the assertions below, which mean
+          # this step itself is wrong, still fail.
           skip() {
             echo "::warning::$1 — skipping this prune, the next deploy reclaims"
             exit 0
@@ -819,7 +324,7 @@ jobs:
               }
             }
           ' prune/referenced.tsv || skip "a referenced asset name needs decoding to compare against a key"
-          touch prune/referenced-names.txt prune/referenced-builds.tsv prune/published.txt
+          touch prune/referenced-names.txt prune/referenced-builds.tsv
           sort -u -o prune/referenced-names.txt prune/referenced-names.txt
           sort -u -o prune/referenced-builds.tsv prune/referenced-builds.tsv
 
@@ -827,14 +332,22 @@ jobs:
           # read. If it doesn't, the keep set isn't describing reality — and
           # since `os asset add` reported success, the index silently didn't
           # take, which is a broken deploy rather than someone else's outage.
-          # This one fails.
-          for PLATFORM in ${{ steps.platforms.outputs.list }}; do
-            for file in artifacts/*_${PLATFORM}.squashfs artifacts/*_${PLATFORM}.iso artifacts/*_${PLATFORM}.img; do
-              [ -f "$file" ] || continue
-              basename "$file" >> prune/published.txt
-            done
-          done
-          sort -u -o prune/published.txt prune/published.txt
+          # This one fails. Once another deploy re-registers the version, it no
+          # longer lists this run's images, and that deploy's prune takes over.
+          [ "$PUBLISHED_LISTS" = success ] || skip "could not download this run's published image lists"
+          shopt -s nullglob
+          lists=(published/*.txt)
+          shopt -u nullglob
+          [ "${#lists[@]}" -gt 0 ] || skip "no platform published an image in this run"
+          sort -u "${lists[@]}" > prune/published.txt
+          deployed_idx="prune/$(printf '%s' "$REGISTRY" | tr -c 'A-Za-z0-9' '-').json"
+          [ -f "$deployed_idx" ] || {
+            echo "::error::$REGISTRY is missing from PRUNE_REGISTRIES"
+            exit 1
+          }
+          commit="$(jq -r --arg version "$VERSION" '.result.versions[$version].gitHash // ""' "$deployed_idx")"
+          [ "$commit" = "$COMMIT" ] \
+            || skip "v$VERSION in $REGISTRY is now registered for ${commit:-no commit}"
           unindexed="$(comm -23 prune/published.txt prune/referenced-names.txt)"
           if [ -n "$unindexed" ]; then
             echo "::error::images published by this run are missing from the registries just read:"

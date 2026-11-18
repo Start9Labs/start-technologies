@@ -47,17 +47,14 @@ Every app follows **abstract `ApiService` + `LiveApiService` + `MockApiService`*
 DI level by workspace config (monorepo) or environment (brochure). Methods are **typed and
 promise-based**; components call `await this.api.method(params)` and never touch HTTP.
 
-- **Monorepo = JSON-RPC** over `HttpService` (`@start9labs/shared`): POST `{ method, params }`
-  to `RELATIVE_URL`, `withCredentials`; transport failures wrap as `HttpError`, RPC-level errors
-  are checked with `isRpcError(body)` → `RpcError` (code 34 → force logout). StartOS's live API
-  reads the `x-patch-sequence` header and awaits the PatchDB cache before resolving, so the UI
-  always reflects a mutation's result. Streams (logs, PatchDB, metrics) via
-  `api.openWebsocket$<T>(guid)` (`rxjs/webSocket`), buffered (`bufferTime(250…1000)`), with
-  retry/backoff in the source service.
-- **start-wrt keeps its own `HttpService`/`RpcService`/`ConnectionService` stack deliberately**:
-  its per-request rxjs `timeout` **aborts the fetch on unsubscribe**, surfacing `{code: 0}`
-  network errors that drive the reconnect UX. Don't swap it for shared's non-aborting client.
-  (Requires `withFetch()`.)
+- **Monorepo = generated, typed JSON-RPC.** Components and pages call `ApiService` methods typed
+  from the generated `RPC.*` trees (StartWRT: its own `bindings.ts`); StartOS/Tunnel pages read
+  PatchDB through `toSignal(patch.watch$(…))`. Transport, key admission, PatchDB fences and
+  stream lifetimes belong to shared primitives and product API, auth, data-source and reconnect
+  services. Their contracts are in `shared-libs/ts-modules/ARCHITECTURE.md` and
+  `projects/start-wrt/web/ARCHITECTURE.md`; read those before changing these owners. Components
+  make RPC calls through the product API service, not directly through the transport. RPC errors
+  surface as `RpcError` (`isRpcError(body)`), network loss as `{ code: 0 }`.
 - **start9-store = REST + Zod through a BFF**: frontend calls `/api/*` only (SSR server proxies
   it — same relative URLs in dev/prod/SSR); domain types + Zod schemas live in `shared/`;
   commerce backends hide behind the API (`CommerceBackend` interface). The frontend must never

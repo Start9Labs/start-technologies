@@ -5,9 +5,9 @@ use url::Url;
 
 use super::*;
 use crate::db::model::public::Public;
-use crate::middleware::auth::signature::call_remote_with_client;
+use crate::middleware::auth::signature::SigningContext;
 use crate::registry::info::RegistryInfo;
-use crate::registry::package::promote::registry_rpc_url;
+use crate::sign::Signer;
 
 #[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
@@ -33,7 +33,7 @@ pub struct ConnectRegistryParams {
 
 rpc_toolkit::reflect_ts!(ConnectRegistryParams);
 
-fn registry_url(value: &str) -> Result<Url, Error> {
+pub(crate) fn registry_url(value: &str) -> Result<Url, Error> {
     let mut url = value.parse::<Url>().with_kind(ErrorKind::ParseUrl)?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
@@ -52,7 +52,7 @@ fn registry_url(value: &str) -> Result<Url, Error> {
     Ok(url)
 }
 
-pub(super) fn same_registry(first: &str, second: &str) -> bool {
+pub(crate) fn same_registry(first: &str, second: &str) -> bool {
     match (registry_url(first), registry_url(second)) {
         (Ok(first), Ok(second)) => first == second,
         _ => false,
@@ -119,8 +119,17 @@ pub(crate) fn ui_registries(ui: &Value) -> Registries {
         .collect()
 }
 
-pub(super) fn is_connected(registries: &Registries, url: &str) -> bool {
-    registries.keys().any(|saved| same_registry(saved, url))
+pub(crate) fn connected_registry_urls(
+    registries: &Registries,
+) -> impl Iterator<Item = Result<Url, Error>> + '_ {
+    registries.keys().map(|url| registry_url(url))
+}
+
+pub(crate) fn is_connected(registries: &Registries, url: &str) -> bool {
+    let Ok(url) = registry_url(url) else {
+        return false;
+    };
+    connected_registry_urls(registries).any(|saved| saved.is_ok_and(|saved| saved == url))
 }
 
 fn offered_keys(public: &Public, url: &str) -> BTreeSet<AnyVerifyingKey> {
@@ -133,11 +142,15 @@ fn offered_keys(public: &Public, url: &str) -> BTreeSet<AnyVerifyingKey> {
         .collect()
 }
 
-async fn fetch_info(client: reqwest::Client, url: &Url) -> Result<RegistryInfo, Error> {
-    let value = call_remote_with_client(
-        None,
+async fn fetch_info(
+    client: &crate::context::rpc::ReloadableHttpClient,
+    url: &Url,
+    signer: Signer,
+) -> Result<RegistryInfo, Error> {
+    let value = crate::registry::context::call(
         client,
-        registry_rpc_url(url)?,
+        &signer,
+        url,
         HeaderMap::new(),
         "info",
         imbl_value::json!({}),
@@ -162,7 +175,7 @@ pub async fn connect(
     params: ConnectRegistryParams,
 ) -> Result<BTreeSet<InternedString>, Error> {
     let url = registry_url(&params.url)?;
-    let info = fetch_info(ctx.client.get(), &url).await?;
+    let info = fetch_info(&ctx.client, &url, ctx.signing_key()?).await?;
     ctx.db
         .mutate(|db| {
             db.as_public_mut()
@@ -172,108 +185,106 @@ pub async fn connect(
         .result
 }
 
-const KEY_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
+/// Returns after queueing resubscription, not after receiving the refreshed catalog.
+pub async fn refresh(ctx: RpcContext, params: TrustedRegistryParams) -> Result<(), Error> {
+    let url = registry_url(&params.url)?;
+    if !is_connected(
+        &ctx.db
+            .peek()
+            .await
+            .as_public()
+            .as_server_info()
+            .as_registries()
+            .de()?,
+        url.as_str(),
+    ) {
+        return Err(Error::new(
+            eyre!("{}", t!("trusted-keys.registry-not-connected")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    ctx.request_registry_refresh(url).await
+}
 
-/// Imports keys a connected registry newly offers, untrusted, and notifies about each new and dropped key.
-pub async fn check_registry(ctx: RpcContext, url: &Url) -> Result<(), Error> {
-    let url = registry_url(url.as_str())?;
-    let registries = ctx
-        .db
-        .peek()
-        .await
-        .into_public()
-        .into_server_info()
-        .into_registries()
-        .de()?;
-    let now = tokio::time::Instant::now();
-    if !is_connected(&registries, url.as_str())
-        || !ctx.registry_key_checks.mutate(|checks| {
-            let due = checks
-                .get(url.as_str())
-                .map_or(true, |last| now.duration_since(*last) >= KEY_CHECK_INTERVAL);
-            if due {
-                checks.insert(url.to_string(), now);
-            }
-            due
-        })
-    {
+pub(crate) fn refresh_registry(
+    db: &mut crate::db::model::DatabaseModel,
+    url: &Url,
+    info: &RegistryInfo,
+) -> Result<(), Error> {
+    if !is_connected(
+        &db.as_public().as_server_info().as_registries().de()?,
+        url.as_str(),
+    ) {
         return Ok(());
     }
-    let info = fetch_info(ctx.client.get(), &url).await?;
     let registry = info
         .name
         .clone()
         .unwrap_or_else(|| url.host_str().unwrap_or_default().to_owned());
-    ctx.db
-        .mutate(|db| {
-            let (added, dropped) = db.as_public_mut().mutate(|public| {
-                let changes = refresh_public(public, &url, &info)?;
-                let os_registry =
-                    same_registry(public.server_info.os_registry.as_str(), url.as_str());
-                let keys = &public.server_info.trusted_keys;
-                let name = |id: &InternedString| {
-                    keys.get(id)
-                        .map_or_else(|| id.to_string(), |key| key.name.clone())
-                };
-                let added = changes
-                    .added
-                    .into_iter()
-                    .map(|id| (name(&id), id))
-                    .collect::<Vec<_>>();
-                let dropped = changes
-                    .dropped
-                    .into_iter()
-                    .map(|id| {
-                        let critical = os_registry || keys.get(&id).is_some_and(|key| key.os);
-                        (name(&id), critical, id)
-                    })
-                    .collect::<Vec<_>>();
-                Ok((added, dropped))
-            })?;
-            for (name, key) in added {
-                crate::notifications::notify(
-                    db,
-                    None,
-                    crate::notifications::NotificationLevel::Info,
-                    t!("trusted-keys.key-added-title").to_string(),
-                    t!(
-                        "trusted-keys.key-added-message",
-                        registry = registry.as_str(),
-                        name = name.as_str()
-                    )
-                    .to_string(),
-                    crate::notifications::RegistryKeyAdded {
-                        registry: url.to_string(),
-                        key,
-                    },
-                )?;
-            }
-            for (name, critical, key) in dropped {
-                crate::notifications::notify(
-                    db,
-                    None,
-                    if critical {
-                        crate::notifications::NotificationLevel::Warning
-                    } else {
-                        crate::notifications::NotificationLevel::Info
-                    },
-                    t!("trusted-keys.key-dropped-title").to_string(),
-                    t!(
-                        "trusted-keys.key-dropped-message",
-                        registry = registry.as_str(),
-                        name = name.as_str()
-                    )
-                    .to_string(),
-                    crate::notifications::RegistryKeyDropped {
-                        registry: url.to_string(),
-                        key,
-                    },
-                )?;
-            }
-            Ok(())
-        })
-        .await
-        .result
+    let (added, dropped) = db.as_public_mut().mutate(|public| {
+        let changes = refresh_public(public, &url, &info)?;
+        let os_registry = same_registry(public.server_info.os_registry.as_str(), url.as_str());
+        let keys = &public.server_info.trusted_keys;
+        let name = |id: &InternedString| {
+            keys.get(id)
+                .map_or_else(|| id.to_string(), |key| key.name.clone())
+        };
+        let added = changes
+            .added
+            .into_iter()
+            .map(|id| (name(&id), id))
+            .collect::<Vec<_>>();
+        let dropped = changes
+            .dropped
+            .into_iter()
+            .map(|id| {
+                let critical = os_registry || keys.get(&id).is_some_and(|key| key.os);
+                (name(&id), critical, id)
+            })
+            .collect::<Vec<_>>();
+        Ok((added, dropped))
+    })?;
+    for (name, key) in added {
+        crate::notifications::notify(
+            db,
+            None,
+            crate::notifications::NotificationLevel::Info,
+            t!("trusted-keys.key-added-title").to_string(),
+            t!(
+                "trusted-keys.key-added-message",
+                registry = registry.as_str(),
+                name = name.as_str()
+            )
+            .to_string(),
+            crate::notifications::RegistryKeyAdded {
+                registry: url.to_string(),
+                key,
+            },
+        )?;
+    }
+    for (name, critical, key) in dropped {
+        crate::notifications::notify(
+            db,
+            None,
+            if critical {
+                crate::notifications::NotificationLevel::Warning
+            } else {
+                crate::notifications::NotificationLevel::Info
+            },
+            t!("trusted-keys.key-dropped-title").to_string(),
+            t!(
+                "trusted-keys.key-dropped-message",
+                registry = registry.as_str(),
+                name = name.as_str()
+            )
+            .to_string(),
+            crate::notifications::RegistryKeyDropped {
+                registry: url.to_string(),
+                key,
+            },
+        )?;
+    }
+    Ok(())
 }
 
 /// Returns the registry-added keys the removal left unoffered.
@@ -470,6 +481,7 @@ fn refresh_public(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::package::promote::registry_rpc_url;
 
     #[test]
     fn cli_parses_registry_commands() {
@@ -738,34 +750,41 @@ mod tests {
             trust_signers: signers([(signing_key.clone(), "Publisher")]),
             ..Default::default()
         };
-        let response = serde_json::to_value(&info).unwrap();
-        let router = axum::Router::new().route(
-            "/catalog/rpc/v0",
-            axum::routing::post(move |axum::Json(request): axum::Json<serde_json::Value>| {
-                let response = response.clone();
-                async move {
-                    assert_eq!(request["params"], serde_json::json!({}));
-                    axum::Json(if request["method"] == "info" {
-                        serde_json::json!({ "jsonrpc": "2.0", "id": request["id"], "result": response })
-                    } else {
-                        serde_json::json!({ "jsonrpc": "2.0", "id": request["id"], "error": { "code": -32601, "message": "Method not found" } })
-                    })
-                }
-            }),
-        );
+        let temp = tempfile::tempdir().unwrap();
+        let ctx =
+            crate::registry::context::test_context(temp.path().to_owned(), signing_key.clone())
+                .await;
+        ctx.db
+            .mutate(|db| {
+                let signers: BTreeSet<_> = info.trust_signers.keys().cloned().collect();
+                db.as_admins_mut().ser(&signers)?;
+                db.as_index_mut().as_trust_signers_mut().ser(&signers)?;
+                db.as_index_mut().as_signers_mut().ser(&info.trust_signers)
+            })
+            .await
+            .result
+            .unwrap();
+        let router = axum::Router::new().nest("/catalog", crate::registry::registry_router(ctx));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = registry_url(&format!(
-            "http://{}/catalog/",
-            listener.local_addr().unwrap()
+            "http://localhost:{}/catalog/",
+            listener.local_addr().unwrap().port()
         ))
         .unwrap();
         let _server: NonDetachingJoinHandle<()> = tokio::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         })
         .into();
+        let (client, _proxy) = crate::registry::context::test_utils::socks_client(&url).await;
         let fetched = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            fetch_info(reqwest::Client::new(), &url),
+            fetch_info(
+                &client,
+                &url,
+                crate::sign::Signer::Key(crate::sign::AnySigningKey::Ed25519(
+                    ed25519_dalek::SigningKey::from_bytes(&[71; 32]),
+                )),
+            ),
         )
         .await
         .unwrap()

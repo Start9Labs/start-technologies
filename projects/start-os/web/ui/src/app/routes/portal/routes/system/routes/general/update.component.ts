@@ -40,7 +40,9 @@ import { TRUSTED_KEYS_LINK } from '../../system.const'
         }
         <div
           safeLinks
-          [innerHTML]="v.notes | localize | markdown | dompurify"
+          [innerHTML]="
+            v.notes | localize: v.defaultLocale | markdown | dompurify
+          "
         ></div>
       }
     </tui-scrollbar>
@@ -125,7 +127,7 @@ export class SystemUpdateModal {
         this.patch.watch$('serverInfo', 'trustedKeys'),
       )
       const trusted = trustedOsUpdateSigners(signers, trustedSigners)
-      if (this.os.updateCandidates()[0]?.version !== latest.version) return
+      if (this.os.updateCandidates()[0] !== latest) return
       if (!trusted.length) {
         this.dialogs
           .openConfirm({

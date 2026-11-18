@@ -427,8 +427,8 @@ release_security() {
 check_registry_notes_cli() {
     local help
     help=$(start-cli registry os version add --help) || return
-    if ! grep -Fq -- '<RELEASE_NOTES_OR_JSON>' <<< "$help"; then
-        >&2 echo "  ✗ start-cli lacks LocaleString release notes; update it before publishing registry notes."
+    if ! grep -Fq -- '<RELEASE_NOTES_OR_JSON>' <<< "$help" || grep -Fq -- '<HEADLINE>' <<< "$help"; then
+        >&2 echo "  ✗ start-cli lacks headline-free LocaleString release notes; update it before publishing registry notes."
         return 1
     fi
 }
@@ -453,7 +453,7 @@ refresh_registry_notes() {
     echo "Setting ${VERSION} release notes on ${registry}..."
     start-cli --registry="$registry" registry os version add \
         "${metadata_args[@]}" \
-        "$VERSION" "v${VERSION}" "$notes" "$range"
+        "$VERSION" "$notes" "$range"
     _INDEX_REGISTRY=""
 }
 
@@ -1247,7 +1247,7 @@ resolve_gha_run() {
 
     # The tag must point at the commit these artifacts were built from.
     local tag_sha
-    RUN_SHA=$(gh run view -R "$REPO" "$RUN_ID" --json headSha -q .headSha)
+    RUN_SHA=$("$SCRIPT_DIR/gha-run-commit.sh" "$REPO" "$RUN_ID") || exit 1
     tag_sha=$(tag_commit_sha)
     if [ "$RUN_SHA" != "$tag_sha" ]; then
         >&2 echo "Run ${RUN_ID} built commit ${RUN_SHA},"
@@ -1703,7 +1703,7 @@ cmd_register() {
     enter_release_dir
     echo "Registering StartWRT ${VERSION} in ${STARTWRT_SOURCE_REGISTRY}..."
     start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os version add \
-        "$VERSION" "v$VERSION" "$notes" "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
+        "$VERSION" "$notes" "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
 
     # start-cli infers the asset slot from the file extension and only accepts
     # iso/img/squashfs. Both images ship gzipped, so present each under a

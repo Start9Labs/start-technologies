@@ -128,7 +128,6 @@ If your registry distributes StartOS images (not just service packages), registe
 ```sh
 start-cli registry os version add \
   <VERSION> \
-  <HEADLINE> \
   <RELEASE_NOTES> \
   <SOURCE_VERSION_RANGE>
 ```

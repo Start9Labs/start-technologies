@@ -2,8 +2,10 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async, from_fn_asy
 
 use crate::context::CliContext;
 use crate::prelude::*;
+use crate::registry::upstream::WRITES_INDEX;
 use crate::util::serde::HandlerExtSerde;
 
+pub mod access;
 pub mod add;
 pub mod category;
 pub mod get;
@@ -19,6 +21,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
             "index",
             from_fn_async(index::get_package_index)
                 .with_metadata("authenticated", Value::Bool(false))
+                .with_metadata("get_signer", Value::Bool(true))
                 .with_display_serializable()
                 .with_about("about.list-packages-categories")
                 .with_call_remote::<CliContext>(),
@@ -26,6 +29,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add::add_package)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("get_signer", Value::Bool(true))
                 .no_cli(),
         )
@@ -39,6 +43,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add-mirror",
             from_fn_async(add::add_mirror)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("get_signer", Value::Bool(true))
                 .no_cli(),
         )
@@ -52,6 +57,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(add::remove_package)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("get_signer", Value::Bool(true))
                 .with_custom_display_fn(|args, changed| {
                     if !changed {
@@ -80,6 +86,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove-mirror",
             from_fn_async(add::remove_mirror)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("get_signer", Value::Bool(true))
                 .no_display()
                 .with_about("about.remove-mirror-package")
@@ -88,6 +95,7 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "sign",
             from_fn_async(sign::sign_package)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("get_signer", Value::Bool(true))
                 .no_cli(),
         )
@@ -103,9 +111,14 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
             signer::signer_api::<C>().with_about("about.add-remove-list-package-signers"),
         )
         .subcommand(
+            "access",
+            access::access_api::<C>().with_about("about.commands-package-access"),
+        )
+        .subcommand(
             "get",
             from_fn_async(get::get_package)
                 .with_metadata("authenticated", Value::Bool(false))
+                .with_metadata("get_signer", Value::Bool(true))
                 .with_metadata("get_device_info", Value::Bool(true))
                 .override_return_ts_as::<get::GetPackageResult>()
                 .with_display_serializable()
