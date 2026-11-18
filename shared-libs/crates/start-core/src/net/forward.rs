@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, SocketAddrV6};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -19,6 +19,7 @@ use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::NetworkInterfaceInfo;
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::transport::{Transport, TransportProtocol};
+use crate::lxc::slot::CONTAINER_NET_V6;
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
@@ -361,6 +362,16 @@ pub struct PortForwardController {
 /// separate tables on the shared nf_tables datapath.
 pub const NFT_TABLE: &str = "startos";
 
+pub async fn enable_forwarding() -> Result<(), Error> {
+    Command::new("sysctl")
+        .arg("-w")
+        .arg("net.ipv4.ip_forward=1")
+        .arg("net.ipv6.conf.all.forwarding=1")
+        .invoke(ErrorKind::Network)
+        .await?;
+    Ok(())
+}
+
 /// Ensure `table ip startos` and its base chains exist. Idempotent (nft's `add
 /// table`/`add chain` are no-ops if present). The forward chain defaults to
 /// `drop` (replacing `iptables -P FORWARD DROP`); callers add ACCEPT rules.
@@ -604,16 +615,7 @@ impl PortForwardController {
                     "ct state established,related accept",
                 )
                 .await?;
-                Command::new("sysctl")
-                    .arg("-w")
-                    .arg("net.ipv4.ip_forward=1")
-                    .invoke(ErrorKind::Network)
-                    .await?;
-                Command::new("sysctl")
-                    .arg("-w")
-                    .arg("net.ipv6.conf.all.forwarding=1")
-                    .invoke(ErrorKind::Network)
-                    .await?;
+                enable_forwarding().await?;
                 Ok::<_, Error>(())
             }
             .await
@@ -1239,14 +1241,6 @@ async fn unforward(
     Ok(())
 }
 
-/// The lxcbr0 IPv6 bridge subnet (a ULA), assigned by lxc-net (see
-/// `debian/postinst`). Containers get a SLAAC address in it.
-pub(crate) const START9_BRIDGE_V6_SUBNET: &str = "fd00:3::/64";
-
-/// The host's own address on the lxcbr0 bridge, pinned in `debian/postinst`
-/// beside the subnet above. The IPv6 counterpart of [`crate::HOST_IP`].
-pub(crate) const START9_BRIDGE_V6_ADDR: Ipv6Addr = Ipv6Addr::new(0xfd00, 3, 0, 0, 0, 0, 0, 1);
-
 /// IPv6 counterpart of [`forward`]: DNAT `source` (a host GUA:port) to `target`
 /// (the container's ULA:port) via the `forward-port6` script. `src_filter`
 /// restricts inbound to a LAN v6 subnet (a LAN-only GUA); `None` is WAN.
@@ -1264,7 +1258,7 @@ pub(crate) async fn forward6(
         .env("sport", source.port().to_string())
         .env("dport", target.port().to_string())
         .env("transport", transport.to_string())
-        .env("bridge_subnet", START9_BRIDGE_V6_SUBNET);
+        .env("bridge_subnet", CONTAINER_NET_V6.to_string());
     if let Some(subnet) = src_filter {
         cmd.env("src_subnet", subnet.to_string());
     }

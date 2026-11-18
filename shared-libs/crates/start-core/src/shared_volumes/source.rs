@@ -5,10 +5,11 @@ use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::cifs::{Cifs, SharedCifs};
-use crate::disk::mount::filesystem::idmapped::IdMapped;
+use crate::disk::mount::filesystem::syscall::userns_fd_from_idmap;
 use crate::disk::mount::filesystem::syscall::open_beneath;
 use crate::disk::mount::filesystem::{FileSystem, MountType, ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard, WeakMountGuard};
+use crate::lxc::slot::ContainerSlot;
 use crate::prelude::*;
 use crate::shared_volumes::mounts::{PreparedSource, confined_relative};
 use crate::shared_volumes::{
@@ -22,12 +23,9 @@ pub async fn create_local_directory(path: &Path) -> Result<(), Error> {
     finish_directory_publication(path, set_local_permissions(path).await).await
 }
 
+/// Stores ids as each container sees them; consumers attach through their own idmap.
 pub(crate) async fn set_local_permissions(path: &Path) -> Result<(), Error> {
-    std::os::unix::fs::chown(
-        path,
-        Some(crate::lxc::BASE_IDMAP.to_id),
-        Some(crate::lxc::BASE_IDMAP.to_id),
-    )?;
+    std::os::unix::fs::chown(path, Some(0), Some(0))?;
     tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o777)).await?;
     Ok(())
 }
@@ -133,13 +131,10 @@ pub(crate) enum PreparedFilesystem<D, C> {
     Disk(D),
     Cifs(C),
 }
-pub(super) type SourceFilesystem = PreparedFilesystem<IdMapped<BlockDev<PathBuf>>, SharedCifs>;
+pub(super) type SourceFilesystem = PreparedFilesystem<BlockDev<PathBuf>, SharedCifs>;
 impl SourceFilesystem {
     fn external(device: &Path) -> Self {
-        Self::Disk(IdMapped::new(
-            BlockDev::new(device.to_owned()),
-            vec![crate::lxc::BASE_IDMAP],
-        ))
+        Self::Disk(BlockDev::new(device.to_owned()))
     }
 }
 impl<D: FileSystem, C: FileSystem> FileSystem for PreparedFilesystem<D, C> {
@@ -196,10 +191,12 @@ impl<D: FileSystem, C: FileSystem> FileSystem for PreparedFilesystem<D, C> {
 }
 
 /// Capacity failures do not invalidate a successfully opened source.
+/// A consumer's source maps container ids into that consumer's range when attached.
 pub async fn open_source(
     ctx: &RpcContext,
     id: &SharedVolumeId,
     mount_type: MountType,
+    consumer: Option<ContainerSlot>,
 ) -> Result<PreparedSource, Error> {
     let definition = SourceDefinition::read(&ctx.db.peek().await, id)?;
     let filesystem = definition.filesystem(id);
@@ -237,7 +234,13 @@ pub async fn open_source(
             ErrorKind::Filesystem,
         )));
     }
-    result.map(|_| prepared.unwrap())
+    let prepared = result.map(|_| prepared.unwrap())?;
+    match consumer {
+        Some(consumer) if !matches!(definition.source(), SharedVolumeSource::Cifs { .. }) => {
+            Ok(prepared.idmapped(userns_fd_from_idmap(&[consumer.idmap()], None).await?))
+        }
+        _ => Ok(prepared),
+    }
 }
 
 pub(super) fn write_checked(

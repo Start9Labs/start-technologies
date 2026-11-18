@@ -84,7 +84,7 @@ pub async fn bind_mount(_: ContainerCliContext, params: BindMountParams) -> Resu
         let fd = syscall::open_tree_clone(&source, recursive)?;
         DetachedMount::from_fd(fd)
     } else {
-        let userns = syscall::userns_fd_from_idmap(&idmap).await?;
+        let userns = syscall::userns_fd_from_idmap(&idmap, None).await?;
         let fd = syscall::open_tree_attr_idmap(&source, recursive, userns.as_fd())?;
         drop(userns);
         DetachedMount::from_fd(fd)

@@ -2888,6 +2888,13 @@ lxc.mod.cleaned-up-containers:
   fr_FR: "Conteneurs LXC orphelins nettoyés avec succès"
   pl_PL: "Pomyślnie wyczyszczono wiszące kontenery LXC"
 
+lxc.slot.service-limit:
+  en_US: "This server already has the maximum of %{max} services installed"
+  de_DE: "Auf diesem Server ist bereits die Höchstzahl von %{max} Diensten installiert"
+  es_ES: "Este servidor ya tiene instalado el máximo de %{max} servicios"
+  fr_FR: "Ce serveur a déjà le maximum de %{max} services installés"
+  pl_PL: "Na tym serwerze zainstalowano już maksymalną liczbę %{max} usług"
+
 release-notes.welcome-message:
   en_US: "Click \"View details\" for what's new in this release."
   de_DE: "Klicken Sie auf \"Details anzeigen\", um zu sehen, was in dieser Version neu ist."

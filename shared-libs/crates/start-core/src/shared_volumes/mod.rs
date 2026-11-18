@@ -634,7 +634,7 @@ pub async fn inspect(
 ) -> Result<SharedVolumeInspection, Error> {
     use crate::disk::mount::filesystem::ReadOnly;
     use crate::disk::mount::guard::GenericMountGuard;
-    if let Ok(guard) = source::open_source(&ctx, &id, ReadOnly).await {
+    if let Ok(guard) = source::open_source(&ctx, &id, ReadOnly, None).await {
         guard.unmount().await?;
     }
     ctx.db

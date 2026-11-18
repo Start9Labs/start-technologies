@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::net::host::Hosts;
 use crate::prelude::*;
+use crate::lxc::slot::ContainerSlot;
 use crate::progress::FullProgress;
 use crate::s9pk::manifest::{LocaleString, Manifest};
 use crate::status::StatusInfo;
@@ -400,6 +401,7 @@ impl Default for ActionVisibility {
 pub struct PackageDataEntry {
     pub state_info: PackageState,
     pub s9pk: PathBuf,
+    pub container_slot: ContainerSlot,
     pub status_info: StatusInfo,
     pub registry: Option<Url>,
     pub developer_key: Der64<ed25519_dalek::VerifyingKey>,

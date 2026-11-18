@@ -21,7 +21,7 @@ pub fn best_locale<'a>(
 pub const DATA_DIR: &str = "/media/startos/data";
 pub const MAIN_DATA: &str = formatcp!("{DATA_DIR}/main");
 pub const PACKAGE_DATA: &str = formatcp!("{DATA_DIR}/package-data");
-pub const HOST_IP: [u8; 4] = [10, 0, 3, 1];
+pub use lxc::slot::HOST_IP;
 pub use std::env::consts::ARCH;
 lazy_static::lazy_static! {
     pub static ref PLATFORM: String = {

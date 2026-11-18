@@ -42,7 +42,7 @@ async fn failed_publications_remove_new_directories_and_successful_ones_preserve
 }
 
 #[tokio::test]
-#[ignore = "requires BTRFS_TEST_VOLUMES_DIR and UID/GID 100000 mapped"]
+#[ignore = "requires BTRFS_TEST_VOLUMES_DIR"]
 async fn local_creation_uses_service_owned_subvolumes_and_rolls_back_failed_publication() {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let fixture = crate::util::btrfs::tests::directory();
@@ -52,7 +52,7 @@ async fn local_creation_uses_service_owned_subvolumes_and_rolls_back_failed_publ
     let metadata = std::fs::metadata(&path).unwrap();
     assert_eq!(
         (metadata.uid(), metadata.gid()),
-        (crate::lxc::BASE_IDMAP.to_id, crate::lxc::BASE_IDMAP.to_id)
+        (0, 0)
     );
     assert_eq!(metadata.permissions().mode() & 0o777, 0o777);
     tokio::fs::write(path.join("sentinel"), b"allocated data")
@@ -437,10 +437,18 @@ async fn external_folder_is_created_pinned_and_limits_consumer_subpaths() {
     let consumer_root = tempfile::tempdir().unwrap();
     std::fs::set_permissions(consumer_root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
     let consumer_path = consumer_root.path().join("volume");
-    let consumer = MountGuard::mount(&Bind::new(source.path()), &consumer_path, ReadWrite)
-        .await
-        .unwrap();
-    let uid = crate::lxc::BASE_IDMAP.to_id.to_string();
+    let slot = crate::lxc::slot::ContainerSlot::new(1).unwrap();
+    let consumer = MountGuard::mount(
+        &crate::disk::mount::filesystem::idmapped::IdMapped::new(
+            Bind::new(source.path()),
+            vec![slot.idmap()],
+        ),
+        &consumer_path,
+        ReadWrite,
+    )
+    .await
+    .unwrap();
+    let uid = slot.host_root().to_string();
     tokio::process::Command::new("setpriv")
         .args([
             "--reuid",
@@ -529,15 +537,23 @@ async fn external_partition_maps_service_ownership_without_changing_disk_owners(
         b"external-preserved\n"
     );
     let metadata = std::fs::metadata(mapped.path()).unwrap();
-    assert_eq!(metadata.uid(), crate::lxc::BASE_IDMAP.to_id);
-    assert_eq!(metadata.gid(), crate::lxc::BASE_IDMAP.to_id);
+    assert_eq!(metadata.uid(), 0);
+    assert_eq!(metadata.gid(), 0);
     let consumer_root = tempfile::tempdir().unwrap();
     std::fs::set_permissions(consumer_root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
     let consumer_path = consumer_root.path().join("volume");
-    let consumer = MountGuard::mount(&Bind::new(mapped.path()), &consumer_path, ReadWrite)
-        .await
-        .unwrap();
-    let uid = crate::lxc::BASE_IDMAP.to_id.to_string();
+    let slot = crate::lxc::slot::ContainerSlot::new(1).unwrap();
+    let consumer = MountGuard::mount(
+        &crate::disk::mount::filesystem::idmapped::IdMapped::new(
+            Bind::new(mapped.path()),
+            vec![slot.idmap()],
+        ),
+        &consumer_path,
+        ReadWrite,
+    )
+    .await
+    .unwrap();
+    let uid = slot.host_root().to_string();
     tokio::process::Command::new("setpriv")
         .args([
             "--reuid",

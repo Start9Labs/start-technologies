@@ -129,7 +129,7 @@ pub(super) async fn backup_volume(
     {
         return Err(overlapping_target_error());
     }
-    let source = source::open_source(ctx, id, ReadOnly).await?;
+    let source = source::open_source(ctx, id, ReadOnly, None).await?;
     let result = async {
         let target_data = backup
             .backup_disk_path()
@@ -329,6 +329,7 @@ async fn restore_local_copy<F: Future<Output = Result<(), Error>>>(
     let result = async {
         source::set_local_permissions(&path).await?;
         copy_folder(source, &path).await?;
+        crate::lxc::slot::rebase_legacy_ids(path.clone(), 0).await?;
         source::set_local_permissions(&path).await?;
         sync_directory(&path).await?;
         // Publication can commit after its caller cancels.
@@ -595,7 +596,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires BTRFS_TEST_VOLUMES_DIR and UID/GID 100000 mapped"]
+    #[ignore = "requires BTRFS_TEST_VOLUMES_DIR"]
     async fn restore_creates_a_new_local_volume_without_touching_existing_data() {
         let fixture = crate::util::btrfs::tests::directory();
         let old_id = SharedVolumeId::new();
@@ -629,13 +630,13 @@ mod tests {
         );
         assert!(crate::util::btrfs::is_subvolume(local_path(fixture.path(), &created)).await);
         let metadata = std::fs::metadata(local_path(fixture.path(), &created)).unwrap();
-        assert_eq!(metadata.uid(), 100000);
-        assert_eq!(metadata.gid(), 100000);
+        assert_eq!(metadata.uid(), 0);
+        assert_eq!(metadata.gid(), 0);
         assert_eq!(metadata.permissions().mode() & 0o777, 0o777);
     }
 
     #[tokio::test]
-    #[ignore = "requires BTRFS_TEST_VOLUMES_DIR and UID/GID 100000 mapped"]
+    #[ignore = "requires BTRFS_TEST_VOLUMES_DIR"]
     async fn failed_restore_copy_or_publication_leaves_no_new_data() {
         let fixture = crate::util::btrfs::tests::directory();
         let source = fixture.path().join("backup");

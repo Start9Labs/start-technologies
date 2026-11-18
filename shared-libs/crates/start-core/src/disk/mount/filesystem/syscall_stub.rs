@@ -78,13 +78,18 @@ impl DetachedMount {
     }
 }
 
+pub fn open_tree_attr_idmap_fd(_source: BorrowedFd, _userns: BorrowedFd) -> Result<OwnedFd, Error> {
+    unsupported()
+}
+
 pub async fn userns_fd_from_idmap(
     _idmap: &[crate::disk::mount::filesystem::idmapped::IdMap],
+    _owner: Option<u32>,
 ) -> Result<OwnedFd, Error> {
     unsupported()
 }
 
-pub fn unshare_userns_main() -> std::io::Result<()> {
+pub fn unshare_userns_main(_owner: Option<u32>) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "unshare-userns is Linux-only",

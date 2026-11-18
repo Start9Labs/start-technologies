@@ -153,7 +153,7 @@ pub(crate) fn is_internal_ip(addr: IpAddr) -> bool {
     let addr = addr.to_canonical();
     addr.is_loopback()
         || addr == IpAddr::V4(crate::HOST_IP.into())
-        || addr == IpAddr::V6(crate::net::forward::START9_BRIDGE_V6_ADDR)
+        || addr == IpAddr::V6(crate::lxc::slot::HOST_IPV6)
 }
 
 pub fn is_private_ip(addr: IpAddr) -> bool {

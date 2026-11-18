@@ -1183,11 +1183,11 @@ mod tests {
     #[test]
     fn internal_ingress_retains_plugin_names_but_localhost_requires_loopback() {
         let binding = ingress_binding();
-        let bridge_v6 = crate::net::forward::START9_BRIDGE_V6_ADDR.to_string();
+        let bridge_v6 = crate::lxc::slot::HOST_IPV6.to_string();
         for (destination, peer, gateway, loopback) in [
             ("127.0.0.1", "127.0.0.1", "lo", true),
             ("::1", "::1", "lo", true),
-            ("10.0.3.1", "10.0.3.2", "lxcbr0", false),
+            ("172.16.0.1", "172.16.0.3", "lxcbr0", false),
             (bridge_v6.as_str(), "fd00::2", "lxcbr0", false),
         ] {
             let mut origin = ingress(gateway, false);

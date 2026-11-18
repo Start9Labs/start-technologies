@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -20,7 +22,8 @@ use tokio::time::Instant;
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
-use crate::disk::mount::filesystem::idmapped::{IdMap, IdMapped};
+use crate::disk::mount::filesystem::idmapped::IdMapped;
+use crate::disk::mount::filesystem::syscall::userns_fd_from_idmap;
 use crate::disk::mount::filesystem::overlayfs::OverlayGuard;
 use crate::disk::mount::filesystem::{MountType, ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard, TmpMountGuard};
@@ -32,21 +35,23 @@ use crate::util::io::{open_file, write_file_owned_atomic};
 use crate::util::rpc_client::UnixRpcClient;
 use crate::util::{FromStrParser, Invoke, new_guid};
 use crate::{InvalidId, PackageId};
+use slot::ContainerSlot;
 
-pub(crate) const BASE_IDMAP: IdMap = IdMap {
-    from_id: 0,
-    to_id: 100000,
-    range: 65536,
-};
-
-fn config_text(guid: &str, lang: &str) -> String {
+fn config_text(guid: &str, lang: &str, slot: ContainerSlot, userns: &Path) -> String {
+    let idmap = slot.idmap();
     format!(
         include_str!("./config.template"),
         guid = guid,
         lang = lang,
-        id_from = BASE_IDMAP.from_id,
-        id_to = BASE_IDMAP.to_id,
-        id_count = BASE_IDMAP.range
+        id_from = idmap.from_id,
+        id_to = idmap.to_id,
+        id_count = idmap.range,
+        userns = userns.display(),
+        veth = slot.veth(),
+        ipv4 = slot.ipv4(),
+        gateway = slot::HOST_IP,
+        ipv6 = slot.ipv6(),
+        gateway_v6 = slot::HOST_IPV6,
     )
 }
 
@@ -54,7 +59,6 @@ const LXC_CONTAINER_DIR: &str = "/var/lib/lxc";
 const RPC_DIR: &str = "media/startos/rpc"; // must not be absolute path
 pub const CONTAINER_RPC_SERVER_SOCKET: &str = "service.sock"; // must not be absolute path
 pub const HOST_RPC_SERVER_SOCKET: &str = "host.sock"; // must not be absolute path
-const CONTAINER_DHCP_TIMEOUT: Duration = Duration::from_secs(30);
 const HARDWARE_ACCELERATION_PATHS: &[&str] = &["/dev/dri", "/dev/nvidia*", "/dev/kfd"];
 const USERSPACE_FILESYSTEM_PATHS: &[&str] = &["/dev/fuse"];
 const VIRTUAL_NETWORKING_PATHS: &[&str] = &["/dev/net/tun"];
@@ -62,6 +66,8 @@ const HARDWARE_VIRTUALIZATION_PATHS: &[&str] = &["/dev/kvm"];
 
 #[cfg(all(test, target_os = "linux"))]
 mod gc_tests;
+pub mod network;
+pub mod slot;
 
 /// Patterns that can still match at or beneath `path`.
 #[cfg(target_os = "linux")]
@@ -138,12 +144,13 @@ impl LxcManager {
     pub async fn create(
         self: &Arc<Self>,
         log_mount: Option<&Path>,
+        slot: ContainerSlot,
         config: LxcConfig,
     ) -> Result<LxcContainer, Error> {
         let mut guard = self.containers.lock().await;
         let container = tokio::time::timeout(
             Duration::from_secs(30),
-            LxcContainer::new(self, log_mount, config),
+            LxcContainer::new(self, log_mount, slot, config),
         )
         .await
         .with_kind(ErrorKind::Timeout)??;
@@ -242,6 +249,9 @@ pub struct LxcContainer {
     pub guid: Arc<ContainerId>,
     rpc_bind: TmpMountGuard,
     log_mount: Option<MountGuard>,
+    slot: ContainerSlot,
+    /// Holds the user namespace open until LXC has joined it.
+    _userns: OwnedFd,
     config: LxcConfig,
     exited: bool,
 }
@@ -249,6 +259,7 @@ impl LxcContainer {
     async fn new(
         manager: &Arc<LxcManager>,
         log_mount: Option<&Path>,
+        slot: ContainerSlot,
         config: LxcConfig,
     ) -> Result<Self, Error> {
         let guid = new_guid();
@@ -256,14 +267,22 @@ impl LxcContainer {
         let machine_id = hex::encode(rand::random::<[u8; 16]>());
         let container_dir = Path::new(LXC_CONTAINER_DIR).join(&*guid);
         tokio::fs::create_dir_all(&container_dir).await?;
-        let config_str = config_text(&guid, &lang);
+        let idmap = slot.idmap();
+        let root = slot.host_root();
+        let userns = userns_fd_from_idmap(&[idmap], Some(root)).await?;
+        let userns_path = std::path::PathBuf::from(format!(
+            "/proc/{}/fd/{}",
+            std::process::id(),
+            userns.as_raw_fd()
+        ));
+        let config_str = config_text(&guid, &lang, slot, &userns_path);
         tokio::fs::write(container_dir.join("config"), config_str).await?;
         let rootfs_dir = container_dir.join("rootfs");
         let rootfs = OverlayGuard::mount(
             TmpMountGuard::mount(
                 &IdMapped::new(
                     BlockDev::new("/usr/lib/startos/container-runtime/rootfs.squashfs"),
-                    vec![BASE_IDMAP],
+                    vec![idmap],
                 ),
                 ReadOnly,
             )
@@ -272,29 +291,29 @@ impl LxcContainer {
         )
         .await?;
         Command::new("chown")
-            .arg(format!("{0}:{0}", BASE_IDMAP.to_id))
+            .arg(format!("{root}:{root}"))
             .arg(&rootfs_dir)
             .invoke(ErrorKind::Filesystem)
             .await?;
         write_file_owned_atomic(
             rootfs_dir.join("etc/machine-id"),
             format!("{machine_id}\n"),
-            BASE_IDMAP.to_id,
-            BASE_IDMAP.to_id,
+            root,
+            root,
         )
         .await?;
         write_file_owned_atomic(
             rootfs_dir.join("etc/hostname"),
             format!("{guid}\n"),
-            BASE_IDMAP.to_id,
-            BASE_IDMAP.to_id,
+            root,
+            root,
         )
         .await?;
         write_file_owned_atomic(
             rootfs_dir.join("etc/default/locale"),
             format!("LANG={lang}\n"),
-            BASE_IDMAP.to_id,
-            BASE_IDMAP.to_id,
+            root,
+            root,
         )
         .await?;
         Command::new("sed")
@@ -313,17 +332,23 @@ impl LxcContainer {
         let rpc_bind = TmpMountGuard::mount(&Bind::new(rpc_dir), ReadWrite).await?;
         Command::new("chown")
             .arg("-R")
-            .arg(format!("{0}:{0}", BASE_IDMAP.to_id))
+            .arg(format!("{root}:{root}"))
             .arg(rpc_bind.path())
             .invoke(ErrorKind::Filesystem)
             .await?;
         let log_mount = if let Some(path) = log_mount {
+            if tokio::fs::metadata(path)
+                .await
+                .is_ok_and(|metadata| metadata.uid() == slot::LEGACY_HOST_ROOT)
+            {
+                slot::rebase_legacy_ids(path.to_owned(), root).await?;
+            }
             let log_mount_point = rootfs_dir.join("var/log/journal").join(machine_id);
             let log_mount =
                 MountGuard::mount(&Bind::new(path), &log_mount_point, MountType::ReadWrite).await?;
             Command::new("chown")
                 // systemd-journal's container GID is 999.
-                .arg(format!("{}:{}", BASE_IDMAP.to_id, BASE_IDMAP.to_id + 999))
+                .arg(format!("{}:{}", root, root + 999))
                 .arg(&log_mount_point)
                 .invoke(crate::ErrorKind::Filesystem)
                 .await?;
@@ -358,6 +383,8 @@ impl LxcContainer {
             rootfs,
             guid: Arc::new(ContainerId::try_from(&*guid)?),
             rpc_bind,
+            slot,
+            _userns: userns,
             config,
             exited: false,
             log_mount,
@@ -445,60 +472,16 @@ impl LxcContainer {
             .with_kind(ErrorKind::Lxc)
     }
 
-    pub async fn ip(&self) -> Result<Ipv4Addr, Error> {
-        let start = Instant::now();
-        loop {
-            let output = self.info("-iH").await?;
-            for line in output.lines() {
-                if let Ok(ip) = line.trim().parse() {
-                    return Ok(ip);
-                }
-            }
-            if start.elapsed() > CONTAINER_DHCP_TIMEOUT {
-                return Err(Error::new(
-                    eyre!("{}", t!("lxc.mod.dhcp-timeout")),
-                    ErrorKind::Timeout,
-                ));
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+    pub fn slot(&self) -> ContainerSlot {
+        self.slot
     }
 
-    /// The container's SLAAC **ULA** (`fd00:3::/64` off lxcbr0), the DNAT target
-    /// for a non-SSL GUA forward, or `None` if it never gets one.
-    ///
-    /// Deliberately the ULA only — StartOS is v4-parity for v6 (one server GUA
-    /// port-forwarded to container ULAs), so a container never holds a GUA and
-    /// any non-ULA address is ignored. Polls with the same retry loop as [`ip`]
-    /// since SLAAC, like DHCP, lands a moment after boot. lxcbr0 always advertises
-    /// the prefix, so kernel SLAAC gives every container a ULA — a timeout here
-    /// should never happen short of a source-code bug, and is logged at error
-    /// level. It's still non-fatal (unlike the mandatory v4 lease): a container
-    /// runs fine on v4 without v6, so v6 forwarding is skipped rather than failing
-    /// startup.
-    ///
-    /// [`ip`]: Self::ip
-    pub async fn ipv6(&self) -> Result<Option<Ipv6Addr>, Error> {
-        let start = Instant::now();
-        let guid: &str = &self.guid;
-        loop {
-            let output = self.info("-iH").await?;
-            if let Some(ula) = output.lines().find_map(|line| {
-                line.trim()
-                    .parse::<Ipv6Addr>()
-                    .ok()
-                    .filter(|ip| crate::net::utils::ipv6_is_ula(*ip))
-            }) {
-                return Ok(Some(ula));
-            }
-            if start.elapsed() > CONTAINER_DHCP_TIMEOUT {
-                tracing::error!(
-                    "container {guid} has no IPv6 ULA after SLAAC timeout — lxcbr0 always advertises the prefix, so this indicates a bug; v6 forwarding disabled for it"
-                );
-                return Ok(None);
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+    pub fn ip(&self) -> Ipv4Addr {
+        self.slot.ipv4()
+    }
+
+    pub fn ipv6(&self) -> Ipv6Addr {
+        self.slot.ipv6()
     }
 
     pub fn rpc_dir(&self) -> &Path {
@@ -611,7 +594,7 @@ impl LxcContainer {
                     .with_ctx(|_| (ErrorKind::Filesystem, format!("mkdir -p {p:?}")))?;
                 for p in parent.ancestors() {
                     Command::new("chown")
-                        .arg(format!("{0}:{0}", BASE_IDMAP.to_id))
+                        .arg(format!("{0}:{0}", self.slot.host_root()))
                         .arg(media_dev.join(p))
                         .invoke(ErrorKind::Filesystem)
                         .await?;
@@ -627,7 +610,7 @@ impl LxcContainer {
                 .invoke(ErrorKind::Filesystem)
                 .await?;
             Command::new("chown")
-                .arg(format!("{0}:{0}", BASE_IDMAP.to_id))
+                .arg(format!("{0}:{0}", self.slot.host_root()))
                 .arg(&target_path)
                 .invoke(ErrorKind::Filesystem)
                 .await?;
@@ -674,7 +657,7 @@ impl LxcContainer {
                 .invoke(ErrorKind::Filesystem)
                 .await?;
             Command::new("chown")
-                .arg(format!("{0}:{0}", BASE_IDMAP.to_id))
+                .arg(format!("{0}:{0}", self.slot.host_root()))
                 .arg(&target_path)
                 .invoke(ErrorKind::Filesystem)
                 .await?;
@@ -842,18 +825,25 @@ mod test {
     use super::*;
 
     #[test]
-    fn config_renders_the_base_namespace_mapping() {
-        let config = config_text("test-container", "C.UTF-8");
-        assert!(
-            config
-                .lines()
-                .any(|line| line == "lxc.idmap = u 0 100000 65536")
+    fn config_renders_the_slot_identity() {
+        let slot = ContainerSlot::new(2).unwrap();
+        let config = config_text(
+            "test-container",
+            "C.UTF-8",
+            slot,
+            Path::new("/proc/1/fd/7"),
         );
-        assert!(
-            config
-                .lines()
-                .any(|line| line == "lxc.idmap = g 0 100000 65536")
-        );
+        let has = |expected: &str| config.lines().any(|line| line == expected);
+        assert!(has("lxc.idmap = u 0 196608 65536"));
+        assert!(has("lxc.idmap = g 0 196608 65536"));
+        assert!(has("lxc.namespace.share.user = /proc/1/fd/7"));
+        assert!(has("lxc.net.0.veth.mode = router"));
+        assert!(has("lxc.net.0.veth.pair = lxc-svc-2"));
+        assert!(has("lxc.net.0.ipv4.address = 172.16.0.5/32"));
+        assert!(has("lxc.net.0.ipv4.gateway = 172.16.0.1"));
+        assert!(has("lxc.net.0.ipv6.address = fd00:3::5/128"));
+        assert!(has("lxc.net.0.ipv6.gateway = fd00:3::1"));
+        assert!(!config.contains("lxc.net.0.link"));
         assert!(config.contains("test-container"));
     }
 

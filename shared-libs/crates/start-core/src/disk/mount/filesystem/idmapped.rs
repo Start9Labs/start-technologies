@@ -100,7 +100,7 @@ impl<Fs: FileSystem> FileSystem for IdMapped<Fs> {
         // window where the cloned mount exists without the idmap, which
         // is the recursive-idmap failure mode for inners that are
         // themselves idmapped.
-        let userns = userns_fd_from_idmap(&self.idmap).await?;
+        let userns = userns_fd_from_idmap(&self.idmap, None).await?;
         let fd = open_tree_attr_idmap(staging.path(), true, userns.as_fd())?;
         drop(userns);
         let detached = DetachedMount::from_fd(fd);

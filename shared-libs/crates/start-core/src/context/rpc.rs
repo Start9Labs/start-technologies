@@ -359,7 +359,10 @@ impl RpcContext {
                         Path::new("/media/startos/data/package-data/nvidia").join(&*version);
 
                     // Generate single squashfs with both debian and generic overlays
-                    let sqfs = nvidia_dir.join("container-overlay.squashfs");
+                    // Root-owned: every container reads it through its own id range.
+                    let sqfs = nvidia_dir.join("container-overlay-root.squashfs");
+                    crate::util::io::delete_file(nvidia_dir.join("container-overlay.squashfs"))
+                        .await?;
                     if tokio::fs::metadata(&sqfs).await.is_err() {
                         let tmp = TmpDir::new().await?;
 
@@ -434,9 +437,9 @@ impl RpcContext {
                             .arg(&*tmp)
                             .arg(&sqfs)
                             .arg("-force-uid")
-                            .arg(crate::lxc::BASE_IDMAP.to_id.to_string())
+                            .arg("0")
                             .arg("-force-gid")
-                            .arg(crate::lxc::BASE_IDMAP.to_id.to_string())
+                            .arg("0")
                             .invoke(ErrorKind::Filesystem)
                             .await?;
                     }

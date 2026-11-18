@@ -471,11 +471,7 @@ pub async fn init(
     update_server_info.complete();
 
     launch_service_network.start();
-    Command::new("systemctl")
-        .arg("start")
-        .arg("lxc-net.service")
-        .invoke(ErrorKind::Lxc)
-        .await?;
+    crate::lxc::network::ensure().await?;
     launch_service_network.complete();
 
     validate_db.start();

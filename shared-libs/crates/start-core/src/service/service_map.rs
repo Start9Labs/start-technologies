@@ -21,6 +21,7 @@ use crate::db::model::package::{
 use crate::disk::mount::guard::GenericMountGuard;
 use crate::error::ErrorData;
 use crate::install::PKG_ARCHIVE_DIR;
+use crate::lxc::slot::ContainerSlot;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{FullProgressTracker, PhaseProgressTrackerHandle, ProgressTrackerWriter};
@@ -259,6 +260,9 @@ impl ServiceMap {
         };
         let mut finalization_progress = progress.add_phase(op_name.into(), Some(50));
         let restoring = recovery_source.is_some();
+        if service.is_none() {
+            ContainerSlot::ensure_available(ctx.db.peek().await.as_public().as_package_data())?;
+        }
         if !restoring {
             crate::volume::InstallBackup::of(&id).begin().await?;
         }
@@ -303,6 +307,9 @@ impl ServiceMap {
                                         progress: install_progress,
                                     },
                                 };
+                                let container_slot = ContainerSlot::allocate(
+                                    db.as_public().as_package_data(),
+                                )?;
                                 db.as_public_mut().as_package_data_mut().insert(
                                     &id,
                                     &PackageDataEntry {
@@ -312,6 +319,7 @@ impl ServiceMap {
                                             PackageState::Installing(installing)
                                         },
                                         s9pk: installed_path,
+                                        container_slot,
                                         status_info: StatusInfo::default(),
                                         registry,
                                         developer_key: Der64::new(developer_key),

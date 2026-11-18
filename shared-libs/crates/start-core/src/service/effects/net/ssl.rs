@@ -6,7 +6,7 @@ use ipnet::IpNet;
 use itertools::Itertools;
 use openssl::pkey::{PKey, Private};
 
-use crate::HOST_IP;
+use crate::lxc::slot::{CONTAINER_NET, CONTAINER_NET_V6};
 use crate::service::effects::callbacks::CallbackHandler;
 use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
@@ -85,9 +85,8 @@ pub async fn get_ssl_certificate(
                         return Err(errfn(&*hostname));
                     }
                 } else if let Ok(ip) = hostname.parse::<IpAddr>() {
-                    if IpNet::new(HOST_IP.into(), 24)
-                        .with_kind(ErrorKind::ParseNetAddress)?
-                        .contains(&ip)
+                    if IpNet::from(CONTAINER_NET).contains(&ip)
+                        || IpNet::from(CONTAINER_NET_V6).contains(&ip)
                     {
                         Ok(())
                     } else if db
@@ -167,11 +166,12 @@ pub async fn get_ssl_key(
     let context = context.deref()?;
     let package_id = &context.seed.id;
     let algorithm = algorithm.unwrap_or(Algorithm::Ecdsa);
-    let container_ip = if let Some(lxc) = context.seed.persistent_container.lxc_container.get() {
-        Some(lxc.ip().await?)
-    } else {
-        None
-    };
+    let container_ip = context
+        .seed
+        .persistent_container
+        .lxc_container
+        .get()
+        .map(|lxc| lxc.ip());
 
     let cert = context
         .seed

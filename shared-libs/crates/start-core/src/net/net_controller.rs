@@ -20,7 +20,7 @@ use crate::hostname::ServerHostname;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
-    ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, nft_rule, nft_rule_v6,
+    ForwardRequirements, InterfacePortForwardController, nft_rule, nft_rule_v6,
 };
 use crate::net::gateway::{NetworkInterfaceController, WildcardListener};
 use crate::net::host::binding::{BindId, BindOptions, UpstreamCertValidation};
@@ -39,11 +39,17 @@ use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::{SyncMutex, Watch};
+use crate::lxc::slot::VETH_PREFIX;
 use crate::{GatewayId, HOST_IP, HostId, Id, OptionExt, PackageId, ServiceInterfaceId};
 
 #[cfg(test)]
 #[path = "net_controller/http_proxy_tests.rs"]
 mod http_proxy_tests;
+
+/// Accepts a container's new connections unless they target another container.
+fn container_egress() -> String {
+    format!("iifname \"{VETH_PREFIX}*\" oifname != \"{VETH_PREFIX}*\" ct state new accept")
+}
 
 pub struct NetController {
     pub(crate) db: TypedPatchDb<Database>,
@@ -96,22 +102,8 @@ impl NetController {
         let tls_client_config_no_verify = Arc::new(crate::net::tls::client_config_no_verify(
             crypto_provider.clone(),
         )?);
-        nft_rule(
-            "forward",
-            "lxcbr0-egress",
-            false,
-            false,
-            &format!("iifname \"{START9_BRIDGE_IFACE}\" ct state new accept"),
-        )
-        .await?;
-        nft_rule_v6(
-            "forward",
-            "lxcbr0-egress",
-            false,
-            false,
-            &format!("iifname \"{START9_BRIDGE_IFACE}\" ct state new accept"),
-        )
-        .await?;
+        nft_rule("forward", "container-egress", false, false, &container_egress()).await?;
+        nft_rule_v6("forward", "container-egress", false, false, &container_egress()).await?;
         let peek = db.peek().await;
         let passthroughs = peek
             .as_public()

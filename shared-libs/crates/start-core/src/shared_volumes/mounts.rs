@@ -5,7 +5,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use crate::disk::mount::filesystem::syscall::{
-    DetachedMount, MountNamespace, open_beneath, open_tree_clone_fd, unmount_fd,
+    DetachedMount, MountNamespace, open_beneath, open_tree_attr_idmap_fd, open_tree_clone_fd,
+    unmount_fd,
 };
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::prelude::*;
@@ -25,8 +26,12 @@ impl AttachedMount {
         destination: &OwnedFd,
         readonly: bool,
         namespace: Arc<MountNamespace>,
+        userns: Option<&OwnedFd>,
     ) -> Result<Self, Error> {
-        let detached = DetachedMount::from_fd(open_tree_clone_fd(source.as_fd())?);
+        let detached = DetachedMount::from_fd(match userns {
+            Some(userns) => open_tree_attr_idmap_fd(source.as_fd(), userns.as_fd())?,
+            None => open_tree_clone_fd(source.as_fd())?,
+        });
         // Clones inherit target propagation without joining the source's peer group.
         detached.set_private()?;
         detached.set_readonly(readonly)?;
@@ -90,6 +95,8 @@ impl AsFd for PinnedDirectory {
 pub struct PreparedSource {
     directory: PinnedDirectory,
     guard: TmpMountGuard,
+    /// Maps the source's container ids into the consumer's range at attachment.
+    userns: Option<OwnedFd>,
 }
 
 impl PreparedSource {
@@ -97,11 +104,20 @@ impl PreparedSource {
         &self.guard
     }
 
+    pub(crate) fn idmapped(mut self, userns: OwnedFd) -> Self {
+        self.userns = Some(userns);
+        self
+    }
+
     pub async fn open(guard: TmpMountGuard, subpath: Option<PathBuf>) -> Result<Self, Error> {
         tokio::task::spawn_blocking(move || {
             let directory =
                 PinnedDirectory::open(guard.path(), subpath.as_deref().unwrap_or(Path::new("")))?;
-            Ok(Self { directory, guard })
+            Ok(Self {
+                directory,
+                guard,
+                userns: None,
+            })
         })
         .await
         .with_kind(ErrorKind::Unknown)?
@@ -116,6 +132,7 @@ impl PreparedSource {
             Ok(Self {
                 directory,
                 guard: self.guard,
+                userns: self.userns,
             })
         })
         .await
@@ -219,7 +236,7 @@ impl SharedVolumeMounts {
             tokio::fs::create_dir_all(&empty).await?;
             tokio::fs::set_permissions(&empty, std::fs::Permissions::from_mode(0)).await?;
             let source = open_beneath(&empty, Path::new(""))?;
-            let placeholder = AttachedMount::bind(&source, &directory, true, namespace)?;
+            let placeholder = AttachedMount::bind(&source, &directory, true, namespace, None)?;
             self.slots.insert(
                 key,
                 AttachmentSlot {
@@ -249,6 +266,7 @@ impl SharedVolumeMounts {
             &slot.placeholder.mount,
             readonly,
             slot.placeholder.namespace.clone(),
+            source.userns.as_ref(),
         )?;
         slot.attachment = Some(VolumeAttachment {
             id,

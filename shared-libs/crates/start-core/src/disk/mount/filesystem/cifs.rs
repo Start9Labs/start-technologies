@@ -268,7 +268,7 @@ mod tests {
                 .await
                 .unwrap()
                 .uid(),
-            100000
+            0
         );
         let mut guest = definition("127.0.0.1", "/guest");
         guest.0.username.clear();
@@ -691,6 +691,7 @@ impl FileSystem for Cifs {
     }
 }
 
+/// Host-root-owned with world-writable modes; every container sees `nobody`.
 pub struct SharedCifs(pub Cifs);
 
 impl FileSystem for SharedCifs {
@@ -701,7 +702,7 @@ impl FileSystem for SharedCifs {
     ) -> Result<(), Error> {
         tokio::time::timeout(std::time::Duration::from_secs(30), self.0.mount_with_options(
             mountpoint.as_ref(),
-            &format!("vers=3,soft,echo_interval=5,noserverino,uid={0},gid={0},forceuid,forcegid,file_mode=0666,dir_mode=0777,{1}", crate::lxc::BASE_IDMAP.to_id, access_options(mount_type)),
+            &format!("vers=3,soft,echo_interval=5,noserverino,uid=0,gid=0,forceuid,forcegid,file_mode=0666,dir_mode=0777,{}", access_options(mount_type)),
         )).await.map_err(|error| Error::new(error, crate::ErrorKind::Timeout))?
     }
 

@@ -2,6 +2,11 @@ use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_2_2};
+use imbl_value::InternedString;
+
+use crate::context::RpcContext;
+use crate::lxc::slot::{ContainerSlot, rebase_legacy_ids};
+use crate::shared_volumes::{SharedVolumeSource, local_path};
 use crate::prelude::*;
 
 lazy_static::lazy_static! {
@@ -24,10 +29,69 @@ impl VersionT for Version {
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
     }
-    fn up(self, _db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
+    fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
+        assign_container_slots(db)?;
         Ok(Value::Null)
     }
-    fn down(self, _db: &mut Value) -> Result<(), Error> {
+    async fn post_up(self, ctx: &RpcContext, _input: Value) -> Result<(), Error> {
+        for (id, volume) in ctx.db.peek().await.as_public().as_shared_volumes().as_entries()? {
+            if volume.as_source().de()? == SharedVolumeSource::Local {
+                rebase_legacy_ids(local_path(crate::PACKAGE_DATA, &id), 0).await?;
+            }
+        }
         Ok(())
+    }
+    fn down(self, db: &mut Value) -> Result<(), Error> {
+        if let Some(packages) = package_data(db) {
+            for (_, package) in packages.iter_mut() {
+                if let Some(package) = package.as_object_mut() {
+                    package.remove("containerSlot");
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn package_data(db: &mut Value) -> Option<&mut imbl_value::InOMap<InternedString, Value>> {
+    db.get_mut("public")?
+        .get_mut("packageData")?
+        .as_object_mut()
+}
+
+/// Gives every installed package a slot, in package-id order.
+fn assign_container_slots(db: &mut Value) -> Result<(), Error> {
+    let Some(packages) = package_data(db) else {
+        return Ok(());
+    };
+    let mut ids = packages.keys().cloned().collect::<Vec<_>>();
+    ids.sort();
+    for (index, id) in ids.into_iter().enumerate() {
+        let slot = ContainerSlot::new(u16::try_from(index).unwrap_or(u16::MAX))?;
+        packages
+            .get_mut(&id)
+            .and_then(Value::as_object_mut)
+            .or_not_found(&id)?
+            .insert("containerSlot".into(), to_value(&slot)?);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn installed_packages_receive_distinct_slots_in_id_order() {
+        let mut db = imbl_value::json!({
+            "public": { "packageData": { "lnd": {}, "bitcoind": {}, "electrs": {} } }
+        });
+        Version.up(&mut db, ()).unwrap();
+        let slot = |id: &str| db["public"]["packageData"][id]["containerSlot"].clone();
+        assert_eq!(slot("bitcoind"), imbl_value::json!(0));
+        assert_eq!(slot("electrs"), imbl_value::json!(1));
+        assert_eq!(slot("lnd"), imbl_value::json!(2));
+        Version.down(&mut db).unwrap();
+        assert_eq!(db["public"]["packageData"]["lnd"], imbl_value::json!({}));
     }
 }

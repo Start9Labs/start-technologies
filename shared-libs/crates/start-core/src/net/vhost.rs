@@ -5,7 +5,7 @@ use std::future::Future;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Weak};
+use std::sync::{Arc, Weak};
 use std::task::{Poll, ready};
 use std::time::{Duration, Instant};
 
@@ -15,7 +15,7 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use imbl::{OrdMap, OrdSet};
 use imbl_value::{InOMap, InternedString};
-use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+use ipnet::IpNet;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -37,7 +37,7 @@ use crate::net::acme::{
     ACME_TLS_ALPN_NAME, AcmeCertStore, AcmeProvider, AcmeTlsAlpnCache, AcmeTlsHandler,
     GetAcmeProvider, ReportOrderFailure,
 };
-use crate::net::forward::START9_BRIDGE_V6_SUBNET;
+use crate::lxc::slot::{CONTAINER_NET, CONTAINER_NET_V6};
 use crate::net::gateway::{
     GatewayInfo, NetworkInterfaceController, NetworkInterfaceListenerAcceptMetadata,
 };
@@ -58,7 +58,7 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::ReadWriter;
 use crate::util::serde::{HandlerExtSerde, MaybeUtf8String, display_serializable};
 use crate::util::sync::{SyncMutex, Watch};
-use crate::{GatewayId, HOST_IP, HostId, PackageId, ResultExt};
+use crate::{GatewayId, HostId, PackageId, ResultExt};
 
 /// Identifies which service+host contributed a set of SNI hostname mappings, so
 /// each can be reconciled independently — a service only ever adds or removes
@@ -1151,18 +1151,11 @@ impl fmt::Debug for ProxyTarget {
     }
 }
 
-/// Whether `ip` sits on lxcbr0, where the containers are.
+/// Whether the address is on the container network.
 fn on_container_bridge(ip: IpAddr) -> bool {
-    static V6: LazyLock<Ipv6Net> =
-        LazyLock::new(|| START9_BRIDGE_V6_SUBNET.parse().expect("const subnet"));
-    static V4: LazyLock<Ipv4Net> = LazyLock::new(|| {
-        Ipv4Net::new(HOST_IP.into(), 24)
-            .expect("const prefix")
-            .trunc()
-    });
     match ip {
-        IpAddr::V4(v4) => V4.contains(&v4),
-        IpAddr::V6(v6) => V6.contains(&v6),
+        IpAddr::V4(v4) => CONTAINER_NET.contains(&v4),
+        IpAddr::V6(v6) => CONTAINER_NET_V6.contains(&v6),
     }
 }
 

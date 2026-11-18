@@ -17,7 +17,6 @@ use crate::disk::mount::filesystem::bind::{Bind, FileType};
 use crate::disk::mount::filesystem::idmapped::{IdMap, IdMapped};
 use crate::disk::mount::filesystem::{FileSystem, MountType};
 use crate::disk::mount::util::{is_mountpoint, unmount};
-use crate::lxc::BASE_IDMAP;
 use crate::s9pk::S9pk;
 use crate::s9pk::manifest::Manifest;
 use crate::service::effects::callbacks::CallbackHandler;
@@ -45,7 +44,7 @@ pub struct MountTarget {
 rpc_toolkit::reflect_ts!(MountTarget);
 rpc_toolkit::ts_export!(MountTarget, namespaces = [""]);
 
-/// The idmap to apply, host-side, for a pointer mount.
+/// The idmap to apply, host-side, for a pointer mount into a container with the given base map.
 ///
 /// The SDK idmap is layered *on top of* the LXC base map (the SDK docs: "the
 /// base LXC mapping is applied automatically"), and a list of idmaps composes
@@ -61,8 +60,7 @@ rpc_toolkit::ts_export!(MountTarget, namespaces = [""]);
 /// a uid_map can't map two on-disk ids to one target, so colliding ids are
 /// dropped to `nobody`, preferring an explicitly-remapped id over a passthrough.
 /// See the proptest in the test module for the exact equivalence to composition.
-fn pointer_idmap(custom: &[IdMap]) -> Vec<IdMap> {
-    let base = BASE_IDMAP;
+fn pointer_idmap(base: IdMap, custom: &[IdMap]) -> Vec<IdMap> {
     if custom.is_empty() {
         return vec![base];
     }
@@ -190,14 +188,14 @@ pub async fn mount(
         ));
     }
     let source = confined_join(&volume, subpath.as_deref().unwrap_or(Path::new(""))).await?;
-    let rootfs = context
+    let lxc = context
         .seed
         .persistent_container
         .lxc_container
         .get()
-        .or_not_found("lxc container")?
-        .rootfs_dir()
-        .to_owned();
+        .or_not_found("lxc container")?;
+    let base = lxc.slot().idmap();
+    let rootfs = lxc.rootfs_dir().to_owned();
     let mountpoint = confined_join(&rootfs, &location).await?;
 
     if is_mountpoint(&mountpoint).await? {
@@ -206,7 +204,7 @@ pub async fn mount(
 
     IdMapped::new(
         Bind::new(source).with_type(filetype).recursive(true),
-        pointer_idmap(&idmap),
+        pointer_idmap(base, &idmap),
     )
     .mount(
         mountpoint,
@@ -642,6 +640,12 @@ pub async fn get_service_manifest(
 mod test {
     use super::*;
 
+    const BASE_IDMAP: IdMap = IdMap {
+        from_id: 0,
+        to_id: 100000,
+        range: 65536,
+    };
+
     #[test]
     fn dependency_titles_use_the_declaring_package_default_with_or_without_the_dependency() {
         let db = Model::from_value(imbl_value::json!({
@@ -815,7 +819,7 @@ mod test {
 
     #[test]
     fn empty_custom_is_just_the_base_map() {
-        assert_eq!(pointer_idmap(&[]), vec![BASE_IDMAP]);
+        assert_eq!(pointer_idmap(BASE_IDMAP, &[]), vec![BASE_IDMAP]);
     }
 
     #[test]
@@ -824,7 +828,7 @@ mod test {
         // its base mapping (k -> 100000 + k), except on-disk 1000, whose base
         // target collides with the override and so is dropped (-> nobody).
         assert_eq!(
-            pointer_idmap(&[idmap(0, 1000, 1)]),
+            pointer_idmap(BASE_IDMAP, &[idmap(0, 1000, 1)]),
             vec![
                 idmap(0, 101000, 1),        // override: on-disk 0 -> container 1000
                 idmap(1, 100001, 999),      // base: on-disk 1..999 -> container 1..999
@@ -838,7 +842,7 @@ mod test {
         // idmap 1 maps the OUTPUT range of idmap 0 (0->1000, then 1000->2000),
         // so they compose: on-disk 0 -> 1000 -> 2000 (host 102000), not 101000.
         let custom = [idmap(0, 1000, 1), idmap(1000, 2000, 1)];
-        let flat = pointer_idmap(&custom);
+        let flat = pointer_idmap(BASE_IDMAP, &custom);
         assert_eq!(
             apply(&flat, 0),
             Some(102000),
@@ -904,7 +908,7 @@ mod test {
             custom in proptest::collection::vec((0u32..60_000, 0u32..60_000, 1u32..2_000), 0..4usize),
         ) {
             let custom: Vec<IdMap> = custom.into_iter().map(|(f, t, r)| idmap(f, t, r)).collect();
-            let flat = pointer_idmap(&custom);
+            let flat = pointer_idmap(BASE_IDMAP, &custom);
 
             proptest::prop_assert!(is_valid_uid_map(&flat), "invalid uid_map: {flat:?}");
 
@@ -973,7 +977,7 @@ mod test {
             Bind::new(&src)
                 .with_type(FileType::Directory)
                 .recursive(true),
-            pointer_idmap(&[idmap(0, 1000, 1)]),
+            pointer_idmap(BASE_IDMAP, &[idmap(0, 1000, 1)]),
         )
         .mount(&target, MountType::ReadWrite)
         .await
