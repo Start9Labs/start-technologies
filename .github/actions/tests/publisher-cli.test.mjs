@@ -502,6 +502,37 @@ test('the CLI binaries cover every triple a release attaches', () => {
   )
 })
 
+test('registry image platforms match the downloaded deb architectures', t => {
+  const mapPlatforms = step(
+    products.jobs['registry-image'],
+    'Map matrix.arch to docker platform',
+  ).run
+  for (const [arches, expected] of [
+    [['x86_64'], ['linux/amd64']],
+    [['aarch64'], ['linux/arm64']],
+    [['riscv64'], ['linux/riscv64']],
+    [
+      ['x86_64', 'aarch64', 'riscv64'],
+      ['linux/amd64', 'linux/arm64', 'linux/riscv64'],
+    ],
+  ]) {
+    const f = fixture(t)
+    for (const arch of arches)
+      f.write(`start-registry-0.4.0-aaaaaaa_${arch}.deb`, '')
+    const output = f.write('env', '')
+    const result = f.run('bash', ['-e', '-c', mapPlatforms], {
+      env: { ...f.env, GITHUB_ENV: output },
+      encoding: 'utf8',
+    })
+    assert.equal(result.status, 0, result.stdout + result.stderr)
+    const platforms = readFileSync(output, 'utf8')
+      .trim()
+      .replace(/^DOCKER_PLATFORM=/, '')
+      .split(',')
+    assert.deepEqual(platforms.sort(), expected.sort())
+  }
+})
+
 test('build environments: release-equivalent on master and NONE, dev elsewhere', () => {
   for (const [event, input, ref, expected] of [
     ['push', {}, 'refs/heads/master', ''],

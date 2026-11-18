@@ -312,7 +312,7 @@ jobs:
           platforms=""
           for deb in *.deb; do
             filename=$(basename "$deb" .deb)
-            arch="${filename##*_}"
+            arch="${filename#*_}"
             case "$arch" in
               x86_64)
                 platform="linux/amd64"
