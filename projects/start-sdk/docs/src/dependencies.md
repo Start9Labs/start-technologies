@@ -19,7 +19,7 @@ const bitcoin = sdk.Dependency.required('bitcoind', {
 export const dependencies = sdk.Dependencies.of().addDependency(bitcoin)
 ```
 
-Pass `dependencies` to `buildManifest(versionGraph, sdkManifest, dependencies)` in `startos/index.ts` and to `sdk.setupInit(..., dependencies, ...)` in `startos/init/index.ts`.
+Pass `dependencies` to `buildManifest({ versionGraph, manifest, dependencies, i18n })` in `startos/index.ts` and to `sdk.setupInit(..., dependencies, ...)` in `startos/init/index.ts`.
 
 The base is serializable at pack time, without effects: every dependency needs a description (which may be `null`), inline title and icon, version range, kind, and health checks when `kind` is `running`. Write `'*'` when any version is accepted. Name multi-flavor dependencies generically: for `bitcoind`, use **Bitcoin**, not Bitcoin Core or Bitcoin Knots. The base is the loosest requirement the service accepts in any configuration.
 
