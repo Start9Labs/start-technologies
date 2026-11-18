@@ -8,8 +8,9 @@ IMAGE_RECIPE_SRC := $(call ls-files, projects/start-os/build/image-recipe/)
 STARTD_SRC := projects/start-os/startd.service projects/start-os/services.slice projects/start-os/startos-shutdown.service projects/start-os/startos-restart.service $(BUILD_SRC)
 STARTOS_RELEASE_NOTES := projects/start-os/release-notes/$(shell cat $(VERSION_FILE)).md
 STARTOS_RELEASE_NOTES_SRC := scripts/changelog.mjs scripts/changelog-version.mjs shared-libs/crates/start-core/locales/release-notes.json .prettierrc.json package.json $(wildcard $(STARTOS_RELEASE_NOTES)) $(call ls-files, projects/start-os/changelog)
-COMPILED_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox target/$(RUST_ARCH)-unknown-linux-musl/release/start-container target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs projects/start-os/container-runtime/rootfs.$(ARCH).squashfs
-STARTOS_TARGETS := $(STARTD_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE) $(STARTOS_RELEASE_NOTES_SRC) $(COMPILED_TARGETS) $(PLATFORM_FILE) \
+COMPILED_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox target/$(RUST_ARCH)-unknown-linux-musl/release/start-container target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs
+CONTAINER_RUNTIME_DIST := projects/start-os/container-runtime/dist/index.js projects/start-os/container-runtime/dist/node_modules/.package-lock.json
+STARTOS_TARGETS := $(STARTD_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE) $(STARTOS_RELEASE_NOTES_SRC) $(COMPILED_TARGETS) projects/start-os/container-runtime/rootfs.$(ARCH).squashfs $(PLATFORM_FILE) \
 	$(shell if [ "$(PLATFORM)" = "raspberrypi" ]; then \
 		echo target/aarch64-unknown-linux-musl/release/pi-beep; \
 	fi) \
@@ -218,7 +219,7 @@ projects/start-os/container-runtime/dist/node_modules/.package-lock.json project
 	./projects/start-os/container-runtime/install-dist-deps.sh
 	touch projects/start-os/container-runtime/dist/node_modules/.package-lock.json
 
-projects/start-os/container-runtime/rootfs.$(ARCH).squashfs: projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/debian.$(ARCH).squashfs projects/start-os/container-runtime/container-runtime.service projects/start-os/container-runtime/update-image.sh projects/start-os/container-runtime/update-image-local.sh projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/dist/index.js projects/start-os/container-runtime/dist/node_modules/.package-lock.json target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
+projects/start-os/container-runtime/rootfs.$(ARCH).squashfs: projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/debian.$(ARCH).squashfs projects/start-os/container-runtime/container-runtime.service projects/start-os/container-runtime/update-image.sh projects/start-os/container-runtime/update-image-local.sh projects/start-os/container-runtime/deb-install.sh $(CONTAINER_RUNTIME_DIST) target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
 	ARCH=$(ARCH) ./projects/start-os/container-runtime/update-image-local.sh
 
 projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts: $(ENVIRONMENT_FILE) $(PLATFORM_FILE) $(shell ls projects/start-os/build/dpkg-deps/*)
@@ -247,9 +248,10 @@ target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(START_CONTAINE
 	ARCH=$(ARCH) PROFILE=release ./build/build-rust-bins.sh start-os:start-container
 	touch target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
 
-# used by github actions
-compiled-$(ARCH).tar: $(COMPILED_TARGETS) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE)
-	tar -cvf $@ $^
+# CI's cross-compiled image inputs. Must not run target-architecture code; image
+# builds assemble the container-runtime rootfs natively.
+compiled-$(ARCH).tar: $(COMPILED_TARGETS) $(CONTAINER_RUNTIME_DIST) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE)
+	tar -cvf $@ $(COMPILED_TARGETS) projects/start-os/container-runtime/dist $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE)
 
 target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs: $(call ls-files, projects/start-os/backup-fs) $(BACKUP_PROTOCOL_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE) $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=$(ARCH) PROFILE=release ./projects/start-os/backup-fs/build-backup-fs.sh
