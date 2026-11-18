@@ -197,7 +197,7 @@ jobs:
       contents: write
 ```
 
-The reusable workflows read `REFERENCE_REGISTRY`, `RELEASE_REGISTRY`, `S3_S9PKS_BASE_URL`, `REGISTRY_PROXY` and `REGISTRY_TOR` from the calling repository's variables, including organization variables. Set them there; pass an input of the same name under `with:` only to override one for a single repo's workflow. Secrets are not read this way and must still be passed.
+The reusable workflows read `REFERENCE_REGISTRY`, `RELEASE_REGISTRY`, `S3_S9PKS_BASE_URL` and `REGISTRY_PROXY` from the calling repository's variables, including organization variables. Set them there; pass an input of the same name under `with:` only to override one for a single repo's workflow. Secrets are not read this way and must still be passed.
 
 **release.yml** -- publishes on manual tag push, for re-releases or testing. This workflow only triggers on manually pushed tags — tags created by tagAndRelease (via `GITHUB_TOKEN`) do not trigger it:
 
@@ -220,7 +220,7 @@ jobs:
       contents: write
 ```
 
-To publish to registries served over Tor, set `REGISTRY_TOR` to `true`. The release jobs then start Tor on their runners, which adds an install and a Tor bootstrap to each job that contacts a registry. Alternatively, set `REGISTRY_PROXY` to a proxy URL the runners can already reach, such as `socks5h://proxy.example:9050`; `.onion` registries need the `socks5h` scheme, which resolves names through the proxy. Either one routes every `start-cli` registry request; set at most one of them.
+To publish to registries served over Tor, run a Tor SOCKS proxy the runners can reach and set `REGISTRY_PROXY` to its URL, such as `socks5h://tor-proxy.example:9050`. The `socks5h` scheme resolves names through the proxy, which `.onion` addresses require. Both workflows then route every `start-cli` registry request through it. The workflows do not start a proxy themselves.
 
 **syncNext.yml** -- carries every change that lands on the base branch onto the paired `next` iteration branch, so `next` never falls behind what has already shipped:
 

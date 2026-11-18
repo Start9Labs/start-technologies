@@ -7,46 +7,12 @@ inputs:
     description: 'Proxy URL for start-cli, e.g. socks5h://proxy.example:9050. A .onion registry needs socks5h, which resolves names through the proxy.'
     required: false
     default: ''
-  tor:
-    description: '`true` starts Tor on the runner and uses it as the proxy. Excludes `proxy`.'
-    required: false
-    default: ''
 runs:
   using: 'composite'
   steps:
-    - name: Start Tor
-      if: ${{ inputs.tor == 'true' }}
-      env:
-        PROXY: ${{ inputs.proxy }}
-      run: |
-        if [ -n "$PROXY" ]; then
-          echo "::error::Set either the registry proxy or Tor, not both"
-          exit 1
-        fi
-        SOCKS_ADDR=127.0.0.1:9050
-        if (exec 3<>"/dev/tcp/${SOCKS_ADDR%:*}/${SOCKS_ADDR#*:}") 2>/dev/null; then
-          echo "Reusing the proxy already listening on ${SOCKS_ADDR}."
-          exit 0
-        fi
-        sudo apt-get update -qq
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tor > /dev/null
-        echo "SocksPort ${SOCKS_ADDR}" | sudo tee /etc/tor/torrc > /dev/null
-        sudo systemctl restart tor 2>/dev/null || sudo tor --RunAsDaemon 1 -f /etc/tor/torrc
-        for _ in $(seq 1 60); do
-          if curl -fsS --max-time 10 --proxy "socks5h://${SOCKS_ADDR}" https://check.torproject.org/api/ip > /dev/null 2>&1; then
-            echo "Tor is ready on ${SOCKS_ADDR}."
-            exit 0
-          fi
-          sleep 3
-        done
-        echo "::error::Tor did not finish bootstrapping on ${SOCKS_ADDR}"
-        sudo journalctl -u 'tor*' --no-pager | tail -30
-        exit 1
-      shell: bash
-
     - name: Configure registry proxy
       env:
-        PROXY: ${{ inputs.tor == 'true' && 'socks5h://127.0.0.1:9050' || inputs.proxy }}
+        PROXY: ${{ inputs.proxy }}
       run: |
         # Host-backed Forgejo jobs share this home directory across jobs and runs.
         CONFIG=~/.startos/config.yaml

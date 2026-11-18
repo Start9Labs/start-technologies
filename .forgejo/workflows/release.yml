@@ -20,13 +20,9 @@ name: Release
         type: string
         default: ${{ vars.S3_S9PKS_BASE_URL }}
       REGISTRY_PROXY:
-        description: Proxy URL start-cli uses to reach the registries, e.g. socks5h://proxy.example:9050 for .onion registries. Defaults to the caller's REGISTRY_PROXY variable.
+        description: Proxy URL start-cli uses to reach the registries, e.g. socks5h://proxy.example:9050 for .onion registries. The proxy must already be reachable from the runner. Defaults to the caller's REGISTRY_PROXY variable.
         type: string
         default: ${{ vars.REGISTRY_PROXY }}
-      REGISTRY_TOR:
-        description: "`true` starts Tor on the publishing runners and reaches the registries through it. Excludes REGISTRY_PROXY. Defaults to the caller's REGISTRY_TOR variable."
-        type: string
-        default: ${{ vars.REGISTRY_TOR }}
     secrets:
       DEV_KEY:
         description: Developer signing key
@@ -123,7 +119,6 @@ jobs:
         uses: https://github.com/Start9Labs/start-technologies/.github/actions/configure-registry-proxy@master
         with:
           proxy: ${{ inputs.REGISTRY_PROXY }}
-          tor: ${{ inputs.REGISTRY_TOR }}
       - name: Checkout services repository
         uses: https://github.com/actions/checkout@v6
         with:
