@@ -583,12 +583,11 @@ For unproxied service TLS, StartOS preserves the client source IP when it routes
 
 **The SANs are the whole contract.** Nothing rewrites the handshake, so the certificate must be valid for every address a client actually dials — there is no proxy to paper over a mismatch:
 
-- `sdk.getOsIp` (`10.0.3.1`) — the bridge, where other services reach you
+- `sdk.getOsIp` — the bridge, where other services reach you
 - `127.0.0.1` — your own subcontainers, which share the service's network namespace
-- `sdk.getContainerIp` — the container itself
 - **every address the interface is published at** — LAN IPs, the server's `.local` name, private and public domains, and any onion a plugin has exported
 
-Those three constants are the internal half, and naming only them is the mistake to avoid: an off-box client dialing the LAN address or the `.local` name gets a certificate matching none of them. Take the external half from the **binding**, so it follows the addresses the operator adds and removes:
+Those two constants are the internal half, and naming only them is the mistake to avoid: an off-box client dialing the LAN address or the `.local` name gets a certificate matching none of them. Take the external half from the **binding**, so it follows the addresses the operator adds and removes:
 
 ```typescript
 export const setupCerts = sdk.setupOnInit(async effects => {
@@ -606,7 +605,7 @@ export const setupCerts = sdk.setupOnInit(async effects => {
     )
     .const()
 
-  const hostnames = [await sdk.getContainerIp(effects).const(), '127.0.0.1', await sdk.getOsIp(effects), ...served]
+  const hostnames = ['127.0.0.1', await sdk.getOsIp(effects), ...served]
   const cert = (await sdk.getSslCertificate(effects, hostnames).const()).join('')
   const key = await sdk.getSslKey(effects, { hostnames })
   await writeFile('/media/startos/volumes/main/tls.cert', cert)

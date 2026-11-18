@@ -17,7 +17,7 @@ Three things are blocked, and one of them is the reason most packages that "can'
 Every service container ships an `/etc/resolv.conf` containing exactly:
 
 ```
-nameserver 10.0.3.1
+nameserver <the address sdk.getOsIp returns>
 ```
 
 That is the OS itself, on the bridge gateway, running a recursive resolver on UDP and TCP port 53. It answers `.startos` and private names locally and forwards everything else to whatever upstream resolvers the box is configured with, preserving the query type — so `TXT`, `SRV` and `MX` lookups all work.

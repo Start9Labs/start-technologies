@@ -2832,13 +2832,6 @@ lxc.mod.rootfs-not-empty:
   fr_FR: "rootfs n'est pas vide, suppression refusée"
   pl_PL: "rootfs nie jest pusty, odmowa usunięcia"
 
-lxc.mod.dhcp-timeout:
-  en_US: "Timed out waiting for container to acquire DHCP lease"
-  de_DE: "Zeitüberschreitung beim Warten auf DHCP-Lease für Container"
-  es_ES: "Tiempo de espera agotado esperando que el contenedor adquiera lease DHCP"
-  fr_FR: "Délai d'attente dépassé pour l'acquisition du bail DHCP par le conteneur"
-  pl_PL: "Przekroczono limit czasu oczekiwania na uzyskanie dzierżawy DHCP przez kontener"
-
 lxc.mod.command-failed:
   en_US: "Command failed with exit code: %{code}\nMessage: %{message}"
   de_DE: "Befehl mit Exit-Code fehlgeschlagen: %{code}\nNachricht: %{message}"

@@ -83,19 +83,19 @@ The bridge between TypeScript service code and the StartOS runtime. Every runtim
 
 Effects are organized by subsystem:
 
-| Subsystem        | Methods                                                                                                            | Purpose                             |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
-| **Action**       | `export`, `clear`, `getInput`, `run`, `createTask`, `clearTasks`                                                   | Register and invoke user actions    |
-| **Control**      | `restart`, `shutdown`, `getStatus`, `setMainStatus`                                                                | Service lifecycle control           |
-| **Files**        | `prepareUpload`, `prepareDownload`                                                                                 | Prepare volume file transfers       |
-| **Dependency**   | `setDependencies`, `getDependencies`, `checkDependencies`, `mount`, `getInstalledPackages`, `getServiceManifest`   | Inter-service dependency management |
-| **Health**       | `setHealth`                                                                                                        | Report health check results         |
-| **Subcontainer** | `createFs`, `destroyFs`                                                                                            | Container filesystem management     |
-| **Networking**   | `bind`, `getServicePortForward`, `clearBindings`, `getHostInfo`, `getContainerIp`, `getOsIp`, `getOutboundGateway` | Port binding and network info       |
-| **Interfaces**   | `exportServiceInterface`, `getServiceInterface`, `listServiceInterfaces`, `clearServiceInterfaces`                 | Service endpoint management         |
-| **Plugin**       | `plugin.url.register`, `plugin.url.exportUrl`, `plugin.url.clearUrls`                                              | Plugin system hooks                 |
-| **SSL**          | `getSslCertificate`, `getSslKey`                                                                                   | TLS certificate management          |
-| **System**       | `getSystemSmtp`, `setDataVersion`, `getDataVersion`                                                                | System-wide configuration           |
+| Subsystem        | Methods                                                                                                          | Purpose                             |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| **Action**       | `export`, `clear`, `getInput`, `run`, `createTask`, `clearTasks`                                                 | Register and invoke user actions    |
+| **Control**      | `restart`, `shutdown`, `getStatus`, `setMainStatus`                                                              | Service lifecycle control           |
+| **Files**        | `prepareUpload`, `prepareDownload`                                                                               | Prepare volume file transfers       |
+| **Dependency**   | `setDependencies`, `getDependencies`, `checkDependencies`, `mount`, `getInstalledPackages`, `getServiceManifest` | Inter-service dependency management |
+| **Health**       | `setHealth`                                                                                                      | Report health check results         |
+| **Subcontainer** | `createFs`, `destroyFs`                                                                                          | Container filesystem management     |
+| **Networking**   | `bind`, `getServicePortForward`, `clearBindings`, `getHostInfo`, `getOsIp`, `getOutboundGateway`                 | Port binding and network info       |
+| **Interfaces**   | `exportServiceInterface`, `getServiceInterface`, `listServiceInterfaces`, `clearServiceInterfaces`               | Service endpoint management         |
+| **Plugin**       | `plugin.url.register`, `plugin.url.exportUrl`, `plugin.url.clearUrls`                                            | Plugin system hooks                 |
+| **SSL**          | `getSslCertificate`, `getSslKey`                                                                                 | TLS certificate management          |
+| **System**       | `getSystemSmtp`, `setDataVersion`, `getDataVersion`                                                              | System-wide configuration           |
 
 Effects also support reactive callbacks: many methods accept an optional `callback` parameter that the runtime invokes when the underlying value changes, enabling the reactive subscription patterns (`const()`, `watch()`, etc.).
 
@@ -187,7 +187,7 @@ Utility modules including:
 **Reactive subscription wrappers** — Each wraps an Effects callback-based method into a consistent reactive API:
 
 - `Watchable<A>` — Base class providing `const()`, `once()`, `watch()`, `onChange()`, `waitFor()`; `MappedWatchable<Raw, Mapped>` adds a `map` over a raw value; `Watchable.from` and `Watchable.combine` build readers from `WatchSource`s
-- `GetContainerIp`, `GetStatus`, `GetSystemSmtp`, `GetOutboundGateway`, `GetSslCertificate`, `GetHostInfo`, `GetServiceManifest` — Typed wrappers for specific Effects methods
+- `GetStatus`, `GetSystemSmtp`, `GetOutboundGateway`, `GetSslCertificate`, `GetHostInfo`, `GetServiceManifest` — Typed wrappers for specific Effects methods
 
 **General utilities:**
 
@@ -225,7 +225,7 @@ The `.build()` method returns an object containing the entire SDK surface area, 
 | **Containers**   | `SubContainer.of`, `SubContainer.withTemp`, `Mounts.of`                                                                             | Container execution with mounts                   |
 | **Forms**        | `InputSpec.of`, `Value`, `Variants`, `List`                                                                                         | Form input builders                               |
 | **Triggers**     | `trigger.defaultTrigger`, `.cooldownTrigger`, `.statusTrigger`, `.onceTrigger`                                                      | Health check polling strategies                   |
-| **Reactive**     | `getContainerIp`, `getStatus`, `getSystemSmtp`, `getOutboundGateway`, `getSslCertificate`, `getServiceManifest`                     | Subscription-based data access                    |
+| **Reactive**     | `getStatus`, `getSystemSmtp`, `getOutboundGateway`, `getSslCertificate`, `getServiceManifest`                                       | Subscription-based data access                    |
 | **Plugins**      | `plugin.url.register`, `plugin.url.exportUrl`                                                                                       | Plugin system (gated by manifest `plugins` field) |
 | **Effects**      | `restart`, `shutdown`, `setHealth`, `mount`, `clearBindings`, ...                                                                   | Direct effect wrappers                            |
 | **Utilities**    | `nullIfEmpty`, `useEntrypoint`, `patterns`, `setDataVersion`, `getDataVersion`                                                      | Misc helpers                                      |
