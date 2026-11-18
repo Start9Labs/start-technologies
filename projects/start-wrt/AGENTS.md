@@ -300,8 +300,9 @@ and retain their selected `PROFILE`.
 
 `make start-wrt-ca-test` checks the built image's certificate stores: they must exclude
 emSign ECC Root CA - G3 and keep ISRG Root X1. It needs a completed `make start-wrt-image`
-and OpenSSL; image CI runs it after the build. `STARTWRT_CA_ROOTFS` selects an unpacked
-image root for artifact verification.
+and OpenSSL; image CI runs it after the build. A failed incremental build can leave the
+previous rootfs; the check verifies its certificates, not image freshness.
+`STARTWRT_CA_ROOTFS` selects an unpacked image root for artifact verification.
 
 The OpenWrt image build needs a consistent environment — Docker is recommended; native builds
 on some distros fail silently.

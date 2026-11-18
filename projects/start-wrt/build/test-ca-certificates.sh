@@ -6,6 +6,7 @@ shopt -s nullglob
 if [ -n "${STARTWRT_CA_ROOTFS:-}" ]; then
     ROOTFS=("$STARTWRT_CA_ROOTFS")
 else
+    # A retained rootfs can belong to an earlier successful build.
     ROOTFS=("$ROOT"/projects/start-wrt/openwrt/build_dir/target-*/root-*)
 fi
 [ "${#ROOTFS[@]}" -eq 1 ] && [ -d "${ROOTFS[0]}" ] || {
