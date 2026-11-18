@@ -173,6 +173,7 @@ export async function mountBackupTarget(
 export const DEFAULT_OPTIONS: T.SyncOptions = {
   delete: true,
   exclude: [],
+  deleteExcluded: false,
 }
 /**
  * Default progress weight of each rsync sync phase. rsync dominates a backup's
@@ -1105,6 +1106,26 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
   }
 }
 
+export function rsyncArgs(
+  srcPath: string,
+  dstPath: string,
+  options: T.SyncOptions,
+) {
+  return [
+    ...(options.delete ? ['--delete'] : []),
+    ...(options.deleteExcluded ? ['--delete-excluded'] : []),
+    ...options.exclude.map(x => `--exclude=${x}`),
+    '-rlptgoAXH',
+    '--partial',
+    '--inplace',
+    '--timeout=300',
+    '--info=progress2',
+    // --no-inc-recursive's full pre-scan times out large backups.
+    srcPath,
+    dstPath,
+  ]
+}
+
 async function runRsync(rsyncOptions: {
   srcPath: string
   dstPath: string
@@ -1118,23 +1139,11 @@ async function runRsync(rsyncOptions: {
 
   await fs.mkdir(dstPath, { recursive: true })
 
-  const command = 'rsync'
-  const args: string[] = []
-  if (options.delete) {
-    args.push('--delete')
-  }
-  for (const exclude of options.exclude) {
-    args.push(`--exclude=${exclude}`)
-  }
-  args.push('-rlptgoAXH')
-  args.push('--partial')
-  args.push('--inplace')
-  args.push('--timeout=300')
-  args.push('--info=progress2')
-  // --no-inc-recursive's full pre-scan times out large backups.
-  args.push(srcPath)
-  args.push(dstPath)
-  const spawned = child_process.spawn(command, args, { detached: true })
+  const spawned = child_process.spawn(
+    'rsync',
+    rsyncArgs(srcPath, dstPath, options),
+    { detached: true },
+  )
   let percentage = 0.0
   spawned.stdout.on('data', (data: unknown) => {
     const lines = String(data).replace(/\r/g, '\n').split('\n')

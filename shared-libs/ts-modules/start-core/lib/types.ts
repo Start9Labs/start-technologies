@@ -180,6 +180,8 @@ export type SyncOptions = {
   delete: boolean
   /** do not sync files with paths that match these patterns */
   exclude: string[]
+  /** also delete excluded paths from the target directory; implies `delete` */
+  deleteExcluded?: boolean
 }
 
 /**
