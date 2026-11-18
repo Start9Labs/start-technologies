@@ -1,5 +1,9 @@
 import { Component, input } from '@angular/core'
-import { LocalizePipe, MarkdownPipe } from '@start9labs/shared'
+import {
+  LocalizePipe,
+  MarkdownPipe,
+  SafeLinksDirective,
+} from '@start9labs/shared'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { MarketplacePkgBase } from '../types'
@@ -9,6 +13,8 @@ import { MarketplacePkgBase } from '../types'
   template: `
     <header tuiHeader>New in {{ pkg().version }}</header>
     <div
+      class="g-markdown"
+      safeLinks
       [innerHTML]="
         pkg().releaseNotes
           | localize: pkg().defaultLocale
@@ -18,14 +24,18 @@ import { MarketplacePkgBase } from '../types'
     ></div>
   `,
   styles: `
-    :host {
-      max-block-size: 30rem;
-      scrollbar-width: none;
-      overflow: auto;
+    .g-markdown {
+      overflow-wrap: anywhere;
     }
   `,
   hostDirectives: [TuiCardLarge],
-  imports: [NgDompurifyPipe, MarkdownPipe, LocalizePipe, TuiHeader],
+  imports: [
+    NgDompurifyPipe,
+    MarkdownPipe,
+    LocalizePipe,
+    SafeLinksDirective,
+    TuiHeader,
+  ],
 })
 export class MarketplaceReleaseNotesComponent {
   readonly pkg = input.required<MarketplacePkgBase>()
