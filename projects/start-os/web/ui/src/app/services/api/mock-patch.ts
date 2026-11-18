@@ -58,7 +58,11 @@ function mockProxyService(
     ...service,
     stateInfo: {
       ...service.stateInfo,
-      manifest: { ...service.stateInfo.manifest, plugins: ['http-proxy-v0'] },
+      manifest: {
+        ...service.stateInfo.manifest,
+        defaultLocale: 'en_US',
+        plugins: ['http-proxy-v0'],
+      },
     },
     plugin: { url: null, httpProxy: { profiles } },
   }
@@ -733,7 +737,11 @@ export const mockPatchData: DataModel = {
       { id: 'standard', name: 'Standard protection', protocols: ['http1'] },
     ]),
     coraza: mockProxyService('coraza', 'Coraza WAF', [
-      { id: 'edge', name: 'Edge protection', protocols: ['http1', 'http2'] },
+      {
+        id: 'edge',
+        name: { de_DE: 'Randschutz', en_US: 'Edge protection' },
+        protocols: ['http1', 'http2'],
+      },
       {
         id: 'application',
         name: 'Application protection',

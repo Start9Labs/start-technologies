@@ -38,6 +38,8 @@ loadTypeScript(
     ['src/app/utils/acme', 'export const toAuthorityName=()=>""'],
   ]),
 )
+const { localizeFor } =
+  await import('../../../../../shared-libs/ts-modules/shared/src/i18n/localize.ts')
 const { TaskService } = await import('@start9labs/shared')
 const { setContext } = await import('@taiga-ui/polymorpheus')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
@@ -157,6 +159,70 @@ test('a gateway draft survives sibling policy and provider status updates', t =>
   packages.next(changed)
   assert.deepEqual(instance.draft().chain, [stage('external')])
   assert.equal(instance.dirty(), false)
+})
+
+test('profile labels follow the installed provider locale through an update', t => {
+  const { instance, packages } = dialog(t)
+  const manifest = {
+    id: 'waf',
+    title: 'Installed WAF',
+    plugins: ['http-proxy-v0'],
+    defaultLocale: 'en_US',
+  }
+  const provider = {
+    stateInfo: { state: 'installed', manifest },
+    plugin: {
+      httpProxy: {
+        profiles: [
+          {
+            id: 'edge',
+            name: { de_DE: 'Schutz', en_US: 'Protection' },
+            protocols: ['http1'],
+          },
+        ],
+      },
+    },
+  }
+  packages.next({ ...packages.value, waf: provider })
+  const choice = () => instance.profiles().get(instance.key(stage('edge')))
+  const label = lang => {
+    const profile = choice()
+    return localizeFor(profile.name, lang, profile.defaultLocale)
+  }
+  assert.equal(label('fr_FR'), 'Protection')
+  assert.equal(label('de_DE'), 'Schutz')
+  assert.equal(choice().packageName, 'Installed WAF')
+
+  const newManifest = {
+    ...manifest,
+    title: 'Updated WAF',
+    defaultLocale: 'de_DE',
+  }
+  packages.next({
+    ...packages.value,
+    waf: {
+      ...provider,
+      stateInfo: {
+        state: 'updating',
+        manifest,
+        installingInfo: { newManifest },
+      },
+    },
+  })
+  assert.equal(choice().defaultLocale, 'en_US')
+  assert.equal(choice().packageName, 'Installed WAF')
+  assert.equal(label('fr_FR'), 'Protection')
+
+  packages.next({
+    ...packages.value,
+    waf: {
+      ...provider,
+      stateInfo: { state: 'installed', manifest: newManifest },
+    },
+  })
+  assert.equal(choice().packageName, 'Updated WAF')
+  assert.equal(label('fr_FR'), 'Schutz')
+  assert.equal(label('en_GB'), 'Protection')
 })
 
 test('saving submits only the selected gateway and its public-only intent', async t => {
