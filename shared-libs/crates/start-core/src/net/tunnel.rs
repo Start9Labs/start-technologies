@@ -369,11 +369,8 @@ pub struct UpdateTunnelParams {
 rpc_toolkit::reflect_ts!(UpdateTunnelParams);
 rpc_toolkit::ts_export!(UpdateTunnelParams, namespaces = [""]);
 
-/// Replace the WireGuard config behind an existing gateway interface in place,
-/// keeping the gateway id and everything keyed to it (forwards, private/public
-/// domains). Used to re-issue a config — e.g. one that now carries a `DNS =`
-/// line. Applied via D-Bus Update2 + Device.Reapply, so the wg device is never
-/// torn down and the gateway (and the request riding its tunnel) survives.
+/// Preserves the gateway id, port forwards, and domains across config updates.
+/// MTU changes reconnect the gateway; other changes keep its connection active.
 pub async fn update_tunnel(
     ctx: RpcContext,
     UpdateTunnelParams { id, config }: UpdateTunnelParams,

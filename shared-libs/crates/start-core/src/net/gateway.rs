@@ -558,9 +558,7 @@ impl WgConfig {
         Ok(settings)
     }
 
-    /// Whether applying this config to a device running the applied settings
-    /// needs a reactivation. NetworkManager rejects a Reapply that changes
-    /// `wireguard.mtu`.
+    /// NetworkManager cannot Reapply a WireGuard MTU change.
     fn needs_reactivation(
         &self,
         applied: &HashMap<String, HashMap<String, OwnedValue>>,
@@ -569,11 +567,9 @@ impl WgConfig {
     }
 }
 
-/// Apply a re-issued WireGuard config to `interface`'s existing NM connection
-/// via D-Bus Update2 + Device.Reapply, which keeps the tunnel — and the request
-/// that triggered the update, when it rides this same tunnel — up. A config
-/// that changes the MTU reactivates the connection instead, briefly taking the
-/// tunnel down.
+/// Replaces the saved profile and applies it to the live gateway.
+/// MTU changes reconnect the gateway and wait for activation to finish.
+/// Other changes preserve the active connection.
 pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Result<(), Error> {
     let parsed = WgConfig::parse(config)?;
 
@@ -586,7 +582,7 @@ pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Re
             ErrorKind::NotFound,
         ));
     }
-    let device_proxy = DeviceProxy::new(&connection, device.clone()).await?;
+    let device_proxy = DeviceProxy::new(&connection, device).await?;
     let ac = device_proxy.active_connection().await?;
     if &*ac == "/" {
         return Err(Error::new(
@@ -595,8 +591,7 @@ pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Re
         ));
     }
     let ac_proxy = active_connection::ActiveConnectionProxy::new(&connection, ac).await?;
-    let settings_path = ac_proxy.connection().await?;
-    let settings = ConnectionSettingsProxy::new(&connection, settings_path.clone()).await?;
+    let settings = ConnectionSettingsProxy::new(&connection, ac_proxy.connection().await?).await?;
 
     // Preserve the connection's uuid so this updates the existing profile rather
     // than defining a new one.
@@ -622,9 +617,14 @@ pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Re
         .await?;
     let (applied, _) = device_proxy.get_applied_connection(0).await?;
     if parsed.needs_reactivation(&applied)? {
-        let root = zbus::zvariant::ObjectPath::try_from("/").with_kind(ErrorKind::Network)?;
-        netman
-            .activate_connection(&settings_path, &device, &root)
+        Command::new("nmcli")
+            .arg("connection")
+            .arg("up")
+            .arg("uuid")
+            .arg(&uuid)
+            .arg("ifname")
+            .arg(interface)
+            .invoke(ErrorKind::Network)
             .await?;
         return Ok(());
     }
@@ -1265,14 +1265,6 @@ trait NetworkManager {
         device: &zbus::zvariant::ObjectPath<'_>,
         specific_object: &zbus::zvariant::ObjectPath<'_>,
     ) -> Result<(OwnedObjectPath, OwnedObjectPath), Error>;
-
-    /// Activate a saved connection, deactivating it first when it is already active.
-    fn activate_connection(
-        &self,
-        connection: &zbus::zvariant::ObjectPath<'_>,
-        device: &zbus::zvariant::ObjectPath<'_>,
-        specific_object: &zbus::zvariant::ObjectPath<'_>,
-    ) -> Result<OwnedObjectPath, Error>;
 
     #[zbus(property)]
     fn all_devices(&self) -> Result<Vec<OwnedObjectPath>, Error>;
