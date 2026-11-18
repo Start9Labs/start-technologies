@@ -152,6 +152,25 @@ make start-os-deb               # Debian package (start-os-squashfs for the squa
 
 `make start-core-ts-bindings` regenerates the TS bindings from the Rust types (see [Cross-layer changes](#cross-layer-changes)).
 
+#### Kernel backport packages
+
+`make start-os-kernel-backports KERNEL_DEB_ARCH=amd64` (or `arm64`) builds the
+signed-kernel bridge into `results/kernel-backports/<arch>/<version>/`, using the
+existing Debian compatibility container. `kernel-backports.conf` under
+`build/image-recipe/` owns its pin and compiler dependency. Run
+`make start-os-kernel-backports-test` for its focused metadata/payload tests.
+
+Retire the bridge when official trixie-backports provides a patched signed kernel
+and usable matching headers/compiler dependencies. Remove its image-recipe
+invocation, pin/repackaging helpers and kernel-package artifact upload, restoring
+normal backports selection. Keep the family-wide backports preferences and
+metadata-based kbuild selection. The bridge version sorts below the corresponding
+official backport; never mix its forky ABI with backports modules or headers.
+Signed kernel/module payload bytes and Debian signatures must survive
+repackaging. Header compiler selectors may change with their package checksums;
+the kernel ABI and configuration stay intact. Rebuilding or locally signing the
+kernel is not this bridge's contract.
+
 #### Deploying to a device
 
 These targets push to a **live device** and are slow/destructive — be deliberate. For devices on the same network:

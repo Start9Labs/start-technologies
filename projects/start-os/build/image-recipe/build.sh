@@ -128,6 +128,17 @@ mkdir -p config/packages.chroot/
 cp $RESULTS_DIR/$IMAGE_BASENAME.deb config/packages.chroot/
 dpkg-name config/packages.chroot/*.deb
 
+case "$IB_SUITE:${IB_TARGET_PLATFORM%%-*}" in
+    trixie:x86_64|trixie:aarch64)
+        source "$SOURCE_DIR/kernel-backports.conf"
+        KERNEL_ARCHIVE="$RESULTS_DIR/kernel-backports/$IB_TARGET_ARCH"
+        "$SOURCE_DIR/build-kernel-backports.sh" "$IB_TARGET_ARCH" "$KERNEL_ARCHIVE"
+        mkdir -p config/archives
+        printf 'deb [trusted=yes] file://%s ./\n' "$KERNEL_ARCHIVE/$KERNEL_BACKPORT_VERSION" \
+            > config/archives/kernel-backports.list.chroot
+        ;;
+esac
+
 mkdir -p config/includes.chroot/etc
 echo start > config/includes.chroot/etc/hostname
 cat > config/includes.chroot/etc/hosts << EOT
@@ -233,7 +244,7 @@ Pin-Priority: -1
 EOF
 else
 cat > config/archives/backports.pref <<-EOF
-Package: linux-image-* linux-headers-* linux-base *nvidia*
+Package: linux-image-* linux-headers-* linux-base* linux-binary-* linux-modules-* linux-kbuild-* *nvidia*
 Pin: release n=${IB_SUITE}-backports
 Pin-Priority: 500
 EOF
@@ -363,13 +374,14 @@ if [ "${NVIDIA}" = "1" ]; then
     echo "[nvidia-hook] Removed build dependencies." >&2
 fi
 
-# Install linux-kbuild for sign-file (Secure Boot module signing)
 KVER_ALL="\$(ls -1t /boot/vmlinuz-* 2>/dev/null | head -n1 | sed 's|.*/vmlinuz-||')"
 if [ -n "\${KVER_ALL}" ]; then
-    KBUILD_VER="\$(echo "\${KVER_ALL}" | grep -oP '^\d+\.\d+')"
-    if [ -n "\${KBUILD_VER}" ]; then
-        echo "[build] Installing linux-kbuild-\${KBUILD_VER} for Secure Boot support" >&2
-        apt-get install -y "linux-kbuild-\${KBUILD_VER}" || echo "[build] WARNING: linux-kbuild-\${KBUILD_VER} not available" >&2
+    KBUILD_PACKAGE="\$(apt-cache depends "linux-headers-\${KVER_ALL}" 2>/dev/null | awk '/Depends: linux-kbuild-/ { print \$2; exit }')"
+    if [ -n "\${KBUILD_PACKAGE}" ]; then
+        echo "[build] Installing \${KBUILD_PACKAGE} for Secure Boot support" >&2
+        apt-get install -y "\${KBUILD_PACKAGE}" || echo "[build] WARNING: \${KBUILD_PACKAGE} not available" >&2
+    else
+        echo "[build] WARNING: no kbuild dependency found for linux-headers-\${KVER_ALL}" >&2
     fi
 fi
 
@@ -428,6 +440,9 @@ else
 	exit $EXIT
 fi
 retry lb chroot
+if [ -f config/archives/kernel-backports.list.chroot ]; then
+    "$SOURCE_DIR/verify-kernel-backports.sh" chroot "$IB_TARGET_ARCH"
+fi
 
 # riscv64 binaries target RVA23, which the build host may lack.
 RUN_TARGET=()
