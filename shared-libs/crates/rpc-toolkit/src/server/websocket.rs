@@ -257,7 +257,8 @@ impl<C: Context> WebSocketServer<C> {
                     );
                     let _ = connection.run().await;
                 });
-            HttpServer::<C>::finish_http_response(&context, &mut middleware, &mut response).await;
+            HttpServer::<C>::finish_http_response(&context, middleware.iter_mut(), &mut response)
+                .await;
             response
         }
         .boxed()

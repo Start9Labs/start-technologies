@@ -31,6 +31,38 @@ struct Fixture {
     closed: watch::Sender<bool>,
 }
 
+#[derive(Clone)]
+struct ResponseContextProbe {
+    closed: watch::Receiver<bool>,
+    callbacks: Arc<AtomicUsize>,
+}
+impl ResponseContextProbe {
+    fn record(&self) {
+        assert!(
+            !*self.closed.borrow(),
+            "response middleware used a closed context"
+        );
+        self.callbacks.fetch_add(1, Ordering::SeqCst);
+    }
+}
+impl rpc_toolkit::Middleware<RegistryContext> for ResponseContextProbe {
+    type Metadata = Empty;
+    async fn process_rpc_response(
+        &mut self,
+        _: &RegistryContext,
+        _: &mut rpc_toolkit::RpcResponse,
+    ) {
+        self.record();
+    }
+    async fn process_http_response(
+        &mut self,
+        _: &RegistryContext,
+        _: &mut axum::response::Response,
+    ) {
+        self.record();
+    }
+}
+
 async fn fixture() -> Fixture {
     let (directory, context, signer, _, _) = crate::registry::tests::fixture().await;
     let (send, requests) = oneshot::channel();
@@ -100,14 +132,25 @@ async fn fixture() -> Fixture {
         .no_cli()
         .no_ts()
     };
+    let callbacks = Arc::new(AtomicUsize::new(0));
+    let response_probe = ResponseContextProbe {
+        closed: closed.subscribe(),
+        callbacks: callbacks.clone(),
+    };
     let rpc = Server::new(
         move || futures::future::ready(Ok(context.clone())),
         ParentHandler::new()
             .subcommand("wait", wait_handler)
             .subcommand("hold", producer)
-            .subcommand("late", late_handler),
+            .subcommand("late", late_handler)
+            .subcommand(
+                "ping",
+                from_fn_async(|_: HandlerArgs<RegistryContext>| async { Ok::<_, Error>(()) })
+                    .no_cli()
+                    .no_ts(),
+            ),
     )
-    .for_http();
+    .middleware(response_probe);
     let upgrades = Arc::new(AtomicUsize::new(0));
     let observed = upgrades.clone();
     let app = Router::new()
@@ -125,7 +168,7 @@ async fn fixture() -> Fixture {
     let url = format!("http://{}/", listener.local_addr().unwrap())
         .parse()
         .unwrap();
-    Fixture {
+    let fixture = Fixture {
         _directory: directory,
         server: WebServer::new(Acceptor::new(listener), app),
         url,
@@ -139,7 +182,19 @@ async fn fixture() -> Fixture {
         cleanup_started,
         cleanup_release,
         closed,
-    }
+    };
+    let response = within(
+        reqwest::Client::new()
+            .post(fixture.url.join("rpc/v1").unwrap())
+            .json(&serde_json::json!({"jsonrpc":"2.0","id":0,"method":"ping","params":{}}))
+            .send(),
+    )
+    .await
+    .unwrap();
+    let response = within(response.json::<serde_json::Value>()).await.unwrap();
+    assert_eq!(response.get("result"), Some(&serde_json::Value::Null));
+    assert_eq!(callbacks.load(Ordering::SeqCst), 2);
+    fixture
 }
 
 fn teardown(

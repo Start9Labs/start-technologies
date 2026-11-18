@@ -88,6 +88,8 @@ Transports wrap a `Server`:
   gets its own scope. MCP carries that owner across its transport task boundary.
   Quiescence closes admission, destroys active producers, and waits for running blocking
   callbacks. `preserve_request_reply` releases only passive completion/reply work.
+  Response middleware requires independent producer admission; already-built replies
+  remain deliverable when teardown skips their remaining metadata/header callbacks.
   HTTP body relays share the application's task owner and remain cancellable under
   transport backpressure. See
   [the WebSocket guide](docs/websocket.md) for wire and lifecycle semantics.

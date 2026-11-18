@@ -70,6 +70,13 @@ impl RequestTasks {
         REQUEST.try_with(|scope| scope.owner.clone()).ok()
     }
 
+    pub(crate) async fn run_current<F: Future>(future: F) -> Option<F::Output> {
+        match Self::current() {
+            Some(owner) => owner.run(future).await,
+            None => Some(future.await),
+        }
+    }
+
     /// Registers before polling; refused futures are destroyed outside the admission lock.
     pub fn run<F: Future>(&self, future: F) -> impl Future<Output = Option<F::Output>> {
         let scope = {

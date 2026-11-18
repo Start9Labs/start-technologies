@@ -85,6 +85,8 @@ pub fn json_http_response<T: Serialize>(t: &T) -> Response {
         .unwrap_or_else(|_| fallback_rpc_error_response())
 }
 
+/// Response callbacks obey producer admission and may be skipped during teardown.
+/// Already-built replies remain deliverable without their metadata or headers.
 pub trait Middleware<Context: Send + 'static>: Clone + Send + Sync + 'static {
     type Metadata: DeserializeOwned + Send + 'static;
     #[allow(unused_variables)]
@@ -289,14 +291,17 @@ impl<Context: crate::Context> HttpServer<Context> {
         let body = buffer_request_body(req, limit).await?;
         Ok((ctx, mid, body))
     }
-    pub(crate) async fn finish_http_response(
+    pub(crate) async fn finish_http_response<'a>(
         ctx: &Context,
-        mid: &mut Vector<DynMiddleware<Context>>,
+        mid: impl Iterator<Item = &'a mut DynMiddleware<Context>> + Send,
         res: &mut Response,
     ) {
-        for middleware in mid.iter_mut() {
-            middleware.process_http_response(ctx, res).await;
-        }
+        let _ = super::requests::RequestTasks::run_current(async {
+            for middleware in mid {
+                middleware.process_http_response(ctx, res).await;
+            }
+        })
+        .await;
     }
     async fn process_http_request(&self, mut req: Request) -> Response {
         let (ctx, mut mid, body) = match self.begin_http_request(&mut req).await {
@@ -317,7 +322,7 @@ impl<Context: crate::Context> HttpServer<Context> {
                             .process_rpc_request_with_stream(&ctx, mid, rpc_req, None)
                             .await,
                     );
-                    Self::finish_http_response(&ctx, mid, &mut res).await;
+                    Self::finish_http_response(&ctx, mid.iter_mut(), &mut res).await;
                     Ok::<_, RpcError>(res)
                 }
                 SingleOrBatchRpcRequest::Batch(rpc_reqs) => {
@@ -345,9 +350,7 @@ impl<Context: crate::Context> HttpServer<Context> {
                             acc
                         },
                     ) {
-                        for middleware in batch_mid.iter_mut() {
-                            middleware.process_http_response(&ctx, &mut res).await;
-                        }
+                        Self::finish_http_response(&ctx, batch_mid.iter_mut(), &mut res).await;
                     }
                     Ok(res)
                 }
@@ -368,15 +371,15 @@ impl<Context: crate::Context> HttpServer<Context> {
     ) -> RpcResponse {
         let id = req.id.clone();
         let operation = self.process_rpc_request_inner(ctx, mid, req, rpc_stream);
-        match super::requests::RequestTasks::current() {
-            Some(tasks) => tasks.run(operation).await.unwrap_or_else(|| {
+        super::requests::RequestTasks::run_current(operation)
+            .await
+            .unwrap_or_else(|| {
+                let tasks = super::requests::RequestTasks::current().expect("request owner");
                 RpcResponse::new(
                     id,
                     Err(tasks.rejection().expect("request admission closed")),
                 )
-            }),
-            None => operation.await,
-        }
+            })
     }
 
     async fn process_rpc_request_inner(
@@ -420,9 +423,12 @@ impl<Context: crate::Context> HttpServer<Context> {
                 .await
         }
         .await;
-        for middleware in mid.iter_mut() {
-            middleware.process_rpc_response(ctx, &mut res).await;
-        }
+        let _ = super::requests::RequestTasks::run_current(async {
+            for middleware in mid.iter_mut() {
+                middleware.process_rpc_response(ctx, &mut res).await;
+            }
+        })
+        .await;
         res.id = id;
         res
     }

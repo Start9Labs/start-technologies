@@ -252,7 +252,7 @@ impl<Context: crate::Context> McpService<Context> {
             let Ok::<_, Infallible>(res) = this.inner.clone().call(req).await;
             let mut res = res.map(Body::new);
             let mut middleware = state.middleware.lock().await;
-            HttpServer::finish_http_response(&state.context, &mut middleware, &mut res).await;
+            HttpServer::finish_http_response(&state.context, middleware.iter_mut(), &mut res).await;
             res
         }
         .boxed()
