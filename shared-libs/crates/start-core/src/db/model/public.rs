@@ -70,6 +70,7 @@ impl Public {
             server_info: ServerInfo {
                 id: account.server_id.clone(),
                 version: Current::default().semver(),
+                git_hash: crate::version::commit_hash().into(),
                 hostname: (*account.hostname).clone(),
                 last_backup: None,
                 package_version_compat: Current::default().compat().clone(),
@@ -175,6 +176,9 @@ pub struct ServerInfo {
     pub id: String,
     pub hostname: InternedString,
     pub version: Version,
+    /// Commit of the running StartOS build, rewritten on every boot.
+    #[serde(default)]
+    pub git_hash: InternedString,
     pub package_version_compat: VersionRange,
     #[visit(ts(type = "z.record(z.string(), z.unknown())"))]
     pub post_init_migration_todos: BTreeMap<Version, Value>,

@@ -85,7 +85,7 @@ pub fn check_enrolled(
 
 /// Admission capabilities independent of enrolled authorization or database availability.
 pub trait SignatureAuthContext: Context + SessionContext {
-    fn server_identity(&self) -> Result<Signer, Error>;
+    fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error>;
     /// Acquires admission replay policy without retaining the authentication owner.
     fn replay_check(&self) -> RequestReplayCheck;
     fn with_secure_session(self, session: crate::middleware::auth::session::SecureSession) -> Self
@@ -199,8 +199,8 @@ impl HasUnenrolledKeys {
 }
 
 impl SignatureAuthContext for RpcContext {
-    fn server_identity(&self) -> Result<Signer, Error> {
-        RpcContext::server_identity(self)
+    fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error> {
+        RpcContext::server_identity(self).map(Into::into)
     }
     fn replay_check(&self) -> RequestReplayCheck {
         RpcContext::replay_check(self)

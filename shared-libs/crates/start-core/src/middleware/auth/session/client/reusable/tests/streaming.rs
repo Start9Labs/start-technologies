@@ -16,7 +16,7 @@ async fn encrypted_streams_deliver_typed_terminals_and_cancel_pending_initializa
         let pending = pending_seen.clone();
         let canceled = canceled_seen.clone();
         async move { upgrade.on_upgrade(move |socket| async move {
-            let (_, _, mut socket) = EncryptedSocket::accept(Box::new(socket), &key, &["server.test".into()], NonZeroUsize::new(1024 * 1024).unwrap(), &Target::Rpc, None, |_| async { Ok(()) }).await.unwrap();
+            let (_, _, mut socket) = EncryptedSocket::accept(Box::new(socket), &key.into(), &["server.test".into()], NonZeroUsize::new(1024 * 1024).unwrap(), &Target::Rpc, None, |_| async { Ok(()) }).await.unwrap();
             for step in 0..4 {
                 let body = socket.next().await.unwrap().unwrap().into_text().unwrap();
                 let request: serde_json::Value = serde_json::from_str(&body).unwrap();

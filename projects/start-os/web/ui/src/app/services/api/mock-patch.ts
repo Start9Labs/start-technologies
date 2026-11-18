@@ -383,6 +383,7 @@ export const mockPatchData: DataModel = {
         ),
     },
     version,
+    gitHash: '',
     lastBackup: new Date(new Date().valueOf() - 604800001).toISOString(),
     network: {
       wifi: {

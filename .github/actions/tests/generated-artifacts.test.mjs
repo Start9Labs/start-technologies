@@ -12,6 +12,12 @@ function copy(f, path) {
   return f.write(path, readFileSync(join(REPO, path)))
 }
 
+const profileFlags = args =>
+  args.filter(
+    (arg, i) =>
+      arg === '--release' || arg === '--profile' || args[i - 1] === '--profile',
+  )
+
 function executable(f, path, source) {
   chmodSync(f.write(path, `#!/bin/bash\nset -eu\n${source}`), 0o755)
 }
@@ -21,6 +27,7 @@ function builderScripts(t, scripts) {
   const f = fixture(t)
   for (const path of [
     'build/builder-alias.sh',
+    'build/rust-build-profile.sh',
     'build/rust-builder/image.sh',
     'build/rust-builder/repository',
     'build/rust-builder/reference',
@@ -59,17 +66,17 @@ test('the bindings generator uses the generated profile and preserves explicit b
     `${core}/build/generator-env.sh`,
     `${core}/build/build-ts.sh`,
   ])
-  for (const [profile, expected, environment] of [
-    [undefined, 'generated', 'dev-unstable'],
-    ['debug', 'dev', 'dev-unstable'],
-    ['dev', 'dev', 'dev-console-unstable'],
-    ['release', 'release', 'dev-unstable'],
-    ['generated', 'generated', 'dev-unstable'],
-    ['bindings', 'bindings', 'dev-unstable'],
-    ['unknown', 'dev', 'dev-unstable'],
+  for (const [profile, flags, environment] of [
+    [undefined, ['--profile', 'generated'], 'dev-unstable'],
+    ['debug', [], 'dev-unstable'],
+    ['dev', [], 'dev-console-unstable'],
+    ['release', ['--release'], 'dev-unstable'],
+    ['generated', ['--profile', 'generated'], 'dev-unstable'],
+    ['bindings', ['--profile', 'bindings'], 'dev-unstable'],
+    ['unknown', [], 'dev-unstable'],
   ]) {
     const [args] = run(`${core}/build/build-ts.sh`, profile, environment)
-    assert.equal(args[args.indexOf('--profile') + 1], expected)
+    assert.deepEqual(profileFlags(args), flags)
     assert.ok(args.includes(builderImage))
     assert.ok(args.includes('PKG_CONFIG_SYSROOT_DIR=/opt/sysroot/aarch64'))
     assert.ok(
@@ -127,15 +134,7 @@ test('man pages build with exactly the unit-test harness settings, so the test b
         conversion.at(-1),
       )
       assert.deepEqual(shared.slice(0, 2), ['cargo', 'test'])
-      assert.deepEqual(
-        shared.filter(
-          (arg, i) =>
-            arg === '--release' ||
-            arg === '--profile' ||
-            shared[i - 1] === '--profile',
-        ),
-        flags,
-      )
+      assert.deepEqual(profileFlags(shared), flags)
       assert.ok(
         shared.includes(
           `--features=test,ts,${environment.replaceAll('-', ',')}`,

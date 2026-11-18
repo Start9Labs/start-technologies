@@ -14,11 +14,11 @@ unset RUST_BUILDER_IMAGE FMT_NATIVE RISCV_OBJDUMP
 
 cat > "$scratch/bin/docker" <<'MOCK'
 #!/bin/bash
-printf '%s\n' '---' "$@" >> "$DOCKER_LOG"
+printf '%s\n' '---' "$@" "Parent profile: ${PROFILE-}" >> "$DOCKER_LOG"
 if [[ "$*" == *'/verify/binary'* ]]; then
     printf '00000000 <probe>:\n    0: addi a0, a0, 1\n'
 fi
-if [[ "$*" == *' cargo run '* ]]; then
+if [[ "$*" == *' cargo run '* || "$*" == *' cargo zigbuild '* ]]; then
     exit "${MOCK_CARGO_EXIT:-0}"
 fi
 MOCK
@@ -43,6 +43,30 @@ assert_log_contains() {
         exit 1
     fi
 }
+
+assert_profile_warning() {
+    local warning="Unknown profile $1: falling back to debug..."
+    if [[ "$1" == unknown-profile ]]; then
+        test "$(grep -cFx -- "$warning" "$2")" = 1
+    elif grep -Fq 'Unknown profile' "$2"; then
+        printf 'Unexpected profile warning for profile %s\n' "$1" >&2
+        exit 1
+    fi
+}
+
+(
+    source ./build/rust-build-profile.sh
+    for rule in set_build_profile set_test_profile set_generated_profile; do
+        for profile in 'release debug' 'release dev'; do
+            PROFILE=$profile
+            BUILD_FLAGS=(--release)
+            "$rule" 2> "$scratch/profile.stderr"
+            test "$PROFILE" = debug
+            test "${#BUILD_FLAGS[@]}" = 0
+            test "$(<"$scratch/profile.stderr")" = "Unknown profile $profile: falling back to debug..."
+        done
+    done
+)
 
 entrypoint="$repo_root/build/rust-builder/entrypoint.sh"
 profile_flags=CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS
@@ -121,6 +145,53 @@ else
 fi
 assert_log_contains chown
 
+for builder in \
+    'build/build-rust-bins.sh start-os:startbox' \
+    projects/start-cli/build/build-cli.sh \
+    projects/start-os/backup-fs/build-backup-fs.sh \
+    shared-libs/crates/pi-beep/build-pi-beep.sh \
+    projects/start-wrt/build/build-rust.sh; do
+    read -ra command <<<"$builder"
+    for profile in '' release debug unknown-profile; do
+        : > "$DOCKER_LOG"
+        status=0
+        PROFILE="$profile" BUILD_FLAGS=--release ARCH=x86_64 MOCK_CARGO_EXIT=19 \
+            bash "${command[@]}" > "$scratch/build.stdout" 2> "$scratch/build.stderr" || status=$?
+        test "$status" = 19
+        if [[ -z "$profile" || "$profile" == release ]]; then
+            assert_log_contains --release
+            assert_log_contains 'Parent profile: release'
+        else
+            if grep -Fxq -- --release "$DOCKER_LOG"; then
+                printf 'Unexpected release flag for %s (profile %s)\n' "$builder" "$profile" >&2
+                exit 1
+            fi
+            assert_log_contains 'Parent profile: debug'
+        fi
+        assert_profile_warning "$profile" "$scratch/build.stderr"
+    done
+done
+
+for profile in '' unit-test release dev debug unknown-profile; do
+    : > "$DOCKER_LOG"
+    PROFILE="$profile" BUILD_FLAGS=--release bash projects/start-wrt/build/run-tests.sh \
+        > "$scratch/test.stdout" 2> "$scratch/test.stderr"
+    case "$profile" in
+        '' | unit-test)
+            assert_log_contains --profile
+            assert_log_contains unit-test
+            ;;
+        release) assert_log_contains --release ;;
+        *)
+            if grep -Fxq -e --release -e --profile "$DOCKER_LOG"; then
+                printf 'Unexpected profile flag for StartWRT tests (profile %s)\n' "$profile" >&2
+                exit 1
+            fi
+            ;;
+    esac
+    assert_profile_warning "$profile" "$scratch/test.stderr"
+done
+
 : > "$DOCKER_LOG"
 bash shared-libs/crates/start-core/run-tests.sh
 assert_log_contains "RUST_BUILDER_IMAGE=$image"
@@ -183,4 +254,4 @@ RISCV_OBJDUMP="$scratch/bin/objdump" bash projects/start-wrt/build/verify-isa.sh
 test ! -s "$DOCKER_LOG"
 grep -Fxq -- "$scratch/probe.o" "$OBJDUMP_LOG"
 
-printf 'Builder selection, RVA23 opt-out, containerized bindings, overrides, derived images, and K1 disassembly checks passed.\n'
+printf 'Builder/profile selection, RVA23 opt-out, containerized bindings, overrides, derived images, and K1 disassembly checks passed.\n'
