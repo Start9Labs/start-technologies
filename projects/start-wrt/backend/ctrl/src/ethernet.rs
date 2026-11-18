@@ -709,7 +709,8 @@ fn set_config(
                 .get::<NetworkInterface>()
                 .is_ok_and(|iface| iface.device == format!("{}.1", bridge.name))
     });
-    // VLAN 1 remains required while `lan` uses its VLAN device.
+    // VLAN 1 stays while `lan` uses its VLAN device, even after the last trunk
+    // or non-Admin profile is gone: dropping it would strand the gateway.
     let needs_vlan_filtering =
         has_trunk || lan_uses_vlan1 || lookup.list().iter().any(|p| p.vlan_tag != 1);
     if has_trunk {
@@ -748,6 +749,11 @@ fn set_config(
         }
 
         let vlan = profile.vlan_tag;
+        // Only a flat bridge, with `lan` on the bridge itself, skips an empty
+        // VID-1 section. Once filtering is on, that section is what keeps the
+        // Admin VLAN on the bridge: it carries the router's own `br-lan.1`
+        // and the Admin SSID, whose AP ports hostapd attaches at runtime and
+        // which never appear in `ethernet.ports`.
         if ports.is_empty() && vlan == 1 && !needs_vlan_filtering {
             continue;
         }
@@ -2600,7 +2606,9 @@ config zone
             ]),
         };
 
-        set(ctx.clone(), DeserializeStdin(layout.clone())).await.unwrap();
+        set(ctx.clone(), DeserializeStdin(layout.clone()))
+            .await
+            .unwrap();
         let vlans = vlan_members(&ctx).await;
         assert_eq!(vlans[&1], vec!["eth0:t".to_string(), "eth1:u*".into()]);
         assert_eq!(lan_device(&ctx).await, "br-lan.1");
@@ -2609,7 +2617,9 @@ config zone
         assert_eq!(after.ports["eth1"].profile.as_ref().unwrap().vlan_tag, 1);
 
         layout.ports.get_mut("eth0").unwrap().trunk = false;
-        set(ctx.clone(), DeserializeStdin(layout.clone())).await.unwrap();
+        set(ctx.clone(), DeserializeStdin(layout.clone()))
+            .await
+            .unwrap();
         assert_eq!(lan_device(&ctx).await, "br-lan.1");
         assert_eq!(
             vlan_members(&ctx).await[&1],
@@ -2623,7 +2633,9 @@ config zone
 
         layout.ports.get_mut("eth0").unwrap().trunk = true;
         layout.wan_port = Some("eth1".into());
-        set(ctx.clone(), DeserializeStdin(layout.clone())).await.unwrap();
+        set(ctx.clone(), DeserializeStdin(layout.clone()))
+            .await
+            .unwrap();
 
         layout.ports.get_mut("eth0").unwrap().trunk = false;
         layout.wan_port = Some("eth0".into());

@@ -211,8 +211,9 @@ Both ends of the cable must agree on tagged or untagged traffic. To use the swit
 
 1. Back up its configuration, then unplug its uplink from the router.
 1. From another connection to the router, set its port back to the desired profile under `Points of Entry > Ethernet`.
-1. On the isolated switch, put the uplink and every device port you will use in one untagged VLAN with matching PVIDs. Remove their other VLAN memberships, including the uplink's parking VLAN.
-1. If the chosen profile is not Admin, give the switch's settings page a free fixed address in that profile's subnet and update its gateway. Keep DHCP off.
+1. On the isolated switch, put the uplink and every device port you will use back in VLAN 1, untagged, with PVID 1, which is the switch's factory layout. Remove their other VLAN memberships, including the uplink's parking VLAN, and leave the management VLAN at 1.
+1. If the chosen profile is not Admin, give the switch's settings page a new fixed address in that profile's subnet, chosen the same way as in [Planning Your Ports](#planning-your-ports), with the router's address in that subnet as its gateway. Keep DHCP off.
 1. Save the switch's configuration, then reconnect the uplink. Every device on those ports now shares the router port's profile.
+1. If the switch's address changed, remove its old reservation on the [Devices](devices.md) page and reserve the new one under the chosen profile.
 
-A factory reset is another way to restore the switch's ordinary, untagged port layout. Keep its uplink disconnected during the reset, set its admin password again, and give it a free fixed address in the chosen profile's subnet with DHCP off before reconnecting it.
+A factory reset is another way to restore the switch's ordinary, untagged port layout. Keep its uplink disconnected during the reset, then set its admin password and fixed address as above before reconnecting it.
