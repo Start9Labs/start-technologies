@@ -26,15 +26,15 @@ export const runHealthScript = async <Manifest extends SDKManifest>(
       `Have ran script ${runCommand} and the result: ${res}`,
   } = {},
 ): Promise<HealthCheckResult> => {
-  const res = await Promise.race([
-    subcontainer.execFail(runCommand),
-    timeoutPromise(timeout),
-  ]).catch(e => {
-    console.warn(errorMessage)
-    console.warn(JSON.stringify(e))
-    console.warn(e.toString())
-    throw { result: 'failure', message: errorMessage } as HealthCheckResult
-  })
+  const deadline = timeoutPromise(timeout)
+  const res = await Promise.race([subcontainer.execFail(runCommand), deadline])
+    .finally(deadline.cancel)
+    .catch(e => {
+      console.warn(errorMessage)
+      console.warn(JSON.stringify(e))
+      console.warn(e.toString())
+      throw { result: 'failure', message: errorMessage } as HealthCheckResult
+    })
   return {
     result: 'success',
     message: message(res.stdout.toString()),
