@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmodSync, readFileSync } from 'node:fs'
+import { chmodSync, readFileSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import yaml from 'js-yaml'
@@ -7,6 +7,33 @@ import { REPO, fixture } from '../../../scripts/tests/fixtures.mjs'
 
 const core = 'shared-libs/crates/start-core'
 const builderImage = 'example.invalid/builder:test'
+
+test('MCP catalog updates do not invalidate their source bindings, while Rust changes do', t => {
+  const f = fixture(t)
+  const source = `${core}/src/lib.rs`
+  const catalog = `${core}/mcp-tools.json`
+  const bindings = `${core}/bindings/index.ts`
+  f.write(
+    'Makefile',
+    `CORE_SRC := ${source} ${catalog}\nENVIRONMENT_FILE :=\ninclude ${join(REPO, core, 'build.mk')}\n`,
+  )
+  const now = Date.now() / 1000
+  for (const path of ['Cargo.toml', 'Cargo.lock', source, catalog, bindings]) {
+    f.write(path, '')
+    utimesSync(join(f.root, path), now - 20, now - 20)
+  }
+  utimesSync(join(f.root, bindings), now - 10, now - 10)
+  const freshness = () => f.run('make', ['-q', bindings]).status
+  assert.equal(freshness(), 0)
+  utimesSync(join(f.root, catalog), now - 5, now - 5)
+  assert.equal(
+    freshness(),
+    0,
+    'Generated catalog feeds back into binding inputs',
+  )
+  utimesSync(join(f.root, source), now - 1, now - 1)
+  assert.equal(freshness(), 1, 'Rust source must still invalidate bindings')
+})
 
 function copy(f, path) {
   return f.write(path, readFileSync(join(REPO, path)))
