@@ -4,8 +4,8 @@
   <a href="https://github.com/Start9Labs/start-technologies/releases">
     <img alt="GitHub release (with filter)" src="https://img.shields.io/github/v/release/start9labs/start-technologies?logo=github">
   </a>
-  <a href="https://github.com/Start9Labs/start-technologies/actions/workflows/startos-iso.yaml">
-    <img src="https://github.com/Start9Labs/start-technologies/actions/workflows/startos-iso.yaml/badge.svg">
+  <a href="https://github.com/Start9Labs/start-technologies/actions/workflows/build-products.yaml">
+    <img src="https://github.com/Start9Labs/start-technologies/actions/workflows/build-products.yaml/badge.svg">
   </a>
   <a href="https://docs.start9.com">
     <img alt="Static Badge" src="https://img.shields.io/badge/docs-orange?label=%F0%9F%91%A4%20support">

@@ -335,7 +335,7 @@ impl ChainRoute {
                     let Ok((stream, _)) = accepted else {
                         continue;
                     };
-                    let (stream, registration, cancel) = context.track_with(Box::pin(stream));
+                    let (stream, registration, cancel) = context.track_with(Box::pin(stream), None);
                     let hop = hop.clone();
                     tokio::spawn(async move {
                         let _registration = registration;

@@ -288,7 +288,7 @@ test('sparse deploy canonical versions and notes', t => {
     const compile = () =>
       run('bash', ['-e', '-c', composeShell], {
         cwd: checkout,
-        env: { ...env, VERSION: version, RUNNER_TEMP: runnerTemp },
+        env: { ...env, VERSION: version, RUNNER_TEMP: runnerTemp, COMMIT: ref },
         encoding: 'utf8',
       })
     const compiled = compile()
@@ -298,7 +298,7 @@ test('sparse deploy canonical versions and notes', t => {
     })
     if (project === 'start-os') {
       assert.equal(text(join(runnerTemp, 'release-security')), 'true\n')
-      contains(deploy, '--git-hash "$GITHUB_SHA" "${SECURITY_ARGS[@]}"')
+      contains(deploy, '--git-hash "$COMMIT" "${SECURITY_ARGS[@]}"')
     }
     const fragmentPath = `checkout-${project}/projects/${project}/changelog/patch-fixed-feature.md`
     write(fragmentPath, '---\nrelease-notes: invalid\n---\n\n- Invalid.\n')
@@ -1339,7 +1339,7 @@ start-cli() {
           ...env,
           RUNNER_TEMP: runnerTemp,
           REGISTRY: 'fixture-registry',
-          GITHUB_SHA: 'fixture-sha',
+          COMMIT: 'fixture-sha',
         },
       },
     )

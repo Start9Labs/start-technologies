@@ -1,0 +1,11 @@
+#!/bin/bash
+
+set -e
+
+config=${1:-/media/startos/config}
+
+# Key removal is durable before the setup marker can disappear.
+rm -f -- "$config/id.key.pem" "$config/setup.key.pem"
+sync "$config"
+rm -f -- "$config/disk.guid"
+sync "$config"

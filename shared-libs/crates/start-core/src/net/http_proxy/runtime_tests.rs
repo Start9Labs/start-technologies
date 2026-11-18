@@ -145,6 +145,62 @@ async fn gateway_routes_isolate_public_only_and_container_source_lifetimes() {
     assert_eq!(client.send_request(request()).await.unwrap().status(), 503);
 }
 
+#[tokio::test]
+async fn address_only_retargeting_preserves_routes_but_chain_policy_changes_retire_ingress() {
+    use crate::net::vhost::{VHostBindListener, VHostTarget};
+
+    let sockets = sockets().await;
+    let mut routes = BindingRoutes::new(dns());
+    let upstream = upstream("127.0.0.1:1".parse().unwrap());
+    let mut policies = vec![HttpProxyChain {
+        gateway: HttpProxyGateway::Network {
+            gateway_id: "eth0".parse().unwrap(),
+        },
+        chain: vec![stage("waf")],
+        public_only: false,
+    }];
+    routes
+        .reconcile(&sockets, &binding(), &policies, &upstream)
+        .await;
+    let mut before = upstream.clone();
+    before.http_chain = Some(routes.target.clone());
+    before.private.insert("192.168.1.2".parse().unwrap());
+
+    routes
+        .reconcile(&sockets, &binding(), &policies, &upstream)
+        .await;
+    let mut readdressed = before.clone();
+    readdressed.http_chain = Some(routes.target.clone());
+    readdressed.private.insert("192.168.1.3".parse().unwrap());
+    assert_ne!(before, readdressed);
+    assert!(VHostTarget::<VHostBindListener>::routes_like(
+        &before,
+        &readdressed
+    ));
+
+    policies[0].public_only = true;
+    routes
+        .reconcile(&sockets, &binding(), &policies, &upstream)
+        .await;
+    let mut changed = before.clone();
+    changed.http_chain = Some(routes.target.clone());
+    assert_ne!(before, changed);
+    assert!(!VHostTarget::<VHostBindListener>::routes_like(
+        &before, &changed
+    ));
+
+    policies.clear();
+    routes
+        .reconcile(&sockets, &binding(), &policies, &upstream)
+        .await;
+    let mut cleared = before.clone();
+    cleared.http_chain = Some(routes.target.clone());
+    assert_ne!(changed, cleared);
+    assert!(!VHostTarget::<VHostBindListener>::routes_like(
+        &changed, &cleared
+    ));
+}
+
 async fn sockets() -> HttpProxySockets {
     let profiles = BTreeMap::from([(
         "standard".into(),

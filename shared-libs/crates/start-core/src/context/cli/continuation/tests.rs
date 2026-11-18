@@ -91,9 +91,17 @@ async fn startup_rpc_and_guid_keep_logical_authority_after_dial_pinning() {
     let dns = Arc::new(crate::net::dns::DnsController::new(
         crate::util::sync::Watch::new(Default::default()),
     ));
-    let startup = InitContext::init(&crate::context::config::ServerConfig::default(), dns)
-        .await
-        .unwrap();
+    let startup = InitContext::init(
+        &crate::context::config::ServerConfig::default(),
+        dns,
+        Some(
+            crate::db::model::private::generate_server_identity_key()
+                .0
+                .into(),
+        ),
+    )
+    .await
+    .unwrap();
     let app = axum::Router::new().nest(
         "/nested",
         crate::net::static_server::ui_router(startup.clone()),

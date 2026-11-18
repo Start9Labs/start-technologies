@@ -408,7 +408,7 @@ const manifest = setupManifest({
   // ...
 })
 
-export default buildManifest(versionGraph, manifest, dependencies)
+export default buildManifest({ versionGraph, manifest, dependencies, i18n })
 ```
 
 `buildManifest()` finalizes the manifest with the current SDK version, OS version compatibility, migration version ranges, and dependency definitions from the same builder that runs during init.

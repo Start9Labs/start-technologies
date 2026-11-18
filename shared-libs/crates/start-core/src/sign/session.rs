@@ -62,6 +62,8 @@ enum Hello {
         ephemeral: ByteString<[u8; 32]>,
         #[serde(rename = "clientHello")]
         client_hello: ByteString<[u8; 32]>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        temporary: bool,
     },
 }
 
@@ -129,6 +131,38 @@ fn transcript(client: &[u8], server: &[u8]) -> [u8; 32] {
     digest.finalize().into()
 }
 
+/// The server's proof identity and its admission scope.
+#[derive(Clone)]
+pub struct ServerIdentity {
+    pub signer: Signer,
+    pub temporary: bool,
+}
+
+impl ServerIdentity {
+    pub fn temporary(signer: Signer) -> Self {
+        Self {
+            signer,
+            temporary: true,
+        }
+    }
+}
+
+impl From<Signer> for ServerIdentity {
+    fn from(signer: Signer) -> Self {
+        Self {
+            signer,
+            temporary: false,
+        }
+    }
+}
+
+/// A verified server identity. Temporary identities must not enter fingerprint history.
+#[derive(Clone, Debug)]
+pub struct PeerIdentity {
+    pub key: AnyVerifyingKey,
+    pub temporary: bool,
+}
+
 /// A single connection's signed initiation, prepared before network deadlines.
 pub struct PreparedClient {
     secret: StaticSecret,
@@ -162,11 +196,12 @@ impl PreparedClient {
     }
 
     /// Authenticates the server response bound to this exact initiation.
-    pub async fn finish(self, response: &[u8]) -> Result<(AnyVerifyingKey, SessionCipher), Error> {
+    pub async fn finish(self, response: &[u8]) -> Result<(PeerIdentity, SessionCipher), Error> {
         let (
             Hello::Server {
                 ephemeral,
                 client_hello,
+                temporary,
             },
             proof,
             _,
@@ -186,14 +221,20 @@ impl PreparedClient {
             &transcript(&self.message, response),
             Side::Client,
         )?;
-        Ok((proof.signer, cipher))
+        Ok((
+            PeerIdentity {
+                key: proof.signer,
+                temporary,
+            },
+            cipher,
+        ))
     }
 }
 
 /// Authenticates a client and applies the caller's replay policy before responding.
 /// The expected target comes from the accepting route, not the client's claim.
 pub async fn accept<F, Fut>(
-    signer: &Signer,
+    identity: &ServerIdentity,
     contexts: &[InternedString],
     request: &[u8],
     expected_target: &Target,
@@ -226,11 +267,12 @@ where
     }
     accept_nonce(proof.commitment).await?;
     let response = encode(
-        signer,
+        &identity.signer,
         &context,
         Hello::Server {
             ephemeral: ByteString(PublicKey::from(&secret).to_bytes()),
             client_hello: ByteString(Sha256::digest(request).into()),
+            temporary: identity.temporary,
         },
     )
     .await?;
