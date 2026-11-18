@@ -232,8 +232,14 @@ pub(crate) async fn initialize_data(
     init_phases: InitPhases,
     rpc_ctx_phases: InitRpcContextPhases,
 ) -> Result<RpcContext, Error> {
-    let init_result =
-        crate::init::init(&server.acceptor_setter(), dns.clone(), config, init_phases).await?;
+    let init_result = crate::init::init(
+        &server.acceptor_setter(),
+        dns.clone(),
+        config,
+        &disk_guid,
+        init_phases,
+    )
+    .await?;
     RpcContext::init(
         &server.acceptor_setter(),
         dns,

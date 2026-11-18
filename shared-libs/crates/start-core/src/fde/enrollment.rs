@@ -80,6 +80,11 @@ pub(crate) async fn owns_enrollment_request() -> Result<bool, Error> {
     request_marker(Path::new(REQUEST_CERTIFICATE)).await
 }
 
+fn requires_authentication_request(enrollment: MokEnrollment, approval_code: Option<&str>) -> bool {
+    enrollment == MokEnrollment::NotEnrolled
+        || (enrollment == MokEnrollment::Pending && approval_code.is_some())
+}
+
 async fn request_marker(path: &Path) -> Result<bool, Error> {
     match tokio::fs::symlink_metadata(path).await {
         Ok(metadata) if metadata.file_type().is_file() => Ok(true),
@@ -267,18 +272,16 @@ async fn enroll(ctx: &RpcContext) -> Result<FdeEnrollmentProgress, Error> {
         required.push((CertificatePurpose::Modules, DKMS_MOK_PUB.into()));
     }
     let mut pending = Vec::new();
-    let mut needs_import = false;
+    let mut needs_request = false;
     for (_, certificate) in &required {
-        match enrollment_status(certificate).await? {
-            MokEnrollment::Enrolled => {}
-            MokEnrollment::Pending => pending.push(certificate.clone()),
-            MokEnrollment::NotEnrolled => {
-                needs_import = true;
-                pending.push(certificate.clone());
-            }
+        let status = enrollment_status(certificate).await?;
+        needs_request |=
+            requires_authentication_request(status, enrollment.approval_code.as_deref());
+        if status != MokEnrollment::Enrolled {
+            pending.push(certificate.clone());
         }
     }
-    if needs_import {
+    if needs_request {
         let code = reserve_request(
             Path::new(REQUEST_CERTIFICATE),
             &certificate,
@@ -333,6 +336,28 @@ async fn enroll(ctx: &RpcContext) -> Result<FdeEnrollmentProgress, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_membership_requires_repair_with_the_retained_approval_code() {
+        for code in [None, Some("approval")] {
+            assert!(requires_authentication_request(
+                MokEnrollment::NotEnrolled,
+                code
+            ));
+            assert!(!requires_authentication_request(
+                MokEnrollment::Enrolled,
+                code
+            ));
+        }
+        assert!(requires_authentication_request(
+            MokEnrollment::Pending,
+            Some("approval")
+        ));
+        assert!(!requires_authentication_request(
+            MokEnrollment::Pending,
+            None
+        ));
+    }
 
     #[test]
     fn offline_acknowledgment_precedes_enrollment() {
