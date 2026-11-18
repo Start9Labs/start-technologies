@@ -17,7 +17,7 @@ on:
         type: string
         required: true
       compiled-run-id:
-        description: Run holding compiled-<arch>.tar; empty for this run
+        description: Run holding compiled-<arch>.tar.gz; empty for this run
         type: string
         default: ''
       commit:
@@ -130,12 +130,12 @@ jobs:
       - name: Download compiled artifacts
         uses: actions/download-artifact@v8
         with:
-          name: compiled-${{ env.ARCH }}.tar
+          name: compiled-${{ env.ARCH }}.tar.gz
           run-id: ${{ inputs.compiled-run-id || github.run_id }}
           github-token: ${{ github.token }}
 
       - name: Extract compiled artifacts
-        run: tar -xvf compiled-${{ env.ARCH }}.tar
+        run: tar -xzvf compiled-${{ env.ARCH }}.tar.gz
 
       - name: Prevent rebuild of compiled artifacts
         run: |
@@ -156,7 +156,7 @@ jobs:
           mkdir -p projects/start-os/web/dist/raw/setup-wizard
           mkdir -p projects/start-os/web/dist/static/ui
           mkdir -p projects/start-os/web/dist/static/setup-wizard
-          make -t compiled-${{ env.ARCH }}.tar
+          make -t compiled-${{ env.ARCH }}.tar.gz
 
       - run: git status
 

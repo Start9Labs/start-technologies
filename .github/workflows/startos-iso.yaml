@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       build-run-id:
-        description: build-products.yaml run whose compiled-<arch>.tar artifacts to publish
+        description: build-products.yaml run whose compiled-<arch>.tar.gz artifacts to publish
         type: string
         required: true
       commit:

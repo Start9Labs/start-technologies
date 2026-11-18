@@ -454,7 +454,7 @@ test('every product builds from one compile per target, on standard runners', ()
   )
   assert.ok(compile !== -1)
   for (const [product, recipe] of [
-    ['start-os', 'make compiled-${{ matrix.arch }}.tar'],
+    ['start-os', 'make compiled-${{ matrix.arch }}.tar.gz'],
     ['start-cli', 'make start-cli-deb'],
     ['start-registry', 'make start-registry-deb'],
     ['start-tunnel', 'make start-tunnel-deb'],
@@ -483,7 +483,7 @@ test('the CLI binaries cover every triple a release attaches', () => {
   const linux = products.jobs.build.steps.find(
     step =>
       step.uses === 'actions/upload-artifact@v7' &&
-      step.with.name.endsWith('-unknown-linux-musl'),
+      step.with.name?.endsWith('-unknown-linux-musl'),
   )
   const built = [
     ...['x86_64', 'aarch64', 'riscv64'].map(arch =>

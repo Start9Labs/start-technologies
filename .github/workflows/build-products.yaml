@@ -197,12 +197,13 @@ jobs:
 
       - name: Package StartOS
         if: needs.changes.outputs.start-os == 'true'
-        run: make compiled-${{ matrix.arch }}.tar
+        run: make compiled-${{ matrix.arch }}.tar.gz
+      # Uploaded as-is: a zipped artifact drops the binaries' execute bits.
       - if: needs.changes.outputs.start-os == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: compiled-${{ matrix.arch }}.tar
-          path: compiled-${{ matrix.arch }}.tar
+          path: compiled-${{ matrix.arch }}.tar.gz
+          archive: false
           retention-days: 1
 
       - name: Package start-cli
@@ -369,7 +370,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: ${{ fromJson(needs.changes.outputs.platforms) }}
-    # Downloading this run's compiled-<arch>.tar by run id needs `actions: read`.
+    # Downloading this run's compiled-<arch>.tar.gz by run id needs `actions: read`.
     permissions:
       contents: read
       actions: read

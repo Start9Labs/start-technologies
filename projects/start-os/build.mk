@@ -250,8 +250,8 @@ target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(START_CONTAINE
 
 # CI's cross-compiled image inputs. Must not run target-architecture code; image
 # builds assemble the container-runtime rootfs natively.
-compiled-$(ARCH).tar: $(COMPILED_TARGETS) $(CONTAINER_RUNTIME_DIST) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE)
-	tar -cvf $@ $(COMPILED_TARGETS) projects/start-os/container-runtime/dist $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE)
+compiled-$(ARCH).tar.gz: $(COMPILED_TARGETS) $(CONTAINER_RUNTIME_DIST) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE)
+	tar -czvf $@ $(COMPILED_TARGETS) projects/start-os/container-runtime/dist $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE)
 
 target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs: $(call ls-files, projects/start-os/backup-fs) $(BACKUP_PROTOCOL_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE) $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=$(ARCH) PROFILE=release ./projects/start-os/backup-fs/build-backup-fs.sh

@@ -36,7 +36,7 @@ Tests are Jest + `ts-jest` (`jest.config.js`, `rootDir: ./src`). `mime` is mocke
 - Compiled JS is installed into the container at `/usr/lib/startos/init/index.js` (the systemd unit runs `start-container pipe-wrap node … /usr/lib/startos/init/index.js`).
 - `update-image-local.sh` mounts the **repo root** into `start9/build-env` (at `/root/start-os`) and runs `update-image.sh` inside it. `update-image.sh` `cd`s to its own dir (`projects/start-os/container-runtime/`), so it reaches the repo-root build output three levels up — it copies `start-container` from `../../../target/<arch>-unknown-linux-musl/release/`.
 - The squashfs lands at `rootfs.<arch>.squashfs` and is installed to `/usr/lib/startos/container-runtime/rootfs.squashfs`.
-- `update-image.sh` runs target-architecture code (`deb-install.sh` in the chroot), so CI builds the rootfs in `startos-image.yaml` on a native runner, not in `build-products.yaml`'s cross-compiling build job: `compiled-<arch>.tar` carries `dist/` and `start-container` instead. A pull request changing these scripts or units builds the images through `OS_IMAGE_PATHS` in `.github/scripts/changed-products.mjs`.
+- `update-image.sh` runs target-architecture code (`deb-install.sh` in the chroot), so CI builds the rootfs in `startos-image.yaml` on a native runner, not in `build-products.yaml`'s cross-compiling build job: `compiled-<arch>.tar.gz` carries `dist/` and `start-container` instead. A pull request changing these scripts or units builds the images through `OS_IMAGE_PATHS` in `.github/scripts/changed-products.mjs`.
 
 ## Host effects bindings
 
