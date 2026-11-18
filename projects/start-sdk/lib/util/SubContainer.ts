@@ -3,12 +3,14 @@ import * as T from '@start9labs/start-core/types'
 import * as cp from 'child_process'
 import { promisify } from 'util'
 import { Buffer } from 'node:buffer'
+import { posix } from 'node:path'
 import { once } from '@start9labs/start-core/util/once'
 import { Drop } from '@start9labs/start-core/util/Drop'
 import { logErrorOnce } from '@start9labs/start-core/util/logErrorOnce'
 import { Mounts } from '../mainFn/Mounts'
 import { FileMounts } from './fileMounts'
 import { jsonEnv } from './jsonEnv'
+import { PathQueue } from './PathQueue'
 
 export const execFile = promisify(cp.execFile)
 const False = () => false
@@ -441,6 +443,8 @@ export class SubContainerEager<
   private readonly fileMounts = new FileMounts()
   private sharedMounts = false
   private sharedVolumeDependency = false
+  private readonly sharedVolumeTargets = new Map<string, boolean>()
+  private readonly sharedVolumeQueue = new PathQueue()
 
   private leader: cp.ChildProcess
   private leaderExited: boolean = false
@@ -597,11 +601,7 @@ export class SubContainerEager<
           options.readonly,
         )
         if (isFile) {
-          if (!this.sharedMounts) {
-            // Exec namespaces become slaves of this tree and receive its rebinds.
-            await execFile('mount', ['--make-rshared', this.rootfs])
-            this.sharedMounts = true
-          }
+          await this.shareMounts()
           let staged = false
           await this.fileMounts.add(from, path, async signal => {
             if (!staged) {
@@ -660,6 +660,13 @@ export class SubContainerEager<
     return this
   }
 
+  private async shareMounts(): Promise<void> {
+    if (!this.sharedMounts) {
+      await execFile('mount', ['--make-rshared', this.rootfs])
+      this.sharedMounts = true
+    }
+  }
+
   /** @internal Includes unsuccessful optional shared-volume mount attempts. */
   get dependsOnSharedVolumes(): boolean {
     return this.sharedVolumeDependency
@@ -678,11 +685,33 @@ export class SubContainerEager<
       )
     }
     this.sharedVolumeDependency = true
-    await prepBind(null, this.subpath(options.mountpoint), 'directory')
-    return this.effects.mountSharedVolume({
-      ...options,
-      subcontainer: this.guid,
-    })
+    const release = this.hold()
+    const target = posix.join(this.rootfs, options.mountpoint)
+    try {
+      return await this.sharedVolumeQueue.run(target, async () => {
+        await prepBind(null, target, 'directory')
+        const prepared = await this.effects.prepareSharedVolume({
+          ...options,
+          subcontainer: this.guid,
+        })
+        await this.shareMounts()
+        const mounted = this.sharedVolumeTargets.get(target)
+        if (mounted === undefined) {
+          await attachBind(prepared.placeholder, target, false, [], true)
+          this.sharedVolumeTargets.set(target, false)
+        } else if (mounted) {
+          await execFile('umount', ['--lazy', target])
+          this.sharedVolumeTargets.set(target, false)
+        }
+        if (prepared.result.kind === 'mounted') {
+          await attachBind(prepared.path, target, false, [], options.readonly)
+          this.sharedVolumeTargets.set(target, true)
+        }
+        return prepared.result
+      })
+    } finally {
+      await release()
+    }
   }
 
   /**
@@ -1266,7 +1295,7 @@ export type MountOptions =
 
 /** A shared-volume directory mount. Names are editable; select by the granted ID. */
 export type SharedVolumeMountOptions = Omit<
-  Parameters<T.Effects['mountSharedVolume']>[0],
+  Parameters<T.Effects['prepareSharedVolume']>[0],
   'subcontainer'
 >
 

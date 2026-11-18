@@ -2825,6 +2825,13 @@ net.dns.static-server-is-self:
   pl_PL: "%{server} wskazuje na ten serwer i nie może być użyty jako nadrzędny serwer DNS"
 
 # lxc/mod.rs
+lxc.control.state-unavailable:
+  en_US: Could not determine whether the service container has stopped.
+  de_DE: Es konnte nicht festgestellt werden, ob der Dienstcontainer gestoppt wurde.
+  es_ES: No se pudo determinar si el contenedor del servicio se ha detenido.
+  fr_FR: Impossible de déterminer si le conteneur du service est arrêté.
+  pl_PL: Nie można ustalić, czy kontener usługi został zatrzymany.
+
 lxc.mod.rootfs-not-empty:
   en_US: "rootfs is not empty, refusing to delete"
   de_DE: "rootfs ist nicht leer, Löschung verweigert"
@@ -4264,6 +4271,13 @@ tunnel.api.invalid-endpoint:
   es_ES: 'Introduce una dirección IPv4, IPv6 o un nombre DNS sin esquema, puerto ni ruta'
   fr_FR: 'Saisissez une adresse IPv4, IPv6 ou un nom DNS sans schéma, port ni chemin'
   pl_PL: 'Wprowadź adres IPv4, IPv6 lub nazwę DNS bez schematu, portu ani ścieżki'
+
+util.actor.runtime-exited:
+  en_US: The task processor has stopped.
+  de_DE: Die Aufgabenverarbeitung wurde gestoppt.
+  es_ES: El procesador de tareas se ha detenido.
+  fr_FR: Le processeur de tâches est arrêté.
+  pl_PL: Przetwarzanie zadań zostało zatrzymane.
 
 util.crypto.invalid-backup-key:
   en_US: "The wrapped backup key is invalid or could not be authenticated."

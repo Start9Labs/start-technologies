@@ -1,34 +1,25 @@
-# Distribution configuration
 lxc.include = /usr/share/lxc/config/common.conf
 # userns.conf clears the cap drop/keep lists from common.conf — every
 # capability is enabled by default in the service LXC, scoped to its userns.
 lxc.include = /usr/share/lxc/config/userns.conf
 lxc.arch = linux64
 
-# Container specific configuration
 lxc.apparmor.profile = generated
 lxc.apparmor.allow_nesting = 1
 lxc.idmap = u {id_from} {id_to} {id_count}
 lxc.idmap = g {id_from} {id_to} {id_count}
 
-# Place every service container's cgroup under the `services.slice` systemd
-# slice (see core/services.slice + system::limit_container_memory) instead of
-# lxc's default per-container `lxc.payload.*`. The slice carries an aggregate
-# `MemoryMax`/`MemoryHigh` and is opted into systemd-oomd PSI monitoring, so a
-# burst of concurrent installs is reclaimed/OOM-killed *within the slice* while
-# the host management plane (startd, sshd; protected by MemoryMin) stays up.
+# services.slice bounds aggregate memory use; revocation kills the payload subtree.
 lxc.cgroup.dir.monitor = services.slice/monitor/{guid}
-lxc.cgroup.dir.container = services.slice/payload/{guid}
+lxc.cgroup.dir.container = {payload_cgroup}
 lxc.cgroup.dir.container.inner = ns
 lxc.rootfs.path = dir:/var/lib/lxc/{guid}/rootfs
 lxc.uts.name = {guid}
 
-# Network configuration
 lxc.net.0.type = veth
 lxc.net.0.link = lxcbr0
 lxc.net.0.flags = up
 
 lxc.rootfs.options = rshared
 
-# Environment
 lxc.environment = LANG={lang}

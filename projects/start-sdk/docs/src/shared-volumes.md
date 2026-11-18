@@ -14,17 +14,20 @@ sharedVolumes: true,
 
 This enables the service's **Shared Volumes** controls in StartOS; it requests no access. Users grant each volume independently as read-only or read/write. `buildManifest` requires StartOS 0.4.3 for this capability and rejects an explicit older compatibility override. Packaging it requires Start CLI 3.0.0 or later; the build wrapper checks before packing and verifies the resulting archive preserves the opt-in. Unreleased builds can report 3.0.0 before including this capability. If archive verification fails, install a volume-capable CLI build; the failed output is removed.
 
+> [!NOTE]
+> Development builds of SDK 5.0.0 and StartOS 0.4.3 must include the same shared-volume protocol. Packages built against the prerelease `mount-shared-volume` effect need rebuilding with the SDK's staged-source API; the old effect is rejected rather than reporting an unmounted directory as usable.
+
 ## Read grants
 
 ```ts
 const grants = await sdk.getSharedVolumes(effects).const()
 ```
 
-Each grant contains `id`, `name`, `readonly` and `availability`. Store the stable GUID `id` in service configuration and use the editable `name` in user-facing choices. Names are neither identities nor paths. The API returns neither host paths nor network credentials. Attached-drive mounts translate ownership through StartOS's existing service UID/GID mapping without changing on-disk owners. Linux mount metadata can reveal the CIFS account name to a granted service; its password remains private.
+Each grant contains `id`, `name`, `readonly` and `availability`. Store the stable GUID `id` in service configuration and use the editable `name` in user-facing choices. Names are neither identities nor paths. The catalog returns neither host paths nor network credentials. Local and attached-drive mounts use the same service UID/GID mapping as package-owned volumes; attaching does not rewrite their on-disk owners. Linux mount metadata can reveal the CIFS account name to a granted service; its password remains private.
 
 The reader supports `.once()`, `.const()`, `.watch()` and the other [reactive reader methods](file-models.md). Reactive reads are invalidated only when one of the service's own granted volumes changes in a way its mounts depend on: a grant is added or revoked, its access mode changes, it becomes available or unavailable (a status reset to unknown does not count), or its source changes, including updated CIFS connection details. Renames and changes to other volumes do not invalidate them, so a returned name can be stale until the next read. Updating a CIFS share's connection details does not change an existing mount, which keeps the source it opened until the service mounts the volume again. An offline granted volume remains listed; revocation removes it. Availability is the host's last observation, not a mount preflight or a guarantee of continued connectivity.
 
-Inside `Daemons.dynamic`, a `.const()` catalog invalidation refreshes containers with declared or attempted shared-volume mounts, including failed optional attempts, even if returned metadata is unchanged. Their shared-container peers and dependents restart too; unrelated containers keep running. The callback covers the service's granted catalog rather than an individual source, so shared-volume consumers refresh together. Create fresh lazy subcontainers inside each builder evaluation. Nested effects retain the reconciler's retry scope rather than restarting the entire service.
+Inside `Daemons.dynamic`, a `.const()` catalog invalidation refreshes containers with declared or attempted shared-volume mounts, including failed optional attempts, even if returned metadata is unchanged. Their shared-container peers and dependents restart too; unrelated containers keep running during ordinary source refreshes. Restrictive grant changes use the whole-runtime revocation boundary described below. The callback covers the service's granted catalog rather than an individual source, so shared-volume consumers refresh together. Create fresh lazy subcontainers inside each builder evaluation. Nested effects retain the reconciler's retry scope rather than restarting the entire service.
 
 ## Optional storage
 
@@ -58,7 +61,7 @@ export async function indexOptionalVolume(effects: T.Effects, id: string) {
 }
 ```
 
-An unavailable source returns `{ kind: 'unavailable', reason: 'sourceUnavailable' | 'timeout' }`. Authorization, invalid paths and internal errors reject instead. Do not catch every rejection as an optional outage. An unavailable source or successful revocation leaves its tracked mountpoint inaccessible and read-only.
+An unavailable source returns `{ kind: 'unavailable', reason: 'sourceUnavailable' | 'timeout' }`. Authorization, invalid paths and internal errors reject instead. Do not catch every rejection as an optional outage. An unavailable source leaves a read-only, inaccessible placeholder beneath the mountpoint; replacing a successful mount cannot expose the writable directory below it.
 
 Mount outside package-owned and dependency volumes, on the subcontainer's own filesystem. A directory created inside a persistent package volume survives later starts even when nothing mounts there; writes can then land in that directory instead of the shared source. Use the stable volume ID rather than its editable name when deriving paths. If a persistent mountpoint is necessary, remove stale empty directories at startup before launching the workload.
 
@@ -82,7 +85,9 @@ Unavailability rejects construction with the volume ID, mountpoint and reason. A
 
 Grants do not pass through dependency mounts. A service reading another service's package volume sees the underlying directory, not shared-volume attachments nested inside it. Each consuming service needs its own grant and mount.
 
-StartOS checks the manifest capability, current grant, access mode and confined paths when attaching. Read-only access cannot be escalated by requesting read/write. Subpaths must remain within the granted source. Revocation detaches the service's attachments without detaching other consumers; applications must respond through their reactive configuration and normal workload lifecycle.
+StartOS checks the manifest capability, current grant, access mode and confined paths before staging a source. The SDK uses the same bind primitive as package-owned volumes. Read-only sources remain read-only in the service's user namespace, including independently created bind aliases. Subpaths must remain within the granted source.
+
+Revoking access or reducing access below what an incarnation has already received retires that service's entire LXC runtime before replacement. This closes retained file descriptors and independently created mount aliases, rather than relying on cooperative SDK unmounts. All workloads in that incarnation stop, including unrelated daemons; other services retain their own access. Startup follows the persisted run intent with the updated grants. Restrictive grants publish only after retirement succeeds; failure reports an error and leaves the previous grant in place. Removing a volume applies the same boundary to every exposed incarnation, including those no longer represented by a live service object. Revocation cannot erase data already copied elsewhere or recall handles deliberately delegated outside that incarnation.
 
 ## Backup ownership
 

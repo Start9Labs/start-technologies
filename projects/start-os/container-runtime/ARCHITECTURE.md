@@ -32,16 +32,17 @@ This runtime lives at `projects/start-os/container-runtime` and is a Node.js pac
 
 ## `/media/startos/` directory (mounted by the host into the container)
 
-| Path                 | Description                                           |
-| -------------------- | ----------------------------------------------------- |
-| `volumes/<name>/`    | Package data volumes (id-mapped, persistent)          |
-| `assets/`            | Read-only assets from s9pk `assets.squashfs`          |
-| `images/<name>/`     | Container images (squashfs, used for subcontainers)   |
-| `images/<name>.env`  | Environment variables for image                       |
-| `images/<name>.json` | Image metadata                                        |
-| `backup/`            | Backup mount point (mounted during backup operations) |
-| `rpc/service.sock`   | RPC socket (container runtime listens here)           |
-| `rpc/host.sock`      | Host RPC socket (effects callbacks back to host)      |
+| Path                 | Description                                                        |
+| -------------------- | ------------------------------------------------------------------ |
+| `volumes/<name>/`    | Package data volumes (id-mapped, persistent)                       |
+| `shared-volumes/`    | Host-owned shared sources and read-only placeholders for SDK binds |
+| `assets/`            | Read-only assets from s9pk `assets.squashfs`                       |
+| `images/<name>/`     | Container images (squashfs, used for subcontainers)                |
+| `images/<name>.env`  | Environment variables for image                                    |
+| `images/<name>.json` | Image metadata                                                     |
+| `backup/`            | Backup mount point (mounted during backup operations)              |
+| `rpc/service.sock`   | RPC socket (container runtime listens here)                        |
+| `rpc/host.sock`      | Host RPC socket (effects callbacks back to host)                   |
 
 ## RPC protocol
 

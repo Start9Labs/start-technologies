@@ -320,15 +320,15 @@ export type ListServiceInterfacesParamsInput = z.input<
   typeof schemas.ListServiceInterfacesParams
 >
 export type Metadata = z.output<typeof schemas.Metadata>
-export type MountSharedVolumeParamsInput = z.input<
-  typeof schemas.MountSharedVolumeParams
->
 export type MountTargetInput = z.input<typeof schemas.MountTarget>
 export type PluginHostnameInfoInput = z.input<typeof schemas.PluginHostnameInfo>
 export type PortForward = z.output<typeof schemas.PortForward>
 export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
 export type PrepareDownloadParamsInput = z.input<
   typeof schemas.PrepareDownloadParams
+>
+export type PrepareSharedVolumeParamsInput = z.input<
+  typeof schemas.PrepareSharedVolumeParams
 >
 export type PrepareUploadParamsInput = z.input<
   typeof schemas.PrepareUploadParams
@@ -424,6 +424,7 @@ export type NamedHealthCheckResultInput = z.input<
   typeof schemas.NamedHealthCheckResult
 >
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
+export type PreparedSharedVolume = z.output<typeof schemas.PreparedSharedVolume>
 export type ProgressInput = z.input<typeof schemas.Progress>
 export type ProxyOptions = z.output<typeof schemas.ProxyOptions>
 export type ProxyOptionsInput = z.input<typeof schemas.ProxyOptions>

@@ -111,8 +111,8 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
             from_fn_async(shared_volumes::get_shared_volumes).no_cli(),
         )
         .subcommand(
-            "mount-shared-volume",
-            from_fn_async(shared_volumes::mount_shared_volume).no_cli(),
+            "prepare-shared-volume",
+            from_fn_async(shared_volumes::prepare_shared_volume).no_cli(),
         )
         .subcommand("mount", from_fn_async(dependency::mount).no_cli())
         .subcommand(

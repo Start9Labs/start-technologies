@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::PackageId;
 
+pub(crate) mod access;
 pub mod mounts;
 pub mod source;
 #[cfg(target_os = "linux")]
@@ -132,6 +133,12 @@ pub struct SharedVolumeGrant {
     pub readonly: bool,
 }
 
+impl SharedVolumeGrant {
+    pub(crate) fn allows(&self, readonly: bool) -> bool {
+        readonly || !self.readonly
+    }
+}
+
 rpc_toolkit::reflect_ts!(SharedVolumeGrant);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, VisitVariants)]
@@ -251,7 +258,7 @@ impl SharedVolume {
         readonly: bool,
     ) -> Result<(), Error> {
         let grant = capable.then(|| self.grants.get(package)).flatten();
-        if grant.is_some_and(|grant| readonly || !grant.readonly) {
+        if grant.is_some_and(|grant| grant.allows(readonly)) {
             Ok(())
         } else {
             Err(access_denied())
@@ -461,6 +468,7 @@ pub struct SetSharedVolumeGrantParams {
 
 rpc_toolkit::reflect_ts!(SetSharedVolumeGrantParams);
 
+/// Publishes restrictive grants after incompatible incarnations retire.
 pub async fn set_grant(
     ctx: RpcContext,
     SetSharedVolumeGrantParams {
@@ -469,28 +477,53 @@ pub async fn set_grant(
         grant,
     }: SetSharedVolumeGrantParams,
 ) -> Result<(), Error> {
+    tokio::spawn(set_grant_owned(ctx, id, package_id, grant))
+        .await
+        .with_kind(ErrorKind::Cancelled)?
+}
+
+fn validate_grant(
+    db: &crate::db::model::DatabaseModel,
+    id: &SharedVolumeId,
+    package_id: &PackageId,
+    grant: Option<&SharedVolumeGrant>,
+) -> Result<(), Error> {
     use crate::db::model::package::ManifestPreference;
-    let service = ctx.services.get(&package_id).await;
-    let mut mounts = if let Some(service) = service.as_ref() {
-        Some(service.shared_volume_mounts().lock().await)
-    } else {
-        None
-    };
+    if grant.is_some()
+        && !db
+            .as_public()
+            .as_package_data()
+            .as_idx(package_id)
+            .or_not_found(package_id)?
+            .as_state_info()
+            .as_manifest(ManifestPreference::Old)
+            .as_shared_volumes()
+            .de()?
+    {
+        return Err(access_denied());
+    }
+    db.as_public()
+        .as_shared_volumes()
+        .as_idx(id)
+        .or_not_found(id)?;
+    Ok(())
+}
+
+async fn set_grant_owned(
+    ctx: RpcContext,
+    id: SharedVolumeId,
+    package_id: PackageId,
+    grant: Option<SharedVolumeGrant>,
+) -> Result<(), Error> {
+    let management = ctx.shared_volume_access.management.write().await;
+    validate_grant(&ctx.db.peek().await, &id, &package_id, grant.as_ref())?;
+    let exposures = ctx.shared_volume_access.service(&package_id);
+    let revocations = exposures.lock().await.capture(&id, grant.as_ref()).await;
+    let reload = !revocations.is_empty();
+    finish_revocations(&ctx, revocations).await?;
     ctx.db
         .mutate(|db| {
-            if grant.is_some()
-                && !db
-                    .as_public()
-                    .as_package_data()
-                    .as_idx(&package_id)
-                    .or_not_found(&package_id)?
-                    .as_state_info()
-                    .as_manifest(ManifestPreference::Old)
-                    .as_shared_volumes()
-                    .de()?
-            {
-                return Err(access_denied());
-            }
+            validate_grant(db, &id, &package_id, grant.as_ref())?;
             let volume = db
                 .as_public_mut()
                 .as_shared_volumes_mut()
@@ -505,10 +538,37 @@ pub async fn set_grant(
         })
         .await
         .result?;
-    if let Some(mounts) = &mut mounts {
-        mounts.reconcile_grant(&id, grant.as_ref())?;
+    drop(management);
+    if reload {
+        ctx.services
+            .load(&ctx, &package_id, crate::service::LoadDisposition::Retry)
+            .await?;
     }
     Ok(())
+}
+
+async fn finish_revocations(
+    ctx: &RpcContext,
+    revocations: Vec<access::Revocation>,
+) -> Result<(), Error> {
+    let mut errors = ErrorCollection::new();
+    let results = futures::future::join_all(revocations.into_iter().map(|revocation| async move {
+        let result = revocation.complete().await;
+        let status = if revocation.runtime.is_retired() {
+            ctx.services
+                .mark_retired(ctx, &revocation.package_id, &revocation.container_id)
+                .await
+        } else {
+            Ok(())
+        };
+        (result, status)
+    }))
+    .await;
+    for (result, status) in results {
+        errors.handle(result);
+        errors.handle(status);
+    }
+    errors.into_result()
 }
 
 #[derive(Deserialize, Serialize, VisitFields)]
@@ -519,36 +579,48 @@ pub struct SharedVolumeParams {
 
 rpc_toolkit::reflect_ts!(SharedVolumeParams);
 
-/// Revokes local grants before detachment; failed deletion keeps the registration.
+/// Retires exposed runtimes before publishing removal; failed local deletion keeps the registration.
 pub async fn remove(
     ctx: RpcContext,
     SharedVolumeParams { id }: SharedVolumeParams,
 ) -> Result<(), Error> {
-    let (source, packages) = ctx.db.mutate(|db| prepare_removal(db, &id)).await.result?;
-    let mut errors = ErrorCollection::new();
-    for package_id in &packages {
-        let service = ctx.services.get(package_id).await;
-        if let Some(service) = service.as_ref() {
-            errors.handle(
-                service
-                    .shared_volume_mounts()
-                    .lock()
-                    .await
-                    .reconcile_grant(&id, None),
-            );
+    tokio::spawn(remove_owned(ctx, id))
+        .await
+        .with_kind(ErrorKind::Cancelled)?
+}
+
+async fn remove_owned(ctx: RpcContext, id: SharedVolumeId) -> Result<(), Error> {
+    let management = ctx.shared_volume_access.management.write().await;
+    let mut revocations = Vec::new();
+    let mut reload = Vec::new();
+    for (package_id, exposures) in ctx.shared_volume_access.services() {
+        let captured = exposures.lock().await.capture(&id, None).await;
+        if !captured.is_empty() {
+            reload.push(package_id);
+            revocations.extend(captured);
         }
     }
-    errors.into_result()?;
+    finish_revocations(&ctx, revocations).await?;
+    let source = ctx.db.mutate(|db| prepare_removal(db, &id)).await.result?;
     if matches!(source, Some(SharedVolumeSource::Local)) {
         delete_local_volume(&ctx.db, &id, Path::new(crate::PACKAGE_DATA)).await?;
     }
-    Ok(())
+    drop(management);
+    let mut errors = ErrorCollection::new();
+    for package_id in reload {
+        errors.handle(
+            ctx.services
+                .load(&ctx, &package_id, crate::service::LoadDisposition::Retry)
+                .await,
+        );
+    }
+    errors.into_result()
 }
 
 fn prepare_removal(
     db: &mut crate::db::model::DatabaseModel,
     id: &SharedVolumeId,
-) -> Result<(Option<SharedVolumeSource>, BTreeSet<PackageId>), Error> {
+) -> Result<Option<SharedVolumeSource>, Error> {
     let source = db
         .as_public()
         .as_shared_volumes()
@@ -565,7 +637,7 @@ fn prepare_removal(
     } else {
         remove_definition(db, id)?;
     }
-    Ok((source, db.as_public().as_package_data().keys()?))
+    Ok(source)
 }
 
 async fn delete_local_volume(
@@ -722,7 +794,7 @@ mod tests {
                 cifs.to_string(): {"password":"secret"}
             } }
         })).unwrap());
-        let (source, _) = prepare_removal(&mut db, &local).unwrap();
+        let source = prepare_removal(&mut db, &local).unwrap();
         assert!(matches!(source, Some(SharedVolumeSource::Local)));
         prepare_removal(&mut db, &cifs).unwrap();
         prepare_removal(&mut db, &disk).unwrap();
