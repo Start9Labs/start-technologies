@@ -3,14 +3,17 @@
 //! The kernel's `gpio-keys` driver reports the button as an input device. A
 //! press held for [`HOLD`] blinks the status LED. The release wipes the overlay
 //! and reboots, keeping the BootROM's download strap low across the reset.
+//! Releasing before the LED cue cancels, even when the event is processed late.
+//! Lost input history cancels the hold; procd restarts observation from live key state.
 
 use std::fs::{self, File};
 use std::io::Read;
 use std::os::fd::{AsFd, AsRawFd};
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
+use nix::time::{clock_gettime, ClockId};
 
 use crate::prelude::*;
 
@@ -19,13 +22,17 @@ const HOLD: Duration = Duration::from_secs(10);
 const INPUT_DEVICE_NAME: &str = "gpio-keys";
 const STATUS_LED: &str = "/sys/class/leds/sys-led";
 
+const EV_SYN: u16 = 0x00;
 const EV_KEY: u16 = 0x01;
+const SYN_DROPPED: u16 = 0x03;
 const KEY_RESTART: u16 = 0x198;
 const KEY_STATE_BYTES: usize = 0x300 / 8;
 const EVENT_SIZE: usize = std::mem::size_of::<libc::input_event>();
 const EVENT_TYPE_OFFSET: usize = EVENT_SIZE - 8;
+const EVENT_TIME_WORD_SIZE: usize = std::mem::size_of::<libc::c_ulong>();
 
 nix::ioctl_read_buf!(eviocgkey, b'E', 0x18, u8);
+nix::ioctl_write_ptr!(eviocsclockid, b'E', 0xa0, libc::c_int);
 
 #[derive(Debug, PartialEq, Eq)]
 enum Action {
@@ -37,27 +44,31 @@ enum Action {
 #[derive(Default)]
 struct Button {
     held_since: Option<Duration>,
-    armed: bool,
+    armed_at: Option<Duration>,
 }
 
 impl Button {
-    fn key(&mut self, pressed: bool, now: Duration) {
+    fn key(&mut self, pressed: bool, at: Duration) {
         if !pressed {
+            if self.armed_at.is_some_and(|armed| at < armed) {
+                self.armed_at = None;
+            }
             self.held_since = None;
         } else if self.held_since.is_none() {
-            self.held_since = Some(now);
+            self.held_since = Some(at);
         }
     }
 
-    fn step(&mut self, now: Duration) -> Action {
-        match (self.armed, self.held_since) {
-            (true, None) => Action::Wipe,
-            (true, Some(_)) | (false, None) => Action::Wait(None),
-            (false, Some(since)) if now >= since + HOLD => {
-                self.armed = true;
-                Action::Blink
-            }
-            (false, Some(since)) => Action::Wait(Some(since + HOLD - now)),
+    fn blinked(&mut self, at: Duration) {
+        self.armed_at = Some(at);
+    }
+
+    fn step(&self, now: Duration) -> Action {
+        match (self.armed_at, self.held_since) {
+            (Some(_), None) => Action::Wipe,
+            (Some(_), Some(_)) | (None, None) => Action::Wait(None),
+            (None, Some(since)) if now >= since + HOLD => Action::Blink,
+            (None, Some(since)) => Action::Wait(Some(since + HOLD - now)),
         }
     }
 }
@@ -77,6 +88,19 @@ fn find_device() -> Result<Option<PathBuf>, Error> {
     Ok(None)
 }
 
+fn monotonic_now() -> Result<Duration, Error> {
+    clock_gettime(ClockId::CLOCK_MONOTONIC)
+        .map(Duration::from)
+        .with_kind(ErrorKind::Filesystem)
+}
+
+fn set_event_clock(device: &File) -> Result<(), Error> {
+    let clock = libc::CLOCK_MONOTONIC;
+    // SAFETY: `clock` is a live integer of the size the ioctl expects.
+    unsafe { eviocsclockid(device.as_raw_fd(), &clock) }.with_kind(ErrorKind::Filesystem)?;
+    Ok(())
+}
+
 fn key_is_down(device: &File) -> Result<bool, Error> {
     let mut state = [0u8; KEY_STATE_BYTES];
     // SAFETY: `state` is a live buffer whose length the ioctl receives.
@@ -84,16 +108,40 @@ fn key_is_down(device: &File) -> Result<bool, Error> {
     Ok(state[usize::from(KEY_RESTART) / 8] & (1 << (KEY_RESTART % 8)) != 0)
 }
 
-fn parse_key_event(event: &[u8; EVENT_SIZE]) -> Option<bool> {
+fn parse_key_event(event: &[u8; EVENT_SIZE]) -> Result<Option<(bool, Duration)>, Error> {
     let field = |offset: usize| u16::from_ne_bytes([event[offset], event[offset + 1]]);
+    let kind = field(EVENT_TYPE_OFFSET);
+    let code = field(EVENT_TYPE_OFFSET + 2);
+    if kind == EV_SYN && code == SYN_DROPPED {
+        return Err(Error::other("FDL input queue overflow; hold history lost"));
+    }
+    if kind != EV_KEY || code != KEY_RESTART {
+        return Ok(None);
+    }
+    let seconds = libc::c_ulong::from_ne_bytes(event[..EVENT_TIME_WORD_SIZE].try_into().unwrap());
+    let micros = libc::c_ulong::from_ne_bytes(
+        event[EVENT_TIME_WORD_SIZE..EVENT_TIME_WORD_SIZE * 2]
+            .try_into()
+            .unwrap(),
+    );
+    let at = Duration::from_secs(seconds as u64) + Duration::from_micros(micros as u64);
     let value = i32::from_ne_bytes([
         event[EVENT_TYPE_OFFSET + 4],
         event[EVENT_TYPE_OFFSET + 5],
         event[EVENT_TYPE_OFFSET + 6],
         event[EVENT_TYPE_OFFSET + 7],
     ]);
-    (field(EVENT_TYPE_OFFSET) == EV_KEY && field(EVENT_TYPE_OFFSET + 2) == KEY_RESTART)
-        .then_some(value != 0)
+    Ok(Some((value != 0, at)))
+}
+
+fn set_status_led_attribute(attr: &str, value: &str) {
+    if let Err(e) = fs::write(format!("{STATUS_LED}/{attr}"), value) {
+        tracing::warn!("failed to set status LED {attr}: {e}");
+    }
+}
+
+pub(crate) fn restore_status_led() {
+    set_status_led_attribute("trigger", "heartbeat");
 }
 
 fn blink_status_led() {
@@ -102,28 +150,28 @@ fn blink_status_led() {
         ("delay_on", "100"),
         ("delay_off", "100"),
     ] {
-        if let Err(e) = fs::write(format!("{STATUS_LED}/{attr}"), value) {
-            tracing::warn!("failed to set status LED {attr}: {e}");
-        }
+        set_status_led_attribute(attr, value);
     }
 }
 
 /// Watches the button for the life of the system; a completed hold wipes the overlay and reboots.
 pub async fn watch() -> Result<(), Error> {
-    let started = Instant::now();
     let Some(path) = find_device()? else {
         tracing::warn!("no {INPUT_DEVICE_NAME} input device");
         return Ok(());
     };
+    restore_status_led();
     let mut device = File::open(path).with_kind(ErrorKind::Filesystem)?;
+    set_event_clock(&device)?;
     let mut button = Button::default();
-    button.key(key_is_down(&device)?, started.elapsed());
+    button.key(key_is_down(&device)?, monotonic_now()?);
 
     loop {
-        let timeout = match button.step(started.elapsed()) {
+        let timeout = match button.step(monotonic_now()?) {
             Action::Wipe => return crate::system::wipe_overlay_and_reboot().await,
             Action::Blink => {
                 blink_status_led();
+                button.blinked(monotonic_now()?);
                 continue;
             }
             Action::Wait(None) => PollTimeout::NONE,
@@ -137,8 +185,12 @@ pub async fn watch() -> Result<(), Error> {
             device
                 .read_exact(&mut event)
                 .with_kind(ErrorKind::Filesystem)?;
-            if let Some(pressed) = parse_key_event(&event) {
-                button.key(pressed, started.elapsed());
+            if let Some((pressed, at)) = parse_key_event(&event)? {
+                let was_armed = button.armed_at.is_some();
+                button.key(pressed, at);
+                if was_armed && button.armed_at.is_none() {
+                    restore_status_led();
+                }
             }
         }
     }
@@ -154,7 +206,7 @@ mod tests {
 
     #[test]
     fn idle_button_waits_without_a_deadline() {
-        let mut button = Button::default();
+        let button = Button::default();
         assert_eq!(button.step(secs(0)), Action::Wait(None));
         assert_eq!(button.step(secs(86_400)), Action::Wait(None));
     }
@@ -173,6 +225,7 @@ mod tests {
         button.key(true, secs(5));
         assert_eq!(button.step(secs(14)), Action::Wait(Some(secs(1))));
         assert_eq!(button.step(secs(15)), Action::Blink);
+        button.blinked(secs(15));
         assert_eq!(button.step(secs(500)), Action::Wait(None));
         button.key(false, secs(500));
         assert_eq!(button.step(secs(500)), Action::Wipe);
@@ -184,6 +237,36 @@ mod tests {
         button.key(true, secs(5));
         button.key(false, secs(14));
         assert_eq!(button.step(secs(14)), Action::Wait(None));
+    }
+
+    #[test]
+    fn queued_early_release_cancels_after_a_delayed_tick() {
+        let mut button = Button::default();
+        button.key(true, secs(5));
+        assert_eq!(button.step(secs(20)), Action::Blink);
+        button.blinked(secs(20));
+        button.key(false, secs(14));
+        assert_eq!(button.step(secs(20)), Action::Wait(None));
+    }
+
+    #[test]
+    fn complete_hold_released_before_the_cue_also_cancels() {
+        let mut button = Button::default();
+        button.key(true, secs(5));
+        assert_eq!(button.step(secs(20)), Action::Blink);
+        button.blinked(secs(20));
+        button.key(false, secs(16));
+        assert_eq!(button.step(secs(20)), Action::Wait(None));
+    }
+
+    #[test]
+    fn queued_release_after_the_cue_still_wipes() {
+        let mut button = Button::default();
+        button.key(true, secs(5));
+        assert_eq!(button.step(secs(15)), Action::Blink);
+        button.blinked(secs(15));
+        button.key(false, secs(16));
+        assert_eq!(button.step(secs(20)), Action::Wipe);
     }
 
     #[test]
@@ -212,9 +295,32 @@ mod tests {
 
     #[test]
     fn parses_only_the_reset_key() {
-        assert_eq!(parse_key_event(&event(EV_KEY, KEY_RESTART, 1)), Some(true));
-        assert_eq!(parse_key_event(&event(EV_KEY, KEY_RESTART, 0)), Some(false));
-        assert_eq!(parse_key_event(&event(0, 0, 0)), None);
-        assert_eq!(parse_key_event(&event(EV_KEY, 116, 1)), None);
+        assert_eq!(
+            parse_key_event(&event(EV_KEY, KEY_RESTART, 1)).unwrap(),
+            Some((true, Duration::ZERO))
+        );
+        assert_eq!(
+            parse_key_event(&event(EV_KEY, KEY_RESTART, 0)).unwrap(),
+            Some((false, Duration::ZERO))
+        );
+        assert_eq!(parse_key_event(&event(EV_SYN, 0, 0)).unwrap(), None);
+        assert_eq!(parse_key_event(&event(EV_KEY, 116, 1)).unwrap(), None);
+    }
+
+    #[test]
+    fn parses_the_kernel_event_timestamp() {
+        let mut bytes = event(EV_KEY, KEY_RESTART, 0);
+        bytes[..EVENT_TIME_WORD_SIZE].copy_from_slice(&(12 as libc::c_ulong).to_ne_bytes());
+        bytes[EVENT_TIME_WORD_SIZE..EVENT_TIME_WORD_SIZE * 2]
+            .copy_from_slice(&(345_678 as libc::c_ulong).to_ne_bytes());
+        assert_eq!(
+            parse_key_event(&bytes).unwrap(),
+            Some((false, Duration::new(12, 345_678_000)))
+        );
+    }
+
+    #[test]
+    fn lost_input_history_requires_a_watcher_restart() {
+        assert!(parse_key_event(&event(EV_SYN, SYN_DROPPED, 0)).is_err());
     }
 }

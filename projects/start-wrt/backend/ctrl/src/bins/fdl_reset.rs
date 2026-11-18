@@ -11,6 +11,7 @@ pub fn main(_args: VecDeque<OsString>) {
         .expect("failed to build tokio runtime")
         .block_on(fdl_button::watch());
     if let Err(e) = result {
+        fdl_button::restore_status_led();
         tracing::error!("FDL button: {e}");
         std::process::exit(1);
     }
