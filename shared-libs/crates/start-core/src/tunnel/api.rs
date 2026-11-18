@@ -608,7 +608,7 @@ fn validate_name(name: &str) -> Result<(), Error> {
         || name.chars().count() > MAX_NAME_LEN
     {
         return Err(Error::new(
-            eyre!("invalid name: {name:?}"),
+            eyre!(t!("tunnel.api.invalid-name", max = MAX_NAME_LEN)),
             ErrorKind::InvalidRequest,
         ));
     }
