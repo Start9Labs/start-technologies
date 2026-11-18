@@ -500,3 +500,24 @@ test('a deploy leg missing one of its images fails before uploading', t => {
     )
   }
 })
+
+test('a start-wrt deploy missing one of its images fails before uploading', t => {
+  const check = step(
+    load('start-wrt.yaml').jobs.deploy,
+    'Check downloaded images',
+  )
+  for (const [files, ok] of [
+    [WRT_IMAGES, true],
+    [[WRT_IMAGES[0]], false],
+    [[WRT_IMAGES[1]], false],
+  ]) {
+    const f = fixture(t)
+    for (const file of files) f.write(`artifacts/${file}`, '')
+    const result = f.run('bash', ['-e', '-c', check], {
+      cwd: join(f.root, 'artifacts'),
+      env: f.env,
+      encoding: 'utf8',
+    })
+    assert.equal(result.status === 0, ok, `${files}: ${result.stdout}`)
+  }
+})

@@ -76,8 +76,8 @@ STARTWRT_TARGET_REGISTRY="${STARTWRT_TARGET_REGISTRY:-https://startwrt-registry.
 STARTWRT_S3_BUCKET="s3://startwrt-images"
 STARTWRT_S3_CDN="https://startwrt-images.nyc3.cdn.digitaloceanspaces.com"
 STARTWRT_PLATFORM="spacemit,k1-x"
-# The CI artifact (start-wrt.yaml `image` job) holding both images.
-STARTWRT_BUILD_ARTIFACT="startwrt-openwrt-image"
+# The CI artifacts (start-wrt.yaml `image` job), one per image.
+STARTWRT_BUILD_ARTIFACTS='startwrt-*.img.gz'
 # Compat floor for `registry os version add`: the oldest installed version
 # allowed to upgrade to this one. An explicit beta floor (not a `^` caret) keeps
 # beta prerelease tags in range. The upper bound (<=$VERSION) is added in
@@ -1302,8 +1302,8 @@ cmd_pull_gha() {
             pull_gha_debs
             ;;
         wrt)
-            echo "  ${STARTWRT_BUILD_ARTIFACT} (sdcard + sysupgrade .img.gz)"
-            gh run download -R "$REPO" "$RUN_ID" -n "$STARTWRT_BUILD_ARTIFACT" -D "$(pwd)"
+            echo "  ${STARTWRT_BUILD_ARTIFACTS} (sdcard + sysupgrade)"
+            "$SCRIPT_DIR/gha-artifact-download.sh" "$REPO" "$RUN_ID" "$STARTWRT_BUILD_ARTIFACTS" "$(pwd)"
             ;;
     esac
 }
