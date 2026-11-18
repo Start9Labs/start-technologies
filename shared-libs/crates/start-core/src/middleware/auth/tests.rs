@@ -13,6 +13,7 @@ impl Context for TestContext {}
 struct Credential {
     accepted: bool,
     calls: Arc<AtomicUsize>,
+    name: &'static str,
 }
 
 impl Middleware<TestContext> for Credential {
@@ -29,7 +30,7 @@ impl Middleware<TestContext> for Credential {
             Ok(())
         } else {
             Err(RpcResponse::from_result(Err(Error::new(
-                eyre!("credential rejected"),
+                eyre!("{}", self.name),
                 ErrorKind::Authorization,
             ))))
         }
@@ -41,16 +42,17 @@ fn auth(
     signature: Option<bool>,
     calls: &Arc<AtomicUsize>,
 ) -> Auth<TestContext> {
-    let credential = |accepted| {
+    let credential = |accepted, name| {
         DynMiddleware::new(Credential {
             accepted,
             calls: calls.clone(),
+            name,
         })
     };
     Auth {
-        local: local.map(credential),
+        local: local.map(|accepted| credential(accepted, "local")),
         bearer: None,
-        signature: signature.map(credential),
+        signature: signature.map(|accepted| credential(accepted, "signature")),
     }
 }
 
@@ -119,6 +121,27 @@ async fn rejected_credentials_still_require_authorization() {
         .result
         .unwrap_err();
     assert_eq!(error.code, ErrorKind::Authorization as i32);
+    assert_eq!(
+        serde_json::to_value(&error).unwrap()["data"]["details"],
+        "signature"
+    );
+}
+
+#[tokio::test]
+async fn caller_supplied_auth_claims_are_removed_before_authentication() {
+    let mut request = request("package.index");
+    request.params = json!({
+        "id": "secret", "__Auth_signer": "forged", "__Auth_userAgent": "forged",
+        "__Auth_local": true, "__DeviceInfo_device_info": "kept"
+    });
+    Auth::<TestContext>::new()
+        .process_rpc_request(&TestContext, json!({"authenticated": false}), &mut request)
+        .await
+        .unwrap();
+    assert_eq!(
+        request.params,
+        json!({"id": "secret", "__DeviceInfo_device_info": "kept"})
+    );
 }
 
 #[tokio::test]

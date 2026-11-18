@@ -3,9 +3,10 @@ use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
+use futures::StreamExt;
 use imbl_value::Value;
 use josekit::jwk::Jwk;
-use rpc_toolkit::{from_fn_async, Context, HandlerExt, ParentHandler};
+use rpc_toolkit::{from_fn_async, Context, Empty, HandlerArgs, HandlerExt, ParentHandler};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
@@ -601,10 +602,6 @@ async fn write_timezone(merged_mount: &str, iana: &str) -> Result<(), Error> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Flash orchestration
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, visit_rs::VisitVariants)]
 #[serde(rename_all = "kebab-case")]
 pub enum FlashMode {
@@ -613,8 +610,20 @@ pub enum FlashMode {
 }
 rpc_toolkit::reflect_ts!(FlashMode);
 
-/// Streaming event sent to the frontend during flash.
-#[derive(Debug, Clone, Serialize, visit_rs::VisitVariants)]
+#[derive(Deserialize, visit_rs::VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct FlashParams {
+    pub mode: FlashMode,
+    pub password: startos::auth::PasswordType,
+    /// IANA timezone name. An unknown name leaves the default unchanged.
+    #[serde(default)]
+    pub timezone: Option<String>,
+}
+rpc_toolkit::reflect_ts!(FlashParams);
+rpc_toolkit::ts_export!(FlashParams, namespaces = ["events"]);
+
+/// Legacy NDJSON adds Complete/Error; typed RPC carries completion in its terminal.
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitVariants)]
 #[serde(
     tag = "phase",
     rename_all = "camelCase",
@@ -640,26 +649,94 @@ pub enum SetupEvent {
 rpc_toolkit::reflect_ts!(SetupEvent);
 rpc_toolkit::ts_export!(SetupEvent, namespaces = ["events"]);
 
-/// Run the full setup flash sequence (blocking).
-///
-/// Sends progress events through `tx`. On error, sends an Error event
-/// before returning.
-pub async fn run_setup_flash(
-    mode: FlashMode,
-    admin_password: &str,
-    timezone: Option<&str>,
-    tx: &mpsc::Sender<SetupEvent>,
-) {
-    if let Err(e) = run_setup_flash_inner(mode, admin_password, timezone, tx).await {
-        let _ = tx
-            .send(SetupEvent::Error {
-                message: e.to_string(),
-            })
-            .await;
-    }
+/// Dropping observation never cancels accepted flashing or releases its exclusion guard.
+pub(crate) struct FlashOperation {
+    events: mpsc::Receiver<SetupEvent>,
+    completion: tokio::task::JoinHandle<Result<(), Error>>,
 }
 
-async fn run_setup_flash_inner(
+pub(crate) fn start_flash(
+    ctx: &ServerContext,
+    params: FlashParams,
+) -> Result<FlashOperation, Error> {
+    let password = crate::auth::decrypt_password(ctx, params.password)?;
+    let guard = ctx.setup_flash.clone().try_lock_owned().map_err(|_| {
+        Error::new(
+            eyre!("flash already in progress"),
+            ErrorKind::InvalidRequest,
+        )
+    })?;
+    let (tx, events) = mpsc::channel(32);
+    let completion = tokio::spawn(async move {
+        startos::util::future::make_send(move || async move {
+            let _guard = guard;
+            Ok(run_setup_flash(params.mode, &password, params.timezone.as_deref(), &tx).await)
+        })
+        .await?
+    });
+    Ok(FlashOperation { events, completion })
+}
+
+fn flash_progress(events: mpsc::Receiver<SetupEvent>) -> impl futures::Stream<Item = SetupEvent> {
+    futures::stream::unfold(events, |mut events| async move {
+        let event = events.recv().await?;
+        Some((event, events))
+    })
+}
+
+pub(crate) fn legacy_flash_events(
+    operation: FlashOperation,
+) -> impl futures::Stream<Item = SetupEvent> {
+    flash_progress(operation.events).chain(futures::stream::once(async move {
+        match operation
+            .completion
+            .await
+            .map_err(Error::from)
+            .and_then(std::convert::identity)
+        {
+            Ok(()) => SetupEvent::Complete,
+            Err(error) => SetupEvent::Error {
+                message: error.to_string(),
+            },
+        }
+    }))
+}
+
+#[instrument(skip_all)]
+async fn flash_rpc(
+    HandlerArgs {
+        context,
+        params,
+        rpc_stream,
+        ..
+    }: HandlerArgs<ServerContext, FlashParams, Empty, SetupEvent>,
+) -> Result<(), Error> {
+    let stream = rpc_stream.ok_or_else(|| {
+        Error::new(
+            eyre!("flash requires a response stream"),
+            ErrorKind::InvalidRequest,
+        )
+    })?;
+    let FlashOperation { events, completion } = start_flash(&context, params)?;
+    tokio::spawn(async move {
+        let result = match stream
+            .forward(flash_progress(events).map(Ok::<_, Error>))
+            .await
+        {
+            Ok(()) => completion
+                .await
+                .map_err(Error::from)
+                .and_then(std::convert::identity)
+                .map_err(rpc_toolkit::yajrc::RpcError::from),
+            Err(error) => Err(error),
+        };
+        let _ = stream.close(result);
+    });
+    Ok(())
+}
+
+/// Returns the provisioning result even after progress observers disconnect.
+pub async fn run_setup_flash(
     mode: FlashMode,
     admin_password: &str,
     timezone: Option<&str>,
@@ -667,7 +744,6 @@ async fn run_setup_flash_inner(
 ) -> Result<(), Error> {
     let total_steps: u32 = 3;
 
-    // ── Step 1: Preparing ──────────────────────────────────────────────
     let _ = tx
         .send(SetupEvent::Status {
             message: "Validating password...".into(),
@@ -683,7 +759,6 @@ async fn run_setup_flash_inner(
         ));
     }
 
-    // Update: backup conffiles before flash (mount old eMMC squashfs + overlay)
     let (conffiles_backup, emmc_had_admin_password) = if mode == FlashMode::Update {
         let _ = tx
             .send(SetupEvent::Status {
@@ -697,7 +772,6 @@ async fn run_setup_flash_inner(
         let emmc_dev = flash::find_emmc(&boot_dev).await?;
         let emmc_path = format!("/dev/{emmc_dev}");
 
-        // Find eMMC rootfs and rootfs_data
         let rootfs_dev = find_partition_by_name(&emmc_path, "rootfs")
             .await?
             .ok_or_else(|| {
@@ -715,7 +789,6 @@ async fn run_setup_flash_inner(
                 )
             })?;
 
-        // Mount squashfs + overlay to get merged view of old config
         mount_emmc_overlayfs(&rootfs_dev, &rootfs_data_dev).await?;
         let backup = backup_conffiles(EMMC_MERGED_MOUNT);
         let had_admin_password = fs::read_to_string(format!("{EMMC_MERGED_MOUNT}/etc/shadow"))
@@ -729,7 +802,6 @@ async fn run_setup_flash_inner(
         (None, false)
     };
 
-    // ── Step 2: Flashing eMMC ──────────────────────────────────────────
     let on_progress = |event: flash::FlashEvent| {
         let setup_event = match event {
             flash::FlashEvent::Copying { copied, total } => SetupEvent::Copying {
@@ -748,7 +820,6 @@ async fn run_setup_flash_inner(
     };
     let result = flash::run_flash_unattended(&on_progress).await?;
 
-    // ── Step 3: Applying settings ──────────────────────────────────────
     let _ = tx
         .send(SetupEvent::Status {
             message: "Configuring system...".into(),
@@ -757,10 +828,8 @@ async fn run_setup_flash_inner(
         })
         .await;
 
-    // Mount SquashFS + ext4 overlay to get a writable merged view
     mount_emmc_overlayfs(&result.rootfs_dev, &result.rootfs_data_dev).await?;
 
-    // Restore conffiles (Update only)
     if let Some(ref files) = conffiles_backup {
         let _ = tx
             .send(SetupEvent::Status {
@@ -772,7 +841,6 @@ async fn run_setup_flash_inner(
         restore_conffiles(EMMC_MERGED_MOUNT, files).await?;
     }
 
-    // Write admin password
     let _ = tx
         .send(SetupEvent::Status {
             message: "Setting admin password...".into(),
@@ -782,11 +850,7 @@ async fn run_setup_flash_inner(
         .await;
     write_admin_password(EMMC_MERGED_MOUNT, admin_password).await?;
 
-    // Carry the setup timezone into the fresh eMMC config. FreshStart only:
-    // Update restores the device's existing /etc/config/system via conffiles,
-    // so its timezone is already preserved. The live `system.set-timezone`
-    // call made during the wizard writes to the throwaway microSD overlay, so
-    // this is the only place a fresh install's timezone reaches eMMC.
+    // Live timezone changes affect the microSD overlay, not the flashed eMMC.
     if mode == FlashMode::FreshStart {
         if let Some(tz) = timezone {
             let _ = tx
@@ -797,8 +861,6 @@ async fn run_setup_flash_inner(
                 })
                 .await;
             if let Err(e) = write_timezone(EMMC_MERGED_MOUNT, tz).await {
-                // Non-fatal: the device boots on the shipped UTC default and
-                // the user can correct it later in Settings.
                 tracing::warn!("failed to carry setup timezone '{tz}' to eMMC: {e}");
             }
         }
@@ -812,19 +874,13 @@ async fn run_setup_flash_inner(
     // Mark overlay as FS_STATE_READY so mount_root doesn't wipe it on first boot
     mark_overlay_ready(EMMC_OVERLAY_MOUNT)?;
 
-    // Unmount the overlayfs stack (non-fatal — mounts are cleaned up on reboot)
+    // Reboot cleans up remaining mounts.
     if let Err(e) = umount_emmc_overlayfs().await {
         eprintln!("WARNING: umount_emmc_overlayfs failed (non-fatal, cleaned up on reboot): {e}");
     }
 
-    let _ = tx.send(SetupEvent::Complete).await;
-
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// RPC endpoints
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -853,6 +909,12 @@ async fn get_pubkey(ctx: ServerContext) -> Result<Jwk, Error> {
 
 pub fn setup<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
+        .subcommand(
+            "flash",
+            from_fn_async(flash_rpc)
+                .with_metadata("authenticated", Value::Bool(false))
+                .no_cli(),
+        )
         .subcommand(
             "status",
             from_fn_async(setup_status_impl)
@@ -1205,8 +1267,6 @@ Conffiles:
         assert_eq!(restored, "content");
     }
 
-    // ── get_pubkey ───────────────────────────────────────────────────
-
     #[tokio::test]
     async fn published_key_decrypts_setup_passwords() {
         let ctx = ServerContext::default();
@@ -1216,12 +1276,11 @@ Conffiles:
         let wire = startos::util::crypto::EncryptedWire::encrypt("initial-admin-password", &pubkey)
             .unwrap();
         assert_eq!(
-            crate::auth::decrypt_password(&ctx, wire).unwrap(),
+            crate::auth::decrypt_password(&ctx, startos::auth::PasswordType::EncryptedWire(wire))
+                .unwrap(),
             "initial-admin-password"
         );
     }
-
-    // ── write_admin_password ─────────────────────────────────────────
 
     #[tokio::test]
     async fn write_password_replaces_root_hash() {
@@ -1309,45 +1368,54 @@ Conffiles:
         assert!(shadow.ends_with('\n'), "output should end with newline");
     }
 
-    // ── run_setup_flash event protocol ───────────────────────────────
+    #[tokio::test]
+    async fn flash_returns_the_real_failure_separately_from_progress() {
+        let (tx, mut rx) = mpsc::channel(16);
+        let error = run_setup_flash(FlashMode::FreshStart, "short", None, &tx)
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+        drop(tx);
+        assert!(matches!(
+            rx.recv().await,
+            Some(SetupEvent::Status { step: 1, .. })
+        ));
+        assert!(rx.recv().await.is_none());
+    }
+
+    fn invalid_flash(ctx: &ServerContext) -> FlashParams {
+        FlashParams {
+            mode: FlashMode::FreshStart,
+            password: startos::auth::PasswordType::EncryptedWire(
+                startos::util::crypto::EncryptedWire::encrypt(
+                    "short",
+                    &AsRef::<Jwk>::as_ref(ctx).to_public_key().unwrap(),
+                )
+                .unwrap(),
+            ),
+            timezone: None,
+        }
+    }
 
     #[tokio::test]
-    async fn flash_rejects_short_password() {
-        let (tx, mut rx) = mpsc::channel(16);
-        run_setup_flash(FlashMode::FreshStart, "short", None, &tx).await;
-        drop(tx);
+    async fn observer_drop_does_not_abort_accepted_work_or_poison_its_gate() {
+        let ctx = ServerContext::default();
+        let operation = start_flash(&ctx, invalid_flash(&ctx)).unwrap();
+        drop(operation.events);
+        let error = operation.completion.await.unwrap().unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+        assert!(ctx.setup_flash.clone().try_lock_owned().is_ok());
+    }
 
-        let mut events = Vec::new();
-        while let Ok(event) = rx.try_recv() {
-            events.push(event);
-        }
-
-        // First event: Status with step 1 ("Validating password...")
-        assert!(
-            events.len() >= 2,
-            "expected at least 2 events, got {}",
-            events.len()
-        );
-        match &events[0] {
-            SetupEvent::Status { step, message, .. } => {
-                assert_eq!(*step, 1);
-                assert!(
-                    message.contains("Validating"),
-                    "expected validating message, got: {message}"
-                );
-            }
-            other => panic!("expected Status event, got: {other:?}"),
-        }
-
-        // Last event: Error about password length
-        match events.last().unwrap() {
-            SetupEvent::Error { message } => {
-                assert!(
-                    message.contains("12"),
-                    "error should mention 12 chars: {message}"
-                );
-            }
-            other => panic!("expected Error event, got: {other:?}"),
-        }
+    #[tokio::test]
+    async fn legacy_observation_reports_the_actual_worker_failure() {
+        let ctx = ServerContext::default();
+        let events = legacy_flash_events(start_flash(&ctx, invalid_flash(&ctx)).unwrap())
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], SetupEvent::Status { step: 1, .. }));
+        assert!(matches!(&events[1], SetupEvent::Error { message } if message.contains("12")));
+        assert!(ctx.setup_flash.clone().try_lock_owned().is_ok());
     }
 }

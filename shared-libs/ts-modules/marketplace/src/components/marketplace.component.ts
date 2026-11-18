@@ -22,6 +22,7 @@ import {
   sameUrl,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import {
   TuiButton,
   tuiButtonOptionsProvider,
@@ -34,18 +35,23 @@ import {
   TuiScrollbar,
   TuiTitle,
 } from '@taiga-ui/core'
-import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import {
   TuiAvatar,
   TuiButtonSelect,
   TuiChevron,
   TuiSkeleton,
 } from '@taiga-ui/kit'
-import { TuiCardLarge, TuiHeader, TuiNavigation } from '@taiga-ui/layout'
+import {
+  TuiBlockStatus,
+  TuiCardLarge,
+  TuiHeader,
+  TuiNavigation,
+} from '@taiga-ui/layout'
 
 import { filterPackages } from '../pipes/filter-packages.pipe'
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreDataWithUrl } from '../types'
+import { isRegistryLoading } from '../registry-state'
 
 const ICONS: Record<string, string> = {
   all: '@tui.layout-grid',
@@ -104,68 +110,83 @@ const ICONS: Record<string, string> = {
     </aside>
     <div class="content">
       <tui-scrollbar>
-        <div class="scroll">
-          @if (current()?.info?.description; as description) {
-            <div
-              tuiNotification
-              appearance="info"
-              class="g-markdown"
-              safeLinks
-              [innerHTML]="description | localize | markdown | dompurify"
-            ></div>
-          }
-          @if (warning(); as warning) {
-            <div tuiNotification appearance="warning">{{ warning | i18n }}</div>
-          }
-          <header tuiHeader="h4">
-            <hgroup tuiTitle>
-              <h2>
-                @if (current()) {
-                  {{ name() | localize }}
-                }
-              </h2>
-            </hgroup>
-            <aside tuiAccessories>
-              <button
-                appearance="secondary-grayscale"
-                tuiButton
-                tuiButtonSelect
-                tuiChevron
-                [(ngModel)]="sortLabel"
-              >
-                {{ sortLabel }}
-                <tui-data-list *tuiDropdown>
-                  @for (key of sortKeys; track key) {
-                    <button tuiOption [value]="getLabel(key)">
-                      {{ getLabel(key) }}
-                    </button>
-                  }
-                </tui-data-list>
-              </button>
-            </aside>
-          </header>
-          <section>
-            @if (current()) {
-              @for ($implicit of packages(); track $index) {
-                <ng-container
-                  *ngTemplateOutlet="template(); context: { $implicit }"
-                />
-              }
-            } @else {
-              @for (_ of '-'.repeat(6); track $index) {
-                <div tuiCardLarge="compact" [tuiSkeleton]="true">
-                  <span tuiCell>
-                    <span tuiAvatar></span>
-                    <span tuiTitle>
-                      Loading
-                      <span tuiSubtitle>Loading</span>
-                    </span>
-                  </span>
-                  <span tuiDescription>Loading</span>
-                </div>
-              }
+        <div class="scroll" [class._blocked]="blocked()">
+          @if (blocked()) {
+            <ng-content select="[marketplaceBlocked]" />
+          } @else {
+            @if (current()?.status === 'error') {
+              <ng-content select="[marketplaceNotice]" />
             }
-          </section>
+            @if (description(); as description) {
+              <div
+                tuiNotification
+                appearance="info"
+                class="g-markdown"
+                safeLinks
+                [innerHTML]="description | localize | markdown | dompurify"
+              ></div>
+            }
+            @if (warning(); as warning) {
+              <div tuiNotification appearance="warning">
+                {{ warning | i18n }}
+              </div>
+            }
+            <header tuiHeader="h4">
+              <hgroup tuiTitle>
+                <h2 [tuiSkeleton]="loading()">
+                  @if (current()) {
+                    {{ name() | localize }}
+                  }
+                </h2>
+              </hgroup>
+              <aside tuiAccessories>
+                <button
+                  appearance="secondary-grayscale"
+                  tuiButton
+                  tuiButtonSelect
+                  tuiChevron
+                  [(ngModel)]="sortLabel"
+                >
+                  {{ sortLabel }}
+                  <tui-data-list *tuiDropdown>
+                    @for (key of sortKeys; track key) {
+                      <button tuiOption [value]="getLabel(key)">
+                        {{ getLabel(key) }}
+                      </button>
+                    }
+                  </tui-data-list>
+                </button>
+              </aside>
+            </header>
+            <section>
+              @if (!loading()) {
+                @for ($implicit of packages(); track $index) {
+                  <ng-container
+                    *ngTemplateOutlet="template(); context: { $implicit }"
+                  />
+                } @empty {
+                  <tui-block-status>
+                    <p>
+                      {{ 'The list is empty' | i18n }}
+                    </p>
+                  </tui-block-status>
+                }
+              } @else {
+                @for (_ of '-'.repeat(6); track $index) {
+                  <div tuiCardLarge="compact" [tuiSkeleton]="true">
+                    <span tuiCell>
+                      <span tuiAvatar></span>
+                      <span tuiTitle>
+                        Loading
+                        <span tuiSubtitle>Loading</span>
+                      </span>
+                    </span>
+                    <span tuiDescription>Loading</span>
+                  </div>
+                }
+              }
+            </section>
+          }
         </div>
       </tui-scrollbar>
     </div>
@@ -186,7 +207,7 @@ const ICONS: Record<string, string> = {
         }
 
         tui-textfield {
-          margin-bottom: 0.75rem;
+          margin-block: 0.75rem;
           padding: 0 0.5rem;
           flex-wrap: nowrap;
           overflow: hidden;
@@ -201,7 +222,14 @@ const ICONS: Record<string, string> = {
       margin-block-start: 0.5rem;
     }
 
+    .scroll._blocked {
+      display: grid;
+      min-block-size: 100cqb;
+      padding-inline: 2rem;
+    }
+
     .content {
+      container-type: size;
       flex: 1;
       min-width: 0;
       display: flex;
@@ -233,7 +261,11 @@ const ICONS: Record<string, string> = {
     }
 
     :host-context(tui-root._mobile) {
-      :is([tuiHeader], section) {
+      .scroll {
+        min-inline-size: 20rem;
+      }
+
+      :is([tuiHeader], section, .scroll._blocked) {
         padding-inline: 1rem;
       }
 
@@ -246,6 +278,7 @@ const ICONS: Record<string, string> = {
     tuiButtonOptionsProvider({ size: 's', appearance: 'flat-grayscale' }),
   ],
   imports: [
+    TuiBlockStatus,
     TuiNavigation,
     TuiInput,
     TuiNotification,
@@ -274,6 +307,8 @@ const ICONS: Record<string, string> = {
 })
 export class MarketplaceComponent {
   readonly registry = input<StoreDataWithUrl>()
+  /** Replaces catalog content and notices while retaining the registry selector. */
+  public readonly blocked = input(false)
   readonly query = model('')
   readonly category = model('')
 
@@ -296,6 +331,18 @@ export class MarketplaceComponent {
       : undefined
   })
 
+  protected readonly loading = computed(
+    (current = this.current()) =>
+      !current || isRegistryLoading(current.status, current.packages.length),
+  )
+
+  protected readonly description = computed((current = this.current()) =>
+    current &&
+    !Object.values(knownRegistries).some(known => sameUrl(known, current.url))
+      ? current.info?.description
+      : null,
+  )
+
   protected readonly warning = computed(() => {
     const url = this.selected()
 
@@ -303,6 +350,7 @@ export class MarketplaceComponent {
   })
 
   protected readonly categories = computed(() => {
+    if (this.loading()) return undefined
     const info = this.current()?.info?.categories
     if (!info) return undefined
 
@@ -315,7 +363,6 @@ export class MarketplaceComponent {
     )
   })
 
-  // Registry switches can leave the selected category unavailable.
   protected readonly effectiveCategory = computed(() => {
     const cats = this.categories()
     const cat = this.category()

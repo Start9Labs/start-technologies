@@ -61,6 +61,11 @@ export default [
         loadComponent: () => import('./routes/wifi/wifi.component'),
       },
       {
+        path: 'ups',
+        title: titleResolver,
+        loadComponent: () => import('./routes/nut'),
+      },
+      {
         path: 'sessions',
         title: titleResolver,
         loadComponent: () => import('./routes/sessions/sessions.component'),

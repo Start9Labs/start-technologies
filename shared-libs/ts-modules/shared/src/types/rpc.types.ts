@@ -1,8 +1,12 @@
-import type { RPC } from '@start9labs/start-core'
+import type { RPC, T } from '@start9labs/start-core'
 
 interface RPCBase {
   jsonrpc: '2.0'
-  id: string
+  id: string | number | null
+}
+
+interface RPCResponseBase extends RPCBase {
+  meta?: T.SyncDbMetadata & Record<string, unknown>
 }
 
 export interface RPCRequest<T> extends RPCBase {
@@ -10,11 +14,11 @@ export interface RPCRequest<T> extends RPCBase {
   params?: T
 }
 
-export interface RPCSuccessRes<T> extends RPCBase {
+export interface RPCSuccessRes<T> extends RPCResponseBase {
   result: T
 }
 
-export interface RPCErrorRes extends RPCBase {
+export interface RPCErrorRes extends RPCResponseBase {
   error: RPCErrorDetails
 }
 

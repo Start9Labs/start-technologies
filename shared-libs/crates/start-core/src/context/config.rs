@@ -15,11 +15,11 @@ use crate::prelude::*;
 use crate::util::serde::IoFormat;
 use crate::version::VersionT;
 
-pub const DEVICE_CONFIG_PATH: &str = "/media/startos/config/config.yaml"; // "/media/startos/config/config.yaml";
+pub const DEVICE_CONFIG_PATH: &str = "/media/startos/config/config.yaml";
 pub const CONFIG_PATH: &str = "/etc/startos/config.yaml";
 pub const CONFIG_PATH_LOCAL: &str = ".startos/config.yaml";
 
-/// The profile a `-H`/`-r` with no explicit name resolves to.
+/// The profile selected when `-H`/`-r` is omitted.
 pub const DEFAULT_PROFILE: &str = "default";
 
 /// Named `host`/`registry` targets — the namespace every config file shares
@@ -50,14 +50,7 @@ impl<'de> Deserialize<'de> for Profiles {
                 Ok(Profiles::default())
             }
             fn visit_str<E>(self, value: &str) -> Result<Profiles, E> {
-                Ok(if value.trim().is_empty() {
-                    Profiles::default()
-                } else {
-                    Profiles(BTreeMap::from([(
-                        DEFAULT_PROFILE.to_owned(),
-                        value.to_owned(),
-                    )]))
-                })
+                Ok(Profiles::bare(value))
             }
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Profiles, A::Error> {
                 let mut profiles = BTreeMap::new();
@@ -71,26 +64,30 @@ impl<'de> Deserialize<'de> for Profiles {
     }
 }
 impl Profiles {
-    /// Add every profile from `lower` that `self` doesn't already define, so a
-    /// higher-precedence config keeps its own entries and only inherits the rest.
-    fn merge_under(&mut self, lower: Profiles) {
-        for (name, url) in lower.0 {
-            self.0.entry(name).or_insert(url);
-        }
-    }
-}
-/// A `-H`/`-r` value is shorthand for the `default` profile — so the flag needs no
-/// special handling, it just contributes `{ default: <value> }` at the top of the stack.
-impl std::str::FromStr for Profiles {
-    type Err = std::convert::Infallible;
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Ok(if value.trim().is_empty() {
+    fn bare(value: &str) -> Self {
+        if value.trim().is_empty() {
             Profiles::default()
         } else {
             Profiles(BTreeMap::from([(
                 DEFAULT_PROFILE.to_owned(),
                 value.to_owned(),
             )]))
+        }
+    }
+    fn merge_under(&mut self, lower: Profiles) {
+        for (name, url) in lower.0 {
+            self.0.entry(name).or_insert(url);
+        }
+    }
+}
+/// CLI `default` selects the files' default, exactly like omitting the flag.
+impl std::str::FromStr for Profiles {
+    type Err = std::convert::Infallible;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(if value == DEFAULT_PROFILE {
+            Profiles::default()
+        } else {
+            Profiles::bare(value)
         })
     }
 }
@@ -153,9 +150,8 @@ pub struct ClientConfig {
     pub config: Option<PathBuf>,
     /// The `host` namespace — named profiles from every config source, merged in
     /// precedence order (`-H`, a `-c` chain, the workspace, `~/.startos`, `/etc/startos`).
-    /// `-H <value>` is shorthand for `{ default: <value> }`, so the flag just seeds the
-    /// top of the stack; resolution follows the `default` profile, chasing a value that
-    /// names another profile until it reaches a URL.
+    /// `-H default` uses the files' default; other flag values override it.
+    /// Profile references resolve recursively to a URL.
     #[arg(short = 'H', long, help = "help.arg.host-url")]
     pub host: Option<Profiles>,
     /// The `registry` namespace, merged the same way. See [`Self::host`].
@@ -208,8 +204,6 @@ impl ContextConfig for ClientConfig {
         self.config.take()
     }
     fn merge_with(&mut self, other: Self) {
-        // Profiles merge *beneath* what's already loaded, so a nearer source's profiles
-        // win a shared alias while distinct aliases accumulate into the union.
         merge_profiles(&mut self.host, other.host);
         merge_profiles(&mut self.registry, other.registry);
         self.registry_hostname = self.registry_hostname.take().or(other.registry_hostname);
@@ -228,10 +222,6 @@ impl ContextConfig for ClientConfig {
 }
 impl ClientConfig {
     pub fn load(mut self) -> Result<Self, Error> {
-        // `-H`/`-r` already sit in `host`/`registry` as `{ default: <value> }` (clap parsed
-        // them via `Profiles`), at the top of the stack. Merge config files under them,
-        // nearest-first — a `-c` chain, the discovered workspace, `~/.startos`, then
-        // `/etc/startos` — each only *adding* profiles a nearer layer didn't already define.
         let path = self.next();
         self.load_path_rec(path)?;
         if let Some(workspace) = find_workspace_config()? {
@@ -395,8 +385,6 @@ mod tests {
             .map(|url| url.to_string())
     }
 
-    /// A `-H`/`-r` flag value is parsed straight into the `default` profile, so the flag
-    /// is a profile map like every other source and needs no special handling.
     #[test]
     fn a_flag_value_is_the_default_profile() {
         assert_eq!(
@@ -408,6 +396,7 @@ mod tests {
             profiles(&[("default", "https://x/")]),
         );
         assert_eq!("".parse::<Profiles>().unwrap(), Profiles::default());
+        assert_eq!("default".parse::<Profiles>().unwrap(), Profiles::default());
     }
 
     // A config file's `host`/`registry` is one key: a bare URL is the `default` profile,
@@ -528,27 +517,96 @@ mod tests {
         assert!(resolve_target(config.host.as_ref()).is_err());
     }
 
-    /// `-H`/`-r` (parsed as `{ default: <value> }`) override whatever `default` the files
-    /// set, because they sit at the top of the merge stack.
     #[test]
-    fn a_flag_overrides_the_files_default() {
-        // as `load` sees it: the flag is already in `host`; files merge under it.
-        let mut config = ClientConfig {
-            host: Some("prod".parse::<Profiles>().unwrap()),
-            ..Default::default()
-        };
-        config.merge_with(parse(
-            "host:\n  default: https://file-default/\n  prod: https://prod/",
-        ));
-        assert_eq!(
-            resolved(config.host.as_ref().unwrap()),
-            Some("https://prod/".into()),
-        );
+    fn explicit_default_flags_use_the_files_default() {
+        for flags in [["-H", "-r"], ["--host", "--registry"]] {
+            for yaml in [
+                "host: https://host/\nregistry: https://registry/",
+                "host:\n  default: https://host/\nregistry:\n  default: https://registry/",
+                "host:\n  default: prod\nregistry:\n  default: prod",
+            ] {
+                let mut config = ClientConfig::try_parse_from([
+                    "start-cli",
+                    flags[0],
+                    "default",
+                    flags[1],
+                    "default",
+                ])
+                .unwrap();
+                config.merge_with(parse(yaml));
+                config.merge_with(parse(
+                    "host:\n  default: https://far-host/\n  prod: leaf\n  leaf: https://host/\nregistry:\n  default: https://far-registry/\n  prod: leaf\n  leaf: https://registry/",
+                ));
+                assert_eq!(
+                    resolve_target(config.host.as_ref())
+                        .unwrap()
+                        .unwrap()
+                        .as_str(),
+                    "https://host/",
+                );
+                assert_eq!(
+                    resolve_target(config.registry.as_ref())
+                        .unwrap()
+                        .unwrap()
+                        .as_str(),
+                    "https://registry/",
+                );
+            }
+        }
     }
 
-    /// The stack `load` builds: the `-H` `default` outranks every file's, and aliases from
-    /// every tier combine into one namespace resolved by following references. The
-    /// walk-up workspace contributes only its `host`/`registry` (via `merge_profiles`).
+    #[test]
+    fn explicit_default_flags_preserve_unset_targets() {
+        let mut config =
+            ClientConfig::try_parse_from(["start-cli", "-H", "default", "-r", "default"]).unwrap();
+        config.merge_with(parse(
+            "host:\n  prod: https://host/\nregistry:\n  prod: https://registry/",
+        ));
+        assert_eq!(resolve_target(config.host.as_ref()).unwrap(), None);
+        assert_eq!(resolve_target(config.registry.as_ref()).unwrap(), None);
+    }
+
+    #[test]
+    fn explicit_default_flags_preserve_invalid_file_targets() {
+        for value in ["default", "missing", "a\n  a: b\n  b: a"] {
+            let mut config =
+                ClientConfig::try_parse_from(["start-cli", "-H", "default", "-r", "default"])
+                    .unwrap();
+            let yaml = format!("host:\n  default: {value}\nregistry:\n  default: {value}");
+            let file = parse(&yaml);
+            config.merge_with(parse(&yaml));
+            for (selected, omitted) in [
+                (config.host.as_ref(), file.host.as_ref()),
+                (config.registry.as_ref(), file.registry.as_ref()),
+            ] {
+                assert_eq!(
+                    resolve_target(selected).unwrap_err().to_string(),
+                    resolve_target(omitted).unwrap_err().to_string(),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_flag_overrides_the_files_default() {
+        for (value, expected) in [
+            ("prod", "https://prod/"),
+            ("https://flag/", "https://flag/"),
+        ] {
+            let mut config =
+                ClientConfig::try_parse_from(["start-cli", "-H", value, "-r", value]).unwrap();
+            config.merge_with(parse(
+                "host:\n  default: https://file-default/\n  prod: https://prod/\nregistry:\n  default: https://file-default/\n  prod: https://prod/",
+            ));
+            for profiles in [config.host.as_ref(), config.registry.as_ref()] {
+                assert_eq!(
+                    resolve_target(profiles).unwrap().unwrap().as_str(),
+                    expected,
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_layered_namespace_combines_every_tier() {
         let mut config = ClientConfig {

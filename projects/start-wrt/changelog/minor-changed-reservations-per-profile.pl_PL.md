@@ -1,1 +1,0 @@
-- Urządzenie zachowuje rezerwację IPv4 dla każdego profilu bezpieczeństwa. Gdy przechodzi do innego profilu, jego rezerwacja i opublikowane porty dla poprzedniego profilu zostają zachowane i znów działają po jego powrocie – niezależnie od tego, czy urządzenie zmieniło profil samo, czy zmieniono profil jego portu Ethernet lub hasła Wi-Fi.

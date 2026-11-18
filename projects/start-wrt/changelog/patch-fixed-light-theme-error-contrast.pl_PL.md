@@ -1,1 +1,0 @@
-- **Komunikaty błędów i powodzenia są czytelne w jasnym motywie.** Wcześniej używały kolorów ciemnego motywu, zbyt bladych na białym tle.

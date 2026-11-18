@@ -1,1 +1,0 @@
-- **Sicherungen werden mit Ihrem Administrator-Passwort verschlüsselt.** Beim Herunterladen einer Sicherung wird das Administrator-Passwort abgefragt, bei der Wiederherstellung das Administrator-Passwort, das beim Erstellen der Sicherung galt. Sicherungen aus früheren Versionen lassen sich weiterhin ohne Passwort wiederherstellen.

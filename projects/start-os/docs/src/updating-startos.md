@@ -25,7 +25,7 @@ StartOS notifies you when your selected OS registry announces a compatible secur
 
 1. When your server comes back, a notification welcomes you to the new version. Open it from **Notifications** — the bell in the menu — to read that release's notes again at any time.
 
-A browser page left open during the update shows **Refresh Needed** while its user interface syncs with the updated server. You can dismiss the dialog and finish your work while syncing continues. When syncing is complete, select **Refresh** to load the synced interface. A sync error offers **Retry**, **Details**, and **Reset UI cache**. If syncing stalls, **Reset UI cache** remains available; confirming it resets the cached interface and reloads the page while preserving your login and settings.
+A browser page left open during the update shows **Refresh Needed** while its user interface syncs with the updated server. You can dismiss the dialog and finish your work while syncing continues. When syncing is complete, select **Refresh** to load the synced interface. A sync error offers **Retry**, **Details**, and **Reset UI cache**. If syncing stalls, select **Refresh** to try again through a page reload, or **Reset UI cache** to reset the cached interface and reload while preserving your login and settings.
 
 ## Trusted Update Signers
 

@@ -1,0 +1,26 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-registry-package-access 1  "access "
+.SH NAME
+start\-cli\-registry\-package\-access \- Commands to manage private package access
+.SH SYNOPSIS
+\fBstart\-cli registry package access\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Commands to manage private package access
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-registry\-package\-access\-add\-reader(1)
+Allow a signer to see a private package
+.TP
+start\-cli\-registry\-package\-access\-get(1)
+Show whether a package is private and which signers can see it
+.TP
+start\-cli\-registry\-package\-access\-remove\-reader(1)
+Revoke a signer\*(Aqs access to a private package
+.TP
+start\-cli\-registry\-package\-access\-set\-private(1)
+Set whether a package is private

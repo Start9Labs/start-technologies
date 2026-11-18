@@ -19,9 +19,7 @@ export default {
   16: 'Motyw',
   17: 'Strefa czasowa',
   18: 'Dostęp zdalny',
-  19: 'nigdy',
   20: 'zawsze',
-  21: 'Gdy za NAT (domyślnie)',
   22: 'Bezpieczeństwo',
   23: 'Pobierz swój główny urząd certyfikacji (Root CA), aby ufać połączeniom HTTPS z dodatkowych urządzeń.',
   24: 'Pobierz Root CA',
@@ -594,4 +592,6 @@ export default {
   640: 'Twój ruch',
   641: 'Aby usunąć ten VPN, najpierw zmień {vpns} tak, aby łączyły się przez coś innego.',
   642: 'Aby wyłączyć ten VPN, najpierw zmień {vpns} tak, aby łączyły się przez coś innego.',
+  643: 'Nigdy (domyślnie)',
+  644: 'Gdy za NAT',
 } satisfies i18n

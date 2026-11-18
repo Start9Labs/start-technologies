@@ -19,9 +19,7 @@ export default {
   16: 'Thème',
   17: 'Fuseau horaire',
   18: 'Accès à distance',
-  19: 'jamais',
   20: 'toujours',
-  21: 'Lorsque derrière un NAT (par défaut)',
   22: 'Sécurité',
   23: 'Téléchargez votre CA racine pour faire confiance aux connexions HTTPS depuis des appareils supplémentaires.',
   24: 'Télécharger la CA racine',
@@ -594,4 +592,6 @@ export default {
   640: 'Votre trafic',
   641: 'Pour supprimer ce VPN, modifiez d’abord {vpns} pour qu’ils se connectent via autre chose.',
   642: 'Pour désactiver ce VPN, modifiez d’abord {vpns} pour qu’ils se connectent via autre chose.',
+  643: 'Jamais (par défaut)',
+  644: 'Lorsque derrière un NAT',
 } satisfies i18n

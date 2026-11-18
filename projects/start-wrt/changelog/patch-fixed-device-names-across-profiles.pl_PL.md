@@ -1,1 +1,0 @@
-- Nazwy urządzeń są rozwiązywane w każdej sieci, której profil bezpieczeństwa pozwala na dostęp, a nie tylko we własnej. Nadana nazwa ma pierwszeństwo przed nazwą hosta przesyłaną przez urządzenie. Urządzenie we własnej sieci zachowuje nazwę, jeśli urządzenie z innej sieci używa takiej samej.

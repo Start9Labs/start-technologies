@@ -1,3 +1,4 @@
+import { defaultRegistries, registryUrl, sameUrl } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import {
   DataModel,
@@ -5,7 +6,7 @@ import {
   PackageDataEntry,
 } from 'src/app/services/patch-db/data-model'
 import { knownAuthorities } from 'src/app/utils/acme'
-import { Mock } from './api.fixures'
+import { Mock, mockAddresses } from './api.fixures'
 const version = require('../../../../../../../../package.json').version
 
 function mockService(
@@ -73,7 +74,45 @@ function mockStart9Key(
   }
 }
 
+/** The community registry mocks an unreachable registry. */
+export function mockRegistryCache(
+  url: string,
+  info: T.RegistryInfo,
+): DataModel['registryCache'][string] {
+  return sameUrl(url, defaultRegistries.community)
+    ? {
+        info,
+        packages: {},
+        status: 'error',
+        error: `error sending request for url (${registryUrl(url)}): connection timed out`,
+      }
+    : { info, packages: Mock.RegistryPackages, status: 'connected' }
+}
+
+export function mockOsUpdateCache(
+  registry: string,
+): NonNullable<DataModel['osUpdateCache']> {
+  return {
+    registry: registryUrl(registry),
+    versions: sameUrl(registry, defaultRegistries.community)
+      ? {}
+      : Mock.RegistryOSUpdate,
+    status: 'connected',
+  }
+}
+
 export const mockPatchData: DataModel = {
+  registryCache: {
+    [defaultRegistries.start9]: mockRegistryCache(
+      defaultRegistries.start9,
+      Mock.RegistryInfo,
+    ),
+    [defaultRegistries.community]: mockRegistryCache(
+      defaultRegistries.community,
+      { ...Mock.RegistryInfo, name: 'Community Registry' },
+    ),
+  },
+  osUpdateCache: mockOsUpdateCache(defaultRegistries.start9),
   disks: structuredClone(Mock.Disks),
   sharedVolumes: {
     MOCKLOCALVOLUME234567ABCDEFGHIJK: {
@@ -344,6 +383,7 @@ export const mockPatchData: DataModel = {
         ),
     },
     version,
+    gitHash: '',
     lastBackup: new Date(new Date().valueOf() - 604800001).toISOString(),
     network: {
       wifi: {
@@ -366,7 +406,7 @@ export const mockPatchData: DataModel = {
               assignedPort: null,
               assignedSslPort: 443,
             },
-            addresses: {
+            addresses: mockAddresses({
               enabled: [],
               disabled: [],
               guaWan: [],
@@ -449,8 +489,9 @@ export const mockPatchData: DataModel = {
                   },
                 },
               ],
-            },
+            }),
             options: {
+              transport: ['tcp'],
               preferredExternalPort: 80,
               addSsl: {
                 upstreamCertValidation: null,
@@ -646,6 +687,7 @@ export const mockPatchData: DataModel = {
     caFingerprint: '63:2B:11:99:44:40:17:DF:37:FC:C3:DF:0F:3D:15',
     ntpSynced: false,
     smtp: null,
+    nut: { enabled: false, settings: null },
     echoipUrls: ['https://ipconfig.me', 'https://ifconfig.co'],
     zram: false,
     governor: 'performance',
@@ -947,7 +989,7 @@ export const mockPatchData: DataModel = {
                 assignedPort: 42080,
                 assignedSslPort: 42443,
               },
-              addresses: {
+              addresses: mockAddresses({
                 enabled: ['203.0.113.45:42443', '[2001:db8:abcd::a3b:2]:1234'],
                 disabled: [],
                 guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
@@ -1051,8 +1093,9 @@ export const mockPatchData: DataModel = {
                     metadata: { kind: 'ipv6', gateway: 'eth0', scopeId: 0 },
                   },
                 ],
-              },
+              }),
               options: {
+                transport: ['tcp', 'udp'],
                 preferredExternalPort: 42443,
                 addSsl: {
                   upstreamCertValidation: null,
@@ -1119,13 +1162,14 @@ export const mockPatchData: DataModel = {
           bindingRanges: {
             49152: {
               enabled: true,
+              transport: ['udp'],
               externalStartPort: 49152,
               numberOfPorts: 100,
               // Same per-address model as a single-port binding, IPv4-only and
               // non-SSL, every entry on the external start port (49152). The
               // public WAN IP is seeded into `enabled` (WAN is opt-in); LAN /
               // mDNS / domains are enabled by default.
-              addresses: {
+              addresses: mockAddresses({
                 enabled: ['203.0.113.45:49152'],
                 disabled: [],
                 guaWan: [],
@@ -1174,12 +1218,12 @@ export const mockPatchData: DataModel = {
                     metadata: { kind: 'private-domain', gateways: ['wlan0'] },
                   },
                 ],
-              },
+              }),
               interface: {
-                id: 'zmq',
-                name: 'ZMQ',
-                description: 'Bitcoin ZMQ notification endpoints',
-                scheme: 'tcp',
+                id: 'udp-relay',
+                name: 'UDP Relay',
+                description: 'UDP-only relay ports',
+                scheme: 'udp',
               },
             },
           },
@@ -1224,7 +1268,7 @@ export const mockPatchData: DataModel = {
                 assignedPort: 48332,
                 assignedSslPort: null,
               },
-              addresses: {
+              addresses: mockAddresses({
                 enabled: [],
                 disabled: [],
                 guaWan: [],
@@ -1262,12 +1306,13 @@ export const mockPatchData: DataModel = {
                     },
                   },
                 ],
-              },
+              }),
               options: {
+                transport: ['tcp', 'udp'],
                 addSsl: null,
                 preferredExternalPort: 48332,
                 secure: { ssl: false },
-                proxy: null,
+                proxy: { type: 'http', addXForwardedHeaders: true, auth: null },
               },
               interfaces: {
                 rpc: {
@@ -1303,14 +1348,15 @@ export const mockPatchData: DataModel = {
                 assignedPort: 48333,
                 assignedSslPort: null,
               },
-              addresses: {
+              addresses: mockAddresses({
                 enabled: [],
                 disabled: [],
                 guaWan: [],
                 lanEnabled: [],
                 available: [],
-              },
+              }),
               options: {
+                transport: ['tcp', 'udp'],
                 addSsl: null,
                 preferredExternalPort: 48333,
                 secure: { ssl: false },

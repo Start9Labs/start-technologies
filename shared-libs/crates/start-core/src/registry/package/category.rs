@@ -10,6 +10,7 @@ use crate::context::CliContext;
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::registry::package::index::Category;
+use crate::registry::upstream::WRITES_INDEX;
 use crate::s9pk::manifest::LocaleString;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 
@@ -18,6 +19,7 @@ pub fn category_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add_category)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.add-category-registry")
@@ -26,6 +28,7 @@ pub fn category_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove_category)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.remove-category-registry")
@@ -34,6 +37,7 @@ pub fn category_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add-package",
             from_fn_async(add_package)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.add-package-category")
@@ -42,6 +46,7 @@ pub fn category_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove-package",
             from_fn_async(remove_package)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.remove-package-category")

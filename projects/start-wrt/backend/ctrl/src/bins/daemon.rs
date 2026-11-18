@@ -1,8 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::OsString;
-use std::future::ready;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,18 +8,12 @@ use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{header, Response};
 use axum::routing::{any, get, post};
-use axum::{Extension, Json, Router};
-use rpc_toolkit::Server;
-use serde::Deserialize;
+use axum::{Extension, Json};
 use startos::middleware::auth::local::LocalAuthContext;
-use startos::middleware::auth::Auth;
+use startos::middleware::auth::session::RpcSessionUpgrader;
 use startos::net::tls::TlsListener;
 use startos::net::web_server::{Accept, Acceptor, DynAccept, MetadataVisitor, WebServer};
-use startos::util::crypto::EncryptedWire;
 use tokio::signal::unix::SignalKind;
-use tokio::sync::mpsc;
-use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
-use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::instrument;
 use visit_rs::Visit;
 
@@ -29,28 +21,8 @@ use crate::continuations::{self, RpcContinuations};
 use crate::embedded_web::serve_embedded;
 use crate::luci_proxy::{self, ProxyClient};
 use crate::prelude::*;
-use crate::setup::{self, FlashMode, SetupEvent};
-use crate::{init_logging, main_api, ssl, ServerContext};
-
-/// Shared state passed to HTTP handlers via Extension.
-#[derive(Clone)]
-struct AppState {
-    /// Guards against concurrent flash operations.
-    flash_in_progress: Arc<AtomicBool>,
-}
-
-#[derive(Deserialize, visit_rs::VisitFields)]
-#[serde(rename_all = "camelCase")]
-struct FlashParams {
-    mode: FlashMode,
-    /// Encrypted to the key from `setup.get-pubkey`.
-    password: EncryptedWire,
-    /// IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
-    #[serde(default)]
-    timezone: Option<String>,
-}
-rpc_toolkit::reflect_ts!(FlashParams);
-rpc_toolkit::ts_export!(FlashParams, namespaces = ["events"]);
+use crate::setup::{self, FlashParams, SetupEvent};
+use crate::{init_logging, ssl, ServerContext};
 
 fn ndjson_error(message: &str) -> Response<Body> {
     let event = SetupEvent::Error {
@@ -63,7 +35,6 @@ fn ndjson_error(message: &str) -> Response<Body> {
         .unwrap()
 }
 
-/// GET /ws/rpc/{guid} — WebSocket continuation handler (e.g., update progress).
 async fn ws_continuation_handler(
     axum::extract::Path(guid): axum::extract::Path<String>,
     ws: axum::extract::ws::WebSocketUpgrade,
@@ -72,58 +43,29 @@ async fn ws_continuation_handler(
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
 
-    let handler = match continuations::Guid::from(&guid) {
-        Some(guid) => continuations.get_ws_handler(&guid).await,
-        None => None,
+    let Some(guid) = continuations::Guid::from(&guid) else {
+        return StatusCode::NOT_FOUND.into_response();
     };
-    match handler {
-        Some(handler) => ws.on_upgrade(handler),
+    match continuations.get_ws_handler(&guid).await {
+        Some(handler) => handler.on_upgrade(ws, guid),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
-/// POST /api/setup/flash — streams NDJSON progress events.
-async fn setup_flash_handler(
-    Extension(state): Extension<AppState>,
+pub(crate) async fn setup_flash_handler(
     Extension(ctx): Extension<ServerContext>,
     Json(params): Json<FlashParams>,
 ) -> Response<Body> {
-    let password = match crate::auth::decrypt_password(&ctx, params.password) {
-        Ok(password) => password,
-        Err(e) => return ndjson_error(&e.to_string()),
+    use futures::StreamExt;
+
+    let operation = match setup::start_flash(&ctx, params) {
+        Ok(operation) => operation,
+        Err(error) => return ndjson_error(&error.to_string()),
     };
-
-    // Prevent concurrent flash operations
-    if state
-        .flash_in_progress
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return ndjson_error("flash already in progress");
-    }
-
-    let flash_flag = state.flash_in_progress.clone();
-    let (tx, rx) = mpsc::channel::<SetupEvent>(32);
-
-    // run_setup_flash holds uciedit Arena across .await points, so its future
-    // is !Send and cannot be `tokio::spawn`ed. Run it on a dedicated thread
-    // with its own single-threaded runtime (which permits !Send futures).
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to create setup-flash runtime");
-        rt.block_on(async move {
-            setup::run_setup_flash(params.mode, &password, params.timezone.as_deref(), &tx).await;
-            flash_flag.store(false, Ordering::SeqCst);
-        });
-    });
-
-    let stream = futures::stream::unfold(rx, |mut rx| async move {
-        let event = rx.recv().await?;
+    let stream = setup::legacy_flash_events(operation).map(|event| {
         let mut json = serde_json::to_string(&event).unwrap();
         json.push('\n');
-        Some((Ok::<_, std::convert::Infallible>(json), rx))
+        Ok::<_, std::convert::Infallible>(json)
     });
 
     Response::builder()
@@ -190,11 +132,15 @@ async fn inner_main() -> Result<(), Error> {
     let setup_mode = setup::is_setup_mode().await;
 
     let continuations = Arc::new(RpcContinuations::new());
+    let auth = Arc::new(crate::auth::AuthState::open().await?);
+    let server_identity = auth.server_identity().await?;
     let ctx = ServerContext {
+        setup_flash: Arc::new(tokio::sync::Mutex::new(())),
+        secure_session: None,
         continuations: continuations.clone(),
-        auth: Arc::new(crate::auth::AuthState::open().await?),
+        auth,
+        server_identity,
     };
-    let app_state;
 
     if setup_mode {
         tracing::info!("setup mode detected (booted from removable media)");
@@ -232,10 +178,6 @@ async fn inner_main() -> Result<(), Error> {
                 tracing::error!("captive portal setup failed: {e}");
             }
         }
-
-        app_state = AppState {
-            flash_in_progress: Arc::new(AtomicBool::new(false)),
-        };
     } else {
         // Normal mode: restore WiFi + manage captive portal state
 
@@ -363,10 +305,6 @@ async fn inner_main() -> Result<(), Error> {
         {
             tracing::error!("Failed to start USB port watcher: {e}");
         }
-
-        app_state = AppState {
-            flash_in_progress: Arc::new(AtomicBool::new(false)),
-        };
     }
 
     let tls = init_tls(ctx.clone()).await;
@@ -402,10 +340,6 @@ async fn inner_main() -> Result<(), Error> {
         tokio::spawn(crate::auth::reap_idle_keys(ctx.clone()));
         tokio::spawn(crate::ssh_sessions::run());
     }
-    let rpc_ctx = ctx.clone();
-    let handler = Server::new(move || ready(Ok(rpc_ctx.clone())), main_api())
-        .middleware(Auth::new().with_local_auth().with_signature_auth());
-
     let proxy_client = ProxyClient(
         reqwest::Client::builder()
             .no_proxy()
@@ -417,41 +351,24 @@ async fn inner_main() -> Result<(), Error> {
             .expect("failed to build proxy HTTP client"),
     );
 
-    // Firmware build stamp on every RPC response. The UI checks it against its
-    // baked-in config.json gitHash on each response, so an open tab notices a
-    // firmware update within one background poll (~5s) even when the daemon
-    // restart was too quick to drop any request (e.g. a CLI deploy). Exposed
-    // through CORS for the cross-origin dev serve.
-    let git_hash_header = header::HeaderName::from_static("x-startwrt-git-hash");
+    let cors = startos::middleware::cors::layer().expose_headers([crate::rpc::GIT_HASH_HEADER]);
 
-    let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::mirror_request())
-        .allow_methods(AllowMethods::mirror_request())
-        .allow_headers(AllowHeaders::mirror_request())
-        .expose_headers([git_hash_header.clone()])
-        .allow_credentials(true);
-
-    let app = Router::new()
-        // RPC API at /rpc/v1 (matches frontend's RELATIVE_URL)
-        .route(
-            "/rpc/v1",
-            post(handler).layer(SetResponseHeaderLayer::overriding(
-                git_hash_header,
-                header::HeaderValue::from_static(env!("STARTWRT_GIT_HASH")),
-            )),
-        )
+    let app = crate::rpc::router(ctx.clone())
         // RPC continuation endpoint (binary I/O for backup/restore/diagnostics)
         .route(
             "/rest/rpc/{guid}",
             any(continuations::continuation_handler)
                 .layer(DefaultBodyLimit::max(continuations::MAX_UPLOAD_BYTES)),
         )
-        // WebSocket continuation endpoint (update progress, live logs).
-        // Registered with `any` (not `get`) so HTTP/2 CONNECT requests (RFC
-        // 8441 extended CONNECT, used for WebSocket-over-h2) reach the
-        // upgrade extractor instead of being rejected with 405.
-        .route("/ws/rpc/{guid}", any(ws_continuation_handler))
-        // Streaming flash endpoint for setup wizard
+        // HTTP/2 WebSockets upgrade with CONNECT.
+        .route(
+            &format!("{}/{{guid}}", RpcSessionUpgrader::PATH),
+            any(ws_continuation_handler),
+        )
+        .route(
+            &format!("{}/{{guid}}", RpcContinuations::LEGACY_WS_PATH),
+            any(ws_continuation_handler),
+        )
         .route("/api/setup/flash", post(setup_flash_handler))
         // Root CA download (no auth required)
         .route(
@@ -490,7 +407,6 @@ async fn inner_main() -> Result<(), Error> {
         .layer(cors)
         .layer(Extension(continuations))
         .layer(Extension(proxy_client))
-        .layer(Extension(app_state))
         .layer(Extension(ctx));
 
     let app = crate::captive::redirect_to_router(app);

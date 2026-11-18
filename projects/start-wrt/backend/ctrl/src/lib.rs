@@ -39,6 +39,7 @@ pub mod published_ports;
 pub mod recent;
 pub mod registry;
 pub mod reservations;
+pub mod rpc;
 pub mod setup;
 pub use startos::sign;
 pub mod ssh_keys;
@@ -128,7 +129,6 @@ fn id_key_path() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("/root/.startwrt/id.key.pem"))
 }
 
-/// CLI arguments parsed by clap
 #[derive(Clone, Parser)]
 #[command(name = "startwrt", version)]
 pub struct CliArgs {
@@ -139,7 +139,7 @@ pub struct CliArgs {
     /// Server URL [default: http://127.0.0.1/rpc/v1 on the router, else https://router.lan/rpc/v1]
     #[clap(long)]
     pub host: Option<Url>,
-    /// PEM certificate authority to trust, such as the router's from /static/local-root-ca.crt. Repeatable.
+    /// PEM certificate authority for HTTP and WebSocket RPC, such as the router's from /static/local-root-ca.crt. Repeatable.
     #[clap(long = "root-ca", value_name = "PEM_PATH")]
     pub root_ca: Vec<PathBuf>,
 }
@@ -149,6 +149,8 @@ pub struct CliContextSeed {
     pub configs_only: bool,
     pub host: Url,
     pub client: Client,
+    pub websocket_client: Client,
+    pub rpc_client: startos::middleware::auth::session::client::SessionClient,
     pub id_key_path: PathBuf,
     id_key: OnceLock<Signer>,
     runtime: OnceLock<Arc<Runtime>>,
@@ -180,26 +182,44 @@ impl CliContext {
         let on_router = std::fs::read_to_string(crate::auth::LOCAL_AUTH_COOKIE_PATH).is_ok();
         let host = args.host.unwrap_or_else(|| default_host(on_router));
 
-        let mut builder = Client::builder();
-        for path in &args.root_ca {
-            let pem = std::fs::read(path)
-                .map_err(|e| Error::new(eyre!("{}: {e}", path.display()), ErrorKind::Filesystem))?;
-            let cert = reqwest::Certificate::from_pem(&pem)
-                .map_err(|e| Error::new(eyre!("{}: {e}", path.display()), ErrorKind::OpenSsl))?;
-            builder = builder.add_root_certificate(cert);
-        }
-        let client = builder.build().map_err(|e| {
-            Error::new(
-                eyre!("Failed to build HTTP client: {}", e),
-                ErrorKind::Network,
-            )
-        })?;
+        let certificates = args
+            .root_ca
+            .iter()
+            .map(|path| {
+                let pem = std::fs::read(path).map_err(|e| {
+                    Error::new(eyre!("{}: {e}", path.display()), ErrorKind::Filesystem)
+                })?;
+                reqwest::Certificate::from_pem(&pem)
+                    .map_err(|e| Error::new(eyre!("{}: {e}", path.display()), ErrorKind::OpenSsl))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let build_client = |mut builder: reqwest::ClientBuilder| {
+            for cert in &certificates {
+                builder = builder.add_root_certificate(cert.clone());
+            }
+            builder.build().map_err(|error| {
+                Error::new(
+                    eyre!("Failed to build HTTP client: {error}"),
+                    ErrorKind::Network,
+                )
+            })
+        };
+        let client = build_client(Client::builder())?;
+        let websocket_client = build_client(
+            Client::builder()
+                .http1_only()
+                .redirect(reqwest::redirect::Policy::none()),
+        )?;
 
         Ok(Self(Arc::new(CliContextSeed {
             config_root: args.config_root,
             configs_only: args.configs_only,
             host,
             client,
+            rpc_client: startos::middleware::auth::session::client::SessionClient::new(
+                websocket_client.clone(),
+            ),
+            websocket_client,
             id_key_path: id_key_path(),
             id_key: OnceLock::new(),
             runtime: OnceLock::new(),
@@ -233,15 +253,19 @@ impl CliContext {
                 headers.insert(AUTHORIZATION, auth);
             }
         }
-        startos::middleware::auth::signature::call_remote(
-            self,
-            self.host.clone(),
-            headers,
-            self.host.host_str(),
-            method,
-            params,
-        )
-        .await
+        let signer = self
+            .rpc_signer(&headers)?
+            .unwrap_or_else(|| self.rpc_client.ephemeral_signer().clone());
+        self.rpc_client
+            .call(
+                &signer,
+                startos::middleware::auth::session::client::websocket_url(self.host.clone())?,
+                self.host.host_str().unwrap_or_default(),
+                headers,
+                method,
+                params,
+            )
+            .await
     }
 
     /// Build URL for a continuation endpoint.
@@ -311,7 +335,16 @@ impl AsRef<Client> for CliContext {
 
 impl SigningContext for CliContext {
     fn signing_key(&self) -> Result<Signer, startos::Error> {
-        Ok(self.id_key()?.clone())
+        self.id_key().cloned().map_err(|mut error| {
+            if error
+                .source
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+            {
+                error.kind = startos::ErrorKind::Uninitialized;
+            }
+            error
+        })
     }
 }
 
@@ -329,8 +362,7 @@ impl Context for CliContext {
         Some(
             self.runtime
                 .get_or_init(|| {
-                    // Multi-thread runtime with 1 worker so `block_in_place`
-                    // works when handlers call blocking uciedit operations.
+                    // Handlers use `block_in_place`.
                     Arc::new(
                         tokio::runtime::Builder::new_multi_thread()
                             .worker_threads(1)
@@ -382,14 +414,51 @@ impl CallRemote<ServerContext> for CliContext {
 
 #[derive(Clone)]
 pub struct ServerContext {
+    pub(crate) setup_flash: Arc<tokio::sync::Mutex<()>>,
     pub continuations: Arc<continuations::RpcContinuations>,
     pub auth: Arc<auth::AuthState>,
+    pub server_identity: startos::sign::Signer,
+    pub(crate) secure_session: Option<Arc<startos::middleware::auth::session::SecureSession>>,
+}
+impl startos::middleware::auth::session::SessionContext for ServerContext {
+    fn secure_session(&self) -> Option<&startos::middleware::auth::session::SecureSession> {
+        self.secure_session.as_deref()
+    }
+}
+impl ServerContext {
+    pub(crate) fn replay_check(&self) -> startos::middleware::auth::signature::RequestReplayCheck {
+        let continuations = Arc::downgrade(&self.continuations);
+        let server_identity = self.server_identity.clone();
+        let setup_flash = self.setup_flash.clone();
+        startos::middleware::auth::signature::RequestReplayCheck::new(&self.auth, move |auth| {
+            Some(Self {
+                continuations: continuations.upgrade()?,
+                auth,
+                server_identity: server_identity.clone(),
+                setup_flash: setup_flash.clone(),
+                secure_session: None,
+            })
+        })
+    }
+    pub(crate) fn server_identity(&self) -> Result<startos::sign::Signer, startos::Error> {
+        Ok(self.server_identity.clone())
+    }
+    pub(crate) fn with_secure_session(
+        mut self,
+        session: startos::middleware::auth::session::SecureSession,
+    ) -> Self {
+        self.secure_session = Some(Arc::new(session));
+        self
+    }
 }
 impl Default for ServerContext {
     fn default() -> Self {
         Self {
+            setup_flash: Arc::new(tokio::sync::Mutex::new(())),
             continuations: Arc::new(continuations::RpcContinuations::new()),
             auth: Arc::new(auth::AuthState::in_memory()),
+            server_identity: startos::sign::AnySigningKey::generate().into(),
+            secure_session: None,
         }
     }
 }
@@ -401,6 +470,44 @@ impl CtrlContext for ServerContext {
 
     fn effectful(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod cli_tests;
+#[cfg(test)]
+mod replay_tests;
+
+#[cfg(test)]
+mod server_identity_tests {
+    use super::*;
+
+    #[test]
+    fn image_preserves_the_server_identity_during_sysupgrade() {
+        let path = PathBuf::from(auth::AUTH_DB_PATH);
+        let stage = include_str!("../../../build/stage-files.sh");
+        let keep = stage
+            .split("<< 'KEEPEOF'")
+            .nth(1)
+            .unwrap()
+            .split("KEEPEOF")
+            .next()
+            .unwrap();
+        assert!(keep.lines().any(|line| line == path.to_str().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn cloned_context_retains_the_server_identity() {
+        let context = ServerContext::default();
+        assert_eq!(
+            context.server_identity.verifying_key().await.unwrap(),
+            context
+                .clone()
+                .server_identity
+                .verifying_key()
+                .await
+                .unwrap()
+        );
     }
 }
 

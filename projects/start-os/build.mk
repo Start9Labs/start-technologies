@@ -1,5 +1,5 @@
-# When this product's build inputs change, mirror them into the `paths:` filter
-# of .github/workflows/startos-iso.yaml (see root AGENTS.md "Coupled changes").
+# When this product's build inputs change, mirror them into its entry in
+# .github/scripts/changed-products.mjs (see root AGENTS.md "Coupled changes").
 
 IMAGE_TYPE=$(shell if [ "$(PLATFORM)" = raspberrypi ]; then echo img; else echo iso; fi)
 FIRMWARE_ROMS := projects/start-os/build/firmware/$(PLATFORM) $(shell jq --raw-output '.[] | select(.platform[] | contains("$(PLATFORM)")) | "./projects/start-os/build/firmware/$(PLATFORM)/" + .id + ".rom.gz"' projects/start-os/build/lib/firmware.json)
@@ -25,16 +25,20 @@ STARTOS_TARGETS := $(STARTD_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_
 start-os: $(STARTOS_TARGETS)
 
 backup-fs-test: $(call ls-files, projects/start-os/backup-fs/src) projects/start-os/backup-fs/Cargo.toml $(BACKUP_PROTOCOL_SRC) Cargo.toml Cargo.lock
-	cargo test -p startos-backup-fs --lib -- --skip mount_tests
+	cargo test --profile unit-test -p startos-backup-fs --lib -- --skip mount_tests
 
 container-runtime-test: projects/start-os/container-runtime/node_modules/.package-lock.json $(call ls-files, projects/start-os/container-runtime/src) projects/start-os/container-runtime/package.json projects/start-os/container-runtime/tsconfig.json
 	cd projects/start-os/container-runtime && npm test
+
+.PHONY: start-os-upgrade-identity-test
+start-os-upgrade-identity-test: projects/start-os/build/tests/upgrade-identity.test.mjs projects/start-os/build/lib/scripts/upgrade projects/start-os/build/lib/scripts/forget-server-identity shared-libs/crates/start-core/src/context/startup.rs shared-libs/crates/start-core/src/developer/mod.rs
+	node --test projects/start-os/build/tests/upgrade-identity.test.mjs
 
 .PHONY: start-os-grub-test
 start-os-grub-test: projects/start-os/build/tests/grub-overrides-test.sh projects/start-os/build/lib/grub-user.cfg projects/start-os/build/lib/scripts/nvme-isolation-test projects/start-os/debian/postinst projects/start-os/build/image-recipe/raspberrypi/squashfs/etc/default/grub.d/raspberrypi.cfg
 	./projects/start-os/build/tests/grub-overrides-test.sh
 
-start-os-scripts-test: start-os-grub-test projects/start-os/build/tests/dns-config-test.sh projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/update-image.sh projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh projects/start-os/build/lib/scripts/gather-debug-info projects/start-os/debian/postinst projects/start-os/build/tests/crash-diagnostics-test.sh projects/start-os/build/tests/btrfsmaintenance-test.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/tests/runtime-package-upgrade-test.sh projects/start-os/build/tests/migration-images-test.sh projects/start-os/build/save-migration-images.sh
+start-os-scripts-test: start-os-grub-test start-os-forward-transport-test start-os-upgrade-identity-test projects/start-os/build/tests/dns-config-test.sh projects/start-os/build/lib/resolved.conf projects/start-os/container-runtime/deb-install.sh projects/start-os/container-runtime/update-image.sh projects/start-os/build/lib/scripts/normalize-fstab projects/start-os/build/tests/normalize-fstab-test.sh projects/start-os/build/image-recipe/raspberrypi/img/usr/lib/startos/scripts/init_resize.sh projects/start-os/build/tests/init-resize-test.sh projects/start-os/build/image-recipe/build.sh projects/start-os/build/tests/backports-pref-test.sh projects/start-os/build/lib/scripts/gather-debug-info projects/start-os/debian/postinst projects/start-os/build/tests/crash-diagnostics-test.sh projects/start-os/build/tests/btrfsmaintenance-test.sh projects/start-os/build/dpkg-deps/depends projects/start-os/build/tests/runtime-package-upgrade-test.sh projects/start-os/build/tests/migration-images-test.sh projects/start-os/build/save-migration-images.sh
 	./projects/start-os/build/tests/migration-images-test.sh
 	./projects/start-os/build/tests/normalize-fstab-test.sh
 	./projects/start-os/build/tests/init-resize-test.sh
@@ -43,6 +47,10 @@ start-os-scripts-test: start-os-grub-test projects/start-os/build/tests/dns-conf
 	./projects/start-os/build/tests/dns-config-test.sh
 	./projects/start-os/build/tests/btrfsmaintenance-test.sh
 	./projects/start-os/build/tests/runtime-package-upgrade-test.sh
+
+.PHONY: start-os-forward-transport-test
+start-os-forward-transport-test: build/lib/scripts/forward-port build/lib/scripts/forward-port6 projects/start-os/build/tests/forward-transport-test.sh
+	./projects/start-os/build/tests/forward-transport-test.sh
 
 projects/start-os/build/lib/migration-images/.done: projects/start-os/build/save-migration-images.sh
 	./projects/start-os/build/save-migration-images.sh projects/start-os/build/lib/migration-images
@@ -184,7 +192,8 @@ start-os-emulate-reflash: $(STARTOS_TARGETS)
 	@if [ -z "$(REMOTE)" ]; then >&2 echo "Must specify REMOTE" && false; fi
 	$(call ssh,'sudo /usr/lib/startos/scripts/chroot-and-upgrade --create')
 	$(MAKE) start-os-install REMOTE=$(REMOTE) SSHPASS=$(SSHPASS) DESTDIR=/media/startos/next PLATFORM=$(PLATFORM)
-	$(call ssh,'sudo rm -f /media/startos/config/disk.guid /media/startos/config/overlay/etc/hostname')
+	$(call ssh,'sudo /media/startos/next/usr/lib/startos/scripts/forget-server-identity')
+	$(call ssh,'sudo rm -f /media/startos/config/overlay/etc/hostname')
 	$(call ssh,'sudo /media/startos/next/usr/lib/startos/scripts/chroot-and-upgrade --no-sync "apt-get install -y $(shell cat ./projects/start-os/build/lib/depends)"')
 
 projects/start-os/container-runtime/debian.$(ARCH).squashfs: ./projects/start-os/container-runtime/download-base-image.sh
@@ -218,33 +227,45 @@ projects/start-os/build/lib/depends projects/start-os/build/lib/conflicts: $(ENV
 $(FIRMWARE_ROMS): projects/start-os/build/lib/firmware.json ./projects/start-os/build/download-firmware.sh $(PLATFORM_FILE)
 	./projects/start-os/build/download-firmware.sh $(PLATFORM)
 
-target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox: $(CORE_SRC) $(COMPRESSED_WEB_UIS) projects/start-os/web/patchdb-ui-seed.json $(ENVIRONMENT_FILE) projects/start-os/build/build-startbox.sh
-	ARCH=$(ARCH) PROFILE=$(PROFILE) ./projects/start-os/build/build-startbox.sh
+STARTBOX_INPUTS := $(CORE_SRC) $(COMPRESSED_WEB_UIS) projects/start-os/web/patchdb-ui-seed.json $(ENVIRONMENT_FILE) $(RUST_BIN_BUILDER_INPUTS)
+START_CONTAINER_INPUTS := $(CORE_SRC) $(ENVIRONMENT_FILE) $(RUST_BIN_BUILDER_INPUTS)
+RUST_BINS_start-os := start-os:startbox
+RUST_OUTPUTS_start-os := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
+RUST_INPUTS_start-os := $(sort $(STARTBOX_INPUTS) $(START_CONTAINER_INPUTS))
+# start-container ships in the release profile, independent of startbox's profile.
+ifeq ($(PROFILE),release)
+RUST_BINS_start-os += start-os:start-container
+else
+RUST_INPUTS_start-os += target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
+endif
+
+target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox: $(STARTBOX_INPUTS)
+	ARCH=$(ARCH) PROFILE=$(PROFILE) ./build/build-rust-bins.sh start-os:startbox
 	touch target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox
 
-target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(CORE_SRC) $(ENVIRONMENT_FILE) projects/start-os/build/build-start-container.sh
-	ARCH=$(ARCH) ./projects/start-os/build/build-start-container.sh
+target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(START_CONTAINER_INPUTS)
+	ARCH=$(ARCH) PROFILE=release ./build/build-rust-bins.sh start-os:start-container
 	touch target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
 
 # used by github actions
 compiled-$(ARCH).tar: $(COMPILED_TARGETS) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE)
 	tar -cvf $@ $^
 
-target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs: $(call ls-files, projects/start-os/backup-fs) $(BACKUP_PROTOCOL_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE)
+target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs: $(call ls-files, projects/start-os/backup-fs) $(BACKUP_PROTOCOL_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE) $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=$(ARCH) PROFILE=release ./projects/start-os/backup-fs/build-backup-fs.sh
 	touch $@
 
 # --- pi-beep: first-party crate, built like the other in-repo bins ---
-target/aarch64-unknown-linux-musl/release/pi-beep: $(call ls-files, shared-libs/crates/pi-beep) $(ENVIRONMENT_FILE)
+target/aarch64-unknown-linux-musl/release/pi-beep: $(call ls-files, shared-libs/crates/pi-beep) $(ENVIRONMENT_FILE) $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=aarch64 PROFILE=release ./shared-libs/crates/pi-beep/build-pi-beep.sh
 	touch $@
 
 # --- external cargo dev tools (crates.io) bundled into unstable/console images ---
-target/$(RUST_ARCH)-unknown-linux-musl/release/tokio-console: ./build/build-cargo-dep.sh
+target/$(RUST_ARCH)-unknown-linux-musl/release/tokio-console: ./build/build-cargo-dep.sh $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=$(ARCH) ./build/build-cargo-dep.sh tokio-console
 	touch $@
 
-target/$(RUST_ARCH)-unknown-linux-musl/release/flamegraph: ./build/build-cargo-dep.sh
+target/$(RUST_ARCH)-unknown-linux-musl/release/flamegraph: ./build/build-cargo-dep.sh $(RUST_ZIG_BUILDER_INPUTS)
 	ARCH=$(ARCH) ./build/build-cargo-dep.sh flamegraph
 	touch $@
 

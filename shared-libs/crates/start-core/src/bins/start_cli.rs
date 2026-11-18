@@ -129,6 +129,39 @@ fn diagnostic_update_accepts_trust_without_an_ignored_registry_argument() {
 }
 
 #[test]
+fn backup_history_cli_defaults_and_pagination() {
+    for (args, offset, limit) in [
+        (vec![], 0, 10),
+        (vec!["--offset", "10", "--limit", "5"], 10, 5),
+        (vec!["--limit", "0"], 0, 0),
+    ] {
+        let matches = app()
+            .into_command()
+            .try_get_matches_from(
+                ["start-cli", "backup", "history", "list"]
+                    .into_iter()
+                    .chain(args),
+            )
+            .unwrap();
+        let params = matches
+            .subcommand_matches("backup")
+            .unwrap()
+            .subcommand_matches("history")
+            .unwrap()
+            .subcommand_matches("list")
+            .unwrap();
+        assert_eq!(params.get_one::<usize>("offset"), Some(&offset));
+        assert_eq!(params.get_one::<usize>("limit"), Some(&limit));
+    }
+    assert!(
+        app()
+            .into_command()
+            .try_get_matches_from(["start-cli", "backup", "history", "list", "--limit", "-1"])
+            .is_err()
+    );
+}
+
+#[test]
 fn export_manpage_start_cli() {
     let dir = concat!(
         env!("CARGO_MANIFEST_DIR"),

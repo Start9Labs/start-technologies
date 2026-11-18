@@ -48,6 +48,7 @@ function hostWith(
   const bindInfo = {
     enabled: true,
     options: {
+      transport: ['tcp', 'udp'],
       preferredExternalPort: 80,
       addSsl: null,
       secure: null,
@@ -56,7 +57,7 @@ function hostWith(
     net: { assignedPort: 80, assignedSslPort: 443 },
     addresses: binding,
     interfaces: {},
-  } as BindInfo
+  } as unknown as BindInfo
   const host = {
     bindings: { 80: bindInfo },
     bindingRanges: {},

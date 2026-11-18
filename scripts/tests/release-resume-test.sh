@@ -22,6 +22,7 @@ b3sum() {
 }
 load_registry_index() { :; }
 resolve_os_commit() { :; }
+reusable_os_release() { :; }
 asset_url() {
     [ "$2" != img ] || echo "$S3_CDN/v$VERSION/image.img"
 }

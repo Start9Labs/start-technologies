@@ -49,27 +49,38 @@ async fn inner_main(
 
         ctx
     } else {
-        let init_ctx = InitContext::init(config, dns.clone()).await?;
-        let handle = init_ctx.progress.clone();
-        let rpc_ctx_phases = InitRpcContextPhases::new(&handle);
-        server.serve_ui_for(init_ctx);
-
-        let ctx = RpcContext::init(
-            &server.acceptor_setter(),
-            dns.clone(),
+        let init_ctx = InitContext::init(
             config,
-            InternedString::intern(
-                tokio::fs::read_to_string("/media/startos/config/disk.guid")
-                    .await?
-                    .trim(),
-            ),
-            None,
-            rpc_ctx_phases,
+            dns.clone(),
+            crate::context::startup::startup_identity().await?,
         )
         .await?;
+        let handle = init_ctx.progress.clone();
+        let rpc_ctx_phases = InitRpcContextPhases::new(&handle);
+        server.serve_ui_for(init_ctx.clone());
+
+        let result = async {
+            RpcContext::init(
+                &server.acceptor_setter(),
+                dns.clone(),
+                config,
+                InternedString::intern(
+                    tokio::fs::read_to_string("/media/startos/config/disk.guid")
+                        .await?
+                        .trim(),
+                ),
+                None,
+                rpc_ctx_phases,
+            )
+            .await
+        }
+        .await;
+        init_ctx
+            .complete_and_retire(result.as_ref().map(|_| ()).map_err(Error::clone_output))
+            .await;
+        let ctx = result?;
 
         server.serve_ui_for(ctx.clone());
-        handle.complete();
 
         ctx
     };
@@ -190,6 +201,7 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
                             },
                             e,
                             dns.clone(),
+                            crate::context::startup::diagnostic_identity().await,
                         )
                         .await?;
 

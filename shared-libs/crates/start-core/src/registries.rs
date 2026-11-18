@@ -2,7 +2,7 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 
 use crate::context::CliContext;
 use crate::prelude::*;
-use crate::trusted_keys::connection::{connect, list, remove, set_os_registry};
+use crate::trusted_keys::connection::{connect, list, refresh, remove, set_os_registry};
 use crate::util::serde::HandlerExtSerde;
 
 pub fn api<C: Context>() -> ParentHandler<C> {
@@ -22,6 +22,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
                 .with_about("about.add-registry")
                 .with_call_remote::<CliContext>(),
         )
+        .subcommand("refresh", from_fn_async(refresh).no_cli())
         .subcommand(
             "remove",
             from_fn_async(remove)

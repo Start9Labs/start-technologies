@@ -104,23 +104,32 @@ const sqlString = (s: string) =>
   `'${s.replace(/\\/g, '\\\\').replace(/'/g, "''")}'`
 const sqlIdent = (s: string) => `\`${s.replace(/`/g, '``')}\``
 
-/** SQL run as root on a freshly initialized data directory, before the dump is replayed into it. */
+/**
+ * SQL run as root on a freshly initialized data directory, before the dump is replayed into it.
+ * The `'%'` accounts match what the images create on first start; services connect over TCP, which `'localhost'` never matches.
+ */
 function mysqlGrantSql(
   database: string,
   user: string,
   password: string | null,
 ) {
-  const account = `${sqlString(user)}@'localhost'`
+  const identifiedBy =
+    password === null ? '' : ` IDENTIFIED BY ${sqlString(password)}`
+  // A GRANT names a LIKE pattern.
+  const databasePattern = sqlIdent(database.replace(/[\\_%]/g, '\\$&'))
   return [
     `SET @@SESSION.sql_mode = REPLACE(@@SESSION.sql_mode, 'NO_BACKSLASH_ESCAPES', '');`,
     `CREATE DATABASE IF NOT EXISTS ${sqlIdent(database)};`,
-    `CREATE USER IF NOT EXISTS ${account}${password === null ? '' : ` IDENTIFIED BY ${sqlString(password)}`};`,
-    // A GRANT names a LIKE pattern.
-    `GRANT ALL ON ${sqlIdent(database.replace(/[\\_%]/g, '\\$&'))}.* TO ${account};`,
+    ...["'localhost'", "'%'"].flatMap(host => [
+      `CREATE USER IF NOT EXISTS ${sqlString(user)}@${host}${identifiedBy};`,
+      `GRANT ALL ON ${databasePattern}.* TO ${sqlString(user)}@${host};`,
+    ]),
     ...(password === null
       ? []
       : [
-          `ALTER USER 'root'@'localhost' IDENTIFIED BY ${sqlString(password)};`,
+          `ALTER USER 'root'@'localhost'${identifiedBy};`,
+          `CREATE USER IF NOT EXISTS 'root'@'%'${identifiedBy};`,
+          `GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;`,
         ]),
     'FLUSH PRIVILEGES;',
   ].join(' ')

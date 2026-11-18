@@ -70,8 +70,8 @@ A component that **is** a control (button, link, badge, row, card, shell chrome)
 **Stamp the host directive's own attribute** (`host: { tuiButton: '' }`) — Taiga's CSS is keyed
 on `[tuiButton]`, `[tuiChip]`, `[tuiBadge]`, and a host directive does not add its selector to
 the element. Skip it and the directive runs with none of its styling, silently: no chrome, no
-`iconStart`. `TuiCell`, `TuiCardLarge` and `TuiAvatar` stamp theirs; `TuiButton`, `TuiChip`,
-`TuiBadge` don't.
+`iconStart`. `TuiCell`, `TuiCardLarge`, `TuiAvatar` and `TuiStatus` stamp theirs; `TuiButton`,
+`TuiChip`, `TuiBadge` don't.
 
 **A component that dresses up one Taiga primitive becomes it.** An avatar wrapper is
 `hostDirectives: [{ directive: TuiAvatar, inputs: ['size'] }]` with the picture or
@@ -79,6 +79,10 @@ the element. Skip it and the directive runs with none of its styling, silently: 
 `<span tuiAvatar [size]="size()">`. Forward the primitive's inputs through `inputs: [...]` rather
 than redeclaring them, and drive the rest from signals in the class:
 `tuiAppearance(computed(() => …))`, `tuiIconStart(computed(() => …))` (`@taiga-ui/core`).
+A primitive without a ready binding takes `tuiDirectiveBinding` (`@taiga-ui/cdk`): a status
+label is `hostDirectives: [TuiStatus]` with
+`tuiDirectiveBinding(TuiStatus, 'tuiStatus', computed(() => COLORS[this.status()]))` and its
+words as content, not a host around an inner `<span [tuiStatus]>`.
 
 Real fleet examples: `header[appHeader]`, `footer[appFooter]`, `button[marketplaceTile]`
 (+`TuiCardLarge`), `button[server]` (+`TuiCell`), `table[appTable]`
@@ -116,14 +120,15 @@ host: {
 }
 ```
 
-`@HostBinding`/`@HostListener`: zero occurrences in target-style code. A static style is
-`:host` CSS, not a `host: { style: '…' }` string.
+`@HostBinding`/`@HostListener`: zero occurrences in target-style code. A component's static
+style is `:host` CSS, not a `host: { style: '…' }` string; only a directive, which has no
+stylesheet, carries one (`formLoading` above).
 
 **A component that is a card takes `hostDirectives: [TuiCardLarge]`** plus
 `tuiCardOptionsProvider({ space: 'compact', appearance: 'outline-grayscale' })`, and a caller
-restyles it from outside (`<business-hire appearance="floating">`) or projects extra content
-into an `<ng-content />` slot. A second page that wants the same card reuses the component
-rather than copying its markup.
+restyles it from outside (`<business-hire tuiTheme="dark">`, `appearance="…"`) or projects
+extra content into an `<ng-content />` slot. A second page that wants the same card reuses the
+component rather than copying its markup.
 
 ### Signal APIs
 
@@ -170,8 +175,8 @@ readonly subscription = merge(inject(PatchDataService), inject(PatchMonitorServi
 
 `takeUntilDestroyed()` is called bare in field initializers (injection context — no `DestroyRef`
 argument). `ngOnDestroy` survives only for cleaning up manually created refs. An `ngOnInit`
-doing form-patching is _known debt_, not style (`// TODO @Alex refactor this to declarative
-validation`).
+that patches a form is debt to replace with declarative validation (forms.md), not a pattern to
+copy.
 
 ## Templates
 

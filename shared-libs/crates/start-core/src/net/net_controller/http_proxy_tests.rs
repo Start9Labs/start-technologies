@@ -1,9 +1,10 @@
 use super::*;
 use crate::db::model::public::IpInfo;
-use crate::net::host::binding::{ProxyOptions, Security};
+use crate::net::host::binding::{AddSslOptions, ProxyOptions, Security};
 
 fn options() -> BindOptions {
     BindOptions {
+        transport: Default::default(),
         preferred_external_port: 8080,
         add_ssl: Some(AddSslOptions {
             preferred_external_port: 8443,
@@ -53,7 +54,7 @@ fn row(host: &str, port: u16, ssl: bool, public: bool, metadata: HostnameMetadat
 }
 
 #[test]
-fn plaintext_http_exposure_keeps_internal_addresses_and_gateway_security() {
+fn plaintext_http_exposure_keeps_internal_and_explicit_private_addresses() {
     let gateway: GatewayId = "eth0".parse().unwrap();
     let ip: IpAddr = "192.0.2.10".parse().unwrap();
     let bridge = row(
@@ -109,6 +110,7 @@ fn plaintext_http_exposure_keeps_internal_addresses_and_gateway_security() {
             "192.0.2.12".parse().unwrap(),
         ]),
         secure: false,
+        transport: Default::default(),
     };
     for trusted in [false, true] {
         let interfaces = [(
@@ -134,13 +136,11 @@ fn plaintext_http_exposure_keeps_internal_addresses_and_gateway_security() {
             &interfaces,
             &requirements,
         );
-        let mut expected = BTreeSet::from([
+        let expected = BTreeSet::from([
             "10.0.3.1".parse::<IpAddr>().unwrap(),
             "127.0.0.1".parse().unwrap(),
+            ip,
         ]);
-        if trusted {
-            expected.insert(ip);
-        }
         assert_eq!(target.private, expected);
         assert!(target.public_v4.is_empty());
         assert!(target.public_v6.is_empty());
@@ -173,6 +173,7 @@ fn plaintext_http_public_scope_is_per_family_and_private_domains_keep_their_lan_
             "2001:db8::10".parse().unwrap(),
         ]),
         secure: true,
+        transport: Default::default(),
     };
     let gua = row(
         "2001:db8::10",

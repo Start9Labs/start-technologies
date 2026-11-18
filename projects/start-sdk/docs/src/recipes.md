@@ -44,7 +44,7 @@ If you're using [Claude Code](https://claude.com/claude-code) (recommended), poi
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | [Run Multiple Containers](recipe-multi-daemon.md)        | App + database, app + cache, app + worker — multi-daemon setups                              |
 | [Run a PostgreSQL Sidecar](recipe-postgresql.md)         | Password generation, pg_isready health check, pg_dump backup                                 |
-| [Run a MySQL/MariaDB Sidecar](recipe-mysql.md)           | MySQL daemon, health check, mysqldump backup and restore                                     |
+| [Run a MySQL/MariaDB Sidecar](recipe-mysql.md)           | MySQL or MariaDB daemon, health check, and backing up its volume                             |
 | [Run a Redis/Valkey Cache](recipe-valkey.md)             | Ephemeral cache daemon with valkey-cli ping health check                                     |
 | [Create Dynamic Daemons](recipe-dynamic-daemons.md)      | Variable number of daemons based on user configuration                                       |
 | [Run a One-Shot Command](recipe-oneshot.md)              | File ownership fixes, app schema upgrades, or setup scripts re-run before every daemon start |

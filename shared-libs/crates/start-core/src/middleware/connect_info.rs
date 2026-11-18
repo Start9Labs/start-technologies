@@ -44,10 +44,12 @@ impl<Context: Send + Sync + 'static> Middleware<Context> for ConnectInfo {
     ) -> Result<(), rpc_toolkit::RpcResponse> {
         if metadata.get_connect_info {
             if let Some(peer_addr) = self.peer_addr {
-                request.params["__ConnectInfo_peer_addr"] = json!(peer_addr);
+                super::params_object(&mut request.params)?
+                    .insert("__ConnectInfo_peer_addr".into(), json!(peer_addr));
             }
             if let Some(local_addr) = self.local_addr {
-                request.params["__ConnectInfo_local_addr"] = json!(local_addr);
+                super::params_object(&mut request.params)?
+                    .insert("__ConnectInfo_local_addr".into(), json!(local_addr));
             }
         }
         Ok(())

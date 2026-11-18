@@ -73,21 +73,21 @@ A CIFS share sends your encrypted backup over the LAN to a shared folder on anot
 
 {{#tab name="Mac"}}
 
+1. Create an account for StartOS to sign in as. Go to `System Settings > Users & Groups`, click "Add User", and set "New Account" to `Standard`. Give it a full name, an account name such as `start9`, and a password.
+
+   > [!NOTE]
+   > StartOS signs in to the share the way a Windows computer does, so the account must be checked under "Windows File Sharing" in the last step. Recent macOS versions do not list `Sharing Only` accounts there, so StartOS cannot sign in as one. A separate account also keeps your own login password out of StartOS.
+
 1. Identify or create a folder to store your server backups.
 
    > [!TIP]
    > This folder can be located on an external drive connected to your Mac.
 
-1. Go to `System Settings > General > Sharing` and click the "info" icon.
+1. Go to `System Settings > General > Sharing` and click the "info" icon next to "File Sharing".
 
-1. Click the toggle to enable file sharing, then click the "plus" icon and select your backups folder.
+1. Click the toggle to enable file sharing, then click the "plus" icon and select your backups folder. With the folder selected, click the "plus" icon under "Users", choose the account you created, and set its access to "Read & Write".
 
-1. Click "Options" and ensure "Share files and folders using SMB" is checked.
-
-1. Check the box next to the user who owns the folder, then click "Done".
-
-> [!WARNING]
-> If the user you want to share the folder with is tied to an Apple ID, StartOS cannot log in as that user. Create a separate user for the share instead: open `System Settings > Users & Groups` and click "Add User". Set "New Account" to `Sharing Only`, then give it a short name such as `start9` and a simple local password. Back in the sharing window, give that user "Read & Write" access to your backups folder, and check the box next to it under "Options".
+1. Click "Options" and ensure "Share files and folders using SMB" is checked. Under "Windows File Sharing", check the box next to the account you created and enter its password when asked, then click "Done".
 
 > [!TIP]
 > You can find the hostname at the top of the sharing window. The hostname will be an address beginning with `smb://`. To use as hostname, disregard the `smb://` and simply enter the IP address that follows it. Alternatively, you can use the computer hostname (open Terminal and type `hostname`). Either method will work.
@@ -370,11 +370,13 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 
 1. **Hostname**: The hostname or IP address of your Mac (see the tip in the section above).
 1. **Path**: The _name_ of your shared folder, _not_ the full directory path.
-1. **Username**: The Mac user you gave access to the shared folder.
-1. **Password**: Your password for the above user.
+1. **Username**: The account name of the user you created in [Step 1](#step-1-create-a-shared-folder) (e.g. `start9`), _not_ its full name.
+1. **Password**: That user's password.
 
 > [!WARNING]
-> If you receive `Filesystem I/O Error mount error(13): Permission denied` and the username belongs to an account tied to an Apple ID, go back to [Step 1](#step-1-create-a-shared-folder) and create a `Sharing Only` user for the share.
+> `Filesystem I/O Error mount error(13): Permission denied` means your Mac refused the sign-in. Check that the account is checked under "Windows File Sharing" in [Step 1](#step-1-create-a-shared-folder), and that the username is its account name.
+>
+> If the folder connects but a backup then fails with `Permission denied`, the account cannot write to the folder. Set its access to "Read & Write" in [Step 1](#step-1-create-a-shared-folder).
 
 {{#endtab}}
 
@@ -459,7 +461,7 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 
 1. Enter your master password.
 
-While a backup runs, its progress appears at the top of the page. Wait for the `Backup Complete` notification before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before raising that notification, so the drive is safe to remove once it appears. The progress card reads `Complete` first, while StartOS is still finishing — the notification is the one to wait for.
+While a backup runs, its progress appears at the top of the page. Wait for the progress card to disappear and the backup to appear in **History** before unplugging a backup drive. StartOS writes out the last of the backup and unmounts the drive before recording a successful backup in history. The progress card reads `Complete` first, while StartOS is still finishing.
 
 ## History
 
@@ -499,7 +501,6 @@ A target that needs attention shows a yellow button in its row, and a warning ic
 New backups are written to a `StartOSBackupsV2` folder on the target, replacing the older `StartOSBackups` (V1) format written by StartOS 0.4 betas. A backup made on StartOS 0.3.5.1 is a different, older backup: it is not removed by **Delete old backup**, and StartOS 0.4 never touches it. To free that space, delete it yourself from the drive.
 
 - When you choose a target that still holds a V1 backup for this server, StartOS warns you before backing up and shows how much free space remains on the target.
-- After a backup completes, if the target still contains this server's V1 backup, StartOS raises a notification reminding you it is no longer needed.
 - A target holding this server's V1 backup shows a **Delete old backup** button. The dialog names this server's latest current backup, or warns that there is none yet. After you confirm, StartOS removes this server's old V1 backup immediately and reclaims the space it occupied in the background, raising a notification once the space has been fully freed (on a large backup this can take a while). Your current `StartOSBackupsV2` backup, and any backups belonging to other servers that share the target, are untouched.
 
 > [!WARNING]

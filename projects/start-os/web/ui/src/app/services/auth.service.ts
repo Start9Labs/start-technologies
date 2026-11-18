@@ -2,6 +2,7 @@ import { inject, Injectable, NgZone, signal } from '@angular/core'
 import { Router } from '@angular/router'
 import { AuthKeyService, i18nKey } from '@start9labs/shared'
 import { distinctUntilChanged, map, ReplaySubject } from 'rxjs'
+import { PatchDbCache } from './patch-db/patch-db-cache'
 import { StorageService } from './storage.service'
 
 export enum AuthState {
@@ -16,6 +17,7 @@ export class AuthService {
   private readonly zone = inject(NgZone)
   private readonly router = inject(Router)
   private readonly authKeys = inject(AuthKeyService)
+  private readonly patchCache = inject(PatchDbCache)
   private readonly authState$ = new ReplaySubject<AuthState>(1)
   private freshLoginAt = 0
 
@@ -58,8 +60,8 @@ export class AuthService {
     }
     this.freshLoginAt = 0
     this.authState$.next(AuthState.UNVERIFIED)
-    // The key lives in IndexedDB, out of reach of `storage.clear()`.
     this.authKeys.clear()
+    this.patchCache.clear()
     this.storage.clear()
 
     if (!skipNavigation) {

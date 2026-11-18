@@ -1,8 +1,4 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
-import { registerHooks } from 'node:module'
-import { dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import '@angular/compiler'
 import {
@@ -15,37 +11,7 @@ import {
 } from '@angular/common/http'
 import { Injector, runInInjectionContext } from '@angular/core'
 import { Observable, Subject } from 'rxjs'
-import ts from 'typescript'
-
-const configPath = fileURLToPath(
-  new URL('../../../../tsconfig.json', import.meta.url),
-)
-const { config, error } = ts.readConfigFile(configPath, ts.sys.readFile)
-assert.equal(error, undefined)
-const compilerOptions = ts.convertCompilerOptionsFromJson(
-  config.compilerOptions,
-  dirname(configPath),
-).options
-
-registerHooks({
-  resolve(specifier, context, next) {
-    if (specifier.startsWith('.') && context.parentURL?.endsWith('.ts')) {
-      const file = new URL(`${specifier}.ts`, context.parentURL)
-      if (existsSync(file)) return { url: file.href, shortCircuit: true }
-    }
-    return next(specifier, context)
-  },
-  load(url, context, next) {
-    if (!url.endsWith('.ts')) return next(url, context)
-    return {
-      format: 'module',
-      source: ts.transpileModule(readFileSync(new URL(url), 'utf8'), {
-        compilerOptions,
-      }).outputText,
-      shortCircuit: true,
-    }
-  },
-})
+import './typescript-loader.mjs'
 const { HttpService } = await import('../src/services/http.service.ts')
 const { getErrorMessage } = await import('../src/services/error.service.ts')
 const { HttpError } = await import('../src/classes/http-error.ts')
@@ -255,6 +221,16 @@ test('aborting unsubscribes the in-flight request instead of merely ignoring its
   abort.abort(reason)
   await assert.rejects(pending, error => error === reason)
   assert.equal(unsubscribed, true)
+})
+
+test('timing out cancels the transport subscription', async context => {
+  context.mock.timers.enable({ apis: ['setInterval'] })
+  const { request, events } = transport()
+  const pending = request({ method: 'POST', url: '/rpc', timeout: 100 })
+  assert.equal(events.observed, true)
+  context.mock.timers.tick(100)
+  await assert.rejects(pending, /timeout/)
+  assert.equal(events.observed, false)
 })
 
 test('an already aborted request does not reach either HTTP backend', async () => {

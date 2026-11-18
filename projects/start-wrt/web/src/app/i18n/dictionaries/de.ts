@@ -19,9 +19,7 @@ export default {
   16: 'Design',
   17: 'Zeitzone',
   18: 'Fernzugriff',
-  19: 'nie',
   20: 'immer',
-  21: 'Wenn hinter NAT (Standard)',
   22: 'Sicherheit',
   23: 'Laden Sie Ihr Root-CA herunter, um HTTPS-Verbindungen von weiteren Geräten zu vertrauen.',
   24: 'Root-CA herunterladen',
@@ -594,4 +592,6 @@ export default {
   640: 'Ihr Datenverkehr',
   641: 'Um dieses VPN zu löschen, stellen Sie zuerst {vpns} so um, dass sie sich über etwas anderes verbinden.',
   642: 'Um dieses VPN zu deaktivieren, stellen Sie zuerst {vpns} so um, dass sie sich über etwas anderes verbinden.',
+  643: 'Nie (Standard)',
+  644: 'Wenn hinter NAT',
 } satisfies i18n

@@ -3292,14 +3292,7 @@ pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<(), Error> {
     )?;
 
     // Write default preferences so the frontend has values on first load
-    cfgs["startwrt"].append(
-        &UciPreferences {
-            language: "en_US".to_string(),
-            theme: "system".to_string(),
-            remote_access: "default".to_string(),
-        },
-        Some("preferences"),
-    )?;
+    cfgs["startwrt"].append(&UciPreferences::default(), Some("preferences"))?;
 
     dump_all(uci_root, cfgs).await?;
     Ok(())
@@ -4230,6 +4223,17 @@ config dhcp 'iot'
             .unwrap();
         let after = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
         assert_eq!(after, startwrt);
+    }
+
+    #[tokio::test]
+    async fn bootstrap_turns_remote_access_off() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("startwrt"), "").unwrap();
+        bootstrap_admin_profile(dir.path().to_str().unwrap())
+            .await
+            .unwrap();
+        let after = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
+        assert!(after.contains("option remote_access 'never'"), "{after}");
     }
 
     #[tokio::test]

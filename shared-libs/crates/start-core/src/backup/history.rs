@@ -1,13 +1,15 @@
 use chrono::{DateTime, Utc};
+use clap::Parser;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use super::BackupReport;
 use super::target::BackupTargetId;
-use crate::context::RpcContext;
+use crate::context::{CliContext, RpcContext};
 use crate::db::model::DatabaseModel;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
+use crate::util::serde::HandlerExtSerde;
 
 /// A completed background backup with its original target name and final report.
 #[derive(Debug, Serialize, Deserialize, VisitFields)]
@@ -49,10 +51,14 @@ pub(super) fn record(db: &mut DatabaseModel, run: &BackupRun) -> Result<(), Erro
     Ok(())
 }
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct HistoryParams {
+    #[arg(long, default_value_t = 0, help = "help.arg.backup-history-offset")]
     pub offset: usize,
+    #[arg(long, default_value_t = 10, help = "help.arg.backup-history-limit")]
     pub limit: usize,
 }
 rpc_toolkit::reflect_ts!(HistoryParams);
@@ -66,7 +72,13 @@ pub struct BackupHistory {
 rpc_toolkit::reflect_ts!(BackupHistory);
 
 pub fn handler<C: Context>() -> ParentHandler<C> {
-    ParentHandler::new().subcommand("list", from_fn_async(list).no_cli())
+    ParentHandler::new().subcommand(
+        "list",
+        from_fn_async(list)
+            .with_display_serializable()
+            .with_about("about.list-backup-history")
+            .with_call_remote::<CliContext>(),
+    )
 }
 
 pub async fn list(ctx: RpcContext, params: HistoryParams) -> Result<BackupHistory, Error> {

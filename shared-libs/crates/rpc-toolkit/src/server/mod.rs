@@ -11,19 +11,20 @@ use crate::{AnyHandler, Empty, HandleAny, HandleAnyArgs, ParentHandler};
 
 pub type GenericRpcMethod = yajrc::GenericRpcMethod<InternedString, Value, Value>;
 pub type RpcRequest = yajrc::RpcRequest<GenericRpcMethod>;
-pub type RpcResponse = yajrc::RpcResponse<GenericRpcMethod>;
 pub type SingleOrBatchRpcRequest = yajrc::SingleOrBatchRpcRequest<GenericRpcMethod>;
 
 pub mod http;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+mod response;
 mod rpcstream;
 pub mod socket;
 #[cfg(feature = "websocket")]
 pub mod websocket;
 
 pub use http::*;
-pub use rpcstream::{RpcStream, RPCSTREAM_CANCELLED_ERROR, RPCSTREAM_VERSION};
+pub use response::RpcResponse;
+pub use rpcstream::{RpcStream, RpcStreamResponse, RPCSTREAM_CANCELLED_ERROR, RPCSTREAM_VERSION};
 pub use socket::*;
 #[cfg(feature = "websocket")]
 pub use websocket::*;
@@ -102,12 +103,7 @@ impl<Context: crate::Context> Server<Context> {
         rpc_stream: Option<RpcStream>,
     ) -> impl Future<Output = RpcResponse> + Send + 'static {
         let handle = self.handle_command_with_stream(method.as_str(), params, rpc_stream);
-        async move {
-            RpcResponse {
-                id,
-                result: handle.await,
-            }
-        }
+        async move { RpcResponse::new(id, handle.await) }
     }
 
     pub fn handle(
@@ -128,13 +124,7 @@ impl<Context: crate::Context> Server<Context> {
                     .collect();
                 async { imbl_value::to_value(&join_all(futs).await) }.boxed()
             }
-            Err(e) => async {
-                imbl_value::to_value(&RpcResponse {
-                    id: None,
-                    result: Err(e),
-                })
-            }
-            .boxed(),
+            Err(e) => async { imbl_value::to_value(&RpcResponse::from(e)) }.boxed(),
         }
     }
 

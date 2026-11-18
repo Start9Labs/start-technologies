@@ -96,7 +96,7 @@ impl VersionT for Version {
                     let manifest: Manifest = from_value(manifest.clone())?;
                     let id = manifest.id.clone();
                     let mut s9pk: S9pk<_> = S9pk::new_with_manifest(archive, None, manifest);
-                    let s9pk_compat_key = ctx.account.peek(|a| a.developer_key.clone());
+                    let s9pk_compat_key = ctx.account.peek(|a| a.server_identity_key.clone());
                     s9pk.as_archive_mut()
                         .set_signer(s9pk_compat_key, SIG_CONTEXT);
                     s9pk.serialize(&mut tmp_file, true).await?;

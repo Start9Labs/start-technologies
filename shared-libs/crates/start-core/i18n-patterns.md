@@ -63,7 +63,7 @@ Examples:
 
 - `error.incorrect-password` — error kind label
 - `bins.start-init.updating-firmware` — startup phase message
-- `backup.bulk.complete-title` — backup notification title
+- `backup.bulk.password-mismatch` — backup error message
 - `help.arg.acme-contact` — CLI help text for an argument
 - `context.diagnostic.starting-diagnostic-ui` — diagnostic context status
 

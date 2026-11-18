@@ -170,6 +170,22 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn filesystem_debug_omits_credentials_without_changing_serialization() {
+        let cifs = Cifs {
+            hostname: "nas.invalid".into(),
+            path: "backup".into(),
+            username: "sensitive username".into(),
+            password: Some("sensitive password".into()),
+        };
+        let text = format!("{cifs:?}");
+        assert!(!text.contains("username"));
+        assert!(!text.contains("password"));
+        let value = serde_json::to_value(&cifs).unwrap();
+        assert_eq!(value["username"], "sensitive username");
+        assert_eq!(value["password"], "sensitive password");
+    }
+
     #[tokio::test]
     async fn overlapping_locations_compare_share_components_and_resolved_endpoints() {
         for (source, destination, expected) in [

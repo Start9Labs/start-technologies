@@ -125,7 +125,7 @@ export class SystemUpdateModal {
         this.patch.watch$('serverInfo', 'trustedKeys'),
       )
       const trusted = trustedOsUpdateSigners(signers, trustedSigners)
-      if (this.os.updateCandidates()[0]?.version !== latest.version) return
+      if (this.os.updateCandidates()[0] !== latest) return
       if (!trusted.length) {
         this.dialogs
           .openConfirm({
