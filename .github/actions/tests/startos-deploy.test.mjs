@@ -472,9 +472,17 @@ test('a deploy leg missing one of its images fails before uploading', t => {
       'raspberrypi',
       [
         `startos-${VERSION}-aaaaaaa_raspberrypi.squashfs`,
-        `startos-${VERSION}-aaaaaaa_raspberrypi.img`,
+        `startos-${VERSION}-aaaaaaa_raspberrypi.img.gz`,
       ],
       true,
+    ],
+    [
+      'raspberrypi',
+      [
+        `startos-${VERSION}-aaaaaaa_raspberrypi.squashfs`,
+        `startos-${VERSION}-aaaaaaa_raspberrypi.img`,
+      ],
+      false,
     ],
     ['raspberrypi', [`startos-${VERSION}-aaaaaaa_raspberrypi.squashfs`], false],
   ]) {

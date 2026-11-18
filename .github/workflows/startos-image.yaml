@@ -168,6 +168,11 @@ jobs:
         run: make start-os-img
         if: ${{ inputs.platform == 'raspberrypi' }}
 
+      # Consumers gunzip it for the raw image the registry indexes.
+      - name: Compress img
+        run: gzip results/*.img
+        if: ${{ inputs.platform == 'raspberrypi' }}
+
       # Release tooling in scripts/ finds these artifacts by file name.
       - uses: actions/upload-artifact@v7
         with:
@@ -184,7 +189,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          path: results/*.img
+          path: results/*.img.gz
           archive: false
           retention-days: 14
         if: ${{ inputs.platform == 'raspberrypi' }}
@@ -284,17 +289,22 @@ jobs:
       - name: Download images
         uses: actions/download-artifact@v8
         with:
-          pattern: startos-*_${{ inputs.platform }}.{squashfs,iso,img}
+          pattern: startos-*_${{ inputs.platform }}.{squashfs,iso,img.gz}
           merge-multiple: true
           path: artifacts/
 
       - name: Check downloaded images
         working-directory: artifacts
         run: |
-          image=$([ "$PLATFORM" = raspberrypi ] && echo img || echo iso)
+          image=$([ "$PLATFORM" = raspberrypi ] && echo img.gz || echo iso)
           for file in startos-*_"$PLATFORM".squashfs startos-*_"$PLATFORM".$image; do
             [ -f "$file" ] || { echo "::error::No $file artifact in this run"; exit 1; }
           done
+
+      - name: Decompress img
+        if: ${{ inputs.platform == 'raspberrypi' }}
+        working-directory: artifacts
+        run: gunzip startos-*_"$PLATFORM".img.gz
 
       - name: Install start-cli
         uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master

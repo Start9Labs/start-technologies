@@ -75,4 +75,22 @@ if (cmd_pull); then
     exit 1
 fi
 [ ! -f "$(release_dir)/image.img.gz" ]
+
+# pull-gha unpacks CI's gzipped img beside its .gz, and keeps that .gz.
+resolve_gha_run() { RUN_ID=1; RUN_SHA=abc; ensure_release_dir; }
+SCRIPT_DIR=$TMP/bin
+mkdir -p "$SCRIPT_DIR"
+export CI_IMG=$TMP/published/image.img
+cat > "$SCRIPT_DIR/gha-artifact-download.sh" <<'EOF'
+#!/bin/bash
+case "$3" in
+    'startos-*_raspberrypi.img.gz') gzip -c "$CI_IMG" > "$4/startos-1.2.3-abc_raspberrypi.img.gz" ;;
+    'startos-*_raspberrypi.squashfs') : > "$4/startos-1.2.3-abc_raspberrypi.squashfs" ;;
+    *) echo "unexpected artifact $3" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$SCRIPT_DIR/gha-artifact-download.sh"
+(cmd_pull_gha)
+cmp "$CI_IMG" "$(release_dir)/startos-1.2.3-abc_raspberrypi.img"
+gzip -c "$CI_IMG" | cmp - "$(release_dir)/startos-1.2.3-abc_raspberrypi.img.gz"
 echo 'Release gzip resume tests passed.'

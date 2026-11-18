@@ -1283,9 +1283,14 @@ cmd_pull_gha() {
         os)
             for platform in $OS_PLATFORMS; do
                 for ext in $(os_image_exts "$platform"); do
+                    # CI ships the img gzipped.
+                    [ "$ext" != img ] || ext=img.gz
                     echo "  startos-*_${platform}.${ext}"
                     "$SCRIPT_DIR/gha-artifact-download.sh" "$REPO" "$RUN_ID" "startos-*_${platform}.${ext}" "$(pwd)"
                 done
+            done
+            for gz in *.img.gz; do
+                [ -f "$gz" ] && gunzip -kf "$gz"
             done
             ensure_img_gz
             ;;
