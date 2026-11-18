@@ -20,6 +20,7 @@ assert.equal(values.DNS, undefined, 'resolved must read the OS stub from resolv.
 const postinst = read(base + 'debian/postinst')
 const nm = postinst.match(/cat << EOF > \/etc\/NetworkManager\/NetworkManager.conf\n([\s\S]*?)\nEOF/)[1]
 assert.match(nm, /^dns=none$/m)
+assert.match(nm, /^systemd-resolved=false$/m, 'NetworkManager must not publish per-link DNS to systemd-resolved')
 for (const [script, server] of [['debian/postinst', '127.0.0.1'], ['container-runtime/deb-install.sh', '10.0.3.1']]) {
   const source = read(base + script)
   assert.deepEqual([...source.matchAll(/echo "nameserver ([^"]+)"/g)].map(match => match[1]), [server])
