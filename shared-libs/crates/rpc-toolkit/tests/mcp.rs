@@ -289,6 +289,142 @@ impl Client {
 }
 
 #[tokio::test]
+async fn producer_quiescence_preserves_mcp_waiters_across_transport_tasks() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    use rpc_toolkit::requests::{preserve_request_reply, RequestTasks};
+
+    struct Dropped(Arc<AtomicBool>);
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    let tasks = RequestTasks::default();
+    let dropped = Arc::new(AtomicBool::new(false));
+    let started = Arc::new(tokio::sync::Notify::new());
+    let waiting = Arc::new(tokio::sync::Notify::new());
+    let (closed, completion) = tokio::sync::watch::channel(false);
+    let hold = {
+        let dropped = dropped.clone();
+        let started = started.clone();
+        from_fn_async(move |_: Ctx, _: Empty| {
+            let dropped = Dropped(dropped.clone());
+            let started = started.clone();
+            async move {
+                let _guard = dropped;
+                started.notify_one();
+                std::future::pending::<()>().await;
+                Ok::<(), RpcError>(())
+            }
+        })
+        .no_cli()
+        .no_ts()
+    };
+    let wait = {
+        let waiting = waiting.clone();
+        from_fn_async(move |_: Ctx, _: Empty| {
+            let waiting = waiting.clone();
+            let mut completion = completion.clone();
+            async move {
+                preserve_request_reply();
+                waiting.notify_one();
+                completion.wait_for(|closed| *closed).await.unwrap();
+                Ok::<(), RpcError>(())
+            }
+        })
+        .no_cli()
+        .no_ts()
+    };
+    let mcp = McpServer::new(
+        Server::new(
+            || async { Ok(Ctx) },
+            ParentHandler::new()
+                .subcommand("hold", hold)
+                .subcommand("wait", wait),
+        )
+        .for_http(),
+        vec![
+            tool("hold", json!({"type":"object"}), None),
+            tool("wait", json!({"type":"object"}), None),
+        ],
+        Policy,
+        Implementation::new("test", "0.0.0"),
+    )
+    .unwrap()
+    .service(StreamableHttpServerConfig::default());
+    let owner = tasks.clone();
+    let app = Router::new()
+        .route("/mcp", any(mcp))
+        .layer(axum::middleware::from_fn(
+            move |request: Request, next: axum::middleware::Next| {
+                let operation = owner.run(next.run(request));
+                async move {
+                    operation
+                        .await
+                        .unwrap_or_else(|| StatusCode::SERVICE_UNAVAILABLE.into_response())
+                }
+            },
+        ));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let client = Arc::new(Client {
+        addr,
+        token: None,
+        http: reqwest::Client::new(),
+    });
+    let hold = {
+        let client = client.clone();
+        tokio::spawn(async move {
+            client
+                .call("tools/call", json!({"name":"hold", "arguments":{}}))
+                .await
+        })
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), started.notified())
+        .await
+        .unwrap();
+    let waiter = {
+        let client = client.clone();
+        tokio::spawn(async move {
+            client
+                .call("tools/call", json!({"name":"wait", "arguments":{}}))
+                .await
+        })
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), waiting.notified())
+        .await
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), tasks.quiesce())
+        .await
+        .unwrap();
+    assert!(dropped.load(Ordering::SeqCst));
+    assert!(!waiter.is_finished());
+    let cancelled = hold.await.unwrap();
+    assert_eq!(cancelled["result"]["isError"], true);
+    assert_eq!(
+        client
+            .send("tools/call", json!({"name":"hold", "arguments":{}}))
+            .await
+            .status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    closed.send_replace(true);
+    let response = tokio::time::timeout(std::time::Duration::from_secs(5), waiter)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response["result"]["content"][0]["text"], "null");
+    assert_ne!(response["result"]["isError"], true);
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test]
 async fn rpc_response_metadata_maps_to_mcp_result_metadata_on_success_and_error() {
     #[derive(Clone)]
     struct ReplyMetadata;

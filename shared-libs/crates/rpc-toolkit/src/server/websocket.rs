@@ -247,6 +247,7 @@ impl<C: Context> WebSocketServer<C> {
                             socket: Box::new(socket),
                         },
                     };
+                    super::requests::preserve_request_reply();
                     let mut connection = Connection::new(
                         admitted.socket,
                         connection_server,

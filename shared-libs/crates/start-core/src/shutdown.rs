@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -141,24 +143,23 @@ rpc_toolkit::ts_export!(ShutdownParams, namespaces = [""]);
 /// The first request consumes the sender; the restart flag labels later errors.
 pub type ShutdownSender = SyncMutex<(Option<oneshot::Sender<Option<Shutdown>>>, bool)>;
 
+pub(crate) fn in_progress_error(restarting: bool) -> Error {
+    let message = if restarting {
+        t!("shutdown.already-restarting")
+    } else {
+        t!("shutdown.already-shutting-down")
+    };
+    Error::new(eyre!(message), ErrorKind::InvalidRequest)
+}
+
 /// `None` requests daemon exit without powering off. Admission never writes to the database.
 pub fn send_shutdown(sender: &ShutdownSender, request: Option<Shutdown>) -> Result<(), Error> {
     sender.mutate(|(sender, restarting)| {
         let Some(sender) = sender.take() else {
-            let message = if *restarting {
-                t!("shutdown.already-restarting")
-            } else {
-                t!("shutdown.already-shutting-down")
-            };
-            return Err(Error::new(eyre!(message), ErrorKind::InvalidRequest));
+            return Err(in_progress_error(*restarting));
         };
         let restart = request.as_ref().is_some_and(|request| request.restart);
-        sender.send(request).map_err(|_| {
-            Error::new(
-                eyre!(t!("shutdown.already-shutting-down")),
-                ErrorKind::InvalidRequest,
-            )
-        })?;
+        sender.send(request).map_err(|_| in_progress_error(false))?;
         *restarting = restart;
         Ok(())
     })
@@ -178,44 +179,52 @@ pub(crate) async fn publish_shutdown_status(db: &TypedPatchDb<Database>, sender:
     .log_err();
 }
 
-pub(crate) async fn request_shutdown(
-    db: &TypedPatchDb<Database>,
-    sender: &ShutdownSender,
+/// Admission completes before the returned status-publication future is polled.
+pub(crate) fn request_shutdown(
+    db: TypedPatchDb<Database>,
+    sender: Arc<ShutdownSender>,
     request: Option<Shutdown>,
-) -> Result<(), Error> {
-    send_shutdown(sender, request)?;
-    publish_shutdown_status(db, sender).await;
+) -> Result<impl Future<Output = ()> + Send + 'static, Error> {
+    send_shutdown(&sender, request)?;
+    Ok(async move { publish_shutdown_status(&db, &sender).await })
+}
+
+async fn begin_shutdown(ctx: RpcContext, restart: bool, wait: bool) -> Result<(), Error> {
+    let tasks = ctx.background_tasks.clone();
+    let completion = ctx.wait_closed();
+    let db = ctx.db.clone();
+    let sender = ctx.shutdown.clone();
+    let request = Some(Shutdown {
+        disk_guid: Some(ctx.disk_guid.clone()),
+        restart,
+    });
+    drop(ctx);
+    let publication = request_shutdown(db, sender, request)?;
+    crate::context::rpc::spawn_background(&tasks, publication).log_err();
+    wait_for_services(completion, wait).await;
     Ok(())
 }
 
-async fn begin_shutdown(ctx: &RpcContext, restart: bool, wait: bool) -> Result<(), Error> {
-    request_shutdown(
-        &ctx.db,
-        &ctx.shutdown,
-        Some(Shutdown {
-            disk_guid: Some(ctx.disk_guid.clone()),
-            restart,
-        }),
-    )
-    .await?;
+/// Accepted replies remain connected through service teardown without retaining a producer scope.
+pub(crate) async fn wait_for_services(completion: impl Future<Output = ()>, wait: bool) {
+    rpc_toolkit::requests::preserve_request_reply();
     if wait {
-        ctx.wait_closed().await;
+        completion.await;
     }
-    Ok(())
 }
 
 pub async fn shutdown(
     ctx: RpcContext,
     ShutdownParams { wait }: ShutdownParams,
 ) -> Result<(), Error> {
-    begin_shutdown(&ctx, false, wait).await
+    begin_shutdown(ctx, false, wait).await
 }
 
 pub async fn restart(
     ctx: RpcContext,
     ShutdownParams { wait }: ShutdownParams,
 ) -> Result<(), Error> {
-    begin_shutdown(&ctx, true, wait).await
+    begin_shutdown(ctx, true, wait).await
 }
 
 #[cfg(test)]
@@ -225,9 +234,9 @@ mod tests {
     use super::*;
     use crate::db::model::public::ServerStatus;
 
-    fn requests() -> (ShutdownSender, oneshot::Receiver<Option<Shutdown>>) {
+    fn requests() -> (Arc<ShutdownSender>, oneshot::Receiver<Option<Shutdown>>) {
         let (sender, receiver) = oneshot::channel();
-        (SyncMutex::new((Some(sender), false)), receiver)
+        (Arc::new(SyncMutex::new((Some(sender), false))), receiver)
     }
 
     async fn database() -> TypedPatchDb<Database> {
@@ -243,6 +252,17 @@ mod tests {
         db
     }
 
+    #[test]
+    fn cli_waits_by_default_while_rpc_wait_remains_opt_in() {
+        assert!(ShutdownParams::try_parse_from(["shutdown"]).unwrap().wait);
+        assert!(
+            !ShutdownParams::try_parse_from(["shutdown", "--nowait"])
+                .unwrap()
+                .wait
+        );
+        assert!(!serde_json::from_str::<ShutdownParams>("{}").unwrap().wait);
+    }
+
     fn request(restart: bool) -> Option<Shutdown> {
         Some(Shutdown {
             disk_guid: None,
@@ -255,14 +275,16 @@ mod tests {
         for restart in [false, true] {
             let db = database().await;
             let (requests, receiver) = requests();
-            request_shutdown(&db, &requests, request(restart))
-                .await
-                .unwrap();
+            request_shutdown(db.clone(), requests.clone(), request(restart))
+                .unwrap()
+                .await;
             assert_eq!(receiver.await.unwrap().unwrap().restart, restart);
             let before = db.dump(&patch_db::json_ptr::ROOT).await;
 
             for later in [request(false), request(true), None] {
-                let error = request_shutdown(&db, &requests, later).await.unwrap_err();
+                let error = request_shutdown(db.clone(), requests.clone(), later)
+                    .err()
+                    .unwrap();
                 assert!(matches!(error.kind, ErrorKind::InvalidRequest));
                 assert_eq!(
                     error.source.to_string(),
@@ -296,9 +318,9 @@ mod tests {
         let (requests, receiver) = requests();
         drop(receiver);
         let before = db.dump(&patch_db::json_ptr::ROOT).await;
-        let error = request_shutdown(&db, &requests, request(true))
-            .await
-            .unwrap_err();
+        let error = request_shutdown(db.clone(), requests.clone(), request(true))
+            .err()
+            .unwrap();
         assert!(matches!(error.kind, ErrorKind::InvalidRequest));
         assert_eq!(
             error.source.to_string(),
@@ -328,9 +350,9 @@ mod tests {
     async fn new_rpc_context_clears_observed_status_and_accepts_a_new_request() {
         let db = database().await;
         let (previous, receiver) = requests();
-        request_shutdown(&db, &previous, request(false))
-            .await
-            .unwrap();
+        request_shutdown(db.clone(), previous.clone(), request(false))
+            .unwrap()
+            .await;
         drop((previous, receiver));
 
         let (requests, receiver) = requests();
@@ -346,9 +368,9 @@ mod tests {
         assert!(!status.shutting_down);
         assert!(!status.restarting);
         assert!(requests.peek(|(sender, _)| sender.is_some()));
-        request_shutdown(&db, &requests, request(true))
-            .await
-            .unwrap();
+        request_shutdown(db.clone(), requests.clone(), request(true))
+            .unwrap()
+            .await;
         assert!(receiver.await.unwrap().unwrap().restart);
     }
 
@@ -385,7 +407,7 @@ mod tests {
         });
         locked_recv.recv().unwrap();
 
-        let shutdown = request_shutdown(&db, &requests, request(false));
+        let shutdown = request_shutdown(db.clone(), requests.clone(), request(false)).unwrap();
         tokio::pin!(shutdown);
         assert!(shutdown.as_mut().now_or_never().is_none());
         assert!(!receiver.try_recv().unwrap().unwrap().restart);
@@ -394,6 +416,6 @@ mod tests {
 
         drop(release_send);
         holder.join().unwrap();
-        shutdown.await.unwrap();
+        shutdown.await;
     }
 }

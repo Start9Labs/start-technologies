@@ -146,7 +146,7 @@ async fn router_reset_joins_upgraded_rpc_calls() {
 }
 
 #[tokio::test]
-async fn router_reset_joins_upgrade_ownership_before_the_handshake_completes() {
+async fn quiescence_joins_upgrade_ownership_before_the_handshake_completes() {
     let (started, running) = oneshot::channel();
     let (stopped, ended) = oneshot::channel();
     let started = Arc::new(SyncMutex::new(Some(started)));
@@ -187,8 +187,9 @@ async fn router_reset_joins_upgrade_ownership_before_the_handshake_completes() {
         .unwrap()
         .unwrap();
 
-    server.reset_router(Router::new()).await;
+    server.quiesce().await;
 
     assert!(ended.now_or_never().unwrap().is_ok());
+    server.reset_router(Router::new()).await;
     server.shutdown().await;
 }

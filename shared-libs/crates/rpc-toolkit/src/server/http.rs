@@ -309,6 +309,7 @@ impl<Context: crate::Context> HttpServer<Context> {
             let request =
                 serde_json::from_slice::<SingleOrBatchRpcRequest>(&body).map_err(parse_error)?;
             drop(body);
+            super::requests::preserve_request_reply();
             match request {
                 SingleOrBatchRpcRequest::Single(rpc_req) => {
                     let mut res = json_http_response(
@@ -359,6 +360,26 @@ impl<Context: crate::Context> HttpServer<Context> {
         }
     }
     pub(crate) async fn process_rpc_request_with_stream(
+        &self,
+        ctx: &Context,
+        mid: &mut Vector<DynMiddleware<Context>>,
+        req: RpcRequest,
+        rpc_stream: Option<crate::RpcStream>,
+    ) -> RpcResponse {
+        let id = req.id.clone();
+        let operation = self.process_rpc_request_inner(ctx, mid, req, rpc_stream);
+        match super::requests::RequestTasks::current() {
+            Some(tasks) => tasks.run(operation).await.unwrap_or_else(|| {
+                RpcResponse::new(
+                    id,
+                    Err(tasks.rejection().expect("request admission closed")),
+                )
+            }),
+            None => operation.await,
+        }
+    }
+
+    async fn process_rpc_request_inner(
         &self,
         ctx: &Context,
         mid: &mut Vector<DynMiddleware<Context>>,

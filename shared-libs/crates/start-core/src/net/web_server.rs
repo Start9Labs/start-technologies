@@ -443,6 +443,7 @@ pub struct WebServer<A: Accept> {
     router: tokio::sync::watch::Sender<Router>,
     acceptor: Watch<A>,
     thread: NonDetachingJoinHandle<()>,
+    requests: rpc_toolkit::requests::RequestTasks,
 }
 impl<A> WebServer<A>
 where
@@ -459,11 +460,15 @@ where
         let acceptor_send = acceptor.acceptor.clone();
         let (router, service) = tokio::sync::watch::channel(router);
         let (shutdown, shutdown_recv) = oneshot::channel();
+        let requests = rpc_toolkit::requests::RequestTasks::default();
+        let request_tasks = requests.clone();
         let thread = NonDetachingJoinHandle::from(tokio::spawn(async move {
             struct SwappableRouter<M> {
                 router: tokio::sync::watch::Receiver<Router>,
                 metadata: M,
                 upgrades: rpc_toolkit::WebSocketTaskOwner,
+                requests: rpc_toolkit::requests::RequestTasks,
+                tasks: ServerTaskSpawner,
             }
             impl<M: for<'a> Visit<ExtensionVisitor<'a>> + Send + Sync + 'static>
                 hyper::service::Service<hyper::Request<hyper::body::Incoming>>
@@ -475,9 +480,8 @@ where
                 type Error = <Router as tower_service::Service<
                     hyper::Request<hyper::body::Incoming>,
                 >>::Error;
-                type Future = <Router as tower_service::Service<
-                    hyper::Request<hyper::body::Incoming>,
-                >>::Future;
+                type Future =
+                    futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
                 fn call(&self, mut req: hyper::Request<hyper::body::Incoming>) -> Self::Future {
                     use tower_service::Service;
@@ -489,15 +493,38 @@ where
                     let mut router = epoch.borrow_and_update().clone();
                     req.extensions_mut().insert(RouterEpoch(epoch));
                     req.extensions_mut().insert(self.upgrades.clone());
-                    router.call(req)
+                    let tasks = self.tasks.clone();
+                    let requests = self.requests.clone();
+                    let operation = self.requests.run(async move {
+                        router.call(req).await.map(|response| {
+                            rpc_toolkit::requests::retain_response_body(response, |future| {
+                                tasks.spawn(future)
+                            })
+                        })
+                    });
+                    async move {
+                        operation.await.unwrap_or_else(|| {
+                            let mut response =
+                                rpc_toolkit::json_http_response(&rpc_toolkit::RpcResponse::from(
+                                    requests.rejection().expect("request admission closed"),
+                                ));
+                            *response.status_mut() = http::StatusCode::SERVICE_UNAVAILABLE;
+                            Ok(response)
+                        })
+                    }
+                    .boxed()
                 }
             }
 
             let tasks = ServerTasks::new();
             let spawner = tasks.spawner();
             let upgrade_spawner = spawner.clone();
+            let upgrade_requests = request_tasks.clone();
             let upgrades = rpc_toolkit::WebSocketTaskOwner::new(move |future| {
-                upgrade_spawner.spawn(future);
+                let operation = upgrade_requests.run(future);
+                upgrade_spawner.spawn(async move {
+                    let _ = operation.await;
+                });
             });
             let graceful = hyper_util::server::graceful::GracefulShutdown::new();
             let mut server = hyper_util::server::conn::auto::Builder::new(spawner.clone());
@@ -526,6 +553,8 @@ where
                                             router: service.clone(),
                                             metadata,
                                             upgrades: upgrades.clone(),
+                                            requests: request_tasks.clone(),
+                                            tasks: spawner.clone(),
                                         },
                                     )
                                     .into_owned(),
@@ -558,13 +587,25 @@ where
             }
 
             tasks.shutdown().await;
+            request_tasks.quiesce().await;
         }));
         Self {
             shutdown,
             router,
             thread,
             acceptor: acceptor_send,
+            requests,
         }
+    }
+
+    /// Closes request admission with the application's teardown error.
+    pub(crate) fn reject_requests(&self, error: rpc_toolkit::yajrc::RpcError) {
+        self.requests.close(error);
+    }
+
+    /// Stops request producers without disconnecting passive shutdown replies.
+    pub(crate) async fn quiesce(&self) {
+        self.requests.quiesce().await;
     }
 
     /// Joins connection cancellation before returning.
@@ -573,7 +614,7 @@ where
         self.thread.await.unwrap()
     }
 
-    /// Joins old connection cancellation before context-dependent teardown.
+    /// Aborts and joins remaining connections after the reply grace.
     pub(crate) async fn reset_router(&mut self, router: Router) {
         let next = Self::new(
             Acceptor {

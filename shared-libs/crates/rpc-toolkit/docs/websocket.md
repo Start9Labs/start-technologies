@@ -174,6 +174,27 @@ request has one bounded event channel and one reserved terminal slot. Closing or
 losing the socket drops pending handlers and receivers, waking producers.
 Applications must also bound upstream queues such as database subscriptions.
 
+`RequestTasks` separates producer quiescence from transport retirement. The host
+registers HTTP work and pending upgrades through `run`; JSON-RPC creates independent
+scopes for each call, including batch members. Admitted native WebSockets become
+transports while GUID callbacks retain producer ownership. MCP carries the owner
+across its transport tasks. `quiesce` closes admission, cancels active futures and
+waits for resource destruction, including running blocking callbacks. `close` can
+supply an application-owned rejection error before quiescence; later closures
+preserve that error.
+
+`preserve_request_reply` releases a scope after its producer work finishes. The
+remaining future may observe completion or assemble a reply; further service work
+requires a separately admitted child scope. This permits waiting shutdown replies
+to stay connected through service teardown while other active/new calls cancel or
+fail admission on the same connection. The host retires those transports afterwards.
+Independent background jobs remain the application's responsibility.
+
+HTTP body relays run in the host's existing task owner with one buffered frame.
+They retain producer scope through source destruction even when the peer stops
+reading. Transport backpressure cannot prevent quiescence from cancelling the
+body producer.
+
 `WebSocketOptions` bounds in-flight calls/buffered initiating responses, active
 streams, queued events per stream, inbound message/frame size, and stalled sends.
 Defaults are 64 in-flight calls, 64 streams, 16 queued events per stream plus its

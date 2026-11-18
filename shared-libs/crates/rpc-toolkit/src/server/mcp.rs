@@ -152,6 +152,7 @@ impl<Context: crate::Context> McpServer<Context> {
 struct McpRequest<Context> {
     context: Context,
     middleware: Mutex<Vector<DynMiddleware<Context>>>,
+    requests: Option<super::requests::RequestTasks>,
 }
 
 impl<Context: crate::Context> ServerHandler for McpServer<Context> {
@@ -198,15 +199,16 @@ impl<Context: crate::Context> ServerHandler for McpServer<Context> {
             params,
         };
         let mut middleware = http_request.middleware.lock().await;
-        let response = self
-            .http
-            .process_rpc_request_with_stream(
-                &http_request.context,
-                &mut middleware,
-                rpc_request,
-                None,
-            )
-            .await;
+        let operation = self.http.process_rpc_request_with_stream(
+            &http_request.context,
+            &mut middleware,
+            rpc_request,
+            None,
+        );
+        let response = match &http_request.requests {
+            Some(tasks) => tasks.transport(operation).await,
+            None => operation.await,
+        };
         let mut result = Self::tool_result(tool, response.result);
         if !response.meta.is_empty() {
             result.meta = Some(
@@ -243,8 +245,10 @@ impl<Context: crate::Context> McpService<Context> {
             let state = Arc::new(McpRequest {
                 context,
                 middleware: Mutex::new(middleware),
+                requests: super::requests::RequestTasks::current(),
             });
             req.extensions_mut().insert(state.clone());
+            super::requests::preserve_request_reply();
             let Ok::<_, Infallible>(res) = this.inner.clone().call(req).await;
             let mut res = res.map(Body::new);
             let mut middleware = state.middleware.lock().await;

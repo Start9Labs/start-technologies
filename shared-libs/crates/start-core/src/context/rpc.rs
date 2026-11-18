@@ -660,9 +660,11 @@ impl RpcContext {
     }
 
     /// Resolves after background jobs, rollback and containers stop.
-    pub async fn wait_closed(&self) {
+    pub fn wait_closed(&self) -> impl Future<Output = ()> + Send + 'static + use<> {
         let mut rx = self.0.closed.subscribe();
-        let _ = rx.wait_for(|closed| *closed).await;
+        async move {
+            let _ = rx.wait_for(|closed| *closed).await;
+        }
     }
 
     /// Runs daemon-owned work; rejects registration after task teardown starts.

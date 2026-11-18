@@ -80,7 +80,16 @@ Transports wrap a `Server`:
   Cancellation or socket loss drops the corresponding futures and receivers.
   The optional `WebSocketTaskOwner` HTTP extension transfers pending upgrades and
   connection futures to the application's task lifetime through `on_websocket_upgrade`,
-  also reused by custom continuation routes. See
+  also reused by custom continuation routes. `server/requests.rs` owns `RequestTasks`,
+  which composes Tokio-util's task-tracker tokens and cancellation tokens for producer
+  scopes independently of transport tasks. Its admission lock seals new tokens on closure.
+  HTTP dispatch delegates
+  to per-call scopes; admitted WebSocket connections become transports and each call
+  gets its own scope. MCP carries that owner across its transport task boundary.
+  Quiescence closes admission, destroys active producers, and waits for running blocking
+  callbacks. `preserve_request_reply` releases only passive completion/reply work.
+  HTTP body relays share the application's task owner and remain cancellable under
+  transport backpressure. See
   [the WebSocket guide](docs/websocket.md) for wire and lifecycle semantics.
 - **MCP** (`server/mcp.rs`, opt-in `mcp` feature): `McpServer` offers methods of an `HttpServer`'s
   tree as [MCP](https://modelcontextprotocol.io) tools over streamable HTTP via `rmcp`, served

@@ -17,7 +17,7 @@ use crate::context::{DiagnosticContext, InitContext, RpcContext};
 use crate::net::dns::DnsController;
 use crate::net::gateway::WildcardListener;
 use crate::net::static_server::refresher;
-use crate::net::web_server::{Acceptor, WebServer};
+use crate::net::web_server::{Accept, Acceptor, ExtensionVisitor, WebServer};
 use crate::prelude::*;
 use crate::shutdown::Shutdown;
 use crate::system::launch_metrics_task;
@@ -25,6 +25,9 @@ use crate::util::cleanup::wait_for_filesystem_cleanup;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::append_file;
 use crate::util::logger::LOGGER;
+
+#[cfg(test)]
+mod wait_tests;
 
 /// Joins metrics cancellation before background and service teardown can unmount storage.
 async fn wait_for_shutdown(
@@ -46,6 +49,21 @@ async fn wait_for_shutdown(
         }
     }
     .with_kind(ErrorKind::Unknown)
+}
+
+/// Must stop request producers before cleanup while preserving shutdown waits through service teardown.
+async fn teardown_runtime<A>(
+    server: &mut WebServer<A>,
+    teardown: impl std::future::Future<Output = Result<(), Error>>,
+) -> Result<(), Error>
+where
+    A: Accept + Send + Sync + 'static,
+    for<'a> A::Metadata: visit_rs::Visit<ExtensionVisitor<'a>> + Send + Sync + 'static,
+{
+    server.quiesce().await;
+    let result = teardown.await;
+    server.reset_router(refresher()).await;
+    result
 }
 
 #[instrument(skip_all)]
@@ -150,8 +168,11 @@ async fn inner_main(
         result
     }
     .await;
-    server.reset_router(refresher()).await;
-    let teardown = rpc_ctx.shutdown().await;
+    let rejection = rpc_ctx
+        .shutdown
+        .peek(|(_, restarting)| crate::shutdown::in_progress_error(*restarting));
+    server.reject_requests(rejection.into());
+    let teardown = teardown_runtime(server, rpc_ctx.shutdown()).await;
     match result {
         Ok(shutdown) => {
             teardown?;
@@ -276,6 +297,76 @@ mod tests {
 
         assert!(shutdown.restart);
         assert!(metrics_stopped.wait().now_or_never().is_some());
+    }
+
+    #[tokio::test]
+    async fn runtime_teardown_preserves_waiting_replies_until_services_stop() {
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::{TcpListener, TcpStream};
+
+        use crate::util::sync::SyncMutex;
+
+        let (services_stopped, mut closed) = tokio::sync::watch::channel(false);
+        let (started, waiting) = oneshot::channel();
+        let reply = DropSignaling::new(async move {
+            started.send(()).unwrap();
+            crate::shutdown::wait_for_services(
+                async move {
+                    closed.wait_for(|closed| *closed).await.unwrap();
+                },
+                true,
+            )
+            .await;
+            http::StatusCode::OK
+        });
+        let mut reply_dropped = reply.subscribe();
+        let reply = Arc::new(SyncMutex::new(Some(reply)));
+        let router = axum::Router::new().route(
+            "/wait",
+            axum::routing::get(move || reply.replace(None).unwrap()),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut server = WebServer::new(Acceptor::new(vec![listener]), router);
+        let mut client = TcpStream::connect(address).await.unwrap();
+        client
+            .write_all(b"GET /wait HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let (stopping, teardown_started) = oneshot::channel();
+        let (release, resume_teardown) = oneshot::channel();
+        let teardown = NonDetachingJoinHandle::from(tokio::spawn(async move {
+            let result = teardown_runtime(&mut server, async move {
+                stopping.send(()).unwrap();
+                resume_teardown.await.unwrap();
+                services_stopped.send_replace(true);
+                Ok(())
+            })
+            .await;
+            server.shutdown().await;
+            result
+        }));
+        tokio::time::timeout(Duration::from_secs(1), teardown_started)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            reply_dropped.wait().now_or_never().is_none(),
+            "waiting reply was cancelled while service teardown remained pending"
+        );
+
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), teardown)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
