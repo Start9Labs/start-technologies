@@ -492,8 +492,8 @@ fn retired_hosts<'a>(held: impl Iterator<Item = &'a HostId>, current: &Hosts) ->
 
 #[derive(Debug)]
 enum ProxyHandle {
-    Tls { _owner: Arc<()> },
-    Plaintext { _server: PlainHttpProxy },
+    Tls { owner: Arc<()> },
+    Plaintext { server: PlainHttpProxy },
 }
 
 #[derive(Default, Debug)]
@@ -979,32 +979,43 @@ impl HostBinds {
             .cloned()
             .collect::<BTreeSet<_>>();
         for key in all {
-            let mut prev = binds.vhosts.remove(&key);
+            let prev = binds.vhosts.remove(&key);
             if let Some(target) = vhosts.remove(&key) {
-                prev = prev.filter(|(t, _)| t == &target);
-                binds.vhosts.insert(
-                    key.clone(),
-                    if let Some(prev) = prev {
-                        prev
-                    } else {
-                        (
-                            target.clone(),
-                            if http_ports.contains(&key.1) {
-                                ProxyHandle::Plaintext {
-                                    _server: ctrl.vhost.plaintext_proxy(key.1, target),
-                                }
-                            } else {
-                                ProxyHandle::Tls {
-                                    _owner: ctrl.vhost.add(
-                                        key.0,
-                                        key.1,
-                                        DynVHostTarget::new(target),
-                                    )?,
-                                }
-                            },
-                        )
+                let plaintext = http_ports.contains(&key.1);
+                let handle = match prev {
+                    Some((prev, handle)) if prev == target => handle,
+                    Some((prev, ProxyHandle::Tls { owner })) if !plaintext => ProxyHandle::Tls {
+                        owner: ctrl.vhost.replace(
+                            key.0.clone(),
+                            key.1,
+                            &DynVHostTarget::new(prev),
+                            owner,
+                            DynVHostTarget::new(target.clone()),
+                        )?,
                     },
-                );
+                    Some((_, ProxyHandle::Plaintext { server }))
+                        if plaintext && server.retarget(&target) =>
+                    {
+                        ProxyHandle::Plaintext { server }
+                    }
+                    prev => {
+                        drop(prev);
+                        if plaintext {
+                            ProxyHandle::Plaintext {
+                                server: ctrl.vhost.plaintext_proxy(key.1, target.clone()),
+                            }
+                        } else {
+                            ProxyHandle::Tls {
+                                owner: ctrl.vhost.add(
+                                    key.0.clone(),
+                                    key.1,
+                                    DynVHostTarget::new(target.clone()),
+                                )?,
+                            }
+                        }
+                    }
+                };
+                binds.vhosts.insert(key, (target, handle));
             } else {
                 if let Some((_, handle)) = prev {
                     let tls = matches!(handle, ProxyHandle::Tls { .. });

@@ -64,6 +64,7 @@ export class OSService {
         .map(([version, info]) => ({
           version,
           notes: info.releaseNotes,
+          defaultLocale: cache?.defaultLocale,
           squashfs: info.squashfs,
         }))
     }),
