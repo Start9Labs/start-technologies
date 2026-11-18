@@ -15,7 +15,12 @@ import { MarketplacePkgBase } from '../types'
     <div
       class="g-markdown"
       safeLinks
-      [innerHTML]="pkg().releaseNotes | localize | markdown | dompurify"
+      [innerHTML]="
+        pkg().releaseNotes
+          | localize: pkg().defaultLocale
+          | markdown
+          | dompurify
+      "
     ></div>
   `,
   styles: `

@@ -108,7 +108,7 @@ export async function prepareSession(
     message: wire.slice(),
     async finish(
       response: Uint8Array,
-    ): Promise<{ peer: string; cipher: SessionCipher }> {
+    ): Promise<{ peer: string; temporary: boolean; cipher: SessionCipher }> {
       const key = secret
       secret = undefined
       if (!key) throw new Error('Session initiation was already consumed')
@@ -149,6 +149,7 @@ export async function prepareSession(
         const incoming = new RecordKey(receive, profile.directions.server)
         return {
           peer,
+          temporary: hello.temporary ?? false,
           cipher: {
             write: bytes => outgoing.write(bytes),
             read: bytes => incoming.read(bytes),

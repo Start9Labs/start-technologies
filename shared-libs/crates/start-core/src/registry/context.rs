@@ -32,6 +32,7 @@ use crate::middleware::auth::signature::{
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
+use crate::registry::locales::IndexLocaleTracker;
 use crate::registry::migrations::run_migrations;
 use crate::registry::mirror::IndexMirrors;
 use crate::registry::package::icon::{icons_dir, referenced_icons, sweep_icons};
@@ -111,6 +112,7 @@ pub struct RegistryContextSeed {
     pub listen: SocketAddr,
     pub db: TypedPatchDb<RegistryDatabase>,
     pub index_mirrors: IndexMirrors,
+    pub index_locales: IndexLocaleTracker,
     pub datadir: PathBuf,
     pub startwrt: bool,
     pub rpc_continuations: RpcContinuations,
@@ -228,12 +230,14 @@ impl RegistryContext {
                 ))
             })
             .transpose()?;
+        let index_locales = IndexLocaleTracker::spawn(db.clone()).await?;
         Ok(Self(
             Arc::new(RegistryContextSeed {
                 hostnames: config.registry_hostname.clone(),
                 listen: config.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN),
                 db,
                 index_mirrors: IndexMirrors::default(),
+                index_locales,
                 datadir,
                 startwrt: config.startwrt,
                 rpc_continuations: RpcContinuations::new(),
@@ -306,6 +310,13 @@ pub(crate) async fn call_cli(
                 headers,
             )
             .await?;
+        if connection.peer.temporary {
+            return Err(Error::new(
+                eyre!("{}", t!("middleware.auth.invalid-request-signature")),
+                ErrorKind::InvalidSignature,
+            )
+            .into());
+        }
         for warning in super::cli_identity::observe(
             &ctx.id_key_path.with_file_name("registry-identities"),
             &url,
@@ -550,8 +561,8 @@ impl LocalAuthContext for RegistryContext {
     const LOCAL_AUTH_COOKIE_OWNERSHIP: &str = "root:root";
 }
 impl SignatureAuthContext for RegistryContext {
-    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
-        RegistryContext::server_identity(self)
+    fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error> {
+        RegistryContext::server_identity(self).map(Into::into)
     }
     fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
         RegistryContext::replay_check(self)
@@ -739,12 +750,14 @@ pub(crate) async fn test_context_for_hosts(
         },
     );
     db.put(&ROOT, &database).await.unwrap();
+    let index_locales = IndexLocaleTracker::spawn(db.clone()).await.unwrap();
     RegistryContext(
         Arc::new(RegistryContextSeed {
             hostnames,
             listen: "127.0.0.1:0".parse().unwrap(),
             db,
             index_mirrors: Default::default(),
+            index_locales,
             datadir,
             startwrt: false,
             rpc_continuations: RpcContinuations::new(),

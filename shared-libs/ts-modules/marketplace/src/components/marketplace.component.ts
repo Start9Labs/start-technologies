@@ -91,7 +91,11 @@ const ICONS: Record<string, string> = {
           type="button"
           (click)="onCategory(cat.key)"
         >
-          {{ cat.value.name ? (cat.value.name | localize) : cat.key }}
+          {{
+            cat.value.name
+              ? (cat.value.name | localize: current()?.info?.defaultLocale)
+              : cat.key
+          }}
         </button>
       }
       <div class="actions">
@@ -123,7 +127,12 @@ const ICONS: Record<string, string> = {
                 appearance="info"
                 class="g-markdown"
                 safeLinks
-                [innerHTML]="description | localize | markdown | dompurify"
+                [innerHTML]="
+                  description
+                    | localize: current()?.info?.defaultLocale
+                    | markdown
+                    | dompurify
+                "
               ></div>
             }
             @if (warning(); as warning) {
@@ -135,7 +144,7 @@ const ICONS: Record<string, string> = {
               <hgroup tuiTitle>
                 <h2 [tuiSkeleton]="loading()">
                   @if (current()) {
-                    {{ name() | localize }}
+                    {{ name() | localize: current()?.info?.defaultLocale }}
                   }
                 </h2>
               </hgroup>
