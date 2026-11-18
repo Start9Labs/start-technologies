@@ -4,19 +4,21 @@ on:
   workflow_call:
     inputs:
       REFERENCE_REGISTRY:
-        description: 'Registry where published versions are permanent (used to check if a version is already taken)'
+        description: "Registry where published versions are permanent (used to check if a version is already taken). Defaults to the caller's REFERENCE_REGISTRY variable."
         type: string
-        required: true
+        default: ${{ vars.REFERENCE_REGISTRY }}
       FREE_DISK_SPACE:
         description: 'Free up disk space before building'
         type: boolean
         default: false
       RELEASE_REGISTRY:
-        description: 'Test registry to publish to'
+        description: "Test registry to publish to. Defaults to the caller's RELEASE_REGISTRY variable."
         type: string
+        default: ${{ vars.RELEASE_REGISTRY }}
       S3_S9PKS_BASE_URL:
-        description: 'S3 base URL for package uploads'
+        description: "S3 base URL for package uploads. Defaults to the caller's S3_S9PKS_BASE_URL variable."
         type: string
+        default: ${{ vars.S3_S9PKS_BASE_URL }}
       REGISTRY_PROXY:
         description: "Proxy URL start-cli uses to reach the registries, e.g. socks5h://127.0.0.1:9050 for .onion registries. A loopback proxy with nothing listening starts Tor on the runner. Defaults to the caller's REGISTRY_PROXY variable."
         type: string
@@ -62,6 +64,10 @@ jobs:
           PACKAGE_ID="${{ steps.extract.outputs.package_id }}"
           VERSION="${{ steps.extract.outputs.version }}"
           REFERENCE_REGISTRY="${{ inputs.REFERENCE_REGISTRY }}"
+          if [ -z "$REFERENCE_REGISTRY" ]; then
+            echo "::error::No reference registry: set the REFERENCE_REGISTRY variable or pass the input."
+            exit 1
+          fi
 
           # hello-world is the canonical package scaffold, not a released package.
           # Skipping it here lets every caller (including hello-world's own) use the

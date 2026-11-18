@@ -189,10 +189,6 @@ concurrency:
 jobs:
   tag:
     uses: Start9Labs/start-technologies/.github/workflows/tagAndRelease.yml@master
-    with:
-      REFERENCE_REGISTRY: ${{ vars.REFERENCE_REGISTRY }}
-      RELEASE_REGISTRY: ${{ vars.RELEASE_REGISTRY }}
-      S3_S9PKS_BASE_URL: ${{ vars.S3_S9PKS_BASE_URL }}
     secrets:
       DEV_KEY: ${{ secrets.DEV_KEY }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
@@ -200,6 +196,8 @@ jobs:
     permissions:
       contents: write
 ```
+
+The reusable workflows read `REFERENCE_REGISTRY`, `RELEASE_REGISTRY`, `S3_S9PKS_BASE_URL` and `REGISTRY_PROXY` from the calling repository's variables, including organization variables. Set them there; pass an input of the same name under `with:` only to override one for a single repo's workflow. Secrets are not read this way and must still be passed.
 
 **release.yml** -- publishes on manual tag push, for re-releases or testing. This workflow only triggers on manually pushed tags — tags created by tagAndRelease (via `GITHUB_TOKEN`) do not trigger it:
 
@@ -214,9 +212,6 @@ on:
 jobs:
   release:
     uses: Start9Labs/start-technologies/.github/workflows/release.yml@master
-    with:
-      RELEASE_REGISTRY: ${{ vars.RELEASE_REGISTRY }}
-      S3_S9PKS_BASE_URL: ${{ vars.S3_S9PKS_BASE_URL }}
     secrets:
       DEV_KEY: ${{ secrets.DEV_KEY }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
@@ -225,7 +220,7 @@ jobs:
       contents: write
 ```
 
-To publish to registries served over Tor, set a `REGISTRY_PROXY` repository or organization variable to a proxy URL such as `socks5h://127.0.0.1:9050`; the callers above need no change. Both workflows route every `start-cli` registry request through it; `.onion` registries need the `socks5h` scheme, which resolves names through the proxy. When the proxy's address is on the runner's loopback and nothing listens there, the workflow starts Tor on that address. Leave the variable unset to reach registries directly.
+To publish to registries served over Tor, set a `REGISTRY_PROXY` variable to a proxy URL such as `socks5h://127.0.0.1:9050`. Both workflows route every `start-cli` registry request through it; `.onion` registries need the `socks5h` scheme, which resolves names through the proxy. When the proxy's address is on the runner's loopback and nothing listens there, the workflow starts Tor on that address. Leave the variable unset to reach registries directly.
 
 **syncNext.yml** -- carries every change that lands on the base branch onto the paired `next` iteration branch, so `next` never falls behind what has already shipped:
 
