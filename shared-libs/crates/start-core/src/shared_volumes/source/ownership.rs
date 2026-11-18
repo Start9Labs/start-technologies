@@ -101,6 +101,17 @@ mod tests {
             &acl(100123),
         )
         .unwrap();
+        let executable = path.join("executable");
+        std::fs::write(&executable, b"executable").unwrap();
+        std::os::unix::fs::chown(&executable, Some(101000), Some(102000)).unwrap();
+        xattr::set(
+            &executable,
+            "security.capability",
+            &[
+                1, 0, 0, 3, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 160, 134, 1, 0,
+            ],
+        )
+        .unwrap();
         xattr::set(path, "system.posix_acl_default", &acl(100123)).unwrap();
     }
 
@@ -145,6 +156,16 @@ mod tests {
         assert_eq!(
             xattr::get(&path, "system.posix_acl_default").unwrap(),
             Some(acl(123))
+        );
+        assert_eq!(
+            xattr::get(path.join("executable"), "system.posix_acl_access").unwrap(),
+            None
+        );
+        assert_eq!(
+            xattr::get(path.join("executable"), "security.capability").unwrap(),
+            Some(vec![
+                1, 0, 0, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ])
         );
         let view = TmpMountGuard::mount(&SourceFilesystem::local(path.clone()), ReadWrite)
             .await
