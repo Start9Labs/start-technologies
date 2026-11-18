@@ -248,6 +248,10 @@ pub(crate) async fn wireguard_psk(interface: &str) -> Result<Option<[u8; 32]>, E
 /// Update2 flag: persist the change to disk (NM_SETTINGS_UPDATE2_FLAG_TO_DISK).
 const NM_UPDATE2_TO_DISK: u32 = 0x1;
 const WG_DNS_PRIORITY: i32 = 10;
+/// The kernel's WireGuard link MTU, which NetworkManager keeps for `wireguard.mtu` 0.
+const WG_KERNEL_DEFAULT_MTU: u32 = 1420;
+const IPV4_MIN_MTU: u32 = 68;
+const IPV6_MIN_MTU: u32 = 1280;
 
 fn endpoint_domain(endpoint: &str) -> Option<InternedString> {
     let (host, port) = endpoint.rsplit_once(':')?;
@@ -272,6 +276,29 @@ pub(crate) fn wireguard_config_domains(config: &str) -> Result<OrdSet<InternedSt
         .filter_map(|peer| peer.endpoint)
         .filter_map(|endpoint| endpoint_domain(&endpoint))
         .collect())
+}
+
+/// The explicit `wireguard.mtu` of NetworkManager settings; None for automatic.
+fn settings_wireguard_mtu(
+    settings: &HashMap<String, HashMap<String, OwnedValue>>,
+) -> Result<Option<u32>, Error> {
+    let Some(mtu) = settings.get("wireguard").and_then(|wg| wg.get("mtu")) else {
+        return Ok(None);
+    };
+    let mtu = mtu.downcast_ref::<u32>().with_kind(ErrorKind::Network)?;
+    Ok((mtu != 0).then_some(mtu))
+}
+
+/// None leaves NetworkManager's automatic MTU.
+fn set_settings_wireguard_mtu(
+    settings: &mut HashMap<String, HashMap<String, OwnedValue>>,
+    mtu: Option<u32>,
+) {
+    let wg = settings.entry("wireguard".into()).or_default();
+    match mtu {
+        Some(mtu) => wg.insert("mtu".into(), mtu.into()),
+        None => wg.remove("mtu"),
+    };
 }
 
 fn settings_endpoint_domains(
@@ -307,6 +334,8 @@ struct WgConfig {
     addresses: Vec<(IpAddr, u8)>,
     dns: Vec<IpAddr>,
     listen_port: Option<u32>,
+    /// None selects NetworkManager's automatic MTU.
+    mtu: Option<u32>,
     peers: Vec<WgPeer>,
 }
 
@@ -328,6 +357,7 @@ impl WgConfig {
         let mut addresses = Vec::new();
         let mut dns = Vec::new();
         let mut listen_port = None;
+        let mut mtu = None;
         let mut peers: Vec<WgPeer> = Vec::new();
 
         for raw in config.lines() {
@@ -383,6 +413,15 @@ impl WgConfig {
                         }
                     }
                     "listenport" => listen_port = val.parse().ok(),
+                    "mtu" => {
+                        mtu = Some(
+                            val.parse::<u16>()
+                                .ok()
+                                .map(u32::from)
+                                .filter(|mtu| *mtu >= IPV4_MIN_MTU)
+                                .ok_or_else(|| invalid("MTU"))?,
+                        )
+                    }
                     _ => {}
                 },
                 Section::Peer => {
@@ -400,11 +439,17 @@ impl WgConfig {
             }
         }
 
+        if mtu.is_some_and(|mtu| mtu < IPV6_MIN_MTU) && addresses.iter().any(|(ip, _)| ip.is_ipv6())
+        {
+            return Err(invalid("MTU below 1280 with an IPv6 address"));
+        }
+
         Ok(Self {
             private_key: private_key.ok_or_else(|| invalid("missing PrivateKey"))?,
             addresses,
             dns,
             listen_port,
+            mtu,
             peers,
         })
     }
@@ -468,6 +513,7 @@ impl WgConfig {
             .collect();
         wg.insert("peers".into(), ov(peers.into())?);
         settings.insert("wireguard".into(), wg);
+        set_settings_wireguard_mtu(&mut settings, self.mtu);
 
         for (proto, is_v4) in [("ipv4", true), ("ipv6", false)] {
             let addrs: Vec<_> = self
@@ -575,10 +621,24 @@ pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Re
             HashMap::new(),
         )
         .await?;
+    let (applied, _) = device_proxy.get_applied_connection(0).await?;
+    let applied_mtu = settings_wireguard_mtu(&applied)?;
     // Full settings so Reapply doesn't strip the connection's other peer fields.
-    device_proxy
-        .reapply(parsed.to_nm_settings(interface, Some(uuid.as_str()))?, 0, 0)
-        .await?;
+    let mut reapply = parsed.to_nm_settings(interface, Some(uuid.as_str()))?;
+    // NM rejects a Reapply that changes `wireguard.mtu`; the link MTU is set below.
+    set_settings_wireguard_mtu(&mut reapply, applied_mtu);
+    device_proxy.reapply(reapply, 0, 0).await?;
+    if parsed.mtu != applied_mtu {
+        Command::new("ip")
+            .arg("link")
+            .arg("set")
+            .arg("dev")
+            .arg(interface)
+            .arg("mtu")
+            .arg(parsed.mtu.unwrap_or(WG_KERNEL_DEFAULT_MTU).to_string())
+            .invoke(ErrorKind::Network)
+            .await?;
+    }
     // NM (<=1.52) drops WG peer PSKs on Reapply even when passed explicitly;
     // restore them on the kernel device directly (PSK over stdin, never argv).
     for peer in &parsed.peers {
@@ -1402,6 +1462,12 @@ mod device {
             version_id: u64,
             flags: u32,
         ) -> Result<(), Error>;
+
+        /// The settings the device is running with, and their version id.
+        fn get_applied_connection(
+            &self,
+            flags: u32,
+        ) -> Result<(HashMap<String, HashMap<String, OwnedValue>>, u64), Error>;
 
         #[zbus(property)]
         fn ip_interface(&self) -> Result<String, Error>;
@@ -4490,6 +4556,66 @@ mod wg_config_tests {
     fn rejects_out_of_range_prefix() {
         assert!(WgConfig::parse("[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/40\n").is_err());
         assert!(WgConfig::parse("[Interface]\nPrivateKey = k=\nAddress = fd00::2/200\n").is_err());
+    }
+
+    #[test]
+    fn explicit_mtu_reaches_nm_settings() {
+        let config =
+            "[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24, fd00::2/64\nMTU = 1320\n";
+        let parsed = WgConfig::parse(config).unwrap();
+        assert_eq!(parsed.mtu, Some(1320));
+        let settings = parsed.to_nm_settings("wg0", None).unwrap();
+        assert_eq!(
+            settings["wireguard"]["mtu"].downcast_ref::<u32>().unwrap(),
+            1320
+        );
+        assert_eq!(settings_wireguard_mtu(&settings).unwrap(), Some(1320));
+    }
+
+    #[test]
+    fn missing_mtu_stays_automatic() {
+        let parsed =
+            WgConfig::parse("[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24\n").unwrap();
+        assert_eq!(parsed.mtu, None);
+        let settings = parsed.to_nm_settings("wg0", None).unwrap();
+        assert!(!settings["wireguard"].contains_key("mtu"));
+        assert_eq!(settings_wireguard_mtu(&settings).unwrap(), None);
+
+        let auto = HashMap::from([(
+            "wireguard".to_string(),
+            HashMap::from([("mtu".to_string(), OwnedValue::from(0u32))]),
+        )]);
+        assert_eq!(settings_wireguard_mtu(&auto).unwrap(), None);
+    }
+
+    #[test]
+    fn reapply_settings_keep_the_applied_mtu() {
+        let parsed = WgConfig::parse("[Interface]\nPrivateKey = k=\nMTU = 1320\n").unwrap();
+        let mut settings = parsed.to_nm_settings("wg0", None).unwrap();
+        set_settings_wireguard_mtu(&mut settings, None);
+        assert_eq!(settings_wireguard_mtu(&settings).unwrap(), None);
+        set_settings_wireguard_mtu(&mut settings, Some(1400));
+        assert_eq!(settings_wireguard_mtu(&settings).unwrap(), Some(1400));
+        assert_eq!(as_str(&settings["wireguard"]["private-key"]), "k=");
+    }
+
+    #[test]
+    fn rejects_invalid_mtu() {
+        for mtu in ["abc", "0", "67", "65536", "-1"] {
+            let config =
+                format!("[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24\nMTU = {mtu}\n");
+            assert!(WgConfig::parse(&config).is_err(), "MTU = {mtu}");
+        }
+        assert!(
+            WgConfig::parse("[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24\nMTU = 1200\n")
+                .is_ok()
+        );
+        assert!(
+            WgConfig::parse(
+                "[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24, fd00::2/64\nMTU = 1200\n"
+            )
+            .is_err()
+        );
     }
 
     // add() lets NM generate the uuid; update() preserves the existing one so the
