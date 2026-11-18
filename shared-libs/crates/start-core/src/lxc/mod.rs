@@ -310,6 +310,13 @@ impl LxcContainer {
         )
         .await?;
         write_file_owned_atomic(
+            rootfs_dir.join("etc/resolv.conf"),
+            format!("nameserver {}\n", slot::HOST_IP),
+            root,
+            root,
+        )
+        .await?;
+        write_file_owned_atomic(
             rootfs_dir.join("etc/default/locale"),
             format!("LANG={lang}\n"),
             root,

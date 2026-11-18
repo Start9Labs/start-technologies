@@ -1197,21 +1197,6 @@ export const GetActionInputParams: z.ZodObject<{
 }).meta({
   id: 'GetActionInputParams',
 })
-export const GetContainerIpParams: z.ZodObject<{
-  packageId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PackageId>>,
-    z.ZodNullable<typeof PackageId>
-  >
-  callback: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof CallbackId>>,
-    z.ZodNullable<typeof CallbackId>
-  >
-}> = /* @__PURE__ */ object({
-  packageId: wire(PackageId.nullable().optional(), PackageId.nullable()),
-  callback: wire(CallbackId.nullable().optional(), CallbackId.nullable()),
-}).meta({
-  id: 'GetContainerIpParams',
-})
 export const GetHostInfoParams: z.ZodObject<{
   hostId: typeof HostId
   packageId: z.ZodCodec<
@@ -3386,12 +3371,6 @@ export const Api = {
     'export-service-interface': {
       _PARAMS: /* @__PURE__ */ ExportServiceInterfaceParams,
       _RETURN: /* @__PURE__ */ z.null(),
-      _ITEM: /* @__PURE__ */ z.never(),
-      _FINAL: /* @__PURE__ */ z.null(),
-    },
-    'get-container-ip': {
-      _PARAMS: /* @__PURE__ */ GetContainerIpParams,
-      _RETURN: /* @__PURE__ */ z.string().nullable(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },

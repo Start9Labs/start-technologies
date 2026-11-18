@@ -459,9 +459,9 @@ describe('generated effects RPC boundary', () => {
     expect(ended).toHaveBeenCalled()
   })
 
-  test('returns nullable IP and variable-length certificate results unchanged', async () => {
+  test('returns nullable host and variable-length certificate results unchanged', async () => {
     const effects = makeEffects({ eventId: null })
-    await expect(effects.getContainerIp({})).resolves.toBeNull()
+    await expect(effects.getHostInfo({ hostId: 'main' })).resolves.toBeNull()
     expect(requests[0].params).not.toHaveProperty('eventId')
     reply = { result: ['leaf', 'root'] }
     await expect(effects.getSslCertificate({ hostnames: [] })).resolves.toEqual(

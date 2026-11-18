@@ -163,6 +163,8 @@ $SYSTEMCTL enable ssh.service
 $SYSTEMCTL enable systemd-oomd.service
 $SYSTEMCTL disable wpa_supplicant.service
 $SYSTEMCTL mask systemd-networkd-wait-online.service # currently use `NetworkManager-wait-online.service`
+# startd owns lxcbr0 and the container network (lxc/network.rs).
+$SYSTEMCTL mask lxc-net.service
 
 $SYSTEMCTL disable postgresql.service
 $SYSTEMCTL disable tor.service
@@ -193,13 +195,6 @@ set_config /etc/systemd/journald.conf ForwardToSyslog no
 set_config /etc/lvm/lvm.conf issue_discards 1
 sed -i 's/\(#\|\^\)\s*\([^=]\+\)=\(suspend\|hibernate\)\s*$/\2=ignore/g' /etc/systemd/logind.conf
 cp /usr/lib/startos/resolved.conf /etc/systemd/resolved.conf
-set_config /etc/default/lxc-net LXC_DHCP_CONFILE /etc/dnsmasq.conf
-# Dual-stack lxcbr0: a ULA (fd00:3::/64) + SLAAC RA, so containers get a v6.
-set_config /etc/default/lxc-net LXC_IPV6_ADDR '"fd00:3::1"'
-set_config /etc/default/lxc-net LXC_IPV6_MASK '"64"'
-set_config /etc/default/lxc-net LXC_IPV6_NETWORK '"fd00:3::/64"'
-set_config /etc/default/lxc-net LXC_IPV6_NAT '"true"'
-echo 'port=0' > /etc/dnsmasq.conf
 sed -i 's/\[Service\]/[Service]\nEnvironment=SYSTEMD_LOG_LEVEL=debug/' /lib/systemd/system/systemd-timesyncd.service
 sed -i "s/\.debian\./\./g;s/#FallbackNTP=/FallbackNTP=/"  /etc/systemd/timesyncd.conf
 set_config /etc/systemd/timesyncd.conf RootDistanceMaxSec 10
@@ -274,6 +269,13 @@ cat > /etc/sysctl.d/97-startos.conf <<EOF
 fs.inotify.max_user_watches=1048576
 # Headroom for nested user namespaces (rootless OCI engines inside service LXCs).
 user.max_user_namespaces=28633
+# Every service container adds neighbour entries to the one shared table.
+net.ipv4.neigh.default.gc_thresh1=2048
+net.ipv4.neigh.default.gc_thresh2=4096
+net.ipv4.neigh.default.gc_thresh3=8192
+net.ipv6.neigh.default.gc_thresh1=2048
+net.ipv6.neigh.default.gc_thresh2=4096
+net.ipv6.neigh.default.gc_thresh3=8192
 kernel.unprivileged_userns_clone=1
 # Outbound source ports stay below the service ports StartOS allocates.
 net.ipv4.ip_local_port_range=32768 49151
@@ -299,16 +301,14 @@ ln -sf /usr/lib/startos/motd /etc/update-motd.d/00-startos
 chmod -x /etc/update-motd.d/*
 chmod +x /etc/update-motd.d/00-startos
 
-# LXC
+# LXC: every service container's id range (lxc/slot.rs). startd writes each container's own map.
 cat /etc/subuid | grep -v '^root:' > /etc/subuid.tmp || true
-echo "root:100000:65536" >> /etc/subuid.tmp
+echo "root:65536:67108864" >> /etc/subuid.tmp
 mv /etc/subuid.tmp /etc/subuid
 
 cat /etc/subgid | grep -v '^root:' > /etc/subgid.tmp || true
-echo "root:100000:65536" >> /etc/subgid.tmp
+echo "root:65536:67108864" >> /etc/subgid.tmp
 mv /etc/subgid.tmp /etc/subgid
 
 cat /etc/lxc/default.conf | grep -v '^lxc\.idmap = [ug]' > /etc/lxc/default.conf.tmp || true
-echo "lxc.idmap = u 0 100000 65536" >> /etc/lxc/default.conf.tmp
-echo "lxc.idmap = g 0 100000 65536" >> /etc/lxc/default.conf.tmp
 mv /etc/lxc/default.conf.tmp /etc/lxc/default.conf

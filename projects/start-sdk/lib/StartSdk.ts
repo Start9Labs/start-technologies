@@ -31,7 +31,6 @@ import { setupExportedUrls } from '@start9labs/start-core/interfaces/setupExport
 import { setupServiceInterfaces } from '@start9labs/start-core/interfaces/setupInterfaces'
 import * as T from '@start9labs/start-core/types'
 import { Effects, ServiceInterfaceType } from '@start9labs/start-core/types'
-import { GetContainerIp } from '@start9labs/start-core/util/GetContainerIp'
 import {
   getBridgeAddress,
   getHost,
@@ -156,7 +155,6 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       | 'getSslCertificate'
       | 'getSystemSmtp'
       | 'getOutboundGateway'
-      | 'getContainerIp'
       | 'getStatus'
       | 'getDataVersion'
       | 'setDataVersion'
@@ -365,21 +363,6 @@ export class StartSdk<Manifest extends T.SDKManifest> {
          */
         getBridgeAddress,
       },
-      /**
-       * Get the container IP address with reactive subscription support.
-       *
-       * Returns an object with multiple read strategies: `const()` for a value
-       * that retries on change, `once()` for a single read, `watch()` for an async
-       * generator, `onChange()` for a callback, and `waitFor()` to block until a predicate is met.
-       *
-       * @param effects - The effects context
-       * @param options - Optional filtering options (e.g. `containerId`)
-       */
-      getContainerIp: <Opts extends { packageId?: T.PackageId } = {}>(
-        effects: T.Effects,
-        options: Opts = {} as Opts,
-      ) => new GetContainerIp(effects, options),
-
       /**
        * Get the service's current status with reactive subscription support.
        *

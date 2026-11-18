@@ -283,9 +283,6 @@ export type FullProgressInput = z.input<typeof schemas.FullProgress>
 export type GetActionInputParamsInput = z.input<
   typeof schemas.GetActionInputParams
 >
-export type GetContainerIpParamsInput = z.input<
-  typeof schemas.GetContainerIpParams
->
 export type GetHostInfoParamsInput = z.input<typeof schemas.GetHostInfoParams>
 export type GetOutboundGatewayParamsInput = z.input<
   typeof schemas.GetOutboundGatewayParams

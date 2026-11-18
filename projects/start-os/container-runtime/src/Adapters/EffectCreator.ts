@@ -241,12 +241,6 @@ export function makeEffects(context: EffectContext): Effects {
     ) => {
       return rpcRound('export-range-service-interface', options)
     }) as Effects['exportRangeServiceInterface'],
-    getContainerIp(...[options]: Parameters<T.Effects['getContainerIp']>) {
-      return rpcRound('get-container-ip', {
-        ...options,
-        callback: context.callbacks?.addCallback(options.callback) || null,
-      })
-    },
     getOsIp(...[]: Parameters<T.Effects['getOsIp']>) {
       return rpcRound('get-os-ip', {})
     },

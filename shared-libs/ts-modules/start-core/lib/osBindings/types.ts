@@ -90,6 +90,8 @@ export type CliSetIconParams = z.output<typeof schemas.CliSetIconParams>
 export type CliSetIconParamsInput = z.input<typeof schemas.CliSetIconParams>
 export type ContactInfo = z.output<typeof schemas.ContactInfo>
 export type ContactInfoInput = z.input<typeof schemas.ContactInfo>
+export type ContainerSlot = z.output<typeof schemas.ContainerSlot>
+export type ContainerSlotInput = z.input<typeof schemas.ContainerSlot>
 
 /**
  * Lifecycle of a daemon-owned conversion attempt.
@@ -857,10 +859,6 @@ export type GatewayPortMapCapabilitiesInput = z.input<
 export type GetActionInputParams = z.output<typeof schemas.GetActionInputParams>
 export type GetActionInputParamsInput = z.input<
   typeof schemas.GetActionInputParams
->
-export type GetContainerIpParams = z.output<typeof schemas.GetContainerIpParams>
-export type GetContainerIpParamsInput = z.input<
-  typeof schemas.GetContainerIpParams
 >
 export type GetHostInfoParams = z.output<typeof schemas.GetHostInfoParams>
 export type GetHostInfoParamsInput = z.input<typeof schemas.GetHostInfoParams>
