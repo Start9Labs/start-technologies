@@ -355,6 +355,10 @@ export const CreatedToken: z.ZodObject<{
 export const DataUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'DataUrl',
 })
+export const DbCursor: z.ZodObject<{ epoch: z.ZodString; id: z.ZodInt }> =
+  /* @__PURE__ */ object({ epoch: z.string(), id: z.int() }).meta({
+    id: 'DbCursor',
+  })
 export const DeviceFilter: z.ZodObject<{
   description: z.ZodString
   class: typeof literal_5
@@ -1431,6 +1435,11 @@ export const SetCountryParams: z.ZodObject<{ country: z.ZodString }> =
   /* @__PURE__ */ object({ country: z.string() }).meta({
     id: 'SetCountryParams',
   })
+export const SetDefaultLocaleParams: z.ZodObject<{
+  defaultLocale: z.ZodNullable<z.ZodString>
+}> = /* @__PURE__ */ object({ defaultLocale: z.string().nullable() }).meta({
+  id: 'SetDefaultLocaleParams',
+})
 export const SetEchoipUrlsParams: z.ZodObject<{
   urls: z.ZodArray<z.ZodString>
 }> = /* @__PURE__ */ object({ urls: z.array(z.string()) }).meta({
@@ -1589,16 +1598,6 @@ export const SshPubKey: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 export const Ssid: z.ZodString = /* @__PURE__ */ z.string().meta({
   id: 'Ssid',
   description: 'Ssid are the names of the wifis, usually human readable.',
-})
-export const SubscribeParams: z.ZodObject<{
-  pointer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'SubscribeParams',
 })
 export const TermSize: z.ZodObject<{
   rows: z.ZodInt
@@ -3591,7 +3590,19 @@ export const PackageIdParams: z.ZodObject<{ id: typeof PackageId }> =
   })
 export const PackageInfoShort: z.ZodObject<{
   releaseNotes: typeof LocaleString
-}> = /* @__PURE__ */ object({ releaseNotes: LocaleString }).meta({
+  /**
+   * `PackageMetadata::default_locale`.
+   */
+  defaultLocale: z.ZodOptional<z.ZodNullable<z.ZodString>>
+}> = /* @__PURE__ */ object({
+  releaseNotes: LocaleString,
+  /**
+   * `PackageMetadata::default_locale`.
+   */
+  defaultLocale: z.string().nullable().optional().meta({
+    description: '`PackageMetadata::default_locale`.',
+  }),
+}).meta({
   id: 'PackageInfoShort',
 })
 export const PackageReaderParams: z.ZodObject<{
@@ -4419,6 +4430,13 @@ export const SubscribeIndexParams: z.ZodIntersection<
       z.ZodOptional<z.ZodNullable<z.ZodString>>,
       z.ZodNullable<z.ZodString>
     >
+    /**
+     * Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.
+     */
+    language: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
   }>,
   typeof ReaderParams
 > = /* @__PURE__ */ z
@@ -4435,12 +4453,46 @@ export const SubscribeIndexParams: z.ZodIntersection<
         description:
           'Client StartOS version. Omission preserves the canonical index format.',
       }),
+      /**
+       * Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.
+       */
+      language: wire(
+        z.string().nullable().optional(),
+        z.string().nullable(),
+      ).meta({
+        description:
+          'Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.',
+      }),
     }),
     ReaderParams,
   )
   .meta({
     id: 'SubscribeIndexParams',
   })
+export const SubscribeParams: z.ZodObject<{
+  pointer: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * The subscriber's last revision; resumes only within the epoch that reported it.
+   */
+  since: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof DbCursor>>,
+    z.ZodNullable<typeof DbCursor>
+  >
+}> = /* @__PURE__ */ object({
+  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * The subscriber's last revision; resumes only within the epoch that reported it.
+   */
+  since: wire(DbCursor.nullable().optional(), DbCursor.nullable()).meta({
+    description:
+      "The subscriber's last revision; resumes only within the epoch that reported it.",
+  }),
+}).meta({
+  id: 'SubscribeParams',
+})
 export const SubscribeRes: z.ZodObject<{
   dump: typeof Dump
   guid: typeof Guid
@@ -5159,6 +5211,10 @@ export const PackageAccess: z.ZodObject<{
 })
 export const PackageMetadata: z.ZodObject<{
   title: z.ZodString
+  /**
+   * Locale this package's `LocaleString`s fall back to when a requested one is missing.
+   */
+  defaultLocale: z.ZodOptional<z.ZodNullable<z.ZodString>>
   description: typeof Description
   releaseNotes: typeof LocaleString
   preDownloadAlert: z.ZodOptional<z.ZodNullable<typeof PreDownloadAlert>>
@@ -5205,6 +5261,13 @@ export const PackageMetadata: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   title: z.string(),
+  /**
+   * Locale this package's `LocaleString`s fall back to when a requested one is missing.
+   */
+  defaultLocale: z.string().nullable().optional().meta({
+    description:
+      "Locale this package's `LocaleString`s fall back to when a requested one is missing.",
+  }),
   description: Description,
   releaseNotes: LocaleString,
   preDownloadAlert: PreDownloadAlert.nullable().optional(),
@@ -5344,6 +5407,13 @@ export const RegistryInfo: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
     z.ZodNullable<typeof LocaleString>
   >
+  /**
+   * `FullIndex::default_locale`.
+   */
+  defaultLocale: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   categories: z.ZodRecord<z.ZodString, typeof Category>
   /**
    * Registry-selected signers, not an assertion of trust.
@@ -5363,6 +5433,15 @@ export const RegistryInfo: z.ZodObject<{
     LocaleString.nullable(),
   ).meta({
     description: "Markdown, shown above the registry's services.",
+  }),
+  /**
+   * `FullIndex::default_locale`.
+   */
+  defaultLocale: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description: '`FullIndex::default_locale`.',
   }),
   categories: z.record(z.string(), Category),
   /**
@@ -6215,6 +6294,34 @@ export const PackageIndex: z.ZodObject<{
 }).meta({
   id: 'PackageIndex',
 })
+
+/**
+ * A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
+ */
+export const SubscribeStart: z.ZodObject<{
+  epoch: z.ZodString
+  id: z.ZodInt
+  value: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodUnknown>>,
+    z.ZodNullable<z.ZodUnknown>
+  >
+  revisions: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof Revision>>>,
+    z.ZodNullable<z.ZodArray<typeof Revision>>
+  >
+}> = /* @__PURE__ */ object({
+  epoch: z.string(),
+  id: z.int(),
+  value: wire(z.unknown().nullable().optional(), z.unknown().nullable()),
+  revisions: wire(
+    z.array(Revision).nullable().optional(),
+    z.array(Revision).nullable(),
+  ),
+}).meta({
+  id: 'SubscribeStart',
+  description:
+    'A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.',
+})
 export const BindOptions: z.ZodCodec<
   typeof CompatibleBindOptions,
   z.ZodObject<{
@@ -6267,6 +6374,13 @@ export const FullIndex: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
     z.ZodNullable<typeof LocaleString>
   >
+  /**
+   * Locale registry-owned `LocaleString`s fall back to when a requested one is missing.
+   */
+  defaultLocale: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   package: typeof PackageIndex
   os: typeof OsIndex
   signers: z.ZodRecord<z.ZodString, typeof SignerInfo>
@@ -6281,12 +6395,33 @@ export const FullIndex: z.ZodObject<{
     LocaleString.nullable().optional(),
     LocaleString.nullable(),
   ),
+  /**
+   * Locale registry-owned `LocaleString`s fall back to when a requested one is missing.
+   */
+  defaultLocale: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description:
+      'Locale registry-owned `LocaleString`s fall back to when a requested one is missing.',
+  }),
   package: PackageIndex,
   os: OsIndex,
   signers: z.record(z.string(), SignerInfo),
   trustSigners: wire(z.array(Guid).optional(), z.array(Guid)),
 }).meta({
   id: 'FullIndex',
+})
+
+/**
+ * Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
+ */
+export const SubscribeStartResult: z.ZodUnion<
+  readonly [typeof SubscribeRes, typeof SubscribeStart]
+> = /* @__PURE__ */ z.union([SubscribeRes, SubscribeStart]).meta({
+  id: 'SubscribeStartResult',
+  description:
+    'Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.',
 })
 export const BindInfo: z.ZodObject<{
   enabled: z.ZodBoolean
@@ -6613,7 +6748,7 @@ export const Api = {
         },
         subscribe: {
           _PARAMS: /* @__PURE__ */ SubscribeParams,
-          _RETURN: /* @__PURE__ */ SubscribeResult,
+          _RETURN: /* @__PURE__ */ SubscribeStartResult,
           _ITEM: /* @__PURE__ */ Revision,
           _FINAL: /* @__PURE__ */ z.null(),
         },
@@ -7696,6 +7831,26 @@ export const Api = {
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
           _CHILDREN: {
+            'set-default-locale': {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  z.intersection(empty, RegistryUrlParams),
+                  z.intersection(
+                    object({
+                      format: wire(
+                        IoFormat.nullable().optional(),
+                        IoFormat.nullable(),
+                      ),
+                    }),
+                    empty,
+                  ),
+                ),
+                SetDefaultLocaleParams,
+              ),
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
             'set-description': {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(

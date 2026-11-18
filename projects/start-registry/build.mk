@@ -1,5 +1,5 @@
-# When this product's build inputs change, mirror them into the `paths:` filter
-# of .github/workflows/start-registry.yaml (see root AGENTS.md "Coupled changes").
+# When this product's build inputs change, mirror them into its entry in
+# .github/scripts/changed-products.mjs (see root AGENTS.md "Coupled changes").
 
 REGISTRY_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/registrybox projects/start-registry/start-registryd.service
 
@@ -14,8 +14,12 @@ start-registry-install: $(REGISTRY_TARGETS)
 	$(call mkdir,$(DESTDIR)/lib/systemd/system)
 	$(call cp,projects/start-registry/start-registryd.service,$(DESTDIR)/lib/systemd/system/start-registryd.service)
 
-target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/registrybox: $(CORE_SRC) $(ENVIRONMENT_FILE) projects/start-registry/build/build-registrybox.sh
-	ARCH=$(ARCH) PROFILE=$(PROFILE) ./projects/start-registry/build/build-registrybox.sh
+RUST_BINS_start-registry := start-registry:registrybox
+RUST_OUTPUTS_start-registry := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/registrybox
+RUST_INPUTS_start-registry := $(CORE_SRC) $(ENVIRONMENT_FILE) $(RUST_BIN_BUILDER_INPUTS)
+
+$(RUST_OUTPUTS_start-registry): $(RUST_INPUTS_start-registry)
+	ARCH=$(ARCH) PROFILE=$(PROFILE) ./build/build-rust-bins.sh $(RUST_BINS_start-registry)
 
 start-registry-deb: results/$(REGISTRY_BASENAME).deb
 

@@ -94,9 +94,10 @@ const { MarketplaceRegistrySelectComponent } =
 const start9 = 'https://registry.start9.com/'
 const community = 'https://community-registry.start9.com/'
 
-function picker({ registries, currentUrl, prompt = '' }) {
+function picker(t, { registries, currentUrl, prompt = '' }) {
   const failures = []
   const connected = []
+  const navigations = []
   const service = {
     registries$: new BehaviorSubject(registries),
     currentRegistryUrl$: new BehaviorSubject(currentUrl),
@@ -106,7 +107,10 @@ function picker({ registries, currentUrl, prompt = '' }) {
   const injector = createEnvironmentInjector(
     [
       { provide: AbstractMarketplaceService, useValue: service },
-      { provide: Router, useValue: { navigate: () => {} } },
+      {
+        provide: Router,
+        useValue: { navigate: (_, extras) => navigations.push(extras) },
+      },
       { provide: TUI_BREAKPOINT, useValue: () => 'desktopLarge' },
       {
         provide: DialogService,
@@ -133,11 +137,12 @@ function picker({ registries, currentUrl, prompt = '' }) {
     injector,
     () => new MarketplaceRegistrySelectComponent(),
   )
-  return { component, connected, failures }
+  t.after(() => injector.destroy())
+  return { component, connected, failures, navigations, service }
 }
 
-test('an invalid custom URL fails inside the task instead of the event handler', async () => {
-  const { component, connected, failures } = picker({
+test('an invalid custom URL fails inside the task instead of the event handler', async t => {
+  const { component, connected, failures } = picker(t, {
     registries: [],
     currentUrl: start9,
     prompt: 'https://',
@@ -150,9 +155,9 @@ test('an invalid custom URL fails inside the task instead of the event handler',
   assert.deepEqual(connected, [])
 })
 
-test('saved custom registries survive the link input binding after the streams replay', () => {
+test('saved custom registries survive the link input binding after the streams replay', t => {
   const saved = 'https://saved.example/'
-  const { component } = picker({
+  const { component } = picker(t, {
     registries: [
       { url: start9, name: 'Start9 Registry' },
       { url: community, name: 'Community Registry' },
@@ -167,4 +172,62 @@ test('saved custom registries survive the link input binding after the streams r
     component['data']().custom.map(r => r.url),
     [saved, 'https://unsaved.example/'],
   )
+})
+
+test('an unsaved selection cannot inherit the previous catalog identity', t => {
+  const { component, service } = picker(t, {
+    registries: [{ url: start9, name: 'Start9 Registry' }],
+    currentUrl: start9,
+  })
+  service.currentRegistry$.next({
+    url: start9,
+    info: { name: 'Previous catalog' },
+    packages: [],
+  })
+  const unsaved = 'https://unsaved.example/'
+  service.currentRegistryUrl$.next(unsaved)
+  assert.equal(component['data']().current?.url, unsaved)
+  assert.equal(component['data']().current?.name, unsaved)
+
+  service.registries$.next([
+    { url: start9, name: 'Start9 Registry' },
+    { url: unsaved, name: 'Connected registry' },
+  ])
+  assert.equal(component['data']().current.name, 'Connected registry')
+})
+
+test('reselecting the active registry repairs its route without reconnecting', async t => {
+  const { component, connected, navigations } = picker(t, {
+    registries: [{ url: start9, name: 'Start9 Registry' }],
+    currentUrl: start9,
+  })
+  await component.connect('https://registry.start9.com')
+  assert.deepEqual(connected, [])
+  assert.deepEqual(navigations, [
+    { queryParams: { registry: start9 }, queryParamsHandling: 'merge' },
+  ])
+})
+
+test('selecting another registry still connects before updating its route', async t => {
+  const { component, connected, navigations, service } = picker(t, {
+    registries: [
+      { url: start9, name: 'Start9 Registry' },
+      { url: community, name: 'Community Registry' },
+    ],
+    currentUrl: start9,
+  })
+  const pending = Promise.withResolvers()
+  service.connect = url => {
+    connected.push(url)
+    return pending.promise
+  }
+  const selection = component.connect(community)
+  assert.deepEqual(connected, [community])
+  assert.deepEqual(navigations, [])
+  pending.resolve()
+  await selection
+  await new Promise(setImmediate)
+  assert.deepEqual(navigations, [
+    { queryParams: { registry: community }, queryParamsHandling: 'merge' },
+  ])
 })

@@ -38,10 +38,10 @@ import { StoreIconDirective } from './store-icon.directive'
       [(tuiDropdownOpen)]="open"
     >
       <span tuiAvatar appearance="action-grayscale" size="xs">
-        <img [storeIcon]="data()?.current?.url || data()?.currentUrl" />
+        <img [storeIcon]="data()?.current.url" />
       </span>
       <b tuiFade>
-        {{ data()?.current?.name || fetched()?.info?.name || 'Loading...' }}
+        {{ data()?.current.name || ('Loading' | i18n) }}
       </b>
       @if (data(); as d) {
         <tui-data-list *tuiDropdown size="m">
@@ -169,8 +169,6 @@ export class MarketplaceRegistrySelectComponent {
   protected open = false
   protected readonly breakpoint = inject(TUI_BREAKPOINT)
 
-  protected readonly fetched = toSignal(this.marketplace.currentRegistry$)
-
   private readonly selection = toSignal(
     combineLatest([
       this.marketplace.registries$,
@@ -178,7 +176,10 @@ export class MarketplaceRegistrySelectComponent {
     ]),
   )
 
-  // StartOS keeps saved registries selectable alongside an unsaved selection.
+  /**
+   * Identifies the selected URL, including unsaved registries.
+   * StartOS keeps saved registries selectable alongside an unsaved selection.
+   */
   protected readonly data = computed(() => {
     const selection = this.selection()
     if (!selection) return
@@ -189,35 +190,45 @@ export class MarketplaceRegistrySelectComponent {
       selected: sameUrl(s.url, currentUrl),
     }))
 
-    const current = withSelected.find(s => s.selected)
+    const saved = withSelected.find(s => s.selected)
+    const current = saved || {
+      url: currentUrl,
+      name: currentUrl,
+      selected: true,
+    }
     const custom = withSelected.filter(s => !isDefaultRegistry(s.url))
 
     return {
-      currentUrl,
       current,
       standard: withSelected.filter(s => isDefaultRegistry(s.url)),
-      custom: current
+      custom: saved
         ? custom
-        : [
-            ...(this.manageRegistriesLink() ? custom : []),
-            { url: currentUrl, name: currentUrl, selected: true },
-          ],
+        : [...(this.manageRegistriesLink() ? custom : []), current],
     }
   })
 
+  /** Reselecting the active registry repairs its URL without reloading the catalog. */
   async connect(rawUrl: string): Promise<void> {
     this.open = false
 
-    if (sameUrl(rawUrl, this.data()?.currentUrl)) return
+    const current = this.data()?.current
+    if (current && sameUrl(rawUrl, current.url)) {
+      this.navigateRegistry(current.url)
+      return
+    }
 
     this.tasks.run(async () => {
       const url = registryUrl(rawUrl)
       await this.marketplace.connect(url)
-      this.router.navigate([], {
-        queryParams: { registry: url },
-        queryParamsHandling: 'merge',
-      })
+      this.navigateRegistry(url)
     }, 'Changing registry')
+  }
+
+  private navigateRegistry(url: string): void {
+    this.router.navigate([], {
+      queryParams: { registry: url },
+      queryParamsHandling: 'merge',
+    })
   }
 
   async viewCustom(initialValue = ''): Promise<void> {

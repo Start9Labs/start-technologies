@@ -112,6 +112,6 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
 
 pub async fn forget_disk<C: Context>(_: C) -> Result<(), Error> {
     delete_file("/media/startos/config/overlay/etc/hostname").await?;
-    delete_file("/media/startos/config/disk.guid").await?;
+    crate::context::startup::forget_identity().await?;
     Ok(())
 }

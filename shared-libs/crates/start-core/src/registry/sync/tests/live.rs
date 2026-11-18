@@ -20,7 +20,7 @@ pub(super) async fn encrypted_server(
     ));
     let (_, _, socket) = EncryptedSocket::accept(
         transport(socket),
-        &identity,
+        &identity.into(),
         &["registry.test".into()],
         std::num::NonZeroUsize::new(1024 * 1024).unwrap(),
         &Target::Rpc,

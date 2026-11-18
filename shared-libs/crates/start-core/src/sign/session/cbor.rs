@@ -27,6 +27,10 @@ impl<'de> Deserialize<'de> for AdmissionValue {
                 formatter.write_str("an untagged admission value with text map keys")
             }
 
+            fn visit_bool<E: serde::de::Error>(self, value: bool) -> Result<Self::Value, E> {
+                Ok(AdmissionValue(Value::Bool(value)))
+            }
+
             fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Self::Value, E> {
                 Ok(AdmissionValue(Value::Integer(value.into())))
             }

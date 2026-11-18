@@ -192,8 +192,8 @@ impl DbContext for ServerContext {
 }
 
 impl SignatureAuthContext for ServerContext {
-    fn server_identity(&self) -> Result<startos::sign::Signer, startos::Error> {
-        ServerContext::server_identity(self)
+    fn server_identity(&self) -> Result<startos::sign::session::ServerIdentity, startos::Error> {
+        ServerContext::server_identity(self).map(Into::into)
     }
     fn replay_check(&self) -> startos::middleware::auth::signature::RequestReplayCheck {
         ServerContext::replay_check(self)

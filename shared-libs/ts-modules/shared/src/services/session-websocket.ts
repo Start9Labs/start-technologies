@@ -16,9 +16,21 @@ export interface SessionSocketIdentity {
 }
 
 export class SessionOpenEvent extends Event {
-  constructor(readonly peer: string) {
+  constructor(
+    readonly peer: string,
+    readonly temporary: boolean,
+  ) {
     super('open')
   }
+}
+
+/** Temporary identities are admissible only to explicitly opted-in startup operations. */
+export function assertServerIdentity(
+  identity: Pick<SessionOpenEvent, 'temporary'>,
+  allowTemporaryIdentity: boolean,
+): void {
+  if (identity.temporary && !allowTemporaryIdentity)
+    throw new Error('Temporary server identity is not allowed')
 }
 
 function validateCloseCode(code: number) {
@@ -62,6 +74,7 @@ export function sessionWebSocketConstructor(
   context: string,
   target: Target,
   Socket: typeof WebSocket = WebSocket,
+  allowTemporaryIdentity = false,
 ): typeof WebSocket {
   return class SessionWebSocket extends EventTarget implements WebSocket {
     static readonly CONNECTING = 0
@@ -134,7 +147,7 @@ export function sessionWebSocketConstructor(
       const raw = (this.raw = new SessionWebSocketStream(socket))
       const abort = () => raw.abort(new Error('Encrypted WebSocket aborted'))
       signal.addEventListener('abort', abort, { once: true })
-      let peer: string
+      let opened: SessionOpenEvent
       try {
         await pEvent(socket, 'open', {
           signal,
@@ -147,14 +160,15 @@ export function sessionWebSocketConstructor(
         )
         const secured = await prepared.finish(response)
         signal.throwIfAborted()
-        peer = secured.peer
+        assertServerIdentity(secured, allowTemporaryIdentity)
+        opened = new SessionOpenEvent(secured.peer, secured.temporary)
         this.cipher = secured.cipher
       } finally {
         signal.removeEventListener('abort', abort)
       }
       this.lifetime.signal.addEventListener('abort', abort, { once: true })
       this.readyState = this.OPEN
-      this.dispatchEvent(new SessionOpenEvent(peer))
+      this.dispatchEvent(opened)
       while (this.readyState < this.CLOSED) {
         const header = await this.readPlain(profile.messageHeaderBytes)
         const length = new DataView(header.buffer).getUint32(0)

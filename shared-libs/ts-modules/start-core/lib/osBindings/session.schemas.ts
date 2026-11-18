@@ -98,6 +98,7 @@ export const Hello: z.ZodUnion<
       z.ZodObject<{
         ephemeral: typeof literal_1
         clientHello: typeof literal_1
+        temporary: z.ZodOptional<z.ZodBoolean>
       }>
     >,
   ]
@@ -124,6 +125,7 @@ export const Hello: z.ZodUnion<
           description:
             'A binary byte string, without a text encoding or an integer-array fallback.',
         }),
+        temporary: z.boolean().optional(),
       }),
     ),
   ])

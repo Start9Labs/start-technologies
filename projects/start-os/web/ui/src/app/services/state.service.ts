@@ -71,6 +71,9 @@ export class StateService extends Observable<ServerState | null> {
   private readonly trigger$ = new BehaviorSubject(true)
 
   readonly dnsStatus = signal<T.DnsStatus | null>(null)
+  private readonly probed$ = new BehaviorSubject<boolean | null>(null)
+  /** Null until a state probe settles; false after one fails. */
+  readonly reachable$ = this.probed$.pipe(distinctUntilChanged())
 
   private readonly disconnected$ = this.alerts.open(
     new PolymorpheusComponent(DisconnectedToast),
@@ -88,10 +91,14 @@ export class StateService extends Observable<ServerState | null> {
       timer(0, 2000).pipe(
         exhaustMap(() =>
           from(this.getState()).pipe(
-            tap(({ dnsStatus }) => this.dnsStatus.set(dnsStatus)),
+            tap(({ dnsStatus }) => {
+              this.dnsStatus.set(dnsStatus)
+              this.probed$.next(true)
+            }),
             map(({ state }) => state),
             catchError(() => {
               this.dnsStatus.set(null)
+              this.probed$.next(false)
               return EMPTY
             }),
           ),

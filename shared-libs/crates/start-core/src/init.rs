@@ -217,15 +217,21 @@ pub async fn init(
     crate::version::Current::default().pre_init(&db).await?;
     let db = TypedPatchDb::<Database>::load_unchecked(db);
     db.mutate(crate::net::ssl::repair_root_cert).await.result?;
+    db.mutate(|d| {
+        d.as_public_mut()
+            .as_server_info_mut()
+            .as_git_hash_mut()
+            .ser(&crate::version::commit_hash().into())
+    })
+    .await
+    .result?;
     let peek = db.peek().await;
     load_database.complete();
 
     load_ssh_keys.start();
-    crate::developer::write_signing_key(
-        &peek.as_private().as_server_identity_key().de()?.0,
-        OS_ID_KEY_PATH,
-    )
-    .await?;
+    let identity_key = peek.as_private().as_server_identity_key().de()?.0;
+    crate::context::startup::mirror_configured_identity(&identity_key).await?;
+    crate::developer::write_signing_key(&identity_key, OS_ID_KEY_PATH).await?;
     Command::new("chown")
         .arg("root:startos")
         .arg(OS_ID_KEY_PATH)

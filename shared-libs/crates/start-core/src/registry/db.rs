@@ -23,7 +23,7 @@ use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::WireCompatibility;
-use crate::registry::mirror::{IndexMirror, index_mirror, mirror_key};
+use crate::registry::mirror::{IndexMirror, IndexView, index_mirror, mirror_key};
 use crate::registry::package::index::ReaderParams;
 use crate::registry::upstream::WRITES_INDEX;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
@@ -147,6 +147,8 @@ pub struct SubscribeIndexParams {
     pub pointer: Option<JsonPointer>,
     /// Client StartOS version. Omission preserves the canonical index format.
     pub os_version: Option<Version>,
+    /// Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.
+    pub language: Option<InternedString>,
     #[serde(flatten)]
     pub reader: ReaderParams,
 }
@@ -158,17 +160,30 @@ async fn visible_subscription(
     SubscribeIndexParams {
         pointer,
         os_version,
+        language,
         reader,
     }: SubscribeIndexParams,
 ) -> Result<(Arc<IndexMirror>, Dump, JsonSubscriber), Error> {
     let pointer = subscription_pointer(pointer)?;
-    let key = mirror_key(&ctx.db.peek().await, reader.signer)?;
     let wire = os_version
         .as_ref()
         .map(WireCompatibility::for_startos)
         .transpose()?
         .unwrap_or_default();
-    let mirror = index_mirror(&ctx.index_mirrors, &ctx.db, key, wire, &ctx.datadir).await?;
+    let (key, view) = match language.as_deref() {
+        None => (
+            mirror_key(&ctx.db.peek().await, reader.signer)?,
+            IndexView::from(wire),
+        ),
+        Some(language) => {
+            let snapshot = ctx.index_locales.snapshot(ctx.db.sequence().await).await?;
+            let db: Model<RegistryDatabase> = snapshot.source.value.clone().into();
+            let key = mirror_key(&db, reader.signer)?;
+            let view = IndexView::localized(&db, &snapshot.locales, key.as_ref(), wire, language)?;
+            (key, view)
+        }
+    };
+    let mirror = index_mirror(&ctx.index_mirrors, &ctx.db, key, view, &ctx.datadir).await?;
     let (dump, sub) = subscription(&mirror.db, Some(pointer)).await?;
     Ok((mirror, dump, sub))
 }
@@ -296,6 +311,10 @@ mod tests {
         crate::sign::instance::load(&db).await.unwrap();
         let (dump, mut sub) = subscription(&db, None).await.unwrap();
         assert_eq!(dump.value, imbl_value::json!({"name": "registry"}));
+        assert_eq!(
+            serde_json::to_value(SubscribeIndexResult::Stream(dump.clone())).unwrap(),
+            serde_json::json!({"id": dump.id, "value": {"name": "registry"}})
+        );
         db.put(&"/index/name".parse::<JsonPointer>().unwrap(), &"renamed")
             .await
             .unwrap();
@@ -338,7 +357,11 @@ mod tests {
         ] {
             let params: SubscribeIndexParams = serde_json::from_value(params).unwrap();
             assert!(params.pointer.is_none());
+            assert!(params.language.is_none());
         }
+        let params: SubscribeIndexParams =
+            serde_json::from_value(serde_json::json!({ "language": "pl_PL" })).unwrap();
+        assert_eq!(params.language.as_deref(), Some("pl_PL"));
     }
 
     #[test]

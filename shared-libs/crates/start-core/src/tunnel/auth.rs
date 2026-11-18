@@ -29,8 +29,8 @@ impl DbContext for TunnelContext {
     }
 }
 impl SignatureAuthContext for TunnelContext {
-    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
-        TunnelContext::server_identity(self)
+    fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error> {
+        TunnelContext::server_identity(self).map(Into::into)
     }
     fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
         TunnelContext::replay_check(self)
