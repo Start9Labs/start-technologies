@@ -131,7 +131,7 @@ test('an older run with unexpired rerun artifacts remains eligible', t => {
         ...debs('start-cli'),
         ...debs('start-tunnel'),
         ...debs('start-registry'),
-      ],
+      ].map(name => ({ name, created_at: daysAgo(1) })),
       { run_attempt: 2 },
     ),
   ])

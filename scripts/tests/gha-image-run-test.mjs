@@ -117,8 +117,10 @@ test('image run selection: an older rerun can hold an unexpired image', t => {
   const result = select(t, {
     'build-products.yaml': [
       [
-        run(1, [IMAGE], {
-          created_at: new Date(Date.now() - 20 * 86400e3).toISOString(),
+        run(1, [{ name: IMAGE, created_at: run(9).created_at }], {
+          created_at: new Date(Date.now() - 20 * 86400e3)
+            .toISOString()
+            .replace(/\.\d+Z$/, 'Z'),
           run_attempt: 2,
         }),
       ],

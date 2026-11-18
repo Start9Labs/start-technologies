@@ -23,7 +23,7 @@ appendFileSync(root + '/gh.log', JSON.stringify(args) + '\\n')
 const artifacts = run => run.artifacts.map((artifact, index) => ({
   id: run.id * 1000 + index,
   expired: false,
-  created_at: run.created_at ?? '',
+  created_at: run.created_at ?? new Date().toISOString().replace(/\\.\\d+Z$/, 'Z'),
   ...(typeof artifact === 'string' ? { name: artifact } : artifact),
   workflow_run: { id: run.id, head_branch: run.head_branch },
 }))

@@ -63,6 +63,23 @@ test('expired matches do not hide unexpired artifacts on later pages', t => {
   assert.deepEqual(result.stdout.trim().split('\n'), ['201', '1'])
 })
 
+test('discovery stops paging at an artifact created over 15 days ago', t => {
+  const old = new Date(Date.now() - 16 * 86400e3)
+    .toISOString()
+    .replace(/\.\d+Z$/, 'Z')
+  const { result, calls } = discover(t, [
+    run(1, 'master', [image('aaaaaaa')]),
+    ...Array.from({ length: 150 }, (_, index) => ({
+      ...run(index + 2, 'integration/other', ['start-cli_x86_64.deb']),
+      created_at: old,
+    })),
+    run(201, 'master', [image('ccccccc')]),
+  ])
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.deepEqual(result.stdout.trim().split('\n'), ['201', '1'])
+  assert.equal(calls.length, 1)
+})
+
 test('artifact discovery propagates API failures', t => {
   const { result } = discover(t, [run(1, 'master', [image('aaaaaaa')])], {
     GH_FAIL_MATCH: '/actions/artifacts',
