@@ -197,7 +197,7 @@ jobs:
       contents: write
 ```
 
-The reusable workflows read `REFERENCE_REGISTRY`, `RELEASE_REGISTRY`, `S3_S9PKS_BASE_URL` and `REGISTRY_PROXY` from the calling repository's variables, including organization variables. Set them there; pass an input of the same name under `with:` only to override one for a single repo's workflow. Secrets are not read this way and must still be passed.
+The reusable workflows read `REFERENCE_REGISTRY`, `RELEASE_REGISTRY`, `S3_S9PKS_BASE_URL`, `REGISTRY_PROXY` and `REGISTRY_TOR` from the calling repository's variables, including organization variables. Set them there; pass an input of the same name under `with:` only to override one for a single repo's workflow. Secrets are not read this way and must still be passed.
 
 **release.yml** -- publishes on manual tag push, for re-releases or testing. This workflow only triggers on manually pushed tags — tags created by tagAndRelease (via `GITHUB_TOKEN`) do not trigger it:
 
@@ -220,7 +220,7 @@ jobs:
       contents: write
 ```
 
-To publish to registries served over Tor, set a `REGISTRY_PROXY` variable to a proxy URL such as `socks5h://127.0.0.1:9050`. Both workflows route every `start-cli` registry request through it; `.onion` registries need the `socks5h` scheme, which resolves names through the proxy. When the proxy's address is on the runner's loopback and nothing listens there, the workflow starts Tor on that address. Leave the variable unset to reach registries directly.
+To publish to registries served over Tor, set `REGISTRY_TOR` to `true`. The release jobs then start Tor on their runners, which adds an install and a Tor bootstrap to each job that contacts a registry. Alternatively, set `REGISTRY_PROXY` to a proxy URL the runners can already reach, such as `socks5h://proxy.example:9050`; `.onion` registries need the `socks5h` scheme, which resolves names through the proxy. Either one routes every `start-cli` registry request; set at most one of them.
 
 **syncNext.yml** -- carries every change that lands on the base branch onto the paired `next` iteration branch, so `next` never falls behind what has already shipped:
 

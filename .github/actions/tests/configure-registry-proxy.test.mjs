@@ -20,7 +20,18 @@ const action = yaml.load(
     'utf8',
   ),
 )
-const step = action.runs.steps[0]
+const step = action.runs.steps.find(
+  ({ name }) => name === 'Configure registry proxy',
+)
+const torStep = action.runs.steps.find(({ name }) => name === 'Start Tor')
+
+test('Tor starts only when the repository opts in', () => {
+  assert.equal(torStep.if, "${{ inputs.tor == 'true' }}")
+  assert.equal(
+    step.env.PROXY,
+    "${{ inputs.tor == 'true' && 'socks5h://127.0.0.1:9050' || inputs.proxy }}",
+  )
+})
 
 for (const existing of [
   '',

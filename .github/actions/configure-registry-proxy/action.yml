@@ -2,20 +2,51 @@ name: 'Configure Registry Proxy'
 description: |
   Routes this runner's start-cli requests through a proxy, so registries can be
   Tor (.onion) addresses. No proxy removes any proxy an earlier job configured.
-
-  A proxy on the runner's loopback with nothing listening there gets a Tor
-  daemon started on that address.
 inputs:
   proxy:
-    description: 'Proxy URL for start-cli, e.g. socks5h://127.0.0.1:9050. A .onion registry needs socks5h, which resolves names through the proxy.'
+    description: 'Proxy URL for start-cli, e.g. socks5h://proxy.example:9050. A .onion registry needs socks5h, which resolves names through the proxy.'
+    required: false
+    default: ''
+  tor:
+    description: '`true` starts Tor on the runner and uses it as the proxy. Excludes `proxy`.'
     required: false
     default: ''
 runs:
   using: 'composite'
   steps:
-    - name: Configure registry proxy
+    - name: Start Tor
+      if: ${{ inputs.tor == 'true' }}
       env:
         PROXY: ${{ inputs.proxy }}
+      run: |
+        if [ -n "$PROXY" ]; then
+          echo "::error::Set either the registry proxy or Tor, not both"
+          exit 1
+        fi
+        SOCKS_ADDR=127.0.0.1:9050
+        if (exec 3<>"/dev/tcp/${SOCKS_ADDR%:*}/${SOCKS_ADDR#*:}") 2>/dev/null; then
+          echo "Reusing the proxy already listening on ${SOCKS_ADDR}."
+          exit 0
+        fi
+        sudo apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tor > /dev/null
+        echo "SocksPort ${SOCKS_ADDR}" | sudo tee /etc/tor/torrc > /dev/null
+        sudo systemctl restart tor 2>/dev/null || sudo tor --RunAsDaemon 1 -f /etc/tor/torrc
+        for _ in $(seq 1 60); do
+          if curl -fsS --max-time 10 --proxy "socks5h://${SOCKS_ADDR}" https://check.torproject.org/api/ip > /dev/null 2>&1; then
+            echo "Tor is ready on ${SOCKS_ADDR}."
+            exit 0
+          fi
+          sleep 3
+        done
+        echo "::error::Tor did not finish bootstrapping on ${SOCKS_ADDR}"
+        sudo journalctl -u 'tor*' --no-pager | tail -30
+        exit 1
+      shell: bash
+
+    - name: Configure registry proxy
+      env:
+        PROXY: ${{ inputs.tor == 'true' && 'socks5h://127.0.0.1:9050' || inputs.proxy }}
       run: |
         # Host-backed Forgejo jobs share this home directory across jobs and runs.
         CONFIG=~/.startos/config.yaml
@@ -32,57 +63,13 @@ runs:
         case "$PROXY" in
           *://*) ;;
           *)
-            echo "::error::The registry proxy has no scheme; use e.g. socks5h://127.0.0.1:9050"
+            echo "::error::The registry proxy has no scheme; use e.g. socks5h://proxy.example:9050"
             exit 1
             ;;
         esac
 
-        HOSTPORT=${PROXY#*://}
-        HOSTPORT=${HOSTPORT%%/*}
-        HOSTPORT=${HOSTPORT##*@}
-        HOST=${HOSTPORT%:*}
-        PORT=${HOSTPORT##*:}
-        if [ "$HOST" = "$HOSTPORT" ] || [ -z "$PORT" ]; then
-          echo "::error::The registry proxy has no port"
-          exit 1
-        fi
-        HOST=${HOST#[}
-        HOST=${HOST%]}
-
-        listening() { (exec 3<>"/dev/tcp/${HOST}/${PORT}") 2>/dev/null; }
-
-        case "$HOST" in
-          localhost|127.*|::1) LOOPBACK=true ;;
-          *) LOOPBACK=false ;;
-        esac
-
-        if [ "$LOOPBACK" = true ] && ! listening; then
-          echo "Nothing listens on ${HOST}:${PORT}; starting Tor there..."
-          sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tor > /dev/null
-          case "$HOST" in
-            ::1) SOCKS_ADDR="[::1]:${PORT}" ;;
-            *) SOCKS_ADDR="${HOST}:${PORT}" ;;
-          esac
-          echo "SocksPort ${SOCKS_ADDR}" | sudo tee /etc/tor/torrc > /dev/null
-          sudo systemctl restart tor 2>/dev/null || sudo tor --RunAsDaemon 1 -f /etc/tor/torrc
-          for _ in $(seq 1 60); do
-            if curl -fsS --max-time 10 --proxy "socks5h://${SOCKS_ADDR}" https://check.torproject.org/api/ip > /dev/null 2>&1; then
-              TOR_READY=true
-              break
-            fi
-            sleep 3
-          done
-          if [ "${TOR_READY:-}" != true ]; then
-            echo "::error::Tor did not finish bootstrapping on ${SOCKS_ADDR}"
-            sudo journalctl -u 'tor*' --no-pager | tail -30
-            exit 1
-          fi
-          echo "Tor is ready on ${SOCKS_ADDR}."
-        fi
-
         mkdir -p ~/.startos
         { without_proxy; printf 'proxy: %s\n' "$(jq -n --arg p "$PROXY" '$p')"; } > "$CONFIG.new"
         mv "$CONFIG.new" "$CONFIG"
-        echo "start-cli will reach registries through the proxy on ${HOST}:${PORT}."
+        echo "start-cli will reach registries through the configured proxy."
       shell: bash
