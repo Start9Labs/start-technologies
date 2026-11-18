@@ -4272,6 +4272,13 @@ tunnel.api.invalid-endpoint:
   fr_FR: 'Saisissez une adresse IPv4, IPv6 ou un nom DNS sans schéma, port ni chemin'
   pl_PL: 'Wprowadź adres IPv4, IPv6 lub nazwę DNS bez schematu, portu ani ścieżki'
 
+tunnel.api.invalid-name:
+  en_US: 'Names must not be empty or only whitespace, must contain no control characters, and must be at most %{max} characters long'
+  de_DE: 'Namen dürfen nicht leer sein oder nur aus Leerzeichen bestehen, keine Steuerzeichen enthalten und höchstens %{max} Zeichen lang sein'
+  es_ES: 'Los nombres no pueden estar vacíos ni contener solo espacios, no deben contener caracteres de control y deben tener como máximo %{max} caracteres'
+  fr_FR: 'Les noms ne doivent pas être vides ni composés uniquement d’espaces, ne doivent contenir aucun caractère de contrôle et doivent comporter au maximum %{max} caractères'
+  pl_PL: 'Nazwy nie mogą być puste ani składać się wyłącznie z białych znaków, nie mogą zawierać znaków sterujących i mogą mieć najwyżej %{max} znaków'
+
 util.actor.runtime-exited:
   en_US: The task processor has stopped.
   de_DE: Die Aufgabenverarbeitung wurde gestoppt.
