@@ -99,6 +99,37 @@ test('PR-only activity does not hide complete master artifacts', t => {
   )
 })
 
+test('all products share one paginated artifact discovery', t => {
+  const { result, downloads, calls } = collectFrom(t, [
+    run(1, daysAgo(2), [
+      ...debs('start-cli'),
+      ...debs('start-tunnel'),
+      ...debs('start-registry'),
+    ]),
+    run(
+      2,
+      daysAgo(1),
+      Array.from({ length: 201 }, (_, index) => `unrelated-${index}`),
+    ),
+  ])
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.deepEqual(
+    downloads.sort(),
+    [
+      ...downloaded(1, 'start-cli'),
+      ...downloaded(1, 'start-tunnel'),
+      ...downloaded(1, 'start-registry'),
+    ].sort(),
+  )
+  const listings = calls.flatMap(args =>
+    args.filter(arg =>
+      arg.startsWith(`repos/${REPOSITORY}/actions/artifacts?`),
+    ),
+  )
+  assert.ok(listings.length > 1)
+  assert.equal(listings.length, new Set(listings).size)
+})
+
 test('a product without a complete build keeps its published package', t => {
   const { result, downloads } = collectFrom(t, [
     run(1, daysAgo(3), [

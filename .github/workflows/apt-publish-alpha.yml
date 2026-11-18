@@ -60,10 +60,9 @@ jobs:
           products=(start-cli start-tunnel start-registry)
           arches=(x86_64 aarch64 riscv64)
           declare -A chosen=()
+          product_glob=$(IFS='|'; printf '%s' "${products[*]}")
           candidate_ids=$(
-            for product in "${products[@]}"; do
-              ./scripts/gha-artifact-run-ids.sh "$GITHUB_REPOSITORY" "${product}-*_${arches[0]}.deb" master || exit 1
-            done | sort -nu
+            ./scripts/gha-artifact-run-ids.sh "$GITHUB_REPOSITORY" "@($product_glob)-*_${arches[0]}.deb" master | sort -nu
           )
           run_metadata=$(
             for run_id in $candidate_ids; do
