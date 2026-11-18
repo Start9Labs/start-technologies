@@ -35,6 +35,14 @@ async fn shared_staging_retirement_preserves_source_and_live_peer_mounts() {
         .await
         .unwrap()
         .with_strict_unmount();
+    let unmapped = MountGuard::mount(
+        &IdMapped::new(Bind::new(&source).recursive(true), Vec::new()),
+        directory.path().join("unmapped"),
+        ReadWrite,
+    )
+    .await
+    .unwrap()
+    .with_strict_unmount();
     let idmapped = IdMapped::new(
         Bind::new(&source).recursive(true),
         vec![IdMap {
@@ -47,10 +55,19 @@ async fn shared_staging_retirement_preserves_source_and_live_peer_mounts() {
         .await
         .unwrap()
         .with_strict_unmount();
+    let mapped_readonly = MountGuard::mount(
+        &idmapped,
+        directory.path().join("mapped-readonly"),
+        ReadOnly,
+    )
+    .await
+    .unwrap()
+    .with_strict_unmount();
     for path in [
         source.join("main"),
         live.path().join("main"),
         mapped.path().join("main"),
+        mapped_readonly.path().join("main"),
     ] {
         assert!(
             crate::disk::mount::util::is_mountpoint(&path)
@@ -72,7 +89,7 @@ async fn shared_staging_retirement_preserves_source_and_live_peer_mounts() {
         .unwrap()
         .with_strict_unmount();
     std::fs::write(source.join("late/marker"), b"late child").unwrap();
-    for path in [live.path(), staging.path()] {
+    for path in [live.path(), staging.path(), unmapped.path()] {
         assert_eq!(
             std::fs::read(path.join("late/marker")).unwrap(),
             b"late child"
@@ -84,11 +101,26 @@ async fn shared_staging_retirement_preserves_source_and_live_peer_mounts() {
             .unwrap()
     );
     assert!(!readonly.path().join("late/marker").exists());
+    for path in [mapped.path(), mapped_readonly.path(), second.path()] {
+        assert!(
+            !crate::disk::mount::util::is_mountpoint(path.join("late"))
+                .await
+                .unwrap()
+        );
+        assert!(!path.join("late/marker").exists());
+    }
+    assert_eq!(
+        std::fs::write(mapped_readonly.path().join("main/marker"), b"rejected")
+            .unwrap_err()
+            .raw_os_error(),
+        Some(libc::EROFS)
+    );
     staging.unmount().await.unwrap();
     for path in [
         source.join("main"),
         live.path().join("main"),
         mapped.path().join("main"),
+        mapped_readonly.path().join("main"),
         second.path().join("main"),
     ] {
         assert_eq!(
@@ -98,6 +130,8 @@ async fn shared_staging_retirement_preserves_source_and_live_peer_mounts() {
     }
     second.unmount(false).await.unwrap();
     mapped.unmount(false).await.unwrap();
+    mapped_readonly.unmount(false).await.unwrap();
+    unmapped.unmount(false).await.unwrap();
     live.unmount(false).await.unwrap();
     readonly.unmount(false).await.unwrap();
     assert!(

@@ -66,8 +66,8 @@ impl ValueParserFactory for IdMap {
 /// `TmpMountGuard`), cloned into a detached fd via
 /// `open_tree(OPEN_TREE_CLONE | AT_RECURSIVE)`, idmapped, and finally
 /// `move_mount`-ed onto the requested mountpoint. The staging mount is
-/// released when this method returns; the detached clone holds independent
-/// mount state.
+/// released when this method returns. Nonempty idmapped mount-tree views retain
+/// existing child mounts across staging retirement, but not later source mounts.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IdMapped<Fs: FileSystem> {
@@ -112,6 +112,9 @@ impl<Fs: FileSystem> FileSystem for IdMapped<Fs> {
         drop(userns);
         let detached = DetachedMount::from_fd(fd);
 
+        if self.filesystem.is_mount_tree() {
+            detached.set_private()?;
+        }
         if matches!(mount_type, MountType::ReadOnly) {
             detached.set_readonly(true)?;
         }
