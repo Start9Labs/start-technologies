@@ -99,6 +99,27 @@ function key(file) {
   return readFileSync(file, 'utf8')
 }
 
+test('emulated reflash delegates identity cleanup to the staged native owner', () => {
+  const result = spawnSync(
+    'make',
+    [
+      '--no-print-directory',
+      '--dry-run',
+      'start-os-emulate-reflash',
+      'STARTOS_TARGETS=',
+      'REMOTE=fixture',
+      'MAKE=true',
+    ],
+    { cwd: root, encoding: 'utf8' },
+  )
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(
+    result.stdout,
+    /sudo \/media\/startos\/next\/usr\/lib\/startos\/scripts\/forget-server-identity/,
+  )
+  assert.doesNotMatch(result.stdout, /sudo rm -f[^\n]*disk\.guid/)
+})
+
 test('the OTA script reserves image storage before seeding identity and changing boot state', () => {
   const call = `preserve_server_identity ${runtimePath} ${persistentPath}`
   const seed = upgrade.indexOf(call)
