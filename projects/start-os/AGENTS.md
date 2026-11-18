@@ -38,6 +38,7 @@ is wired and built.
 - Build the UI: `make start-os-ui` (or `make start-os-uis` for ui + setup-wizard).
 - Tests: `make test` (Rust + SDK + container-runtime + shell), `make start-core-test`, `make backup-fs-test` for all backup-fs library tests except the mount-based `/dev/fuse` suite, or `make start-os-scripts-test` for the shell suite under `build/tests/`.
 - Focused GRUB/diagnostic coverage: `make start-os-grub-test` (requires `grub-common`, no root privileges). This target is included in `start-os-scripts-test`.
+- Focused pre-reboot identity migration coverage: `make start-os-upgrade-identity-test` (Node.js and OpenSSL, no root privileges). Included in `start-os-scripts-test`.
 - Backup helper integration: `cargo build -p startos-backup-fs --bin startos-backup-fs`, then `bash projects/start-os/backup-fs/test-cli.sh target/debug/startos-backup-fs`. Requires Linux FUSE mount privileges, `fusermount3`, Node.js, and `attr`.
 - Legacy helper interoperability: `bash projects/start-os/backup-fs/test-legacy-interop.sh <current-helper> <format-1-helper>` exercises old/new FUSE writes and reads before explicit conversion. Build the old helper from the pre-PR revision pinned in `backup-fs/testdata/generate.sh`; the test requires the same FUSE privileges and tools as helper integration. The old helper also needs `io_uring` syscalls, which Docker's default seccomp profile denies.
 - Migration capacity regression: after building the helper, `bash projects/start-os/backup-fs/test-migration-space.sh target/debug/startos-backup-fs`. Requires Docker; its isolated 3 MiB tmpfs has no room for a second copy of the legacy objects.
@@ -172,7 +173,7 @@ To deploy a **CI build** rather than a local one — no local compile, and the i
 | `start-os-update-from-gha REMOTE=start9@<ip> RUN_ID=<id\|url>` | A specific Actions run (e.g. an integration PR) |
 | `start-os-update-from-gha REMOTE=start9@<ip> BRANCH=<name>`    | That branch's latest successful build           |
 
-It reads the platform off the device, downloads that run's `<platform>.squashfs`, and runs the same checksummed upgrade as `start-os-update-squashfs`. Needs `gh` (authenticated) and `b3sum`. Squashfs artifacts expire 14 days after the run. `scripts/update-from-gha.sh --help` documents the rest.
+It reads the platform off the device, downloads that run's `<platform>.squashfs`, and runs the same checksummed upgrade as `start-os-update-squashfs`. Needs `gh` (authenticated), `b3sum`, and `jq`. Squashfs artifacts expire 14 days after the run. `scripts/update-from-gha.sh --help` documents the rest.
 
 For devices on a different network (uses [magic-wormhole](https://github.com/magic-wormhole/magic-wormhole)):
 

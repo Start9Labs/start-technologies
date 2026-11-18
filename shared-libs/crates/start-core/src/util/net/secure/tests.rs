@@ -70,7 +70,7 @@ async fn states() -> (SessionCipher, SessionCipher) {
         .await
         .unwrap();
     let (_, _, response, server) = crate::sign::session::accept(
-        &signer(42),
+        &signer(42).into(),
         &[CONTEXT.into()],
         prepared.message(),
         &Target::Rpc,
@@ -446,7 +446,7 @@ async fn close_result_reuses_the_existing_send_deadline() {
 async fn silent_handshake_is_bounded() {
     let result = EncryptedSocket::accept(
         Box::new(StalledSocket),
-        &signer(42),
+        &signer(42).into(),
         &[CONTEXT.into()],
         NonZeroUsize::new(1024).unwrap(),
         &Target::Rpc,
@@ -492,7 +492,7 @@ impl WebSocketUpgrader<PeerContext> for SecureUpgrade {
                 .map_err(|error| axum::Error::new(error.source))?;
             let (peer, _, socket) = EncryptedSocket::accept(
                 Box::new(socket),
-                &signer(42),
+                &signer(42).into(),
                 &[CONTEXT.into()],
                 options.max_message_size,
                 &Target::Rpc,
@@ -582,7 +582,7 @@ async fn closing_server(
             upgrade.on_upgrade(move |socket| async move {
                 let (_, _, socket) = EncryptedSocket::accept(
                     Box::new(socket),
-                    &signer(42),
+                    &signer(42).into(),
                     &[CONTEXT.into()],
                     NonZeroUsize::new(1024).unwrap(),
                     &Target::Rpc,
@@ -730,7 +730,8 @@ async fn connect(url: &str, seed: u8) -> EncryptedSocket {
     )
     .await
     .unwrap();
-    assert_eq!(peer, signer(42).verifying_key().await.unwrap());
+    assert_eq!(peer.key, signer(42).verifying_key().await.unwrap());
+    assert!(!peer.temporary);
     socket
 }
 

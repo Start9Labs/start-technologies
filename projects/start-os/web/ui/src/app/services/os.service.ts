@@ -5,7 +5,6 @@ import { registryStatus } from '@start9labs/marketplace'
 import { T, Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
-  BehaviorSubject,
   combineLatest,
   distinctUntilChanged,
   filter,
@@ -24,7 +23,6 @@ import { DataModel } from './patch-db/data-model'
 export class OSService {
   private readonly api = inject(ApiService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-  private loadSequence = 0
   private readonly registry$ = this.patch
     .watch$('serverInfo', 'osRegistry')
     .pipe(distinctUntilChanged())
@@ -40,8 +38,6 @@ export class OSService {
     shareReplay({ bufferSize: 1, refCount: true }),
   )
 
-  private readonly gitHash$ = new BehaviorSubject<string | null>(null)
-
   readonly registryStatus$ = this.catalog$.pipe(
     map(registryStatus),
     distinctUntilChanged(),
@@ -49,7 +45,7 @@ export class OSService {
 
   readonly updateCandidates$ = combineLatest([
     this.catalog$,
-    this.gitHash$,
+    this.patch.watch$('serverInfo', 'gitHash'),
     this.patch.watch$('serverInfo', 'version'),
   ]).pipe(
     map(([cache, gitHash, installed]) => {
@@ -78,11 +74,6 @@ export class OSService {
   readonly updateCandidates = toSignal(this.updateCandidates$, {
     initialValue: [],
   })
-  readonly updateAvailable$ = this.updateCandidates$.pipe(
-    map(candidates => candidates.length > 0),
-    distinctUntilChanged(),
-  )
-
   private readonly statusInfo$ = this.patch
     .watch$('serverInfo', 'statusInfo')
     .pipe(shareReplay({ bufferSize: 1, refCount: true }))
@@ -92,20 +83,35 @@ export class OSService {
     distinctUntilChanged(),
   )
 
+  readonly updated$ = this.statusInfo$.pipe(
+    map(status => status.restart === 'update'),
+    distinctUntilChanged(),
+  )
+
   readonly backingUp$ = this.statusInfo$.pipe(
     map(status => isBackupProgressActive(status.backupProgress)),
     distinctUntilChanged(),
   )
 
-  readonly updatingOrBackingUp$ = combineLatest([
+  readonly updateDisabled$ = combineLatest([
     this.updating$,
+    this.updated$,
     this.backingUp$,
-  ]).pipe(map(([updating, backingUp]) => !!updating || backingUp))
+  ]).pipe(
+    map(([updating, updated, backingUp]) => !!updating || updated || backingUp),
+  )
 
   readonly showUpdate$ = combineLatest([
-    this.updateAvailable$,
+    this.updateCandidates$,
     this.updating$,
-  ]).pipe(map(([available, updating]) => available && !updating))
+    this.updated$,
+  ]).pipe(
+    map(
+      ([candidates, updating, updated]) =>
+        !!candidates.length && !updating && !updated,
+    ),
+    distinctUntilChanged(),
+  )
 
   async publishesUpdates(registry: string): Promise<boolean> {
     const { id } = await getServerInfo(this.patch)
@@ -117,24 +123,19 @@ export class OSService {
     return Object.keys(versions).length > 0
   }
 
-  /** Registry changes supersede pending loads; catalog data comes from the matching cache. */
-  async loadOS(registry?: string): Promise<void> {
-    const sequence = ++this.loadSequence
-    const target = registry ?? (await firstValueFrom(this.registry$))
-    const gitHash = await this.api.rpc.gitInfo({})
-    if (sequence !== this.loadSequence) return
-    this.gitHash$.next(gitHash.trim())
+  /** Settles once the selected registry's cache is published; a registry switch releases it. */
+  async checkForUpdates(): Promise<void> {
+    const target = await firstValueFrom(this.registry$)
     const [cache, selected] = await firstValueFrom(
       combineLatest([this.catalog$, this.registry$]).pipe(
         filter(
           ([cache, selected]) =>
-            sequence !== this.loadSequence ||
             !sameUrl(selected, target) ||
             (!!cache && registryStatus(cache) !== 'connecting'),
         ),
       ),
     )
-    if (sequence !== this.loadSequence || !sameUrl(selected, target)) return
+    if (!sameUrl(selected, target)) return
     if (registryStatus(cache) === 'error')
       throw new Error('registry unavailable')
   }

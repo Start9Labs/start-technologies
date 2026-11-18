@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use start_core::context::InitContext;
 use start_core::context::config::ServerConfig;
+use start_core::context::{InitContext, StartupIdentity};
 use start_core::net::dns::DnsController;
 use start_core::net::static_server::ui_router;
 use start_core::net::web_server::{Acceptor, WebServer};
@@ -10,9 +10,15 @@ use start_core::util::sync::Watch;
 #[tokio::main]
 async fn main() {
     let dns = Arc::new(DnsController::new(Watch::new(Default::default())));
-    let context = InitContext::init(&ServerConfig::default(), dns)
-        .await
-        .unwrap();
+    let context = InitContext::init(
+        &ServerConfig::default(),
+        dns,
+        Some(StartupIdentity::temporary(
+            start_core::db::model::private::generate_server_identity_key().0,
+        )),
+    )
+    .await
+    .unwrap();
     let _phase = context
         .progress
         .add_phase("x".repeat(17 * 1024 * 1024).into(), None);

@@ -15,6 +15,7 @@ CONSOLE_LOG=$BENCH_STATE_DIR/console.log
 SNAPSHOT_DIR=$BENCH_STATE_DIR/snapshots
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+source "$REPO_ROOT/build/rust-build-profile.sh"
 
 usage() {
 	cat <<'EOF'
@@ -169,7 +170,8 @@ EOF
 }
 
 cmd_deployed() {
-	local bin=$REPO_ROOT/target/riscv64gc-unknown-linux-musl/${PROFILE:-release}/startwrt
+	set_build_profile
+	local bin=$REPO_ROOT/target/riscv64gc-unknown-linux-musl/$PROFILE/startwrt
 	[ -f "$bin" ] || die "no local build at $bin"
 	local here there
 	here=$(sha256sum "$bin" | cut -d' ' -f1)

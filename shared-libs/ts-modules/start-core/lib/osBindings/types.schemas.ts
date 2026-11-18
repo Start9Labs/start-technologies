@@ -8561,6 +8561,10 @@ export const ServerInfo: z.ZodObject<{
   id: z.ZodString
   hostname: z.ZodString
   version: z.ZodString
+  /**
+   * Commit of the running StartOS build, rewritten on every boot.
+   */
+  gitHash: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
   packageVersionCompat: z.ZodString
   postInitMigrationTodos: typeof literal_1
   latestMigrationRevision: z.ZodCodec<z.ZodOptional<z.ZodInt>, z.ZodInt>
@@ -8635,6 +8639,13 @@ export const ServerInfo: z.ZodObject<{
   id: z.string(),
   hostname: z.string(),
   version: z.string(),
+  /**
+   * Commit of the running StartOS build, rewritten on every boot.
+   */
+  gitHash: wire(z.string().optional(), z.string()).meta({
+    description:
+      'Commit of the running StartOS build, rewritten on every boot.',
+  }),
   packageVersionCompat: z.string(),
   postInitMigrationTodos: literal_1,
   latestMigrationRevision: wire(z.int().optional(), z.int()),

@@ -11,7 +11,7 @@ use url::Url;
 
 use super::{WRITE_TIMEOUT, connect};
 use crate::prelude::Value;
-use crate::sign::session::Target;
+use crate::sign::session::{PeerIdentity, Target};
 use crate::sign::{AnyVerifyingKey, Signer};
 use crate::util::net::WebSocket;
 use crate::util::rpc_client::{CapturedRequest, RpcClient, RpcResponseStream};
@@ -47,7 +47,7 @@ impl std::fmt::Debug for Client {
 }
 
 pub(crate) struct Connection {
-    pub peer: AnyVerifyingKey,
+    pub peer: PeerIdentity,
     dispatcher: RpcClient,
 }
 

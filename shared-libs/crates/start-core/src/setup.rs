@@ -12,7 +12,6 @@ use patch_db::json_ptr::ROOT;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::try_join;
 use tracing::instrument;
@@ -43,8 +42,7 @@ use crate::shutdown::Shutdown;
 use crate::system::{KeyboardOptions, SetLanguageParams, save_language, sync_kiosk};
 use crate::util::Invoke;
 use crate::util::io::{
-    Counter, create_file, dir_copy, dir_copy_excluding, dir_size, dir_size_excluding,
-    read_file_to_string,
+    Counter, dir_copy, dir_copy_excluding, dir_size, dir_size_excluding, read_file_to_string,
 };
 use crate::util::serde::{HandlerExtSerde, IoFormat, Pem};
 use crate::{DATA_DIR, Error, ErrorKind, MAIN_DATA, PACKAGE_DATA, PLATFORM, ResultExt};
@@ -769,6 +767,9 @@ pub(crate) mod test {
             &server,
             crate::context::config::ServerConfig::default(),
             dns,
+            Some(crate::context::StartupIdentity::temporary(
+                crate::db::model::private::generate_server_identity_key().0,
+            )),
         )
         .unwrap();
         (context, server)
@@ -919,9 +920,12 @@ pub async fn execute(
 pub async fn complete(ctx: SetupContext) -> Result<SetupResult, Error> {
     match ctx.result.get() {
         Some(Ok((res, ctx))) => {
-            let mut guid_file = create_file("/media/startos/config/disk.guid").await?;
-            guid_file.write_all(ctx.disk_guid.as_bytes()).await?;
-            guid_file.sync_all().await?;
+            crate::context::startup::complete_identity(
+                &ctx.account
+                    .peek(|account| account.server_identity_key.clone()),
+                &ctx.disk_guid,
+            )
+            .await?;
             Command::new("systemd-firstboot")
                 .arg("--root=/media/startos/config/overlay/")
                 .arg(format!("--hostname={}", res.hostname.as_ref()))
@@ -1112,7 +1116,12 @@ async fn fresh_setup(
         ..
     }: SetupExecuteProgress,
 ) -> Result<(SetupResult, RpcContext), Error> {
-    let account = AccountInfo::new(password, root_ca_start_time().await, hostname)?;
+    let account = AccountInfo::new_with_identity(
+        password,
+        root_ca_start_time().await,
+        hostname,
+        ctx.startup_rpc.key()?,
+    )?;
 
     let db = ctx.db().await?;
     sync_kiosk(kiosk).await?;
