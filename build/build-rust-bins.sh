@@ -6,6 +6,7 @@
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 source ./build/builder-alias.sh
+source ./build/rust-build-profile.sh
 
 set -ea
 shopt -s expand_aliases
@@ -15,11 +16,7 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
-PROFILE=$(./build/rust-build-profile.sh "${PROFILE:-}")
-BUILD_FLAGS=()
-if [ "$PROFILE" = release ]; then
-  BUILD_FLAGS=(--release)
-fi
+set_build_profile
 
 ARCH=${ARCH:-$(uname -m)}
 if [ "$ARCH" = arm64 ]; then
