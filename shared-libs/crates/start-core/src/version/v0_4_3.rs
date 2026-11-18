@@ -1,13 +1,12 @@
 use exver::VersionRange;
+use imbl_value::InternedString;
 
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_2_2};
-use imbl_value::InternedString;
-
 use crate::context::RpcContext;
 use crate::lxc::slot::{ContainerSlot, rebase_legacy_ids};
-use crate::shared_volumes::{SharedVolumeSource, local_path};
 use crate::prelude::*;
+use crate::shared_volumes::{SharedVolumeSource, local_path};
 
 lazy_static::lazy_static! {
     static ref V0_4_3: exver::Version = exver::Version::new([0, 4, 3], []);
@@ -34,7 +33,14 @@ impl VersionT for Version {
         Ok(Value::Null)
     }
     async fn post_up(self, ctx: &RpcContext, _input: Value) -> Result<(), Error> {
-        for (id, volume) in ctx.db.peek().await.as_public().as_shared_volumes().as_entries()? {
+        for (id, volume) in ctx
+            .db
+            .peek()
+            .await
+            .as_public()
+            .as_shared_volumes()
+            .as_entries()?
+        {
             if volume.as_source().de()? == SharedVolumeSource::Local {
                 rebase_legacy_ids(local_path(crate::PACKAGE_DATA, &id), 0).await?;
             }

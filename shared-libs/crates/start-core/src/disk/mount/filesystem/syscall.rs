@@ -501,10 +501,8 @@ pub fn unshare_userns_main(owner: Option<u32>) -> std::io::Result<()> {
     if let Some(owner) = owner {
         let errno = |e: nix::Error| std::io::Error::from_raw_os_error(e as i32);
         let root = (nix::unistd::Uid::from_raw(0), nix::unistd::Gid::from_raw(0));
-        nix::unistd::setresgid(root.1, nix::unistd::Gid::from_raw(owner), root.1)
-            .map_err(errno)?;
-        nix::unistd::setresuid(root.0, nix::unistd::Uid::from_raw(owner), root.0)
-            .map_err(errno)?;
+        nix::unistd::setresgid(root.1, nix::unistd::Gid::from_raw(owner), root.1).map_err(errno)?;
+        nix::unistd::setresuid(root.0, nix::unistd::Uid::from_raw(owner), root.0).map_err(errno)?;
     }
     nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWUSER)
         .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;

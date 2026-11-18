@@ -13,6 +13,7 @@ use imbl_value::InternedString;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{RpcRequest, RpcResponse};
 use serde::{Deserialize, Serialize};
+use slot::ContainerSlot;
 use tokio::fs::ReadDir;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -23,8 +24,8 @@ use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::idmapped::IdMapped;
-use crate::disk::mount::filesystem::syscall::userns_fd_from_idmap;
 use crate::disk::mount::filesystem::overlayfs::OverlayGuard;
+use crate::disk::mount::filesystem::syscall::userns_fd_from_idmap;
 use crate::disk::mount::filesystem::{MountType, ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard, TmpMountGuard};
 use crate::disk::mount::util::unmount;
@@ -35,7 +36,6 @@ use crate::util::io::{open_file, write_file_owned_atomic};
 use crate::util::rpc_client::UnixRpcClient;
 use crate::util::{FromStrParser, Invoke, new_guid};
 use crate::{InvalidId, PackageId};
-use slot::ContainerSlot;
 
 fn config_text(guid: &str, lang: &str, slot: ContainerSlot, userns: &Path) -> String {
     let idmap = slot.idmap();
@@ -834,12 +834,7 @@ mod test {
     #[test]
     fn config_renders_the_slot_identity() {
         let slot = ContainerSlot::new(2).unwrap();
-        let config = config_text(
-            "test-container",
-            "C.UTF-8",
-            slot,
-            Path::new("/proc/1/fd/7"),
-        );
+        let config = config_text("test-container", "C.UTF-8", slot, Path::new("/proc/1/fd/7"));
         let has = |expected: &str| config.lines().any(|line| line == expected);
         assert!(has("lxc.idmap = u 0 196608 65536"));
         assert!(has("lxc.idmap = g 0 196608 65536"));

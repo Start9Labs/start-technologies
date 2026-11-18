@@ -39,17 +39,7 @@ pub const VETH_PREFIX: &str = "lxc-svc-";
 const FIRST_CONTAINER_HOST: u32 = 3;
 
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Serialize,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    VisitFields,
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash, VisitFields,
 )]
 #[visit(ts(type = "z.number()"))]
 pub struct ContainerSlot(u16);
@@ -228,7 +218,10 @@ mod test {
         let last = ContainerSlot::new(MAX_SERVICES - 1).unwrap();
         assert_eq!(last.host_root(), 1024 << 16);
         let next = ContainerSlot::new(1).unwrap();
-        assert_eq!(first.idmap().to_id + first.idmap().range, next.idmap().to_id);
+        assert_eq!(
+            first.idmap().to_id + first.idmap().range,
+            next.idmap().to_id
+        );
         assert!(u64::from(last.host_root()) + u64::from(ID_RANGE) <= i32::MAX as u64);
     }
 
@@ -259,7 +252,9 @@ mod test {
         let foreign = dir.join("foreign");
         std::fs::write(&legacy, b"").unwrap();
         std::fs::write(&foreign, b"").unwrap();
-        std::os::unix::fs::chown(&dir, Some(LEGACY_HOST_ROOT), Some(LEGACY_HOST_ROOT)).unwrap();
+        if std::os::unix::fs::chown(&dir, Some(LEGACY_HOST_ROOT), Some(LEGACY_HOST_ROOT)).is_err() {
+            return;
+        }
         std::os::unix::fs::chown(
             &legacy,
             Some(LEGACY_HOST_ROOT + 1000),

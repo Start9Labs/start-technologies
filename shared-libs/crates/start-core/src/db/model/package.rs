@@ -10,9 +10,9 @@ use patch_db::json_ptr::JsonPointer;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 
+use crate::lxc::slot::ContainerSlot;
 use crate::net::host::Hosts;
 use crate::prelude::*;
-use crate::lxc::slot::ContainerSlot;
 use crate::progress::FullProgress;
 use crate::s9pk::manifest::{LocaleString, Manifest};
 use crate::status::StatusInfo;

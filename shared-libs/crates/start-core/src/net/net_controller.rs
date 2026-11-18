@@ -17,6 +17,7 @@ use tracing::instrument;
 use crate::db::model::Database;
 use crate::db::model::public::NetworkInterfaceInfo;
 use crate::hostname::ServerHostname;
+use crate::lxc::slot::VETH_PREFIX;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
@@ -39,7 +40,6 @@ use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::{SyncMutex, Watch};
-use crate::lxc::slot::VETH_PREFIX;
 use crate::{GatewayId, HOST_IP, HostId, Id, OptionExt, PackageId, ServiceInterfaceId};
 
 #[cfg(test)]
@@ -102,8 +102,22 @@ impl NetController {
         let tls_client_config_no_verify = Arc::new(crate::net::tls::client_config_no_verify(
             crypto_provider.clone(),
         )?);
-        nft_rule("forward", "container-egress", false, false, &container_egress()).await?;
-        nft_rule_v6("forward", "container-egress", false, false, &container_egress()).await?;
+        nft_rule(
+            "forward",
+            "container-egress",
+            false,
+            false,
+            &container_egress(),
+        )
+        .await?;
+        nft_rule_v6(
+            "forward",
+            "container-egress",
+            false,
+            false,
+            &container_egress(),
+        )
+        .await?;
         let peek = db.peek().await;
         let passthroughs = peek
             .as_public()
@@ -560,7 +574,7 @@ impl NetServiceData {
                 continue;
             }
             // A binding with no exported interface is internal-only: it forwards
-            // to lo / lxcbr0 but never to a gateway (see `enabled_addresses`).
+            // to lo / the container network but never to a gateway (see `enabled_addresses`).
             let enabled_addresses = bind.enabled_addresses();
             let addr: SocketAddr = (self.ip, *port).into();
             // The container's bridge v6, for the source-preserving leg of a v6 client.
@@ -796,7 +810,7 @@ impl NetServiceData {
                 continue;
             }
             // A range with no exported interface is internal-only: it forwards
-            // to lo / lxcbr0 but never to a gateway (see `enabled_addresses`).
+            // to lo / the container network but never to a gateway (see `enabled_addresses`).
             let enabled_addresses = range.enabled_addresses();
 
             for addr_info in &enabled_addresses {
@@ -1846,8 +1860,8 @@ mod tests {
                 gateway: eth.clone(),
             },
         );
-        let bridge = row("10.0.3.1", true, false, 49443, ipv4());
-        let bridge_plain = row("10.0.3.1", false, false, 49080, ipv4());
+        let bridge = row("172.16.0.1", true, false, 49443, ipv4());
+        let bridge_plain = row("172.16.0.1", false, false, 49080, ipv4());
         let lan = row("192.0.2.10", true, false, 49443, ipv4());
 
         assert_eq!(named_vhost_leg(&onion, 49443), Some((49443, false)));
@@ -1855,7 +1869,7 @@ mod tests {
         assert_eq!(named_vhost_leg(&lan, 49443), None);
         assert_eq!(
             ssl_vhost_internal_ips([&onion, &bridge, &bridge_plain, &lan]),
-            BTreeSet::from(["10.0.3.1".parse::<IpAddr>().unwrap()])
+            BTreeSet::from(["172.16.0.1".parse::<IpAddr>().unwrap()])
         );
     }
 
@@ -1879,7 +1893,7 @@ mod tests {
             gateways: BTreeSet::from([eth.clone()]),
         };
         let bridge = row(
-            "10.0.3.1",
+            "172.16.0.1",
             false,
             49443,
             HostnameMetadata::Ipv4 {
@@ -1896,7 +1910,7 @@ mod tests {
                     public_v6_gateways: BTreeSet::new(),
                     private: BTreeSet::new(),
                     acme: None,
-                    addr: "10.0.3.2:443".parse().unwrap(),
+                    addr: "172.16.0.3:443".parse().unwrap(),
                     addr_v6: None,
                     proxy: None,
                     connect_ssl: None,
@@ -1910,7 +1924,7 @@ mod tests {
         let accepts = |vhosts: &BTreeMap<VHostKey, ProxyTarget>, name: &str, public| {
             let ProxyTarget { private, .. } =
                 &vhosts[&(Some(InternedString::intern(name)), 49443, public)];
-            private.contains(&"10.0.3.1".parse::<IpAddr>().unwrap())
+            private.contains(&"172.16.0.1".parse::<IpAddr>().unwrap())
         };
 
         let onion = row("example.onion", true, 443, plugin());
@@ -1953,7 +1967,7 @@ mod tests {
             },
         )]);
         let name = mdns(true, 8443, ["eth0"]);
-        let bridge = lan_ip("10.0.3.1", true, 8443, "lxcbr0");
+        let bridge = lan_ip("172.16.0.1", true, 8443, "lxcbr0");
         let enabled = BTreeSet::from([&name, &bridge]);
         let mut vhosts = BTreeMap::new();
         add_named_vhosts(&mut vhosts, &enabled, 8443, &ifaces, |_, _| {
@@ -1962,14 +1976,14 @@ mod tests {
         let target = &vhosts[&(Some(name.hostname.clone()), 8443, false)];
         assert_eq!(
             target.private,
-            BTreeSet::from([ip("10.0.3.1"), ip("192.0.2.10"), ip("192.0.2.11")]),
+            BTreeSet::from([ip("172.16.0.1"), ip("192.0.2.10"), ip("192.0.2.11")]),
         );
         assert!(target.public_v4.is_empty());
         assert!(target.public_v6.is_empty());
         assert!(target.public_v6_gateways.is_empty());
         assert_eq!(
             ssl_vhost_private_ips(enabled.iter().copied()),
-            BTreeSet::from([ip("10.0.3.1")]),
+            BTreeSet::from([ip("172.16.0.1")]),
         );
     }
 
@@ -2131,12 +2145,12 @@ mod tests {
         let addrs = [
             lan_ip("fe80::1", true, 443, "eth0"),
             mdns(true, 443, ["eth0"]),
-            lan_ip("10.0.3.1", true, 443, "lxcbr0"),
+            lan_ip("172.16.0.1", true, 443, "lxcbr0"),
         ];
 
         assert_eq!(
             ssl_vhost_private_ips(addrs.iter()),
-            BTreeSet::from([ip("fe80::1"), ip("10.0.3.1")]),
+            BTreeSet::from([ip("fe80::1"), ip("172.16.0.1")]),
             "only the addresses still enabled are served"
         );
     }
@@ -2201,14 +2215,14 @@ mod tests {
 
     #[test]
     fn the_container_bridges_own_addresses_are_internal() {
-        assert!(lan_ip("10.0.3.1", true, 443, "lxcbr0").is_internal());
+        assert!(lan_ip("172.16.0.1", true, 443, "lxcbr0").is_internal());
         assert!(lan_ip("fd00:3::1", true, 443, "lxcbr0").is_internal());
         assert!(lan_ip("127.0.0.1", true, 443, "lo").is_internal());
         assert!(lan_ip("::1", true, 443, "lo").is_internal());
 
         assert!(!lan_ip("192.168.1.5", true, 443, "eth0").is_internal());
         assert!(
-            !lan_ip("fd00:3::5", true, 443, "eth0").is_internal(),
+            !lan_ip("fd00:3::8", true, 443, "eth0").is_internal(),
             "a router handing out the bridge's own prefix does not make its \
              addresses internal, which would put them beyond the operator's reach"
         );
@@ -2237,7 +2251,7 @@ mod tests {
             public_v6_gateways: BTreeSet::new(),
             private: private.iter().map(|ip| ip.parse().unwrap()).collect(),
             acme: None,
-            addr: "10.0.3.2:80".parse().unwrap(),
+            addr: "172.16.0.3:80".parse().unwrap(),
             addr_v6: None,
             proxy: None,
             connect_ssl: None,
@@ -2308,8 +2322,8 @@ mod tests {
     /// `ip rule` rejects an IPv6 source without `-6`.
     #[test]
     fn outbound_rule_family_follows_its_source() {
-        assert_eq!(args(&ip_rule("10.0.3.5".parse().unwrap())), ["rule"]);
-        assert_eq!(args(&ip_rule("fd00:3::5".parse().unwrap())), ["-6", "rule"]);
+        assert_eq!(args(&ip_rule("172.16.0.5".parse().unwrap())), ["rule"]);
+        assert_eq!(args(&ip_rule("fd00:3::8".parse().unwrap())), ["-6", "rule"]);
     }
 
     #[test]
@@ -2323,17 +2337,24 @@ mod tests {
         assert_eq!(
             args(&outbound_rule_command(
                 "add",
-                "10.0.3.5".parse().unwrap(),
+                "172.16.0.5".parse().unwrap(),
                 ServiceOutboundRule::Gateway(1004),
             )),
             [
-                "rule", "add", "from", "10.0.3.5", "lookup", "1004", "priority", "70"
+                "rule",
+                "add",
+                "from",
+                "172.16.0.5",
+                "lookup",
+                "1004",
+                "priority",
+                "70"
             ]
         );
         assert_eq!(
             args(&outbound_rule_command(
                 "add",
-                "fd00:3::5".parse().unwrap(),
+                "fd00:3::8".parse().unwrap(),
                 ServiceOutboundRule::Reject,
             )),
             [
@@ -2341,7 +2362,7 @@ mod tests {
                 "rule",
                 "add",
                 "from",
-                "fd00:3::5",
+                "fd00:3::8",
                 "unreachable",
                 "priority",
                 "71"
@@ -2352,12 +2373,12 @@ mod tests {
     #[test]
     fn conntrack_filter_family_follows_its_source() {
         assert_eq!(
-            args(&delete_conntrack_command("10.0.3.5".parse().unwrap())),
-            ["-D", "-s", "10.0.3.5"]
+            args(&delete_conntrack_command("172.16.0.5".parse().unwrap())),
+            ["-D", "-s", "172.16.0.5"]
         );
         assert_eq!(
-            args(&delete_conntrack_command("fd00:3::5".parse().unwrap())),
-            ["-D", "-f", "ipv6", "-s", "fd00:3::5"]
+            args(&delete_conntrack_command("fd00:3::8".parse().unwrap())),
+            ["-D", "-f", "ipv6", "-s", "fd00:3::8"]
         );
     }
 
@@ -2365,7 +2386,7 @@ mod tests {
     fn outbound_sources_cover_every_address_the_container_holds() {
         let mut data = NetServiceData {
             id: None,
-            ip: Ipv4Addr::new(10, 0, 3, 5),
+            ip: Ipv4Addr::new(172, 16, 0, 5),
             ipv6: None,
             _dns: Default::default(),
             controller: Default::default(),
@@ -2373,13 +2394,13 @@ mod tests {
         };
         assert_eq!(
             data.outbound_sources(),
-            ["10.0.3.5".parse::<IpAddr>().unwrap()]
+            ["172.16.0.5".parse::<IpAddr>().unwrap()]
         );
 
-        data.ipv6 = Some("fd00:3::5".parse().unwrap());
+        data.ipv6 = Some("fd00:3::8".parse().unwrap());
         assert_eq!(
             data.outbound_sources(),
-            ["10.0.3.5", "fd00:3::5"].map(|a| a.parse::<IpAddr>().unwrap())
+            ["172.16.0.5", "fd00:3::8"].map(|a| a.parse::<IpAddr>().unwrap())
         );
     }
 

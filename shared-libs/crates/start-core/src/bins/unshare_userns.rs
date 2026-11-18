@@ -12,7 +12,10 @@ use std::ffi::OsString;
 use crate::disk::mount::filesystem::syscall::unshare_userns_main;
 
 pub fn main(args: VecDeque<OsString>) {
-    let owner = match args.get(1).map(|owner| owner.to_string_lossy().parse::<u32>()) {
+    let owner = match args
+        .get(1)
+        .map(|owner| owner.to_string_lossy().parse::<u32>())
+    {
         None => None,
         Some(Ok(owner)) => Some(owner),
         Some(Err(e)) => {

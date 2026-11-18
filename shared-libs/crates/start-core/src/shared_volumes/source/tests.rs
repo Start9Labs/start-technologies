@@ -50,10 +50,7 @@ async fn local_creation_uses_service_owned_subvolumes_and_rolls_back_failed_publ
     create_local_directory(&path).await.unwrap();
     assert!(crate::util::btrfs::is_subvolume(&path).await);
     let metadata = std::fs::metadata(&path).unwrap();
-    assert_eq!(
-        (metadata.uid(), metadata.gid()),
-        (0, 0)
-    );
+    assert_eq!((metadata.uid(), metadata.gid()), (0, 0));
     assert_eq!(metadata.permissions().mode() & 0o777, 0o777);
     tokio::fs::write(path.join("sentinel"), b"allocated data")
         .await

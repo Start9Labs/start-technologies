@@ -307,9 +307,8 @@ impl ServiceMap {
                                         progress: install_progress,
                                     },
                                 };
-                                let container_slot = ContainerSlot::allocate(
-                                    db.as_public().as_package_data(),
-                                )?;
+                                let container_slot =
+                                    ContainerSlot::allocate(db.as_public().as_package_data())?;
                                 db.as_public_mut().as_package_data_mut().insert(
                                     &id,
                                     &PackageDataEntry {

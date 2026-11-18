@@ -33,11 +33,11 @@ use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
 use crate::db::model::public::{AcmeSettings, NetworkInterfaceInfo};
 use crate::db::{DbAccessByKey, DbAccessMut};
+use crate::lxc::slot::{CONTAINER_NET, CONTAINER_NET_V6};
 use crate::net::acme::{
     ACME_TLS_ALPN_NAME, AcmeCertStore, AcmeProvider, AcmeTlsAlpnCache, AcmeTlsHandler,
     GetAcmeProvider, ReportOrderFailure,
 };
-use crate::lxc::slot::{CONTAINER_NET, CONTAINER_NET_V6};
 use crate::net::gateway::{
     GatewayInfo, NetworkInterfaceController, NetworkInterfaceListenerAcceptMetadata,
 };
@@ -2444,7 +2444,7 @@ mod port_map_tests {
             public_v6_gateways: BTreeSet::new(),
             private: BTreeSet::new(),
             acme: acme.then(|| AcmeProvider::from_str("letsencrypt").unwrap()),
-            addr: "10.0.3.2:443".parse().unwrap(),
+            addr: "172.16.0.3:443".parse().unwrap(),
             addr_v6: None,
             proxy: None,
             connect_ssl: None,
@@ -2692,8 +2692,8 @@ mod accept_filter_tests {
         assert!(!t.gateways_client(ip("192.168.1.5")));
         assert!(!t.gateways_client(ip("fd00:3::1")));
 
-        // on lxcbr0 with the backend, which answers it directly over that link
-        assert!(!t.gateways_client(ip("10.0.3.42")));
+        // on the container network with the backend
+        assert!(!t.gateways_client(ip("172.16.0.42")));
         assert!(!t.gateways_client(ip("fd00:3::c9f:81ff:fe37:c0a9")));
     }
 
@@ -3475,7 +3475,7 @@ mod upstream_alpn_tests {
     /// has to be part of a target's identity.
     #[test]
     fn a_target_is_not_equal_to_one_that_pins_a_different_protocol() {
-        let addr: SocketAddr = "10.0.3.2:443".parse().unwrap();
+        let addr: SocketAddr = "172.16.0.3:443".parse().unwrap();
         let pinned = |proto: &[u8]| Some(AlpnInfo(vec![MaybeUtf8String(proto.to_vec())]));
         assert_ne!(
             target(addr, None, pinned(b"h2")),
