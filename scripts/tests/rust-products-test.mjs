@@ -78,10 +78,7 @@ for (const profile of ['release', 'debug', 'dev']) {
     ]) {
       chmodSync(f.write(path, readFileSync(join(REPO, path))), 0o755)
     }
-    f.write(
-      'build/builder-alias.sh',
-      `source ${JSON.stringify(join(REPO, 'build/builder-alias.sh'))}\nalias rust-zig-builder='true'\n`,
-    )
+    f.write('build/builder-alias.sh', "alias rust-zig-builder='true'\n")
     const target = 'x86_64-unknown-linux-musl'
     for (const outputProfile of ['release', 'debug']) {
       f.write(`target/${target}/${outputProfile}/start-cli`, outputProfile)

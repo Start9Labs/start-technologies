@@ -18,9 +18,7 @@ import { FilterUpdatesPipe } from '../routes/portal/routes/updates/filter-update
 export class BadgeService {
   private readonly notifications = inject(NotificationService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-  private readonly system$ = inject(OSService).updateAvailable$.pipe(
-    map(Number),
-  )
+  private readonly system$ = inject(OSService).showUpdate$.pipe(map(Number))
   private readonly metrics$ = this.patch
     .watch$('serverInfo', 'ntpSynced')
     .pipe(map(synced => !synced))

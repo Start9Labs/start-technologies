@@ -73,11 +73,6 @@ export class OSService {
   readonly updateCandidates = toSignal(this.updateCandidates$, {
     initialValue: [],
   })
-  readonly updateAvailable$ = this.updateCandidates$.pipe(
-    map(candidates => candidates.length > 0),
-    distinctUntilChanged(),
-  )
-
   private readonly statusInfo$ = this.patch
     .watch$('serverInfo', 'statusInfo')
     .pipe(shareReplay({ bufferSize: 1, refCount: true }))
@@ -87,20 +82,35 @@ export class OSService {
     distinctUntilChanged(),
   )
 
+  readonly updated$ = this.statusInfo$.pipe(
+    map(status => status.restart === 'update'),
+    distinctUntilChanged(),
+  )
+
   readonly backingUp$ = this.statusInfo$.pipe(
     map(status => !!status.backupProgress),
     distinctUntilChanged(),
   )
 
-  readonly updatingOrBackingUp$ = combineLatest([
+  readonly updateDisabled$ = combineLatest([
     this.updating$,
+    this.updated$,
     this.backingUp$,
-  ]).pipe(map(([updating, backingUp]) => !!updating || backingUp))
+  ]).pipe(
+    map(([updating, updated, backingUp]) => !!updating || updated || backingUp),
+  )
 
   readonly showUpdate$ = combineLatest([
-    this.updateAvailable$,
+    this.updateCandidates$,
     this.updating$,
-  ]).pipe(map(([available, updating]) => available && !updating))
+    this.updated$,
+  ]).pipe(
+    map(
+      ([candidates, updating, updated]) =>
+        !!candidates.length && !updating && !updated,
+    ),
+    distinctUntilChanged(),
+  )
 
   async publishesUpdates(registry: string): Promise<boolean> {
     const { id } = await getServerInfo(this.patch)

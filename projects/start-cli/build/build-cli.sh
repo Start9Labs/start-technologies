@@ -35,7 +35,8 @@ if [ -z "${TARGET:-}" ]; then
   esac
 fi
 
-PROFILE=$(./build/rust-build-profile.sh "${PROFILE:-}")
+source ./build/rust-build-profile.sh
+set_build_profile
 PROFILE=$PROFILE TARGET=$TARGET ./build/build-rust-bins.sh start-cli:start-cli
 
 if [ "$INSTALL" = "true" ]; then

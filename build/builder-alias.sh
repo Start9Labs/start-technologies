@@ -2,14 +2,6 @@
 
 RUST_BUILDER_IMAGE=$(RUST_BUILDER_IMAGE="${RUST_BUILDER_IMAGE:-}" "$(dirname "${BASH_SOURCE[0]}")/rust-builder/image.sh")
 
-set_build_profile() {
-  PROFILE=$("$(dirname "${BASH_SOURCE[0]}")/rust-build-profile.sh" "${PROFILE:-}")
-  BUILD_FLAGS=
-  if [ "$PROFILE" = release ]; then
-    BUILD_FLAGS=--release
-  fi
-}
-
 USE_TTY=
 if tty -s; then
   USE_TTY="-it"

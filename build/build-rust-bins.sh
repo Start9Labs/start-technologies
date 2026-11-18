@@ -6,6 +6,7 @@
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 source ./build/builder-alias.sh
+source ./build/rust-build-profile.sh
 
 set -ea
 shopt -s expand_aliases
@@ -45,7 +46,7 @@ done
 
 echo "FEATURES=\"$FEATURES\""
 echo "RUSTFLAGS=\"$RUSTFLAGS\""
-rust-zig-builder cargo zigbuild --manifest-path=./Cargo.toml $BUILD_FLAGS --features="$FEATURES" --locked "${PACKAGES[@]}" "${BINS[@]}" --target="$TARGET"
+rust-zig-builder cargo zigbuild --manifest-path=./Cargo.toml "${BUILD_FLAGS[@]}" --features="$FEATURES" --locked "${PACKAGES[@]}" "${BINS[@]}" --target="$TARGET"
 if [ "$(ls -nd "target/$TARGET/$PROFILE/${1#*:}" | awk '{ print $3 }')" != "$UID" ]; then
   rust-zig-builder sh -c "chown -R $UID:$UID target && chown -R $UID:$UID /usr/local/cargo"
 fi
