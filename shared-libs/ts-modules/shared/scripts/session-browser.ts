@@ -64,7 +64,7 @@ const identities = injector.get(ServerIdentityService)
 const peers: string[] = []
 const observe = identities.observe.bind(identities)
 identities.observe = async peer => {
-  peers.push(peer)
+  peers.push(peer.peer)
   await observe(peer)
 }
 let continuation: WebSocket | undefined

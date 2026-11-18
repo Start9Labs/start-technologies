@@ -9,21 +9,21 @@ name: Publish alpha apt suite
 # GitHub keeps a single *pending* run per group, so a third publisher superseded
 # a queued one and left that product's package stale until its next push.
 #
-# Collecting every product's latest successful master build into a single
-# publish makes supersession harmless instead: whichever run survives
-# republishes the current state of all three, so a dropped run costs nothing.
-# That is also why this collects the latest successful run per product rather
-# than the artifacts of the run that triggered it.
+# Collecting every product's latest master build into a single publish makes
+# supersession harmless instead: whichever run survives republishes the current
+# state of all three, so a dropped run costs nothing. That is also why this
+# collects each product's latest build rather than the artifacts of the run that
+# triggered it.
 on:
   workflow_run:
-    workflows: [start-cli, start-tunnel, start-registry]
+    workflows: [Build Products]
     types: [completed]
     branches: [master]
   workflow_dispatch:
 
 permissions:
   contents: read
-  # Listing and downloading artifacts from the product workflows' runs.
+  # Listing and downloading artifacts from build-products.yaml runs.
   actions: read
 
 concurrency:
@@ -39,15 +39,13 @@ jobs:
     # triggering event to be a push closes that: a push run can only originate
     # from a ref in this repository.
     #
-    # A failed product build must not publish, but it also must not block the
-    # other two: the next successful build of any product republishes the set.
+    # One run builds every product, so its conclusion does not gate this: a
+    # product whose packaging failed has no debs in that run, and the step below
+    # takes that product from its last complete build instead.
     if: >-
       ${{
         github.event_name == 'workflow_dispatch'
-        || (
-          github.event.workflow_run.event == 'push'
-          && github.event.workflow_run.conclusion == 'success'
-        )
+        || github.event.workflow_run.event == 'push'
       }}
     runs-on: ubuntu-latest
     steps:
@@ -59,42 +57,48 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p debs
-          collected=0
-          for wf in start-cli.yaml start-tunnel.yaml start-registry.yaml; do
-            product="${wf%.yaml}"
-            # Filter and order client-side: with branch/event/status query
-            # filters, the runs API answers this job's token with months-old
-            # runs instead of the newest one.
-            # event == "push" is load-bearing, not a tidiness filter. A master
-            # head branch alone matches a pull_request run from a fork branch of
-            # that name — this job would then collect and sign attacker-built
-            # .debs into alpha. It also excludes workflow_dispatch builds, which
-            # may be dev-flavoured or partial-arch.
-            page=1
-            while :; do
-              selection=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/runs?per_page=100&page=$page" \
-                --jq '[(.workflow_runs | length), ([.workflow_runs[]
-                  | select(.event == "push" and .head_branch == "master"
-                      and .conclusion == "success"
-                      and .head_repository.full_name == env.GITHUB_REPOSITORY)]
-                  | max_by(.created_at) | .id)] | @tsv')
-              read -r run_count run_id <<< "$selection"
-              if [ -n "$run_id" ] || [ "$run_count" -eq 0 ]; then
-                break
-              fi
-              page=$((page + 1))
+          products=(start-cli start-tunnel start-registry)
+          arches=(x86_64 aarch64 riscv64)
+          declare -A chosen=()
+          candidate_ids=$(
+            for product in "${products[@]}"; do
+              ./scripts/gha-artifact-run-ids.sh "$GITHUB_REPOSITORY" "${product}_${arches[0]}.deb" master || exit 1
+            done | sort -nu
+          )
+          run_metadata=$(
+            for run_id in $candidate_ids; do
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" || exit 1
             done
+          )
+          # event == "push" excludes fork PRs, which can report master as their
+          # head branch, and dispatched builds, which may be dev-flavoured or
+          # partial-arch.
+          runs=$(jq -sr '[.[]
+            | select(.path == ".github/workflows/build-products.yaml"
+                and .event == "push" and .status == "completed"
+                and .head_repository.full_name == env.GITHUB_REPOSITORY)]
+            | sort_by(.created_at) | reverse | .[].id' <<< "$run_metadata")
+          for run_id in $runs; do
+            names=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.expired | not) | .name')
+            for product in "${products[@]}"; do
+              [ -z "${chosen[$product]:-}" ] || continue
+              complete=1
+              for arch in "${arches[@]}"; do
+                grep -qx "${product}_${arch}.deb" <<< "$names" || complete=0
+              done
+              [ "$complete" = 0 ] || chosen[$product]=$run_id
+            done
+            [ "${#chosen[@]}" -lt "${#products[@]}" ] || break
+          done
+          collected=0
+          for product in "${products[@]}"; do
+            run_id=${chosen[$product]:-}
             if [ -z "$run_id" ]; then
-              echo "::warning::$product has no successful master run; the suite keeps whatever version it already holds."
+              echo "::warning::$product has no complete master build left; the suite keeps whatever version it already holds."
               continue
             fi
-            # Artifacts expire (14 days), so a product whose last successful
-            # build has aged out is skipped rather than failing the publish —
-            # its existing package stays put.
-            if ! gh run download -R "$GITHUB_REPOSITORY" "$run_id" -p '*.deb' -D debs; then
-              echo "::warning::$product run $run_id has no .deb artifacts left; skipping it."
-              continue
-            fi
+            gh run download -R "$GITHUB_REPOSITORY" "$run_id" -p "${product}_*.deb" -D debs
             echo "$product: collected from run $run_id ($(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq .head_sha))"
             collected=1
           done
