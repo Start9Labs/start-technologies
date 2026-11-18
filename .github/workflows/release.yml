@@ -18,9 +18,9 @@ on:
         description: 'S3 base URL for package uploads (e.g. https://bucket.region.digitaloceanspaces.com)'
         type: string
       REGISTRY_PROXY:
-        description: 'Proxy URL start-cli uses to reach the registries, e.g. socks5h://127.0.0.1:9050 for .onion registries. A loopback proxy with nothing listening starts Tor on the runner.'
+        description: "Proxy URL start-cli uses to reach the registries, e.g. socks5h://127.0.0.1:9050 for .onion registries. A loopback proxy with nothing listening starts Tor on the runner. Defaults to the caller's REGISTRY_PROXY variable."
         type: string
-        default: ''
+        default: ${{ vars.REGISTRY_PROXY }}
     secrets:
       DEV_KEY:
         description: 'Developer signing key'

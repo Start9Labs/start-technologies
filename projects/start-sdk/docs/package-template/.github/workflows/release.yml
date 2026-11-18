@@ -11,7 +11,6 @@ jobs:
     with:
       RELEASE_REGISTRY: ${{ vars.RELEASE_REGISTRY }}
       S3_S9PKS_BASE_URL: ${{ vars.S3_S9PKS_BASE_URL }}
-      REGISTRY_PROXY: ${{ vars.REGISTRY_PROXY }}
     secrets:
       DEV_KEY: ${{ secrets.DEV_KEY }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
