@@ -25,17 +25,19 @@ A device plugged into the switch gets its profile from the switch port it is on,
 
 ## What Can Go Wrong, and What Protects You
 
-Everywhere else, StartWRT decides which profile a port belongs to. On a managed-switch port it hands that decision to the switch and trusts it. Before you decide anything, know the five ways this can go wrong and what stands in the way of each.
+Everywhere else, StartWRT decides which profile a port belongs to. On a managed-switch port it hands that decision to the switch and trusts it. Before you decide anything, know the main ways this can go wrong and what stands in the way of each.
 
-- **The switch is not configured yet, or a laptop is plugged straight into the trunk cable.** Nothing bad happens. Traffic that reaches the router without a lane number gets no address and no access, so an unconfigured switch, a wrong cable or a factory-reset switch lands its devices nowhere rather than in Admin. This is deliberate, and it means a mistake on the switch shows up as "no connection", never as "the wrong profile".
+- **Untagged traffic reaches the trunk.** Traffic that reaches the router without a lane number gets no address and no access. An ordinary laptop plugged straight into the trunk cable, or sending untagged traffic through a factory-reset switch, gets no connection.
+
+- **Someone reaches a trunk cable.** A device configured to send VLAN-tagged traffic can choose any profile, Admin included, without logging in to the switch. Keep the router's trunk port and the switches' uplink and downlink ports and cables physically protected.
 
 - **A switch port is set to the wrong profile.** The device on it joins that profile. The [Devices](devices.md) page shows every device under the profile it actually landed in, so this is caught by looking, and fixed on the switch. The laptop test in this guide catches it before any real device is connected.
 
-- **Someone logs in to the switch.** This is the one thing the router cannot protect. Anyone who can sign in to the switch's admin page can put any of its ports, including the one they are plugged into, on any profile, Admin included. Protect the switch's password as you protect the router's, set it before the switch touches the router, and keep the switch somewhere a guest cannot reach a cable. Some switches have no password at all until one is created, so whoever opens the settings page first sets it. Inexpensive switches typically serve their admin page over plain HTTP, and the ES208G in the [TP-Link notes](managed-switch-tp-link.md) answers on every VLAN, so the password is the only gate.
+- **Someone logs in to the switch.** Anyone who can sign in to the switch's admin page can put any of its ports, including the one they are plugged into, on any profile, Admin included. Protect the switch's password as you protect the router's and set it before the switch touches the router. Some switches have no password at all until one is created, so whoever opens the settings page first sets it. Inexpensive switches typically serve their admin page over plain HTTP, and the ES208G in the [TP-Link notes](managed-switch-tp-link.md) answers on every VLAN, so the password guards its settings page.
 
 - **Two cables between the same two boxes.** A second cable between the switch and the router, or between two switches, is a loop, and a loop can bring the whole network to a crawl within seconds. Run exactly one cable between any two boxes, turn on the switch's loop protection, and disable the switch ports you are not using so a stray cable does nothing.
 
-- **The switch forgets its settings.** Many switches apply a change at once but keep it only in memory until you press a separate save button, and all of them lose their settings on a factory reset. Every device behind a switch that has forgotten its VLANs goes dark, as above. Save the configuration, download a backup, and keep it with your other important files.
+- **The switch forgets its settings.** Many switches apply a change at once but keep it only in memory until you press a separate save button, and all of them lose their settings on a factory reset. Ordinary devices behind a switch that has forgotten its VLANs lose their connection; the trunk still accepts tagged traffic. Save the configuration, download a backup, and keep it with your other important files.
 
 ## Choosing a Switch
 
@@ -162,7 +164,7 @@ Connect the switch's uplink port to the router port you set to **Managed switch*
 | An unused port          | No address.                                                                                                     |
 | The uplink port         | No address. The cable to the router is the only thing that belongs here.                                        |
 
-The last two rows look like failures and are the point of the test: a port that gives a laptop nothing cannot give a stranger's device anything either. Also open the switch's settings page from the Admin port, at its new address, to confirm the address and gateway are right.
+The last two rows check plain, untagged traffic. Keep uplinks physically protected as described under [What Can Go Wrong, and What Protects You](#what-can-go-wrong-and-what-protects-you). Also open the switch's settings page from the Admin port, at its new address, to confirm the address and gateway are right.
 
 Then unplug the switch's power, plug it back in, and repeat the Admin and one other row. A switch that passes again after a power cut has saved its settings.
 
@@ -205,6 +207,12 @@ Everything a profile allows applies to the device as usual: its Internet access,
 
 ## Undoing It
 
-Set the router port back to a profile under `Points of Entry > Ethernet`. Every device on the switch then shares that profile, as it would behind an ordinary switch, and the switch's VLAN settings are ignored. You can leave the switch configured in case you want to come back.
+Both ends of the cable must agree on tagged or untagged traffic. To use the switch like an ordinary switch:
 
-To return the switch itself to factory settings, hold its reset button or use the reset option on its settings page. A factory-reset switch behind a **Managed switch** port gives its devices nothing until it is configured again.
+1. Back up its configuration, then unplug its uplink from the router.
+1. From another connection to the router, set its port back to the desired profile under `Points of Entry > Ethernet`.
+1. On the isolated switch, put the uplink and every device port you will use in one untagged VLAN with matching PVIDs. Remove their other VLAN memberships, including the uplink's parking VLAN.
+1. If the chosen profile is not Admin, give the switch's settings page a free fixed address in that profile's subnet and update its gateway. Keep DHCP off.
+1. Save the switch's configuration, then reconnect the uplink. Every device on those ports now shares the router port's profile.
+
+A factory reset is another way to restore the switch's ordinary, untagged port layout. Keep its uplink disconnected during the reset, set its admin password again, and give it a free fixed address in the chosen profile's subnet with DHCP off before reconnecting it.

@@ -1,6 +1,6 @@
 //! Trunk ports. A trunk carries every profile's VLAN tagged and no profile
 //! untagged, for a managed switch behind it to hand each of its own ports to one
-//! profile. Which profile a device lands in is then the switch's decision.
+//! profile. Peers on a trunk can select any profile, Admin included.
 //!
 //! Only profile VLANs decide whether a port is a trunk. A bridge VLAN that
 //! belongs to no profile does not change the answer, whatever the port's

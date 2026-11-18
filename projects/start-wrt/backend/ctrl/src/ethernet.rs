@@ -703,7 +703,15 @@ fn set_config(
     }
 
     let has_trunk = layout.values().any(|p| p.trunk);
-    let needs_vlan_filtering = has_trunk || lookup.list().iter().any(|p| p.vlan_tag != 1);
+    let lan_uses_vlan1 = cfgs["network"].sections.iter().any(|section| {
+        section.name().as_deref() == Some("lan")
+            && section
+                .get::<NetworkInterface>()
+                .is_ok_and(|iface| iface.device == format!("{}.1", bridge.name))
+    });
+    // VLAN 1 remains required while `lan` uses its VLAN device.
+    let needs_vlan_filtering =
+        has_trunk || lan_uses_vlan1 || lookup.list().iter().any(|p| p.vlan_tag != 1);
     if has_trunk {
         profiles::attach_lan_to_vlan1(cfgs, &bridge.name)?;
     }
@@ -740,22 +748,6 @@ fn set_config(
         }
 
         let vlan = profile.vlan_tag;
-        // VLAN filtering OFF (no profile has a tag != 1): br-lan is a plain
-        // flat bridge — the `lan` L3 interface sits on `br-lan` directly, not
-        // `br-lan.1`, and no bridge-vlan sections exist (the br-lan -> br-lan.1
-        // flip + VID-1 creation happens only in profiles::ensure_vlan_filtering,
-        // when the first non-admin profile is created). There is no Admin VLAN
-        // to preserve here; emitting an empty VID-1 section would needlessly
-        // turn the flat bridge into a filtering bridge with no member ports.
-        // So skip it.
-        //
-        // VLAN filtering ON: do NOT skip. The (possibly empty) VID-1 section is
-        // what keeps the Admin VLAN on the bridge, carrying the router's own
-        // `br-lan.1` management interface and the default `network='lan'`
-        // wireless SSID — the AP ports are attached at runtime by hostapd and
-        // never appear in `ethernet.ports`. Dropping it there was the bug that
-        // left WiFi/gateway with "No route to host"; hence the
-        // `&& !needs_vlan_filtering` guard.
         if ports.is_empty() && vlan == 1 && !needs_vlan_filtering {
             continue;
         }
@@ -2545,8 +2537,7 @@ config interface 'guest'
     }
 
     #[tokio::test]
-    async fn set_trunk_alone_turns_on_vlan_filtering() {
-        // Admin is the only profile: a flat bridge with `lan` on br-lan itself.
+    async fn set_trunk_lifecycle_preserves_admin_vlan() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("startwrt"),
@@ -2588,38 +2579,59 @@ config zone
         )
         .unwrap();
         let ctx = TestContext(dir.path().to_path_buf());
+        let mut layout = Ethernet {
+            wan_ipv6: false,
+            wan_port: None,
+            ports: BTreeMap::from([
+                (
+                    "eth0".into(),
+                    Port {
+                        profile: None,
+                        trunk: true,
+                    },
+                ),
+                (
+                    "eth1".into(),
+                    Port {
+                        profile: None,
+                        trunk: false,
+                    },
+                ),
+            ]),
+        };
 
-        set(
-            ctx.clone(),
-            DeserializeStdin(Ethernet {
-                wan_ipv6: false,
-                wan_port: None,
-                ports: BTreeMap::from([
-                    (
-                        "eth0".into(),
-                        Port {
-                            profile: None,
-                            trunk: true,
-                        },
-                    ),
-                    (
-                        "eth1".into(),
-                        Port {
-                            profile: None,
-                            trunk: false,
-                        },
-                    ),
-                ]),
-            }),
-        )
-        .await
-        .unwrap();
-
+        set(ctx.clone(), DeserializeStdin(layout.clone())).await.unwrap();
         let vlans = vlan_members(&ctx).await;
         assert_eq!(vlans[&1], vec!["eth0:t".to_string(), "eth1:u*".into()]);
         assert_eq!(lan_device(&ctx).await, "br-lan.1");
-        let after = get(ctx).await.unwrap();
+        let after = get(ctx.clone()).await.unwrap();
         assert!(after.ports["eth0"].trunk);
+        assert_eq!(after.ports["eth1"].profile.as_ref().unwrap().vlan_tag, 1);
+
+        layout.ports.get_mut("eth0").unwrap().trunk = false;
+        set(ctx.clone(), DeserializeStdin(layout.clone())).await.unwrap();
+        assert_eq!(lan_device(&ctx).await, "br-lan.1");
+        assert_eq!(
+            vlan_members(&ctx).await[&1],
+            vec!["eth0:u*".to_string(), "eth1:u*".into()]
+        );
+        let after = get(ctx.clone()).await.unwrap();
+        for port in after.ports.values() {
+            assert!(!port.trunk);
+            assert_eq!(port.profile.as_ref().unwrap().vlan_tag, 1);
+        }
+
+        layout.ports.get_mut("eth0").unwrap().trunk = true;
+        layout.wan_port = Some("eth1".into());
+        set(ctx.clone(), DeserializeStdin(layout.clone())).await.unwrap();
+
+        layout.ports.get_mut("eth0").unwrap().trunk = false;
+        layout.wan_port = Some("eth0".into());
+        set(ctx.clone(), DeserializeStdin(layout)).await.unwrap();
+        assert_eq!(lan_device(&ctx).await, "br-lan.1");
+        assert_eq!(vlan_members(&ctx).await[&1], vec!["eth1:u*".to_string()]);
+        let after = get(ctx).await.unwrap();
+        assert_eq!(after.wan_port.as_deref(), Some("eth0"));
         assert_eq!(after.ports["eth1"].profile.as_ref().unwrap().vlan_tag, 1);
     }
 
