@@ -152,6 +152,12 @@ make start-os-deb               # Debian package (start-os-squashfs for the squa
 
 `make start-core-ts-bindings` regenerates the TS bindings from the Rust types (see [Cross-layer changes](#cross-layer-changes)).
 
+#### Kernel backport packages
+
+Before changing or retiring the signed-kernel bridge, read
+[`build/image-recipe/kernel-backports/AGENTS.md`](build/image-recipe/kernel-backports/AGENTS.md).
+That directory owns its build rules, tests, configuration and removal boundary.
+
 #### Deploying to a device
 
 These targets push to a **live device** and are slow/destructive — be deliberate. For devices on the same network:

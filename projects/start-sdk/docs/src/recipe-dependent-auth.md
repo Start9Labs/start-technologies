@@ -1,6 +1,6 @@
 # Let Dependents Through a Proxy Auth Gate
 
-A binding gated with `addSsl.auth` challenges every client on every address, the plaintext bridge address included. A service that depends on it gets `401` unless it sends a credential the gate accepts. Both sides of the dependency take part: the gated service publishes a machine key, and its dependents read it and send it.
+A binding gated with `proxy.auth` challenges every client on every address, the plaintext bridge address included. A service that depends on it gets `401` unless it sends a credential the gate accepts. Both sides of the dependency take part: the gated service publishes a machine key, and its dependents read it and send it.
 
 ## Solution
 
