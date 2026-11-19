@@ -5,6 +5,7 @@ use color_eyre::eyre::eyre;
 use tokio::process::Command;
 
 use crate::disk::util::pvscan;
+use crate::os_install::same_device;
 use crate::prelude::*;
 use crate::util::Invoke;
 
@@ -219,6 +220,22 @@ pub async fn quiesce_disk(disk_path: &Path) -> Result<(), Error> {
         }
     }
 
+    Ok(())
+}
+
+/// Removes the kernel's mapping of every partition on the disk but the one kept.
+/// Fails on a partition still open.
+pub async fn forget_partitions(disk_path: &Path, keep: Option<&Path>) -> Result<(), Error> {
+    for part in list_partitions(disk_path).await? {
+        if keep.is_some_and(|keep| same_device(&part, keep)) {
+            continue;
+        }
+        Command::new("partx")
+            .arg("--delete")
+            .arg(&part)
+            .invoke(ErrorKind::DiskManagement)
+            .await?;
+    }
     Ok(())
 }
 
