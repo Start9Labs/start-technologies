@@ -190,7 +190,17 @@ async fn authorize_mount(
         )
 }
 
+/// Owns authorization, placeholder installation and data attachment through cancellation.
 pub async fn mount_shared_volume(
+    context: EffectContext,
+    params: MountSharedVolumeParams,
+) -> Result<SharedVolumeMountResult, Error> {
+    tokio::spawn(mount_shared_volume_owned(context, params))
+        .await
+        .with_kind(ErrorKind::Cancelled)?
+}
+
+async fn mount_shared_volume_owned(
     context: EffectContext,
     MountSharedVolumeParams {
         id,
@@ -203,7 +213,7 @@ pub async fn mount_shared_volume(
     use crate::disk::mount::filesystem::syscall::MountNamespace;
     use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
     use crate::disk::mount::guard::GenericMountGuard;
-    use crate::shared_volumes::mounts::{PreparedTarget, confined_relative};
+    use crate::shared_volumes::mounts::confined_relative;
     let service = context.deref()?;
     let container = &service.seed.persistent_container;
     container.shared_volumes.lock().await.check_allowed()?;
@@ -228,33 +238,34 @@ pub async fn mount_shared_volume(
         Ok(source) => Ok(source.into_subpath(subpath).await),
         Err(error) => Err(error),
     };
-    let lxc = container
-        .lxc_container
-        .get()
-        .or_not_found("lxc container")?;
-    let pid = lxc.pid().await?;
-    let namespace = std::sync::Arc::new(MountNamespace::for_process(pid)?);
-    let root = {
-        let subcontainers = container.subcontainers.lock().await;
-        std::path::PathBuf::from(format!("/proc/{pid}/root")).join(
-            subcontainers
-                .get(&subcontainer)
-                .or_not_found("subcontainer")?
-                .overlay
-                .path()
-                .strip_prefix(lxc.rootfs_dir())
-                .with_kind(ErrorKind::Incoherent)?,
-        )
-    };
-    let target = PreparedTarget::open(root, mountpoint, namespace).await?;
+    let _admission = service
+        .seed
+        .ctx
+        .shared_volume_access
+        .management
+        .read()
+        .await;
     let mut mounts = container.shared_volumes.lock().await;
     mounts.check_allowed()?;
     authorize_mount(&service, &id, readonly).await?;
     let subcontainers = container.subcontainers.lock().await;
-    subcontainers
+    let lxc = container
+        .lxc_container
+        .get()
+        .or_not_found("lxc container")?;
+    let root = subcontainers
         .get(&subcontainer)
-        .or_not_found("subcontainer")?;
-    let location = mounts.prepare(&subcontainer, target).await?;
+        .or_not_found("subcontainer")?
+        .overlay
+        .path()
+        .strip_prefix(lxc.rootfs_dir())
+        .with_kind(ErrorKind::Incoherent)?;
+    let pid = lxc.pid().await?;
+    let service_root = std::path::PathBuf::from(format!("/proc/{pid}/root"));
+    let namespace = std::sync::Arc::new(MountNamespace::for_process(pid)?);
+    mounts
+        .prepare_target(&subcontainer, &mountpoint, &service_root, root, namespace)
+        .await?;
     let source = match source {
         Ok(prepared) => prepared?,
         Err(error) => {
@@ -267,7 +278,16 @@ pub async fn mount_shared_volume(
             });
         }
     };
-    mounts.attach(&subcontainer, location, id, source, readonly)?;
+    mounts
+        .mount_source(
+            &subcontainer,
+            &mountpoint,
+            &id,
+            source,
+            readonly,
+            &service_root,
+        )
+        .await?;
     Ok(SharedVolumeMountResult::Mounted)
 }
 

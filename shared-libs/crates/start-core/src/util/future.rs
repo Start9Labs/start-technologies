@@ -85,23 +85,31 @@ async fn test_detach_inside_own_task() {
     assert!(!survives(false).await);
 }
 
+struct DropSignal(watch::Sender<bool>);
+
+impl Drop for DropSignal {
+    fn drop(&mut self) {
+        let _ = self.0.send(true);
+    }
+}
+
 /// Notifies observers after the inner future is fully dropped.
 #[pin_project::pin_project]
 pub struct DropSignaling<F> {
-    // Field order keeps notification after future destruction.
     #[pin]
     fut: F,
-    on_drop: watch::Sender<()>,
+    // Must follow the future; field drop order defines completion.
+    on_drop: DropSignal,
 }
 impl<F> DropSignaling<F> {
     pub fn new(fut: F) -> Self {
         Self {
             fut,
-            on_drop: watch::channel(()).0,
+            on_drop: DropSignal(watch::channel(false).0),
         }
     }
     pub fn subscribe(&self) -> DropHandle {
-        DropHandle(self.on_drop.subscribe())
+        DropHandle(self.on_drop.0.subscribe())
     }
 }
 impl<F> Future for DropSignaling<F>
@@ -114,11 +122,35 @@ where
         this.fut.poll(cx)
     }
 }
+
+#[tokio::test]
+async fn drop_completion_follows_inner_resource_cleanup() {
+    struct Probe(std::sync::Arc<std::sync::Mutex<Option<DropHandle>>>);
+    impl Future for Probe {
+        type Output = ();
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
+            Poll::Pending
+        }
+    }
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            assert!(!*self.0.lock().unwrap().as_ref().unwrap().0.borrow());
+        }
+    }
+    let observer = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let future = DropSignaling::new(Probe(observer.clone()));
+    let mut completion = future.subscribe();
+    *observer.lock().unwrap() = Some(completion.clone());
+    drop(future);
+    completion.wait().await;
+    assert!(*completion.0.borrow());
+}
+
 #[derive(Clone)]
-pub struct DropHandle(watch::Receiver<()>);
+pub struct DropHandle(watch::Receiver<bool>);
 impl DropHandle {
     pub async fn wait(&mut self) {
-        let _ = self.0.changed().await;
+        let _ = self.0.wait_for(|dropped| *dropped).await;
     }
 }
 
@@ -168,7 +200,7 @@ pub struct CancellationHandle {
 impl CancellationHandle {
     /// True after the future is dropped, not when cancellation is requested.
     pub fn is_finished(&self) -> bool {
-        self.on_drop.0.has_changed().is_err()
+        *self.on_drop.0.borrow()
     }
 
     pub fn cancel(&mut self) {
