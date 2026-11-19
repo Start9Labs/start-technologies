@@ -35,7 +35,7 @@ This runtime lives at `projects/start-os/container-runtime` and is a Node.js pac
 | Path                 | Description                                                        |
 | -------------------- | ------------------------------------------------------------------ |
 | `volumes/<name>/`    | Package data volumes (id-mapped, persistent)                       |
-| `shared-volumes/`    | Host-owned shared sources and read-only placeholders for SDK binds |
+| `shared-volumes/`    | Host-owned shared sources and read-only placeholder for host binds |
 | `assets/`            | Read-only assets from s9pk `assets.squashfs`                       |
 | `images/<name>/`     | Container images (squashfs, used for subcontainers)                |
 | `images/<name>.env`  | Environment variables for image                                    |

@@ -14,9 +14,6 @@ sharedVolumes: true,
 
 This enables the service's **Shared Volumes** controls in StartOS; it requests no access. Users grant each volume independently as read-only or read/write. `buildManifest` requires StartOS 0.4.3 for this capability and rejects an explicit older compatibility override. Packaging it requires Start CLI 3.0.0 or later; the build wrapper checks before packing and verifies the resulting archive preserves the opt-in. Unreleased builds can report 3.0.0 before including this capability. If archive verification fails, install a volume-capable CLI build; the failed output is removed.
 
-> [!NOTE]
-> Development builds of SDK 5.0.0 and StartOS 0.4.3 must include the same shared-volume protocol. Packages built against the prerelease `mount-shared-volume` effect need rebuilding with the SDK's staged-source API; the old effect is rejected rather than reporting an unmounted directory as usable.
-
 ## Read grants
 
 ```ts
