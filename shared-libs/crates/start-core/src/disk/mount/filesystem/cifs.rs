@@ -703,7 +703,8 @@ impl FileSystem for Cifs {
     }
 }
 
-/// CIFS lacks `FS_ALLOW_IDMAP`; root owns it with world-writable modes, so containers see `nobody`.
+/// CIFS lacks `FS_ALLOW_IDMAP`; service ownership comes from mount options.
+/// Owned by host root with world-writable modes; containers see `nobody` and cannot change owners or modes.
 pub struct SharedCifs(pub Cifs);
 
 impl FileSystem for SharedCifs {
