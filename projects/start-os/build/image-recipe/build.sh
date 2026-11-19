@@ -128,16 +128,7 @@ mkdir -p config/packages.chroot/
 cp $RESULTS_DIR/$IMAGE_BASENAME.deb config/packages.chroot/
 dpkg-name config/packages.chroot/*.deb
 
-case "$IB_SUITE:${IB_TARGET_PLATFORM%%-*}" in
-    trixie:x86_64|trixie:aarch64)
-        source "$SOURCE_DIR/kernel-backports.conf"
-        KERNEL_ARCHIVE="$RESULTS_DIR/kernel-backports/$IB_TARGET_ARCH"
-        "$SOURCE_DIR/build-kernel-backports.sh" "$IB_TARGET_ARCH" "$KERNEL_ARCHIVE"
-        mkdir -p config/archives
-        printf 'deb [trusted=yes] file://%s ./\n' "$KERNEL_ARCHIVE/$KERNEL_BACKPORT_VERSION" \
-            > config/archives/kernel-backports.list.chroot
-        ;;
-esac
+"$SOURCE_DIR/kernel-backports/stage.sh" "$IB_SUITE" "$IB_TARGET_PLATFORM" "$IB_TARGET_ARCH" "$RESULTS_DIR"
 
 mkdir -p config/includes.chroot/etc
 echo start > config/includes.chroot/etc/hostname
@@ -440,9 +431,7 @@ else
 	exit $EXIT
 fi
 retry lb chroot
-if [ -f config/archives/kernel-backports.list.chroot ]; then
-    "$SOURCE_DIR/verify-kernel-backports.sh" chroot "$IB_TARGET_ARCH"
-fi
+"$SOURCE_DIR/kernel-backports/verify-kernel-backports.sh" chroot "$IB_TARGET_ARCH"
 
 # riscv64 binaries target RVA23, which the build host may lack.
 RUN_TARGET=()

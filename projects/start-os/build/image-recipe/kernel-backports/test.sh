@@ -1,12 +1,18 @@
 #!/bin/bash
 set -euo pipefail
-ROOT=$(realpath "$(dirname "${BASH_SOURCE[0]}")/../../../..")
-RECIPE="$ROOT/projects/start-os/build/image-recipe"
+RECIPE=$(realpath "$(dirname "${BASH_SOURCE[0]}")")
 source "$RECIPE/kernel-backports.conf"
 WORK=$(mktemp -d)
 trap 'rm -rf -- "$WORK"' EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
+if grep -Eq 'KERNEL_BACKPORT_|snapshot\.debian\.org|kernel-backports\.list' "$RECIPE/../build.sh"; then
+    fail 'bridge policy leaked into the parent recipe'
+fi
+[ "$(grep -Fc '"$SOURCE_DIR/kernel-backports/' "$RECIPE/../build.sh")" -eq 2 ] || fail 'expected two bridge hooks'
+if grep -Eq '^KERNEL_(BACKPORT|DEB_ARCH)' "$RECIPE/../../../build.mk"; then
+    fail 'bridge build policy leaked into the parent Makefile'
+fi
 fixture() {
     local package=$1 architecture=$2 compression=$3
     rm -rf "$WORK/input"
@@ -78,14 +84,8 @@ if "$RECIPE/repack-kernel-deb.sh" "$WORK/wrong.deb" "$WORK/output" >/dev/null 2>
     fail 'unmatched source version accepted'
 fi
 
-awk '
-/^case "\$IB_SUITE:\$\{IB_TARGET_PLATFORM%%-\*\}" in$/ { found=1 }
-found { print }
-found && /^esac$/ { exit }
-' "$RECIPE/build.sh" > "$WORK/stage.sh"
-[ -s "$WORK/stage.sh" ] || fail 'missing archive staging'
 mkdir -p "$WORK/recipe" "$WORK/stage/config/archives"
-cp "$RECIPE/kernel-backports.conf" "$WORK/recipe/"
+cp "$RECIPE/kernel-backports.conf" "$RECIPE/stage.sh" "$WORK/recipe/"
 cat > "$WORK/recipe/build-kernel-backports.sh" <<'EOF'
 #!/bin/bash
 printf '%s\n' "$@" > "$RESULTS_DIR/called"
@@ -96,7 +96,7 @@ cd "$WORK/stage"
 for target in x86_64:amd64 x86_64-nonfree:amd64 x86_64-nvidia:amd64 aarch64:arm64 aarch64-nonfree:arm64 aarch64-nvidia:arm64; do
     IFS=: read -r platform arch <<< "$target"
     rm -f config/archives/kernel-backports.list.chroot "$WORK/called"
-    IB_SUITE=trixie IB_TARGET_PLATFORM="$platform" IB_TARGET_ARCH="$arch" bash "$WORK/stage.sh"
+    bash "$WORK/recipe/stage.sh" trixie "$platform" "$arch" "$RESULTS_DIR"
     [ -f "$WORK/called" ] || fail "$platform archive build"
     grep -Fxq "deb [trusted=yes] file://$WORK/kernel-backports/$arch/$KERNEL_BACKPORT_VERSION ./" \
         config/archives/kernel-backports.list.chroot || fail "$platform archive URL"
@@ -104,36 +104,16 @@ done
 for target in raspberrypi:arm64 rockchip64:arm64 riscv64:riscv64 riscv64-nonfree:riscv64; do
     IFS=: read -r platform arch <<< "$target"
     rm -f config/archives/kernel-backports.list.chroot "$WORK/called"
-    IB_SUITE=trixie IB_TARGET_PLATFORM="$platform" IB_TARGET_ARCH="$arch" bash "$WORK/stage.sh"
+    bash "$WORK/recipe/stage.sh" trixie "$platform" "$arch" "$RESULTS_DIR"
     [ ! -f "$WORK/called" ] || fail "$platform kernel selection changed"
     [ ! -f config/archives/kernel-backports.list.chroot ] || fail "$platform retained bridge archive"
 done
 rm -f "$WORK/called"
-IB_SUITE=bookworm IB_TARGET_PLATFORM=x86_64 IB_TARGET_ARCH=amd64 bash "$WORK/stage.sh"
+bash "$WORK/recipe/stage.sh" bookworm x86_64 amd64 "$RESULTS_DIR"
 [ ! -f "$WORK/called" ] || fail 'bridge used outside trixie'
 
-awk '
-/^KVER_ALL=/ { found=1 }
-found && /^if \[ "\$\{IB_SUITE\}" = trixie \]/ { exit }
-found { gsub(/\\\$/, "$"); print }
-' "$RECIPE/build.sh" > "$WORK/kbuild.sh"
-mkdir "$WORK/bin"
-cat > "$WORK/bin/ls" <<'EOF'
-#!/bin/bash
-printf '/boot/vmlinuz-target-abi\n'
-EOF
-cat > "$WORK/bin/apt-cache" <<'EOF'
-#!/bin/bash
-[ "$*" = 'depends linux-headers-target-abi' ] || exit 1
-printf '  Depends: linux-kbuild-from-header-metadata\n'
-EOF
-cat > "$WORK/bin/apt-get" <<'EOF'
-#!/bin/bash
-printf '%s\n' "$*" > "$RESULTS_DIR/kbuild-installed"
-EOF
-chmod +x "$WORK/bin/"*
-PATH="$WORK/bin:$PATH" bash "$WORK/kbuild.sh"
-grep -Fxq 'install -y linux-kbuild-from-header-metadata' "$WORK/kbuild-installed" || fail 'target kbuild selection'
+"$RECIPE/verify-kernel-backports.sh" "$WORK/not-an-image" amd64
+: > "$KERNEL_BACKPORT_ARCHIVE_LIST"
 IMAGE="$WORK/image"
 ABI=7.3.4+deb13-amd64
 mkdir -p "$IMAGE"/{var/lib/dpkg,usr/lib/modules/$ABI,boot,etc/default}
