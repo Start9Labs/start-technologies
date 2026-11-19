@@ -268,9 +268,8 @@ pub async fn restore_volumes_rpc(
         None => db.as_public().as_server_info().as_id().de()?,
     };
     let backup = BackupMountGuard::mount(fs.mount(ReadWrite).await?, &server_id, &password).await?;
-    let (reply, result) = tokio::sync::oneshot::channel();
     let owner = ctx.clone();
-    owner.spawn_background(async move {
+    let result = owner.spawn_background_result(async move {
         let mut result = RestoreVolumeResult::default();
         for id in selected_ids(Some(ids), []) {
             match restore_volume(&ctx, &backup, &id).await {
@@ -283,7 +282,7 @@ pub async fn restore_volumes_rpc(
             }
         }
         backup.unmount().await.log_err();
-        let _ = reply.send(Ok(result));
+        Ok(result)
     })?;
     result.await.with_kind(ErrorKind::Unknown)?
 }

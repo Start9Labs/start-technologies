@@ -15,12 +15,23 @@ pub(crate) type TaskHandles = Vec<NonDetachingJoinHandle<()>>;
 pub(crate) type CleanupTasks = SyncMutex<TaskHandles>;
 
 lazy_static! {
-    /// startd joins destructor-started filesystem cleanup before runtime closure and storage export.
+    /// startd joins mount-retaining filesystem work and destructor cleanup before storage export.
     static ref FILESYSTEM_CLEANUP: CleanupTasks = SyncMutex::new(Vec::new());
 }
 
 pub(crate) fn spawn_filesystem_cleanup(future: impl Future<Output = ()> + Send + 'static) {
     let _ = spawn_cleanup(&FILESYSTEM_CLEANUP, future);
+}
+
+/// Caller cancellation cannot release mounts retained by an unfinished blocking operation.
+pub(crate) async fn run_filesystem_blocking<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, tokio::task::JoinError> {
+    spawn_cleanup(&FILESYSTEM_CLEANUP, async move {
+        tokio::task::spawn_blocking(work).await
+    })
+    .await
+    .expect("filesystem task retained until cleanup drain")
 }
 
 pub(crate) async fn wait_for_filesystem_cleanup() {
@@ -37,15 +48,14 @@ pub(crate) fn retain_owned_task(tasks: &mut TaskHandles, task: NonDetachingJoinH
 }
 
 /// Dropping the completion receiver leaves teardown responsible for the task.
-pub(crate) fn spawn_cleanup<F: Future<Output = ()> + Send + 'static>(
+pub(crate) fn spawn_cleanup<T: Send + 'static>(
     tasks: &CleanupTasks,
-    future: F,
-) -> oneshot::Receiver<()> {
+    future: impl Future<Output = T> + Send + 'static,
+) -> oneshot::Receiver<T> {
     let (completed, completion) = oneshot::channel();
     // A closed runtime can synchronously drop the future during spawn.
     let task = tokio::spawn(async move {
-        future.await;
-        let _ = completed.send(());
+        let _ = completed.send(future.await);
     })
     .into();
     tasks.mutate(|tasks| retain_owned_task(tasks, task));

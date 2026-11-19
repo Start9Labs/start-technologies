@@ -261,8 +261,7 @@ pub async fn sideload(
         progress_tracker.add_phase("Uploading".into(), Some(100)),
     )
     .await?;
-    let (completed, done) = tokio::sync::oneshot::channel();
-    ctx.spawn_background({
+    let done = ctx.spawn_background_result({
         let ctx = ctx.clone();
         let progress_tracker = progress_tracker.clone();
         async move {
@@ -311,7 +310,7 @@ pub async fn sideload(
                 tracing::error!("Error sideloading package: {error}");
                 tracing::debug!("{error:?}");
             }
-            let _ = completed.send(result);
+            result
         }
     })?;
     let source = progress_until_complete(progress_tracker, async move {

@@ -479,7 +479,7 @@ pub async fn set_grant(
         grant,
     }: SetSharedVolumeGrantParams,
 ) -> Result<(), Error> {
-    tokio::spawn(set_grant_owned(ctx, id, package_id, grant))
+    ctx.spawn_background_result(set_grant_owned(ctx.clone(), id, package_id, grant))?
         .await
         .with_kind(ErrorKind::Cancelled)?
 }
@@ -556,7 +556,7 @@ pub async fn remove(
     ctx: RpcContext,
     SharedVolumeParams { id }: SharedVolumeParams,
 ) -> Result<(), Error> {
-    tokio::spawn(remove_owned(ctx, id))
+    ctx.spawn_background_result(remove_owned(ctx.clone(), id))?
         .await
         .with_kind(ErrorKind::Cancelled)?
 }

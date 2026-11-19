@@ -64,7 +64,7 @@ use crate::util::lshw::LshwDevice;
 use crate::util::sync::{SyncMutex, SyncRwLock, Watch};
 use crate::{DATA_DIR, PLATFORM, PackageId};
 
-/// Clears context-owned backup observations without discarding pending restart intent.
+/// Retains power observations and reboot-required state while clearing abandoned backup work.
 fn reset_backup_status(db: &mut DatabaseModel) -> Result<(), Error> {
     let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
     status.as_backup_progress_mut().ser(&None)?;
@@ -90,6 +90,18 @@ pub(crate) fn spawn_background<F: Future<Output = ()> + Send + 'static>(
         retain_owned_task(tasks, tokio::spawn(future.take().unwrap()).into());
         Ok(())
     })
+}
+
+/// Result observers cannot cancel accepted work; daemon shutdown joins its destruction.
+pub(crate) fn spawn_background_result<T: Send + 'static>(
+    tasks: &BackgroundTasks,
+    future: impl Future<Output = T> + Send + 'static,
+) -> Result<oneshot::Receiver<T>, Error> {
+    let (reply, result) = oneshot::channel();
+    spawn_background(tasks, async move {
+        let _ = reply.send(future.await);
+    })?;
+    Ok(result)
 }
 
 async fn stop_background_tasks(tasks: &BackgroundTasks, cleanup: &CleanupTasks) {
@@ -677,6 +689,13 @@ impl RpcContext {
         spawn_background(&self.background_tasks, fut)
     }
 
+    pub(crate) fn spawn_background_result<T: Send + 'static>(
+        &self,
+        future: impl Future<Output = T> + Send + 'static,
+    ) -> Result<oneshot::Receiver<T>, Error> {
+        spawn_background_result(&self.background_tasks, future)
+    }
+
     #[instrument(skip_all)]
     pub async fn cleanup_and_initialize(
         &self,
@@ -951,11 +970,12 @@ mod tests {
                 let _ = completed.send(());
             });
         });
-        spawn_background(&tasks, async move {
+        let observer = spawn_background_result(&tasks, async move {
             let _guard = guard;
             std::future::pending::<()>().await;
         })
         .unwrap();
+        drop(observer);
 
         let teardown = stop_background_tasks(&tasks, &cleanup);
         tokio::pin!(teardown);
@@ -975,14 +995,12 @@ mod tests {
         let tasks = BackgroundTasks::new(Some(Vec::new()));
         let (started, running) = oneshot::channel();
         let (release, released) = oneshot::channel();
-        let (completed, completion) = oneshot::channel();
         let work = crate::util::future::DropSignaling::new(async move {
             let _ = started.send(());
             released.await.unwrap();
-            let _ = completed.send(());
         });
         let mut resources_dropped = work.subscribe();
-        spawn_background(&tasks, work).unwrap();
+        let completion = spawn_background_result(&tasks, work).unwrap();
         running.await.unwrap();
 
         drop(completion);
@@ -994,6 +1012,15 @@ mod tests {
             .await
             .unwrap();
         stop_background_tasks(&tasks, &CleanupTasks::new(Vec::new())).await;
+    }
+
+    #[tokio::test]
+    async fn background_result_delivery_shares_task_admission() {
+        let tasks = BackgroundTasks::new(Some(Vec::new()));
+        let result = spawn_background_result(&tasks, async { 42 }).unwrap();
+        assert_eq!(result.await.unwrap(), 42);
+        stop_background_tasks(&tasks, &CleanupTasks::new(Vec::new())).await;
+        assert!(spawn_background_result(&tasks, async { 99 }).is_err());
     }
 
     #[tokio::test]

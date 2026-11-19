@@ -195,7 +195,9 @@ pub async fn mount_shared_volume(
     context: EffectContext,
     params: MountSharedVolumeParams,
 ) -> Result<SharedVolumeMountResult, Error> {
-    tokio::spawn(mount_shared_volume_owned(context, params))
+    let owner = context.deref()?.seed.ctx.clone();
+    owner
+        .spawn_background_result(mount_shared_volume_owned(context, params))?
         .await
         .with_kind(ErrorKind::Cancelled)?
 }

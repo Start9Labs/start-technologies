@@ -35,6 +35,44 @@ fn closed_runtime_cleanup_registration_drops_work_outside_the_registry_lock() {
 }
 
 #[tokio::test]
+async fn blocking_filesystem_work_retains_resources_after_its_caller_is_cancelled() {
+    use futures::FutureExt;
+
+    let _serial = FILESYSTEM_CLEANUP_TEST_LOCK.lock().await;
+    wait_for_filesystem_cleanup().await;
+    assert_eq!(run_filesystem_blocking(|| 42).await.unwrap(), 42);
+    let (started, running) = oneshot::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let (cleanup_started, cleanup_running) = oneshot::channel();
+    let (finish_cleanup, cleanup_finished) = oneshot::channel();
+    let (destroyed, destruction) = oneshot::channel();
+    let guard = crate::util::GeneralBoxedGuard::new(move || {
+        spawn_filesystem_cleanup(async move {
+            cleanup_started.send(()).unwrap();
+            cleanup_finished.await.unwrap();
+            destroyed.send(()).unwrap();
+        });
+    });
+    let caller = tokio::spawn(run_filesystem_blocking(move || {
+        let _guard = guard;
+        started.send(()).unwrap();
+        released.recv().unwrap();
+    }));
+    running.await.unwrap();
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    let drain = wait_for_filesystem_cleanup();
+    tokio::pin!(drain);
+    assert!(futures::poll!(&mut drain).is_pending());
+    release.send(()).unwrap();
+    cleanup_running.await.unwrap();
+    assert!(futures::poll!(&mut drain).is_pending());
+    finish_cleanup.send(()).unwrap();
+    drain.await;
+    assert!(destruction.now_or_never().unwrap().is_ok());
+}
+
+#[tokio::test]
 async fn temporary_directory_drop_cleanup_finishes_before_teardown_returns() {
     let _serial = FILESYSTEM_CLEANUP_TEST_LOCK.lock().await;
     wait_for_filesystem_cleanup().await;

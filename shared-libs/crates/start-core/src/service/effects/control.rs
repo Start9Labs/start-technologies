@@ -15,12 +15,12 @@ pub async fn rebuild(context: EffectContext) -> Result<(), Error> {
     let ctx = seed.ctx.clone();
     let id = seed.id.clone();
     drop(seed);
-    tokio::spawn(async move {
+    let owner = ctx.clone();
+    owner.spawn_background(async move {
         super::super::rebuild(ctx, RebuildParams { id })
             .await
-            .log_err()
-    });
-    Ok(())
+            .log_err();
+    })
 }
 
 pub async fn restart(context: EffectContext) -> Result<(), Error> {
