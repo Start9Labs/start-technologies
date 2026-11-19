@@ -1,6 +1,7 @@
 import * as T from '@start9labs/start-core/types'
 import * as child_process from 'child_process'
 import * as fs from 'fs/promises'
+import * as path from 'path'
 import { Affine, asError } from '../util'
 import { InitKind, InitScript } from '@start9labs/start-core/inits'
 import { CommandOptions, SubContainer, execFile } from '../util/SubContainer'
@@ -11,6 +12,7 @@ import {
 } from '@start9labs/start-core/util/FullProgressTracker'
 
 const BACKUP_HOST_PATH = '/media/startos/backup'
+const BACKUP_VOLUMES_PATH = `${BACKUP_HOST_PATH}/volumes`
 const BACKUP_CONTAINER_MOUNT = '/backup-target'
 const MARIADB_SHUTDOWN_TIMEOUT = 120_000
 
@@ -1005,6 +1007,11 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       phase.complete()
     }
 
+    await pruneBackupVolumes(
+      BACKUP_VOLUMES_PATH,
+      this.backupSet.map(s => s.backupPath),
+    )
+
     const dataVersion = await effects.getDataVersion()
     if (dataVersion)
       await fs.writeFile('/media/startos/backup/dataVersion.txt', dataVersion, {
@@ -1105,6 +1112,56 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
   }
 }
 
+/**
+ * Removes entries of the backup's volumes directory disjoint from every backup path.
+ * Leaves a volumes root that is not a real directory untouched.
+ */
+export async function pruneBackupVolumes(
+  volumesDir: string,
+  backupPaths: string[],
+) {
+  const kept = new Set<string>()
+  for (const backupPath of backupPaths) {
+    const parts = path.posix.relative(volumesDir, backupPath).split('/')
+    const volume = parts[0]!
+    if (volume === '' || parts.every(part => part === '..')) return
+    if (volume !== '..') kept.add(volume)
+  }
+  const metadata = await fs.lstat(volumesDir).catch(e => {
+    if (e?.code === 'ENOENT') return undefined
+    throw e
+  })
+  if (!metadata?.isDirectory()) return
+  const entries = await fs.readdir(volumesDir)
+  for (const entry of entries) {
+    if (!kept.has(entry)) {
+      await fs.rm(path.posix.join(volumesDir, entry), {
+        recursive: true,
+        force: true,
+      })
+    }
+  }
+}
+
+export function rsyncArgs(
+  srcPath: string,
+  dstPath: string,
+  options: T.SyncOptions,
+) {
+  return [
+    ...(options.delete ? ['--delete', '--delete-excluded'] : []),
+    ...options.exclude.map(x => `--exclude=${x}`),
+    '-rlptgoAXH',
+    '--partial',
+    '--inplace',
+    '--timeout=300',
+    '--info=progress2',
+    // --no-inc-recursive's full pre-scan times out large backups.
+    srcPath,
+    dstPath,
+  ]
+}
+
 async function runRsync(rsyncOptions: {
   srcPath: string
   dstPath: string
@@ -1118,23 +1175,11 @@ async function runRsync(rsyncOptions: {
 
   await fs.mkdir(dstPath, { recursive: true })
 
-  const command = 'rsync'
-  const args: string[] = []
-  if (options.delete) {
-    args.push('--delete')
-  }
-  for (const exclude of options.exclude) {
-    args.push(`--exclude=${exclude}`)
-  }
-  args.push('-rlptgoAXH')
-  args.push('--partial')
-  args.push('--inplace')
-  args.push('--timeout=300')
-  args.push('--info=progress2')
-  // --no-inc-recursive's full pre-scan times out large backups.
-  args.push(srcPath)
-  args.push(dstPath)
-  const spawned = child_process.spawn(command, args, { detached: true })
+  const spawned = child_process.spawn(
+    'rsync',
+    rsyncArgs(srcPath, dstPath, options),
+    { detached: true },
+  )
   let percentage = 0.0
   spawned.stdout.on('data', (data: unknown) => {
     const lines = String(data).replace(/\r/g, '\n').split('\n')

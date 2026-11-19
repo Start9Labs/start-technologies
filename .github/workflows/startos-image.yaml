@@ -168,6 +168,16 @@ jobs:
         run: make start-os-img
         if: ${{ inputs.platform == 'raspberrypi' }}
 
+      - name: Archive kernel backport packages
+        uses: actions/upload-artifact@v7
+        if: ${{ inputs.platform == 'x86_64' || inputs.platform == 'aarch64' }}
+        with:
+          name: ${{ inputs.platform }}.kernel-backports
+          path: results/kernel-backports/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
       # Images are already compressed, so the artifacts are stored as-is.
       - uses: actions/upload-artifact@v7
         with:

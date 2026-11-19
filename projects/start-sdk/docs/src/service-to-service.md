@@ -67,7 +67,7 @@ When a dependency [retires](interfaces.md#retiring-a-host-or-binding) the host o
 
 ### Reaching a gated dependency
 
-A binding with [`addSsl.auth`](interfaces.md#authenticating-at-the-proxy) challenges its bridge address like any other, so dialing it without a credential gets `401`. A dependency that [admits dependents](interfaces.md#admitting-dependent-services) publishes a key at `credentials.json` → `apiKey` on its `public` volume and exports the id of the host that accepts it. Resolve **that** host, not the browser one:
+A binding with [`proxy.auth`](interfaces.md#authenticating-at-the-proxy) challenges its bridge address like any other, so dialing it without a credential gets `401`. A dependency that [admits dependents](interfaces.md#admitting-dependent-services) publishes a key at `credentials.json` → `apiKey` on its `public` volume and exports the id of the host that accepts it. Resolve **that** host, not the browser one:
 
 ```typescript
 import { apiKeyHostId, apiPort } from 'llama-cpp-startos/startos/utils'
