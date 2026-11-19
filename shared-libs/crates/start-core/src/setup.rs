@@ -7,6 +7,7 @@ use color_eyre::eyre::eyre;
 use const_format::formatcp;
 use itertools::Itertools;
 use josekit::jwk::Jwk;
+use patch_db::ModelExt;
 use patch_db::json_ptr::ROOT;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
@@ -23,7 +24,7 @@ use crate::bins::set_locale;
 use crate::context::rpc::InitRpcContextPhases;
 use crate::context::setup::SetupResult;
 use crate::context::{CliContext, RpcContext, SetupContext};
-use crate::db::model::Database;
+use crate::db::model::{Database, DatabaseModel};
 use crate::disk::REPAIR_DISK_PATH;
 use crate::disk::fsck::RepairStrategy;
 use crate::disk::main::{DEFAULT_PASSWORD, ImportMode};
@@ -1142,6 +1143,20 @@ async fn recover(
     .await
 }
 
+/// New-volume copies cannot inherit source-volume keyslot authority.
+fn reset_transferred_volume_authority(db: &mut DatabaseModel) -> Result<(), Error> {
+    let private = db.as_private_mut();
+    private.as_luks_credentials_mut().ser(&None)?;
+    if let Some(enrollment) = private
+        .as_fde_enrollment_mut()
+        .as_value_mut()
+        .as_object_mut()
+    {
+        enrollment.remove("administrator");
+    }
+    Ok(())
+}
+
 #[instrument(skip_all)]
 async fn migrate(
     ctx: &SetupContext,
@@ -1230,6 +1245,10 @@ async fn migrate(
                 }
             } => res,
         }
+        let db = TypedPatchDb::<Database>::load_unchecked(ctx.db().await?);
+        let _secret_memory = crate::fde::memory::protect_authorities(&db.peek().await)?;
+        db.mutate(reset_transferred_volume_authority).await.result?;
+        drop(db);
         Command::new("sync").invoke(ErrorKind::Filesystem).await?;
         Ok::<_, Error>(())
     }
@@ -1265,6 +1284,10 @@ async fn migrate(
         rpc_ctx,
     ))
 }
+
+#[cfg(test)]
+#[path = "setup_transfer_tests.rs"]
+mod transfer_tests;
 
 pub async fn set_language(
     ctx: SetupContext,
