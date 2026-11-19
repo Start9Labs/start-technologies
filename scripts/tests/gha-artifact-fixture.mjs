@@ -12,9 +12,10 @@ export function artifactFixture(t, runs) {
   f.write('runs.json', JSON.stringify(runs))
   f.write('gh.log', '')
   f.write('downloads.log', '')
+  f.nodeExecutable('sleep', '')
   f.nodeExecutable(
     'gh',
-    `import { appendFileSync, readFileSync } from 'node:fs'
+    `import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 const root = ${JSON.stringify(f.root)}
 const runs = JSON.parse(readFileSync(root + '/runs.json'))
@@ -31,7 +32,16 @@ const newestFirst = (a, b) =>
   b.created_at.localeCompare(a.created_at) || b.workflow_run.id - a.workflow_run.id
 if (args[0] === 'api') {
   const url = args.find(arg => arg.startsWith('repos/'))
-  if (process.env.GH_FAIL_MATCH && url.includes(process.env.GH_FAIL_MATCH)) process.exit(17)
+  if (process.env.GH_FAIL_MATCH && url.includes(process.env.GH_FAIL_MATCH)) {
+    // GH_FAIL_TIMES bounds the failures, shared across calls through a counter file.
+    const limit = Number(process.env.GH_FAIL_TIMES ?? Infinity)
+    const counter = root + '/gh-failures'
+    const failed = existsSync(counter) ? Number(readFileSync(counter, 'utf8')) : 0
+    if (failed < limit) {
+      writeFileSync(counter, String(failed + 1))
+      process.exit(17)
+    }
+  }
   const page = Number(new URL('https://x/' + url).searchParams.get('page') ?? 1)
   let response
   const workflow = url.match(/workflows\\/([^/]+)\\/runs/)
