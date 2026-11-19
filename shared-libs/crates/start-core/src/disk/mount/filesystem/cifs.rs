@@ -292,7 +292,8 @@ mod tests {
             fixture.path(),
             crate::lxc::slot::ContainerSlot::new(0).unwrap().idmap(),
         )
-        .await.unwrap();
+        .await
+        .unwrap();
         let guid = Guid::new();
         let namespace =
             std::sync::Arc::new(

@@ -175,8 +175,8 @@ impl PersistentContainer {
                 lxc_container.rootfs_dir(),
                 lxc_container.slot().idmap(),
             )
-                .boxed()
-                .await?
+            .boxed()
+            .await?
         } else {
             Default::default()
         };

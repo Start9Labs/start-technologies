@@ -4,11 +4,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+use crate::disk::mount::filesystem::idmapped::IdMap;
 use crate::disk::mount::filesystem::syscall::{
     DetachedMount, MountNamespace, open_beneath, open_tree_attr_idmap_fd, open_tree_clone_fd,
     same_mount, unmount_fd, userns_fd_from_idmap,
 };
-use crate::disk::mount::filesystem::idmapped::IdMap;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;

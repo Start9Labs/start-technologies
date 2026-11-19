@@ -196,10 +196,14 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         );
     }
     let first_mounts = Arc::new(tokio::sync::Mutex::new(
-        SharedVolumeMounts::new(first.rootfs_dir(), first.slot().idmap()).await.unwrap(),
+        SharedVolumeMounts::new(first.rootfs_dir(), first.slot().idmap())
+            .await
+            .unwrap(),
     ));
     let second_mounts = Arc::new(tokio::sync::Mutex::new(
-        SharedVolumeMounts::new(second.rootfs_dir(), second.slot().idmap()).await.unwrap(),
+        SharedVolumeMounts::new(second.rootfs_dir(), second.slot().idmap())
+            .await
+            .unwrap(),
     ));
     let registry = crate::shared_volumes::access::SharedVolumeAccess::default();
     let first_package = "first".parse().unwrap();
