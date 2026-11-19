@@ -28,12 +28,21 @@ impl AttachedMount {
         destination: &OwnedFd,
         readonly: bool,
         namespace: Arc<MountNamespace>,
-        userns: Option<&OwnedFd>,
     ) -> Result<Self, Error> {
-        let detached = DetachedMount::from_fd(match userns {
-            Some(userns) => open_tree_attr_idmap_fd(source.as_fd(), userns.as_fd())?,
-            None => open_tree_clone_fd(source.as_fd(), false)?,
-        });
+        Self::attach(
+            DetachedMount::from_fd(open_tree_clone_fd(source.as_fd(), false)?),
+            destination,
+            readonly,
+            namespace,
+        )
+    }
+
+    fn attach(
+        detached: DetachedMount,
+        destination: &OwnedFd,
+        readonly: bool,
+        namespace: Arc<MountNamespace>,
+    ) -> Result<Self, Error> {
         detached.set_private()?;
         detached.set_readonly(readonly)?;
         let mount = namespace.run(|| detached.attach_to_fd(destination.as_fd()))?;
@@ -117,6 +126,17 @@ impl PreparedSource {
         self.container_ids
     }
 
+    /// Maps container ids through the consumer container's idmap.
+    async fn clone_for_attachment(&self, idmap: IdMap) -> Result<DetachedMount, Error> {
+        let mount = if self.container_ids {
+            let userns = userns_fd_from_idmap(&[idmap], None).await?;
+            open_tree_attr_idmap_fd(self.directory.as_fd(), userns.as_fd())?
+        } else {
+            open_tree_clone_fd(self.directory.as_fd(), false)?
+        };
+        Ok(DetachedMount::from_fd(mount))
+    }
+
     pub async fn open(guard: TmpMountGuard, subpath: Option<PathBuf>) -> Result<Self, Error> {
         tokio::task::spawn_blocking(move || {
             let directory =
@@ -195,6 +215,18 @@ impl StagedMount {
     }
 }
 
+#[derive(Debug)]
+pub(crate) enum MountSourceError {
+    Source(Error),
+    Attachment(Error),
+}
+
+impl From<Error> for MountSourceError {
+    fn from(error: Error) -> Self {
+        Self::Attachment(error)
+    }
+}
+
 /// Revocation detaches SDK-managed targets and stages, including manually managed subcontainers.
 /// Independent aliases and open handles remain outside this best-effort boundary.
 #[derive(Default)]
@@ -217,13 +249,13 @@ impl SharedVolumeMounts {
         tokio::fs::create_dir_all(&target).await?;
         let destination = open_beneath(rootfs, Path::new(SERVICE_ROOT))?;
         let namespace = Arc::new(MountNamespace::for_process(std::process::id())?);
-        let mount = AttachedMount::bind(&source, &destination, false, namespace.clone(), None)?;
+        let mount = AttachedMount::bind(&source, &destination, false, namespace.clone())?;
         let directory = PinnedDirectory::open(&target, Path::new(""))?;
         let empty = directory.path().join("unavailable");
         tokio::fs::create_dir(&empty).await?;
         tokio::fs::set_permissions(&empty, std::fs::Permissions::from_mode(0)).await?;
         let empty = open_beneath(directory.path(), Path::new("unavailable"))?;
-        let unavailable = AttachedMount::bind(&empty, &empty, true, namespace, None)?;
+        let unavailable = AttachedMount::bind(&empty, &empty, true, namespace)?;
         Ok(Self {
             blocked: false,
             idmap: Some(idmap),
@@ -306,7 +338,7 @@ impl SharedVolumeMounts {
         source: PreparedSource,
         readonly: bool,
         service_root: &Path,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MountSourceError> {
         self.check_allowed()?;
         let root = self
             .root
@@ -314,22 +346,22 @@ impl SharedVolumeMounts {
             .or_not_found("shared-volume staging root")?;
         let key = (guid.clone(), confined_relative(location)?);
         let slot = self.slots.get_mut(&key).or_not_found("volume mountpoint")?;
+        let idmap = self.idmap.or_not_found("container idmap")?;
+        let detached = source
+            .clone_for_attachment(idmap)
+            .await
+            .map_err(MountSourceError::Source)?;
         let relative = Path::new(id.as_ref()).join(Guid::new().to_string());
         let path = root.directory.path().join(&relative);
-        tokio::fs::create_dir_all(&path).await?;
+        tokio::fs::create_dir_all(&path)
+            .await
+            .with_kind(ErrorKind::Filesystem)?;
         let destination = open_beneath(root.directory.path(), &relative)?;
-        let userns = if source.container_ids {
-            let idmap = self.idmap.or_not_found("container idmap")?;
-            Some(userns_fd_from_idmap(&[idmap], None).await?)
-        } else {
-            None
-        };
-        let mount = AttachedMount::bind(
-            &source.directory,
+        let mount = AttachedMount::attach(
+            detached,
             &destination,
             readonly,
             root._mount.namespace.clone(),
-            userns.as_ref(),
         )?;
         slot.stage = Some(StagedMount {
             id: id.clone(),
