@@ -12,11 +12,11 @@ A fresh install starts one registry, and StartOS surfaces two setup tasks under 
 
 Run the **Manage Registries** action to name the registry (1–32 characters). This is what users see when they browse your registry from another StartOS device. The same action can add more registries to the service, each with its own catalog, signers, and addresses.
 
-Then run **Configure Registry** to set an optional icon and description for it. The description appears above the registry's services and may use markdown.
+Then run **Configure Registry**, choose the registry by name, and set an optional icon and description for it. The description appears above the registry's services and may use markdown.
 
 Use the description to identify who runs the registry, how to contact them, what packages it carries, and what support users can expect. Include a link to your package-signing public keys and instructions for verifying them.
 
-The registry's hostnames, listen address, Tor proxy, and data directory are managed by StartOS automatically — you don't configure them by hand. As the service's network addresses change (e.g. you add a clearnet domain to the API interface), the configured hostnames update to match.
+The registry's hostnames, listen address, Tor proxy, and data directory are managed by StartOS automatically — you don't configure them by hand. As the service's network addresses change (e.g. you add a clearnet domain to the registry's **Web API — _registry name_** interface), the configured hostnames update to match.
 
 ### Publish signing keys
 
@@ -44,7 +44,7 @@ it added. Manage package trust under System → Trusted Keys; see
 
 ## 3. Add the first administrator
 
-Run **Manage Signers** and add an entry to the registry's signer list. Give it a label and paste your public key into **Public Keys**: a PEM-encoded Ed25519 public key, or a complete armored GPG export of an Ed25519 key. Contacts (email addresses, Matrix usernames, or URLs) are optional. Turn on **Admin**. Admins can manage signers, publish packages, register OS versions, and edit categories.
+Run **Manage Signers**, expand the section bearing the registry's name, and add an entry to its **Signers** list. Give it a label and paste your public key into **Public Keys**: a PEM-encoded Ed25519 public key, or a complete armored GPG export of an Ed25519 key. Contacts (email addresses, Matrix usernames, or URLs) are optional. Turn on **Admin**. Admins can manage signers, publish packages, register OS versions, and edit categories.
 
 **Offer for Trust**, on the same entry, is separate from **Admin**: it offers the signer's keys to users who connect the registry. See [Offering signing keys to users](host-registry-administration.md#offering-signing-keys-to-users) before turning it on.
 
@@ -63,7 +63,7 @@ To keep the key in gpg-agent instead, skip `init-key` and point `start-cli` at a
 
 ## 4. Point `start-cli` at the registry
 
-All registry operations go through `start-cli registry` (or `start-cli s9pk publish` for uploading packages). Pass the registry's URL with `--registry`. It is a top-level flag, so it goes before the subcommand:
+All registry operations go through `start-cli registry` (or `start-cli s9pk publish` for uploading packages). Pass the registry's URL with `--registry`, using an address listed on its **Web API — _registry name_** interface: authenticated requests are signed for that hostname. It is a top-level flag, so it goes before the subcommand:
 
 ```sh
 start-cli --registry https://my-registry.example.com registry index
@@ -87,6 +87,6 @@ start-cli registry index
 start-cli registry admin list
 ```
 
-The first lists registry metadata and packages (empty on a fresh install). The second should show the administrator you added in step 3. If either fails, check that the service is running, the API interface is reachable from your workstation, and your identity key matches the public key you registered.
+The first lists registry metadata and packages (empty on a fresh install). The second should show the administrator you added in step 3. If either fails, check that the service is running, the registry's **Web API — _registry name_** interface is reachable from your workstation, and your identity key matches the public key you registered.
 
 You're now ready to add signers, publish packages, and register StartOS versions. Before inviting users to connect, [select which signing keys your registry offers](host-registry-administration.md#offering-signing-keys-to-users). See [Administration](host-registry-administration.md) for these operations.
