@@ -129,10 +129,13 @@ expected_call_permissions = {
         ('packages', 'write'),
         ('actions', 'write'),
     },
-    'start-wrt': {('contents', 'read')},
+    'start-wrt': {('contents', 'read'), ('pull-requests', 'read'), ('actions', 'read')},
 }
 for job, expected in expected_call_permissions.items():
     assert job_permissions(listener, job) == expected, job
+
+start_wrt = (WORKFLOWS / 'start-wrt.yaml').read_text()
+assert job_permissions(start_wrt, 'changes') == expected_call_permissions['start-wrt']
 
 products = (WORKFLOWS / 'build-products.yaml').read_text()
 for job in ('build', 'cli-macos'):

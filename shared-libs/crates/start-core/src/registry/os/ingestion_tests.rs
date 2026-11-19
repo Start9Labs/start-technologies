@@ -414,7 +414,7 @@ async fn os_version_edits_preserve_omitted_metadata_assets_and_signers() {
             &ctx.index_mirrors,
             &ctx.db,
             None,
-            wire,
+            wire.into(),
             &ctx.datadir,
         )
         .await

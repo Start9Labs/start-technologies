@@ -599,11 +599,28 @@ pub struct AddSubnetParams {
 rpc_toolkit::reflect_ts!(AddSubnetParams);
 rpc_toolkit::ts_export!(AddSubnetParams, namespaces = ["tunnel"]);
 
+const MAX_NAME_LEN: usize = 64;
+
+/// A device name becomes a comment line in its WireGuard config.
+fn validate_name(name: &str) -> Result<(), Error> {
+    if name.trim().is_empty()
+        || name.chars().any(char::is_control)
+        || name.chars().count() > MAX_NAME_LEN
+    {
+        return Err(Error::new(
+            eyre!(t!("tunnel.api.invalid-name", max = MAX_NAME_LEN)),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    Ok(())
+}
+
 pub async fn add_subnet(
     ctx: TunnelContext,
     AddSubnetParams { name }: AddSubnetParams,
     SubnetParams { mut subnet }: SubnetParams,
 ) -> Result<(), Error> {
+    validate_name(&name)?;
     if subnet.prefix_len() > 24 {
         return Err(Error::new(
             eyre!("invalid subnet"),
@@ -1009,6 +1026,7 @@ pub async fn add_device(
         kind,
     }: AddDeviceParams,
 ) -> Result<(), Error> {
+    validate_name(&name)?;
     let server = ctx
         .db
         .mutate(|db| {
@@ -1997,6 +2015,29 @@ pub async fn list_http_redirects(ctx: TunnelContext) -> Result<Vec<HttpRedirectS
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_reject_control_characters_blanks_and_overlong_input() {
+        for name in [
+            "Phone",
+            "My Phone",
+            "Téléphone",
+            "x".repeat(MAX_NAME_LEN).as_str(),
+        ] {
+            assert!(validate_name(name).is_ok(), "{name:?}");
+        }
+        for name in [
+            "",
+            "   ",
+            "Phone\nPostUp = id",
+            "Phone\rPostUp = id",
+            "Phone\u{0}",
+            "Phone\u{85}",
+            "x".repeat(MAX_NAME_LEN + 1).as_str(),
+        ] {
+            assert!(validate_name(name).is_err(), "{name:?}");
+        }
+    }
 
     fn config_fixture(
         device_wan: Option<&str>,

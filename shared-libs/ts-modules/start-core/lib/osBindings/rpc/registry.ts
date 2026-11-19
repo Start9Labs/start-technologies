@@ -194,6 +194,9 @@ export type RemoveVersionParamsInput = z.input<
  * JSON Patch 'replace' operation representation
  */
 export type ReplaceOperation = z.output<typeof schemas.ReplaceOperation>
+export type SetDefaultLocaleParamsInput = z.input<
+  typeof schemas.SetDefaultLocaleParams
+>
 export type SetNameParamsInput = z.input<typeof schemas.SetNameParams>
 
 /**
