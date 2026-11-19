@@ -79,20 +79,35 @@ pub async fn check_for_firmware_update() -> Result<Option<Firmware>, Error> {
         return Ok(None);
     }
 
-    for firmware in serde_json::from_str::<Vec<Firmware>>(
+    let firmwares = serde_json::from_str::<Vec<Firmware>>(
         &tokio::fs::read_to_string("/usr/lib/startos/firmware.json").await?,
     )
-    .with_kind(ErrorKind::Deserialization)?
-    {
+    .with_kind(ErrorKind::Deserialization)?;
+
+    Ok(find_firmware_update(
+        firmwares,
+        &PLATFORM,
+        &system_product_name,
+        &bios_version,
+    ))
+}
+
+fn find_firmware_update(
+    firmwares: Vec<Firmware>,
+    platform: &str,
+    system_product_name: &str,
+    bios_version: &str,
+) -> Option<Firmware> {
+    firmwares.into_iter().find(|firmware| {
         let matches_product_name = firmware
             .system_product_name
             .as_ref()
-            .map_or(true, |spn| spn == &system_product_name);
+            .map_or(true, |spn| spn == system_product_name);
         let matches_bios_version = firmware
             .bios_version
             .as_ref()
             .map_or(Some(true), |bv| {
-                let mut semver_str = bios_version.as_str();
+                let mut semver_str = bios_version;
                 if let Some(prefix) = &bv.semver_prefix {
                     semver_str = semver_str.strip_prefix(prefix)?;
                 }
@@ -113,12 +128,8 @@ pub async fn check_for_firmware_update() -> Result<Option<Firmware>, Error> {
                 )
             })
             .unwrap_or(false);
-        if firmware.platform.contains(&*PLATFORM) && matches_product_name && matches_bios_version {
-            return Ok(Some(firmware));
-        }
-    }
-
-    Ok(None)
+        firmware.platform.contains(platform) && matches_product_name && matches_bios_version
+    })
 }
 
 /// We wanted to make sure during every init
@@ -156,4 +167,32 @@ pub async fn update_firmware(firmware: Firmware) -> Result<(), Error> {
         .invoke(ErrorKind::Firmware)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shipped_update(bios_version: &str) -> Option<String> {
+        let firmwares: Vec<Firmware> = serde_json::from_str(include_str!(
+            "../../../../projects/start-os/build/lib/firmware.json"
+        ))
+        .unwrap();
+        find_firmware_update(firmwares, "x86_64", "librem_mini_v2", bios_version)
+            .map(|firmware| firmware.id)
+    }
+
+    #[test]
+    fn server_pure_updates_to_latest_pureboot() {
+        let latest = Some("pureboot-librem_mini_v2-basic_usb_autoboot-start9-30.1.2".to_owned());
+        assert_eq!(shipped_update("PureBoot-Release-28"), latest);
+        assert_eq!(shipped_update("PureBoot-Release-29"), latest);
+        assert_eq!(shipped_update("PureBoot-start9-30.1.1"), latest);
+    }
+
+    #[test]
+    fn server_pure_on_latest_pureboot_is_left_alone() {
+        assert_eq!(shipped_update("PureBoot-start9-30.1.2"), None);
+        assert_eq!(shipped_update("PureBoot-Release-31"), None);
+    }
 }
