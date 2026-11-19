@@ -719,6 +719,7 @@ impl RpcContext {
             &mut optimize_storage,
         )
         .await?;
+        crate::version::prepare_shared_volume_ids(self).await?;
         optimize_storage.complete();
 
         init_services.start();
@@ -1005,7 +1006,7 @@ mod tests {
 
     #[test]
     fn only_onions_go_through_tor() {
-        let tor = format!("socks5h://{TOR_SOCKS}").parse::<Url>().unwrap();
+        let tor = "socks5h://tor.startos:9050".parse::<Url>().unwrap();
         assert_eq!(
             ProxyRoute::Tor
                 .proxy_for("registryxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.onion"),

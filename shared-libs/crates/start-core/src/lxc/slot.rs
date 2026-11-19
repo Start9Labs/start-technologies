@@ -143,7 +143,7 @@ fn rebase_legacy_id(id: u32, base: u32) -> Option<u32> {
         .then(|| id - LEGACY_HOST_ROOT + base)
 }
 
-/// Moves owners in the legacy shared range to the same container ids at the base.
+/// Moves owners and named POSIX ACL identities into the same container ids at the base.
 ///
 /// Stays on one filesystem and preserves set-id bits. A missing path is left alone.
 pub async fn rebase_legacy_ids(path: std::path::PathBuf, base: u32) -> Result<(), Error> {
@@ -175,6 +175,16 @@ fn rebase_legacy_tree(root: &std::path::Path, base: u32) -> std::io::Result<()> 
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode & 0o7777))?;
             }
         }
+        #[cfg(target_os = "linux")]
+        if !metadata.is_symlink() {
+            for attribute in ["system.posix_acl_access", "system.posix_acl_default"] {
+                if let Some(mut acl) = xattr::get(&path, attribute)? {
+                    if rebase_acl_ids(&mut acl, base)? {
+                        xattr::set(&path, attribute, &acl)?;
+                    }
+                }
+            }
+        }
         if metadata.is_dir() {
             for entry in std::fs::read_dir(&path)? {
                 pending.push(entry?.path());
@@ -182,6 +192,26 @@ fn rebase_legacy_tree(root: &std::path::Path, base: u32) -> std::io::Result<()> 
         }
     }
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn rebase_acl_ids(acl: &mut [u8], base: u32) -> std::io::Result<bool> {
+    // Linux POSIX ACL xattrs use version 2 and little-endian eight-byte entries.
+    if acl.len() < 4 || acl[..4] != 2u32.to_le_bytes() || (acl.len() - 4) % 8 != 0 {
+        return Err(std::io::ErrorKind::InvalidData.into());
+    }
+    let mut changed = false;
+    for entry in acl[4..].chunks_exact_mut(8) {
+        let tag = u16::from_le_bytes(entry[..2].try_into().unwrap());
+        if matches!(tag, 0x02 | 0x08) {
+            let id = u32::from_le_bytes(entry[4..].try_into().unwrap());
+            if let Some(id) = rebase_legacy_id(id, base) {
+                entry[4..].copy_from_slice(&id.to_le_bytes());
+                changed = true;
+            }
+        }
+    }
+    Ok(changed)
 }
 
 fn service_limit() -> Error {
@@ -303,6 +333,49 @@ mod test {
         assert_eq!(owner(&foreign), (42, 42));
         rebase_legacy_ids(root.path().to_owned(), 0).await.unwrap();
         assert_eq!(owner(&legacy), (1000, 999));
+    }
+
+    #[cfg(target_os = "linux")]
+    const LEGACY_ACL: [u8; 60] = [
+        2, 0, 0, 0, 1, 0, 7, 0, 255, 255, 255, 255, 2, 0, 4, 0, 42, 0, 0, 0, 2, 0, 4, 0, 136, 138,
+        1, 0, 4, 0, 0, 0, 255, 255, 255, 255, 8, 0, 6, 0, 135, 138, 1, 0, 16, 0, 6, 0, 255, 255,
+        255, 255, 32, 0, 0, 0, 255, 255, 255, 255,
+    ];
+
+    #[cfg(target_os = "linux")]
+    fn rebased_acl() -> [u8; 60] {
+        let mut expected = LEGACY_ACL;
+        expected[24..28].copy_from_slice(&1000u32.to_le_bytes());
+        expected[40..44].copy_from_slice(&999u32.to_le_bytes());
+        expected
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn named_acl_entries_in_the_legacy_range_move_to_the_base() {
+        let mut acl = LEGACY_ACL;
+        assert!(rebase_acl_ids(&mut acl, 0).unwrap());
+        assert_eq!(acl, rebased_acl());
+        assert!(!rebase_acl_ids(&mut acl, 0).unwrap());
+        assert!(rebase_acl_ids(&mut [1, 0, 0, 0], 0).is_err());
+        assert!(rebase_acl_ids(&mut LEGACY_ACL[..59].to_vec(), 0).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn legacy_access_and_default_acls_keep_their_container_identities() {
+        let root = tempfile::tempdir().unwrap();
+        for attribute in ["system.posix_acl_access", "system.posix_acl_default"] {
+            if let Err(error) = xattr::set(root.path(), attribute, &LEGACY_ACL) {
+                eprintln!("skipped: legacy ids are unmapped or ACLs unsupported here ({error})");
+                return;
+            }
+        }
+        rebase_legacy_ids(root.path().to_owned(), 0).await.unwrap();
+        for attribute in ["system.posix_acl_access", "system.posix_acl_default"] {
+            let rebased = xattr::get(root.path(), attribute).unwrap().unwrap();
+            assert_eq!(rebased, rebased_acl());
+        }
     }
 
     #[test]

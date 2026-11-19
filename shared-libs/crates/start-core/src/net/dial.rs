@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::future::Future;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use fast_socks5::client::{Config as ClientConfig, Socks5Stream};
@@ -9,12 +9,11 @@ use futures::{Stream, StreamExt};
 use tokio::net::TcpStream;
 use tokio::time::Instant;
 
-use crate::HOST_IP;
 use crate::net::mdns::resolve_mdns;
 use crate::prelude::*;
 
-/// Tor's SOCKS proxy, which the user-installable `tor` service binds on the container network.
-pub const TOR_SOCKS: SocketAddr = SocketAddr::V4(SocketAddrV4::new(HOST_IP, 9050));
+/// Tor's internal SOCKS endpoint, independent of its reassigned bridge port.
+pub const TOR_SOCKS: &str = "tor.startos:9050";
 
 const CONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(250);
 const RESOLUTION_DELAY: Duration = Duration::from_millis(50);
@@ -193,7 +192,7 @@ impl reqwest::dns::Resolve for OsResolver {
 
 #[cfg(test)]
 mod test {
-    use std::net::Ipv6Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
 
     use futures::FutureExt;
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};

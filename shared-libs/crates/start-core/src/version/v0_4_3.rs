@@ -35,21 +35,6 @@ impl VersionT for Version {
         assign_container_slots(db)?;
         Ok(Value::Null)
     }
-    async fn post_up(self, ctx: &RpcContext, _input: Value) -> Result<(), Error> {
-        for (id, volume) in ctx
-            .db
-            .peek()
-            .await
-            .as_public()
-            .as_shared_volumes()
-            .as_entries()?
-        {
-            if volume.as_source().de()? == SharedVolumeSource::Local {
-                rebase_legacy_ids(local_path(crate::PACKAGE_DATA, &id), 0).await?;
-            }
-        }
-        Ok(())
-    }
     fn down(self, db: &mut Value) -> Result<(), Error> {
         if let Some(packages) = package_data(db) {
             for (_, package) in packages.iter_mut() {
@@ -60,6 +45,26 @@ impl VersionT for Version {
         }
         Ok(())
     }
+}
+
+/// Requires quiescent storage, before shared-volume observers or services start.
+pub(crate) async fn prepare_shared_volume_ids(ctx: &RpcContext) -> Result<(), Error> {
+    let db = ctx.db.peek().await;
+    if !db
+        .as_public()
+        .as_server_info()
+        .as_post_init_migration_todos()
+        .de()?
+        .contains_key(&Version.semver())
+    {
+        return Ok(());
+    }
+    for (id, volume) in db.as_public().as_shared_volumes().as_entries()? {
+        if volume.as_source().de()? == SharedVolumeSource::Local {
+            rebase_legacy_ids(local_path(crate::PACKAGE_DATA, &id), 0).await?;
+        }
+    }
+    Ok(())
 }
 
 fn package_data(db: &mut Value) -> Option<&mut imbl_value::InOMap<InternedString, Value>> {

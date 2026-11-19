@@ -63,8 +63,8 @@ for protocol in "${protocols[@]}"; do
             fi
             # DNAT for locally-originated (hairpin from the host itself).
             echo "add rule ip6 startos output ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
-            # Allow new forwarded connections to the container.
-            echo "add rule ip6 startos forward ip6 daddr $dip $PROTO th dport $dport ct state new accept comment \"$TAG\""
+            # Container ports accept DNAT traffic, never direct container-address connections.
+            echo "add rule ip6 startos forward ip6 daddr $dip $PROTO th dport $dport ct state new ct status dnat accept comment \"$TAG\""
             # Masquerade hairpin replies so they reverse through this host. A target
             # the host holds answers locally and sees the client's own source.
             echo "add rule ip6 startos postrouting fib saddr type local fib daddr type != local ct original ip6 daddr $sip ip6 daddr $dip $PROTO th dport $dport masquerade comment \"$TAG\""

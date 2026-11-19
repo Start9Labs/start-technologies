@@ -37,8 +37,25 @@ use crate::util::rpc_client::UnixRpcClient;
 use crate::util::{FromStrParser, Invoke, new_guid};
 use crate::{InvalidId, PackageId};
 
-fn config_text(guid: &str, lang: &str, slot: ContainerSlot, userns: &Path) -> String {
+fn config_text(
+    guid: &str,
+    lang: &str,
+    slot: ContainerSlot,
+    userns: &Path,
+    shared_netns: Option<&Path>,
+) -> String {
     let idmap = slot.idmap();
+    let network = match shared_netns {
+        Some(path) => format!("lxc.namespace.share.net = {}", path.display()),
+        None => format!(
+            include_str!("./network.template"),
+            veth = slot.veth(),
+            ipv4 = slot.ipv4(),
+            gateway = slot::HOST_IP,
+            ipv6 = slot.ipv6(),
+            gateway_v6 = slot::HOST_IPV6,
+        ),
+    };
     format!(
         include_str!("./config.template"),
         guid = guid,
@@ -47,11 +64,7 @@ fn config_text(guid: &str, lang: &str, slot: ContainerSlot, userns: &Path) -> St
         id_to = idmap.to_id,
         id_count = idmap.range,
         userns = userns.display(),
-        veth = slot.veth(),
-        ipv4 = slot.ipv4(),
-        gateway = slot::HOST_IP,
-        ipv6 = slot.ipv6(),
-        gateway_v6 = slot::HOST_IPV6,
+        network = network,
     )
 }
 
@@ -145,12 +158,13 @@ impl LxcManager {
         self: &Arc<Self>,
         log_mount: Option<&Path>,
         slot: ContainerSlot,
+        namespace_owner: Option<&LxcContainer>,
         config: LxcConfig,
     ) -> Result<LxcContainer, Error> {
         let mut guard = self.containers.lock().await;
         let container = tokio::time::timeout(
             Duration::from_secs(30),
-            LxcContainer::new(self, log_mount, slot, config),
+            LxcContainer::new(self, log_mount, slot, namespace_owner, config),
         )
         .await
         .with_kind(ErrorKind::Timeout)??;
@@ -260,6 +274,7 @@ impl LxcContainer {
         manager: &Arc<LxcManager>,
         log_mount: Option<&Path>,
         slot: ContainerSlot,
+        namespace_owner: Option<&LxcContainer>,
         config: LxcConfig,
     ) -> Result<Self, Error> {
         let guid = new_guid();
@@ -269,13 +284,22 @@ impl LxcContainer {
         tokio::fs::create_dir_all(&container_dir).await?;
         let idmap = slot.idmap();
         let root = slot.host_root();
-        let userns = userns_fd_from_idmap(&[idmap], Some(root)).await?;
+        let (userns, shared_netns) = match namespace_owner {
+            Some(owner) => (
+                owner._userns.try_clone()?,
+                Some(std::path::PathBuf::from(format!(
+                    "/proc/{}/ns/net",
+                    owner.pid().await?
+                ))),
+            ),
+            None => (userns_fd_from_idmap(&[idmap], Some(root)).await?, None),
+        };
         let userns_path = std::path::PathBuf::from(format!(
             "/proc/{}/fd/{}",
             std::process::id(),
             userns.as_raw_fd()
         ));
-        let config_str = config_text(&guid, &lang, slot, &userns_path);
+        let config_str = config_text(&guid, &lang, slot, &userns_path, shared_netns.as_deref());
         tokio::fs::write(container_dir.join("config"), config_str).await?;
         let rootfs_dir = container_dir.join("rootfs");
         let rootfs = OverlayGuard::mount(
@@ -834,7 +858,13 @@ mod test {
     #[test]
     fn config_renders_the_slot_identity() {
         let slot = ContainerSlot::new(2).unwrap();
-        let config = config_text("test-container", "C.UTF-8", slot, Path::new("/proc/1/fd/7"));
+        let config = config_text(
+            "test-container",
+            "C.UTF-8",
+            slot,
+            Path::new("/proc/1/fd/7"),
+            None,
+        );
         let has = |expected: &str| config.lines().any(|line| line == expected);
         assert!(has("lxc.idmap = u 0 196608 65536"));
         assert!(has("lxc.idmap = g 0 196608 65536"));
@@ -847,6 +877,20 @@ mod test {
         assert!(has("lxc.net.0.ipv6.gateway = fd00:3::1"));
         assert!(!config.contains("lxc.net.0.link"));
         assert!(config.contains("test-container"));
+    }
+
+    #[test]
+    fn shared_networks_do_not_recreate_the_service_veth_or_routes() {
+        let config = config_text(
+            "backup-container",
+            "C.UTF-8",
+            ContainerSlot::new(2).unwrap(),
+            Path::new("/proc/1/fd/7"),
+            Some(Path::new("/proc/42/ns/net")),
+        );
+        assert!(config.contains("lxc.namespace.share.user = /proc/1/fd/7"));
+        assert!(config.contains("lxc.namespace.share.net = /proc/42/ns/net"));
+        assert!(!config.contains("lxc.net."));
     }
 
     const DEV: &[&str] = &[

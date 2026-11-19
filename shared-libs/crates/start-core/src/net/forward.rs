@@ -30,7 +30,6 @@ pub const START9_BRIDGE_IFACE: &str = "lxcbr0";
 /// The host's `ip_local_port_range` ends below this; see `projects/start-os/debian/postinst`.
 const DYNAMIC_PORT_START: u16 = 49152;
 // Held by host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11 forwarding 6010).
-// 9050 stays claimable: the tor service binds it for `net::dial::TOR_SOCKS`.
 const RESTRICTED_PORTS: &[u16] = &[5353, 5355, 5432, 6010];
 
 /// Only a privileged claimant — StartOS itself, which runs as root — may take a

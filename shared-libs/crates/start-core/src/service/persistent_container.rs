@@ -114,7 +114,7 @@ pub struct PersistentContainer {
 impl PersistentContainer {
     #[instrument(skip_all)]
     pub async fn new(ctx: &RpcContext, s9pk: S9pk) -> Result<Self, Error> {
-        let mut container = Self::new_filesystem(ctx, s9pk).await?;
+        let mut container = Self::new_filesystem(ctx, s9pk, None).await?;
         let lxc_container = container
             .lxc_container
             .get()
@@ -129,13 +129,22 @@ impl PersistentContainer {
         Ok(container)
     }
 
-    pub async fn new_backup(ctx: &RpcContext, s9pk: S9pk) -> Result<Self, Error> {
-        let container = Self::new_filesystem(ctx, s9pk).await?;
+    /// Shares the service's user/network namespaces, with separate filesystem and shared mounts.
+    pub async fn new_backup(
+        ctx: &RpcContext,
+        s9pk: S9pk,
+        namespace_owner: &LxcContainer,
+    ) -> Result<Self, Error> {
+        let container = Self::new_filesystem(ctx, s9pk, Some(namespace_owner)).await?;
         container.shared_volumes.lock().await.block();
         Ok(container)
     }
 
-    async fn new_filesystem(ctx: &RpcContext, s9pk: S9pk) -> Result<Self, Error> {
+    async fn new_filesystem(
+        ctx: &RpcContext,
+        s9pk: S9pk,
+        namespace_owner: Option<&LxcContainer>,
+    ) -> Result<Self, Error> {
         let id = &s9pk.as_manifest().id;
         let slot = ctx
             .db
@@ -153,6 +162,7 @@ impl PersistentContainer {
             .create(
                 Some(&Path::new(PACKAGE_DATA).join("logs").join(id)),
                 slot,
+                namespace_owner,
                 LxcConfig {
                     hardware_acceleration: s9pk.manifest.metadata.hardware_acceleration,
                     userspace_filesystems: s9pk.manifest.metadata.userspace_filesystems,

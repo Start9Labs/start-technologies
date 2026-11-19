@@ -25,15 +25,7 @@ lxc.cgroup.dir.container.inner = ns
 lxc.rootfs.path = dir:/var/lib/lxc/{guid}/rootfs
 lxc.uts.name = {guid}
 
-# Network configuration
-lxc.net.0.type = veth
-lxc.net.0.veth.mode = router
-lxc.net.0.veth.pair = {veth}
-lxc.net.0.flags = up
-lxc.net.0.ipv4.address = {ipv4}/32
-lxc.net.0.ipv4.gateway = {gateway}
-lxc.net.0.ipv6.address = {ipv6}/128
-lxc.net.0.ipv6.gateway = {gateway_v6}
+{network}
 
 lxc.rootfs.options = rshared
 
