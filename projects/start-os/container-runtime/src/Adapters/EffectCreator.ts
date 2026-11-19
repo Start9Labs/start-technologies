@@ -280,6 +280,10 @@ export function makeEffects(context: EffectContext): Effects {
         callback: context.callbacks?.addCallback(options.callback) || null,
       })
     },
+    getContainerIp() {
+      // The address never changes; no callback is registered.
+      return rpcRound('get-container-ip', { callback: null })
+    },
     getOutboundGateway(
       ...[options]: Parameters<T.Effects['getOutboundGateway']>
     ) {

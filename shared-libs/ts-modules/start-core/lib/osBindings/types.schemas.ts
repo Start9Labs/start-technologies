@@ -3113,6 +3113,39 @@ export const GetActionInputParams: z.ZodObject<{
 }).meta({
   id: 'GetActionInputParams',
 })
+export const GetContainerIpParams: z.ZodCodec<
+  z.ZodObject<{
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: z.ZodOptional<z.ZodNullable<typeof CallbackId>>
+  }>,
+  z.ZodObject<{
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: z.ZodNullable<typeof CallbackId>
+  }>
+> = /* @__PURE__ */ wire(
+  object({
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: CallbackId.nullable().optional().meta({
+      description: 'Ignored: the address is fixed for the installation.',
+    }),
+  }),
+  object({
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: CallbackId.nullable().meta({
+      description: 'Ignored: the address is fixed for the installation.',
+    }),
+  }),
+).meta({
+  id: 'GetContainerIpParams',
+})
 export const GetHostInfoParams: z.ZodObject<{
   hostId: typeof HostId
   packageId: z.ZodCodec<

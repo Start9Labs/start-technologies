@@ -860,6 +860,10 @@ export type GetActionInputParams = z.output<typeof schemas.GetActionInputParams>
 export type GetActionInputParamsInput = z.input<
   typeof schemas.GetActionInputParams
 >
+export type GetContainerIpParams = z.output<typeof schemas.GetContainerIpParams>
+export type GetContainerIpParamsInput = z.input<
+  typeof schemas.GetContainerIpParams
+>
 export type GetHostInfoParams = z.output<typeof schemas.GetHostInfoParams>
 export type GetHostInfoParamsInput = z.input<typeof schemas.GetHostInfoParams>
 export type GetOutboundGatewayParams = z.output<

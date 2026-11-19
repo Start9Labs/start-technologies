@@ -247,6 +247,10 @@ export type Effects = {
     hostId: HostId
     callback?: () => void
   }): Promise<Host | null>
+  /** Returns the calling service's own container address */
+  getContainerIp(options: {
+    callback?: () => void
+  }): Promise<RPC.RpcReturnType<RPC.Effects, 'get-container-ip'>>
   /** Returns the IP address of StartOS */
   getOsIp(): Promise<string>
   /** Returns the effective outbound gateway for this service */

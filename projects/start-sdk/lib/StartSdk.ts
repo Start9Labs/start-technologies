@@ -54,6 +54,7 @@ import { Mounts } from './mainFn/Mounts'
 import { cooldownTrigger, onceTrigger, statusTrigger } from './trigger'
 import { defaultTrigger } from './trigger/defaultTrigger'
 import {
+  GetContainerIp,
   GetOutboundGateway,
   GetSslCertificate,
   GetSystemSmtp,
@@ -155,6 +156,7 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       | 'getSslCertificate'
       | 'getSystemSmtp'
       | 'getOutboundGateway'
+      | 'getContainerIp'
       | 'getStatus'
       | 'getDataVersion'
       | 'setDataVersion'
@@ -618,6 +620,13 @@ export class StartSdk<Manifest extends T.SDKManifest> {
        */
       getOutboundGateway: <E extends Effects>(effects: E) =>
         new GetOutboundGateway(effects),
+      /**
+       * Get this service's own container address with reactive subscription support.
+       * The address is fixed for the installation.
+       * @param effects - The effects context
+       */
+      getContainerIp: <E extends Effects>(effects: E) =>
+        new GetContainerIp(effects),
       /**
        * Get an SSL certificate for the given hostnames with reactive subscription support.
        * @param effects - The effects context

@@ -1197,6 +1197,39 @@ export const GetActionInputParams: z.ZodObject<{
 }).meta({
   id: 'GetActionInputParams',
 })
+export const GetContainerIpParams: z.ZodCodec<
+  z.ZodObject<{
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: z.ZodOptional<z.ZodNullable<typeof CallbackId>>
+  }>,
+  z.ZodObject<{
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: z.ZodNullable<typeof CallbackId>
+  }>
+> = /* @__PURE__ */ wire(
+  object({
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: CallbackId.nullable().optional().meta({
+      description: 'Ignored: the address is fixed for the installation.',
+    }),
+  }),
+  object({
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: CallbackId.nullable().meta({
+      description: 'Ignored: the address is fixed for the installation.',
+    }),
+  }),
+).meta({
+  id: 'GetContainerIpParams',
+})
 export const GetHostInfoParams: z.ZodObject<{
   hostId: typeof HostId
   packageId: z.ZodCodec<
@@ -3371,6 +3404,12 @@ export const Api = {
     'export-service-interface': {
       _PARAMS: /* @__PURE__ */ ExportServiceInterfaceParams,
       _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
+    },
+    'get-container-ip': {
+      _PARAMS: /* @__PURE__ */ GetContainerIpParams,
+      _RETURN: /* @__PURE__ */ z.string(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },

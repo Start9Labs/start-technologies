@@ -1,3 +1,5 @@
+use std::net::Ipv4Addr;
+
 use imbl::OrdMap;
 use patch_db::TypedDbWatch;
 use patch_db::json_ptr::JsonPointer;
@@ -9,6 +11,44 @@ use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
 use crate::util::Invoke;
 use crate::{GatewayId, PackageId};
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct GetContainerIpParams {
+    /// Ignored: the address is fixed for the installation.
+    callback: Option<CallbackId>,
+    /// Rejected when present: the effect answers only for the calling service.
+    #[serde(default, skip_serializing)]
+    #[visit(ts(skip))]
+    package_id: Option<imbl_value::Value>,
+}
+
+rpc_toolkit::reflect_ts!(GetContainerIpParams);
+rpc_toolkit::ts_export!(GetContainerIpParams, namespaces = [""]);
+
+/// The calling service's own container address.
+pub async fn get_container_ip(
+    context: EffectContext,
+    GetContainerIpParams { package_id, .. }: GetContainerIpParams,
+) -> Result<Ipv4Addr, Error> {
+    if package_id.is_some() {
+        return Err(Error::new(
+            eyre!(
+                "{}",
+                t!("service.effects.net.info.container-ip-is-self-only")
+            ),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    let context = context.deref()?;
+    Ok(context
+        .seed
+        .persistent_container
+        .lxc_container
+        .get()
+        .or_not_found("lxc container")?
+        .ip())
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]

@@ -584,10 +584,11 @@ For unproxied service TLS, StartOS preserves the client source IP when it routes
 **The SANs are the whole contract.** Nothing rewrites the handshake, so the certificate must be valid for every address a client actually dials — there is no proxy to paper over a mismatch:
 
 - `sdk.getOsIp` — the bridge, where other services reach you
+- `sdk.getContainerIp` — the container itself, which StartOS dials when it rewraps your TLS
 - `127.0.0.1` — your own subcontainers, which share the service's network namespace
 - **every address the interface is published at** — LAN IPs, the server's `.local` name, private and public domains, and any onion a plugin has exported
 
-Those two constants are the internal half, and naming only them is the mistake to avoid: an off-box client dialing the LAN address or the `.local` name gets a certificate matching none of them. Take the external half from the **binding**, so it follows the addresses the operator adds and removes:
+Those three constants are the internal half, and naming only them is the mistake to avoid: an off-box client dialing the LAN address or the `.local` name gets a certificate matching none of them. Take the external half from the **binding**, so it follows the addresses the operator adds and removes:
 
 ```typescript
 export const setupCerts = sdk.setupOnInit(async effects => {
@@ -605,7 +606,7 @@ export const setupCerts = sdk.setupOnInit(async effects => {
     )
     .const()
 
-  const hostnames = ['127.0.0.1', await sdk.getOsIp(effects), ...served]
+  const hostnames = [await sdk.getContainerIp(effects).once(), '127.0.0.1', await sdk.getOsIp(effects), ...served]
   const cert = (await sdk.getSslCertificate(effects, hostnames).const()).join('')
   const key = await sdk.getSslKey(effects, { hostnames })
   await writeFile('/media/startos/volumes/main/tls.cert', cert)
@@ -619,7 +620,7 @@ That distinction has teeth because reissuing the certificate restarts the servic
 
 `getSslCertificate` signs an IP the **box itself holds** — one in the container bridge subnet, or an address on one of the server's own gateways. A WAN IPv4 fails the whole call because that address belongs to the router, not to you; an IPv6 GUA is configured on the box and is signed. See [Narrowing the set](main.md#narrowing-the-set) for why that exclusion is a union rather than a two-field `exclude`.
 
-Read the container IP with `.const()` rather than `.once()`: a container that comes back on a new IP must reissue the certificate, or every client dialing the old one fails verification.
+The container IP is fixed for the installation, so `.once()` reads it.
 
 Most daemons read their TLS pair once at startup, so reissuing the file is only half the job — something has to restart the service, or it keeps serving the old certificate against the new address set. Whatever you key that restart on must not blink: a value that momentarily reads empty will restart the daemon for nothing, and if the restart can feed back into the value, it will not converge.
 

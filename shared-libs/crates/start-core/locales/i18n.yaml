@@ -3520,6 +3520,14 @@ service.effects.dependency.volume-missing:
   fr_FR: "le volume %{volume} de %{package} n'existe pas — %{package} est-il installé ?"
   pl_PL: "wolumin %{volume} pakietu %{package} nie istnieje — czy %{package} jest zainstalowany?"
 
+# service/effects/net/info.rs
+service.effects.net.info.container-ip-is-self-only:
+  en_US: "getContainerIp returns the calling service's own address and takes no packageId"
+  de_DE: "getContainerIp gibt die eigene Adresse des aufrufenden Dienstes zurück und akzeptiert keine packageId"
+  es_ES: "getContainerIp devuelve la dirección del propio servicio que llama y no acepta packageId"
+  fr_FR: "getContainerIp renvoie l'adresse du service appelant lui-même et n'accepte pas de packageId"
+  pl_PL: "getContainerIp zwraca adres samej wywołującej usługi i nie przyjmuje packageId"
+
 service.effects.subcontainer.sync.unknown-group:
   en_US: "unknown group: %{group}"
   de_DE: "unbekannte Gruppe: %{group}"
