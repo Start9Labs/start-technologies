@@ -471,6 +471,7 @@ describe('generated effects RPC boundary', () => {
 
   test('requests only its own container address and registers no callback', async () => {
     const callbacks = new CallbackHolder()
+    const addCallback = jest.spyOn(callbacks, 'addCallback')
     const effects = makeEffects({ eventId: null, callbacks })
     reply = { result: '172.16.0.3' }
     await expect(effects.getContainerIp({ callback: jest.fn() })).resolves.toBe(
@@ -478,6 +479,32 @@ describe('generated effects RPC boundary', () => {
     )
     expect(requests[0].method).toBe('get-container-ip')
     expect(requests[0].params).toEqual({ callback: null })
+    expect(addCallback).not.toHaveBeenCalled()
+  })
+
+  test('preserves legacy package selectors for host rejection', async () => {
+    const callbacks = new CallbackHolder()
+    const addCallback = jest.spyOn(callbacks, 'addCallback')
+    const effects = makeEffects({ eventId: null, callbacks })
+    const options = Object.freeze({
+      packageId: 'dependency',
+      callback: jest.fn(),
+    })
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {})
+    reply = { error: { code: 59, message: 'InvalidRequest' } }
+    try {
+      await expect(effects.getContainerIp(options)).rejects.toThrow(
+        'InvalidRequest@get-container-ip',
+      )
+      expect(requests[0].method).toBe('get-container-ip')
+      expect(requests[0].params).toEqual({
+        packageId: 'dependency',
+        callback: null,
+      })
+      expect(addCallback).not.toHaveBeenCalled()
+    } finally {
+      error.mockRestore()
+    }
   })
 
   test('shared-volume listing preserves grants and registers payload-free invalidation', async () => {
