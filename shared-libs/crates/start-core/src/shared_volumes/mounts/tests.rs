@@ -88,7 +88,7 @@ async fn grows(path: &Path, previous: u64) -> u64 {
 
 #[tokio::test]
 #[ignore = "requires a StartOS VM with LXC, root and BTRFS_TEST_VOLUMES_DIR"]
-async fn real_lxc_revocation_kills_independent_aliases_and_locks_readonly_stages() {
+async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_stages() {
     use crate::disk::mount::filesystem::ReadWrite;
     use crate::disk::mount::filesystem::bind::Bind;
     use crate::lxc::{LxcConfig, LxcManager, service_filesystem};
@@ -109,14 +109,22 @@ async fn real_lxc_revocation_kills_independent_aliases_and_locks_readonly_stages
     let manager = Arc::new(LxcManager::new());
     let first = manager.create(None, LxcConfig::default()).await.unwrap();
     let second = manager.create(None, LxcConfig::default()).await.unwrap();
-    let first_control = first.control().clone();
-    let second_control = second.control().clone();
-    let mut first_mounts = SharedVolumeMounts::new(first.rootfs_dir()).await.unwrap();
-    let mut second_mounts = SharedVolumeMounts::new(second.rootfs_dir()).await.unwrap();
+    let first_mounts = Arc::new(tokio::sync::Mutex::new(
+        SharedVolumeMounts::new(first.rootfs_dir()).await.unwrap(),
+    ));
+    let second_mounts = Arc::new(tokio::sync::Mutex::new(
+        SharedVolumeMounts::new(second.rootfs_dir()).await.unwrap(),
+    ));
+    let registry = crate::shared_volumes::access::SharedVolumeAccess::default();
+    let first_package = "first".parse().unwrap();
+    registry.register(&first_package, &first_mounts);
+    registry.register(&"second".parse().unwrap(), &second_mounts);
     let id = SharedVolumeId::new();
     let first_guid = Guid::new();
     let second_guid = Guid::new();
     let first_path = first_mounts
+        .lock()
+        .await
         .stage(
             &first_guid,
             "/alias".into(),
@@ -127,6 +135,8 @@ async fn real_lxc_revocation_kills_independent_aliases_and_locks_readonly_stages
         .await
         .unwrap();
     let second_path = second_mounts
+        .lock()
+        .await
         .stage(
             &second_guid,
             "/alias".into(),
@@ -155,27 +165,94 @@ async fn real_lxc_revocation_kills_independent_aliases_and_locks_readonly_stages
     let before = std::fs::metadata(fixture.path().join("first"))
         .unwrap()
         .len();
-    first_mounts.remove_subcontainer(&first_guid).await.unwrap();
+    let read_stage = first_mounts
+        .lock()
+        .await
+        .stage(
+            &first_guid,
+            "/read".into(),
+            &id,
+            PreparedSource::open(source.clone(), None).await.unwrap(),
+            true,
+        )
+        .await
+        .unwrap();
+    let unrelated = SharedVolumeId::new();
+    let other_stage = first_mounts
+        .lock()
+        .await
+        .stage(
+            &first_guid,
+            "/other".into(),
+            &unrelated,
+            PreparedSource::open(source.clone(), None).await.unwrap(),
+            false,
+        )
+        .await
+        .unwrap();
+    registry
+        .reconcile_grant(
+            &first_package,
+            &id,
+            Some(&crate::shared_volumes::SharedVolumeGrant { readonly: true }),
+        )
+        .await
+        .unwrap();
+    first
+        .command(&[
+            "sh",
+            "-ec",
+            &format!(
+                "test ! -e '{}'; test -r '{}/sentinel'; test -r '{}/sentinel'",
+                first_path.display(),
+                read_stage.display(),
+                other_stage.display(),
+            ),
+        ])
+        .await
+        .unwrap();
     grows(&fixture.path().join("first"), before).await;
-    first.kill_and_wait().await.unwrap();
-    assert!(first_control.is_stopped().unwrap());
-    first_control.kill_and_wait().await.unwrap();
-    let stopped = std::fs::metadata(fixture.path().join("first"))
-        .unwrap()
-        .len();
+    registry
+        .reconcile_grant(&first_package, &id, None)
+        .await
+        .unwrap();
+    first
+        .command(&[
+            "sh",
+            "-ec",
+            &format!(
+                "test ! -e '{}'; test -r '{}/sentinel'",
+                read_stage.display(),
+                other_stage.display(),
+            ),
+        ])
+        .await
+        .unwrap();
+    second
+        .command(&[
+            "sh",
+            "-ec",
+            &format!("test -r '{}/sentinel'", second_path.display()),
+        ])
+        .await
+        .unwrap();
+    registry.remove_volume(&id).await.unwrap();
+    second
+        .command(&[
+            "sh",
+            "-ec",
+            &format!("test ! -e '{}'", second_path.display()),
+        ])
+        .await
+        .unwrap();
     let other = std::fs::metadata(fixture.path().join("second"))
         .unwrap()
         .len();
     grows(&fixture.path().join("second"), other).await;
-    assert_eq!(
-        std::fs::metadata(fixture.path().join("first"))
-            .unwrap()
-            .len(),
-        stopped
-    );
-    assert!(!second_control.is_stopped().unwrap());
 
     let readonly = second_mounts
+        .lock()
+        .await
         .stage(
             &second_guid,
             "/readonly".into(),
@@ -191,22 +268,19 @@ async fn real_lxc_revocation_kills_independent_aliases_and_locks_readonly_stages
         readonly.display(),
     );
     second.command(&["sh", "-c", &probe]).await.unwrap();
-    let placeholder = second_mounts.unavailable_path();
+    let placeholder = second_mounts.lock().await.unavailable_path();
     let probe = format!(
         "set -e; mkdir /optional; start-container bind-mount --source '{}' --target /optional --recursive --readonly; if touch /optional/forbidden 2>/dev/null; then exit 105; fi; start-container bind-mount --source '{}' --target /optional --recursive --readonly; test \"$(cat /optional/sentinel)\" = 'private data'; umount /optional; if test -e /optional/sentinel; then exit 106; fi; if touch /optional/forbidden 2>/dev/null; then exit 107; fi",
         placeholder.display(),
         readonly.display(),
     );
     second.command(&["sh", "-c", &probe]).await.unwrap();
-    second.kill_and_wait().await.unwrap();
-    assert!(second_control.is_stopped().unwrap());
-    first_mounts.clear().await.unwrap();
-    second_mounts.clear().await.unwrap();
+    assert!(first_mounts.lock().await.check_allowed().is_ok());
+    first_mounts.lock().await.clear().await.unwrap();
+    second_mounts.lock().await.clear().await.unwrap();
     drop(first_mounts);
     drop(second_mounts);
     first.exit().await.unwrap();
     second.exit().await.unwrap();
-    first_control.kill_and_wait().await.unwrap();
-    second_control.kill_and_wait().await.unwrap();
     source.unmount().await.unwrap();
 }

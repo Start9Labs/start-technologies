@@ -10,7 +10,7 @@ use crate::disk::mount::filesystem::syscall::{
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
-use crate::shared_volumes::SharedVolumeId;
+use crate::shared_volumes::{SharedVolumeGrant, SharedVolumeId};
 use crate::util::io::TmpDir;
 
 const SERVICE_ROOT: &str = "media/startos/shared-volumes";
@@ -130,6 +130,8 @@ struct StagingRoot {
 }
 
 struct StagedMount {
+    id: SharedVolumeId,
+    readonly: bool,
     mount: AttachedMount,
     source: PreparedSource,
     directory: PathBuf,
@@ -146,7 +148,7 @@ impl StagedMount {
 }
 
 /// Host-owned stages propagate into the service user namespace before SDK binds.
-/// Grant revocation belongs to the whole LXC payload, not these source mounts.
+/// Retiring stages does not revoke existing SDK binds, independent aliases or open handles.
 #[derive(Default)]
 pub struct SharedVolumeMounts {
     blocked: bool,
@@ -182,10 +184,6 @@ impl SharedVolumeMounts {
             }),
             slots: BTreeMap::new(),
         })
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.slots.is_empty()
     }
 
     pub fn block(&mut self) {
@@ -233,6 +231,8 @@ impl SharedVolumeMounts {
             root._mount.namespace.clone(),
         )?;
         let staged = StagedMount {
+            id: id.clone(),
+            readonly,
             mount,
             source,
             directory: path,
@@ -253,6 +253,26 @@ impl SharedVolumeMounts {
             .filter(|(container, _)| container == guid)
             .cloned()
             .collect::<Vec<_>>();
+        self.retire_slots(keys).await
+    }
+
+    pub(crate) async fn reconcile_grant(
+        &mut self,
+        volume: &SharedVolumeId,
+        grant: Option<&SharedVolumeGrant>,
+    ) -> Result<(), Error> {
+        let keys = self
+            .slots
+            .iter()
+            .filter(|(_, stage)| {
+                stage.id == *volume && !grant.is_some_and(|grant| grant.allows(stage.readonly))
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        self.retire_slots(keys).await
+    }
+
+    async fn retire_slots(&mut self, keys: Vec<(Guid, PathBuf)>) -> Result<(), Error> {
         let mut errors = ErrorCollection::new();
         for key in keys {
             errors.handle(self.slots.remove(&key).unwrap().retire().await);
@@ -262,11 +282,8 @@ impl SharedVolumeMounts {
 
     pub async fn clear(&mut self) -> Result<(), Error> {
         self.blocked = true;
-        let mut errors = ErrorCollection::new();
-        for (_, stage) in std::mem::take(&mut self.slots) {
-            errors.handle(stage.retire().await);
-        }
-        errors.into_result()
+        self.retire_slots(self.slots.keys().cloned().collect())
+            .await
     }
 }
 

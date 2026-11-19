@@ -3,8 +3,8 @@ use std::path::Path;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use futures::Future;
 use futures::future::ready;
+use futures::{Future, FutureExt};
 use imbl::{Vector, vector};
 use imbl_value::InternedString;
 use rpc_toolkit::{Empty, Server, ShutdownHandle};
@@ -32,7 +32,7 @@ use crate::service::rpc::{
 };
 use crate::service::{ProcedureName, Service, rpc};
 use crate::util::Invoke;
-use crate::util::future::{ControlledTask, TaskControl};
+use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::create_file;
 use crate::util::rpc_client::UnixRpcClient;
 use crate::volume::data_dir;
@@ -41,7 +41,7 @@ use crate::{ARCH, DATA_DIR, ImageId, PACKAGE_DATA, VolumeId};
 const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(120);
 const DROP_RPC_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
-async fn shutdown_rpc_server<ExitFuture, ExitError, Shutdown, ServerFuture, ServerError>(
+async fn shutdown_rpc_server<ExitFuture, ExitError, Shutdown, ServerFuture>(
     exit: ExitFuture,
     shutdown: Shutdown,
     server: ServerFuture,
@@ -51,8 +51,7 @@ async fn shutdown_rpc_server<ExitFuture, ExitError, Shutdown, ServerFuture, Serv
     ExitFuture: Future<Output = Result<(), ExitError>>,
     ExitError: Into<Error>,
     Shutdown: FnOnce(),
-    ServerFuture: Future<Output = Result<(), ServerError>>,
-    ServerError: std::error::Error + Send + Sync + 'static,
+    ServerFuture: Future<Output = Result<(), tokio::task::JoinError>>,
 {
     let exit = match timeout {
         Some(timeout) => tokio::time::timeout(timeout, exit)
@@ -99,8 +98,7 @@ pub struct PersistentContainer {
     pub(super) s9pk: S9pk,
     pub(super) lxc_container: OnceCell<LxcContainer>,
     pub(super) rpc_client: UnixRpcClient,
-    pub(super) rpc_server: watch::Sender<Option<(ControlledTask, ShutdownHandle)>>,
-    pub(super) effects_control: OnceCell<TaskControl>,
+    pub(super) rpc_server: watch::Sender<Option<(NonDetachingJoinHandle<()>, ShutdownHandle)>>,
     js_mount: MountGuard,
     volumes: BTreeMap<VolumeId, MountGuard>,
     assets: Vec<MountGuard>,
@@ -163,10 +161,16 @@ impl PersistentContainer {
             .await?;
         let shared_volumes = if s9pk.as_manifest().shared_volumes {
             crate::shared_volumes::mounts::SharedVolumeMounts::new(lxc_container.rootfs_dir())
+                .boxed()
                 .await?
         } else {
             Default::default()
         };
+        let shared_volumes = Arc::new(Mutex::new(shared_volumes));
+        if s9pk.as_manifest().shared_volumes {
+            ctx.shared_volume_access
+                .register(&s9pk.as_manifest().id, &shared_volumes);
+        }
         let rpc_client = lxc_container.connect_rpc(Some(RPC_CONNECT_TIMEOUT)).await?;
         let js_mount = MountGuard::mount(
             &LoopDev::from(
@@ -309,14 +313,13 @@ impl PersistentContainer {
             lxc_container: OnceCell::new_with(Some(lxc_container)),
             rpc_client,
             rpc_server: watch::channel(None).0,
-            effects_control: OnceCell::new(),
             // procedures: Default::default(),
             js_mount,
             volumes,
             assets,
             images,
             subcontainers: Arc::new(Mutex::new(BTreeMap::new())),
-            shared_volumes: Arc::new(Mutex::new(shared_volumes)),
+            shared_volumes,
             state: Arc::new(watch::channel(ServiceState::new()).0),
             net_service: None,
             destroyed: false,
@@ -363,7 +366,7 @@ impl PersistentContainer {
             .rpc_dir()
             .join(HOST_RPC_SERVER_SOCKET);
         let (send, recv) = oneshot::channel();
-        let handle = ControlledTask::from(tokio::spawn(async move {
+        let handle = NonDetachingJoinHandle::from(tokio::spawn(async move {
             let chown_status = async {
                 let res = server.run_unix(&path, |err| {
                     tracing::error!(
@@ -393,12 +396,6 @@ impl PersistentContainer {
                 fut.await;
             }
         }));
-        self.effects_control.set(handle.control()).map_err(|_| {
-            Error::new(
-                eyre!(t!("service.persistent-container.already-initialized")),
-                ErrorKind::InvalidRequest,
-            )
-        })?;
         let shutdown = recv.await.map_err(|_| {
             Error::new(
                 eyre!(

@@ -32,10 +32,8 @@ use crate::util::rpc_client::UnixRpcClient;
 use crate::util::{FromStrParser, Invoke, new_guid};
 use crate::{InvalidId, PackageId};
 
-mod control;
 mod filesystem;
 
-pub(crate) use control::LxcControl;
 pub(crate) use filesystem::{BASE_IDMAP, service_filesystem, unshifted_filesystem};
 
 fn config_text(guid: &str, lang: &str) -> String {
@@ -45,13 +43,8 @@ fn config_text(guid: &str, lang: &str) -> String {
         lang = lang,
         id_from = BASE_IDMAP.from_id,
         id_to = BASE_IDMAP.to_id,
-        id_count = BASE_IDMAP.range,
-        payload_cgroup = payload_cgroup(guid).display()
+        id_count = BASE_IDMAP.range
     )
-}
-
-fn payload_cgroup(guid: &str) -> std::path::PathBuf {
-    std::path::Path::new("services.slice/payload").join(guid)
 }
 
 const LXC_CONTAINER_DIR: &str = "/var/lib/lxc";
@@ -178,7 +171,12 @@ impl LxcManager {
             let running = running.contains(container);
             async move {
                 if running {
-                    kill_container(container).await?;
+                    Command::new("lxc-stop")
+                        .arg("--kill")
+                        .arg("--name")
+                        .arg(&**container)
+                        .invoke(ErrorKind::Lxc)
+                        .await?;
                 }
                 destroy_stopped(container).await.log_err();
                 Ok::<_, Error>(())
@@ -206,46 +204,6 @@ async fn lxc_ls(filter: &[&str]) -> Result<BTreeSet<ContainerId>, Error> {
     .filter(|s| !s.is_empty())
     .map(|s| Ok(ContainerId::try_from(s)?))
     .collect()
-}
-
-async fn container_info(container: &ContainerId, field: &str) -> Result<String, Error> {
-    Ok(String::from_utf8(
-        Command::new("lxc-info")
-            .arg("--name")
-            .arg(&**container)
-            .arg(field)
-            .timeout(Some(Duration::from_secs(10)))
-            .invoke(ErrorKind::Lxc)
-            .await?,
-    )?)
-}
-
-async fn confirm_stopped(container: &ContainerId, result: Result<(), Error>) -> Result<(), Error> {
-    match result {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            if container_info(container, "-sH")
-                .await
-                .is_ok_and(|state| state.trim() == "STOPPED")
-            {
-                Ok(())
-            } else {
-                Err(error)
-            }
-        }
-    }
-}
-
-async fn kill_container(container: &ContainerId) -> Result<(), Error> {
-    let result = Command::new("lxc-stop")
-        .arg("--kill")
-        .arg("--name")
-        .arg(&**container)
-        .timeout(Some(Duration::from_secs(60)))
-        .invoke(ErrorKind::Lxc)
-        .await
-        .map(|_| ());
-    confirm_stopped(container, result).await
 }
 
 /// Refuses to destroy a container whose rootfs still holds files after unmounting.
@@ -279,7 +237,6 @@ pub struct LxcContainer {
     manager: Weak<LxcManager>,
     rootfs: OverlayGuard<TmpMountGuard>,
     pub guid: Arc<ContainerId>,
-    control: Arc<LxcControl>,
     rpc_bind: TmpMountGuard,
     log_mount: Option<MountGuard>,
     config: LxcConfig,
@@ -393,18 +350,10 @@ impl LxcContainer {
             .arg("DEBUG")
             .invoke(ErrorKind::Lxc)
             .await?;
-        let control = match LxcControl::open(&guid) {
-            Ok(control) => Arc::new(control),
-            Err(error) => {
-                kill_container(&ContainerId::try_from(&*guid)?).await?;
-                return Err(error);
-            }
-        };
         let res = Self {
             manager: Arc::downgrade(manager),
             rootfs,
             guid: Arc::new(ContainerId::try_from(&*guid)?),
-            control,
             rpc_bind,
             config,
             exited: false,
@@ -475,15 +424,14 @@ impl LxcContainer {
     }
 
     async fn info(&self, field: &str) -> Result<String, Error> {
-        container_info(&self.guid, field).await
-    }
-
-    pub(crate) fn control(&self) -> &Arc<LxcControl> {
-        &self.control
-    }
-
-    pub(crate) async fn kill_and_wait(&self) -> Result<(), Error> {
-        self.control.kill_and_wait().await
+        Ok(String::from_utf8(
+            Command::new("lxc-info")
+                .arg("--name")
+                .arg(&**self.guid)
+                .arg(field)
+                .invoke(ErrorKind::Lxc)
+                .await?,
+        )?)
     }
 
     pub async fn ip(&self) -> Result<Ipv4Addr, Error> {
@@ -575,13 +523,11 @@ impl LxcContainer {
 
     #[instrument(skip_all)]
     pub async fn exit(mut self) -> Result<(), Error> {
-        let stopped = Command::new("lxc-stop")
+        Command::new("lxc-stop")
             .arg("--name")
             .arg(&**self.guid)
             .invoke(ErrorKind::Lxc)
-            .await
-            .map(|_| ());
-        confirm_stopped(&self.guid, stopped).await?;
+            .await?;
         self.rpc_bind.take().unmount().await?;
         if let Some(log_mount) = self.log_mount.take() {
             log_mount.unmount(false).await?;

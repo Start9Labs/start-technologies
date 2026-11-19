@@ -468,7 +468,7 @@ pub struct SetSharedVolumeGrantParams {
 
 rpc_toolkit::reflect_ts!(SetSharedVolumeGrantParams);
 
-/// Publishes restrictive grants after incompatible incarnations retire.
+/// Applies grant intent before best-effort retirement of incompatible staging sources.
 pub async fn set_grant(
     ctx: RpcContext,
     SetSharedVolumeGrantParams {
@@ -516,11 +516,6 @@ async fn set_grant_owned(
     grant: Option<SharedVolumeGrant>,
 ) -> Result<(), Error> {
     let management = ctx.shared_volume_access.management.write().await;
-    validate_grant(&ctx.db.peek().await, &id, &package_id, grant.as_ref())?;
-    let exposures = ctx.shared_volume_access.service(&package_id);
-    let revocations = exposures.lock().await.capture(&id, grant.as_ref()).await;
-    let reload = !revocations.is_empty();
-    finish_revocations(&ctx, revocations).await?;
     ctx.db
         .mutate(|db| {
             validate_grant(db, &id, &package_id, grant.as_ref())?;
@@ -538,37 +533,12 @@ async fn set_grant_owned(
         })
         .await
         .result?;
+    let result = ctx
+        .shared_volume_access
+        .reconcile_grant(&package_id, &id, grant.as_ref())
+        .await;
     drop(management);
-    if reload {
-        ctx.services
-            .load(&ctx, &package_id, crate::service::LoadDisposition::Retry)
-            .await?;
-    }
-    Ok(())
-}
-
-async fn finish_revocations(
-    ctx: &RpcContext,
-    revocations: Vec<access::Revocation>,
-) -> Result<(), Error> {
-    let mut errors = ErrorCollection::new();
-    let results = futures::future::join_all(revocations.into_iter().map(|revocation| async move {
-        let result = revocation.complete().await;
-        let status = if revocation.runtime.is_retired() {
-            ctx.services
-                .mark_retired(ctx, &revocation.package_id, &revocation.container_id)
-                .await
-        } else {
-            Ok(())
-        };
-        (result, status)
-    }))
-    .await;
-    for (result, status) in results {
-        errors.handle(result);
-        errors.handle(status);
-    }
-    errors.into_result()
+    result
 }
 
 #[derive(Deserialize, Serialize, VisitFields)]
@@ -579,7 +549,7 @@ pub struct SharedVolumeParams {
 
 rpc_toolkit::reflect_ts!(SharedVolumeParams);
 
-/// Retires exposed runtimes before publishing removal; failed local deletion keeps the registration.
+/// Revokes future access before staging cleanup; failed local deletion keeps the registration.
 pub async fn remove(
     ctx: RpcContext,
     SharedVolumeParams { id }: SharedVolumeParams,
@@ -591,30 +561,13 @@ pub async fn remove(
 
 async fn remove_owned(ctx: RpcContext, id: SharedVolumeId) -> Result<(), Error> {
     let management = ctx.shared_volume_access.management.write().await;
-    let mut revocations = Vec::new();
-    let mut reload = Vec::new();
-    for (package_id, exposures) in ctx.shared_volume_access.services() {
-        let captured = exposures.lock().await.capture(&id, None).await;
-        if !captured.is_empty() {
-            reload.push(package_id);
-            revocations.extend(captured);
-        }
-    }
-    finish_revocations(&ctx, revocations).await?;
     let source = ctx.db.mutate(|db| prepare_removal(db, &id)).await.result?;
+    ctx.shared_volume_access.remove_volume(&id).await?;
     if matches!(source, Some(SharedVolumeSource::Local)) {
         delete_local_volume(&ctx.db, &id, Path::new(crate::PACKAGE_DATA)).await?;
     }
     drop(management);
-    let mut errors = ErrorCollection::new();
-    for package_id in reload {
-        errors.handle(
-            ctx.services
-                .load(&ctx, &package_id, crate::service::LoadDisposition::Retry)
-                .await,
-        );
-    }
-    errors.into_result()
+    Ok(())
 }
 
 fn prepare_removal(

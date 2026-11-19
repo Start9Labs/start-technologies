@@ -67,7 +67,6 @@ pub mod exec;
 pub mod persistent_container;
 pub mod procedure_name;
 mod rpc;
-mod runtime_control;
 mod service_actor;
 pub mod service_map;
 pub mod start_stop;
@@ -75,7 +74,6 @@ mod transition;
 pub mod uninstall;
 
 pub use procedure_name::ProcedureName;
-pub(crate) use runtime_control::ServiceRuntime;
 pub use service_map::ServiceMap;
 
 pub const HEALTH_CHECK_COOLDOWN_SECONDS: u64 = 15;
@@ -236,9 +234,6 @@ impl ServiceRef {
         .boxed())
     }
     pub async fn shutdown(self, uninit: Option<ExitParams>) -> Result<(), Error> {
-        if self.runtime_control()?.is_retired() {
-            self.seed.persistent_container.rpc_server.send_replace(None);
-        }
         if let Some((hdl, shutdown)) = self.seed.persistent_container.rpc_server.send_replace(None)
         {
             self.seed
@@ -305,29 +300,8 @@ pub struct Service {
 impl Service {
     pub(crate) fn shared_volume_mounts(
         &self,
-    ) -> &Arc<tokio::sync::Mutex<crate::shared_volumes::mounts::SharedVolumeMounts>> {
+    ) -> &tokio::sync::Mutex<crate::shared_volumes::mounts::SharedVolumeMounts> {
         &self.seed.persistent_container.shared_volumes
-    }
-
-    pub(crate) fn lxc_container(&self) -> Result<&crate::lxc::LxcContainer, Error> {
-        self.seed
-            .persistent_container
-            .lxc_container
-            .get()
-            .or_not_found("lxc container")
-    }
-
-    pub(crate) fn runtime_control(&self) -> Result<ServiceRuntime, Error> {
-        Ok(ServiceRuntime::new(
-            self.lxc_container()?.control().clone(),
-            self.actor.control(),
-            self.seed
-                .persistent_container
-                .effects_control
-                .get()
-                .or_not_found("effects server")?
-                .clone(),
-        ))
     }
 
     pub fn is_initialized(&self) -> bool {

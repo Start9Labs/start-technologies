@@ -10,7 +10,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::actor::background::BackgroundJobQueue;
-use crate::util::future::ControlledTask;
+use crate::util::future::NonDetachingJoinHandle;
 
 pub mod background;
 pub mod concurrent;
@@ -121,29 +121,32 @@ fn enqueue<A: Handler<M>, M: Send + 'static>(
     })
 }
 
-async fn shutdown_runtime(
-    mut runtime: ControlledTask,
+fn shutdown_runtime(
+    mut runtime: NonDetachingJoinHandle<()>,
     shutdown: oneshot::Sender<()>,
     strategy: PendingMessageStrategy,
-) {
-    let timeout = match strategy {
-        PendingMessageStrategy::CancelAll => {
-            let _ = runtime.wait_for_abort().await;
-            return;
+) -> BoxFuture<'static, ()> {
+    async move {
+        let timeout = match strategy {
+            PendingMessageStrategy::CancelAll => {
+                let _ = runtime.wait_for_abort().await;
+                return;
+            }
+            PendingMessageStrategy::FinishCurrentCancelPending { timeout } => {
+                let _ = shutdown.send(());
+                timeout
+            }
+            PendingMessageStrategy::FinishAll { timeout } => timeout,
+        };
+        if let Some(timeout) = timeout {
+            if tokio::time::timeout(timeout, &mut runtime).await.is_err() {
+                let _ = runtime.wait_for_abort().await;
+            }
+        } else {
+            let _ = runtime.await;
         }
-        PendingMessageStrategy::FinishCurrentCancelPending { timeout } => {
-            let _ = shutdown.send(());
-            timeout
-        }
-        PendingMessageStrategy::FinishAll { timeout } => timeout,
-    };
-    if let Some(timeout) = timeout {
-        if tokio::time::timeout(timeout, &mut runtime).await.is_err() {
-            let _ = runtime.wait_for_abort().await;
-        }
-    } else {
-        let _ = runtime.await;
     }
+    .boxed()
 }
 
 /// Shutdown always joins the runner, including cancellation.

@@ -463,15 +463,12 @@ impl Debug for ErrorData {
 impl std::error::Error for ErrorData {}
 impl From<Error> for ErrorData {
     fn from(value: Error) -> Self {
-        Self::from(&value)
-    }
-}
-impl From<&Error> for ErrorData {
-    fn from(value: &Error) -> Self {
+        let details = value.display_src().to_string();
+        let debug = value.display_dbg().to_string();
         Self {
-            details: value.display_src().to_string(),
-            debug: value.display_dbg().to_string(),
-            info: value.info.clone(),
+            details,
+            debug,
+            info: value.info,
         }
     }
 }

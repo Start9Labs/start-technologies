@@ -6,18 +6,18 @@ use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::actor::background::BackgroundJobQueue;
 use crate::util::actor::{Actor, Handler, PendingMessageStrategy, Request};
-use crate::util::future::ControlledTask;
+use crate::util::future::NonDetachingJoinHandle;
 
 pub struct SimpleActor<A: Actor> {
     shutdown: oneshot::Sender<()>,
-    runtime: ControlledTask,
+    runtime: NonDetachingJoinHandle<()>,
     messenger: mpsc::UnboundedSender<Request<A>>,
 }
 impl<A: Actor> SimpleActor<A> {
     pub fn new(mut actor: A) -> Self {
         let (shutdown_send, mut shutdown_recv) = oneshot::channel();
         let (messenger_send, mut messenger_recv) = mpsc::unbounded_channel::<Request<A>>();
-        let runtime = ControlledTask::from(tokio::spawn(async move {
+        let runtime = NonDetachingJoinHandle::from(tokio::spawn(async move {
             let (queue, mut runner) = BackgroundJobQueue::new();
             actor.init(&queue);
             loop {

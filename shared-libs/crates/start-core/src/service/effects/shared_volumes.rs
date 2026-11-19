@@ -246,12 +246,6 @@ pub async fn prepare_shared_volume(
         .management
         .read()
         .await;
-    let access = service
-        .seed
-        .ctx
-        .shared_volume_access
-        .service(&service.seed.id);
-    let mut exposures = access.lock().await;
     let mut mounts = container.shared_volumes.lock().await;
     mounts.check_allowed()?;
     authorize_mount(&service, &id, readonly).await?;
@@ -275,7 +269,6 @@ pub async fn prepare_shared_volume(
             });
         }
     };
-    exposures.record(&id, readonly, &service)?;
     let path = mounts
         .stage(&subcontainer, mountpoint, &id, source, readonly)
         .await?;

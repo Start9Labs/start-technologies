@@ -2825,13 +2825,6 @@ net.dns.static-server-is-self:
   pl_PL: "%{server} wskazuje na ten serwer i nie może być użyty jako nadrzędny serwer DNS"
 
 # lxc/mod.rs
-lxc.control.state-unavailable:
-  en_US: Could not determine whether the service container has stopped.
-  de_DE: Es konnte nicht festgestellt werden, ob der Dienstcontainer gestoppt wurde.
-  es_ES: No se pudo determinar si el contenedor del servicio se ha detenido.
-  fr_FR: Impossible de déterminer si le conteneur du service est arrêté.
-  pl_PL: Nie można ustalić, czy kontener usługi został zatrzymany.
-
 lxc.mod.rootfs-not-empty:
   en_US: "rootfs is not empty, refusing to delete"
   de_DE: "rootfs ist nicht leer, Löschung verweigert"

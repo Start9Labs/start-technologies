@@ -6,146 +6,87 @@ use tokio::sync::{Mutex, RwLock};
 use super::mounts::SharedVolumeMounts;
 use super::{SharedVolumeGrant, SharedVolumeId};
 use crate::PackageId;
-use crate::lxc::ContainerId;
 use crate::prelude::*;
-use crate::service::{Service, ServiceRuntime};
 use crate::util::sync::SyncMutex;
 
-struct Exposure {
-    service: Weak<Service>,
-    runtime: ServiceRuntime,
-    mounts: Arc<Mutex<SharedVolumeMounts>>,
-    volumes: BTreeMap<SharedVolumeId, SharedVolumeGrant>,
-}
-
-impl Exposure {
-    fn admit(&mut self, volume: &SharedVolumeId, readonly: bool) {
-        self.volumes
-            .entry(volume.clone())
-            .and_modify(|access| access.readonly &= readonly)
-            .or_insert(SharedVolumeGrant { readonly });
-    }
-}
-
-pub(crate) struct ServiceExposures {
-    package_id: PackageId,
-    incarnations: BTreeMap<ContainerId, Exposure>,
-}
-
-impl ServiceExposures {
-    fn new(package_id: PackageId) -> Self {
-        Self {
-            package_id,
-            incarnations: BTreeMap::new(),
-        }
-    }
-
-    fn prune(&mut self) {
-        self.incarnations.retain(|_, exposure| {
-            exposure.service.strong_count() > 0
-                || !exposure.runtime.is_retired()
-                || !exposure
-                    .mounts
-                    .try_lock()
-                    .is_ok_and(|mounts| mounts.is_empty())
-        });
-    }
-
-    pub(crate) fn record(
-        &mut self,
-        volume: &SharedVolumeId,
-        readonly: bool,
-        service: &Arc<Service>,
-    ) -> Result<(), Error> {
-        self.prune();
-        let container = service.lxc_container()?;
-        if !self.incarnations.contains_key(container.guid.as_ref()) {
-            self.incarnations.insert(
-                (*container.guid).clone(),
-                Exposure {
-                    service: Arc::downgrade(service),
-                    runtime: service.runtime_control()?,
-                    mounts: service.shared_volume_mounts().clone(),
-                    volumes: BTreeMap::new(),
-                },
-            );
-        }
-        self.incarnations
-            .get_mut(container.guid.as_ref())
-            .unwrap()
-            .admit(volume, readonly);
-        Ok(())
-    }
-
-    pub(crate) async fn capture(
-        &mut self,
-        volume: &SharedVolumeId,
-        grant: Option<&SharedVolumeGrant>,
-    ) -> Vec<Revocation> {
-        self.prune();
-        let mut revocations = Vec::new();
-        for (container_id, exposure) in &self.incarnations {
-            let Some(access) = exposure.volumes.get(volume) else {
-                continue;
-            };
-            if grant.is_some_and(|grant| grant.allows(access.readonly))
-                && !exposure.runtime.payload_is_stopped()
-            {
-                continue;
-            }
-            exposure.mounts.lock().await.block();
-            revocations.push(Revocation {
-                package_id: self.package_id.clone(),
-                container_id: container_id.clone(),
-                runtime: exposure.runtime.clone(),
-                mounts: exposure.mounts.clone(),
-            });
-        }
-        revocations
-    }
-}
-
-pub(crate) struct Revocation {
-    pub(crate) package_id: PackageId,
-    pub(crate) container_id: ContainerId,
-    pub(crate) runtime: ServiceRuntime,
-    mounts: Arc<Mutex<SharedVolumeMounts>>,
-}
-
-impl Revocation {
-    pub(crate) async fn complete(&self) -> Result<(), Error> {
-        self.runtime.revoke().await?;
-        self.mounts.lock().await.clear().await
-    }
-}
-
-/// Published restrictions exclude every incompatible admitted incarnation.
-/// Admitted access survives SDK unmounts and Service destruction until full retirement.
+/// Grant changes deny future preparation and retire incompatible staging sources.
+/// Revocation is best-effort: existing bindings, aliases and open handles can remain usable.
 #[derive(Default)]
 pub(crate) struct SharedVolumeAccess {
     pub(crate) management: RwLock<()>,
-    services: SyncMutex<BTreeMap<PackageId, Arc<Mutex<ServiceExposures>>>>,
+    stages: SyncMutex<BTreeMap<PackageId, Vec<Weak<Mutex<SharedVolumeMounts>>>>>,
 }
 
 impl SharedVolumeAccess {
-    pub(crate) fn service(&self, package: &PackageId) -> Arc<Mutex<ServiceExposures>> {
-        self.services.mutate(|services| {
-            services
-                .entry(package.clone())
-                .or_insert_with(|| Arc::new(Mutex::new(ServiceExposures::new(package.clone()))))
-                .clone()
+    pub(crate) fn register(&self, package: &PackageId, mounts: &Arc<Mutex<SharedVolumeMounts>>) {
+        self.stages.mutate(|stages| {
+            let stages = stages.entry(package.clone()).or_default();
+            stages.retain(|stage| stage.strong_count() > 0);
+            stages.push(Arc::downgrade(mounts));
+        });
+    }
+
+    fn live_stages(&self) -> BTreeMap<PackageId, Vec<Arc<Mutex<SharedVolumeMounts>>>> {
+        self.stages.mutate(|stages| {
+            let mut live = BTreeMap::new();
+            stages.retain(|package, stages| {
+                let mounts: Vec<_> = stages.iter().filter_map(Weak::upgrade).collect();
+                stages.retain(|stage| stage.strong_count() > 0);
+                if mounts.is_empty() {
+                    false
+                } else {
+                    live.insert(package.clone(), mounts);
+                    true
+                }
+            });
+            live
         })
     }
 
-    pub(crate) fn services(&self) -> Vec<(PackageId, Arc<Mutex<ServiceExposures>>)> {
-        self.services.peek(|services| {
-            services
-                .iter()
-                .map(|(id, exposures)| (id.clone(), exposures.clone()))
-                .collect()
-        })
+    pub(crate) async fn reconcile_grant(
+        &self,
+        package: &PackageId,
+        volume: &SharedVolumeId,
+        grant: Option<&SharedVolumeGrant>,
+    ) -> Result<(), Error> {
+        let mut errors = ErrorCollection::new();
+        for mounts in self.live_stages().remove(package).unwrap_or_default() {
+            errors.handle(mounts.lock().await.reconcile_grant(volume, grant).await);
+        }
+        errors.into_result()
+    }
+
+    pub(crate) async fn remove_volume(&self, volume: &SharedVolumeId) -> Result<(), Error> {
+        let mut errors = ErrorCollection::new();
+        for mounts in self.live_stages().into_values().flatten() {
+            errors.handle(mounts.lock().await.reconcile_grant(volume, None).await);
+        }
+        errors.into_result()
     }
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn registry_tracks_staging_lifetimes_without_owning_them() {
+        let registry = SharedVolumeAccess::default();
+        let package = "consumer".parse().unwrap();
+        let first = Arc::new(Mutex::new(SharedVolumeMounts::default()));
+        let second = Arc::new(Mutex::new(SharedVolumeMounts::default()));
+        registry.register(&package, &first);
+        registry.register(&package, &second);
+        assert_eq!(Arc::strong_count(&first), 1);
+        assert_eq!(registry.live_stages()[&package].len(), 2);
+        drop(first);
+        assert_eq!(registry.live_stages()[&package].len(), 1);
+        registry
+            .reconcile_grant(&package, &SharedVolumeId::new(), None)
+            .await
+            .unwrap();
+        assert!(second.lock().await.check_allowed().is_ok());
+        drop(second);
+        assert!(registry.live_stages().is_empty());
+    }
+}

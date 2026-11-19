@@ -1,11 +1,11 @@
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
-use std::sync::{Arc, Weak};
+use std::sync::Weak;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use futures::future::{BoxFuture, FusedFuture, Shared, abortable, pending};
+use futures::future::{BoxFuture, FusedFuture, abortable, pending};
 use futures::stream::{AbortHandle, Abortable, BoxStream};
 use futures::{Future, FutureExt, Stream, StreamExt};
 use tokio::sync::{oneshot, watch};
@@ -60,96 +60,6 @@ impl<T> Future for NonDetachingJoinHandle<T> {
         let this = self.project();
         this.0.poll(cx)
     }
-}
-
-type SharedCompletion = Shared<BoxFuture<'static, Result<(), Arc<JoinError>>>>;
-
-#[derive(Clone)]
-pub struct TaskControl {
-    completion: SharedCompletion,
-    abort: tokio::task::AbortHandle,
-}
-
-impl TaskControl {
-    pub fn is_finished(&self) -> bool {
-        self.abort.is_finished()
-    }
-
-    pub async fn cancel_and_wait(&self) -> Result<(), Arc<JoinError>> {
-        self.abort.abort();
-        self.completion.clone().await
-    }
-}
-
-/// Aborts on owner drop; retained controls can independently cancel and join.
-pub struct ControlledTask {
-    control: TaskControl,
-    completion: SharedCompletion,
-}
-
-impl ControlledTask {
-    pub fn control(&self) -> TaskControl {
-        self.control.clone()
-    }
-
-    pub async fn wait_for_abort(self) -> Result<(), Arc<JoinError>> {
-        self.control.cancel_and_wait().await
-    }
-}
-
-impl From<JoinHandle<()>> for ControlledTask {
-    fn from(handle: JoinHandle<()>) -> Self {
-        let abort = handle.abort_handle();
-        let completion = NonDetachingJoinHandle::from(handle)
-            .map(|result| result.map_err(Arc::new))
-            .boxed()
-            .shared();
-        Self {
-            control: TaskControl {
-                completion: completion.clone(),
-                abort,
-            },
-            completion,
-        }
-    }
-}
-
-impl Future for ControlledTask {
-    type Output = Result<(), Arc<JoinError>>;
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.get_mut().completion).poll(cx)
-    }
-}
-
-impl Drop for ControlledTask {
-    fn drop(&mut self) {
-        self.control.abort.abort();
-    }
-}
-
-#[tokio::test]
-async fn retained_control_joins_owner_drop_and_concurrent_waiters() {
-    let resource = Arc::new(());
-    let held = resource.clone();
-    let (started, ready) = oneshot::channel();
-    let task = ControlledTask::from(tokio::spawn(async move {
-        let _held = held;
-        started.send(()).unwrap();
-        pending::<()>().await;
-    }));
-    ready.await.unwrap();
-    let control = task.control();
-    drop(task);
-    assert!(control.cancel_and_wait().await.unwrap_err().is_cancelled());
-    assert!(control.is_finished());
-    assert_eq!(Arc::strong_count(&resource), 1);
-    assert!(control.cancel_and_wait().await.unwrap_err().is_cancelled());
-
-    let task = ControlledTask::from(tokio::spawn(pending::<()>()));
-    let control = task.control();
-    let (owned, external) = tokio::join!(task, control.cancel_and_wait());
-    assert!(owned.unwrap_err().is_cancelled());
-    assert!(external.unwrap_err().is_cancelled());
 }
 
 #[tokio::test]
@@ -214,7 +124,7 @@ where
 
 #[tokio::test]
 async fn drop_completion_follows_inner_resource_cleanup() {
-    struct Probe(Arc<std::sync::Mutex<Option<DropHandle>>>);
+    struct Probe(std::sync::Arc<std::sync::Mutex<Option<DropHandle>>>);
     impl Future for Probe {
         type Output = ();
         fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
@@ -226,7 +136,7 @@ async fn drop_completion_follows_inner_resource_cleanup() {
             assert!(!*self.0.lock().unwrap().as_ref().unwrap().0.borrow());
         }
     }
-    let observer = Arc::new(std::sync::Mutex::new(None));
+    let observer = std::sync::Arc::new(std::sync::Mutex::new(None));
     let future = DropSignaling::new(Probe(observer.clone()));
     let mut completion = future.subscribe();
     *observer.lock().unwrap() = Some(completion.clone());

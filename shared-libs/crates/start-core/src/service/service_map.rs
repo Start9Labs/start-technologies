@@ -128,35 +128,6 @@ impl ServiceMap {
         self.entry(id).write_owned().await
     }
 
-    async fn record_retirement(ctx: &RpcContext, id: &PackageId) -> Result<(), Error> {
-        ctx.db
-            .mutate(|db| {
-                if let Some(pde) = db.as_public_mut().as_package_data_mut().as_idx_mut(id) {
-                    pde.as_status_info_mut().init()?;
-                }
-                Ok(())
-            })
-            .await
-            .result
-    }
-
-    /// The identified payload and its host work must have exited.
-    pub(crate) async fn mark_retired(
-        &self,
-        ctx: &RpcContext,
-        id: &PackageId,
-        container: &crate::lxc::ContainerId,
-    ) -> Result<(), Error> {
-        if let Some(guard) = self.try_get(id) {
-            if let Some(current) = &*guard {
-                if current.lxc_container()?.guid.as_ref() == container {
-                    Self::record_retirement(ctx, id).await?;
-                }
-            }
-        }
-        Ok(())
-    }
-
     #[instrument(skip_all)]
     pub async fn init(&self, ctx: &RpcContext) -> Result<(), Error> {
         let ids = ctx.db.peek().await.as_public().as_package_data().keys()?;
@@ -179,24 +150,8 @@ impl ServiceMap {
         disposition: LoadDisposition,
     ) -> Result<(), Error> {
         let mut service = self.get_mut(id).await;
-        if let Some(previous) = service.take() {
-            let runtime = previous.runtime_control()?;
-            if let Err(error) = previous.shutdown(None).await {
-                if runtime.is_retired() {
-                    Self::record_retirement(ctx, id).await?;
-                }
-                let data = ErrorData::from(&error);
-                ctx.db
-                    .mutate(|db| {
-                        if let Some(pde) = db.as_public_mut().as_package_data_mut().as_idx_mut(id) {
-                            pde.as_status_info_mut().as_error_mut().ser(&Some(data))?;
-                        }
-                        Ok(())
-                    })
-                    .await
-                    .result?;
-                return Err(error);
-            }
+        if let Some(service) = service.take() {
+            service.shutdown(None).await?;
         }
         match Service::load(ctx, id, disposition).await {
             Ok(s) => {
@@ -677,6 +632,7 @@ impl ServiceRefReloadInfo {
         self.ctx
             .services
             .load(&self.ctx, &self.id, LoadDisposition::Undo)
+            .boxed()
             .await
     }
 

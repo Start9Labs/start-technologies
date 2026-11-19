@@ -9,7 +9,7 @@ use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::actor::background::{BackgroundJobQueue, BackgroundJobRunner};
 use crate::util::actor::{Actor, ConflictFn, Handler, PendingMessageStrategy, Request};
-use crate::util::future::{ControlledTask, TaskControl};
+use crate::util::future::NonDetachingJoinHandle;
 
 #[pin_project::pin_project]
 struct ConcurrentRunner<A> {
@@ -148,14 +148,14 @@ impl<A: Actor + Clone> Future for ConcurrentRunner<A> {
 
 pub struct ConcurrentActor<A: Actor + Clone> {
     shutdown: oneshot::Sender<()>,
-    runtime: ControlledTask,
+    runtime: NonDetachingJoinHandle<()>,
     messenger: mpsc::UnboundedSender<Request<A>>,
 }
 impl<A: Actor + Clone> ConcurrentActor<A> {
     pub fn new(mut actor: A) -> Self {
         let (shutdown_send, shutdown_recv) = oneshot::channel();
         let (messenger_send, messenger_recv) = mpsc::unbounded_channel::<Request<A>>();
-        let runtime = ControlledTask::from(tokio::spawn(async move {
+        let runtime = NonDetachingJoinHandle::from(tokio::spawn(async move {
             let (queue, runner) = BackgroundJobQueue::new();
             actor.init(&queue);
             ConcurrentRunner {
@@ -193,15 +193,6 @@ impl<A: Actor + Clone> ConcurrentActor<A> {
         A: Handler<M>,
     {
         self.queue(id, message).await
-    }
-
-    /// Cancels handlers and background work, awaiting release of their resources.
-    pub async fn cancel(&self) {
-        let _ = self.control().cancel_and_wait().await;
-    }
-
-    pub fn control(&self) -> TaskControl {
-        self.runtime.control()
     }
 
     pub async fn shutdown(self, strategy: PendingMessageStrategy) {
@@ -311,18 +302,6 @@ mod test {
     }
 
     #[tokio::test]
-    async fn cancellation_joins_handler_and_background_resource_release() {
-        let (actor, resource) = holding_actor().await;
-        actor.cancel().await;
-        assert_eq!(std::sync::Arc::strong_count(&resource), 1);
-        assert!(actor.send(Guid::new(), NoConflicts).await.is_err());
-        actor.cancel().await;
-        actor
-            .shutdown(crate::util::actor::PendingMessageStrategy::CancelAll)
-            .await;
-    }
-
-    #[tokio::test]
     async fn cancel_all_shutdown_joins_resource_release() {
         let (actor, resource) = holding_actor().await;
         actor
@@ -342,23 +321,11 @@ mod test {
     }
 
     #[tokio::test]
-    async fn retained_control_interrupts_an_owned_graceful_shutdown() {
-        let (actor, resource) = holding_actor().await;
-        let control = actor.control();
-        let shutdown =
-            actor.shutdown(crate::util::actor::PendingMessageStrategy::FinishAll { timeout: None });
-        let (_, result) = tokio::join!(shutdown, control.cancel_and_wait());
-        assert!(result.unwrap_err().is_cancelled());
-        assert_eq!(std::sync::Arc::strong_count(&resource), 1);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn cancellation_racing_admission_returns_without_panicking() {
-        for _ in 0..128 {
-            let actor = super::ConcurrentActor::new(CActor);
-            let _ = tokio::join!(actor.cancel(), actor.send(Guid::new(), NoConflicts));
-            assert!(actor.send(Guid::new(), NoConflicts).await.is_err());
-        }
+    async fn stopped_actor_rejects_admission_without_panicking() {
+        let mut actor = super::ConcurrentActor::new(CActor);
+        actor.runtime.abort();
+        let _ = (&mut actor.runtime).await;
+        assert!(actor.send(Guid::new(), NoConflicts).await.is_err());
     }
 
     struct AwaitRelease {
