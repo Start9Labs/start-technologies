@@ -171,7 +171,10 @@ impl PersistentContainer {
             )
             .await?;
         let shared_volumes = if s9pk.as_manifest().shared_volumes {
-            crate::shared_volumes::mounts::SharedVolumeMounts::new(lxc_container.rootfs_dir())
+            crate::shared_volumes::mounts::SharedVolumeMounts::new(
+                lxc_container.rootfs_dir(),
+                lxc_container.slot().idmap(),
+            )
                 .boxed()
                 .await?
         } else {

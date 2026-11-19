@@ -134,14 +134,7 @@ async fn mount_managed(
             PreparedSource::open(source.clone(), None)
                 .await
                 .unwrap()
-                .idmapped(
-                    crate::disk::mount::filesystem::syscall::userns_fd_from_idmap(
-                        &[container.slot().idmap()],
-                        None,
-                    )
-                    .await
-                    .unwrap(),
-                ),
+                .storing_container_ids(),
             readonly,
             &root,
         )
@@ -203,10 +196,10 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         );
     }
     let first_mounts = Arc::new(tokio::sync::Mutex::new(
-        SharedVolumeMounts::new(first.rootfs_dir()).await.unwrap(),
+        SharedVolumeMounts::new(first.rootfs_dir(), first.slot().idmap()).await.unwrap(),
     ));
     let second_mounts = Arc::new(tokio::sync::Mutex::new(
-        SharedVolumeMounts::new(second.rootfs_dir()).await.unwrap(),
+        SharedVolumeMounts::new(second.rootfs_dir(), second.slot().idmap()).await.unwrap(),
     ));
     let registry = crate::shared_volumes::access::SharedVolumeAccess::default();
     let first_package = "first".parse().unwrap();

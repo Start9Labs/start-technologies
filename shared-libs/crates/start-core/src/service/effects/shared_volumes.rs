@@ -228,16 +228,10 @@ async fn mount_shared_volume_owned(
         .await
         .get(&subcontainer)
         .or_not_found("subcontainer")?;
-    let consumer = container
-        .lxc_container
-        .get()
-        .or_not_found("lxc container")?
-        .slot();
     let source = match crate::shared_volumes::source::open_source(
         &service.seed.ctx,
         &id,
         if readonly { ReadOnly } else { ReadWrite },
-        Some(consumer),
     )
     .await
     {

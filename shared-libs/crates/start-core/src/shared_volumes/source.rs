@@ -5,10 +5,9 @@ use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::cifs::{Cifs, SharedCifs};
-use crate::disk::mount::filesystem::syscall::{open_beneath, userns_fd_from_idmap};
+use crate::disk::mount::filesystem::syscall::open_beneath;
 use crate::disk::mount::filesystem::{FileSystem, MountType, ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard, WeakMountGuard};
-use crate::lxc::slot::ContainerSlot;
 use crate::prelude::*;
 use crate::shared_volumes::mounts::{PreparedSource, confined_relative};
 use crate::shared_volumes::{
@@ -115,6 +114,11 @@ impl SourceDefinition {
         }
     }
 
+    /// Whether the host view holds container ids, which attachment maps into a container.
+    pub(crate) fn stores_container_ids(&self) -> bool {
+        !matches!(self.source, SharedVolumeSource::Cifs { .. })
+    }
+
     pub(super) fn filesystem(&self, id: &SharedVolumeId) -> SourceFilesystem {
         match &self.source {
             SharedVolumeSource::Local => {
@@ -155,6 +159,8 @@ pub(crate) enum PreparedFilesystem<L, D, C> {
     Disk(D),
     Cifs(C),
 }
+/// Host views carry no idmap: local and disk files keep container ids, which attachment maps.
+/// CIFS cannot be idmapped and presents its forced service owner instead.
 pub(crate) type SourceFilesystem =
     PreparedFilesystem<LocalSubvolume, BlockDev<PathBuf>, SharedCifs>;
 impl SourceFilesystem {
@@ -212,12 +218,10 @@ impl<L: FileSystem, D: FileSystem, C: FileSystem> FileSystem for PreparedFilesys
 }
 
 /// Capacity failures do not invalidate a successfully opened source.
-/// A consumer's source maps container ids into that consumer's range when attached.
 pub async fn open_source(
     ctx: &RpcContext,
     id: &SharedVolumeId,
     mount_type: MountType,
-    consumer: Option<ContainerSlot>,
 ) -> Result<PreparedSource, Error> {
     let definition = SourceDefinition::read(&ctx.db.peek().await, id)?;
     let filesystem = definition.filesystem(id);
@@ -226,7 +230,12 @@ pub async fn open_source(
     let result = source_result(
         async {
             let mount = TmpMountGuard::mount(&filesystem, mount_type).await?;
-            prepared = Some(PreparedSource::open(mount, subpath).await?);
+            let source = PreparedSource::open(mount, subpath).await?;
+            prepared = Some(if definition.stores_container_ids() {
+                source.storing_container_ids()
+            } else {
+                source
+            });
             Ok(())
         }
         .await,
@@ -255,13 +264,7 @@ pub async fn open_source(
             ErrorKind::Filesystem,
         )));
     }
-    let prepared = result.map(|_| prepared.unwrap())?;
-    match consumer {
-        Some(consumer) if !matches!(definition.source(), SharedVolumeSource::Cifs { .. }) => {
-            Ok(prepared.idmapped(userns_fd_from_idmap(&[consumer.idmap()], None).await?))
-        }
-        _ => Ok(prepared),
-    }
+    result.map(|_| prepared.unwrap())
 }
 
 pub(super) fn write_checked(

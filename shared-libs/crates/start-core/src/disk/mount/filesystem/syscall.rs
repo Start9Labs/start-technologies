@@ -138,7 +138,7 @@ pub fn open_tree_attr_idmap_fd(source: BorrowedFd, userns: BorrowedFd) -> Result
             SYS_OPEN_TREE_ATTR,
             source.as_raw_fd(),
             empty.as_ptr(),
-            OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC | AT_EMPTY_PATH as libc::c_uint,
+            clone_flags(false) | AT_EMPTY_PATH as libc::c_uint,
             &attr as *const _ as *const libc::c_void,
             std::mem::size_of::<MountAttr>(),
         )

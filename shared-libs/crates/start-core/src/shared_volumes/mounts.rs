@@ -6,8 +6,9 @@ use std::sync::Arc;
 
 use crate::disk::mount::filesystem::syscall::{
     DetachedMount, MountNamespace, open_beneath, open_tree_attr_idmap_fd, open_tree_clone_fd,
-    same_mount, unmount_fd,
+    same_mount, unmount_fd, userns_fd_from_idmap,
 };
+use crate::disk::mount::filesystem::idmapped::IdMap;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -98,8 +99,8 @@ impl AsFd for PinnedDirectory {
 pub struct PreparedSource {
     directory: PinnedDirectory,
     guard: TmpMountGuard,
-    /// Maps the source's container ids into the consumer's range at attachment.
-    userns: Option<OwnedFd>,
+    /// The host view holds container ids; attaching applies the container's map.
+    container_ids: bool,
 }
 
 impl PreparedSource {
@@ -107,9 +108,13 @@ impl PreparedSource {
         &self.guard
     }
 
-    pub(crate) fn idmapped(mut self, userns: OwnedFd) -> Self {
-        self.userns = Some(userns);
+    pub(crate) fn storing_container_ids(mut self) -> Self {
+        self.container_ids = true;
         self
+    }
+
+    pub(crate) fn stores_container_ids(&self) -> bool {
+        self.container_ids
     }
 
     pub async fn open(guard: TmpMountGuard, subpath: Option<PathBuf>) -> Result<Self, Error> {
@@ -119,7 +124,7 @@ impl PreparedSource {
             Ok(Self {
                 directory,
                 guard,
-                userns: None,
+                container_ids: false,
             })
         })
         .await
@@ -135,7 +140,7 @@ impl PreparedSource {
             Ok(Self {
                 directory,
                 guard: self.guard,
-                userns: self.userns,
+                container_ids: self.container_ids,
             })
         })
         .await
@@ -195,13 +200,15 @@ impl StagedMount {
 #[derive(Default)]
 pub struct SharedVolumeMounts {
     blocked: bool,
+    /// The container's map, applied to sources that hold container ids.
+    idmap: Option<IdMap>,
     slots: BTreeMap<(Guid, PathBuf), MountSlot>,
     root: Option<StagingRoot>,
 }
 
 impl SharedVolumeMounts {
     /// The caller must establish this root before executing package JavaScript.
-    pub(crate) async fn new(rootfs: &Path) -> Result<Self, Error> {
+    pub(crate) async fn new(rootfs: &Path, idmap: IdMap) -> Result<Self, Error> {
         let backing = TmpDir::new().await?;
         tokio::fs::set_permissions(&*backing, std::fs::Permissions::from_mode(0o755)).await?;
         std::os::unix::fs::chown(&*backing, Some(0), Some(0))?;
@@ -219,6 +226,7 @@ impl SharedVolumeMounts {
         let unavailable = AttachedMount::bind(&empty, &empty, true, namespace, None)?;
         Ok(Self {
             blocked: false,
+            idmap: Some(idmap),
             root: Some(StagingRoot {
                 _unavailable: unavailable,
                 directory,
@@ -310,12 +318,18 @@ impl SharedVolumeMounts {
         let path = root.directory.path().join(&relative);
         tokio::fs::create_dir_all(&path).await?;
         let destination = open_beneath(root.directory.path(), &relative)?;
+        let userns = if source.container_ids {
+            let idmap = self.idmap.or_not_found("container idmap")?;
+            Some(userns_fd_from_idmap(&[idmap], None).await?)
+        } else {
+            None
+        };
         let mount = AttachedMount::bind(
             &source.directory,
             &destination,
             readonly,
             root._mount.namespace.clone(),
-            source.userns.as_ref(),
+            userns.as_ref(),
         )?;
         slot.stage = Some(StagedMount {
             id: id.clone(),
