@@ -5,7 +5,6 @@ use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::cifs::{Cifs, SharedCifs};
-use crate::disk::mount::filesystem::idmapped::IdMapped;
 use crate::disk::mount::filesystem::syscall::open_beneath;
 use crate::disk::mount::filesystem::{FileSystem, MountType, ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard, WeakMountGuard};
@@ -115,6 +114,11 @@ impl SourceDefinition {
         }
     }
 
+    /// Whether the host view holds container ids, which attachment maps into a container.
+    pub(crate) fn stores_container_ids(&self) -> bool {
+        !matches!(self.source, SharedVolumeSource::Cifs { .. })
+    }
+
     pub(super) fn filesystem(&self, id: &SharedVolumeId) -> SourceFilesystem {
         match &self.source {
             SharedVolumeSource::Local => {
@@ -155,19 +159,17 @@ pub(crate) enum PreparedFilesystem<L, D, C> {
     Disk(D),
     Cifs(C),
 }
+/// Host views carry no idmap: local and disk files keep container ids, which attachment maps.
+/// CIFS cannot be idmapped and presents its forced service owner instead.
 pub(crate) type SourceFilesystem =
-    PreparedFilesystem<IdMapped<LocalSubvolume>, IdMapped<BlockDev<PathBuf>>, SharedCifs>;
+    PreparedFilesystem<LocalSubvolume, BlockDev<PathBuf>, SharedCifs>;
 impl SourceFilesystem {
-    // Local files retain unshifted owners on disk; service views apply BASE_IDMAP.
     pub(crate) fn local(path: PathBuf) -> Self {
-        Self::Local(crate::lxc::service_filesystem(LocalSubvolume(path), &[]))
+        Self::Local(LocalSubvolume(path))
     }
 
     fn external(device: &Path) -> Self {
-        Self::Disk(crate::lxc::service_filesystem(
-            BlockDev::new(device.to_owned()),
-            &[],
-        ))
+        Self::Disk(BlockDev::new(device.to_owned()))
     }
 }
 impl<L: FileSystem, D: FileSystem, C: FileSystem> FileSystem for PreparedFilesystem<L, D, C> {
@@ -228,7 +230,12 @@ pub async fn open_source(
     let result = source_result(
         async {
             let mount = TmpMountGuard::mount(&filesystem, mount_type).await?;
-            prepared = Some(PreparedSource::open(mount, subpath).await?);
+            let source = PreparedSource::open(mount, subpath).await?;
+            prepared = Some(if definition.stores_container_ids() {
+                source.storing_container_ids()
+            } else {
+                source
+            });
             Ok(())
         }
         .await,

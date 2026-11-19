@@ -131,7 +131,10 @@ async fn mount_managed(
             guid,
             Path::new(location),
             id,
-            PreparedSource::open(source.clone(), None).await.unwrap(),
+            PreparedSource::open(source.clone(), None)
+                .await
+                .unwrap()
+                .storing_container_ids(),
             readonly,
             &root,
         )
@@ -146,7 +149,7 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
     use crate::disk::mount::filesystem::ReadWrite;
     use crate::disk::mount::filesystem::bind::{Bind, FileType};
     use crate::disk::mount::guard::MountGuard;
-    use crate::lxc::{LxcConfig, LxcManager, service_filesystem};
+    use crate::lxc::{LxcConfig, LxcManager};
 
     let fixture = crate::util::btrfs::tests::directory();
     std::fs::write(fixture.path().join("sentinel"), b"private data").unwrap();
@@ -155,12 +158,9 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         std::fs::Permissions::from_mode(0o600),
     )
     .unwrap();
-    let source = TmpMountGuard::mount(
-        &service_filesystem(Bind::new(fixture.path()), &[]),
-        ReadWrite,
-    )
-    .await
-    .unwrap();
+    let source = TmpMountGuard::mount(&Bind::new(fixture.path()), ReadWrite)
+        .await
+        .unwrap();
     let manager = Arc::new(LxcManager::new());
     let first = manager.create(None, LxcConfig::default()).await.unwrap();
     let second = manager.create(None, LxcConfig::default()).await.unwrap();

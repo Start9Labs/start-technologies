@@ -1,7 +1,7 @@
 //! Detached Linux bind mounts with optional idmaps and read-only attributes.
 //! Atomic clone attributes require Linux 6.15 or later.
 
-use std::ffi::{CString, OsString};
+use std::ffi::{CStr, CString, OsString};
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
@@ -100,9 +100,29 @@ pub fn open_tree_attr_idmap(
     recursive: bool,
     userns: BorrowedFd,
 ) -> Result<OwnedFd, Error> {
+    open_tree_attr_idmap_at(AT_FDCWD, &cstr_path(path)?, clone_flags(recursive), userns)
+}
+
+/// Clones a pinned directory without its child mounts, idmapped through the user namespace.
+pub fn open_tree_attr_idmap_fd(source: BorrowedFd, userns: BorrowedFd) -> Result<OwnedFd, Error> {
+    open_tree_attr_idmap_at(
+        source.as_raw_fd(),
+        &cstr_str("")?,
+        clone_flags(false) | AT_EMPTY_PATH as libc::c_uint,
+        userns,
+    )
+}
+
+fn open_tree_attr_idmap_at(
+    source: RawFd,
+    path: &CStr,
+    flags: libc::c_uint,
+    userns: BorrowedFd,
+) -> Result<OwnedFd, Error> {
     open_tree_attr(
+        source,
         path,
-        recursive,
+        flags,
         &MountAttr {
             attr_set: MOUNT_ATTR_IDMAP,
             userns_fd: userns.as_raw_fd() as u64,
@@ -115,8 +135,9 @@ pub fn open_tree_attr_idmap(
 /// Clones with private propagation and access flags atomically; requires Linux 6.15.
 pub fn open_tree_private(path: &Path, recursive: bool, readonly: bool) -> Result<OwnedFd, Error> {
     open_tree_attr(
-        path,
-        recursive,
+        AT_FDCWD,
+        &cstr_path(path)?,
+        clone_flags(recursive),
         &MountAttr {
             attr_set: if readonly { MOUNT_ATTR_RDONLY } else { 0 },
             attr_clr: if readonly { 0 } else { MOUNT_ATTR_RDONLY },
@@ -128,24 +149,23 @@ pub fn open_tree_private(path: &Path, recursive: bool, readonly: bool) -> Result
 }
 
 fn open_tree_attr(
-    path: &Path,
-    recursive: bool,
+    source: RawFd,
+    path: &CStr,
+    flags: libc::c_uint,
     attr: &MountAttr,
     context: &'static str,
 ) -> Result<OwnedFd, Error> {
-    let p = cstr_path(path)?;
-    let flags = clone_flags(recursive);
-    let r = unsafe {
+    let raw = unsafe {
         libc::syscall(
             SYS_OPEN_TREE_ATTR,
-            AT_FDCWD,
-            p.as_ptr(),
+            source,
+            path.as_ptr(),
             flags,
             attr as *const _ as *const libc::c_void,
             std::mem::size_of::<MountAttr>(),
         )
     };
-    fd_from_raw(r, context)
+    fd_from_raw(raw, context)
 }
 
 /// A detached clone rooted at a pinned directory, optionally including submounts.

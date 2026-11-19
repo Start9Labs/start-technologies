@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::disk::mount::filesystem::syscall::{
-    DetachedMount, MountNamespace, open_beneath, open_tree_clone_fd, same_mount, unmount_fd,
+    DetachedMount, MountNamespace, open_beneath, open_tree_attr_idmap_fd, open_tree_clone_fd,
+    same_mount, unmount_fd, userns_fd_from_idmap,
 };
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::prelude::*;
@@ -27,7 +28,20 @@ impl AttachedMount {
         readonly: bool,
         namespace: Arc<MountNamespace>,
     ) -> Result<Self, Error> {
-        let detached = DetachedMount::from_fd(open_tree_clone_fd(source.as_fd(), false)?);
+        Self::attach(
+            DetachedMount::from_fd(open_tree_clone_fd(source.as_fd(), false)?),
+            destination,
+            readonly,
+            namespace,
+        )
+    }
+
+    fn attach(
+        detached: DetachedMount,
+        destination: &OwnedFd,
+        readonly: bool,
+        namespace: Arc<MountNamespace>,
+    ) -> Result<Self, Error> {
         detached.set_private()?;
         detached.set_readonly(readonly)?;
         let mount = namespace.run(|| detached.attach_to_fd(destination.as_fd()))?;
@@ -93,6 +107,8 @@ impl AsFd for PinnedDirectory {
 pub struct PreparedSource {
     directory: PinnedDirectory,
     guard: TmpMountGuard,
+    /// The host view holds container ids; attaching applies the container's map.
+    container_ids: bool,
 }
 
 impl PreparedSource {
@@ -100,11 +116,34 @@ impl PreparedSource {
         &self.guard
     }
 
+    pub(crate) fn storing_container_ids(mut self) -> Self {
+        self.container_ids = true;
+        self
+    }
+
+    pub(crate) fn stores_container_ids(&self) -> bool {
+        self.container_ids
+    }
+
+    async fn clone_for_attachment(&self) -> Result<DetachedMount, Error> {
+        let mount = if self.container_ids {
+            let userns = userns_fd_from_idmap(&[crate::lxc::BASE_IDMAP]).await?;
+            open_tree_attr_idmap_fd(self.directory.as_fd(), userns.as_fd())?
+        } else {
+            open_tree_clone_fd(self.directory.as_fd(), false)?
+        };
+        Ok(DetachedMount::from_fd(mount))
+    }
+
     pub async fn open(guard: TmpMountGuard, subpath: Option<PathBuf>) -> Result<Self, Error> {
         tokio::task::spawn_blocking(move || {
             let directory =
                 PinnedDirectory::open(guard.path(), subpath.as_deref().unwrap_or(Path::new("")))?;
-            Ok(Self { directory, guard })
+            Ok(Self {
+                directory,
+                guard,
+                container_ids: false,
+            })
         })
         .await
         .with_kind(ErrorKind::Unknown)?
@@ -119,6 +158,7 @@ impl PreparedSource {
             Ok(Self {
                 directory,
                 guard: self.guard,
+                container_ids: self.container_ids,
             })
         })
         .await
@@ -170,6 +210,18 @@ impl StagedMount {
         self.source.unmount().await?;
         tokio::fs::remove_dir(self.directory).await?;
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum MountSourceError {
+    Source(Error),
+    Attachment(Error),
+}
+
+impl From<Error> for MountSourceError {
+    fn from(error: Error) -> Self {
+        Self::Attachment(error)
     }
 }
 
@@ -281,7 +333,7 @@ impl SharedVolumeMounts {
         source: PreparedSource,
         readonly: bool,
         service_root: &Path,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MountSourceError> {
         self.check_allowed()?;
         let root = self
             .root
@@ -289,12 +341,18 @@ impl SharedVolumeMounts {
             .or_not_found("shared-volume staging root")?;
         let key = (guid.clone(), confined_relative(location)?);
         let slot = self.slots.get_mut(&key).or_not_found("volume mountpoint")?;
+        let detached = source
+            .clone_for_attachment()
+            .await
+            .map_err(MountSourceError::Source)?;
         let relative = Path::new(id.as_ref()).join(Guid::new().to_string());
         let path = root.directory.path().join(&relative);
-        tokio::fs::create_dir_all(&path).await?;
+        tokio::fs::create_dir_all(&path)
+            .await
+            .with_kind(ErrorKind::Filesystem)?;
         let destination = open_beneath(root.directory.path(), &relative)?;
-        let mount = AttachedMount::bind(
-            &source.directory,
+        let mount = AttachedMount::attach(
+            detached,
             &destination,
             readonly,
             root._mount.namespace.clone(),

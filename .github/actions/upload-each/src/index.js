@@ -11,6 +11,7 @@ async function run() {
     core.getInput('compression-level') || '6',
     10,
   )
+  const archive = core.getInput('archive') !== 'false'
   const ifNoFilesFound = (
     core.getInput('if-no-files-found') || 'warn'
   ).toLowerCase()
@@ -33,7 +34,7 @@ async function run() {
     const name = path.basename(file)
     const rel = path.relative(cwd, file) || file
     core.info(`Uploading ${name} (${rel})`)
-    const opts = { compressionLevel }
+    const opts = archive ? { compressionLevel } : { skipArchive: true }
     if (retentionDays > 0) opts.retentionDays = retentionDays
     const result = await client.uploadArtifact(name, [file], cwd, opts)
     core.info(`  artifact id=${result.id} size=${result.size}`)

@@ -53,6 +53,13 @@ for (const [path, push, pullRequest = push, osImage = false] of [
     true,
   ],
   ['projects/start-os/startd.service', ['start-os'], undefined, true],
+  [
+    'projects/start-os/container-runtime/deb-install.sh',
+    ['start-os'],
+    undefined,
+    true,
+  ],
+  ['projects/start-os/container-runtime/src/index.ts', ['start-os']],
   ['projects/start-os/src/main.rs', ['start-os']],
   ['projects/start-os/docs/src/overview.md', []],
   ['projects/start-os/release-notes/0.4.1.md', ['start-os'], undefined, true],

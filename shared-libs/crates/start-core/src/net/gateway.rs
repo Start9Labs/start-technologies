@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use clap::Parser;
+use futures::future::BoxFuture;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use imbl::{OrdMap, OrdSet};
 use imbl_value::{InternedString, Value};
@@ -19,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::process::Command;
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
 use url::Url;
 use visit_rs::{Visit, VisitFields};
 use zbus::proxy::{PropertyChanged, PropertyStream, SignalStream};
@@ -1509,6 +1510,21 @@ impl<'a> StubStream<'a> for SignalStream<'a> {
     }
 }
 
+/// Resolves once the device's `IpInterface` differs from the observed name.
+///
+/// NetworkManager leaves `IpInterface` empty until activation reaches `IP_CHECK`, and announces
+/// the name only on the device itself. A scan that skips an unnamed device depends on this to
+/// rescan it.
+async fn ip_interface_changed(device_proxy: &DeviceProxy<'_>, observed: &str) -> Result<(), Error> {
+    let mut changes = device_proxy.receive_ip_interface_changed().await;
+    while let Some(change) = changes.next().await {
+        if change.get().await? != observed {
+            return Ok(());
+        }
+    }
+    futures::future::pending().await
+}
+
 #[instrument(skip_all)]
 async fn watcher(
     watch_ip_info: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
@@ -1527,7 +1543,16 @@ async fn watcher(
 
             let netman_proxy = NetworkManagerProxy::new(&connection).await?;
 
+            let rescan = Notify::new();
+            let rescan = &rescan;
             let mut until = Until::new()
+                .with_async_fn(move || {
+                    async move {
+                        rescan.notified().await;
+                        Ok(())
+                    }
+                    .fuse()
+                })
                 .with_stream(netman_proxy.receive_all_devices_changed().await.stub())
                 .with_stream(
                     netman_proxy
@@ -1563,13 +1588,21 @@ async fn watcher(
                         );
                         let mut ifaces = BTreeSet::new();
                         let mut policy_ifaces: BTreeMap<GatewayId, u32> = BTreeMap::new();
-                        let mut jobs = Vec::new();
+                        let mut jobs: Vec<(String, BoxFuture<'_, Result<(), Error>>)> = Vec::new();
                         for device in devices {
-                            use futures::future::Either;
-
                             let device_proxy =
                                 device::DeviceProxy::new(&connection, device.clone()).await?;
                             let iface = InternedString::intern(device_proxy.ip_interface().await?);
+                            jobs.push((device.to_string(), {
+                                let device_proxy = device_proxy.clone();
+                                let observed = iface.clone();
+                                async move {
+                                    ip_interface_changed(&device_proxy, &observed).await?;
+                                    rescan.notify_one();
+                                    Ok(())
+                                }
+                                .boxed()
+                            }));
                             if iface.is_empty() {
                                 continue;
                             }
@@ -1588,25 +1621,27 @@ async fn watcher(
                             }
                             if watch_activation.peek(|a| a.contains_key(&iface)) {
                                 jobs.push((
-                                    iface.clone(),
-                                    Either::Left(watch_activated(
+                                    iface.to_string(),
+                                    watch_activated(
                                         &connection,
                                         device_proxy.clone(),
                                         iface.clone(),
                                         &watch_activation,
-                                    )),
+                                    )
+                                    .boxed(),
                                 ));
                             }
 
                             jobs.push((
-                                iface.clone(),
-                                Either::Right(watch_ip(
+                                iface.to_string(),
+                                watch_ip(
                                     &connection,
                                     device_proxy.clone(),
                                     iface.clone(),
                                     &watch_ip_info,
                                     db.as_ref(),
-                                )),
+                                )
+                                .boxed(),
                             ));
                             ifaces.insert(iface);
                         }
@@ -3866,6 +3901,127 @@ mod policy_rule_tests {
             "48:\tfrom all to 2000::/3 fwmark 0x3ec lookup 1004",
             1003
         ));
+    }
+}
+
+#[cfg(test)]
+mod ip_interface_tests {
+    use super::*;
+
+    const DEVICE_PATH: &str = "/org/freedesktop/NetworkManager/Devices/7";
+
+    struct FakeDevice {
+        ip_interface: String,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.NetworkManager.Device")]
+    impl FakeDevice {
+        #[zbus(property)]
+        fn ip_interface(&self) -> String {
+            self.ip_interface.clone()
+        }
+    }
+
+    /// A NetworkManager stand-in serving one device, and a client connected to it.
+    #[allow(deprecated)]
+    async fn fake_network_manager(ip_interface: &str) -> (Connection, Connection) {
+        let (server, client) = std::os::unix::net::UnixStream::pair().unwrap();
+        let device = FakeDevice {
+            ip_interface: ip_interface.to_owned(),
+        };
+        let (server, client) = tokio::join!(
+            async {
+                zbus::connection::Builder::unix_stream(server)
+                    .server(zbus::Guid::generate())
+                    .unwrap()
+                    .p2p()
+                    .serve_at(DEVICE_PATH, device)
+                    .unwrap()
+                    .build()
+                    .await
+                    .unwrap()
+            },
+            async {
+                zbus::connection::Builder::unix_stream(client)
+                    .p2p()
+                    .build()
+                    .await
+                    .unwrap()
+            },
+        );
+        (server, client)
+    }
+
+    async fn rename(server: &Connection, ip_interface: &str) {
+        let device = server
+            .object_server()
+            .interface::<_, FakeDevice>(DEVICE_PATH)
+            .await
+            .unwrap();
+        device.get_mut().await.ip_interface = ip_interface.to_owned();
+        device
+            .get()
+            .await
+            .ip_interface_changed(device.signal_emitter())
+            .await
+            .unwrap();
+    }
+
+    async fn observe(client: &Connection) -> (DeviceProxy<'_>, String) {
+        let device = DeviceProxy::new(client, DEVICE_PATH).await.unwrap();
+        let observed = device.ip_interface().await.unwrap();
+        (device, observed)
+    }
+
+    #[tokio::test]
+    async fn an_unnamed_device_is_reported_once_it_gains_an_ip_interface() {
+        let (server, client) = fake_network_manager("").await;
+        let (device, observed) = observe(&client).await;
+        assert_eq!(observed, "");
+
+        let changed = ip_interface_changed(&device, &observed);
+        tokio::pin!(changed);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), &mut changed)
+                .await
+                .is_err(),
+            "an unchanged interface must not trigger a rescan"
+        );
+
+        rename(&server, "wg1").await;
+        tokio::time::timeout(Duration::from_secs(5), changed)
+            .await
+            .expect("the new interface name must trigger a rescan")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_rename_before_the_wait_begins_is_not_lost() {
+        let (server, client) = fake_network_manager("").await;
+        let (device, observed) = observe(&client).await;
+
+        rename(&server, "wg1").await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while device
+                .inner()
+                .cached_property::<String>("IpInterface")
+                .unwrap()
+                .as_deref()
+                != Some("wg1")
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            ip_interface_changed(&device, &observed),
+        )
+        .await
+        .expect("a rename the scan missed must trigger a rescan")
+        .unwrap();
     }
 }
 
