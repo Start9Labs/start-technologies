@@ -1,7 +1,59 @@
+use openssl::pkey::{PKey, Private};
+
+use super::super::private_config::{LegacyReplacements, ProjectedConfig};
 use super::*;
-use crate::os_overlay::{OVERLAY_FILE, VerityImage};
+use crate::os_overlay::{OVERLAY_FILE, PreparedGeneration, VerityImage, VerityMount};
 use crate::rpc_continuations::Guid;
+use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::util::squashfs::{Entry, NodeContents};
+
+async fn prepare_test_configuration<D: GenericMountGuard>(
+    snapshot: Squashfs<DynFileSource>,
+    public: VerityMount,
+    data: D,
+    store: PathBuf,
+    key: PKey<Private>,
+) -> Result<(PreparedGeneration, LegacyReplacements), Error> {
+    complete_owned_operation(async move {
+        let memory = super::super::memory::ProcessSecretMemory::protect()?;
+        let rootfs = public.image_path().to_owned();
+        let capture = capture_configuration(snapshot, public, data).await?;
+        let result = async {
+            let image = crate::util::io::open_file(capture.image()).await?;
+            let snapshot = Squashfs::deserialize(MultiCursorFile::open(&image).await?)
+                .await?
+                .into_dyn();
+            let projected = ProjectedConfig::stage(
+                snapshot,
+                &capture
+                    .layers
+                    .lower()
+                    .data
+                    .path()
+                    .join(crate::MAIN_FILESYSTEM),
+                capture.host_keys(),
+            )
+            .await?;
+            let prepared = projected.prepare_generation(&rootfs, &store, &key).await?;
+            let legacy = projected.legacy_replacements();
+            memory.check()?;
+            Ok((prepared, legacy))
+        }
+        .await;
+        let cleanup = capture.unmount().await;
+        match result {
+            Ok(value) => {
+                cleanup?;
+                Ok(value)
+            }
+            Err(error) => {
+                cleanup.log_err();
+                Err(error)
+            }
+        }
+    })
+    .await
+}
 
 #[tokio::test]
 #[ignore = "requires exclusive managed guest, genuine FDE_SOURCE_IMAGE and verity/loop/overlay/namespace privileges"]
@@ -74,7 +126,7 @@ async fn authorized_configuration_uses_prospective_native_inputs_and_redacts_bef
     let snapshot = Squashfs::from_directory(&raw).await.unwrap().into_dyn();
     let key = crate::os_overlay::generate_signing_key().unwrap();
     let (prepared, legacy) =
-        prepare_configuration(snapshot, public, mounted_data, store.clone(), key)
+        prepare_test_configuration(snapshot, public, mounted_data, store.clone(), key)
             .await
             .unwrap();
     assert!(
@@ -143,7 +195,7 @@ async fn authorized_configuration_uses_prospective_native_inputs_and_redacts_bef
         .unwrap()
         .with_strict_unmount();
     assert!(
-        prepare_configuration(
+        prepare_test_configuration(
             snapshot,
             public,
             mounted_data,
@@ -190,7 +242,7 @@ async fn authorized_configuration_uses_prospective_native_inputs_and_redacts_bef
     let snapshot = Squashfs::from_directory(&raw).await.unwrap().into_dyn();
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(45),
-        prepare_configuration(
+        prepare_test_configuration(
             snapshot,
             public,
             mounted_data,

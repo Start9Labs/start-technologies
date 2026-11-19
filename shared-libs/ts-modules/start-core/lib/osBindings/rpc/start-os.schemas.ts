@@ -5028,13 +5028,6 @@ export const DependencyMetadata: z.ZodIntersection<
  * Firmware enrollment observation, not proof of active disk protection.
  */
 export const FdeEnrollmentProgress: z.ZodObject<{
-  /**
-   * An unpublished configuration candidate, not boot activation or active protection.
-   */
-  preparedGeneration: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
   firmwareEnrolled: z.ZodBoolean
   approvalCode: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -5042,16 +5035,6 @@ export const FdeEnrollmentProgress: z.ZodObject<{
   >
   certificates: z.ZodArray<typeof CertificateProgress>
 }> = /* @__PURE__ */ object({
-  /**
-   * An unpublished configuration candidate, not boot activation or active protection.
-   */
-  preparedGeneration: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description:
-      'An unpublished configuration candidate, not boot activation or active protection.',
-  }),
   firmwareEnrolled: z.boolean(),
   approvalCode: wire(z.string().nullable().optional(), z.string().nullable()),
   certificates: z.array(CertificateProgress),

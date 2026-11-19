@@ -678,7 +678,8 @@ async fn stopped_unit(unit: &str) -> Result<bool, Error> {
 /// The image-store reservation excludes native update/pruning through manifest preparation.
 /// The operation request contains paths, never signing or unlock secrets.
 /// Unpublished preparation does not admit the base as a public builder source.
-pub(crate) async fn prepare(ctx: &RpcContext) -> Result<String, Error> {
+/// Publishes nothing; hidden staging may remain after return.
+pub(crate) async fn prepare(ctx: &RpcContext) -> Result<(), Error> {
     let memory = ProcessSecretMemory::protect()?;
     let _images = crate::os_overlay::reserve_image_store(false).await?;
     let rootfs = running_image().await?;
@@ -724,5 +725,5 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<String, Error> {
     )?;
     super::public_image::stage(ctx, &prepared, &descriptor).await?;
     memory.check()?;
-    Ok(prepared.name().to_owned())
+    Ok(())
 }

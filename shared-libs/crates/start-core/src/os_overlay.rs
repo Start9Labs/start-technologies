@@ -690,10 +690,6 @@ impl PreparedGeneration {
         &self.public_key
     }
 
-    pub(crate) fn name(&self) -> &str {
-        self.destination.file_name().unwrap().to_str().unwrap()
-    }
-
     /// Syncs all staged files and atomically publishes the complete generation.
     ///
     /// Returns after the store directory is synced. An I/O failure after rename

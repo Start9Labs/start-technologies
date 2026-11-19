@@ -8,9 +8,6 @@ mod tests;
 
 use std::path::{Path, PathBuf};
 
-use openssl::pkey::{PKey, Private};
-
-use super::private_config::{LegacyReplacements, ProjectedConfig};
 use super::root::VerifiedMounts;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
@@ -18,10 +15,8 @@ use crate::disk::mount::filesystem::overlayfs::OverlayFs;
 use crate::disk::mount::filesystem::private_tmpfs::PrivateTmpfs;
 use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
-use crate::os_overlay::{PreparedGeneration, VerityMount};
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::DynFileSource;
-use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::util::future::complete_owned_operation;
 use crate::util::io::{TmpDir, create_file_mod};
 use crate::util::squashfs::Squashfs;
@@ -177,56 +172,6 @@ pub(crate) async fn capture_configuration<P: GenericMountGuard, D: GenericMountG
             }),
             Err(error) => {
                 layers.unmount().await.log_err();
-                Err(error)
-            }
-        }
-    })
-    .await
-}
-
-/// Retains base-image authority through preparation; data writes must be available after capture.
-/// Returns an unpublished signed configuration and a source-independent legacy plan.
-pub(crate) async fn prepare_configuration<D: GenericMountGuard>(
-    snapshot: Squashfs<DynFileSource>,
-    public: VerityMount,
-    data: D,
-    store: PathBuf,
-    key: PKey<Private>,
-) -> Result<(PreparedGeneration, LegacyReplacements), Error> {
-    complete_owned_operation(async move {
-        let memory = super::memory::ProcessSecretMemory::protect()?;
-        let rootfs = public.image_path().to_owned();
-        let capture = capture_configuration(snapshot, public, data).await?;
-        let result = async {
-            let image = crate::util::io::open_file(capture.image()).await?;
-            let snapshot = Squashfs::deserialize(MultiCursorFile::open(&image).await?)
-                .await?
-                .into_dyn();
-            let projected = ProjectedConfig::stage(
-                snapshot,
-                &capture
-                    .layers
-                    .lower()
-                    .data
-                    .path()
-                    .join(crate::MAIN_FILESYSTEM),
-                capture.host_keys(),
-            )
-            .await?;
-            let prepared = projected.prepare_generation(&rootfs, &store, &key).await?;
-            let legacy = projected.legacy_replacements();
-            memory.check()?;
-            Ok((prepared, legacy))
-        }
-        .await;
-        let cleanup = capture.unmount().await;
-        match result {
-            Ok(value) => {
-                cleanup?;
-                Ok(value)
-            }
-            Err(error) => {
-                cleanup.log_err();
                 Err(error)
             }
         }
