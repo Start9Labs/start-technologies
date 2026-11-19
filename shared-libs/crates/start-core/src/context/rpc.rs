@@ -159,6 +159,16 @@ impl Drop for RpcContextSeed {
     }
 }
 
+async fn close_after_teardown(
+    teardown: impl Future<Output = Result<(), Error>>,
+    is_closed: &AtomicBool,
+    closed: &watch::Sender<bool>,
+) {
+    teardown.await.log_err();
+    is_closed.store(true, Ordering::SeqCst);
+    closed.send_replace(true);
+}
+
 pub struct Hardware {
     pub devices: Vec<LshwDevice>,
     pub ram: u64,
@@ -645,7 +655,7 @@ impl RpcContext {
         }
         .await;
         if let Err(error) = initialized {
-            res.shutdown().await.log_err();
+            res.shutdown().await;
             return Err(error);
         }
         Ok(res)
@@ -661,19 +671,23 @@ impl RpcContext {
     }
 
     #[instrument(skip_all)]
-    pub async fn shutdown(self) -> Result<(), Error> {
+    pub async fn shutdown(self) {
         stop_background_tasks(&self.background_tasks, &self.cleanup_tasks).await;
         wait_for_filesystem_cleanup().await;
-        let services = self.services.shutdown_all().await;
-        wait_for_filesystem_cleanup().await;
-        services?;
-        self.is_closed.store(true, Ordering::SeqCst);
-        self.closed.send_replace(true);
+        close_after_teardown(
+            async {
+                let services = self.services.shutdown_all().await;
+                wait_for_filesystem_cleanup().await;
+                services
+            },
+            &self.0.is_closed,
+            &self.0.closed,
+        )
+        .await;
         tracing::info!("{}", t!("context.rpc.rpc-context-shutdown"));
-        Ok(())
     }
 
-    /// Resolves after background jobs, rollback and containers stop.
+    /// Resolves after owned work and cleanup finish, even when service teardown fails.
     pub fn wait_closed(&self) -> impl Future<Output = ()> + Send + 'static + use<> {
         let mut rx = self.0.closed.subscribe();
         async move {
@@ -1147,6 +1161,22 @@ mod tests {
                 .build()
                 .unwrap(),
         }
+    }
+
+    #[tokio::test]
+    async fn failed_teardown_still_closes_the_context() {
+        let is_closed = AtomicBool::new(false);
+        let closed = watch::Sender::new(false);
+
+        close_after_teardown(
+            async { Err(Error::new(eyre!("teardown failed"), ErrorKind::Unknown)) },
+            &is_closed,
+            &closed,
+        )
+        .await;
+
+        assert!(is_closed.load(Ordering::SeqCst));
+        assert!(*closed.borrow());
     }
 
     #[tokio::test]

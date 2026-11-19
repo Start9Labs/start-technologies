@@ -52,10 +52,10 @@ async fn wait_for_shutdown(
 }
 
 /// Must stop request producers before cleanup while preserving shutdown waits through service teardown.
-async fn teardown_runtime<A>(
+async fn teardown_runtime<A, T>(
     server: &mut WebServer<A>,
-    teardown: impl std::future::Future<Output = Result<(), Error>>,
-) -> Result<(), Error>
+    teardown: impl std::future::Future<Output = T>,
+) -> T
 where
     A: Accept + Send + Sync + 'static,
     for<'a> A::Metadata: visit_rs::Visit<ExtensionVisitor<'a>> + Send + Sync + 'static,
@@ -191,17 +191,8 @@ async fn inner_main(
         .shutdown
         .peek(|(_, restarting)| crate::shutdown::in_progress_error(*restarting));
     server.reject_requests(rejection.into());
-    let teardown = teardown_runtime(server, rpc_ctx.shutdown()).await;
-    match result {
-        Ok(shutdown) => {
-            teardown?;
-            Ok(shutdown)
-        }
-        Err(error) => {
-            teardown.log_err();
-            Err(error)
-        }
-    }
+    teardown_runtime(server, rpc_ctx.shutdown()).await;
+    result
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {
@@ -479,7 +470,7 @@ mod tests {
                 stopping.send(()).unwrap();
                 resume_teardown.await.unwrap();
                 services_stopped.send_replace(true);
-                Ok(())
+                Ok::<(), Error>(())
             })
             .await;
             server.shutdown().await;

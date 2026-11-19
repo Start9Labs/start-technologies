@@ -217,7 +217,7 @@ fn teardown(
             started.send(()).unwrap();
             completion.await.unwrap();
             closed.send_replace(true);
-            Ok(())
+            Ok::<(), Error>(())
         })
         .await
         .unwrap();
