@@ -84,6 +84,13 @@ test('uses explicit next/base even for the default branch', async t => {
   assert.equal(f.remoteSha('next/master'), tip)
 })
 
+test('a default branch with no next/base joins its sibling next/* lines', async t => {
+  const f = fixture(t)
+  f.git('push', 'origin', 'master:refs/heads/next/older')
+  assert.equal(await f.run(), 'created')
+  assert.equal(f.remoteSha('next/master'), f.initial)
+})
+
 test('non-default branches get their own iteration branch', async t => {
   const f = fixture(t)
   f.forge.defaultBranch = async () => 'main'

@@ -4,8 +4,11 @@ import { REPO, fixture } from './fixtures.mjs'
 
 export function artifactFixture(t, runs) {
   const f = fixture(t)
-  const helper = 'scripts/gha-artifact-run-ids.sh'
-  chmodSync(f.write(helper, readFileSync(join(REPO, helper))), 0o755)
+  for (const helper of [
+    'scripts/gha-artifact-run-ids.sh',
+    'scripts/gha-artifact-download.sh',
+  ])
+    chmodSync(f.write(helper, readFileSync(join(REPO, helper))), 0o755)
   f.write('runs.json', JSON.stringify(runs))
   f.write('gh.log', '')
   f.write('downloads.log', '')
@@ -17,23 +20,33 @@ const root = ${JSON.stringify(f.root)}
 const runs = JSON.parse(readFileSync(root + '/runs.json'))
 const args = process.argv.slice(2)
 appendFileSync(root + '/gh.log', JSON.stringify(args) + '\\n')
-const artifacts = run => run.artifacts.map(artifact => ({
+const artifacts = run => run.artifacts.map((artifact, index) => ({
+  id: run.id * 1000 + index,
   expired: false,
+  created_at: run.created_at ?? new Date().toISOString().replace(/\\.\\d+Z$/, 'Z'),
   ...(typeof artifact === 'string' ? { name: artifact } : artifact),
   workflow_run: { id: run.id, head_branch: run.head_branch },
 }))
+const newestFirst = (a, b) =>
+  b.created_at.localeCompare(a.created_at) || b.workflow_run.id - a.workflow_run.id
 if (args[0] === 'api') {
   const url = args.find(arg => arg.startsWith('repos/'))
   if (process.env.GH_FAIL_MATCH && url.includes(process.env.GH_FAIL_MATCH)) process.exit(17)
+  const page = Number(new URL('https://x/' + url).searchParams.get('page') ?? 1)
   let response
   const workflow = url.match(/workflows\\/([^/]+)\\/runs/)
   const run = url.match(/actions\\/runs\\/(\\d+)(\\/artifacts)?/)
-  if (url.endsWith('/actions/artifacts')) {
-    const name = args.find(arg => arg.startsWith('name=')).slice(5)
-    const matching = runs.flatMap(artifacts).filter(artifact => artifact.name === name)
-    response = { artifacts: args.includes('--paginate') ? matching : matching.slice(0, 100) }
+  const zip = url.match(/actions\\/artifacts\\/(\\d+)\\/zip$/)
+  if (/\\/actions\\/artifacts(\\?|$)/.test(url)) {
+    const all = runs.flatMap(artifacts).sort(newestFirst)
+    response = { artifacts: all.slice((page - 1) * 100, page * 100) }
+  } else if (zip) {
+    const found = runs.flatMap(artifacts).find(artifact => String(artifact.id) === zip[1])
+    if (!found) process.exit(22)
+    appendFileSync(root + '/downloads.log', found.workflow_run.id + ' ' + found.name + '\\n')
+    process.stdout.write(found.name + ' contents\\n')
+    process.exit(0)
   } else if (workflow) {
-    const page = Number(new URL('https://x/' + url).searchParams.get('page') ?? 1)
     const matching = runs.filter(run => run.path === '.github/workflows/' + workflow[1])
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
     response = { workflow_runs: matching.slice((page - 1) * 100, page * 100) }
@@ -52,8 +65,6 @@ if (args[0] === 'api') {
     process.exit(result.status)
   }
   console.log(JSON.stringify(args.includes('--slurp') ? [response] : response))
-} else if (args[0] === 'run' && args[1] === 'download') {
-  appendFileSync(root + '/downloads.log', args[4] + ' ' + args[args.indexOf('-p') + 1] + '\\n')
 } else process.exit(2)
 `,
   )

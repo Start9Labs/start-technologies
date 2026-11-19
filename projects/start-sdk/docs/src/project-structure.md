@@ -240,7 +240,7 @@ jobs:
       pull-requests: write
 ```
 
-The paired branch is derived rather than configured: an explicit `next/<base>` is used where one exists — that is how the multi-branch packages keep one iteration branch per major line or flavor — and otherwise the repo's default branch pairs with a plain `next`. **A repo with no `next` gets one created at the base tip on the first run**, so a package never has to be seeded by hand.
+The paired branch is derived rather than configured: a repo with any `next/<line>` branch pairs every base with its own `next/<base>` — that is how the multi-branch packages keep one iteration branch per major line or flavor, including a new line that just became the default branch — and otherwise the repo's default branch pairs with a plain `next`. **A repo with no `next` gets one created at the base tip on the first run**, so a package never has to be seeded by hand.
 
 Neither `next` nor the base branch is force-pushed or rewritten. `next` is fast-forwarded when it is merely behind, given a merge commit when it carries unmerged work, and left untouched with a pull request opened for a human only when that merge conflicts. That pull request is headed by a throwaway `sync-next/<base>` branch rather than the base itself, so resolving its conflicts in GitHub's web editor — which commits to the head branch — cannot land on the base. **Merge it with a merge commit rather than a squash**, so `next` comes out with the base as an ancestor; a squash leaves equivalent content under a fresh commit and the following sync conflicts all over again. `workflow_dispatch` is there so a package can be brought into line without waiting for its next merge.
 

@@ -1,23 +1,52 @@
 use super::*;
 
 #[tokio::test]
-async fn local_sources_apply_the_base_map_and_keep_raw_backup_targets_separate() {
+async fn host_views_carry_no_idmap_and_only_cifs_forces_an_owner() {
     let id = SharedVolumeId::new();
-    let definition = SourceDefinition::new(SharedVolumeSource::Local, None);
-    let path = local_path(crate::PACKAGE_DATA, &id);
-    let mapped = definition.filesystem(&id);
-    let expected = IdMapped::new(Bind::new(&path), vec![crate::lxc::BASE_IDMAP]);
+    let local = SourceDefinition::new(SharedVolumeSource::Local, None);
+    assert!(local.stores_container_ids());
     assert_eq!(
-        mapped.source_hash().await.unwrap(),
-        expected.source_hash().await.unwrap()
+        local.filesystem(&id).source_hash().await.unwrap(),
+        Bind::new(local_path(crate::PACKAGE_DATA, &id))
+            .source_hash()
+            .await
+            .unwrap()
     );
-    let raw = PreparedFilesystem::<_, BlockDev<PathBuf>, Cifs>::Local(LocalSubvolume(path));
-    for access in [ReadOnly, ReadWrite] {
-        assert_ne!(
-            mapped.mount_hash(access).await.unwrap(),
-            raw.mount_hash(access).await.unwrap()
-        );
-    }
+    let device = tempfile::NamedTempFile::new().unwrap();
+    let disk = SourceDefinition::new(
+        SharedVolumeSource::Disk {
+            logicalname: device.path().to_owned(),
+            path: "data".into(),
+            drive: None,
+        },
+        None,
+    );
+    assert!(disk.stores_container_ids());
+    assert_eq!(
+        disk.filesystem(&id).source_hash().await.unwrap(),
+        BlockDev::new(device.path().to_owned())
+            .source_hash()
+            .await
+            .unwrap()
+    );
+    let cifs = SourceDefinition::new(
+        SharedVolumeSource::Cifs {
+            hostname: "nas.local".into(),
+            path: "share".into(),
+            username: "user".into(),
+        },
+        Some(SharedVolumeCredentials {
+            password: Some("secret".into()),
+        }),
+    );
+    assert!(!cifs.stores_container_ids());
+    assert_eq!(
+        cifs.filesystem(&id).source_hash().await.unwrap(),
+        SharedCifs(cifs.cifs().unwrap())
+            .source_hash()
+            .await
+            .unwrap()
+    );
 }
 
 #[tokio::test]
@@ -52,7 +81,7 @@ async fn failed_publications_remove_new_directories_and_successful_ones_preserve
 
 #[tokio::test]
 #[ignore = "requires root, BTRFS_TEST_VOLUMES_DIR and a private Linux mount namespace"]
-async fn local_creation_maps_owners_without_shifting_persisted_ids() {
+async fn local_creation_keeps_container_ids_on_the_host_view() {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let fixture = crate::util::btrfs::tests::directory();
     let path = fixture.path().join("volume");
@@ -68,13 +97,9 @@ async fn local_creation_maps_owners_without_shifting_persisted_ids() {
         .await
         .unwrap();
     let root = std::fs::metadata(view.path()).unwrap();
-    assert_eq!((root.uid(), root.gid()), (100000, 100000));
-    let mapped_file = view.path().join("owner");
-    let metadata = std::fs::metadata(&mapped_file).unwrap();
-    assert_eq!((metadata.uid(), metadata.gid()), (101000, 102000));
-    std::os::unix::fs::chown(&mapped_file, Some(103000), Some(104000)).unwrap();
-    let metadata = std::fs::metadata(&file).unwrap();
-    assert_eq!((metadata.uid(), metadata.gid()), (3000, 4000));
+    assert_eq!((root.uid(), root.gid()), (0, 0));
+    let metadata = std::fs::metadata(view.path().join("owner")).unwrap();
+    assert_eq!((metadata.uid(), metadata.gid()), (1000, 2000));
     view.unmount().await.unwrap();
     tokio::fs::write(path.join("sentinel"), b"allocated data")
         .await
@@ -457,9 +482,16 @@ async fn external_folder_is_created_pinned_and_limits_consumer_subpaths() {
     let consumer_root = tempfile::tempdir().unwrap();
     std::fs::set_permissions(consumer_root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
     let consumer_path = consumer_root.path().join("volume");
-    let consumer = MountGuard::mount(&Bind::new(source.path()), &consumer_path, ReadWrite)
-        .await
-        .unwrap();
+    let consumer = MountGuard::mount(
+        &crate::disk::mount::filesystem::idmapped::IdMapped::new(
+            Bind::new(source.path()),
+            vec![crate::lxc::BASE_IDMAP],
+        ),
+        &consumer_path,
+        ReadWrite,
+    )
+    .await
+    .unwrap();
     let uid = crate::lxc::BASE_IDMAP.to_id.to_string();
     tokio::process::Command::new("setpriv")
         .args([
@@ -549,14 +581,20 @@ async fn external_partition_maps_service_ownership_without_changing_disk_owners(
         b"external-preserved\n"
     );
     let metadata = std::fs::metadata(mapped.path()).unwrap();
-    assert_eq!(metadata.uid(), crate::lxc::BASE_IDMAP.to_id);
-    assert_eq!(metadata.gid(), crate::lxc::BASE_IDMAP.to_id);
+    assert_eq!((metadata.uid(), metadata.gid()), (0, 0));
     let consumer_root = tempfile::tempdir().unwrap();
     std::fs::set_permissions(consumer_root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
     let consumer_path = consumer_root.path().join("volume");
-    let consumer = MountGuard::mount(&Bind::new(mapped.path()), &consumer_path, ReadWrite)
-        .await
-        .unwrap();
+    let consumer = MountGuard::mount(
+        &crate::disk::mount::filesystem::idmapped::IdMapped::new(
+            Bind::new(mapped.path()),
+            vec![crate::lxc::BASE_IDMAP],
+        ),
+        &consumer_path,
+        ReadWrite,
+    )
+    .await
+    .unwrap();
     let uid = crate::lxc::BASE_IDMAP.to_id.to_string();
     tokio::process::Command::new("setpriv")
         .args([
