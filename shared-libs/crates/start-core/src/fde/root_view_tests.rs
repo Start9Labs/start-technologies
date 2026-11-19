@@ -173,6 +173,13 @@ async fn native_isolated_base_view_preserves_merged_references_without_source_su
         crate::util::squashfs::Metadata::new(0o755),
         crate::util::squashfs::DirectoryContents::new(),
     );
+    let selected = root.path().join("selected.private");
+    let mut image = crate::util::io::create_file_mod(&selected, 0o600)
+        .await
+        .unwrap();
+    working.serialize(&mut image).await.unwrap();
+    image.sync_all().await.unwrap();
+    drop(image);
     let before_validation = crate::disk::mount::util::mountpoints_under(Path::new(TmpDir::BASE))
         .await
         .unwrap();
@@ -183,6 +190,7 @@ async fn native_isolated_base_view_preserves_merged_references_without_source_su
             &backing_data,
             &store,
             &images,
+            &selected,
             &working
         )
         .await
@@ -201,6 +209,7 @@ async fn native_isolated_base_view_preserves_merged_references_without_source_su
             &backing_data,
             &store,
             &images,
+            &selected,
             &working
         )
         .await

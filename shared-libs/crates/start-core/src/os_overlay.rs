@@ -62,13 +62,20 @@ pub(crate) fn image_store_command(
     lease: &crate::util::FileLock,
     program: &str,
 ) -> Result<tokio::process::Command, Error> {
+    let mut command = tokio::process::Command::new(program);
+    inherit_image_store(lease, &mut command)?;
+    Ok(command)
+}
+
+fn inherit_image_store(
+    lease: &crate::util::FileLock,
+    command: &mut tokio::process::Command,
+) -> Result<(), Error> {
     let variable = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../../projects/start-os/build/lib/scripts/os-image-lock-fd-name"
     ));
-    let mut command = tokio::process::Command::new(program);
-    lease.inherit(&mut command, variable.trim())?;
-    Ok(command)
+    lease.inherit(command, variable.trim())
 }
 pub(crate) async fn admit_image_space(
     lease: &crate::util::FileLock,

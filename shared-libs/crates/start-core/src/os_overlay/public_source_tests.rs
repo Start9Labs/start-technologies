@@ -620,7 +620,7 @@ async fn shell_pruning_keeps_old_tools_without_a_cache_and_rejects_unsupported_c
     tokio::fs::rename(root.path().join("running"), volume.join("current"))
         .await
         .unwrap();
-    tokio::fs::symlink(volume.join("current"), volume.join("config/current.rootfs"))
+    tokio::fs::symlink(&image, volume.join("config/current.rootfs"))
         .await
         .unwrap();
     shell_prune(&lease, &volume, &binary).await.unwrap();

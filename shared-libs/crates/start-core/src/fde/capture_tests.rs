@@ -20,6 +20,8 @@ mod profiles;
 mod published_references;
 #[path = "root_view_tests.rs"]
 mod root_views;
+#[path = "selected_reference_tests.rs"]
+mod selected_references;
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
 use crate::disk::mount::guard::GenericMountGuard;
 use crate::os_overlay::OVERLAY_FILE;
@@ -142,6 +144,7 @@ impl Fixture {
             "data/main/network-profiles",
             "generations",
             "images",
+            "config",
         ] {
             tokio::fs::create_dir_all(volume.path().join(relative))
                 .await
@@ -194,6 +197,20 @@ impl Fixture {
             nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
         )
         .unwrap();
+        let selected = volume.path().join("selected.private");
+        let empty = Squashfs::<crate::s9pk::merkle_archive::source::DynFileSource>::new(
+            Metadata::new(0o755),
+            DirectoryContents::new(),
+        );
+        let mut file = crate::util::io::create_file_mod(&selected, 0o600)
+            .await
+            .unwrap();
+        empty.serialize(&mut file).await.unwrap();
+        file.sync_all().await.unwrap();
+        drop(file);
+        tokio::fs::symlink(&selected, volume.path().join("config/current.rootfs"))
+            .await
+            .unwrap();
         let working = MountGuard::mount(
             &crate::os_overlay::working_filesystem(
                 &raw,
@@ -214,7 +231,7 @@ impl Fixture {
     }
 
     async fn epoch(&self) -> ReadEpoch {
-        ReadEpoch::new(
+        let mut epoch = ReadEpoch::new(
             ConfigurationSource::Working {
                 lower: self.volume.path().join("raw"),
                 upper: self.ram.path().join("upper"),
@@ -231,7 +248,13 @@ impl Fixture {
             &[self.working.path().to_owned(), self.ram.path().to_owned()],
         )
         .await
-        .unwrap()
+        .unwrap();
+        epoch.selected_image = Some(
+            crate::os_overlay::image_store::selected_image(&self.volume.path().join("config"))
+                .await
+                .unwrap(),
+        );
+        epoch
     }
 
     async fn gate(&self) -> (tokio::fs::File, inotify::EventStream<[u8; 4096]>) {
@@ -339,6 +362,7 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
     .unwrap();
     let published_id = Guid::new();
     let stored_id = Guid::new();
+    let selected_id = Guid::new();
     let generation = fixture
         .volume
         .path()
@@ -351,6 +375,7 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
             &stored_id,
             fixture.volume.path().join("images/stored.rootfs"),
         ),
+        (&selected_id, fixture.volume.path().join("selected.private")),
     ] {
         let relative = PathBuf::from(id.to_string()).join("etc/image-key");
         let backing = fixture
@@ -451,7 +476,8 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
         std::collections::BTreeSet::from([
             std::ffi::OsString::from(current_id.to_string()),
             std::ffi::OsString::from(published_id.to_string()),
-            std::ffi::OsString::from(stored_id.to_string())
+            std::ffi::OsString::from(stored_id.to_string()),
+            std::ffi::OsString::from(selected_id.to_string())
         ])
     );
     drop(existing);

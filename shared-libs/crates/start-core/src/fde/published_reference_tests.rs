@@ -21,7 +21,8 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
     for path in [&data, &store, &base, &stored, &upper] {
         tokio::fs::create_dir(path).await.unwrap();
     }
-    let ids: Vec<_> = (0..7).map(|_| Guid::new()).collect();
+    let selected = root.path().join("selected.private");
+    let ids: Vec<_> = (0..8).map(|_| Guid::new()).collect();
     let targets: Vec<_> = ids
         .iter()
         .map(|id| {
@@ -78,7 +79,13 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
         )
         .unwrap();
     let mut published = Vec::new();
-    for (index, compression) in [(2, "gzip"), (3, "zstd"), (5, "gzip"), (6, "zstd")] {
+    for (index, compression) in [
+        (2, "gzip"),
+        (3, "zstd"),
+        (5, "gzip"),
+        (6, "zstd"),
+        (7, "gzip"),
+    ] {
         let source = root.path().join(format!("source-{index}"));
         tokio::fs::create_dir(&source).await.unwrap();
         tokio::fs::symlink(&targets[index], source.join("reference"))
@@ -93,9 +100,11 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
             let image = generation.join(crate::os_overlay::OVERLAY_FILE);
             published.push(image.clone());
             image
+        } else if index == 7 {
+            selected.clone()
         } else {
             stored.join(if index == 5 {
-                "selected.rootfs"
+                "private-repack.rootfs"
             } else {
                 "recovery.squashfs"
             })
@@ -112,9 +121,17 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
         .await
         .unwrap();
     assert_eq!(
-        configuration_backings(running.path(), &base, &data, &store, &stored, &working)
-            .await
-            .unwrap(),
+        configuration_backings(
+            running.path(),
+            &base,
+            &data,
+            &store,
+            &stored,
+            &selected,
+            &working
+        )
+        .await
+        .unwrap(),
         ids.iter().cloned().collect()
     );
     assert_eq!(
@@ -126,21 +143,64 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
     let unknown = store.join("unknown");
     tokio::fs::create_dir(&unknown).await.unwrap();
     assert!(
-        configuration_backings(running.path(), &base, &data, &store, &stored, &working)
-            .await
-            .is_err()
+        configuration_backings(
+            running.path(),
+            &base,
+            &data,
+            &store,
+            &stored,
+            &selected,
+            &working
+        )
+        .await
+        .is_err()
     );
     tokio::fs::remove_dir(unknown).await.unwrap();
-    for image in [&published[0], &stored.join("selected.rootfs")] {
+    for image in [
+        &published[0],
+        &stored.join("private-repack.rootfs"),
+        &selected,
+    ] {
         let original = tokio::fs::read(image).await.unwrap();
         tokio::fs::write(image, b"corrupt image").await.unwrap();
         assert!(
-            configuration_backings(running.path(), &base, &data, &store, &stored, &working)
-                .await
-                .is_err()
+            configuration_backings(
+                running.path(),
+                &base,
+                &data,
+                &store,
+                &stored,
+                &selected,
+                &working
+            )
+            .await
+            .is_err()
         );
         tokio::fs::write(image, original).await.unwrap();
     }
+    let substitute = MountGuard::mount(
+        &Bind::new(stored.join("recovery.squashfs"))
+            .with_type(crate::disk::mount::filesystem::bind::FileType::File),
+        &selected,
+        ReadOnly,
+    )
+    .await
+    .unwrap()
+    .with_strict_unmount();
+    assert!(
+        configuration_backings(
+            running.path(),
+            &base,
+            &data,
+            &store,
+            &stored,
+            &selected,
+            &working
+        )
+        .await
+        .is_err()
+    );
+    substitute.unmount(false).await.unwrap();
     assert_eq!(
         crate::disk::mount::util::mountpoints_under(Path::new(TmpDir::BASE))
             .await

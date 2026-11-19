@@ -64,6 +64,9 @@ struct ReadEpoch {
     generation_store: PathBuf,
     #[serde(default = "default_image_directory")]
     image_directory: PathBuf,
+    // Resolved before freeze; readlink can write symlink access times.
+    #[serde(default)]
+    selected_image: Option<PathBuf>,
     frozen_filesystems: Vec<PathBuf>,
     readonly_filesystems: Vec<PathBuf>,
 }
@@ -162,9 +165,22 @@ impl ReadEpoch {
             source,
             generation_store,
             image_directory,
+            selected_image: None,
             frozen_filesystems,
             readonly_filesystems,
         })
+    }
+
+    async fn selected_image(&self) -> Result<&Path, Error> {
+        let image = self.selected_image.as_deref().ok_or_else(invalid_source)?;
+        let file = crate::os_overlay::regular_file(image).await?;
+        let device = file.metadata().await?.dev();
+        for filesystem in &self.frozen_filesystems {
+            if crate::util::io::file_identity(filesystem).await?.0 == device {
+                return Ok(image);
+            }
+        }
+        Err(invalid_source())
     }
 
     async fn snapshot(
@@ -355,6 +371,7 @@ pub(crate) async fn run(path: &Path) -> Result<(), Error> {
             &epoch.data_root.join(crate::MAIN_FILESYSTEM),
             &epoch.generation_store,
             &epoch.image_directory,
+            epoch.selected_image().await?,
             &snapshot,
         )
         .await?;
@@ -429,6 +446,7 @@ async fn configuration_backings(
     data: &Path,
     store: &Path,
     images: &Path,
+    selected: &Path,
     working: &Squashfs<crate::s9pk::merkle_archive::source::DynFileSource>,
 ) -> Result<std::collections::BTreeSet<Guid>, Error> {
     let data = capture_view(&IsolatedBind::new(data))
@@ -456,6 +474,20 @@ async fn configuration_backings(
         for image in crate::os_overlay::image_store::image_paths(&path).await? {
             retained.extend(mounted_backings(&SquashfsImage::new(&image), &data).await?);
         }
+        let parent = capture_view(&IsolatedBind::new(
+            selected.parent().ok_or_else(invalid_source)?,
+        ))
+        .await?
+        .with_strict_unmount();
+        let image = parent
+            .path()
+            .join(selected.file_name().ok_or_else(invalid_source)?);
+        mounts.push(parent);
+        drop(crate::os_overlay::regular_file(&image).await?);
+        if !crate::util::io::same_file(selected, &image).await? {
+            return Err(invalid_source());
+        }
+        retained.extend(mounted_backings(&SquashfsImage::new(&image), &data).await?);
         Ok(retained)
     }
     .await;
@@ -780,7 +812,13 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<(), Error> {
     let memory = ProcessSecretMemory::protect()?;
     let images = crate::os_overlay::reserve_image_store(false).await?;
     let rootfs = running_image().await?;
-    let epoch = ReadEpoch::current().await?;
+    let mut epoch = ReadEpoch::current().await?;
+    crate::os_overlay::image_store::repair_selection(&images, Path::new("/media/startos")).await?;
+    epoch.selected_image = Some(
+        crate::os_overlay::image_store::selected_image(Path::new(CONFIGURATION).parent().unwrap())
+            .await?,
+    );
+    epoch.selected_image().await?;
     let store = super::boot::create_generation_store(Path::new("/media/startos/config"))?;
     crate::os_overlay::recover_unpublished(&store).await?;
     let pause = ctx.db.pause_mutations().await;

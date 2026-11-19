@@ -55,24 +55,49 @@ startos_oldest_unselected_image() (
     }
 )
 
-startos_prune_images() {
-    local volume=$1 needed=$2 margin=$3 newest current to_prune
-    local target=$((needed + margin))
-    startos_reserve_image_store "$volume/config" || return
+startos_newest_rootfs() (
+    set -o pipefail
+    startos_image_paths "$1" | {
+        local path newest=''
+        while IFS= read -r -d '' path; do
+            if [[ -z $newest && $path == *.rootfs ]]; then
+                newest=$path
+            fi
+        done
+        printf '%s' "$newest"
+    }
+)
 
-    # The initramfs fallback may leave current.rootfs absent.
+# The caller holds the image-store lease; initramfs fallback may leave no pointer.
+startos_repair_image_selection() {
+    local volume=$1 newest
     if ! [ -h "$volume/config/current.rootfs" ] || ! [ -e "$volume/config/current.rootfs" ]; then
-        newest="$(ls -t1 "$volume"/images/*.rootfs 2> /dev/null | head -n1)"
+        newest="$(startos_newest_rootfs "$volume/images")" || return
         if [ -f "$newest" ]; then
             echo "Recreating missing current.rootfs -> $newest"
             ln -rsf "$newest" "$volume/config/current.rootfs" || return
         fi
     fi
+}
+
+startos_selected_image() {
+    local pointer="$1/current.rootfs" target
+    [[ -h $pointer && -e $pointer ]] || return 1
+    IFS= read -r -d '' target < <(readlink -ez -- "$pointer") || return
+    [[ -f $target && ! -L $target ]] || return 1
+    printf '%s\0' "$target"
+}
+
+startos_prune_images() {
+    local volume=$1 needed=$2 margin=$3 current to_prune
+    local target=$((needed + margin))
+    startos_reserve_image_store "$volume/config" || return
+    startos_repair_image_selection "$volume" || return
 
     if [ -h "$volume/config/current.rootfs" ] && [ -e "$volume/config/current.rootfs" ]; then
         startos_prune_public_sources "$volume" || return
         echo 'Pruning...'
-        current="$(readlink -f "$volume/config/current.rootfs")" || return
+        IFS= read -r -d '' current < <(startos_selected_image "$volume/config") || return
         while [[ "$(df -B1 --output=avail --sync "$volume/images" | tail -n1)" -lt "$target" ]]; do
             to_prune="$(startos_oldest_unselected_image "$volume/images" "$current")" || return
             if [ -e "$to_prune" ]; then

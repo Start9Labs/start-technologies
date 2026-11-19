@@ -23,7 +23,7 @@ done
 root=$(mktemp -d /var/tmp/startos-fde-root-view.XXXXXXXX)
 trap 'rm -rf -- "$root"' EXIT
 for selected in "$@"; do
-    STARTOS_TEST_MANAGED_GUEST=1 FDE_ROOT_VIEW_TEST_ROOT="$root" \
+    STARTOS_TEST_MANAGED_GUEST=1 FDE_ROOT_VIEW_TEST_ROOT="$root" RUST_MIN_STACK="${RUST_MIN_STACK:-8388608}" \
         timeout --kill-after=20s 120s unshare --mount --propagation private -- \
         "$binary" --ignored --exact "$selected" --nocapture
 done

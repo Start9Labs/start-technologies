@@ -342,7 +342,7 @@ impl SourceCache {
         self.prune(
             &boot_releases(
                 &self.os_volume.join("current"),
-                &self.os_volume.join("config/current.rootfs"),
+                &super::image_store::selected_image(&self.os_volume.join("config")).await?,
             )
             .await?,
         )
