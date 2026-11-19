@@ -17,6 +17,9 @@ use crate::shared_volumes::{
 };
 use crate::util::io::create_directory_beneath;
 
+mod ownership;
+pub(crate) use ownership::migrate_local_ownership;
+
 pub async fn create_local_directory(path: &Path) -> Result<(), Error> {
     tokio::fs::create_dir_all(path.parent().expect("managed volume root")).await?;
     crate::util::btrfs::create_subvolume(path).await?;
@@ -24,11 +27,7 @@ pub async fn create_local_directory(path: &Path) -> Result<(), Error> {
 }
 
 pub(crate) async fn set_local_permissions(path: &Path) -> Result<(), Error> {
-    std::os::unix::fs::chown(
-        path,
-        Some(crate::lxc::BASE_IDMAP.to_id),
-        Some(crate::lxc::BASE_IDMAP.to_id),
-    )?;
+    std::os::unix::fs::chown(path, Some(0), Some(0))?;
     tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o777)).await?;
     Ok(())
 }
@@ -119,7 +118,7 @@ impl SourceDefinition {
     pub(super) fn filesystem(&self, id: &SharedVolumeId) -> SourceFilesystem {
         match &self.source {
             SharedVolumeSource::Local => {
-                SourceFilesystem::Local(local_path(crate::PACKAGE_DATA, id))
+                SourceFilesystem::local(local_path(crate::PACKAGE_DATA, id))
             }
             SharedVolumeSource::Disk { logicalname, .. } => SourceFilesystem::external(logicalname),
             SharedVolumeSource::Cifs { .. } => {
@@ -129,36 +128,56 @@ impl SourceDefinition {
     }
 }
 
-pub(crate) enum PreparedFilesystem<D, C> {
-    Local(PathBuf),
+pub(crate) struct LocalSubvolume(pub(crate) PathBuf);
+
+impl FileSystem for LocalSubvolume {
+    async fn mount<P: AsRef<Path> + Send>(
+        &self,
+        mountpoint: P,
+        mount_type: MountType,
+    ) -> Result<(), Error> {
+        if !crate::util::btrfs::is_subvolume(&self.0).await {
+            return Err(Error::new(
+                eyre!(t!("shared-volumes.source-unavailable")),
+                ErrorKind::Filesystem,
+            ));
+        }
+        Bind::new(&self.0).mount(mountpoint, mount_type).await
+    }
+
+    async fn source_hash(&self) -> Result<digest::Output<sha2::Sha256>, Error> {
+        Bind::new(&self.0).source_hash().await
+    }
+}
+
+pub(crate) enum PreparedFilesystem<L, D, C> {
+    Local(L),
     Disk(D),
     Cifs(C),
 }
-pub(super) type SourceFilesystem = PreparedFilesystem<IdMapped<BlockDev<PathBuf>>, SharedCifs>;
+pub(crate) type SourceFilesystem =
+    PreparedFilesystem<IdMapped<LocalSubvolume>, IdMapped<BlockDev<PathBuf>>, SharedCifs>;
 impl SourceFilesystem {
+    // Local files retain unshifted owners on disk; service views apply BASE_IDMAP.
+    pub(crate) fn local(path: PathBuf) -> Self {
+        Self::Local(crate::lxc::service_filesystem(LocalSubvolume(path), &[]))
+    }
+
     fn external(device: &Path) -> Self {
-        Self::Disk(IdMapped::new(
+        Self::Disk(crate::lxc::service_filesystem(
             BlockDev::new(device.to_owned()),
-            vec![crate::lxc::BASE_IDMAP],
+            &[],
         ))
     }
 }
-impl<D: FileSystem, C: FileSystem> FileSystem for PreparedFilesystem<D, C> {
+impl<L: FileSystem, D: FileSystem, C: FileSystem> FileSystem for PreparedFilesystem<L, D, C> {
     async fn mount<P: AsRef<Path> + Send>(
         &self,
         mountpoint: P,
         mount_type: MountType,
     ) -> Result<(), Error> {
         match self {
-            Self::Local(path) => {
-                if !crate::util::btrfs::is_subvolume(path).await {
-                    return Err(Error::new(
-                        eyre!(t!("shared-volumes.source-unavailable")),
-                        ErrorKind::Filesystem,
-                    ));
-                }
-                Bind::new(path).mount(mountpoint, mount_type).await
-            }
+            Self::Local(filesystem) => filesystem.mount(mountpoint, mount_type).await,
             Self::Disk(filesystem) => filesystem.mount(mountpoint, mount_type).await,
             Self::Cifs(filesystem) => filesystem.mount(mountpoint, mount_type).await,
         }
@@ -167,19 +186,19 @@ impl<D: FileSystem, C: FileSystem> FileSystem for PreparedFilesystem<D, C> {
         match self {
             Self::Cifs(filesystem) => filesystem.check_mount(mountpoint).await,
             Self::Disk(filesystem) => filesystem.check_mount(mountpoint).await,
-            Self::Local(_) => Ok(()),
+            Self::Local(filesystem) => filesystem.check_mount(mountpoint).await,
         }
     }
     async fn device(&self) -> Result<Option<PathBuf>, Error> {
         match self {
             Self::Disk(filesystem) => filesystem.device().await,
             Self::Cifs(filesystem) => filesystem.device().await,
-            Self::Local(_) => Ok(None),
+            Self::Local(filesystem) => filesystem.device().await,
         }
     }
     async fn source_hash(&self) -> Result<digest::Output<sha2::Sha256>, Error> {
         match self {
-            Self::Local(path) => Bind::new(path).source_hash().await,
+            Self::Local(filesystem) => filesystem.source_hash().await,
             Self::Disk(filesystem) => filesystem.source_hash().await,
             Self::Cifs(filesystem) => filesystem.source_hash().await,
         }
@@ -191,7 +210,7 @@ impl<D: FileSystem, C: FileSystem> FileSystem for PreparedFilesystem<D, C> {
         match self {
             Self::Cifs(filesystem) => filesystem.mount_hash(mount_type).await,
             Self::Disk(filesystem) => filesystem.mount_hash(mount_type).await,
-            Self::Local(path) => Bind::new(path).mount_hash(mount_type).await,
+            Self::Local(filesystem) => filesystem.mount_hash(mount_type).await,
         }
     }
 }

@@ -4272,6 +4272,13 @@ tunnel.api.invalid-name:
   fr_FR: 'Les noms ne doivent pas être vides ni composés uniquement d’espaces, ne doivent contenir aucun caractère de contrôle et doivent comporter au maximum %{max} caractères'
   pl_PL: 'Nazwy nie mogą być puste ani składać się wyłącznie z białych znaków, nie mogą zawierać znaków sterujących i mogą mieć najwyżej %{max} znaków'
 
+util.actor.runtime-exited:
+  en_US: The task processor has stopped.
+  de_DE: Die Aufgabenverarbeitung wurde gestoppt.
+  es_ES: El procesador de tareas se ha detenido.
+  fr_FR: Le processeur de tâches est arrêté.
+  pl_PL: Przetwarzanie zadań zostało zatrzymane.
+
 util.crypto.invalid-backup-key:
   en_US: "The wrapped backup key is invalid or could not be authenticated."
   de_DE: "Der verschlüsselte Sicherungsschlüssel ist ungültig oder konnte nicht authentifiziert werden."

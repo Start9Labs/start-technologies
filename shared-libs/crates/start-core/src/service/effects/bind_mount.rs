@@ -90,9 +90,7 @@ pub async fn bind_mount(_: ContainerCliContext, params: BindMountParams) -> Resu
         DetachedMount::from_fd(fd)
     };
 
-    if readonly {
-        detached.set_readonly(true)?;
-    }
+    detached.configure_bind(readonly)?;
 
     if beneath {
         detached.attach_beneath(&target)?;

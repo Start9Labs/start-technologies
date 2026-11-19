@@ -66,11 +66,9 @@ mod linux {
 
     use crate::util::io::Counter;
 
-    /// Clone granularity for regular files. Must be a multiple of the
-    /// filesystem block size so every chunk boundary is FICLONERANGE-aligned.
+    // Must align to filesystem blocks for FICLONERANGE.
     const CHUNK: u64 = 1 << 30;
 
-    /// FS_NOCOW_FL from linux/fs.h; libc does not export the FS_*_FL family.
     const FS_NOCOW_FL: libc::c_long = 0x0080_0000;
 
     pub struct Cloner {
@@ -84,10 +82,27 @@ mod linux {
             if !dst.is_dir() {
                 std::fs::create_dir(dst)?;
             }
-            copy_dir_flags(src, dst)?;
-            copy_xattrs_nofollow(src, dst)?;
+            self.clone_directory(src, dst, &meta)
+        }
+
+        // Cloned children must not acquire ACL entries absent from the source.
+        fn clone_directory(
+            &mut self,
+            src: &Path,
+            dst: &Path,
+            meta: &std::fs::Metadata,
+        ) -> std::io::Result<()> {
+            mirror_directory_nocow(src, dst)?;
+            for name in ["system.posix_acl_access", "system.posix_acl_default"] {
+                if let Err(error) = ::xattr::remove(dst, name) {
+                    if !matches!(error.raw_os_error(), Some(libc::ENODATA | libc::ENOTSUP)) {
+                        return Err(error);
+                    }
+                }
+            }
             self.clone_dir_contents(src, dst)?;
-            apply_dir_metadata(dst, &meta)
+            apply_dir_metadata(dst, meta)?;
+            copy_xattrs_nofollow(src, dst)
         }
 
         fn clone_dir_contents(&mut self, src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -99,10 +114,7 @@ mod linux {
                 let ft = meta.file_type();
                 if ft.is_dir() {
                     std::fs::create_dir(&dst_path)?;
-                    copy_dir_flags(&src_path, &dst_path)?;
-                    copy_xattrs_nofollow(&src_path, &dst_path)?;
-                    self.clone_dir_contents(&src_path, &dst_path)?;
-                    apply_dir_metadata(&dst_path, &meta)?;
+                    self.clone_directory(&src_path, &dst_path, &meta)?;
                 } else if ft.is_file() {
                     if meta.nlink() > 1 {
                         if let Some(existing) = self.hardlinks.get(&(meta.dev(), meta.ino())) {
@@ -151,11 +163,7 @@ mod linux {
                 .create_new(true)
                 .mode(meta.mode() & 0o777)
                 .open(dst)?;
-            // Flags must match before cloning: btrfs returns EINVAL for a
-            // clone between nodatacow and datacow inodes, and +C only sticks
-            // while the destination has no extents. Mirror exactly — the
-            // destination may have inherited +C from its parent dir even when
-            // the source file is datacow.
+            // Btrfs requires matching +C before the destination acquires extents.
             mirror_nocow(&src_f, &dst_f)?;
             let size = meta.len();
             let mut offset = 0u64;
@@ -165,9 +173,9 @@ mod linux {
                 self.ctr.add(len);
                 offset += len;
             }
+            // Ownership changes clear file capabilities.
             fchown(&dst_f, Some(meta.uid()), Some(meta.gid()))?;
             dst_f.set_permissions(PermissionsExt::from_mode(meta.mode() & 0o7777))?;
-            // chown clears file capabilities.
             copy_xattrs(&src_f, &dst_f)?;
             set_times(&dst_f, meta)
         }
@@ -210,9 +218,7 @@ mod linux {
         Ok(())
     }
 
-    /// Mirrors +C on a directory so files created inside inherit it, matching
-    /// the source's inheritance behavior.
-    fn copy_dir_flags(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fn mirror_directory_nocow(src: &Path, dst: &Path) -> std::io::Result<()> {
         mirror_nocow(&File::open(src)?, &File::open(dst)?)
     }
 
@@ -450,6 +456,32 @@ mod linux {
                 Some(&b"present"[..])
             );
             assert_eq!(progress.load(), 5);
+        }
+
+        #[tokio::test]
+        #[ignore = "requires root and BTRFS_TEST_VOLUMES_DIR"]
+        async fn clones_capabilities_after_restoring_file_ownership() {
+            let fixture = crate::util::btrfs::tests::directory();
+            let src = fixture.path().join("src");
+            let dst = fixture.path().join("dst");
+            std::fs::create_dir(&src).unwrap();
+            let file = src.join("file");
+            std::fs::write(&file, b"executable").unwrap();
+            std::os::unix::fs::chown(&file, Some(1000), Some(2000)).unwrap();
+            ::xattr::set(
+                &file,
+                "security.capability",
+                &[1, 0, 0, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            )
+            .unwrap();
+            let capabilities = xattr(&file, "security.capability").unwrap();
+            clone_tree(&src, &dst, ctr()).await.unwrap();
+            assert_eq!(
+                xattr(&dst.join("file"), "security.capability"),
+                Some(capabilities)
+            );
+            let metadata = std::fs::metadata(dst.join("file")).unwrap();
+            assert_eq!((metadata.uid(), metadata.gid()), (1000, 2000));
         }
 
         #[tokio::test]

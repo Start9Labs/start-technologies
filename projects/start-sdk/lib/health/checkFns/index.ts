@@ -9,11 +9,15 @@ export { checkWebUrl } from './checkWebUrl'
  *
  * @param ms - Timeout duration in milliseconds
  * @param options.message - Custom error message (defaults to "Timed out")
- * @returns A promise that never resolves, only rejects after the timeout
+ * @returns A rejecting deadline; `cancel()` clears an unused timer.
  */
 export function timeoutPromise(ms: number, { message = 'Timed out' } = {}) {
-  return new Promise<never>((resolve, reject) =>
-    setTimeout(() => reject(new Error(message)), ms),
+  let timer!: ReturnType<typeof setTimeout>
+  return Object.assign(
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms)
+    }),
+    { cancel: () => clearTimeout(timer) },
   )
 }
 export { runHealthScript }

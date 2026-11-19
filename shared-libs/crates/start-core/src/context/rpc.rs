@@ -78,6 +78,7 @@ pub struct RpcContextSeed {
     pub net_controller: Arc<NetController>,
     pub s9pk_arch: Option<&'static str>,
     pub services: ServiceMap,
+    pub(crate) shared_volume_access: crate::shared_volumes::access::SharedVolumeAccess,
     pub cancellable_installs: SyncMutex<BTreeMap<PackageId, oneshot::Sender<()>>>,
     pub installing_s9pks: SyncMutex<BTreeMap<PackageId, S9pk<DynFileSource>>>,
     pub metrics_cache: Watch<Option<crate::system::Metrics>>,
@@ -527,6 +528,7 @@ impl RpcContext {
                 Some(crate::ARCH)
             },
             services,
+            shared_volume_access: Default::default(),
             cancellable_installs: SyncMutex::new(BTreeMap::new()),
             installing_s9pks: SyncMutex::new(BTreeMap::new()),
             metrics_cache,
@@ -699,6 +701,9 @@ impl RpcContext {
             &mut optimize_storage,
         )
         .await?;
+        for path in crate::shared_volumes::local_volume_paths(&peek)? {
+            crate::shared_volumes::source::migrate_local_ownership(&path).await?;
+        }
         optimize_storage.complete();
 
         init_services.start();
