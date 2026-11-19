@@ -141,14 +141,12 @@ else
     trap 'rm -rf "$DOWNLOAD_DIR"' EXIT
 fi
 
-echo "Downloading ${PLATFORM}.squashfs from run $RUN_ID..."
-gh run download -R "$REPO" "$RUN_ID" -n "${PLATFORM}.squashfs" -D "$DOWNLOAD_DIR"
-
-SQUASHFS=$(find "$DOWNLOAD_DIR" -name '*.squashfs' -type f | head -n1)
-if [ -z "$SQUASHFS" ]; then
-    >&2 echo "Run $RUN_ID has no ${PLATFORM}.squashfs artifact (expired, or that platform was not built)"
+echo "Downloading the ${PLATFORM} squashfs from run $RUN_ID..."
+if ! "$(dirname "${BASH_SOURCE[0]}")/gha-artifact-download.sh" "$REPO" "$RUN_ID" "startos-*_${PLATFORM}.squashfs" "$DOWNLOAD_DIR"; then
+    >&2 echo "(expired, that platform was not built, or the run predates unarchived image artifacts)"
     exit 1
 fi
+SQUASHFS=$(find "$DOWNLOAD_DIR" -name "startos-*_${PLATFORM}.squashfs" -type f | head -n1)
 
 # The upgrade script compares against the first half of the blake3 hash, the
 # same truncation start-os-update-squashfs passes.
