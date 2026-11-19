@@ -25,7 +25,7 @@ use crate::net::forward::{
 };
 use crate::net::gateway::{NetworkInterfaceController, WildcardListener};
 use crate::net::host::binding::{BindId, BindOptions, UpstreamCertValidation};
-use crate::net::host::{Host, Hosts, host_for, host_for_existing};
+use crate::net::host::{Host, HostOwner, Hosts, host_for, host_for_existing};
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::service_interface::{
     AddressInfo, HostnameInfo, HostnameMetadata, ServiceInterface, ServiceInterfaceType,
@@ -70,6 +70,18 @@ pub struct NetController {
     pub(super) forward: InterfacePortForwardController,
     pub(crate) port_map: PortMapController,
     pub(crate) callbacks: Arc<ServiceCallbacks>,
+    _ui_listen: UiListenGuard,
+}
+
+/// Returns the UI listener to the wildcard once the forwards reaching the OS listen addresses
+/// are gone.
+struct UiListenGuard(Watch<WildcardListener>);
+impl Drop for UiListenGuard {
+    fn drop(&mut self) {
+        self.0
+            .send_modify(WildcardListener::serve_wildcard)
+            .log_err();
+    }
 }
 
 impl NetController {
@@ -82,7 +94,11 @@ impl NetController {
         crate::lxc::network::ensure().await?;
         let net_iface = Arc::new(NetworkInterfaceController::new(db.clone()));
         dns.activate(net_iface.clone());
-        webserver.send_modify(|listener| listener.set_ip_info(net_iface.watcher.subscribe()));
+        webserver.send_modify(|listener| {
+            listener.set_ip_info(net_iface.watcher.subscribe());
+            listener.serve_os_listen()
+        })?;
+        let ui_listen = UiListenGuard((**webserver).clone());
         let crypto_provider = Arc::new(tokio_rustls::rustls::crypto::ring::default_provider());
         let tls_client_config = Arc::new(crate::net::tls::client_config(
             crypto_provider.clone(),
@@ -172,6 +188,7 @@ impl NetController {
             port_map,
             net_iface,
             callbacks: Arc::new(ServiceCallbacks::default()),
+            _ui_listen: ui_listen,
         })
     }
 
@@ -410,14 +427,6 @@ fn forwarded_lan_ips<'a>(
     ips
 }
 
-/// Loopback reaches an OS listen target untranslated, keeping the client's loopback source.
-fn forwarded_to(target: Ipv4Addr, mut requirements: ForwardRequirements) -> ForwardRequirements {
-    if is_os_listen(target.into()) {
-        requirements.private_ips.retain(|ip| !ip.is_loopback());
-    }
-    requirements
-}
-
 fn binding_proxy_target(
     options: &BindOptions,
     addr: SocketAddr,
@@ -527,11 +536,10 @@ struct HostBinds {
     forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements, Arc<()>)>,
     vhosts: BTreeMap<VHostKey, (ProxyTarget, ProxyHandle)>,
     private_dns: BTreeMap<InternedString, Arc<()>>,
-    /// Directly-forwarded v6: `(host GUA, external port) -> (container v6,
-    /// internal port, LAN source filter)`. A GUA on a port no listener of ours
-    /// answers is DNAT'd to the container (see `forward6`); tracked so a stale
-    /// forward is torn down when the GUA's exposure or target changes.
-    gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>, Transport)>,
+    /// Directly-forwarded v6: `(host address, external port) -> (target v6,
+    /// internal port, LAN source filter)`, DNAT'd by `forward6`; tracked so a stale
+    /// forward is torn down when the address's exposure or target changes.
+    v6_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>, Transport)>,
 }
 
 pub struct NetServiceData {
@@ -561,7 +569,7 @@ impl NetServiceData {
         // Non-SSL v6 DNAT forwards to the container — net_controller's concern (no
         // vhost owns them), but the forward controller opens their upstream pinhole
         // together with the DNAT (see the reconcile below).
-        let mut gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>, Transport)> =
+        let mut v6_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>, Transport)> =
             BTreeMap::new();
         let binds = self.binds.entry(id.clone()).or_default();
 
@@ -744,22 +752,18 @@ impl NetServiceData {
                 }
                 forwards.insert(
                     external,
-                    (
-                        SocketAddrV4::new(self.ip, *port),
-                        1,
-                        forwarded_to(self.ip, requirements.clone()),
-                    ),
+                    (SocketAddrV4::new(self.ip, *port), 1, requirements.clone()),
                 );
 
                 // No listener of ours answers here, so DNAT the host's
-                // GUA:external to the container's v6:internal. A LAN-only GUA is
+                // v6:external to the target's v6:internal. A LAN address is
                 // source-restricted to its on-link subnet; a LAN+WAN GUA is
-                // unrestricted. Fail closed: skip a LAN-only GUA whose subnet we
+                // unrestricted. Fail closed: skip a LAN address whose subnet we
                 // can't determine rather than expose it unrestricted.
                 if let Some(container_v6) = self.ipv6 {
                     for a in enabled_addresses.iter() {
                         // A vhost's port is its listener's; DNAT only this one.
-                        let Some(gua) = a.gua().filter(|g| g.port() == external) else {
+                        let Some(source) = a.forwarded_v6().filter(|g| g.port() == external) else {
                             continue;
                         };
                         // Secure only when the underlying protocol is itself secure —
@@ -776,7 +780,7 @@ impl NetServiceData {
                                 .filter_map(|gw| net_ifaces.get(gw))
                                 .filter_map(|info| info.ip_info.as_ref())
                                 .flat_map(|ip| ip.subnets.iter())
-                                .find(|s| s.contains(&IpAddr::V6(*gua.ip())))
+                                .find(|s| s.contains(&IpAddr::V6(*source.ip())))
                                 .copied()
                             {
                                 Some(subnet) => Some(subnet),
@@ -787,8 +791,8 @@ impl NetServiceData {
                         // container — no vhost owns a non-TLS port. The forward
                         // controller opens its upstream pinhole together with the
                         // DNAT (see the reconcile below).
-                        gua_forwards.insert(
-                            (*gua.ip(), gua.port()),
+                        v6_forwards.insert(
+                            (*source.ip(), source.port()),
                             (
                                 container_v6,
                                 *port,
@@ -852,15 +856,12 @@ impl NetServiceData {
                 (
                     SocketAddrV4::new(self.ip, internal_start),
                     range.number_of_ports,
-                    forwarded_to(
-                        self.ip,
-                        ForwardRequirements {
-                            public_gateways,
-                            private_ips,
-                            secure: true,
-                            transport: range.transport.clone(),
-                        },
-                    ),
+                    ForwardRequirements {
+                        public_gateways,
+                        private_ips,
+                        secure: true,
+                        transport: range.transport.clone(),
+                    },
                 ),
             );
         }
@@ -876,14 +877,14 @@ impl NetServiceData {
         // then install new/changed ones. The forward controller owns each forward's
         // DNAT *and* its upstream pinhole (WAN forwards only), just like the v4 path.
         // Best-effort — a nft failure on one forward is logged, not fatal.
-        for (key, spec) in &binds.gua_forwards {
-            if gua_forwards.get(key) != Some(spec) {
-                let &(gua, ext) = key;
+        for (key, spec) in &binds.v6_forwards {
+            if v6_forwards.get(key) != Some(spec) {
+                let &(source, ext) = key;
                 let (tgt, int, src, transport) = spec.clone();
                 if let Err(e) = ctrl
                     .forward
                     .unforward6(
-                        SocketAddrV6::new(gua, ext, 0, 0),
+                        SocketAddrV6::new(source, ext, 0, 0),
                         SocketAddrV6::new(tgt, int, 0, 0),
                         64,
                         src.clone(),
@@ -891,14 +892,14 @@ impl NetServiceData {
                     )
                     .await
                 {
-                    tracing::error!("failed to remove v6 forward [{gua}]:{ext}: {e}");
+                    tracing::error!("failed to remove v6 forward [{source}]:{ext}: {e}");
                     tracing::debug!("{e:?}");
                 }
             }
         }
-        for (key, spec) in &gua_forwards {
-            if binds.gua_forwards.get(key) != Some(spec) {
-                let &(gua, ext) = key;
+        for (key, spec) in &v6_forwards {
+            if binds.v6_forwards.get(key) != Some(spec) {
+                let &(source, ext) = key;
                 let (tgt, int, src, transport) = spec.clone();
                 // PCP candidates for the pinhole (only used for a WAN forward).
                 let gateways: Vec<(IpAddr, Option<u32>)> = if src.is_none() {
@@ -907,7 +908,7 @@ impl NetServiceData {
                         .map(|(_, i)| i)
                         .find(|info| {
                             info.ip_info.as_ref().map_or(false, |i| {
-                                i.subnets.iter().any(|s| s.addr() == IpAddr::V6(gua))
+                                i.subnets.iter().any(|s| s.addr() == IpAddr::V6(source))
                             })
                         })
                         .map(|info| {
@@ -923,7 +924,7 @@ impl NetServiceData {
                 if let Err(e) = ctrl
                     .forward
                     .forward6(
-                        SocketAddrV6::new(gua, ext, 0, 0),
+                        SocketAddrV6::new(source, ext, 0, 0),
                         SocketAddrV6::new(tgt, int, 0, 0),
                         64,
                         src.clone(),
@@ -932,12 +933,14 @@ impl NetServiceData {
                     )
                     .await
                 {
-                    tracing::error!("failed to add v6 forward [{gua}]:{ext} -> [{tgt}]:{int}: {e}");
+                    tracing::error!(
+                        "failed to add v6 forward [{source}]:{ext} -> [{tgt}]:{int}: {e}"
+                    );
                     tracing::debug!("{e:?}");
                 }
             }
         }
-        binds.gua_forwards = gua_forwards;
+        binds.v6_forwards = v6_forwards;
 
         // ── Phase 3: Reconcile ──
         let all = binds
@@ -1435,12 +1438,12 @@ impl NetService {
                 let host = host_for(db, &pkg_id, &id)?;
                 let is_new = !host.as_bindings().contains_key(&internal_port)?;
                 host.add_binding(&mut ports, internal_port, options, privileged)?;
-                host.update_addresses(&hostname, &gateways, &ports)?;
+                host.update_addresses(HostOwner::of(&pkg_id), &hostname, &gateways, &ports)?;
                 // Isolate a newly-bound binding from any pre-existing public
                 // domain on this host, then re-derive so port forwards match.
                 if is_new {
                     host.reconcile_public_domains_on_new_binding(internal_port)?;
-                    host.update_addresses(&hostname, &gateways, &ports)?;
+                    host.update_addresses(HostOwner::of(&pkg_id), &hostname, &gateways, &ports)?;
                 }
                 db.as_private_mut().as_available_ports_mut().ser(&ports)?;
                 Ok(())
@@ -1488,12 +1491,12 @@ impl NetService {
                     privileged,
                     transport,
                 )?;
-                host.update_addresses(&hostname, &gateways, &ports)?;
+                host.update_addresses(HostOwner::of(&pkg_id), &hostname, &gateways, &ports)?;
                 // Isolate a newly-bound range from any pre-existing public domain
                 // on this host, then re-derive so port forwards match.
                 if is_new {
                     host.reconcile_public_domains_on_new_range(internal_start_port)?;
-                    host.update_addresses(&hostname, &gateways, &ports)?;
+                    host.update_addresses(HostOwner::of(&pkg_id), &hostname, &gateways, &ports)?;
                 }
                 db.as_private_mut().as_available_ports_mut().ser(&ports)?;
                 Ok(())
@@ -1549,7 +1552,7 @@ impl NetService {
                             }
                             Ok(())
                         })?;
-                        host.update_addresses(&hostname, &gateways, &ports)?;
+                        host.update_addresses(HostOwner::Package, &hostname, &gateways, &ports)?;
                     }
                 } else {
                     let host = db
@@ -1579,7 +1582,7 @@ impl NetService {
                         }
                         Ok(())
                     })?;
-                    host.update_addresses(&hostname, &gateways, &ports)?;
+                    host.update_addresses(HostOwner::Server, &hostname, &gateways, &ports)?;
                 }
                 Ok(())
             })
@@ -1673,7 +1676,7 @@ impl NetService {
                 }
                 // `port_forwards` is computed from the bindings, so it still
                 // advertises the retired one until this re-derives it.
-                host.update_addresses(&hostname, &gateways, &ports)?;
+                host.update_addresses(HostOwner::Package, &hostname, &gateways, &ports)?;
                 db.as_private_mut().as_available_ports_mut().ser(&ports)?;
                 Ok(true)
             })
@@ -2250,29 +2253,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn an_os_listen_forward_leaves_loopback_untranslated() {
-        let requirements = ForwardRequirements {
-            public_gateways: BTreeSet::from([gw("eth0")]),
-            private_ips: BTreeSet::from([
-                ip("127.0.0.1"),
-                ip("::1"),
-                ip("172.16.0.1"),
-                ip("192.168.1.5"),
-            ]),
-            secure: false,
-            transport: Default::default(),
-        };
-        let os = forwarded_to(OS_LISTEN_IP, requirements.clone());
-        assert_eq!(
-            os.private_ips,
-            BTreeSet::from([ip("172.16.0.1"), ip("192.168.1.5")])
-        );
-        assert_eq!(os.public_gateways, requirements.public_gateways);
-        let container = crate::lxc::slot::ContainerSlot::new(0).unwrap().ipv4();
-        assert_eq!(forwarded_to(container, requirements.clone()), requirements);
-    }
-
     fn host_id(s: &str) -> HostId {
         HostId::from(Id::try_from(s.to_owned()).unwrap())
     }
@@ -2345,12 +2325,12 @@ mod tests {
             forwards,
             vhosts,
             private_dns,
-            gua_forwards,
+            v6_forwards,
         } = HostBinds::default();
         assert!(forwards.is_empty());
         assert!(vhosts.is_empty());
         assert!(private_dns.is_empty());
-        assert!(gua_forwards.is_empty());
+        assert!(v6_forwards.is_empty());
     }
 
     fn args(cmd: &Command) -> Vec<&str> {

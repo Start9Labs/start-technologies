@@ -28,7 +28,7 @@ Open the **Interfaces** tab to see every interface the service exposes. Each int
 
 Each inbound gateway on your server has its own table. The rows in each table are the addresses available through that gateway. Addresses can be individually enabled or disabled. A LAN IP address you have not switched yourself follows the interface's `.local` address, so an address your server is assigned later starts out the way `.local` is set. On an interface served without TLS the two go together: switching on a LAN IP address switches `.local` on, and switching `.local` off switches its LAN IP addresses off. There, a `.local` address that is on while every IP address in its table is off shows a warning, since those are the addresses the name resolves to. The `.local` address stays in the table while the gateway is disconnected.
 
-For an interface whose SSL StartOS terminates, plain-HTTP addresses on an insecure gateway are hidden until explicitly enabled from the [command line](#plain-http-private-addresses). Disabling one in the table removes its row.
+For an interface whose SSL StartOS terminates, plain-HTTP addresses on an insecure gateway are hidden until explicitly enabled from the [command line](#plain-http-private-addresses). Disabling one in the table removes its row. The StartOS UI is the exception: its private plain-HTTP addresses are enabled by default on every gateway, so you can always [download your Root CA](trust-ca.md) over your local network. They are never public.
 
 Each table has the following columns:
 

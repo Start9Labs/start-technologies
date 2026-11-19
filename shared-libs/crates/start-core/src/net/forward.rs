@@ -606,7 +606,7 @@ impl PortForwardController {
                 )
                 .await?;
                 // Same for the v6 forward chain (drop policy) so reply packets of
-                // a non-SSL GUA forward aren't dropped.
+                // a non-SSL v6 forward aren't dropped.
                 nft_rule_v6(
                     "forward",
                     "base-established",
@@ -1076,7 +1076,7 @@ impl InterfacePortForwardController {
         }
     }
 
-    /// DNAT a host GUA to a container ULA (v6 counterpart of a v4 forward) and, for
+    /// DNAT a host IPv6 address to a target's (v6 counterpart of a v4 forward) and, for
     /// a WAN forward (`src_filter == None`), open its upstream firewall pinhole —
     /// so the DNAT and its pinhole are owned together, as in the v4 path.
     /// `gateways` are the PCP candidates for the pinhole (ignored for a LAN-only
@@ -1241,9 +1241,9 @@ async fn unforward(
     Ok(())
 }
 
-/// IPv6 counterpart of [`forward`]: DNAT `source` (a host GUA:port) to `target`
-/// (the container's ULA:port) via the `forward-port6` script. `src_filter`
-/// restricts inbound to a LAN v6 subnet (a LAN-only GUA); `None` is WAN.
+/// IPv6 counterpart of [`forward`]: DNAT `source` (a host address:port) to `target`
+/// via the `forward-port6` script. `src_filter` restricts inbound to a LAN v6
+/// subnet; `None` is WAN.
 pub(crate) async fn forward6(
     source: SocketAddrV6,
     target: SocketAddrV6,

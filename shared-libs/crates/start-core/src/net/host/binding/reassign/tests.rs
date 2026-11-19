@@ -97,8 +97,8 @@ fn database(host: Host, server: Host, ports: AvailablePorts) -> DatabaseModel {
         .de()
         .unwrap();
     for host in all_hosts(&mut db) {
-        host.unwrap()
-            .update_addresses(&hostname, &gateways, &ports)
+        let (owner, host) = host.unwrap();
+        host.update_addresses(owner, &hostname, &gateways, &ports)
             .unwrap();
     }
     db

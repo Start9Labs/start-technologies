@@ -30,7 +30,7 @@ pub async fn cleanup(ctx: &RpcContext, id: &PackageId, soft: bool) -> Result<(),
                     d.as_private_mut().as_package_stores_mut().remove(&id)?;
                     // Remove plugin URLs exported by this package from all hosts
                     for host in all_hosts(d) {
-                        let host = host?;
+                        let (_, host) = host?;
                         for (_, bind) in host.as_bindings_mut().as_entries_mut()? {
                             bind.as_addresses_mut().mutate_available(
                                 |available: &mut BTreeSet<HostnameInfo>| {

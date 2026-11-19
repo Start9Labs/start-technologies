@@ -40,9 +40,7 @@ use crate::net::forward::{START9_BRIDGE_IFACE, nft_ensure_base};
 use crate::net::gateway::device::DeviceProxy;
 use crate::net::host::all_hosts;
 use crate::net::port_map::{candidate_gateways, probe};
-use crate::net::utils::{
-    bind_mio_listener, find_wifi_iface, ipv6_is_link_local, ipv6_is_local, is_global_ip,
-};
+use crate::net::utils::{find_wifi_iface, ipv6_is_link_local, ipv6_is_local, is_global_ip};
 use crate::net::web_server::{Accept, AcceptStream, MetadataVisitor, TcpMetadata};
 use crate::net::{
     DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY, DEFAULT_OUTBOUND_RULE_PRIORITY, LOCAL_OUTBOUND_MARK,
@@ -3181,7 +3179,8 @@ impl NetworkInterfaceController {
             let hostname = crate::hostname::ServerHostname::load(db.as_public().as_server_info())?;
             let ports = db.as_private().as_available_ports().de()?;
             for host in all_hosts(db) {
-                host?.update_addresses(&hostname, info, &ports)?;
+                let (owner, host) = host?;
+                host.update_addresses(owner, &hostname, info, &ports)?;
             }
             Ok(())
         })
@@ -3713,9 +3712,32 @@ pub(super) fn poll_accept_described<M>(
     }
 }
 
-/// Accepts wildcard TCP connections with their matching `GatewayInfo`.
+/// The addresses the UI listener binds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UiListen {
+    Wildcard,
+    OsListen,
+}
+impl UiListen {
+    fn addresses(self, port: u16) -> Vec<SocketAddr> {
+        match self {
+            Self::Wildcard => vec![SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), port)],
+            Self::OsListen => vec![
+                SocketAddr::new(OS_LISTEN_IP.into(), port),
+                SocketAddr::new(OS_LISTEN_IPV6.into(), port),
+            ],
+        }
+    }
+}
+
+/// Accepts the UI's TCP connections with their matching `GatewayInfo`.
+///
+/// Binds the dual-stack wildcard until the network controller narrows it to the OS listen
+/// addresses, which every other address reaches through a forward.
 pub struct WildcardListener {
-    listener: TcpListener,
+    listeners: Vec<TcpListener>,
+    listen: UiListen,
+    port: u16,
     ip_info: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     /// Handle to the self-contained watcher task started in `new()`.
     /// Dropped (and thus aborted) when `set_ip_info` replaces the ip_info source.
@@ -3723,17 +3745,15 @@ pub struct WildcardListener {
 }
 impl WildcardListener {
     pub fn new(port: u16) -> Result<Self, Error> {
-        let listener = TcpListener::from_std(
-            bind_mio_listener(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))
-                .with_kind(ErrorKind::Network)?
-                .into(),
-        )
-        .with_kind(ErrorKind::Network)?;
+        let listeners = bind_ui_listeners(UiListen::Wildcard, port)?;
+        let port = listeners[0].local_addr()?.port();
         let ip_info = Watch::new(OrdMap::new());
         let watcher_handle =
             tokio::spawn(watcher(ip_info.clone(), Watch::new(BTreeMap::new()), None)).into();
         Ok(Self {
-            listener,
+            listeners,
+            listen: UiListen::Wildcard,
+            port,
             ip_info,
             _watcher: Some(watcher_handle),
         })
@@ -3749,7 +3769,47 @@ impl WildcardListener {
         self.ip_info = ip_info;
         self._watcher = None;
     }
+
+    /// Serves the OS listen addresses alone. Requires the forwards that reach them.
+    pub fn serve_os_listen(&mut self) -> Result<(), Error> {
+        self.serve(UiListen::OsListen)
+    }
+
+    /// Serves every address of the server.
+    pub fn serve_wildcard(&mut self) -> Result<(), Error> {
+        self.serve(UiListen::Wildcard)
+    }
+
+    /// Binds the replacement before releasing the current sockets. A failed bind keeps them.
+    fn serve(&mut self, listen: UiListen) -> Result<(), Error> {
+        if self.listen != listen {
+            self.listeners = bind_ui_listeners(listen, self.port)?;
+            self.listen = listen;
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn local_addrs(&self) -> Vec<SocketAddr> {
+        self.listeners
+            .iter()
+            .map(|listener| listener.local_addr().unwrap())
+            .collect()
+    }
 }
+
+/// Shares the port with the sockets being replaced.
+fn bind_ui_listeners(listen: UiListen, port: u16) -> Result<Vec<TcpListener>, Error> {
+    listen
+        .addresses(port)
+        .into_iter()
+        .map(|addr| {
+            crate::net::utils::bind_tokio_listener_reuse_port(addr)
+                .with_ctx(|_| (ErrorKind::Network, addr.to_string()))
+        })
+        .collect()
+}
+
 impl Accept for WildcardListener {
     type Metadata = NetworkInterfaceListenerAcceptMetadata;
     fn poll_accept(
@@ -3757,11 +3817,20 @@ impl Accept for WildcardListener {
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(Self::Metadata, AcceptStream), Error>> {
         let ip_info = &self.ip_info;
-        poll_accept_described(&self.listener, cx, |stream, peer_addr| {
-            ip_info.peek(|interfaces| {
-                NetworkInterfaceListenerAcceptMetadata::from_stream(stream, peer_addr, interfaces)
-            })
-        })
+        for listener in &self.listeners {
+            if let Poll::Ready(accepted) =
+                poll_accept_described(listener, cx, |stream, peer_addr| {
+                    ip_info.peek(|interfaces| {
+                        NetworkInterfaceListenerAcceptMetadata::from_stream(
+                            stream, peer_addr, interfaces,
+                        )
+                    })
+                })
+            {
+                return Poll::Ready(accepted);
+            }
+        }
+        Poll::Pending
     }
 }
 
@@ -3917,6 +3986,35 @@ mod lookup_tests {
                 prefix: 24,
             }])
             .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod ui_listener_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn the_ui_listener_narrows_to_the_os_listen_addresses_and_back() {
+        let mut listener = WildcardListener::new(0).unwrap();
+        let port = listener.port;
+        assert_eq!(
+            listener.local_addrs(),
+            [SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), port)]
+        );
+        listener.serve_os_listen().unwrap();
+        assert_eq!(
+            listener.local_addrs(),
+            [
+                SocketAddr::new(OS_LISTEN_IP.into(), port),
+                SocketAddr::new(OS_LISTEN_IPV6.into(), port),
+            ]
+        );
+        listener.serve_os_listen().unwrap();
+        listener.serve_wildcard().unwrap();
+        assert_eq!(
+            listener.local_addrs(),
+            [SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), port)]
         );
     }
 }

@@ -283,6 +283,73 @@ fn translated_ingress_keeps_the_dialed_destination_gateway_and_peer() {
                     .unwrap();
                 }
             }
+
+            let loopback: OrdMap<crate::GatewayId, NetworkInterfaceInfo> = [(
+                "lo".parse::<crate::GatewayId>().unwrap(),
+                NetworkInterfaceInfo {
+                    ip_info: Some(Arc::new(IpInfo {
+                        subnets: ["127.0.0.1/8", "::1/128"]
+                            .into_iter()
+                            .map(|ip| ip.parse::<ipnet::IpNet>().unwrap())
+                            .collect(),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                },
+            )]
+            .into_iter()
+            .collect();
+            for (script, dialed, target, prefix) in [
+                (
+                    include_str!("../../../../../../build/lib/scripts/forward-port"),
+                    SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 41004),
+                    SocketAddr::new(OS_LISTEN_IP.into(), 41003),
+                    "16",
+                ),
+                (
+                    include_str!("../../../../../../build/lib/scripts/forward-port6"),
+                    SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 41004),
+                    SocketAddr::new(OS_LISTEN_IPV6.into(), 41003),
+                    "64",
+                ),
+            ] {
+                tokio::process::Command::new("bash")
+                    .args(["-c", script])
+                    .env("sip", dialed.ip().to_string())
+                    .env("sport", dialed.port().to_string())
+                    .env("dip", target.ip().to_string())
+                    .env("dport", target.port().to_string())
+                    .env("dprefix", prefix)
+                    .env("transport", "tcp")
+                    .invoke(crate::ErrorKind::Network)
+                    .await
+                    .unwrap();
+                let listener = tokio::net::TcpListener::bind(target).await.unwrap();
+                let (client, accepted) = tokio::time::timeout(timeout, async {
+                    tokio::join!(TcpStream::connect(dialed), listener.accept())
+                })
+                .await
+                .unwrap();
+                let client = client.unwrap();
+                let (stream, peer_addr) = accepted.unwrap();
+                assert_eq!(peer_addr, client.local_addr().unwrap(), "{dialed}");
+                let metadata = NetworkInterfaceListenerAcceptMetadata::from_stream(
+                    &stream, peer_addr, &loopback,
+                )
+                .unwrap();
+                assert_eq!(metadata.inner.local_addr, dialed);
+                assert_eq!(metadata.info.id.as_str(), "lo");
+                let origin = crate::net::request_origin::RequestOrigin::from_connection(
+                    Some(&metadata.inner),
+                    Some(&metadata.info),
+                );
+                assert!(origin.peer_ip.is_some_and(|ip| ip.is_loopback()), "{dialed}");
+                assert!(origin.is_internal(), "{dialed}");
+                assert!(
+                    crate::middleware::auth::signature::startos_signing_identities(None, &origin)
+                        .contains("localhost")
+                );
+            }
         });
 }
 

@@ -221,7 +221,7 @@ pub async fn set_hostname_rpc(
         .mutate(|db| {
             let reserved = hostname.local_domain_name();
             for host in all_hosts(db) {
-                if host?.as_private_domains().contains_key(&reserved)? {
+                if host?.1.as_private_domains().contains_key(&reserved)? {
                     hostname.reject_private_domain(&reserved)?;
                 }
             }

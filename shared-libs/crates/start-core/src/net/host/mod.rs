@@ -150,17 +150,36 @@ fn mdns_gateways(
         .collect()
 }
 
+/// Whose host an address derivation runs for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostOwner {
+    /// The StartOS UI's host. Its private plain-HTTP addresses need no insecure-HTTP consent;
+    /// its public exposure follows the rules of every host.
+    Server,
+    Package,
+}
+impl HostOwner {
+    pub fn of(package: &PackageId) -> Self {
+        if package.is_start_os() {
+            Self::Server
+        } else {
+            Self::Package
+        }
+    }
+}
+
 impl Model<Host> {
     /// Runs for service, network and operator changes alike. An operator action
     /// that groups addresses applies its intent first through `derive_addresses`.
     pub fn update_addresses(
         &mut self,
+        owner: HostOwner,
         mdns: &ServerHostname,
         gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
         available_ports: &AvailablePorts,
     ) -> Result<(), Error> {
         let previous = self.as_bindings().de()?;
-        self.derive_addresses(mdns, gateways, available_ports)?;
+        self.derive_addresses(owner, mdns, gateways, available_ports)?;
         self.as_bindings_mut().mutate(|bindings| {
             for (port, binding) in bindings.iter_mut() {
                 let addresses = previous
@@ -170,12 +189,13 @@ impl Model<Host> {
             }
             Ok(())
         })?;
-        self.derive_addresses(mdns, gateways, available_ports)
+        self.derive_addresses(owner, mdns, gateways, available_ports)
     }
 
     /// Rebuilds the address rows and port forwards from the stored selections.
     fn derive_addresses(
         &mut self,
+        owner: HostOwner,
         mdns: &ServerHostname,
         gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
         available_ports: &AvailablePorts,
@@ -390,7 +410,13 @@ impl Model<Host> {
             addresses.insecure = addresses
                 .available
                 .iter()
-                .filter(|a| opt.secure.is_none() && !a.ssl && !a.public && !a.is_internal())
+                .filter(|a| {
+                    opt.secure.is_none()
+                        && owner != HostOwner::Server
+                        && !a.ssl
+                        && !a.public
+                        && !a.is_internal()
+                })
                 .filter(|a| {
                     a.metadata
                         .gateways()
@@ -688,19 +714,24 @@ pub fn host_for_existing<'a>(
         .as_idx_mut(host_id))
 }
 
-pub fn all_hosts(db: &mut DatabaseModel) -> impl Iterator<Item = Result<&mut Model<Host>, Error>> {
+pub fn all_hosts(
+    db: &mut DatabaseModel,
+) -> impl Iterator<Item = Result<(HostOwner, &mut Model<Host>), Error>> {
     use patch_db::DestructureMut;
     let destructured = db.as_public_mut().destructure_mut();
-    [Ok(destructured.server_info.as_network_mut().as_host_mut())]
-        .into_iter()
-        .chain(
-            [destructured.package_data.as_entries_mut()]
-                .into_iter()
-                .flatten_ok()
-                .map(|entry| entry.and_then(|(_, v)| v.as_hosts_mut().as_entries_mut()))
-                .flatten_ok()
-                .map_ok(|(_, v)| v),
-        )
+    [Ok((
+        HostOwner::Server,
+        destructured.server_info.as_network_mut().as_host_mut(),
+    ))]
+    .into_iter()
+    .chain(
+        [destructured.package_data.as_entries_mut()]
+            .into_iter()
+            .flatten_ok()
+            .map(|entry| entry.and_then(|(_, v)| v.as_hosts_mut().as_entries_mut()))
+            .flatten_ok()
+            .map_ok(|(_, v)| (HostOwner::Package, v)),
+    )
 }
 
 impl Model<Host> {
@@ -843,6 +874,13 @@ pub trait HostApiKind: 'static {
     type Inheritance: RefUnwindSafe + OrEmpty<Self::Inheritance> + Send + Sync + 'static;
     fn inheritance(params: Self::Params, inherited: Self::InheritedParams) -> Self::Inheritance;
     fn is_server(inheritance: &Self::Inheritance) -> bool;
+    fn owner(inheritance: &Self::Inheritance) -> HostOwner {
+        if Self::is_server(inheritance) {
+            HostOwner::Server
+        } else {
+            HostOwner::Package
+        }
+    }
     fn host_for<'a>(
         inheritance: &Self::Inheritance,
         db: &'a mut DatabaseModel,
@@ -990,7 +1028,7 @@ mod tests {
     use imbl_value::InternedString;
     use ipnet::IpNet;
 
-    use super::{Host, Model, PublicDomainConfig, mdns_gateways};
+    use super::{Host, HostOwner, Model, PublicDomainConfig, mdns_gateways};
     use crate::GatewayId;
     use crate::db::model::public::{
         CapabilityVerdict, GatewayType, IpInfo, NetworkInterfaceInfo, NetworkInterfaceType,
@@ -1107,6 +1145,7 @@ mod tests {
             }
             let mut host = Model::<Host>::from(imbl_value::to_value(&value).unwrap());
             host.update_addresses(
+                HostOwner::Package,
                 &ServerHostname::new(InternedString::intern("server")).unwrap(),
                 &Default::default(),
                 &ports,
@@ -1132,6 +1171,7 @@ mod tests {
             .unwrap();
 
         host.update_addresses(
+            HostOwner::Package,
             &ServerHostname::new(InternedString::intern("server")).unwrap(),
             &gateways,
             &ports,
@@ -1182,11 +1222,13 @@ mod tests {
         let mut host = host();
         host.add_binding(&mut ports, 9735, plain(9735), false)
             .unwrap();
-        host.update_addresses(&server, &gateways, &ports).unwrap();
+        host.update_addresses(HostOwner::Package, &server, &gateways, &ports)
+            .unwrap();
         assert_eq!(mdns_rows(&host, 9735), [[gw("eth0")].into_iter().collect()]);
 
         gateways[&gw("eth0")].ip_info = None;
-        host.update_addresses(&server, &gateways, &ports).unwrap();
+        host.update_addresses(HostOwner::Package, &server, &gateways, &ports)
+            .unwrap();
         assert_eq!(mdns_rows(&host, 9735), [[gw("eth0")].into_iter().collect()]);
         let bind = &host.de().unwrap().bindings[&9735];
         assert!(!bind.addresses.available.iter().any(|a| a.metadata.is_ip()));
@@ -1198,7 +1240,8 @@ mod tests {
         );
 
         gateways.remove(&gw("eth0"));
-        host.update_addresses(&server, &gateways, &ports).unwrap();
+        host.update_addresses(HostOwner::Package, &server, &gateways, &ports)
+            .unwrap();
         assert!(mdns_rows(&host, 9735).is_empty());
     }
 
@@ -1230,7 +1273,8 @@ mod tests {
                 },
             )
             .unwrap();
-        host.update_addresses(&server, &gateways, &ports).unwrap();
+        host.update_addresses(HostOwner::Package, &server, &gateways, &ports)
+            .unwrap();
         host.as_bindings_mut()
             .mutate(|bindings| {
                 bindings.get_mut(&5223).unwrap().addresses.disabled.clear();
@@ -1240,11 +1284,90 @@ mod tests {
 
         host.add_binding(&mut ports, 5223, plain(5223), false)
             .unwrap();
-        host.update_addresses(&server, &gateways, &ports).unwrap();
+        host.update_addresses(HostOwner::Package, &server, &gateways, &ports)
+            .unwrap();
 
         let addresses = host.de().unwrap().bindings[&5223].addresses.clone();
         assert!(addresses.gua_wan.is_empty());
         assert!(addresses.enabled().iter().all(|a| !a.public));
+    }
+
+    #[test]
+    fn the_server_host_serves_private_plain_http_without_consent_and_never_publicly() {
+        let server = ServerHostname::new(InternedString::intern("server")).unwrap();
+        let mut eth0 = iface(NetworkInterfaceType::Ethernet, None);
+        let info = Arc::make_mut(eth0.ip_info.as_mut().unwrap());
+        info.subnets = [
+            "192.0.2.10/24".parse::<IpNet>().unwrap(),
+            "2001:db8::1/64".parse::<IpNet>().unwrap(),
+            "fd12::1/64".parse::<IpNet>().unwrap(),
+        ]
+        .into_iter()
+        .collect();
+        info.wan_ip = Some(Ipv4Addr::new(198, 51, 100, 2));
+        let gateways: OrdMap<GatewayId, NetworkInterfaceInfo> =
+            [(gw("eth0"), eth0)].into_iter().collect();
+        let derive = |owner: HostOwner, disabled: Option<(InternedString, u16)>| {
+            let mut ports = AvailablePorts::new();
+            let mut host = host();
+            host.add_binding(&mut ports, 80, BindOptions::server_ui(), true)
+                .unwrap();
+            host.as_public_domains_mut()
+                .insert(
+                    &InternedString::intern("ui.example.com"),
+                    &PublicDomainConfig {
+                        gateway: gw("eth0"),
+                        acme: None,
+                    },
+                )
+                .unwrap();
+            if let Some(key) = disabled {
+                host.as_bindings_mut()
+                    .mutate(|bindings| {
+                        bindings
+                            .get_mut(&80)
+                            .unwrap()
+                            .addresses
+                            .disabled
+                            .insert(key);
+                        Ok(())
+                    })
+                    .unwrap();
+            }
+            host.update_addresses(owner, &server, &gateways, &ports)
+                .unwrap();
+            host.de().unwrap().bindings[&80].addresses.clone()
+        };
+
+        let addresses = derive(HostOwner::Server, None);
+        let plain: Vec<_> = addresses.available.iter().filter(|a| !a.ssl).collect();
+        assert!(addresses.insecure.is_empty());
+        assert!(plain.iter().all(|a| !a.public), "{plain:?}");
+        let enabled = addresses.enabled();
+        for host in ["192.0.2.10", "2001:db8::1", "fd12::1", "server.local"] {
+            assert!(
+                plain
+                    .iter()
+                    .any(|a| a.hostname == host && enabled.contains(*a)),
+                "{host}"
+            );
+        }
+        assert!(enabled.iter().all(|a| a.ssl || !a.public));
+
+        let declined = derive(
+            HostOwner::Server,
+            Some((InternedString::intern("192.0.2.10"), 80)),
+        );
+        assert!(
+            !declined
+                .enabled()
+                .iter()
+                .any(|a| a.hostname == "192.0.2.10" && !a.ssl)
+        );
+
+        let other = derive(HostOwner::Package, None);
+        assert!(!other.insecure.is_empty());
+        assert!(other.enabled().iter().all(|a| a.ssl));
     }
 
     #[test]
@@ -1399,7 +1522,8 @@ mod tests {
                 },
             )
             .unwrap();
-        host.update_addresses(&server, &gateways, &ports).unwrap();
+        host.update_addresses(HostOwner::Package, &server, &gateways, &ports)
+            .unwrap();
         let initial = host.de().unwrap();
         let addresses = &initial.bindings[&8096].addresses;
         assert_eq!(addresses.available.iter().filter(|a| !a.ssl).count(), 4);
@@ -1414,7 +1538,8 @@ mod tests {
         assert_eq!(addresses.insecure.len(), 4);
 
         gateways[&gw("wg0")].secure = Some(true);
-        host.update_addresses(&server, &gateways, &ports).unwrap();
+        host.update_addresses(HostOwner::Package, &server, &gateways, &ports)
+            .unwrap();
         let secure = host.de().unwrap();
         let addresses = &secure.bindings[&8096].addresses;
         assert!(addresses.insecure.is_empty());
@@ -1427,7 +1552,8 @@ mod tests {
         );
 
         gateways[&gw("wg0")].secure = Some(false);
-        host.update_addresses(&server, &gateways, &ports).unwrap();
+        host.update_addresses(HostOwner::Package, &server, &gateways, &ports)
+            .unwrap();
         assert!(
             host.de().unwrap().bindings[&8096]
                 .addresses
@@ -1453,7 +1579,8 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        host.update_addresses(&server, &gateways, &ports).unwrap();
+        host.update_addresses(HostOwner::Package, &server, &gateways, &ports)
+            .unwrap();
         let snapshot = host.de().unwrap();
         let addresses = &snapshot.bindings[&8096].addresses;
         let insecure_domain = addresses.available.iter().find(|a| !a.ssl && matches!(&a.metadata, HostnameMetadata::PrivateDomain { gateways } if gateways == &BTreeSet::from([gw("wg0")]))).unwrap().clone();
@@ -1476,7 +1603,8 @@ mod tests {
                     )
                 })
                 .unwrap();
-            host.update_addresses(&server, &gateways, &ports).unwrap();
+            host.update_addresses(HostOwner::Package, &server, &gateways, &ports)
+                .unwrap();
             let snapshot = host.de().unwrap();
             let addresses = &snapshot.bindings[&8096].addresses;
             assert_eq!(addresses.enabled().contains(&insecure_domain), on);
