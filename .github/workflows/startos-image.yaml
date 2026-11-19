@@ -168,6 +168,16 @@ jobs:
         run: make start-os-img
         if: ${{ inputs.platform == 'raspberrypi' }}
 
+      - name: Archive kernel backport packages
+        uses: actions/upload-artifact@v7
+        if: ${{ inputs.platform == 'x86_64' || inputs.platform == 'aarch64' }}
+        with:
+          name: ${{ inputs.platform }}.kernel-backports
+          path: results/kernel-backports/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
       # Images are already compressed, so the artifacts are stored as-is.
       - uses: actions/upload-artifact@v7
         with:
@@ -275,6 +285,14 @@ jobs:
       FORCE_OVERWRITE: ${{ inputs.force-overwrite }}
       COMMIT: ${{ inputs.commit || github.sha }}
     steps:
+      # Upload tooling belongs to this workflow, not the published build.
+      # Checkout cleans the workspace, deleting any earlier artifact download.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: scripts/s3-put-once.sh
+          sparse-checkout-cone-mode: false
+
       - name: Download squashfs
         uses: actions/download-artifact@v8
         with:
@@ -317,36 +335,14 @@ jobs:
           mkdir -p ~/.startos
           printf '%s' "${{ secrets.DEV_KEY }}" > ~/.startos/developer.key.pem
 
-      # An existing object under one of these keys is a hard stop unless it
-      # already holds these bytes. Basenames are commit-derived, so a key that
-      # already exists means this commit was already published — and since
-      # `os promote` copies asset URLs through verbatim, beta or production
-      # commitments may already point at those exact bytes. Replacing them would
-      # leave those signatures validating against content that no longer
-      # matches. Re-dispatch with force-overwrite when replacing is genuinely
-      # what you want.
       - name: Upload to S3
         working-directory: artifacts
         run: |
           set -uo pipefail
-          upload() {
-            local key="$S3_BUCKET/v$VERSION/$1"
-            if [ "$FORCE_OVERWRITE" != true ] && [ -n "$(s3cmd ls "$key")" ]; then
-              # `s3cmd put` records the MD5 that `s3cmd info` reports.
-              if [ "$(s3cmd info "$key" | sed -n 's/^ *MD5 sum: *//p')" = "$(md5sum "$1" | cut -d' ' -f1)" ]; then
-                echo "$key already holds $1."
-                return 0
-              fi
-              echo "::error::$key already exists — this commit has been published before. Overwriting it would invalidate any beta or production commitment pointing at that URL. Re-dispatch with force-overwrite to replace it deliberately."
-              return 1
-            fi
-            echo "Uploading $1..."
-            s3cmd put -P "$1" "$key"
-          }
           pids=()
           for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img; do
             [ -f "$file" ] || continue
-            upload "$file" &
+            "$GITHUB_WORKSPACE/scripts/s3-put-once.sh" "$file" "$S3_BUCKET/v$VERSION/$file" &
             pids+=("$!")
           done
           # Report every conflict before failing, rather than one per re-run.

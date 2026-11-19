@@ -7,6 +7,7 @@ use exver::VersionRange;
 use patch_db::ModelExt;
 use rust_i18n::t;
 
+use crate::db::model::DatabaseModel;
 use crate::db::model::package::{
     CurrentDependencies, CurrentDependencyInfo, CurrentDependencyKind, ManifestPreference,
     TaskEntry,
@@ -511,11 +512,27 @@ pub async fn check_dependencies(
 ) -> Result<Vec<CheckDependenciesResult>, Error> {
     let context = context.deref()?;
     let db = context.seed.ctx.db.peek().await;
+    let manifest = context.seed.persistent_container.s9pk.as_manifest();
+    dependency_statuses(
+        &db,
+        &context.seed.id,
+        manifest.metadata.default_locale.as_deref(),
+        package_ids,
+    )
+}
+
+/// Titles use the declaring package's default locale.
+fn dependency_statuses(
+    db: &DatabaseModel,
+    package_id: &PackageId,
+    default_locale: Option<&str>,
+    package_ids: Option<Vec<PackageId>>,
+) -> Result<Vec<CheckDependenciesResult>, Error> {
     let pde = db
         .as_public()
         .as_package_data()
-        .as_idx(&context.seed.id)
-        .or_not_found(&context.seed.id)?;
+        .as_idx(package_id)
+        .or_not_found(package_id)?;
     let current_dependencies = pde.as_current_dependencies().de()?;
     let tasks = pde.as_tasks().de()?;
     let package_dependency_info: Vec<_> = package_ids
@@ -529,16 +546,19 @@ pub async fn check_dependencies(
     let mut results = Vec::with_capacity(package_dependency_info.len());
 
     for (package_id, dependency_info) in package_dependency_info {
-        let title = dependency_info.title.clone();
+        let title = dependency_info
+            .title
+            .clone()
+            .map(|title| title.localized(default_locale));
+        let tasks = tasks
+            .iter()
+            .filter(|(_, v)| v.task.package_id == package_id)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         let Some(package) = db.as_public().as_package_data().as_idx(&package_id) else {
-            let tasks = tasks
-                .iter()
-                .filter(|(_, v)| v.task.package_id == package_id)
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
             results.push(CheckDependenciesResult {
                 package_id,
-                title: title.map(|t| t.localized()),
+                title,
                 installed_version: None,
                 satisfies: BTreeSet::new(),
                 is_running: false,
@@ -557,14 +577,9 @@ pub async fn check_dependencies(
             .transpose_ref()
             .is_some();
         let health_checks = package.as_status_info().as_health().de()?;
-        let tasks = tasks
-            .iter()
-            .filter(|(_, v)| v.task.package_id == package_id)
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
         results.push(CheckDependenciesResult {
             package_id,
-            title: title.map(|t| t.localized()),
+            title,
             installed_version,
             satisfies,
             is_running,
@@ -626,6 +641,46 @@ pub async fn get_service_manifest(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn dependency_titles_use_the_declaring_package_default_with_or_without_the_dependency() {
+        let db = Model::from_value(imbl_value::json!({
+            "public": { "packageData": {
+                "caller": {
+                    "currentDependencies": {
+                        "installed": {
+                            "title": { "de_DE": "Deutsch", "pl_PL": "Polski" },
+                            "kind": "exists", "versionRange": "*",
+                        },
+                        "missing": {
+                            "title": { "de_DE": "Deutsch", "pl_PL": "Polski" },
+                            "kind": "exists", "versionRange": "*",
+                        },
+                    },
+                    "tasks": {},
+                },
+                "installed": {
+                    "stateInfo": {
+                        "state": "installed",
+                        "manifest": {
+                            "version": "1.0.0:0", "satisfies": [], "defaultLocale": "pl_PL",
+                        },
+                    },
+                    "statusInfo": { "started": null, "health": {} },
+                },
+            }},
+        }));
+        let caller = "caller".parse().unwrap();
+        let results = dependency_statuses(&db, &caller, Some("de_DE"), None).unwrap();
+        assert_eq!(results.len(), 2);
+        for result in results {
+            assert_eq!(result.title.as_deref(), Some("Deutsch"));
+            assert_eq!(
+                result.installed_version.is_some(),
+                &*result.package_id == "installed"
+            );
+        }
+    }
 
     #[test]
     fn required_manifest_requirement_is_the_static_fallback() {

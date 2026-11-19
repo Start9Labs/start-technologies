@@ -291,6 +291,7 @@ export namespace Mock {
   }
 
   export const RegistryInfo: T.RegistryInfo = {
+    defaultLocale: 'en_US',
     trustSigners: {
       'start9-signer': {
         name: 'Start9',

@@ -97,6 +97,7 @@ export function mockOsUpdateCache(
     versions: sameUrl(registry, defaultRegistries.community)
       ? {}
       : Mock.RegistryOSUpdate,
+    defaultLocale: 'en_US',
     status: 'connected',
   }
 }

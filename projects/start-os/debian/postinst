@@ -44,6 +44,7 @@ if [ -f /etc/default/grub ]; then
 	mkdir -p /etc/default/grub.d
 	cp /usr/lib/startos/grub-user.cfg /etc/default/grub.d/zz-startos-user.cfg
 	grub_set GRUB_DISTRIBUTOR "StartOS v$(cat /usr/lib/startos/VERSION.txt)"
+	# Image-built defaults must select their kernel across lower-ABI updates.
 	grub_set GRUB_TOP_LEVEL "$(ls -1 /boot/vmlinuz-* | sort -V | tail -n1)"
 	# Graphical terminal (serial added conditionally via /etc/grub.d/01_serial)
 	grub_set GRUB_TERMINAL_INPUT 'console'
@@ -143,10 +144,12 @@ rm -f "$resolv_conf"
 echo "nameserver 127.0.0.1" > "$resolv_conf"
 
 echo "#" > /etc/network/interfaces
+# The StartOS resolver is the only host DNS path; NetworkManager publishes no resolver config.
 cat << EOF > /etc/NetworkManager/NetworkManager.conf
 [main]
 plugins=ifupdown,keyfile
 dns=none
+systemd-resolved=false
 
 [ifupdown]
 managed=true
