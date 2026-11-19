@@ -266,7 +266,8 @@ fn unit() -> String {
 }
 
 fn lease_path() -> PathBuf {
-    PathBuf::from(std::env::var_os("FDE_CAPTURE_TEST_ROOT").unwrap()).join("image-store.lock")
+    PathBuf::from(std::env::var_os("FDE_CAPTURE_TEST_ROOT").unwrap())
+        .join("volume/image-store.lock")
 }
 
 async fn image_lease() -> crate::util::FileLock {
@@ -714,10 +715,13 @@ async fn native_capture_requester_death_leaves_cleanup_owned_by_pid1() {
     )
     .unwrap();
     assert!(!requester.wait().await.unwrap().success());
-    assert!(
-        crate::util::FileLock::new(lease_path(), false)
-            .await
-            .is_err()
+    let rejected_while_frozen = matches!(
+        tokio::time::timeout(
+            Duration::from_millis(500),
+            crate::util::FileLock::new(lease_path(), false),
+        )
+        .await,
+        Ok(Err(_))
     );
     assert!(
         tokio::fs::write(fixture.working.path().join("before-stop"), b"blocked")
@@ -744,6 +748,10 @@ async fn native_capture_requester_death_leaves_cleanup_owned_by_pid1() {
         crate::util::FileLock::new(lease_path(), false)
             .await
             .is_ok()
+    );
+    assert!(
+        rejected_while_frozen,
+        "busy acquisition waited for filesystem thaw"
     );
     drop(gate);
     tokio::fs::write(

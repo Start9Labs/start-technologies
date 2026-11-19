@@ -26,7 +26,7 @@ use tracing::instrument;
 use url::Url;
 
 use crate::shutdown::Shutdown;
-use crate::util::io::{canonicalize, create_file};
+use crate::util::io::canonicalize;
 use crate::util::serde::{deserialize_from_str, serialize_display};
 use crate::{Error, ErrorKind, ResultExt as _};
 
@@ -695,6 +695,7 @@ impl<F: FnOnce() -> T, T> Drop for GeneralGuard<F, T> {
 }
 
 /// The kernel lease lasts until its last inherited descriptor closes.
+/// Existing reservations open without writes, including on frozen filesystems.
 pub struct FileLock(#[allow(unused)] OwnedMutexGuard<()>, Option<File>);
 impl Drop for FileLock {
     fn drop(&mut self) {
@@ -762,7 +763,25 @@ impl FileLock {
                 .await
                 .with_ctx(|_| (crate::ErrorKind::Filesystem, parent.display().to_string()))?;
         }
-        let f = create_file(&path).await?;
+        let open_existing =
+            || async { tokio::fs::OpenOptions::new().write(true).open(&path).await };
+        let f = match open_existing().await {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match tokio::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .await
+                {
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                        open_existing().await
+                    }
+                    result => result,
+                }
+            }
+            result => result,
+        }
+        .with_kind(ErrorKind::Filesystem)?;
         let file_guard = tokio::task::spawn_blocking(move || {
             use std::os::fd::AsRawFd;
 

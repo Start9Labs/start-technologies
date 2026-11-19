@@ -31,6 +31,23 @@ fn variable() -> &'static str {
 }
 
 #[tokio::test]
+async fn locking_an_existing_file_preserves_its_contents() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join(lock_name());
+    tokio::fs::write(&path, b"retained-lock-file")
+        .await
+        .unwrap();
+    let identity = crate::util::io::file_identity(&path).await.unwrap();
+    let lease = FileLock::new(&path, false).await.unwrap();
+    assert_eq!(tokio::fs::read(&path).await.unwrap(), b"retained-lock-file");
+    assert_eq!(
+        crate::util::io::file_identity(&path).await.unwrap(),
+        identity
+    );
+    lease.unlock().await.unwrap();
+}
+
+#[tokio::test]
 async fn shared_descriptor_retains_the_kernel_lease_with_close_on_exec() {
     use std::os::fd::AsRawFd;
 
