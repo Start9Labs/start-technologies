@@ -22,7 +22,7 @@ use super::memory::ProcessSecretMemory;
 use super::namespace::invalid_source;
 use super::private_config::ProjectedConfig;
 use crate::context::RpcContext;
-use crate::disk::mount::filesystem::bind::Bind;
+use crate::disk::mount::filesystem::bind::{Bind, IsolatedBind};
 use crate::disk::mount::filesystem::private_tmpfs::PrivateTmpfs;
 use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
 use crate::disk::mount::guard::MountGuard;
@@ -191,7 +191,8 @@ impl ReadEpoch {
 }
 
 pub(super) async fn check_eligibility() -> Result<(), Error> {
-    ReadEpoch::current().await.map(|_| ())
+    ReadEpoch::current().await?;
+    IsolatedBind::new(PUBLIC).check_readonly()
 }
 
 /// Preserves native mount options while changing filesystem writability.
@@ -328,8 +329,8 @@ pub(crate) async fn run(path: &Path) -> Result<(), Error> {
     let scratch = MountGuard::mount(&PrivateTmpfs::new(), TmpDir::BASE, ReadWrite).await?;
     epoch.enter().await?;
     let result = async {
-        let base = disposable_view(&epoch.base_root).await?;
-        let data = disposable_view(&epoch.data_root).await?;
+        let base = base_image_view(&epoch.base_root).await?;
+        let data = data_view(&epoch.data_root).await?;
         let capture = capture_configuration(epoch.snapshot().await?, base, data).await?;
         let profiles = crate::net::wifi::read_network_profiles(&epoch.network_profiles).await?;
         epoch.release().await?;
@@ -388,11 +389,22 @@ pub(crate) async fn release(path: &Path) -> Result<(), Error> {
     crate::util::io::delete_file(path).await
 }
 
-async fn disposable_view(source: &Path) -> Result<MountGuard, Error> {
+/// Host submounts are outside the rootfs image commitment.
+async fn base_image_view(source: &Path) -> Result<MountGuard, Error> {
+    capture_view(&IsolatedBind::new(source)).await
+}
+
+async fn data_view(source: &Path) -> Result<MountGuard, Error> {
+    capture_view(&Bind::new(source).recursive(true)).await
+}
+
+async fn capture_view(
+    filesystem: &impl crate::disk::mount::filesystem::FileSystem,
+) -> Result<MountGuard, Error> {
     let target = TmpDir::new().await?;
     let path = target.to_path_buf();
     target.leak();
-    MountGuard::mount(&Bind::new(source).recursive(true), path, ReadOnly).await
+    MountGuard::mount(filesystem, path, ReadOnly).await
 }
 
 #[derive(Deserialize)]

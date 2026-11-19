@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 use super::FileSystem;
-use super::syscall::{DetachedMount, open_tree_clone};
+use super::syscall::{DetachedMount, open_tree_clone, open_tree_private};
 use crate::disk::mount::filesystem::MountType;
 use crate::prelude::*;
 use crate::util::io::{canonicalize, create_file};
@@ -31,6 +31,62 @@ rpc_toolkit::ts_export!(FileType, namespaces = [""]);
 impl Default for FileType {
     fn default() -> Self {
         FileType::Directory
+    }
+}
+
+/// A private single-directory-mount view excludes existing and future source submounts.
+/// Read-only and writable views have separate cache identities.
+/// The caller retains the source mount and quiesces writes for stable metadata.
+/// Requires Linux 6.15.
+pub struct IsolatedBind<Src: AsRef<Path>>(Bind<Src>);
+
+impl<Src: AsRef<Path>> IsolatedBind<Src> {
+    pub fn new(source: Src) -> Self {
+        Self(Bind::new(source))
+    }
+
+    /// Probes atomic read-only cloning without attaching a mount.
+    pub fn check_readonly(&self) -> Result<(), Error> {
+        drop(open_tree_private(self.0.src.as_ref(), false, true)?);
+        Ok(())
+    }
+}
+
+impl<Src: AsRef<Path> + Send + Sync> FileSystem for IsolatedBind<Src> {
+    async fn source(&self) -> Result<Option<impl AsRef<Path>>, Error> {
+        self.0.source().await
+    }
+
+    async fn pre_mount(&self, mountpoint: &Path, access: MountType) -> Result<(), Error> {
+        self.0.pre_mount(mountpoint, access).await
+    }
+
+    async fn mount<P: AsRef<Path> + Send>(
+        &self,
+        mountpoint: P,
+        access: MountType,
+    ) -> Result<(), Error> {
+        self.pre_mount(mountpoint.as_ref(), access).await?;
+        DetachedMount::from_fd(open_tree_private(
+            self.0.src.as_ref(),
+            false,
+            access == MountType::ReadOnly,
+        )?)
+        .attach(mountpoint.as_ref())
+    }
+
+    async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
+        let mut sha = Sha256::new();
+        sha.update("IsolatedBind");
+        sha.update(self.0.source_hash().await?);
+        Ok(sha.finalize())
+    }
+
+    async fn mount_hash(&self, access: MountType) -> Result<digest::Output<Sha256>, Error> {
+        let mut sha = Sha256::new();
+        sha.update(self.source_hash().await?);
+        sha.update([u8::from(access == MountType::ReadOnly)]);
+        Ok(sha.finalize())
     }
 }
 

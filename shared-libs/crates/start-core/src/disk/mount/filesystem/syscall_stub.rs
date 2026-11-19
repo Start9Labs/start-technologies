@@ -36,6 +36,14 @@ pub fn open_tree_clone(_path: &Path, _recursive: bool) -> Result<OwnedFd, Error>
     unsupported()
 }
 
+pub fn open_tree_private(
+    _path: &Path,
+    _recursive: bool,
+    _readonly: bool,
+) -> Result<OwnedFd, Error> {
+    unsupported()
+}
+
 pub fn unmount_fd(_mount: BorrowedFd) -> Result<(), Error> {
     unsupported()
 }

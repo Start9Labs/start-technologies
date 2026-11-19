@@ -13,6 +13,8 @@ use super::*;
 mod lifecycle;
 #[path = "profile_transport_tests.rs"]
 mod profiles;
+#[path = "root_view_tests.rs"]
+mod root_views;
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
 use crate::disk::mount::guard::GenericMountGuard;
 use crate::os_overlay::OVERLAY_FILE;

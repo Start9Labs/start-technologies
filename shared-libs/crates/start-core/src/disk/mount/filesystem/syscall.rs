@@ -1,5 +1,5 @@
 //! Detached Linux bind mounts with optional idmaps and read-only attributes.
-//! `open_tree_attr` requires Linux 6.15+ for cloning an already-idmapped source.
+//! Atomic clone attributes require Linux 6.15 or later.
 
 use std::ffi::{CString, OsString};
 use std::io;
@@ -24,10 +24,7 @@ const MOVE_MOUNT_BENEATH: libc::c_uint = 0x00000200;
 const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
 const RESOLVE_BENEATH: u64 = 0x08;
 
-// open_tree_attr(2) — added in Linux 6.15. libc 0.2 only defines
-// SYS_open_tree_attr for m68k, but the number is unified at 467 across
-// x86_64 / aarch64 / riscv64 / armv7 / i686, covering every arch start-os
-// targets.
+// libc omits this syscall on supported StartOS architectures.
 const SYS_OPEN_TREE_ATTR: libc::c_long = 467;
 
 #[repr(C)]
@@ -98,28 +95,55 @@ pub fn open_tree_attr_idmap(
     recursive: bool,
     userns: BorrowedFd,
 ) -> Result<OwnedFd, Error> {
+    open_tree_attr(
+        path,
+        recursive,
+        &MountAttr {
+            attr_set: MOUNT_ATTR_IDMAP,
+            userns_fd: userns.as_raw_fd() as u64,
+            ..Default::default()
+        },
+        "open_tree_attr IDMAP",
+    )
+}
+
+/// Clones with private propagation and access flags atomically; requires Linux 6.15.
+pub fn open_tree_private(path: &Path, recursive: bool, readonly: bool) -> Result<OwnedFd, Error> {
+    open_tree_attr(
+        path,
+        recursive,
+        &MountAttr {
+            attr_set: if readonly { MOUNT_ATTR_RDONLY } else { 0 },
+            attr_clr: if readonly { 0 } else { MOUNT_ATTR_RDONLY },
+            propagation: libc::MS_PRIVATE as u64,
+            ..Default::default()
+        },
+        "open_tree_attr private",
+    )
+}
+
+fn open_tree_attr(
+    path: &Path,
+    recursive: bool,
+    attr: &MountAttr,
+    context: &'static str,
+) -> Result<OwnedFd, Error> {
     let p = cstr_path(path)?;
     let mut flags = OPEN_TREE_CLOEXEC | OPEN_TREE_CLONE;
     if recursive {
         flags |= AT_RECURSIVE as libc::c_uint;
     }
-    let attr = MountAttr {
-        attr_set: MOUNT_ATTR_IDMAP,
-        attr_clr: 0,
-        propagation: 0,
-        userns_fd: userns.as_raw_fd() as u64,
-    };
     let r = unsafe {
         libc::syscall(
             SYS_OPEN_TREE_ATTR,
             AT_FDCWD,
             p.as_ptr(),
             flags,
-            &attr as *const _ as *const libc::c_void,
+            attr as *const _ as *const libc::c_void,
             std::mem::size_of::<MountAttr>(),
         )
     };
-    fd_from_raw(r, "open_tree_attr IDMAP")
+    fd_from_raw(r, context)
 }
 
 /// Clones a pinned directory without including its child mounts.
