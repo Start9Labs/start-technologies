@@ -8,9 +8,9 @@ set -ea
 if [ "${RUST_BUILDER_IMAGE:-start9/start-core-testenv}" = "start9/start-core-testenv" ]; then
   base_image=$(env -u RUST_BUILDER_IMAGE ./build/rust-builder/image.sh)
   RUST_BUILDER_IMAGE=start9/start-core-testenv
-  docker buildx build --load -t "$RUST_BUILDER_IMAGE" \
+  RUST_BUILDER_IMAGE=$(./build/docker-build-image.sh -t "$RUST_BUILDER_IMAGE" \
     --build-arg RUST_BUILDER_IMAGE="$base_image" \
-    -f shared-libs/crates/start-core/testenv.Dockerfile .
+    -f shared-libs/crates/start-core/testenv.Dockerfile .)
 fi
 
 source ./build/builder-alias.sh

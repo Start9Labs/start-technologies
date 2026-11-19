@@ -18,9 +18,9 @@ esac
 
 IMAGE=start9/fmt-env
 base_image=$(./build/rust-builder/image.sh)
-docker buildx build --load --platform="$platform" -t "$IMAGE" \
+IMAGE=$(./build/docker-build-image.sh --platform="$platform" -t "$IMAGE" \
     --build-arg RUST_BUILDER_IMAGE="$base_image" \
-    -f build/fmt/fmtenv.Dockerfile build/fmt
+    -f build/fmt/fmtenv.Dockerfile build/fmt)
 
 tty_args=()
 if tty -s; then tty_args=(-it); fi

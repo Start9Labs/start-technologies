@@ -15,6 +15,15 @@ unset RUST_BUILDER_IMAGE FMT_NATIVE RISCV_OBJDUMP
 cat > "$scratch/bin/docker" <<'MOCK'
 #!/bin/bash
 printf '%s\n' '---' "$@" "Parent profile: ${PROFILE-}" >> "$DOCKER_LOG"
+if [[ "$1 $2" == 'buildx build' ]]; then
+    arguments=("$@")
+    for ((i=0; i<${#arguments[@]}; i++)); do
+        if [ "${arguments[i]}" = --iidfile ]; then
+            printf '%s' "${MOCK_BUILD_IID:-sha256:1111111111111111111111111111111111111111111111111111111111111111}" > "${arguments[i+1]}"
+        fi
+    done
+    exit "${MOCK_BUILD_EXIT:-0}"
+fi
 if [[ "$*" == *'/verify/binary'* ]]; then
     printf '00000000 <probe>:\n    0: addi a0, a0, 1\n'
 fi
@@ -196,6 +205,7 @@ done
 bash shared-libs/crates/start-core/run-tests.sh
 assert_log_contains "RUST_BUILDER_IMAGE=$image"
 assert_log_contains start9/start-core-testenv
+assert_log_contains sha256:1111111111111111111111111111111111111111111111111111111111111111
 assert_log_contains --features=test,ts,dev,unstable
 
 : > "$DOCKER_LOG"
@@ -231,6 +241,17 @@ assert_log_contains "RUST_BUILDER_IMAGE=$image"
 assert_log_contains /workdir/shared-libs/crates/start-core
 assert_log_contains RUSTUP_TOOLCHAIN=nightly-2026-05-28
 assert_log_contains --load
+assert_log_contains sha256:1111111111111111111111111111111111111111111111111111111111111111
+
+: > "$DOCKER_LOG"
+if MOCK_BUILD_IID=invalid ./build/docker-build-image.sh . > "$scratch/image.stdout" 2> "$scratch/image.stderr"; then
+    printf 'Invalid built image ID unexpectedly accepted\n' >&2
+    exit 1
+fi
+: > "$DOCKER_LOG"
+status=0
+MOCK_BUILD_EXIT=17 ./build/docker-build-image.sh . > "$scratch/image.stdout" 2> "$scratch/image.stderr" || status=$?
+test "$status" = 17
 
 : > "$DOCKER_LOG"
 RUST_BUILDER_IMAGE="$custom" ./build/fmt/run-fmt.sh cargo fmt --version
