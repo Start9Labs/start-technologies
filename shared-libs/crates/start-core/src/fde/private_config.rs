@@ -1,5 +1,7 @@
 //! Private configuration remains on unlocked data; signed snapshots contain references.
 //! Reference inodes retain no private-file ownership, timestamps or xattrs.
+//! Regular files without other-read access or beneath non-other-searchable
+//! configuration directories stay private, including every hardlink alias.
 //!
 //! Callers retain the encrypted data mount, quiesce configuration writers and
 //! protect transient credentials through preparation and publication.
@@ -182,11 +184,43 @@ fn snapshot_directory<'a>(
 impl ProjectedConfig {
     /// Requires an unlocked encrypted data mount and quiescent source paths.
     /// Supply both native default and prospective HostKey paths from the admitted root.
+    /// Discards prior bootstrap input; complete boot publication requires fresh sealed credentials.
     pub(crate) async fn stage(
         mut snapshot: Squashfs<DynFileSource>,
         data: &Path,
         host_keys: &[PathBuf],
     ) -> Result<Self, Error> {
+        super::credentials::SealedCredentials::clear_previous(&mut snapshot)?;
+        let entries = snapshot_entries(&snapshot);
+        let private_directories: BTreeSet<_> = entries
+            .iter()
+            .filter_map(|(path, entry)| match entry {
+                Entry::Node(Node {
+                    metadata,
+                    contents: NodeContents::Directory(_),
+                    ..
+                }) if !path.as_os_str().is_empty() && metadata.mode & 0o001 == 0 => {
+                    Some(path.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        let mut private = BTreeSet::new();
+        for (path, entry) in &entries {
+            if entry.is_file_or_hardlink() {
+                let (canonical, node) = resolved(&snapshot, path)?;
+                if matches!(node.contents, NodeContents::File(_))
+                    && !overlay_whiteout(node)
+                    && (node.metadata.mode & 0o004 == 0
+                        || path
+                            .ancestors()
+                            .skip(1)
+                            .any(|parent| private_directories.contains(parent)))
+                {
+                    private.insert(canonical);
+                }
+            }
+        }
         let key_directory = Path::new(crate::ssh::HOST_KEY_DIRECTORY);
         let mut paths = [crate::auth::SHADOW_PATH, crate::util::mok::DKMS_MOK_KEY]
             .into_iter()
@@ -204,20 +238,19 @@ impl ProjectedConfig {
         if let Some(entries) = snapshot_directory(&snapshot, profiles)? {
             for (name, entry) in entries.iter() {
                 if crate::net::wifi::is_network_profile_name(name)
-                    && matches!(
-                        entry,
-                        Entry::Hardlink(_)
-                            | Entry::Node(Node {
-                                contents: NodeContents::File(_),
+                    && (entry.is_file_or_hardlink()
+                        || matches!(
+                            entry,
+                            Entry::Node(Node {
+                                contents: NodeContents::Symlink(_),
                                 ..
                             })
-                    )
+                        ))
                 {
                     paths.insert(profiles.join(name));
                 }
             }
         }
-        let mut private = BTreeSet::new();
         for path in &paths {
             if !path.is_absolute() {
                 return Err(invalid_layout(path));
@@ -268,14 +301,7 @@ impl ProjectedConfig {
                     .contents_mut()
                     .insert_path(&path, private_reference(target.clone()))?;
             }
-            if matches!(
-                entry,
-                Entry::Hardlink(_)
-                    | Entry::Node(Node {
-                        contents: NodeContents::File(_),
-                        ..
-                    })
-            ) {
+            if entry.is_file_or_hardlink() {
                 let (canonical, _) = resolved(&snapshot, &path)?;
                 if private.contains(&canonical) {
                     aliases.entry(canonical).or_default().push(path);
@@ -360,6 +386,14 @@ impl ProjectedConfig {
         open_file(data.join(DIRECTORY)).await?.sync_all().await?;
         open_file(data).await?.sync_all().await?;
         Ok(projected)
+    }
+
+    /// Fresh ciphertext remains available before the data drive unlocks.
+    pub(crate) fn insert_bootstrap(
+        &mut self,
+        credentials: super::credentials::SealedCredentials,
+    ) -> Result<(), Error> {
+        credentials.insert_into(&mut self.snapshot)
     }
 
     pub(crate) async fn prepare_generation(

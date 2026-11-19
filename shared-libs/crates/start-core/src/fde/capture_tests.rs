@@ -1,5 +1,6 @@
 use std::mem::ManuallyDrop;
 use std::os::unix::ffi::OsStringExt;
+use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
 use inotify::{Inotify, WatchMask};
@@ -158,6 +159,14 @@ impl Fixture {
                 .path()
                 .join("data/main/network-profiles/private.nmconnection"),
             b"[connection]\nid=captured\n[wifi-security]\npsk=captured-bootstrap-password\n",
+        )
+        .await
+        .unwrap();
+        tokio::fs::set_permissions(
+            volume
+                .path()
+                .join("data/main/network-profiles/private.nmconnection"),
+            std::fs::Permissions::from_mode(0o600),
         )
         .await
         .unwrap();

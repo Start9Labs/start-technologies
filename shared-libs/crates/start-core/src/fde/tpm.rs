@@ -166,7 +166,11 @@ struct Workspace(TmpDir);
 
 impl Workspace {
     async fn new() -> Result<Self, Error> {
-        let directory = TmpDir::new().await?;
+        Self::new_in(Path::new(TmpDir::BASE)).await
+    }
+
+    async fn new_in(parent: &Path) -> Result<Self, Error> {
+        let directory = TmpDir::new_in(parent).await?;
         tokio::fs::set_permissions(&*directory, std::fs::Permissions::from_mode(0o700)).await?;
         Ok(Self(directory))
     }
@@ -339,8 +343,14 @@ pub fn verify_authorization(
 }
 
 /// Creates a TPM-bound object with policy-only authorization and encrypted input.
-pub async fn seal(key: &[u8; 32], authority: &PKey<Private>) -> Result<SealedKey, Error> {
-    let workspace = Workspace::new().await?;
+/// The caller retains a tmpfs workspace base and excludes swap/core-handler changes.
+pub async fn seal(
+    key: &[u8; 32],
+    authority: &PKey<Private>,
+    workspace_base: &Path,
+) -> Result<SealedKey, Error> {
+    super::memory::require_tmpfs(workspace_base)?;
+    let workspace = Workspace::new_in(workspace_base).await?;
     workspace.load_authority(&public_key(authority)?).await?;
     workspace.start_trial().await?;
     let trial = async {
@@ -577,6 +587,44 @@ pub async fn measure_filesystems(event: &[u8; 32]) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn sealing_rejects_non_ram_workspace_before_creating_contexts() {
+        let authority = crate::util::crypto::gen_nistp256().unwrap();
+        let error = seal(&[42; 32], &authority, Path::new("/proc"))
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Bios);
+        assert_eq!(
+            error.source.to_string(),
+            t!("fde.memory.unsafe-environment").to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_uses_selected_base_with_private_permissions() {
+        let base = tempfile::tempdir().unwrap();
+        let workspace = Workspace::new_in(base.path()).await.unwrap();
+        assert_eq!(workspace.path().parent(), Some(base.path()));
+        assert_eq!(
+            std::fs::metadata(workspace.path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        workspace
+            .write("public-context", b"context bytes")
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read(workspace.path().join("public-context")).unwrap(),
+            b"context bytes"
+        );
+        workspace.0.delete().await.unwrap();
+    }
 
     #[tokio::test]
     async fn tpm_helpers_do_not_inherit_session_key_logging() {
@@ -902,7 +950,9 @@ mod tests {
         let authorization = authorize(&read_measurements().await.unwrap(), &authority)
             .await
             .unwrap();
-        let sealed = seal(&key, &authority).await.unwrap();
+        let sealed = seal(&key, &authority, Path::new(TmpDir::BASE))
+            .await
+            .unwrap();
         let public = public_key(&authority).unwrap();
         assert_eq!(
             unseal(&sealed, &authorization, &public)
@@ -951,7 +1001,9 @@ mod tests {
             .await
             .unwrap();
         let mut authorization = profile.authorization.clone();
-        let sealed = seal(&key, &authority).await.unwrap();
+        let sealed = seal(&key, &authority, Path::new(TmpDir::BASE))
+            .await
+            .unwrap();
         let authority_public = public_key(&authority).unwrap();
         assert_eq!(
             unseal(&sealed, &authorization, &authority_public)

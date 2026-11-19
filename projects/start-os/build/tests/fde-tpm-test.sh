@@ -7,12 +7,24 @@ image_id=$(mktemp)
 trap 'rm -f "$image_id"' EXIT
 bash "$directory/fde-tpm-build-image.sh" "$image_id"
 image=$(<"$image_id")
-for test in \
-    fde::tpm::tests::software_tpm_unseals_only_the_authorized_boot_state \
-    fde::tpm::tests::software_tpm_rejects_external_stub_parameters \
-    fde::tpm::tests::software_tpm_rejects_external_stub_extensions \
-    fde::boot::tests::software_tpm_selects_only_compatible_generations \
-    fde::credentials::tests::software_tpm_sealed_snapshot_round_trips_and_rejects_tampering; do
+tests=(
+    fde::tpm::tests::software_tpm_unseals_only_the_authorized_boot_state
+    fde::tpm::tests::software_tpm_rejects_external_stub_parameters
+    fde::tpm::tests::software_tpm_rejects_external_stub_extensions
+    fde::boot::tests::software_tpm_selects_only_compatible_generations
+    fde::credentials::tests::software_tpm_sealed_snapshot_round_trips_and_rejects_tampering
+    fde::private_config::tests::permissions::software_tpm_bootstrap_stays_public_through_private_projection
+)
+if [ "$#" -gt 1 ]; then
+    for selected in "${@:2}"; do
+        printf '%s\n' "${tests[@]}" | grep -Fx -- "$selected" >/dev/null || {
+            printf 'Unsupported software TPM case: %s\n' "$selected" >&2
+            exit 1
+        }
+    done
+    tests=("${@:2}")
+fi
+for test in "${tests[@]}"; do
     docker run --rm --network none --tmpfs /var/tmp:rw,nosuid,nodev,mode=0700 \
         --mount "type=bind,source=$binary,target=/fde-tests,readonly" \
         "$image" fde-tpm-run /fde-tests "$test"

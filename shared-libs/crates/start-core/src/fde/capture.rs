@@ -550,7 +550,7 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<String, Error> {
     drop(pause);
     let (image, keys, profiles) = captured?;
     credentials.network_profiles = profiles;
-    let mut snapshot = Squashfs::deserialize(MultiCursorFile::from(image))
+    let snapshot = Squashfs::deserialize(MultiCursorFile::from(image))
         .await?
         .into_dyn();
     let enrollment = ctx
@@ -561,11 +561,16 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<String, Error> {
         .as_fde_enrollment()
         .de()?
         .ok_or_else(invalid_source)?;
-    let sealed =
-        super::credentials::SealedCredentials::seal(&credentials, &enrollment.policy_key).await?;
+    let sealed = super::credentials::SealedCredentials::seal(
+        &credentials,
+        &enrollment.policy_key,
+        Path::new("/run"),
+    )
+    .await?;
     drop(credentials);
-    sealed.insert_into(&mut snapshot)?;
-    let projected = ProjectedConfig::stage(snapshot, Path::new(crate::MAIN_DATA), &keys).await?;
+    let mut projected =
+        ProjectedConfig::stage(snapshot, Path::new(crate::MAIN_DATA), &keys).await?;
+    projected.insert_bootstrap(sealed)?;
     let store = super::boot::generation_store(Path::new("/media/startos/config"));
     tokio::fs::create_dir_all(&store).await?;
     let prepared = projected

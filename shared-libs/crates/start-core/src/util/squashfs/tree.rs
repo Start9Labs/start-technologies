@@ -52,6 +52,16 @@ impl<S> Entry<S> {
     pub fn directory(metadata: Metadata, contents: DirectoryContents<S>) -> Self {
         Self::new(metadata, NodeContents::Directory(contents))
     }
+    pub(crate) fn is_file_or_hardlink(&self) -> bool {
+        matches!(
+            self,
+            Self::Hardlink(_)
+                | Self::Node(Node {
+                    contents: NodeContents::File(_),
+                    ..
+                })
+        )
+    }
     pub fn as_node(&self) -> Option<&Node<S>> {
         match self {
             Self::Node(node) => Some(node),
@@ -184,6 +194,27 @@ impl<S> DirectoryContents<S> {
                 .and_then(|node| node.contents.as_directory())
                 .ok_or_else(|| invalid("archive ancestor is not a directory"))?;
         }
+    }
+
+    pub(crate) fn remove_path(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> std::io::Result<Option<Entry<S>>> {
+        let path = normalize_path(path.as_ref())?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| invalid("cannot remove the archive root"))?;
+        let mut directory = self;
+        for component in path.parent().expect("a named path has a parent").iter() {
+            let Some(entry) = directory.get_mut(component) else {
+                return Ok(None);
+            };
+            directory = entry
+                .as_node_mut()
+                .and_then(|node| node.contents.as_directory_mut())
+                .ok_or_else(|| invalid("archive ancestor is not a directory"))?;
+        }
+        Ok(directory.entries.remove(name))
     }
 
     /// Creates missing ancestors with root ownership, mode 0755, and zero timestamps.
@@ -435,6 +466,30 @@ mod tests {
     use std::os::unix::ffi::OsStringExt;
 
     use super::*;
+
+    #[test]
+    fn removal_keeps_siblings_and_rejects_redirected_ancestors() {
+        let mut directory = DirectoryContents::<()>::new();
+        directory
+            .insert_path("etc/old", Entry::file(Metadata::new(0o600), ()))
+            .unwrap();
+        directory
+            .insert_path("etc/kept", Entry::file(Metadata::new(0o644), ()))
+            .unwrap();
+        directory
+            .insert_path(
+                "alias",
+                Entry::new(Metadata::new(0o777), NodeContents::Symlink("etc".into())),
+            )
+            .unwrap();
+        assert!(directory.remove_path("etc/old").unwrap().is_some());
+        assert!(directory.get_path("etc/old").is_none());
+        assert!(directory.get_path("etc/kept").is_some());
+        assert!(directory.remove_path("missing/file").unwrap().is_none());
+        assert!(directory.remove_path("alias/kept").is_err());
+        assert!(directory.get_path("etc/kept").is_some());
+        assert!(directory.remove_path("/").is_err());
+    }
 
     #[test]
     fn checked_lookup_distinguishes_missing_entries_from_non_directory_ancestors() {

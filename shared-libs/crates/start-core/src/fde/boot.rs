@@ -523,10 +523,13 @@ mod tests {
         let raw = temp.path().join("raw");
         std::fs::create_dir(&raw).unwrap();
         std::fs::write(raw.join("setting"), b"configuration override").unwrap();
-        let snapshot =
-            SealedCredentials::seal(&super::super::credentials::test_credentials(), &authority)
-                .await
-                .unwrap();
+        let snapshot = SealedCredentials::seal(
+            &super::super::credentials::test_credentials(),
+            &authority,
+            Path::new(crate::util::io::TmpDir::BASE),
+        )
+        .await
+        .unwrap();
         let snapshot_path = raw.join(SEALED_CREDENTIALS_FILE);
         std::fs::create_dir_all(snapshot_path.parent().unwrap()).unwrap();
         std::fs::write(snapshot_path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
@@ -553,7 +556,13 @@ mod tests {
             .unwrap();
         descriptor.stage_profile(&prepared, &profile).await.unwrap();
         prepared.publish().await.unwrap();
-        let sealed = tpm::seal(&[42; 32], &authority).await.unwrap();
+        let sealed = tpm::seal(
+            &[42; 32],
+            &authority,
+            Path::new(crate::util::io::TmpDir::BASE),
+        )
+        .await
+        .unwrap();
         let mountpoint = temp.path().join("mounted");
         std::fs::create_dir(&mountpoint).unwrap();
         let before = boot_mappings();

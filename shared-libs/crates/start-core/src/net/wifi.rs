@@ -1199,16 +1199,42 @@ fn parse_wired_profile(contents: &str) -> Option<WiredProfile> {
     })
 }
 
+fn is_visible_profile_name(name: &[u8]) -> bool {
+    !name.is_empty() && !name.starts_with(b".") && !name.contains(&b'/') && !name.contains(&0)
+}
+
+/// Native `/etc` keyfile candidates include suffixless names; backup and certificate names are excluded.
 pub(crate) fn is_network_profile_name(name: &std::ffi::OsStr) -> bool {
-    Path::new(name)
-        .extension()
-        .is_some_and(|extension| extension == "nmconnection")
+    use std::os::unix::ffi::OsStrExt;
+    let name = name.as_bytes();
+    is_visible_profile_name(name)
+        && !name.ends_with(b"~")
+        && !name
+            .iter()
+            .rposition(|&byte| byte == b'.')
+            .map(|index| &name[index + 1..])
+            .is_some_and(|suffix| {
+                suffix.eq_ignore_ascii_case(b"pem")
+                    || suffix.eq_ignore_ascii_case(b"der")
+                    || (suffix.len() == 6 && suffix.iter().all(u8::is_ascii_alphanumeric))
+            })
+}
+
+fn is_runtime_profile_name(name: &std::ffi::OsStr) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let name = name.as_bytes();
+    is_visible_profile_name(name) && name.ends_with(b".nmconnection")
 }
 
 async fn read_network_profile(
     entry: &tokio::fs::DirEntry,
 ) -> Result<Option<zeroize::Zeroizing<String>>, Error> {
-    if !is_network_profile_name(&entry.file_name()) || !entry.file_type().await?.is_file() {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = tokio::fs::metadata(entry.path()).await?;
+    if !metadata.is_file()
+        || metadata.mode() & 0o077 != 0
+        || ![0, nix::unistd::geteuid().as_raw()].contains(&metadata.uid())
+    {
         return Ok(None);
     }
     let bytes =
@@ -1226,15 +1252,13 @@ async fn read_wired_profile(entry: &tokio::fs::DirEntry) -> Result<Option<WiredP
         .and_then(|contents| parse_wired_profile(&contents)))
 }
 
-pub(crate) async fn capture_network_profiles() -> Result<NetworkProfiles, Error> {
-    read_network_profiles(Path::new(SAVED_PROFILE_DIRECTORY)).await
-}
-
 pub(crate) async fn read_network_profiles(directory: &Path) -> Result<NetworkProfiles, Error> {
     let mut entries = tokio::fs::read_dir(directory).await?;
     let mut profiles = BTreeMap::new();
     while let Some(entry) = entries.next_entry().await? {
-        if let Some(contents) = read_network_profile(&entry).await? {
+        if is_network_profile_name(&entry.file_name())
+            && let Some(contents) = read_network_profile(&entry).await?
+        {
             let name = entry.file_name().into_string().map_err(|_| {
                 Error::new(
                     eyre!("{}", t!("fde.bootstrap.invalid-profile-name")),
@@ -1256,12 +1280,15 @@ async fn remove_shadowing_wired_profiles(runtime: &Path, saved: &Path) -> Result
     let mut saved_entries = tokio::fs::read_dir(saved).await?;
     let mut saved_uuids = BTreeSet::new();
     while let Some(entry) = saved_entries.next_entry().await? {
-        if let Some(profile) = read_wired_profile(&entry).await? {
+        if is_network_profile_name(&entry.file_name())
+            && let Some(profile) = read_wired_profile(&entry).await?
+        {
             saved_uuids.insert(profile.uuid);
         }
     }
     while let Some(entry) = entries.next_entry().await? {
-        if let Some(profile) = read_wired_profile(&entry).await?
+        if is_runtime_profile_name(&entry.file_name())
+            && let Some(profile) = read_wired_profile(&entry).await?
             && profile.auto_default
             && saved_uuids.contains(&profile.uuid)
         {

@@ -2,6 +2,9 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
 use super::*;
 
+#[path = "private_config_permission_tests.rs"]
+mod permissions;
+
 async fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
     let root = tempfile::tempdir().unwrap();
     let raw = root.path().join("raw");
@@ -46,13 +49,13 @@ fn target<'a>(projected: &'a ProjectedConfig, path: &str) -> &'a Path {
 }
 
 #[tokio::test]
-async fn saved_network_profiles_and_their_aliases_are_private_without_redacting_other_files() {
+async fn native_network_candidates_and_aliases_are_private_without_redacting_certificates() {
     let (_root, raw, data) = fixture().await;
     let directory = Path::new(crate::net::wifi::SAVED_PROFILE_DIRECTORY)
         .strip_prefix("/")
         .unwrap();
     let profile = directory.join("private.nmconnection");
-    let public = directory.join("private.nmconnection.pub");
+    let public = directory.join("certificate.PEM");
     tokio::fs::create_dir_all(raw.join(directory))
         .await
         .unwrap();
@@ -243,6 +246,15 @@ async fn public_references_drop_private_metadata_in_fresh_and_resumed_snapshots(
 #[tokio::test]
 async fn configuration_container_mode_does_not_block_the_runtime_namespace() {
     let (_root, raw, data) = fixture().await;
+    tokio::fs::write(raw.join("etc/public.note"), b"public-note")
+        .await
+        .unwrap();
+    tokio::fs::set_permissions(
+        raw.join("etc/public.note"),
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .await
+    .unwrap();
     tokio::fs::set_permissions(&raw, std::fs::Permissions::from_mode(0o700))
         .await
         .unwrap();
@@ -256,6 +268,13 @@ async fn configuration_container_mode_does_not_block_the_runtime_namespace() {
         0o755
     );
     assert_eq!(projected.snapshot.root_metadata().mode, 0o700);
+    assert!(matches!(
+        resolved(&projected.snapshot, Path::new("etc/public.note"))
+            .unwrap()
+            .1
+            .contents,
+        NodeContents::File(_)
+    ));
 }
 
 #[tokio::test]

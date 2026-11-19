@@ -27,18 +27,15 @@ pub struct SealedCredentials {
 fn admit_bootstrap_path(
     snapshot: &crate::util::squashfs::Squashfs<crate::s9pk::merkle_archive::source::DynFileSource>,
 ) -> Result<(), Error> {
-    use crate::util::squashfs::{Entry, Node, NodeContents, snapshot_entries};
+    use crate::util::squashfs::{Entry, snapshot_entries};
     let path = Path::new(SEALED_CREDENTIALS_FILE);
-    if !matches!(
-        snapshot.contents().get_path_checked(path)?,
-        None | Some(Entry::Hardlink(_))
-            | Some(Entry::Node(Node {
-                contents: NodeContents::File(_),
-                ..
-            }))
-    ) || snapshot_entries(snapshot)
-        .iter()
-        .any(|(_, entry)| matches!(entry, Entry::Hardlink(target) if target == path))
+    if snapshot
+        .contents()
+        .get_path_checked(path)?
+        .is_some_and(|entry| !entry.is_file_or_hardlink())
+        || snapshot_entries(snapshot)
+            .iter()
+            .any(|(_, entry)| matches!(entry, Entry::Hardlink(target) if target == path))
     {
         return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into());
     }
@@ -46,14 +43,30 @@ fn admit_bootstrap_path(
 }
 
 impl SealedCredentials {
-    /// The caller protects transient key handling and the TPM workspace.
-    pub async fn seal(credentials: &Credentials, authority: &PKey<Private>) -> Result<Self, Error> {
+    /// The caller protects transient keys and retains a tmpfs workspace base.
+    pub async fn seal(
+        credentials: &Credentials,
+        authority: &PKey<Private>,
+        workspace_base: &Path,
+    ) -> Result<Self, Error> {
         let key = super::bootstrap::generate_key()?;
         let envelope = credentials.encrypt(&key)?;
         Ok(Self {
-            key: super::tpm::seal(&key, authority).await?,
+            key: super::tpm::seal(&key, authority, workspace_base).await?,
             envelope,
         })
+    }
+
+    pub(super) fn clear_previous(
+        snapshot: &mut crate::util::squashfs::Squashfs<
+            crate::s9pk::merkle_archive::source::DynFileSource,
+        >,
+    ) -> Result<(), Error> {
+        admit_bootstrap_path(snapshot)?;
+        snapshot
+            .contents_mut()
+            .remove_path(SEALED_CREDENTIALS_FILE)?;
+        Ok(())
     }
 
     pub(crate) fn insert_into(
@@ -173,16 +186,6 @@ impl Credentials {
         serde_json::from_slice(&plaintext).with_kind(ErrorKind::Deserialization)
     }
 
-    pub fn capture_network(&mut self, db: &DatabaseModel) -> Result<(), Error> {
-        self.network = Some(super::network::BootstrapNetwork::capture(db)?);
-        Ok(())
-    }
-
-    pub async fn capture_network_profiles(&mut self) -> Result<(), Error> {
-        self.network_profiles = crate::net::wifi::capture_network_profiles().await?;
-        Ok(())
-    }
-
     /// Writes credentials beneath `/run`; the saved data-drive profiles remain authoritative.
     pub async fn install_network_profiles(&self) -> Result<PathBuf, Error> {
         let directory = Path::new(RUNTIME_PROFILES);
@@ -197,24 +200,27 @@ impl Credentials {
     async fn install_profiles_at(&self, directory: &Path) -> Result<(), Error> {
         tokio::fs::create_dir_all(directory).await?;
         for (name, contents) in &self.network_profiles {
-            write_file_private_atomic(profile_path(directory, name), contents).await?;
+            write_file_private_atomic(profile_path(directory, name)?, contents).await?;
         }
         Ok(())
     }
 
     async fn remove_profiles_at(&self, directory: &Path) -> Result<(), Error> {
         for name in self.network_profiles.keys() {
-            delete_file(profile_path(directory, name)).await?;
+            delete_file(profile_path(directory, name)?).await?;
         }
         Ok(())
     }
 }
 
-fn profile_path(directory: &Path, name: &str) -> PathBuf {
-    directory.join(format!(
-        "startos-unlock-{}.nmconnection",
-        blake3::hash(name.as_bytes()).to_hex(),
-    ))
+fn profile_path(directory: &Path, name: &str) -> Result<PathBuf, Error> {
+    if !crate::net::wifi::is_network_profile_name(std::ffi::OsStr::new(name)) {
+        return Err(Error::new(
+            eyre!(t!("fde.bootstrap.invalid-profile-name")),
+            ErrorKind::Filesystem,
+        ));
+    }
+    Ok(directory.join(name))
 }
 
 #[cfg(test)]
@@ -247,7 +253,7 @@ mod tests {
         let authority = crate::util::crypto::gen_nistp256().unwrap();
         let public = PKey::public_key_from_der(&authority.public_key_to_der().unwrap()).unwrap();
         let original = credentials();
-        let sealed = SealedCredentials::seal(&original, &authority)
+        let sealed = SealedCredentials::seal(&original, &authority, Path::new("/var/tmp"))
             .await
             .unwrap();
         let bytes = serde_json::to_vec(&sealed).unwrap();
@@ -631,6 +637,12 @@ mod tests {
         )
         .await
         .unwrap();
+        tokio::fs::set_permissions(
+            saved.join("wired.nmconnection"),
+            std::fs::Permissions::from_mode(0o600),
+        )
+        .await
+        .unwrap();
         tokio::fs::write(saved.join("ignored.txt"), "not a profile")
             .await
             .unwrap();
@@ -643,9 +655,10 @@ mod tests {
         credentials.network_profiles = crate::net::wifi::read_network_profiles(&saved)
             .await
             .unwrap();
-        assert_eq!(credentials.network_profiles.len(), 1);
+        assert_eq!(credentials.network_profiles.len(), 2);
         credentials.install_profiles_at(&runtime).await.unwrap();
-        let path = profile_path(&runtime, "wired.nmconnection");
+        let path = profile_path(&runtime, "wired.nmconnection").unwrap();
+        assert_eq!(path.file_name().unwrap(), "wired.nmconnection");
         assert_eq!(
             tokio::fs::read_to_string(&path).await.unwrap(),
             "[connection]\nuuid=saved\n"
@@ -679,6 +692,12 @@ mod tests {
         tokio::fs::write(directory.path().join("invalid.nmconnection"), [0xff])
             .await
             .unwrap();
+        tokio::fs::set_permissions(
+            directory.path().join("invalid.nmconnection"),
+            std::fs::Permissions::from_mode(0o600),
+        )
+        .await
+        .unwrap();
         let error = crate::net::wifi::read_network_profiles(directory.path())
             .await
             .unwrap_err();
@@ -691,12 +710,17 @@ mod tests {
         for name in [
             "../outside",
             "/etc/shadow",
-            "normal.nmconnection",
-            &"a".repeat(1000),
+            "",
+            ".hidden",
+            "../",
+            "bad\0name",
         ] {
-            let path = profile_path(directory, name);
+            assert!(profile_path(directory, name).is_err());
+        }
+        for name in ["normal.nmconnection", "legacy", "κλειδί"] {
+            let path = profile_path(directory, name).unwrap();
             assert_eq!(path.parent(), Some(directory));
-            assert!(path.file_name().unwrap().len() < 255);
+            assert_eq!(path.file_name().unwrap(), name);
         }
     }
 }
