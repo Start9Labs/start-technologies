@@ -381,6 +381,7 @@ jobs:
       }}
     permissions:
       contents: read
+      actions: read
     env:
       ARCH: ${{ matrix.arch }}
       PLATFORM: ${{ matrix.arch }}

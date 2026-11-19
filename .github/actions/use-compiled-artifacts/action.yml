@@ -2,6 +2,7 @@ name: Use compiled artifacts
 description: >-
   Unpacks a build-products.yaml run's compiled-<arch>.tar.gz into the checkout
   and marks it current, so make uses it rather than recompiling.
+  Requires `actions: read`.
 inputs:
   arch:
     description: Architecture whose tarball to unpack

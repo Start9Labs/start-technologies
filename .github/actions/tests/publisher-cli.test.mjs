@@ -871,3 +871,12 @@ test('the rootfs builds once per architecture for every image this run or its pu
     false,
   )
 })
+
+test('compiled-artifact consumers grant Actions read permission', () => {
+  for (const permissions of [
+    products.jobs.rootfs.permissions,
+    products.jobs.image.permissions,
+    iso.permissions,
+  ])
+    assert.equal(permissions.actions, 'read')
+})
