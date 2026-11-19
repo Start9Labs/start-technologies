@@ -23,7 +23,9 @@ The registry returns the signer's ID. Use that ID with `start-cli registry admin
 
 To grant a signer admin privileges (or revoke them), use `start-cli registry admin add <SIGNER_ID>` / `... admin remove <SIGNER_ID>`.
 
-Registry 1.6.0 and later keep a package signature only while its key belongs to a registered signer. Signatures from any other key are dropped when a package is indexed, and again each time the registry starts. Register a key before you rely on the signatures it makes.
+Authoritative registries running Registry 1.6.0 or later keep a package signature only while its key belongs to a registered signer. Signatures from any other key are dropped when a package is indexed and on each startup. Register a key before you rely on the signatures it makes.
+
+A read-only registry configured with `mirror-of` preserves its upstream's signatures, including across restarts. Removing `mirror-of` enables signature pruning on the next startup.
 
 Revoking a key, with `admin signer edit <SIGNER_ID> --remove-key <KEY>` or by deleting its signer with `admin signer remove <SIGNER_ID>`, removes it from every signer that holds it and deletes its signatures from indexed packages. Adding the key back does not restore those signatures; [cosign](#cosigning) the affected versions again.
 
