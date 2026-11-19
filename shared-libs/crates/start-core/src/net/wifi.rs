@@ -24,8 +24,30 @@ use crate::{Error, ErrorKind, GatewayId};
 
 pub(crate) const SAVED_PROFILE_DIRECTORY: &str = "/etc/NetworkManager/system-connections";
 
-/// Saved NetworkManager profile contents, zeroized when released.
-pub type NetworkProfiles = BTreeMap<String, zeroize::Zeroizing<String>>;
+/// Saved NetworkManager profiles indexed by their original basenames.
+pub type NetworkProfiles = BTreeMap<String, NetworkProfile>;
+
+/// NetworkManager ranks duplicate UUIDs by nanosecond mtime, then filename.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NetworkProfile {
+    pub contents: zeroize::Zeroizing<String>,
+    /// Unix modification time in seconds and nanoseconds.
+    pub modified: (i64, i64),
+}
+
+impl NetworkProfile {
+    pub(crate) async fn install_at(&self, path: &Path) -> Result<(), Error> {
+        crate::util::io::write_file_private_atomic(path, &self.contents).await?;
+        let file = crate::util::io::open_file(path).await?.into_std().await;
+        nix::sys::stat::futimens(
+            &file,
+            &nix::sys::time::TimeSpec::UTIME_OMIT,
+            &nix::sys::time::TimeSpec::new(self.modified.0, self.modified.1),
+        )
+        .with_kind(ErrorKind::Filesystem)
+    }
+}
 
 impl RpcContext {
     async fn read_wifi_manager(&self) -> Result<RwLockReadGuard<'_, WpaCli>, Error> {
@@ -1228,7 +1250,7 @@ fn is_runtime_profile_name(name: &std::ffi::OsStr) -> bool {
 
 async fn read_network_profile(
     entry: &tokio::fs::DirEntry,
-) -> Result<Option<zeroize::Zeroizing<String>>, Error> {
+) -> Result<Option<NetworkProfile>, Error> {
     use std::os::unix::fs::MetadataExt;
     let metadata = tokio::fs::metadata(entry.path()).await?;
     if !metadata.is_file()
@@ -1239,17 +1261,20 @@ async fn read_network_profile(
     }
     let bytes =
         crate::util::io::read_secret_file(crate::util::io::open_file(entry.path()).await?).await?;
-    Ok(Some(zeroize::Zeroizing::new(
-        std::str::from_utf8(&bytes)
-            .with_kind(ErrorKind::Filesystem)?
-            .to_owned(),
-    )))
+    Ok(Some(NetworkProfile {
+        contents: zeroize::Zeroizing::new(
+            std::str::from_utf8(&bytes)
+                .with_kind(ErrorKind::Filesystem)?
+                .to_owned(),
+        ),
+        modified: (metadata.mtime(), metadata.mtime_nsec()),
+    }))
 }
 
 async fn read_wired_profile(entry: &tokio::fs::DirEntry) -> Result<Option<WiredProfile>, Error> {
     Ok(read_network_profile(entry)
         .await?
-        .and_then(|contents| parse_wired_profile(&contents)))
+        .and_then(|profile| parse_wired_profile(&profile.contents)))
 }
 
 pub(crate) async fn read_network_profiles(directory: &Path) -> Result<NetworkProfiles, Error> {

@@ -3,50 +3,53 @@ use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
+use futures::StreamExt;
 use inotify::{Inotify, WatchMask};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 use super::*;
 
 #[path = "capture_lifecycle_tests.rs"]
 mod lifecycle;
+#[path = "profile_transport_tests.rs"]
+mod profiles;
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
 use crate::disk::mount::guard::GenericMountGuard;
 use crate::os_overlay::OVERLAY_FILE;
+use crate::util::io::open_file;
 use crate::util::squashfs::NodeContents;
 
 async fn transport(profiles: bool) -> tokio::fs::File {
     let file = anonymous_file().unwrap();
-    let mut archive = tokio_tar::Builder::new(file);
+    let mut archive = tar::Builder::new(file.into_std().await);
     let data = b"private configuration bytes";
-    let mut header = tokio_tar::Header::new_gnu();
+    let mut header = tar::Header::new_gnu();
     header.set_mode(0o600);
     header.set_size(data.len() as u64);
     header.set_cksum();
     archive
         .append_data(&mut header, CAPTURE_FILE, &data[..])
-        .await
         .unwrap();
     append_json(
         &mut archive,
         KEYS_FILE,
         &vec![OsString::from_vec(b"/key-\xff".to_vec())],
     )
-    .await
     .unwrap();
     if profiles {
-        append_json(
+        append_profiles(
             &mut archive,
-            PROFILES_FILE,
             &std::collections::BTreeMap::from([(
                 "private.nmconnection".to_owned(),
-                Zeroizing::new("private-profile-secret".to_owned()),
+                crate::net::wifi::NetworkProfile {
+                    contents: Zeroizing::new("private-profile-secret".to_owned()),
+                    modified: (123, 456_789),
+                },
             )]),
         )
-        .await
         .unwrap();
     }
-    archive.into_inner().await.unwrap()
+    tokio::fs::File::from_std(archive.into_inner().unwrap())
 }
 
 #[tokio::test]
@@ -60,7 +63,11 @@ async fn capture_transport_keeps_private_profiles_and_native_paths_in_owned_memo
         vec![PathBuf::from(OsString::from_vec(b"/key-\xff".to_vec()))]
     );
     assert_eq!(
-        profiles.get("private.nmconnection").unwrap().as_str(),
+        profiles
+            .get("private.nmconnection")
+            .unwrap()
+            .contents
+            .as_str(),
         "private-profile-secret"
     );
     assert_eq!(profiles.len(), 1);
@@ -363,7 +370,11 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
     drop(gate);
     let (image, keys, profiles) = capture.await.unwrap();
     assert_eq!(
-        profiles.get("private.nmconnection").unwrap().as_str(),
+        profiles
+            .get("private.nmconnection")
+            .unwrap()
+            .contents
+            .as_str(),
         "[connection]\nid=captured\n[wifi-security]\npsk=captured-bootstrap-password\n"
     );
     assert!(writer.wait().await.unwrap().success());

@@ -1118,21 +1118,30 @@ pub(crate) async fn write_secret_file(
 pub(crate) async fn read_secret_file(file: File) -> Result<Zeroizing<Vec<u8>>, Error> {
     let file = file.into_std().await;
     tokio::task::spawn_blocking(move || -> Result<_, Error> {
-        use std::os::unix::fs::FileExt;
-
         let metadata = file.metadata()?;
         ensure_code!(
             metadata.is_file(),
             ErrorKind::Filesystem,
             "expected a regular credential file"
         );
-        let size = usize::try_from(metadata.len()).with_kind(ErrorKind::Filesystem)?;
-        let mut bytes = Zeroizing::new(vec![0; size]);
-        file.read_exact_at(&mut bytes, 0)?;
-        Ok(bytes)
+        read_secret_at(&file, 0, metadata.len())
     })
     .await
     .with_kind(ErrorKind::Unknown)?
+}
+
+/// Requires stable regular-file bytes; reads exactly the requested range without cursor changes.
+pub(crate) fn read_secret_at(
+    file: &std::fs::File,
+    offset: u64,
+    length: u64,
+) -> Result<Zeroizing<Vec<u8>>, Error> {
+    use std::os::unix::fs::FileExt;
+
+    let size = usize::try_from(length).with_kind(ErrorKind::Filesystem)?;
+    let mut bytes = Zeroizing::new(vec![0; size]);
+    file.read_exact_at(&mut bytes, offset)?;
+    Ok(bytes)
 }
 
 #[instrument(skip_all)]

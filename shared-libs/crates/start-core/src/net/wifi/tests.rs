@@ -93,8 +93,12 @@ async fn saved_capture_keeps_suffixless_symlinks_and_excludes_insecure_files() {
         profiles.keys().map(String::as_str).collect::<Vec<_>>(),
         ["alias", "legacy", "private.nmconnection"]
     );
-    assert_eq!(&*profiles["legacy"], &*profiles["alias"]);
-    assert!(profiles["private.nmconnection"].contains("psk=private-value"));
+    assert_eq!(&*profiles["legacy"].contents, &*profiles["alias"].contents);
+    assert!(
+        profiles["private.nmconnection"]
+            .contents
+            .contains("psk=private-value")
+    );
 }
 
 const WIRED_UUID: &str = "11111111-2222-3333-4444-555555555555";

@@ -58,6 +58,13 @@ if [ "$#" = 0 ]; then
         fde::capture::tests::native_capture_stop_thaws_before_waiting_for_a_blocked_owned_writer \
         fde::capture::tests::native_capture_requester_death_leaves_cleanup_owned_by_pid1
 fi
+inventory=$("$binary" --list)
+for name in "$@"; do
+    if ! grep -Fxq -- "$name: test" <<< "$inventory"; then
+        echo "Unknown exact test: $name" >&2
+        exit 1
+    fi
+done
 for name in "$@"; do
     fixture="$root/$(< /proc/sys/kernel/random/uuid)"
     mkdir -m 700 "$fixture"

@@ -10,10 +10,9 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use futures::StreamExt;
 use nix::sys::memfd::{MFdFlags, memfd_create};
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::AsyncSeekExt;
 use tokio::process::Command;
 use zeroize::Zeroizing;
 
@@ -31,7 +30,7 @@ use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::util::Invoke;
-use crate::util::io::{TmpDir, open_file, read_secret_file, write_file_private_atomic};
+use crate::util::io::{TmpDir, read_secret_file, write_file_private_atomic};
 use crate::util::squashfs::Squashfs;
 
 const REQUESTS: &str = "/run/startos-fde-capture";
@@ -41,6 +40,7 @@ const CONFIGURATION: &str = "/media/startos/config/overlay";
 const CAPTURE_FILE: &str = "configuration.squashfs";
 const KEYS_FILE: &str = "host-keys.json";
 const PROFILES_FILE: &str = "network-profiles.json";
+const PROFILE_CONTENTS: &str = "network-profiles";
 
 nix::ioctl_readwrite!(freeze_filesystem, b'X', 119, libc::c_int);
 nix::ioctl_readwrite!(thaw_filesystem, b'X', 120, libc::c_int);
@@ -281,19 +281,42 @@ async fn request(path: &Path) -> Result<ReadEpoch, Error> {
         .with_kind(ErrorKind::Deserialization)?)
 }
 
-async fn append_json<T: Serialize + Sync>(
-    archive: &mut tokio_tar::Builder<tokio::fs::File>,
+/// Nonsecret paths and timestamps only; credential bytes use raw archive members.
+fn append_json<T: Serialize>(
+    archive: &mut tar::Builder<std::fs::File>,
     name: &str,
     value: &T,
 ) -> Result<(), Error> {
     let bytes = Zeroizing::new(serde_json::to_vec(value).with_kind(ErrorKind::Serialization)?);
-    let mut header = tokio_tar::Header::new_gnu();
+    let mut header = tar::Header::new_gnu();
     header.set_size(bytes.len() as u64);
     header.set_mode(0o600);
     header.set_cksum();
-    archive
-        .append_data(&mut header, name, bytes.as_slice())
-        .await?;
+    archive.append_data(&mut header, name, bytes.as_slice())?;
+    Ok(())
+}
+
+/// Profile bytes bypass JSON encoding and intermediate async file buffers.
+fn append_profiles(
+    archive: &mut tar::Builder<std::fs::File>,
+    profiles: &crate::net::wifi::NetworkProfiles,
+) -> Result<(), Error> {
+    let metadata: std::collections::BTreeMap<_, _> = profiles
+        .iter()
+        .map(|(name, profile)| (name, profile.modified))
+        .collect();
+    append_json(archive, PROFILES_FILE, &metadata)?;
+    for (name, profile) in profiles {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(profile.contents.len() as u64);
+        header.set_mode(0o600);
+        header.set_cksum();
+        archive.append_data(
+            &mut header,
+            Path::new(PROFILE_CONTENTS).join(name),
+            profile.contents.as_bytes(),
+        )?;
+    }
     Ok(())
 }
 
@@ -311,22 +334,25 @@ pub(crate) async fn run(path: &Path) -> Result<(), Error> {
         let profiles = crate::net::wifi::read_network_profiles(&epoch.network_profiles).await?;
         epoch.release().await?;
         let exported = async {
-            let mut archive = tokio_tar::Builder::new(tokio::fs::File::from_std(
-                nix::unistd::dup(std::io::stdout())
-                    .with_kind(ErrorKind::Filesystem)?
-                    .into(),
-            ));
-            archive
-                .append_file(CAPTURE_FILE, &mut open_file(capture.image()).await?)
-                .await?;
+            let stdout = std::fs::File::from(
+                nix::unistd::dup(std::io::stdout()).with_kind(ErrorKind::Filesystem)?,
+            );
+            let image = capture.image().to_owned();
             let keys: Vec<_> = capture
                 .host_keys()
                 .iter()
                 .map(|path| path.as_os_str().to_owned())
                 .collect();
-            append_json(&mut archive, KEYS_FILE, &keys).await?;
-            append_json(&mut archive, PROFILES_FILE, &profiles).await?;
-            archive.into_inner().await?;
+            tokio::task::spawn_blocking(move || -> Result<(), Error> {
+                let mut archive = tar::Builder::new(stdout);
+                archive.append_file(CAPTURE_FILE, &mut std::fs::File::open(image)?)?;
+                append_json(&mut archive, KEYS_FILE, &keys)?;
+                append_profiles(&mut archive, &profiles)?;
+                archive.into_inner()?;
+                Ok(())
+            })
+            .await
+            .with_kind(ErrorKind::Unknown)??;
             memory.check()?;
             Ok::<_, Error>(())
         }
@@ -445,46 +471,93 @@ async fn receive(
     Error,
 > {
     archive.rewind().await?;
-    let mut archive = tokio_tar::ArchiveBuilder::new(archive)
-        .set_ignore_zeros(true)
-        .build();
-    let mut entries = archive.entries()?;
-    let mut snapshot = None;
+    let archive = archive.into_std().await;
+    let output = anonymous_file()?.into_std().await;
+    let (output, keys, profiles) =
+        tokio::task::spawn_blocking(move || receive_archive(archive, output))
+            .await
+            .with_kind(ErrorKind::Unknown)??;
+    Ok((tokio::fs::File::from_std(output), keys, profiles))
+}
+
+fn receive_archive(
+    source: std::fs::File,
+    mut output: std::fs::File,
+) -> Result<
+    (
+        std::fs::File,
+        Vec<PathBuf>,
+        crate::net::wifi::NetworkProfiles,
+    ),
+    Error,
+> {
+    use std::io::{Read, Seek};
+
+    let raw = source.try_clone()?;
+    let mut archive = tar::Archive::new(source);
+    archive.set_ignore_zeros(true);
+    let mut snapshot = false;
     let mut keys = None;
-    let mut profiles = None;
-    while let Some(entry) = entries.next().await {
+    let mut metadata: Option<std::collections::BTreeMap<String, (i64, i64)>> = None;
+    let mut profiles = crate::net::wifi::NetworkProfiles::new();
+    for entry in archive.entries_with_seek()? {
         let mut entry = entry?;
         if !entry.header().entry_type().is_file() {
             return Err(invalid_source());
         }
-        match entry.path()?.as_ref() {
-            path if path == Path::new(CAPTURE_FILE) && snapshot.is_none() => {
-                let mut output = anonymous_file()?;
-                tokio::io::copy(&mut entry, &mut output).await?;
-                output.rewind().await?;
-                snapshot = Some(output);
+        let path = entry.path()?.into_owned();
+        match path.as_path() {
+            path if path == Path::new(CAPTURE_FILE) && !snapshot => {
+                std::io::copy(&mut entry, &mut output)?;
+                output.rewind()?;
+                snapshot = true;
             }
             path if path == Path::new(KEYS_FILE) && keys.is_none() => {
                 let mut bytes = Vec::new();
-                entry.read_to_end(&mut bytes).await?;
+                entry.read_to_end(&mut bytes)?;
                 let paths: Vec<OsString> =
                     serde_json::from_slice(&bytes).with_kind(ErrorKind::Deserialization)?;
                 keys = Some(paths.into_iter().map(PathBuf::from).collect());
             }
-            path if path == Path::new(PROFILES_FILE) && profiles.is_none() => {
-                let mut bytes = Zeroizing::new(Vec::new());
-                entry.read_to_end(&mut bytes).await?;
-                profiles =
+            path if path == Path::new(PROFILES_FILE) && metadata.is_none() => {
+                let mut bytes = Vec::new();
+                entry.read_to_end(&mut bytes)?;
+                metadata =
                     Some(serde_json::from_slice(&bytes).with_kind(ErrorKind::Deserialization)?);
             }
-            _ => return Err(invalid_source()),
+            path => {
+                let name = path
+                    .strip_prefix(PROFILE_CONTENTS)
+                    .ok()
+                    .and_then(Path::to_str)
+                    .ok_or_else(invalid_source)?;
+                if !crate::net::wifi::is_network_profile_name(std::ffi::OsStr::new(name))
+                    || profiles.contains_key(name)
+                {
+                    return Err(invalid_source());
+                }
+                let modified = metadata
+                    .as_mut()
+                    .and_then(|values| values.remove(name))
+                    .ok_or_else(invalid_source)?;
+                let bytes =
+                    crate::util::io::read_secret_at(&raw, entry.raw_file_position(), entry.size())?;
+                let contents = Zeroizing::new(
+                    std::str::from_utf8(&bytes)
+                        .with_kind(ErrorKind::Deserialization)?
+                        .to_owned(),
+                );
+                profiles.insert(
+                    name.to_owned(),
+                    crate::net::wifi::NetworkProfile { contents, modified },
+                );
+            }
         }
     }
-    Ok((
-        snapshot.ok_or_else(invalid_source)?,
-        keys.ok_or_else(invalid_source)?,
-        profiles.ok_or_else(invalid_source)?,
-    ))
+    if !snapshot || !metadata.is_some_and(|values| values.is_empty()) {
+        return Err(invalid_source());
+    }
+    Ok((output, keys.ok_or_else(invalid_source)?, profiles))
 }
 
 /// Executable and request paths must be literal systemd arguments.

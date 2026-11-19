@@ -10,7 +10,7 @@ use crate::hostname::ServerHostname;
 use crate::net::acme::{AcmeProvider, BootstrapAcme};
 use crate::net::ssl::{CertificateIdentity, LocalIssuer};
 use crate::prelude::*;
-use crate::util::io::{delete_file, write_file_private_atomic};
+use crate::util::io::delete_file;
 
 const RUNTIME_PROFILES: &str = "/run/startos-fde/system-connections";
 pub const SEALED_CREDENTIALS_FILE: &str = "etc/startos/fde-bootstrap.json";
@@ -197,10 +197,10 @@ impl Credentials {
         self.remove_profiles_at(Path::new(RUNTIME_PROFILES)).await
     }
 
-    async fn install_profiles_at(&self, directory: &Path) -> Result<(), Error> {
+    pub(super) async fn install_profiles_at(&self, directory: &Path) -> Result<(), Error> {
         tokio::fs::create_dir_all(directory).await?;
-        for (name, contents) in &self.network_profiles {
-            write_file_private_atomic(profile_path(directory, name)?, contents).await?;
+        for (name, profile) in &self.network_profiles {
+            profile.install_at(&profile_path(directory, name)?).await?;
         }
         Ok(())
     }
@@ -234,7 +234,10 @@ pub(super) fn test_credentials() -> Credentials {
         network: None,
         network_profiles: [(
             "private.nmconnection".to_owned(),
-            Zeroizing::new("[wireguard]\nprivate-key=test-secret\n".to_owned()),
+            crate::net::wifi::NetworkProfile {
+                contents: Zeroizing::new("[wireguard]\nprivate-key=test-secret\n".to_owned()),
+                modified: (1_700_000_000, 123_456_789),
+            },
         )]
         .into_iter()
         .collect(),
@@ -534,6 +537,7 @@ mod tests {
                 .network_profiles
                 .get("private.nmconnection")
                 .unwrap()
+                .contents
                 .as_str(),
             "[wireguard]\nprivate-key=test-secret\n"
         );
@@ -700,7 +704,8 @@ mod tests {
         .unwrap();
         let error = crate::net::wifi::read_network_profiles(directory.path())
             .await
-            .unwrap_err();
+            .err()
+            .unwrap();
         assert_eq!(error.kind, ErrorKind::Filesystem);
     }
 
