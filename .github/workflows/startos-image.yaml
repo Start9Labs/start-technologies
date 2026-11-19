@@ -131,7 +131,6 @@ jobs:
         run: make start-os-img
         if: ${{ inputs.platform == 'raspberrypi' }}
 
-      # Consumers gunzip it for the raw image the registry indexes.
       - name: Compress img
         run: gzip results/*.img
         if: ${{ inputs.platform == 'raspberrypi' }}
@@ -264,11 +263,6 @@ jobs:
             [ -f "$file" ] || { echo "::error::No $file artifact in this run"; exit 1; }
           done
 
-      - name: Decompress img
-        if: ${{ inputs.platform == 'raspberrypi' }}
-        working-directory: artifacts
-        run: gunzip startos-*_"$PLATFORM".img.gz
-
       - name: Install start-cli
         uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master
         with:
@@ -296,7 +290,7 @@ jobs:
         run: |
           set -uo pipefail
           pids=()
-          for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img; do
+          for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img.gz; do
             [ -f "$file" ] || continue
             "$GITHUB_WORKSPACE/scripts/s3-put-once.sh" "$file" "$S3_BUCKET/v$VERSION/$file" &
             pids+=("$!")
@@ -317,8 +311,15 @@ jobs:
           registered_commit() {
             jq -er --arg version "$VERSION" '.versions | objects | .[$version].gitHash // ""' <<<"$1"
           }
+          # The registry slot a file fills.
+          slot() {
+            case "$1" in
+              *.img.gz) echo img ;;
+              *) echo "${1##*.}" ;;
+            esac
+          }
           files=()
-          for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img; do
+          for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img.gz; do
             [ -f "$file" ] && files+=("$file")
           done
 
@@ -334,16 +335,22 @@ jobs:
 
           index() {
             if [ "$FORCE_OVERWRITE" = true ]; then
-              start-cli --registry="$REGISTRY" registry os asset remove "${1##*.}" "$VERSION" "$PLATFORM" || return 1
+              start-cli --registry="$REGISTRY" registry os asset remove "$(slot "$1")" "$VERSION" "$PLATFORM" || return 1
+            fi
+            # `asset add` takes the slot from the file extension. The img is
+            # indexed gzipped, through a hardlink named for its slot.
+            local indexed=$1 attempt
+            if [ "$(slot "$1")" = img ]; then
+              indexed=${1%.gz}
+              ln -f "$1" "$indexed" || return 1
             fi
             # Adding a file that is already indexed is a no-op, so a failure retries.
-            local attempt
             for attempt in 1 2 3; do
               echo "Indexing $1 for platform $PLATFORM (attempt $attempt)..."
               start-cli --registry="$REGISTRY" registry os asset add \
                 --platform="$PLATFORM" \
                 --version="$VERSION" \
-                "$1" \
+                "$indexed" \
                 "$S3_CDN/v$VERSION/$1" && return 0
               [ "$attempt" -eq 3 ] || sleep $((attempt * 30))
             done
@@ -367,11 +374,11 @@ jobs:
           fi
           if [ "$commit" != "$COMMIT" ]; then
             for file in "${files[@]}"; do
-              jq -e --arg version "$VERSION" --arg kind "${file##*.}" --arg platform "$PLATFORM" \
+              jq -e --arg version "$VERSION" --arg kind "$(slot "$file")" --arg platform "$PLATFORM" \
                 --arg url "$S3_CDN/v$VERSION/$file" \
                 '.versions[$version][$kind][$platform].urls // [] | any(.[]; . == $url)' \
                 <<<"$index_json" > /dev/null || continue
-              start-cli --registry="$REGISTRY" registry os asset remove "${file##*.}" "$VERSION" "$PLATFORM" \
+              start-cli --registry="$REGISTRY" registry os asset remove "$(slot "$file")" "$VERSION" "$PLATFORM" \
                 || echo "::error::could not remove $file from v$VERSION in $REGISTRY"
             done
             echo "::error::v$VERSION in $REGISTRY was registered for ${commit:-no commit} while $PLATFORM indexed; this leg's images were withdrawn."
@@ -383,7 +390,7 @@ jobs:
         working-directory: artifacts
         run: |
           shopt -s nullglob
-          printf '%s\n' *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img > "$RUNNER_TEMP/published-$PLATFORM.txt"
+          printf '%s\n' *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img.gz > "$RUNNER_TEMP/published-$PLATFORM.txt"
 
       - uses: actions/upload-artifact@v7
         with:

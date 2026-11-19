@@ -59,7 +59,7 @@ format-check:
 .PHONY: release-notes-test package-ci-test
 release-notes-test:
 	node --test scripts/tests/*-test.mjs
-	bash scripts/tests/release-resume-test.sh
+	bash scripts/tests/release-images-test.sh
 	bash scripts/tests/apt-publish-test.sh
 
 package-ci-test:
