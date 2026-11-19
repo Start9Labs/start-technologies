@@ -7,7 +7,7 @@ import { DeepPartial } from '../../../types'
 import { InputSpecTools, createInputSpecTools } from './inputSpecTools'
 
 /** Every key optional at every level; each object keeps its own unknown-key mode and a discriminated union its discriminator, unlike `z.deepPartial`. */
-function deepPartial(schema: z.ZodType): any {
+export function deepPartial(schema: z.ZodType): any {
   const def = (schema as any)._zod.def
   switch (def.type) {
     case 'optional':
@@ -221,6 +221,7 @@ export class InputSpec<
     deepPartial(this.validator)
   /**
    * Builds the runtime form specification and combined Zod validator from this InputSpec's fields.
+   * The validator drops every key the form doesn't declare; `validator` and `partialValidator` keep them, for file models.
    *
    * @returns An object containing the resolved `spec` (field specs keyed by name) and a combined `validator`
    */

@@ -3,6 +3,7 @@ import { ValueSpec, ValueSpecUnion } from '../inputSpecTypes'
 import {
   LazyBuild,
   InputSpec,
+  deepPartial,
   ExtractInputSpecType,
   ExtractInputSpecStaticValidatedAs,
 } from './inputSpec'
@@ -183,7 +184,7 @@ export class Variants<
             Object.fromEntries(
               Object.entries(validators).map(([k, v]) => [
                 k,
-                z.any().optional(),
+                deepPartial(v).optional().catch(undefined),
               ]),
             ),
           )

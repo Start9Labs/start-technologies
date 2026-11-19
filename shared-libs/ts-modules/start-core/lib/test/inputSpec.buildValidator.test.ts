@@ -59,6 +59,35 @@ describe('the validator an action runs its input through', () => {
     })
   })
 
+  test('strips saved union-history drafts too, without requiring their fields', async () => {
+    const { validator } = await Variants.of({
+      selected: { name: 'Selected', spec: InputSpec.of({}) },
+      previous: { name: 'Previous', spec },
+      broken: { name: 'Broken', spec },
+    }).build({ effects: {} as Effects, prefill: null })
+    expect(
+      validator.parse({
+        selection: 'selected',
+        value: {},
+        other: {
+          previous: { ...submitted, rpc: { rpcauth: 'injected' } },
+          broken: { rpc: { port: 'not a number' } },
+          undeclared: { extra: 'injected' },
+        },
+      }),
+    ).toEqual({
+      selection: 'selected',
+      value: {},
+      other: {
+        previous: {
+          rpc: {},
+          mode: { selection: 'a', value: { x: true } },
+          peers: [{ host: 'h' }],
+        },
+      },
+    })
+  })
+
   test('leaves the static validators keeping them, for file models', () => {
     expect(spec.validator.parse(submitted)).toEqual(submitted)
     expect(spec.partialValidator.parse(submitted)).toEqual(submitted)
