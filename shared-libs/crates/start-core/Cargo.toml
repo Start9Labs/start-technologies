@@ -192,6 +192,7 @@ proptest-derive = "0.7.0"
 qrcode = "0.14.1"
 r3bl_tui = "0.7.6"
 rand = "0.10.1"
+rayon = "1.12.0"
 rcgen = { version = "0.14", default-features = false, features = [
   "pem",
   "ring",
