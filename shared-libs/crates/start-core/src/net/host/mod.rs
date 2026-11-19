@@ -150,6 +150,10 @@ fn mdns_gateways(
         .collect()
 }
 
+fn is_link_local(ip: IpAddr) -> bool {
+    matches!(ip, IpAddr::V6(v6) if crate::net::utils::ipv6_is_link_local(v6))
+}
+
 /// Whose host an address derivation runs for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostOwner {
@@ -219,7 +223,12 @@ impl Model<Host> {
                 let Some(ip_info) = &g.ip_info else {
                     continue;
                 };
-                for subnet in &ip_info.subnets {
+                // IPv6 link-local addresses are never address rows, for any host.
+                for subnet in ip_info
+                    .subnets
+                    .iter()
+                    .filter(|subnet| !is_link_local(subnet.addr()))
+                {
                     let host = InternedString::from_display(&subnet.addr());
                     let metadata = if subnet.addr().is_ipv4() {
                         HostnameMetadata::Ipv4 {
@@ -1368,6 +1377,38 @@ mod tests {
         let other = derive(HostOwner::Package, None);
         assert!(!other.insecure.is_empty());
         assert!(other.enabled().iter().all(|a| a.ssl));
+    }
+
+    #[test]
+    fn no_host_lists_an_ipv6_link_local_address() {
+        let server = ServerHostname::new(InternedString::intern("server")).unwrap();
+        let mut eth0 = iface(NetworkInterfaceType::Ethernet, None);
+        Arc::make_mut(eth0.ip_info.as_mut().unwrap()).subnets = [
+            "192.0.2.10/24".parse::<IpNet>().unwrap(),
+            "fe80::1/64".parse::<IpNet>().unwrap(),
+            "fd12::1/64".parse::<IpNet>().unwrap(),
+        ]
+        .into_iter()
+        .collect();
+        let gateways: OrdMap<GatewayId, NetworkInterfaceInfo> =
+            [(gw("eth0"), eth0)].into_iter().collect();
+        for (owner, options) in [
+            (HostOwner::Server, BindOptions::server_ui()),
+            (HostOwner::Package, plain(9735)),
+        ] {
+            let mut ports = AvailablePorts::new();
+            let mut host = host();
+            host.add_binding(&mut ports, 80, options, owner == HostOwner::Server)
+                .unwrap();
+            host.update_addresses(owner, &server, &gateways, &ports)
+                .unwrap();
+            let available = host.de().unwrap().bindings[&80].addresses.available.clone();
+            assert!(available.iter().any(|a| a.hostname == "fd12::1"));
+            assert!(
+                available.iter().all(|a| a.hostname != "fe80::1"),
+                "{owner:?}: {available:?}"
+            );
+        }
     }
 
     #[test]

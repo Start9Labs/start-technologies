@@ -2164,14 +2164,14 @@ mod tests {
     #[test]
     fn a_name_contributes_no_address_to_the_ssl_vhost() {
         let addrs = [
-            lan_ip("fe80::1", true, 443, "eth0"),
+            lan_ip("fd12::1", true, 443, "eth0"),
             mdns(true, 443, ["eth0"]),
             lan_ip("172.16.0.1", true, 443, "lxcbr0"),
         ];
 
         assert_eq!(
             ssl_vhost_private_ips(addrs.iter()),
-            BTreeSet::from([ip("fe80::1"), ip("172.16.0.1")]),
+            BTreeSet::from([ip("fd12::1"), ip("172.16.0.1")]),
             "only the addresses still enabled are served"
         );
     }
@@ -2246,10 +2246,6 @@ mod tests {
             !lan_ip("fd00:3::8", true, 443, "eth0").is_internal(),
             "a router handing out the bridge's own prefix does not make its \
              addresses internal, which would put them beyond the operator's reach"
-        );
-        assert!(
-            !lan_ip("fe80::1", true, 443, "lxcbr0").is_internal(),
-            "a link-local address is the kernel's, not one the bridge is given"
         );
     }
 

@@ -816,7 +816,7 @@ impl VHostBindListener {
 }
 
 /// The listeners `reqs` calls for: every IP of a required public gateway, plus
-/// each explicitly required private IP, bound on `port`.
+/// each explicitly required private IP, bound on `port`. Never IPv6 link-local.
 fn desired_listeners(
     port: u16,
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
@@ -828,14 +828,11 @@ fn desired_listeners(
         .flat_map(|(id, iface, ip_info)| {
             ip_info.subnets.iter().filter_map(move |subnet| {
                 let ip = subnet.addr();
-                let wanted = reqs.public_gateways.contains(id) || reqs.private_ips.contains(&ip);
+                let link_local = matches!(ip, IpAddr::V6(v6) if ipv6_is_link_local(v6));
+                let wanted = !link_local
+                    && (reqs.public_gateways.contains(id) || reqs.private_ips.contains(&ip));
                 wanted.then(|| {
-                    let addr = match ip {
-                        IpAddr::V6(v6) if ipv6_is_link_local(v6) => {
-                            SocketAddrV6::new(v6, port, 0, ip_info.scope_id).into()
-                        }
-                        ip => SocketAddr::new(ip, port),
-                    };
+                    let addr = SocketAddr::new(ip, port);
                     let gateway = GatewayInfo {
                         id: id.clone(),
                         info: iface.clone(),
