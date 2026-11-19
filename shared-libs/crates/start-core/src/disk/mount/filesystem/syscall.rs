@@ -1,7 +1,7 @@
 //! Detached Linux bind mounts with optional idmaps and read-only attributes.
 //! `open_tree_attr` requires Linux 6.15+ for cloning an already-idmapped source.
 
-use std::ffi::{CString, OsString};
+use std::ffi::{CStr, CString, OsString};
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
@@ -103,25 +103,42 @@ pub fn open_tree_attr_idmap(
     recursive: bool,
     userns: BorrowedFd,
 ) -> Result<OwnedFd, Error> {
-    let p = cstr_path(path)?;
-    let flags = clone_flags(recursive);
+    open_tree_attr_idmap_at(AT_FDCWD, &cstr_path(path)?, clone_flags(recursive), userns)
+}
+
+/// Clones a pinned directory without its child mounts, idmapped through the user namespace.
+pub fn open_tree_attr_idmap_fd(source: BorrowedFd, userns: BorrowedFd) -> Result<OwnedFd, Error> {
+    open_tree_attr_idmap_at(
+        source.as_raw_fd(),
+        &cstr_str("")?,
+        clone_flags(false) | AT_EMPTY_PATH as libc::c_uint,
+        userns,
+    )
+}
+
+fn open_tree_attr_idmap_at(
+    source: RawFd,
+    path: &CStr,
+    flags: libc::c_uint,
+    userns: BorrowedFd,
+) -> Result<OwnedFd, Error> {
     let attr = MountAttr {
         attr_set: MOUNT_ATTR_IDMAP,
         attr_clr: 0,
         propagation: 0,
         userns_fd: userns.as_raw_fd() as u64,
     };
-    let r = unsafe {
+    let raw = unsafe {
         libc::syscall(
             SYS_OPEN_TREE_ATTR,
-            AT_FDCWD,
-            p.as_ptr(),
+            source,
+            path.as_ptr(),
             flags,
             &attr as *const _ as *const libc::c_void,
             std::mem::size_of::<MountAttr>(),
         )
     };
-    fd_from_raw(r, "open_tree_attr IDMAP")
+    fd_from_raw(raw, "open_tree_attr IDMAP")
 }
 
 /// A detached clone rooted at a pinned directory, optionally including submounts.
