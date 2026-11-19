@@ -23,9 +23,15 @@ The registry returns the signer's ID. Use that ID with `start-cli registry admin
 
 To grant a signer admin privileges (or revoke them), use `start-cli registry admin add <SIGNER_ID>` / `... admin remove <SIGNER_ID>`.
 
+A registry keeps a package signature only while its key belongs to a registered signer. Signatures from any other key are dropped when a package is indexed and on each startup. Register a key before you rely on the signatures it makes.
+
+The exception is a read-only registry configured with `mirror-of`: it preserves its upstream's signatures, including across restarts. Removing `mirror-of` enables signature pruning on the next startup.
+
+Revoking a key, with `admin signer edit <SIGNER_ID> --remove-key <KEY>` or by deleting its signer with `admin signer remove <SIGNER_ID>`, removes it from every signer that holds it and deletes its signatures from indexed packages. Adding the key back does not restore those signatures; [cosign](#cosigning) the affected versions again.
+
 ## Offering signing keys to users
 
-Registry 1.4.0 and start-cli 2.7.0 support selecting registered signers whose keys the registry offers to StartOS 0.4.1.2 and later. New and upgraded registries start with no selection; registering an administrator or authorizing a package publisher does not select them.
+A registry can offer the keys of selected registered signers to the StartOS servers that connect it. It starts with no selection; registering an administrator or authorizing a package publisher does not select them.
 
 As an administrator, list your registered signers and use the [trust-signer selection command](/start-os/cli-reference.html#start-cli-registry-info-set-trust-signers-signer) to select their IDs. Each call replaces the entire selection; passing no IDs clears it. The registry offers all keys belonging to the selected signers, along with their names and contact details. Select the signers whose signatures users should accept, not every identity allowed to upload.
 
@@ -58,9 +64,9 @@ start-cli s9pk publish myservice_1.2.0_x86_64.s9pk
 
 `publish` uploads the original file to the configured S3 bucket and adds its URL and identity-key endorsement to the configured registry index. Configure the S3 destination and registry before publishing. To index an already hosted file, use `start-cli registry package add <S9PK_FILE> --url <PACKAGE_URL>`.
 
-For package add and add-mirror, the CLI submits verified endorsements from `<S9PK_FILE>` separately from the authenticated uploader's signature. The registry verifies every submitted endorsement against the indexed package's exact Merkle root, signed bound, and `s9pk` context before adding it to the asset signature map. An invalid entry rejects the request atomically. The hosted file may contain only the base archive, and its bytes remain unchanged. Promotion forwards the indexed signature map to the destination registry.
+For package add and add-mirror, the CLI submits verified endorsements from `<S9PK_FILE>` separately from the authenticated uploader's signature. The registry verifies every submitted endorsement against the indexed package's exact Merkle root, signed bound, and `s9pk` context before adding it to the asset signature map, then keeps only signatures from registered signers. An invalid entry rejects the request atomically. The hosted file may contain only the base archive, and its bytes remain unchanged. Promotion forwards the indexed signature map to the destination registry, which keeps only the signatures from its own registered signers.
 
-Supplemental keys do not become registered signers, proposed trust keys, or authorized uploaders. Publishing authorization remains tied to the registered uploader.
+Supplemental keys do not become registered signers, proposed trust keys, or authorized uploaders, so register a supplemental key as a signer if its endorsement should stay in the index. Publishing authorization remains tied to the registered uploader.
 
 ### Promoting a package
 
