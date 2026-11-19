@@ -29,9 +29,7 @@ const ASSEMBLER: &str = "/usr/lib/startos/scripts/fde-assemble-boot-inputs-v2.mj
 pub(crate) const SOURCE_APPLET: &str = "start-fde-source";
 
 /// The caller retains the image-store lease and fresh configuration authorization.
-/// Cached and downloaded sources require existing accepted OS signers.
 /// The descriptor is public boot data, not authority to execute source providers.
-/// Complete configured-runtime closure and UKI activation remain separate.
 pub(super) async fn stage(
     ctx: &RpcContext,
     generation: &PreparedGeneration,
@@ -43,7 +41,8 @@ pub(super) async fn stage(
         trusted_keys::signer_policy(trusted_keys::required(ctx, TrustContext::Os, false).await?)
             .expect("required OS signer policy");
     let cache = SourceCache::system();
-    cache.prune_boot_sources().await?;
+    // Native space admission repairs legacy pointers before retention pruning.
+    cache.recover_workspace().await?;
     let cached = cache.find_approved(&expected, policy.clone()).await?;
     let asset: Option<RegistryAsset<Blake3Commitment>> = if cached.is_none() {
         let registry = ctx

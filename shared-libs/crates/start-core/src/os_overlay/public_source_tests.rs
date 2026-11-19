@@ -468,6 +468,53 @@ async fn volume_lease(volume: &Path) -> crate::util::FileLock {
 
 #[tokio::test]
 #[ignore = "requires the actual built startbox in FDE_SOURCE_GC_STARTBOX"]
+async fn source_entry_recovery_defers_retention_until_native_legacy_pointer_repair() {
+    let binary = PathBuf::from(std::env::var_os("FDE_SOURCE_GC_STARTBOX").unwrap());
+    let root = tempfile::tempdir().unwrap();
+    let volume = root.path().join("volume");
+    let cache = cache(&volume);
+    let lease = volume_lease(&volume).await;
+    let key = SigningKey::from_bytes(&[23; 32]);
+    let mut retained = Vec::new();
+    for commit in ["running", "abandoned"] {
+        let image = fixture(root.path(), commit, "gzip").await;
+        retained.push(
+            cache
+                .retain(signed_asset(&image, &key).await, &image)
+                .await
+                .unwrap(),
+        );
+        tokio::fs::remove_file(image).await.unwrap();
+    }
+    tokio::fs::rename(root.path().join("running"), volume.join("current"))
+        .await
+        .unwrap();
+    let candidate = volume.join("images/recovery.rootfs");
+    tokio::fs::hard_link(&retained[0].path, &candidate)
+        .await
+        .unwrap();
+    let pointer = volume.join("config/current.rootfs");
+    assert!(!pointer.exists());
+    assert!(cache.prune_boot_sources().await.is_err());
+    assert!(retained.iter().all(|source| source.path.is_file()));
+    cache.recover_workspace().await.unwrap();
+    assert!(!pointer.exists());
+    assert!(retained.iter().all(|source| source.path.is_file()));
+    shell_prune(&lease, &volume, &binary).await.unwrap();
+    assert_eq!(tokio::fs::canonicalize(pointer).await.unwrap(), candidate);
+    assert!(retained[0].path.is_file());
+    assert!(!retained[1].path.exists());
+    assert!(
+        cache
+            .find_approved(&release("running"), policy(&key))
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the actual built startbox in FDE_SOURCE_GC_STARTBOX"]
 async fn shell_space_admission_prunes_public_sources_with_the_native_owner_and_lease() {
     use std::os::unix::ffi::OsStringExt;
 
