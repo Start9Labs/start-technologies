@@ -15,11 +15,13 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
         .unwrap();
     let data = root.path().join("data");
     let store = root.path().join("generations");
-    let running = root.path().join("running");
-    for path in [&data, &store, &running] {
+    let base = root.path().join("base");
+    let stored = root.path().join("images");
+    let upper = root.path().join("upper");
+    for path in [&data, &store, &base, &stored, &upper] {
         tokio::fs::create_dir(path).await.unwrap();
     }
-    let ids: Vec<_> = (0..4).map(|_| Guid::new()).collect();
+    let ids: Vec<_> = (0..7).map(|_| Guid::new()).collect();
     let targets: Vec<_> = ids
         .iter()
         .map(|id| {
@@ -38,9 +40,32 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
             .await
             .unwrap();
     }
-    tokio::fs::symlink(&targets[0], running.join("current"))
+    tokio::fs::symlink(&targets[0], upper.join("current"))
         .await
         .unwrap();
+    tokio::fs::symlink(&targets[4], base.join("masked"))
+        .await
+        .unwrap();
+    tokio::fs::write(upper.join("masked"), b"running override")
+        .await
+        .unwrap();
+    let running = MountGuard::mount(
+        &crate::disk::mount::filesystem::overlayfs::OverlayFs::new(
+            vec![base.clone()],
+            upper,
+            root.path().join("work"),
+        ),
+        root.path().join("running"),
+        ReadWrite,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        tokio::fs::read(running.path().join("masked"))
+            .await
+            .unwrap(),
+        b"running override"
+    );
     let mut working = Squashfs::new(Metadata::new(0o755), DirectoryContents::new());
     working
         .contents_mut()
@@ -52,9 +77,9 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
             ),
         )
         .unwrap();
-    let mut images = Vec::new();
-    for (index, compression) in [(2, "gzip"), (3, "zstd")] {
-        let source = root.path().join(compression);
+    let mut published = Vec::new();
+    for (index, compression) in [(2, "gzip"), (3, "zstd"), (5, "gzip"), (6, "zstd")] {
+        let source = root.path().join(format!("source-{index}"));
         tokio::fs::create_dir(&source).await.unwrap();
         tokio::fs::symlink(&targets[index], source.join("reference"))
             .await
@@ -62,9 +87,19 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
         tokio::fs::hard_link(source.join("reference"), source.join("alias"))
             .await
             .unwrap();
-        let generation = store.join(format!("generation-{}", Guid::new()));
-        tokio::fs::create_dir(&generation).await.unwrap();
-        let image = generation.join(crate::os_overlay::OVERLAY_FILE);
+        let image = if index < 4 {
+            let generation = store.join(format!("generation-{}", Guid::new()));
+            tokio::fs::create_dir(&generation).await.unwrap();
+            let image = generation.join(crate::os_overlay::OVERLAY_FILE);
+            published.push(image.clone());
+            image
+        } else {
+            stored.join(if index == 5 {
+                "selected.rootfs"
+            } else {
+                "recovery.squashfs"
+            })
+        };
         Command::new("/usr/bin/mksquashfs")
             .arg(&source)
             .arg(&image)
@@ -72,13 +107,12 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
             .invoke(ErrorKind::Filesystem)
             .await
             .unwrap();
-        images.push(image);
     }
     let before = crate::disk::mount::util::mountpoints_under(Path::new(TmpDir::BASE))
         .await
         .unwrap();
     assert_eq!(
-        configuration_backings(&running, &data, &store, &working)
+        configuration_backings(running.path(), &base, &data, &store, &stored, &working)
             .await
             .unwrap(),
         ids.iter().cloned().collect()
@@ -92,19 +126,21 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
     let unknown = store.join("unknown");
     tokio::fs::create_dir(&unknown).await.unwrap();
     assert!(
-        configuration_backings(&running, &data, &store, &working)
+        configuration_backings(running.path(), &base, &data, &store, &stored, &working)
             .await
             .is_err()
     );
     tokio::fs::remove_dir(unknown).await.unwrap();
-    tokio::fs::write(&images[0], b"corrupt image")
-        .await
-        .unwrap();
-    assert!(
-        configuration_backings(&running, &data, &store, &working)
-            .await
-            .is_err()
-    );
+    for image in [&published[0], &stored.join("selected.rootfs")] {
+        let original = tokio::fs::read(image).await.unwrap();
+        tokio::fs::write(image, b"corrupt image").await.unwrap();
+        assert!(
+            configuration_backings(running.path(), &base, &data, &store, &stored, &working)
+                .await
+                .is_err()
+        );
+        tokio::fs::write(image, original).await.unwrap();
+    }
     assert_eq!(
         crate::disk::mount::util::mountpoints_under(Path::new(TmpDir::BASE))
             .await
@@ -123,6 +159,7 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
             b"retained"
         );
     }
+    running.unmount(false).await.unwrap();
     scratch.unmount(false).await.unwrap();
     root.unmount(false).await.unwrap();
 }

@@ -28,10 +28,32 @@ startos_prune_public_sources() {
     fi
 }
 
-startos_oldest_unselected_image() {
+# NUL-delimited, newest first; callers retain the image-store lease.
+startos_image_paths() (
+    local images=$1 path
+    [[ -d $images && ! -L $images && -r $images && -x $images ]] || return 1
+    shopt -s nullglob
+    local -a paths=("$images"/*.rootfs "$images"/*.squashfs)
+    ((${#paths[@]})) || return 0
+    for path in "${paths[@]}"; do
+        [[ -f $path && ! -L $path ]] || return 1
+    done
+    LC_ALL=C ls -dt --zero -- "${paths[@]}"
+)
+
+startos_oldest_unselected_image() (
+    set -o pipefail
     local images=$1 current=$2
-    ls -t1 "$images"/*.rootfs "$images"/*.squashfs 2> /dev/null | grep -Fvx -- "$current" | tail -n1
-}
+    startos_image_paths "$images" | {
+        local path oldest=''
+        while IFS= read -r -d '' path; do
+            if [[ $path != "$current" ]]; then
+                oldest=$path
+            fi
+        done
+        printf '%s' "$oldest"
+    }
+)
 
 startos_prune_images() {
     local volume=$1 needed=$2 margin=$3 newest current to_prune
@@ -52,7 +74,7 @@ startos_prune_images() {
         echo 'Pruning...'
         current="$(readlink -f "$volume/config/current.rootfs")" || return
         while [[ "$(df -B1 --output=avail --sync "$volume/images" | tail -n1)" -lt "$target" ]]; do
-            to_prune="$(startos_oldest_unselected_image "$volume/images" "$current")"
+            to_prune="$(startos_oldest_unselected_image "$volume/images" "$current")" || return
             if [ -e "$to_prune" ]; then
                 echo "  Pruning $to_prune"
                 rm -rf "$to_prune" || return

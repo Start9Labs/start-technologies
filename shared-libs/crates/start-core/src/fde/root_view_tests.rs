@@ -166,7 +166,9 @@ async fn native_isolated_base_view_preserves_merged_references_without_source_su
     .await
     .unwrap();
     let store = root.path().join("generations");
+    let images = root.path().join("images");
     tokio::fs::create_dir_all(&store).await.unwrap();
+    tokio::fs::create_dir_all(&images).await.unwrap();
     let working = Squashfs::new(
         crate::util::squashfs::Metadata::new(0o755),
         crate::util::squashfs::DirectoryContents::new(),
@@ -175,9 +177,16 @@ async fn native_isolated_base_view_preserves_merged_references_without_source_su
         .await
         .unwrap();
     assert_eq!(
-        configuration_backings(source.path(), &backing_data, &store, &working)
-            .await
-            .unwrap(),
+        configuration_backings(
+            source.path(),
+            base.path(),
+            &backing_data,
+            &store,
+            &images,
+            &working
+        )
+        .await
+        .unwrap(),
         std::collections::BTreeSet::from([lower_id.clone(), upper_id.clone()])
     );
     let missing = backing_data
@@ -186,9 +195,16 @@ async fn native_isolated_base_view_preserves_merged_references_without_source_su
         .join("etc/key");
     tokio::fs::remove_file(&missing).await.unwrap();
     assert!(
-        configuration_backings(source.path(), &backing_data, &store, &working)
-            .await
-            .is_err()
+        configuration_backings(
+            source.path(),
+            base.path(),
+            &backing_data,
+            &store,
+            &images,
+            &working
+        )
+        .await
+        .is_err()
     );
     assert_eq!(
         crate::disk::mount::util::mountpoints_under(Path::new(TmpDir::BASE))

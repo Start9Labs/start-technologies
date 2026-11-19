@@ -10,6 +10,7 @@ async fn unsupported_filesystem_rejects_before_any_epoch_mutation() {
         "/unused".into(),
         "/unused".into(),
         "/unused".into(),
+        "/unused".into(),
         &[PathBuf::from("/proc")],
         &[],
     )

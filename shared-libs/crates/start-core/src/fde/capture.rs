@@ -62,8 +62,14 @@ struct ReadEpoch {
     source: ConfigurationSource,
     #[serde(default = "default_generation_store")]
     generation_store: PathBuf,
+    #[serde(default = "default_image_directory")]
+    image_directory: PathBuf,
     frozen_filesystems: Vec<PathBuf>,
     readonly_filesystems: Vec<PathBuf>,
+}
+
+fn default_image_directory() -> PathBuf {
+    IMAGES.into()
 }
 
 fn default_generation_store() -> PathBuf {
@@ -95,6 +101,7 @@ impl ReadEpoch {
             crate::DATA_DIR.into(),
             crate::net::wifi::SAVED_PROFILE_DIRECTORY.into(),
             default_generation_store(),
+            default_image_directory(),
             &[
                 "/media/startos/root".into(),
                 crate::MAIN_DATA.into(),
@@ -111,6 +118,7 @@ impl ReadEpoch {
         data_root: PathBuf,
         network_profiles: PathBuf,
         generation_store: PathBuf,
+        image_directory: PathBuf,
         filesystems: &[PathBuf],
         readonly_candidates: &[PathBuf],
     ) -> Result<Self, Error> {
@@ -153,6 +161,7 @@ impl ReadEpoch {
             network_profiles,
             source,
             generation_store,
+            image_directory,
             frozen_filesystems,
             readonly_filesystems,
         })
@@ -342,8 +351,10 @@ pub(crate) async fn run(path: &Path) -> Result<(), Error> {
         let snapshot = epoch.snapshot().await?;
         configuration_backings(
             Path::new("/"),
+            &epoch.base_root,
             &epoch.data_root.join(crate::MAIN_FILESYSTEM),
             &epoch.generation_store,
+            &epoch.image_directory,
             &snapshot,
         )
         .await?;
@@ -414,8 +425,10 @@ async fn base_image_view(source: &Path) -> Result<MountGuard, Error> {
 
 async fn configuration_backings(
     root: &Path,
+    base: &Path,
     data: &Path,
     store: &Path,
+    images: &Path,
     working: &Squashfs<crate::s9pk::merkle_archive::source::DynFileSource>,
 ) -> Result<std::collections::BTreeSet<Guid>, Error> {
     let data = capture_view(&IsolatedBind::new(data))
@@ -423,14 +436,9 @@ async fn configuration_backings(
         .with_strict_unmount();
     let mut mounts = super::root::VerifiedMounts::new(data);
     let result = async {
-        let view = capture_view(&IsolatedBind::new(root))
-            .await?
-            .with_strict_unmount();
-        let path = view.path().to_owned();
-        mounts.push(view);
-        let snapshot = Squashfs::from_directory(path).await?.into_dyn();
         let data = mounts.lower().path().to_owned();
-        let mut retained = super::private_config::referenced_backings(&snapshot, &data).await?;
+        let mut retained = mounted_backings(&IsolatedBind::new(root), &data).await?;
+        retained.extend(mounted_backings(&IsolatedBind::new(base), &data).await?);
         retained.extend(super::private_config::referenced_backings(working, &data).await?);
         let generations = capture_view(&IsolatedBind::new(store))
             .await?
@@ -438,23 +446,33 @@ async fn configuration_backings(
         let path = generations.path().to_owned();
         mounts.push(generations);
         for image in crate::os_overlay::published_overlays(&path).await? {
-            let view = capture_view(&SquashfsImage::new(&image))
-                .await?
-                .with_strict_unmount();
-            let result = async {
-                let snapshot = Squashfs::from_directory(view.path()).await?.into_dyn();
-                super::private_config::referenced_backings(&snapshot, &data).await
-            }
-            .await;
-            retained.extend(crate::util::future::finish_with_cleanup(
-                result,
-                view.unmount(false).await,
-            )?);
+            retained.extend(mounted_backings(&SquashfsImage::new(&image), &data).await?);
+        }
+        let directory = capture_view(&IsolatedBind::new(images))
+            .await?
+            .with_strict_unmount();
+        let path = directory.path().to_owned();
+        mounts.push(directory);
+        for image in crate::os_overlay::image_store::image_paths(&path).await? {
+            retained.extend(mounted_backings(&SquashfsImage::new(&image), &data).await?);
         }
         Ok(retained)
     }
     .await;
     crate::util::future::finish_with_cleanup(result, mounts.unmount().await)
+}
+
+async fn mounted_backings(
+    filesystem: &impl crate::disk::mount::filesystem::FileSystem,
+    data: &Path,
+) -> Result<std::collections::BTreeSet<Guid>, Error> {
+    let view = capture_view(filesystem).await?.with_strict_unmount();
+    let result = async {
+        let snapshot = Squashfs::from_directory(view.path()).await?.into_dyn();
+        super::private_config::referenced_backings(&snapshot, data).await
+    }
+    .await;
+    crate::util::future::finish_with_cleanup(result, view.unmount(false).await)
 }
 
 async fn data_view(source: &Path) -> Result<MountGuard, Error> {

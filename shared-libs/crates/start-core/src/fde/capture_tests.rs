@@ -141,6 +141,7 @@ impl Fixture {
             "data/package-data",
             "data/main/network-profiles",
             "generations",
+            "images",
         ] {
             tokio::fs::create_dir_all(volume.path().join(relative))
                 .await
@@ -222,6 +223,7 @@ impl Fixture {
             self.volume.path().join("data"),
             self.volume.path().join("data/main/network-profiles"),
             self.volume.path().join("generations"),
+            self.volume.path().join("images"),
             &[
                 self.volume.path().to_owned(),
                 self.volume.path().join("data/main"),
@@ -336,47 +338,55 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
     .await
     .unwrap();
     let published_id = Guid::new();
-    let published_relative = PathBuf::from(published_id.to_string()).join("etc/published-key");
-    let backing = fixture
-        .volume
-        .path()
-        .join("data/main")
-        .join(super::super::private_config::DIRECTORY)
-        .join(&published_relative);
-    tokio::fs::create_dir_all(backing.parent().unwrap())
-        .await
-        .unwrap();
-    tokio::fs::write(backing, b"published credential fixture")
-        .await
-        .unwrap();
+    let stored_id = Guid::new();
     let generation = fixture
         .volume
         .path()
         .join("generations")
         .join(format!("generation-{}", Guid::new()));
     tokio::fs::create_dir(&generation).await.unwrap();
-    let mut published = Squashfs::<crate::s9pk::merkle_archive::source::DynFileSource>::new(
-        Metadata::new(0o755),
-        DirectoryContents::new(),
-    );
-    published
-        .contents_mut()
-        .insert_path(
-            "published-reference",
-            Entry::new(
-                Metadata::new(0o777),
-                NodeContents::Symlink(
-                    Path::new(super::super::private_config::RUNTIME).join(published_relative),
+    for (id, image) in [
+        (&published_id, generation.join(OVERLAY_FILE)),
+        (
+            &stored_id,
+            fixture.volume.path().join("images/stored.rootfs"),
+        ),
+    ] {
+        let relative = PathBuf::from(id.to_string()).join("etc/image-key");
+        let backing = fixture
+            .volume
+            .path()
+            .join("data/main")
+            .join(super::super::private_config::DIRECTORY)
+            .join(&relative);
+        tokio::fs::create_dir_all(backing.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(backing, b"image credential fixture")
+            .await
+            .unwrap();
+        let mut snapshot = Squashfs::<crate::s9pk::merkle_archive::source::DynFileSource>::new(
+            Metadata::new(0o755),
+            DirectoryContents::new(),
+        );
+        snapshot
+            .contents_mut()
+            .insert_path(
+                "image-reference",
+                Entry::new(
+                    Metadata::new(0o777),
+                    NodeContents::Symlink(
+                        Path::new(super::super::private_config::RUNTIME).join(relative),
+                    ),
                 ),
-            ),
-        )
-        .unwrap();
-    let mut file = crate::util::io::create_file_mod(generation.join(OVERLAY_FILE), 0o600)
-        .await
-        .unwrap();
-    published.serialize(&mut file).await.unwrap();
-    file.sync_all().await.unwrap();
-    drop(file);
+            )
+            .unwrap();
+        let mut file = crate::util::io::create_file_mod(image, 0o600)
+            .await
+            .unwrap();
+        snapshot.serialize(&mut file).await.unwrap();
+        file.sync_all().await.unwrap();
+    }
     let data_alias = MountGuard::mount(
         &IsolatedBind::new(fixture.volume.path().join("data/main")),
         fixture.volume.path().join("alias"),
@@ -440,7 +450,8 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
         names,
         std::collections::BTreeSet::from([
             std::ffi::OsString::from(current_id.to_string()),
-            std::ffi::OsString::from(published_id.to_string())
+            std::ffi::OsString::from(published_id.to_string()),
+            std::ffi::OsString::from(stored_id.to_string())
         ])
     );
     drop(existing);
