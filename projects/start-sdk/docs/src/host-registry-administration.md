@@ -31,7 +31,7 @@ Revoking a key, with `admin signer edit <SIGNER_ID> --remove-key <KEY>` or by de
 
 ## Offering signing keys to users
 
-Registry 1.4.0 and start-cli 2.7.0 support selecting registered signers whose keys the registry offers to StartOS 0.4.1.2 and later. New and upgraded registries start with no selection; registering an administrator or authorizing a package publisher does not select them.
+A registry can offer the keys of selected registered signers to the StartOS servers that connect it. It starts with no selection; registering an administrator or authorizing a package publisher does not select them.
 
 As an administrator, list your registered signers and use the [trust-signer selection command](/start-os/cli-reference.html#start-cli-registry-info-set-trust-signers-signer) to select their IDs. Each call replaces the entire selection; passing no IDs clears it. The registry offers all keys belonging to the selected signers, along with their names and contact details. Select the signers whose signatures users should accept, not every identity allowed to upload.
 
