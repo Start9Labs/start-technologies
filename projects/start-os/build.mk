@@ -56,7 +56,8 @@ projects/start-os/build/lib/migration-images/.done: projects/start-os/build/save
 	./projects/start-os/build/save-migration-images.sh projects/start-os/build/lib/migration-images
 	touch $@
 
-include projects/start-os/build/image-recipe/kernel-backports/build.mk
+# May be included from an isolated build directory.
+include $(dir $(lastword $(MAKEFILE_LIST)))build/image-recipe/kernel-backports/build.mk
 
 .PHONY: start-os-kbuild-test
 start-os-kbuild-test: projects/start-os/build/tests/kernel-kbuild-test.sh projects/start-os/build/image-recipe/build.sh
