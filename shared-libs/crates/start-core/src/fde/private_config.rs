@@ -100,12 +100,22 @@ async fn require_data_filesystem(data: &Path, path: &Path) -> Result<(), Error> 
     Ok(())
 }
 
-async fn backing_file(data: &Path, target: &Path) -> Result<PathBuf, Error> {
+async fn resolve_backing(data: &Path, target: &Path) -> Result<(Guid, PathBuf), Error> {
     let relative = target
         .strip_prefix(RUNTIME)
         .map_err(|_| invalid_layout(target))?;
     let relative = confined_relative(relative)?;
     let parent = relative.parent().ok_or_else(|| invalid_layout(target))?;
+    let parent_path = data.join(DIRECTORY).join(parent);
+    // Backing identity belongs to its GUID directory, without redirected ancestors.
+    if tokio::fs::canonicalize(&parent_path).await?
+        != tokio::fs::canonicalize(data)
+            .await?
+            .join(DIRECTORY)
+            .join(parent)
+    {
+        return Err(invalid_layout(target));
+    }
     crate::disk::mount::filesystem::syscall::open_beneath(
         data,
         &Path::new(DIRECTORY).join(parent),
@@ -114,16 +124,49 @@ async fn backing_file(data: &Path, target: &Path) -> Result<PathBuf, Error> {
         .iter()
         .next()
         .and_then(|id| id.to_str())
-        .and_then(Guid::from);
+        .and_then(Guid::from)
+        .ok_or_else(|| invalid_layout(target))?;
     let file = data.join(DIRECTORY).join(&relative);
-    if id.is_none()
-        || relative.components().count() < 2
-        || !tokio::fs::symlink_metadata(&file).await?.is_file()
-    {
+    if relative.components().count() < 2 || !tokio::fs::symlink_metadata(&file).await?.is_file() {
         return Err(invalid_layout(target));
     }
     require_data_filesystem(data, &file).await?;
-    Ok(file)
+    Ok((id, file))
+}
+
+async fn backing_file(data: &Path, target: &Path) -> Result<PathBuf, Error> {
+    Ok(resolve_backing(data, target).await?.1)
+}
+
+fn reference_nodes(
+    snapshot: &Squashfs<DynFileSource>,
+) -> Result<BTreeMap<PathBuf, PathBuf>, Error> {
+    let mut references = BTreeMap::new();
+    for (path, entry) in snapshot_entries(snapshot) {
+        let (canonical, node) = match &entry {
+            Entry::Node(node) => (path, node),
+            Entry::Hardlink(_) => resolved(snapshot, &path)?,
+        };
+        if let NodeContents::Symlink(target) = &node.contents
+            && target.starts_with(RUNTIME)
+        {
+            references.insert(canonical, target.clone());
+        }
+    }
+    Ok(references)
+}
+
+/// Requires retained source/data mounts and exclusion of reference and backing writers.
+/// Validates referenced files without opening their contents.
+pub(crate) async fn referenced_backings(
+    snapshot: &Squashfs<DynFileSource>,
+    data: &Path,
+) -> Result<BTreeSet<Guid>, Error> {
+    let mut retained = BTreeSet::new();
+    for target in reference_nodes(snapshot)?.values() {
+        retained.insert(resolve_backing(data, target).await?.0);
+    }
+    Ok(retained)
 }
 
 fn private_reference(target: PathBuf) -> Entry<DynFileSource> {
@@ -285,25 +328,19 @@ impl ProjectedConfig {
             }
         }
         let mut aliases: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
-        let mut replacements = BTreeMap::new();
+        let replacements = reference_nodes(&snapshot)?;
+        for (path, target) in &replacements {
+            let backing = backing_file(data, target).await?;
+            open_file(&backing).await?.sync_all().await?;
+            open_file(backing.parent().expect("credential parent"))
+                .await?
+                .sync_all()
+                .await?;
+            snapshot
+                .contents_mut()
+                .insert_path(path, private_reference(target.clone()))?;
+        }
         for (path, entry) in snapshot_entries(&snapshot) {
-            if let Entry::Node(Node {
-                contents: NodeContents::Symlink(target),
-                ..
-            }) = &entry
-                && target.starts_with(RUNTIME)
-            {
-                let backing = backing_file(data, target).await?;
-                open_file(&backing).await?.sync_all().await?;
-                open_file(backing.parent().expect("credential parent"))
-                    .await?
-                    .sync_all()
-                    .await?;
-                replacements.insert(path.clone(), target.clone());
-                snapshot
-                    .contents_mut()
-                    .insert_path(&path, private_reference(target.clone()))?;
-            }
             if entry.is_file_or_hardlink() {
                 let (canonical, _) = resolved(&snapshot, &path)?;
                 if private.contains(&canonical) {

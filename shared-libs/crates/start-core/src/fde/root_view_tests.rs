@@ -46,12 +46,25 @@ async fn native_isolated_base_view_preserves_merged_references_without_source_su
             .await
             .unwrap();
     }
+    let lower_id = Guid::new();
+    let upper_id = Guid::new();
     let lower = PathBuf::from(crate::fde::private_config::RUNTIME)
-        .join(Guid::new().to_string())
+        .join(lower_id.to_string())
         .join("etc/key");
     let upper = PathBuf::from(crate::fde::private_config::RUNTIME)
-        .join(Guid::new().to_string())
+        .join(upper_id.to_string())
         .join("etc/key");
+    let backing_data = root.path().join("backing-data");
+    for id in [&lower_id, &upper_id] {
+        let parent = backing_data
+            .join(crate::fde::private_config::DIRECTORY)
+            .join(id.to_string())
+            .join("etc");
+        tokio::fs::create_dir_all(&parent).await.unwrap();
+        tokio::fs::write(parent.join("key"), b"retained fixture")
+            .await
+            .unwrap();
+    }
     for (path, target) in [
         ("lower/etc/lower-link", &lower),
         ("lower/etc/replaced", &lower),
@@ -105,6 +118,14 @@ async fn native_isolated_base_view_preserves_merged_references_without_source_su
     tokio::fs::write(existing.path().join("host-mount"), b"not-image-bytes")
         .await
         .unwrap();
+    tokio::fs::symlink(
+        Path::new(crate::fde::private_config::RUNTIME)
+            .join(Guid::new().to_string())
+            .join("absent"),
+        existing.path().join("host-reference"),
+    )
+    .await
+    .unwrap();
     let before_probe = crate::disk::mount::util::mountpoints_under(root.path())
         .await
         .unwrap();
@@ -136,6 +157,39 @@ async fn native_isolated_base_view_preserves_merged_references_without_source_su
             .unwrap(),
         b"late-underlay"
     );
+    tokio::fs::symlink(
+        Path::new(crate::fde::private_config::RUNTIME)
+            .join(Guid::new().to_string())
+            .join("absent"),
+        late.path().join("host-reference"),
+    )
+    .await
+    .unwrap();
+    let before_validation = crate::disk::mount::util::mountpoints_under(Path::new(TmpDir::BASE))
+        .await
+        .unwrap();
+    validate_running_references(source.path(), &backing_data)
+        .await
+        .unwrap();
+    let missing = backing_data
+        .join(crate::fde::private_config::DIRECTORY)
+        .join(upper_id.to_string())
+        .join("etc/key");
+    tokio::fs::remove_file(&missing).await.unwrap();
+    assert!(
+        validate_running_references(source.path(), &backing_data)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        crate::disk::mount::util::mountpoints_under(Path::new(TmpDir::BASE))
+            .await
+            .unwrap(),
+        before_validation
+    );
+    tokio::fs::write(missing, b"retained fixture")
+        .await
+        .unwrap();
     let metadata = Squashfs::from_directory(base.path())
         .await
         .unwrap()
@@ -170,6 +224,12 @@ async fn native_isolated_base_view_preserves_merged_references_without_source_su
         .collect();
     assert!(links.contains(&lower));
     assert!(links.contains(&upper));
+    assert_eq!(
+        crate::fde::private_config::referenced_backings(&metadata, &backing_data)
+            .await
+            .unwrap(),
+        std::collections::BTreeSet::from([lower_id, upper_id])
+    );
     assert_eq!(
         tokio::fs::write(base.path().join("read-only"), b"rejected")
             .await

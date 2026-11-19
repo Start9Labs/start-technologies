@@ -25,7 +25,7 @@ use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::{Bind, IsolatedBind};
 use crate::disk::mount::filesystem::private_tmpfs::PrivateTmpfs;
 use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
-use crate::disk::mount::guard::MountGuard;
+use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
@@ -329,6 +329,11 @@ pub(crate) async fn run(path: &Path) -> Result<(), Error> {
     let scratch = MountGuard::mount(&PrivateTmpfs::new(), TmpDir::BASE, ReadWrite).await?;
     epoch.enter().await?;
     let result = async {
+        validate_running_references(
+            Path::new("/"),
+            &epoch.data_root.join(crate::MAIN_FILESYSTEM),
+        )
+        .await?;
         let base = base_image_view(&epoch.base_root).await?;
         let data = data_view(&epoch.data_root).await?;
         let capture = capture_configuration(epoch.snapshot().await?, base, data).await?;
@@ -392,6 +397,26 @@ pub(crate) async fn release(path: &Path) -> Result<(), Error> {
 /// Host submounts are outside the rootfs image commitment.
 async fn base_image_view(source: &Path) -> Result<MountGuard, Error> {
     capture_view(&IsolatedBind::new(source)).await
+}
+
+async fn validate_running_references(root: &Path, data: &Path) -> Result<(), Error> {
+    let data = capture_view(&IsolatedBind::new(data))
+        .await?
+        .with_strict_unmount();
+    let mut mounts = super::root::VerifiedMounts::new(data);
+    let result = async {
+        let view = capture_view(&IsolatedBind::new(root))
+            .await?
+            .with_strict_unmount();
+        let path = view.path().to_owned();
+        mounts.push(view);
+        let snapshot = Squashfs::from_directory(path).await?.into_dyn();
+        super::private_config::referenced_backings(&snapshot, mounts.lower().path())
+            .await
+            .map(drop)
+    }
+    .await;
+    crate::util::future::finish_with_cleanup(result, mounts.unmount().await)
 }
 
 async fn data_view(source: &Path) -> Result<MountGuard, Error> {

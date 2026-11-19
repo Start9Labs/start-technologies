@@ -6,6 +6,8 @@ use super::*;
 mod permissions;
 #[path = "private_config_reclamation_tests.rs"]
 mod reclamation;
+#[path = "private_config_reference_tests.rs"]
+mod references;
 
 async fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
     let root = tempfile::tempdir().unwrap();

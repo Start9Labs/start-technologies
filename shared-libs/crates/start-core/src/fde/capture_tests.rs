@@ -309,6 +309,34 @@ async fn gate_opened<T>(
 #[ignore = "requires exclusive managed guest, real PID1/Btrfs/loop/overlay privileges, genuine FDE_SOURCE_IMAGE and built FDE_CAPTURE_EXECUTABLE; never on build host"]
 async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_thaw() {
     let fixture = Fixture::new().await;
+    let current_id = Guid::new();
+    let relative = PathBuf::from(current_id.to_string()).join("etc/current-key");
+    let backing = fixture
+        .volume
+        .path()
+        .join("data/main")
+        .join(super::super::private_config::DIRECTORY)
+        .join(&relative);
+    tokio::fs::create_dir_all(backing.parent().unwrap())
+        .await
+        .unwrap();
+    tokio::fs::write(backing, b"live current credential fixture")
+        .await
+        .unwrap();
+    tokio::fs::symlink(
+        Path::new(super::super::private_config::RUNTIME).join(relative),
+        PathBuf::from(std::env::var_os("FDE_CAPTURE_TEST_ROOT").unwrap()).join("running-reference"),
+    )
+    .await
+    .unwrap();
+    let data_alias = MountGuard::mount(
+        &IsolatedBind::new(fixture.volume.path().join("data/main")),
+        fixture.volume.path().join("alias"),
+        ReadOnly,
+    )
+    .await
+    .unwrap()
+    .with_strict_unmount();
     let expected = source_image();
     let backing = loop_backing_image(fixture.base.path(), expected.parent().unwrap())
         .await
@@ -349,13 +377,19 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
         .await
         .is_err()
     );
-    assert!(
-        !fixture
-            .volume
+    let mut existing = tokio::fs::read_dir(
+        data_alias
             .path()
-            .join("data/main/fde-private-config")
-            .exists()
+            .join(super::super::private_config::DIRECTORY),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        existing.next_entry().await.unwrap().unwrap().file_name(),
+        std::ffi::OsString::from(current_id.to_string())
     );
+    assert!(existing.next_entry().await.unwrap().is_none());
+    drop(existing);
     assert!(
         tokio::fs::write(fixture.working.path().join("blocked"), b"blocked")
             .await
@@ -482,6 +516,7 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
     db.close().await;
     drop(overlay);
     drop(projected);
+    data_alias.unmount(false).await.unwrap();
     fixture.cleanup().await;
 }
 
