@@ -357,21 +357,72 @@ jobs:
 
           EOF
 
+  # The container-runtime rootfs runs target-architecture code, so each
+  # architecture's is built once, on a native runner, for every image that
+  # this run or its publish builds.
+  rootfs:
+    name: Container runtime (${{ matrix.arch }})
+    needs: [changes, build]
+    if: >-
+      !cancelled() && needs.build.result == 'success'
+      && needs.changes.outputs.start-os == 'true'
+      && (needs.changes.outputs.channel != '' || github.event_name != 'pull_request' || needs.changes.outputs.os-image == 'true')
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJson(needs.changes.outputs.arches) }}
+    runs-on: >-
+      ${{
+        fromJson('{
+          "x86_64": "ubuntu-latest",
+          "aarch64": "ubuntu-24.04-arm",
+          "riscv64": "ubuntu-24.04-riscv"
+        }')[matrix.arch]
+      }}
+    permissions:
+      contents: read
+    env:
+      ARCH: ${{ matrix.arch }}
+      PLATFORM: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # Precedes every JavaScript action after checkout.
+      - name: Update RISC-V action runtime
+        if: ${{ matrix.arch == 'riscv64' }}
+        uses: ./.github/actions/riscv-action-runtime
+        with:
+          nodejs-version: ${{ env.NODEJS_VERSION }}
+
+      - uses: ./.github/actions/use-compiled-artifacts
+        with:
+          arch: ${{ matrix.arch }}
+          run-id: ${{ github.run_id }}
+
+      - name: Build container runtime rootfs
+        run: make projects/start-os/container-runtime/rootfs.${{ matrix.arch }}.squashfs
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: projects/start-os/container-runtime/rootfs.${{ matrix.arch }}.squashfs
+          archive: false
+          retention-days: 1
+
   # A build that does not publish checks the images here: every push outside
   # master, a dispatch without a channel, and a pull request that touches
   # image assembly. A publishing build's images are built by startos-iso.yaml.
   image:
     name: Image (${{ matrix.platform }})
-    needs: [changes, build]
+    needs: [changes, build, rootfs]
     if: >-
-      !cancelled() && needs.build.result == 'success'
+      !cancelled() && needs.rootfs.result == 'success'
       && needs.changes.outputs.start-os == 'true' && needs.changes.outputs.channel == ''
       && (github.event_name != 'pull_request' || needs.changes.outputs.os-image == 'true')
     strategy:
       fail-fast: false
       matrix:
         platform: ${{ fromJson(needs.changes.outputs.platforms) }}
-    # Downloading this run's compiled-<arch>.tar.gz by run id needs `actions: read`.
+    # Downloading this run's compiled tarball and rootfs by run id needs `actions: read`.
     permissions:
       contents: read
       actions: read
@@ -383,8 +434,8 @@ jobs:
 
   publish:
     name: Publish StartOS
-    needs: [changes, build]
-    if: ${{ !cancelled() && needs.build.result == 'success' && needs.changes.outputs.channel != '' }}
+    needs: [changes, build, rootfs]
+    if: ${{ !cancelled() && needs.rootfs.result == 'success' && needs.changes.outputs.channel != '' }}
     runs-on: ubuntu-latest
     permissions:
       actions: write

@@ -248,8 +248,8 @@ target/$(RUST_ARCH)-unknown-linux-musl/release/start-container: $(START_CONTAINE
 	ARCH=$(ARCH) PROFILE=release ./build/build-rust-bins.sh start-os:start-container
 	touch target/$(RUST_ARCH)-unknown-linux-musl/release/start-container
 
-# CI's cross-compiled image inputs. Must not run target-architecture code; image
-# builds assemble the container-runtime rootfs natively.
+# CI's cross-compiled image inputs. Must not run target-architecture code; CI
+# builds the container-runtime rootfs on a native runner.
 compiled-$(ARCH).tar.gz: $(COMPILED_TARGETS) $(CONTAINER_RUNTIME_DIST) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE)
 	tar -czvf $@ $(COMPILED_TARGETS) projects/start-os/container-runtime/dist $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE)
 

@@ -1,0 +1,44 @@
+name: Use compiled artifacts
+description: >-
+  Unpacks a build-products.yaml run's compiled-<arch>.tar.gz into the checkout
+  and marks it current, so make uses it rather than recompiling.
+inputs:
+  arch:
+    description: Architecture whose tarball to unpack
+    required: true
+  run-id:
+    description: Run holding the tarball
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v8
+      with:
+        name: compiled-${{ inputs.arch }}.tar.gz
+        run-id: ${{ inputs.run-id }}
+        github-token: ${{ github.token }}
+
+    - shell: bash
+      env:
+        TARBALL: compiled-${{ inputs.arch }}.tar.gz
+      run: |
+        set -euo pipefail
+        tar -xzvf "$TARBALL"
+        mkdir -p node_modules
+        mkdir -p projects/start-os/web/dist/raw
+        mkdir -p projects/start-tunnel/web/dist/raw
+        mkdir -p shared-libs/crates/start-core/bindings
+        mkdir -p shared-libs/ts-modules/start-core/lib/osBindings
+        mkdir -p projects/start-os/container-runtime/node_modules
+        mkdir -p projects/start-os/container-runtime/dist
+        mkdir -p projects/start-os/container-runtime/dist/node_modules
+        mkdir -p projects/start-sdk/dist
+        mkdir -p shared-libs/ts-modules/start-core/dist
+        mkdir -p shared-libs/crates/patch-db/client/node_modules
+        mkdir -p shared-libs/crates/patch-db/client/dist
+        mkdir -p .angular
+        mkdir -p projects/start-os/web/dist/raw/ui
+        mkdir -p projects/start-os/web/dist/raw/setup-wizard
+        mkdir -p projects/start-os/web/dist/static/ui
+        mkdir -p projects/start-os/web/dist/static/setup-wizard
+        make -t "$TARBALL"
