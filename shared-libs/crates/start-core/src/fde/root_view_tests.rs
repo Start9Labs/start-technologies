@@ -1,12 +1,5 @@
-use std::path::PathBuf;
-
-use nix::mount::{MsFlags, mount};
-
 use super::*;
 use crate::disk::mount::filesystem::FileSystem;
-use crate::disk::mount::filesystem::overlayfs::OverlayFs;
-use crate::disk::mount::guard::GenericMountGuard;
-use crate::util::squashfs::{NodeContents, snapshot_entries};
 
 #[tokio::test]
 async fn isolated_view_cache_identity_separates_access_and_plain_binds() {
@@ -22,9 +15,17 @@ async fn isolated_view_cache_identity_separates_access_and_plain_binds() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore = "requires exclusive managed guest, real OverlayFS/open_tree/mount_setattr; never on build host"]
 async fn native_isolated_base_view_preserves_merged_references_without_source_submounts() {
+    use std::path::PathBuf;
+
+    use nix::mount::{MsFlags, mount};
+
+    use crate::disk::mount::filesystem::overlayfs::OverlayFs;
+    use crate::disk::mount::guard::GenericMountGuard;
+    use crate::util::squashfs::{NodeContents, snapshot_entries};
     let directory = PathBuf::from(
         std::env::var_os("FDE_ROOT_VIEW_TEST_ROOT").expect("owned root-view fixture"),
     );
