@@ -189,13 +189,8 @@ mod tests {
     }
 
     fn shipped_update(bios_version: &str) -> Option<String> {
-        find_firmware_update(
-            shipped_firmwares(),
-            "x86_64",
-            LIBREM_MINI_V2,
-            bios_version,
-        )
-        .map(|firmware| firmware.id)
+        find_firmware_update(shipped_firmwares(), "x86_64", LIBREM_MINI_V2, bios_version)
+            .map(|firmware| firmware.id)
     }
 
     #[test]
