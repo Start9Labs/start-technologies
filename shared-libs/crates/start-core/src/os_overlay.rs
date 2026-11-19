@@ -809,6 +809,24 @@ fn is_generation(name: &std::ffi::OsStr) -> bool {
     has_generation_id(name, GENERATION_PREFIX)
 }
 
+/// Every published overlay is a retention input, regardless of boot eligibility.
+/// Requires stable paths; unknown entries and invalid directory/file types reject the set.
+pub(crate) async fn published_overlays(store: &Path) -> Result<Vec<PathBuf>, Error> {
+    let mut entries = read_generation_directory(store).await?;
+    let mut images = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        if !is_generation(&entry.file_name()) || !entry.file_type().await?.is_dir() {
+            return Err(invalid_signature());
+        }
+        drop(read_generation_directory(&entry.path()).await?);
+        let image = entry.path().join(OVERLAY_FILE);
+        regular_file(&image).await?;
+        images.push(image);
+    }
+    images.sort();
+    Ok(images)
+}
+
 /// Requires the exclusive image-store reservation, before admitting any new preparation.
 /// Published generations and private backings are not part of this recovery namespace.
 pub(crate) async fn recover_unpublished(store: &Path) -> Result<(), Error> {
@@ -949,6 +967,9 @@ mod orphan_tests;
 #[cfg(test)]
 #[path = "os_overlay/reclamation_tests.rs"]
 mod reclamation_tests;
+#[cfg(test)]
+#[path = "os_overlay/retention_tests.rs"]
+mod retention_tests;
 
 #[cfg(test)]
 mod tests {

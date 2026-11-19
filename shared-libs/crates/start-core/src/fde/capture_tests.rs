@@ -9,17 +9,22 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 use super::*;
 
+#[path = "configuration_reference_tests.rs"]
+mod configuration_references;
 #[path = "capture_lifecycle_tests.rs"]
 mod lifecycle;
 #[path = "profile_transport_tests.rs"]
 mod profiles;
+#[cfg(target_os = "linux")]
+#[path = "published_reference_tests.rs"]
+mod published_references;
 #[path = "root_view_tests.rs"]
 mod root_views;
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
 use crate::disk::mount::guard::GenericMountGuard;
 use crate::os_overlay::OVERLAY_FILE;
 use crate::util::io::open_file;
-use crate::util::squashfs::NodeContents;
+use crate::util::squashfs::{DirectoryContents, Entry, Metadata, NodeContents};
 
 async fn transport(profiles: bool) -> tokio::fs::File {
     let file = anonymous_file().unwrap();
@@ -216,6 +221,7 @@ impl Fixture {
             self.base.path().to_owned(),
             self.volume.path().join("data"),
             self.volume.path().join("data/main/network-profiles"),
+            self.volume.path().join("generations"),
             &[
                 self.volume.path().to_owned(),
                 self.volume.path().join("data/main"),
@@ -329,6 +335,48 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
     )
     .await
     .unwrap();
+    let published_id = Guid::new();
+    let published_relative = PathBuf::from(published_id.to_string()).join("etc/published-key");
+    let backing = fixture
+        .volume
+        .path()
+        .join("data/main")
+        .join(super::super::private_config::DIRECTORY)
+        .join(&published_relative);
+    tokio::fs::create_dir_all(backing.parent().unwrap())
+        .await
+        .unwrap();
+    tokio::fs::write(backing, b"published credential fixture")
+        .await
+        .unwrap();
+    let generation = fixture
+        .volume
+        .path()
+        .join("generations")
+        .join(format!("generation-{}", Guid::new()));
+    tokio::fs::create_dir(&generation).await.unwrap();
+    let mut published = Squashfs::<crate::s9pk::merkle_archive::source::DynFileSource>::new(
+        Metadata::new(0o755),
+        DirectoryContents::new(),
+    );
+    published
+        .contents_mut()
+        .insert_path(
+            "published-reference",
+            Entry::new(
+                Metadata::new(0o777),
+                NodeContents::Symlink(
+                    Path::new(super::super::private_config::RUNTIME).join(published_relative),
+                ),
+            ),
+        )
+        .unwrap();
+    let mut file = crate::util::io::create_file_mod(generation.join(OVERLAY_FILE), 0o600)
+        .await
+        .unwrap();
+    published.serialize(&mut file).await.unwrap();
+    file.sync_all().await.unwrap();
+    drop(file);
     let data_alias = MountGuard::mount(
         &IsolatedBind::new(fixture.volume.path().join("data/main")),
         fixture.volume.path().join("alias"),
@@ -384,11 +432,17 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
     )
     .await
     .unwrap();
+    let mut names = std::collections::BTreeSet::new();
+    while let Some(entry) = existing.next_entry().await.unwrap() {
+        names.insert(entry.file_name());
+    }
     assert_eq!(
-        existing.next_entry().await.unwrap().unwrap().file_name(),
-        std::ffi::OsString::from(current_id.to_string())
+        names,
+        std::collections::BTreeSet::from([
+            std::ffi::OsString::from(current_id.to_string()),
+            std::ffi::OsString::from(published_id.to_string())
+        ])
     );
-    assert!(existing.next_entry().await.unwrap().is_none());
     drop(existing);
     assert!(
         tokio::fs::write(fixture.working.path().join("blocked"), b"blocked")

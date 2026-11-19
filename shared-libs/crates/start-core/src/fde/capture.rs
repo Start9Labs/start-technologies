@@ -23,6 +23,7 @@ use super::namespace::invalid_source;
 use super::private_config::ProjectedConfig;
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::{Bind, IsolatedBind};
+use crate::disk::mount::filesystem::loop_dev::SquashfsImage;
 use crate::disk::mount::filesystem::private_tmpfs::PrivateTmpfs;
 use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
@@ -59,8 +60,14 @@ struct ReadEpoch {
     data_root: PathBuf,
     network_profiles: PathBuf,
     source: ConfigurationSource,
+    #[serde(default = "default_generation_store")]
+    generation_store: PathBuf,
     frozen_filesystems: Vec<PathBuf>,
     readonly_filesystems: Vec<PathBuf>,
+}
+
+fn default_generation_store() -> PathBuf {
+    super::boot::generation_store(Path::new(CONFIGURATION).parent().unwrap())
 }
 
 impl ReadEpoch {
@@ -87,6 +94,7 @@ impl ReadEpoch {
             PUBLIC.into(),
             crate::DATA_DIR.into(),
             crate::net::wifi::SAVED_PROFILE_DIRECTORY.into(),
+            default_generation_store(),
             &[
                 "/media/startos/root".into(),
                 crate::MAIN_DATA.into(),
@@ -102,6 +110,7 @@ impl ReadEpoch {
         base_root: PathBuf,
         data_root: PathBuf,
         network_profiles: PathBuf,
+        generation_store: PathBuf,
         filesystems: &[PathBuf],
         readonly_candidates: &[PathBuf],
     ) -> Result<Self, Error> {
@@ -143,6 +152,7 @@ impl ReadEpoch {
             data_root,
             network_profiles,
             source,
+            generation_store,
             frozen_filesystems,
             readonly_filesystems,
         })
@@ -329,14 +339,17 @@ pub(crate) async fn run(path: &Path) -> Result<(), Error> {
     let scratch = MountGuard::mount(&PrivateTmpfs::new(), TmpDir::BASE, ReadWrite).await?;
     epoch.enter().await?;
     let result = async {
-        validate_running_references(
+        let snapshot = epoch.snapshot().await?;
+        configuration_backings(
             Path::new("/"),
             &epoch.data_root.join(crate::MAIN_FILESYSTEM),
+            &epoch.generation_store,
+            &snapshot,
         )
         .await?;
         let base = base_image_view(&epoch.base_root).await?;
         let data = data_view(&epoch.data_root).await?;
-        let capture = capture_configuration(epoch.snapshot().await?, base, data).await?;
+        let capture = capture_configuration(snapshot, base, data).await?;
         let profiles = crate::net::wifi::read_network_profiles(&epoch.network_profiles).await?;
         epoch.release().await?;
         let exported = async {
@@ -399,7 +412,12 @@ async fn base_image_view(source: &Path) -> Result<MountGuard, Error> {
     capture_view(&IsolatedBind::new(source)).await
 }
 
-async fn validate_running_references(root: &Path, data: &Path) -> Result<(), Error> {
+async fn configuration_backings(
+    root: &Path,
+    data: &Path,
+    store: &Path,
+    working: &Squashfs<crate::s9pk::merkle_archive::source::DynFileSource>,
+) -> Result<std::collections::BTreeSet<Guid>, Error> {
     let data = capture_view(&IsolatedBind::new(data))
         .await?
         .with_strict_unmount();
@@ -411,9 +429,29 @@ async fn validate_running_references(root: &Path, data: &Path) -> Result<(), Err
         let path = view.path().to_owned();
         mounts.push(view);
         let snapshot = Squashfs::from_directory(path).await?.into_dyn();
-        super::private_config::referenced_backings(&snapshot, mounts.lower().path())
-            .await
-            .map(drop)
+        let data = mounts.lower().path().to_owned();
+        let mut retained = super::private_config::referenced_backings(&snapshot, &data).await?;
+        retained.extend(super::private_config::referenced_backings(working, &data).await?);
+        let generations = capture_view(&IsolatedBind::new(store))
+            .await?
+            .with_strict_unmount();
+        let path = generations.path().to_owned();
+        mounts.push(generations);
+        for image in crate::os_overlay::published_overlays(&path).await? {
+            let view = capture_view(&SquashfsImage::new(&image))
+                .await?
+                .with_strict_unmount();
+            let result = async {
+                let snapshot = Squashfs::from_directory(view.path()).await?.into_dyn();
+                super::private_config::referenced_backings(&snapshot, &data).await
+            }
+            .await;
+            retained.extend(crate::util::future::finish_with_cleanup(
+                result,
+                view.unmount(false).await,
+            )?);
+        }
+        Ok(retained)
     }
     .await;
     crate::util::future::finish_with_cleanup(result, mounts.unmount().await)

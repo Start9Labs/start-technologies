@@ -165,19 +165,28 @@ async fn native_isolated_base_view_preserves_merged_references_without_source_su
     )
     .await
     .unwrap();
+    let store = root.path().join("generations");
+    tokio::fs::create_dir_all(&store).await.unwrap();
+    let working = Squashfs::new(
+        crate::util::squashfs::Metadata::new(0o755),
+        crate::util::squashfs::DirectoryContents::new(),
+    );
     let before_validation = crate::disk::mount::util::mountpoints_under(Path::new(TmpDir::BASE))
         .await
         .unwrap();
-    validate_running_references(source.path(), &backing_data)
-        .await
-        .unwrap();
+    assert_eq!(
+        configuration_backings(source.path(), &backing_data, &store, &working)
+            .await
+            .unwrap(),
+        std::collections::BTreeSet::from([lower_id.clone(), upper_id.clone()])
+    );
     let missing = backing_data
         .join(crate::fde::private_config::DIRECTORY)
         .join(upper_id.to_string())
         .join("etc/key");
     tokio::fs::remove_file(&missing).await.unwrap();
     assert!(
-        validate_running_references(source.path(), &backing_data)
+        configuration_backings(source.path(), &backing_data, &store, &working)
             .await
             .is_err()
     );
