@@ -12,6 +12,7 @@ use crate::registry::FullIndex;
 use crate::registry::context::RegistryContext;
 use crate::registry::package::index::Category;
 use crate::registry::signer::SignerInfo;
+use crate::registry::upstream::WRITES_INDEX;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::manifest::LocaleString;
 use crate::util::DataUrl;
@@ -29,6 +30,7 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
         .subcommand(
             "set-trust-signers",
             from_fn_async(set_trust_signers)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.set-registry-trust-signers")
@@ -37,6 +39,7 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
         .subcommand(
             "set-name",
             from_fn_async(set_name)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_display()
                 .with_about("about.set-registry-name")
@@ -45,6 +48,7 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
         .subcommand(
             "set-description",
             from_fn_async(set_description)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_cli(),
         )
@@ -55,8 +59,18 @@ pub fn info_api<C: Context>() -> ParentHandler<C, WithIoFormat<Empty>> {
                 .with_about("about.set-registry-description"),
         )
         .subcommand(
+            "set-default-locale",
+            from_fn_async(set_default_locale)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
+                .with_metadata("admin", Value::Bool(true))
+                .no_display()
+                .with_about("about.set-registry-default-locale")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
             "set-icon",
             from_fn_async(set_icon)
+                .with_metadata(WRITES_INDEX, Value::Bool(true))
                 .with_metadata("admin", Value::Bool(true))
                 .no_cli(),
         )
@@ -75,6 +89,9 @@ pub struct RegistryInfo {
     pub icon: Option<DataUrl<'static>>,
     /// Markdown, shown above the registry's services.
     pub description: Option<LocaleString>,
+    /// `FullIndex::default_locale`.
+    #[serde(default)]
+    pub default_locale: Option<InternedString>,
     pub categories: BTreeMap<InternedString, Category>,
     /// Registry-selected signers, not an assertion of trust.
     #[serde(default)]
@@ -85,12 +102,17 @@ rpc_toolkit::reflect_ts!(RegistryInfo);
 rpc_toolkit::ts_export!(RegistryInfo, namespaces = [""]);
 
 pub async fn get_info(ctx: RegistryContext) -> Result<RegistryInfo, Error> {
-    let index: FullIndex = ctx.db.peek().await.into_index().de()?;
+    from_index(&ctx.db.peek().await.into_index())
+}
+
+pub(crate) fn from_index(index: &Model<FullIndex>) -> Result<RegistryInfo, Error> {
+    let index = index.de()?;
     let trust_signers = proposed_signers(&index);
     Ok(RegistryInfo {
         name: index.name,
         icon: index.icon,
         description: index.description,
+        default_locale: index.default_locale,
         categories: index.package.categories,
         trust_signers,
     })
@@ -162,6 +184,42 @@ pub async fn set_name(
 ) -> Result<(), Error> {
     ctx.db
         .mutate(|db| db.as_index_mut().as_name_mut().ser(&Some(name)))
+        .await
+        .result
+}
+
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
+#[command(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
+pub struct SetDefaultLocaleParams {
+    #[arg(
+        help = "help.arg.registry-default-locale",
+        required_unless_present = "clear",
+        conflicts_with = "clear"
+    )]
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[visit(input_wire = "Option<String>", type_attributes(visit::input_wire))]
+    pub default_locale: Option<InternedString>,
+    #[arg(long, help = "help.arg.clear-registry-default-locale")]
+    #[serde(skip)]
+    #[visit(ts(skip))]
+    pub clear: bool,
+}
+
+rpc_toolkit::reflect_ts!(SetDefaultLocaleParams);
+rpc_toolkit::ts_export!(SetDefaultLocaleParams, namespaces = [""]);
+
+pub async fn set_default_locale(
+    ctx: RegistryContext,
+    SetDefaultLocaleParams { default_locale, .. }: SetDefaultLocaleParams,
+) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| {
+            db.as_index_mut()
+                .as_default_locale_mut()
+                .ser(&default_locale)
+        })
         .await
         .result
 }

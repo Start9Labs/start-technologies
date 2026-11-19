@@ -88,7 +88,7 @@ import { UPDATE } from './update.component'
           tuiButton
           appearance="accent"
           [iconStart]="update ? '@tui.eye' : '@tui.refresh-cw'"
-          [disabled]="os.updatingOrBackingUp$ | async"
+          [disabled]="os.updateDisabled$ | async"
           (click)="onUpdate()"
         >
           {{ (update ? 'View' : 'Check for updates') | i18n }}
@@ -490,7 +490,7 @@ export default class SystemGeneralComponent {
 
   private async check(): Promise<void> {
     const success = await this.tasks.run(
-      async () => await this.os.loadOS(),
+      async () => await this.os.checkForUpdates(),
       'Checking for updates',
     )
 

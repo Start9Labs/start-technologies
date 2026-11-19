@@ -1,1 +1,0 @@
-- Les iPhone et iPad peuvent installer l’autorité racine d’un routeur configuré avant StartWRT 1.2.0. Son empreinte change lors de la mise à jour, et les appareils qui lui font déjà confiance continuent de faire confiance au routeur.

@@ -1,31 +1,39 @@
+use clap::Parser;
 use http::HeaderMap;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::*;
 use crate::db::model::public::Public;
-use crate::middleware::auth::signature::call_remote_with_client;
+use crate::middleware::auth::signature::SigningContext;
 use crate::registry::info::RegistryInfo;
-use crate::registry::package::promote::registry_rpc_url;
+use crate::sign::Signer;
 
-#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct TrustedRegistryParams {
+    #[arg(help = "help.arg.registry-url")]
     pub url: String,
 }
 
 rpc_toolkit::reflect_ts!(TrustedRegistryParams);
 
-#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct ConnectRegistryParams {
+    #[arg(help = "help.arg.registry-url")]
     pub url: String,
+    #[arg(long, help = "help.arg.registry-name")]
     pub name: Option<String>,
 }
 
 rpc_toolkit::reflect_ts!(ConnectRegistryParams);
 
-fn registry_url(value: &str) -> Result<Url, Error> {
+pub(crate) fn registry_url(value: &str) -> Result<Url, Error> {
     let mut url = value.parse::<Url>().with_kind(ErrorKind::ParseUrl)?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
@@ -44,17 +52,84 @@ fn registry_url(value: &str) -> Result<Url, Error> {
     Ok(url)
 }
 
-pub(super) fn same_registry(first: &str, second: &str) -> bool {
+pub(crate) fn same_registry(first: &str, second: &str) -> bool {
     match (registry_url(first), registry_url(second)) {
         (Ok(first), Ok(second)) => first == second,
         _ => false,
     }
 }
 
-pub(super) fn is_connected(ui: &Value, url: &str) -> bool {
+const BUILTIN_REGISTRIES: [(&str, &str); 2] = [
+    ("https://registry.start9.com/", "Start9 Registry"),
+    (
+        "https://community-registry.start9.com/",
+        "Community Registry",
+    ),
+];
+
+#[cfg(feature = "beta")]
+const BETA_REGISTRIES: [(&str, &str); 3] = [
+    ("https://beta-registry.start9.com/", "Start9 Beta Registry"),
+    (
+        "https://community-beta-registry.start9.com/",
+        "Community Beta Registry",
+    ),
+    (
+        "https://alpha-registry-x.start9.com/",
+        "Start9 Alpha Registry",
+    ),
+];
+
+#[cfg(not(feature = "beta"))]
+const INITIAL_OS_REGISTRY: &str = "https://registry.start9.com/";
+#[cfg(feature = "beta")]
+const INITIAL_OS_REGISTRY: &str = "https://beta-registry.start9.com/";
+
+/// Registries a new server starts connected to.
+pub fn initial_registries() -> Registries {
+    let mut registries = Registries::new();
+    ensure_builtin_registries(&mut registries);
+    #[cfg(feature = "beta")]
+    for (url, name) in BETA_REGISTRIES {
+        registries.insert(url.into(), Some(name.into()));
+    }
+    registries
+}
+
+/// Registry a new server, or the diagnostic UI, takes StartOS updates from.
+pub fn initial_os_registry() -> Url {
+    INITIAL_OS_REGISTRY.parse().unwrap()
+}
+
+pub(crate) fn ensure_builtin_registries(registries: &mut Registries) {
+    for (url, name) in BUILTIN_REGISTRIES {
+        if !registries.keys().any(|saved| same_registry(saved, url)) {
+            registries.insert(url.into(), Some(name.into()));
+        }
+    }
+}
+
+/// Reads the `registries` map StartOS kept in `public.ui` before 0.4.2.1.
+pub(crate) fn ui_registries(ui: &Value) -> Registries {
     ui.get("registries")
         .and_then(Value::as_object)
-        .is_some_and(|registries| registries.keys().any(|saved| same_registry(saved, url)))
+        .into_iter()
+        .flatten()
+        .map(|(url, name)| (url.clone(), name.as_str().map(str::to_owned)))
+        .collect()
+}
+
+pub(crate) fn connected_registry_urls(
+    registries: &Registries,
+) -> impl Iterator<Item = Result<Url, Error>> + '_ {
+    registries.keys().map(|url| registry_url(url))
+}
+
+pub(crate) fn is_connected(registries: &Registries, url: &str) -> bool {
+    let Ok(url) = registry_url(url) else {
+        return false;
+    };
+    connected_registry_urls(registries).any(|saved| saved.is_ok_and(|saved| saved == url))
 }
 
 fn offered_keys(public: &Public, url: &str) -> BTreeSet<AnyVerifyingKey> {
@@ -67,11 +142,15 @@ fn offered_keys(public: &Public, url: &str) -> BTreeSet<AnyVerifyingKey> {
         .collect()
 }
 
-async fn fetch_info(client: reqwest::Client, url: &Url) -> Result<RegistryInfo, Error> {
-    let value = call_remote_with_client(
-        None,
+async fn fetch_info(
+    client: &crate::context::rpc::ReloadableHttpClient,
+    url: &Url,
+    signer: Signer,
+) -> Result<RegistryInfo, Error> {
+    let value = crate::registry::context::call(
         client,
-        registry_rpc_url(url)?,
+        &signer,
+        url,
         HeaderMap::new(),
         "info",
         imbl_value::json!({}),
@@ -80,13 +159,23 @@ async fn fetch_info(client: reqwest::Client, url: &Url) -> Result<RegistryInfo, 
     from_value(value)
 }
 
+pub async fn list(ctx: RpcContext) -> Result<Registries, Error> {
+    ctx.db
+        .peek()
+        .await
+        .into_public()
+        .into_server_info()
+        .into_registries()
+        .de()
+}
+
 /// Returns the keys it added, which are trusted for packages.
 pub async fn connect(
     ctx: RpcContext,
     params: ConnectRegistryParams,
 ) -> Result<BTreeSet<InternedString>, Error> {
     let url = registry_url(&params.url)?;
-    let info = fetch_info(ctx.client.get(), &url).await?;
+    let info = fetch_info(&ctx.client, &url, ctx.signing_key()?).await?;
     ctx.db
         .mutate(|db| {
             db.as_public_mut()
@@ -96,104 +185,106 @@ pub async fn connect(
         .result
 }
 
-const KEY_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
+/// Returns after queueing resubscription, not after receiving the refreshed catalog.
+pub async fn refresh(ctx: RpcContext, params: TrustedRegistryParams) -> Result<(), Error> {
+    let url = registry_url(&params.url)?;
+    if !is_connected(
+        &ctx.db
+            .peek()
+            .await
+            .as_public()
+            .as_server_info()
+            .as_registries()
+            .de()?,
+        url.as_str(),
+    ) {
+        return Err(Error::new(
+            eyre!("{}", t!("trusted-keys.registry-not-connected")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    ctx.request_registry_refresh(url).await
+}
 
-/// Imports keys a connected registry newly offers, untrusted, and notifies about each new and dropped key.
-pub async fn check_registry(ctx: RpcContext, url: &Url) -> Result<(), Error> {
-    let url = registry_url(url.as_str())?;
-    let ui = ctx.db.peek().await.as_public().as_ui().de()?;
-    let now = tokio::time::Instant::now();
-    if !is_connected(&ui, url.as_str())
-        || !ctx.registry_key_checks.mutate(|checks| {
-            let due = checks
-                .get(url.as_str())
-                .map_or(true, |last| now.duration_since(*last) >= KEY_CHECK_INTERVAL);
-            if due {
-                checks.insert(url.to_string(), now);
-            }
-            due
-        })
-    {
+pub(crate) fn refresh_registry(
+    db: &mut crate::db::model::DatabaseModel,
+    url: &Url,
+    info: &RegistryInfo,
+) -> Result<(), Error> {
+    if !is_connected(
+        &db.as_public().as_server_info().as_registries().de()?,
+        url.as_str(),
+    ) {
         return Ok(());
     }
-    let info = fetch_info(ctx.client.get(), &url).await?;
     let registry = info
         .name
         .clone()
         .unwrap_or_else(|| url.host_str().unwrap_or_default().to_owned());
-    ctx.db
-        .mutate(|db| {
-            let (added, dropped) = db.as_public_mut().mutate(|public| {
-                let changes = refresh_public(public, &url, &info)?;
-                let os_registry = public
-                    .ui
-                    .get("startosRegistry")
-                    .and_then(Value::as_str)
-                    .is_some_and(|os| same_registry(os, url.as_str()));
-                let keys = &public.server_info.trusted_keys;
-                let name = |id: &InternedString| {
-                    keys.get(id)
-                        .map_or_else(|| id.to_string(), |key| key.name.clone())
-                };
-                let added = changes
-                    .added
-                    .into_iter()
-                    .map(|id| (name(&id), id))
-                    .collect::<Vec<_>>();
-                let dropped = changes
-                    .dropped
-                    .into_iter()
-                    .map(|id| {
-                        let critical = os_registry || keys.get(&id).is_some_and(|key| key.os);
-                        (name(&id), critical, id)
-                    })
-                    .collect::<Vec<_>>();
-                Ok((added, dropped))
-            })?;
-            for (name, key) in added {
-                crate::notifications::notify(
-                    db,
-                    None,
-                    crate::notifications::NotificationLevel::Info,
-                    t!("trusted-keys.key-added-title").to_string(),
-                    t!(
-                        "trusted-keys.key-added-message",
-                        registry = registry.as_str(),
-                        name = name.as_str()
-                    )
-                    .to_string(),
-                    crate::notifications::RegistryKeyAdded {
-                        registry: url.to_string(),
-                        key,
-                    },
-                )?;
-            }
-            for (name, critical, key) in dropped {
-                crate::notifications::notify(
-                    db,
-                    None,
-                    if critical {
-                        crate::notifications::NotificationLevel::Warning
-                    } else {
-                        crate::notifications::NotificationLevel::Info
-                    },
-                    t!("trusted-keys.key-dropped-title").to_string(),
-                    t!(
-                        "trusted-keys.key-dropped-message",
-                        registry = registry.as_str(),
-                        name = name.as_str()
-                    )
-                    .to_string(),
-                    crate::notifications::RegistryKeyDropped {
-                        registry: url.to_string(),
-                        key,
-                    },
-                )?;
-            }
-            Ok(())
-        })
-        .await
-        .result
+    let (added, dropped) = db.as_public_mut().mutate(|public| {
+        let changes = refresh_public(public, &url, &info)?;
+        let os_registry = same_registry(public.server_info.os_registry.as_str(), url.as_str());
+        let keys = &public.server_info.trusted_keys;
+        let name = |id: &InternedString| {
+            keys.get(id)
+                .map_or_else(|| id.to_string(), |key| key.name.clone())
+        };
+        let added = changes
+            .added
+            .into_iter()
+            .map(|id| (name(&id), id))
+            .collect::<Vec<_>>();
+        let dropped = changes
+            .dropped
+            .into_iter()
+            .map(|id| {
+                let critical = os_registry || keys.get(&id).is_some_and(|key| key.os);
+                (name(&id), critical, id)
+            })
+            .collect::<Vec<_>>();
+        Ok((added, dropped))
+    })?;
+    for (name, key) in added {
+        crate::notifications::notify(
+            db,
+            None,
+            crate::notifications::NotificationLevel::Info,
+            t!("trusted-keys.key-added-title").to_string(),
+            t!(
+                "trusted-keys.key-added-message",
+                registry = registry.as_str(),
+                name = name.as_str()
+            )
+            .to_string(),
+            crate::notifications::RegistryKeyAdded {
+                registry: url.to_string(),
+                key,
+            },
+        )?;
+    }
+    for (name, critical, key) in dropped {
+        crate::notifications::notify(
+            db,
+            None,
+            if critical {
+                crate::notifications::NotificationLevel::Warning
+            } else {
+                crate::notifications::NotificationLevel::Info
+            },
+            t!("trusted-keys.key-dropped-title").to_string(),
+            t!(
+                "trusted-keys.key-dropped-message",
+                registry = registry.as_str(),
+                name = name.as_str()
+            )
+            .to_string(),
+            crate::notifications::RegistryKeyDropped {
+                registry: url.to_string(),
+                key,
+            },
+        )?;
+    }
+    Ok(())
 }
 
 /// Returns the registry-added keys the removal left unoffered.
@@ -225,49 +316,27 @@ pub async fn set_os_registry(
 }
 
 fn forget_registry(
-    ui: &mut Value,
+    registries: &mut Registries,
     snapshots: &mut BTreeMap<InternedString, BTreeSet<AnyVerifyingKey>>,
     url: &str,
-) -> Result<(), Error> {
-    let object = ui.as_object_mut().ok_or_else(invalid_key)?;
-    if !object.contains_key("registries") {
-        object.insert("registries".into(), imbl_value::json!({}));
-    }
-    let registries = object
-        .get_mut("registries")
-        .unwrap()
-        .as_object_mut()
-        .ok_or_else(invalid_key)?;
-    let aliases = registries
-        .keys()
-        .filter(|saved| same_registry(saved, url))
-        .cloned()
-        .collect::<Vec<_>>();
-    for alias in aliases {
-        registries.remove(&alias);
-    }
+) {
+    registries.retain(|saved, _| !same_registry(saved, url));
     snapshots.retain(|saved, _| !same_registry(saved, url));
-    Ok(())
 }
 
 fn remove_public(public: &mut Public, url: &Url) -> Result<BTreeSet<InternedString>, Error> {
-    if public
-        .ui
-        .get("startosRegistry")
-        .and_then(Value::as_str)
-        .is_some_and(|os| same_registry(os, url.as_str()))
-    {
+    if same_registry(public.server_info.os_registry.as_str(), url.as_str()) {
         return Err(Error::new(
             eyre!("{}", t!("trusted-keys.os-registry-in-use")),
             ErrorKind::InvalidRequest,
         ));
     }
     let offered = offered_keys(public, url.as_str());
-    let mut ui = public.ui.clone();
+    let mut registries = public.server_info.registries.clone();
     let mut snapshots = public.server_info.registry_keys.clone();
-    forget_registry(&mut ui, &mut snapshots, url.as_str())?;
+    forget_registry(&mut registries, &mut snapshots, url.as_str());
     let mut keys = public.server_info.trusted_keys.clone();
-    protect_registry_keys(&mut keys, &snapshots, &ui);
+    protect_registry_keys(&mut keys, &snapshots, &registries);
     let orphaned = keys
         .iter()
         .filter(|(_, key)| {
@@ -275,7 +344,7 @@ fn remove_public(public: &mut Public, url: &Url) -> Result<BTreeSet<InternedStri
         })
         .map(|(id, _)| id.clone())
         .collect();
-    public.ui = ui;
+    public.server_info.registries = registries;
     public.server_info.registry_keys = snapshots;
     public.server_info.trusted_keys = keys;
     Ok(orphaned)
@@ -285,17 +354,13 @@ fn set_os_registry_public(
     public: &mut Public,
     url: &Url,
 ) -> Result<BTreeSet<InternedString>, Error> {
-    if !is_connected(&public.ui, url.as_str()) {
+    if !is_connected(&public.server_info.registries, url.as_str()) {
         return Err(Error::new(
             eyre!("{}", t!("trusted-keys.registry-not-connected")),
             ErrorKind::NotFound,
         ));
     }
     let offered = offered_keys(public, url.as_str());
-    let mut ui = public.ui.clone();
-    ui.as_object_mut()
-        .ok_or_else(invalid_key)?
-        .insert("startosRegistry".into(), to_value(url)?);
     let mut keys = public.server_info.trusted_keys.clone();
     let mut enabled = BTreeSet::new();
     for (id, key) in &mut keys {
@@ -304,7 +369,7 @@ fn set_os_registry_public(
             enabled.insert(id.clone());
         }
     }
-    public.ui = ui;
+    public.server_info.os_registry = url.clone();
     public.server_info.trusted_keys = keys;
     Ok(enabled)
 }
@@ -360,22 +425,13 @@ fn connect_public(
         }
     }
     merge_individual_keys(&mut keys, proposal);
-    let mut ui = public.ui.clone();
+    let mut registries = public.server_info.registries.clone();
     let mut snapshots = public.server_info.registry_keys.clone();
-    forget_registry(&mut ui, &mut snapshots, origin)?;
-    ui.as_object_mut()
-        .unwrap()
-        .get_mut("registries")
-        .unwrap()
-        .as_object_mut()
-        .unwrap()
-        .insert(
-            origin.into(),
-            to_value(&name.or_else(|| info.name.clone()))?,
-        );
+    forget_registry(&mut registries, &mut snapshots, origin);
+    registries.insert(origin.into(), name.or_else(|| info.name.clone()));
     snapshots.insert(origin.into(), proposed);
-    protect_registry_keys(&mut keys, &snapshots, &ui);
-    public.ui = ui;
+    protect_registry_keys(&mut keys, &snapshots, &registries);
+    public.server_info.registries = registries;
     public.server_info.registry_keys = snapshots;
     public.server_info.trusted_keys = keys;
     Ok(added)
@@ -394,7 +450,7 @@ fn refresh_public(
     info: &RegistryInfo,
 ) -> Result<KeyChanges, Error> {
     let origin = url.as_str().trim_end_matches('/');
-    if !is_connected(&public.ui, origin) {
+    if !is_connected(&public.server_info.registries, origin) {
         return Ok(KeyChanges::default());
     }
     let proposal = proposed_keys(info, origin)?;
@@ -416,7 +472,7 @@ fn refresh_public(
     snapshots.retain(|saved, _| !same_registry(saved, origin));
     snapshots.insert(origin.into(), proposed);
     merge_individual_keys(&mut keys, proposal);
-    protect_registry_keys(&mut keys, &snapshots, &public.ui);
+    protect_registry_keys(&mut keys, &snapshots, &public.server_info.registries);
     public.server_info.registry_keys = snapshots;
     public.server_info.trusted_keys = keys;
     Ok(KeyChanges { added, dropped })
@@ -425,6 +481,35 @@ fn refresh_public(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::package::promote::registry_rpc_url;
+
+    #[test]
+    fn cli_parses_registry_commands() {
+        let add = ConnectRegistryParams::try_parse_from([
+            "add",
+            "https://registry.example",
+            "--name",
+            "Mine",
+        ])
+        .unwrap();
+        assert_eq!(
+            (add.url.as_str(), add.name.as_deref()),
+            ("https://registry.example", Some("Mine"))
+        );
+        assert_eq!(
+            ConnectRegistryParams::try_parse_from(["add", "https://registry.example"])
+                .unwrap()
+                .name,
+            None
+        );
+        assert_eq!(
+            TrustedRegistryParams::try_parse_from(["remove", "https://registry.example"])
+                .unwrap()
+                .url,
+            "https://registry.example"
+        );
+        assert!(TrustedRegistryParams::try_parse_from(["remove"]).is_err());
+    }
     use crate::util::future::NonDetachingJoinHandle;
 
     fn public() -> Public {
@@ -432,7 +517,7 @@ mod tests {
             crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
                 .unwrap();
         let mut public = Public::init(&account, false, None, None).unwrap();
-        public.ui = imbl_value::json!({ "registries": {} });
+        public.server_info.registries = Registries::new();
         mutate_public_keys(&mut public, |_| Ok(())).unwrap();
         public
     }
@@ -559,8 +644,8 @@ mod tests {
                 let protected = public.server_info.trusted_keys[requested.last().unwrap()]
                     .public_key
                     .clone();
-                public.ui =
-                    imbl_value::json!({ "registries": { "https://registry.example": null } });
+                public.server_info.registries =
+                    Registries::from([("https://registry.example".into(), None)]);
                 public.server_info.registry_keys.insert(
                     "https://registry.example".into(),
                     BTreeSet::from([protected]),
@@ -633,7 +718,10 @@ mod tests {
                 .registry_keys
                 .insert("https://alpha-registry.start9.com".into(), alpha.clone());
             if connected {
-                public.ui["registries"]["https://alpha-registry.start9.com"] = Value::Null;
+                public
+                    .server_info
+                    .registries
+                    .insert("https://alpha-registry.start9.com".into(), None);
             }
             let changes = refresh_public(&mut public, &url, &info).unwrap();
             assert_eq!(
@@ -662,34 +750,41 @@ mod tests {
             trust_signers: signers([(signing_key.clone(), "Publisher")]),
             ..Default::default()
         };
-        let response = serde_json::to_value(&info).unwrap();
-        let router = axum::Router::new().route(
-            "/catalog/rpc/v0",
-            axum::routing::post(move |axum::Json(request): axum::Json<serde_json::Value>| {
-                let response = response.clone();
-                async move {
-                    assert_eq!(request["params"], serde_json::json!({}));
-                    axum::Json(if request["method"] == "info" {
-                        serde_json::json!({ "jsonrpc": "2.0", "id": request["id"], "result": response })
-                    } else {
-                        serde_json::json!({ "jsonrpc": "2.0", "id": request["id"], "error": { "code": -32601, "message": "Method not found" } })
-                    })
-                }
-            }),
-        );
+        let temp = tempfile::tempdir().unwrap();
+        let ctx =
+            crate::registry::context::test_context(temp.path().to_owned(), signing_key.clone())
+                .await;
+        ctx.db
+            .mutate(|db| {
+                let signers: BTreeSet<_> = info.trust_signers.keys().cloned().collect();
+                db.as_admins_mut().ser(&signers)?;
+                db.as_index_mut().as_trust_signers_mut().ser(&signers)?;
+                db.as_index_mut().as_signers_mut().ser(&info.trust_signers)
+            })
+            .await
+            .result
+            .unwrap();
+        let router = axum::Router::new().nest("/catalog", crate::registry::registry_router(ctx));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = registry_url(&format!(
-            "http://{}/catalog/",
-            listener.local_addr().unwrap()
+            "http://localhost:{}/catalog/",
+            listener.local_addr().unwrap().port()
         ))
         .unwrap();
         let _server: NonDetachingJoinHandle<()> = tokio::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         })
         .into();
+        let (client, _proxy) = crate::registry::context::test_utils::socks_client(&url).await;
         let fetched = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            fetch_info(reqwest::Client::new(), &url),
+            fetch_info(
+                &client,
+                &url,
+                crate::sign::Signer::Key(crate::sign::AnySigningKey::Ed25519(
+                    ed25519_dalek::SigningKey::from_bytes(&[71; 32]),
+                )),
+            ),
         )
         .await
         .unwrap()
@@ -714,7 +809,10 @@ mod tests {
             )
         })
         .unwrap();
-        existing.ui["registries"][url.as_str().trim_end_matches('/')] = Value::Null;
+        existing
+            .server_info
+            .registries
+            .insert(url.as_str().trim_end_matches('/').into(), None);
         assert!(existing.server_info.trusted_keys[&id].removable);
         assert!(
             refresh_public(&mut existing, &url, &fetched)
@@ -757,8 +855,8 @@ mod tests {
             BTreeSet::from([first.interned_der64(), second.interned_der64()])
         );
         assert_eq!(
-            public.ui["registries"]["https://registry.example/base"],
-            imbl_value::json!("Registry")
+            public.server_info.registries["https://registry.example/base"],
+            Some("Registry".into())
         );
         for key in [&first, &second] {
             let entry = public
@@ -843,20 +941,6 @@ mod tests {
     }
 
     #[test]
-    fn invalid_ui_leaves_registry_and_trust_unchanged() {
-        let mut public = public();
-        let url = registry_url("https://registry.example").unwrap();
-        public.ui = imbl_value::json!({ "registries": false });
-        let before = to_value(&public).unwrap();
-        let info = RegistryInfo {
-            trust_signers: signers([(key(42), "New key")]),
-            ..Default::default()
-        };
-        assert!(connect_public(&mut public, &url, None, &info).is_err());
-        assert_eq!(to_value(&public).unwrap(), before);
-    }
-
-    #[test]
     fn existing_registries_without_proposals_connect_without_implicit_trust() {
         let mut public = public();
         let saved = public.server_info.trusted_keys.clone();
@@ -874,8 +958,8 @@ mod tests {
         );
         assert_eq!(public.server_info.trusted_keys, saved);
         assert_eq!(
-            public.ui["registries"]["https://legacy.example"],
-            Value::Null
+            public.server_info.registries["https://legacy.example"],
+            None
         );
     }
 
@@ -925,7 +1009,10 @@ mod tests {
         let mut public = public();
         let key = key(44);
         let id = key.interned_der64();
-        public.ui = imbl_value::json!({ "registries": { "https://REGISTRY.example/": "Old", "https://unrelated.example/": null } });
+        public.server_info.registries = Registries::from([
+            ("https://REGISTRY.example/".into(), Some("Old".into())),
+            ("https://unrelated.example/".into(), None),
+        ]);
         public.server_info.registry_keys.insert(
             "https://registry.example/".into(),
             BTreeSet::from([key.clone()]),
@@ -937,10 +1024,10 @@ mod tests {
             ..Default::default()
         };
         connect_public(&mut public, &url, None, &info).unwrap();
-        assert_eq!(public.ui["registries"].as_object().unwrap().len(), 2);
+        assert_eq!(public.server_info.registries.len(), 2);
         assert_eq!(
-            public.ui["registries"]["https://registry.example"],
-            imbl_value::json!("Fetched name")
+            public.server_info.registries["https://registry.example"],
+            Some("Fetched name".into())
         );
         assert_eq!(public.server_info.registry_keys.len(), 1);
         let saved = public.server_info.trusted_keys[&id].clone();
@@ -953,7 +1040,7 @@ mod tests {
             .unwrap(),
             BTreeSet::from([id.clone()])
         );
-        assert_eq!(public.ui["registries"].as_object().unwrap().len(), 1);
+        assert_eq!(public.server_info.registries.len(), 1);
         assert!(public.server_info.registry_keys.is_empty());
         assert_eq!(
             public.server_info.trusted_keys[&id],
@@ -1147,18 +1234,20 @@ mod tests {
             "https://registry.example/base".into(),
             BTreeSet::from([key(88)]),
         );
-        assert!(!is_connected(&public.ui, url.as_str()));
+        assert!(!is_connected(&public.server_info.registries, url.as_str()));
         let saved = to_value(&public).unwrap();
         assert_eq!(
             refresh_public(&mut public, &url, &gpg_info()).unwrap(),
             KeyChanges::default()
         );
         assert_eq!(to_value(&public).unwrap(), saved);
-        public.ui =
-            imbl_value::json!({ "registries": { "https://REGISTRY.example/base/": "Saved" } });
-        assert!(is_connected(&public.ui, url.as_str()));
-        assert!(!is_connected(&public.ui, "https://registry.example/other"));
-        assert!(!is_connected(&public.ui, "https://unknown.example/base"));
+        let registries = Registries::from([(
+            "https://REGISTRY.example/base/".into(),
+            Some("Saved".into()),
+        )]);
+        assert!(is_connected(&registries, url.as_str()));
+        assert!(!is_connected(&registries, "https://registry.example/other"));
+        assert!(!is_connected(&registries, "https://unknown.example/base"));
     }
 
     #[test]
@@ -1220,10 +1309,7 @@ mod tests {
             set_os_registry_public(&mut public, &url).unwrap(),
             BTreeSet::from([listed.interned_der64()])
         );
-        assert_eq!(
-            public.ui["startosRegistry"],
-            imbl_value::json!("https://registry.example/")
-        );
+        assert_eq!(public.server_info.os_registry, url);
         let keys = &public.server_info.trusted_keys;
         assert!(keys[&listed.interned_der64()].os);
         assert!(!keys[&unlisted.interned_der64()].os);
@@ -1284,6 +1370,38 @@ mod tests {
     }
 
     #[test]
+    fn a_new_server_takes_os_updates_from_a_connected_registry() {
+        assert!(is_connected(
+            &initial_registries(),
+            initial_os_registry().as_str()
+        ));
+    }
+
+    #[test]
+    fn builtin_registries_can_be_removed_unless_they_provide_os_updates() {
+        let mut public = public();
+        ensure_builtin_registries(&mut public.server_info.registries);
+        public.server_info.os_registry = "https://registry.start9.com/".parse().unwrap();
+        let start9 = registry_url("https://registry.start9.com").unwrap();
+        assert!(remove_public(&mut public, &start9).is_err());
+        remove_public(
+            &mut public,
+            &registry_url("https://community-registry.start9.com/").unwrap(),
+        )
+        .unwrap();
+        assert!(!is_connected(
+            &public.server_info.registries,
+            "https://community-registry.start9.com"
+        ));
+        public.server_info.os_registry = "https://registry.example/".parse().unwrap();
+        remove_public(&mut public, &start9).unwrap();
+        assert!(!is_connected(
+            &public.server_info.registries,
+            "https://registry.start9.com"
+        ));
+    }
+
+    #[test]
     fn the_last_os_update_key_keeps_its_trust() {
         let mut public = public();
         let ids = public
@@ -1313,15 +1431,15 @@ mod tests {
         }
         let before = to_value(&public).unwrap();
         assert!(distrust(&mut public, last).is_err());
-        let key = public.server_info.trusted_keys[last].public_key.clone();
-        assert!(mutate_public_keys(&mut public, |keys| legacy_remove(keys, &key)).is_err());
+        assert!(mutate_public_keys(&mut public, |keys| remove_key(keys, last)).is_err());
         assert_eq!(to_value(&public).unwrap(), before);
     }
 
     #[test]
     fn legacy_registry_discovery_canonicalizes_snapshot_aliases_and_is_atomic_on_invalid_exports() {
         let mut public = public();
-        public.ui = imbl_value::json!({ "registries": { "https://REGISTRY.example/": "My name" } });
+        public.server_info.registries =
+            Registries::from([("https://REGISTRY.example/".into(), Some("My name".into()))]);
         let url = registry_url("https://registry.example").unwrap();
         let mut info = gpg_info();
         let listed = info.trust_signers.values().next().unwrap().keys.clone();
@@ -1342,8 +1460,8 @@ mod tests {
             ids(&listed)
         );
         assert_eq!(
-            public.ui["registries"]["https://REGISTRY.example/"],
-            imbl_value::json!("My name")
+            public.server_info.registries["https://REGISTRY.example/"],
+            Some("My name".into())
         );
         assert_eq!(public.server_info.registry_keys.len(), 1);
         assert!(

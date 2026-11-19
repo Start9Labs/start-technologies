@@ -5,12 +5,12 @@ use std::time::Duration;
 
 use futures::future::BoxFuture;
 use futures::{Future, FutureExt};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
-#[allow(unused_imports)]
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::actor::background::BackgroundJobQueue;
+use crate::util::future::NonDetachingJoinHandle;
 
 pub mod background;
 pub mod concurrent;
@@ -23,7 +23,7 @@ pub trait Actor: Sized + Send + 'static {
 
 pub trait Handler<M: Any + Send>: Actor {
     type Response: Any + Send;
-    /// DRAGONS: this must be correctly implemented bi-directionally in order to work as expected
+    /// Conflict decisions must be symmetric.
     fn conflicts_with(#[allow(unused_variables)] msg: &M) -> ConflictBuilder<Self> {
         ConflictBuilder::everything()
     }
@@ -93,6 +93,63 @@ type Request<A> = (
     oneshot::Sender<Box<dyn Any + Send>>,
 );
 
+fn runtime_exited() -> Error {
+    Error::new(eyre!(t!("util.actor.runtime-exited")), ErrorKind::Unknown)
+}
+
+fn enqueue<A: Handler<M>, M: Send + 'static>(
+    messenger: &mpsc::UnboundedSender<Request<A>>,
+    id: Guid,
+    message: M,
+) -> impl Future<Output = Result<A::Response, Error>> {
+    let (reply, response) = oneshot::channel();
+    if messenger.send((id, Box::new(message), reply)).is_err() {
+        return futures::future::Either::Left(futures::future::ready(Err(runtime_exited())));
+    }
+    futures::future::Either::Right(async move {
+        response
+            .await
+            .map_err(|_| runtime_exited())?
+            .downcast()
+            .map(|value| *value)
+            .map_err(|_| {
+                Error::new(
+                    eyre!("received incorrect type in response"),
+                    ErrorKind::Incoherent,
+                )
+            })
+    })
+}
+
+fn shutdown_runtime(
+    mut runtime: NonDetachingJoinHandle<()>,
+    shutdown: oneshot::Sender<()>,
+    strategy: PendingMessageStrategy,
+) -> BoxFuture<'static, ()> {
+    async move {
+        let timeout = match strategy {
+            PendingMessageStrategy::CancelAll => {
+                let _ = runtime.wait_for_abort().await;
+                return;
+            }
+            PendingMessageStrategy::FinishCurrentCancelPending { timeout } => {
+                let _ = shutdown.send(());
+                timeout
+            }
+            PendingMessageStrategy::FinishAll { timeout } => timeout,
+        };
+        if let Some(timeout) = timeout {
+            if tokio::time::timeout(timeout, &mut runtime).await.is_err() {
+                let _ = runtime.wait_for_abort().await;
+            }
+        } else {
+            let _ = runtime.await;
+        }
+    }
+    .boxed()
+}
+
+/// Shutdown always joins the runner, including cancellation.
 pub enum PendingMessageStrategy {
     CancelAll,
     FinishCurrentCancelPending { timeout: Option<Duration> },

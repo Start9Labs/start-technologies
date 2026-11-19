@@ -1,6 +1,5 @@
-// @ts-check
-
 import * as net from 'net'
+import { schemas } from '@start9labs/start-core'
 
 import {
   ExtendedVersion,
@@ -82,6 +81,11 @@ const initType = z.looseObject({
     kind: z.enum(['install', 'update', 'restore']).nullable(),
   }),
 })
+const initBackupType = z.looseObject({
+  id: idType.optional(),
+  method: z.literal('init-backup'),
+  params: schemas.BackupInitParams,
+})
 const startType = z.looseObject({
   id: idType.optional(),
   method: z.literal('start'),
@@ -155,6 +159,7 @@ export class RpcListener {
   unixSocketServer = net.createServer(async server => {})
   private _system: System | undefined
   private callbacks: CallbackHolder | undefined
+  private backupOnly = false
 
   constructor(readonly getDependencies: AllGetDependencies) {
     if (!fs.existsSync(SOCKET_PARENT)) {
@@ -229,6 +234,13 @@ export class RpcListener {
         }
       })
     })
+  }
+
+  private async loadSystem(eventId: string) {
+    const system = await this.getDependencies.system()
+    const callbacks = new CallbackHolder(makeEffects({ eventId }))
+    this.callbacks = callbacks
+    return { system, callbacks }
   }
 
   private get system() {
@@ -325,20 +337,34 @@ export class RpcListener {
           'exit',
           (async () => {
             if (this._system) {
-              let target = null
-              if (params.target)
-                try {
-                  target = ExtendedVersion.parse(params.target)
-                } catch (_) {
-                  target = VersionRange.parse(params.target).normalize()
-                }
-              await this._system.exit(
-                makeEffects({
-                  eventId: params.id,
-                }),
-                target,
-              )
+              if (!this.backupOnly) {
+                let target = null
+                if (params.target)
+                  try {
+                    target = ExtendedVersion.parse(params.target)
+                  } catch (_) {
+                    target = VersionRange.parse(params.target).normalize()
+                  }
+                await this._system.exit(
+                  makeEffects({ eventId: params.id }),
+                  target,
+                )
+              }
               this.shouldExit = true
+            }
+          })().then(result => ({ result })),
+        )
+      }
+      case 'init-backup': {
+        const { id, params } = initBackupType.parse(input)
+        return handleRpc(
+          id,
+          'init-backup',
+          (async () => {
+            if (!this._system) {
+              const { system } = await this.loadSystem(params.id)
+              this.backupOnly = true
+              this._system = system
             }
           })().then(result => ({ result })),
         )
@@ -350,18 +376,12 @@ export class RpcListener {
           'init',
           (async () => {
             if (!this._system) {
-              const system = await this.getDependencies.system()
-              this.callbacks = new CallbackHolder(
-                makeEffects({
-                  eventId: params.id,
-                }),
-              )
-              const callbacks = this.callbacks.child('init')
+              const { system, callbacks } = await this.loadSystem(params.id)
               console.error('Initializing...')
               await system.init(
                 makeEffects({
                   eventId: params.id,
-                  callbacks,
+                  callbacks: callbacks.child('init'),
                 }),
                 params.kind,
               )

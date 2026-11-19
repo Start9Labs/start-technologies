@@ -32,20 +32,23 @@ This runtime lives at `projects/start-os/container-runtime` and is a Node.js pac
 
 ## `/media/startos/` directory (mounted by the host into the container)
 
-| Path                 | Description                                           |
-| -------------------- | ----------------------------------------------------- |
-| `volumes/<name>/`    | Package data volumes (id-mapped, persistent)          |
-| `assets/`            | Read-only assets from s9pk `assets.squashfs`          |
-| `images/<name>/`     | Container images (squashfs, used for subcontainers)   |
-| `images/<name>.env`  | Environment variables for image                       |
-| `images/<name>.json` | Image metadata                                        |
-| `backup/`            | Backup mount point (mounted during backup operations) |
-| `rpc/service.sock`   | RPC socket (container runtime listens here)           |
-| `rpc/host.sock`      | Host RPC socket (effects callbacks back to host)      |
+| Path                 | Description                                                        |
+| -------------------- | ------------------------------------------------------------------ |
+| `volumes/<name>/`    | Package data volumes (id-mapped, persistent)                       |
+| `shared-volumes/`    | Host-owned shared sources and read-only placeholder for host binds |
+| `assets/`            | Read-only assets from s9pk `assets.squashfs`                       |
+| `images/<name>/`     | Container images (squashfs, used for subcontainers)                |
+| `images/<name>.env`  | Environment variables for image                                    |
+| `images/<name>.json` | Image metadata                                                     |
+| `backup/`            | Backup mount point (mounted during backup operations)              |
+| `rpc/service.sock`   | RPC socket (container runtime listens here)                        |
+| `rpc/host.sock`      | Host RPC socket (effects callbacks back to host)                   |
 
 ## RPC protocol
 
-The runtime listens on `/media/startos/rpc/service.sock` and exposes a JSON-RPC API for the host (`init`, `exit`, `start`, `stop`, `execute`, `callback`, …). Effects flowing the other way (filesystem, network, store, dependency calls) reach the host over `host.sock`. The full method list and parameter types live in [`RPCSpec.md`](RPCSpec.md).
+The runtime listens on `/media/startos/rpc/service.sock` and exposes a JSON-RPC API for the host (`init`, `init-backup`, `exit`, `start`, `stop`, `execute`, `callback`, …). Effects flowing the other way (filesystem, network, store, dependency calls) reach the host over `host.sock`. The full method list and parameter types live in [`RPCSpec.md`](RPCSpec.md).
+
+Services declaring the shared-volume capability run backup procedures in a separate, fresh runtime. `init-backup` loads the ABI without service initialization hooks; exit skips uninitialization hooks. The host never attaches shared sources to this runtime and rejects shared mount effects. Package-owned volume and backup mounts retain their ordinary behavior. The service's normal runtime remains separate, including its networking and any open shared-volume handles.
 
 ## Image build
 
@@ -53,7 +56,7 @@ The runtime ships as a squashfs rootfs baked into the StartOS image:
 
 1. `download-base-image.sh` fetches the Debian trixie LXC base (`debian.<arch>.squashfs`).
 2. `npm run build` compiles `src/` to `dist/`; `install-dist-deps.sh` installs production deps into `dist/node_modules`.
-3. `update-image-local.sh` runs `update-image.sh` inside the `start9/build-env` container: it overlays `dist/` into the base at `/usr/lib/startos/init/`, drops in `start-container` and the systemd units, runs `deb-install.sh` in the chroot to upgrade base packages and install runtime dependencies, and mksquashfs's the result to `rootfs.<arch>.squashfs`.
+3. `update-image-local.sh` runs `update-image.sh` inside the `start9/build-env` container: it extracts the base, copies `dist/` into it at `/usr/lib/startos/init/`, drops in `start-container` and the systemd units, runs `deb-install.sh` in the chroot to upgrade base packages and install runtime dependencies, and mksquashfs's the result to `rootfs.<arch>.squashfs`.
 
 The top-level `Makefile` orchestrates all of this (`projects/start-os/container-runtime/rootfs.$(ARCH).squashfs` target); the squashfs is installed to `/usr/lib/startos/container-runtime/rootfs.squashfs` in the final OS image.
 

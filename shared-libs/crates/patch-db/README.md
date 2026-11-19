@@ -66,6 +66,14 @@ capacities. Send these buffers directly rather than serializing them again.
 fresh dump and subscription rather than continuing with missing patches. Ordinary typed subscribers
 and watches keep their existing unbounded behavior.
 
+### Resuming subscriptions
+
+`catch_up_and_sub(pointer, since)` returns the store's epoch, a `Catchup`, and a subscription. Given
+`Some((epoch, id))` from an earlier call to the same open store, and an `id` the retained history of
+1024 revisions still reaches, it replays the revisions after `id` scoped to `pointer`, followed by the
+current revision id; otherwise it dumps. The epoch is random per open, so a cursor never resumes
+against another store or a reopened one.
+
 ### TypeScript
 
 ```typescript
@@ -92,7 +100,8 @@ db.watch$('settings', 'theme').subscribe(theme => {
 ## Rust reflection
 
 The core crate's optional `reflect` feature enables `visit_rs::VisitFields`
-for the `Dump` struct, providing raw declaration facts and static field traversal. RPC's `ts` + `patch-db` integration enables it and owns TypeScript
+for snapshot, revision and patch structs, plus `VisitVariants` for patch operations,
+providing raw declaration facts and static traversal. RPC's `ts` + `patch-db` integration enables it and owns TypeScript
 rendering and bridges. Dependency edges point from RPC to patch-db, not back to RPC.
 
 ## Further reading

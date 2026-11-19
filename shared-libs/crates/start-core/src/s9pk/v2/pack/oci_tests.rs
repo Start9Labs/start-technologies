@@ -1,4 +1,7 @@
 use std::os::unix::fs::PermissionsExt;
+use std::time::Duration;
+
+use tokio::io::AsyncBufReadExt;
 
 use super::*;
 
@@ -20,13 +23,28 @@ async fn builder_and_local_layouts_avoid_daemon_round_trips() {
             &docker,
             r#"#!/bin/sh
 set -eu
+build_log() {
+  echo 'build progress' >&2
+  attempts=0
+  while [ ! -e "$STARTOS_OCI_SOURCE_TEST/ack" ]; do
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 1000 ] || exit 1
+    sleep 0.01
+  done
+  case "$STARTOS_OCI_SOURCE_KIND" in
+    *-failed) echo 'build failed' >&2; exit 17 ;;
+  esac
+}
 case "$*" in
   'buildx build '*)
     case " $* " in *" --output=type=oci,dest=- "*) ;; *) exit 1 ;; esac
     touch "$STARTOS_OCI_SOURCE_TEST/built"
+    build_log
     cat "$STARTOS_OCI_SOURCE_TEST/image.tar" ;;
   'build '*--format=oci*)
-    touch "$STARTOS_OCI_SOURCE_TEST/built" ;;
+    touch "$STARTOS_OCI_SOURCE_TEST/built"
+    echo 'podman stdout'
+    build_log ;;
   'image save --format=oci-archive start9/package-build:'*)
     touch "$STARTOS_OCI_SOURCE_TEST/exported"
     cat "$STARTOS_OCI_SOURCE_TEST/image.tar" ;;
@@ -46,20 +64,63 @@ esac
             .unwrap();
         let mut paths = vec![temp.to_path_buf()];
         paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
-        for source in ["docker-builder", "podman-builder", "local"] {
-            Command::new(std::env::current_exe().unwrap())
+        for source in [
+            "docker-builder",
+            "docker-builder-failed",
+            "podman-builder",
+            "podman-builder-failed",
+            "local",
+        ] {
+            let mut child = Command::new(std::env::current_exe().unwrap())
                 .arg(TEST)
                 .arg("--exact")
+                .arg("--nocapture")
                 .env(CHILD, &**temp)
                 .env("STARTOS_OCI_SOURCE_KIND", source)
                 .env("PATH", std::env::join_paths(&paths).unwrap())
-                .invoke(ErrorKind::Filesystem)
-                .await
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
                 .unwrap();
+            let mut stderr = tokio::io::BufReader::new(child.stderr.take().unwrap()).lines();
+            let logs = async {
+                let mut logs = Vec::new();
+                while let Some(line) = stderr.next_line().await.unwrap() {
+                    if line == "build progress" {
+                        tokio::fs::write(temp.join("ack"), b"").await.unwrap();
+                    }
+                    logs.push(line);
+                }
+                logs
+            };
+            let (output, logs) = tokio::time::timeout(Duration::from_secs(30), async {
+                tokio::join!(child.wait_with_output(), logs)
+            })
+            .await
+            .expect("build logs must be visible before the build exits");
+            let output = output.unwrap();
+            assert!(
+                output.status.success(),
+                "{source}: {logs:?}\n{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            assert_eq!(
+                logs.iter().any(|line| line == "build progress"),
+                source != "local"
+            );
+            assert_eq!(
+                logs.iter().any(|line| line == "build failed"),
+                source.ends_with("-failed")
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout).contains("podman stdout"),
+                source.starts_with("podman")
+            );
             assert_eq!(temp.join("built").exists(), source != "local");
             assert_eq!(temp.join("exported").exists(), source == "podman-builder");
             assert_eq!(temp.join("removed").exists(), source == "podman-builder");
-            for marker in ["built", "exported", "removed"] {
+            for marker in ["built", "exported", "removed", "ack"] {
                 if temp.join(marker).exists() {
                     tokio::fs::remove_file(temp.join(marker)).await.unwrap();
                 }
@@ -69,7 +130,7 @@ esac
         return;
     }
     let kind = std::env::var("STARTOS_OCI_SOURCE_KIND").unwrap();
-    PREFER_DOCKER.set(kind != "podman-builder").unwrap();
+    PREFER_DOCKER.set(!kind.starts_with("podman")).unwrap();
     let source = if kind != "local" {
         ImageSource::DockerBuild {
             workdir: None,
@@ -83,15 +144,22 @@ esac
         }
     };
     let mut files = DirectoryContents::<TmpSource<PackSource>>::new();
-    source
+    let result = source
         .load(
             temp.clone(),
             &"main".parse().unwrap(),
             "aarch64",
             &mut files,
         )
-        .await
-        .unwrap();
+        .await;
+    if kind.ends_with("-failed") {
+        let error = result.unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Docker);
+        assert!(error.to_string().contains("build failed"), "{error}");
+        temp.gc().await.unwrap();
+        return;
+    }
+    result.unwrap();
     let metadata: ImageMetadata = serde_json::from_slice(
         &files
             .get_path("images/aarch64/main.json")

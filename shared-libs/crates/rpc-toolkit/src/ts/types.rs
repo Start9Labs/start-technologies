@@ -1144,6 +1144,7 @@ impl_ts!(serde_json::Value => "z.unknown()", "z.ZodUnknown");
 #[cfg(feature = "cbor")]
 impl_ts!(serde_cbor::Value => "z.unknown()", "z.ZodUnknown");
 impl_ts!(Never => "z.never()", "z.ZodNever");
+impl_ts!(crate::Never => "z.never()", "z.ZodNever");
 impl_ts!(() => "z.null()", "z.ZodNull");
 impl_ts!(serde_json::Number => "z.number()", "z.ZodNumber");
 #[cfg(feature = "url")]
@@ -1416,6 +1417,26 @@ impl_ts!(yasi::InternedString => "z.string()", "z.ZodString");
 impl_ts!(exver::Version, exver::ExtendedVersion, exver::VersionRange => "z.string()", "z.ZodString");
 #[cfg(feature = "patch-db")]
 crate::reflect_ts!(patch_db::Dump);
+#[cfg(feature = "patch-db")]
+crate::reflect_ts!(patch_db::Revision);
+#[cfg(feature = "patch-db")]
+crate::reflect_ts!(patch_db::DiffPatch);
+#[cfg(feature = "patch-db")]
+crate::reflect_ts!(patch_db::json_patch::Patch);
+#[cfg(feature = "patch-db")]
+crate::reflect_ts!(patch_db::json_patch::PatchOperation);
+#[cfg(feature = "patch-db")]
+crate::reflect_ts!(patch_db::json_patch::AddOperation);
+#[cfg(feature = "patch-db")]
+crate::reflect_ts!(patch_db::json_patch::RemoveOperation);
+#[cfg(feature = "patch-db")]
+crate::reflect_ts!(patch_db::json_patch::ReplaceOperation);
+#[cfg(feature = "patch-db")]
+crate::reflect_ts!(patch_db::json_patch::MoveOperation);
+#[cfg(feature = "patch-db")]
+crate::reflect_ts!(patch_db::json_patch::CopyOperation);
+#[cfg(feature = "patch-db")]
+crate::reflect_ts!(patch_db::json_patch::TestOperation);
 #[cfg(feature = "patch-db")]
 impl<S: AsRef<str>, V: patch_db::json_ptr::SegList> TS for patch_db::json_ptr::JsonPointer<S, V> {
     fn visit_ts(visitor: &mut TSVisitor) {

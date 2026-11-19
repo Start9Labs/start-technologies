@@ -3,29 +3,39 @@
 The fleet's newest whole apps run on 12–48 lines of global CSS and a few `:host` blocks. The
 ladder from SKILL.md doctrine #3, expanded:
 
-1. **Layout primitives before any CSS**: `tuiCardLarge` (+`appearance="floating"`), `tuiHeader`
-   - `hgroup tuiTitle` + `aside tuiAccessories` for page headers, `tuiCell` rows, `tuiForm="m"`,
-     `tuiTitle`/`tuiSubtitle`, `tuiBadge`, `tuiAvatar` (large icons — not `tui-icon` +
-     `font-size`), `TuiNavigation` shells, `tuiTable`. _"Hand-centering a card's contents means
-     you missed a primitive."_
-2. **Appearances are the color system**: `appearance="primary | secondary | flat | outline |
-accent | positive | negative | warning | info | icon | floating | primary-destructive |
-flat-grayscale | outline-grayscale | action-grayscale | …"` on buttons/badges/cells/
-   notifications — never color classes on components that have appearances. `appearance=""`
+1. **Layout primitives before any CSS**: `tuiCardLarge` (with `appearance="floating"`),
+   `tuiHeader` with `hgroup tuiTitle` and `aside tuiAccessories` for page headers, `tuiCell`
+   rows, `tuiForm="m"`, `tuiTitle`/`tuiSubtitle`, `tuiBadge`, `tuiAvatar` (large icons — not
+   `tui-icon` with a `font-size`), `TuiNavigation` shells, `tuiTable`. _"Hand-centering a
+   card's contents means you missed a primitive."_
+   - **Illustrations are built from the same primitives.** A mock chat, notification, invoice
+     or dashboard drawn for a marketing page is `tuiCardLarge="compact" appearance="floating"`
+     around `tuiHeader` / `tuiCell` rows with `tuiAvatar`, `tuiTitle`/`tuiSubtitle`, `tuiBadge`
+     and `tuiChip` — not a `BOX` constant, a literal `box-shadow` and per-element font rules.
+   - **Type size comes from the element, not CSS.** `tuiHeader="h6"` (or `body-s`, `h2`, …)
+     sizes any element, a `dd` or a price included; fine print is `<small>`. A
+     `font: var(--tui-typography-…)` rule on an element a primitive can size gets deleted.
+     `tuiHeader`, `tuiChip` and `tuiBadge` set the `font` shorthand on their own
+     element, so `<b tuiChip>` loses its bold: nest it, `<code tuiChip><b>…</b></code>`.
+     `tuiHeader` also sets `text-align: start`, so a centred heading keeps its own type rule.
+2. **Appearances are the color system**: `appearance` (the names are in taiga.md) on
+   buttons/badges/cells/notifications — never color classes on components that have appearances. `appearance=""`
    deliberately neutralizes chrome (e.g. accordion/drawer buttons). Custom appearances are
    built with Taiga's SCSS mixins in the theme sheet under
    `[tuiAppearance][data-appearance='…']`, not with bespoke selectors.
-3. **Option providers restyle subtrees** — `providers: [tuiButtonOptionsProvider({ appearance:
-'flat-grayscale', size: 'm' })]` on a header restyles every nav button, zero CSS. This is
+3. **Option providers restyle subtrees** —
+   `providers: [tuiButtonOptionsProvider({ appearance: 'flat-grayscale', size: 'm' })]` on a header restyles every nav button, zero CSS. This is
    _the_ answer to "all the Xs in here should look like Y". A single element takes the
    option as its own attribute instead (`<tui-textfield tuiTextfieldSize="s">`), not a
    component-level provider written for one consumer.
-4. **Design tokens** for one-off values: `var(--tui-…)` everywhere; define new knobs as CSS
+4. **Design tokens** for one-off values: `var(--tui-…)` everywhere, shadows included
+   (`box-shadow: var(--tui-shadow-small)`, never `0 1rem 2.5rem rgb(0 0 0 / 14%)`); define new knobs as CSS
    custom properties bound from the template (`[style.--gap.rem]`).
 5. **`g-*` global utilities** (shared stylesheet only — never re-declared per app/component):
    layout (`g-page`, `g-form`, `g-table`, `g-aside`, `g-buttons`, store's `g-band`/`g-wrap`
-   marketing system) and text colors (`g-positive/negative/warning/info/secondary/primary`) for
-   things with no appearance input (`tui-icon`), and the selected state, `g-active`
+   marketing system) and text colors (`g-positive/negative/warning/info/primary/secondary/tertiary`)
+   for things with no appearance input — `<tui-icon class="g-positive">`, never a
+   `tui-icon { color: … }` rule in the component — and the selected state, `g-active`
    (`routerLinkActive="g-active"`, `[class.g-active]`): a selected button keeps its appearance
    instead of swapping it in an `[appearance]` ternary.
 6. **`:host` layout CSS last**: `display: grid/flex`, `gap`, sizing. Modern CSS is expected —
@@ -33,7 +43,22 @@ flat-grayscale | outline-grayscale | action-grayscale | …"` on buttons/badges/
    `color-mix()`, `clamp()`, container queries, `dvh`. Fluid sizing via `min(36rem, 90vw)`.
    Taiga SCSS utils import into inline styles: `@use '@taiga-ui/styles/utils' as taiga` +
    `@include taiga.transition(...)`. A state class nests under its element
-   (`.search { …; &._open { … } }`).
+   (`.search { …; &._open { … } }`). A class names a state, never a part: a card's trailing
+   row is a `<footer>` styled as `footer {}`, a number over its caption is a `tuiTitle`, not
+   `._rules`, `._percent` or `li > span:last-child`.
+
+**`tuiCardLarge` owns its stack.** Its column `gap` and `align-items: stretch` sit at specificity
+0,3,0, so a component's `[tuiCardLarge] { gap; align-items: center }` silently loses. A card that
+is one row carries the row primitive on itself, `<div tuiCardLarge="compact" tuiHeader="body-s">`,
+which the stack rule skips; content that must centre keeps a plain `:host` box. The stack also
+pushes its last child to the bottom (`margin-block-start: auto`) and spaces a `> footer`, so a
+card's closing row is a `<footer>` that takes both, never a `margin: 0 !important` against them.
+
+**Floating cards in the light theme pool their shadows.** Large cards close together
+(`appearance="floating"`, `--tui-shadow-medium`) blur into a grey wash between them. Where cards
+sit on `--tui-background-base-alt`, drop the shadow on cards,
+`[tuiCardLarge] { --tui-shadow-medium: none }`, and let a darker light `base-alt` carry the
+contrast (start-equity).
 
 **Space with margins, not a flex column.** A page is block flow. The element that needs room
 takes a margin (`header { margin-block-end: 1.25rem }`, `form { margin-block-start: 2rem }`).

@@ -130,6 +130,10 @@ mod test {
             "package.list",
             "package.logs",
             "server.time",
+            "volumes.create",
+            "volumes.set-grant",
+            "backup.volume.restore",
+            "notification.push.key",
         ] {
             assert!(server.get_tool(exposed).is_some(), "{exposed} is withheld");
         }

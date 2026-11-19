@@ -23,7 +23,7 @@ root OS image build. Sibling product crates (`start-cli`, `start-registry`,
   `startd` daemon, the `start-cli` client, and the `unshare-userns` applet. It
   also embeds the built web UIs at compile time via `include_dir!`
   (`web/dist/static/ui`, `web/dist/static/setup-wizard`) and the Patch-DB UI
-  seed (`web/patchdb-ui-seed.json`, or `*.beta.json` under the `beta` feature).
+  seed (`web/patchdb-ui-seed.json`).
   Because the UIs are embedded, the web build must run before the Rust build —
   the `Makefile` encodes this ordering.
 - **`start-container`** (`src/bin/start-container.rs`) — runs **inside** each
@@ -52,7 +52,7 @@ They consume the shared `@start9labs/shared` and `@start9labs/marketplace` libs
 from the shared TypeScript modules at `../../shared-libs/ts-modules`. The frontend talks to
 the backend exclusively over JSON-RPC, with reactive state via Patch-DB.
 
-`web/patchdb-ui-seed.json` / `patchdb-ui-seed.beta.json` seed initial UI state
+`web/patchdb-ui-seed.json` seeds initial UI state
 and are embedded into `startbox`.
 
 ## Container runtime

@@ -86,6 +86,56 @@ test('a failed temp write preserves the target and restricts temp permissions', 
   )
 })
 
+test.each(['backup', 'directory'])(
+  'a failed %s sync preserves an unparseable target',
+  async stage => {
+    const before = '{"count":'
+    await fs.writeFile(path, before)
+    let backupOpened = false
+    open.mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+      const handle = await actual.open(...args)
+      const name = String(args[0])
+      const isBackup = name.startsWith(`${path}.unparseable-`)
+      if (isBackup) backupOpened = true
+      if (
+        (stage === 'backup' && isBackup) ||
+        (stage === 'directory' && name === dir && backupOpened)
+      ) {
+        handle.sync = async () => {
+          throw new Error(`${stage} sync failed`)
+        }
+      }
+      return handle
+    })
+
+    await expect(
+      FileHelper.json(path, shape).merge(effects, {}),
+    ).rejects.toThrow(`${stage} sync failed`)
+
+    expect(await fs.readFile(path, 'utf8')).toBe(before)
+  },
+)
+
+test('a failed exclusive backup preserves the target and earlier backup', async () => {
+  const before = '{"count":'
+  const backup = `${path}.unparseable-fixed`
+  await fs.writeFile(path, before)
+  await fs.writeFile(backup, 'earlier backup')
+  const timestamp = jest
+    .spyOn(Date.prototype, 'toISOString')
+    .mockReturnValue('fixed')
+  try {
+    await expect(
+      FileHelper.json(path, shape).merge(effects, {}),
+    ).rejects.toMatchObject({ code: 'EEXIST' })
+
+    expect(await fs.readFile(path, 'utf8')).toBe(before)
+    expect(await fs.readFile(backup, 'utf8')).toBe('earlier backup')
+  } finally {
+    timestamp.mockRestore()
+  }
+})
+
 test('the first write removes temps left by dead writers', async () => {
   await fs.writeFile(path, '{"count":1}')
   const hex = 'ab'.repeat(12)

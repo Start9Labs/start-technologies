@@ -1,1 +1,0 @@
-- Ruch przewodowy między Internetem a urządzeniami osiąga pełną prędkość gigabitową. Router rozdziela pracę każdego portu Ethernet między rdzenie procesora, a ustanowione połączenia pomijają kontrole zapory dla poszczególnych pakietów, które już przeszły.

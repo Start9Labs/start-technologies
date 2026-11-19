@@ -9,21 +9,21 @@ CLAUDE.md is a one-line `@AGENTS.md` import. See [ARCHITECTURE.md](./ARCHITECTUR
 - `src/main.rs` — `MultiExecutable` wiring (`enable_start_registry` + `enable_start_registryd`).
 - `Cargo.toml` — crate metadata; `[[bin]] name = "registrybox"`; depends on `start-core = { path = "../../shared-libs/crates/start-core" }`.
 - `start-registryd.service` — systemd unit (`ExecStart=/usr/bin/start-registryd`).
-- `build/build-registrybox.sh` — release musl build via the `rust-zig-builder` container (what `make start-registry` runs).
+- `make start-registry` builds `registrybox` through the shared `build/build-rust-bins.sh` (release musl build in the `rust-zig-builder` container).
 - **Real implementation:** `shared-libs/crates/start-core/src/bins/registry.rs` (server `main` + CLI `cli`) and `shared-libs/crates/start-core/src/registry/` (context, db, info, os, package, admin, metrics, signer, migrations, asset).
 - **UI:** `shared-libs/ts-modules/marketplace/` (`@start9labs/marketplace`) — not built or served by this crate.
 
 ## Build & test (run from the monorepo root, not this dir)
 
-| Command                                           | What                                                                        |
-| ------------------------------------------------- | --------------------------------------------------------------------------- |
-| `cargo build -p start-registry --bin registrybox` | build the binary (host target, debug)                                       |
-| `cargo check -p start-registry`                   | fast type-check (linux only locally)                                        |
-| `cargo clippy -p start-registry`                  | lints                                                                       |
-| `cargo test -p start-core registry`               | exercise the registry logic (lives in start-core)                           |
-| `make start-registry-format`                      | format (`make start-registry-format-check` for the read-only CI check)      |
-| `make start-registry`                             | release musl build via `projects/start-registry/build/build-registrybox.sh` |
-| `make start-registry-install DESTDIR=…`           | stage binary + symlinks + service                                           |
+| Command                                           | What                                                                   |
+| ------------------------------------------------- | ---------------------------------------------------------------------- |
+| `cargo build -p start-registry --bin registrybox` | build the binary (host target, debug)                                  |
+| `cargo check -p start-registry`                   | fast type-check (linux only locally)                                   |
+| `cargo clippy -p start-registry`                  | lints                                                                  |
+| `cargo test -p start-core registry`               | exercise the registry logic (lives in start-core)                      |
+| `make start-registry-format`                      | format (`make start-registry-format-check` for the read-only CI check) |
+| `make start-registry`                             | release musl build via `build/build-rust-bins.sh`                      |
+| `make start-registry-install DESTDIR=…`           | stage binary + symlinks + service                                      |
 
 Because the code lives in `start-core`, most meaningful tests and lints target `-p start-core`, not `-p start-registry`. The thin wrapper mainly verifies that the bin links.
 
@@ -72,6 +72,8 @@ Every master build is also tagged `sha-<commit>`. Pushing a `start-registry/v<ve
 
 Add subcommands in `registry/mod.rs`; use `with_call_remote::<CliContext>()` for
 CLI exposure and `with_about(...)` for localized help. Tag admin-only commands
-with `with_metadata("admin", true)`. Changes that rewrite persisted registry data
+with `with_metadata("admin", true)`. Tag handlers that write the index with
+`with_metadata(WRITES_INDEX, Value::Bool(true))` (`registry/upstream.rs`) so
+mirrors reject them. Changes that rewrite persisted registry data
 need a migration in `shared-libs/crates/start-core/src/registry/migrations/`.
 Additive fields with serde defaults can deserialize existing records without one.

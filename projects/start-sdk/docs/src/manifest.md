@@ -27,6 +27,11 @@ export const long = {
 }
 ```
 
+If neither the requested locale nor a same-language translation is available,
+StartOS and registries use the package's default locale: the `DEFAULT_LANG` given
+to `setupI18n` in `startos/i18n`. `buildManifest()` reads it from the `i18n`
+passed in `startos/index.ts`.
+
 ### How long each one may be
 
 |         | limit           |
@@ -369,7 +374,7 @@ images: {
 
 ## Volumes
 
-Storage volumes for persistent data. When possible, prefer matching the upstream project's volume naming convention for clarity:
+Package-owned storage for persistent data. When possible, prefer matching the upstream project's volume naming convention for clarity:
 
 ```typescript
 // If upstream docker-compose uses a volume named "mcaptcha-data"
@@ -387,6 +392,8 @@ volumes: ['main', 'db', 'config'],
 
 Reference these in `main.ts` mounts by the volume ID you chose.
 
+To support user-managed local folders, attached drives and network shares, declare `sharedVolumes: true` separately. This enables user-selected grants rather than adding sources to package-owned `volumes`. See [Shared Volumes](shared-volumes.md) for optional mounting, reactive grants and backup ownership.
+
 ## Dependencies
 
-Define dependencies in `startos/dependencies.ts` with `sdk.Dependency.required` or `sdk.Dependency.optional`, and pass the resulting `sdk.Dependencies.of()` builder to `buildManifest(versionGraph, sdkManifest, dependencies)`. See [Dependencies](dependencies.md) for base requirements and runtime narrowing.
+Define dependencies in `startos/dependencies.ts` with `sdk.Dependency.required` or `sdk.Dependency.optional`, and pass the resulting `sdk.Dependencies.of()` builder to `buildManifest({ versionGraph, manifest, dependencies, i18n })`. See [Dependencies](dependencies.md) for base requirements and runtime narrowing.

@@ -37,6 +37,8 @@ export interface Device extends DeviceTableItem {
   customName?: string
   /** May auto-create port forwards via PCP/UPnP (default off). */
   allowAutoPortForward: boolean
+  /** Ports it was recently refused for lacking that permission. */
+  autoPortForwardRequests: string[]
   /** May publish DNS records into the router's resolver (default off). */
   allowDnsInjection: boolean
   /** Was recently refused DNS records for lacking that permission. */

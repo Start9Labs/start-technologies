@@ -31,7 +31,7 @@ export interface LegacyBackupData {
         <strong>{{ 'Back up everything you need' | i18n }}</strong>
         <span tuiSubtitle>
           {{
-            'Because the old backup will no longer be updated, be sure to select ANY and ALL services you want backed up. Once this new backup completes successfully, DELETE the old "StartOSBackups" folder from the drive to free up space — do NOT delete "StartOSBackupsV2".'
+            'Because the old backup will no longer be updated, be sure to select everything you want backed up. Once this new backup completes successfully, select Delete old backup on this target to free up space.'
               | i18n
           }}
         </span>

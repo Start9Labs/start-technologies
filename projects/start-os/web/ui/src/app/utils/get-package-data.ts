@@ -28,6 +28,10 @@ export function getManifest(pkg: PackageDataEntry): T.Manifest {
     : pkg.stateInfo.manifest!
 }
 
+export function getCurrentManifest(pkg: PackageDataEntry): T.Manifest {
+  return pkg.stateInfo.manifest ?? getManifest(pkg)
+}
+
 /** Tasks on the package itself or a current dependency, keyed by replay ID. */
 export function getLiveTasks(pkg: PackageDataEntry): [string, T.TaskEntry][] {
   const { id } = getManifest(pkg)

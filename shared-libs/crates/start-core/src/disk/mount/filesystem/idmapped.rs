@@ -120,6 +120,9 @@ impl<Fs: FileSystem> FileSystem for IdMapped<Fs> {
 
         Ok(())
     }
+    async fn device(&self) -> Result<Option<std::path::PathBuf>, Error> {
+        self.filesystem.device().await
+    }
     async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
         let mut sha = Sha256::new();
         sha.update("IdMapped");

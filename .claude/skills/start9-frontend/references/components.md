@@ -70,8 +70,8 @@ A component that **is** a control (button, link, badge, row, card, shell chrome)
 **Stamp the host directive's own attribute** (`host: { tuiButton: '' }`) — Taiga's CSS is keyed
 on `[tuiButton]`, `[tuiChip]`, `[tuiBadge]`, and a host directive does not add its selector to
 the element. Skip it and the directive runs with none of its styling, silently: no chrome, no
-`iconStart`. `TuiCell`, `TuiCardLarge` and `TuiAvatar` stamp theirs; `TuiButton`, `TuiChip`,
-`TuiBadge` don't.
+`iconStart`. `TuiCell`, `TuiCardLarge`, `TuiAvatar` and `TuiStatus` stamp theirs; `TuiButton`,
+`TuiChip`, `TuiBadge` don't.
 
 **A component that dresses up one Taiga primitive becomes it.** An avatar wrapper is
 `hostDirectives: [{ directive: TuiAvatar, inputs: ['size'] }]` with the picture or
@@ -79,6 +79,10 @@ the element. Skip it and the directive runs with none of its styling, silently: 
 `<span tuiAvatar [size]="size()">`. Forward the primitive's inputs through `inputs: [...]` rather
 than redeclaring them, and drive the rest from signals in the class:
 `tuiAppearance(computed(() => …))`, `tuiIconStart(computed(() => …))` (`@taiga-ui/core`).
+A primitive without a ready binding takes `tuiDirectiveBinding` (`@taiga-ui/cdk`): a status
+label is `hostDirectives: [TuiStatus]` with
+`tuiDirectiveBinding(TuiStatus, 'tuiStatus', computed(() => COLORS[this.status()]))` and its
+words as content, not a host around an inner `<span [tuiStatus]>`.
 
 Real fleet examples: `header[appHeader]`, `footer[appFooter]`, `button[marketplaceTile]`
 (+`TuiCardLarge`), `button[server]` (+`TuiCell`), `table[appTable]`
@@ -116,7 +120,15 @@ host: {
 }
 ```
 
-`@HostBinding`/`@HostListener`: zero occurrences in target-style code.
+`@HostBinding`/`@HostListener`: zero occurrences in target-style code. A component's static
+style is `:host` CSS, not a `host: { style: '…' }` string; only a directive, which has no
+stylesheet, carries one (`formLoading` above).
+
+**A component that is a card takes `hostDirectives: [TuiCardLarge]`** plus
+`tuiCardOptionsProvider({ space: 'compact', appearance: 'outline-grayscale' })`, and a caller
+restyles it from outside (`<business-hire tuiTheme="dark">`, `appearance="…"`) or projects
+extra content into an `<ng-content />` slot. A second page that wants the same card reuses the
+component rather than copying its markup.
 
 ### Signal APIs
 
@@ -163,8 +175,8 @@ readonly subscription = merge(inject(PatchDataService), inject(PatchMonitorServi
 
 `takeUntilDestroyed()` is called bare in field initializers (injection context — no `DestroyRef`
 argument). `ngOnDestroy` survives only for cleaning up manually created refs. An `ngOnInit`
-doing form-patching is _known debt_, not style (`// TODO @Alex refactor this to declarative
-validation`).
+that patches a form is debt to replace with declarative validation (forms.md), not a pattern to
+copy.
 
 ## Templates
 
@@ -180,6 +192,9 @@ validation`).
   `(click.self)="close()"`, `.stop`, `.capture`, `.once`, `.passive`.
 - **Template reference variables replace trivial state**: `#input` +
   `(input)="onQuery(input.value)"`; `#carousel` + `carousel.next()`.
+- **A space between inline elements is `&ngsp;`.** Prettier's
+  `htmlWhitespaceSensitivity: "ignore"` and Angular's whitespace stripping both drop it:
+  `<b>{{ m.who }}&ngsp;</b><small>{{ m.time }}</small>` — never a `gap` or `margin` to fake it.
 - **Object literals take shorthand**: `fill(message, { email })`, and
   `@for ($implicit of items(); track $implicit.key)` feeds `context: { $implicit }`.
 - **Attribute order** on an element: `*structuralDirective`, `#templateRef`, `booleanAttr`,
@@ -193,6 +208,8 @@ validation`).
   `safeLinks` directive (forces `target="_blank" rel="noreferrer"` on external links).
 - Text stacks use `tuiTitle`/`tuiSubtitle` with `<b>` for the title — never custom
   heading/caption CSS: `<span tuiTitle><b>{{ title }}</b><span tuiSubtitle>{{ sub }}</span></span>`.
+  A standalone `tuiTitle` leaves `tuiSubtitle` in the inherited text colour. Add
+  `class="g-secondary"` when no surrounding primitive supplies the secondary text colour.
 - **A cell's children sit flat in the `[tuiCell]`.** A single-line title is one element,
   `<span tuiTitle tuiFade>`, with no inner span. Trailing `<time tuiSubtitle>`, badges and
   statuses are direct children, and the title's own flex pushes them to the end. Taiga already
@@ -216,4 +233,6 @@ becomes part of the heading's accessible name.
 `<h1 tuiTitle>`. When the heading has a subtitle or inline content such as a count
 `tuiBadge`, wrap it as `<hgroup tuiTitle><h1>…</h1></hgroup>`, since `tuiTitle` is a column and
 would stack the badge under the words. `aside tuiAccessories` is the header's direct child,
-beside the title.
+beside the title. An eyebrow above the heading is the hgroup's first child
+(`<p tuiBadge>24/7/365</p>` or `<p tuiCaption>`), not a sibling before the `<header>` with a
+margin; a lede longer than a line goes after the header as `<p tuiDescription>`.

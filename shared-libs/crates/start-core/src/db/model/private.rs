@@ -22,8 +22,9 @@ pub struct Private {
     pub password: String, // argon2 hash
     #[serde(default)]
     pub sessions: Sessions,
-    #[serde(default = "generate_developer_key")]
-    pub developer_key: Der64<ed25519_dalek::SigningKey>,
+    /// Retains the persisted name for existing databases.
+    #[serde(default = "generate_server_identity_key", rename = "developerKey")]
+    pub server_identity_key: Der64<ed25519_dalek::SigningKey>,
     pub ssh_privkey: Pem<ssh_key::PrivateKey>,
     pub ssh_pubkeys: SshKeys,
     pub available_ports: AvailablePorts,
@@ -31,13 +32,27 @@ pub struct Private {
     #[serde(default)]
     pub os_security_notifications: SecurityNotifications,
     #[serde(default)]
+    pub registry_indexes: BTreeMap<url::Url, crate::registry::FullIndex>,
+    #[serde(default)]
     pub push: crate::notifications::push::PushState,
     pub cifs: CifsTargets,
+    #[serde(default)]
+    pub backup_history: BTreeMap<String, crate::backup::history::BackupRun>,
+    #[serde(default)]
+    pub backup_target_credentials: BTreeMap<
+        crate::backup::target::BackupTargetId,
+        crate::shared_volumes::SharedVolumeCredentials,
+    >,
+    #[serde(default)]
+    pub shared_volume_credentials: BTreeMap<
+        crate::shared_volumes::SharedVolumeId,
+        crate::shared_volumes::SharedVolumeCredentials,
+    >,
     #[serde(default)]
     pub package_stores: BTreeMap<PackageId, Value>,
 }
 
-pub fn generate_developer_key() -> Der64<ed25519_dalek::SigningKey> {
+pub fn generate_server_identity_key() -> Der64<ed25519_dalek::SigningKey> {
     Der64(ed25519_dalek::SigningKey::generate(
         &mut crate::util::crypto::os_rng(),
     ))

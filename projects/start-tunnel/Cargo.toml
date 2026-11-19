@@ -3,7 +3,7 @@ edition = "2024"
 license = "MIT"
 name = "start-tunnel"
 repository = "https://github.com/Start9Labs/start-technologies"
-version = "1.5.1"                                               # VERSION_BUMP
+version = "1.5.2"                                               # VERSION_BUMP
 
 [[bin]]
 name = "tunnelbox"
@@ -19,4 +19,5 @@ unstable = ["start-core/unstable"]
 
 [dependencies]
 include_dir = "0.7.3"
+mimalloc = "0.1"
 start-core = { path = "../../shared-libs/crates/start-core" }

@@ -1,41 +1,61 @@
-import { computed, inject, Service, signal } from '@angular/core'
+import { computed, DestroyRef, inject, Service, signal } from '@angular/core'
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop'
 import { SwUpdate } from '@angular/service-worker'
 import { WA_WINDOW } from '@ng-web-apis/common'
-import { Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
-import { distinctUntilChanged, filter, map, merge, shareReplay } from 'rxjs'
+import {
+  distinctUntilChanged,
+  filter,
+  map,
+  merge,
+  shareReplay,
+  switchMap,
+} from 'rxjs'
 
 import { ConfigService } from 'src/app/services/config.service'
+import { ConnectionService } from 'src/app/services/connection.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 
+// A stalled sync permits reload without confirming successful synchronization.
 type UiUpdateState =
   | {
       status:
         | 'idle'
         | 'checking'
         | 'updating'
+        | 'stalled'
         | 'ready'
         | 'resetting'
         | 'reloading'
     }
   | { status: 'error'; error: string | null }
 
+// A stopped worker can lose the event settling a sync.
+const SYNC_DEADLINE_MS = 60_000
+
 @Service()
 export class UiUpdateService {
   private readonly updates = inject(SwUpdate)
   private readonly win = inject(WA_WINDOW)
-  private readonly version = Version.parse(inject(ConfigService).version)
-  private readonly outdated$ = inject<PatchDB<DataModel>>(PatchDB)
-    .watch$('serverInfo', 'version')
-    .pipe(
-      distinctUntilChanged(),
-      map(version => this.version.compare(Version.parse(version)) !== 'equal'),
-      shareReplay({ bufferSize: 1, refCount: true }),
-    )
+  private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
+  private readonly gitHash = inject(ConfigService).gitHash
+  private readonly outdated$ = inject(ConnectionService).pipe(
+    filter(Boolean),
+    switchMap(() => this.patch.watch$('serverInfo', 'gitHash')),
+    map(hash => hash !== this.gitHash),
+    distinctUntilChanged(),
+    shareReplay({ bufferSize: 1, refCount: true }),
+  )
   private readonly current = signal<UiUpdateState>({ status: 'idle' })
+  private deadline?: ReturnType<typeof setTimeout>
+  private readonly cleanup = inject(DestroyRef).onDestroy(() =>
+    clearTimeout(this.deadline),
+  )
 
   readonly state = this.current.asReadonly()
+  readonly canRefresh = computed(() =>
+    ['ready', 'stalled'].includes(this.state().status),
+  )
   readonly busy = computed(() =>
     ['resetting', 'reloading'].includes(this.state().status),
   )
@@ -44,6 +64,8 @@ export class UiUpdateService {
       case 'ready':
       case 'reloading':
         return 'ready'
+      case 'stalled':
+        return 'stalled'
       case 'error':
         return 'error'
       default:
@@ -67,10 +89,10 @@ export class UiUpdateService {
           this.transition({ status: 'ready' })
           break
         case 'NO_NEW_VERSION_DETECTED':
-          if (['idle', 'checking'].includes(this.state().status))
+          if (['idle', 'checking', 'stalled'].includes(this.state().status))
             this.transition({
               status:
-                this.outdated() || this.state().status === 'checking'
+                this.outdated() || this.state().status !== 'idle'
                   ? 'ready'
                   : 'idle',
             })
@@ -107,7 +129,7 @@ export class UiUpdateService {
     this.transition({ status: 'checking' })
     try {
       const found = await this.updates.checkForUpdate()
-      if (this.state().status === 'checking')
+      if (['checking', 'stalled'].includes(this.state().status))
         this.transition(
           found ? { status: 'ready' } : { status: 'error', error: null },
         )
@@ -117,7 +139,7 @@ export class UiUpdateService {
   }
 
   refresh(): void {
-    if (this.state().status === 'ready') this.reloadPage()
+    if (this.canRefresh()) this.reloadPage()
   }
 
   async resetCache(): Promise<void> {
@@ -145,10 +167,17 @@ export class UiUpdateService {
 
   private transition(state: UiUpdateState): void {
     if (this.state().status === 'reloading') return
+    clearTimeout(this.deadline)
     this.current.set(state)
+    if (state.status === 'checking' || state.status === 'updating')
+      this.deadline = setTimeout(
+        () => this.transition({ status: 'stalled' }),
+        SYNC_DEADLINE_MS,
+      )
   }
 
   private reloadPage(): void {
+    clearTimeout(this.deadline)
     this.current.set({ status: 'reloading' })
     this.win.location.reload()
   }

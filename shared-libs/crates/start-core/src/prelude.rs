@@ -8,6 +8,7 @@ pub use visit_rs::{VisitFields, VisitVariants};
 pub use crate::db::prelude::*;
 pub use crate::ensure_code;
 pub use crate::error::{Error, ErrorCollection, ErrorKind, OptionExt, ResultExt};
+pub use crate::middleware::auth::session::SessionContext;
 pub use crate::util::output::print_table;
 
 #[macro_export]

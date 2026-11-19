@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core'
+import type { RpcStreamClient, RpcStreamOptions } from '@start9labs/start-core'
 import type * as Bindings from './bindings'
 import type * as Events from './events'
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
@@ -17,7 +18,11 @@ export abstract class ApiService {
   abstract systemInfo(timeout?: number): Promise<SystemInfoRes>
   abstract configCheck(): Promise<ConfigCheck>
   abstract systemNewerVersions(): Promise<VersionInfo[]>
-  abstract systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes>
+  /** Cancels observation, never an accepted update. A successful terminal precedes the reboot. */
+  abstract systemUpdate(
+    params: SystemUpdateReq,
+    options?: RpcStreamOptions,
+  ): Promise<SystemUpdateStream>
   abstract systemRestart(): Promise<null>
   abstract setPassword(params: SetPasswordReq): Promise<null>
   abstract setPreferences(
@@ -63,10 +68,14 @@ export abstract class ApiService {
     params: SetInitialPasswordReq,
   ): Promise<RpcReturnType<Api, 'auth.set-initial-password'>>
   abstract setupStatus(): Promise<SetupStatusRes>
-  abstract getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>>
+  /** Cancels observation, never accepted flashing. Successful termination confirms provisioning. */
+  abstract setupFlash(
+    params: SetupFlashReq,
+    options?: RpcStreamOptions,
+  ): Promise<SetupFlashStream>
   abstract systemFactoryReset(): Promise<null>
   abstract systemLogs(): Promise<LogsResponse>
-  abstract followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>>
+  abstract followLogs(options?: RpcStreamOptions): Promise<LogsFollowStream>
   abstract devicesList(): Promise<DeviceFromApi[]>
   abstract devicesUpdate(params: DeviceUpdateReq): Promise<null>
   abstract devicesSetAutoForward(params: {
@@ -116,6 +125,9 @@ export abstract class ApiService {
   abstract sshKeysAdd(params: SshKeysAddRequest): Promise<SshKeyFromApi>
   abstract ethernetGet(): Promise<EthernetConfig>
   abstract ethernetSet(params: EthernetSetConfig): Promise<EthernetSetResult>
+  abstract ethernetRemoveUsbPort(
+    params: RpcParamType<Api, 'ethernet.remove-usb-port'>,
+  ): Promise<null>
   abstract sshKeysDelete(params: SshKeysDeleteRequest): Promise<null>
   abstract activityList(
     params?: ActivityListParams,
@@ -129,15 +141,6 @@ export abstract class ApiService {
     params: RpcParamType<Api, 'backup.restore'>,
   ): Promise<BackupRestoreRes>
   abstract diagnosticsCreate(): Promise<DiagnosticsCreateRes>
-
-  async encrypt(password: string): Promise<EncryptedWire> {
-    // A dynamic import of node-jose itself has only a default export.
-    const [{ encrypt }, pubkey] = await Promise.all([
-      import('./encrypt'),
-      this.getPubkey(),
-    ])
-    return encrypt(pubkey, password)
-  }
 }
 
 export type BackupCreateRes = RpcReturnType<Api, 'backup.create'>
@@ -149,6 +152,8 @@ export type DiagnosticsCreateRes = RpcReturnType<Api, 'diagnostics.create'>
 export type EthernetPort = RpcReturnType<Api, 'ethernet.get'>['ports'][string]
 
 export type EthernetConfig = RpcReturnType<Api, 'ethernet.get'>
+
+export type UsbPortStatus = EthernetConfig['usb_ports'][string]
 
 export type EthernetSetPort = RpcParamType<Api, 'ethernet.set'>['ports'][string]
 
@@ -175,6 +180,10 @@ export type LanIpv6SetRequest = RpcParamType<Api, 'lan.ipv6-set'>
 export type LogEntry = Bindings.LogEntry
 
 export type LogsResponse = RpcReturnType<Api, 'system.logs'>
+
+export type LogsFollowStream = Awaited<
+  ReturnType<RpcStreamClient<Api>['system']['logsFollow']>
+>
 
 export type LoginReq = RpcParamType<Api, 'auth.login'>
 
@@ -208,7 +217,9 @@ export type VersionInfo = RpcReturnType<Api, 'system.newer-versions'>[number]
 
 export type SystemUpdateReq = RpcParamType<Api, 'system.update'>
 
-export type SystemUpdateRes = RpcReturnType<Api, 'system.update'>
+export type SystemUpdateStream = Awaited<
+  ReturnType<RpcStreamClient<Api>['system']['update']>
+>
 
 export type FullProgress = Events.FullProgress
 
@@ -220,7 +231,7 @@ export type SetPasswordReq = RpcParamType<Api, 'auth.set-password'>
 
 export type Theme = 'dark' | 'light' | 'system'
 
-export type RemoteAccess = 'default' | 'never' | 'always'
+export type RemoteAccess = 'never' | 'behind-nat' | 'always'
 
 export type SetPreferencesReq = Partial<{
   language: string
@@ -309,9 +320,10 @@ export type SetInitialPasswordReq = RpcParamType<
 
 export type SetupStatusRes = RpcReturnType<Api, 'setup.status'>
 
-export type EncryptedWire = Bindings.EncryptedWireInput
-
-export type SetupFlashReq = Events.FlashParamsInput
+export type SetupFlashReq = RpcParamType<Api, 'setup.flash'>
+export type SetupFlashStream = Awaited<
+  ReturnType<RpcStreamClient<Api>['setup']['flash']>
+>
 
 export type SetupFlashEvent = Events.SetupEvent
 

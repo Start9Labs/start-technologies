@@ -85,6 +85,17 @@ fn resolve_families(
     }
 }
 
+pub(crate) async fn connect_domain(domain: String, port: u16) -> Result<TcpStream, Error> {
+    connect_each(
+        resolve_families(
+            lookup_family(domain.clone(), port, libc::AF_INET6),
+            lookup_family(domain, port, libc::AF_INET),
+        ),
+        |addr| TcpStream::connect(addr),
+    )
+    .await
+}
+
 /// Alternates families, incorporating late DNS answers without restarting attempts.
 async fn connect_each<S, F, Fut, T>(resolutions: S, mut connect: F) -> Result<T, Error>
 where
@@ -148,16 +159,7 @@ async fn connect_target(addr: TargetAddr) -> Result<TcpStream, Error> {
                 .await
                 .with_kind(ErrorKind::Network)
         }
-        TargetAddr::Domain(domain, port) => {
-            connect_each(
-                resolve_families(
-                    lookup_family(domain.clone(), port, libc::AF_INET6),
-                    lookup_family(domain, port, libc::AF_INET),
-                ),
-                |addr| TcpStream::connect(addr),
-            )
-            .await
-        }
+        TargetAddr::Domain(domain, port) => connect_domain(domain, port).await,
         TargetAddr::Ip(addr) => TcpStream::connect(addr).await.with_kind(ErrorKind::Network),
     }
 }

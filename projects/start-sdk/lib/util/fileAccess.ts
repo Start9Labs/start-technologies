@@ -4,8 +4,9 @@ import { promisify } from 'node:util'
 import { randomBytes } from 'node:crypto'
 import * as fs from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
+import { PathQueue } from './PathQueue'
 
-const queues = new Map<string, Promise<void>>()
+const queue = new PathQueue()
 const heldLocks = new AsyncLocalStorage<
   {
     target: string
@@ -65,7 +66,7 @@ export async function withFileQueue<A>(
   if (outer.some(lock => lock.held && lock.target === target)) {
     return operation(target, signal)
   }
-  const result = (queues.get(target) ?? Promise.resolve()).then(async () => {
+  const result = queue.run(target, async () => {
     signal.throwIfAborted()
     const holder = { target, held: true, flocked: false, signal }
     try {
@@ -75,14 +76,6 @@ export async function withFileQueue<A>(
     } finally {
       holder.held = false
     }
-  })
-  const tail = result.then(
-    () => {},
-    () => {},
-  )
-  queues.set(target, tail)
-  void tail.then(() => {
-    if (queues.get(target) === tail) queues.delete(target)
   })
   return waitForFileOperation(result, signal)
 }
@@ -260,6 +253,28 @@ async function sweepTemps(
   swept.add(path)
 }
 
+async function syncPath(path: string): Promise<void> {
+  const handle = await fs.open(path, 'r')
+  try {
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
+
+/** Persists an exclusive backup before callers may replace the source. */
+export async function copyFileBackup(
+  source: string,
+  backup: string,
+  signal: AbortSignal,
+): Promise<void> {
+  signal.throwIfAborted()
+  await fs.copyFile(source, backup, fs.constants.COPYFILE_EXCL)
+  await syncPath(backup)
+  signal.throwIfAborted()
+  await syncPath(dirname(backup))
+}
+
 export async function replaceFile(
   path: string,
   data: string,
@@ -324,12 +339,7 @@ export async function replaceFile(
         await target.close()
       }
     })
-    const directory = await fs.open(dirname(path), 'r')
-    try {
-      await directory.sync()
-    } finally {
-      await directory.close()
-    }
+    await syncPath(dirname(path))
   } finally {
     if (created) await fs.rm(temp, { force: true })
     if (metadataTemp) await fs.rm(metadataTemp, { force: true })

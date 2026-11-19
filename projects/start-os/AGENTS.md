@@ -37,6 +37,7 @@ monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product 
 - Build the UI: `make start-os-ui` (or `make start-os-uis` for ui + setup-wizard).
 - Tests: `make test` (Rust + SDK + container-runtime + shell), `make start-core-test`, `make backup-fs-test` for all backup-fs library tests except the mount-based `/dev/fuse` suite, or `make start-os-scripts-test` for the shell suite under `build/tests/`.
 - Focused GRUB/diagnostic coverage: `make start-os-grub-test` (requires `grub-common`, no root privileges). This target is included in `start-os-scripts-test`.
+- Focused pre-reboot identity migration coverage: `make start-os-upgrade-identity-test` (Node.js and OpenSSL, no root privileges). Included in `start-os-scripts-test`.
 - Backup helper integration: `cargo build -p startos-backup-fs --bin startos-backup-fs`, then `bash projects/start-os/backup-fs/test-cli.sh target/debug/startos-backup-fs`. Requires Linux FUSE mount privileges, `fusermount3`, Node.js, and `attr`.
 - Legacy helper interoperability: `bash projects/start-os/backup-fs/test-legacy-interop.sh <current-helper> <format-1-helper>` exercises old/new FUSE writes and reads before explicit conversion. Build the old helper from the pre-PR revision pinned in `backup-fs/testdata/generate.sh`; the test requires the same FUSE privileges and tools as helper integration. The old helper also needs `io_uring` syscalls, which Docker's default seccomp profile denies.
 - Migration capacity regression: after building the helper, `bash projects/start-os/backup-fs/test-migration-space.sh target/debug/startos-backup-fs`. Requires Docker; its isolated 3 MiB tmpfs has no room for a second copy of the legacy objects.
@@ -74,9 +75,12 @@ monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product 
   `RpcContext`'s router replaces `name` and `short_name` with the server's
   hostname. Keep it out of `ngsw-config.json`: an asset group makes the service
   worker hash-check it against a body it never receives and drop out of service.
-- **The `beta` feature swaps the UI seed** (`patchdb-ui-seed.beta.json`) and
-  forwards to `start-core`'s `beta` feature — keep both seeds in sync when you
-  change seed shape.
+- **The `beta` feature forwards to `start-core`'s `beta` feature**, which
+  selects the beta registries a new server connects to and takes StartOS
+  updates from.
+- **`web/patchdb-ui-seed.json` seeds only UI-owned state.** The backend never
+  reads or writes `public.ui` outside migrations; state the backend needs
+  belongs in a typed `serverInfo` field.
 
 ## Contributor workflow
 
@@ -148,6 +152,12 @@ make start-os-deb               # Debian package (start-os-squashfs for the squa
 
 `make start-core-ts-bindings` regenerates the TS bindings from the Rust types (see [Cross-layer changes](#cross-layer-changes)).
 
+#### Kernel backport packages
+
+Before changing or retiring the signed-kernel bridge, read
+[`build/image-recipe/kernel-backports/AGENTS.md`](build/image-recipe/kernel-backports/AGENTS.md).
+That directory owns its build rules, tests, configuration and removal boundary.
+
 #### Deploying to a device
 
 These targets push to a **live device** and are slow/destructive — be deliberate. For devices on the same network:
@@ -168,7 +178,7 @@ To deploy a **CI build** rather than a local one — no local compile, and the i
 | `start-os-update-from-gha REMOTE=start9@<ip> RUN_ID=<id\|url>` | A specific Actions run (e.g. an integration PR) |
 | `start-os-update-from-gha REMOTE=start9@<ip> BRANCH=<name>`    | That branch's latest successful build           |
 
-It reads the platform off the device, downloads that run's `<platform>.squashfs`, and runs the same checksummed upgrade as `start-os-update-squashfs`. Needs `gh` (authenticated) and `b3sum`. Squashfs artifacts expire 14 days after the run. `scripts/update-from-gha.sh --help` documents the rest.
+It reads the platform off the device, downloads that run's `startos-*_<platform>.squashfs`, and runs the same checksummed upgrade as `start-os-update-squashfs`. Needs `gh` (authenticated), `b3sum`, and `jq`. Squashfs artifacts expire 14 days after the run. `scripts/update-from-gha.sh --help` documents the rest.
 
 For devices on a different network (uses [magic-wormhole](https://github.com/magic-wormhole/magic-wormhole)):
 
@@ -220,13 +230,15 @@ sudo bash projects/start-os/build/tests/subcontainer-exec-test.sh /path/to/start
 
 It exercises concurrent execs, rootfs isolation, read-only roots, user/workdir/environment settings,
 nested user namespaces, and command exit codes. It requires root and a statically linked BusyBox.
-The launch teardown regression uses the same fixtures in a private mount namespace:
+The launch teardown regression uses the same fixtures in a private mount namespace.
+Install the tested binary at `/usr/bin/start-container` in the disposable VM; the launcher executes that path:
 
 ```sh
-sudo unshare --mount --propagation private bash projects/start-os/build/tests/subcontainer-launch-test.sh /path/to/start-container /path/to/static-busybox
+sudo unshare --mount --propagation private bash projects/start-os/build/tests/subcontainer-launch-test.sh /usr/bin/start-container /path/to/static-busybox
 ```
 
 It checks that killing the launch parent kills the image init and its descendants, as root and a numeric user.
+Commandless init cases cover early and ready launcher death, graceful shutdown, and both pipe and PTY launches.
 The end-to-end attach suite runs on a StartOS VM with an installed package whose selected
 subcontainer is running and provides `sh`:
 

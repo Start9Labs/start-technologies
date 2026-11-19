@@ -1,5 +1,10 @@
 # Routing
 
+- A heavy library one route needs loads inside the function that uses it,
+  `const { default: ExcelJS } = await import('exceljs')`, so it becomes a chunk of its own. A
+  package whose root entry re-exports a heavy module puts it in the initial bundle wherever the
+  root is imported; give that module its own subpath export, as start-equity does with
+  `@start-equity/engine/import/pulley`.
 - Routes are flat arrays of **lazy default exports**: `loadComponent: () => import('./routes/x')`
   (no `.then` — components are `export default class`), `loadChildren: () => import('./x/routes')`
   where the child file ends `export default [ … ] satisfies Routes`. Eager `component:` only for

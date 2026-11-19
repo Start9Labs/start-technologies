@@ -117,6 +117,15 @@ export type Effects = {
     callback?: () => void
   }): Promise<Manifest | null>
 
+  /** User-granted shared volumes. Changes invalidate the subscription without a payload. */
+  getSharedVolumes(options: {
+    callback?: () => void
+  }): Promise<RPC.RpcReturnType<RPC.Effects, 'get-shared-volumes'>>
+  /** Mounts and tracks user-granted storage; authorization and invalid paths reject. */
+  mountSharedVolume(
+    options: RPC.RpcParamType<RPC.Effects, 'mount-shared-volume'>,
+  ): Promise<RPC.RpcReturnType<RPC.Effects, 'mount-shared-volume'>>
+
   // backup
   /**
    * Low-level backup-progress report. **Prefer `FullProgressTracker`** — the
@@ -229,8 +238,10 @@ export type Effects = {
    * Resolves `false` if nothing was bound at `internalPort`.
    */
   retireBinding(options: RetireBindingParams): Promise<boolean>
-  // host
-  /** Returns information about the specified host, if it exists */
+  /**
+   * Returns the host, with disabled insecure candidates hidden from service readers.
+   * Administrator binding-list APIs retain the complete candidate list.
+   */
   getHostInfo(options: {
     packageId?: PackageId
     hostId: HostId

@@ -29,7 +29,7 @@ Every root generates a module pair, `Bindings { schemas, types }`:
 - The **schema module** is runtime code: one [zod](https://zod.dev) schema per
   Rust type, `export const Request: z.ZodObject<{...}> = object({...}).meta({ id: 'Request' })`,
   and for a handler tree the root as a plain object of schemas
-  (`export const Api = { _PARAMS, _RETURN, _CHILDREN }`). It imports `zod` and
+  (`export const Api = { _PARAMS, _RETURN, _ITEM, _FINAL, _CHILDREN }`). It imports `zod` and
   nothing else. Every declaration is annotated with its schema type, with member
   JSDoc inside the type literal: TypeScript's declaration emit drops comments
   from an inferred shape, so the annotation is what keeps field documentation in
@@ -56,6 +56,13 @@ type Params = RpcParamType<Api, 'users.create'>
 type Result = RpcReturnType<Api, 'users.create'>
 const inputSchema = z.toJSONSchema(schemas._CHILDREN.users._CHILDREN.create._PARAMS, { io: 'input' })
 ```
+
+Callable nodes carry independent `_ITEM` and `_FINAL` output schemas from the handler's
+`Item` and `Final` types. `Never` items mark non-streaming methods; unit terminals serialize
+as `null`. `RpcStreamItemType`, `RpcStreamFinalType`, `RpcIsStreaming` and
+`RpcStreamingMethod` select these facts. `RpcEndpointType` owns method-path lookup for
+all parameter, initial-result and stream projections. Opted-out methods expose unknown
+stream types and indeterminate streaming capability.
 
 A node's `_PARAMS` already includes every enclosing parent's parameters (`z.intersection(Parent, Own)`; a parent with no parameters adds nothing), so `RpcParamType` is a lookup and `z.toJSONSchema(node._PARAMS)` describes the whole request. A parent with a
 `root_handler` is callable at its own method path; the empty method selects the

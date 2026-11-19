@@ -4,6 +4,7 @@ import { i18nPipe } from '@start9labs/shared'
 import { TuiHint, TuiIcon } from '@taiga-ui/core'
 import { TuiBadgedContent, TuiBadgeNotification } from '@taiga-ui/kit'
 import { getMenu } from 'src/app/utils/system-utilities'
+import { UpdatesCount } from '../updates-count'
 
 @Component({
   selector: 'header-navigation',
@@ -19,8 +20,21 @@ import { getMenu } from 'src/app/utils/system-utilities'
         [tuiHint]="rla.isActive ? '' : (item.name | i18n)"
       >
         <tui-badged-content [style.--tui-radius.%]="50">
-          @if (item.badge(); as badge) {
-            <tui-badge-notification tuiSlot="top" size="s">
+          @if (item.warning()) {
+            <tui-icon
+              tuiSlot="top"
+              icon="@tui.triangle-alert"
+              class="warning"
+              role="img"
+              [attr.aria-label]="'Warning' | i18n"
+              [attr.aria-hidden]="false"
+            />
+          } @else if (item.badge(); as badge) {
+            <tui-badge-notification
+              tuiSlot="top"
+              size="s"
+              [appUpdatesCount]="item.routerLink === 'updates'"
+            >
               {{ badge }}
             </tui-badge-notification>
           }
@@ -156,9 +170,15 @@ import { getMenu } from 'src/app/utils/system-utilities'
     :host-context(tui-root._mobile) {
       display: none;
     }
+
+    .link tui-icon.warning {
+      font-size: 0.75rem;
+      color: var(--tui-status-warning);
+    }
   `,
   imports: [
     TuiBadgeNotification,
+    UpdatesCount,
     TuiBadgedContent,
     RouterLink,
     TuiIcon,

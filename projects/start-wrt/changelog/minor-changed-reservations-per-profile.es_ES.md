@@ -1,1 +1,0 @@
-- Un dispositivo conserva una reserva IPv4 para cada perfil de seguridad. Cuando pasa a otro perfil, su reserva y sus puertos publicados del perfil anterior se conservan y vuelven a funcionar cuando regresa, tanto si el dispositivo cambió por sí mismo como si usted cambió el perfil de su puerto Ethernet o de su contraseña Wi-Fi.

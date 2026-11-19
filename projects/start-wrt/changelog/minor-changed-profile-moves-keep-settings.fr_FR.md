@@ -1,5 +1,0 @@
-- Changer le profil de sécurité d’un port Ethernet ou d’un mot de passe Wi-Fi, ou supprimer le dernier mot de passe Wi-Fi d’un profil, ne supprime plus les réservations ni les ports publiés de ses appareils. La confirmation indique les appareils qui les conservent.
-- Supprimer un profil de sécurité supprime aussi les réservations et les ports publiés de ce profil. La confirmation les énumère.
-- Une nouvelle réservation doit appartenir au sous-réseau du profil dans lequel se trouve l’appareil et ne pas être réservée à un autre appareil. Les réservations des profils où l’appareil ne se trouve pas sont listées comme inactives sur sa page de détails, où elles peuvent être supprimées.
-- Un port publié pour un profil où son appareil ne se trouve pas s’affiche comme inactif.
-- Une redirection de port automatique ne reste plus ouverte sur l’adresse réservée d’un appareil une fois qu’il obtient une adresse dans un autre profil.

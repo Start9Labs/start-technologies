@@ -37,6 +37,11 @@ S3_ORIGIN="https://startos-images.nyc3.digitaloceanspaces.com"
 START9_GPG_KEY="2D63C217"
 SDK_NPM_PACKAGE="@start9labs/start-sdk"
 CHANGELOG_SUMMARY="<summary>Full changelog</summary>"
+IMAGE_DOWNLOADS_HEADING="## Image Downloads"
+# The GitHub release asset holding the edited notes for every locale. Tag CI
+# (changelog.mjs sync) archives it onto master, so it must exist before the tag.
+NOTES_ASSET="release-notes.json"
+NOTE_LABELS="shared-libs/crates/start-core/locales/release-notes.json"
 
 # The S3 origin, deliberately NOT the `*.cdn.*` host that apt/start9*.list point
 # clients at. Do not "harmonize" the two. A promotion has to see the suite as it
@@ -71,8 +76,8 @@ STARTWRT_TARGET_REGISTRY="${STARTWRT_TARGET_REGISTRY:-https://startwrt-registry.
 STARTWRT_S3_BUCKET="s3://startwrt-images"
 STARTWRT_S3_CDN="https://startwrt-images.nyc3.cdn.digitaloceanspaces.com"
 STARTWRT_PLATFORM="spacemit,k1-x"
-# The CI artifact (start-wrt.yaml `image` job) holding both images.
-STARTWRT_BUILD_ARTIFACT="startwrt-openwrt-image"
+# The CI artifacts (start-wrt.yaml `image` job), one per image.
+STARTWRT_BUILD_ARTIFACTS='startwrt-*.img.gz'
 # Compat floor for `registry os version add`: the oldest installed version
 # allowed to upgrade to this one. An explicit beta floor (not a `^` caret) keeps
 # beta prerelease tags in range. The upper bound (<=$VERSION) is added in
@@ -106,24 +111,183 @@ check_changelog_version() (
     node scripts/changelog.mjs check-version "projects/$PROJECT" "$VERSION"
 )
 
-notes_path() { echo "$REPO_ROOT/projects/$1/release-notes/${VERSION}.md"; }
-
-pre_update_notes_path() {
-    local notes
-    notes=$(notes_path "$1")
-    echo "${notes%.md}.pre-update.md"
-}
-
 composed_notes() (
     cd "$REPO_ROOT"
     node scripts/changelog.mjs release-notes "projects/$PROJECT" "$VERSION" \
-        ${NOTES_REF:+--ref "$NOTES_REF"}
+        ${NOTES_REF:+--ref "$NOTES_REF"} ${NOTES_FILE:+--notes "$NOTES_FILE"}
 )
 
 registry_notes() (
     cd "$REPO_ROOT"
     node scripts/changelog.mjs registry-notes "projects/$PROJECT" "$VERSION" \
-        ${NOTES_REF:+--ref "$NOTES_REF"} ${CHANGELOG_REF:+--changelog-ref "$CHANGELOG_REF"}
+        ${NOTES_REF:+--ref "$NOTES_REF"} ${CHANGELOG_REF:+--changelog-ref "$CHANGELOG_REF"} \
+        ${NOTES_FILE:+--notes "$NOTES_FILE"}
+)
+
+# Fetch the release's edited notes into <file>. Fails when it has none.
+download_notes_bundle() {
+    gh release download -R "$REPO" "$TAG" --pattern "$NOTES_ASSET" --output "$1" --clobber 2>/dev/null
+}
+
+translation_locales() {
+    jq -r '."release-notes.highlights-title" | keys[] | select(. != "en_US")' "$REPO_ROOT/$NOTE_LABELS"
+}
+
+notes_editor() {
+    if [ -n "${VISUAL:-${EDITOR:-}}" ]; then
+        echo "${VISUAL:-${EDITOR}}"
+    elif command -v sensible-editor >/dev/null; then
+        echo sensible-editor
+    else
+        echo vi
+    fi
+}
+
+launch_editor() {
+    local editor
+    read -ra editor <<< "$(notes_editor)"
+    "${editor[@]}" "$@"
+}
+
+# Translate English notes into a locale: <english> <previous translation> <locale>.
+translate_notes() {
+    local english=$1 previous=$2 locale=$3 labels prompt
+    labels=$(jq -r --arg l "$locale" '
+        "Highlights -> \(."release-notes.highlights-title"[$l]), Security -> \(."release-notes.security-title"[$l])"
+    ' "$REPO_ROOT/$NOTE_LABELS")
+    prompt="Translate the Start9 release notes in <english> from English into the ${locale} locale.
+Output only the translated Markdown: no preamble, no commentary, no code fence around it.
+Keep the Markdown structure, links, URLs, code spans, version numbers, and product names (StartOS, StartTunnel, StartWRT, start-cli, Start9) unchanged.
+Copy every HTML comment (such as <!-- pre-update --> and <!-- /pre-update -->) verbatim and in place; never translate, move, or drop one.
+Use these section titles: ${labels}.
+<previous-translation> translated an earlier draft; reuse its wording wherever it still matches the English."
+    {
+        printf '<english>\n%s\n</english>\n' "$(cat "$english")"
+        printf '<previous-translation>\n%s\n</previous-translation>\n' "$(cat "$previous")"
+    } | claude -p --tools "" --no-session-persistence --output-format text "$prompt"
+}
+
+prerelease_tags() {
+    local name number
+    git -C "$REPO_ROOT" fetch -q --tags origin
+    while read -r name; do
+        number="${name#"${PROJECT}/v${VERSION}-rc."}"
+        [[ "$number" =~ ^[1-9][0-9]*$ ]] || continue
+        echo "$name"
+    done < <(git -C "$REPO_ROOT" for-each-ref --sort=-version:refname --format='%(refname:short)' "refs/tags/${PROJECT}/v${VERSION}-rc.*")
+}
+
+# The newest earlier prerelease of this version with uploaded notes, if any.
+previous_prerelease() {
+    local name
+    while read -r name; do
+        [ "$name" != "$TAG" ] || continue
+        if gh release view -R "$REPO" "$name" --json assets --jq '.assets[].name' 2>/dev/null | grep -qxF "$NOTES_ASSET"; then
+            echo "$name"
+            return 0
+        fi
+    done < <(prerelease_tags)
+}
+
+# Published OS image links, checksums, and signatures are reusable for the same commit.
+reusable_os_release() {
+    local name sha release
+    sha=$(tag_commit_sha)
+    while read -r name; do
+        [ "$name" != "$TAG" ] || continue
+        [ "$(git -C "$REPO_ROOT" rev-parse "${name}^{commit}")" = "$sha" ] || continue
+        release=$(gh release view -R "$REPO" "$name" --json tagName,isDraft,isPrerelease,assets,body) || continue
+        if jq -e --arg notes "$NOTES_ASSET" --arg heading "$IMAGE_DOWNLOADS_HEADING" '
+            .isDraft == false and .isPrerelease == true and
+            any(.assets[]; .name == $notes) and
+            any(.assets[]; .name == "CHANGELOG.md") and
+            any(.assets[]; .name == "signatures.tar.gz") and
+            (.body | contains("\n" + $heading + "\n"))
+        ' <<< "$release" >/dev/null; then
+            echo "$release"
+            return 0
+        fi
+    done < <(prerelease_tags)
+}
+
+# Build the English notes to start editing from: <bundle out> <english out> <ref>.
+# A re-run starts from this release's uploaded notes. Otherwise the fragments
+# picker chooses what to add, on top of the latest prerelease's notes if any.
+seed_notes() {
+    local bundle=$1 english=$2 ref=$3 previous since work base_args=()
+    if download_notes_bundle "$bundle"; then
+        jq -j .en_US "$bundle" > "$english"
+        return
+    fi
+    work=$(dirname "$bundle")
+    if [ -n "${REUSED_OS_RELEASE:-}" ]; then
+        previous=$(jq -r .tagName <<< "$REUSED_OS_RELEASE")
+    else
+        previous=$(previous_prerelease)
+    fi
+    if [ -n "$previous" ]; then
+        TAG="$previous" download_notes_bundle "$bundle"
+        jq -j .en_US "$bundle" > "$work/base.md"
+        base_args=(--base "$work/base.md")
+        since=$(git -C "$REPO_ROOT" rev-parse "${previous}^{commit}")
+        echo "Starting from the ${previous} notes."
+    else
+        echo '{"en_US": ""}' > "$bundle"
+    fi
+    (cd "$REPO_ROOT" && node scripts/changelog.mjs candidates "projects/$PROJECT" "$VERSION" \
+        ${ref:+--ref "$ref"} ${since:+--since "$since"}) > "$work/candidates.json"
+    VISUAL=$(notes_editor) node "$REPO_ROOT/scripts/release-notes-select.mjs" "$work/candidates.json" "$work/selection.json" \
+        "$(project_display_name "$PROJECT") ${TAG#"${PROJECT}/"} release notes"
+    (cd "$REPO_ROOT" && node scripts/changelog.mjs compose-notes "projects/$PROJECT" "$VERSION" \
+        --selection "$work/selection.json" ${ref:+--ref "$ref"} \
+        ${since:+--since "$since"} "${base_args[@]}") > "$english"
+}
+
+# English is the editable source; generated translations bypass the editor.
+# Existing translations are kept while the English matches the bundle's en_US.
+edit_notes_bundle() (
+    local bundle=$1 dir locale file args=() filter="" pids=() pid
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    cp "$2" "$dir/en_US.md"
+    jq -j .en_US "$bundle" > "$dir/source"
+    echo "Opening the ${VERSION} release notes in your editor..."
+    launch_editor "$dir/en_US.md"
+    if [ "${NO_TRANSLATE:-}" != 1 ] && [ -s "$dir/en_US.md" ] && ! command -v claude >/dev/null; then
+        >&2 echo "  ✗ claude CLI not found; install Claude Code or set NO_TRANSLATE=1 to publish English only."
+        exit 1
+    fi
+    for locale in $(translation_locales); do
+        if [ "${NO_TRANSLATE:-}" = 1 ]; then continue; fi
+        if jq -e --arg l "$locale" 'has($l)' "$bundle" >/dev/null; then
+            jq -j --arg l "$locale" '.[$l]' "$bundle" > "$dir/$locale.previous"
+            if cmp -s "$dir/en_US.md" "$dir/source"; then
+                cp "$dir/$locale.previous" "$dir/$locale.md"
+                continue
+            fi
+        else
+            : > "$dir/$locale.previous"
+        fi
+        if [ ! -s "$dir/en_US.md" ]; then
+            : > "$dir/$locale.md"
+            continue
+        fi
+        echo "Translating into ${locale}..."
+        translate_notes "$dir/en_US.md" "$dir/$locale.previous" "$locale" > "$dir/$locale.md" &
+        pids+=("$!")
+    done
+    for pid in "${pids[@]}"; do wait "$pid"; done
+    for file in "$dir"/*.md; do
+        locale=$(basename "$file" .md)
+        if [ -s "$file" ] && [ "$(grep -o '<!--[^>]*-->' "$file")" != "$(grep -o '<!--[^>]*-->' "$dir/en_US.md")" ]; then
+            >&2 echo "  ✗ The ${locale} notes' HTML comments differ from the English notes."
+            exit 1
+        fi
+        args+=(--rawfile "$locale" "$file")
+        filter+="${filter:+, }\"${locale}\": \$${locale}"
+    done
+    jq -n "${args[@]}" "{${filter}}" > "$bundle"
+    (cd "$REPO_ROOT" && node scripts/changelog.mjs format-notes "$bundle")
 )
 
 curated_notes() {
@@ -195,6 +359,13 @@ os_image_exts() {
     esac
 }
 
+os_image_file_ext() {
+    case "$1" in
+        img) echo img.gz ;;
+        *) echo "$1" ;;
+    esac
+}
+
 # Load a registry's OS index into $_INDEX_JSON, refetching only when asked for a
 # different registry than the one held — a release reads a dozen asset URLs off
 # it and each fetch is a round trip. Call it once at the top of a scope that
@@ -263,8 +434,8 @@ release_security() {
 check_registry_notes_cli() {
     local help
     help=$(start-cli registry os version add --help) || return
-    if ! grep -Fq -- '<RELEASE_NOTES_OR_JSON>' <<< "$help"; then
-        >&2 echo "  ✗ start-cli lacks LocaleString release notes; update it before publishing registry notes."
+    if ! grep -Fq -- '<RELEASE_NOTES_OR_JSON>' <<< "$help" || grep -Fq -- '<HEADLINE>' <<< "$help"; then
+        >&2 echo "  ✗ start-cli lacks headline-free LocaleString release notes; update it before publishing registry notes."
         return 1
     fi
 }
@@ -289,7 +460,7 @@ refresh_registry_notes() {
     echo "Setting ${VERSION} release notes on ${registry}..."
     start-cli --registry="$registry" registry os version add \
         "${metadata_args[@]}" \
-        "$VERSION" "v${VERSION}" "$notes" "$range"
+        "$VERSION" "$notes" "$range"
     _INDEX_REGISTRY=""
 }
 
@@ -361,34 +532,11 @@ deb_files() {
     for f in *.deb; do [ -f "$f" ] && echo "$f"; done
 }
 
-# Compress every raw .img in the release dir beside itself.
-#
-# The registry keeps indexing the image bare: an installer streams it and the
-# signed commitment is over the raw bytes. But a raw card image is mostly
-# zeroes, and the release notes hand it to a human on a browser — so the notes
-# link the .gz, and it is hashed and signed alongside the bare image.
-#
-# Idempotent: skips a .gz already newer than its source, and stages through a
-# temp file so an interrupted run can't leave a truncated one looking current.
-# A no-op outside the os kind — nothing else ships a raw .img.
-ensure_img_gz() {
-    local img
-    for img in *.img; do
-        [ -f "$img" ] || continue
-        if [ -f "${img}.gz" ] && [ ! "$img" -nt "${img}.gz" ]; then
-            continue
-        fi
-        >&2 echo "  compressing ${img} -> ${img}.gz"
-        gzip -c "$img" > "${img}.gz.tmp"
-        mv -f "${img}.gz.tmp" "${img}.gz"
-    done
-}
-
 # List every file the project ships (for signing / checksums), one per line.
 release_files() {
     local f
     case "$KIND" in
-        os) for f in *.iso *.img *.img.gz *.squashfs; do [ -f "$f" ] && echo "$f"; done ;;
+        os) for f in *.iso *.img.gz *.squashfs; do [ -f "$f" ] && echo "$f"; done ;;
         cli) cli_binaries; deb_files ;;
         deb) deb_files ;;
         wrt) for f in *-sdcard.img.gz *-sysupgrade.img.gz; do [ -f "$f" ] && echo "$f"; done ;;
@@ -596,40 +744,28 @@ compiled_metadata_matches() {
 }
 
 assert_metadata_matches_adopted() {
-    local adopted file untracked label
+    local adopted warnings untracked
     adopted=$(tag_commit_sha)
-    for file in "$REPO_ROOT/projects/$PROJECT/changelog" "$(notes_path "$PROJECT")" "$(pre_update_notes_path "$PROJECT")"; do
-        label="${file#"$REPO_ROOT/"}"
-        case "$file" in
-            */changelog)
-                if compiled_metadata_matches render "$adopted"; then continue; fi ;;
-            "$(notes_path "$PROJECT")")
-                label="release-note bundle at $label (including locale companions)"
-                if compiled_metadata_matches notes-bundle "$adopted"; then continue; fi ;;
-            *)
-                untracked=$(cd "$REPO_ROOT" && git ls-files --others --exclude-standard -- "$file")
-                if [ -z "$untracked" ] && (cd "$REPO_ROOT" && git diff --quiet "$adopted" -- "$file"); then continue; fi ;;
-        esac
-        if [ -n "${UNCOMMITTED_NOTES:-}" ] && [ "$file" != "$REPO_ROOT/projects/$PROJECT/changelog" ]; then
-            >&2 echo "  ! ${label} differs from ${adopted}; releasing it anyway (UNCOMMITTED_NOTES)"
-            continue
-        fi
-
-        >&2 echo "  ✗ ${label} differs between the working tree and the"
+    if ! compiled_metadata_matches render "$adopted"; then
+        >&2 echo "  ✗ projects/${PROJECT}/changelog differs between the working tree and the"
         >&2 echo "    commit being tagged (${adopted}). Generated release metadata would not match the tag."
         >&2 echo
         >&2 echo "      git checkout ${adopted}"
         >&2 echo "      ./scripts/manage-release.sh release ${PROJECT}"
         return 1
-    done
-    if ! compiled_metadata_matches registry-notes "$adopted"; then
-        if [ -n "${UNCOMMITTED_NOTES:-}" ]; then
-            >&2 echo "  ! release-note bundle (including localized pre-update warnings) differs from ${adopted}; releasing it anyway (UNCOMMITTED_NOTES)"
-        else
-            >&2 echo "  ✗ release-note bundle (including localized pre-update warnings) differs from the commit being tagged (${adopted})."
-            return 1
-        fi
     fi
+    warnings="projects/${PROJECT}/release-notes/${VERSION}*.pre-update.md"
+    untracked=$(cd "$REPO_ROOT" && git ls-files --others --exclude-standard -- "$warnings")
+    if [ -z "$untracked" ] && (cd "$REPO_ROOT" && git diff --quiet "$adopted" -- "$warnings"); then return 0; fi
+    if [ -n "${UNCOMMITTED_NOTES:-}" ]; then
+        >&2 echo "  ! pre-update warnings differ from ${adopted}; releasing them anyway (UNCOMMITTED_NOTES)"
+        return 0
+    fi
+    >&2 echo "  ✗ pre-update warnings differ between the working tree and the commit being tagged (${adopted})."
+    >&2 echo
+    >&2 echo "      git checkout ${adopted}"
+    >&2 echo "      ./scripts/manage-release.sh release ${PROJECT}"
+    return 1
 }
 
 # Clear every payload this staging path produces, both halves. Clearing only the
@@ -668,8 +804,8 @@ promote_alpha_debs() {
 pull_gha_debs() {
     local arch
     for arch in $DEB_ARCHES; do
-        echo "  ${PROJECT}_${arch}.deb"
-        gh run download -R "$REPO" "$RUN_ID" -n "${PROJECT}_${arch}.deb" -D "$(pwd)"
+        echo "  ${PROJECT}-*_${arch}.deb"
+        "$SCRIPT_DIR/gha-artifact-download.sh" "$REPO" "$RUN_ID" "${PROJECT}-*_${arch}.deb" "$(pwd)"
     done
 }
 
@@ -718,23 +854,25 @@ publish_debs() {
 # The `release` steps for this kind, in order.
 release_steps() {
     case "$KIND" in
-        os) echo pre-check pull push-gz tag create-gh-release index sign ;;
+        # create-gh-release drafts the release with the edited notes before the
+        # tag exists: tag CI archives the notes from that draft.
+        os) echo pre-check pull create-gh-release tag publish-gh-release index sign ;;
         # Promote the debs CI published to alpha rather than rebuilding
         # trust from a CI run: what testers have been running is what ships.
         # (start-cli's per-triple binaries still come from the run — they are
         # published only as release assets, so there is no channel to promote
         # them from. Both halves are pinned to the tagged commit.)
-        cli | deb) echo pre-check pull-alpha tag create-gh-release push sign ;;
-        # create-gh-release before push: everything idempotent runs ahead of
+        cli | deb) echo pre-check pull-alpha create-gh-release tag publish-gh-release push sign ;;
+        # Publish the release before push: everything idempotent runs ahead of
         # the one irreversible step (npm publish can't be re-run for a version).
-        npm) echo pre-check tag create-gh-release push ;;
+        npm) echo pre-check create-gh-release tag publish-gh-release push ;;
         # CI (start-wrt.yaml `deploy`) uploaded the images to S3 and
         # registered + indexed them into the source (beta) registry, where
         # beta routers soaked the version — so there's no push here. Pull
         # the registered images (signature-verified) to build the release
         # notes + sign them, tag, cut the GitHub release, and `index`
         # promotes them from source into production.
-        wrt) echo pre-check pull tag create-gh-release index sign ;;
+        wrt) echo pre-check pull create-gh-release tag publish-gh-release index sign ;;
     esac
 }
 
@@ -742,14 +880,6 @@ release_steps() {
 declare -A DONE=()
 # The commit origin's release tag points at. Empty if untagged.
 REMOTE_TAG_SHA=""
-
-published_exists() {
-    [ "$(curl -sI "${APT_NO_CACHE[@]}" -o /dev/null -w '%{http_code}' "$1")" = 200 ]
-}
-
-os_img_gz_origin() {
-    echo "${S3_ORIGIN}/v${VERSION}/$(basename "$1").gz"
-}
 
 detect_progress() {
     local release assets="" arch triple platform url published=1
@@ -759,27 +889,20 @@ detect_progress() {
 
     if release=$(gh release view -R "$REPO" "$TAG" --json assets,isDraft,isPrerelease,body 2>/dev/null); then
         assets=$(jq -r '.assets[].name' <<< "$release")
-        if jq -e --arg summary "$CHANGELOG_SUMMARY" --argjson prerelease "${PRERELEASE:-0}" '
-            .isDraft == false and
+        if jq -e --arg summary "$CHANGELOG_SUMMARY" --arg notes "$NOTES_ASSET" --argjson prerelease "${PRERELEASE:-0}" '
             ($prerelease != 1 or .isPrerelease == true) and
             any(.assets[]; .name == "CHANGELOG.md") and
+            any(.assets[]; .name == $notes) and
             (.body | contains($summary))
         ' <<< "$release" >/dev/null; then
             DONE[create-gh-release]=1
+            if [ "$(jq -r .isDraft <<< "$release")" = false ]; then DONE[publish-gh-release]=1; fi
         fi
         if grep -qxF signatures.tar.gz <<< "$assets"; then DONE[sign]=1; fi
     fi
 
     case "$KIND" in
         os)
-            for platform in $OS_PLATFORMS; do
-                [[ " $(os_image_exts "$platform") " == *" img "* ]] || continue
-                url=$(asset_url "$STARTOS_SOURCE_REGISTRY" img "$platform")
-                if [ -z "$url" ] || ! published_exists "$(os_img_gz_origin "$url")"; then
-                    published=
-                fi
-            done
-            [ -z "$published" ] || DONE[push-gz]=1
             if [ "${PRERELEASE:-}" != 1 ] && [ -z "$(missing_registry_assets "$STARTOS_TARGET_REGISTRY")" ]; then
                 load_registry_index "$STARTOS_TARGET_REGISTRY"
                 if [ "$(jq -r --arg v "$VERSION" '.versions[$v].gitHash // empty' <<< "$_INDEX_JSON")" = "$(tag_commit_sha)" ]; then
@@ -842,6 +965,15 @@ cmd_pre_check() {
     case "$KIND" in
         os | wrt) check_registry_notes_cli || errors=1 ;;
     esac
+
+    if [ "${NO_TRANSLATE:-}" = 1 ]; then
+        echo "  ! NO_TRANSLATE=1: release notes publish in English only"
+    elif command -v claude >/dev/null; then
+        echo "  ✓ claude CLI available to translate the release notes"
+    else
+        >&2 echo "  ✗ claude CLI not found; install Claude Code or set NO_TRANSLATE=1 to publish English notes only"
+        errors=1
+    fi
 
     # releases/latest can resolve to another product's release.
     if [ "$KIND" = os ]; then
@@ -1027,9 +1159,7 @@ cmd_pre_check() {
         >&2 echo "  ✗ gh not authenticated (run: gh auth login)"
         errors=1
     fi
-    # os/cli/deb/wrt also sign their artifacts with the Start9 org key, and
-    # render checksum blocks into the release notes (see checksum_block).
-    if [ "$KIND" != npm ]; then
+    if [ "$KIND" != npm ] && [ -z "${REUSED_OS_RELEASE:-}" ]; then
         if gpg --list-secret-keys "$START9_GPG_KEY" >/dev/null 2>&1; then
             echo "  ✓ Start9 signing key ${START9_GPG_KEY} present"
         else
@@ -1050,9 +1180,7 @@ cmd_pre_check() {
         fi
     fi
 
-    # cli/deb publish debs to the apt repo and os pushes the compressed images
-    # (push-gz) — all three upload to S3, which needs s3cmd + credentials.
-    if [ "$KIND" = cli ] || [ "$KIND" = deb ] || [ "$KIND" = os ]; then
+    if { [ "$KIND" = cli ] || [ "$KIND" = deb ] || [ "$KIND" = os ]; } && [ -z "${REUSED_OS_RELEASE:-}" ]; then
         if command -v s3cmd >/dev/null 2>&1; then
             echo "  ✓ s3cmd available"
         else
@@ -1087,7 +1215,7 @@ resolve_gha_run() {
 
     # The tag must point at the commit these artifacts were built from.
     local tag_sha
-    RUN_SHA=$(gh run view -R "$REPO" "$RUN_ID" --json headSha -q .headSha)
+    RUN_SHA=$("$SCRIPT_DIR/gha-run-commit.sh" "$REPO" "$RUN_ID") || exit 1
     tag_sha=$(tag_commit_sha)
     if [ "$RUN_SHA" != "$tag_sha" ]; then
         >&2 echo "Run ${RUN_ID} built commit ${RUN_SHA},"
@@ -1123,11 +1251,11 @@ cmd_pull_gha() {
         os)
             for platform in $OS_PLATFORMS; do
                 for ext in $(os_image_exts "$platform"); do
-                    echo "  ${platform}.${ext}"
-                    gh run download -R "$REPO" "$RUN_ID" -n "${platform}.${ext}" -D "$(pwd)"
+                    ext=$(os_image_file_ext "$ext")
+                    echo "  startos-*_${platform}.${ext}"
+                    "$SCRIPT_DIR/gha-artifact-download.sh" "$REPO" "$RUN_ID" "startos-*_${platform}.${ext}" "$(pwd)"
                 done
             done
-            ensure_img_gz
             ;;
         cli)
             pull_gha_cli_binaries
@@ -1137,8 +1265,8 @@ cmd_pull_gha() {
             pull_gha_debs
             ;;
         wrt)
-            echo "  ${STARTWRT_BUILD_ARTIFACT} (sdcard + sysupgrade .img.gz)"
-            gh run download -R "$REPO" "$RUN_ID" -n "$STARTWRT_BUILD_ARTIFACT" -D "$(pwd)"
+            echo "  ${STARTWRT_BUILD_ARTIFACTS} (sdcard + sysupgrade)"
+            "$SCRIPT_DIR/gha-artifact-download.sh" "$REPO" "$RUN_ID" "$STARTWRT_BUILD_ARTIFACTS" "$(pwd)"
             ;;
     esac
 }
@@ -1192,23 +1320,6 @@ matches_commitment() {
     [ -f "$1" ] && [ "$(b3sum --no-names "$1")" = "$(asset_commitment_b3 "$2" "$3" "$4")" ]
 }
 
-pull_published_img_gz() {
-    local img=$1 url tmp digest
-    url=$(os_img_gz_origin "$img")
-    published_exists "$url" || return 0
-    tmp=$(mktemp "${img}.gz.XXXXXX")
-    echo "  img.gz -> ${img}.gz"
-    if ! curl -fSL --progress-bar "${APT_NO_CACHE[@]}" "$url" -o "$tmp" \
-        || ! digest=$(gzip -dc "$tmp" | b3sum --no-names) \
-        || [ "$digest" != "$(b3sum --no-names "$img")" ]; then
-        rm -f "$tmp"
-        >&2 echo "  ✗ published ${img}.gz does not decompress to the indexed image"
-        return 1
-    fi
-    touch -r "$img" "$tmp"
-    mv -f "$tmp" "${img}.gz"
-}
-
 cmd_pull() {
     ensure_release_dir
     # Released assets replace any GHA-pulled ones, so the marker no longer applies.
@@ -1219,8 +1330,8 @@ cmd_pull() {
         os)
             # start-cli names its output startos-<ver>_<platform>.<ext>, which
             # drops the commit hash the published basename carries. Land each
-            # asset under its published name instead, so checksums, signatures,
-            # and the .gz key all agree with what is actually on S3.
+            # asset under its published name instead, so checksums and
+            # signatures agree with what is actually on S3.
             local platform ext url published tmp stale expected=()
             load_registry_index "$STARTOS_SOURCE_REGISTRY"
             for platform in $OS_PLATFORMS; do
@@ -1232,7 +1343,6 @@ cmd_pull() {
                     fi
                     published=$(basename "$url")
                     expected+=("$published")
-                    [ "$ext" != img ] || expected+=("${published}.gz")
                     if matches_commitment "$published" "$STARTOS_SOURCE_REGISTRY" "$ext" "$platform"; then
                         echo "  ${ext} ${platform} -> ${published} (already here)"
                     else
@@ -1242,12 +1352,8 @@ cmd_pull() {
                         mv -f "$tmp"/* "$published"
                         rmdir "$tmp"
                     fi
-                    if [ "$ext" = img ]; then
-                        pull_published_img_gz "$published" || return 1
-                    fi
                 done
             done
-            ensure_img_gz
             # Everything the notes hash and sign must be named for the S3 object
             # it links. Anything else the dir has collected — a pull from before
             # assets were renamed to their published basename, or another build
@@ -1328,11 +1434,26 @@ cmd_tag() {
 
 cmd_create_gh_release() (
     require_kind os cli deb npm wrt
-    if [ "$KIND" != npm ]; then
-        enter_release_dir
-        ensure_img_gz
+    local changelog_dir notes_ref prerelease_args=() title_version="$VERSION" sha
+    # Notes describe the tagged build, or the build FORCE will tag.
+    if [ -z "${FORCE:-}" ] && sha=$(git -C "$REPO_ROOT" rev-parse --verify "${TAG}^{commit}" 2>/dev/null); then
+        if [ -n "${COMMIT:-}" ] && [ "$(tag_commit_sha)" != "$sha" ]; then
+            >&2 echo "  ✗ COMMIT=${COMMIT} differs from the commit ${TAG} already names (${sha})."
+            return 1
+        fi
+        COMMIT=$sha
+    else
+        if [ "$KIND" = os ]; then
+            resolve_os_commit
+        elif [ -z "${COMMIT:-}" ] && [ -f "$(gha_commit_file)" ]; then
+            COMMIT=$(cat "$(gha_commit_file)")
+        fi
+        sha=$(tag_commit_sha)
     fi
-    local changelog_dir draft notes_ref="$TAG" prerelease_args=() title_version="$VERSION"
+    if [ "$KIND" != npm ] && [ -z "${REUSED_OS_RELEASE:-}" ]; then
+        enter_release_dir
+    fi
+    notes_ref=$sha
     if [ "${PRERELEASE:-}" = 1 ]; then
         prerelease_args+=(--prerelease --latest=false)
         title_version="${TAG#"${PROJECT}/v"}"
@@ -1340,20 +1461,28 @@ cmd_create_gh_release() (
     if [ -n "${UNCOMMITTED_NOTES:-}" ]; then notes_ref=; fi
     changelog_dir=$(mktemp -d)
     trap 'rm -rf "$changelog_dir"' EXIT
-    (cd "$REPO_ROOT" && node scripts/changelog.mjs render "projects/$PROJECT" "$VERSION" --ref "$TAG") > "$changelog_dir/CHANGELOG.md"
-    NOTES_REF="$notes_ref" release_body "$(cat "$changelog_dir/CHANGELOG.md")" > "$changelog_dir/notes.md"
-    echo "Creating GitHub release ${TAG}..."
-    if draft=$(gh release view -R "$REPO" "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+    local bundle="$changelog_dir/$NOTES_ASSET"
+    seed_notes "$bundle" "$changelog_dir/english.md" "$notes_ref"
+    edit_notes_bundle "$bundle" "$changelog_dir/english.md"
+    (cd "$REPO_ROOT" && node scripts/changelog.mjs render "projects/$PROJECT" "$VERSION" --ref "$sha") > "$changelog_dir/CHANGELOG.md"
+    NOTES_FILE="$bundle" NOTES_REF="$notes_ref" release_body "$(cat "$changelog_dir/CHANGELOG.md")" > "$changelog_dir/notes.md"
+    if gh release view -R "$REPO" "$TAG" --json isDraft >/dev/null 2>&1; then
+        echo "Updating GitHub release ${TAG}..."
         gh release edit -R "$REPO" "$TAG" "${prerelease_args[@]}" --title "$(project_display_name "$PROJECT") v${title_version}" --notes-file "$changelog_dir/notes.md"
     else
-        draft=true
-        gh release create -R "$REPO" "$TAG" --draft --verify-tag "${prerelease_args[@]}" --title "$(project_display_name "$PROJECT") v${title_version}" --notes-file "$changelog_dir/notes.md"
+        echo "Drafting GitHub release ${TAG} at ${sha}..."
+        gh release create -R "$REPO" "$TAG" --draft --target "$sha" "${prerelease_args[@]}" --title "$(project_display_name "$PROJECT") v${title_version}" --notes-file "$changelog_dir/notes.md"
     fi
-    gh release upload -R "$REPO" "$TAG" "$changelog_dir/CHANGELOG.md" --clobber
-    if [ "$draft" = true ]; then
+    gh release upload -R "$REPO" "$TAG" "$changelog_dir/CHANGELOG.md" "$bundle" --clobber
+)
+
+cmd_publish_gh_release() {
+    require_kind os cli deb npm wrt
+    if [ "$(gh release view -R "$REPO" "$TAG" --json isDraft --jq .isDraft)" = true ]; then
+        echo "Publishing GitHub release ${TAG}..."
         gh release edit -R "$REPO" "$TAG" --draft=false
     fi
-)
+}
 
 cmd_push() {
     case "$KIND" in
@@ -1362,7 +1491,7 @@ cmd_push() {
             echo "Uploading OS images to ${S3_BUCKET}/v${VERSION}/ ..."
             for platform in $OS_PLATFORMS; do
                 for ext in $(os_image_exts "$platform"); do
-                    for file in *_"$platform"."$ext"; do
+                    for file in *_"$platform"."$(os_image_file_ext "$ext")"; do
                         [ -f "$file" ] || continue
                         echo "  $file"
                         s3cmd put -P "$file" "${S3_BUCKET}/v${VERSION}/$file"
@@ -1400,70 +1529,20 @@ cmd_push() {
     esac
 }
 
-# Put the compressed copy of each raw .img beside the bare image on S3.
-#
-# This adds an object rather than replacing one: the registry keeps pointing at
-# the bare .img (see ensure_img_gz), and only the release-notes download link
-# moves to the .gz. That link is the indexed URL + ".gz", so the key has to be
-# the indexed basename + ".gz" — the guards below exist because any other name
-# yields notes that link to nothing.
-#
-# The local img is picked by content, not name: one platform can be hotfixed
-# and re-indexed at a different commit than the rest of the release, and a
-# start-cli download drops the hash entirely, so the git hash a basename embeds
-# proves nothing. The registry's signed blake3 commitment is what the .gz must
-# decompress to; match against that, then rename to the indexed basename so
-# checksums and signatures agree with the object the notes link.
-cmd_push_gz() {
-    require_kind os
-    enter_release_dir
-    ensure_img_gz
-    echo "Uploading compressed OS images to ${S3_BUCKET}/v${VERSION}/ ..."
-    local platform ext url published expected img f
-    for platform in $OS_PLATFORMS; do
-        for ext in $(os_image_exts "$platform"); do
-            [ "$ext" = img ] || continue
-            url=$(asset_url "$STARTOS_SOURCE_REGISTRY" img "$platform")
-            if [ -z "$url" ]; then
-                >&2 echo "  ✗ no ${platform} img indexed in ${STARTOS_SOURCE_REGISTRY}"
-                exit 1
-            fi
-            published=$(basename "$url")
-            if [ "$url" != "${S3_CDN}/v${VERSION}/${published}" ]; then
-                >&2 echo "  ✗ ${platform} img is indexed at ${url}, outside ${S3_CDN}/v${VERSION}/ — a .gz uploaded to ${S3_BUCKET} would not be reachable at that URL + .gz"
-                exit 1
-            fi
-            expected=$(asset_commitment_b3 "$STARTOS_SOURCE_REGISTRY" img "$platform")
-            if [ -z "$expected" ]; then
-                >&2 echo "  ✗ ${published} has no blake3 commitment in ${STARTOS_SOURCE_REGISTRY}"
-                exit 1
-            fi
-            img=
-            for f in "$published" *.img; do
-                [ -f "$f" ] || continue
-                if [ "$(b3sum --no-names "$f")" = "$expected" ]; then
-                    img=$f
-                    break
-                fi
-            done
-            if [ -z "$img" ]; then
-                >&2 echo "  ✗ no img in $(release_dir) matches the blake3 ${STARTOS_SOURCE_REGISTRY} commits to for ${published} — run 'pull' (or 'pull-gha' with the run that built the indexed img) first"
-                exit 1
-            fi
-            if [ "$img" != "$published" ]; then
-                echo "  ${img} -> ${published} (renaming to the indexed basename)"
-                mv -f "$img" "$published"
-                [ ! -f "${img}.gz" ] || mv -f "${img}.gz" "${published}.gz"
-                ensure_img_gz
-            fi
-            echo "  ${published}.gz"
-            s3cmd put -P "${published}.gz" "${S3_BUCKET}/v${VERSION}/${published}.gz"
-        done
-    done
-}
-
 cmd_index() {
     require_kind os wrt
+    local NOTES_FILE
+    NOTES_FILE=$(mktemp)
+    if ! download_notes_bundle "$NOTES_FILE"; then
+        rm -f "$NOTES_FILE"
+        >&2 echo "  ✗ GitHub release ${TAG} has no ${NOTES_ASSET}; run create-gh-release first."
+        return 1
+    fi
+    index_promote
+    rm -f "$NOTES_FILE"
+}
+
+index_promote() {
     case "$KIND" in
         os)
             _INDEX_REGISTRY=""
@@ -1483,6 +1562,7 @@ cmd_index() {
             # (beta) registry into production — the same index-copy +
             # developer-key re-sign as the OS; the images stay on the StartWRT
             # S3 bucket, so nothing is re-uploaded.
+            local NOTES_REF="$(tag_commit_sha)"
             refresh_registry_notes "$STARTWRT_SOURCE_REGISTRY"
             echo "Promoting StartWRT ${VERSION}: ${STARTWRT_SOURCE_REGISTRY} -> ${STARTWRT_TARGET_REGISTRY} ..."
             start-cli registry os promote --from "$STARTWRT_SOURCE_REGISTRY" --to "$STARTWRT_TARGET_REGISTRY" "$VERSION"
@@ -1506,7 +1586,7 @@ cmd_register() {
     enter_release_dir
     echo "Registering StartWRT ${VERSION} in ${STARTWRT_SOURCE_REGISTRY}..."
     start-cli --registry="$STARTWRT_SOURCE_REGISTRY" registry os version add \
-        "$VERSION" "v$VERSION" "$notes" "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
+        "$VERSION" "$notes" "${STARTWRT_COMPAT_FLOOR} <=$VERSION"
 
     # start-cli infers the asset slot from the file extension and only accepts
     # iso/img/squashfs. Both images ship gzipped, so present each under a
@@ -1532,8 +1612,17 @@ cmd_register() {
 
 cmd_sign() {
     require_kind os cli deb wrt
+    if [ -n "${REUSED_OS_RELEASE:-}" ]; then
+        (
+            dir=$(mktemp -d)
+            trap 'rm -rf "$dir"' EXIT
+            gh release download -R "$REPO" "$(jq -r .tagName <<< "$REUSED_OS_RELEASE")" \
+                --pattern signatures.tar.gz --output "$dir/signatures.tar.gz"
+            gh release upload -R "$REPO" "$TAG" "$dir/signatures.tar.gz" --clobber
+        )
+        return
+    fi
     enter_release_dir
-    ensure_img_gz
     resolve_gh_user
 
     local files file
@@ -1561,7 +1650,6 @@ cmd_sign() {
 cmd_cosign() {
     require_kind os cli deb wrt
     enter_release_dir
-    ensure_img_gz
     resolve_gh_user
 
     if [ -z "$GH_USER" ] || [ -z "$GH_GPG_KEY" ]; then
@@ -1630,7 +1718,7 @@ cmd_cosign_registry() {
 }
 
 release_body() {
-    echo "<!-- Generated by scripts/manage-release.sh from changelog fragments and optional projects/${PROJECT}/release-notes/${VERSION}.md and .pre-update.md framing — edits made here are overwritten. -->"
+    echo "<!-- Generated by scripts/manage-release.sh from the ${NOTES_ASSET} asset and optional projects/${PROJECT}/release-notes/${VERSION}.pre-update.md — edits made here are overwritten; re-run create-gh-release to edit the notes. -->"
     echo
     composed_notes
     echo
@@ -1647,11 +1735,18 @@ release_body() {
 }
 
 generated_sections() {
-
+    if [ -n "${REUSED_OS_RELEASE:-}" ]; then
+        jq -j .body <<< "$REUSED_OS_RELEASE" | awk -v heading="$IMAGE_DOWNLOADS_HEADING" '
+            $0 == heading {section=""; assets=1}
+            assets {section=section $0 ORS}
+            END {printf "%s", section}
+        '
+        return
+    fi
     local platform
     case "$KIND" in
         os)
-            echo "## Image Downloads"
+            echo "$IMAGE_DOWNLOADS_HEADING"
             echo
             echo "| Hardware | Image | Download |"
             echo "| --- | --- | --- |"
@@ -1667,7 +1762,7 @@ generated_sections() {
                     url=$(asset_url "$STARTOS_SOURCE_REGISTRY" "$ext" "$platform")
                     [ -n "$url" ] || continue
                     if [ "$ext" = img ]; then
-                        url="${url}.gz \"gzip-compressed — Raspberry Pi Imager and balenaEtcher flash it without unpacking\""
+                        url="${url} \"gzip-compressed — Raspberry Pi Imager and balenaEtcher flash it without unpacking\""
                     fi
                     echo "| ${hardware} | ${image} | [${ext^^}](${url}) |"
                 done
@@ -1696,7 +1791,7 @@ generated_sections() {
             checksum_block "${PROJECT} packages" "${debs[@]}"
             ;;
         wrt)
-            echo "## Image Downloads"
+            echo "$IMAGE_DOWNLOADS_HEADING"
             echo
             echo "| Hardware | Image | Download |"
             echo "| --- | --- | --- |"
@@ -1751,7 +1846,6 @@ cmd_body() {
     require_kind os cli deb npm wrt
     if [ "$KIND" != npm ]; then
         enter_release_dir
-        ensure_img_gz
     fi
     local changelog
     changelog=$(cd "$REPO_ROOT" && node scripts/changelog.mjs render "projects/$PROJECT" "$VERSION")
@@ -1760,12 +1854,10 @@ cmd_body() {
 
 select_prerelease_tag() {
     local name number highest=0
-    git -C "$REPO_ROOT" fetch --tags origin
     while read -r name; do
         number="${name#"${PROJECT}/v${VERSION}-rc."}"
-        [[ "$number" =~ ^[1-9][0-9]*$ ]] || continue
         if [ "$number" -gt "$highest" ]; then highest=$number; fi
-    done < <(git -C "$REPO_ROOT" for-each-ref --sort=-version:refname --format='%(refname:short)' "refs/tags/${PROJECT}/v${VERSION}-rc.*")
+    done < <(prerelease_tags)
     TAG="${PROJECT}/v${VERSION}-rc.$((highest + 1))"
 }
 
@@ -1782,10 +1874,30 @@ cmd_pre_release() {
 }
 
 cmd_release() {
-    if [ "$KIND" = os ]; then resolve_os_commit; fi
-    local step
+    local REUSED_OS_RELEASE="" step draft_sha
+    if [ "$KIND" = os ]; then
+        resolve_os_commit
+        if [ -z "${FORCE:-}" ]; then REUSED_OS_RELEASE=$(reusable_os_release); fi
+    fi
     for step in $(release_steps); do
+        if [ -n "$REUSED_OS_RELEASE" ]; then
+            case "$step" in
+                pull)
+                    echo "Skipping ${step}: reusing assets from $(jq -r .tagName <<< "$REUSED_OS_RELEASE")."
+                    continue
+                    ;;
+            esac
+        fi
         if [ -n "${DONE[$step]:-}" ] && [ -z "${FORCE:-}" ]; then
+            # Untagged drafts pin the build when reusing release metadata.
+            if [ "$step" = create-gh-release ] && [ -z "${DONE[tag]:-}" ]; then
+                draft_sha=$(gh release view -R "$REPO" "$TAG" --json targetCommitish --jq .targetCommitish)
+                if [ "$draft_sha" != "$(tag_commit_sha)" ]; then
+                    >&2 echo "  ✗ Draft ${TAG} targets ${draft_sha}, but the selected artifacts were built from $(tag_commit_sha)."
+                    >&2 echo "Recreate the draft for the selected build or release its original build."
+                    return 1
+                fi
+            fi
             echo "Skipping ${step}: already published."
             continue
         fi
@@ -1802,8 +1914,8 @@ usage() {
 Usage: manage-release.sh <subcommand> <project>
 
 Projects:
-  start-os        OS images (iso/squashfs, raspberrypi img) -> S3 + registry
-                  OS index; the raw img also gets a .gz on S3 for the notes
+  start-os        OS images (iso/squashfs, raspberrypi img.gz) -> S3 + registry
+                  OS index
   start-cli       per-triple binaries -> GitHub release; per-arch .deb -> apt + GitHub
   start-tunnel    per-arch .deb -> apt repo + GitHub release
   start-registry  per-arch .deb -> apt repo + GitHub release
@@ -1820,7 +1932,9 @@ Subcommands:
   pre-release        start-os only: promote alpha -> beta and publish a GitHub
                      prerelease tagged start-os/v<VERSION>-rc.N. N increments
                      on every invocation; the beta listing is replaced.
-                     The image's internal version stays unchanged.
+                     The image's internal version stays unchanged. Same-commit
+                     prereleases reuse their published image metadata and
+                     signatures, as described under release.
   pre-check          Verify changelog fragments and their version severity,
                      and report which release steps are already published
                      (tag, GitHub release, uploads, registry, signatures).
@@ -1846,21 +1960,31 @@ Subcommands:
                      (os/cli/deb/wrt; set RUN_ID or you'll be prompted.)
   pull               Download the released assets from their official location
                      (registry / apt repo / GitHub release / npm).
+  create-gh-release  Pick the release's highlights (release-notes: true are
+                     checked; tab rewords one; security fragments are always
+                     included), edit the compiled notes in $VISUAL/$EDITOR
+                     (default: sensible-editor), translate them into every
+                     locale with the claude CLI, then draft (or
+                     update) the GitHub release at the commit being tagged with
+                     the notes, an expandable changelog, the full-history
+                     attachment, and the prettier-formatted notes for every
+                     locale as release-notes.json. A release or prerelease after
+                     a prerelease of its version starts from that prerelease's
+                     notes and offers only the fragments added since. Re-running
+                     starts from the uploaded notes. Runs before `tag`: tag CI
+                     archives release-notes.json onto master, and `index`
+                     publishes it to the registry. (all projects.)
   tag                Create and push the <project>/v<version> git tag. Fails if
                      pull-gha'd assets were built from a different commit.
-  create-gh-release  Publish (or update) the GitHub release with notes,
-                     an expandable changelog and full-history attachment.
+  publish-gh-release Publish the drafted GitHub release once the tag exists.
                      (all projects.)
   push               Upload artifacts to their destination (S3 for os, GitHub
                      release + apt for cli/deb, npm publish for sdk). For os this
                      normally runs in CI; use it for a manual re-publish.
-  push-gz            os only: compress each raw .img and upload the .gz beside
-                     the bare image on S3 — the registry keeps indexing the bare
-                     image; only the release-notes download link uses the .gz.
-                     Run 'pull' (or 'pull-gha') first.
-  index              Promote the version from the source (beta) registry into
-                     the production registry. (os: pre-release promotes alpha
-                     into beta. wrt: CI indexes into beta.)
+  index              Set the release's edited notes on the source registry and
+                     promote the version into the production registry. (os:
+                     pre-release promotes alpha into beta. wrt: CI indexes into
+                     beta.)
   register           wrt only: register + index a CI build's images into the
                      source (beta) registry, pointing at their S3/CDN URLs.
                      Manual fallback — the CI deploy normally does this. Run
@@ -1885,7 +2009,10 @@ Subcommands:
                      changelog, downloads and checksums. (all projects.)
   release            Run the full applicable pipeline for the project, skipping
                      the steps pre-check finds already published — re-running
-                     after a failure resumes at the step that failed.
+                     after a failure resumes at the step that failed. StartOS
+                     reuses a published same-commit prerelease's image links,
+                     checksums and signatures, without downloading or signing
+                     the images again. Notes still receive a final edit.
 
 Environment variables:
   VERSION                  Override the version (default: read from the manifest)
@@ -1900,6 +2027,10 @@ Environment variables:
                            fails)
   UNCOMMITTED_NOTES        Set to 1 to release curated notes that differ from the
                            tagged commit; commit them to master afterwards
+  VISUAL, EDITOR           Editor create-gh-release opens the notes in (default:
+                           sensible-editor when installed, otherwise vi)
+  NO_TRANSLATE             Set to 1 to publish English notes without translating
+                           them with the claude CLI
   CLEAN                    Set to 1 to wipe and recreate the release directory
   GH_USER                  Override GitHub username (default: autodetected via gh)
   OTP                      npm one-time password for start-sdk publish
@@ -1950,8 +2081,8 @@ case "$SUBCOMMAND" in
     pull) cmd_pull ;;
     tag) cmd_tag ;;
     create-gh-release) cmd_create_gh_release ;;
+    publish-gh-release) cmd_publish_gh_release ;;
     push) cmd_push ;;
-    push-gz) cmd_push_gz ;;
     index) cmd_index ;;
     register) cmd_register ;;
     sign) cmd_sign ;;

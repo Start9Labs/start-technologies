@@ -34,7 +34,7 @@ Yes. StartWRT is built on OpenWrt, and the full CLI is accessible over [SSH](ssh
 
 You have two options:
 
-1. **Factory reset** — Perform a [factory reset](factory-reset.md) from the web interface (if you are still logged in). This wipes all settings; Wi-Fi comes back up with the sticker password.
+1. **Factory reset** — Perform a [factory reset](factory-reset.md) from the web interface (if you are still logged in) or, on the four-port Start9 Router, with the factory-reset button. This wipes all settings; Wi-Fi comes back up with the sticker password.
 2. **Reflash** — Boot from a microSD card and choose "Keep settings" to reinstall the firmware while preserving settings. You will be prompted to create a new admin password. See [Installing StartWRT](installing.md).
 
 ## What if I lose my Wi-Fi sticker password?
@@ -163,3 +163,14 @@ StartWRT's default addresses (`192.168.0.x` for the Admin profile, then `192.168
 ### Why doesn't the router get an Internet address after I replaced my old router?
 
 Some ISPs only give an address to the device they already know, which they identify by its MAC address. In [WAN Settings](wan.md#mac-address), set **MAC Address** to **Custom** and enter the MAC address of your old router's Internet port. Take it from the old router's admin page, not its label, which usually shows a different port's address. Then disconnect the old router.
+
+### Why is the router unresponsive with its green light on but not blinking?
+
+The red light shows that the router has power. The green light comes on with it and, within a minute, starts blinking in a heartbeat rhythm, which shows that the router's Linux kernel is running. StartWRT starts after that, and the router is ready once the web interface loads. If the green light is still on without blinking after a minute, the router never got past early startup: there is no Wi-Fi, devices connected by Ethernet get no address, and `router.lan` does not load. The Ethernet port lights can stay on regardless: they show a cable link, not that StartWRT is running.
+
+Check these in order, and watch the green light for a minute after each:
+
+1. **Restart** — Unplug the router, wait ten seconds, and plug it back in.
+2. **Power supply** — Run the router from the 12 V power supply that came with it, plugged firmly into the router. A USB cable from a computer or phone charger may not supply enough power.
+3. **Wi-Fi module** — A poor connection between the Wi-Fi module and its slot can stop the router from starting, even when the module looks firmly screwed down. To check, start the router without it. Open the router as described in [Installing the Wi-Fi Module](wifi-module.md#installing-the-module), and follow the static precautions in [Before You Start](wifi-module.md#before-you-start). Remove the two screws holding the module, lift each antenna connector straight up off its socket without pulling on the wire, and slide the module out of its slot. Close the case and power on the router. Connect a computer to the router's LAN port with an Ethernet cable, and open `http://router.lan/` in its browser. If the green light blinks and the web interface loads, the module was stopping the router from starting. If the green light still doesn't blink, the module is not the cause: [get help](https://start9.com/help).
+4. **Reseat** — Install the module again as described in [Installing the Wi-Fi Module](wifi-module.md#installing-the-module): attach the antenna wires, slide it in until the gold contacts disappear, press it flat, and screw it down. If the green light blinks and Wi-Fi comes back, the module had a poor connection. If the green light stays on without blinking again, the module or its slot is faulty: [get help](https://start9.com/help), and tell us what you tried.

@@ -63,6 +63,10 @@ jobs:
         with:
           node-version: '24.17.0'
 
+      # Release notes are not compiled here: sync archives each release's
+      # release-notes.json asset, which manage-release.sh attaches to the
+      # draft GitHub release before pushing the tag. Reading drafts needs the
+      # App token's contents write access.
       - name: Compile released changelogs onto master
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}

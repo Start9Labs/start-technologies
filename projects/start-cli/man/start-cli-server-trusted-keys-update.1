@@ -1,0 +1,45 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-trusted-keys-update 1  "update "
+.SH NAME
+start\-cli\-server\-trusted\-keys\-update \- Rename a trusted key and set what it is trusted for
+.SH SYNOPSIS
+\fBstart\-cli server trusted\-keys update\fR <\fB\-\-name\fR> <\fB\-\-marketplace\fR> <\fB\-\-os\fR> [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR>
+.SH DESCRIPTION
+Rename a trusted key and set what it is trusted for
+.SH OPTIONS
+.TP
+\fB\-\-name\fR \fI<NAME>\fR
+Name for the key; blank names each GPG key after its identity
+.TP
+\fB\-\-marketplace\fR \fI<MARKETPLACE>\fR
+Whether to trust the key for packages
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+true
+.IP \(bu 2
+false
+.RE
+.TP
+\fB\-\-os\fR \fI<OS>\fR
+Whether to trust the key for StartOS updates
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+true
+.IP \(bu 2
+false
+.RE
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIID\fR>
+ID of the trusted key, as listed

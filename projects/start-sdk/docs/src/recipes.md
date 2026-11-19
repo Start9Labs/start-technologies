@@ -44,7 +44,7 @@ If you're using [Claude Code](https://claude.com/claude-code) (recommended), poi
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | [Run Multiple Containers](recipe-multi-daemon.md)        | App + database, app + cache, app + worker — multi-daemon setups                              |
 | [Run a PostgreSQL Sidecar](recipe-postgresql.md)         | Password generation, pg_isready health check, pg_dump backup                                 |
-| [Run a MySQL/MariaDB Sidecar](recipe-mysql.md)           | MySQL daemon, health check, mysqldump backup and restore                                     |
+| [Run a MySQL/MariaDB Sidecar](recipe-mysql.md)           | MySQL or MariaDB daemon, health check, and backing up its volume                             |
 | [Run a Redis/Valkey Cache](recipe-valkey.md)             | Ephemeral cache daemon with valkey-cli ping health check                                     |
 | [Create Dynamic Daemons](recipe-dynamic-daemons.md)      | Variable number of daemons based on user configuration                                       |
 | [Run a One-Shot Command](recipe-oneshot.md)              | File ownership fixes, app schema upgrades, or setup scripts re-run before every daemon start |
@@ -62,13 +62,13 @@ If you're using [Claude Code](https://claude.com/claude-code) (recommended), poi
 
 ## Dependencies
 
-| Recipe                                                               | Description                                                                                                |
-| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| [Depend on Another Service](recipe-dependency.md)                    | Declare a dependency, read its connection info, and auto-configure                                         |
-| [Enforce Settings on a Dependency](recipe-enforce-dependency.md)     | Create a cross-service task that requires specific dependency configuration                                |
-| [Mount Volumes from Another Service](recipe-mount-dependency.md)     | Read-only access to a dependency's data volume                                                             |
-| [Let Dependents Through a Proxy Auth Gate](recipe-dependent-auth.md) | Publish a key on a `public` volume so dependents pass an `addSsl.auth` gate, and read it on the other side |
-| [Support Alternative Dependencies](recipe-alternative-deps.md)       | Let users choose between backends (e.g., LND vs CLN)                                                       |
+| Recipe                                                               | Description                                                                                              |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| [Depend on Another Service](recipe-dependency.md)                    | Declare a dependency, read its connection info, and auto-configure                                       |
+| [Enforce Settings on a Dependency](recipe-enforce-dependency.md)     | Create a cross-service task that requires specific dependency configuration                              |
+| [Mount Volumes from Another Service](recipe-mount-dependency.md)     | Read-only access to a dependency's data volume                                                           |
+| [Let Dependents Through a Proxy Auth Gate](recipe-dependent-auth.md) | Publish a key on a `public` volume so dependents pass a `proxy.auth` gate, and read it on the other side |
+| [Support Alternative Dependencies](recipe-alternative-deps.md)       | Let users choose between backends (e.g., LND vs CLN)                                                     |
 
 ## Data & Health
 

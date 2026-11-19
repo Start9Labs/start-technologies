@@ -34,7 +34,7 @@ export class TrustedKeysService extends MarketplaceTrust {
   readonly offers = toSignal(
     combineLatest([
       this.patch.watch$('serverInfo', 'registryKeys'),
-      this.patch.watch$('ui', 'registries'),
+      this.patch.watch$('serverInfo', 'registries'),
     ]).pipe(
       map(([snapshots, registries]) => {
         const offers: Record<string, RegistryOffer[]> = {}

@@ -43,10 +43,12 @@ On each run the reconciler diffs entries by `id` and a `configHash` of their str
 
 - **absent → present** — start the new daemon
 - **present → absent** — stop the removed daemon
-- **same `configHash`** — leave it running, untouched
+- **same `configHash` and shared-container membership** — leave it running unless its shared-volume dependencies were invalidated
 - **different `configHash`** — restart it
 
-Dependents (via `requires`) of any restarted or stopped daemon restart too, so the wiring stays consistent. Closures — `ready.fn`, `ready.trigger`, a function-form `exec.fn` — are **not** part of the hash. If such a closure captures a value the reconciler must react to (say, a host the `exec.fn` reads before building its command), pass that value as the entry's `uses`; any change to it restarts the daemon on the next reconcile. Only JSON-serializable `uses` values are useful — functions, symbols, cycles and `undefined` normalize to distinct `UNSERIALIZABLE:*` sentinels, so a change only visible there never triggers a restart, and BigInts hash as their decimal string.
+Processes sharing a subcontainer restart together, including when their sharing membership changes. Dependents (via `requires`) restart too. Create fresh lazy handles inside each builder evaluation; stopped handles are destroyed and cannot be reused.
+
+A reactive [shared-volume](shared-volumes.md) catalog invalidation refreshes containers with declared or attempted shared-volume mounts even when IDs and metadata are unchanged. Its callback covers all granted sources, so shared-volume consumers refresh together; unrelated containers stay running. Nested effects retain this reconciliation scope. Closures — `ready.fn`, `ready.trigger`, a function-form `exec.fn` — are **not** part of the hash. If such a closure captures a value the reconciler must react to (say, a host the `exec.fn` reads before building its command), pass that value as the entry's `uses`; any change to it restarts the daemon on the next reconcile. Only JSON-serializable `uses` values are useful — functions, symbols, cycles and `undefined` normalize to distinct `UNSERIALIZABLE:*` sentinels, so a change only visible there never triggers a restart, and BigInts hash as their decimal string.
 
 **Reference:** [Main](main.md) · [Actions](actions.md) · [File Models](file-models.md)
 

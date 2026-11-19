@@ -231,13 +231,14 @@ Writes replace the file atomically, preserving its owner, access ACL, permission
 
 Every `merge()` — including `merge(effects, {})` — reads the file, parses it through your schema, deep-merges the patch over the parsed value, re-serializes, and writes only if the result differs from what was on disk. With an empty patch, against a file that already exists:
 
-| Existing content        | Result                                                                |
-| ----------------------- | --------------------------------------------------------------------- |
-| Key present and valid   | Untouched                                                             |
-| Key missing             | Filled from its `.catch()` default                                    |
-| Key present but invalid | **Replaced** by its `.catch()` default — this is the self-healing     |
-| Key outside the schema  | Preserved (see [Unknown Key Preservation](#unknown-key-preservation)) |
-| Comments, formatting    | **Not preserved** — the file is re-serialized from the parsed value   |
+| Existing content        | Result                                                                                                                                   |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Key present and valid   | Untouched                                                                                                                                |
+| Key missing             | Filled from its `.catch()` default                                                                                                       |
+| Key present but invalid | **Replaced** by its `.catch()` default — this is the self-healing                                                                        |
+| Key outside the schema  | Preserved (see [Unknown Key Preservation](#unknown-key-preservation))                                                                    |
+| Comments, formatting    | **Not preserved** — the file is re-serialized from the parsed value                                                                      |
+| File that doesn't parse | **Rebuilt** from the `.catch()` defaults after a copy is saved beside it as `<file>.unparseable-<timestamp>`, with a warning in the logs |
 
 So `merge(effects, {})` is safe to call on every init: it seeds a fresh file, repairs a corrupted one, and does nothing to a file that already round-trips cleanly. The parse is why [every key needs `.catch()`](#every-key-should-have-catch) — a value the schema can't repair makes `merge()` throw rather than heal.
 
@@ -443,6 +444,8 @@ A file model must **preserve** unknown keys, not strip them: upstream config fil
 > **Never use `z.object` in a file model. Use `z.looseObject`, at every nesting level.** A `z.object` shape deletes every key it doesn't declare the next time the file is written — by `merge()`, `write()`, or `update()` — with no error and no warning.
 >
 > The one exception is a file you have **fully** modeled — every key it can ever hold — and will **always** keep fully modeled, so that a key added later by an upstream release, a plugin, or a user's edit lands in your shape before it lands in the file. That is the only case in which deleting unknown keys is what you want. If you are not certain, it is `z.looseObject`.
+>
+> A `FileHelper.env` model is written differently, because its validator must output `Record<string, string>` and `z.looseObject` types undeclared keys as `unknown`. Use `z.object({ … }).catchall(z.string())`, which keeps every undeclared line just as `z.looseObject` would.
 
 Preserving unknown keys has two consequences:
 

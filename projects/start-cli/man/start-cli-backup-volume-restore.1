@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-volume-restore 1  "restore "
+.SH NAME
+start\-cli\-backup\-volume\-restore \- Restore volumes as new local copies
+.SH SYNOPSIS
+\fBstart\-cli backup volume restore\fR [\fB\-\-server\-id\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET_ID\fR> [\fIIDS\fR]
+.SH DESCRIPTION
+Restore volumes as new local copies
+.SH OPTIONS
+.TP
+\fB\-\-server\-id\fR \fI<SERVER_ID>\fR
+Unique server identifier
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fITARGET_ID\fR>
+Backup target identifier
+.TP
+[\fIIDS\fR]
+Volume backup IDs to restore as new local volumes

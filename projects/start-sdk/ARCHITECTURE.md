@@ -199,7 +199,7 @@ Utility modules including:
 
 ## SDK Layer (`projects/start-sdk/lib/`)
 
-The SDK layer provides the developer-facing API. It re-exports everything from `@start9labs/start-core` and adds higher-level abstractions.
+The SDK layer provides the developer-facing API. Its `lib/index.ts` re-exports selected `@start9labs/start-core` types and builders alongside higher-level abstractions.
 
 ### StartSdk Facade (`lib/StartSdk.ts`)
 
@@ -292,7 +292,9 @@ export const main = sdk.setupMain(async ({ effects }) => {
 })
 ```
 
-Diff semantics per id: absent→present **start**, present→absent **stop**, same `configHash` **leave alone**, different `configHash` **restart**. Dependents of any restarted/stopped daemon are also restarted. `configHash` is a canonical-JSON hash over the subcontainer descriptor (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec, `requires`, `uses`, and the structural parts of `ready` — closures (`ready.fn`, `ready.trigger`) are excluded so a watched-file touch with unchanged content doesn't bounce every daemon. Captured values that must trigger a restart belong in the entry's `uses`. Lazy `SubContainer`s (`SubContainer.of`) are required under `Daemons.dynamic`; eager handles produced inside the builder would defeat the "leave alone" guarantee and the reconciler throws if it sees one.
+Diff semantics per id: absent→present **start**, present→absent **stop**, unchanged structural configuration and shared-container membership **leave alone**, changed configuration or membership **restart**. A container's processes restart together, followed by their dependents. `configHash` is a canonical-JSON hash over the subcontainer descriptor (`imageId`, `sharedRun`, `name`, `mounts.build()`), exec, `requires`, `uses`, and the structural parts of `ready` — closures (`ready.fn`, `ready.trigger`) are excluded so a watched-file touch with unchanged content doesn't bounce every daemon. Captured values that must trigger a restart belong in the entry's `uses`. Create fresh lazy `SubContainer`s (`SubContainer.of`) inside each builder evaluation; stopped handles are terminal. Eager handles materialize before diffing and are rejected.
+
+Builder effects and their descendants share one reconciliation callback. The existing shared-volume catalog callback also advances a private reconciler revision; running entries record the revision at their start. A mismatch refreshes containers with declared or attempted shared-volume dependencies, including unsuccessful optional attempts. The callback identifies the granted catalog rather than an individual source, so its shared-volume consumers refresh together while unrelated containers remain running. In-flight callbacks leave newer revisions pending, and failed builders do not acknowledge them. This uses the existing callback and mount-intent owners without new wire fields or a callback registry.
 
 **SubContainers** come in two flavors:
 
@@ -306,6 +308,8 @@ The unified `SubContainer<M>` interface widens `rootfs` / `guid` / `subpath()` t
 ```typescript
 sdk.Mounts.of().mountVolume({ volumeId: 'main', subpath: null, mountpoint: '/data', readonly: false }).mountAssets({ subpath: 'scripts', mountpoint: '/scripts' }).mountDependency({ dependencyId: 'bitcoind', volumeId: 'main', subpath: null, mountpoint: '/bitcoin-data', readonly: true })
 ```
+
+`SubContainer` delegates shared volumes through one `mount-shared-volume` request, like host-owned dependency mounts. StartOS authorizes the grant, installs a permanent inaccessible read-only placeholder, attaches the mapped source and retains its mount descriptor. Read-only staging is internal to the host; the SDK receives only a mounted/unavailable outcome. Host and ordinary CLI binds reuse the common detached-mount policy. Missing source directories are never created. Per-target work shares `PathQueue` with filesystem access serialization, and in-flight mounts hold their subcontainer until completion. Grant changes detach incompatible SDK binds even in manually managed subcontainers. Independent aliases and open handles can remain usable.
 
 ### Health Checks (`lib/health/`)
 
@@ -404,7 +408,7 @@ const manifest = setupManifest({
   // ...
 })
 
-export default buildManifest(versionGraph, manifest, dependencies)
+export default buildManifest({ versionGraph, manifest, dependencies, i18n })
 ```
 
 `buildManifest()` finalizes the manifest with the current SDK version, OS version compatibility, migration version ranges, and dependency definitions from the same builder that runs during init.

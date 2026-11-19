@@ -82,6 +82,9 @@ pub struct Device {
     /// Whether this device may auto-create port forwards via PCP/UPnP
     /// (default off; set via `devices set-auto-forward`).
     pub allow_auto_port_forward: bool,
+    /// External ports or ranges (`443`, `5000-5009`) the router refused to
+    /// open for this device for lack of that permission in the last half hour.
+    pub auto_port_forward_requests: Vec<String>,
     /// Whether this device may publish DNS records into the router's resolver
     /// (`devices set-dns-injection`; `vpn-server peer-set-dns-injection` for a
     /// VPN peer).
@@ -1837,6 +1840,10 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
         .get()
         .map(|di| di.asking_sources())
         .unwrap_or_default();
+    let mut asking_to_forward = crate::port_control::PORT_CONTROL
+        .get()
+        .map(|pc| pc.requested_ports(Instant::now()))
+        .unwrap_or_default();
 
     let mut devices = Vec::new();
     for mac in &all_macs {
@@ -2000,6 +2007,12 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 .chain(ipv4.as_deref())
                 .filter_map(|ip| ip.parse::<IpAddr>().ok())
                 .any(|ip| asking_to_publish.contains(&ip));
+        let allow_auto_port_forward = host.is_some_and(|h| h._allow_pcp.as_deref() == Some("1"));
+        let auto_port_forward_requests = if allow_auto_port_forward {
+            Vec::new()
+        } else {
+            asking_to_forward.remove(mac).unwrap_or_default()
+        };
 
         devices.push(Device {
             mac: Some(mac.clone()),
@@ -2015,7 +2028,8 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             ipv4_static: active_reservation.is_some(),
             ipv4_reservations,
             profile_network: profile_address.map(|net| net.to_string()),
-            allow_auto_port_forward: host.is_some_and(|h| h._allow_pcp.as_deref() == Some("1")),
+            allow_auto_port_forward,
+            auto_port_forward_requests,
             allow_dns_injection,
             dns_injection_requested,
             allow_router_advertisements: host.is_some_and(|h| h._allow_ra.as_deref() == Some("1")),
@@ -2127,6 +2141,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
                 profile_network: None,
                 // No MAC to authorize, so a VPN peer can never be auto-forward capable.
                 allow_auto_port_forward: false,
+                auto_port_forward_requests: Vec::new(),
                 allow_dns_injection: peer_cfg.allow_dns_injection,
                 dns_injection_requested: !peer_cfg.allow_dns_injection
                     && peer_cfg

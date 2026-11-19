@@ -32,8 +32,13 @@ export async function syncNext({ cwd, base, forge, botName, botEmail }) {
     )
 
   const defaultBranch = await forge.defaultBranch()
+  const lineBranches = git(
+    'for-each-ref',
+    '--format=%(refname)',
+    'refs/remotes/origin/next/',
+  )
   const target =
-    exists(`next/${base}`) || base !== defaultBranch ? `next/${base}` : 'next'
+    lineBranches || base !== defaultBranch ? `next/${base}` : 'next'
   const baseSha = git('rev-parse', `origin/${base}`)
   if (!exists(target)) {
     git('push', 'origin', `${baseSha}:refs/heads/${target}`)

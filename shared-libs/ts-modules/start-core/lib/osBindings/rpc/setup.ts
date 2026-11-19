@@ -3,6 +3,8 @@ import type * as schemas from './setup.schemas'
 export type RpcHandler = {
   _PARAMS: unknown
   _RETURN?: unknown
+  _ITEM?: unknown
+  _FINAL?: unknown
   _CHILDREN?: { [name: string]: RpcHandler }
 }
 
@@ -20,47 +22,71 @@ export type RpcMethod<Root extends RpcHandler> =
         }[keyof Children & string]
       : never)
 
-export type RpcParamType<
+export type RpcEndpointType<
   Root extends RpcHandler,
   Method extends string,
 > = Method extends ''
   ? Root extends { _RETURN: unknown }
-    ? Root['_PARAMS']
+    ? Root
     : never
   : Root extends { _CHILDREN: infer Children }
     ? Method extends `${infer Head}.${infer Tail}`
       ? Head extends keyof Children
         ? Children[Head] extends RpcHandler
-          ? RpcParamType<Children[Head], Tail>
+          ? RpcEndpointType<Children[Head], Tail>
           : never
         : never
       : Method extends keyof Children
         ? Children[Method] extends RpcHandler
-          ? RpcParamType<Children[Method], ''>
+          ? RpcEndpointType<Children[Method], ''>
           : never
         : never
     : never
 
+export type RpcEndpointField<
+  Endpoint,
+  Field extends PropertyKey,
+> = Endpoint extends { _RETURN: unknown }
+  ? Field extends keyof Endpoint
+    ? Endpoint[Field]
+    : unknown
+  : never
+
+export type RpcParamType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_PARAMS'>
+
 export type RpcReturnType<
   Root extends RpcHandler,
   Method extends string,
-> = Method extends ''
-  ? Root extends { _RETURN: infer Return }
-    ? Return
-    : never
-  : Root extends { _CHILDREN: infer Children }
-    ? Method extends `${infer Head}.${infer Tail}`
-      ? Head extends keyof Children
-        ? Children[Head] extends RpcHandler
-          ? RpcReturnType<Children[Head], Tail>
-          : never
-        : never
-      : Method extends keyof Children
-        ? Children[Method] extends RpcHandler
-          ? RpcReturnType<Children[Method], ''>
-          : never
-        : never
-    : never
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_RETURN'>
+
+export type RpcStreamItemType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_ITEM'>
+
+export type RpcStreamFinalType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_FINAL'>
+
+export type RpcIsStreaming<Root extends RpcHandler, Method extends string> = [
+  RpcEndpointType<Root, Method>,
+] extends [never]
+  ? never
+  : unknown extends RpcStreamItemType<Root, Method>
+    ? boolean
+    : [RpcStreamItemType<Root, Method>] extends [never]
+      ? false
+      : true
+
+export type RpcStreamingMethod<Root extends RpcHandler> = {
+  [Method in RpcMethod<Root>]: RpcIsStreaming<Root, Method> extends false
+    ? never
+    : Method
+}[RpcMethod<Root>]
 
 export type RpcSchemaTree<Schema> = {
   [Key in keyof Schema as Key extends '_OPAQUE'
@@ -69,7 +95,7 @@ export type RpcSchemaTree<Schema> = {
     ? Schema[Key] extends z.ZodType
       ? z.input<Schema[Key]>
       : never
-    : Key extends '_RETURN'
+    : Key extends '_RETURN' | '_ITEM' | '_FINAL'
       ? Schema[Key] extends z.ZodType
         ? z.output<Schema[Key]>
         : never
@@ -117,7 +143,6 @@ export type RecoverySourceInput<Password> = z.input<
 export type ServerHostname = z.output<typeof schemas.ServerHostname>
 export type SetLanguageParamsInput = z.input<typeof schemas.SetLanguageParams>
 export type SetupInfo = z.output<typeof schemas.SetupInfo>
-export type AttachParamsInput = z.input<typeof schemas.AttachParams>
 export type BackupTargetFSInput = z.input<typeof schemas.BackupTargetFS>
 
 /**
@@ -142,9 +167,9 @@ export type InstallOsParamsInput = z.input<typeof schemas.InstallOsParams>
 export type IpInfo = z.output<typeof schemas.IpInfo>
 export type LogFollowResponse = z.output<typeof schemas.LogFollowResponse>
 export type LogResponse = z.output<typeof schemas.LogResponse>
+export type PasswordTypeInput = z.input<typeof schemas.PasswordType>
 export type RequiresHostIdInput = z.input<typeof schemas.RequiresHostId>
 export type RequiresPackageIdInput = z.input<typeof schemas.RequiresPackageId>
-export type SetupExecuteParamsInput = z.input<typeof schemas.SetupExecuteParams>
 export type SetupResult = z.output<typeof schemas.SetupResult>
 
 /**
@@ -152,11 +177,13 @@ export type SetupResult = z.output<typeof schemas.SetupResult>
  * [`BackupUnencryptedMetadata`]'s key material.
  */
 export type StartOsRecoveryInfo = z.output<typeof schemas.StartOsRecoveryInfo>
-export type VerifyCifsParamsInput = z.input<typeof schemas.VerifyCifsParams>
+export type AttachParamsInput = z.input<typeof schemas.AttachParams>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
 export type PartitionInfo = z.output<typeof schemas.PartitionInfo>
 export type Progress = z.output<typeof schemas.Progress>
+export type SetupExecuteParamsInput = z.input<typeof schemas.SetupExecuteParams>
 export type SetupProgress = z.output<typeof schemas.SetupProgress>
+export type VerifyCifsParamsInput = z.input<typeof schemas.VerifyCifsParams>
 export type DiskInfo = z.output<typeof schemas.DiskInfo>
 export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type SetupStatusRes = z.output<typeof schemas.SetupStatusRes>

@@ -48,12 +48,39 @@ describe('checkPortListening', () => {
   const procNet = (tcp: string) => (path: string) =>
     Promise.resolve(path === '/proc/net/tcp' ? tcp : header)
 
-  afterEach(() => readFile.mockReset())
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => {
+    const timers = jest.getTimerCount()
+    jest.useRealTimers()
+    readFile.mockReset()
+    expect(timers).toBe(0)
+  })
 
   it('is not satisfied by connections left behind after the listener exits', async () => {
     readFile.mockImplementation(procNet(leftoverConnections))
     const result = await checkPortListening({} as never, 50001, options)
     expect(result).toEqual({ result: 'failure', message: 'not listening' })
+  })
+
+  it('releases the deadline when reading the socket table fails', async () => {
+    readFile.mockRejectedValue(new Error('unreadable'))
+    await expect(
+      checkPortListening({} as never, 50001, options),
+    ).rejects.toThrow('unreadable')
+  })
+
+  it('reports the configured timeout when a socket-table read remains pending', async () => {
+    readFile.mockReturnValue(new Promise(() => {}))
+    const result = checkPortListening({} as never, 50001, {
+      ...options,
+      timeout: 5,
+      timeoutMessage: 'slow',
+    })
+    await jest.advanceTimersByTimeAsync(5)
+    await expect(result).resolves.toEqual({
+      result: 'failure',
+      message: 'slow',
+    })
   })
 
   it('is satisfied by a listening socket', async () => {

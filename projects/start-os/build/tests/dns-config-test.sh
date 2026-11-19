@@ -20,6 +20,7 @@ assert.equal(values.DNS, undefined, 'resolved must read the OS stub from resolv.
 const postinst = read(base + 'debian/postinst')
 const nm = postinst.match(/cat << EOF > \/etc\/NetworkManager\/NetworkManager.conf\n([\s\S]*?)\nEOF/)[1]
 assert.match(nm, /^dns=none$/m)
+assert.match(nm, /^systemd-resolved=false$/m, 'NetworkManager must not publish per-link DNS to systemd-resolved')
 for (const [script, server] of [['debian/postinst', '127.0.0.1'], ['container-runtime/deb-install.sh', '10.0.3.1']]) {
   const source = read(base + script)
   assert.deepEqual([...source.matchAll(/echo "nameserver ([^"]+)"/g)].map(match => match[1]), [server])
@@ -58,6 +59,6 @@ try {
 }
 const recipe = read(base + 'build/image-recipe/build.sh')
 assert.doesNotMatch(recipe, /resolv\.conf\.bak/, 'must not restore build-host DNS into the shipped rootfs')
-assert.match(recipe, /lb chroot\n[\s\S]*?\nlb installer\nlb binary_chroot\nlb chroot_prep install all mode-apt-install-binary mode-archives-chroot\nlb binary_rootfs\n[\s\S]*?if \[ "\$\{IMAGE_TYPE\}" = iso \]; then/, 'ISO and img share live-build resolver cleanup and rootfs assembly')
+assert.match(recipe, /\nretry lb chroot\n[\s\S]*?\nretry lb installer\nretry lb binary_chroot\nretry lb chroot_prep install all mode-apt-install-binary mode-archives-chroot\nretry lb binary_rootfs\n[\s\S]*?if \[ "\$\{IMAGE_TYPE\}" = iso \]; then/, 'ISO and img share live-build resolver cleanup and rootfs assembly')
 console.log('DNS configuration preserves build DNS until live-build restores the runtime OS stub')
 NODE

@@ -1,5 +1,6 @@
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
 import { inject, Injectable } from '@angular/core'
+import type { RpcStreamOptions } from '@start9labs/start-core'
 import { pauseFor, RPCErrorDetails, RpcError } from '@start9labs/shared'
 import { GIT_HASH } from 'src/app/utils/workspace-config'
 import {
@@ -18,7 +19,8 @@ import {
   SetUciRes,
   VersionInfo,
   SystemUpdateReq,
-  SystemUpdateRes,
+  SystemUpdateStream,
+  LogsFollowStream,
   SetPasswordReq,
   SetPreferencesReq,
   VpnServer,
@@ -43,6 +45,8 @@ import {
   CheckInitializedRes,
   SetInitialPasswordReq,
   SetupStatusRes,
+  SetupFlashReq,
+  SetupFlashStream,
   LogEntry,
   LogsResponse,
   DeviceFromApi,
@@ -283,7 +287,7 @@ export class MockApiService extends ApiService {
     language: 'en_US',
     date: new Date().toISOString(),
     theme: 'system',
-    remoteAccess: 'default',
+    remoteAccess: 'never',
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   }
 
@@ -322,9 +326,22 @@ export class MockApiService extends ApiService {
     ]
   }
 
-  async systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes> {
-    await pauseFor(500)
-    return { target: '1.5.0', progress: 'mock-guid-1234' }
+  async systemUpdate(
+    params: SystemUpdateReq,
+    options?: RpcStreamOptions,
+  ): Promise<SystemUpdateStream> {
+    await pauseFor(500, options?.signal)
+    const target = params.targetVersion ?? '1.5.0'
+    this.mockSystemInfo.version = target
+    return {
+      initial: { target, progress: null },
+      items: (async function* () {
+        options?.signal?.throwIfAborted()
+        yield { overall: true, phases: [] }
+        options?.signal?.throwIfAborted()
+        return null
+      })(),
+    }
   }
 
   async systemRestart(): Promise<null> {
@@ -1174,13 +1191,28 @@ export class MockApiService extends ApiService {
     return { setupMode: false, disk: { emmcFound: true, hasFirmware: true } }
   }
 
-  async getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>> {
-    await pauseFor(250)
+  async setupFlash(
+    params: SetupFlashReq,
+    options?: RpcStreamOptions,
+  ): Promise<SetupFlashStream> {
+    options?.signal?.throwIfAborted()
+    await pauseFor(250, options?.signal)
+    options?.signal?.throwIfAborted()
     return {
-      kty: 'EC',
-      crv: 'P-256',
-      x: 'yHTDYSfjU809fkSv9MmN4wuojf5c3cnD7ZDN13n-jz4',
-      y: '8Mpkn744A5KDag0DmX2YivB63srjbugYZzWc3JOpQXI',
+      initial: null,
+      items: (async function* () {
+        for (let step = 1; step <= 3; step++) {
+          await pauseFor(250, options?.signal)
+          options?.signal?.throwIfAborted()
+          yield {
+            phase: 'status' as const,
+            message: 'Configuring system...',
+            step,
+            totalSteps: 3,
+          }
+        }
+        return null
+      })(),
     }
   }
 
@@ -1189,9 +1221,20 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>> {
-    await pauseFor(250)
-    return { guid: 'MOCKLOGSFOLLOWGUIDAAAAAAAAAAAAAA' }
+  async followLogs(options?: RpcStreamOptions): Promise<LogsFollowStream> {
+    await pauseFor(250, options?.signal)
+    const signal = options?.signal
+    return {
+      initial: { guid: null },
+      items: (async function* () {
+        signal?.throwIfAborted()
+        await new Promise(resolve =>
+          signal?.addEventListener('abort', resolve, { once: true }),
+        )
+        signal?.throwIfAborted()
+        return null
+      })(),
+    }
   }
 
   async systemLogs(): Promise<LogsResponse> {
@@ -1276,6 +1319,9 @@ export class MockApiService extends ApiService {
         })),
         profile_network: profile ? `${profile.gateway_ip}/24` : null,
         allow_auto_port_forward: this.autoForwardAllowed.has(mac),
+        auto_port_forward_requests: this.autoForwardAllowed.has(mac)
+          ? []
+          : (this.autoForwardRequested.get(mac) ?? []),
         allow_dns_injection: this.dnsInjectionAllowed.has(mac),
         dns_injection_requested:
           !this.dnsInjectionAllowed.has(mac) &&
@@ -1339,6 +1385,10 @@ export class MockApiService extends ApiService {
 
   /** MACs allowed to auto-create port forwards via PCP/UPnP. */
   private autoForwardAllowed = new Set<string>(['00:1A:2B:3C:4D:5E'])
+  /** Ports the router recently refused to open, by MAC. */
+  private readonly autoForwardRequested = new Map<string, string[]>([
+    ['00:1A:2B:3C:4D:5F', ['3074', '27015-27030']],
+  ])
 
   async devicesSetAutoForward(params: {
     mac: string
@@ -1348,6 +1398,7 @@ export class MockApiService extends ApiService {
     const macUpper = params.mac.toUpperCase()
     if (params.allow) {
       this.autoForwardAllowed.add(macUpper)
+      this.autoForwardRequested.delete(macUpper)
     } else {
       this.autoForwardAllowed.delete(macUpper)
     }
@@ -2140,12 +2191,36 @@ export class MockApiService extends ApiService {
       eth3: {
         profile: { fullname: 'Guest', interface: 'guest', vlan_tag: 100 },
       },
+      usb_eth0: {
+        profile: { fullname: 'Guest', interface: 'guest', vlan_tag: 100 },
+      },
+      usb_eth1: { profile: null },
+    },
+    usb_ports: {
+      usb_eth0: { present: true, active: true },
+      usb_eth1: { present: false, active: false },
     },
   }
 
   async ethernetGet(): Promise<EthernetConfig> {
     await pauseFor(250)
     return structuredClone(this.mockEthernet)
+  }
+
+  async ethernetRemoveUsbPort(
+    params: RpcParamType<Api, 'ethernet.remove-usb-port'>,
+  ): Promise<null> {
+    await pauseFor(250)
+    const without = <T>(ports: Record<string, T>) =>
+      Object.fromEntries(
+        Object.entries(ports).filter(([name]) => name !== params.port),
+      )
+    this.mockEthernet = {
+      ...this.mockEthernet,
+      ports: without(this.mockEthernet.ports),
+      usb_ports: without(this.mockEthernet.usb_ports),
+    }
+    return null
   }
 
   async ethernetSet(params: EthernetSetConfig): Promise<EthernetSetResult> {
@@ -2172,6 +2247,7 @@ export class MockApiService extends ApiService {
           },
         ]),
       ),
+      usb_ports: this.mockEthernet.usb_ports,
     }
     const changedPorts = Object.keys(params.ports).join(', ')
     this.logActivity(

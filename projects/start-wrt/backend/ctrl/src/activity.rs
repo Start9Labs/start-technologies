@@ -12,6 +12,8 @@ use crate::utils::HandlerExtSerde;
 use crate::{CliContext, ServerContext};
 
 pub const ACTIVITY_DB: &str = "/var/lib/startwrt/activity.db";
+/// Opens each entry's syslog line.
+pub const SYSLOG_TAG: &str = "startwrt-activity";
 pub(crate) const MAX_ENTRIES: usize = 500;
 
 const ACTIVITY_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS activity (
@@ -125,10 +127,9 @@ fn log_inner(
     error: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Emit to syslog via tracing.
-    // The startwrt-activity prefix makes these entries easy to find: `logread | grep startwrt-activity`
     let status = if success { "OK" } else { "FAIL" };
     let err_suffix = error.map(|e| format!(": {e}")).unwrap_or_default();
-    tracing::info!(target: "activity", "startwrt-activity [{category}.{action}] {status} {summary}{err_suffix}");
+    tracing::info!(target: "activity", "{SYSLOG_TAG} [{category}.{action}] {status} {summary}{err_suffix}");
 
     // Insert into SQLite
     let conn = db().map_err(|e| e.to_string())?;
@@ -187,7 +188,7 @@ fn log_to_inner(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let status = if success { "OK" } else { "FAIL" };
     let err_suffix = error.map(|e| format!(": {e}")).unwrap_or_default();
-    tracing::info!(target: "activity", "startwrt-activity(eMMC) [{category}.{action}] {status} {summary}{err_suffix}");
+    tracing::info!(target: "activity", "{SYSLOG_TAG}(eMMC) [{category}.{action}] {status} {summary}{err_suffix}");
 
     let conn = open_db(db_path)?;
     insert_entry(&conn, category, action, success, summary, error)?;

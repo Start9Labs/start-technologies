@@ -36,6 +36,9 @@ pub struct Manifest {
     pub metadata: PackageMetadata,
     pub images: BTreeMap<ImageId, ImageConfig>,
     pub volumes: BTreeSet<VolumeId>,
+    /// Enables user-managed grants to shared volumes; grants default to none.
+    #[serde(default)]
+    pub shared_volumes: bool,
     #[serde(default)]
     pub dependencies: Dependencies,
     #[serde(default)]
@@ -208,39 +211,43 @@ impl std::str::FromStr for LocaleString {
     }
 }
 impl LocaleString {
-    pub fn localize_for(&mut self, locale: &str) {
+    /// Resolves to the requested locale's exact or same-language translation, else the
+    /// owner's declared default, else an arbitrary stored one.
+    pub fn localize_for(&mut self, locale: Option<&str>, default: Option<&str>) {
         if let Self::LanguageMap(map) = self {
-            if let Some(translated) = map.remove(locale) {
-                *self = Self::Translated(translated);
-                return;
-            }
-            let prefix = locale.split_inclusive("_").next().unwrap();
-            let mut first = None;
-            for (lang, translated) in std::mem::take(map) {
-                if lang.starts_with(prefix) {
-                    *self = Self::Translated(translated);
-                    return;
-                }
-                if first.is_none() {
-                    first = Some(translated);
-                }
-            }
-            *self = Self::Translated(first.unwrap_or_default())
+            let requested = locale
+                .and_then(|locale| crate::best_locale(locale, map.keys().map(|l| &**l)))
+                .map(InternedString::intern);
+            let translated = requested
+                .and_then(|l| map.remove(&l))
+                .or_else(|| default.and_then(|default| map.remove(default)))
+                .or_else(|| map.values().next().cloned())
+                .unwrap_or_default();
+            *self = Self::Translated(translated);
         }
     }
-    pub fn localized_for(mut self, locale: &str) -> String {
-        self.localize_for(locale);
+    /// Locales of a language map; none for a plain string.
+    pub fn languages(&self) -> impl Iterator<Item = &InternedString> {
+        match self {
+            Self::LanguageMap(map) => Some(map.keys()),
+            Self::Translated(_) => None,
+        }
+        .into_iter()
+        .flatten()
+    }
+    pub fn localized_for(mut self, locale: Option<&str>, default: Option<&str>) -> String {
+        self.localize_for(locale, default);
         if let Self::Translated(s) = self {
             s
         } else {
             unreachable!()
         }
     }
-    pub fn localize(&mut self) {
-        self.localize_for(&*rust_i18n::locale());
+    pub fn localize(&mut self, default: Option<&str>) {
+        self.localize_for(Some(&*rust_i18n::locale()), default);
     }
-    pub fn localized(self) -> String {
-        self.localized_for(&*rust_i18n::locale())
+    pub fn localized(self, default: Option<&str>) -> String {
+        self.localized_for(Some(&*rust_i18n::locale()), default)
     }
 }
 impl<'de> Deserialize<'de> for LocaleString {
@@ -415,11 +422,6 @@ pub struct Description {
 rpc_toolkit::reflect_ts!(Description);
 rpc_toolkit::ts_export!(Description, namespaces = [""]);
 impl Description {
-    pub fn localize_for(&mut self, locale: &str) {
-        self.short.localize_for(locale);
-        self.long.localize_for(locale);
-    }
-
     /// The marketplace tile clamps `short` to two lines and hides the rest —
     /// about 80 characters; the headroom is for locales that need more words
     /// to say the same thing. `long` is rendered unclamped.
@@ -452,6 +454,37 @@ impl Description {
         }
         Ok(())
     }
+}
+
+#[test]
+fn locale_resolution_prefers_requested_then_declared_default() {
+    let text = || -> LocaleString {
+        serde_json::from_str(r#"{"en_US":"English","de_DE":"Deutsch","pl_PL":"Polski"}"#).unwrap()
+    };
+    for (locale, default, expected) in [
+        (Some("pl_PL"), Some("de_DE"), "Polski"),
+        (Some("en_GB"), Some("de_DE"), "English"),
+        (Some("zz_ZZ"), Some("de_DE"), "Deutsch"),
+        (Some(""), Some("de_DE"), "Deutsch"),
+        (None, Some("pl_PL"), "Polski"),
+        (None, Some("de_DE"), "Deutsch"),
+    ] {
+        assert_eq!(text().localized_for(locale, default), expected);
+    }
+    for locale in [Some("zz_ZZ"), Some(""), None] {
+        for default in [None, Some("ja_JP")] {
+            let resolved = text().localized_for(locale, default);
+            assert!(["English", "Deutsch", "Polski"].contains(&&*resolved));
+        }
+    }
+    assert_eq!(
+        LocaleString::LanguageMap(InOMap::default()).localized_for(Some(""), None),
+        ""
+    );
+    assert_eq!(
+        LocaleString::Translated("Plain".into()).localized_for(Some("pl_PL"), Some("de_DE")),
+        "Plain"
+    );
 }
 
 #[test]

@@ -5,7 +5,7 @@ use std::sync::Arc;
 pub use crate::VolumeId;
 use crate::prelude::*;
 use crate::progress::{PhaseProgressTrackerHandle, ProgressUnits};
-use crate::util::clone::clone_tree;
+use crate::util::btrfs::{CONVERT_OLD_SUFFIX, CONVERT_TMP_SUFFIX};
 use crate::util::io::Counter;
 use crate::util::{VersionString, btrfs};
 use crate::{DATA_DIR, PackageId};
@@ -267,9 +267,6 @@ async fn with_byte_progress(
     }
 }
 
-const CONVERT_TMP_SUFFIX: &str = ".convert-tmp";
-const CONVERT_OLD_SUFFIX: &str = ".convert-old";
-
 /// Boot-time volume maintenance, run after the db loads and before any service
 /// container exists (so nothing can hold a mount on a volume): recovers any
 /// interrupted conversion, sweeps orphaned install backups, and converts
@@ -310,8 +307,11 @@ async fn recover_and_sweep(
     // Resolve restores first: readdir order could otherwise reap a backup that a
     // restore-old marker still needs.
     for name in &names {
-        if name.ends_with(CONVERT_TMP_SUFFIX) || name.ends_with(INSTALL_BACKUP_TMP_SUFFIX) {
-            // incomplete conversion or snapshot from an interrupted boot
+        if let Some(owner) = name.strip_suffix(CONVERT_TMP_SUFFIX) {
+            btrfs::recover_conversion(&volumes.join(owner))
+                .await
+                .log_err();
+        } else if name.ends_with(INSTALL_BACKUP_TMP_SUFFIX) {
             btrfs::delete_tree(volumes.join(name)).await.log_err();
         } else if let Some(owner) = name.strip_suffix(RESTORE_OLD_SUFFIX) {
             if let Ok(owner) = owner.parse::<PackageId>() {
@@ -327,14 +327,9 @@ async fn recover_and_sweep(
         let entry_path = volumes.join(name);
         let name = name.as_str();
         if let Some(owner) = name.strip_suffix(CONVERT_OLD_SUFFIX) {
-            let live = volumes.join(owner);
-            if tokio::fs::metadata(&live).await.is_ok() {
-                // interrupted after the swap completed
-                btrfs::delete_tree(&entry_path).await.log_err();
-            } else {
-                // interrupted mid-swap: put the original back
-                crate::util::io::rename(&entry_path, &live).await.log_err();
-            }
+            btrfs::recover_conversion(&volumes.join(owner))
+                .await
+                .log_err();
         } else if let Some(owner) = name.strip_suffix(INSTALL_BACKUP_SUFFIX) {
             let Ok(owner) = owner.parse::<PackageId>() else {
                 continue;
@@ -380,7 +375,7 @@ async fn needs_subvolume_conversion(path: &Path) -> bool {
 pub(crate) async fn convert_package_to_subvolume(id: &PackageId) -> Result<(), Error> {
     let src = pkg_volume_dir(id);
     if needs_subvolume_conversion(&src).await {
-        convert_one(id, &src, None).await?;
+        convert_directory_to_subvolume(&src, None).await?;
     }
     Ok(())
 }
@@ -390,11 +385,23 @@ async fn convert_to_subvolumes(
     installed: &BTreeSet<PackageId>,
     phase: &mut PhaseProgressTrackerHandle,
 ) -> Result<(), Error> {
+    convert_directories_to_subvolumes(installed.iter().map(|id| volumes.join(id)).collect(), phase)
+        .await
+}
+
+/// The caller must exclude mounts and writers throughout maintenance.
+pub(crate) async fn convert_directories_to_subvolumes(
+    paths: Vec<PathBuf>,
+    phase: &mut PhaseProgressTrackerHandle,
+) -> Result<(), Error> {
     let mut pending = Vec::new();
-    for id in installed {
-        let src = volumes.join(id);
+    for src in paths {
+        if let Err(error) = btrfs::recover_conversion(&src).await {
+            tracing::warn!("Could not recover volume {src:?}: {error}");
+            continue;
+        }
         if needs_subvolume_conversion(&src).await {
-            pending.push((id, src));
+            pending.push(src);
         }
     }
     if pending.is_empty() {
@@ -402,21 +409,22 @@ async fn convert_to_subvolumes(
     }
     let mut sized = Vec::new();
     let mut total = 0u64;
-    for (id, src) in pending {
+    for src in pending {
         match crate::util::io::dir_size(&src, None).await {
             Ok(size) => {
                 total += size;
-                sized.push((id, src, size));
+                sized.push((src, size));
             }
-            Err(e) => tracing::warn!("Could not size volumes of {id} for conversion: {e}"),
+            Err(e) => tracing::warn!("Could not size volume {src:?} for conversion: {e}"),
         }
     }
     phase.set_units(Some(ProgressUnits::Bytes));
     phase.set_total(total);
+    phase.set_done(0);
     let mut done = 0;
-    for (id, src, size) in sized {
-        if let Err(e) = convert_one(id, &src, Some((&mut *phase, done))).await {
-            tracing::warn!("Could not convert volumes of {id} to a subvolume: {e}");
+    for (src, size) in sized {
+        if let Err(e) = convert_directory_to_subvolume(&src, Some((&mut *phase, done))).await {
+            tracing::warn!("Could not convert volume {src:?} to a subvolume: {e}");
         }
         done += size;
         phase.set_done(done);
@@ -424,42 +432,18 @@ async fn convert_to_subvolumes(
     Ok(())
 }
 
-async fn convert_one(
-    id: &PackageId,
+/// The caller must exclude mounts and writers throughout conversion.
+pub(crate) async fn convert_directory_to_subvolume(
     src: &Path,
     progress: Option<(&mut PhaseProgressTrackerHandle, u64)>,
 ) -> Result<(), Error> {
-    let start = std::time::Instant::now();
-    let tmp = src.with_file_name(format!("{id}{CONVERT_TMP_SUFFIX}"));
-    let old = src.with_file_name(format!("{id}{CONVERT_OLD_SUFFIX}"));
-    btrfs::delete_tree(&tmp).await?;
-    btrfs::create_subvolume(&tmp).await?;
-    let ctr = Arc::new(Counter::new(0, std::sync::atomic::Ordering::Relaxed));
-    let clone = clone_tree(src, &tmp, ctr.clone());
-    let cloned = if let Some((phase, base)) = progress {
-        with_byte_progress(phase, base, &ctr, clone).await
+    let counter = Arc::new(Counter::new(0, std::sync::atomic::Ordering::Relaxed));
+    let conversion = btrfs::convert_directory(src, counter.clone());
+    if let Some((phase, base)) = progress {
+        with_byte_progress(phase, base, &counter, conversion).await
     } else {
-        clone.await
-    };
-    if let Err(e) = cloned {
-        btrfs::delete_tree(&tmp).await.log_err();
-        return Err(e);
+        conversion.await
     }
-    if let Err(e) = crate::util::io::rename(src, &old).await {
-        btrfs::delete_tree(&tmp).await.log_err();
-        return Err(e);
-    }
-    if let Err(e) = crate::util::io::rename(&tmp, src).await {
-        crate::util::io::rename(&old, src).await.log_err();
-        btrfs::delete_tree(&tmp).await.log_err();
-        return Err(e);
-    }
-    crate::util::io::delete_dir(&old).await.log_err();
-    tracing::info!(
-        "Converted volumes of {id} to a subvolume in {:?}",
-        start.elapsed()
-    );
-    Ok(())
 }
 
 #[cfg(test)]

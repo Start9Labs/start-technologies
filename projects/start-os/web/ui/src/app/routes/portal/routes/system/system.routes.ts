@@ -33,16 +33,22 @@ export default [
         loadComponent: () => import('./routes/smtp/smtp.component'),
       },
       {
-        path: 'backup',
+        path: 'volumes',
         title: titleResolver,
-        loadComponent: () => import('./routes/backups/backups.component'),
-        data: { type: 'create' },
+        data: { title: 'Shared Volumes' },
+        loadComponent: () => import('./routes/volumes'),
       },
       {
-        path: 'restore',
+        path: 'backup-targets',
         title: titleResolver,
-        loadComponent: () => import('./routes/backups/backups.component'),
-        data: { type: 'restore' },
+        data: { title: 'Backup Targets' },
+        loadComponent: () => import('./routes/backups/targets'),
+      },
+      {
+        path: 'backups',
+        title: titleResolver,
+        data: { title: 'Backups' },
+        loadComponent: () => import('./routes/backups'),
       },
       {
         path: 'interfaces',
@@ -53,6 +59,11 @@ export default [
         path: 'wifi',
         title: titleResolver,
         loadComponent: () => import('./routes/wifi/wifi.component'),
+      },
+      {
+        path: 'ups',
+        title: titleResolver,
+        loadComponent: () => import('./routes/nut'),
       },
       {
         path: 'sessions',

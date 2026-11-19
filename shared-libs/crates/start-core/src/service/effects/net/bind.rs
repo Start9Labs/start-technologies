@@ -30,7 +30,7 @@ pub async fn bind(
     context
         .seed
         .persistent_container
-        .net_service
+        .net_service()?
         .bind(id, internal_port, options)
         .await
 }
@@ -42,6 +42,8 @@ pub struct BindRangeParams {
     pub internal_start_port: u16,
     pub external_start_port: u16,
     pub number_of_ports: u16,
+    #[serde(default)]
+    pub transport: crate::net::transport::Transport,
 }
 
 rpc_toolkit::reflect_ts!(BindRangeParams);
@@ -54,6 +56,7 @@ pub async fn bind_range(
         internal_start_port,
         external_start_port,
         number_of_ports,
+        transport,
     }: BindRangeParams,
 ) -> Result<(), Error> {
     if number_of_ports < 2 {
@@ -72,14 +75,53 @@ pub async fn bind_range(
     context
         .seed
         .persistent_container
-        .net_service
+        .net_service()?
         .bind_range(
             id,
             internal_start_port,
             external_start_port,
             number_of_ports,
+            transport,
         )
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::net::transport::Transport;
+
+    #[test]
+    fn range_transport_is_optional_and_round_trips() {
+        let mut input = serde_json::json!({
+            "id": "relay", "internalStartPort": 42000,
+            "externalStartPort": 43000, "numberOfPorts": 10,
+        });
+        let params: BindRangeParams = serde_json::from_value(input.clone()).unwrap();
+        assert_eq!(params.transport, Transport::default());
+        for (wire, transport, expected) in [
+            (
+                serde_json::json!("tcp"),
+                Transport::tcp(),
+                serde_json::json!(["tcp"]),
+            ),
+            (
+                serde_json::json!("udp"),
+                Transport::udp(),
+                serde_json::json!(["udp"]),
+            ),
+            (
+                serde_json::json!(["tcp", "udp"]),
+                Transport::default(),
+                serde_json::json!(["tcp", "udp"]),
+            ),
+        ] {
+            input["transport"] = wire;
+            let params: BindRangeParams = serde_json::from_value(input.clone()).unwrap();
+            assert_eq!(params.transport, transport);
+            assert_eq!(serde_json::to_value(params).unwrap()["transport"], expected);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
@@ -101,7 +143,7 @@ pub async fn clear_bindings(
     context
         .seed
         .persistent_container
-        .net_service
+        .net_service()?
         .clear_bindings(except.into_iter().collect())
         .await?;
     Ok(())
@@ -125,7 +167,7 @@ pub async fn retire_host(
     context
         .seed
         .persistent_container
-        .net_service
+        .net_service()?
         .retire_host(id)
         .await
 }
@@ -148,7 +190,7 @@ pub async fn retire_binding(
     context
         .seed
         .persistent_container
-        .net_service
+        .net_service()?
         .retire_binding(id, internal_port)
         .await
 }

@@ -80,7 +80,7 @@ import { PORT_FORWARDS_MODAL } from './port-forwards.component'
                 {{ 'Update config' | i18n }}
               </button>
               <button tuiOption class="g-negative" (click)="remove()">
-                {{ 'Delete' | i18n }}
+                {{ 'Remove' | i18n }}
               </button>
             }
           </tui-data-list>
@@ -179,7 +179,7 @@ export class GatewaysItemComponent {
         this.tasks.run(
           async () =>
             await this.api.rpc.net.tunnel.remove({ id: this.gateway().id }),
-          'Deleting',
+          'Removing',
         ),
       )
   }

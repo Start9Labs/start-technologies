@@ -67,8 +67,11 @@ import { FilterUpdatesPipe } from 'src/app/routes/portal/routes/updates/filter-u
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { LiveApiService } from 'src/app/services/api/embassy-live-api.service'
 import { MockApiService } from 'src/app/services/api/embassy-mock-api.service'
+import {
+  StartupApiService,
+  StartupLiveApiService,
+} from 'src/app/services/api/startup-api.service'
 import { AuthService } from 'src/app/services/auth.service'
-import { ClientStorageService } from 'src/app/services/client-storage.service'
 import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import {
@@ -128,10 +131,12 @@ export const APP_CONFIG: ApplicationConfig = {
     tuiInputDateOptionsProvider({ valueTransformer: DateTransformer }),
     tuiInputDateTimeOptionsProvider({ valueTransformer: DatetimeTransformer }),
     tuiHintOptionsProvider({ appearance: 'primary-grayscale' }),
-    {
-      provide: ApiService,
-      useClass: useMocks ? MockApiService : LiveApiService,
-    },
+    useMocks ? MockApiService : LiveApiService,
+    tuiProvide(ApiService, useMocks ? MockApiService : LiveApiService),
+    tuiProvide(
+      StartupApiService,
+      useMocks ? MockApiService : StartupLiveApiService,
+    ),
     {
       provide: PatchDB,
       deps: [PatchDbSource, PATCH_CACHE],
@@ -141,14 +146,12 @@ export const APP_CONFIG: ApplicationConfig = {
     tuiProvide(MarketplaceTrust, TrustedKeysService),
     provideAppInitializer(() => {
       const i18n = inject(i18nService)
-      const clientStorage = inject(ClientStorageService)
       const router = inject(Router)
       const auth = inject(AuthService)
 
-      inject(StorageService).migrate036()
+      inject(StorageService).migrate()
       // Initial navigation waits for the IndexedDB key check.
       return auth.init().then(() => {
-        clientStorage.init()
         router.initialNavigation()
         i18n.setLanguage(i18n.language || 'english')
       })

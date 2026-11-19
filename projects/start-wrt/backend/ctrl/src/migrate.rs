@@ -26,6 +26,7 @@ const RECORD: &str = "etc/startwrt/migrations";
 /// one from any earlier release. The runner replays migrations after power
 /// loss before the record advances, after a restored backup without a
 /// record, and on a pre-runner install.
+/// Published entries keep their indices; the record stores their count.
 const MIGRATIONS: &[Migration] = &[
     Migration::RemoveEtcNftablesRules,
     Migration::StripUnreferencedWanZoneVpns,
@@ -41,6 +42,9 @@ const MIGRATIONS: &[Migration] = &[
     Migration::ReissueRootCa,
     Migration::NameProfileFirewallSections,
     Migration::BindLuciToLoopback,
+    Migration::DisableFlowOffloading,
+    Migration::TurnOffRemoteAccess,
+    Migration::SplitAutomaticForwardTransports,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -76,6 +80,11 @@ enum Migration {
     NameProfileFirewallSections,
     /// Earlier images served LuCI's uhttpd on every address.
     BindLuciToLoopback,
+    /// Earlier releases offloaded established forwarded connections.
+    DisableFlowOffloading,
+    /// Earlier releases defaulted Remote Access to When behind NAT, stored as `default`.
+    TurnOffRemoteAccess,
+    SplitAutomaticForwardTransports,
 }
 
 impl Migration {
@@ -95,6 +104,13 @@ impl Migration {
             Migration::ReissueRootCa => reissue_root_ca(root).await,
             Migration::NameProfileFirewallSections => name_profile_firewall_sections(root).await,
             Migration::BindLuciToLoopback => bind_luci_to_loopback(root).await,
+            Migration::DisableFlowOffloading => disable_flow_offloading(root).await,
+            Migration::TurnOffRemoteAccess => turn_off_remote_access(root).await,
+            Migration::SplitAutomaticForwardTransports => {
+                crate::port_control::split_legacy_forwards_uci(&uci_root(root))
+                    .await
+                    .map(|_| ())
+            }
         }
     }
 
@@ -127,6 +143,13 @@ impl Migration {
                 "name each profile's firewall sections so saving a profile keeps changes made in LuCI"
             }
             Migration::BindLuciToLoopback => "serve LuCI only over HTTPS",
+            Migration::DisableFlowOffloading => {
+                "stop offloading established connections, which stalled traffic to Wi-Fi devices from other profiles"
+            }
+            Migration::TurnOffRemoteAccess => {
+                "turn off Remote Access if it was still set to When behind NAT"
+            }
+            Migration::SplitAutomaticForwardTransports => "track automatic TCP and UDP mappings independently",
         }
     }
 }
@@ -421,6 +444,68 @@ async fn enable_flow_offloading(root: &Path) -> Result<(), Error> {
             }
             break;
         }
+    }
+    if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+/// Clears `1`, the value an earlier release wrote. An owner's `1` reads the
+/// same and is cleared too; any other value stays.
+async fn disable_flow_offloading(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["firewall"]).await?;
+    let mut changed = false;
+    for section in &mut cfgs["firewall"].sections {
+        if let Some(mut defaults) = section.get_typed::<FirewallDefaults>()? {
+            if defaults.flow_offloading.as_deref().map(str::trim) == Some("1") {
+                defaults.flow_offloading = None;
+                section.set(&defaults)?;
+                changed = true;
+            }
+            break;
+        }
+    }
+    if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, TypedSection, Default)]
+#[uci(ty = "preferences")]
+struct StoredRemoteAccess {
+    remote_access: Option<String>,
+}
+
+/// Turns off `default` and an unset mode; any other mode stays.
+async fn turn_off_remote_access(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["startwrt", "firewall"]).await?;
+    let mut changed = false;
+    let mut legacy = true;
+    for section in &mut cfgs["startwrt"].sections {
+        if section.name().as_deref() != Some("preferences") {
+            continue;
+        }
+        if let Some(mut prefs) = section.get_typed::<StoredRemoteAccess>()? {
+            match prefs.remote_access.as_deref() {
+                Some("default") => {
+                    prefs.remote_access = Some("never".to_string());
+                    section.set(&prefs)?;
+                    changed = true;
+                }
+                Some(_) => legacy = false,
+                None => {}
+            }
+        }
+        break;
+    }
+    if legacy {
+        let sections = cfgs["firewall"].sections.len();
+        crate::system::apply_remote_access_config(&mut cfgs, "never", None, &[]);
+        changed |= cfgs["firewall"].sections.len() != sections;
     }
     if changed {
         dump_all(uci_root(root), cfgs).await?;
@@ -774,6 +859,50 @@ config forwarding
         format!("{}\n", MIGRATIONS.len())
     }
 
+    fn pending(migration: Migration) -> String {
+        let index = MIGRATIONS
+            .iter()
+            .position(|m| std::mem::discriminant(m) == std::mem::discriminant(&migration))
+            .unwrap();
+        format!("{index}\n")
+    }
+
+    #[tokio::test]
+    async fn completed_remote_access_migration_still_splits_automatic_transports() {
+        let dir = router(Some("16\n"), true);
+        write(&dir, "etc/config/startwrt", &preferences(Some("always")));
+        write(
+            &dir,
+            "etc/config/firewall",
+            "config redirect 'apf_legacy'\n\toption name 'retained label'\n\toption src 'wan'\n\toption target 'DNAT'\n\toption _apf_label 'PCP'\n\toption enabled '0'\n\tlist proto 'tcp'\n\tlist proto 'udp'\n",
+        );
+        run(dir.path()).await.unwrap();
+        assert_eq!(record(&dir), current());
+        assert_eq!(
+            read(&dir, "etc/config/startwrt"),
+            preferences(Some("always"))
+        );
+        let firewall = read(&dir, "etc/config/firewall");
+        let arena = Arena::new();
+        let parsed = uciedit::Config::parse_str(&arena, &firewall).unwrap();
+        assert_eq!(parsed.sections.len(), 2);
+        for protocol in ["tcp", "udp"] {
+            let section = parsed
+                .sections
+                .iter()
+                .find(|section| {
+                    section.name().as_deref() == Some(&format!("apf_legacy_{protocol}"))
+                })
+                .unwrap();
+            let redirect = section.get::<uciedit::openwrt::FirewallRedirect>().unwrap();
+            assert_eq!(redirect.proto, vec![protocol.to_string()]);
+            assert_eq!(redirect.name, "retained label");
+            assert_eq!(redirect.enabled.as_deref(), Some("0"));
+        }
+        run(dir.path()).await.unwrap();
+        assert_eq!(read(&dir, "etc/config/firewall"), firewall);
+    }
+
     #[tokio::test]
     async fn log_migration_record_runs_session_cleanup_next() {
         let dir = router(Some("6\n"), true);
@@ -854,7 +983,7 @@ config forwarding
         assert_eq!(read(&dir, "etc/config/uhttpd"), migrated[5]);
         assert_eq!(wan_ipv6(&dir).as_deref(), Some("1"));
         assert!(migrated[1].contains("option dest 'vlan_guest'"));
-        assert!(migrated[1].contains("option flow_offloading '1'"));
+        assert!(!migrated[1].contains("flow_offloading"));
         assert!(migrated[2].contains("option lan_access 'all'"));
         assert!(migrated[2].contains("option lan_access 'same_profile'"));
         assert!(migrated[5].contains("list listen_http '127.0.0.1:8080'"));
@@ -1020,24 +1149,108 @@ config forwarding
     }
 
     #[tokio::test]
-    async fn flow_offloading_is_enabled_unless_set() {
+    async fn flow_offloading_stays_off_from_before_it_shipped() {
         let dir = router(Some("9\n"), true);
         write(&dir, "etc/config/firewall", SHIPPED_FIREWALL_DEFAULTS);
         run(dir.path()).await.unwrap();
         assert_eq!(record(&dir), current());
-        let firewall = read(&dir, "etc/config/firewall");
-        assert!(
-            firewall.contains("option flow_offloading '1'"),
-            "{firewall}"
-        );
-        assert!(firewall.contains("option syn_flood '1'"), "{firewall}");
-        assert!(firewall.contains("option forward 'REJECT'"), "{firewall}");
+        assert_eq!(read(&dir, "etc/config/firewall"), SHIPPED_FIREWALL_DEFAULTS);
 
         let disabled = format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '0'\n");
         let dir = router(Some("9\n"), true);
         write(&dir, "etc/config/firewall", &disabled);
         run(dir.path()).await.unwrap();
         assert_eq!(read(&dir, "etc/config/firewall"), disabled);
+    }
+
+    #[tokio::test]
+    async fn flow_offloading_an_earlier_release_enabled_is_cleared() {
+        let offloaded = format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '1'\n");
+        let before = pending(Migration::DisableFlowOffloading);
+        let dir = router(Some(&before), true);
+        write(&dir, "etc/config/firewall", &offloaded);
+        run(dir.path()).await.unwrap();
+        assert_eq!(record(&dir), current());
+        assert_eq!(read(&dir, "etc/config/firewall"), SHIPPED_FIREWALL_DEFAULTS);
+
+        for kept in ["0", "yes"] {
+            let chosen = format!("{SHIPPED_FIREWALL_DEFAULTS}\toption flow_offloading '{kept}'\n");
+            let dir = router(Some(&before), true);
+            write(&dir, "etc/config/firewall", &chosen);
+            run(dir.path()).await.unwrap();
+            assert_eq!(read(&dir, "etc/config/firewall"), chosen);
+        }
+    }
+
+    const REMOTE_ACCESS_FIREWALL: &str = "\
+config zone 'wan'
+\toption name 'wan'
+\toption input 'REJECT'
+
+config rule 'startwrt_remote_22_ipv4_10'
+\toption name 'startwrt_remote_22_ipv4_10'
+\toption src 'wan'
+\toption src_ip '10.0.0.0/8'
+\toption dest_port '22'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+\toption family 'ipv4'
+
+config rule 'wg_server'
+\toption name 'wg_server'
+\toption src 'wan'
+\toption dest_port '51820'
+\tlist proto 'udp'
+\toption target 'ACCEPT'
+";
+
+    fn preferences(remote_access: Option<&str>) -> String {
+        let mut prefs =
+            "config preferences 'preferences'\n\toption language 'de_DE'\n\toption theme 'dark'\n"
+                .to_string();
+        if let Some(mode) = remote_access {
+            prefs.push_str(&format!("\toption remote_access '{mode}'\n"));
+        }
+        prefs
+    }
+
+    #[tokio::test]
+    async fn remote_access_on_the_old_default_is_turned_off() {
+        for (stored, expected) in [
+            (preferences(Some("default")), preferences(Some("never"))),
+            (preferences(None), preferences(None)),
+            (String::new(), String::new()),
+        ] {
+            let dir = router(Some(&pending(Migration::TurnOffRemoteAccess)), true);
+            write(&dir, "etc/config/startwrt", &stored);
+            write(&dir, "etc/config/firewall", REMOTE_ACCESS_FIREWALL);
+            run(dir.path()).await.unwrap();
+            assert_eq!(record(&dir), current());
+
+            let startwrt = read(&dir, "etc/config/startwrt");
+            assert_eq!(startwrt, expected);
+            let arena = Arena::new();
+            let parsed = uciedit::Config::parse_str(&arena, &startwrt).unwrap();
+            let prefs = crate::system::preferences(&parsed).unwrap();
+            assert_eq!(prefs.remote_access, "never");
+
+            let firewall = read(&dir, "etc/config/firewall");
+            assert!(!firewall.contains("startwrt_remote_"), "{firewall}");
+            assert!(firewall.contains("config rule 'wg_server'"), "{firewall}");
+            assert!(firewall.contains("config zone 'wan'"), "{firewall}");
+        }
+    }
+
+    #[tokio::test]
+    async fn remote_access_chosen_by_the_owner_stays() {
+        for mode in ["never", "behind-nat", "always"] {
+            let dir = router(Some(&pending(Migration::TurnOffRemoteAccess)), true);
+            write(&dir, "etc/config/startwrt", &preferences(Some(mode)));
+            write(&dir, "etc/config/firewall", REMOTE_ACCESS_FIREWALL);
+            run(dir.path()).await.unwrap();
+            assert_eq!(read(&dir, "etc/config/startwrt"), preferences(Some(mode)));
+            assert_eq!(read(&dir, "etc/config/firewall"), REMOTE_ACCESS_FIREWALL);
+        }
     }
 
     #[tokio::test]

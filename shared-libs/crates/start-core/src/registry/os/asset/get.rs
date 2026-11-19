@@ -8,6 +8,7 @@ use imbl_value::{InternedString, json};
 use itertools::Itertools;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::context::CliContext;
 use crate::prelude::*;
@@ -173,7 +174,7 @@ async fn cli_get_os_asset(
 
     res.validate(SIG_CONTEXT, res.all_signers())?;
 
-    let download = download.join(format!("startos-{version}_{platform}.{ext}"));
+    let download = download.join(download_file_name(&version, &platform, ext, &res.urls));
     let mut file = AtomicFile::new(&download, None::<&Path>).await?;
 
     let progress = FullProgressTracker::new();
@@ -210,4 +211,56 @@ async fn cli_get_os_asset(
     progress_task.await.with_kind(ErrorKind::Unknown)?;
 
     Ok(res)
+}
+
+/// Ends in `.gz` when every URL serving the asset names a `.gz` file.
+fn download_file_name(
+    version: &impl std::fmt::Display,
+    platform: &impl std::fmt::Display,
+    ext: &str,
+    urls: &[Url],
+) -> String {
+    let gzipped = !urls.is_empty() && urls.iter().all(|url| url.path().ends_with(".gz"));
+    format!(
+        "startos-{version}_{platform}.{ext}{}",
+        if gzipped { ".gz" } else { "" }
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn urls(paths: &[&str]) -> Vec<Url> {
+        paths
+            .iter()
+            .map(|path| Url::parse(&format!("https://cdn.example{path}")).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn download_keeps_the_gzip_suffix_of_its_urls() {
+        assert_eq!(
+            download_file_name(
+                &"0.4.3",
+                &"raspberrypi",
+                "img",
+                &urls(&["/v0.4.3/a_raspberrypi.img.gz"])
+            ),
+            "startos-0.4.3_raspberrypi.img.gz"
+        );
+        assert_eq!(
+            download_file_name(
+                &"0.4.3",
+                &"raspberrypi",
+                "img",
+                &urls(&["/v0.4.3/a_raspberrypi.img"])
+            ),
+            "startos-0.4.3_raspberrypi.img"
+        );
+        assert_eq!(
+            download_file_name(&"0.4.3", &"x86_64", "iso", &urls(&["/v0.4.3/a.iso?x=1.gz"])),
+            "startos-0.4.3_x86_64.iso"
+        );
+    }
 }

@@ -1,0 +1,409 @@
+name: StartOS Image
+
+# One platform's image, its migration payload where one exists, and its deploy
+# when a channel is given. build-products.yaml (checks) and startos-iso.yaml
+# (publishing) call this once per platform, so each platform publishes as soon as
+# its own image is built rather than waiting for the slowest one.
+on:
+  workflow_call:
+    inputs:
+      platform:
+        type: string
+        required: true
+      environment:
+        type: string
+        default: ''
+      nodejs-version:
+        type: string
+        required: true
+      compiled-run-id:
+        description: Run holding compiled-<arch>.tar.gz and rootfs.<arch>.squashfs; empty for this run
+        type: string
+        default: ''
+      commit:
+        description: Commit the image is built from; empty for this run's
+        type: string
+        default: ''
+      channel:
+        description: Deploy channel; empty builds without deploying
+        type: string
+        default: ''
+      registry:
+        type: string
+        default: ''
+      version:
+        type: string
+        default: ''
+      s3-bucket:
+        type: string
+        default: ''
+      s3-cdn:
+        type: string
+        default: ''
+      force-overwrite:
+        type: boolean
+        default: false
+
+env:
+  NODEJS_VERSION: ${{ inputs.nodejs-version }}
+  ENVIRONMENT: ${{ inputs.environment }}
+
+jobs:
+  build:
+    name: Build
+    # RISC-V image assembly stays native; full emulation is too slow.
+    runs-on: >-
+      ${{
+        fromJson('{
+          "x86_64": "ubuntu-latest",
+          "x86_64-nonfree": "ubuntu-latest",
+          "x86_64-nvidia": "ubuntu-latest",
+          "aarch64": "ubuntu-24.04-arm",
+          "aarch64-nonfree": "ubuntu-24.04-arm",
+          "aarch64-nvidia": "ubuntu-24.04-arm",
+          "raspberrypi": "ubuntu-24.04-arm",
+          "riscv64": "ubuntu-24.04-riscv",
+          "riscv64-nonfree": "ubuntu-24.04-riscv"
+        }')[inputs.platform]
+      }}
+    env:
+      ARCH: >-
+        ${{
+          fromJson('{
+            "x86_64": "x86_64",
+            "x86_64-nonfree": "x86_64",
+            "x86_64-nvidia": "x86_64",
+            "aarch64": "aarch64",
+            "aarch64-nonfree": "aarch64",
+            "aarch64-nvidia": "aarch64",
+            "raspberrypi": "aarch64",
+            "riscv64": "riscv64",
+            "riscv64-nonfree": "riscv64"
+          }')[inputs.platform]
+        }}
+      PLATFORM: ${{ inputs.platform }}
+    steps:
+      # Some runners lack /opt/hostedtoolcache, which setup-qemu expects
+      - name: Ensure hostedtoolcache exists
+        run: sudo mkdir -p /opt/hostedtoolcache && sudo chown "$USER:$USER" /opt/hostedtoolcache
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+          fetch-depth: 0
+
+      # Precedes every JavaScript action after checkout.
+      - name: Update RISC-V action runtime
+        if: ${{ env.ARCH == 'riscv64' }}
+        uses: ./.github/actions/riscv-action-runtime
+        with:
+          nodejs-version: ${{ env.NODEJS_VERSION }}
+
+      - name: Set up docker QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Free space
+        run: .github/actions/setup-build/free-disk-space.sh
+
+      - uses: ./.github/actions/use-compiled-artifacts
+        with:
+          arch: ${{ env.ARCH }}
+          run-id: ${{ inputs.compiled-run-id || github.run_id }}
+
+      - name: Download container runtime rootfs
+        uses: actions/download-artifact@v8
+        with:
+          name: rootfs.${{ env.ARCH }}.squashfs
+          path: projects/start-os/container-runtime
+          run-id: ${{ inputs.compiled-run-id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Prevent rebuild of the rootfs
+        run: make -t projects/start-os/container-runtime/rootfs.${{ env.ARCH }}.squashfs
+
+      - run: git status
+
+      - name: Run iso build
+        run: make start-os-iso
+        if: ${{ inputs.platform != 'raspberrypi' }}
+
+      - name: Run img build
+        run: make start-os-img
+        if: ${{ inputs.platform == 'raspberrypi' }}
+
+      - name: Compress img
+        run: gzip results/*.img
+        if: ${{ inputs.platform == 'raspberrypi' }}
+
+      - name: Archive kernel backport packages
+        uses: actions/upload-artifact@v7
+        if: ${{ inputs.platform == 'x86_64' || inputs.platform == 'aarch64' }}
+        with:
+          name: ${{ inputs.platform }}.kernel-backports
+          path: results/kernel-backports/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      # Release tooling in scripts/ finds these artifacts by file name.
+      - uses: actions/upload-artifact@v7
+        with:
+          path: results/*.squashfs
+          archive: false
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: results/*.iso
+          archive: false
+          retention-days: 14
+        if: ${{ inputs.platform != 'raspberrypi' }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: results/*.img.gz
+          archive: false
+          retention-days: 14
+        if: ${{ inputs.platform == 'raspberrypi' }}
+
+  # The OTA payload legacy (0.3.5.1) boxes pull via their frozen rsync updater:
+  # the 0.4.0 base squashfs (built just above) repackaged onto the published
+  # 0.3.5.1 rootfs. Pure repackaging (no OS compile), so it runs on x86_64 for
+  # every platform. Only platforms that shipped in 0.3.5.1 (no nvidia/riscv);
+  # raspberrypi requires a reflash (#3443). The startos-*_<platform>.migration.squashfs
+  # artifact is what ops publishes to the frozen registry as the version's OTA
+  # image. See projects/start-os/build/assemble-migration-payload.sh and PR #3399.
+  migration:
+    name: Migration Image
+    needs: [build]
+    if: contains(fromJson('["x86_64", "x86_64-nonfree", "aarch64", "aarch64-nonfree"]'), inputs.platform)
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MIGRATION_FROM_TAG: v0.3.5.1
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+
+      - uses: ./.github/actions/free-disk-space
+
+      - name: Fetch the 0.4.0 base squashfs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: startos-*_${{ inputs.platform }}.squashfs
+          merge-multiple: true
+          path: base-new
+
+      - name: Fetch the legacy (0.3.5.1) base image
+        run: |
+          mkdir -p base-old
+          gh release download "$MIGRATION_FROM_TAG" --repo "${{ github.repository }}" \
+            --pattern "startos-*_${{ inputs.platform }}.iso" --dir base-old
+
+      # Runs in start9/build-env (the canonical Start9 build image — already has
+      # the squashfs toolchain + b3sum) so unsquashfs/mksquashfs can restore the
+      # rootfs's ownership + device nodes. Only xorriso (to crack the squashfs out
+      # of the 0.3.5.1 ISO) is missing, so we add just that. Not --privileged:
+      # creating device nodes needs only CAP_MKNOD, in docker's default caps.
+      - name: Assemble migration payload
+        run: |
+          ARCH=$(printf '%s' "${{ inputs.platform }}" | sed 's/-nonfree$//')
+          NEW=$(ls base-new/*.squashfs | head -n1)
+          OLD=$(ls base-old/startos-*_${{ inputs.platform }}.iso | head -n1)
+          mkdir -p results
+          OUT="results/$(basename "${NEW%.squashfs}").migration.squashfs"
+          docker run --rm -v "$PWD":/w -w /w \
+            -e ARCH="$ARCH" -e NEW="$NEW" -e OLD="$OLD" -e OUT="$OUT" \
+            -e OWNER_UID="$(id -u)" -e OWNER_GID="$(id -g)" \
+            start9/build-env bash -euc '
+              apt-get update -qq
+              apt-get install -yq --no-install-recommends xorriso
+              projects/start-os/build/assemble-migration-payload.sh \
+                --arch "$ARCH" --new-squashfs "$NEW" --old-image "$OLD" --out "$OUT"
+            '
+          echo "Built $OUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: results/*.migration.squashfs
+          archive: false
+          retention-days: 14
+
+  deploy:
+    name: Deploy
+    needs: [build]
+    if: inputs.channel != ''
+    runs-on: ubuntu-latest
+    # One group per platform across channels: alpha and beta deploys of one
+    # commit write the same S3 keys. Each channel publishes one run at a time,
+    # so no group holds a second pending leg for GitHub to cancel.
+    concurrency:
+      group: startos-deploy-${{ inputs.platform }}
+      cancel-in-progress: false
+    env:
+      PLATFORM: ${{ inputs.platform }}
+      VERSION: ${{ inputs.version }}
+      REGISTRY: ${{ inputs.registry }}
+      S3_BUCKET: ${{ inputs.s3-bucket }}
+      S3_CDN: ${{ inputs.s3-cdn }}
+      FORCE_OVERWRITE: ${{ inputs.force-overwrite }}
+      COMMIT: ${{ inputs.commit || github.sha }}
+    steps:
+      # Upload tooling belongs to this workflow, not the published build.
+      # Checkout cleans the workspace, deleting any earlier artifact download.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: scripts/s3-put-once.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Download images
+        uses: actions/download-artifact@v8
+        with:
+          pattern: startos-*_${{ inputs.platform }}.{squashfs,iso,img.gz}
+          merge-multiple: true
+          path: artifacts/
+
+      - name: Check downloaded images
+        working-directory: artifacts
+        run: |
+          image=$([ "$PLATFORM" = raspberrypi ] && echo img.gz || echo iso)
+          for file in startos-*_"$PLATFORM".squashfs startos-*_"$PLATFORM".$image; do
+            [ -f "$file" ] || { echo "::error::No $file artifact in this run"; exit 1; }
+          done
+
+      - name: Install start-cli
+        uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master
+        with:
+          channel: alpha
+
+      - name: Configure S3
+        run: |
+          sudo apt-get install -y -qq s3cmd > /dev/null
+          cat > ~/.s3cfg <<EOF
+          [default]
+          access_key = ${{ secrets.S3_ACCESS_KEY }}
+          secret_key = ${{ secrets.S3_SECRET_KEY }}
+          host_base = nyc3.digitaloceanspaces.com
+          host_bucket = %(bucket)s.nyc3.digitaloceanspaces.com
+          use_https = True
+          EOF
+
+      - name: Set up developer key
+        run: |
+          mkdir -p ~/.startos
+          printf '%s' "${{ secrets.DEV_KEY }}" > ~/.startos/developer.key.pem
+
+      - name: Upload to S3
+        working-directory: artifacts
+        run: |
+          set -uo pipefail
+          pids=()
+          for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img.gz; do
+            [ -f "$file" ] || continue
+            "$GITHUB_WORKSPACE/scripts/s3-put-once.sh" "$file" "$S3_BUCKET/v$VERSION/$file" &
+            pids+=("$!")
+          done
+          # Report every conflict before failing, rather than one per re-run.
+          status=0
+          for pid in "${pids[@]}"; do wait "$pid" || status=1; done
+          exit "$status"
+
+      # deploy-prepare registered this commit before the images were built. An
+      # entry naming another commit belongs to another deploy; these assets stay
+      # out of it rather than being listed under its hash.
+      - name: Index assets in registry
+        working-directory: artifacts
+        run: |
+          set -uo pipefail
+          # The commit an index records for this version; empty when it records none.
+          registered_commit() {
+            jq -er --arg version "$VERSION" '.versions | objects | .[$version].gitHash // ""' <<<"$1"
+          }
+          # The registry slot a file fills.
+          slot() {
+            case "$1" in
+              *.img.gz) echo img ;;
+              *) echo "${1##*.}" ;;
+            esac
+          }
+          files=()
+          for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img.gz; do
+            [ -f "$file" ] && files+=("$file")
+          done
+
+          if ! index_json="$(start-cli --registry="$REGISTRY" registry os index)" \
+            || ! commit="$(registered_commit "$index_json")"; then
+            echo "::error::could not read v$VERSION from $REGISTRY"
+            exit 1
+          fi
+          if [ "$commit" != "$COMMIT" ]; then
+            echo "::error::v$VERSION in $REGISTRY is registered for ${commit:-no commit}, not $COMMIT; leaving $PLATFORM unindexed."
+            exit 1
+          fi
+
+          index() {
+            if [ "$FORCE_OVERWRITE" = true ]; then
+              start-cli --registry="$REGISTRY" registry os asset remove "$(slot "$1")" "$VERSION" "$PLATFORM" || return 1
+            fi
+            # `asset add` takes the slot from the file extension. The img is
+            # indexed gzipped, through a hardlink named for its slot.
+            local indexed=$1 attempt
+            if [ "$(slot "$1")" = img ]; then
+              indexed=${1%.gz}
+              ln -f "$1" "$indexed" || return 1
+            fi
+            # Adding a file that is already indexed is a no-op, so a failure retries.
+            for attempt in 1 2 3; do
+              echo "Indexing $1 for platform $PLATFORM (attempt $attempt)..."
+              start-cli --registry="$REGISTRY" registry os asset add \
+                --platform="$PLATFORM" \
+                --version="$VERSION" \
+                "$indexed" \
+                "$S3_CDN/v$VERSION/$1" && return 0
+              [ "$attempt" -eq 3 ] || sleep $((attempt * 30))
+            done
+            return 1
+          }
+          pids=()
+          for file in "${files[@]}"; do
+            index "$file" &
+            pids+=("$!")
+          done
+          status=0
+          for pid in "${pids[@]}"; do wait "$pid" || status=1; done
+
+          # `asset add` does not check the commit, so an entry another publisher
+          # replaces mid-index can list these images under its commit. Only slots
+          # holding this leg's upload are withdrawn.
+          if ! index_json="$(start-cli --registry="$REGISTRY" registry os index)" \
+            || ! commit="$(registered_commit "$index_json")"; then
+            echo "::error::could not confirm v$VERSION in $REGISTRY still belongs to $COMMIT"
+            exit 1
+          fi
+          if [ "$commit" != "$COMMIT" ]; then
+            for file in "${files[@]}"; do
+              jq -e --arg version "$VERSION" --arg kind "$(slot "$file")" --arg platform "$PLATFORM" \
+                --arg url "$S3_CDN/v$VERSION/$file" \
+                '.versions[$version][$kind][$platform].urls // [] | any(.[]; . == $url)' \
+                <<<"$index_json" > /dev/null || continue
+              start-cli --registry="$REGISTRY" registry os asset remove "$(slot "$file")" "$VERSION" "$PLATFORM" \
+                || echo "::error::could not remove $file from v$VERSION in $REGISTRY"
+            done
+            echo "::error::v$VERSION in $REGISTRY was registered for ${commit:-no commit} while $PLATFORM indexed; this leg's images were withdrawn."
+            exit 1
+          fi
+          exit "$status"
+
+      - name: Record published images
+        working-directory: artifacts
+        run: |
+          shopt -s nullglob
+          printf '%s\n' *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img.gz > "$RUNNER_TEMP/published-$PLATFORM.txt"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: startos-published-${{ inputs.platform }}
+          path: ${{ runner.temp }}/published-${{ inputs.platform }}.txt
+          retention-days: 1

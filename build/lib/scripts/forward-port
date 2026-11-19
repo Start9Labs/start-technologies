@@ -2,8 +2,8 @@
 
 # Manage a single port-forward (or contiguous port range) as native nftables
 # rules in `table ip startos`. Invoked once per (sip, sport -> dip:dport,
-# src_subnet) tuple by shared-libs/crates/start-core/src/net/forward.rs. All rules for one forward share
-# a comment tag so the whole forward can be torn down by handle without
+# src_subnet, transport) tuple by shared-libs/crates/start-core/src/net/forward.rs.
+# Each protocol owns a comment tag so it can be torn down by handle without
 # disturbing other forwards or the rules StartOS installs from Rust.
 #
 # count (default 1) is the number of contiguous ports. For a range:
@@ -32,8 +32,13 @@ if [ "$sport_end" -gt 65535 ] || [ "$dport_end" -gt 65535 ]; then
     exit 1
 fi
 
-TAG="F4-$(echo "$sip:$sport+$count -> $dip/$dprefix:$dport ${src_subnet:-any}" | sha256sum | head -c 16)"
-PROTO='meta l4proto { tcp, udp }'
+IFS=, read -r -a protocols <<< "${transport:-tcp,udp}"
+for protocol in "${protocols[@]}"; do
+    case "$protocol" in
+        tcp | udp) ;;
+        *) echo "invalid transport: $protocol" >&2; exit 1 ;;
+    esac
+done
 PRIVATE_SUBNETS='{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16 }'
 
 # DNAT clause (the part following $PROTO) and the internal-port matcher used by
@@ -92,29 +97,33 @@ delete_tagged() {
     done
 }
 
-{
-    delete_tagged
-    if [ "${UNDO:-0}" != 1 ]; then
-        # DNAT inbound. A private forward (src_subnet set) admits its on-link
-        # subnet and every private source routed to it; a public one admits any.
-        if [ -n "${src_subnet:-}" ]; then
-            echo "add rule ip startos prerouting ip saddr $src_subnet ip daddr $sip $PROTO $dnat comment \"$TAG\""
-            echo "add rule ip startos prerouting ip saddr $PRIVATE_SUBNETS ip daddr $sip $PROTO $dnat comment \"$TAG\""
-        else
-            echo "add rule ip startos prerouting ip daddr $sip $PROTO $dnat comment \"$TAG\""
+for protocol in "${protocols[@]}"; do
+    TAG="F4-$(echo "$sip:$sport+$count -> $dip/$dprefix:$dport ${src_subnet:-any} $protocol" | sha256sum | head -c 16)"
+    PROTO="meta l4proto $protocol"
+    {
+        delete_tagged
+        if [ "${UNDO:-0}" != 1 ]; then
+            # DNAT inbound. A private forward (src_subnet set) admits its on-link
+            # subnet and every private source routed to it; a public one admits any.
+            if [ -n "${src_subnet:-}" ]; then
+                echo "add rule ip startos prerouting ip saddr $src_subnet ip daddr $sip $PROTO $dnat comment \"$TAG\""
+                echo "add rule ip startos prerouting ip saddr $PRIVATE_SUBNETS ip daddr $sip $PROTO $dnat comment \"$TAG\""
+            else
+                echo "add rule ip startos prerouting ip daddr $sip $PROTO $dnat comment \"$TAG\""
+            fi
+            # DNAT for locally-originated (hairpin from the host itself).
+            echo "add rule ip startos output ip daddr $sip $PROTO $dnat comment \"$TAG\""
+            # Allow new forwarded connections to the target.
+            echo "add rule ip startos forward ip daddr $dip $PROTO th dport $dport_match ct state new accept comment \"$TAG\""
+            # Masquerade hairpin replies so they reverse through this host.
+            echo "add rule ip startos postrouting fib saddr type local ct original ip daddr $sip ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
+            echo "add rule ip startos postrouting ip saddr $dip/$dprefix ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
+            if [ "$protocol" = udp ] && [ -n "$sip_iface" ]; then
+                echo "add rule ip startos forward_snat ip saddr $dip oifname \"$sip_iface\" meta l4proto udp $snat comment \"$TAG\""
+            fi
         fi
-        # DNAT for locally-originated (hairpin from the host itself).
-        echo "add rule ip startos output ip daddr $sip $PROTO $dnat comment \"$TAG\""
-        # Allow new forwarded connections to the target.
-        echo "add rule ip startos forward ip daddr $dip $PROTO th dport $dport_match ct state new accept comment \"$TAG\""
-        # Masquerade hairpin replies so they reverse through this host.
-        echo "add rule ip startos postrouting fib saddr type local ct original ip daddr $sip ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
-        echo "add rule ip startos postrouting ip saddr $dip/$dprefix ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
-        if [ -n "$sip_iface" ]; then
-            echo "add rule ip startos forward_snat ip saddr $dip oifname \"$sip_iface\" meta l4proto udp $snat comment \"$TAG\""
-        fi
-    fi
-} | nft -f -
+    } | nft -f - || exit $?
+done
 
 # Tracked flows keep the NAT they started with.
 # A daemon restart reinstalls forwards whose flows are still live.
@@ -126,6 +135,7 @@ else
 fi
 # conntrack -D takes a single port and exits 1 when nothing matches.
 for ((p = sport; p <= sport_end; p++)); do
-    conntrack -D -p tcp "${match[@]}" "$p" 2> /dev/null || true
-    conntrack -D -p udp "${match[@]}" "$p" 2> /dev/null || true
+    for protocol in "${protocols[@]}"; do
+        conntrack -D -p "$protocol" "${match[@]}" "$p" 2> /dev/null || true
+    done
 done

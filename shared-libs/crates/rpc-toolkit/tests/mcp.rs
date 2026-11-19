@@ -157,14 +157,14 @@ impl Middleware<Ctx> for Auth {
         request: &mut RpcRequest,
     ) -> Result<(), RpcResponse> {
         if metadata["guarded"] == Value::Bool(true) && self.user.as_deref() != Some("admin") {
-            return Err(RpcResponse {
-                id: request.id.clone(),
-                result: Err(RpcError {
+            return Err(RpcResponse::new(
+                request.id.clone(),
+                Err(RpcError {
                     code: 34,
                     message: "forbidden".into(),
                     data: None,
                 }),
-            });
+            ));
         }
         Ok(())
     }
@@ -184,6 +184,35 @@ impl Middleware<Ctx> for Auth {
                 .insert("x-user", user.parse().unwrap());
         }
     }
+}
+
+#[tokio::test]
+async fn request_body_limit_rejects_streamed_input_before_auth_or_mcp_decoding() {
+    let service = McpServer::new(
+        Server::new(|| async { Ok(Ctx) }, tree())
+            .for_http()
+            .with_max_request_body_size(std::num::NonZeroUsize::new(32).unwrap())
+            .middleware(Auth::default()),
+        catalog(),
+        Policy,
+        Implementation::new("test", "0.0.0"),
+    )
+    .unwrap()
+    .service(StreamableHttpServerConfig::default());
+    let chunks = futures::stream::iter([
+        Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"[[[[[[[[[[[[[[[[")),
+        Ok(axum::body::Bytes::from_static(b"[[[[[[[[[[[[[[[[[[")),
+    ]);
+    let response = service
+        .handle(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .body(axum::body::Body::from_stream(chunks))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
 
 async fn serve() -> SocketAddr {
@@ -224,26 +253,27 @@ struct Client {
     http: reqwest::Client,
 }
 impl Client {
-    async fn send(&self, method: &str, mut params: serde_json::Value) -> reqwest::Response {
+    fn message(method: &str, mut params: serde_json::Value) -> serde_json::Value {
         params["_meta"] = json!({
             "io.modelcontextprotocol/protocolVersion": "2026-07-28",
             "io.modelcontextprotocol/clientCapabilities": {},
             "io.modelcontextprotocol/clientInfo": { "name": "test", "version": "0.0.0" },
         });
+        json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params })
+    }
+    async fn send(&self, method: &str, params: serde_json::Value) -> reqwest::Response {
+        self.send_message(Self::message(method, params)).await
+    }
+    async fn send_message(&self, message: serde_json::Value) -> reqwest::Response {
         let mut request = self
             .http
             .post(format!("http://{}/mcp", self.addr))
             .header("accept", "application/json, text/event-stream")
             .header("mcp-protocol-version", "2026-07-28")
-            .header("mcp-method", method)
+            .header("mcp-method", message["method"].as_str().unwrap())
             .header("content-type", "application/json")
-            .body(
-                serde_json::to_vec(
-                    &json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }),
-                )
-                .unwrap(),
-            );
-        if let Some(name) = params["name"].as_str() {
+            .body(serde_json::to_vec(&message).unwrap());
+        if let Some(name) = message["params"]["name"].as_str() {
             request = request.header("mcp-name", name);
         }
         if let Some(token) = self.token {
@@ -255,6 +285,56 @@ impl Client {
         let response = self.send(method, params).await;
         assert_eq!(response.status(), StatusCode::OK);
         body(response).await
+    }
+}
+
+#[tokio::test]
+async fn rpc_response_metadata_maps_to_mcp_result_metadata_on_success_and_error() {
+    #[derive(Clone)]
+    struct ReplyMetadata;
+    impl Middleware<Ctx> for ReplyMetadata {
+        type Metadata = rpc_toolkit::Empty;
+        async fn process_rpc_response(&mut self, _: &Ctx, response: &mut RpcResponse) {
+            response.add_meta(json!({"patchSequence": 7})).unwrap();
+        }
+    }
+    let service = McpServer::new(
+        Server::new(|| async { Ok(Ctx) }, tree())
+            .middleware(Auth::default())
+            .middleware(ReplyMetadata),
+        catalog(),
+        Policy,
+        Implementation::new("test", "0.0.0"),
+    )
+    .unwrap()
+    .service(
+        StreamableHttpServerConfig::default()
+            .with_legacy_session_mode(false)
+            .with_json_response(true),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, Router::new().route("/mcp", any(service)))
+            .await
+            .unwrap();
+    });
+    let client = Client {
+        addr,
+        token: Some("user"),
+        http: reqwest::Client::new(),
+    };
+    for (name, arguments, error) in [
+        ("greet", json!({"name":"mcp"}), false),
+        ("fail", json!({}), true),
+    ] {
+        let message = Client::message("tools/call", json!({"name":name, "arguments":arguments}));
+        let response = body(client.send_message(message).await).await;
+        assert_eq!(response["result"]["_meta"], json!({"patchSequence":7}));
+        assert_eq!(response["result"]["isError"] == true, error);
+        assert!(response["result"]["structuredContent"]
+            .get("meta")
+            .is_none());
     }
 }
 

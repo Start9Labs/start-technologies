@@ -1,1 +1,0 @@
-- Ein Gerät behält für jedes Sicherheitsprofil eine IPv4-Reservierung. Wechselt es in ein anderes Profil, bleiben seine Reservierung und veröffentlichten Ports für das alte Profil erhalten und gelten wieder, sobald es zurückkehrt – ob das Gerät selbst gewechselt ist oder Sie das Profil seines Ethernet-Ports oder WLAN-Passworts geändert haben.

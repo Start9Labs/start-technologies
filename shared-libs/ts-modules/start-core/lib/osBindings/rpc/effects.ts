@@ -3,6 +3,8 @@ import type * as schemas from './effects.schemas'
 export type RpcHandler = {
   _PARAMS: unknown
   _RETURN?: unknown
+  _ITEM?: unknown
+  _FINAL?: unknown
   _CHILDREN?: { [name: string]: RpcHandler }
 }
 
@@ -20,47 +22,71 @@ export type RpcMethod<Root extends RpcHandler> =
         }[keyof Children & string]
       : never)
 
-export type RpcParamType<
+export type RpcEndpointType<
   Root extends RpcHandler,
   Method extends string,
 > = Method extends ''
   ? Root extends { _RETURN: unknown }
-    ? Root['_PARAMS']
+    ? Root
     : never
   : Root extends { _CHILDREN: infer Children }
     ? Method extends `${infer Head}.${infer Tail}`
       ? Head extends keyof Children
         ? Children[Head] extends RpcHandler
-          ? RpcParamType<Children[Head], Tail>
+          ? RpcEndpointType<Children[Head], Tail>
           : never
         : never
       : Method extends keyof Children
         ? Children[Method] extends RpcHandler
-          ? RpcParamType<Children[Method], ''>
+          ? RpcEndpointType<Children[Method], ''>
           : never
         : never
     : never
 
+export type RpcEndpointField<
+  Endpoint,
+  Field extends PropertyKey,
+> = Endpoint extends { _RETURN: unknown }
+  ? Field extends keyof Endpoint
+    ? Endpoint[Field]
+    : unknown
+  : never
+
+export type RpcParamType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_PARAMS'>
+
 export type RpcReturnType<
   Root extends RpcHandler,
   Method extends string,
-> = Method extends ''
-  ? Root extends { _RETURN: infer Return }
-    ? Return
-    : never
-  : Root extends { _CHILDREN: infer Children }
-    ? Method extends `${infer Head}.${infer Tail}`
-      ? Head extends keyof Children
-        ? Children[Head] extends RpcHandler
-          ? RpcReturnType<Children[Head], Tail>
-          : never
-        : never
-      : Method extends keyof Children
-        ? Children[Method] extends RpcHandler
-          ? RpcReturnType<Children[Method], ''>
-          : never
-        : never
-    : never
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_RETURN'>
+
+export type RpcStreamItemType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_ITEM'>
+
+export type RpcStreamFinalType<
+  Root extends RpcHandler,
+  Method extends string,
+> = RpcEndpointField<RpcEndpointType<Root, Method>, '_FINAL'>
+
+export type RpcIsStreaming<Root extends RpcHandler, Method extends string> = [
+  RpcEndpointType<Root, Method>,
+] extends [never]
+  ? never
+  : unknown extends RpcStreamItemType<Root, Method>
+    ? boolean
+    : [RpcStreamItemType<Root, Method>] extends [never]
+      ? false
+      : true
+
+export type RpcStreamingMethod<Root extends RpcHandler> = {
+  [Method in RpcMethod<Root>]: RpcIsStreaming<Root, Method> extends false
+    ? never
+    : Method
+}[RpcMethod<Root>]
 
 export type RpcSchemaTree<Schema> = {
   [Key in keyof Schema as Key extends '_OPAQUE'
@@ -69,7 +95,7 @@ export type RpcSchemaTree<Schema> = {
     ? Schema[Key] extends z.ZodType
       ? z.input<Schema[Key]>
       : never
-    : Key extends '_RETURN'
+    : Key extends '_RETURN' | '_ITEM' | '_FINAL'
       ? Schema[Key] extends z.ZodType
         ? z.output<Schema[Key]>
         : never
@@ -147,6 +173,22 @@ export type SetDataVersionParamsInput = z.input<
 export type SetMainStatusStatusInput = z.input<
   typeof schemas.SetMainStatusStatus
 >
+export type SharedVolumeAvailability = z.output<
+  typeof schemas.SharedVolumeAvailability
+>
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export type SharedVolumeId = z.output<typeof schemas.SharedVolumeId>
+
+/**
+ * A 32-character uppercase base32 volume identity.
+ */
+export type SharedVolumeIdInput = z.input<typeof schemas.SharedVolumeId>
+export type SharedVolumeUnavailableReason = z.output<
+  typeof schemas.SharedVolumeUnavailableReason
+>
 export type SmtpSecurity = z.output<typeof schemas.SmtpSecurity>
 export type StartStop = z.output<typeof schemas.StartStop>
 export type TaskCondition = z.output<typeof schemas.TaskCondition>
@@ -155,6 +197,8 @@ export type TaskInputRepr = z.output<typeof schemas.TaskInputRepr>
 export type TaskInputReprInput = z.input<typeof schemas.TaskInputRepr>
 export type TaskSeverity = z.output<typeof schemas.TaskSeverity>
 export type TaskSeverityInput = z.input<typeof schemas.TaskSeverity>
+export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
+export type TransportProtocolInput = z.input<typeof schemas.TransportProtocol>
 export type UploadLimits = z.output<typeof schemas.UploadLimits>
 export type UploadLimitsInput = z.input<typeof schemas.UploadLimits>
 
@@ -196,7 +240,6 @@ export type AlpnInfo = z.output<typeof schemas.AlpnInfo>
  */
 export type AlpnInfoInput = z.input<typeof schemas.AlpnInfo>
 export type BindIdInput = z.input<typeof schemas.BindId>
-export type BindRangeParamsInput = z.input<typeof schemas.BindRangeParams>
 export type CheckDependenciesParamInput = z.input<
   typeof schemas.CheckDependenciesParam
 >
@@ -256,6 +299,9 @@ export type GetServiceManifestParamsInput = z.input<
 export type GetServicePortForwardParamsInput = z.input<
   typeof schemas.GetServicePortForwardParams
 >
+export type GetSharedVolumesParamsInput = z.input<
+  typeof schemas.GetSharedVolumesParams
+>
 export type GetSslCertificateParamsInput = z.input<
   typeof schemas.GetSslCertificateParams
 >
@@ -264,6 +310,7 @@ export type GetStatusParamsInput = z.input<typeof schemas.GetStatusParams>
 export type GetSystemSmtpParamsInput = z.input<
   typeof schemas.GetSystemSmtpParams
 >
+export type GrantedSharedVolume = z.output<typeof schemas.GrantedSharedVolume>
 export type HardwareRequirements = z.output<typeof schemas.HardwareRequirements>
 export type HostnameMetadata = z.output<typeof schemas.HostnameMetadata>
 export type ImageSource = z.output<typeof schemas.ImageSource>
@@ -273,6 +320,9 @@ export type ListServiceInterfacesParamsInput = z.input<
   typeof schemas.ListServiceInterfacesParams
 >
 export type Metadata = z.output<typeof schemas.Metadata>
+export type MountSharedVolumeParamsInput = z.input<
+  typeof schemas.MountSharedVolumeParams
+>
 export type MountTargetInput = z.input<typeof schemas.MountTarget>
 export type PluginHostnameInfoInput = z.input<typeof schemas.PluginHostnameInfo>
 export type PortForward = z.output<typeof schemas.PortForward>
@@ -338,11 +388,16 @@ export type RetireBindingParamsInput = z.input<
 >
 export type RetireHostParamsInput = z.input<typeof schemas.RetireHostParams>
 export type SetMainStatusInput = z.input<typeof schemas.SetMainStatus>
+export type SharedVolumeMountResult = z.output<
+  typeof schemas.SharedVolumeMountResult
+>
 export type SmtpValue = z.output<typeof schemas.SmtpValue>
 export type TaskInput = z.output<typeof schemas.TaskInput>
 export type TaskInputInput = z.input<typeof schemas.TaskInput>
 export type TaskTrigger = z.output<typeof schemas.TaskTrigger>
 export type TaskTriggerInput = z.input<typeof schemas.TaskTrigger>
+export type TransportWire = z.output<typeof schemas.TransportWire>
+export type TransportWireInput = z.input<typeof schemas.TransportWire>
 export type UploadedFile = z.output<typeof schemas.UploadedFile>
 export type UrlPluginRegisterParamsInput = z.input<
   typeof schemas.UrlPluginRegisterParams
@@ -378,6 +433,18 @@ export type SetDependenciesParamsInput = z.input<
 >
 export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export type Transport = z.output<typeof schemas.Transport>
+
+/**
+ * Non-empty selected transports, serialized as a sorted, deduplicated array.
+ * A protocol string is accepted as a singleton. Omission selects TCP and UDP.
+ */
+export type TransportInput = z.input<typeof schemas.Transport>
 export type UrlPluginClearUrlsParamsInput = z.input<
   typeof schemas.UrlPluginClearUrlsParams
 >
@@ -387,6 +454,7 @@ export type UrlPluginExportUrlParamsInput = z.input<
 export type ActionResult = z.output<typeof schemas.ActionResult>
 export type AddSslOptions = z.output<typeof schemas.AddSslOptions>
 export type AddSslOptionsInput = z.input<typeof schemas.AddSslOptions>
+export type BindRangeParamsInput = z.input<typeof schemas.BindRangeParams>
 export type CreateTaskParamsInput = z.input<typeof schemas.CreateTaskParams>
 export type DepInfo = z.output<typeof schemas.DepInfo>
 export type DerivedAddressInfo = z.output<typeof schemas.DerivedAddressInfo>
@@ -408,12 +476,8 @@ export type LegacyProxySslOptionsInput = z.input<
 >
 
 /**
- * Contiguous port-range binding (e.g. WebRTC/STUN/TURN RTP ranges).
- *
- * Keyed by `internal_start_port` in [`BindingRanges`]. The range covers
- * `internal_start_port..(internal_start_port + number_of_ports)` and is
- * forwarded through a single iptables rule per protocol per gateway,
- * preserving the destination port number.
+ * A contiguous binding keyed by its internal start port in [`BindingRanges`].
+ * External ports map to internal ports by offset.
  */
 export type RangeBindInfo = z.output<typeof schemas.RangeBindInfo>
 export type BindingRanges = z.output<typeof schemas.BindingRanges>

@@ -21,7 +21,6 @@ use service_actor::ServiceActor;
 use termion::raw::IntoRawMode;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use url::Url;
 
 use crate::context::{CliContext, RpcContext};
@@ -33,7 +32,7 @@ use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::lxc::ContainerId;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
-use crate::rpc_continuations::{Guid, RpcContinuation};
+use crate::rpc_continuations::{Guid, RpcContinuation, WebSocket, WebSocketPolicy};
 use crate::s9pk::S9pk;
 use crate::service::action::update_tasks;
 use crate::service::rpc::{ExitParams, InitKind};
@@ -46,7 +45,6 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::{
     AsyncReadStream, AtomicFile, TermSize, delete_file, maybe_read_file_to_string,
 };
-use crate::util::net::WebSocket;
 use crate::util::serde::Der64;
 use crate::util::sync::SyncMutex;
 use crate::util::tui::choose;
@@ -55,8 +53,14 @@ use crate::{ActionId, CAP_1_KiB, DATA_DIR, ImageId, PackageId};
 
 pub mod action;
 pub mod action_files;
+#[cfg(test)]
+mod attach_cli_tests;
 mod attach_environment;
 mod attach_input;
+mod attach_output;
+mod attach_stdin;
+#[cfg(test)]
+mod attach_tests;
 pub mod cli;
 pub mod effects;
 pub mod exec;
@@ -294,6 +298,12 @@ pub struct Service {
     seed: Arc<ServiceActorSeed>,
 }
 impl Service {
+    pub(crate) fn shared_volume_mounts(
+        &self,
+    ) -> &tokio::sync::Mutex<crate::shared_volumes::mounts::SharedVolumeMounts> {
+        &self.seed.persistent_container.shared_volumes
+    }
+
     pub fn is_initialized(&self) -> bool {
         self.seed.persistent_container.state.borrow().rt_initialized
     }
@@ -398,21 +408,14 @@ impl Service {
             })
             .await
             .result?;
-        let seed = Arc::new(ServiceActorSeed {
-            id,
-            persistent_container,
+        let service = Self::from_container(
             ctx,
-            backup: SyncMutex::new(None),
-            backup_phase: SyncMutex::new(None),
-            init_phase: SyncMutex::new(init_progress),
-            action_files: Arc::new(action_files::ActionFiles::default()),
-        });
-        let service: ServiceRef = Self {
-            actor: ConcurrentActor::new(ServiceActor(seed.clone())),
-            seed,
-        }
-        .into();
+            persistent_container,
+            Arc::new(SyncMutex::new(None)),
+            init_progress,
+        );
         let recovery_guard = if let Some(recovery_source) = &recovery_source {
+            service.shared_volume_mounts().lock().await.block();
             Some(
                 service
                     .seed
@@ -434,8 +437,74 @@ impl Service {
         }
         if let Some(recovery_source) = recovery_source {
             recovery_source.unmount().await?;
+            service.shared_volume_mounts().lock().await.allow();
         }
+        service
+            .seed
+            .persistent_container
+            .state
+            .send_modify(|state| state.rt_initialized = true);
         Ok(service)
+    }
+
+    fn from_container(
+        ctx: RpcContext,
+        persistent_container: PersistentContainer,
+        backup_phase: Arc<SyncMutex<Option<crate::progress::PhaseProgressTrackerHandle>>>,
+        init_progress: Option<crate::progress::PhaseProgressTrackerHandle>,
+    ) -> ServiceRef {
+        let seed = Arc::new(ServiceActorSeed {
+            id: persistent_container.s9pk.as_manifest().id.clone(),
+            persistent_container,
+            ctx,
+            backup: SyncMutex::new(None),
+            backup_phase,
+            init_phase: SyncMutex::new(init_progress),
+            action_files: Arc::new(action_files::ActionFiles::default()),
+        });
+        Self {
+            actor: ConcurrentActor::new(ServiceActor(seed.clone())),
+            seed,
+        }
+        .into()
+    }
+
+    pub(in crate::service) async fn isolated_backup(
+        seed: &ServiceActorSeed,
+        event_id: Guid,
+        path: PathBuf,
+    ) -> Result<(), Error> {
+        let container =
+            PersistentContainer::new_backup(&seed.ctx, seed.persistent_container.s9pk.clone())
+                .await?;
+        let backup =
+            Self::from_container(seed.ctx.clone(), container, seed.backup_phase.clone(), None);
+        let result = async {
+            let container = &backup.seed.persistent_container;
+            container
+                .init_backup(backup.weak(), event_id.clone())
+                .await?;
+            let guard = container
+                .mount_backup(path, crate::disk::mount::filesystem::ReadWrite)
+                .await?;
+            let result = container
+                .execute::<crate::util::serde::NoOutput>(
+                    event_id,
+                    ProcedureName::CreateBackup,
+                    Value::Null,
+                    None,
+                )
+                .await;
+            let unmount = guard.unmount(true).await;
+            result?;
+            unmount
+        }
+        .await;
+        let shutdown = backup.shutdown(None).await;
+        let mut errors = ErrorCollection::new();
+        errors.handle(result);
+        errors.handle(shutdown);
+        errors.into_result()
     }
 
     #[instrument(skip_all)]
@@ -891,7 +960,7 @@ struct ServiceActorSeed {
     backup: SyncMutex<Option<BoxFuture<'static, ()>>>,
     /// Set while a backup procedure is running so the service container can
     /// stream progress updates back via the `setBackupProgress` effect.
-    backup_phase: SyncMutex<Option<crate::progress::PhaseProgressTrackerHandle>>,
+    backup_phase: Arc<SyncMutex<Option<crate::progress::PhaseProgressTrackerHandle>>>,
     /// Set while the init procedure is running so the service container can
     /// stream progress updates back via the `setInitProgress` effect. Routed
     /// to the install/update finalization phase of the install progress.
@@ -929,7 +998,9 @@ impl std::fmt::Display for SubcontainerInfo {
 #[serde(rename_all = "camelCase")]
 pub struct AttachParams {
     pub id: PackageId,
+    /// Accepts strings and legacy platform arguments without losing bytes.
     #[visit(opaque, wire = "Vec<String>", type_attributes(visit::wire))]
+    #[serde(deserialize_with = "crate::util::serde::deserialize_os_strings")]
     pub command: Vec<OsString>,
     pub tty: bool,
     pub stderr_tty: bool,
@@ -1068,8 +1139,9 @@ pub async fn attach(
         .add(
             guid.clone(),
             RpcContinuation::ws_authed(
-                &ctx,
-                signer,
+                crate::auth::continuation_subscription(&ctx, signer).await?,
+                WebSocketPolicy::Authenticated,
+                ctx.secure_session().cloned(),
                 move |mut ws| async move {
                     if let Err(e) = handler(&mut ws, cmd).await {
                         if !crate::util::net::is_ws_reset_without_close(&e) {
@@ -1154,8 +1226,6 @@ pub async fn cli_attach(
         ..
     }: HandlerArgs<CliContext, CliAttachParams>,
 ) -> Result<(), Error> {
-    use std::io::Write;
-
     use tokio_tungstenite::tungstenite::Message;
 
     let stdin = std::io::stdin();
@@ -1202,23 +1272,14 @@ pub async fn cli_attach(
             }
         },
     )?;
-    let mut ws = context.ws_continuation(guid).await?;
+    let mut ws = context.ws_continuation::<RpcContext>(guid).await?;
 
     print!("\r");
-    let (kill, thread_kill) = tokio::sync::oneshot::channel();
+    let (stdin_cancel, thread_cancel) = std::os::unix::net::UnixStream::pair()?;
     let (thread_send, recv) = tokio::sync::mpsc::channel(4 * CAP_1_KiB);
     let stdin_thread: NonDetachingJoinHandle<()> = tokio::task::spawn_blocking(move || {
-        use std::io::Read;
-        let mut stdin = stdin.lock().bytes();
-
-        while thread_kill.is_empty() {
-            if let Some(b) = stdin.next() {
-                if let Err(_) = thread_send.blocking_send(b) {
-                    break;
-                }
-            } else {
-                break;
-            }
+        if let Err(error) = attach_stdin::forward(stdin, thread_cancel, &thread_send) {
+            let _ = thread_send.blocking_send(Err(error));
         }
     })
     .into();
@@ -1231,7 +1292,7 @@ pub async fn cli_attach(
         .with_kind(ErrorKind::Network)?;
     let mut stdout = Some(stdout);
     let mut stderr = Some(stderr);
-    loop {
+    let result = loop {
         futures::select_biased! {
             input = stdin.as_mut().map_or(
                 futures::future::Either::Left(futures::future::pending()),
@@ -1258,64 +1319,20 @@ pub async fn cli_attach(
                     stdin.take();
                 }
             }
-            msg = ws.try_next() => {
+            msg = ws.try_next().fuse() => {
                 if let Some(msg) = msg.with_kind(ErrorKind::Network)? {
-                    match msg {
-                        Message::Text(out_ty) => {
-                            current_out = out_ty;
-                        }
-                        Message::Binary(data) => {
-                            match &*current_out {
-                                "stdout" => {
-                                    if let Some(stdout) = &mut stdout {
-                                        stdout.write_all(&data)?;
-                                        stdout.flush()?;
-                                    }
-                                }
-                                "stderr" => {
-                                    if let Some(stderr) = &mut stderr {
-                                        stderr.write_all(&data)?;
-                                        stderr.flush()?;
-                                    }
-                                }
-                                "close-stdout" => {
-                                    stdout.take();
-                                }
-                                "close-stderr" => {
-                                    stderr.take();
-                                }
-                                "exit" => {
-                                    if data.len() != 4 {
-                                        return Err(Error::new(
-                                            eyre!("{}", t!("service.mod.invalid-byte-length-for-exit-code", length = data.len())),
-                                            ErrorKind::InvalidRequest
-                                        ));
-                                    }
-                                    let mut exit_buf = [0u8; 4];
-                                    exit_buf.clone_from_slice(&data);
-                                    let code = i32::from_be_bytes(exit_buf);
-                                    drop(raw);
-                                    std::process::exit(code);
-                                }
-                                _ => (),
-                            }
-                        }
-                        Message::Close(Some(close)) => {
-                            if close.code != CloseCode::Normal {
-                                return Err(Error::new(
-                                    color_eyre::eyre::Report::msg(close.reason),
-                                    ErrorKind::Network
-                                ));
-                            }
-                        }
-                        _ => ()
+                    if let Some(code) = attach_output::handle(msg, &mut current_out, &mut stdout, &mut stderr)? {
+                        break Ok::<_, Error>(code);
                     }
                 } else {
-                    kill.send(()).ok();
-                    stdin_thread.wait_for_abort().await.log_err();
-                    return Ok(())
+                    break Err(crate::util::net::tungstenite::unexpected_eof());
                 }
             }
         }
-    }
+    };
+    drop(stdin);
+    drop(stdin_cancel);
+    stdin_thread.wait_for_abort().await.log_err();
+    drop(raw);
+    std::process::exit(result?);
 }

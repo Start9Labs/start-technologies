@@ -3,10 +3,11 @@ set -eo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 PROJECT_DIR=projects/start-wrt
+source ./build/rust-build-profile.sh
 
 ARCH=${ARCH:-riscv64}
 RUST_ARCH=${RUST_ARCH:-riscv64gc}
-PROFILE=${PROFILE:-release}
+set_build_profile
 # The Rust crates are members of the monorepo workspace, so the binary lands in
 # the workspace-root target/ (not the old backend/target/).
 RUST_TARGET_DIR="target/${RUST_ARCH}-unknown-linux-musl/${PROFILE}"
@@ -66,6 +67,24 @@ start() {
 }
 DNSINJEOF
 chmod +x "${FILES_DIR}/etc/init.d/startwrt-dnsinject"
+
+cat > "${FILES_DIR}/etc/init.d/startwrt-fdl-reset" << 'FDLEOF'
+#!/bin/sh /etc/rc.common
+
+START=11
+
+USE_PROCD=1
+
+start_service() {
+    procd_open_instance
+    procd_set_param command /usr/bin/startwrt startwrt-fdl-reset
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param respawn
+    procd_close_instance
+}
+FDLEOF
+chmod +x "${FILES_DIR}/etc/init.d/startwrt-fdl-reset"
 
 # Custom SmartDNS init script — uses our generated config instead of the
 # stock UCI-generated one. The stock init script generates its own config
@@ -210,7 +229,6 @@ cat > "${FILES_DIR}/lib/upgrade/keep.d/startwrt" << 'KEEPEOF'
 /etc/nlbwmon/data/
 /etc/startwrt/pending-update
 /etc/startwrt/migrations
-# Enrolled sign-in keys. Without this every sysupgrade signs every browser out.
 /etc/startwrt/auth.db
 # Persistent device-identity cache (hostnames + DHCP fingerprints). Written
 # atomically (temp + rename), so a live `sysupgrade --create-backup` always

@@ -1,5 +1,12 @@
 #![cfg(feature = "websocket")]
 
+#[path = "websocket/cancellation.rs"]
+mod cancellation;
+#[path = "websocket/flush.rs"]
+mod flush;
+#[path = "websocket/upgrade.rs"]
+mod upgrade;
+
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -21,6 +28,8 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use yajrc::RpcError;
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type WatchArgs<Final = ()> =
+    HandlerArgs<TestContext, WatchParams, rpc_toolkit::Empty, Revision, Final>;
 
 #[derive(Clone, Default)]
 struct TestContext {
@@ -28,8 +37,9 @@ struct TestContext {
     drop_signal: Arc<Notify>,
     started: Arc<Notify>,
     release: Arc<Notify>,
-    producer: Arc<Mutex<Option<RpcStream>>>,
+    producer: Arc<Mutex<Option<RpcStream<Revision, Value>>>>,
     echo_calls: Arc<AtomicUsize>,
+    completed: Arc<AtomicUsize>,
     deny: Arc<AtomicBool>,
     http_calls: Arc<AtomicUsize>,
     rpc_calls: Arc<AtomicUsize>,
@@ -59,7 +69,7 @@ impl Drop for ProducerGuard {
     }
 }
 
-async fn watch(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn watch(args: WatchArgs) -> Result<Dump, RpcError> {
     let value = args.params.value;
     if let Some(producer) = args.rpc_stream {
         let context = args.context;
@@ -73,7 +83,7 @@ async fn watch(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcE
     Ok(Dump { snapshot: value })
 }
 
-async fn fail(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn fail(args: WatchArgs) -> Result<Dump, RpcError> {
     watch(args).await?;
     Err(RpcError {
         code: 123,
@@ -82,7 +92,7 @@ async fn fail(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcEr
     })
 }
 
-async fn finite(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn finite(args: WatchArgs) -> Result<Dump, RpcError> {
     let producer = args.rpc_stream.unwrap();
     producer
         .send(Revision {
@@ -95,7 +105,7 @@ async fn finite(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, Rpc
     })
 }
 
-async fn finish(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn finish(args: WatchArgs<Value>) -> Result<Dump, RpcError> {
     let producer = args.rpc_stream.unwrap();
     producer
         .send(Revision {
@@ -108,7 +118,7 @@ async fn finish(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, Rpc
     })
 }
 
-async fn finish_then_fail(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn finish_then_fail(args: WatchArgs<Value>) -> Result<Dump, RpcError> {
     finish(args).await?;
     Err(RpcError {
         code: 789,
@@ -117,9 +127,9 @@ async fn finish_then_fail(args: HandlerArgs<TestContext, WatchParams>) -> Result
     })
 }
 
-async fn close_error(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn close_error(args: WatchArgs) -> Result<Dump, RpcError> {
     let _guard = ProducerGuard(args.context);
-    args.rpc_stream.unwrap().close::<(), _>(Err(RpcError {
+    args.rpc_stream.unwrap().close(Err(RpcError {
         code: 456,
         message: "source failed".into(),
         data: Some(wire!({"detail":1})),
@@ -129,7 +139,7 @@ async fn close_error(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump
     })
 }
 
-async fn push(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn push(args: WatchArgs<Value>) -> Result<Dump, RpcError> {
     let producer = args.rpc_stream.unwrap();
     producer
         .send(Revision {
@@ -142,7 +152,7 @@ async fn push(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcEr
     })
 }
 
-async fn push_fail(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn push_fail(args: WatchArgs<Value>) -> Result<Dump, RpcError> {
     push(args).await?;
     Err(RpcError {
         code: 123,
@@ -151,7 +161,7 @@ async fn push_fail(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, 
     })
 }
 
-async fn push_blocked(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn push_blocked(args: WatchArgs<Value>) -> Result<Dump, RpcError> {
     let context = args.context.clone();
     let dump = push(args).await?;
     context.started.notify_one();
@@ -159,15 +169,16 @@ async fn push_blocked(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dum
     Ok(dump)
 }
 
-async fn blocked(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn blocked(args: WatchArgs) -> Result<Dump, RpcError> {
     let guard = ProducerGuard(args.context.clone());
     args.context.started.notify_one();
     args.context.release.notified().await;
+    args.context.completed.fetch_add(1, Ordering::SeqCst);
     drop(guard);
     watch(args).await
 }
 
-async fn remember(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn remember(args: WatchArgs<Value>) -> Result<Dump, RpcError> {
     *args.context.producer.lock().unwrap() = args.rpc_stream;
     Ok(Dump {
         snapshot: args.params.value,
@@ -181,7 +192,7 @@ impl Serialize for BadSerialization {
     }
 }
 
-async fn bad_serialization(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn bad_serialization(args: WatchArgs<BadSerialization>) -> Result<Dump, RpcError> {
     args.rpc_stream
         .unwrap()
         .close(Ok::<_, RpcError>(BadSerialization))?;
@@ -190,7 +201,9 @@ async fn bad_serialization(args: HandlerArgs<TestContext, WatchParams>) -> Resul
     })
 }
 
-async fn bulk(args: HandlerArgs<TestContext, WatchParams>) -> Result<Dump, RpcError> {
+async fn bulk(
+    args: HandlerArgs<TestContext, WatchParams, rpc_toolkit::Empty, String>,
+) -> Result<Dump, RpcError> {
     let producer = args.rpc_stream.unwrap();
     let context = args.context;
     tokio::spawn(async move {
@@ -259,7 +272,7 @@ fn rpc_server(context: TestContext) -> Server<TestContext> {
     )
 }
 
-async fn serve(server: rpc_toolkit::WebSocketServer<TestContext>) -> (String, ServerGuard) {
+async fn serve<C: Context>(server: rpc_toolkit::WebSocketServer<C>) -> (String, ServerGuard) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}/rpc", listener.local_addr().unwrap());
     let router = Router::new().route("/rpc", get(server));
@@ -345,10 +358,10 @@ async fn async_and_thread_producers_keep_event_order_and_close_with_a_distinct_r
     sender.send(Revision { patch: 102 }).await.unwrap();
     assert_eq!(receive(&mut socket).await["result"], wire!({"patch":102}));
     let producer = std::thread::spawn(move || {
-        sender.blocking_send("from-thread").unwrap();
+        sender.blocking_send(Revision { patch: 103 }).unwrap();
         sender.close(Ok::<_, RpcError>(wire!({"total":3}))).unwrap();
     });
-    assert_eq!(receive(&mut socket).await["result"], wire!("from-thread"));
+    assert_eq!(receive(&mut socket).await["result"], wire!({"patch":103}));
     producer.join().unwrap();
     assert_eq!(
         receive(&mut socket).await,
@@ -364,7 +377,7 @@ async fn explicit_error_close_terminates_the_stream_without_closing_the_socket()
     receive(&mut socket).await;
     let sender = context.producer.lock().unwrap().take().unwrap();
     sender
-        .close::<(), _>(Err(RpcError {
+        .close(Err(RpcError {
             code: 456,
             message: "producer failed".into(),
             data: None,
@@ -586,14 +599,16 @@ async fn closure_can_cancel_an_in_flight_initiating_call() {
 #[tokio::test]
 async fn disconnect_drops_pending_calls_and_active_sources() {
     let (mut socket, context, _server) = connect(WebSocketOptions::default()).await;
-    send(&mut socket, request(wire!(9), "nested.watch", 1)).await;
-    receive(&mut socket).await;
-    receive(&mut socket).await;
+    for id in [9, 11] {
+        send(&mut socket, request(wire!(id), "nested.watch", 1)).await;
+        receive(&mut socket).await;
+        receive(&mut socket).await;
+    }
     send(&mut socket, request(wire!(10), "blocked", 1)).await;
     context.started.notified().await;
     drop(socket);
     tokio::time::timeout(Duration::from_secs(3), async {
-        while context.dropped.load(Ordering::SeqCst) < 2 {
+        while context.dropped.load(Ordering::SeqCst) < 3 {
             context.drop_signal.notified().await;
         }
     })
@@ -630,13 +645,9 @@ async fn handle_can_send_after_initial_reply_and_drop_emits_fixed_cancellation()
     send(&mut socket, request(wire!(13), "remember", 1)).await;
     assert_eq!(receive(&mut socket).await["result"], wire!({"snapshot":1}));
     let producer = context.producer.lock().unwrap().take().unwrap();
-    assert_eq!(
-        producer.send(BadSerialization).await.unwrap_err().code,
-        -32603
-    );
-    producer.send("late event").await.unwrap();
+    producer.send(Revision { patch: 2 }).await.unwrap();
     drop(producer);
-    assert_eq!(receive(&mut socket).await["result"], wire!("late event"));
+    assert_eq!(receive(&mut socket).await["result"], wire!({"patch":2}));
     assert_eq!(
         receive(&mut socket).await,
         wire!({
@@ -765,8 +776,7 @@ async fn stream_capacity_is_released_by_closure_and_does_not_block_ordinary_call
 }
 
 #[tokio::test]
-async fn request_capacity_rejects_work_before_execution_and_ordinary_calls_are_not_stream_cancelled(
-) {
+async fn request_capacity_rejects_work_before_execution_and_cancellation_releases_it() {
     let options = WebSocketOptions {
         max_in_flight: NonZeroUsize::new(1).unwrap(),
         ..Default::default()
@@ -778,7 +788,6 @@ async fn request_capacity_rejects_work_before_execution_and_ordinary_calls_are_n
     )
     .await;
     context.started.notified().await;
-    send(&mut socket, wire!({"rpcstream":"1.0","close":23})).await;
     send(
         &mut socket,
         wire!({"jsonrpc":"2.0","id":24,"method":"echo"}),
@@ -786,11 +795,10 @@ async fn request_capacity_rejects_work_before_execution_and_ordinary_calls_are_n
     .await;
     assert_eq!(receive(&mut socket).await["error"]["code"], -32000);
     assert_eq!(context.echo_calls.load(Ordering::SeqCst), 0);
-    context.release.notify_one();
-    assert_eq!(
-        receive(&mut socket).await,
-        wire!({"jsonrpc":"2.0","id":23,"result":{"snapshot":1}})
-    );
+    send(&mut socket, wire!({"rpcstream":"1.0","close":23})).await;
+    tokio::time::timeout(Duration::from_secs(3), context.drop_signal.notified())
+        .await
+        .unwrap();
     send(
         &mut socket,
         wire!({"jsonrpc":"2.0","id":24,"method":"echo"}),
@@ -942,6 +950,56 @@ async fn upgrade_middleware_can_refuse_the_socket_before_rpc_dispatch() {
     );
     assert_eq!(context.http_calls.load(Ordering::SeqCst), 1);
     assert_eq!(context.echo_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn large_dumps_and_events_are_independent_of_the_inbound_request_limit() {
+    const SNAPSHOT_BYTES: usize = 17 * 1024 * 1024;
+    const EVENT_BYTES: usize = 5 * 1024 * 1024;
+
+    async fn large(
+        args: HandlerArgs<TestContext, rpc_toolkit::Empty, rpc_toolkit::Empty, Value>,
+    ) -> Result<Value, RpcError> {
+        let producer = args.rpc_stream.unwrap();
+        tokio::spawn(async move {
+            let event = wire!({"id":1, "patch":[{"op":"add", "path":"/large", "value":"y".repeat(EVENT_BYTES)}]});
+            producer.send(event).await.unwrap();
+            producer.close(Ok::<_, RpcError>(())).unwrap();
+        });
+        Ok(wire!({"id":0, "value":{"text":"x".repeat(SNAPSHOT_BYTES)}}))
+    }
+
+    let server = Server::new(
+        || async { Ok(TestContext::default()) },
+        ParentHandler::new().subcommand("large", from_fn_async(large).no_cli().no_ts()),
+    )
+    .for_websocket();
+    let (url, _server) = serve(server).await;
+    let receive_limit = 64 * 1024 * 1024;
+    let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(receive_limit))
+        .max_frame_size(Some(receive_limit));
+    let (mut socket, _) = tokio_tungstenite::connect_async_with_config(url, Some(config), false)
+        .await
+        .unwrap();
+    send(
+        &mut socket,
+        wire!({"jsonrpc":"2.0", "rpcstream":"1.0", "id":90, "method":"large", "params":{}}),
+    )
+    .await;
+    let initial = receive(&mut socket).await;
+    assert_eq!(initial["id"], 90);
+    assert_eq!(
+        initial["result"]["value"]["text"].as_str().unwrap().len(),
+        SNAPSHOT_BYTES
+    );
+    let event = receive(&mut socket).await;
+    assert_eq!(event["id"], 90);
+    assert_eq!(
+        event["result"]["patch"][0]["value"].as_str().unwrap().len(),
+        EVENT_BYTES
+    );
+    assert_eq!(receive(&mut socket).await["end"], true);
 }
 
 #[derive(Clone, Default)]

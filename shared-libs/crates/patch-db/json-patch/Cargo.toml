@@ -15,11 +15,13 @@ version = "0.2.7-alpha.0"
 default = ["diff"]
 diff = []
 nightly = []
+reflect = ["dep:visit-rs"]
 
 [dependencies]
 imbl-value = { path = "../../imbl-value" }
 json-ptr = { path = "../json-ptr" }
 serde = { version = "1", features = ["derive"] }
+visit-rs = { path = "../../visit-rs", optional = true, default-features = false }
 
 [dev-dependencies]
 imbl-value = { path = "../../imbl-value", features = ["arbitrary"] }

@@ -1,7 +1,7 @@
 //! Detached Linux bind mounts with optional idmaps and read-only attributes.
 //! `open_tree_attr` requires Linux 6.15+ for cloning an already-idmapped source.
 
-use std::ffi::{CString, OsString};
+use std::ffi::{CStr, CString, OsString};
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
@@ -19,7 +19,10 @@ use crate::prelude::*;
 
 // libc's musl targets omit these linux/mount.h flags.
 const MOVE_MOUNT_F_EMPTY_PATH: libc::c_uint = 0x00000004;
+const MOVE_MOUNT_T_EMPTY_PATH: libc::c_uint = 0x00000040;
 const MOVE_MOUNT_BENEATH: libc::c_uint = 0x00000200;
+const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
+const RESOLVE_BENEATH: u64 = 0x08;
 
 // open_tree_attr(2) — added in Linux 6.15. libc 0.2 only defines
 // SYS_open_tree_attr for m68k, but the number is unified at 467 across
@@ -69,15 +72,20 @@ fn check(ret: i64, what: &'static str) -> Result<(), Error> {
     }
 }
 
-/// `open_tree(AT_FDCWD, path, OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC | [AT_RECURSIVE])`
-/// — a detached clone of the mount at `path` (its submounts too when
-/// `recursive`).
+fn clone_flags(recursive: bool) -> libc::c_uint {
+    OPEN_TREE_CLOEXEC
+        | OPEN_TREE_CLONE
+        | if recursive {
+            AT_RECURSIVE as libc::c_uint
+        } else {
+            0
+        }
+}
+
+/// A detached clone of the requested directory, optionally including submounts.
 pub fn open_tree_clone(path: &Path, recursive: bool) -> Result<OwnedFd, Error> {
     let p = cstr_path(path)?;
-    let mut flags = OPEN_TREE_CLOEXEC | OPEN_TREE_CLONE;
-    if recursive {
-        flags |= AT_RECURSIVE as libc::c_uint;
-    }
+    let flags = clone_flags(recursive);
     let r = unsafe { libc::syscall(libc::SYS_open_tree, AT_FDCWD, p.as_ptr(), flags) };
     fd_from_raw(r, "open_tree")
 }
@@ -95,31 +103,188 @@ pub fn open_tree_attr_idmap(
     recursive: bool,
     userns: BorrowedFd,
 ) -> Result<OwnedFd, Error> {
-    let p = cstr_path(path)?;
-    let mut flags = OPEN_TREE_CLOEXEC | OPEN_TREE_CLONE;
-    if recursive {
-        flags |= AT_RECURSIVE as libc::c_uint;
-    }
+    open_tree_attr_idmap_at(AT_FDCWD, &cstr_path(path)?, clone_flags(recursive), userns)
+}
+
+/// Clones a pinned directory without its child mounts, idmapped through the user namespace.
+pub fn open_tree_attr_idmap_fd(source: BorrowedFd, userns: BorrowedFd) -> Result<OwnedFd, Error> {
+    open_tree_attr_idmap_at(
+        source.as_raw_fd(),
+        &cstr_str("")?,
+        clone_flags(false) | AT_EMPTY_PATH as libc::c_uint,
+        userns,
+    )
+}
+
+fn open_tree_attr_idmap_at(
+    source: RawFd,
+    path: &CStr,
+    flags: libc::c_uint,
+    userns: BorrowedFd,
+) -> Result<OwnedFd, Error> {
     let attr = MountAttr {
         attr_set: MOUNT_ATTR_IDMAP,
         attr_clr: 0,
         propagation: 0,
         userns_fd: userns.as_raw_fd() as u64,
     };
-    let r = unsafe {
+    let raw = unsafe {
         libc::syscall(
             SYS_OPEN_TREE_ATTR,
-            AT_FDCWD,
-            p.as_ptr(),
+            source,
+            path.as_ptr(),
             flags,
             &attr as *const _ as *const libc::c_void,
             std::mem::size_of::<MountAttr>(),
         )
     };
-    fd_from_raw(r, "open_tree_attr IDMAP")
+    fd_from_raw(raw, "open_tree_attr IDMAP")
+}
+
+/// A detached clone rooted at a pinned directory, optionally including submounts.
+pub fn open_tree_clone_fd(source: BorrowedFd, recursive: bool) -> Result<OwnedFd, Error> {
+    let empty = cstr_str("")?;
+    let raw = unsafe {
+        libc::syscall(
+            libc::SYS_open_tree,
+            source.as_raw_fd(),
+            empty.as_ptr(),
+            clone_flags(recursive) | AT_EMPTY_PATH as libc::c_uint,
+        )
+    };
+    fd_from_raw(raw, "open_tree fd")
+}
+
+/// Pins a directory below the root, rejecting path and symlink escapes.
+pub fn open_beneath(base: &Path, relative: &Path) -> Result<OwnedFd, Error> {
+    let base = cstr_path(base)?;
+    let root = fd_from_raw(
+        unsafe {
+            libc::open(
+                base.as_ptr(),
+                libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC,
+            )
+        } as i64,
+        "open root",
+    )?;
+    let path = cstr_path(if relative.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        relative
+    })?;
+    #[repr(C)]
+    struct OpenHow {
+        flags: u64,
+        mode: u64,
+        resolve: u64,
+    }
+    let how = OpenHow {
+        flags: (libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC) as u64,
+        mode: 0,
+        resolve: RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS,
+    };
+    let raw = unsafe {
+        libc::syscall(
+            libc::SYS_openat2,
+            root.as_raw_fd(),
+            path.as_ptr(),
+            &how,
+            std::mem::size_of::<OpenHow>(),
+        )
+    };
+    if raw < 0 {
+        let error = io::Error::last_os_error();
+        let kind = match error.raw_os_error() {
+            Some(libc::EXDEV | libc::ELOOP | libc::ENOENT | libc::ENOTDIR | libc::EINVAL) => {
+                ErrorKind::InvalidRequest
+            }
+            _ => ErrorKind::Filesystem,
+        };
+        return Err(Error::new(error, kind));
+    }
+    fd_from_raw(raw, "openat2 confined directory")
+}
+
+/// Detaches the pinned mount, including when its directory has moved.
+pub fn unmount_fd(mount: BorrowedFd) -> Result<(), Error> {
+    let path = cstr_path(Path::new(&format!("/proc/self/fd/{}", mount.as_raw_fd())))?;
+    let raw = unsafe { libc::umount2(path.as_ptr(), libc::MNT_DETACH) };
+    if raw < 0
+        && matches!(
+            io::Error::last_os_error().raw_os_error(),
+            Some(libc::EINVAL | libc::ENOENT)
+        )
+    {
+        return Ok(());
+    }
+    check(raw as i64, "umount fd")
+}
+
+fn mount_id(fd: BorrowedFd) -> Result<u64, Error> {
+    let empty = cstr_str("")?;
+    let mut stat = std::mem::MaybeUninit::<libc::statx>::zeroed();
+    check(
+        unsafe {
+            libc::syscall(
+                libc::SYS_statx,
+                fd.as_raw_fd(),
+                empty.as_ptr(),
+                AT_EMPTY_PATH,
+                libc::STATX_MNT_ID,
+                stat.as_mut_ptr(),
+            )
+        },
+        "statx mount",
+    )?;
+    Ok(unsafe { stat.assume_init() }.stx_mnt_id)
+}
+
+pub(crate) fn same_mount(left: BorrowedFd, right: BorrowedFd) -> Result<bool, Error> {
+    Ok(mount_id(left)? == mount_id(right)?)
+}
+
+pub(crate) struct MountNamespace(OwnedFd);
+
+impl MountNamespace {
+    pub(crate) fn for_process(pid: u32) -> Result<Self, Error> {
+        Ok(Self(
+            std::fs::File::open(format!("/proc/{pid}/ns/mnt"))?.into(),
+        ))
+    }
+
+    pub(crate) fn run<T: Send>(
+        &self,
+        operation: impl FnOnce() -> Result<T, Error> + Send,
+    ) -> Result<T, Error> {
+        let root = std::fs::File::open("/")?;
+        std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .spawn_scoped(scope, || {
+                    use nix::sched::{CloneFlags, setns, unshare};
+                    unshare(CloneFlags::CLONE_FS).with_kind(ErrorKind::Filesystem)?;
+                    setns(&self.0, CloneFlags::CLONE_NEWNS).with_kind(ErrorKind::Filesystem)?;
+                    // The service's procfs cannot resolve this host thread's PID.
+                    nix::unistd::fchdir(&root).with_kind(ErrorKind::Filesystem)?;
+                    nix::unistd::chroot(".").with_kind(ErrorKind::Filesystem)?;
+                    operation()
+                })
+                .with_kind(ErrorKind::Filesystem)?
+                .join()
+                .unwrap()
+        })
+    }
 }
 
 fn move_mount(detached: BorrowedFd, to: &Path, flags: libc::c_uint) -> Result<(), Error> {
+    move_mount_at(detached, AT_FDCWD, to, flags)
+}
+
+fn move_mount_at(
+    detached: BorrowedFd,
+    target: RawFd,
+    to: &Path,
+    flags: libc::c_uint,
+) -> Result<(), Error> {
     let empty = cstr_str("")?;
     let t = cstr_path(to)?;
     let r = unsafe {
@@ -127,7 +292,7 @@ fn move_mount(detached: BorrowedFd, to: &Path, flags: libc::c_uint) -> Result<()
             libc::SYS_move_mount,
             detached.as_raw_fd(),
             empty.as_ptr(),
-            AT_FDCWD,
+            target,
             t.as_ptr(),
             MOVE_MOUNT_F_EMPTY_PATH | flags,
         )
@@ -135,27 +300,19 @@ fn move_mount(detached: BorrowedFd, to: &Path, flags: libc::c_uint) -> Result<()
     check(r, "move_mount")
 }
 
-/// `mount_setattr(fd, "", AT_EMPTY_PATH, attr, sizeof(attr))` toggling
-/// `MOUNT_ATTR_RDONLY`.
-fn mount_setattr_ro(fd: BorrowedFd, ro: bool) -> Result<(), Error> {
-    let attr = MountAttr {
-        attr_set: if ro { MOUNT_ATTR_RDONLY } else { 0 },
-        attr_clr: if ro { 0 } else { MOUNT_ATTR_RDONLY },
-        propagation: 0,
-        userns_fd: 0,
-    };
+fn mount_setattr(fd: BorrowedFd, attr: &MountAttr) -> Result<(), Error> {
     let empty = cstr_str("")?;
     let r = unsafe {
         libc::syscall(
             libc::SYS_mount_setattr,
             fd.as_raw_fd(),
             empty.as_ptr(),
-            AT_EMPTY_PATH,
-            &attr as *const _ as *const libc::c_void,
+            AT_EMPTY_PATH | AT_RECURSIVE,
+            attr as *const _ as *const libc::c_void,
             std::mem::size_of::<MountAttr>(),
         )
     };
-    check(r, "mount_setattr RDONLY")
+    check(r, "mount_setattr")
 }
 
 /// A detached mount fd (from `open_tree`/`open_tree_attr`). Not visible at any
@@ -168,13 +325,55 @@ impl DetachedMount {
     pub fn from_fd(fd: OwnedFd) -> Self {
         Self { fd }
     }
-    /// Toggle `MOUNT_ATTR_RDONLY` on the detached mount.
+    /// Sets read-only state across the detached tree.
     pub fn set_readonly(&self, ro: bool) -> Result<(), Error> {
-        mount_setattr_ro(self.fd.as_fd(), ro)
+        mount_setattr(
+            self.fd.as_fd(),
+            &MountAttr {
+                attr_set: if ro { MOUNT_ATTR_RDONLY } else { 0 },
+                attr_clr: if ro { 0 } else { MOUNT_ATTR_RDONLY },
+                ..Default::default()
+            },
+        )
+    }
+    /// Isolates the detached tree from source propagation.
+    pub fn set_private(&self) -> Result<(), Error> {
+        self.set_propagation(libc::MS_PRIVATE as u64)
+    }
+
+    /// Source-slave for writable trees; private and recursively read-only otherwise.
+    /// Bind targets never propagate unmounts back to their sources.
+    pub fn configure_bind(&self, readonly: bool) -> Result<(), Error> {
+        if readonly {
+            self.set_private()?;
+            self.set_readonly(true)
+        } else {
+            self.set_propagation(libc::MS_SLAVE as u64)
+        }
+    }
+
+    fn set_propagation(&self, propagation: u64) -> Result<(), Error> {
+        mount_setattr(
+            self.fd.as_fd(),
+            &MountAttr {
+                propagation,
+                ..Default::default()
+            },
+        )
     }
     /// Attach the detached mount at the requested path.
     pub fn attach(self, mountpoint: &Path) -> Result<(), Error> {
         move_mount(self.fd.as_fd(), mountpoint, 0)
+    }
+    /// Attaches to a pinned directory and retains a handle to the attached mount.
+    pub fn attach_to_fd(self, target: BorrowedFd) -> Result<OwnedFd, Error> {
+        move_mount_at(
+            self.fd.as_fd(),
+            target.as_raw_fd(),
+            Path::new(""),
+            MOVE_MOUNT_T_EMPTY_PATH,
+        )?;
+        Ok(self.fd)
     }
     /// Insert beneath the top mount; detaching the top reveals this mount. Requires Linux 6.5+.
     pub fn attach_beneath(self, mountpoint: &Path) -> Result<(), Error> {

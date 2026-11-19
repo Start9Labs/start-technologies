@@ -52,6 +52,10 @@ nothing may import it. When in doubt: the official MCP
   hover/active), `tuiAppearanceFocus`, `tuiAppearanceMode`. Bundled names: `primary`,
   `secondary`, `flat`, `outline`, `action`, `accent`, `icon`, `floating`, `textfield`,
   `neutral`/`positive`/`negative`/`warning`/`info` (+ `-grayscale` variants used fleet-wide).
+- `tuiAppearanceMode="checked"` draws a picked badge, chip or card in its appearance's checked
+  styling, not a `._on` class with its own border and shadow. Only `outline*`, `secondary*` and
+  the status appearances define one, and `floating` has none:
+  `<span tuiBadge appearance="outline-grayscale" tuiAppearanceMode="checked">Selected</span>`.
 - **Custom appearance = CSS, not TS**, in the theme sheet with the state mixins:
 
 ```scss
@@ -63,9 +67,9 @@ nothing may import it. When in doubt: the official MCP
 ```
 
 - **Tokens** (override at any DOM level; this _is_ branding): backgrounds
-  (`--tui-background-base|-neutral-1…|-accent-1…|-elevation-1/2/3`), text (`--tui-text-primary|
--secondary|-tertiary|-action|-primary-on-accent-1`), status (`--tui-status-negative|-positive|
--warning|-info` + `-pale` variants), borders (`--tui-border-normal|-hover|-focus`), shadows
+  (`--tui-background-base`, `-neutral-1…`, `-accent-1…`, `-elevation-1/2/3`), text
+  (`--tui-text-primary`, `-secondary`, `-tertiary`, `-action`, `-primary-on-accent-1`),
+  status (`--tui-status-negative`, `-positive`, `-warning`, `-info` and their `-pale` variants), borders (`--tui-border-normal|-hover|-focus`), shadows
   (`--tui-shadow-small|-medium|-popup`), sizing (`--tui-height-l/m/s/xs`, `--tui-padding-*`,
   `--tui-radius-l/m/s/xs`), typography composites (`font: var(--tui-typography-body-s)`,
   families `--tui-typography-family-display/-text`), charts `--tui-chart-categorical-00…22`.
@@ -83,9 +87,8 @@ nothing may import it. When in doubt: the official MCP
 
 ### Overlay facts
 
-- `tuiDialog(Component, options)` factory (typed data/result inference) is valid v5 API — the
-  fleet standardizes on `TuiResponsiveDialogService`/shared `DialogService` instead; don't mix
-  per app. `TuiDialogOptions`: `label`, `size: 's'|'m'|'l'`, `data`, `closable`, `dismissible`,
+- `tuiDialog(Component, options)` is valid v5 API that the fleet doesn't use (overlays.md).
+  `TuiDialogOptions`: `label`, `size: 's'|'m'|'l'`, `data`, `closable`, `dismissible`,
   `required`, `appearance` (`'fullscreen'` for mobile-style takeover).
 - Declarative twins exist for all three: `[(tuiDialog)]`, `[(tuiNotification)]`, `[(tuiToast)]`
   on `ng-template`, each with an `[…Options]` input — pair with a `signal(false)`.
@@ -108,6 +111,13 @@ renders the selected value, `[filler]` ghost-texts. Dropdown content attaches wi
 `*tuiDropdown` **inside the textfield**; `tui-data-list-wrapper` takes `[items]` (`null` =
 loading state), `[itemContent]`, `[emptyContent]`; filter with `| tuiFilterByInput`;
 `[stringify]`/`[identityMatcher]` come from `TuiItemsHandlers`. `tuiChevron` adds the arrow.
+A `textarea[tuiTextarea]` grows between `[minRows]` and `[maxRows]`; its `[min]`/`[max]` are
+deprecated aliases.
+
+A date input opens a calendar only when its textfield holds one:
+`<tui-calendar *tuiDropdown />` beside `input[tuiInputDate]` (`TuiCalendar` arrives with the
+`TuiInputDate` bundle). Without it the calendar icon does nothing. A size-`s` textfield draws
+its `tuiLabel` outside the box.
 
 ### Polymorpheus (`@taiga-ui/polymorpheus`)
 
@@ -175,4 +185,8 @@ Handles paste/drop/autofill/predictive keyboards; SSR-safe. Never keydown-regex 
 | Radio group                                     | `tuiGroup` of `tuiRadio` rows           | `tui-radio-list` + `[items]` + `[itemContent]`                                                                  |
 | Full-width row in a dialog/card/list            | `inline-size: 100%` + padding CSS       | `tuiCell` + `tuiCellStretch`; its gutter is in styling.md                                                       |
 | Copy button, rating, pagination, PIN, carousel… | write it                                | it's in kit — check the docs first                                                                              |
+| Wrapping row of chips/badges                    | `display: flex; flex-wrap: wrap; gap`   | `<div tuiItemGroup>` (layout)                                                                                   |
+| Pill, tag or labelled chip                      | padded span + border-radius CSS         | `tuiChip` / `tuiBadge` with `iconStart`/`iconEnd`; `iconStart="@img.<url>"` for a picture                       |
+| Inline code                                     | global `code { padding; background }`   | `<code tuiChip size="xs">`                                                                                      |
+| Icon in a tinted circle, logo tile              | sized div + `place-items: center`       | `tuiAvatar="@tui.x" appearance="negative"`; `<span tuiAvatar [round]="false"><img …></span>`                    |
 | Empty state                                     | custom illustration div                 | `tui-block-status`                                                                                              |

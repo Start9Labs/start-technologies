@@ -213,6 +213,51 @@ Enable or disable ZRAM compressed swap.
 
 - `--enable` — Enable zram
 
+### `start-cli server registries list`
+
+List the registries this server's Marketplace is connected to, with their names.
+
+- `--format` — Output format
+
+### `start-cli server registries add <URL>`
+
+Connect a registry. The keys it offers that the server doesn't already have become trusted for packages; prints their IDs. See [Trusted Keys](trusted-keys.md#keys-from-registries).
+
+- `--name <NAME>` — Name to show for the registry instead of its own
+
+### `start-cli server registries remove <URL>`
+
+Disconnect a registry, including the Start9 Registry and the Community Registry, which the web interface doesn't remove. The registry that provides StartOS updates can't be removed until another is chosen with `set-os`. Prints the IDs of keys the registry added that no connected registry still offers; remove them with `server trusted-keys remove`.
+
+### `start-cli server registries set-os <URL>`
+
+Use a connected registry for StartOS updates. The keys it offers become trusted for StartOS updates; prints their IDs.
+
+### `start-cli server trusted-keys list`
+
+List trusted keys by ID, with each key's name and whether it is trusted for packages and for StartOS updates. See [Trusted Keys](trusted-keys.md).
+
+- `--format` — Output format
+
+### `start-cli server trusted-keys add <PUBLIC_KEYS>...`
+
+Import Ed25519 public keys in PEM or armored GPG format. Put options before `--` and the quoted keys after it. Newly added keys are trusted for packages; `--trust-for os` additionally trusts them for StartOS updates.
+
+- `--name <NAME>` — Name for the keys; blank names each GPG key after its identity
+- `--trust-for <marketplace|os>` — Grant this trust to every imported key, including keys already present
+
+### `start-cli server trusted-keys update <ID>`
+
+Rename a key and set both trust selections at once.
+
+- `--name <NAME>` — New name (required)
+- `--marketplace <true|false>` — Trust for packages (required)
+- `--os <true|false>` — Trust for StartOS updates (required)
+
+### `start-cli server trusted-keys remove <ID>`
+
+Remove a key. Keys a connected registry offers can't be removed; distrust them with `update` instead.
+
 ### Server Host Management
 
 Manage network addresses and bindings for the server UI host.
@@ -247,12 +292,21 @@ List network bindings for the server host.
 
 - `--format` — Output format
 
+### `start-cli server host binding reassign-port <INTERNAL_PORT> <EXTERNAL_PORT>`
+
+Change the server binding's assigned external port, preserving its address enable/disable settings. The chosen port must be available and not reserved for a host daemon. The server UI's SSL port is fixed at 443; `--ssl` accepts 443 to retain or restore that assignment.
+
+- `--ssl` — Change the assigned SSL port instead of the non-SSL port
+
+Preferred ports stay unchanged. TLS domains continue to use the preferred port when a shared TLS listener serves it; otherwise they use the assigned SSL port. Update any router forwarding rules for addresses whose port changes.
+
 ### `start-cli server host binding set-address-enabled <INTERNAL_PORT>`
 
 Enable or disable a specific address binding.
 
 - `--address <ADDRESS>` — Address to modify (required)
 - `--enabled <true|false>` — Enable or disable
+- `--allow-insecure` — Accept readable and alterable plaintext traffic, including passwords; required to enable a [plain-HTTP private address](interfaces.md#plain-http-private-addresses) on an insecure gateway
 
 ## Services
 
@@ -358,9 +412,11 @@ Clear a pending service task.
 
 - `--force` — Force clear even if running
 
-### `start-cli package backup restore <TARGET_ID> <PASSWORD> [IDS...]`
+### `start-cli package backup restore <TARGET_ID> [IDS...]`
 
 Restore one or more packages from a backup.
+
+- `--server-id <ID>` — Server identifier
 
 ### Service Host Management
 
@@ -396,23 +452,43 @@ List network bindings for a service host.
 
 - `--format` — Output format
 
+### `start-cli package host <PACKAGE> binding <HOST> reassign-port <INTERNAL_PORT> <EXTERNAL_PORT>`
+
+Change a service binding's assigned external port, preserving its address enable/disable settings. The chosen port must be available, above 1024, and not reserved for a host daemon. The assignment survives service restarts.
+
+- `--ssl` — Change the assigned SSL port instead of the non-SSL port
+
+Preferred ports stay unchanged, with the same shared-TLS behavior as [server bindings](#start-cli-server-host-binding-reassign-port-internal_port-external_port).
+
 ### `start-cli package host binding set-address-enabled <INTERNAL_PORT>`
 
 Enable or disable a specific address binding for a service.
 
 - `--address <ADDRESS>` — Address to modify (required)
 - `--enabled <true|false>` — Enable or disable
+- `--allow-insecure` — Accept readable and alterable plaintext traffic, including passwords; required to enable a [plain-HTTP private address](interfaces.md#plain-http-private-addresses) on an insecure gateway
 
 ## Backups
 
-Create backups and manage backup targets (network shares).
+Create backups and manage registered local-folder, drive-folder and network-share targets. Register local and drive targets in **System → Backup Targets**, then obtain their IDs with `start-cli backup target list`. Direct `disk-<logicalname>` IDs are replaced by registered IDs; existing `cifs-N` IDs remain valid.
+
+Target info/mount and package restore read the backup password from `BACKUP_PASSWORD` or prompt for it. CIFS add/update read `CIFS_PASSWORD` or prompt; an empty password selects guest access.
 
 ### `start-cli backup create <TARGET_ID> <PASSWORD>`
 
-Create a backup of all or selected packages.
+Create a backup of all or selected packages. The backup continues in the background; `start-cli backup history list` reports its result.
 
 - `--old-password <PASS>` — Previous backup password (for re-encryption)
 - `--package-ids <IDS>` — Limit to specific packages
+- `--shared-volume-ids <IDS>` — Limit to specific shared volumes
+
+### `start-cli backup history list`
+
+List past backups and their reports, newest first.
+
+- `--offset <N>` — Number of most recent backups to skip (default `0`)
+- `--limit <N>` — Maximum number of backups to return (default `10`)
+- `--format` — Output format
 
 ### `start-cli backup target list`
 
@@ -420,13 +496,13 @@ List configured backup targets.
 
 - `--format` — Output format
 
-### `start-cli backup target info <TARGET_ID> <SERVER_ID> <PASSWORD>`
+### `start-cli backup target info <TARGET_ID> <SERVER_ID>`
 
 Display backup information for a target.
 
 - `--format` — Output format
 
-### `start-cli backup target mount <TARGET_ID> <PASSWORD>`
+### `start-cli backup target mount <TARGET_ID>`
 
 Mount a backup target.
 
@@ -443,11 +519,11 @@ Delete this server's legacy (V1) backup from a target. The backup is removed
 immediately; its space is reclaimed in the background, with a notification
 when it finishes.
 
-### `start-cli backup target cifs add <HOSTNAME> <PATH> <USERNAME> [PASSWORD]`
+### `start-cli backup target cifs add <HOSTNAME> <PATH> <USERNAME>`
 
 Add a new CIFS/SMB network share as a backup target.
 
-### `start-cli backup target cifs update <ID> <HOSTNAME> <PATH> <USERNAME> [PASSWORD]`
+### `start-cli backup target cifs update <ID> <HOSTNAME> <PATH> <USERNAME>`
 
 Update an existing CIFS backup target.
 
@@ -599,7 +675,11 @@ Manage authorized SSH keys for server access.
 
 ### `start-cli ssh add <KEY>`
 
-Add an SSH public key.
+Add an SSH public key. Pass the key's text, not its path, as a single quoted argument:
+
+```sh
+start-cli ssh add "$(cat ~/.ssh/id_ed25519.pub)"
+```
 
 ### `start-cli ssh list`
 
@@ -607,9 +687,9 @@ List authorized SSH keys.
 
 - `--format` — Output format
 
-### `start-cli ssh remove <KEY>`
+### `start-cli ssh remove <FINGERPRINT>`
 
-Remove an SSH key.
+Remove an SSH key by the fingerprint `start-cli ssh list` shows for it.
 
 ## WiFi
 
@@ -711,14 +791,7 @@ Disable kiosk mode.
 
 ## Disks
 
-List, repair, and format storage devices.
-
-### `start-cli disk list`
-
-List all disks and partitions. Unmountable partitions and EFI system
-partitions are omitted.
-
-- `--format` — Output format
+Repair and format storage devices.
 
 ### `start-cli disk repair`
 
@@ -907,6 +980,14 @@ Set the registry's description (markdown), shown above its services in the marke
 
 Over RPC, pass `null` in the setter's `description` field to clear it; a value sets it.
 
+### `start-cli registry info set-default-locale [DEFAULT_LOCALE] [--clear]`
+
+Set the locale, such as `en_US`, that the registry's own description, category names and OS release notes fall back to when a reader's language is missing. Supply either `DEFAULT_LOCALE` or `--clear`, but not both.
+
+- `--clear` — Remove the registry's default locale
+
+Over RPC, pass `null` in the setter's `defaultLocale` field to clear it; a value sets it.
+
 ### `start-cli registry info set-trust-signers [SIGNER...]`
 
 Select which existing signers the registry offers to StartOS servers for package trust. Run it without signer IDs to clear the selection. See [Trusted Keys](trusted-keys.md#keys-from-registries) for how StartOS treats offered keys.
@@ -1070,7 +1151,7 @@ List all OS versions.
 
 - `--format` — Output format
 
-### `start-cli registry os version add <VERSION> <HEADLINE> <RELEASE_NOTES> <SOURCE_VERSION>`
+### `start-cli registry os version add <VERSION> <RELEASE_NOTES> <SOURCE_VERSION>`
 
 Register a new OS version.
 

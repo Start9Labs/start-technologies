@@ -138,10 +138,10 @@ tui-notification-middle {
     border-bottom: 0;
   }
 
-  // Keep the loader hugging its switch so the overlay spinner sits on the
-  // toggle, not centered across the whole cell.
+  // Exactly its switch's width: the overlay spinner sits on the toggle, and a
+  // column with no header text can't squeeze the cell below the switch.
   tui-loader {
-    inline-size: fit-content;
+    inline-size: max-content;
   }
 }
 

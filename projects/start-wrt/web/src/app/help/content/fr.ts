@@ -59,7 +59,7 @@ Retire un appareil hors ligne de votre liste d’appareils. Tout nom personnalis
 
 ### Port
 
-L’identifiant du port Ethernet physique (par ex. eth0, eth1).
+Le port physique : un port Ethernet (par ex. eth0, eth1) ou un port USB équipé d’un adaptateur Ethernet USB (par ex. usb_eth0). Un port USB apparaît la première fois qu’un appareil réseau y est branché et conserve son profil quand rien n’y est branché. Chaque port d’un hub USB est un port USB à part entière. Un port USB sans adaptateur branché peut être supprimé.
 
 ### Profil de sécurité
 
@@ -67,7 +67,7 @@ Le profil de sécurité par défaut attribué aux appareils connectés via le po
 
 ### WAN
 
-Le port WAN (Wide Area Network) se connecte au modem de votre ISP ou au réseau en amont. Un seul port Ethernet peut être désigné comme WAN à la fois.
+Le port WAN (Wide Area Network) se connecte au modem de votre ISP ou au réseau en amont. Un seul port Ethernet peut être désigné comme WAN à la fois. Le port WAN doit être un port Ethernet.
 
 ### Changer le port WAN
 
@@ -188,14 +188,14 @@ Les VPN sortants acheminent votre trafic Internet par des tunnels chiffrés vers
 
 ### Chaînage de VPN
 
-Acheminez un VPN par un autre pour davantage de confidentialité. Votre trafic ressort par plusieurs serveurs, ce qui le rend plus difficile à retracer jusqu’à vous. Notez que le chaînage augmente la latence.
+Acheminez un VPN par un autre pour davantage de confidentialité. Votre trafic passe par plusieurs serveurs, ce qui le rend plus difficile à retracer jusqu’à vous. Notez que le chaînage augmente la latence.
 
 ### Pour commencer
 
 Téléversez un fichier de configuration WireGuard fourni par votre fournisseur de VPN (Mullvad, ProtonVPN, IVPN, etc.) pour créer un nouveau client VPN.`,
   '/outbound/vpn': `## VPN sortants
 
-<details><summary>Étiquette</summary> Un nom convivial pour identifier cette connexion VPN. Utilisez un nom descriptif comme « Mullvad Suède » ou « VPN du travail ». </details> <details><summary>Se connecte à</summary> L’endroit où le trafic de ce VPN doit être acheminé :<ul><li><b>Internet :</b> Le trafic ressort directement vers Internet par ce VPN.</li><li><b>Un autre VPN :</b> Chaîner d’abord par un autre VPN pour plus de confidentialité. Votre trafic sera chiffré plusieurs fois et ressortira par plusieurs serveurs.</li></ul><b>Remarque :</b> Le chaînage de VPN augmente la latence et peut réduire les débits. </details> <details><summary>Serveurs DNS</summary> Résolveurs joints via le tunnel par les profils acheminés par ce VPN qui n’ont pas de serveurs DNS propres. Laissez vide pour utiliser les serveurs DNS personnalisés du système via le tunnel — ou, si le système utilise le DNS de votre fournisseur d’accès, les serveurs de celui-ci hors du tunnel. </details> <details><summary>Chemin de connexion</summary> Affiche l’itinéraire complet que prend votre trafic depuis ce VPN jusqu’à Internet. Par exemple : Mullvad → Proton → Internet signifie que le trafic est chiffré par Mullvad, envoyé via Proton, puis ressort vers Internet.</details>`,
+<details><summary>Étiquette</summary> Un nom convivial pour identifier cette connexion VPN. Utilisez un nom descriptif comme « Mullvad Suède » ou « VPN du travail ». </details> <details><summary>Se connecte via</summary> Comment ce VPN atteint son propre serveur VPN :<ul><li><b>Internet :</b> Directement par internet.</li><li><b>Un autre VPN :</b> Par le tunnel de l’autre VPN, pour plus de confidentialité. Votre trafic est chiffré plusieurs fois et passe par plusieurs serveurs, puis ressort vers internet depuis le serveur de ce VPN.</li></ul><b>Remarque :</b> Le chaînage de VPN augmente la latence et peut réduire les débits. </details> <details><summary>Serveurs DNS</summary> Résolveurs joints via le tunnel par les profils acheminés par ce VPN qui n’ont pas de serveurs DNS propres. Laissez vide pour utiliser les serveurs DNS personnalisés du système via le tunnel — ou, si le système utilise le DNS de votre fournisseur d’accès, les serveurs de celui-ci hors du tunnel. </details> <details><summary>Chemin de connexion</summary> Affiche les tunnels chiffrés que traverse votre trafic jusqu’à Internet. Chaque tunnel commence au routeur et se termine à son serveur VPN. Lorsque ce VPN se connecte via un autre, son tunnel passe à l’intérieur de l’autre : le serveur de cet autre VPN ouvre le tunnel extérieur et transmet le tunnel intérieur au serveur de ce VPN, d’où votre trafic sort vers Internet.</details>`,
   '/outbound/dialog': `## VPN sortants
 
 Les clients VPN établissent une connexion sortante vers un serveur VPN, permettant aux appareils d’envoyer et de recevoir des données comme s’ils étaient directement connectés au réseau privé. Masque votre adresse IP, contourne les restrictions géographiques et protège les données sensibles sur les réseaux Wi-Fi publics.
@@ -208,9 +208,9 @@ Un nom clair et descriptif pour la connexion VPN, tel que « Mullvad Suède » o
 
 Téléversez un fichier **.conf** WireGuard fourni par votre fournisseur de VPN. Ce fichier contient l’adresse du serveur, les clés et les paramètres de connexion nécessaires pour établir le tunnel. La plupart des fournisseurs (Mullvad, ProtonVPN, IVPN, etc.) proposent des fichiers de configuration WireGuard à télécharger depuis leur site web ou leur application.
 
-### Cible
+### Se connecte via
 
-Le saut suivant dans le chemin d’une connexion VPN en couches.
+Comment ce VPN atteint son propre serveur VPN : directement par internet, ou par le tunnel d’un autre VPN.
 
 ### Serveurs DNS
 
