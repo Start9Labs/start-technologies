@@ -128,10 +128,8 @@ fn systemd_is_stopping() -> bool {
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct ShutdownParams {
-    /// Block until graceful teardown completes (default over the CLI; the
-    /// frontend omits this and gets an immediate reply). Cleared with
-    /// `--nowait`. The wait can't outlive the webserver teardown that follows
-    /// container shutdown, so the connection drops once services are stopped.
+    /// Waits for service teardown and owned cleanup, including logged service failures.
+    /// Defaults to true over the CLI (`--nowait` disables it) and false over RPC.
     #[arg(long = "nowait", action = clap::ArgAction::SetFalse, help = "help.arg.nowait")]
     #[serde(default)]
     wait: bool,
