@@ -300,8 +300,8 @@ const catalog = {
   '0.4.0.3': { releaseNotes: 'newer', squashfs },
 }
 const candidates = [
-  { version: '0.4.0.4', notes: 'newest', squashfs },
-  { version: '0.4.0.3', notes: 'newer', squashfs },
+  { version: '0.4.0.4', notes: 'newest', squashfs, defaultLocale: 'pl_PL' },
+  { version: '0.4.0.3', notes: 'newer', squashfs, defaultLocale: 'pl_PL' },
 ]
 const state = version => ({
   registryCache: {},
@@ -427,7 +427,7 @@ function fixture(t, cachedVersion, providers = []) {
   const availability = [],
     shown = []
   const subs = [
-    os.updateAvailable$.subscribe(value => availability.push(value)),
+    os.updateCandidates$.subscribe(value => availability.push(!!value.length)),
     os.showUpdate$.subscribe(value => shown.push(value)),
   ]
   t.after(() => {
@@ -483,6 +483,20 @@ function fixture(t, cachedVersion, providers = []) {
         },
       ])
     },
+    restartFor(reason) {
+      source.next([
+        {
+          id: ++revision,
+          patch: [
+            {
+              op: 'replace',
+              path: '/serverInfo/statusInfo/restart',
+              value: reason,
+            },
+          ],
+        },
+      ])
+    },
     build(gitHash) {
       source.next([
         {
@@ -499,7 +513,7 @@ function fixture(t, cachedVersion, providers = []) {
       versions = catalog,
       { registry = 'https://registry.test/', status = 'connected' } = {},
     ) {
-      osUpdateCache = { registry, versions, status }
+      osUpdateCache = { registry, versions, defaultLocale: 'pl_PL', status }
       source.next([
         {
           id: ++revision,
@@ -1076,7 +1090,14 @@ test('a registry switch releases a load waiting for the previous source without 
     { registry: 'https://second.test' },
   )
   await f.os.checkForUpdates()
-  assert.equal(f.os.updateCandidates()[0].notes, 'selected')
+  assert.deepEqual(f.os.updateCandidates(), [
+    {
+      version: '0.4.0.3',
+      notes: 'selected',
+      squashfs,
+      defaultLocale: 'pl_PL',
+    },
+  ])
 })
 
 test('without a cache, load waits for the first live state', async t => {
@@ -1123,7 +1144,12 @@ test('strictly newer candidates sort descending; offline cache remains readable;
   assert.equal(f.requests.length, 0)
   await f.load({ '0.4.0.5': { releaseNotes: 'refreshed', squashfs } })
   assert.deepEqual(f.os.updateCandidates(), [
-    { version: '0.4.0.5', notes: 'refreshed', squashfs },
+    {
+      version: '0.4.0.5',
+      notes: 'refreshed',
+      squashfs,
+      defaultLocale: 'pl_PL',
+    },
   ])
 })
 
@@ -1136,7 +1162,12 @@ test('a different image at the installed version is offered and submitted', asyn
   })
   assert.deepEqual(f.os.updateCandidates(), [
     ...candidates,
-    { version: '0.4.0.2', notes: 'next image', squashfs },
+    {
+      version: '0.4.0.2',
+      notes: 'next image',
+      squashfs,
+      defaultLocale: 'pl_PL',
+    },
   ])
 
   await f.load({
@@ -1164,6 +1195,17 @@ for (const gitHash of [runningGitHash, null, undefined]) {
   })
 }
 
+test('a downloaded update is no longer offered and blocks another update until restart', async t => {
+  const f = fixture(t, '0.4.0.2')
+  await f.load()
+  assert.equal(f.shown.at(-1), true)
+  assert.equal(await firstValueFrom(f.os.updateDisabled$), false)
+  f.restartFor('update')
+  assert.equal(f.availability.at(-1), true)
+  assert.equal(f.shown.at(-1), false)
+  assert.equal(await firstValueFrom(f.os.updateDisabled$), true)
+})
+
 test('a refreshed same-version listing clears availability when its image matches the running build', async t => {
   const f = fixture(t, '0.4.0.2')
   await f.load({
@@ -1186,7 +1228,12 @@ test('a same-version image is offered from the synced catalog without a manual c
     '0.4.0.2': { releaseNotes: 'next image', squashfs, gitHash: nextGitHash },
   })
   assert.deepEqual(f.os.updateCandidates(), [
-    { version: '0.4.0.2', notes: 'next image', squashfs },
+    {
+      version: '0.4.0.2',
+      notes: 'next image',
+      squashfs,
+      defaultLocale: 'pl_PL',
+    },
   ])
   assert.equal(f.availability.at(-1), true)
   f.build(nextGitHash)

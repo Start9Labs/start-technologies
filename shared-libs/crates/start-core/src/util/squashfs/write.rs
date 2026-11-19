@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ffi::OsString;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
@@ -6,8 +6,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
+use tokio::sync::oneshot;
 
-use super::blocks::{METADATA_SIZE, MetadataTable, UNCOMPRESSED_DATA, encode_block, invalid};
+use super::blocks::{
+    EncodedBlock, METADATA_SIZE, MetadataTable, UNCOMPRESSED_DATA, encode_block, invalid,
+};
 use super::format::*;
 use super::tree::{normalize_path, *};
 use crate::prelude::*;
@@ -108,7 +111,6 @@ fn flatten<S>(root: &Node<S>) -> std::io::Result<Vec<FlatNode<'_, S>>> {
         .collect())
 }
 
-#[derive(Clone)]
 struct FileLayout {
     block: u64,
     size: u64,
@@ -118,29 +120,129 @@ struct FileLayout {
     offset: u32,
 }
 
+/// Data block position in output order.
+type BlockIndex = usize;
+
+/// A file's layout before its compressed block sizes are known.
+struct PendingLayout {
+    first: BlockIndex,
+    size: u64,
+    sparse: u64,
+    /// `None` for a sparse block.
+    blocks: Vec<Option<BlockIndex>>,
+    fragment: u32,
+    offset: u32,
+}
+
+/// Data blocks queued per compression thread.
+const QUEUED_PER_THREAD: usize = 4;
+
+/// Compresses data blocks on the rayon pool and writes them in submission order.
 struct DataWriter {
     block_size: usize,
     level: i32,
-    fragments: Vec<Fragment>,
+    queue_depth: usize,
+    in_flight: VecDeque<oneshot::Receiver<std::io::Result<EncodedBlock>>>,
+    submitted: usize,
+    written: WrittenBlocks,
+    fragment_blocks: Vec<BlockIndex>,
     tail: Vec<u8>,
 }
 
+struct WrittenBlocks {
+    start: u64,
+    ends: Vec<u64>,
+    sizes: Vec<u32>,
+}
+
+impl WrittenBlocks {
+    fn position(&self, index: BlockIndex) -> u64 {
+        index
+            .checked_sub(1)
+            .map_or(self.start, |last| self.ends[last])
+    }
+
+    fn layout(&self, pending: &PendingLayout) -> FileLayout {
+        FileLayout {
+            block: self.position(pending.first),
+            size: pending.size,
+            sparse: pending.sparse,
+            blocks: pending
+                .blocks
+                .iter()
+                .map(|block| block.map_or(0, |index| self.sizes[index]))
+                .collect(),
+            fragment: pending.fragment,
+            offset: pending.offset,
+        }
+    }
+
+    fn fragments(&self, blocks: &[BlockIndex]) -> Vec<Fragment> {
+        blocks
+            .iter()
+            .map(|index| Fragment {
+                block: self.position(*index),
+                size: self.sizes[*index],
+                unused: 0,
+            })
+            .collect()
+    }
+}
+
 impl DataWriter {
-    fn new(options: Options) -> Self {
+    fn new(options: Options, queue_depth: usize, start: u64) -> Self {
         Self {
             block_size: options.block_size() as usize,
             level: options.compression_level(),
-            fragments: Vec::new(),
+            queue_depth: queue_depth.max(1),
+            in_flight: VecDeque::new(),
+            submitted: 0,
+            written: WrittenBlocks {
+                start,
+                ends: Vec::new(),
+                sizes: Vec::new(),
+            },
+            fragment_blocks: Vec::new(),
             tail: Vec::new(),
         }
     }
 
     async fn block<W: AsyncWrite + Unpin>(
-        &self,
-        bytes: &[u8],
+        &mut self,
+        bytes: Vec<u8>,
         writer: &mut TrackingIO<W>,
-    ) -> Result<u32, Error> {
-        let block = encode_block(bytes, self.level)?;
+    ) -> Result<BlockIndex, Error> {
+        if self.in_flight.len() >= self.queue_depth {
+            self.write_oldest(writer).await?;
+        }
+        let level = self.level;
+        let (send, receive) = oneshot::channel();
+        rayon::spawn(move || {
+            // An unwinding rayon job aborts the process.
+            if let Ok(block) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                encode_block(&bytes, level)
+            })) {
+                let _ = send.send(block);
+            }
+        });
+        self.in_flight.push_back(receive);
+        self.submitted += 1;
+        Ok(self.submitted - 1)
+    }
+
+    async fn write_oldest<W: AsyncWrite + Unpin>(
+        &mut self,
+        writer: &mut TrackingIO<W>,
+    ) -> Result<(), Error> {
+        let Some(task) = self.in_flight.pop_front() else {
+            return Ok(());
+        };
+        let block = task.await.map_err(|_| {
+            Error::new(
+                eyre!("SquashFS block compression stopped"),
+                ErrorKind::Unknown,
+            )
+        })??;
         let size = u32::try_from(block.bytes.len())
             .map_err(|_| invalid("SquashFS data block exceeds format limit"))?
             | if block.compressed {
@@ -149,7 +251,9 @@ impl DataWriter {
                 UNCOMPRESSED_DATA
             };
         writer.write_all(&block.bytes).await?;
-        Ok(size)
+        self.written.sizes.push(size);
+        self.written.ends.push(writer.position());
+        Ok(())
     }
 
     async fn flush_fragment<W: AsyncWrite + Unpin>(
@@ -157,16 +261,24 @@ impl DataWriter {
         writer: &mut TrackingIO<W>,
     ) -> Result<(), Error> {
         if !self.tail.is_empty() {
-            let block = writer.position();
-            let size = self.block(&self.tail, writer).await?;
-            self.fragments.push(Fragment {
-                block,
-                size,
-                unused: 0,
-            });
-            self.tail.clear();
+            let tail = std::mem::take(&mut self.tail);
+            let index = self.block(tail, writer).await?;
+            self.fragment_blocks.push(index);
         }
         Ok(())
+    }
+
+    /// Writes every outstanding block, including the final fragment.
+    async fn finish<W: AsyncWrite + Unpin>(
+        mut self,
+        writer: &mut TrackingIO<W>,
+    ) -> Result<(WrittenBlocks, Vec<Fragment>), Error> {
+        self.flush_fragment(writer).await?;
+        while !self.in_flight.is_empty() {
+            self.write_oldest(writer).await?;
+        }
+        let fragments = self.written.fragments(&self.fragment_blocks);
+        Ok((self.written, fragments))
     }
 
     async fn file<S: FileSource, W: AsyncWrite + Unpin>(
@@ -175,11 +287,11 @@ impl DataWriter {
         size: u64,
         hash: Option<blake3::Hash>,
         writer: &mut TrackingIO<W>,
-    ) -> Result<FileLayout, Error> {
+    ) -> Result<PendingLayout, Error> {
         let mut reader = source.reader().await?;
         let mut hasher = blake3::Hasher::new();
-        let mut layout = FileLayout {
-            block: writer.position(),
+        let mut layout = PendingLayout {
+            first: self.submitted,
             size,
             sparse: 0,
             blocks: Vec::new(),
@@ -194,10 +306,11 @@ impl DataWriter {
                 hasher.update(&buffer);
             }
             if buffer.iter().all(|b| *b == 0) {
-                layout.blocks.push(0);
+                layout.blocks.push(None);
                 layout.sparse += self.block_size as u64;
             } else {
-                layout.blocks.push(self.block(&buffer, writer).await?);
+                let block = std::mem::replace(&mut buffer, vec![0; self.block_size]);
+                layout.blocks.push(Some(self.block(block, writer).await?));
             }
             remaining -= self.block_size as u64;
         }
@@ -210,7 +323,7 @@ impl DataWriter {
             if self.tail.len() + bytes.len() > self.block_size {
                 self.flush_fragment(writer).await?;
             }
-            layout.fragment = u32::try_from(self.fragments.len())
+            layout.fragment = u32::try_from(self.fragment_blocks.len())
                 .map_err(|_| invalid("too many SquashFS fragments"))?;
             layout.offset = self.tail.len() as u32;
             self.tail.extend_from_slice(bytes);
@@ -315,7 +428,7 @@ impl InodeTables {
         &mut self,
         index: usize,
         node: &FlatNode<'_, S>,
-        layouts: &[Option<Arc<FileLayout>>],
+        layouts: &[Option<FileLayout>],
         nodes: &[FlatNode<'_, S>],
     ) -> std::io::Result<()> {
         self.references[index] = self.inodes.reference()?;
@@ -512,18 +625,29 @@ async fn indexed_table<W: AsyncWrite + Unpin>(
 impl<S: FileSource> Squashfs<S> {
     /// Writes an image at the current position and leaves the output after its 4 KiB padding.
     /// Identical contents, inode attributes, options, and Zstd version produce identical bytes,
-    /// independent of insertion order and which hardlink carries the file source.
+    /// independent of insertion order, which hardlink carries the file source, and how many
+    /// data blocks compress concurrently.
+    /// Compresses data blocks on the global rayon pool.
     /// Rejects symlink targets above 4095 bytes for lossless reads on 4 KiB-page kernels.
     pub async fn serialize<W: AsyncWrite + AsyncSeek + Unpin + Send>(
         &self,
         writer: &mut W,
     ) -> Result<(), Error> {
+        let queue_depth = rayon::current_num_threads() * QUEUED_PER_THREAD;
+        self.serialize_with_queue_depth(writer, queue_depth).await
+    }
+
+    async fn serialize_with_queue_depth<W: AsyncWrite + AsyncSeek + Unpin + Send>(
+        &self,
+        writer: &mut W,
+        queue_depth: usize,
+    ) -> Result<(), Error> {
         let nodes = flatten(self.root())?;
         let base = writer.stream_position().await?;
         let mut output = TrackingIO::new(0, &mut *writer);
         output.write_all(&[0; Superblock::SIZE]).await?;
-        let mut data = DataWriter::new(self.options);
-        let mut layouts = vec![None; nodes.len()];
+        let mut data = DataWriter::new(self.options, queue_depth, output.position());
+        let mut pending = vec![None; nodes.len()];
         let mut duplicates = BTreeMap::new();
         for (index, node) in nodes.iter().enumerate() {
             if let NodeContents::File(source) = &node.node.contents {
@@ -543,10 +667,14 @@ impl<S: FileSource> Squashfs<S> {
                     }
                     layout
                 };
-                layouts[index] = Some(layout);
+                pending[index] = Some(layout);
             }
         }
-        data.flush_fragment(&mut output).await?;
+        let (written, fragments) = data.finish(&mut output).await?;
+        let layouts: Vec<_> = pending
+            .iter()
+            .map(|layout| layout.as_deref().map(|layout| written.layout(layout)))
+            .collect();
         let level = self.options.compression_level();
         let mut tables = InodeTables::new(&nodes, level)?;
         for (index, node) in nodes.iter().enumerate() {
@@ -567,11 +695,10 @@ impl<S: FileSource> Squashfs<S> {
         header.directory_table = output.position();
         output.write_all(&tables.directories.finish()?).await?;
         let mut fragment_bytes = Vec::new();
-        for fragment in &data.fragments {
+        for fragment in &fragments {
             fragment.serialize(&mut fragment_bytes)?;
         }
-        header.fragment_count = data
-            .fragments
+        header.fragment_count = fragments
             .len()
             .try_into()
             .map_err(|_| invalid("too many SquashFS fragments"))?;

@@ -34,6 +34,7 @@ pub mod context;
 pub mod db;
 pub mod device_info;
 pub mod info;
+pub mod locales;
 pub mod metrics;
 mod migrations;
 pub mod mirror;
@@ -77,6 +78,9 @@ pub struct FullIndex {
     pub name: Option<String>,
     pub icon: Option<DataUrl<'static>>,
     pub description: Option<LocaleString>,
+    /// Locale registry-owned `LocaleString`s fall back to when a requested one is missing.
+    #[serde(default)]
+    pub default_locale: Option<InternedString>,
     pub package: PackageIndex,
     pub os: OsIndex,
     pub signers: BTreeMap<Guid, SignerInfo>,
@@ -94,6 +98,36 @@ impl Model<FullIndex> {
             packages.retain_registered_signatures(&signers);
             Ok(())
         })
+    }
+
+    /// Resolves every `LocaleString` with `LocaleString::localize_for` and its owner's default.
+    pub fn localize_for(&mut self, locale: Option<&str>) -> Result<(), Error> {
+        let default = self.as_default_locale().de()?;
+        self.for_each_unpackaged_locale_string(&mut |s| {
+            s.localize_for(locale, default.as_deref())
+        })?;
+        for (_, package) in self.as_package_mut().as_packages_mut().as_entries_mut()? {
+            for (_, version) in package.as_versions_mut().as_entries_mut()? {
+                version.localize_for(locale)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Visits every `LocaleString` outside `PackageIndex.packages`.
+    pub(crate) fn for_each_unpackaged_locale_string(
+        &mut self,
+        f: &mut impl FnMut(&mut LocaleString),
+    ) -> Result<(), Error> {
+        self.as_description_mut()
+            .mutate(|d| Ok(d.iter_mut().for_each(&mut *f)))?;
+        for (_, category) in self.as_package_mut().as_categories_mut().as_entries_mut()? {
+            category.as_name_mut().mutate(|n| Ok(f(n)))?;
+        }
+        for (_, version) in self.as_os_mut().as_versions_mut().as_entries_mut()? {
+            version.as_release_notes_mut().mutate(|n| Ok(f(n)))?;
+        }
+        Ok(())
     }
 }
 

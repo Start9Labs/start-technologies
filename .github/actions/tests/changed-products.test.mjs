@@ -10,20 +10,29 @@ import {
 
 const ALL = Object.keys(PRODUCTS)
 const DEBS = ['start-cli', 'start-registry', 'start-tunnel']
+const BUILD_PRODUCTS = ['start-os', ...DEBS]
+const WEB = ['start-os', 'start-tunnel', 'start-wrt']
 
 for (const [path, push, pullRequest = push, osImage = false] of [
   ['shared-libs/crates/start-core/src/lib.rs', ALL],
   ['Cargo.lock', ALL],
   ['build/env/check-platform.sh', ALL, ALL, true],
-  ['debian/build.sh', ALL, ALL, true],
-  ['.github/workflows/build-products.yaml', ALL, ALL, true],
+  ['debian/build.sh', BUILD_PRODUCTS, BUILD_PRODUCTS, true],
+  [
+    '.github/workflows/build-products.yaml',
+    BUILD_PRODUCTS,
+    BUILD_PRODUCTS,
+    true,
+  ],
+  ['.github/workflows/start-wrt.yaml', ['start-wrt']],
   ['.github/scripts/changed-products.mjs', ALL],
+  ['.github/scripts/classify-event.sh', ALL],
   ['projects/start-cli/src/main.rs', ['start-cli']],
   ['projects/start-registry/Cargo.toml', ['start-registry']],
   ['projects/start-tunnel/web/src/main.ts', ['start-tunnel']],
-  ['shared-libs/ts-modules/shared/src/index.ts', ['start-os', 'start-tunnel']],
-  ['package-lock.json', ['start-os', 'start-tunnel']],
-  ['package.json', ['start-os', 'start-tunnel'], undefined, true],
+  ['shared-libs/ts-modules/shared/src/index.ts', WEB],
+  ['package-lock.json', WEB],
+  ['package.json', WEB, undefined, true],
   ['projects/start-sdk/lib/index.ts', ['start-os']],
   [
     'projects/start-os/build/image-recipe/build.sh',
@@ -32,16 +41,27 @@ for (const [path, push, pullRequest = push, osImage = false] of [
     true,
   ],
   ['projects/start-os/startd.service', ['start-os'], undefined, true],
+  [
+    'projects/start-os/container-runtime/deb-install.sh',
+    ['start-os'],
+    undefined,
+    true,
+  ],
+  ['projects/start-os/container-runtime/src/index.ts', ['start-os']],
   ['projects/start-os/src/main.rs', ['start-os']],
   ['projects/start-os/docs/src/overview.md', []],
   ['projects/start-os/release-notes/0.4.1.md', ['start-os'], undefined, true],
   ['projects/start-cli/changelog/patch-fixed-x.md', ['start-cli'], []],
   ['projects/start-tunnel/release-notes/1.2.0.md', ['start-tunnel'], []],
-  ['scripts/manage-release.sh', DEBS, []],
+  ['scripts/manage-release.sh', [...DEBS, 'start-wrt'], []],
   ['scripts/changelog.mjs', ALL, ['start-os'], true],
   ['.prettierrc.json', ALL, ['start-os'], true],
+  ['scripts/s3-put-once.sh', ['start-os', 'start-wrt'], []],
   ['AGENTS.md', []],
-  ['projects/start-wrt/backend/ctrl/src/lib.rs', []],
+  ['projects/start-wrt/backend/ctrl/src/lib.rs', ['start-wrt']],
+  ['projects/start-wrt/web/src/main.ts', ['start-wrt']],
+  ['projects/start-wrt/release-notes/1.3.0.md', ['start-wrt'], []],
+  ['projects/start-wrt/docs/src/overview.md', []],
 ]) {
   test(`${path} rebuilds the products whose build reads it`, () => {
     for (const [event, expected] of [
@@ -59,9 +79,11 @@ test('the script prints step outputs for the changed paths on stdin', () => {
   const script = join(REPO, '.github/scripts/changed-products.mjs')
   const run = (args, input) =>
     spawnSync(process.execPath, [script, ...args], { input, encoding: 'utf8' })
+  const changed =
+    'projects/start-cli/src/main.rs\nprojects/start-registry/src/main.rs\n'
   const result = run(
-    ['--event', 'pull_request'],
-    'projects/start-cli/src/main.rs\nprojects/start-registry/src/main.rs\n',
+    ['--workflow', 'build-products.yaml', '--event', 'pull_request'],
+    changed,
   )
   assert.equal(result.status, 0, result.stderr)
   assert.equal(
@@ -76,12 +98,24 @@ test('the script prints step outputs for the changed paths on stdin', () => {
       '',
     ].join('\n'),
   )
-  const all = run(['--all'], '')
+  const all = run(['--workflow', 'build-products.yaml', '--all'], '')
   assert.equal(all.status, 0, all.stderr)
   assert.match(
     all.stdout,
     /^products=start-os start-cli start-registry start-tunnel$/m,
   )
   assert.match(all.stdout, /^os-image=true$/m)
-  assert.notEqual(run(['--event', 'workflow_dispatch'], '').status, 0)
+  const wrt = run(['--workflow', 'start-wrt.yaml', '--event', 'push'], changed)
+  assert.equal(wrt.status, 0, wrt.stderr)
+  assert.equal(wrt.stdout, 'start-wrt=false\nos-image=false\nproducts=\n')
+  assert.equal(
+    run(['--workflow', 'start-wrt.yaml', '--all'], '').stdout,
+    'start-wrt=true\nos-image=false\nproducts=start-wrt\n',
+  )
+  for (const args of [
+    ['--workflow', 'build-products.yaml', '--event', 'workflow_dispatch'],
+    ['--event', 'pull_request'],
+    ['--workflow', 'other.yaml', '--all'],
+  ])
+    assert.notEqual(run(args, changed).status, 0, args.join(' '))
 })

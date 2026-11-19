@@ -120,5 +120,5 @@ jobs:
         uses: Start9Labs/start-technologies/.github/actions/upload-each@master
         with:
           pattern: '*.s9pk'
+          archive: false
           retention-days: 14
-          compression-level: 0

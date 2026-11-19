@@ -143,7 +143,7 @@ async fn newer_versions(_ctx: ServerContext) -> Result<Vec<VersionInfo>, Error> 
         })
         .map(|(ver, info)| VersionInfo {
             version: ver,
-            release_notes: info.release_notes.localized_for("en_US"),
+            release_notes: info.release_notes.localized_for(Some("en_US"), None),
         })
         .collect();
     // Sort ascending by semver precedence. The map above iterates in
