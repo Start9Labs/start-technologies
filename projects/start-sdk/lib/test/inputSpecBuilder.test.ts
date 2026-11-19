@@ -96,7 +96,7 @@ describe('values', () => {
       })
     })
 
-    test('comes after every other top-level field', async () => {
+    test('requires acceptance alongside the other fields', async () => {
       const spec = InputSpec.of({
         confirm: acknowledgement(),
         address: Value.text({ name: 'Address', required: true, default: null }),
@@ -109,7 +109,6 @@ describe('values', () => {
         }),
       })
       const built = await spec.build({} as any)
-      expect(Object.keys(built.spec)).toEqual(['address', 'amount', 'confirm'])
       expect(() =>
         built.validator.parse({ address: 'a', amount: 1, confirm: false }),
       ).toThrow()

@@ -222,8 +222,7 @@ export class InputSpec<
   /**
    * Builds the runtime form specification and combined Zod validator from this InputSpec's fields.
    *
-   * @returns An object containing the resolved `spec` (field specs keyed by name) and a combined `validator`.
-   * The `spec` lists every {@link Value.acknowledgement} after the other fields.
+   * @returns An object containing the resolved `spec` (field specs keyed by name) and a combined `validator`
    */
   async build<OuterType>(options: LazyBuildOptions<OuterType>): Promise<{
     spec: {
@@ -231,22 +230,19 @@ export class InputSpec<
     }
     validator: z.ZodType<Type>
   }> {
-    const fields: [keyof Type, ValueSpec][] = []
-    const acknowledgements: [keyof Type, ValueSpec][] = []
+    const answer = {} as {
+      [K in keyof Type]: ValueSpec
+    }
     const validator = {} as {
       [K in keyof Type]: z.ZodType<any>
     }
     for (const k in this.spec) {
       const built = await this.spec[k].build(options as any)
-      ;(built.spec.type === 'acknowledgement' ? acknowledgements : fields).push(
-        [k, built.spec],
-      )
+      answer[k] = built.spec
       validator[k] = built.validator
     }
     return {
-      spec: Object.fromEntries([...fields, ...acknowledgements]) as {
-        [K in keyof Type]: ValueSpec
-      },
+      spec: answer,
       validator: z.looseObject(validator) as any,
     }
   }
