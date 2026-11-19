@@ -67,6 +67,17 @@ pub(crate) fn image_store_command(
     lease.inherit(&mut command, variable.trim())?;
     Ok(command)
 }
+pub(crate) async fn admit_image_space(
+    lease: &crate::util::FileLock,
+    bytes: u64,
+) -> Result<(), Error> {
+    image_store_command(lease, "/usr/lib/startos/scripts/prune-images")?
+        .arg(bytes.to_string())
+        .invoke(ErrorKind::Filesystem)
+        .await?;
+    Ok(())
+}
+
 pub const OVERLAY_FILE: &str = "overlay.squashfs";
 pub const MANIFEST_FILE: &str = "manifest.bin";
 pub const SIGNATURE_FILE: &str = "manifest.sig";
@@ -278,6 +289,28 @@ impl VerityImage {
             }
         })
         .await
+    }
+
+    /// Reclaims an inactive owner's reserved mapping; busy or uninspectable state rejects.
+    pub(crate) async fn close_if_active(name: &str) -> Result<(), Error> {
+        let status = verity_command()
+            .arg("status")
+            .arg("--")
+            .arg(name)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .await?
+            .status;
+        match status.code() {
+            Some(0) => Self::close(name).await,
+            Some(4) => Ok(()),
+            _ => Err(Error::new(
+                eyre!("{} ({status})", t!("error.disk-management")),
+                ErrorKind::Filesystem,
+            )),
+        }
     }
 
     /// Requires every mount using the mapping to be unmounted first.

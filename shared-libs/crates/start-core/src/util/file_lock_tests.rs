@@ -31,6 +31,57 @@ fn variable() -> &'static str {
 }
 
 #[tokio::test]
+async fn inherited_child_keeps_the_lease_after_its_guard_is_released() {
+    use std::process::Stdio;
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join(lock_name());
+    for explicit_unlock in [false, true] {
+        let lease = FileLock::new(&path, true).await.unwrap();
+        let mut command = tokio::process::Command::new("/bin/bash");
+        command
+            .args(["-euc", "printf ready; read -r release"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true);
+        lease.inherit(&mut command, variable()).unwrap();
+        let mut child = command.spawn().unwrap();
+        drop(command);
+        let mut ready = [0; 5];
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            child.stdout.as_mut().unwrap().read_exact(&mut ready),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(&ready, b"ready");
+        if explicit_unlock {
+            lease.unlock().await.unwrap();
+        } else {
+            drop(lease);
+        }
+        assert!(FileLock::new(&path, false).await.is_err());
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(b"release\n")
+            .await
+            .unwrap();
+        assert!(child.wait().await.unwrap().success());
+        FileLock::new(&path, false)
+            .await
+            .unwrap()
+            .unlock()
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
 async fn image_store_native_child_reuses_the_inherited_real_file_lease() {
     let root = tempfile::tempdir().unwrap();
     let directory = root.path().join("configuration with space");

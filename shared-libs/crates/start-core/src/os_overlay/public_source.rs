@@ -22,6 +22,9 @@ use crate::util::io::{open_file, read_secret_file, write_file_private_atomic};
 const METADATA: [&str; 3] = ["VERSION.txt", "GIT_HASH.txt", "PLATFORM.txt"];
 const IMAGE: &str = "image.squashfs";
 const RECORD: &str = "asset.json";
+const WORKSPACE: &str = ".workspace";
+/// Reserved by the image-store lease for private-namespace public-source assembly.
+pub(crate) const SOURCE_MAPPING: &str = "startos-fde-source";
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Release {
@@ -58,7 +61,7 @@ impl Release {
         Self::parse(fields)
     }
 
-    async fn read_image(path: &Path) -> Result<Self, Error> {
+    pub(crate) async fn read_image(path: &Path) -> Result<Self, Error> {
         let mut fields = [Vec::new(), Vec::new(), Vec::new()];
         for (field, name) in fields.iter_mut().zip(METADATA) {
             *field = Command::new("/usr/bin/unsquashfs")
@@ -123,15 +126,84 @@ impl SourceCache {
         self.os_volume.join("images").join(name.trim())
     }
 
-    async fn entries(&self) -> Result<Vec<PathBuf>, Error> {
-        let directory = self.directory();
-        match tokio::fs::symlink_metadata(&directory).await {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+    pub(crate) fn workspace(&self) -> PathBuf {
+        self.directory().join(WORKSPACE)
+    }
+
+    pub(crate) async fn create_workspace(&self) -> Result<PathBuf, Error> {
+        self.create_directory()?;
+        let workspace = self.workspace();
+        tokio::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&workspace)
+            .await?;
+        Ok(workspace)
+    }
+
+    fn create_directory(&self) -> Result<(), Error> {
+        crate::util::io::create_directory_beneath(
+            &self.os_volume,
+            self.directory().strip_prefix(&self.os_volume).unwrap(),
+        )
+    }
+
+    /// The lease excludes producers, including children surviving their requesting daemon.
+    pub(crate) async fn recover_workspace(&self) -> Result<(), Error> {
+        if !self.directory_exists().await? {
+            return Ok(());
+        }
+        match tokio::fs::symlink_metadata(self.workspace()).await {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
             Ok(metadata) if metadata.is_dir() => (),
             Ok(_) => return Err(invalid_source()),
             Err(error) => return Err(error.into()),
         }
-        let mut entries = tokio::fs::read_dir(&directory).await?;
+        let mounts = ["source", "runtime", "rootfs"].map(|name| self.workspace().join(name));
+        for path in &mounts {
+            match tokio::fs::symlink_metadata(path).await {
+                Ok(metadata) if metadata.is_dir() => (),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                Ok(_) => return Err(invalid_source()),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        for path in &mounts {
+            crate::disk::mount::util::unmount_tree(path, false).await?;
+        }
+        super::VerityImage::close_if_active(SOURCE_MAPPING).await?;
+        self.remove_workspace_files().await
+    }
+
+    async fn remove_workspace_files(&self) -> Result<(), Error> {
+        let directory = self.workspace();
+        for file in ["download.squashfs", IMAGE, "image.verity"] {
+            crate::util::io::delete_file(directory.join(file)).await?;
+        }
+        for mount in ["source", "runtime", "rootfs"] {
+            match tokio::fs::remove_dir(directory.join(mount)).await {
+                Ok(()) => (),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        tokio::fs::remove_dir(directory).await?;
+        self.sync().await
+    }
+
+    async fn directory_exists(&self) -> Result<bool, Error> {
+        match tokio::fs::symlink_metadata(self.directory()).await {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Ok(metadata) if metadata.is_dir() => Ok(true),
+            Ok(_) => Err(invalid_source()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    async fn entries(&self) -> Result<Vec<PathBuf>, Error> {
+        if !self.directory_exists().await? {
+            return Ok(Vec::new());
+        }
+        let mut entries = tokio::fs::read_dir(self.directory()).await?;
         let mut paths = Vec::new();
         while let Some(entry) = entries.next_entry().await? {
             if entry.file_type().await?.is_dir() && is_digest(&entry.file_name()) {
@@ -209,10 +281,7 @@ impl SourceCache {
             .await?;
         let release = Release::read_image(image).await?;
         let directory = self.directory();
-        tokio::fs::create_dir_all(&directory).await?;
-        if !tokio::fs::symlink_metadata(&directory).await?.is_dir() {
-            return Err(invalid_source());
-        }
+        self.create_directory()?;
         let path = directory.join(asset_key(&asset));
         let exists = match tokio::fs::symlink_metadata(&path).await {
             Ok(metadata) if metadata.is_dir() => true,
@@ -266,6 +335,7 @@ impl SourceCache {
     }
 
     pub(crate) async fn prune_boot_sources(&self) -> Result<(), Error> {
+        self.recover_workspace().await?;
         if self.entries().await?.is_empty() {
             return Ok(());
         }
@@ -341,3 +411,7 @@ async fn boot_releases(current: &Path, next: &Path) -> Result<BTreeSet<Release>,
 #[cfg(test)]
 #[path = "public_source_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "source_workspace_tests.rs"]
+mod workspace_tests;

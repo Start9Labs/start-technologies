@@ -484,10 +484,7 @@ pub(crate) async fn do_update(
     #[cfg(target_os = "linux")]
     let sources = crate::os_overlay::public_source::SourceCache::system();
     prune_phase.start();
-    crate::os_overlay::image_store_command(&images, "/usr/lib/startos/scripts/prune-images")?
-        .arg(asset.commitment.size.to_string())
-        .invoke(ErrorKind::Filesystem)
-        .await?;
+    crate::os_overlay::admit_image_space(&images, asset.commitment.size).await?;
     crate::os_overlay::image_store_command(&images, "/usr/lib/startos/scripts/prune-boot")?
         .invoke(ErrorKind::Filesystem)
         .await?;

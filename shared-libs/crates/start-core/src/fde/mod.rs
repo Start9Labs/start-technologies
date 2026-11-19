@@ -21,7 +21,7 @@ pub(crate) mod namespace;
 pub mod network;
 pub(crate) mod private_config;
 #[cfg(target_os = "linux")]
-mod public_image;
+pub(crate) mod public_image;
 mod root;
 pub mod source;
 pub mod tpm;

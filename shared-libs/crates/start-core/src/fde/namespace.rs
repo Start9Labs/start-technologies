@@ -55,6 +55,7 @@ pub(super) async fn prepare<L: GenericMountGuard>(
     Ok(())
 }
 
+/// Only standard I/O crosses into the execution root.
 pub(super) fn command(root: &Path) -> tokio::process::Command {
     let mut command = tokio::process::Command::new("/usr/bin/unshare");
     command
@@ -72,5 +73,20 @@ pub(super) fn command(root: &Path) -> tokio::process::Command {
         .arg(root)
         .arg("--wd=/")
         .env_clear();
+    #[cfg(target_os = "linux")]
+    unsafe {
+        command.pre_exec(|| {
+            if libc::syscall(
+                libc::SYS_close_range,
+                3_u32,
+                u32::MAX,
+                libc::CLOSE_RANGE_CLOEXEC,
+            ) < 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
     command
 }

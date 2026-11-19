@@ -681,7 +681,7 @@ async fn stopped_unit(unit: &str) -> Result<bool, Error> {
 /// Publishes nothing; hidden staging may remain after return.
 pub(crate) async fn prepare(ctx: &RpcContext) -> Result<(), Error> {
     let memory = ProcessSecretMemory::protect()?;
-    let _images = crate::os_overlay::reserve_image_store(false).await?;
+    let images = crate::os_overlay::reserve_image_store(false).await?;
     let rootfs = running_image().await?;
     let epoch = ReadEpoch::current().await?;
     let pause = ctx.db.pause_mutations().await;
@@ -723,7 +723,7 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<(), Error> {
         &prepared,
         super::tpm::public_key(&enrollment.policy_key)?,
     )?;
-    super::public_image::stage(ctx, &prepared, &descriptor).await?;
+    super::public_image::stage(ctx, &prepared, &descriptor, &images).await?;
     memory.check()?;
     Ok(())
 }

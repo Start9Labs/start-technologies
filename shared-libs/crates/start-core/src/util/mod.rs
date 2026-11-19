@@ -13,7 +13,6 @@ use std::time::Duration;
 use ::serde::{Deserialize, Serialize};
 use async_trait::async_trait;
 use color_eyre::eyre::{self, eyre};
-use fd_lock_rs::FdLock;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use imbl_value::InternedString;
@@ -695,12 +694,11 @@ impl<F: FnOnce() -> T, T> Drop for GeneralGuard<F, T> {
     }
 }
 
-pub struct FileLock(#[allow(unused)] OwnedMutexGuard<()>, Option<FdLock<File>>);
+/// The kernel lease lasts until its last inherited descriptor closes.
+pub struct FileLock(#[allow(unused)] OwnedMutexGuard<()>, Option<File>);
 impl Drop for FileLock {
     fn drop(&mut self) {
-        if let Some(fd_lock) = self.1.take() {
-            tokio::task::spawn_blocking(|| fd_lock.unlock(true).map_err(|(_, e)| e).log_err());
-        }
+        drop(self.1.take());
     }
 }
 impl FileLock {
@@ -712,7 +710,7 @@ impl FileLock {
     ) -> Result<(), Error> {
         use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
         let descriptor = nix::fcntl::fcntl(
-            &**self.1.as_ref().unwrap(),
+            self.1.as_ref().unwrap(),
             nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(3),
         )
         .with_kind(ErrorKind::Filesystem)?;
@@ -758,20 +756,22 @@ impl FileLock {
         }
         let f = create_file(&path).await?;
         let file_guard = tokio::task::spawn_blocking(move || {
-            fd_lock_rs::FdLock::lock(f, fd_lock_rs::LockType::Exclusive, blocking)
+            use std::os::fd::AsRawFd;
+
+            let options = libc::LOCK_EX | if blocking { 0 } else { libc::LOCK_NB };
+            if unsafe { libc::flock(f.as_raw_fd(), options) } != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(f)
         })
         .await
         .with_kind(crate::ErrorKind::Unknown)?
         .with_kind(crate::ErrorKind::Filesystem)?;
         Ok(FileLock(tex_guard, Some(file_guard)))
     }
+    /// Releases this guard; inherited children retain their share.
     pub async fn unlock(mut self) -> Result<(), Error> {
-        if let Some(fd_lock) = self.1.take() {
-            tokio::task::spawn_blocking(|| fd_lock.unlock(true).map_err(|(_, e)| e))
-                .await
-                .with_kind(crate::ErrorKind::Unknown)?
-                .with_kind(crate::ErrorKind::Filesystem)?;
-        }
+        drop(self.1.take());
         Ok(())
     }
 }

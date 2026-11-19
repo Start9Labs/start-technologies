@@ -180,6 +180,10 @@ impl MultiExecutable {
             self.bins.insert("start-fde-capture", fde_capture::capture);
             self.bins.insert("start-fde-release", fde_capture::release);
             self.bins.insert("start-fde-stop", fde_capture::stop);
+            self.bins.insert(
+                crate::fde::public_image::SOURCE_APPLET,
+                os_image::assemble_source,
+            );
         }
         self
     }
