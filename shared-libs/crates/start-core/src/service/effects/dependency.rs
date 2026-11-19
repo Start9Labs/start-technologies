@@ -14,9 +14,10 @@ use crate::db::model::package::{
 };
 use crate::dependencies::DepInfo;
 use crate::disk::mount::filesystem::bind::{Bind, FileType};
-use crate::disk::mount::filesystem::idmapped::{IdMap, IdMapped};
+use crate::disk::mount::filesystem::idmapped::IdMap;
 use crate::disk::mount::filesystem::{FileSystem, MountType};
 use crate::disk::mount::util::{is_mountpoint, unmount};
+use crate::lxc::service_filesystem;
 use crate::s9pk::S9pk;
 use crate::s9pk::manifest::Manifest;
 use crate::service::effects::callbacks::CallbackHandler;
@@ -43,86 +44,6 @@ pub struct MountTarget {
 
 rpc_toolkit::reflect_ts!(MountTarget);
 rpc_toolkit::ts_export!(MountTarget, namespaces = [""]);
-
-/// The idmap to apply, host-side, for a pointer mount into a container with the given base map.
-///
-/// The SDK idmap is layered *on top of* the LXC base map (the SDK docs: "the
-/// base LXC mapping is applied automatically"), and a list of idmaps composes
-/// in sequence — each entry remaps the output of the entries before it. We
-/// can't stack the layers as separate mounts (re-idmapping an already-idmapped
-/// mount *replaces* the mapping, it doesn't compose — verified on a 6.15+
-/// kernel), so the whole stack is collapsed into one equivalent idmap here.
-///
-/// Computed pointwise: for each on-disk id, start from its base mapping
-/// (`k -> base + k`) and fold the idmaps in order (each is identity outside its
-/// `from_id` range). The composition can be non-injective — overriding
-/// `0 -> 1000` leaves both on-disk 0 and on-disk 1000 wanting target 1000 — and
-/// a uid_map can't map two on-disk ids to one target, so colliding ids are
-/// dropped to `nobody`, preferring an explicitly-remapped id over a passthrough.
-/// See the proptest in the test module for the exact equivalence to composition.
-fn pointer_idmap(base: IdMap, custom: &[IdMap]) -> Vec<IdMap> {
-    if custom.is_empty() {
-        return vec![base];
-    }
-    let len = base.range as usize;
-
-    // Per on-disk id: its composed host target, and whether an idmap touched it.
-    let mut host = vec![0u32; len];
-    let mut explicit = vec![false; len];
-    for d in 0..base.range {
-        // base maps on-disk d -> container d (base.from_id is 0)
-        let mut c = d;
-        let mut touched = false;
-        for m in custom {
-            if c >= m.from_id && c - m.from_id < m.range {
-                c = m.to_id.saturating_add(c - m.from_id);
-                touched = true;
-            }
-        }
-        host[d as usize] = base.to_id.saturating_add(c);
-        explicit[d as usize] = touched;
-    }
-
-    // A uid_map target must be unique. On a collision, an explicit remap wins
-    // over a passthrough; otherwise the lowest on-disk id wins.
-    let mut owner: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
-    for d in 0..base.range {
-        match owner.get(&host[d as usize]) {
-            None => {
-                owner.insert(host[d as usize], d);
-            }
-            Some(&prev) if explicit[d as usize] && !explicit[prev as usize] => {
-                owner.insert(host[d as usize], d);
-            }
-            Some(_) => {}
-        }
-    }
-    let mut keep = vec![None; len];
-    for (h, d) in owner {
-        keep[d as usize] = Some(h);
-    }
-
-    // Coalesce contiguous survivors into extents.
-    let mut out = Vec::new();
-    let mut d = 0u32;
-    while (d as usize) < len {
-        if let Some(h0) = keep[d as usize] {
-            let mut n = 1u32;
-            while ((d + n) as usize) < len && keep[(d + n) as usize] == Some(h0.saturating_add(n)) {
-                n += 1;
-            }
-            out.push(IdMap {
-                from_id: d,
-                to_id: h0,
-                range: n,
-            });
-            d += n;
-        } else {
-            d += 1;
-        }
-    }
-    out
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -202,9 +123,10 @@ pub async fn mount(
         unmount(&mountpoint, true).await?;
     }
 
-    IdMapped::new(
+    service_filesystem(
         Bind::new(source).with_type(filetype).recursive(true),
-        pointer_idmap(base, &idmap),
+        base,
+        &idmap,
     )
     .mount(
         mountpoint,
@@ -817,129 +739,6 @@ mod test {
         }
     }
 
-    #[test]
-    fn empty_custom_is_just_the_base_map() {
-        assert_eq!(pointer_idmap(BASE_IDMAP, &[]), vec![BASE_IDMAP]);
-    }
-
-    #[test]
-    fn override_is_layered_on_top_of_the_base_map() {
-        // mostro: on-disk 0 -> container 1000 (host 101000); every other id keeps
-        // its base mapping (k -> 100000 + k), except on-disk 1000, whose base
-        // target collides with the override and so is dropped (-> nobody).
-        assert_eq!(
-            pointer_idmap(BASE_IDMAP, &[idmap(0, 1000, 1)]),
-            vec![
-                idmap(0, 101000, 1),        // override: on-disk 0 -> container 1000
-                idmap(1, 100001, 999),      // base: on-disk 1..999 -> container 1..999
-                idmap(1001, 101001, 64535), // base: on-disk 1001..65535 (1000 dropped)
-            ],
-        );
-    }
-
-    #[test]
-    fn chaining_idmaps_compose_sequentially() {
-        // idmap 1 maps the OUTPUT range of idmap 0 (0->1000, then 1000->2000),
-        // so they compose: on-disk 0 -> 1000 -> 2000 (host 102000), not 101000.
-        let custom = [idmap(0, 1000, 1), idmap(1000, 2000, 1)];
-        let flat = pointer_idmap(BASE_IDMAP, &custom);
-        assert_eq!(
-            apply(&flat, 0),
-            Some(102000),
-            "0 composes through both layers"
-        );
-        // an untouched id keeps its base mapping
-        assert_eq!(apply(&flat, 5), Some(100005));
-        // on-disk 1000 ALSO composes to 102000 (passthrough idmap 0, then 1000->2000),
-        // colliding with on-disk 0 — a single uid_map can't hold both, so it drops.
-        assert_eq!(compose_ref(&custom, 1000), Some(102000));
-        assert_eq!(apply(&flat, 1000), None);
-    }
-
-    // Reference: the intended (possibly non-injective) composition — base, then
-    // each idmap applied in sequence to the running value (identity out of range).
-    fn compose_ref(custom: &[IdMap], on_disk: u32) -> Option<u32> {
-        let base = BASE_IDMAP;
-        if on_disk >= base.range {
-            return None;
-        }
-        let mut c = on_disk;
-        for m in custom {
-            if c >= m.from_id && c - m.from_id < m.range {
-                c = m.to_id.saturating_add(c - m.from_id);
-            }
-        }
-        Some(base.to_id.saturating_add(c))
-    }
-
-    // Apply a flat uid_map to an on-disk id (None == nobody / unmapped).
-    fn apply(map: &[IdMap], on_disk: u32) -> Option<u32> {
-        map.iter().find_map(|m| {
-            (on_disk >= m.from_id && on_disk - m.from_id < m.range)
-                .then(|| m.to_id.saturating_add(on_disk - m.from_id))
-        })
-    }
-
-    // A valid uid_map: non-overlapping source ranges AND non-overlapping target
-    // ranges (an idmapped mount is a bijection between the two).
-    fn is_valid_uid_map(map: &[IdMap]) -> bool {
-        let overlaps = |mut v: Vec<(u32, u32)>| {
-            v.sort();
-            v.windows(2).any(|w| w[0].1 > w[1].0)
-        };
-        let froms: Vec<(u32, u32)> = map
-            .iter()
-            .map(|m| (m.from_id, m.from_id + m.range))
-            .collect();
-        let tos: Vec<(u32, u32)> = map.iter().map(|m| (m.to_id, m.to_id + m.range)).collect();
-        !overlaps(froms) && !overlaps(tos)
-    }
-
-    proptest::proptest! {
-        #![proptest_config(proptest::test_runner::Config { cases: 48, ..proptest::test_runner::Config::default() })]
-
-        /// `pointer_idmap` is exactly the injective restriction of the layered
-        /// composition: it is a valid uid_map, never maps an on-disk id to
-        /// anything other than what composition would, and preserves every
-        /// target composition reaches uniquely — only genuine collisions (which
-        /// a single uid_map cannot represent) drop to nobody.
-        #[test]
-        fn flatten_is_the_injective_restriction_of_composition(
-            custom in proptest::collection::vec((0u32..60_000, 0u32..60_000, 1u32..2_000), 0..4usize),
-        ) {
-            let custom: Vec<IdMap> = custom.into_iter().map(|(f, t, r)| idmap(f, t, r)).collect();
-            let flat = pointer_idmap(BASE_IDMAP, &custom);
-
-            proptest::prop_assert!(is_valid_uid_map(&flat), "invalid uid_map: {flat:?}");
-
-            let comp: Vec<Option<u32>> =
-                (0..BASE_IDMAP.range).map(|d| compose_ref(&custom, d)).collect();
-            let mut hits: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
-            for c in comp.iter().flatten() {
-                *hits.entry(*c).or_default() += 1;
-            }
-
-            for d in 0..BASE_IDMAP.range {
-                let f = apply(&flat, d);
-                let c = comp[d as usize];
-                // never wrong: flatten agrees with composition or drops to nobody
-                proptest::prop_assert!(f.is_none() || f == c, "d={d}: flat={f:?} compose={c:?}");
-                // lossless where representable: a uniquely-reached target is kept
-                if let Some(h) = c {
-                    if hits[&h] == 1 {
-                        proptest::prop_assert_eq!(f, Some(h), "d={} dropped a unique target", d);
-                    }
-                }
-            }
-        }
-    }
-
-    /// End-to-end check of the host-side mechanism the `mount-pointer` RPC
-    /// effect runs: build the composed idmap and apply it with `IdMapped`
-    /// (startd, init_user_ns), then read uids back through the mount. Requires
-    /// root + a 6.15+ kernel, so it is ignored by default. Run with:
-    ///   sudo <test-bin> --ignored --exact \
-    ///     service::effects::dependency::test::idmap_host_side_remaps_uids --nocapture
     #[tokio::test]
     #[ignore = "requires root + mount privileges"]
     async fn idmap_host_side_remaps_uids() {
@@ -972,12 +771,12 @@ mod test {
             std::os::unix::fs::chown(src.join(name), Some(uid), Some(uid)).unwrap();
         }
 
-        // exactly what mount() runs for a pointer mount with idmap [{0->1000}]
-        IdMapped::new(
+        service_filesystem(
             Bind::new(&src)
                 .with_type(FileType::Directory)
                 .recursive(true),
-            pointer_idmap(BASE_IDMAP, &[idmap(0, 1000, 1)]),
+            BASE_IDMAP,
+            &[idmap(0, 1000, 1)],
         )
         .mount(&target, MountType::ReadWrite)
         .await

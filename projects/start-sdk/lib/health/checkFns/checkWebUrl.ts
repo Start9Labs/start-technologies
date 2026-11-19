@@ -25,7 +25,9 @@ export const checkWebUrl = async (
     errorMessage = `Error while fetching URL: ${url}`,
   } = {},
 ): Promise<HealthCheckResult> => {
-  return Promise.race([fetch(url), timeoutPromise(timeout)])
+  const deadline = timeoutPromise(timeout)
+  return Promise.race([fetch(url), deadline])
+    .finally(deadline.cancel)
     .then(
       x =>
         ({

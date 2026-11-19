@@ -103,7 +103,6 @@ fn uninit_target(data_ver: &str, prev: &Manifest, next: &Manifest) -> Result<Exi
     }
 }
 
-/// This is the structure to contain all the services
 #[derive(Default)]
 pub struct ServiceMap(SyncMutex<OrdMap<PackageId, Arc<RwLock<Option<ServiceRef>>>>>);
 impl ServiceMap {
@@ -144,6 +143,7 @@ impl ServiceMap {
         Ok(())
     }
 
+    /// Attempts replacement even if shutdown fails; a successful load can return a shutdown error.
     #[instrument(skip_all)]
     pub async fn load(
         &self,
@@ -642,6 +642,7 @@ impl ServiceRefReloadInfo {
         self.ctx
             .services
             .load(&self.ctx, &self.id, LoadDisposition::Undo)
+            .boxed()
             .await
     }
 

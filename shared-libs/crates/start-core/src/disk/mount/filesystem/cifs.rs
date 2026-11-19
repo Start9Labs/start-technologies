@@ -231,7 +231,7 @@ mod tests {
         use crate::disk::mount::guard::MountGuard;
         use crate::rpc_continuations::Guid;
         use crate::shared_volumes::SharedVolumeId;
-        use crate::shared_volumes::mounts::{PreparedSource, PreparedTarget, SharedVolumeMounts};
+        use crate::shared_volumes::mounts::{PreparedSource, SharedVolumeMounts};
         assert_eq!(std::env::var("VOLUME_CIFS_FIXTURE").as_deref(), Ok("1"));
         fn definition(hostname: &str, path: &str) -> SharedCifs {
             SharedCifs(Cifs {
@@ -288,29 +288,35 @@ mod tests {
         let tree = MountGuard::mount(&Bind::new(fixture.path()), fixture.path(), ReadWrite)
             .await
             .unwrap();
-        let mut mounts = SharedVolumeMounts::default();
+        let mut mounts = SharedVolumeMounts::new(fixture.path()).await.unwrap();
         let guid = Guid::new();
-        let target = PreparedTarget::open(
-            fixture.path().to_owned(),
-            "data".into(),
+        let namespace =
             std::sync::Arc::new(
                 crate::disk::mount::filesystem::syscall::MountNamespace::for_process(
                     std::process::id(),
                 )
                 .unwrap(),
-            ),
-        )
-        .await
-        .unwrap();
-        let location = mounts.prepare(&guid, target).await.unwrap();
+            );
         mounts
-            .attach(
+            .prepare_target(
                 &guid,
-                location,
-                SharedVolumeId::new(),
+                Path::new("data"),
+                fixture.path(),
+                Path::new(""),
+                namespace,
+            )
+            .await
+            .unwrap();
+        mounts
+            .mount_source(
+                &guid,
+                Path::new("data"),
+                &SharedVolumeId::new(),
                 PreparedSource::open(source.clone(), None).await.unwrap(),
                 true,
+                fixture.path(),
             )
+            .await
             .unwrap();
         assert!(
             tokio::fs::write(fixture.path().join("data/forbidden"), b"no")
@@ -392,7 +398,8 @@ mod tests {
                 .unwrap(),
             "cancelled helper left a late mount"
         );
-        mounts.clear();
+        mounts.clear().await.unwrap();
+        drop(mounts);
         source.unmount().await.unwrap();
         tree.unmount(false).await.unwrap();
     }
@@ -691,7 +698,7 @@ impl FileSystem for Cifs {
     }
 }
 
-/// Host-root-owned with world-writable modes; every container sees `nobody`.
+/// CIFS lacks `FS_ALLOW_IDMAP`; root owns it with world-writable modes, so containers see `nobody`.
 pub struct SharedCifs(pub Cifs);
 
 impl FileSystem for SharedCifs {

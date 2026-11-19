@@ -28,16 +28,16 @@ Use a volume's **Manage** dialog, or the service's **Shared Volumes** page. Each
 
 The **Shared Volumes** tab appears only for services that support shared volumes. Creating a volume grants access to no services automatically. Multiple services can use the same volume with different access modes.
 
-Revoking access detaches that service's attachments without detaching other consumers. How a service responds to missing storage depends on its package. Prefer volumes for optional media, documents and other shared files rather than operation-critical databases.
+Revocation is best-effort. Access changes control future mount requests and detach incompatible SDK-managed mounts. Extra mounts created independently by a service and open files can remain usable. Services that read their volume configuration reactively refresh affected workloads through their normal lifecycle; other consumers retain their own access. A saved **No Access** or **Read** setting does not prove earlier access has ended. Prefer volumes for optional media, documents and other shared files rather than operation-critical databases.
 
 ## Remove a volume
 
 Remove a volume from its **Manage** dialog. Removing revokes all service access, and what happens to the data depends on the source:
 
-- For a managed **Local folder**, the button reads **Delete**. It permanently deletes the folder and its contents after attachments are detached, so StartOS asks you to type the volume's name to confirm.
+- For a managed **Local folder**, the button reads **Delete**. It permanently deletes the folder and its contents after managed source mounts are cleaned up, so StartOS asks you to type the volume's name to confirm.
 - For an **External drive** or **CIFS share**, **Remove** deletes the volume configuration but leaves the source's contents untouched.
 
-If detachment or local deletion fails, StartOS reports the error and keeps the local volume registered without service access. Retry **Delete** from its **Manage** dialog. Local deletion completes before the request returns; the filesystem can reclaim its space afterward.
+If managed-source cleanup or local deletion fails, StartOS reports the error and keeps the local volume registered without service access. Retry **Delete** from its **Manage** dialog. Local deletion completes before the request returns; the filesystem can reclaim its space afterward.
 
 Uninstalling or rolling back a consuming service leaves volume contents untouched.
 

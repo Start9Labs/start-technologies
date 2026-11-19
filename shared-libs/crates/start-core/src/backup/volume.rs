@@ -13,9 +13,10 @@ use super::target::{BackupTargetId, BackupTargetSource, SharedVolumeBackupInfo, 
 use super::{PackageBackupReport, VolumeBackupReport};
 use crate::context::{CliContext, RpcContext};
 use crate::disk::mount::backup::BackupMountGuard;
+use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::{FileSystem, ReadOnly, ReadWrite};
-use crate::disk::mount::guard::GenericMountGuard;
+use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::disk::mount::util::sync_directory;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -105,6 +106,7 @@ pub(super) async fn measure_backup(
     )
 }
 
+/// Copies the service view of the volume, retaining host-visible owners.
 pub(super) async fn backup_volume(
     ctx: &RpcContext,
     backup: &BackupMountGuard<TargetMount>,
@@ -596,7 +598,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires BTRFS_TEST_VOLUMES_DIR"]
+    #[ignore = "requires root, BTRFS_TEST_VOLUMES_DIR and a private Linux mount namespace"]
     async fn restore_creates_a_new_local_volume_without_touching_existing_data() {
         let fixture = crate::util::btrfs::tests::directory();
         let old_id = SharedVolumeId::new();
@@ -606,6 +608,8 @@ mod tests {
         std::fs::create_dir(&source).unwrap();
         std::fs::write(old_path.join("sentinel"), b"existing data").unwrap();
         std::fs::write(source.join("sentinel"), b"restored data").unwrap();
+        std::os::unix::fs::chown(&source, Some(100000), Some(100000)).unwrap();
+        std::os::unix::fs::chown(source.join("sentinel"), Some(101000), Some(102000)).unwrap();
         let created = restore_local_copy(fixture.path(), &source, "Photos".into(), |id, volume| {
             assert_ne!(id, old_id);
             assert_eq!(volume.name, "Photos");
@@ -633,15 +637,29 @@ mod tests {
         assert_eq!(metadata.uid(), 0);
         assert_eq!(metadata.gid(), 0);
         assert_eq!(metadata.permissions().mode() & 0o777, 0o777);
+        let restored = local_path(fixture.path(), &created).join("sentinel");
+        let metadata = std::fs::metadata(&restored).unwrap();
+        assert_eq!((metadata.uid(), metadata.gid()), (1000, 2000));
+        let view = TmpMountGuard::mount(
+            &source::SourceFilesystem::local(local_path(fixture.path(), &created)),
+            ReadOnly,
+        )
+        .await
+        .unwrap();
+        let metadata = std::fs::metadata(view.path().join("sentinel")).unwrap();
+        assert_eq!((metadata.uid(), metadata.gid()), (101000, 102000));
+        view.unmount().await.unwrap();
     }
 
     #[tokio::test]
-    #[ignore = "requires BTRFS_TEST_VOLUMES_DIR"]
+    #[ignore = "requires root, BTRFS_TEST_VOLUMES_DIR and a private Linux mount namespace"]
     async fn failed_restore_copy_or_publication_leaves_no_new_data() {
         let fixture = crate::util::btrfs::tests::directory();
         let source = fixture.path().join("backup");
         std::fs::create_dir(&source).unwrap();
         std::fs::write(source.join("sentinel"), b"backup data").unwrap();
+        std::os::unix::fs::chown(&source, Some(100000), Some(100000)).unwrap();
+        std::os::unix::fs::chown(source.join("sentinel"), Some(100000), Some(100000)).unwrap();
         let failed_copy = restore_local_copy(
             fixture.path(),
             &fixture.path().join("missing"),

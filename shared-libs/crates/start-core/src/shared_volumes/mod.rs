@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(test)]
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -7,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::PackageId;
 
+pub(crate) mod access;
 pub mod mounts;
 pub mod source;
 #[cfg(target_os = "linux")]
@@ -132,6 +135,12 @@ pub struct SharedVolumeGrant {
     pub readonly: bool,
 }
 
+impl SharedVolumeGrant {
+    pub(crate) fn allows(&self, readonly: bool) -> bool {
+        readonly || !self.readonly
+    }
+}
+
 rpc_toolkit::reflect_ts!(SharedVolumeGrant);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, VisitVariants)]
@@ -167,7 +176,7 @@ impl SharedVolume {
     }
 }
 
-pub(crate) fn managed_local_paths(
+pub(crate) fn local_volume_paths(
     database: &crate::db::model::DatabaseModel,
 ) -> Result<Vec<PathBuf>, Error> {
     let mut paths = Vec::new();
@@ -176,6 +185,13 @@ pub(crate) fn managed_local_paths(
             paths.push(local_path(crate::PACKAGE_DATA, &id));
         }
     }
+    Ok(paths)
+}
+
+pub(crate) fn managed_local_paths(
+    database: &crate::db::model::DatabaseModel,
+) -> Result<Vec<PathBuf>, Error> {
+    let mut paths = local_volume_paths(database)?;
     for (id, target) in database.as_public().as_backup_targets().as_entries()? {
         if matches!(target.as_source().de()?, SharedVolumeSource::Local) {
             paths.push(crate::backup::target::catalog::local_path(
@@ -244,7 +260,7 @@ impl SharedVolume {
         readonly: bool,
     ) -> Result<(), Error> {
         let grant = capable.then(|| self.grants.get(package)).flatten();
-        if grant.is_some_and(|grant| readonly || !grant.readonly) {
+        if grant.is_some_and(|grant| grant.allows(readonly)) {
             Ok(())
         } else {
             Err(access_denied())
@@ -454,6 +470,7 @@ pub struct SetSharedVolumeGrantParams {
 
 rpc_toolkit::reflect_ts!(SetSharedVolumeGrantParams);
 
+/// Applies grant intent before best-effort retirement of incompatible staging sources.
 pub async fn set_grant(
     ctx: RpcContext,
     SetSharedVolumeGrantParams {
@@ -462,28 +479,48 @@ pub async fn set_grant(
         grant,
     }: SetSharedVolumeGrantParams,
 ) -> Result<(), Error> {
+    tokio::spawn(set_grant_owned(ctx, id, package_id, grant))
+        .await
+        .with_kind(ErrorKind::Cancelled)?
+}
+
+fn validate_grant(
+    db: &crate::db::model::DatabaseModel,
+    id: &SharedVolumeId,
+    package_id: &PackageId,
+    grant: Option<&SharedVolumeGrant>,
+) -> Result<(), Error> {
     use crate::db::model::package::ManifestPreference;
-    let service = ctx.services.get(&package_id).await;
-    let mut mounts = if let Some(service) = service.as_ref() {
-        Some(service.shared_volume_mounts().lock().await)
-    } else {
-        None
-    };
+    if grant.is_some()
+        && !db
+            .as_public()
+            .as_package_data()
+            .as_idx(package_id)
+            .or_not_found(package_id)?
+            .as_state_info()
+            .as_manifest(ManifestPreference::Old)
+            .as_shared_volumes()
+            .de()?
+    {
+        return Err(access_denied());
+    }
+    db.as_public()
+        .as_shared_volumes()
+        .as_idx(id)
+        .or_not_found(id)?;
+    Ok(())
+}
+
+async fn set_grant_owned(
+    ctx: RpcContext,
+    id: SharedVolumeId,
+    package_id: PackageId,
+    grant: Option<SharedVolumeGrant>,
+) -> Result<(), Error> {
+    let management = ctx.shared_volume_access.management.write().await;
     ctx.db
         .mutate(|db| {
-            if grant.is_some()
-                && !db
-                    .as_public()
-                    .as_package_data()
-                    .as_idx(&package_id)
-                    .or_not_found(&package_id)?
-                    .as_state_info()
-                    .as_manifest(ManifestPreference::Old)
-                    .as_shared_volumes()
-                    .de()?
-            {
-                return Err(access_denied());
-            }
+            validate_grant(db, &id, &package_id, grant.as_ref())?;
             let volume = db
                 .as_public_mut()
                 .as_shared_volumes_mut()
@@ -498,10 +535,12 @@ pub async fn set_grant(
         })
         .await
         .result?;
-    if let Some(mounts) = &mut mounts {
-        mounts.reconcile_grant(&id, grant.as_ref())?;
-    }
-    Ok(())
+    let result = ctx
+        .shared_volume_access
+        .reconcile_grant(&package_id, &id, grant.as_ref())
+        .await;
+    drop(management);
+    result
 }
 
 #[derive(Deserialize, Serialize, VisitFields)]
@@ -512,36 +551,31 @@ pub struct SharedVolumeParams {
 
 rpc_toolkit::reflect_ts!(SharedVolumeParams);
 
-/// Revokes local grants before detachment; failed deletion keeps the registration.
+/// Revokes future access before staging cleanup; failed local deletion keeps the registration.
 pub async fn remove(
     ctx: RpcContext,
     SharedVolumeParams { id }: SharedVolumeParams,
 ) -> Result<(), Error> {
-    let (source, packages) = ctx.db.mutate(|db| prepare_removal(db, &id)).await.result?;
-    let mut errors = ErrorCollection::new();
-    for package_id in &packages {
-        let service = ctx.services.get(package_id).await;
-        if let Some(service) = service.as_ref() {
-            errors.handle(
-                service
-                    .shared_volume_mounts()
-                    .lock()
-                    .await
-                    .reconcile_grant(&id, None),
-            );
-        }
-    }
-    errors.into_result()?;
+    tokio::spawn(remove_owned(ctx, id))
+        .await
+        .with_kind(ErrorKind::Cancelled)?
+}
+
+async fn remove_owned(ctx: RpcContext, id: SharedVolumeId) -> Result<(), Error> {
+    let management = ctx.shared_volume_access.management.write().await;
+    let source = ctx.db.mutate(|db| prepare_removal(db, &id)).await.result?;
+    ctx.shared_volume_access.remove_volume(&id).await?;
     if matches!(source, Some(SharedVolumeSource::Local)) {
         delete_local_volume(&ctx.db, &id, Path::new(crate::PACKAGE_DATA)).await?;
     }
+    drop(management);
     Ok(())
 }
 
 fn prepare_removal(
     db: &mut crate::db::model::DatabaseModel,
     id: &SharedVolumeId,
-) -> Result<(Option<SharedVolumeSource>, BTreeSet<PackageId>), Error> {
+) -> Result<Option<SharedVolumeSource>, Error> {
     let source = db
         .as_public()
         .as_shared_volumes()
@@ -558,7 +592,7 @@ fn prepare_removal(
     } else {
         remove_definition(db, id)?;
     }
-    Ok((source, db.as_public().as_package_data().keys()?))
+    Ok(source)
 }
 
 async fn delete_local_volume(
@@ -567,10 +601,11 @@ async fn delete_local_volume(
     package_data: &Path,
 ) -> Result<(), Error> {
     use crate::disk::mount::filesystem::ReadOnly;
-    use crate::disk::mount::filesystem::bind::Bind;
     use crate::disk::mount::guard::TmpMountGuard;
     let path = local_path(package_data, id);
-    let _unused = TmpMountGuard::reserve_unmounted(&Bind::new(&path), ReadOnly).await?;
+    let _unused =
+        TmpMountGuard::reserve_unmounted(&source::SourceFilesystem::local(path.clone()), ReadOnly)
+            .await?;
     crate::util::btrfs::delete_volume_root(&path).await?;
     database.mutate(|db| remove_definition(db, id)).await.result
 }
@@ -714,7 +749,7 @@ mod tests {
                 cifs.to_string(): {"password":"secret"}
             } }
         })).unwrap());
-        let (source, _) = prepare_removal(&mut db, &local).unwrap();
+        let source = prepare_removal(&mut db, &local).unwrap();
         assert!(matches!(source, Some(SharedVolumeSource::Local)));
         prepare_removal(&mut db, &cifs).unwrap();
         prepare_removal(&mut db, &disk).unwrap();
@@ -757,6 +792,10 @@ mod tests {
                 }
             }
         }));
+        assert_eq!(
+            local_volume_paths(&database).unwrap(),
+            vec![local_path(crate::PACKAGE_DATA, &volume)]
+        );
         let paths: BTreeSet<_> = managed_local_paths(&database)
             .unwrap()
             .into_iter()
@@ -883,7 +922,7 @@ mod tests {
         tokio::fs::write(path.join("sentinel"), b"managed contents")
             .await
             .unwrap();
-        let filesystem = source::SourceFilesystem::Local(path.clone());
+        let filesystem = source::SourceFilesystem::local(path.clone());
         let held = TmpMountGuard::mount(&filesystem, ReadOnly).await.unwrap();
         database
             .mutate(|db| prepare_removal(db, &id))

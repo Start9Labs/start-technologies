@@ -6,7 +6,7 @@ use super::*;
 fn local_filesystem_uses_persisted_package_data_partition() {
     let id = BackupTargetId::new();
     let definition = SourceDefinition::new(SharedVolumeSource::Local, None);
-    let PreparedFilesystem::Local(path) = filesystem(&id, &definition) else {
+    let PreparedFilesystem::Local(LocalSubvolume(path)) = filesystem(&id, &definition) else {
         panic!("local filesystem")
     };
     assert!(path.starts_with(crate::PACKAGE_DATA));

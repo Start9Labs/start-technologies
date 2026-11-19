@@ -501,7 +501,7 @@ describe('generated effects RPC boundary', () => {
     { kind: 'unavailable', reason: 'sourceUnavailable' },
     { kind: 'unavailable', reason: 'timeout' },
   ])(
-    'preserves shared-volume mount outcome %j and original fields',
+    'delegates shared-volume mounting once and preserves outcome %j and original fields',
     async outcome => {
       const effects = makeEffects({ eventId: null })
       const options = Object.freeze({
