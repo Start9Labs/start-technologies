@@ -166,8 +166,8 @@ If StartWRT sits behind another router (for example an ISP router or gateway), c
 
 To check, look at **Assigned IP** under **IPv4** in [WAN Settings](wan.md), and check the upstream router's LAN subnet mask in its own settings. For an upstream `/24` (`255.255.255.0`), the first three numbers must match a profile's full subnet: `192.168.1.221` overlaps `192.168.1.0/24`, not `10.47.1.0/24`. The first two numbers of a profile's subnet come from StartWRT's **Network Block** in [LAN Settings](lan.md#ipv4), and the third is the profile's **Subnet**. If the upstream mask is not `/24`, compare the full address ranges instead. If any profile overlaps, do one of the following:
 
-- Change that profile's **Subnet** to an unused number outside the upstream LAN range, such as `10` when the upstream LAN is `192.168.1.0/24`. See [Editing a Profile](security-profiles.md#editing-a-profile).
-- Change StartWRT's **Network Block** in [LAN Settings](lan.md#ipv4) to a range outside the upstream LAN, such as `10.47` behind a `192.168.x.x` network. This moves every profile.
+- Change that profile's **Subnet** to an unused number outside the upstream LAN range, such as `10` when the upstream LAN is `192.168.1.0/24`. See [Editing a Profile](security-profiles.md#editing-a-profile). If that profile is **Admin**, which overlaps an upstream router at `192.168.0.1` by default, this also changes the router's own address, for example to `192.168.10.1`. Reconnect your device if needed, then open the web interface at the new address or at `router.lan`.
+- Change StartWRT's **Network Block** in [LAN Settings](lan.md#ipv4) to a range outside the upstream LAN, such as `10.47` behind a `192.168.x.x` network. This moves every profile, including the router's own address.
 - Change the other router's LAN address to a range StartWRT does not use.
 
 Changing a profile's subnet or the Network Block is blocked while affected devices have static IP reservations, so remove those first. If affected profiles have [Inbound VPN](inbound-vpn.md) clients, saving asks for confirmation to delete their VPN servers. Recreate those servers and import new client configurations afterward.
