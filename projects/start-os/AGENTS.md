@@ -152,6 +152,12 @@ make start-os-deb               # Debian package (start-os-squashfs for the squa
 
 `make start-core-ts-bindings` regenerates the TS bindings from the Rust types (see [Cross-layer changes](#cross-layer-changes)).
 
+#### Kernel backport packages
+
+Before changing or retiring the signed-kernel bridge, read
+[`build/image-recipe/kernel-backports/AGENTS.md`](build/image-recipe/kernel-backports/AGENTS.md).
+That directory owns its build rules, tests, configuration and removal boundary.
+
 #### Deploying to a device
 
 These targets push to a **live device** and are slow/destructive — be deliberate. For devices on the same network:
@@ -172,7 +178,7 @@ To deploy a **CI build** rather than a local one — no local compile, and the i
 | `start-os-update-from-gha REMOTE=start9@<ip> RUN_ID=<id\|url>` | A specific Actions run (e.g. an integration PR) |
 | `start-os-update-from-gha REMOTE=start9@<ip> BRANCH=<name>`    | That branch's latest successful build           |
 
-It reads the platform off the device, downloads that run's `<platform>.squashfs`, and runs the same checksummed upgrade as `start-os-update-squashfs`. Needs `gh` (authenticated), `b3sum`, and `jq`. Squashfs artifacts expire 14 days after the run. `scripts/update-from-gha.sh --help` documents the rest.
+It reads the platform off the device, downloads that run's `startos-*_<platform>.squashfs`, and runs the same checksummed upgrade as `start-os-update-squashfs`. Needs `gh` (authenticated), `b3sum`, and `jq`. Squashfs artifacts expire 14 days after the run. `scripts/update-from-gha.sh --help` documents the rest.
 
 For devices on a different network (uses [magic-wormhole](https://github.com/magic-wormhole/magic-wormhole)):
 

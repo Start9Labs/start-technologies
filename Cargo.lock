@@ -9269,6 +9269,7 @@ dependencies = [
  "qrcode",
  "r3bl_tui",
  "rand 0.10.3",
+ "rayon",
  "rcgen",
  "regex",
  "reqwest 0.12.28",

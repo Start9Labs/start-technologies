@@ -4,19 +4,25 @@ name: Tag and Release
   workflow_call:
     inputs:
       REFERENCE_REGISTRY:
-        description: Registry where published versions are permanent (used to check if a version is already taken)
+        description: Registry where published versions are permanent (used to check if a version is already taken). Defaults to the caller's REFERENCE_REGISTRY variable.
         type: string
-        required: true
+        default: ${{ vars.REFERENCE_REGISTRY }}
       FREE_DISK_SPACE:
         description: Free up disk space before building
         type: boolean
         default: false
       RELEASE_REGISTRY:
-        description: Test registry to publish to
+        description: Test registry to publish to. Defaults to the caller's RELEASE_REGISTRY variable.
         type: string
+        default: ${{ vars.RELEASE_REGISTRY }}
       S3_S9PKS_BASE_URL:
-        description: S3 base URL for package uploads
+        description: S3 base URL for package uploads. Defaults to the caller's S3_S9PKS_BASE_URL variable.
         type: string
+        default: ${{ vars.S3_S9PKS_BASE_URL }}
+      REGISTRY_PROXY:
+        description: Proxy URL start-cli uses to reach the registries, e.g. socks5h://proxy.example:9050 for .onion registries. The proxy must already be reachable from the runner. Defaults to the caller's REGISTRY_PROXY variable.
+        type: string
+        default: ${{ vars.REGISTRY_PROXY }}
     secrets:
       DEV_KEY:
         description: Developer signing key
@@ -40,6 +46,10 @@ jobs:
         uses: https://github.com/actions/checkout@v6
       - name: Install start-cli
         uses: https://github.com/Start9Labs/start-technologies/.github/actions/install-start-cli@master
+      - name: Configure registry proxy
+        uses: https://github.com/Start9Labs/start-technologies/.github/actions/configure-registry-proxy@master
+        with:
+          proxy: ${{ inputs.REGISTRY_PROXY }}
       - name: Extract package ID and version
         id: extract
         uses: https://github.com/Start9Labs/start-technologies/.github/actions/extract-version@master
@@ -49,6 +59,10 @@ jobs:
           PACKAGE_ID="${{ steps.extract.outputs.package_id }}"
           VERSION="${{ steps.extract.outputs.version }}"
           REFERENCE_REGISTRY="${{ inputs.REFERENCE_REGISTRY }}"
+          if [ -z "$REFERENCE_REGISTRY" ]; then
+            echo "::error::No reference registry: set the REFERENCE_REGISTRY variable or pass the input."
+            exit 1
+          fi
 
           # hello-world is the canonical package scaffold, not a released package.
           # Skipping it here lets every caller (including hello-world's own) use the
@@ -94,6 +108,7 @@ jobs:
       FREE_DISK_SPACE: ${{ inputs.FREE_DISK_SPACE }}
       RELEASE_REGISTRY: ${{ inputs.RELEASE_REGISTRY }}
       S3_S9PKS_BASE_URL: ${{ inputs.S3_S9PKS_BASE_URL }}
+      REGISTRY_PROXY: ${{ inputs.REGISTRY_PROXY }}
     secrets:
       DEV_KEY: ${{ secrets.DEV_KEY }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}

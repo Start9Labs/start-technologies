@@ -196,6 +196,7 @@ proptest-derive = "0.7.0"
 qrcode = "0.14.1"
 r3bl_tui = "0.7.6"
 rand = "0.10.1"
+rayon = "1.12.0"
 rcgen = { version = "0.14", default-features = false, features = [
   "pem",
   "ring",
@@ -279,6 +280,7 @@ clap_mangen = "0.2.33"
 librqbit-bencode = { git = "https://github.com/Start9Labs/rqbit", rev = "233e1a180ed46861969a11e7852afdb1fd7595c4" }
 tempfile = "3.14.0"
 tokio = { version = "1.38.1", features = ["test-util"] }
+zbus = { version = "5.1.1", features = ["p2p"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 inotify = "0.11.0"

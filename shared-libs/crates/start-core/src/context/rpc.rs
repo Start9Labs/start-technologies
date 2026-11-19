@@ -77,6 +77,7 @@ pub struct RpcContextSeed {
     pub net_controller: Arc<NetController>,
     pub s9pk_arch: Option<&'static str>,
     pub services: ServiceMap,
+    pub(crate) shared_volume_access: crate::shared_volumes::access::SharedVolumeAccess,
     pub cancellable_installs: SyncMutex<BTreeMap<PackageId, oneshot::Sender<()>>>,
     pub installing_s9pks: SyncMutex<BTreeMap<PackageId, S9pk<DynFileSource>>>,
     pub metrics_cache: Watch<Option<crate::system::Metrics>>,
@@ -96,6 +97,16 @@ impl Drop for RpcContextSeed {
     fn drop(&mut self) {
         tracing::info!("{}", t!("context.rpc.rpc-context-dropped"));
     }
+}
+
+async fn close_after_teardown(
+    teardown: impl Future<Output = Result<(), Error>>,
+    is_closed: &AtomicBool,
+    closed: &watch::Sender<bool>,
+) {
+    teardown.await.log_err();
+    is_closed.store(true, Ordering::SeqCst);
+    closed.send_replace(true);
 }
 
 pub struct Hardware {
@@ -535,6 +546,7 @@ impl RpcContext {
                 Some(crate::ARCH)
             },
             services,
+            shared_volume_access: Default::default(),
             cancellable_installs: SyncMutex::new(BTreeMap::new()),
             installing_s9pks: SyncMutex::new(BTreeMap::new()),
             metrics_cache,
@@ -664,20 +676,19 @@ impl RpcContext {
     }
 
     #[instrument(skip_all)]
-    pub async fn shutdown(self) -> Result<(), Error> {
+    pub async fn shutdown(self) {
         self.torrents.shutdown();
-        self.crons.mutate(BTreeMap::clear);
-        self.services.shutdown_all().await?;
-        self.is_closed.store(true, Ordering::SeqCst);
-        self.closed.send_replace(true);
+        self.crons.mutate(|c| std::mem::take(c));
+        close_after_teardown(
+            self.services.shutdown_all(),
+            &self.0.is_closed,
+            &self.0.closed,
+        )
+        .await;
         tracing::info!("{}", t!("context.rpc.rpc-context-shutdown"));
-        Ok(())
     }
 
-    /// Resolves once graceful teardown (`shutdown`) has completed. Used by the
-    /// `wait` path of the server shutdown/restart RPC so a caller can block
-    /// until containers are stopped (it won't outlive the webserver teardown
-    /// that immediately follows).
+    /// Resolves once service teardown has finished, failed or not.
     pub async fn wait_closed(&self) {
         let mut rx = self.0.closed.subscribe();
         let _ = rx.wait_for(|closed| *closed).await;
@@ -757,6 +768,9 @@ impl RpcContext {
             &mut optimize_storage,
         )
         .await?;
+        for path in crate::shared_volumes::local_volume_paths(&peek)? {
+            crate::shared_volumes::source::migrate_local_ownership(&path).await?;
+        }
         optimize_storage.complete();
 
         init_services.start();
@@ -889,6 +903,22 @@ mod tests {
                 .build()
                 .unwrap(),
         }
+    }
+
+    #[tokio::test]
+    async fn failed_teardown_still_closes_the_context() {
+        let is_closed = AtomicBool::new(false);
+        let closed = watch::Sender::new(false);
+
+        close_after_teardown(
+            async { Err(Error::new(eyre!("teardown failed"), ErrorKind::Unknown)) },
+            &is_closed,
+            &closed,
+        )
+        .await;
+
+        assert!(is_closed.load(Ordering::SeqCst));
+        assert!(*closed.borrow());
     }
 
     #[tokio::test]

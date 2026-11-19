@@ -195,7 +195,6 @@ cmd_pull() {
     mkdir -p "$(release_dir)"
     printf image > "$(release_dir)/image.iso"
 }
-cmd_push_gz() { :; }
 cmd_sign() {
     if [ -n "\${REUSED_OS_RELEASE:-}" ]; then
         (eval "$production_sign"; cmd_sign)
@@ -338,7 +337,6 @@ appendFileSync(process.argv[2], '\\nFinal release edit.\\n')
 eval "$production_sign"
 gpg() { echo 'unexpected signing-key access' >&2; return 91; }
 cmd_pull() { echo 'unexpected image download' >&2; return 92; }
-cmd_push_gz() { echo 'unexpected image upload' >&2; return 93; }
 `,
     'cmd_release',
   )
@@ -376,7 +374,6 @@ test('a repeated same-commit prerelease copies the prior signatures and checksum
 eval "$production_sign"
 gpg() { return 91; }
 cmd_pull() { return 92; }
-cmd_push_gz() { return 93; }
 `,
   )
   const second = data(`start-os_v${VERSION}-rc.2.json`)
@@ -392,7 +389,6 @@ test('a failed signature copy resumes without downloading images or signing agai
 eval "$production_sign"
 gpg() { return 91; }
 cmd_pull() { return 92; }
-cmd_push_gz() { return 93; }
 `
   release(false, reuseOnly, 'cmd_release')
   const stable = data(`start-os_v${VERSION}.json`)
