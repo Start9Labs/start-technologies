@@ -66,6 +66,21 @@ where
     result
 }
 
+/// Runtime RPCs remain unavailable until shutdown handling and fallible startup are ready.
+async fn activate_runtime<A, T>(
+    server: &mut WebServer<A>,
+    startup: impl Future<Output = Result<T, Error>>,
+    router: impl FnOnce() -> axum::Router,
+) -> Result<T, Error>
+where
+    A: Accept + Send + Sync + 'static,
+    for<'a> A::Metadata: visit_rs::Visit<ExtensionVisitor<'a>> + Send + Sync + 'static,
+{
+    let runtime = startup.await?;
+    server.serve_router(router());
+    Ok(runtime)
+}
+
 #[instrument(skip_all)]
 async fn inner_main(
     server: &mut WebServer<WildcardListener>,
@@ -85,7 +100,6 @@ async fn inner_main(
         };
         tokio::fs::write("/run/startos/initialized", "").await?;
 
-        server.serve_ui_for(ctx.clone());
         LOGGER.set_logfile(None);
         handle.complete();
 
@@ -120,11 +134,7 @@ async fn inner_main(
         init_ctx
             .complete_and_retire(result.as_ref().map(|_| ()).map_err(Error::clone_output))
             .await;
-        let ctx = result?;
-
-        server.serve_ui_for(ctx.clone());
-
-        ctx
+        result?
     };
 
     let requests = rpc_ctx
@@ -132,37 +142,46 @@ async fn inner_main(
         .replace(None)
         .expect("startd owns the shutdown receiver");
     let result = async {
-        crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.clone())).await?;
+        let (sig_handler, metrics_task) = activate_runtime(
+            server,
+            async {
+                crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.clone()))
+                    .await?;
 
-        let shutdown_send = rpc_ctx.shutdown.clone();
-        let sig_handler = NonDetachingJoinHandle::from(tokio::spawn(async move {
-            use tokio::signal::unix::SignalKind;
-            futures::future::select_all(
-                [
-                    SignalKind::interrupt(),
-                    SignalKind::quit(),
-                    SignalKind::terminate(),
-                ]
-                .iter()
-                .map(|s| {
-                    async move {
-                        signal(*s)
-                            .unwrap_or_else(|_| panic!("register {:?} handler", s))
-                            .recv()
-                            .await
-                    }
-                    .boxed()
-                }),
-            )
-            .await;
-            crate::shutdown::send_shutdown(&shutdown_send, None).log_err();
-        }));
+                let shutdown_send = rpc_ctx.shutdown.clone();
+                let sig_handler = NonDetachingJoinHandle::from(tokio::spawn(async move {
+                    use tokio::signal::unix::SignalKind;
+                    futures::future::select_all(
+                        [
+                            SignalKind::interrupt(),
+                            SignalKind::quit(),
+                            SignalKind::terminate(),
+                        ]
+                        .iter()
+                        .map(|s| {
+                            async move {
+                                signal(*s)
+                                    .unwrap_or_else(|_| panic!("register {:?} handler", s))
+                                    .recv()
+                                    .await
+                            }
+                            .boxed()
+                        }),
+                    )
+                    .await;
+                    crate::shutdown::send_shutdown(&shutdown_send, None).log_err();
+                }));
 
-        let metrics_ctx = rpc_ctx.clone();
-        let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(async move {
-            launch_metrics_task(&metrics_ctx.metrics_cache, &metrics_ctx.db).await
-        }));
+                let metrics_ctx = rpc_ctx.clone();
+                let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(async move {
+                    launch_metrics_task(&metrics_ctx.metrics_cache, &metrics_ctx.db).await
+                }));
 
+                Ok((sig_handler, metrics_task))
+            },
+            || crate::net::static_server::ui_router(rpc_ctx.clone()),
+        )
+        .await?;
         let result = wait_for_shutdown(requests, metrics_task).await;
         let _ = sig_handler.wait_for_abort().await;
         result
@@ -273,6 +292,121 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
 mod tests {
     use super::*;
     use crate::util::future::DropSignaling;
+
+    #[tokio::test]
+    async fn startup_power_requests_are_rejected_until_runtime_activation_succeeds() {
+        use rpc_toolkit::{Empty, HandlerArgs, HandlerExt, ParentHandler, Server, from_fn_async};
+
+        use crate::util::sync::{SyncMutex, Watch};
+
+        struct RuntimeContext;
+        impl rpc_toolkit::Context for RuntimeContext {}
+
+        for failed in [false, true] {
+            let dns = Arc::new(DnsController::new(Watch::new(Default::default())));
+            let init = InitContext::init(
+                &ServerConfig::default(),
+                dns,
+                Some(
+                    crate::db::model::private::generate_server_identity_key()
+                        .0
+                        .into(),
+                ),
+            )
+            .await
+            .unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/rpc/v1", listener.local_addr().unwrap());
+            let mut server = WebServer::new(
+                Acceptor::new(listener),
+                crate::net::static_server::ui_router(init),
+            );
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap();
+            let (send, requests) = oneshot::channel();
+            let send = Arc::new(SyncMutex::new((Some(send), false)));
+            let (release, ready) = oneshot::channel();
+            let mut activation = Box::pin(activate_runtime(
+                &mut server,
+                async move {
+                    ready.await.unwrap();
+                    if failed {
+                        Err(Error::new(eyre!("startup failed"), ErrorKind::Filesystem))
+                    } else {
+                        Ok(requests)
+                    }
+                },
+                move || {
+                    let api = ParentHandler::<RuntimeContext>::new().subcommand(
+                        "server",
+                        ParentHandler::<RuntimeContext>::new().subcommand(
+                            "restart",
+                            from_fn_async(move |_: HandlerArgs<RuntimeContext, Empty, Empty>| {
+                                let send = send.clone();
+                                async move {
+                                    crate::shutdown::send_shutdown(
+                                        &send,
+                                        Some(Shutdown {
+                                            disk_guid: None,
+                                            restart: true,
+                                        }),
+                                    )
+                                }
+                            })
+                            .no_cli()
+                            .no_ts(),
+                        ),
+                    );
+                    axum::Router::new().route(
+                        "/rpc/v1",
+                        axum::routing::post(
+                            Server::new(|| async { Ok(RuntimeContext) }, api).for_http(),
+                        ),
+                    )
+                },
+            ));
+            assert!(futures::poll!(&mut activation).is_pending());
+            for method in ["server.shutdown", "server.restart"] {
+                let response: serde_json::Value = client
+                    .post(&url)
+                    .json(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":method,"params":{}}))
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                assert_eq!(response["error"]["code"], -32601, "{response}");
+            }
+            release.send(()).unwrap();
+            let outcome = activation.await;
+            if failed {
+                assert_eq!(outcome.unwrap_err().kind, ErrorKind::Filesystem);
+                let response: serde_json::Value = client.post(&url)
+                    .json(&serde_json::json!({"jsonrpc":"2.0","id":2,"method":"server.restart","params":{}}))
+                    .send().await.unwrap().json().await.unwrap();
+                assert_eq!(response["error"]["code"], -32601, "{response}");
+            } else {
+                let mut requests = outcome.unwrap();
+                assert!(matches!(
+                    requests.try_recv(),
+                    Err(oneshot::error::TryRecvError::Empty)
+                ));
+                let response: serde_json::Value = client.post(&url)
+                    .json(&serde_json::json!({"jsonrpc":"2.0","id":2,"method":"server.restart","params":{}}))
+                    .send().await.unwrap().json().await.unwrap();
+                assert_eq!(
+                    response.get("result"),
+                    Some(&serde_json::Value::Null),
+                    "{response}"
+                );
+                assert!(requests.await.unwrap().unwrap().restart);
+            }
+            server.shutdown().await;
+        }
+    }
 
     #[tokio::test]
     async fn shutdown_does_not_wait_for_metrics_to_observe_the_request() {
