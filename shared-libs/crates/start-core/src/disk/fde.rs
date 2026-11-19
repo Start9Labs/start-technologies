@@ -181,6 +181,15 @@ pub struct LuksPool {
 }
 
 impl LuksPool {
+    pub(crate) fn system(guid: &str) -> Result<Self, Error> {
+        Self::new(
+            guid,
+            Path::new(HEADER_BACKUP_DIR)
+                .parent()
+                .expect("header backups have a configuration parent"),
+        )
+    }
+
     pub fn new(guid: &str, config_dir: impl AsRef<Path>) -> Result<Self, Error> {
         if !(guid.starts_with("STARTOS_") || guid.starts_with("EMBASSY_"))
             || guid.ends_with("_UNENC")
@@ -1413,6 +1422,12 @@ esac
             }
             self.assert_clean();
         }
+    }
+
+    #[test]
+    fn running_pool_uses_the_canonical_header_backup_directory() {
+        let pool = LuksPool::system(GUID).unwrap();
+        assert_eq!(pool.config_dir.join("luks"), Path::new(HEADER_BACKUP_DIR));
     }
 
     #[test]

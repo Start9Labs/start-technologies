@@ -198,7 +198,7 @@ pub async fn begin(
         let snapshot = ctx.db.peek().await;
         crate::auth::check_password(&snapshot.as_private().as_password().de()?, &password)?;
         crate::disk::fde::validate_new_password(&password)?;
-        let pool = crate::disk::fde::LuksPool::new(&ctx.disk_guid, "/media/startos/config")?;
+        let pool = crate::disk::fde::LuksPool::system(&ctx.disk_guid)?;
         require_hardware(
             crate::util::mok::is_secure_boot_enabled().await,
             crate::util::io::maybe_read_file_to_string("/sys/class/tpm/tpm0/tpm_version_major")

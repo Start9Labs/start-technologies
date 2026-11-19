@@ -195,7 +195,7 @@ async fn open_luks(
     credential: super::fde::KeyCredential<'_>,
     read_only: bool,
 ) -> Result<PathBuf, Error> {
-    super::fde::LuksPool::new(guid, super::fde::HEADER_BACKUP_DIR)?
+    super::fde::LuksPool::system(guid)?
         .open_volume(mapper_name, credential, read_only)
         .await
 }
@@ -666,7 +666,7 @@ pub(crate) async fn import_with_keys(
     repair: RepairStrategy,
     progress: Option<&FullProgressTracker>,
 ) -> Result<RequiresReboot, Error> {
-    super::fde::LuksPool::new(guid, super::fde::HEADER_BACKUP_DIR)?;
+    super::fde::LuksPool::system(guid)?;
     activate_pool(guid).await?;
     let mounted = mounted_pool_filesystems(guid, datadir)?;
     if mounted.len() == POOL_FILESYSTEMS.len() {

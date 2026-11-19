@@ -220,7 +220,7 @@ async fn unlock(
             if completion.is_none() {
                 return Ok(None);
             }
-            let pool = LuksPool::new(&context.disk_guid, crate::disk::fde::HEADER_BACKUP_DIR)?;
+            let pool = LuksPool::system(&context.disk_guid)?;
             let memory = pool.protect_secret_handling()?;
             let (_, keys) = pool.capture_unlock_keys(&password).await?;
             drop(password);
@@ -285,7 +285,7 @@ async fn import(
 }
 
 pub(crate) async fn require_cached_unlock(guid: &str) -> Result<(), Error> {
-    let pool = LuksPool::new(guid, crate::disk::fde::HEADER_BACKUP_DIR)?;
+    let pool = LuksPool::system(guid)?;
     let memory = pool.protect_secret_handling()?;
     if pool.cached_unlock_keys().await?.is_none() {
         return Err(invalid_handoff());
@@ -300,7 +300,7 @@ pub(crate) async fn initialize(
 ) -> Result<Result<(RpcContext, FullProgressTracker), Shutdown>, Error> {
     let mut handoff = super::initramfs::load_handoff().await?;
     let guid = handoff.credentials.disk_guid.clone();
-    let pool = LuksPool::new(&guid, crate::disk::fde::HEADER_BACKUP_DIR)?;
+    let pool = LuksPool::system(&guid)?;
     let memory = pool.protect_secret_handling()?;
     crate::disk::main::activate_pool(&guid).await?;
     let init_context = InitContext::init(

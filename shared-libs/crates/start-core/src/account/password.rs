@@ -115,7 +115,7 @@ async fn change_password(ctx: &RpcContext, password: &str) -> Result<(), Error> 
         )
         .await;
     };
-    let pool = LuksPool::new(&ctx.disk_guid, "/media/startos/config")?;
+    let pool = LuksPool::system(&ctx.disk_guid)?;
     let memory = pool.protect_secret_handling()?;
     let keys = pool.cached_unlock_keys().await?.ok_or_else(|| {
         Error::new(

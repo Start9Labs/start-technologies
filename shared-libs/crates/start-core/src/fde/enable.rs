@@ -58,8 +58,8 @@ fn set_setup(db: &mut DatabaseModel, setup: &AdministratorSetup) -> Result<(), E
         })
 }
 
-/// The caller authenticates the current password and owns `password_changes` without swap.
-/// Native firmware enrollment precedes this setup; DEFAULT retirement is a separate activation step.
+/// Re-authenticates the current password; the caller holds `password_changes`.
+/// The caller verifies firmware enrollment before administrator installation.
 pub(crate) async fn prepare_administrator(
     db: &TypedPatchDb<Database>,
     account: &SyncRwLock<AccountInfo>,
@@ -134,7 +134,8 @@ pub(crate) async fn prepare_administrator(
     }
 }
 
-/// Retains pending authority during startup; protected boots require existing unlock keys.
+/// Restores missing volatile unlock keys from persisted pending-enable DEFAULT authority.
+/// Protected boots require retained unlock keys.
 pub(crate) async fn restore_pending_keys(
     db: &TypedPatchDb<Database>,
     guid: &str,
@@ -146,7 +147,7 @@ pub(crate) async fn restore_pending_keys(
     let Some(setup) = enrollment.administrator else {
         return Ok(());
     };
-    let pool = LuksPool::new(guid, "/media/startos/config")?;
+    let pool = LuksPool::system(guid)?;
     let memory = pool.protect_secret_handling()?;
     pending_keys(&pool, &setup).await?;
     memory.check()
