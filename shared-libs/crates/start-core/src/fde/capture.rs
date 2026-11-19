@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use futures::StreamExt;
-use nix::mount::{MsFlags, mount};
 use nix::sys::memfd::{MFdFlags, memfd_create};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -114,7 +113,13 @@ impl ReadEpoch {
                 .filesystem_type()
                 != nix::sys::statfs::BTRFS_SUPER_MAGIC
             {
-                return Err(invalid_source());
+                return Err(Error::new(
+                    eyre!(t!(
+                        "fde.capture.unsupported-filesystem",
+                        path = path.display()
+                    )),
+                    ErrorKind::InvalidRequest,
+                ));
             }
             if devices.insert(crate::util::io::file_identity(path).await?.0) {
                 frozen_filesystems.push(path.to_owned());
@@ -159,9 +164,9 @@ impl ReadEpoch {
         })
     }
 
-    fn enter(&self) -> Result<(), Error> {
+    async fn enter(&self) -> Result<(), Error> {
         for path in &self.readonly_filesystems {
-            remount(path, true)?;
+            remount(path, true).await?;
         }
         for path in &self.frozen_filesystems {
             frozen(path, true)?;
@@ -169,21 +174,15 @@ impl ReadEpoch {
         Ok(())
     }
 
-    fn release(&self) -> Result<(), Error> {
+    async fn release(&self) -> Result<(), Error> {
         let mut first = None;
-        for result in self
-            .frozen_filesystems
-            .iter()
-            .rev()
-            .map(|path| frozen(path, false))
-            .chain(
-                self.readonly_filesystems
-                    .iter()
-                    .rev()
-                    .map(|path| remount(path, false)),
-            )
-        {
-            if let Err(error) = result {
+        for path in self.frozen_filesystems.iter().rev() {
+            if let Err(error) = frozen(path, false) {
+                first.get_or_insert(error);
+            }
+        }
+        for path in self.readonly_filesystems.iter().rev() {
+            if let Err(error) = remount(path, false).await {
                 first.get_or_insert(error);
             }
         }
@@ -191,14 +190,59 @@ impl ReadEpoch {
     }
 }
 
-fn remount(path: &Path, readonly: bool) -> Result<(), Error> {
-    let flags = MsFlags::MS_REMOUNT
-        | if readonly {
-            MsFlags::MS_RDONLY
-        } else {
-            MsFlags::empty()
-        };
-    mount(None::<&str>, path, None::<&str>, flags, None::<&str>).with_kind(ErrorKind::Filesystem)
+pub(super) async fn check_eligibility() -> Result<(), Error> {
+    ReadEpoch::current().await.map(|_| ())
+}
+
+/// Preserves native mount options while changing filesystem writability.
+async fn remount(path: &Path, readonly: bool) -> Result<(), Error> {
+    let flags = invoke_mount_tool(
+        Command::new("/usr/bin/findmnt")
+            .args([
+                "--kernel",
+                "--tab-file",
+                "/proc/self/mountinfo",
+                "--first-only",
+                "--direction=backward",
+                "--noheadings",
+                "--vfs-all",
+                "--output",
+                "VFS-OPTIONS",
+                "--mountpoint",
+            ])
+            .arg(path),
+    )
+    .await?;
+    let flags = std::str::from_utf8(&flags)
+        .with_kind(ErrorKind::Filesystem)?
+        .trim_end();
+    let mode = if readonly { "ro" } else { "rw" };
+    invoke_mount_tool(
+        Command::new("/usr/bin/mount")
+            .args([
+                "--internal-only",
+                "--no-mtab",
+                "--options-source=mtab",
+                "--options-mode=ignore",
+                "--options",
+            ])
+            .arg(format!("{flags},remount,{mode}"))
+            .arg("--target")
+            .arg(path),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn invoke_mount_tool(command: &mut Command) -> Result<Vec<u8>, Error> {
+    command
+        .env_clear()
+        .env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
+        .env("LC_ALL", "C")
+        .env("LIBMOUNT_MTAB", "/proc/self/mountinfo")
+        .timeout(Some(std::time::Duration::from_secs(10)))
+        .invoke(ErrorKind::Filesystem)
+        .await
 }
 
 fn frozen(path: &Path, freeze: bool) -> Result<(), Error> {
@@ -259,13 +303,13 @@ pub(crate) async fn run(path: &Path) -> Result<(), Error> {
     let memory = ProcessSecretMemory::protect()?;
     let epoch = request(path).await?;
     let scratch = MountGuard::mount(&PrivateTmpfs::new(), TmpDir::BASE, ReadWrite).await?;
-    epoch.enter()?;
+    epoch.enter().await?;
     let result = async {
         let base = disposable_view(&epoch.base_root).await?;
         let data = disposable_view(&epoch.data_root).await?;
         let capture = capture_configuration(epoch.snapshot().await?, base, data).await?;
         let profiles = crate::net::wifi::read_network_profiles(&epoch.network_profiles).await?;
-        epoch.release()?;
+        epoch.release().await?;
         let exported = async {
             let mut archive = tokio_tar::Builder::new(tokio::fs::File::from_std(
                 nix::unistd::dup(std::io::stdout())
@@ -309,13 +353,12 @@ pub(crate) async fn stop(path: &Path, unit: &str) -> Result<(), Error> {
     } else {
         Ok(Vec::new())
     };
-    let restored = epoch.release();
     killed?;
-    restored
+    epoch.release().await
 }
 
 pub(crate) async fn release(path: &Path) -> Result<(), Error> {
-    request(path).await?.release()?;
+    request(path).await?.release().await?;
     crate::util::io::delete_file(path).await
 }
 
@@ -503,24 +546,48 @@ async fn capture_in_unit(
         .capture(false)
         .invoke(ErrorKind::Filesystem)
         .await;
-    if result.is_err() {
-        Command::new("/usr/bin/systemctl")
-            .arg("stop")
-            .arg(unit)
-            .invoke(ErrorKind::Filesystem)
-            .await
-            .log_err();
-        if stopped_unit(unit).await? && tokio::fs::try_exists(&path).await? {
-            release(&path).await?;
-        }
-    }
+    restore_after_unit(epoch, &path, unit).await;
     result?;
     receive(archive).await
+}
+
+/// The caller holds its database pause until restoration succeeds.
+async fn restore_after_unit(epoch: &ReadEpoch, path: &Path, unit: &str) {
+    let mut reported = false;
+    loop {
+        let restored = async {
+            if !stopped_unit(unit).await? {
+                Command::new("/usr/bin/systemctl")
+                    .arg("stop")
+                    .arg(unit)
+                    .timeout(Some(std::time::Duration::from_secs(10)))
+                    .invoke(ErrorKind::Filesystem)
+                    .await?;
+                if !stopped_unit(unit).await? {
+                    return Err(invalid_source());
+                }
+            }
+            epoch.release().await?;
+            crate::util::io::delete_file(path).await
+        }
+        .await;
+        match restored {
+            Ok(()) => return,
+            Err(error) => {
+                if !reported {
+                    tracing::error!("Configuration capture cleanup remains incomplete: {error}");
+                    reported = true;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
+    }
 }
 
 async fn stopped_unit(unit: &str) -> Result<bool, Error> {
     let load = Command::new("/usr/bin/systemctl")
         .args(["show", "--value", "--property=LoadState", unit])
+        .timeout(Some(std::time::Duration::from_secs(10)))
         .invoke(ErrorKind::Filesystem)
         .await?;
     if load == b"not-found\n" {
@@ -528,6 +595,7 @@ async fn stopped_unit(unit: &str) -> Result<bool, Error> {
     }
     let active = Command::new("/usr/bin/systemctl")
         .args(["show", "--value", "--property=ActiveState", unit])
+        .timeout(Some(std::time::Duration::from_secs(10)))
         .invoke(ErrorKind::Filesystem)
         .await?;
     Ok(active == b"inactive\n" || active == b"failed\n")

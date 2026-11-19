@@ -29,12 +29,12 @@ cleanup() {
         systemctl stop "$unit" 2>/dev/null || true
     fi
     if [ -n "$fixture" ]; then
-        for path in working ram base volume; do
+        for path in volume/alias working ram base volume; do
             if mountpoint -q "$fixture/$path"; then
                 umount "$fixture/$path" || result=1
             fi
         done
-        for path in working ram base volume; do
+        for path in volume/alias working ram base volume; do
             if mountpoint -q "$fixture/$path"; then
                 echo "Fixture mount remains: $fixture/$path" >&2
                 exit 1
@@ -50,6 +50,8 @@ cp -- "$startbox" "$root/startbox"
 chmod 755 "$root/startbox"
 if [ "$#" = 0 ]; then
     set -- \
+        fde::capture::tests::lifecycle::native_remount_preserves_security_flags_and_raw_alias_exclusion \
+        fde::capture::tests::lifecycle::native_cleanup_retry_holds_mutation_admission_and_keeps_cached_reads_live \
         fde::capture::tests::native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_thaw \
         fde::capture::tests::native_profile_capture_failure_thaws_before_returning_without_projection \
         fde::capture::tests::native_capture_helper_death_restores_owned_sources_and_preserves_readonly_intent \

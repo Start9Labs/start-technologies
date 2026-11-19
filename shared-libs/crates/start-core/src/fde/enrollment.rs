@@ -207,6 +207,8 @@ pub async fn begin(
                 .await?
                 .as_deref(),
         )?;
+        #[cfg(target_os = "linux")]
+        super::capture::check_eligibility().await?;
         let zram_was_active = crate::system::zram_active().await?;
         let result = async {
             crate::system::disable_zram().await?;

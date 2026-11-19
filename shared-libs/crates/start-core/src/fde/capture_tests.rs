@@ -7,6 +7,9 @@ use inotify::{Inotify, WatchMask};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 use super::*;
+
+#[path = "capture_lifecycle_tests.rs"]
+mod lifecycle;
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
 use crate::disk::mount::guard::GenericMountGuard;
 use crate::os_overlay::OVERLAY_FILE;
@@ -491,8 +494,8 @@ async fn native_profile_capture_failure_thaws_before_returning_without_projectio
 #[ignore = "requires exclusive managed guest, real PID1/Btrfs/loop/overlay privileges, genuine FDE_SOURCE_IMAGE and built FDE_CAPTURE_EXECUTABLE; never on build host"]
 async fn native_capture_helper_death_restores_owned_sources_and_preserves_readonly_intent() {
     let fixture = Fixture::new().await;
-    remount(fixture.working.path(), true).unwrap();
-    remount(fixture.ram.path(), true).unwrap();
+    remount(fixture.working.path(), true).await.unwrap();
+    remount(fixture.ram.path(), true).await.unwrap();
     let epoch = fixture.epoch().await;
     assert!(epoch.readonly_filesystems.is_empty());
     let (gate, mut events) = fixture.gate().await;
