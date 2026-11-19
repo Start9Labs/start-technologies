@@ -16,6 +16,7 @@
 //! Callers exclude private credentials from public configuration images through
 //! `fde::private_config::ProjectedConfig` before signing.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -88,6 +89,7 @@ pub(crate) async fn admit_image_space(
     Ok(())
 }
 
+pub const ROOTFS_FILE: &str = "rootfs.squashfs";
 pub const OVERLAY_FILE: &str = "overlay.squashfs";
 pub const MANIFEST_FILE: &str = "manifest.bin";
 pub const SIGNATURE_FILE: &str = "manifest.sig";
@@ -589,19 +591,19 @@ pub(crate) async fn read_manifest(path: &Path, key: &PKeyRef<Public>) -> Result<
 
 async fn verify_generation(
     path: &Path,
-    rootfs: &Path,
     rootfs_sha256: &[u8; 32],
     key: &PKeyRef<Public>,
 ) -> Result<Manifest, Error> {
     let manifest = read_manifest(path, key).await?;
     if &manifest.rootfs_sha256 != rootfs_sha256
+        || manifest.rootfs_sha256 != digest_file(&path.join(ROOTFS_FILE)).await?
         || manifest.overlay_sha256 != digest_file(&path.join(OVERLAY_FILE)).await?
     {
         return Err(invalid_signature());
     }
     manifest
         .rootfs_verity
-        .verify(rootfs, &path.join(ROOTFS_VERITY_FILE))
+        .verify(&path.join(ROOTFS_FILE), &path.join(ROOTFS_VERITY_FILE))
         .await?;
     manifest
         .overlay_verity
@@ -610,7 +612,9 @@ async fn verify_generation(
     Ok(manifest)
 }
 
-/// A hidden, unpublished generation. Abandonment leaves it invisible to selection.
+/// A hidden, unpublished generation with its own rootfs bytes.
+/// Source replacement or deletion cannot change the retained image.
+/// Abandonment leaves it invisible to selection.
 #[must_use]
 pub struct PreparedGeneration {
     staging: PathBuf,
@@ -674,14 +678,28 @@ impl PreparedGeneration {
             .await
             .with_kind(ErrorKind::Filesystem)?;
         let result = async {
+            drop(regular_file(rootfs).await?);
+            crate::util::io::copy_file(rootfs, staging.join(ROOTFS_FILE)).await?;
+            tokio::fs::set_permissions(
+                staging.join(ROOTFS_FILE),
+                std::fs::Permissions::from_mode(0o600),
+            )
+            .await?;
+            regular_file(&staging.join(ROOTFS_FILE))
+                .await?
+                .sync_all()
+                .await?;
             let mut overlay = create_file_mod(staging.join(OVERLAY_FILE), 0o600).await?;
             snapshot.serialize(&mut overlay).await?;
             overlay.sync_all().await?;
             let manifest = Manifest {
-                rootfs_sha256: digest_file(rootfs).await?,
+                rootfs_sha256: digest_file(&staging.join(ROOTFS_FILE)).await?,
                 overlay_sha256: digest_file(&staging.join(OVERLAY_FILE)).await?,
-                rootfs_verity: VerityImage::format(rootfs, &staging.join(ROOTFS_VERITY_FILE))
-                    .await?,
+                rootfs_verity: VerityImage::format(
+                    &staging.join(ROOTFS_FILE),
+                    &staging.join(ROOTFS_VERITY_FILE),
+                )
+                .await?,
                 overlay_verity: VerityImage::format(
                     &staging.join(OVERLAY_FILE),
                     &staging.join(OVERLAY_VERITY_FILE),
@@ -757,7 +775,6 @@ impl PreparedGeneration {
     pub async fn publish(self) -> Result<PathBuf, Error> {
         verify_generation(
             &self.staging,
-            &self.rootfs,
             &digest_file(&self.rootfs).await?,
             &self.public_key,
         )
@@ -818,9 +835,9 @@ fn is_generation(name: &std::ffi::OsStr) -> bool {
     has_generation_id(name, GENERATION_PREFIX)
 }
 
-/// Every published overlay is a retention input, regardless of boot eligibility.
+/// Every published rootfs and overlay is a retention input, regardless of boot eligibility.
 /// Requires stable paths; unknown entries and invalid directory/file types reject the set.
-pub(crate) async fn published_overlays(store: &Path) -> Result<Vec<PathBuf>, Error> {
+pub(crate) async fn published_images(store: &Path) -> Result<Vec<PathBuf>, Error> {
     let mut entries = read_generation_directory(store).await?;
     let mut images = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
@@ -828,9 +845,11 @@ pub(crate) async fn published_overlays(store: &Path) -> Result<Vec<PathBuf>, Err
             return Err(invalid_signature());
         }
         drop(read_generation_directory(&entry.path()).await?);
-        let image = entry.path().join(OVERLAY_FILE);
-        regular_file(&image).await?;
-        images.push(image);
+        for file in [ROOTFS_FILE, OVERLAY_FILE] {
+            let image = entry.path().join(file);
+            drop(regular_file(&image).await?);
+            images.push(image);
+        }
     }
     images.sort();
     Ok(images)
@@ -933,7 +952,7 @@ pub async fn verified_generations(
             continue;
         }
         let path = entry.path();
-        let Ok(manifest) = verify_generation(&path, rootfs, &rootfs_sha256, key).await else {
+        let Ok(manifest) = verify_generation(&path, &rootfs_sha256, key).await else {
             continue;
         };
         let timestamp = entry.metadata().await?.modified()?;
@@ -979,6 +998,9 @@ mod reclamation_tests;
 #[cfg(test)]
 #[path = "os_overlay/retention_tests.rs"]
 mod retention_tests;
+#[cfg(test)]
+#[path = "os_overlay/rootfs_pin_tests.rs"]
+mod rootfs_pin_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1162,6 +1184,7 @@ mod tests {
     ) -> PathBuf {
         let path = store.join(format!("{GENERATION_PREFIX}{}", Guid::new()));
         fs::create_dir(&path).unwrap();
+        fs::copy(rootfs, path.join(ROOTFS_FILE)).unwrap();
         fs::write(
             path.join(OVERLAY_FILE),
             image_bytes(b"complete overlay content"),

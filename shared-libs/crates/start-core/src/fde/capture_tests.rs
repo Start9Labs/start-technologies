@@ -113,7 +113,10 @@ impl Fixture {
         let backing = crate::util::io::create_file_mod(root.join("data.btrfs"), 0o600)
             .await
             .unwrap();
-        backing.set_len(512 * 1024 * 1024).await.unwrap();
+        backing
+            .set_len(tokio::fs::metadata(&image).await.unwrap().len() + 512 * 1024 * 1024)
+            .await
+            .unwrap();
         backing.sync_all().await.unwrap();
         drop(backing);
         Command::new("mkfs.btrfs")
@@ -363,6 +366,7 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
     let published_id = Guid::new();
     let stored_id = Guid::new();
     let selected_id = Guid::new();
+    let pinned_id = Guid::new();
     let generation = fixture
         .volume
         .path()
@@ -371,6 +375,7 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
     tokio::fs::create_dir(&generation).await.unwrap();
     for (id, image) in [
         (&published_id, generation.join(OVERLAY_FILE)),
+        (&pinned_id, generation.join(crate::os_overlay::ROOTFS_FILE)),
         (
             &stored_id,
             fixture.volume.path().join("images/stored.rootfs"),
@@ -477,7 +482,8 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
             std::ffi::OsString::from(current_id.to_string()),
             std::ffi::OsString::from(published_id.to_string()),
             std::ffi::OsString::from(stored_id.to_string()),
-            std::ffi::OsString::from(selected_id.to_string())
+            std::ffi::OsString::from(selected_id.to_string()),
+            std::ffi::OsString::from(pinned_id.to_string())
         ])
     );
     drop(existing);

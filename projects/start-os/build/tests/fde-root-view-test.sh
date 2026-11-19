@@ -12,10 +12,11 @@ binary=$(realpath -e -- "$1")
 shift
 name=fde::capture::tests::root_views::native_isolated_base_view_preserves_merged_references_without_source_submounts
 published=fde::capture::tests::published_references::native_configuration_union_retains_published_gzip_and_zstd_without_boot_authority
+pinned=os_overlay::rootfs_pin_tests::native_rootfs_retention_crosses_readonly_image_and_writable_config_bind_views
 if [ "$#" = 0 ]; then set -- "$name"; fi
 inventory=$("$binary" --list)
 for selected in "$@"; do
-    if ! { [ "$selected" = "$name" ] || [ "$selected" = "$published" ]; } || ! grep -Fxq -- "$selected: test" <<< "$inventory"; then
+    if ! { [ "$selected" = "$name" ] || [ "$selected" = "$published" ] || [ "$selected" = "$pinned" ]; } || ! grep -Fxq -- "$selected: test" <<< "$inventory"; then
         echo "Unknown exact test: $selected" >&2
         exit 1
     fi

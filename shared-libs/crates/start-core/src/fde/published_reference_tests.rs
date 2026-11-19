@@ -22,7 +22,7 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
         tokio::fs::create_dir(path).await.unwrap();
     }
     let selected = root.path().join("selected.private");
-    let ids: Vec<_> = (0..8).map(|_| Guid::new()).collect();
+    let ids: Vec<_> = (0..9).map(|_| Guid::new()).collect();
     let targets: Vec<_> = ids
         .iter()
         .map(|id| {
@@ -117,6 +117,34 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
             .await
             .unwrap();
     }
+    for overlay in &published {
+        tokio::fs::copy(
+            overlay,
+            overlay
+                .parent()
+                .unwrap()
+                .join(crate::os_overlay::ROOTFS_FILE),
+        )
+        .await
+        .unwrap();
+    }
+    let pinned = published[0]
+        .parent()
+        .unwrap()
+        .join(crate::os_overlay::ROOTFS_FILE);
+    let pin_source = root.path().join("pinned-source");
+    tokio::fs::create_dir(&pin_source).await.unwrap();
+    tokio::fs::symlink(&targets[8], pin_source.join("only-in-published-rootfs"))
+        .await
+        .unwrap();
+    tokio::fs::remove_file(&pinned).await.unwrap();
+    Command::new("/usr/bin/mksquashfs")
+        .arg(&pin_source)
+        .arg(&pinned)
+        .args(["-noappend", "-no-progress", "-comp", "gzip"])
+        .invoke(ErrorKind::Filesystem)
+        .await
+        .unwrap();
     let before = crate::disk::mount::util::mountpoints_under(Path::new(TmpDir::BASE))
         .await
         .unwrap();
@@ -158,6 +186,7 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
     tokio::fs::remove_dir(unknown).await.unwrap();
     for image in [
         &published[0],
+        &pinned,
         &stored.join("private-repack.rootfs"),
         &selected,
     ] {

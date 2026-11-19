@@ -463,7 +463,7 @@ async fn configuration_backings(
             .with_strict_unmount();
         let path = generations.path().to_owned();
         mounts.push(generations);
-        for image in crate::os_overlay::published_overlays(&path).await? {
+        for image in crate::os_overlay::published_images(&path).await? {
             retained.extend(mounted_backings(&SquashfsImage::new(&image), &data).await?);
         }
         let directory = capture_view(&IsolatedBind::new(images))
