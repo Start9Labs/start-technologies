@@ -142,6 +142,7 @@ impl ServiceMap {
         Ok(())
     }
 
+    /// Attempts replacement even if shutdown fails; a successful load can return a shutdown error.
     #[instrument(skip_all)]
     pub async fn load(
         &self,
@@ -149,9 +150,10 @@ impl ServiceMap {
         id: &PackageId,
         disposition: LoadDisposition,
     ) -> Result<(), Error> {
+        let mut shutdown_err = Ok(());
         let mut service = self.get_mut(id).await;
         if let Some(service) = service.take() {
-            service.shutdown(None).await?;
+            shutdown_err = service.shutdown(None).await;
         }
         match Service::load(ctx, id, disposition).await {
             Ok(s) => {
@@ -181,6 +183,7 @@ impl ServiceMap {
                     .result?;
             }
         }
+        shutdown_err?;
         Ok(())
     }
 
