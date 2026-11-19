@@ -1,9 +1,8 @@
 use std::any::Any;
 use std::sync::Arc;
-use std::time::Duration;
 
-use futures::future::{BoxFuture, ready};
-use futures::{Future, FutureExt, TryFutureExt};
+use futures::future::BoxFuture;
+use futures::{Future, FutureExt};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::prelude::*;
@@ -36,6 +35,7 @@ impl<A: Actor + Clone> Future for ConcurrentRunner<A> {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let mut this = self.project();
+        let was_accepting = this.shutdown.is_some();
         *this.shutdown = this.shutdown.take().and_then(|mut s| {
             if s.poll_unpin(cx).is_pending() {
                 Some(s)
@@ -43,6 +43,10 @@ impl<A: Actor + Clone> Future for ConcurrentRunner<A> {
                 None
             }
         });
+        if was_accepting && this.shutdown.is_none() {
+            this.waiting.clear();
+            this.recv.close();
+        }
         if this.shutdown.is_some() {
             while let std::task::Poll::Ready(Some((id, msg, reply))) = this.recv.poll_recv(cx) {
                 if this
@@ -172,7 +176,7 @@ impl<A: Actor + Clone> ConcurrentActor<A> {
         }
     }
 
-    /// Message is guaranteed to be queued immediately
+    /// Enqueues before the returned future is polled.
     pub fn queue<M: Send + 'static>(
         &self,
         id: Guid,
@@ -181,32 +185,7 @@ impl<A: Actor + Clone> ConcurrentActor<A> {
     where
         A: Handler<M>,
     {
-        if self.runtime.is_finished() {
-            return futures::future::Either::Left(ready(Err(Error::new(
-                eyre!("actor runtime has exited"),
-                ErrorKind::Unknown,
-            ))));
-        }
-        let (reply_send, reply_recv) = oneshot::channel();
-        self.messenger
-            .send((id, Box::new(message), reply_send))
-            .unwrap();
-        futures::future::Either::Right(
-            reply_recv
-                .map_err(|_| Error::new(eyre!("actor runtime has exited"), ErrorKind::Unknown))
-                .and_then(|a| {
-                    ready(
-                        a.downcast()
-                            .map_err(|_| {
-                                Error::new(
-                                    eyre!("received incorrect type in response"),
-                                    ErrorKind::Incoherent,
-                                )
-                            })
-                            .map(|a| *a),
-                    )
-                }),
-        )
+        super::enqueue(&self.messenger, id, message)
     }
 
     pub async fn send<M: Send + 'static>(&self, id: Guid, message: M) -> Result<A::Response, Error>
@@ -218,31 +197,7 @@ impl<A: Actor + Clone> ConcurrentActor<A> {
 
     pub async fn shutdown(self, strategy: PendingMessageStrategy) {
         drop(self.messenger);
-        let timeout = match strategy {
-            PendingMessageStrategy::CancelAll => {
-                self.shutdown.send(()).unwrap();
-                Some(Duration::from_secs(0))
-            }
-            PendingMessageStrategy::FinishCurrentCancelPending { timeout } => {
-                self.shutdown.send(()).unwrap();
-                timeout
-            }
-            PendingMessageStrategy::FinishAll { timeout } => timeout,
-        };
-        let aborter = if let Some(timeout) = timeout {
-            let hdl = self.runtime.abort_handle();
-            async move {
-                tokio::time::sleep(timeout).await;
-                hdl.abort();
-            }
-            .boxed()
-        } else {
-            futures::future::pending().boxed()
-        };
-        tokio::select! {
-            _ = aborter => (),
-            _ = self.runtime => (),
-        }
+        super::shutdown_runtime(self.runtime, self.shutdown, strategy).await;
     }
 }
 
@@ -297,6 +252,135 @@ mod test {
         ) -> Self::Response {
         }
     }
+    struct HoldResources {
+        resource: std::sync::Arc<()>,
+        started: tokio::sync::oneshot::Sender<()>,
+        background_started: tokio::sync::oneshot::Sender<()>,
+    }
+    impl Handler<HoldResources> for CActor {
+        type Response = ();
+        fn conflicts_with(_: &HoldResources) -> ConflictBuilder<Self> {
+            ConflictBuilder::nothing()
+        }
+        async fn handle(
+            &mut self,
+            _: Guid,
+            message: HoldResources,
+            jobs: &BackgroundJobQueue,
+        ) -> Self::Response {
+            let background = message.resource.clone();
+            jobs.add_job(async move {
+                let _held = background;
+                message.background_started.send(()).unwrap();
+                futures::future::pending::<()>().await;
+            });
+            message.started.send(()).unwrap();
+            let _held = message.resource;
+            futures::future::pending().await
+        }
+    }
+
+    async fn held_resources(enqueue: impl FnOnce(HoldResources)) -> std::sync::Arc<()> {
+        let resource = std::sync::Arc::new(());
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (background_started, background_ready) = tokio::sync::oneshot::channel();
+        enqueue(HoldResources {
+            resource: resource.clone(),
+            started,
+            background_started,
+        });
+        ready.await.unwrap();
+        background_ready.await.unwrap();
+        assert_eq!(std::sync::Arc::strong_count(&resource), 3);
+        resource
+    }
+
+    async fn holding_actor() -> (super::ConcurrentActor<CActor>, std::sync::Arc<()>) {
+        let actor = super::ConcurrentActor::new(CActor);
+        let resource = held_resources(|message| drop(actor.queue(Guid::new(), message))).await;
+        (actor, resource)
+    }
+
+    #[tokio::test]
+    async fn cancel_all_shutdown_joins_resource_release() {
+        let (actor, resource) = holding_actor().await;
+        actor
+            .shutdown(crate::util::actor::PendingMessageStrategy::CancelAll)
+            .await;
+        assert_eq!(std::sync::Arc::strong_count(&resource), 1);
+    }
+
+    #[tokio::test]
+    async fn simple_actor_cancel_all_joins_resource_release() {
+        let actor = crate::util::actor::simple::SimpleActor::new(CActor);
+        let resource = held_resources(|message| drop(actor.queue(message))).await;
+        actor
+            .shutdown(crate::util::actor::PendingMessageStrategy::CancelAll)
+            .await;
+        assert_eq!(std::sync::Arc::strong_count(&resource), 1);
+    }
+
+    #[tokio::test]
+    async fn stopped_actor_rejects_admission_without_panicking() {
+        let mut actor = super::ConcurrentActor::new(CActor);
+        actor.runtime.abort();
+        let _ = (&mut actor.runtime).await;
+        assert!(actor.send(Guid::new(), NoConflicts).await.is_err());
+    }
+
+    struct AwaitRelease {
+        started: tokio::sync::oneshot::Sender<()>,
+        release: tokio::sync::oneshot::Receiver<()>,
+    }
+    impl Handler<AwaitRelease> for CActor {
+        type Response = ();
+        fn conflicts_with(_: &AwaitRelease) -> ConflictBuilder<Self> {
+            ConflictBuilder::everything().except::<NoConflicts>()
+        }
+        async fn handle(&mut self, _: Guid, message: AwaitRelease, _: &BackgroundJobQueue) {
+            message.started.send(()).unwrap();
+            message.release.await.unwrap();
+        }
+    }
+    struct TrackWork(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    impl Handler<TrackWork> for CActor {
+        type Response = ();
+        async fn handle(&mut self, _: Guid, message: TrackWork, _: &BackgroundJobQueue) {
+            message.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    async fn finish_current_discards_waiting_messages_without_a_timeout() {
+        let actor = super::ConcurrentActor::new(CActor);
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        drop(actor.queue(
+            Guid::new(),
+            AwaitRelease {
+                started,
+                release: released,
+            },
+        ));
+        ready.await.unwrap();
+        let pending = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        drop(actor.queue(Guid::new(), TrackWork(pending.clone())));
+        actor.send(Guid::new(), NoConflicts).await.unwrap();
+        let shutdown = actor.shutdown(
+            crate::util::actor::PendingMessageStrategy::FinishCurrentCancelPending {
+                timeout: None,
+            },
+        );
+        let (result, ()) = tokio::join!(
+            tokio::time::timeout(Duration::from_secs(2), shutdown),
+            async {
+                release.send(()).unwrap();
+            },
+        );
+        result.unwrap();
+        assert_eq!(pending.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
     #[tokio::test]
     async fn test_conflicts() {
         let actor = super::ConcurrentActor::new(CActor);

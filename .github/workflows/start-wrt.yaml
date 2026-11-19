@@ -165,6 +165,9 @@ jobs:
       - name: Build image
         run: make start-wrt-image
 
+      - name: Verify the image trust store
+        run: make start-wrt-ca-test
+
       - uses: actions/upload-artifact@v7
         with:
           name: startwrt-openwrt-image

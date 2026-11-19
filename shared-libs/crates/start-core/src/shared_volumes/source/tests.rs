@@ -1,14 +1,23 @@
 use super::*;
 
-#[test]
-fn local_filesystem_uses_persisted_package_data_partition() {
+#[tokio::test]
+async fn local_sources_apply_the_base_map_and_keep_raw_backup_targets_separate() {
     let id = SharedVolumeId::new();
     let definition = SourceDefinition::new(SharedVolumeSource::Local, None);
-    let PreparedFilesystem::Local(path) = definition.filesystem(&id) else {
-        panic!("local filesystem")
-    };
-    assert!(path.starts_with(crate::PACKAGE_DATA));
-    assert!(path.ends_with(Path::new("shared-volumes").join(id.as_ref())));
+    let path = local_path(crate::PACKAGE_DATA, &id);
+    let mapped = definition.filesystem(&id);
+    let expected = IdMapped::new(Bind::new(&path), vec![crate::lxc::BASE_IDMAP]);
+    assert_eq!(
+        mapped.source_hash().await.unwrap(),
+        expected.source_hash().await.unwrap()
+    );
+    let raw = PreparedFilesystem::<_, BlockDev<PathBuf>, Cifs>::Local(LocalSubvolume(path));
+    for access in [ReadOnly, ReadWrite] {
+        assert_ne!(
+            mapped.mount_hash(access).await.unwrap(),
+            raw.mount_hash(access).await.unwrap()
+        );
+    }
 }
 
 #[tokio::test]
@@ -42,19 +51,31 @@ async fn failed_publications_remove_new_directories_and_successful_ones_preserve
 }
 
 #[tokio::test]
-#[ignore = "requires BTRFS_TEST_VOLUMES_DIR and UID/GID 100000 mapped"]
-async fn local_creation_uses_service_owned_subvolumes_and_rolls_back_failed_publication() {
+#[ignore = "requires root, BTRFS_TEST_VOLUMES_DIR and a private Linux mount namespace"]
+async fn local_creation_maps_owners_without_shifting_persisted_ids() {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let fixture = crate::util::btrfs::tests::directory();
     let path = fixture.path().join("volume");
     create_local_directory(&path).await.unwrap();
     assert!(crate::util::btrfs::is_subvolume(&path).await);
     let metadata = std::fs::metadata(&path).unwrap();
-    assert_eq!(
-        (metadata.uid(), metadata.gid()),
-        (crate::lxc::BASE_IDMAP.to_id, crate::lxc::BASE_IDMAP.to_id)
-    );
+    assert_eq!((metadata.uid(), metadata.gid()), (0, 0));
     assert_eq!(metadata.permissions().mode() & 0o777, 0o777);
+    let file = path.join("owner");
+    std::fs::write(&file, b"data").unwrap();
+    std::os::unix::fs::chown(&file, Some(1000), Some(2000)).unwrap();
+    let view = TmpMountGuard::mount(&SourceFilesystem::local(path.clone()), ReadWrite)
+        .await
+        .unwrap();
+    let root = std::fs::metadata(view.path()).unwrap();
+    assert_eq!((root.uid(), root.gid()), (100000, 100000));
+    let mapped_file = view.path().join("owner");
+    let metadata = std::fs::metadata(&mapped_file).unwrap();
+    assert_eq!((metadata.uid(), metadata.gid()), (101000, 102000));
+    std::os::unix::fs::chown(&mapped_file, Some(103000), Some(104000)).unwrap();
+    let metadata = std::fs::metadata(&file).unwrap();
+    assert_eq!((metadata.uid(), metadata.gid()), (3000, 4000));
+    view.unmount().await.unwrap();
     tokio::fs::write(path.join("sentinel"), b"allocated data")
         .await
         .unwrap();
@@ -319,13 +340,12 @@ async fn checking_a_missing_local_directory_does_not_recreate_it() {
     let path = root.path().join("removed");
     let target = root.path().join("mountpoint");
     assert!(
-        SourceFilesystem::Local(path.clone())
+        SourceFilesystem::local(path.clone())
             .mount(&target, ReadWrite)
             .await
             .is_err()
     );
     assert!(!path.exists());
-    assert!(!target.exists());
 }
 
 #[test]

@@ -581,3 +581,61 @@ async fn rejects_short_growing_and_mutating_sources() {
         assert!(image.serialize(&mut Cursor::new(Vec::new())).await.is_err());
     }
 }
+
+fn data_block_fixture() -> Squashfs<Bytes> {
+    let mut contents = DirectoryContents::new();
+    let text: Vec<u8> = (0u64..200_000)
+        .flat_map(|line| format!("line {line} value {}\n", line * line % 977).into_bytes())
+        .collect();
+    contents.insert("text", file(0o644, &text)).unwrap();
+    contents.insert("text-copy", file(0o644, &text)).unwrap();
+    contents
+        .insert("random", file(0o644, &random_bytes(700_001)))
+        .unwrap();
+    let mut holey = random_bytes(131072);
+    holey.extend(vec![0; 262144]);
+    holey.extend(&text[..200_000]);
+    contents.insert("holey", file(0o644, &holey)).unwrap();
+    for index in 0u32..400 {
+        let size = 1 + (index as usize * 7919) % 3000;
+        contents
+            .insert_path(
+                format!("small/{index:03}"),
+                file(0o644, &text[index as usize..index as usize + size]),
+            )
+            .unwrap();
+    }
+    image(contents)
+}
+
+/// Expected hashes pin the bytes of already-published images.
+#[tokio::test]
+async fn data_block_bytes_are_independent_of_compression_queue_depth() {
+    let mut small_blocks = Options::new(4096, 3).unwrap();
+    small_blocks.deduplicate = false;
+    for (options, expected) in [
+        (
+            Options::default(),
+            "b5647f9c602c31119c91ca05c67201a262376b3db5d79149e20910611a8b3d19",
+        ),
+        (
+            small_blocks,
+            "1f93fe067b61a8e38aaef6e8df1ccbe8cc4d90605ff87e7964b6409e8c8bef52",
+        ),
+    ] {
+        let mut image = data_block_fixture();
+        image.options = options;
+        for queue_depth in [1, 2, 3, 64] {
+            let mut output = Cursor::new(Vec::new());
+            image
+                .serialize_with_queue_depth(&mut output, queue_depth)
+                .await
+                .unwrap();
+            assert_eq!(
+                blake3::hash(output.get_ref()).to_hex().as_str(),
+                expected,
+                "queue depth {queue_depth}"
+            );
+        }
+    }
+}

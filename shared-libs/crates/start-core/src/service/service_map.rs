@@ -149,6 +149,7 @@ impl ServiceMap {
         Ok(())
     }
 
+    /// Attempts replacement even if shutdown fails; a successful load can return a shutdown error.
     #[instrument(skip_all)]
     pub async fn load(
         &self,
@@ -710,6 +711,7 @@ impl ServiceRefReloadInfo {
         self.ctx
             .services
             .load(&self.ctx, &self.id, LoadDisposition::Undo)
+            .boxed()
             .await
     }
 
