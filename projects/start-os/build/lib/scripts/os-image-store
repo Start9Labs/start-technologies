@@ -8,7 +8,10 @@ startos_reserve_image_store() {
     descriptor=${!variable-}
     # An inherited descriptor must name the actual lock file.
     if ! [[ $descriptor =~ ^[0-9]+$ && /proc/self/fd/$descriptor -ef $path ]]; then
-        exec {descriptor}>"$path"
+        if ! [[ -e $path ]]; then
+            (set -o noclobber; : >"$path") 2>/dev/null || [[ -f $path ]] || return
+        fi
+        exec {descriptor}<"$path" || return
         printf -v "$variable" '%s' "$descriptor"
         export "$variable"
     fi

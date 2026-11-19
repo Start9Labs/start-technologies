@@ -12,6 +12,7 @@ fi
 binary=$(realpath -e -- "$1")
 startbox=$(realpath -e -- "$2")
 image=$(realpath -e -- "$3")
+scripts=$(realpath -e -- "${FDE_IMAGE_SCRIPTS:-/usr/lib/startos/scripts}")
 shift 3
 root=$(mktemp -d /var/lib/startos-fde-capture.XXXXXXXX)
 unit=
@@ -74,7 +75,7 @@ for name in "$@"; do
     mkdir -m 700 "$fixture"
     unit="startos-fde-capture-$(< /proc/sys/kernel/random/uuid)"
     STARTOS_TEST_MANAGED_GUEST=1 FDE_CAPTURE_TEST_ROOT="$fixture" FDE_CAPTURE_EXECUTABLE="$root/startbox" \
-        FDE_CAPTURE_UNIT="$unit" FDE_SOURCE_IMAGE="$image" \
+        FDE_CAPTURE_UNIT="$unit" FDE_SOURCE_IMAGE="$image" FDE_IMAGE_SCRIPTS="$scripts" \
         timeout --kill-after=20s 240s "$binary" "$name" --exact --ignored --nocapture
     systemctl stop "$unit" 2>/dev/null || true
     unit=

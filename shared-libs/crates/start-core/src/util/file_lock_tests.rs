@@ -126,6 +126,36 @@ async fn inherited_child_keeps_the_lease_after_its_guard_is_released() {
 }
 
 #[tokio::test]
+async fn native_shell_reservation_preserves_existing_contents_and_file_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join(lock_name());
+    tokio::fs::write(&path, b"retained-shell-lock")
+        .await
+        .unwrap();
+    let identity = crate::util::io::file_identity(&path).await.unwrap();
+    tokio::process::Command::new("/bin/bash")
+        .args([
+            "-euc",
+            "source \"$1/os-image-store\"; startos_reserve_image_store \"$2\"",
+            "native-shell-lease",
+        ])
+        .arg(scripts())
+        .arg(root.path())
+        .env_remove(variable())
+        .invoke(ErrorKind::Filesystem)
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::fs::read(&path).await.unwrap(),
+        b"retained-shell-lock"
+    );
+    assert_eq!(
+        crate::util::io::file_identity(&path).await.unwrap(),
+        identity
+    );
+}
+
+#[tokio::test]
 async fn image_store_native_child_reuses_the_inherited_real_file_lease() {
     let root = tempfile::tempdir().unwrap();
     let directory = root.path().join("configuration with space");

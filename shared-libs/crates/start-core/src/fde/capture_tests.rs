@@ -267,7 +267,14 @@ fn unit() -> String {
 
 fn lease_path() -> PathBuf {
     PathBuf::from(std::env::var_os("FDE_CAPTURE_TEST_ROOT").unwrap())
-        .join("volume/image-store.lock")
+        .join("volume")
+        .join(
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../projects/start-os/build/lib/scripts/os-image-lock-name"
+            ))
+            .trim(),
+        )
 }
 
 async fn image_lease() -> crate::util::FileLock {
@@ -723,6 +730,51 @@ async fn native_capture_requester_death_leaves_cleanup_owned_by_pid1() {
         .await,
         Ok(Err(_))
     );
+    let adapter = root.join("flock");
+    let flock_entered = root.join("kernel-flock-entered");
+    tokio::fs::write(
+        &adapter,
+        format!(
+            "#!/bin/sh\nprintf reached > {}\nexec /usr/bin/flock --nonblock \"$@\"\n",
+            flock_entered.display()
+        ),
+    )
+    .await
+    .unwrap();
+    tokio::fs::set_permissions(&adapter, std::fs::Permissions::from_mode(0o700))
+        .await
+        .unwrap();
+    let scripts =
+        PathBuf::from(std::env::var_os("FDE_IMAGE_SCRIPTS").expect("current native image scripts"));
+    let mut shell = Command::new("/bin/bash");
+    shell
+        .args([
+            "-euc",
+            "source \"$1/os-image-store\"; startos_reserve_image_store \"$2\"",
+            "frozen-shell-lease",
+        ])
+        .arg(scripts)
+        .arg(fixture.volume.path())
+        .env(
+            "PATH",
+            format!("{}:/usr/sbin:/usr/bin:/sbin:/bin", root.display()),
+        )
+        .env_remove(
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../projects/start-os/build/lib/scripts/os-image-lock-fd-name"
+            ))
+            .trim(),
+        );
+    let shell_rejected_while_frozen = matches!(
+        tokio::time::timeout(
+            Duration::from_millis(500),
+            shell.invoke(ErrorKind::Filesystem)
+        )
+        .await,
+        Ok(Err(_))
+    );
+    let shell_reached_kernel = flock_entered.exists();
     assert!(
         tokio::fs::write(fixture.working.path().join("before-stop"), b"blocked")
             .await
@@ -752,6 +804,10 @@ async fn native_capture_requester_death_leaves_cleanup_owned_by_pid1() {
     assert!(
         rejected_while_frozen,
         "busy acquisition waited for filesystem thaw"
+    );
+    assert!(
+        shell_rejected_while_frozen && shell_reached_kernel,
+        "native shell acquisition waited for filesystem thaw"
     );
     drop(gate);
     tokio::fs::write(
