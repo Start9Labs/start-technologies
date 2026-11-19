@@ -3,10 +3,8 @@ use imbl_value::InternedString;
 
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_2_2};
-use crate::context::RpcContext;
-use crate::lxc::slot::{ContainerSlot, rebase_legacy_ids};
+use crate::lxc::slot::ContainerSlot;
 use crate::prelude::*;
-use crate::shared_volumes::{SharedVolumeSource, local_path};
 
 lazy_static::lazy_static! {
     static ref V0_4_3: exver::Version = exver::Version::new([0, 4, 3], []);
@@ -45,26 +43,6 @@ impl VersionT for Version {
         }
         Ok(())
     }
-}
-
-/// Requires quiescent storage, before shared-volume observers or services start.
-pub(crate) async fn prepare_shared_volume_ids(ctx: &RpcContext) -> Result<(), Error> {
-    let db = ctx.db.peek().await;
-    if !db
-        .as_public()
-        .as_server_info()
-        .as_post_init_migration_todos()
-        .de()?
-        .contains_key(&Version.semver())
-    {
-        return Ok(());
-    }
-    for (id, volume) in db.as_public().as_shared_volumes().as_entries()? {
-        if volume.as_source().de()? == SharedVolumeSource::Local {
-            rebase_legacy_ids(local_path(crate::PACKAGE_DATA, &id), 0).await?;
-        }
-    }
-    Ok(())
 }
 
 fn package_data(db: &mut Value) -> Option<&mut imbl_value::InOMap<InternedString, Value>> {

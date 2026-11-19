@@ -7,7 +7,6 @@ use futures::future::BoxFuture;
 use futures::{Future, FutureExt};
 use imbl_value::{InternedString, to_value};
 use patch_db::json_ptr::ROOT;
-pub(crate) use v0_4_3::prepare_shared_volume_ids;
 
 use crate::Error;
 use crate::context::RpcContext;

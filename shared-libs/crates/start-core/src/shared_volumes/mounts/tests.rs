@@ -167,15 +167,25 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
     )
     .unwrap();
     let source = TmpMountGuard::mount(&Bind::new(fixture.path()), ReadWrite)
-    .await
-    .unwrap();
+        .await
+        .unwrap();
     let manager = Arc::new(LxcManager::new());
     let first = manager
-        .create(None, ContainerSlot::new(0).unwrap(), None, LxcConfig::default())
+        .create(
+            None,
+            ContainerSlot::new(0).unwrap(),
+            None,
+            LxcConfig::default(),
+        )
         .await
         .unwrap();
     let second = manager
-        .create(None, ContainerSlot::new(1).unwrap(), None, LxcConfig::default())
+        .create(
+            None,
+            ContainerSlot::new(1).unwrap(),
+            None,
+            LxcConfig::default(),
+        )
         .await
         .unwrap();
     let helper = std::env::var_os("STARTOS_TEST_CONTAINER_HELPER")

@@ -344,7 +344,7 @@ export class StartSdk<Manifest extends T.SDKManifest> {
          */
         getAddressGateways,
         /**
-         * Resolve the bridge address (`10.0.3.1:<port>`) a dependency's binding
+         * Resolve the bridge address (`172.16.0.1:<port>`) a dependency's binding
          * is reachable at from this container, with the same reactive read
          * strategies as `get`/`getOwn`.
          *

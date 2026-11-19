@@ -58,7 +58,10 @@ async fn local_creation_maps_owners_without_shifting_persisted_ids() {
     let slot = crate::lxc::slot::ContainerSlot::new(1).unwrap();
     let base = slot.host_root();
     let view = TmpMountGuard::mount(
-        &crate::disk::mount::filesystem::idmapped::IdMapped::new(SourceFilesystem::local(path.clone()), vec![slot.idmap()]),
+        &crate::disk::mount::filesystem::idmapped::IdMapped::new(
+            SourceFilesystem::local(path.clone()),
+            vec![slot.idmap()],
+        ),
         ReadWrite,
     )
     .await

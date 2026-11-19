@@ -13,10 +13,9 @@ use super::target::{BackupTargetId, BackupTargetSource, SharedVolumeBackupInfo, 
 use super::{PackageBackupReport, VolumeBackupReport};
 use crate::context::{CliContext, RpcContext};
 use crate::disk::mount::backup::BackupMountGuard;
-use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::{FileSystem, ReadOnly, ReadWrite};
-use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
+use crate::disk::mount::guard::GenericMountGuard;
 use crate::disk::mount::util::sync_directory;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -106,7 +105,7 @@ pub(super) async fn measure_backup(
     )
 }
 
-/// Copies the service view of the volume, retaining host-visible owners.
+/// Copies the volume with the ids its containers see.
 pub(super) async fn backup_volume(
     ctx: &RpcContext,
     backup: &BackupMountGuard<TargetMount>,
@@ -610,6 +609,8 @@ mod tests {
         std::fs::write(source.join("sentinel"), b"restored data").unwrap();
         std::os::unix::fs::chown(&source, Some(100000), Some(100000)).unwrap();
         std::os::unix::fs::chown(source.join("sentinel"), Some(101000), Some(102000)).unwrap();
+        std::fs::write(source.join("current"), b"container ids").unwrap();
+        std::os::unix::fs::chown(source.join("current"), Some(1000), Some(2000)).unwrap();
         let created = restore_local_copy(fixture.path(), &source, "Photos".into(), |id, volume| {
             assert_ne!(id, old_id);
             assert_eq!(volume.name, "Photos");
@@ -640,15 +641,9 @@ mod tests {
         let restored = local_path(fixture.path(), &created).join("sentinel");
         let metadata = std::fs::metadata(&restored).unwrap();
         assert_eq!((metadata.uid(), metadata.gid()), (1000, 2000));
-        let view = TmpMountGuard::mount(
-            &source::SourceFilesystem::local(local_path(fixture.path(), &created)),
-            ReadOnly,
-        )
-        .await
-        .unwrap();
-        let metadata = std::fs::metadata(view.path().join("sentinel")).unwrap();
-        assert_eq!((metadata.uid(), metadata.gid()), (101000, 102000));
-        view.unmount().await.unwrap();
+        let metadata =
+            std::fs::metadata(local_path(fixture.path(), &created).join("current")).unwrap();
+        assert_eq!((metadata.uid(), metadata.gid()), (1000, 2000));
     }
 
     #[tokio::test]

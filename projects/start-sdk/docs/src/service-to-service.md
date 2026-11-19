@@ -42,7 +42,7 @@ Three things make this correct, and each matters:
 
    `rpcHostId` and `rpcInternalPort` are imported from the dependency's package (`bitcoin-core-startos/startos/utils`), not hardcoded — the internal port and host id are the stable contract.
 
-   **On `ssl`:** most bindings publish one bridge address and need no discriminator. A binding that uses `protocol: 'http'`/`'ws'`, or `secure: null` with `addSsl`, publishes **two** — bitcoind's RPC is reachable at both `10.0.3.1:8332` (plaintext) and `10.0.3.1:54404` (TLS-terminated). Only there does filtering on `ssl` matter; adding it elsewhere selects nothing and re-introduces the very assumption this rule removes.
+   **On `ssl`:** most bindings publish one bridge address and need no discriminator. A binding that uses `protocol: 'http'`/`'ws'`, or `secure: null` with `addSsl`, publishes **two** — bitcoind's RPC is reachable at both `172.16.0.1:8332` (plaintext) and `172.16.0.1:54404` (TLS-terminated). Only there does filtering on `ssl` matter; adding it elsewhere selects nothing and re-introduces the very assumption this rule removes.
 
 2. **`.const()` on a minimal mapped value.** `.const()` re-runs `main` only when the **mapped** value changes, not on every churn of the dependency's host record. Because the mapped value is just the address string, the restart behavior is exactly what you want:
 

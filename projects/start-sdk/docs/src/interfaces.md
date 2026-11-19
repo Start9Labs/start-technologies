@@ -427,7 +427,7 @@ Each internal port a host currently binds belongs to one claim. A `bindPortRange
 
 `setupInterfaces()` ends every pass by **disabling** each binding it did not just declare — it does not delete it. Disabling is the right default: it keeps the row, the external port number, and the user's per-address choices, so a binding your package declares conditionally comes back at the same address they already bookmarked.
 
-The cost is that a binding you stop declaring **for good** stays behind. It keeps its external port claimed for as long as your service is installed, it keeps recomputing its addresses, and a dependency resolving it through `getBridgeAddress` still gets a `10.0.3.1:<port>` that nothing listens on. Retire it explicitly:
+The cost is that a binding you stop declaring **for good** stays behind. It keeps its external port claimed for as long as your service is installed, it keeps recomputing its addresses, and a dependency resolving it through `getBridgeAddress` still gets a `172.16.0.1:<port>` that nothing listens on. Retire it explicitly:
 
 ```typescript
 await sdk.MultiHost.of(effects, 'ui-multi').retire() // the whole host
