@@ -28,7 +28,7 @@ Use a volume's **Manage** dialog, or the service's **Shared Volumes** page. Each
 
 The **Shared Volumes** tab appears only for services that support shared volumes. Creating a volume grants access to no services automatically. Multiple services can use the same volume with different access modes.
 
-Revocation is best-effort. Access changes control future mount requests and clean up managed source mounts, but existing bindings, extra mounts and open files can remain usable. Services that read their volume configuration reactively refresh affected workloads through their normal lifecycle; other consumers retain their own access. A saved **No Access** or **Read** setting does not prove earlier access has ended. Prefer volumes for optional media, documents and other shared files rather than operation-critical databases.
+Revocation is best-effort. Access changes control future mount requests and detach incompatible SDK-managed mounts. Extra mounts created independently by a service and open files can remain usable. Services that read their volume configuration reactively refresh affected workloads through their normal lifecycle; other consumers retain their own access. A saved **No Access** or **Read** setting does not prove earlier access has ended. Prefer volumes for optional media, documents and other shared files rather than operation-critical databases.
 
 ## Remove a volume
 

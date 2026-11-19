@@ -239,6 +239,9 @@ export type AlpnInfo = z.output<typeof schemas.AlpnInfo>
  * The protocols a binding answers with, carried on the wire as the list itself.
  */
 export type AlpnInfoInput = z.input<typeof schemas.AlpnInfo>
+export type AttachSharedVolumeParamsInput = z.input<
+  typeof schemas.AttachSharedVolumeParams
+>
 export type BindIdInput = z.input<typeof schemas.BindId>
 export type CheckDependenciesParamInput = z.input<
   typeof schemas.CheckDependenciesParam

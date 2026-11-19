@@ -125,6 +125,10 @@ export type Effects = {
   prepareSharedVolume(
     options: RPC.RpcParamType<RPC.Effects, 'prepare-shared-volume'>,
   ): Promise<RPC.RpcReturnType<RPC.Effects, 'prepare-shared-volume'>>
+  /** Attaches a prepared source with host-owned revocation bookkeeping. */
+  attachSharedVolume(
+    options: RPC.RpcParamType<RPC.Effects, 'attach-shared-volume'>,
+  ): Promise<RPC.RpcReturnType<RPC.Effects, 'attach-shared-volume'>>
 
   // backup
   /**

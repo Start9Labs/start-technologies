@@ -443,7 +443,7 @@ export class SubContainerEager<
   private readonly fileMounts = new FileMounts()
   private sharedMounts = false
   private sharedVolumeDependency = false
-  private readonly sharedVolumeTargets = new Map<string, boolean>()
+  private readonly sharedVolumePlaceholders = new Set<string>()
   private readonly sharedVolumeQueue = new PathQueue()
 
   private leader: cp.ChildProcess
@@ -695,17 +695,16 @@ export class SubContainerEager<
           subcontainer: this.guid,
         })
         await this.shareMounts()
-        const mounted = this.sharedVolumeTargets.get(target)
-        if (mounted === undefined) {
+        if (!this.sharedVolumePlaceholders.has(target)) {
           await attachBind(prepared.placeholder, target, false, [], true)
-          this.sharedVolumeTargets.set(target, false)
-        } else if (mounted) {
-          await execFile('umount', ['--lazy', target])
-          this.sharedVolumeTargets.set(target, false)
+          this.sharedVolumePlaceholders.add(target)
         }
         if (prepared.result.kind === 'mounted') {
-          await attachBind(prepared.path, target, false, [], options.readonly)
-          this.sharedVolumeTargets.set(target, true)
+          await this.effects.attachSharedVolume({
+            subcontainer: this.guid,
+            mountpoint: options.mountpoint,
+            path: prepared.path,
+          })
         }
         return prepared.result
       })

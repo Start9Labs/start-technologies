@@ -85,9 +85,9 @@ Unavailability rejects construction with the volume ID, mountpoint and reason. A
 
 Grants do not pass through dependency mounts. A service reading another service's package volume sees the underlying directory, not shared-volume attachments nested inside it. Each consuming service needs its own grant and mount.
 
-StartOS checks the manifest capability, current grant, access mode and confined paths before staging a source. The SDK uses the same bind primitive as package-owned volumes. Read-only sources remain read-only in the service's user namespace, including independently created bind aliases. Subpaths must remain within the granted source.
+StartOS checks the manifest capability, current grant, access mode and confined paths before staging a source. The SDK's data binds use the shared native bind machinery and remain registered with StartOS for detachment. Read-only sources remain read-only in the service's user namespace, including independently created bind aliases. Subpaths must remain within the granted source.
 
-Revocation is best-effort. Grant changes govern future mount requests and retire incompatible managed staging sources; existing binds, independently created aliases and open handles can remain usable. Persisted grants describe authorization intent, not proof that earlier access has ended. Reactive consumers refresh through the ordinary workload lifecycle described above. Removing a volume applies staging cleanup across its consumers.
+Revocation is best-effort. Grant changes govern future mount requests and detach incompatible SDK-managed binds and staging sources, including in manually managed subcontainers. Independently created aliases and open handles can remain usable. Persisted grants describe authorization intent, not proof that earlier access has ended. Reactive consumers refresh through the ordinary workload lifecycle described above. Removing a volume detaches its SDK-managed binds and stages across its consumers.
 
 ## Backup ownership
 

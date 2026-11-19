@@ -253,6 +253,7 @@ pub async fn prepare_shared_volume(
     subcontainers
         .get(&subcontainer)
         .or_not_found("subcontainer")?;
+    mounts.remove_target(&subcontainer, &mountpoint).await?;
     let source = match source {
         Ok(prepared) => prepared?,
         Err(error) => {
@@ -277,6 +278,66 @@ pub async fn prepare_shared_volume(
         placeholder: mounts.unavailable_path(),
         result: SharedVolumeMountResult::Mounted,
     })
+}
+
+#[derive(Serialize, Deserialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachSharedVolumeParams {
+    pub subcontainer: crate::rpc_continuations::Guid,
+    pub mountpoint: std::path::PathBuf,
+    pub path: std::path::PathBuf,
+}
+
+rpc_toolkit::reflect_ts!(AttachSharedVolumeParams);
+rpc_toolkit::ts_export!(AttachSharedVolumeParams, namespaces = [""]);
+
+/// Registers and attaches the SDK target under the grant-management gate.
+pub async fn attach_shared_volume(
+    context: EffectContext,
+    params: AttachSharedVolumeParams,
+) -> Result<(), Error> {
+    tokio::spawn(attach_shared_volume_owned(context, params))
+        .await
+        .with_kind(ErrorKind::Cancelled)?
+}
+
+async fn attach_shared_volume_owned(
+    context: EffectContext,
+    AttachSharedVolumeParams {
+        subcontainer,
+        mountpoint,
+        path,
+    }: AttachSharedVolumeParams,
+) -> Result<(), Error> {
+    use crate::disk::mount::guard::GenericMountGuard;
+
+    let service = context.deref()?;
+    let container = &service.seed.persistent_container;
+    let _admission = service
+        .seed
+        .ctx
+        .shared_volume_access
+        .management
+        .read()
+        .await;
+    let mut mounts = container.shared_volumes.lock().await;
+    let (id, readonly) = mounts.staged_access(&subcontainer, &mountpoint, &path)?;
+    authorize_mount(&service, &id, readonly).await?;
+    let lxc = container
+        .lxc_container
+        .get()
+        .or_not_found("lxc container")?;
+    let subcontainers = container.subcontainers.lock().await;
+    let root = subcontainers
+        .get(&subcontainer)
+        .or_not_found("subcontainer")?
+        .overlay
+        .path()
+        .strip_prefix(lxc.rootfs_dir())
+        .with_kind(ErrorKind::Incoherent)?;
+    mounts
+        .attach(&subcontainer, &mountpoint, &path, lxc, root)
+        .await
 }
 
 #[cfg(test)]

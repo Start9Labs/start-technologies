@@ -9,8 +9,8 @@ use crate::PackageId;
 use crate::prelude::*;
 use crate::util::sync::SyncMutex;
 
-/// Grant changes deny future preparation and retire incompatible staging sources.
-/// Revocation is best-effort: existing bindings, aliases and open handles can remain usable.
+/// Grant changes deny future preparation and detach incompatible SDK-managed binds and stages.
+/// Independent aliases and open handles remain outside this best-effort boundary.
 #[derive(Default)]
 pub(crate) struct SharedVolumeAccess {
     pub(crate) management: RwLock<()>,

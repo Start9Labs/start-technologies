@@ -945,6 +945,17 @@ export const AlpnInfo: z.ZodArray<typeof MaybeUtf8String> = /* @__PURE__ */ z
     description:
       'The protocols a binding answers with, carried on the wire as the list itself.',
   })
+export const AttachSharedVolumeParams: z.ZodObject<{
+  subcontainer: typeof Guid
+  mountpoint: z.ZodString
+  path: z.ZodString
+}> = /* @__PURE__ */ object({
+  subcontainer: Guid,
+  mountpoint: z.string(),
+  path: z.string(),
+}).meta({
+  id: 'AttachSharedVolumeParams',
+})
 export const BindId: z.ZodObject<{
   id: typeof HostId
   internalPort: z.ZodInt
@@ -3362,6 +3373,12 @@ export const Api = {
           _FINAL: /* @__PURE__ */ z.null(),
         },
       },
+    },
+    'attach-shared-volume': {
+      _PARAMS: /* @__PURE__ */ AttachSharedVolumeParams,
+      _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     bind: {
       _PARAMS: /* @__PURE__ */ BindParams,

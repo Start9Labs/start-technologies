@@ -86,11 +86,32 @@ async fn grows(path: &Path, previous: u64) -> u64 {
     .expect("container heartbeat did not advance")
 }
 
+async fn attach_managed(
+    container: &crate::lxc::LxcContainer,
+    mounts: &Arc<tokio::sync::Mutex<SharedVolumeMounts>>,
+    guid: &Guid,
+    location: &str,
+    path: &Path,
+) {
+    let placeholder = mounts.lock().await.unavailable_path();
+    container.command(&["sh", "-ec", &format!(
+        "mkdir '{location}'; start-container bind-mount --source '{}' --target '{location}' --recursive --readonly",
+        placeholder.display(),
+    )]).await.unwrap();
+    mounts
+        .lock()
+        .await
+        .attach(guid, Path::new(location), path, container, Path::new(""))
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
-#[ignore = "requires a StartOS VM with LXC, root and BTRFS_TEST_VOLUMES_DIR"]
+#[ignore = "requires a StartOS VM, BTRFS_TEST_VOLUMES_DIR and STARTOS_TEST_CONTAINER_HELPER"]
 async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_stages() {
     use crate::disk::mount::filesystem::ReadWrite;
-    use crate::disk::mount::filesystem::bind::Bind;
+    use crate::disk::mount::filesystem::bind::{Bind, FileType};
+    use crate::disk::mount::guard::MountGuard;
     use crate::lxc::{LxcConfig, LxcManager, service_filesystem};
 
     let fixture = crate::util::btrfs::tests::directory();
@@ -109,6 +130,20 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
     let manager = Arc::new(LxcManager::new());
     let first = manager.create(None, LxcConfig::default()).await.unwrap();
     let second = manager.create(None, LxcConfig::default()).await.unwrap();
+    let helper = std::env::var_os("STARTOS_TEST_CONTAINER_HELPER")
+        .expect("STARTOS_TEST_CONTAINER_HELPER must name this build's start-container");
+    let mut helper_mounts = Vec::new();
+    for container in [&first, &second] {
+        helper_mounts.push(
+            MountGuard::mount(
+                &Bind::new(Path::new(&helper)).with_type(FileType::File),
+                container.rootfs_dir().join("usr/bin/start-container"),
+                crate::disk::mount::filesystem::ReadOnly,
+            )
+            .await
+            .unwrap(),
+        );
+    }
     let first_mounts = Arc::new(tokio::sync::Mutex::new(
         SharedVolumeMounts::new(first.rootfs_dir()).await.unwrap(),
     ));
@@ -148,7 +183,7 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         .unwrap();
     let worker = |path: &Path, name: &str| {
         format!(
-            "mkdir /alias; start-container bind-mount --source '{}' --target /alias --recursive; unshare --mount --pid --cgroup --fork sh -c 'exec 3>>/alias/{name}; echo ready >&3; while :; do printf x >&3; sleep 0.02; done' >/dev/null 2>&1 </dev/null &",
+            "mkdir /independent; start-container bind-mount --source '{}' --target /independent --recursive; unshare --mount --pid --cgroup --fork sh -c 'exec 3>>/independent/{name}; echo ready >&3; while :; do printf x >&3; sleep 0.02; done' >/dev/null 2>&1 </dev/null &",
             path.display(),
         )
     };
@@ -160,6 +195,26 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         .command(&["sh", "-c", &worker(&second_path, "second")])
         .await
         .unwrap();
+    first.command(&["sh", "-ec", &format!(
+        "mkdir '{0}/nested'; mount -t tmpfs tmpfs '{0}/nested'; echo nested > '{0}/nested/marker'",
+        first_path.display(),
+    )]).await.unwrap();
+    attach_managed(&first, &first_mounts, &first_guid, "/alias", &first_path).await;
+    first
+        .command(&["sh", "-ec", &format!(
+            "test \"$(cat /alias/nested/marker)\" = nested; mkdir /readonly-tree; start-container bind-mount --source '{}' --target /readonly-tree --recursive --readonly; test \"$(cat /readonly-tree/nested/marker)\" = nested; if touch /readonly-tree/nested/forbidden 2>/dev/null; then exit 110; fi; mkdir '{0}/late-child'; mount -t tmpfs tmpfs '{0}/late-child'; echo late > '{0}/late-child/marker'; test \"$(cat /alias/late-child/marker)\" = late; test ! -e /readonly-tree/late-child/marker",
+            first_path.display(),
+        )])
+        .await
+        .unwrap();
+    attach_managed(
+        &second,
+        &second_mounts,
+        &second_guid,
+        "/alias",
+        &second_path,
+    )
+    .await;
     grows(&fixture.path().join("first"), 0).await;
     grows(&fixture.path().join("second"), 0).await;
     let before = std::fs::metadata(fixture.path().join("first"))
@@ -177,6 +232,7 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         )
         .await
         .unwrap();
+    attach_managed(&first, &first_mounts, &first_guid, "/read", &read_stage).await;
     let unrelated = SharedVolumeId::new();
     let other_stage = first_mounts
         .lock()
@@ -190,6 +246,8 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         )
         .await
         .unwrap();
+    attach_managed(&first, &first_mounts, &first_guid, "/other", &other_stage).await;
+    first.command(&["sh", "-ec", "unshare --mount --propagation slave sh -c 'touch /execution-ready; exec sleep 300' >/dev/null 2>&1 & echo $! > /execution-pid; timeout 5 sh -c 'until test -e /execution-ready; do sleep 0.01; done'"]).await.unwrap();
     registry
         .reconcile_grant(
             &first_package,
@@ -203,14 +261,14 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
             "sh",
             "-ec",
             &format!(
-                "test ! -e '{}'; test -r '{}/sentinel'; test -r '{}/sentinel'",
+                "test ! -e '{}'; test ! -e /alias/sentinel; test -r /read/sentinel; test -r /other/sentinel; if mount -o remount,bind,rw /read 2>/dev/null; then exit 109; fi; if touch /alias/forbidden 2>/dev/null; then exit 108; fi; test -r '{}/sentinel'; test -r '{}/sentinel'",
                 first_path.display(),
                 read_stage.display(),
                 other_stage.display(),
             ),
         ])
-        .await
-        .unwrap();
+        .await.unwrap();
+    first.command(&["sh", "-ec", "nsenter --mount=/proc/$(cat /execution-pid)/ns/mnt -- sh -ec 'test ! -e /alias/sentinel; test -r /read/sentinel; test -r /other/sentinel'; kill $(cat /execution-pid)"]).await.unwrap();
     grows(&fixture.path().join("first"), before).await;
     registry
         .reconcile_grant(&first_package, &id, None)
@@ -221,7 +279,7 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
             "sh",
             "-ec",
             &format!(
-                "test ! -e '{}'; test -r '{}/sentinel'",
+                "test ! -e '{}'; test ! -e /read/sentinel; test -r /other/sentinel; test -r '{}/sentinel'",
                 read_stage.display(),
                 other_stage.display(),
             ),
@@ -232,7 +290,10 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         .command(&[
             "sh",
             "-ec",
-            &format!("test -r '{}/sentinel'", second_path.display()),
+            &format!(
+                "test -r /alias/sentinel; test -r '{}/sentinel'",
+                second_path.display()
+            ),
         ])
         .await
         .unwrap();
@@ -241,7 +302,10 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         .command(&[
             "sh",
             "-ec",
-            &format!("test ! -e '{}'", second_path.display()),
+            &format!(
+                "test ! -e /alias/sentinel; test ! -e '{}'",
+                second_path.display()
+            ),
         ])
         .await
         .unwrap();
@@ -249,6 +313,39 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         .unwrap()
         .len();
     grows(&fixture.path().join("second"), other).await;
+
+    let delayed = second_mounts
+        .lock()
+        .await
+        .stage(
+            &second_guid,
+            "/late".into(),
+            &id,
+            PreparedSource::open(source.clone(), None).await.unwrap(),
+            false,
+        )
+        .await
+        .unwrap();
+    second.command(&["mkdir", "/late"]).await.unwrap();
+    registry.remove_volume(&id).await.unwrap();
+    assert!(
+        second_mounts
+            .lock()
+            .await
+            .attach(
+                &second_guid,
+                Path::new("/late"),
+                &delayed,
+                &second,
+                Path::new(""),
+            )
+            .await
+            .is_err()
+    );
+    second
+        .command(&["sh", "-ec", "test ! -e /late/sentinel"])
+        .await
+        .unwrap();
 
     let readonly = second_mounts
         .lock()
@@ -280,6 +377,9 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
     second_mounts.lock().await.clear().await.unwrap();
     drop(first_mounts);
     drop(second_mounts);
+    for helper in helper_mounts {
+        helper.unmount(false).await.unwrap();
+    }
     first.exit().await.unwrap();
     second.exit().await.unwrap();
     source.unmount().await.unwrap();

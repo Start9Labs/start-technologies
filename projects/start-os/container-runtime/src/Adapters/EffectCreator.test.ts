@@ -530,6 +530,24 @@ describe('generated effects RPC boundary', () => {
     },
   )
 
+  test('shared-volume target attachment preserves the preparation identity', async () => {
+    const effects = makeEffects({ eventId: null })
+    const options = {
+      subcontainer: 'guid',
+      mountpoint: '/music',
+      path: '/staged-source',
+    }
+    reply = { result: null }
+    await expect(effects.attachSharedVolume(options)).resolves.toBeNull()
+    expect(requests).toEqual([
+      {
+        id: expect.any(Number),
+        method: 'attach-shared-volume',
+        params: options,
+      },
+    ])
+  })
+
   test.each(['Authorization', 'InvalidRequest'])(
     'shared-volume %s failures reject rather than becoming unavailable',
     async message => {

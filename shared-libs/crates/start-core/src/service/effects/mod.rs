@@ -111,6 +111,10 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
             from_fn_async(shared_volumes::get_shared_volumes).no_cli(),
         )
         .subcommand(
+            "attach-shared-volume",
+            from_fn_async(shared_volumes::attach_shared_volume).no_cli(),
+        )
+        .subcommand(
             "prepare-shared-volume",
             from_fn_async(shared_volumes::prepare_shared_volume).no_cli(),
         )

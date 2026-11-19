@@ -434,6 +434,14 @@ impl LxcContainer {
         )?)
     }
 
+    pub(crate) async fn pid(&self) -> Result<u32, Error> {
+        self.info("-pH")
+            .await?
+            .trim()
+            .parse::<u32>()
+            .with_kind(ErrorKind::Lxc)
+    }
+
     pub async fn ip(&self) -> Result<Ipv4Addr, Error> {
         let start = Instant::now();
         loop {

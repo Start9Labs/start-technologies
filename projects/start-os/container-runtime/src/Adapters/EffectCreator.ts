@@ -223,6 +223,12 @@ export function makeEffects(context: EffectContext): Effects {
     ) {
       return rpcRound('prepare-shared-volume', options)
     },
+
+    attachSharedVolume(
+      ...[options]: Parameters<T.Effects['attachSharedVolume']>
+    ) {
+      return rpcRound('attach-shared-volume', options)
+    },
     subcontainer: {
       createFs(options: { imageId: string; name: string }) {
         return rpcRound('subcontainer.create-fs', options)

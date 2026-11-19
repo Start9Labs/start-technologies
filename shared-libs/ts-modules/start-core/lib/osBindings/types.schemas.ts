@@ -2529,6 +2529,17 @@ export const AlpnInfo: z.ZodArray<typeof MaybeUtf8String> = /* @__PURE__ */ z
     description:
       'The protocols a binding answers with, carried on the wire as the list itself.',
   })
+export const AttachSharedVolumeParams: z.ZodObject<{
+  subcontainer: typeof Guid
+  mountpoint: z.ZodString
+  path: z.ZodString
+}> = /* @__PURE__ */ object({
+  subcontainer: Guid,
+  mountpoint: z.string(),
+  path: z.string(),
+}).meta({
+  id: 'AttachSharedVolumeParams',
+})
 
 /**
  * Enrolled sign-ins indexed by canonical DER64 SPKI.

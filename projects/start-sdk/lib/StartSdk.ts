@@ -179,6 +179,8 @@ export class StartSdk<Manifest extends T.SDKManifest> {
       mount: (effects, ...args) => effects.mount(...args),
       prepareSharedVolume: (effects, ...args) =>
         effects.prepareSharedVolume(...args),
+      attachSharedVolume: (effects, ...args) =>
+        effects.attachSharedVolume(...args),
       getInstalledPackages: (effects, ...args) =>
         effects.getInstalledPackages(...args),
       getServicePortForward: (effects, ...args) =>

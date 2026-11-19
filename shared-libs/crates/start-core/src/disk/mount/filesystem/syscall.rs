@@ -72,15 +72,20 @@ fn check(ret: i64, what: &'static str) -> Result<(), Error> {
     }
 }
 
-/// `open_tree(AT_FDCWD, path, OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC | [AT_RECURSIVE])`
-/// — a detached clone of the mount at `path` (its submounts too when
-/// `recursive`).
+fn clone_flags(recursive: bool) -> libc::c_uint {
+    OPEN_TREE_CLOEXEC
+        | OPEN_TREE_CLONE
+        | if recursive {
+            AT_RECURSIVE as libc::c_uint
+        } else {
+            0
+        }
+}
+
+/// A detached clone of the requested directory, optionally including submounts.
 pub fn open_tree_clone(path: &Path, recursive: bool) -> Result<OwnedFd, Error> {
     let p = cstr_path(path)?;
-    let mut flags = OPEN_TREE_CLOEXEC | OPEN_TREE_CLONE;
-    if recursive {
-        flags |= AT_RECURSIVE as libc::c_uint;
-    }
+    let flags = clone_flags(recursive);
     let r = unsafe { libc::syscall(libc::SYS_open_tree, AT_FDCWD, p.as_ptr(), flags) };
     fd_from_raw(r, "open_tree")
 }
@@ -99,10 +104,7 @@ pub fn open_tree_attr_idmap(
     userns: BorrowedFd,
 ) -> Result<OwnedFd, Error> {
     let p = cstr_path(path)?;
-    let mut flags = OPEN_TREE_CLOEXEC | OPEN_TREE_CLONE;
-    if recursive {
-        flags |= AT_RECURSIVE as libc::c_uint;
-    }
+    let flags = clone_flags(recursive);
     let attr = MountAttr {
         attr_set: MOUNT_ATTR_IDMAP,
         attr_clr: 0,
@@ -122,15 +124,15 @@ pub fn open_tree_attr_idmap(
     fd_from_raw(r, "open_tree_attr IDMAP")
 }
 
-/// Clones a pinned directory without including its child mounts.
-pub fn open_tree_clone_fd(source: BorrowedFd) -> Result<OwnedFd, Error> {
+/// A detached clone rooted at a pinned directory, optionally including submounts.
+pub fn open_tree_clone_fd(source: BorrowedFd, recursive: bool) -> Result<OwnedFd, Error> {
     let empty = cstr_str("")?;
     let raw = unsafe {
         libc::syscall(
             libc::SYS_open_tree,
             source.as_raw_fd(),
             empty.as_ptr(),
-            OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC | AT_EMPTY_PATH as libc::c_uint,
+            clone_flags(recursive) | AT_EMPTY_PATH as libc::c_uint,
         )
     };
     fd_from_raw(raw, "open_tree fd")
@@ -265,7 +267,7 @@ fn mount_setattr(fd: BorrowedFd, attr: &MountAttr) -> Result<(), Error> {
             libc::SYS_mount_setattr,
             fd.as_raw_fd(),
             empty.as_ptr(),
-            AT_EMPTY_PATH,
+            AT_EMPTY_PATH | AT_RECURSIVE,
             attr as *const _ as *const libc::c_void,
             std::mem::size_of::<MountAttr>(),
         )
@@ -283,7 +285,7 @@ impl DetachedMount {
     pub fn from_fd(fd: OwnedFd) -> Self {
         Self { fd }
     }
-    /// Toggle `MOUNT_ATTR_RDONLY` on the detached mount.
+    /// Sets read-only state across the detached tree.
     pub fn set_readonly(&self, ro: bool) -> Result<(), Error> {
         mount_setattr(
             self.fd.as_fd(),
@@ -294,12 +296,27 @@ impl DetachedMount {
             },
         )
     }
-    /// Isolates the clone from its source's propagation peer group.
+    /// Isolates the detached tree from source propagation.
     pub fn set_private(&self) -> Result<(), Error> {
+        self.set_propagation(libc::MS_PRIVATE as u64)
+    }
+
+    /// Source-slave for writable trees; private and recursively read-only otherwise.
+    /// Bind targets never propagate unmounts back to their sources.
+    pub fn configure_bind(&self, readonly: bool) -> Result<(), Error> {
+        if readonly {
+            self.set_private()?;
+            self.set_readonly(true)
+        } else {
+            self.set_propagation(libc::MS_SLAVE as u64)
+        }
+    }
+
+    fn set_propagation(&self, propagation: u64) -> Result<(), Error> {
         mount_setattr(
             self.fd.as_fd(),
             &MountAttr {
-                propagation: libc::MS_PRIVATE as u64,
+                propagation,
                 ..Default::default()
             },
         )

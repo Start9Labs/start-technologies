@@ -27,7 +27,7 @@ impl AttachedMount {
         readonly: bool,
         namespace: Arc<MountNamespace>,
     ) -> Result<Self, Error> {
-        let detached = DetachedMount::from_fd(open_tree_clone_fd(source.as_fd())?);
+        let detached = DetachedMount::from_fd(open_tree_clone_fd(source.as_fd(), false)?);
         detached.set_private()?;
         detached.set_readonly(readonly)?;
         let mount = namespace.run(|| detached.attach_to_fd(destination.as_fd()))?;
@@ -132,13 +132,19 @@ struct StagingRoot {
 struct StagedMount {
     id: SharedVolumeId,
     readonly: bool,
+    target: Option<AttachedMount>,
     mount: AttachedMount,
     source: PreparedSource,
     directory: PathBuf,
+    path: PathBuf,
 }
 
 impl StagedMount {
     async fn retire(self) -> Result<(), Error> {
+        if let Some(target) = self.target {
+            target.detach()?;
+            drop(target);
+        }
         self.mount.detach()?;
         drop(self.mount);
         self.source.unmount().await?;
@@ -147,8 +153,8 @@ impl StagedMount {
     }
 }
 
-/// Host-owned stages propagate into the service user namespace before SDK binds.
-/// Retiring stages does not revoke existing SDK binds, independent aliases or open handles.
+/// Revocation detaches SDK-managed targets and stages, including manually managed subcontainers.
+/// Independent aliases and open handles remain outside this best-effort boundary.
 #[derive(Default)]
 pub struct SharedVolumeMounts {
     blocked: bool,
@@ -236,14 +242,76 @@ impl SharedVolumeMounts {
             mount,
             source,
             directory: path,
+            path: Path::new("/").join(SERVICE_ROOT).join(relative),
+            target: None,
         };
+        let path = staged.path.clone();
         if let Some(previous) = self
             .slots
             .insert((guid.clone(), confined_relative(&location)?), staged)
         {
             previous.retire().await?;
         }
-        Ok(Path::new("/").join(SERVICE_ROOT).join(relative))
+        Ok(path)
+    }
+
+    pub(crate) async fn remove_target(
+        &mut self,
+        guid: &Guid,
+        location: &Path,
+    ) -> Result<(), Error> {
+        let key = (guid.clone(), confined_relative(location)?);
+        if let Some(stage) = self.slots.remove(&key) {
+            stage.retire().await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn staged_access(
+        &self,
+        guid: &Guid,
+        location: &Path,
+        path: &Path,
+    ) -> Result<(SharedVolumeId, bool), Error> {
+        self.check_allowed()?;
+        let stage = self
+            .slots
+            .get(&(guid.clone(), confined_relative(location)?))
+            .filter(|stage| stage.path == path)
+            .or_not_found("shared-volume preparation")?;
+        Ok((stage.id.clone(), stage.readonly))
+    }
+
+    /// The caller holds the management gate through attachment and registration.
+    pub(crate) async fn attach(
+        &mut self,
+        guid: &Guid,
+        location: &Path,
+        path: &Path,
+        container: &crate::lxc::LxcContainer,
+        container_root: &Path,
+    ) -> Result<(), Error> {
+        self.staged_access(guid, location, path)?;
+        let relative = confined_relative(location)?;
+        let stage = self
+            .slots
+            .get_mut(&(guid.clone(), relative.clone()))
+            .or_not_found("shared-volume preparation")?;
+        if stage.target.is_some() {
+            return Ok(());
+        }
+        let pid = container.pid().await?;
+        let namespace = Arc::new(MountNamespace::for_process(pid)?);
+        let root = PathBuf::from(format!("/proc/{pid}/root"));
+        let source = open_beneath(&root, &confined_relative(path)?)?;
+        let target = open_beneath(&root.join(container_root), &relative)?;
+        let mount = namespace.run(|| {
+            let detached = DetachedMount::from_fd(open_tree_clone_fd(source.as_fd(), true)?);
+            detached.configure_bind(stage.readonly)?;
+            detached.attach_to_fd(target.as_fd())
+        })?;
+        stage.target = Some(AttachedMount { mount, namespace });
+        Ok(())
     }
 
     pub async fn remove_subcontainer(&mut self, guid: &Guid) -> Result<(), Error> {

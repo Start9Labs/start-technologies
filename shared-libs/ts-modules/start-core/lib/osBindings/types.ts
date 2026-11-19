@@ -668,6 +668,12 @@ export type AlpnInfo = z.output<typeof schemas.AlpnInfo>
  * The protocols a binding answers with, carried on the wire as the list itself.
  */
 export type AlpnInfoInput = z.input<typeof schemas.AlpnInfo>
+export type AttachSharedVolumeParams = z.output<
+  typeof schemas.AttachSharedVolumeParams
+>
+export type AttachSharedVolumeParamsInput = z.input<
+  typeof schemas.AttachSharedVolumeParams
+>
 
 /**
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
