@@ -243,7 +243,7 @@ export class InputSpec<
     }
     return {
       spec: answer,
-      validator: z.looseObject(validator) as any,
+      validator: z.object(validator) as any,
     }
   }
 

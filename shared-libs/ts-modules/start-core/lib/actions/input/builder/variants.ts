@@ -179,7 +179,7 @@ export class Variants<
           validators[key] = built.validator
         }
         const other = z
-          .looseObject(
+          .object(
             Object.fromEntries(
               Object.entries(validators).map(([k, v]) => [
                 k,
@@ -192,7 +192,7 @@ export class Variants<
           spec: variants,
           validator: z.union(
             Object.entries(validators).map(([k, v]) =>
-              z.looseObject({
+              z.object({
                 selection: z.literal(k),
                 value: v,
                 other,
