@@ -12,7 +12,6 @@ export function transformConfigSpec(oldSpec: OldConfigSpec): IST.InputSpec {
         description: oldVal.description || null,
         warning: oldVal.warning || null,
         footnote: null,
-        mustBeTrue: false,
         disabled: false,
         immutable: false,
       }

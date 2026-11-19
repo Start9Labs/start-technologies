@@ -121,13 +121,6 @@ function asRequiredParser<Type, Input extends { required: boolean }>(
   return parser.nullish().transform(v => v ?? null) as any
 }
 
-/** A toggle's validator: any boolean, or only `true` when the toggle must be on. */
-function toggleValidator(mustBeTrue?: boolean): z.ZodType<boolean> {
-  return mustBeTrue
-    ? z.boolean().refine(v => v, { message: 'Must be on' })
-    : z.boolean()
-}
-
 /**
  * Core builder class for defining a single form field in a service configuration spec.
  *
@@ -176,7 +169,6 @@ export class Value<
       // optional
       description: null,
       warning: null,
-      mustBeTrue: false,
       immutable: false,
     }),
     * ```
@@ -190,19 +182,12 @@ export class Value<
     footnote?: string | null
     default: boolean
     /**
-     * @description Whether the toggle must be on for the form to be submitted, like a
-     * checkbox that has to be ticked. Use it for an acknowledgement the user has to give;
-     * the form marks the toggle and does not submit while it is off.
-     * @default false
-     */
-    mustBeTrue?: boolean
-    /**
      * @description Once set, the value can never be changed.
      * @default false
      */
     immutable?: boolean
   }) {
-    const validator = toggleValidator(a.mustBeTrue)
+    const validator = z.boolean()
     return new Value<boolean>(
       async () => ({
         spec: {
@@ -211,14 +196,12 @@ export class Value<
           footnote: null,
           type: 'toggle' as const,
           disabled: false,
-          ...a,
-          mustBeTrue: a.mustBeTrue ?? false,
           immutable: a.immutable ?? false,
+          ...a,
         },
         validator,
       }),
-      // the static validator also backs partial (prefill) validation, where `false` is valid
-      z.boolean(),
+      validator,
     )
   }
   /** Like {@link Value.toggle} but options are resolved lazily at runtime via a builder function. */
@@ -230,15 +213,14 @@ export class Value<
         warning?: string | null
         footnote?: string | null
         default: boolean
-        mustBeTrue?: boolean
         disabled?: false | string
       },
       OuterType
     >,
   ) {
-    return new Value<boolean, boolean, OuterType>(async options => {
-      const built = await a(options)
-      return {
+    const validator = z.boolean()
+    return new Value<boolean, boolean, OuterType>(
+      async options => ({
         spec: {
           description: null,
           warning: null,
@@ -246,12 +228,12 @@ export class Value<
           type: 'toggle' as const,
           disabled: false,
           immutable: false,
-          ...built,
-          mustBeTrue: built.mustBeTrue ?? false,
+          ...(await a(options)),
         },
-        validator: toggleValidator(built.mustBeTrue),
-      }
-    }, z.boolean())
+        validator,
+      }),
+      validator,
+    )
   }
   /**
    * @description Displays a three-state toggle — a boolean toggle with a neutral middle
@@ -334,6 +316,48 @@ export class Value<
           disabled: false,
           immutable: false,
           ...(await a(options)),
+        },
+        validator,
+      }),
+      validator,
+    )
+  }
+  /**
+   * @description Displays a checkbox the user must tick before the form submits, for a
+   * consequence they have to accept. The field always submits `true` and starts unticked,
+   * whatever the prefill. It belongs at the top level of an {@link InputSpec}; building one
+   * nested in an object, a union variant or a list item throws. The form shows it after every
+   * other field.
+   * @example
+   * ```
+    acknowledgementExample: Value.acknowledgement({
+      // required
+      name: 'I hold the keys of this address',
+
+      // optional
+      description: null,
+      warning: null,
+      footnote: null,
+    }),
+   * ```
+   */
+  static acknowledgement(a: {
+    name: string
+    description?: string | null
+    /** Presents a warning prompt before permitting the value to change. */
+    warning?: string | null
+    /** Supplementary text rendered persistently beneath the field. */
+    footnote?: string | null
+  }) {
+    const validator = z.literal(true)
+    return new Value<true>(
+      async () => ({
+        spec: {
+          description: null,
+          warning: null,
+          footnote: null,
+          ...a,
+          type: 'acknowledgement' as const,
         },
         validator,
       }),
@@ -1189,7 +1213,7 @@ export class Value<
     spec: InputSpec<Type, StaticValidatedAs>,
   ) {
     const value = new Value<Type, StaticValidatedAs>(async options => {
-      const built = await spec.build(options as any)
+      const built = await spec.buildNested(options as any)
       return {
         spec: {
           type: 'object' as const,

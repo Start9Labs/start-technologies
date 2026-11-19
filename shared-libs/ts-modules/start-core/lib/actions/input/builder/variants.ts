@@ -171,7 +171,7 @@ export class Variants<
         }
         for (const key in a) {
           const value = a[key]
-          const built = await value.spec.build(options as any)
+          const built = await value.spec.buildNested(options as any)
           variants[key] = {
             name: value.name,
             spec: built.spec,

@@ -57,19 +57,6 @@ describe('values', () => {
     const validator = value.validator
     validator.parse(false)
     testOutput<typeof validator._output, boolean>()(null)
-    expect(value.spec).toMatchObject({ mustBeTrue: false })
-  })
-  test('mustBeTrue toggle', async () => {
-    const value = await Value.toggle({
-      name: 'I understand',
-      default: false,
-      mustBeTrue: true,
-    }).build({} as any)
-    const validator = value.validator
-    validator.parse(true)
-    expect(() => validator.parse(false)).toThrow()
-    testOutput<typeof validator._output, boolean>()(null)
-    expect(value.spec).toMatchObject({ mustBeTrue: true, default: false })
   })
   test('triState', async () => {
     const value = await Value.triState({
@@ -87,6 +74,64 @@ describe('values', () => {
       name: 'Testing',
       default: null,
       footnote: null,
+    })
+  })
+  describe('acknowledgement', () => {
+    const acknowledgement = () =>
+      Value.acknowledgement({ name: 'I hold the keys' })
+
+    test('accepts only true', async () => {
+      const value = await acknowledgement().build({} as any)
+      const validator = value.validator
+      validator.parse(true)
+      expect(() => validator.parse(false)).toThrow()
+      expect(() => validator.parse(undefined)).toThrow()
+      testOutput<typeof validator._output, true>()(null)
+      expect(value.spec).toEqual({
+        type: 'acknowledgement',
+        name: 'I hold the keys',
+        description: null,
+        warning: null,
+        footnote: null,
+      })
+    })
+
+    test('comes after every other top-level field', async () => {
+      const spec = InputSpec.of({
+        confirm: acknowledgement(),
+        address: Value.text({ name: 'Address', required: true, default: null }),
+      }).add({
+        amount: Value.number({
+          name: 'Amount',
+          required: true,
+          default: null,
+          integer: true,
+        }),
+      })
+      const built = await spec.build({} as any)
+      expect(Object.keys(built.spec)).toEqual(['address', 'amount', 'confirm'])
+      expect(() =>
+        built.validator.parse({ address: 'a', amount: 1, confirm: false }),
+      ).toThrow()
+      built.validator.parse({ address: 'a', amount: 1, confirm: true })
+    })
+
+    test('may not be nested', async () => {
+      const inner = InputSpec.of({ confirm: acknowledgement() })
+      const nested = [
+        Value.object({ name: 'Object' }, inner),
+        Value.union({
+          name: 'Union',
+          default: 'a',
+          variants: Variants.of({ a: { name: 'A', spec: inner } }),
+        }),
+        Value.list(List.obj({ name: 'List' }, { spec: inner })),
+      ]
+      for (const value of nested) {
+        await expect(value.build({} as any)).rejects.toThrow(
+          'must be at the top level',
+        )
+      }
     })
   })
   test('text', async () => {
@@ -370,19 +415,7 @@ describe('values', () => {
         description: null,
         warning: null,
         default: false,
-        mustBeTrue: false,
       })
-    })
-    test('mustBeTrue toggle', async () => {
-      const value = await Value.dynamicToggle(async () => ({
-        name: 'I understand',
-        default: false,
-        mustBeTrue: true,
-      })).build({} as any)
-      const validator = value.validator
-      validator.parse(true)
-      expect(() => validator.parse(false)).toThrow()
-      expect(value.spec).toMatchObject({ mustBeTrue: true })
     })
     test('triState', async () => {
       const value = await Value.dynamicTriState(async () => ({

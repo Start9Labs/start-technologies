@@ -222,7 +222,8 @@ export class InputSpec<
   /**
    * Builds the runtime form specification and combined Zod validator from this InputSpec's fields.
    *
-   * @returns An object containing the resolved `spec` (field specs keyed by name) and a combined `validator`
+   * @returns An object containing the resolved `spec` (field specs keyed by name) and a combined `validator`.
+   * The `spec` lists every {@link Value.acknowledgement} after the other fields.
    */
   async build<OuterType>(options: LazyBuildOptions<OuterType>): Promise<{
     spec: {
@@ -230,21 +231,40 @@ export class InputSpec<
     }
     validator: z.ZodType<Type>
   }> {
-    const answer = {} as {
-      [K in keyof Type]: ValueSpec
-    }
+    const fields: [keyof Type, ValueSpec][] = []
+    const acknowledgements: [keyof Type, ValueSpec][] = []
     const validator = {} as {
       [K in keyof Type]: z.ZodType<any>
     }
     for (const k in this.spec) {
       const built = await this.spec[k].build(options as any)
-      answer[k] = built.spec
+      ;(built.spec.type === 'acknowledgement' ? acknowledgements : fields).push(
+        [k, built.spec],
+      )
       validator[k] = built.validator
     }
     return {
-      spec: answer,
+      spec: Object.fromEntries([...fields, ...acknowledgements]) as {
+        [K in keyof Type]: ValueSpec
+      },
       validator: z.looseObject(validator) as any,
     }
+  }
+
+  /**
+   * Builds this InputSpec as the contents of an object, a union variant or a list item.
+   *
+   * @throws when it holds a {@link Value.acknowledgement}
+   */
+  async buildNested<OuterType>(options: LazyBuildOptions<OuterType>) {
+    const built = await this.build(options)
+    for (const [key, spec] of Object.entries<ValueSpec>(built.spec)) {
+      if (spec.type === 'acknowledgement')
+        throw new Error(
+          `acknowledgement "${key}" must be at the top level of an InputSpec, not nested in an object, union or list`,
+        )
+    }
+    return built
   }
 
   /**
