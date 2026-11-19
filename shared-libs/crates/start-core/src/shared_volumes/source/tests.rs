@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn local_sources_apply_the_base_map_and_keep_raw_backup_targets_separate() {
+async fn local_sources_map_service_views_and_store_container_ids_unmapped() {
     let id = SharedVolumeId::new();
     let definition = SourceDefinition::new(SharedVolumeSource::Local, None);
     let path = local_path(crate::PACKAGE_DATA, &id);
@@ -11,13 +11,60 @@ async fn local_sources_apply_the_base_map_and_keep_raw_backup_targets_separate()
         mapped.source_hash().await.unwrap(),
         expected.source_hash().await.unwrap()
     );
-    let raw = PreparedFilesystem::<_, BlockDev<PathBuf>, Cifs>::Local(LocalSubvolume(path));
+    let unmapped = definition.unmapped_filesystem(path.clone());
+    assert_eq!(
+        unmapped.source_hash().await.unwrap(),
+        Bind::new(&path).source_hash().await.unwrap()
+    );
     for access in [ReadOnly, ReadWrite] {
         assert_ne!(
             mapped.mount_hash(access).await.unwrap(),
-            raw.mount_hash(access).await.unwrap()
+            unmapped.mount_hash(access).await.unwrap()
         );
     }
+}
+
+#[tokio::test]
+async fn unmapped_disk_and_cifs_sources_carry_no_service_owner() {
+    let device = tempfile::NamedTempFile::new().unwrap();
+    let disk = SourceDefinition::new(
+        SharedVolumeSource::Disk {
+            logicalname: device.path().to_owned(),
+            path: "data".into(),
+            drive: None,
+        },
+        None,
+    );
+    assert_eq!(
+        disk.unmapped_filesystem(PathBuf::new())
+            .source_hash()
+            .await
+            .unwrap(),
+        BlockDev::new(device.path().to_owned())
+            .source_hash()
+            .await
+            .unwrap()
+    );
+    let cifs = SourceDefinition::new(
+        SharedVolumeSource::Cifs {
+            hostname: "nas.local".into(),
+            path: "share".into(),
+            username: "user".into(),
+        },
+        Some(SharedVolumeCredentials {
+            password: Some("secret".into()),
+        }),
+    );
+    let plain = cifs.cifs().unwrap();
+    let unmapped = cifs.unmapped_filesystem(PathBuf::new());
+    assert_eq!(
+        unmapped.source_hash().await.unwrap(),
+        plain.source_hash().await.unwrap()
+    );
+    assert_ne!(
+        unmapped.source_hash().await.unwrap(),
+        SharedCifs(plain).source_hash().await.unwrap()
+    );
 }
 
 #[tokio::test]

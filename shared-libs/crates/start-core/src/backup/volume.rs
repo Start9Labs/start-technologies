@@ -13,10 +13,9 @@ use super::target::{BackupTargetId, BackupTargetSource, SharedVolumeBackupInfo, 
 use super::{PackageBackupReport, VolumeBackupReport};
 use crate::context::{CliContext, RpcContext};
 use crate::disk::mount::backup::BackupMountGuard;
-use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::{FileSystem, ReadOnly, ReadWrite};
-use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
+use crate::disk::mount::guard::GenericMountGuard;
 use crate::disk::mount::util::sync_directory;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -106,7 +105,8 @@ pub(super) async fn measure_backup(
     )
 }
 
-/// Copies the service view of the volume, retaining host-visible owners.
+/// Copies the volume as stored: container ids, as package backups hold. CIFS keeps the share's
+/// reported owners.
 pub(super) async fn backup_volume(
     ctx: &RpcContext,
     backup: &BackupMountGuard<TargetMount>,
@@ -131,7 +131,7 @@ pub(super) async fn backup_volume(
     {
         return Err(overlapping_target_error());
     }
-    let source = source::open_source(ctx, id, ReadOnly).await?;
+    let source = source::open_unmapped_source(ctx, id, ReadOnly).await?;
     let result = async {
         let target_data = backup
             .backup_disk_path()
@@ -330,16 +330,7 @@ async fn restore_local_copy<F: Future<Output = Result<(), Error>>>(
     let mut incomplete = IncompleteRestore(Some(path.clone()));
     let result = async {
         source::set_local_permissions(&path).await?;
-        // Volume backups retain host-visible owners, including the LXC offset.
-        let unshifted = TmpMountGuard::mount(
-            &crate::lxc::unshifted_filesystem(Bind::new(source)),
-            ReadOnly,
-        )
-        .await
-        .with_kind(ErrorKind::Backup)?;
-        let copied = copy_folder(unshifted.path(), &path).await;
-        unshifted.unmount().await?;
-        copied?;
+        copy_folder(source, &path).await?;
         source::set_local_permissions(&path).await?;
         sync_directory(&path).await?;
         // Publication can commit after its caller cancels.
@@ -605,6 +596,47 @@ mod tests {
         assert!(!generation_path(&data, &unpublished).unwrap().exists());
     }
 
+    fn container_owned_source(root: &Path) -> Option<PathBuf> {
+        let source = root.join("source");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("sentinel"), b"container data").unwrap();
+        std::os::unix::fs::chown(source.join("sentinel"), Some(1000), Some(2000)).ok()?;
+        Some(source)
+    }
+
+    #[tokio::test]
+    async fn a_backup_copy_keeps_container_ids() {
+        let root = tempfile::tempdir().unwrap();
+        let Some(source) = container_owned_source(root.path()) else {
+            eprintln!("skipped: needs permission to chown to container ids");
+            return;
+        };
+        let data = root.path().join("data");
+        let generation = stage_copy(&data, &source).await.unwrap();
+        let metadata = std::fs::metadata(data.join(generation).join("sentinel")).unwrap();
+        assert_eq!((metadata.uid(), metadata.gid()), (1000, 2000));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires root, BTRFS_TEST_VOLUMES_DIR and a private Linux mount namespace"]
+    async fn backup_and_restore_round_trip_preserves_container_ids() {
+        let fixture = crate::util::btrfs::tests::directory();
+        let source = container_owned_source(fixture.path()).unwrap();
+        let data = fixture.path().join("data");
+        let generation = stage_copy(&data, &source).await.unwrap();
+        let created = restore_local_copy(
+            fixture.path(),
+            &data.join(generation),
+            "Photos".into(),
+            |_, _| async { Ok(()) },
+        )
+        .await
+        .unwrap();
+        let metadata =
+            std::fs::metadata(local_path(fixture.path(), &created).join("sentinel")).unwrap();
+        assert_eq!((metadata.uid(), metadata.gid()), (1000, 2000));
+    }
+
     #[tokio::test]
     #[ignore = "requires root, BTRFS_TEST_VOLUMES_DIR and a private Linux mount namespace"]
     async fn restore_creates_a_new_local_volume_without_touching_existing_data() {
@@ -616,8 +648,7 @@ mod tests {
         std::fs::create_dir(&source).unwrap();
         std::fs::write(old_path.join("sentinel"), b"existing data").unwrap();
         std::fs::write(source.join("sentinel"), b"restored data").unwrap();
-        std::os::unix::fs::chown(&source, Some(100000), Some(100000)).unwrap();
-        std::os::unix::fs::chown(source.join("sentinel"), Some(101000), Some(102000)).unwrap();
+        std::os::unix::fs::chown(source.join("sentinel"), Some(1000), Some(2000)).unwrap();
         let created = restore_local_copy(fixture.path(), &source, "Photos".into(), |id, volume| {
             assert_ne!(id, old_id);
             assert_eq!(volume.name, "Photos");
@@ -648,15 +679,6 @@ mod tests {
         let restored = local_path(fixture.path(), &created).join("sentinel");
         let metadata = std::fs::metadata(&restored).unwrap();
         assert_eq!((metadata.uid(), metadata.gid()), (1000, 2000));
-        let view = TmpMountGuard::mount(
-            &source::SourceFilesystem::local(local_path(fixture.path(), &created)),
-            ReadOnly,
-        )
-        .await
-        .unwrap();
-        let metadata = std::fs::metadata(view.path().join("sentinel")).unwrap();
-        assert_eq!((metadata.uid(), metadata.gid()), (101000, 102000));
-        view.unmount().await.unwrap();
     }
 
     #[tokio::test]
@@ -666,8 +688,6 @@ mod tests {
         let source = fixture.path().join("backup");
         std::fs::create_dir(&source).unwrap();
         std::fs::write(source.join("sentinel"), b"backup data").unwrap();
-        std::os::unix::fs::chown(&source, Some(100000), Some(100000)).unwrap();
-        std::os::unix::fs::chown(source.join("sentinel"), Some(100000), Some(100000)).unwrap();
         let failed_copy = restore_local_copy(
             fixture.path(),
             &fixture.path().join("missing"),

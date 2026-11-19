@@ -114,6 +114,18 @@ impl SourceDefinition {
         }
     }
 
+    /// The stored files without the service idmap: container ids for local and disk sources,
+    /// and the share's own reported owners for CIFS.
+    pub(crate) fn unmapped_filesystem(&self, local: PathBuf) -> UnmappedFilesystem {
+        match &self.source {
+            SharedVolumeSource::Local => PreparedFilesystem::Local(LocalSubvolume(local)),
+            SharedVolumeSource::Disk { logicalname, .. } => {
+                PreparedFilesystem::Disk(BlockDev::new(logicalname.clone()))
+            }
+            SharedVolumeSource::Cifs { .. } => PreparedFilesystem::Cifs(self.cifs().unwrap()),
+        }
+    }
+
     pub(super) fn filesystem(&self, id: &SharedVolumeId) -> SourceFilesystem {
         match &self.source {
             SharedVolumeSource::Local => {
@@ -156,6 +168,7 @@ pub(crate) enum PreparedFilesystem<L, D, C> {
 }
 pub(crate) type SourceFilesystem =
     PreparedFilesystem<IdMapped<LocalSubvolume>, IdMapped<BlockDev<PathBuf>>, SharedCifs>;
+pub(crate) type UnmappedFilesystem = PreparedFilesystem<LocalSubvolume, BlockDev<PathBuf>, Cifs>;
 impl SourceFilesystem {
     // Local files retain unshifted owners on disk; service views apply BASE_IDMAP.
     pub(crate) fn local(path: PathBuf) -> Self {
@@ -220,8 +233,29 @@ pub async fn open_source(
     id: &SharedVolumeId,
     mount_type: MountType,
 ) -> Result<PreparedSource, Error> {
+    open_prepared(ctx, id, mount_type, |definition| definition.filesystem(id)).await
+}
+
+/// The source as stored, for copies that keep container ids rather than service owners.
+pub async fn open_unmapped_source(
+    ctx: &RpcContext,
+    id: &SharedVolumeId,
+    mount_type: MountType,
+) -> Result<PreparedSource, Error> {
+    open_prepared(ctx, id, mount_type, |definition| {
+        definition.unmapped_filesystem(local_path(crate::PACKAGE_DATA, id))
+    })
+    .await
+}
+
+async fn open_prepared<F: FileSystem>(
+    ctx: &RpcContext,
+    id: &SharedVolumeId,
+    mount_type: MountType,
+    filesystem: impl FnOnce(&SourceDefinition) -> F,
+) -> Result<PreparedSource, Error> {
     let definition = SourceDefinition::read(&ctx.db.peek().await, id)?;
-    let filesystem = definition.filesystem(id);
+    let filesystem = filesystem(&definition);
     let subpath = definition.subpath();
     let mut prepared = None;
     let result = source_result(
