@@ -45,6 +45,7 @@ const DOMAIN: &[u8] = b"StartOS configuration overlay\0";
 pub const MANIFEST_VERSION: u32 = 1;
 const MANIFEST_LEN: usize = DOMAIN.len() + 4 + 32 + 32 + 40 + 40;
 const GENERATION_PREFIX: &str = "generation-";
+const STAGING_PREFIX: &str = ".staging-";
 
 /// Retain through image/boot reads or mutations, including every native subprocess.
 pub(crate) async fn reserve_image_store(wait: bool) -> Result<crate::util::FileLock, Error> {
@@ -657,7 +658,7 @@ impl PreparedGeneration {
     ) -> Result<Self, Error> {
         require_p256(key)?;
         let id = Guid::new();
-        let staging = store.join(format!(".staging-{id}"));
+        let staging = store.join(format!("{STAGING_PREFIX}{id}"));
         tokio::fs::DirBuilder::new()
             .mode(0o700)
             .create(&staging)
@@ -798,10 +799,49 @@ pub(crate) fn sync_tree(path: &Path) -> impl Future<Output = Result<(), Error>> 
     }
 }
 
-fn is_generation(name: &std::ffi::OsStr) -> bool {
+fn has_generation_id(name: &std::ffi::OsStr, prefix: &str) -> bool {
     name.to_str()
-        .and_then(|name| name.strip_prefix(GENERATION_PREFIX))
+        .and_then(|name| name.strip_prefix(prefix))
         .is_some_and(|id| Guid::from(id).is_some())
+}
+
+fn is_generation(name: &std::ffi::OsStr) -> bool {
+    has_generation_id(name, GENERATION_PREFIX)
+}
+
+/// Requires the exclusive image-store reservation, before admitting any new preparation.
+/// Published generations and private backings are not part of this recovery namespace.
+pub(crate) async fn recover_unpublished(store: &Path) -> Result<(), Error> {
+    match tokio::fs::symlink_metadata(store).await {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Ok(metadata) if metadata.is_dir() => (),
+        Ok(_) => return Err(invalid_signature()),
+        Err(error) => return Err(error.into()),
+    }
+    let mut entries = read_generation_directory(store).await?;
+    let mut abandoned = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        if has_generation_id(&entry.file_name(), STAGING_PREFIX) {
+            if !entry.file_type().await?.is_dir() {
+                return Err(invalid_signature());
+            }
+            abandoned.push(entry.path());
+        }
+    }
+    if abandoned.is_empty() {
+        return Ok(());
+    }
+    let mounts = crate::disk::mount::util::mountpoints_under(store).await?;
+    if abandoned
+        .iter()
+        .any(|path| mounts.iter().any(|mount| mount.starts_with(path)))
+    {
+        return Err(invalid_signature());
+    }
+    for path in abandoned {
+        remove_unpublished_directory(&path).await?;
+    }
+    Ok(())
 }
 
 /// Authenticated file contents at verification time; callers own their stability.
@@ -903,6 +943,9 @@ pub async fn prune(store: &Path, retain: &[PathBuf]) -> Result<(), Error> {
     Ok(())
 }
 
+#[cfg(test)]
+#[path = "os_overlay/orphan_tests.rs"]
+mod orphan_tests;
 #[cfg(test)]
 #[path = "os_overlay/reclamation_tests.rs"]
 mod reclamation_tests;

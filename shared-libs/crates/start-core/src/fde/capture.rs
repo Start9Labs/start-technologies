@@ -684,6 +684,8 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<(), Error> {
     let images = crate::os_overlay::reserve_image_store(false).await?;
     let rootfs = running_image().await?;
     let epoch = ReadEpoch::current().await?;
+    let store = super::boot::create_generation_store(Path::new("/media/startos/config"))?;
+    crate::os_overlay::recover_unpublished(&store).await?;
     let pause = ctx.db.pause_mutations().await;
     let mut credentials =
         super::credentials::Credentials::capture(&ctx.db.peek().await, ctx.disk_guid.clone())?;
@@ -714,8 +716,6 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<(), Error> {
         ProjectedConfig::stage(snapshot, Path::new(crate::MAIN_DATA), &keys).await?;
     let prepared = async {
         projected.insert_bootstrap(sealed)?;
-        let store = super::boot::generation_store(Path::new("/media/startos/config"));
-        tokio::fs::create_dir_all(&store).await?;
         projected
             .prepare_generation(&rootfs, &store, &enrollment.manifest_key)
             .await

@@ -48,6 +48,11 @@ pub fn generation_store(config: &Path) -> PathBuf {
     config.join(GENERATIONS_DIR)
 }
 
+pub(crate) fn create_generation_store(config: &Path) -> Result<PathBuf, Error> {
+    crate::util::io::create_directory_beneath(config, Path::new(GENERATIONS_DIR))?;
+    Ok(generation_store(config))
+}
+
 impl Descriptor {
     pub(crate) fn for_generation(
         generation: &PreparedGeneration,
@@ -364,6 +369,30 @@ mod tests {
 
     fn public(key: &PKey<Private>) -> PKey<Public> {
         PKey::public_key_from_der(&key.public_key_to_der().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn generation_store_creation_rejects_redirected_namespace_parents() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config");
+        let outside = root.path().join("outside");
+        std::fs::create_dir(&config).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        symlink(&outside, config.join("fde")).unwrap();
+        assert!(create_generation_store(&config).is_err());
+        assert!(!outside.join("generations").exists());
+        std::fs::remove_file(config.join("fde")).unwrap();
+        std::fs::create_dir(config.join("fde")).unwrap();
+        symlink(&outside, generation_store(&config)).unwrap();
+        assert!(create_generation_store(&config).is_err());
+        std::fs::remove_file(generation_store(&config)).unwrap();
+        assert_eq!(
+            create_generation_store(&config).unwrap(),
+            generation_store(&config)
+        );
+        assert!(generation_store(&config).is_dir());
     }
 
     #[test]
