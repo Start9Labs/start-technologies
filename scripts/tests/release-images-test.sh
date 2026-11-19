@@ -42,27 +42,16 @@ cmd_sign() {
     [ "$(release_files)" = "$PUBLISHED" ]
     cmp "$TMP/published/$PUBLISHED" "$(release_dir)/$PUBLISHED"
 }
-for ext in img.gz img; do
-    HOME=$TMP/$ext/home
-    PUBLISHED=startos-1.2.3-abc_raspberrypi.$ext
-    case "$ext" in
-        img.gz) printf 'published image\n' | gzip -c > "$TMP/published/$PUBLISHED" ;;
-        img) printf 'published image\n' > "$TMP/published/$PUBLISHED" ;;
-    esac
-    DONE=()
-    cmd_release
-    notes=$(generated_sections)
-    grep -Fq "$S3_CDN/v$VERSION/$PUBLISHED" <<< "$notes"
-    grep -Fq "  $PUBLISHED" <<< "$notes"
-    if [ "$ext" = img.gz ]; then
-        grep -Fq 'gzip-compressed' <<< "$notes"
-    else
-        [[ "$notes" != *gzip-compressed* ]]
-    fi
-done
+HOME=$TMP/release/home
+PUBLISHED=startos-1.2.3-abc_raspberrypi.img.gz
+printf 'published image\n' | gzip -c > "$TMP/published/$PUBLISHED"
+cmd_release
+notes=$(generated_sections)
+grep -Fq "$S3_CDN/v$VERSION/$PUBLISHED" <<< "$notes"
+grep -Fq "  $PUBLISHED" <<< "$notes"
+grep -Fq 'gzip-compressed' <<< "$notes"
 
 HOME=$TMP/gha/home
-PUBLISHED=startos-1.2.3-abc_raspberrypi.img.gz
 resolve_gha_run() { RUN_ID=1; RUN_SHA=abc; ensure_release_dir; }
 SCRIPT_DIR=$TMP/bin
 mkdir -p "$SCRIPT_DIR"

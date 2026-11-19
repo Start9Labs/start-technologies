@@ -532,11 +532,11 @@ deb_files() {
     for f in *.deb; do [ -f "$f" ] && echo "$f"; done
 }
 
-# Legacy raw images remain eligible for checksums and signatures.
+# List every file the project ships (for signing / checksums), one per line.
 release_files() {
     local f
     case "$KIND" in
-        os) for f in *.iso *.img *.img.gz *.squashfs; do [ -f "$f" ] && echo "$f"; done ;;
+        os) for f in *.iso *.img.gz *.squashfs; do [ -f "$f" ] && echo "$f"; done ;;
         cli) cli_binaries; deb_files ;;
         deb) deb_files ;;
         wrt) for f in *-sdcard.img.gz *-sysupgrade.img.gz; do [ -f "$f" ] && echo "$f"; done ;;
@@ -1761,7 +1761,7 @@ generated_sections() {
                     [ "$ext" != squashfs ] || continue
                     url=$(asset_url "$STARTOS_SOURCE_REGISTRY" "$ext" "$platform")
                     [ -n "$url" ] || continue
-                    if [ "$ext" = img ] && [[ "$url" = *.gz ]]; then
+                    if [ "$ext" = img ]; then
                         url="${url} \"gzip-compressed — Raspberry Pi Imager and balenaEtcher flash it without unpacking\""
                     fi
                     echo "| ${hardware} | ${image} | [${ext^^}](${url}) |"
