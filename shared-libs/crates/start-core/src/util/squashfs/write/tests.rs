@@ -610,7 +610,7 @@ fn data_block_fixture() -> Squashfs<Bytes> {
 
 /// Expected hashes pin the bytes of already-published images.
 #[tokio::test]
-async fn data_block_bytes_are_independent_of_compression_workers() {
+async fn data_block_bytes_are_independent_of_compression_queue_depth() {
     let mut small_blocks = Options::new(4096, 3).unwrap();
     small_blocks.deduplicate = false;
     for (options, expected) in [
@@ -625,16 +625,16 @@ async fn data_block_bytes_are_independent_of_compression_workers() {
     ] {
         let mut image = data_block_fixture();
         image.options = options;
-        for workers in [1, 2, 3, 64] {
+        for queue_depth in [1, 2, 3, 64] {
             let mut output = Cursor::new(Vec::new());
             image
-                .serialize_with_workers(&mut output, workers)
+                .serialize_with_queue_depth(&mut output, queue_depth)
                 .await
                 .unwrap();
             assert_eq!(
                 blake3::hash(output.get_ref()).to_hex().as_str(),
                 expected,
-                "{workers} workers"
+                "queue depth {queue_depth}"
             );
         }
     }

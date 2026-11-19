@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
-use tokio::task::JoinHandle;
+use tokio::sync::oneshot;
 
 use super::blocks::{
     EncodedBlock, METADATA_SIZE, MetadataTable, UNCOMPRESSED_DATA, encode_block, invalid,
@@ -134,12 +134,15 @@ struct PendingLayout {
     offset: u32,
 }
 
-/// Compresses data blocks concurrently and writes them in submission order.
+/// Data blocks queued per compression thread.
+const QUEUED_PER_THREAD: usize = 4;
+
+/// Compresses data blocks on the rayon pool and writes them in submission order.
 struct DataWriter {
     block_size: usize,
     level: i32,
-    workers: usize,
-    in_flight: VecDeque<JoinHandle<std::io::Result<EncodedBlock>>>,
+    queue_depth: usize,
+    in_flight: VecDeque<oneshot::Receiver<std::io::Result<EncodedBlock>>>,
     submitted: usize,
     written: WrittenBlocks,
     fragment_blocks: Vec<BlockIndex>,
@@ -187,11 +190,11 @@ impl WrittenBlocks {
 }
 
 impl DataWriter {
-    fn new(options: Options, workers: usize, start: u64) -> Self {
+    fn new(options: Options, queue_depth: usize, start: u64) -> Self {
         Self {
             block_size: options.block_size() as usize,
             level: options.compression_level(),
-            workers: workers.max(1),
+            queue_depth: queue_depth.max(1),
             in_flight: VecDeque::new(),
             submitted: 0,
             written: WrittenBlocks {
@@ -209,14 +212,20 @@ impl DataWriter {
         bytes: Vec<u8>,
         writer: &mut TrackingIO<W>,
     ) -> Result<BlockIndex, Error> {
-        if self.in_flight.len() >= self.workers {
+        if self.in_flight.len() >= self.queue_depth {
             self.write_oldest(writer).await?;
         }
         let level = self.level;
-        self.in_flight
-            .push_back(tokio::task::spawn_blocking(move || {
+        let (send, receive) = oneshot::channel();
+        rayon::spawn(move || {
+            // An unwinding rayon job aborts the process.
+            if let Ok(block) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 encode_block(&bytes, level)
-            }));
+            })) {
+                let _ = send.send(block);
+            }
+        });
+        self.in_flight.push_back(receive);
         self.submitted += 1;
         Ok(self.submitted - 1)
     }
@@ -228,7 +237,12 @@ impl DataWriter {
         let Some(task) = self.in_flight.pop_front() else {
             return Ok(());
         };
-        let block = task.await.with_kind(ErrorKind::Unknown)??;
+        let block = task.await.map_err(|_| {
+            Error::new(
+                eyre!("SquashFS block compression stopped"),
+                ErrorKind::Unknown,
+            )
+        })??;
         let size = u32::try_from(block.bytes.len())
             .map_err(|_| invalid("SquashFS data block exceeds format limit"))?
             | if block.compressed {
@@ -613,25 +627,26 @@ impl<S: FileSource> Squashfs<S> {
     /// Identical contents, inode attributes, options, and Zstd version produce identical bytes,
     /// independent of insertion order, which hardlink carries the file source, and how many
     /// data blocks compress concurrently.
+    /// Compresses data blocks on the global rayon pool.
     /// Rejects symlink targets above 4095 bytes for lossless reads on 4 KiB-page kernels.
     pub async fn serialize<W: AsyncWrite + AsyncSeek + Unpin + Send>(
         &self,
         writer: &mut W,
     ) -> Result<(), Error> {
-        let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
-        self.serialize_with_workers(writer, workers).await
+        let queue_depth = rayon::current_num_threads() * QUEUED_PER_THREAD;
+        self.serialize_with_queue_depth(writer, queue_depth).await
     }
 
-    async fn serialize_with_workers<W: AsyncWrite + AsyncSeek + Unpin + Send>(
+    async fn serialize_with_queue_depth<W: AsyncWrite + AsyncSeek + Unpin + Send>(
         &self,
         writer: &mut W,
-        workers: usize,
+        queue_depth: usize,
     ) -> Result<(), Error> {
         let nodes = flatten(self.root())?;
         let base = writer.stream_position().await?;
         let mut output = TrackingIO::new(0, &mut *writer);
         output.write_all(&[0; Superblock::SIZE]).await?;
-        let mut data = DataWriter::new(self.options, workers, output.position());
+        let mut data = DataWriter::new(self.options, queue_depth, output.position());
         let mut pending = vec![None; nodes.len()];
         let mut duplicates = BTreeMap::new();
         for (index, node) in nodes.iter().enumerate() {
