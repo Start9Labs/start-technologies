@@ -976,6 +976,14 @@ Set the registry's description (markdown), shown above its services in the marke
 
 Over RPC, pass `null` in the setter's `description` field to clear it; a value sets it.
 
+### `start-cli registry info set-default-locale [DEFAULT_LOCALE] [--clear]`
+
+Set the locale, such as `en_US`, that the registry's own description, category names and OS release notes fall back to when a reader's language is missing. Supply either `DEFAULT_LOCALE` or `--clear`, but not both.
+
+- `--clear` — Remove the registry's default locale
+
+Over RPC, pass `null` in the setter's `defaultLocale` field to clear it; a value sets it.
+
 ### `start-cli registry info set-trust-signers [SIGNER...]`
 
 Select which existing signers the registry offers to StartOS servers for package trust. Run it without signer IDs to clear the selection. See [Trusted Keys](trusted-keys.md#keys-from-registries) for how StartOS treats offered keys.

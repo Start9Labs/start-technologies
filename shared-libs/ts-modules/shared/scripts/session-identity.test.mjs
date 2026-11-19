@@ -92,6 +92,7 @@ test('independent WebCrypto golden matches both directional records and full cap
   assert.deepEqual(prepared.message, client)
   const admitted = await prepared.finish(server)
   assert.equal(admitted.peer, fixture.serverIdentity)
+  assert.equal(admitted.temporary, false)
   assert.deepEqual(
     await admitted.cipher.write(encoder.encode(fixture.clientRecord.plaintext)),
     bytes(fixture.clientRecord.ciphertext),
@@ -134,12 +135,30 @@ test('ordinary HTTP without crypto.subtle retains the independent handshake and 
   )
 })
 
+test('temporary identity scope comes from the signed server hello', async context => {
+  const body = (await decodeFirst(server)).value
+  body.hello.temporary = true
+  const wire = await signedResponse(encode(body))
+  const prepared = await frozenClient(context)
+  const admitted = await prepared.finish(wire)
+  assert.equal(admitted.temporary, true)
+  const changed = (await decodeFirst(wire)).value
+  changed.hello.temporary = false
+  const tampered = concatenate(
+    encode(changed),
+    wire.subarray((await decodeFirst(wire)).length),
+  )
+  const another = await frozenClient(context)
+  await assert.rejects(another.finish(tampered))
+})
+
 test('admission rejects unknown signed fields and invalid binary shapes', async context => {
   const signer = auth.requestSigner(await auth.generateAuthKey())
-  for (const mode of ['unknown', 'text', 'array', 'length']) {
+  for (const mode of ['unknown', 'text', 'array', 'length', 'temporary']) {
     const prepared = await frozenClient(context)
     const body = (await decodeFirst(server)).value
     if (mode === 'unknown') body.hello.unexpected = true
+    if (mode === 'temporary') body.hello.temporary = 'true'
     if (mode === 'text') body.hello.ephemeral = fixture.serverPublic
     if (mode === 'array') body.hello.ephemeral = [...body.hello.ephemeral]
     if (mode === 'length')

@@ -15,11 +15,16 @@ export class ServerIdentityService {
   private readonly alerts = inject(TuiNotificationService)
   readonly openObserver = {
     next: (event: Event) => {
-      void this.observe((event as SessionOpenEvent).peer)
+      void this.observe(event as SessionOpenEvent)
     },
   }
 
-  async observe(peer: string): Promise<void> {
+  /** Temporary proof identities never replace remembered server fingerprints. */
+  async observe({
+    peer,
+    temporary,
+  }: Pick<SessionOpenEvent, 'peer' | 'temporary'>): Promise<void> {
+    if (temporary) return
     const endpoint = new URL(this.relativeUrl, this.win.location.origin)
     if (endpoint.origin !== this.win.location.origin) return
     const target = new URL(endpoint.pathname, endpoint.origin).href

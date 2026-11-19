@@ -460,6 +460,12 @@ export type SetDataVersionParams = z.output<typeof schemas.SetDataVersionParams>
 export type SetDataVersionParamsInput = z.input<
   typeof schemas.SetDataVersionParams
 >
+export type SetDefaultLocaleParams = z.output<
+  typeof schemas.SetDefaultLocaleParams
+>
+export type SetDefaultLocaleParamsInput = z.input<
+  typeof schemas.SetDefaultLocaleParams
+>
 export type SetLanguageParams = z.output<typeof schemas.SetLanguageParams>
 export type SetLanguageParamsInput = z.input<typeof schemas.SetLanguageParams>
 export type SetMainStatusStatus = z.output<typeof schemas.SetMainStatusStatus>

@@ -14,8 +14,8 @@ registerHooks({
       shortCircuit: true,
       source: `
       export async function prepareSession() {
-        return { message: new Uint8Array([1]), async finish() {
-          return { peer: ${JSON.stringify(auth.ed25519PublicKeyDer64(new Uint8Array(32).fill(7)))}, cipher: {
+        return { message: new Uint8Array([1]), async finish(response) {
+          return { temporary: response[0] === 2, peer: ${JSON.stringify(auth.ed25519PublicKeyDer64(new Uint8Array(32).fill(7)))}, cipher: {
             async write(bytes) { return bytes.slice() }, async read(bytes) { await globalThis.sessionRecordGate?.(); return bytes.slice() }
           } }
         } }
@@ -72,7 +72,11 @@ function record(bytes) {
   frame.set(bytes, 2)
   return frame.buffer
 }
-async function framedSocket(context) {
+async function framedSocket(
+  context,
+  temporary = false,
+  allowTemporaryIdentity = true,
+) {
   class Open extends Socket {
     constructor(url) {
       super(url)
@@ -81,7 +85,7 @@ async function framedSocket(context) {
     send(data) {
       super.send(data)
       if (this.writes.length === 1)
-        queueMicrotask(() => this.receive(record([1])))
+        queueMicrotask(() => this.receive(record([temporary ? 2 : 1])))
     }
   }
   const lifetime = new AbortController()
@@ -90,13 +94,17 @@ async function framedSocket(context) {
     'server.test',
     'rpc',
     Open,
+    allowTemporaryIdentity,
   )
   const socket = new Constructor('ws://server.test/rpc/v2')
-  const opened = await new Promise(resolve =>
-    socket.addEventListener('open', resolve, { once: true }),
-  )
+  context.after(() => socket.close())
+  const opened = await new Promise((resolve, reject) => {
+    socket.addEventListener('open', resolve, { once: true })
+    socket.addEventListener('error', event => reject(event.error), {
+      once: true,
+    })
+  })
   const raw = Socket.instances.at(-1)
-  context.after(() => raw.close())
   return {
     socket,
     opened,
@@ -195,14 +203,26 @@ test('handshake bound survives a split record header without oversized allocatio
   raw.abort(Error('test complete'))
 })
 
-test('open carries immutable identity from completed admission', async context => {
-  const { socket, opened } = await framedSocket(context)
-  assert.equal(
-    opened.peer,
-    auth.ed25519PublicKeyDer64(new Uint8Array(32).fill(7)),
+for (const temporary of [false, true])
+  test(`open carries verified identity and temporary=${temporary} from admission`, async context => {
+    const { socket, opened } = await framedSocket(context, temporary)
+    assert.equal(
+      opened.peer,
+      auth.ed25519PublicKeyDer64(new Uint8Array(32).fill(7)),
+    )
+    assert.equal(opened.temporary, temporary)
+    assert.equal(socket.readyState, socket.OPEN)
+    socket.close()
+  })
+
+test('normal admission rejects a temporary identity before open or application writes', async context => {
+  await assert.rejects(
+    framedSocket(context, true, false),
+    /Temporary server identity is not allowed/,
   )
-  assert.equal(socket.readyState, socket.OPEN)
-  socket.close()
+  const raw = Socket.instances.at(-1)
+  assert.equal(raw.writes.length, 1)
+  assert.ok(raw.closed)
 })
 
 test('logical text retains its leading UTF-8 BOM', async context => {

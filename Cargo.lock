@@ -8470,6 +8470,7 @@ dependencies = [
  "qrcode",
  "r3bl_tui",
  "rand 0.10.3",
+ "rayon",
  "rcgen",
  "regex",
  "reqwest",
@@ -8535,7 +8536,7 @@ dependencies = [
 
 [[package]]
 name = "start-registry"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "mimalloc",
  "start-core",

@@ -1,6 +1,7 @@
 import { Effects } from '@start9labs/start-core/types'
 import { HealthCheckResult } from './HealthCheckResult'
 import * as fs from 'node:fs/promises'
+import { timeoutPromise } from './index'
 
 /** `TCP_LISTEN` in the state column of `/proc/net/tcp{,6}`. */
 const TCP_LISTEN = 0x0a
@@ -59,6 +60,9 @@ export async function checkPortListening(
     timeout?: number
   },
 ): Promise<HealthCheckResult> {
+  const deadline = timeoutPromise(options.timeout ?? 1_000, {
+    message: options.timeoutMessage || `Timeout trying to check port ${port}`,
+  })
   return Promise.race<HealthCheckResult>([
     Promise.resolve().then(async () => {
       const hasAddress =
@@ -88,16 +92,6 @@ export async function checkPortListening(
         message: options.errorMessage,
       }
     }),
-    new Promise(resolve => {
-      setTimeout(
-        () =>
-          resolve({
-            result: 'failure',
-            message:
-              options.timeoutMessage || `Timeout trying to check port ${port}`,
-          }),
-        options.timeout ?? 1_000,
-      )
-    }),
-  ])
+    deadline.catch(error => ({ result: 'failure', message: error.message })),
+  ]).finally(deadline.cancel)
 }

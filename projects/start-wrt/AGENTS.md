@@ -15,7 +15,7 @@ start-wrt was migrated from its own repo into this monorepo. Key consequences:
 - **`startwrt-core` consumes shared code directly:** the old embedded `start-os` submodule is gone — its `core/` crate is now the shared `start-core`, pulled in **aliased** as `startos` (`startos = { package = "start-core", path = "../../../../shared-libs/crates/start-core" }`) so existing `use startos::…` imports resolve unchanged. `rpc-toolkit` and `imbl-value` likewise point at the vendored `shared-libs/crates/` copies, not git/crates.io.
 - **The web is a project in the root Angular workspace** (`start-wrt` in the root `angular.json`), sharing the root `package.json`/`node_modules`/`tsconfig.json` like every other app. Build it with `npm run build:wrt`, serve with `npm run start:wrt`, type-check with `npm run check:wrt` (all run from the repo root). It adopts `@start9labs/shared` for its common utilities — see [`web/AGENTS.md`](web/AGENTS.md).
 - **`openwrt/` is a disposable, gitignored build workspace** (no submodule, no fork, no git repo inside). `make start-wrt-openwrt-setup` rebuilds it from the sha256-pinned upstream release tarball ([`build/openwrt-version`](build/openwrt-version)) and applies the Start9 delta: [`openwrt-patches/`](openwrt-patches/) (modified upstream files, applied with `patch -p1`) + [`openwrt-overlay/`](openwrt-overlay/) (added files, rsynced over the tree). Every setup run **rebuilds the tree** (generated state — `dl/`, `build_dir/`, `feeds/`, `files/`, `.config`, keys — is preserved) — never keep work inside it; change the patch/overlay dirs instead (workflow in [AGENTS.md](AGENTS.md#openwrt-tree-pinned-upstream--patches--overlay)). The binary build does _not_ need the workspace, only the full image does.
-- **Build targets live in [`build.mk`](build.mk)** (included by the root `Makefile`), not a standalone product Makefile. From the repo root: `make start-wrt` (binary+web), `make start-wrt-image` (full image), `make start-wrt-update STARTWRT_REMOTE=…` (deploy). When you change a build input in `build.mk`, mirror it into `.github/workflows/start-wrt.yaml` `paths:` (root AGENTS.md "Coupled changes").
+- **Build targets live in [`build.mk`](build.mk)** (included by the root `Makefile`), not a standalone product Makefile. From the repo root: `make start-wrt` (binary+web), `make start-wrt-image` (full image), `make start-wrt-update STARTWRT_REMOTE=…` (deploy). When you change a build input in `build.mk`, mirror it into StartWRT's entry in `.github/scripts/changed-products.mjs` (root AGENTS.md "Coupled changes").
 
 ## Operating rules
 
@@ -298,6 +298,12 @@ and retain their selected `PROFILE`.
 | `make start-wrt-update STARTWRT_REMOTE=root@IP` | deploy binary over SSH (default `root@192.168.0.1`)                                |
 | `make start-wrt-clean`                          | remove start-wrt build artifacts                                                   |
 
+`make start-wrt-ca-test` checks the built image's certificate stores: they must exclude
+emSign ECC Root CA - G3 and keep ISRG Root X1. It needs a completed `make start-wrt-image`
+and OpenSSL; image CI runs it after the build. A failed incremental build can leave the
+previous rootfs; the check verifies its certificates, not image freshness.
+`STARTWRT_CA_ROOTFS` selects an unpacked image root for artifact verification.
+
 The OpenWrt image build needs a consistent environment — Docker is recommended; native builds
 on some distros fail silently.
 
@@ -356,7 +362,7 @@ rebuilds. Every setup run:
 3. Rsyncs [`openwrt-overlay/`](openwrt-overlay/) over the tree — the _added_ files
    (mirroring upstream layout): `target/linux/spacemit/` (the K1 target, including its
    `patches-6.18/` kernel patches), `package/boot/{opensbi,uboot}-spacemit/`, the generic
-   6.18 kernel stubs, one mac80211 build patch, and a wireless-regdb patch. Additions live as plain files, not
+   6.18 kernel stubs, one mac80211 build patch, a wireless-regdb patch, and a ca-certificates patch. Additions live as plain files, not
    patches, so upstream bumps can never conflict with them. Most of this tree comes from
    SpaceMiT's BSP and from OpenWrt, and it is GPL-2.0-only rather than MIT — see
    [`openwrt-overlay/README.md`](openwrt-overlay/README.md) before editing it.

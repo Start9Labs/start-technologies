@@ -14,8 +14,8 @@ use url::Url;
 use super::RpcSessionUpgrader;
 use crate::middleware::auth::signature::rpc_request_body;
 use crate::prelude::*;
-use crate::sign::session::{PreparedClient, Target};
-use crate::sign::{AnyVerifyingKey, Signer};
+use crate::sign::Signer;
+use crate::sign::session::{PeerIdentity, PreparedClient, Target};
 use crate::util::net::secure::{DEFAULT_RPC_RESPONSE_LIMIT, EncryptedSocket, wire_message_size};
 use crate::util::net::tungstenite::reqwest_transport;
 
@@ -85,7 +85,7 @@ pub async fn connect(
     address: &str,
     target: Target,
     mut headers: HeaderMap,
-) -> Result<(AnyVerifyingKey, EncryptedSocket), Error> {
+) -> Result<(PeerIdentity, EncryptedSocket), Error> {
     let mut logical = url.clone();
     logical
         .set_host(Some(address))
@@ -115,7 +115,7 @@ pub(crate) async fn admit(
     address: &str,
     target: Target,
     upgrade: impl Future<Output = Result<BoxWebSocket, Error>>,
-) -> Result<(AnyVerifyingKey, EncryptedSocket), Error> {
+) -> Result<(PeerIdentity, EncryptedSocket), Error> {
     let prepared = PreparedClient::new(signer, address, target).await?;
     let limit = NonZeroUsize::new(DEFAULT_RPC_RESPONSE_LIMIT).unwrap();
     tokio::time::timeout(CONNECT_TIMEOUT, async {

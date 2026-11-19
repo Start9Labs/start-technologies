@@ -60,7 +60,7 @@ async fn cli_sideload_waits_for_finalization_and_cancels_observation_when_upload
             let guids = guids.clone();
             async move {
                 upgrade.on_upgrade(move |socket| async move {
-                let (_, _, mut socket) = EncryptedSocket::accept(Box::new(socket), &key, &["127.0.0.1".into()], NonZeroUsize::new(1024 * 1024).unwrap(), &Target::Rpc, None, |_| async { Ok(()) }).await.unwrap();
+                let (_, _, mut socket) = EncryptedSocket::accept(Box::new(socket), &key.into(), &["127.0.0.1".into()], NonZeroUsize::new(1024 * 1024).unwrap(), &Target::Rpc, None, |_| async { Ok(()) }).await.unwrap();
                 for step in 0..2 {
                     let text = socket.next().await.unwrap().unwrap().into_text().unwrap();
                     let request: serde_json::Value = serde_json::from_str(&text).unwrap();

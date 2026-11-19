@@ -7,7 +7,7 @@ use futures::{SinkExt, StreamExt};
 use super::*;
 use crate::rpc_continuations::websocket_tests::{echo, serve};
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuation, WebSocketPolicy};
-use crate::sign::AnySigningKey;
+use crate::sign::{AnySigningKey, Signer};
 use crate::util::net::secure::tests::raw_socket;
 
 struct ScopeOwner {
@@ -24,7 +24,7 @@ async fn scope() -> (SecureSession, Signer, ScopeOwner) {
     let scope = SecureSession {
         peer,
         address: "localhost".into(),
-        server_identity: context.server_identity().unwrap(),
+        server_identity: context.server_identity().unwrap().into(),
         replay_check: context.replay_check(),
     };
     (

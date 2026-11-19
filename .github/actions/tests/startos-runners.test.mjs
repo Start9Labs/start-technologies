@@ -11,11 +11,9 @@ const load = name =>
     readFileSync(new URL(`../../workflows/${name}`, import.meta.url), 'utf8'),
   )
 const workflow = load('startos-iso.yaml')
+const products = load('build-products.yaml')
 const image = load('startos-image.yaml').jobs.build
-const [standard, fast] = Array.from(
-  image['runs-on'].matchAll(/fromJson\('([\s\S]*?)'\)/g),
-  match => yaml.load(match[1]),
-)
+const runners = yaml.load(image['runs-on'].match(/fromJson\('([\s\S]*?)'\)/)[1])
 const architectures = yaml.load(
   image.env.ARCH.match(/fromJson\('([\s\S]*?)'\)/)[1],
 )
@@ -24,9 +22,8 @@ const bootstrap = image.steps.find(
 )
 
 for (const platform of ['riscv64', 'riscv64-nonfree']) {
-  test(`${platform} retains native assembly and the fast-runner alternative`, () => {
-    assert.equal(standard[platform], 'ubuntu-24.04-riscv')
-    assert.equal(fast[platform], 'amd64-fast')
+  test(`${platform} image assembly stays native`, () => {
+    assert.equal(runners[platform], 'ubuntu-24.04-riscv')
     assert.equal(architectures[platform], 'riscv64')
   })
 }
@@ -34,18 +31,12 @@ for (const platform of ['riscv64', 'riscv64-nonfree']) {
 test('the native runtime bootstrap precedes every JavaScript action', () => {
   assert.ok(bootstrap)
   assert.ok(image.steps.indexOf(bootstrap) < image.steps.findIndex(s => s.uses))
-  assert.equal(
-    bootstrap.if,
-    "${{ env.ARCH == 'riscv64' && !inputs.fast-runner }}",
-  )
-  assert.equal(
-    workflow.jobs.image.with['fast-runner'],
-    "${{ github.event.inputs.runner == 'fast' }}",
-  )
-  assert.equal(
-    workflow.jobs.image.with['nodejs-version'],
-    workflow.env.NODEJS_VERSION,
-  )
+  assert.equal(bootstrap.if, "${{ env.ARCH == 'riscv64' }}")
+  for (const caller of [workflow, products])
+    assert.equal(
+      caller.jobs.image.with['nodejs-version'],
+      caller.env.NODEJS_VERSION,
+    )
 })
 
 for (const [name, validChecksum, startsJavaScript] of [

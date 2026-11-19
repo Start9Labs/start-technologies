@@ -10,7 +10,7 @@
 - **Root and node injectors only.** Singletons in `app.config.ts` or `@Service()`/
   `@Injectable({providedIn: 'root'})`; everything scoped goes in a **component's** `providers`/
   `viewProviders` — per-page service bindings (`providers: [provideFormService(WifiService)]`),
-  per-dialog validation messages, per-subtree Taiga options. **Never `providers` on a route.**
+  per-dialog validation messages, per-subtree Taiga options. Never on a route (routing.md).
 - **Tokens**: `new InjectionToken('description', { factory })` — and the factory often returns
   live state: a signal (`HELP_OPEN`), a `toSignal` of composed streams (`STATUS`), a
   `BehaviorSubject` (`PATCH_CACHE`). Consumers just `inject(STATUS)` and call it. Value tokens

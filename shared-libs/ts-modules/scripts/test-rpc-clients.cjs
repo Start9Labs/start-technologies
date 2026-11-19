@@ -957,6 +957,38 @@ test('setup stream capture precedes key acquisition and cancellation prevents la
   assert.equal(dispatched, 0)
 })
 
+test('Setup explicitly admits temporary identities for streams and continuations', async () => {
+  const { dependencies, tokens, load } = harness()
+  const calls = []
+  dependencies.set(tokens.AuthKeyService, {
+    admissionLease: async () => ({
+      signer: {},
+      signal: new AbortController().signal,
+    }),
+  })
+  dependencies.set(tokens.HttpService, {})
+  dependencies.set(tokens.RpcSocketService, {
+    stream: async (_, __, options) => {
+      calls.push(options)
+      return { initial: {}, items: (async function* () {})() }
+    },
+    open: (_, config) => {
+      calls.push(config)
+      return of()
+    },
+  })
+  const client = new (load(
+    'projects/start-os/web/setup-wizard/src/app/services/live-api.service.ts',
+  ).LiveApiService)()
+  await client.streams.setup.status({})
+  client.openWebsocket$('setup-guid')
+  assert.equal(calls.length, 2)
+  for (const options of calls) {
+    assert.equal(options.allowTemporaryIdentity, true)
+    assert.equal(options.openObserver, undefined)
+  }
+})
+
 test('setup mock ordinary and typed status share their progress and terminal owner', async () => {
   const { load } = harness(new Map(), { AbortController })
   const mock = Object.create(
@@ -1154,12 +1186,14 @@ test('Setup sends unwrapped secrets through encrypted admission and preserves th
   assert.equal(calls[0].method, 'setup.install-os')
   assert.deepEqual(calls[0].params, params)
   assert.equal(calls[0].timeout, 5 * 60 * 1000)
+  assert.equal(calls[0].allowTemporaryIdentity, true)
   await client.rpc.setup.execute({
     guid: 'drive',
     password: '  secret  ',
     kiosk: false,
   })
   assert.equal(calls[1].method, 'setup.execute')
+  assert.equal(calls[1].allowTemporaryIdentity, true)
   assert.equal(calls[1].params.password, '  secret  ')
   assert.equal(calls.length, 2)
 })

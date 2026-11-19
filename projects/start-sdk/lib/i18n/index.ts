@@ -35,7 +35,8 @@ function firstUsableLocale(...candidates: string[]): string | undefined {
  * @param defaultDict - The default language dictionary mapping strings to numeric indices
  * @param translations - Translation dictionaries for each supported locale
  * @param defaultLang - The default language code (e.g., 'en_US')
- * @returns A typed i18n function that accepts dictionary keys and optional parameters
+ * @returns A typed i18n function that accepts dictionary keys and optional parameters,
+ *   carrying the default language as `defaultLang` for `buildManifest`
  */
 export function setupI18n<
   Dict extends Record<string, number>,
@@ -78,10 +79,7 @@ export function setupI18n<
     return value
   }
 
-  return function i18n(
-    key: keyof Dict,
-    params?: Record<string, ParamValue>,
-  ): string {
+  function i18n(key: keyof Dict, params?: Record<string, ParamValue>): string {
     let result = translation
       ? translation[defaultDict[key as string]]
       : (key as string)
@@ -94,4 +92,6 @@ export function setupI18n<
 
     return result
   }
+
+  return Object.assign(i18n, { defaultLang })
 }

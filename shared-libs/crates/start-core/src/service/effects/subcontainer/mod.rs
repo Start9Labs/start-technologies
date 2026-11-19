@@ -50,7 +50,7 @@ pub async fn destroy_subcontainer_fs(
     let mut subcontainers = context.seed.persistent_container.subcontainers.lock().await;
     if let Some(overlay) = subcontainers.get(&guid) {
         kill_subcontainer(&context.seed.persistent_container, overlay).await?;
-        shared_volumes.remove_subcontainer(&guid);
+        shared_volumes.remove_subcontainer(&guid).await?;
         subcontainers
             .remove(&guid)
             .unwrap()

@@ -4277,6 +4277,20 @@ tunnel.api.invalid-endpoint:
   fr_FR: 'Saisissez une adresse IPv4, IPv6 ou un nom DNS sans schéma, port ni chemin'
   pl_PL: 'Wprowadź adres IPv4, IPv6 lub nazwę DNS bez schematu, portu ani ścieżki'
 
+tunnel.api.invalid-name:
+  en_US: 'Names must not be empty or only whitespace, must contain no control characters, and must be at most %{max} characters long'
+  de_DE: 'Namen dürfen nicht leer sein oder nur aus Leerzeichen bestehen, keine Steuerzeichen enthalten und höchstens %{max} Zeichen lang sein'
+  es_ES: 'Los nombres no pueden estar vacíos ni contener solo espacios, no deben contener caracteres de control y deben tener como máximo %{max} caracteres'
+  fr_FR: 'Les noms ne doivent pas être vides ni composés uniquement d’espaces, ne doivent contenir aucun caractère de contrôle et doivent comporter au maximum %{max} caractères'
+  pl_PL: 'Nazwy nie mogą być puste ani składać się wyłącznie z białych znaków, nie mogą zawierać znaków sterujących i mogą mieć najwyżej %{max} znaków'
+
+util.actor.runtime-exited:
+  en_US: The task processor has stopped.
+  de_DE: Die Aufgabenverarbeitung wurde gestoppt.
+  es_ES: El procesador de tareas se ha detenido.
+  fr_FR: Le processeur de tâches est arrêté.
+  pl_PL: Przetwarzanie zadań zostało zatrzymane.
+
 util.crypto.invalid-backup-key:
   en_US: "The wrapped backup key is invalid or could not be authenticated."
   de_DE: "Der verschlüsselte Sicherungsschlüssel ist ungültig oder konnte nicht authentifiziert werden."
@@ -5642,6 +5656,20 @@ help.arg.cifs-username:
   es_ES: "Nombre de usuario de autenticación CIFS"
   fr_FR: "Nom d'utilisateur d'authentification CIFS"
   pl_PL: "Nazwa użytkownika uwierzytelniania CIFS"
+
+help.arg.registry-default-locale:
+  en_US: "Locale the registry's own text falls back to, such as en_US"
+  de_DE: "Gebietsschema, auf das die eigenen Texte des Registrys zurückfallen, z. B. en_US"
+  es_ES: "Configuración regional a la que recurren los textos propios del registro, como en_US"
+  fr_FR: "Paramètre régional de repli pour les textes propres au registre, par exemple en_US"
+  pl_PL: "Ustawienia regionalne, do których wracają własne teksty rejestru, np. en_US"
+
+help.arg.clear-registry-default-locale:
+  en_US: "Remove the registry default locale"
+  de_DE: "Das Standard-Gebietsschema des Registrys entfernen"
+  es_ES: "Eliminar la configuración regional predeterminada del registro"
+  fr_FR: "Supprimer le paramètre régional par défaut du registre"
+  pl_PL: "Usuń domyślne ustawienia regionalne rejestru"
 
 help.arg.clear-registry-description:
   en_US: "Remove the registry description"
@@ -8111,6 +8139,13 @@ about.set-registry-description:
   es_ES: "Establecer la descripción del registro"
   fr_FR: "Définir la description du registre"
   pl_PL: "Ustaw opis rejestru"
+
+about.set-registry-default-locale:
+  en_US: "Set the locale the registry's own text falls back to"
+  de_DE: "Das Gebietsschema festlegen, auf das die eigenen Texte des Registrys zurückfallen"
+  es_ES: "Establecer la configuración regional a la que recurren los textos propios del registro"
+  fr_FR: "Définir le paramètre régional de repli pour les textes propres au registre"
+  pl_PL: "Ustaw ustawienia regionalne, do których wracają własne teksty rejestru"
 
 about.set-registry-name:
   en_US: "Set the registry name"
