@@ -2529,17 +2529,6 @@ export const AlpnInfo: z.ZodArray<typeof MaybeUtf8String> = /* @__PURE__ */ z
     description:
       'The protocols a binding answers with, carried on the wire as the list itself.',
   })
-export const AttachSharedVolumeParams: z.ZodObject<{
-  subcontainer: typeof Guid
-  mountpoint: z.ZodString
-  path: z.ZodString
-}> = /* @__PURE__ */ object({
-  subcontainer: Guid,
-  mountpoint: z.string(),
-  path: z.string(),
-}).meta({
-  id: 'AttachSharedVolumeParams',
-})
 
 /**
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
@@ -3788,6 +3777,24 @@ export const MetricsSummary: z.ZodObject<{
 }).meta({
   id: 'MetricsSummary',
 })
+export const MountSharedVolumeParams: z.ZodObject<{
+  id: typeof SharedVolumeId
+  subcontainer: typeof Guid
+  mountpoint: z.ZodString
+  subpath: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  readonly: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  id: SharedVolumeId,
+  subcontainer: Guid,
+  mountpoint: z.string(),
+  subpath: wire(z.string().nullable().optional(), z.string().nullable()),
+  readonly: z.boolean(),
+}).meta({
+  id: 'MountSharedVolumeParams',
+})
 export const MountTarget: z.ZodCodec<
   z.ZodObject<{
     packageId: typeof PackageId
@@ -4183,24 +4190,6 @@ export const PreDownloadAlert: z.ZodObject<{
   when: PreDownloadAlertWhen,
 }).meta({
   id: 'PreDownloadAlert',
-})
-export const PrepareSharedVolumeParams: z.ZodObject<{
-  id: typeof SharedVolumeId
-  subcontainer: typeof Guid
-  mountpoint: z.ZodString
-  subpath: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  readonly: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  id: SharedVolumeId,
-  subcontainer: Guid,
-  mountpoint: z.string(),
-  subpath: wire(z.string().nullable().optional(), z.string().nullable()),
-  readonly: z.boolean(),
-}).meta({
-  id: 'PrepareSharedVolumeParams',
 })
 
 /**
@@ -5897,34 +5886,6 @@ export const PartitionInfo: z.ZodObject<{
   filesystem: wire(z.string().nullable().optional(), z.string().nullable()),
 }).meta({
   id: 'PartitionInfo',
-})
-export const PreparedSharedVolume: z.ZodObject<{
-  /**
-   * Absolute path inside the service LXC.
-   */
-  path: z.ZodString
-  /**
-   * Read-only empty source retained beneath optional data mounts.
-   */
-  placeholder: z.ZodString
-  result: typeof SharedVolumeMountResult
-}> = /* @__PURE__ */ object({
-  /**
-   * Absolute path inside the service LXC.
-   */
-  path: z.string().meta({
-    description: 'Absolute path inside the service LXC.',
-  }),
-  /**
-   * Read-only empty source retained beneath optional data mounts.
-   */
-  placeholder: z.string().meta({
-    description:
-      'Read-only empty source retained beneath optional data mounts.',
-  }),
-  result: SharedVolumeMountResult,
-}).meta({
-  id: 'PreparedSharedVolume',
 })
 export const Progress: z.ZodUnion<
   readonly [

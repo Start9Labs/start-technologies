@@ -121,14 +121,10 @@ export type Effects = {
   getSharedVolumes(options: {
     callback?: () => void
   }): Promise<RPC.RpcReturnType<RPC.Effects, 'get-shared-volumes'>>
-  /** Prepares service-visible sources for SDK binds; authorization and invalid paths reject. */
-  prepareSharedVolume(
-    options: RPC.RpcParamType<RPC.Effects, 'prepare-shared-volume'>,
-  ): Promise<RPC.RpcReturnType<RPC.Effects, 'prepare-shared-volume'>>
-  /** Attaches a prepared source with host-owned revocation bookkeeping. */
-  attachSharedVolume(
-    options: RPC.RpcParamType<RPC.Effects, 'attach-shared-volume'>,
-  ): Promise<RPC.RpcReturnType<RPC.Effects, 'attach-shared-volume'>>
+  /** Mounts and tracks user-granted storage; authorization and invalid paths reject. */
+  mountSharedVolume(
+    options: RPC.RpcParamType<RPC.Effects, 'mount-shared-volume'>,
+  ): Promise<RPC.RpcReturnType<RPC.Effects, 'mount-shared-volume'>>
 
   // backup
   /**

@@ -9,7 +9,7 @@ use crate::PackageId;
 use crate::prelude::*;
 use crate::util::sync::SyncMutex;
 
-/// Grant changes deny future preparation and detach incompatible SDK-managed binds and stages.
+/// Grant changes deny future mount requests and detach incompatible SDK-managed binds and stages.
 /// Independent aliases and open handles remain outside this best-effort boundary.
 #[derive(Default)]
 pub(crate) struct SharedVolumeAccess {

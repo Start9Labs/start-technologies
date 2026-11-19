@@ -130,7 +130,7 @@ pub async fn get_shared_volumes(
 
 #[derive(Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-pub struct PrepareSharedVolumeParams {
+pub struct MountSharedVolumeParams {
     pub id: SharedVolumeId,
     pub subcontainer: crate::rpc_continuations::Guid,
     pub mountpoint: std::path::PathBuf,
@@ -138,8 +138,8 @@ pub struct PrepareSharedVolumeParams {
     pub readonly: bool,
 }
 
-rpc_toolkit::reflect_ts!(PrepareSharedVolumeParams);
-rpc_toolkit::ts_export!(PrepareSharedVolumeParams, namespaces = [""]);
+rpc_toolkit::reflect_ts!(MountSharedVolumeParams);
+rpc_toolkit::ts_export!(MountSharedVolumeParams, namespaces = [""]);
 
 #[derive(Debug, Clone, Serialize, Deserialize, VisitVariants)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -152,19 +152,6 @@ pub enum SharedVolumeMountResult {
 
 rpc_toolkit::reflect_ts!(SharedVolumeMountResult);
 rpc_toolkit::ts_export!(SharedVolumeMountResult, namespaces = [""]);
-
-#[derive(Debug, Clone, Serialize, Deserialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
-pub struct PreparedSharedVolume {
-    /// Absolute path inside the service LXC.
-    pub path: std::path::PathBuf,
-    /// Read-only empty source retained beneath optional data mounts.
-    pub placeholder: std::path::PathBuf,
-    pub result: SharedVolumeMountResult,
-}
-
-rpc_toolkit::reflect_ts!(PreparedSharedVolume);
-rpc_toolkit::ts_export!(PreparedSharedVolume, namespaces = [""]);
 
 #[derive(Debug, Clone, Serialize, Deserialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
@@ -203,17 +190,29 @@ async fn authorize_mount(
         )
 }
 
-pub async fn prepare_shared_volume(
+/// Owns authorization, placeholder installation and data attachment through cancellation.
+pub async fn mount_shared_volume(
     context: EffectContext,
-    PrepareSharedVolumeParams {
+    params: MountSharedVolumeParams,
+) -> Result<SharedVolumeMountResult, Error> {
+    tokio::spawn(mount_shared_volume_owned(context, params))
+        .await
+        .with_kind(ErrorKind::Cancelled)?
+}
+
+async fn mount_shared_volume_owned(
+    context: EffectContext,
+    MountSharedVolumeParams {
         id,
         subcontainer,
         mountpoint,
         subpath,
         readonly,
-    }: PrepareSharedVolumeParams,
-) -> Result<PreparedSharedVolume, Error> {
+    }: MountSharedVolumeParams,
+) -> Result<SharedVolumeMountResult, Error> {
+    use crate::disk::mount::filesystem::syscall::MountNamespace;
     use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
+    use crate::disk::mount::guard::GenericMountGuard;
     use crate::shared_volumes::mounts::confined_relative;
     let service = context.deref()?;
     let container = &service.seed.persistent_container;
@@ -250,84 +249,10 @@ pub async fn prepare_shared_volume(
     mounts.check_allowed()?;
     authorize_mount(&service, &id, readonly).await?;
     let subcontainers = container.subcontainers.lock().await;
-    subcontainers
-        .get(&subcontainer)
-        .or_not_found("subcontainer")?;
-    mounts.remove_target(&subcontainer, &mountpoint).await?;
-    let source = match source {
-        Ok(prepared) => prepared?,
-        Err(error) => {
-            return Ok(PreparedSharedVolume {
-                path: mounts.unavailable_path(),
-                placeholder: mounts.unavailable_path(),
-                result: SharedVolumeMountResult::Unavailable {
-                    reason: if matches!(error.kind, ErrorKind::Timeout) {
-                        SharedVolumeUnavailableReason::Timeout
-                    } else {
-                        SharedVolumeUnavailableReason::SourceUnavailable
-                    },
-                },
-            });
-        }
-    };
-    let path = mounts
-        .stage(&subcontainer, mountpoint, &id, source, readonly)
-        .await?;
-    Ok(PreparedSharedVolume {
-        path,
-        placeholder: mounts.unavailable_path(),
-        result: SharedVolumeMountResult::Mounted,
-    })
-}
-
-#[derive(Serialize, Deserialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
-pub struct AttachSharedVolumeParams {
-    pub subcontainer: crate::rpc_continuations::Guid,
-    pub mountpoint: std::path::PathBuf,
-    pub path: std::path::PathBuf,
-}
-
-rpc_toolkit::reflect_ts!(AttachSharedVolumeParams);
-rpc_toolkit::ts_export!(AttachSharedVolumeParams, namespaces = [""]);
-
-/// Registers and attaches the SDK target under the grant-management gate.
-pub async fn attach_shared_volume(
-    context: EffectContext,
-    params: AttachSharedVolumeParams,
-) -> Result<(), Error> {
-    tokio::spawn(attach_shared_volume_owned(context, params))
-        .await
-        .with_kind(ErrorKind::Cancelled)?
-}
-
-async fn attach_shared_volume_owned(
-    context: EffectContext,
-    AttachSharedVolumeParams {
-        subcontainer,
-        mountpoint,
-        path,
-    }: AttachSharedVolumeParams,
-) -> Result<(), Error> {
-    use crate::disk::mount::guard::GenericMountGuard;
-
-    let service = context.deref()?;
-    let container = &service.seed.persistent_container;
-    let _admission = service
-        .seed
-        .ctx
-        .shared_volume_access
-        .management
-        .read()
-        .await;
-    let mut mounts = container.shared_volumes.lock().await;
-    let (id, readonly) = mounts.staged_access(&subcontainer, &mountpoint, &path)?;
-    authorize_mount(&service, &id, readonly).await?;
     let lxc = container
         .lxc_container
         .get()
         .or_not_found("lxc container")?;
-    let subcontainers = container.subcontainers.lock().await;
     let root = subcontainers
         .get(&subcontainer)
         .or_not_found("subcontainer")?
@@ -335,9 +260,35 @@ async fn attach_shared_volume_owned(
         .path()
         .strip_prefix(lxc.rootfs_dir())
         .with_kind(ErrorKind::Incoherent)?;
+    let pid = lxc.pid().await?;
+    let service_root = std::path::PathBuf::from(format!("/proc/{pid}/root"));
+    let namespace = std::sync::Arc::new(MountNamespace::for_process(pid)?);
     mounts
-        .attach(&subcontainer, &mountpoint, &path, lxc, root)
-        .await
+        .prepare_target(&subcontainer, &mountpoint, &service_root, root, namespace)
+        .await?;
+    let source = match source {
+        Ok(prepared) => prepared?,
+        Err(error) => {
+            return Ok(SharedVolumeMountResult::Unavailable {
+                reason: if matches!(error.kind, ErrorKind::Timeout) {
+                    SharedVolumeUnavailableReason::Timeout
+                } else {
+                    SharedVolumeUnavailableReason::SourceUnavailable
+                },
+            });
+        }
+    };
+    mounts
+        .mount_source(
+            &subcontainer,
+            &mountpoint,
+            &id,
+            source,
+            readonly,
+            &service_root,
+        )
+        .await?;
+    Ok(SharedVolumeMountResult::Mounted)
 }
 
 #[cfg(test)]

@@ -290,23 +290,34 @@ mod tests {
             .unwrap();
         let mut mounts = SharedVolumeMounts::new(fixture.path()).await.unwrap();
         let guid = Guid::new();
-        let path = mounts
-            .stage(
+        let namespace =
+            std::sync::Arc::new(
+                crate::disk::mount::filesystem::syscall::MountNamespace::for_process(
+                    std::process::id(),
+                )
+                .unwrap(),
+            );
+        mounts
+            .prepare_target(
                 &guid,
-                "data".into(),
-                &SharedVolumeId::new(),
-                PreparedSource::open(source.clone(), None).await.unwrap(),
-                true,
+                Path::new("data"),
+                fixture.path(),
+                Path::new(""),
+                namespace,
             )
             .await
             .unwrap();
-        let alias = MountGuard::mount(
-            &Bind::new(fixture.path().join(path.strip_prefix("/").unwrap())),
-            fixture.path().join("data"),
-            ReadOnly,
-        )
-        .await
-        .unwrap();
+        mounts
+            .mount_source(
+                &guid,
+                Path::new("data"),
+                &SharedVolumeId::new(),
+                PreparedSource::open(source.clone(), None).await.unwrap(),
+                true,
+                fixture.path(),
+            )
+            .await
+            .unwrap();
         assert!(
             tokio::fs::write(fixture.path().join("data/forbidden"), b"no")
                 .await
@@ -387,7 +398,6 @@ mod tests {
                 .unwrap(),
             "cancelled helper left a late mount"
         );
-        alias.unmount(false).await.unwrap();
         mounts.clear().await.unwrap();
         drop(mounts);
         source.unmount().await.unwrap();

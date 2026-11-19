@@ -203,6 +203,29 @@ pub fn unmount_fd(mount: BorrowedFd) -> Result<(), Error> {
     check(raw as i64, "umount fd")
 }
 
+fn mount_id(fd: BorrowedFd) -> Result<u64, Error> {
+    let empty = cstr_str("")?;
+    let mut stat = std::mem::MaybeUninit::<libc::statx>::zeroed();
+    check(
+        unsafe {
+            libc::syscall(
+                libc::SYS_statx,
+                fd.as_raw_fd(),
+                empty.as_ptr(),
+                AT_EMPTY_PATH,
+                libc::STATX_MNT_ID,
+                stat.as_mut_ptr(),
+            )
+        },
+        "statx mount",
+    )?;
+    Ok(unsafe { stat.assume_init() }.stx_mnt_id)
+}
+
+pub(crate) fn same_mount(left: BorrowedFd, right: BorrowedFd) -> Result<bool, Error> {
+    Ok(mount_id(left)? == mount_id(right)?)
+}
+
 pub(crate) struct MountNamespace(OwnedFd);
 
 impl MountNamespace {

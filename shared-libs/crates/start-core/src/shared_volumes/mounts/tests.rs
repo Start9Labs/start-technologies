@@ -59,6 +59,18 @@ fn pinned_paths_reject_symlink_and_absolute_escapes() {
     }
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn mount_identity_distinguishes_mounts_not_directories() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("child")).unwrap();
+    let parent = open_beneath(root.path(), Path::new("")).unwrap();
+    let child = open_beneath(root.path(), Path::new("child")).unwrap();
+    let procfs = open_beneath(Path::new("/proc"), Path::new("")).unwrap();
+    assert!(same_mount(parent.as_fd(), child.as_fd()).unwrap());
+    assert!(!same_mount(parent.as_fd(), procfs.as_fd()).unwrap());
+}
+
 #[tokio::test]
 async fn backup_restore_scope_blocks_staging_until_explicitly_reenabled() {
     let mut mounts = SharedVolumeMounts::default();
@@ -86,24 +98,46 @@ async fn grows(path: &Path, previous: u64) -> u64 {
     .expect("container heartbeat did not advance")
 }
 
-async fn attach_managed(
+async fn prepare_target(
+    container: &crate::lxc::LxcContainer,
+    mounts: &mut SharedVolumeMounts,
+    guid: &Guid,
+    location: &str,
+) -> PathBuf {
+    container.command(&["mkdir", "-p", location]).await.unwrap();
+    let pid = container.pid().await.unwrap();
+    let root = PathBuf::from(format!("/proc/{pid}/root"));
+    let namespace = Arc::new(MountNamespace::for_process(pid).unwrap());
+    mounts
+        .prepare_target(guid, Path::new(location), &root, Path::new(""), namespace)
+        .await
+        .unwrap();
+    root
+}
+
+async fn mount_managed(
     container: &crate::lxc::LxcContainer,
     mounts: &Arc<tokio::sync::Mutex<SharedVolumeMounts>>,
     guid: &Guid,
     location: &str,
-    path: &Path,
-) {
-    let placeholder = mounts.lock().await.unavailable_path();
-    container.command(&["sh", "-ec", &format!(
-        "mkdir '{location}'; start-container bind-mount --source '{}' --target '{location}' --recursive --readonly",
-        placeholder.display(),
-    )]).await.unwrap();
+    id: &SharedVolumeId,
+    source: &TmpMountGuard,
+    readonly: bool,
+) -> PathBuf {
+    let mut mounts = mounts.lock().await;
+    let root = prepare_target(container, &mut mounts, guid, location).await;
     mounts
-        .lock()
-        .await
-        .attach(guid, Path::new(location), path, container, Path::new(""))
+        .mount_source(
+            guid,
+            Path::new(location),
+            id,
+            PreparedSource::open(source.clone(), None).await.unwrap(),
+            readonly,
+            &root,
+        )
         .await
         .unwrap();
+    PathBuf::from(location)
 }
 
 #[tokio::test]
@@ -157,30 +191,26 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
     let id = SharedVolumeId::new();
     let first_guid = Guid::new();
     let second_guid = Guid::new();
-    let first_path = first_mounts
-        .lock()
-        .await
-        .stage(
-            &first_guid,
-            "/alias".into(),
-            &id,
-            PreparedSource::open(source.clone(), None).await.unwrap(),
-            false,
-        )
-        .await
-        .unwrap();
-    let second_path = second_mounts
-        .lock()
-        .await
-        .stage(
-            &second_guid,
-            "/alias".into(),
-            &id,
-            PreparedSource::open(source.clone(), None).await.unwrap(),
-            false,
-        )
-        .await
-        .unwrap();
+    let first_path = mount_managed(
+        &first,
+        &first_mounts,
+        &first_guid,
+        "/alias",
+        &id,
+        &source,
+        false,
+    )
+    .await;
+    let second_path = mount_managed(
+        &second,
+        &second_mounts,
+        &second_guid,
+        "/alias",
+        &id,
+        &source,
+        false,
+    )
+    .await;
     let worker = |path: &Path, name: &str| {
         format!(
             "mkdir /independent; start-container bind-mount --source '{}' --target /independent --recursive; unshare --mount --pid --cgroup --fork sh -c 'exec 3>>/independent/{name}; echo ready >&3; while :; do printf x >&3; sleep 0.02; done' >/dev/null 2>&1 </dev/null &",
@@ -199,7 +229,6 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         "mkdir '{0}/nested'; mount -t tmpfs tmpfs '{0}/nested'; echo nested > '{0}/nested/marker'",
         first_path.display(),
     )]).await.unwrap();
-    attach_managed(&first, &first_mounts, &first_guid, "/alias", &first_path).await;
     first
         .command(&["sh", "-ec", &format!(
             "test \"$(cat /alias/nested/marker)\" = nested; mkdir /readonly-tree; start-container bind-mount --source '{}' --target /readonly-tree --recursive --readonly; test \"$(cat /readonly-tree/nested/marker)\" = nested; if touch /readonly-tree/nested/forbidden 2>/dev/null; then exit 110; fi; mkdir '{0}/late-child'; mount -t tmpfs tmpfs '{0}/late-child'; echo late > '{0}/late-child/marker'; test \"$(cat /alias/late-child/marker)\" = late; test ! -e /readonly-tree/late-child/marker",
@@ -207,46 +236,32 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         )])
         .await
         .unwrap();
-    attach_managed(
-        &second,
-        &second_mounts,
-        &second_guid,
-        "/alias",
-        &second_path,
-    )
-    .await;
     grows(&fixture.path().join("first"), 0).await;
     grows(&fixture.path().join("second"), 0).await;
     let before = std::fs::metadata(fixture.path().join("first"))
         .unwrap()
         .len();
-    let read_stage = first_mounts
-        .lock()
-        .await
-        .stage(
-            &first_guid,
-            "/read".into(),
-            &id,
-            PreparedSource::open(source.clone(), None).await.unwrap(),
-            true,
-        )
-        .await
-        .unwrap();
-    attach_managed(&first, &first_mounts, &first_guid, "/read", &read_stage).await;
+    let read_stage = mount_managed(
+        &first,
+        &first_mounts,
+        &first_guid,
+        "/read",
+        &id,
+        &source,
+        true,
+    )
+    .await;
     let unrelated = SharedVolumeId::new();
-    let other_stage = first_mounts
-        .lock()
-        .await
-        .stage(
-            &first_guid,
-            "/other".into(),
-            &unrelated,
-            PreparedSource::open(source.clone(), None).await.unwrap(),
-            false,
-        )
-        .await
-        .unwrap();
-    attach_managed(&first, &first_mounts, &first_guid, "/other", &other_stage).await;
+    let other_stage = mount_managed(
+        &first,
+        &first_mounts,
+        &first_guid,
+        "/other",
+        &unrelated,
+        &source,
+        false,
+    )
+    .await;
     first.command(&["sh", "-ec", "unshare --mount --propagation slave sh -c 'touch /execution-ready; exec sleep 300' >/dev/null 2>&1 & echo $! > /execution-pid; timeout 5 sh -c 'until test -e /execution-ready; do sleep 0.01; done'"]).await.unwrap();
     registry
         .reconcile_grant(
@@ -261,7 +276,7 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
             "sh",
             "-ec",
             &format!(
-                "test ! -e '{}'; test ! -e /alias/sentinel; test -r /read/sentinel; test -r /other/sentinel; if mount -o remount,bind,rw /read 2>/dev/null; then exit 109; fi; if touch /alias/forbidden 2>/dev/null; then exit 108; fi; test -r '{}/sentinel'; test -r '{}/sentinel'",
+                "test ! -e '{}/sentinel'; test ! -e /alias/sentinel; test -r /read/sentinel; test -r /other/sentinel; if mount -o remount,bind,rw /read 2>/dev/null; then exit 109; fi; if touch /alias/forbidden 2>/dev/null; then exit 108; fi; test -r '{}/sentinel'; test -r '{}/sentinel'",
                 first_path.display(),
                 read_stage.display(),
                 other_stage.display(),
@@ -279,7 +294,7 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
             "sh",
             "-ec",
             &format!(
-                "test ! -e '{}'; test ! -e /read/sentinel; test -r /other/sentinel; test -r '{}/sentinel'",
+                "test ! -e '{}/sentinel'; test ! -e /read/sentinel; test -r /other/sentinel; test -r '{}/sentinel'",
                 read_stage.display(),
                 other_stage.display(),
             ),
@@ -303,7 +318,7 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
             "sh",
             "-ec",
             &format!(
-                "test ! -e /alias/sentinel; test ! -e '{}'",
+                "test ! -e /alias/sentinel; test ! -e '{}/sentinel'",
                 second_path.display()
             ),
         ])
@@ -314,64 +329,79 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         .len();
     grows(&fixture.path().join("second"), other).await;
 
-    let delayed = second_mounts
-        .lock()
-        .await
-        .stage(
-            &second_guid,
-            "/late".into(),
-            &id,
-            PreparedSource::open(source.clone(), None).await.unwrap(),
-            false,
-        )
-        .await
-        .unwrap();
-    second.command(&["mkdir", "/late"]).await.unwrap();
-    registry.remove_volume(&id).await.unwrap();
-    assert!(
-        second_mounts
-            .lock()
-            .await
-            .attach(
-                &second_guid,
-                Path::new("/late"),
-                &delayed,
-                &second,
-                Path::new(""),
-            )
-            .await
-            .is_err()
+    let readonly = mount_managed(
+        &second,
+        &second_mounts,
+        &second_guid,
+        "/readonly",
+        &id,
+        &source,
+        true,
+    )
+    .await;
+    let probe = format!(
+        "set -e; mkdir /readonly-alias; start-container bind-mount --source '{}' --target /readonly-alias --recursive --readonly; test \"$(cat /readonly/sentinel)\" = 'private data'; if mount -o remount,bind,rw /readonly-alias 2>/dev/null; then exit 111; fi; if mount -o remount,bind,rw /readonly 2>/dev/null; then exit 101; fi; if touch /readonly/forbidden 2>/dev/null; then exit 103; fi",
+        readonly.display(),
     );
+    second.command(&["sh", "-c", &probe]).await.unwrap();
+    mount_managed(
+        &second,
+        &second_mounts,
+        &second_guid,
+        "/optional",
+        &id,
+        &source,
+        true,
+    )
+    .await;
     second
-        .command(&["sh", "-ec", "test ! -e /late/sentinel"])
+        .command(&["sh", "-ec", "test -r /optional/sentinel"])
         .await
         .unwrap();
-
-    let readonly = second_mounts
-        .lock()
-        .await
-        .stage(
-            &second_guid,
-            "/readonly".into(),
-            &id,
-            PreparedSource::open(source.clone(), None).await.unwrap(),
-            true,
-        )
+    {
+        let mut mounts = second_mounts.lock().await;
+        prepare_target(&second, &mut mounts, &second_guid, "/optional").await;
+    }
+    second.command(&["sh", "-ec", "test ! -e /optional/sentinel; if touch /optional/forbidden 2>/dev/null; then exit 107; fi; if mount -o remount,bind,rw /optional 2>/dev/null; then exit 112; fi"]).await.unwrap();
+    mount_managed(
+        &second,
+        &second_mounts,
+        &second_guid,
+        "/optional",
+        &id,
+        &source,
+        true,
+    )
+    .await;
+    second
+        .command(&["sh", "-ec", "test -r /optional/sentinel"])
         .await
         .unwrap();
-    let probe = format!(
-        "set -e; mkdir /readonly; start-container bind-mount --source '{}' --target /readonly --recursive --readonly; test \"$(cat /readonly/sentinel)\" = 'private data'; if mount -o remount,bind,rw /readonly 2>/dev/null; then exit 101; fi; if mount -o remount,bind,rw '{}' 2>/dev/null; then exit 102; fi; if touch /readonly/forbidden 2>/dev/null; then exit 103; fi; if touch /media/startos/shared-volumes/forbidden 2>/dev/null; then exit 104; fi",
-        readonly.display(),
-        readonly.display(),
-    );
-    second.command(&["sh", "-c", &probe]).await.unwrap();
-    let placeholder = second_mounts.lock().await.unavailable_path();
-    let probe = format!(
-        "set -e; mkdir /optional; start-container bind-mount --source '{}' --target /optional --recursive --readonly; if touch /optional/forbidden 2>/dev/null; then exit 105; fi; start-container bind-mount --source '{}' --target /optional --recursive --readonly; test \"$(cat /optional/sentinel)\" = 'private data'; umount /optional; if test -e /optional/sentinel; then exit 106; fi; if touch /optional/forbidden 2>/dev/null; then exit 107; fi",
-        placeholder.display(),
-        readonly.display(),
-    );
-    second.command(&["sh", "-c", &probe]).await.unwrap();
+    mount_managed(
+        &first,
+        &first_mounts,
+        &first_guid,
+        "/moving/data",
+        &id,
+        &source,
+        true,
+    )
+    .await;
+    first
+        .command(&["sh", "-ec", "mv /moving /moved; mkdir -p /moving/data"])
+        .await
+        .unwrap();
+    mount_managed(
+        &first,
+        &first_mounts,
+        &first_guid,
+        "/moving/data",
+        &id,
+        &source,
+        true,
+    )
+    .await;
+    first.command(&["sh", "-ec", "test -r /moving/data/sentinel; test ! -e /moved/data/sentinel; if touch /moving/data/forbidden 2>/dev/null; then exit 113; fi"]).await.unwrap();
     assert!(first_mounts.lock().await.check_allowed().is_ok());
     first_mounts.lock().await.clear().await.unwrap();
     second_mounts.lock().await.clear().await.unwrap();

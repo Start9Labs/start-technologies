@@ -501,7 +501,7 @@ describe('generated effects RPC boundary', () => {
     { kind: 'unavailable', reason: 'sourceUnavailable' },
     { kind: 'unavailable', reason: 'timeout' },
   ])(
-    'preserves prepared shared-volume sources, outcome %j, and original fields',
+    'delegates shared-volume mounting once and preserves outcome %j and original fields',
     async outcome => {
       const effects = makeEffects({ eventId: null })
       const options = Object.freeze({
@@ -511,42 +511,17 @@ describe('generated effects RPC boundary', () => {
         subpath: 'albums',
         readonly: true,
       })
-      const prepared = {
-        path: '/staged-source',
-        placeholder: '/staged-empty',
-        result: outcome,
-      }
-      reply = { result: prepared }
-      await expect(effects.prepareSharedVolume(options)).resolves.toEqual(
-        prepared,
-      )
+      reply = { result: outcome }
+      await expect(effects.mountSharedVolume(options)).resolves.toEqual(outcome)
       expect(requests).toEqual([
         {
           id: expect.any(Number),
-          method: 'prepare-shared-volume',
+          method: 'mount-shared-volume',
           params: options,
         },
       ])
     },
   )
-
-  test('shared-volume target attachment preserves the preparation identity', async () => {
-    const effects = makeEffects({ eventId: null })
-    const options = {
-      subcontainer: 'guid',
-      mountpoint: '/music',
-      path: '/staged-source',
-    }
-    reply = { result: null }
-    await expect(effects.attachSharedVolume(options)).resolves.toBeNull()
-    expect(requests).toEqual([
-      {
-        id: expect.any(Number),
-        method: 'attach-shared-volume',
-        params: options,
-      },
-    ])
-  })
 
   test.each(['Authorization', 'InvalidRequest'])(
     'shared-volume %s failures reject rather than becoming unavailable',
@@ -555,13 +530,13 @@ describe('generated effects RPC boundary', () => {
       reply = { error: { code: 59, message, data: { details: 'denied' } } }
       try {
         await expect(
-          makeEffects({ eventId: null }).prepareSharedVolume({
+          makeEffects({ eventId: null }).mountSharedVolume({
             id: 'e680a57e-5066-4dfd-bbab-06361bfceec2',
             subcontainer: 'guid',
             mountpoint: '/music',
             readonly: false,
           }),
-        ).rejects.toThrow(`${message}: denied@prepare-shared-volume`)
+        ).rejects.toThrow(`${message}: denied@mount-shared-volume`)
       } finally {
         error.mockRestore()
       }

@@ -34,12 +34,6 @@ const options = {
 }
 const essential = () => Mounts.of<Manifest>().mountSharedVolume(options)
 
-const stagedPath = '/staged-source'
-const placeholderPath = '/staged-unavailable'
-function prepared(result: T.SharedVolumeMountResult): T.PreparedSharedVolume {
-  return { path: stagedPath, placeholder: placeholderPath, result }
-}
-
 function context() {
   return {
     onLeaveContext: jest.fn(),
@@ -50,11 +44,9 @@ function context() {
       destroyFs: jest.fn(async () => null),
     },
     mount: jest.fn(async () => null),
-    prepareSharedVolume: jest.fn(
-      async (): Promise<T.PreparedSharedVolume> =>
-        prepared({ kind: 'mounted' }),
+    mountSharedVolume: jest.fn(
+      async (): Promise<T.SharedVolumeMountResult> => ({ kind: 'mounted' }),
     ),
-    attachSharedVolume: jest.fn(async () => null),
     getSharedVolumes: jest.fn(),
   } as unknown as T.Effects
 }
@@ -157,7 +149,7 @@ test('essential shared mounts materialize through the same optional mount primit
     'test',
   )
   try {
-    expect(effects.prepareSharedVolume).toHaveBeenCalledWith({
+    expect(effects.mountSharedVolume).toHaveBeenCalledWith({
       ...options,
       subcontainer: 'guid',
     })
@@ -238,7 +230,7 @@ test.each(['eager', 'lazy'] as const)(
       expect(fs.mkdir).toHaveBeenCalledWith('/rootfs/media/music', {
         recursive: true,
       })
-      expect(effects.prepareSharedVolume).toHaveBeenCalledWith({
+      expect(effects.mountSharedVolume).toHaveBeenCalledWith({
         ...options,
         subcontainer: 'guid',
       })
@@ -250,7 +242,7 @@ test.each(['eager', 'lazy'] as const)(
   },
 )
 
-test('shared data binds are host-tracked above an ordinary read-only placeholder', async () => {
+test('shared data and placeholders are owned by one host request, unlike package volume binds', async () => {
   const effects = context()
   const sub = await SubContainer.eager<Manifest>(
     effects,
@@ -271,7 +263,7 @@ test('shared data binds are host-tracked above an ordinary read-only placeholder
         ([command, args]) =>
           command === 'start-container' && args?.[0] === 'bind-mount',
       )
-    expect(binds).toHaveLength(2)
+    expect(binds).toHaveLength(1)
     expect(binds[0][1]).toEqual(
       expect.arrayContaining([
         '--source',
@@ -280,32 +272,23 @@ test('shared data binds are host-tracked above an ordinary read-only placeholder
         '/rootfs/data',
       ]),
     )
-    expect(binds[1][1]).toEqual(
-      expect.arrayContaining(['--source', placeholderPath, '--readonly']),
-    )
-    expect(effects.attachSharedVolume).toHaveBeenCalledWith({
+    expect(effects.mountSharedVolume).toHaveBeenCalledTimes(1)
+    expect(effects.mountSharedVolume).toHaveBeenCalledWith({
+      ...options,
       subcontainer: 'guid',
-      mountpoint: options.mountpoint,
-      path: stagedPath,
-    })
-    expect(fs.mkdir).not.toHaveBeenCalledWith(stagedPath, { recursive: true })
-    expect(fs.mkdir).not.toHaveBeenCalledWith(placeholderPath, {
-      recursive: true,
     })
   } finally {
     await sub.destroy()
   }
 })
 
-test('shared remounts retain one read-only placeholder beneath data', async () => {
+test('each shared remount delegates once without SDK binds or unmounts', async () => {
   const effects = context()
   jest
-    .mocked(effects.prepareSharedVolume)
-    .mockResolvedValueOnce(prepared({ kind: 'mounted' }))
-    .mockResolvedValueOnce(
-      prepared({ kind: 'unavailable', reason: 'sourceUnavailable' }),
-    )
-    .mockResolvedValueOnce(prepared({ kind: 'mounted' }))
+    .mocked(effects.mountSharedVolume)
+    .mockResolvedValueOnce({ kind: 'mounted' })
+    .mockResolvedValueOnce({ kind: 'unavailable', reason: 'sourceUnavailable' })
+    .mockResolvedValueOnce({ kind: 'mounted' })
   const sub = await SubContainer.eager<Manifest>(
     effects,
     { imageId: 'main' },
@@ -324,8 +307,8 @@ test('shared remounts retain one read-only placeholder beneath data', async () =
       ([command, args]) =>
         command === 'start-container' && args?.[0] === 'bind-mount',
     )
-    expect(binds.map(([, args]) => args?.[2])).toEqual([placeholderPath])
-    expect(effects.attachSharedVolume).toHaveBeenCalledTimes(2)
+    expect(binds).toEqual([])
+    expect(effects.mountSharedVolume).toHaveBeenCalledTimes(3)
     expect(calls.filter(([command]) => command === 'umount')).toEqual([])
   } finally {
     await sub.destroy()
@@ -334,10 +317,10 @@ test('shared remounts retain one read-only placeholder beneath data', async () =
 
 test('an in-flight shared bind holds the subcontainer until it completes', async () => {
   const effects = context()
-  let release!: (value: T.PreparedSharedVolume) => void
+  let release!: (value: T.SharedVolumeMountResult) => void
   let started!: () => void
   const ready = new Promise<void>(resolve => (started = resolve))
-  jest.mocked(effects.prepareSharedVolume).mockImplementation(() => {
+  jest.mocked(effects.mountSharedVolume).mockImplementation(() => {
     started()
     return new Promise(resolve => (release = resolve))
   })
@@ -351,15 +334,15 @@ test('an in-flight shared bind holds the subcontainer until it completes', async
   await ready
   await sub.destroy()
   expect(effects.subcontainer.destroyFs).not.toHaveBeenCalled()
-  release(prepared({ kind: 'mounted' }))
+  release({ kind: 'mounted' })
   await mounting
   expect(effects.subcontainer.destroyFs).toHaveBeenCalledWith({ guid: 'guid' })
 })
 
-test('revocation between preparation and attachment rejects without an unmanaged fallback bind', async () => {
+test('a rejected host request never falls back to an SDK bind', async () => {
   const effects = context()
-  const revoked = new Error('shared-volume preparation revoked')
-  jest.mocked(effects.attachSharedVolume).mockRejectedValue(revoked)
+  const revoked = new Error('shared-volume grant revoked')
+  jest.mocked(effects.mountSharedVolume).mockRejectedValue(revoked)
   const sub = await SubContainer.eager<Manifest>(
     effects,
     { imageId: 'main' },
@@ -374,10 +357,7 @@ test('revocation between preparation and attachment rejects without an unmanaged
         ([command, args]) =>
           command === 'start-container' && args?.[0] === 'bind-mount',
       )
-    expect(binds).toHaveLength(1)
-    expect(binds[0][1]).toEqual(
-      expect.arrayContaining(['--source', placeholderPath]),
-    )
+    expect(binds).toEqual([])
   } finally {
     await sub.destroy()
   }
@@ -388,8 +368,8 @@ test.each(['sourceUnavailable', 'timeout'] as const)(
   async reason => {
     const effects = context()
     jest
-      .mocked(effects.prepareSharedVolume)
-      .mockResolvedValue(prepared({ kind: 'unavailable', reason }))
+      .mocked(effects.mountSharedVolume)
+      .mockResolvedValue({ kind: 'unavailable', reason })
     const sub = SubContainer.of<Manifest>(
       effects,
       { imageId: 'main' },
@@ -415,8 +395,8 @@ test.each(['sourceUnavailable', 'timeout'] as const)(
   async reason => {
     const effects = context()
     jest
-      .mocked(effects.prepareSharedVolume)
-      .mockResolvedValue(prepared({ kind: 'unavailable', reason }))
+      .mocked(effects.mountSharedVolume)
+      .mockResolvedValue({ kind: 'unavailable', reason })
     await expect(
       SubContainer.eager(effects, { imageId: 'main' }, essential(), 'test'),
     ).rejects.toThrow(`Essential shared volume ${id} unavailable (${reason})`)
@@ -431,7 +411,7 @@ test.each(['Authorization', 'InvalidRequest', 'Filesystem'])(
   async message => {
     const effects = context()
     const error = new Error(message)
-    jest.mocked(effects.prepareSharedVolume).mockRejectedValue(error)
+    jest.mocked(effects.mountSharedVolume).mockRejectedValue(error)
     const sub = await SubContainer.eager<Manifest>(
       effects,
       { imageId: 'main' },
@@ -463,7 +443,7 @@ test('invalid traversal cannot prepare a directory outside the subcontainer', as
       sub.tryMountSharedVolume({ ...options, mountpoint: '../../outside' }),
     ).rejects.toThrow('within the subcontainer')
     expect(fs.mkdir).not.toHaveBeenCalled()
-    expect(effects.prepareSharedVolume).not.toHaveBeenCalled()
+    expect(effects.mountSharedVolume).not.toHaveBeenCalled()
   } finally {
     await sub.destroy()
   }
@@ -483,11 +463,9 @@ test('dynamic recovery recreates an optional consumer and remounts after an equa
     .mocked(effects.subcontainer.createFs)
     .mockImplementation(async () => [`/rootfs/${++created}`, `guid-${created}`])
   jest
-    .mocked(effects.prepareSharedVolume)
-    .mockResolvedValueOnce(
-      prepared({ kind: 'unavailable', reason: 'sourceUnavailable' }),
-    )
-    .mockResolvedValue(prepared({ kind: 'mounted' }))
+    .mocked(effects.mountSharedVolume)
+    .mockResolvedValueOnce({ kind: 'unavailable', reason: 'sourceUnavailable' })
+    .mockResolvedValue({ kind: 'mounted' })
   const reconciler = Daemons.dynamic<Manifest>(effects, async ({ effects }) => {
     await getSharedVolumes(effects).const()
     const sub = SubContainer.of<Manifest>(
@@ -520,7 +498,7 @@ test('dynamic recovery recreates an optional consumer and remounts after an equa
   const built = await reconciler.build()
   const waitForMounts = async (count: number) => {
     for (let i = 0; i < 100; i++) {
-      if (jest.mocked(effects.prepareSharedVolume).mock.calls.length >= count)
+      if (jest.mocked(effects.mountSharedVolume).mock.calls.length >= count)
         return
       await new Promise(resolve => setImmediate(resolve))
     }
@@ -531,11 +509,11 @@ test('dynamic recovery recreates an optional consumer and remounts after an equa
     callback!()
     await waitForMounts(2)
     expect(effects.subcontainer.createFs).toHaveBeenCalledTimes(2)
-    expect(effects.prepareSharedVolume).toHaveBeenNthCalledWith(1, {
+    expect(effects.mountSharedVolume).toHaveBeenNthCalledWith(1, {
       ...options,
       subcontainer: 'guid-1',
     })
-    expect(effects.prepareSharedVolume).toHaveBeenNthCalledWith(2, {
+    expect(effects.mountSharedVolume).toHaveBeenNthCalledWith(2, {
       ...options,
       subcontainer: 'guid-2',
     })

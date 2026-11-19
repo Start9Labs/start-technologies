@@ -945,17 +945,6 @@ export const AlpnInfo: z.ZodArray<typeof MaybeUtf8String> = /* @__PURE__ */ z
     description:
       'The protocols a binding answers with, carried on the wire as the list itself.',
   })
-export const AttachSharedVolumeParams: z.ZodObject<{
-  subcontainer: typeof Guid
-  mountpoint: z.ZodString
-  path: z.ZodString
-}> = /* @__PURE__ */ object({
-  subcontainer: Guid,
-  mountpoint: z.string(),
-  path: z.string(),
-}).meta({
-  id: 'AttachSharedVolumeParams',
-})
 export const BindId: z.ZodObject<{
   id: typeof HostId
   internalPort: z.ZodInt
@@ -1568,6 +1557,24 @@ export const Metadata: z.ZodObject<{
 }> = /* @__PURE__ */ object({ title: LocaleString, icon: PathOrUrl }).meta({
   id: 'Metadata',
 })
+export const MountSharedVolumeParams: z.ZodObject<{
+  id: typeof SharedVolumeId
+  subcontainer: typeof Guid
+  mountpoint: z.ZodString
+  subpath: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  readonly: z.ZodBoolean
+}> = /* @__PURE__ */ object({
+  id: SharedVolumeId,
+  subcontainer: Guid,
+  mountpoint: z.string(),
+  subpath: wire(z.string().nullable().optional(), z.string().nullable()),
+  readonly: z.boolean(),
+}).meta({
+  id: 'MountSharedVolumeParams',
+})
 export const MountTarget: z.ZodCodec<
   z.ZodObject<{
     packageId: typeof PackageId
@@ -1766,24 +1773,6 @@ export const PrepareDownloadParams: z.ZodObject<{
   }),
 }).meta({
   id: 'PrepareDownloadParams',
-})
-export const PrepareSharedVolumeParams: z.ZodObject<{
-  id: typeof SharedVolumeId
-  subcontainer: typeof Guid
-  mountpoint: z.ZodString
-  subpath: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  readonly: z.ZodBoolean
-}> = /* @__PURE__ */ object({
-  id: SharedVolumeId,
-  subcontainer: Guid,
-  mountpoint: z.string(),
-  subpath: wire(z.string().nullable().optional(), z.string().nullable()),
-  readonly: z.boolean(),
-}).meta({
-  id: 'PrepareSharedVolumeParams',
 })
 export const PrepareUploadParams: z.ZodIntersection<
   z.ZodObject<{
@@ -2453,34 +2442,6 @@ export const PackageMetadata: z.ZodObject<{
   satisfies: wire(z.array(Version).optional(), z.array(Version)),
 }).meta({
   id: 'PackageMetadata',
-})
-export const PreparedSharedVolume: z.ZodObject<{
-  /**
-   * Absolute path inside the service LXC.
-   */
-  path: z.ZodString
-  /**
-   * Read-only empty source retained beneath optional data mounts.
-   */
-  placeholder: z.ZodString
-  result: typeof SharedVolumeMountResult
-}> = /* @__PURE__ */ object({
-  /**
-   * Absolute path inside the service LXC.
-   */
-  path: z.string().meta({
-    description: 'Absolute path inside the service LXC.',
-  }),
-  /**
-   * Read-only empty source retained beneath optional data mounts.
-   */
-  placeholder: z.string().meta({
-    description:
-      'Read-only empty source retained beneath optional data mounts.',
-  }),
-  result: SharedVolumeMountResult,
-}).meta({
-  id: 'PreparedSharedVolume',
 })
 export const Progress: z.ZodUnion<
   readonly [
@@ -3374,12 +3335,6 @@ export const Api = {
         },
       },
     },
-    'attach-shared-volume': {
-      _PARAMS: /* @__PURE__ */ AttachSharedVolumeParams,
-      _RETURN: /* @__PURE__ */ z.null(),
-      _ITEM: /* @__PURE__ */ z.never(),
-      _FINAL: /* @__PURE__ */ z.null(),
-    },
     bind: {
       _PARAMS: /* @__PURE__ */ BindParams,
       _RETURN: /* @__PURE__ */ z.null(),
@@ -3548,6 +3503,12 @@ export const Api = {
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },
+    'mount-shared-volume': {
+      _PARAMS: /* @__PURE__ */ MountSharedVolumeParams,
+      _RETURN: /* @__PURE__ */ SharedVolumeMountResult,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
+    },
     notification: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
@@ -3590,12 +3551,6 @@ export const Api = {
     'prepare-download': {
       _PARAMS: /* @__PURE__ */ PrepareDownloadParams,
       _RETURN: /* @__PURE__ */ Guid,
-      _ITEM: /* @__PURE__ */ z.never(),
-      _FINAL: /* @__PURE__ */ z.null(),
-    },
-    'prepare-shared-volume': {
-      _PARAMS: /* @__PURE__ */ PrepareSharedVolumeParams,
-      _RETURN: /* @__PURE__ */ PreparedSharedVolume,
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },

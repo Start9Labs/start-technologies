@@ -218,16 +218,10 @@ export function makeEffects(context: EffectContext): Effects {
         callback: context.callbacks?.addCallback(options.callback) || null,
       })
     },
-    prepareSharedVolume(
-      ...[options]: Parameters<T.Effects['prepareSharedVolume']>
+    mountSharedVolume(
+      ...[options]: Parameters<T.Effects['mountSharedVolume']>
     ) {
-      return rpcRound('prepare-shared-volume', options)
-    },
-
-    attachSharedVolume(
-      ...[options]: Parameters<T.Effects['attachSharedVolume']>
-    ) {
-      return rpcRound('attach-shared-volume', options)
+      return rpcRound('mount-shared-volume', options)
     },
     subcontainer: {
       createFs(options: { imageId: string; name: string }) {

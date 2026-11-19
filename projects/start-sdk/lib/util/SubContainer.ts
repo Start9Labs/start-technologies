@@ -443,7 +443,6 @@ export class SubContainerEager<
   private readonly fileMounts = new FileMounts()
   private sharedMounts = false
   private sharedVolumeDependency = false
-  private readonly sharedVolumePlaceholders = new Set<string>()
   private readonly sharedVolumeQueue = new PathQueue()
 
   private leader: cp.ChildProcess
@@ -690,23 +689,11 @@ export class SubContainerEager<
     try {
       return await this.sharedVolumeQueue.run(target, async () => {
         await prepBind(null, target, 'directory')
-        const prepared = await this.effects.prepareSharedVolume({
+        await this.shareMounts()
+        return this.effects.mountSharedVolume({
           ...options,
           subcontainer: this.guid,
         })
-        await this.shareMounts()
-        if (!this.sharedVolumePlaceholders.has(target)) {
-          await attachBind(prepared.placeholder, target, false, [], true)
-          this.sharedVolumePlaceholders.add(target)
-        }
-        if (prepared.result.kind === 'mounted') {
-          await this.effects.attachSharedVolume({
-            subcontainer: this.guid,
-            mountpoint: options.mountpoint,
-            path: prepared.path,
-          })
-        }
-        return prepared.result
       })
     } finally {
       await release()
@@ -1294,7 +1281,7 @@ export type MountOptions =
 
 /** A shared-volume directory mount. Names are editable; select by the granted ID. */
 export type SharedVolumeMountOptions = Omit<
-  Parameters<T.Effects['prepareSharedVolume']>[0],
+  Parameters<T.Effects['mountSharedVolume']>[0],
   'subcontainer'
 >
 

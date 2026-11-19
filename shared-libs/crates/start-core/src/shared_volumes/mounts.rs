@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
-use std::os::fd::{AsFd, AsRawFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use crate::disk::mount::filesystem::syscall::{
-    DetachedMount, MountNamespace, open_beneath, open_tree_clone_fd, unmount_fd,
+    DetachedMount, MountNamespace, open_beneath, open_tree_clone_fd, same_mount, unmount_fd,
 };
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::prelude::*;
@@ -31,6 +31,21 @@ impl AttachedMount {
         detached.set_private()?;
         detached.set_readonly(readonly)?;
         let mount = namespace.run(|| detached.attach_to_fd(destination.as_fd()))?;
+        Ok(Self { mount, namespace })
+    }
+
+    fn bind_in_namespace(
+        source: BorrowedFd,
+        destination: BorrowedFd,
+        readonly: bool,
+        recursive: bool,
+        namespace: Arc<MountNamespace>,
+    ) -> Result<Self, Error> {
+        let mount = namespace.run(|| {
+            let detached = DetachedMount::from_fd(open_tree_clone_fd(source, recursive)?);
+            detached.configure_bind(readonly)?;
+            detached.attach_to_fd(destination)
+        })?;
         Ok(Self { mount, namespace })
     }
 
@@ -129,6 +144,11 @@ struct StagingRoot {
     _backing: TmpDir,
 }
 
+struct MountSlot {
+    stage: Option<StagedMount>,
+    placeholder: AttachedMount,
+}
+
 struct StagedMount {
     id: SharedVolumeId,
     readonly: bool,
@@ -158,7 +178,7 @@ impl StagedMount {
 #[derive(Default)]
 pub struct SharedVolumeMounts {
     blocked: bool,
-    slots: BTreeMap<(Guid, PathBuf), StagedMount>,
+    slots: BTreeMap<(Guid, PathBuf), MountSlot>,
     root: Option<StagingRoot>,
 }
 
@@ -209,23 +229,66 @@ impl SharedVolumeMounts {
         Ok(())
     }
 
-    pub(crate) fn unavailable_path(&self) -> PathBuf {
-        Path::new("/").join(SERVICE_ROOT).join("unavailable")
-    }
-
-    pub(crate) async fn stage(
+    /// The caller holds the management gate and subcontainer lifetime through mounting.
+    /// Remounts follow the requested path after parent-directory moves.
+    pub(crate) async fn prepare_target(
         &mut self,
         guid: &Guid,
-        location: PathBuf,
+        location: &Path,
+        service_root: &Path,
+        container_root: &Path,
+        namespace: Arc<MountNamespace>,
+    ) -> Result<(), Error> {
+        self.check_allowed()?;
+        let relative = confined_relative(location)?;
+        let key = (guid.clone(), relative.clone());
+        if let Some(slot) = self.slots.get_mut(&key) {
+            if let Some(stage) = slot.stage.take() {
+                stage.retire().await?;
+            }
+        }
+        let destination = open_beneath(&service_root.join(container_root), &relative)?;
+        if let Some(slot) = self.slots.get(&key) {
+            if same_mount(slot.placeholder.mount.as_fd(), destination.as_fd())? {
+                return Ok(());
+            }
+        }
+        self.slots.remove(&key);
+        let source = open_beneath(service_root, &Path::new(SERVICE_ROOT).join("unavailable"))?;
+        let placeholder = AttachedMount::bind_in_namespace(
+            source.as_fd(),
+            destination.as_fd(),
+            true,
+            false,
+            namespace,
+        )?;
+        self.slots.insert(
+            key,
+            MountSlot {
+                placeholder,
+                stage: None,
+            },
+        );
+        Ok(())
+    }
+
+    /// Cross-namespace staging supplies the read-only lock; service-owned targets remain detachable.
+    pub(crate) async fn mount_source(
+        &mut self,
+        guid: &Guid,
+        location: &Path,
         id: &SharedVolumeId,
         source: PreparedSource,
         readonly: bool,
-    ) -> Result<PathBuf, Error> {
+        service_root: &Path,
+    ) -> Result<(), Error> {
         self.check_allowed()?;
         let root = self
             .root
             .as_ref()
             .or_not_found("shared-volume staging root")?;
+        let key = (guid.clone(), confined_relative(location)?);
+        let slot = self.slots.get_mut(&key).or_not_found("volume mountpoint")?;
         let relative = Path::new(id.as_ref()).join(Guid::new().to_string());
         let path = root.directory.path().join(&relative);
         tokio::fs::create_dir_all(&path).await?;
@@ -236,7 +299,7 @@ impl SharedVolumeMounts {
             readonly,
             root._mount.namespace.clone(),
         )?;
-        let staged = StagedMount {
+        slot.stage = Some(StagedMount {
             id: id.clone(),
             readonly,
             mount,
@@ -244,73 +307,17 @@ impl SharedVolumeMounts {
             directory: path,
             path: Path::new("/").join(SERVICE_ROOT).join(relative),
             target: None,
-        };
-        let path = staged.path.clone();
-        if let Some(previous) = self
-            .slots
-            .insert((guid.clone(), confined_relative(&location)?), staged)
-        {
-            previous.retire().await?;
-        }
-        Ok(path)
-    }
-
-    pub(crate) async fn remove_target(
-        &mut self,
-        guid: &Guid,
-        location: &Path,
-    ) -> Result<(), Error> {
-        let key = (guid.clone(), confined_relative(location)?);
-        if let Some(stage) = self.slots.remove(&key) {
-            stage.retire().await?;
-        }
-        Ok(())
-    }
-
-    pub(crate) fn staged_access(
-        &self,
-        guid: &Guid,
-        location: &Path,
-        path: &Path,
-    ) -> Result<(SharedVolumeId, bool), Error> {
-        self.check_allowed()?;
-        let stage = self
-            .slots
-            .get(&(guid.clone(), confined_relative(location)?))
-            .filter(|stage| stage.path == path)
-            .or_not_found("shared-volume preparation")?;
-        Ok((stage.id.clone(), stage.readonly))
-    }
-
-    /// The caller holds the management gate through attachment and registration.
-    pub(crate) async fn attach(
-        &mut self,
-        guid: &Guid,
-        location: &Path,
-        path: &Path,
-        container: &crate::lxc::LxcContainer,
-        container_root: &Path,
-    ) -> Result<(), Error> {
-        self.staged_access(guid, location, path)?;
-        let relative = confined_relative(location)?;
-        let stage = self
-            .slots
-            .get_mut(&(guid.clone(), relative.clone()))
-            .or_not_found("shared-volume preparation")?;
-        if stage.target.is_some() {
-            return Ok(());
-        }
-        let pid = container.pid().await?;
-        let namespace = Arc::new(MountNamespace::for_process(pid)?);
-        let root = PathBuf::from(format!("/proc/{pid}/root"));
-        let source = open_beneath(&root, &confined_relative(path)?)?;
-        let target = open_beneath(&root.join(container_root), &relative)?;
-        let mount = namespace.run(|| {
-            let detached = DetachedMount::from_fd(open_tree_clone_fd(source.as_fd(), true)?);
-            detached.configure_bind(stage.readonly)?;
-            detached.attach_to_fd(target.as_fd())
-        })?;
-        stage.target = Some(AttachedMount { mount, namespace });
+        });
+        let stage = slot.stage.as_mut().unwrap();
+        let source = open_beneath(service_root, &confined_relative(&stage.path)?)?;
+        let namespace = slot.placeholder.namespace.clone();
+        stage.target = Some(AttachedMount::bind_in_namespace(
+            source.as_fd(),
+            slot.placeholder.mount.as_fd(),
+            readonly,
+            true,
+            namespace,
+        )?);
         Ok(())
     }
 
@@ -321,7 +328,9 @@ impl SharedVolumeMounts {
             .filter(|(container, _)| container == guid)
             .cloned()
             .collect::<Vec<_>>();
-        self.retire_slots(keys).await
+        let result = self.retire_stages(keys).await;
+        self.slots.retain(|(container, _), _| container != guid);
+        result
     }
 
     pub(crate) async fn reconcile_grant(
@@ -332,26 +341,33 @@ impl SharedVolumeMounts {
         let keys = self
             .slots
             .iter()
-            .filter(|(_, stage)| {
-                stage.id == *volume && !grant.is_some_and(|grant| grant.allows(stage.readonly))
+            .filter(|(_, slot)| {
+                slot.stage.as_ref().is_some_and(|stage| {
+                    stage.id == *volume && !grant.is_some_and(|grant| grant.allows(stage.readonly))
+                })
             })
             .map(|(key, _)| key.clone())
             .collect();
-        self.retire_slots(keys).await
+        self.retire_stages(keys).await
     }
 
-    async fn retire_slots(&mut self, keys: Vec<(Guid, PathBuf)>) -> Result<(), Error> {
+    async fn retire_stages(&mut self, keys: Vec<(Guid, PathBuf)>) -> Result<(), Error> {
         let mut errors = ErrorCollection::new();
         for key in keys {
-            errors.handle(self.slots.remove(&key).unwrap().retire().await);
+            if let Some(stage) = self.slots.get_mut(&key).and_then(|slot| slot.stage.take()) {
+                errors.handle(stage.retire().await);
+            }
         }
         errors.into_result()
     }
 
     pub async fn clear(&mut self) -> Result<(), Error> {
         self.blocked = true;
-        self.retire_slots(self.slots.keys().cloned().collect())
-            .await
+        let result = self
+            .retire_stages(self.slots.keys().cloned().collect())
+            .await;
+        self.slots.clear();
+        result
     }
 }
 

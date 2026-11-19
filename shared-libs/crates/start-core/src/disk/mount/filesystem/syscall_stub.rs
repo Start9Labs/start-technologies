@@ -17,6 +17,10 @@ fn unsupported<T>() -> Result<T, Error> {
     ))
 }
 
+pub(crate) fn same_mount(_left: BorrowedFd, _right: BorrowedFd) -> Result<bool, Error> {
+    unsupported()
+}
+
 pub(crate) struct MountNamespace;
 
 impl MountNamespace {

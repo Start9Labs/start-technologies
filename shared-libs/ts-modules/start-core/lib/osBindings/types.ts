@@ -668,12 +668,6 @@ export type AlpnInfo = z.output<typeof schemas.AlpnInfo>
  * The protocols a binding answers with, carried on the wire as the list itself.
  */
 export type AlpnInfoInput = z.input<typeof schemas.AlpnInfo>
-export type AttachSharedVolumeParams = z.output<
-  typeof schemas.AttachSharedVolumeParams
->
-export type AttachSharedVolumeParamsInput = z.input<
-  typeof schemas.AttachSharedVolumeParams
->
 
 /**
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
@@ -976,6 +970,12 @@ export type MetricsMemory = z.output<typeof schemas.MetricsMemory>
 export type MetricsMemoryInput = z.input<typeof schemas.MetricsMemory>
 export type MetricsSummary = z.output<typeof schemas.MetricsSummary>
 export type MetricsSummaryInput = z.input<typeof schemas.MetricsSummary>
+export type MountSharedVolumeParams = z.output<
+  typeof schemas.MountSharedVolumeParams
+>
+export type MountSharedVolumeParamsInput = z.input<
+  typeof schemas.MountSharedVolumeParams
+>
 export type MountTarget = z.output<typeof schemas.MountTarget>
 export type MountTargetInput = z.input<typeof schemas.MountTarget>
 export type Notification = z.output<typeof schemas.Notification>
@@ -1024,12 +1024,6 @@ export type PortForward = z.output<typeof schemas.PortForward>
 export type PortForwardInput = z.input<typeof schemas.PortForward>
 export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
 export type PreDownloadAlertInput = z.input<typeof schemas.PreDownloadAlert>
-export type PrepareSharedVolumeParams = z.output<
-  typeof schemas.PrepareSharedVolumeParams
->
-export type PrepareSharedVolumeParamsInput = z.input<
-  typeof schemas.PrepareSharedVolumeParams
->
 
 /**
  * Auth gate enforced by the OS reverse proxy on incoming requests.
@@ -1386,10 +1380,6 @@ export type PackagePlugin = z.output<typeof schemas.PackagePlugin>
 export type PackagePluginInput = z.input<typeof schemas.PackagePlugin>
 export type PartitionInfo = z.output<typeof schemas.PartitionInfo>
 export type PartitionInfoInput = z.input<typeof schemas.PartitionInfo>
-export type PreparedSharedVolume = z.output<typeof schemas.PreparedSharedVolume>
-export type PreparedSharedVolumeInput = z.input<
-  typeof schemas.PreparedSharedVolume
->
 export type Progress = z.output<typeof schemas.Progress>
 export type ProgressInput = z.input<typeof schemas.Progress>
 export type ProxyOptions = z.output<typeof schemas.ProxyOptions>
