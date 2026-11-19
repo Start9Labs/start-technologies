@@ -43,8 +43,14 @@ async fn published_reference_inputs_reject_unknown_redirected_and_incomplete_roo
         .path()
         .join(format!("{STAGING_PREFIX}{}", Guid::new()));
     tokio::fs::create_dir(&staging).await.unwrap();
+    let inputs = published_images(directory.path()).await.unwrap();
+    assert_eq!(inputs.len(), 2);
+    assert!(inputs.contains(&image));
+    assert!(inputs.contains(&rootfs));
+    tokio::fs::remove_dir(&staging).await.unwrap();
+    tokio::fs::symlink(outside.path(), &staging).await.unwrap();
     assert!(published_images(directory.path()).await.is_err());
-    tokio::fs::remove_dir(staging).await.unwrap();
+    tokio::fs::remove_file(staging).await.unwrap();
     let redirected = directory
         .path()
         .join(format!("{GENERATION_PREFIX}{}", Guid::new()));

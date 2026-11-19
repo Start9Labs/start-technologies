@@ -339,14 +339,37 @@ impl SourceCache {
         if self.entries().await?.is_empty() {
             return Ok(());
         }
-        self.prune(
-            &boot_releases(
-                &self.os_volume.join("current"),
-                &super::image_store::selected_image(&self.os_volume.join("config")).await?,
-            )
-            .await?,
+        self.prune(&self.retained_releases().await?).await
+    }
+
+    /// Stored images and published rootfs bytes pin releases independently of boot eligibility.
+    /// Metadata retains candidates; current signer policy and complete bytes still authorize use.
+    async fn retained_releases(&self) -> Result<BTreeSet<Release>, Error> {
+        let configuration = self.os_volume.join("config");
+        let mut releases = boot_releases(
+            &self.os_volume.join("current"),
+            &super::image_store::selected_image(&configuration).await?,
         )
-        .await
+        .await?;
+        let mut images: BTreeSet<_> =
+            super::image_store::image_paths(&self.os_volume.join("images"))
+                .await?
+                .into_iter()
+                .collect();
+        if let Some(store) = crate::fde::boot::existing_generation_store(&configuration).await? {
+            images.extend(
+                super::published_images(&store)
+                    .await?
+                    .into_iter()
+                    .filter(|path| {
+                        path.file_name() == Some(std::ffi::OsStr::new(super::ROOTFS_FILE))
+                    }),
+            );
+        }
+        for image in images {
+            releases.insert(Release::read_image(&image).await?);
+        }
+        Ok(releases)
     }
 
     async fn prune(&self, retained: &BTreeSet<Release>) -> Result<(), Error> {

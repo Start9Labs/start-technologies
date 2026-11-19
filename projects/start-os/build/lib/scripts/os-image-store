@@ -103,6 +103,7 @@ startos_prune_images() {
             if [ -e "$to_prune" ]; then
                 echo "  Pruning $to_prune"
                 rm -rf "$to_prune" || return
+                startos_prune_public_sources "$volume" || return
                 sync || return
             else
                 >&2 echo "Not enough space and nothing to prune!"

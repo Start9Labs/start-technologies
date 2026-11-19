@@ -836,12 +836,19 @@ fn is_generation(name: &std::ffi::OsStr) -> bool {
 }
 
 /// Every published rootfs and overlay is a retention input, regardless of boot eligibility.
-/// Requires stable paths; unknown entries and invalid directory/file types reject the set.
+/// Recognized unpublished staging is excluded; unknown entries and invalid types reject the set.
+/// The caller retains stable paths through inspection.
 pub(crate) async fn published_images(store: &Path) -> Result<Vec<PathBuf>, Error> {
     let mut entries = read_generation_directory(store).await?;
     let mut images = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
-        if !is_generation(&entry.file_name()) || !entry.file_type().await?.is_dir() {
+        if !entry.file_type().await?.is_dir() {
+            return Err(invalid_signature());
+        }
+        if has_generation_id(&entry.file_name(), STAGING_PREFIX) {
+            continue;
+        }
+        if !is_generation(&entry.file_name()) {
             return Err(invalid_signature());
         }
         drop(read_generation_directory(&entry.path()).await?);

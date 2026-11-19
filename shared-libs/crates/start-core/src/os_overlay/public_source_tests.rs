@@ -1,5 +1,8 @@
 use std::os::unix::fs::MetadataExt;
 
+#[path = "public_source_retention_tests.rs"]
+mod retention;
+
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
 
@@ -422,6 +425,22 @@ async fn shell_prune(
     volume: &Path,
     binary: &Path,
 ) -> Result<Vec<u8>, Error> {
+    let (mut command, _executable) = shell_command(
+        lease,
+        volume,
+        binary,
+        "source \"$1/os-image-store\"; startos_prune_images \"$2\" 0 0",
+    )
+    .await?;
+    command.invoke(ErrorKind::Filesystem).await
+}
+
+async fn shell_command(
+    lease: &crate::util::FileLock,
+    volume: &Path,
+    binary: &Path,
+    script: &str,
+) -> Result<(Command, tempfile::TempDir), Error> {
     let executable = tempfile::tempdir()?;
     tokio::fs::symlink(binary, executable.path().join("startbox")).await?;
     let path = std::env::join_paths(
@@ -443,14 +462,14 @@ async fn shell_prune(
             "15s",
             "/bin/bash",
             "-euc",
-            "source \"$1/os-image-store\"; startos_prune_images \"$2\" 0 0",
+            script,
             "source-cache-prune",
         ])
         .arg(scripts)
         .arg(volume)
         .env("PATH", path);
     lease.inherit(&mut command, variable)?;
-    command.invoke(ErrorKind::Filesystem).await
+    Ok((command, executable))
 }
 
 async fn volume_lease(volume: &Path) -> crate::util::FileLock {
@@ -527,7 +546,7 @@ async fn shell_space_admission_prunes_public_sources_with_the_native_owner_and_l
     let lease = volume_lease(&volume).await;
     let key = SigningKey::from_bytes(&[21; 32]);
     let mut sources = Vec::new();
-    for commit in ["running", "pending", "abandoned"] {
+    for commit in ["running", "pending", "abandoned", "published"] {
         let image = fixture(root.path(), commit, "gzip").await;
         let source = cache
             .retain(signed_asset(&image, &key).await, &image)
@@ -545,6 +564,12 @@ async fn shell_space_admission_prunes_public_sources_with_the_native_owner_and_l
     tokio::fs::rename(root.path().join("running"), volume.join("current"))
         .await
         .unwrap();
+    let generation = retention::published_rootfs(&volume.join("config"), &sources[3]).await;
+    let staging = crate::fde::boot::generation_store(&volume.join("config")).join(format!(
+        ".staging-{}",
+        crate::rpc_continuations::Guid::new()
+    ));
+    tokio::fs::create_dir(&staging).await.unwrap();
     let selected = volume.join("images/selected.rootfs");
     let other = volume.join("images/other.rootfs");
     for (source, path, seconds) in [(&sources[1], &selected, 0), (&sources[2], &other, 1)] {
@@ -584,7 +609,17 @@ async fn shell_space_admission_prunes_public_sources_with_the_native_owner_and_l
     shell_prune(&lease, &volume, &binary).await.unwrap();
     assert!(sources[0].is_file());
     assert!(sources[1].is_file());
+    assert!(sources[2].is_file());
+    assert!(sources[3].is_file());
+    assert!(staging.is_dir());
+    tokio::fs::remove_file(&other).await.unwrap();
+    shell_prune(&lease, &volume, &binary).await.unwrap();
     assert!(!sources[2].exists());
+    assert!(sources[3].is_file());
+    crate::util::io::delete_dir(generation).await.unwrap();
+    shell_prune(&lease, &volume, &binary).await.unwrap();
+    assert!(!sources[3].exists());
+    assert!(staging.is_dir());
     assert_eq!(
         tokio::fs::read_link(volume.join("config/current.rootfs"))
             .await

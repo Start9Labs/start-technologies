@@ -48,6 +48,22 @@ pub fn generation_store(config: &Path) -> PathBuf {
     config.join(GENERATIONS_DIR)
 }
 
+/// An absent namespace has no published inputs; redirected ancestors reject inspection.
+pub(crate) async fn existing_generation_store(config: &Path) -> Result<Option<PathBuf>, Error> {
+    drop(os_overlay::read_generation_directory(config).await?);
+    let mut directory = config.to_owned();
+    for component in Path::new(GENERATIONS_DIR).components() {
+        directory.push(component);
+        match tokio::fs::symlink_metadata(&directory).await {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Ok(metadata) if metadata.is_dir() => (),
+            Ok(_) => return Err(invalid()),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(Some(directory))
+}
+
 pub(crate) fn create_generation_store(config: &Path) -> Result<PathBuf, Error> {
     crate::util::io::create_directory_beneath(config, Path::new(GENERATIONS_DIR))?;
     Ok(generation_store(config))
@@ -393,6 +409,39 @@ mod tests {
             generation_store(&config)
         );
         assert!(generation_store(&config).is_dir());
+    }
+
+    #[tokio::test]
+    async fn generation_store_inspection_preserves_absence_and_rejects_redirected_ancestors() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config");
+        std::fs::create_dir(&config).unwrap();
+        assert_eq!(existing_generation_store(&config).await.unwrap(), None);
+        assert!(!config.join("fde").exists());
+        let outside = root.path().join("outside");
+        symlink(&outside, config.join("fde")).unwrap();
+        assert!(existing_generation_store(&config).await.is_err());
+        assert!(!outside.exists());
+        std::fs::remove_file(config.join("fde")).unwrap();
+        std::fs::create_dir(config.join("fde")).unwrap();
+        assert_eq!(existing_generation_store(&config).await.unwrap(), None);
+        assert!(!generation_store(&config).exists());
+        symlink(&outside, generation_store(&config)).unwrap();
+        assert!(existing_generation_store(&config).await.is_err());
+        std::fs::remove_file(generation_store(&config)).unwrap();
+        std::fs::write(generation_store(&config), b"wrong type").unwrap();
+        assert!(existing_generation_store(&config).await.is_err());
+        std::fs::remove_file(generation_store(&config)).unwrap();
+        let store = create_generation_store(&config).unwrap();
+        assert_eq!(
+            existing_generation_store(&config).await.unwrap(),
+            Some(store)
+        );
+        let alias = root.path().join("alias");
+        symlink(&config, &alias).unwrap();
+        assert!(existing_generation_store(&alias).await.is_err());
     }
 
     #[test]
