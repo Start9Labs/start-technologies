@@ -8,6 +8,7 @@ RUN apt-get update && \
     live-build \
     procps \
     binfmt-support \
+    binutils \
     qemu-utils \
     qemu-user-static \
     xorriso \
