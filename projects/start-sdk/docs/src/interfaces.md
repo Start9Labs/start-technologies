@@ -756,7 +756,7 @@ const userTokens = (await storeJson.read(s => s.apiKeys).const(effects)) ?? []
 
 await sdk.MultiHost.of(effects, apiHostId).bindPort(apiPort, {
   protocol: 'http',
-  addSsl: {
+  proxy: {
     auth: {
       type: 'bearer',
       tokens: [...(apiKey ? [apiKey] : []), ...userTokens.map(k => k.token)],
@@ -772,7 +772,7 @@ await sdk.MultiHost.of(effects, apiHostId).bindPort(apiPort, {
 if (apiKey) {
   const apiOrigin = await sdk.MultiHost.of(effects, apiKeyHostId).bindPort(apiPort, {
     protocol: 'http',
-    addSsl: { auth: { type: 'bearer', tokens: [apiKey], realm: null } },
+    proxy: { auth: { type: 'bearer', tokens: [apiKey], realm: null } },
   })
   receipts.push(await apiOrigin.export([api])) // `type: 'api'`
 }

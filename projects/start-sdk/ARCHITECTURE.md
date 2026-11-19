@@ -311,6 +311,8 @@ The unified `SubContainer<M>` interface widens `rootfs` / `guid` / `subpath()` t
 sdk.Mounts.of().mountVolume({ volumeId: 'main', subpath: null, mountpoint: '/data', readonly: false }).mountAssets({ subpath: 'scripts', mountpoint: '/scripts' }).mountDependency({ dependencyId: 'bitcoind', volumeId: 'main', subpath: null, mountpoint: '/bitcoin-data', readonly: true })
 ```
 
+`SubContainer` delegates shared volumes through one `mount-shared-volume` request, like host-owned dependency mounts. StartOS authorizes the grant, installs a permanent inaccessible read-only placeholder, attaches the mapped source and retains its mount descriptor. Read-only staging is internal to the host; the SDK receives only a mounted/unavailable outcome. Host and ordinary CLI binds reuse the common detached-mount policy. Missing source directories are never created. Per-target work shares `PathQueue` with filesystem access serialization, and in-flight mounts hold their subcontainer until completion. Grant changes detach incompatible SDK binds even in manually managed subcontainers. Independent aliases and open handles can remain usable.
+
 ### Health Checks (`lib/health/`)
 
 ```

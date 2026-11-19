@@ -4,8 +4,9 @@ import { promisify } from 'node:util'
 import { randomBytes } from 'node:crypto'
 import * as fs from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
+import { PathQueue } from './PathQueue'
 
-const queues = new Map<string, Promise<void>>()
+const queue = new PathQueue()
 const heldLocks = new AsyncLocalStorage<
   {
     target: string
@@ -65,7 +66,7 @@ export async function withFileQueue<A>(
   if (outer.some(lock => lock.held && lock.target === target)) {
     return operation(target, signal)
   }
-  const result = (queues.get(target) ?? Promise.resolve()).then(async () => {
+  const result = queue.run(target, async () => {
     signal.throwIfAborted()
     const holder = { target, held: true, flocked: false, signal }
     try {
@@ -75,14 +76,6 @@ export async function withFileQueue<A>(
     } finally {
       holder.held = false
     }
-  })
-  const tail = result.then(
-    () => {},
-    () => {},
-  )
-  queues.set(target, tail)
-  void tail.then(() => {
-    if (queues.get(target) === tail) queues.delete(target)
   })
   return waitForFileOperation(result, signal)
 }

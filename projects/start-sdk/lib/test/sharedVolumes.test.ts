@@ -242,6 +242,127 @@ test.each(['eager', 'lazy'] as const)(
   },
 )
 
+test('shared data and placeholders are owned by one host request, unlike package volume binds', async () => {
+  const effects = context()
+  const sub = await SubContainer.eager<Manifest>(
+    effects,
+    { imageId: 'main' },
+    Mounts.of<Manifest>().mountVolume({
+      volumeId: 'main',
+      mountpoint: '/data',
+      subpath: null,
+      readonly: false,
+    }),
+    'test',
+  )
+  try {
+    await sub.tryMountSharedVolume(options)
+    const binds = jest
+      .mocked(subcontainers.execFile)
+      .mock.calls.filter(
+        ([command, args]) =>
+          command === 'start-container' && args?.[0] === 'bind-mount',
+      )
+    expect(binds).toHaveLength(1)
+    expect(binds[0][1]).toEqual(
+      expect.arrayContaining([
+        '--source',
+        '/media/startos/volumes/main/',
+        '--target',
+        '/rootfs/data',
+      ]),
+    )
+    expect(effects.mountSharedVolume).toHaveBeenCalledTimes(1)
+    expect(effects.mountSharedVolume).toHaveBeenCalledWith({
+      ...options,
+      subcontainer: 'guid',
+    })
+  } finally {
+    await sub.destroy()
+  }
+})
+
+test('each shared remount delegates once without SDK binds or unmounts', async () => {
+  const effects = context()
+  jest
+    .mocked(effects.mountSharedVolume)
+    .mockResolvedValueOnce({ kind: 'mounted' })
+    .mockResolvedValueOnce({ kind: 'unavailable', reason: 'sourceUnavailable' })
+    .mockResolvedValueOnce({ kind: 'mounted' })
+  const sub = await SubContainer.eager<Manifest>(
+    effects,
+    { imageId: 'main' },
+    null,
+    'test',
+  )
+  try {
+    await sub.tryMountSharedVolume(options)
+    await sub.tryMountSharedVolume({
+      ...options,
+      mountpoint: '/media//./music',
+    })
+    await sub.tryMountSharedVolume(options)
+    const calls = jest.mocked(subcontainers.execFile).mock.calls
+    const binds = calls.filter(
+      ([command, args]) =>
+        command === 'start-container' && args?.[0] === 'bind-mount',
+    )
+    expect(binds).toEqual([])
+    expect(effects.mountSharedVolume).toHaveBeenCalledTimes(3)
+    expect(calls.filter(([command]) => command === 'umount')).toEqual([])
+  } finally {
+    await sub.destroy()
+  }
+})
+
+test('an in-flight shared bind holds the subcontainer until it completes', async () => {
+  const effects = context()
+  let release!: (value: T.SharedVolumeMountResult) => void
+  let started!: () => void
+  const ready = new Promise<void>(resolve => (started = resolve))
+  jest.mocked(effects.mountSharedVolume).mockImplementation(() => {
+    started()
+    return new Promise(resolve => (release = resolve))
+  })
+  const sub = await SubContainer.eager<Manifest>(
+    effects,
+    { imageId: 'main' },
+    null,
+    'test',
+  )
+  const mounting = sub.tryMountSharedVolume(options)
+  await ready
+  await sub.destroy()
+  expect(effects.subcontainer.destroyFs).not.toHaveBeenCalled()
+  release({ kind: 'mounted' })
+  await mounting
+  expect(effects.subcontainer.destroyFs).toHaveBeenCalledWith({ guid: 'guid' })
+})
+
+test('a rejected host request never falls back to an SDK bind', async () => {
+  const effects = context()
+  const revoked = new Error('shared-volume grant revoked')
+  jest.mocked(effects.mountSharedVolume).mockRejectedValue(revoked)
+  const sub = await SubContainer.eager<Manifest>(
+    effects,
+    { imageId: 'main' },
+    null,
+    'test',
+  )
+  try {
+    await expect(sub.tryMountSharedVolume(options)).rejects.toBe(revoked)
+    const binds = jest
+      .mocked(subcontainers.execFile)
+      .mock.calls.filter(
+        ([command, args]) =>
+          command === 'start-container' && args?.[0] === 'bind-mount',
+      )
+    expect(binds).toEqual([])
+  } finally {
+    await sub.destroy()
+  }
+})
+
 test.each(['sourceUnavailable', 'timeout'] as const)(
   'optional %s is an outcome and the affected workload is not launched',
   async reason => {

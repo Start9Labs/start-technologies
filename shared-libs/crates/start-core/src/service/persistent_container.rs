@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use futures::Future;
+use futures::FutureExt;
 use futures::future::ready;
 use imbl_value::InternedString;
 use rpc_toolkit::{Empty, Server, ShutdownHandle};
@@ -14,12 +14,11 @@ use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
-use crate::disk::mount::filesystem::idmapped::IdMapped;
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
 use crate::disk::mount::filesystem::overlayfs::AnchoredOverlayGuard;
 use crate::disk::mount::filesystem::{MountType, ReadOnly};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
-use crate::lxc::{BASE_IDMAP, HOST_RPC_SERVER_SOCKET, LxcConfig, LxcContainer};
+use crate::lxc::{BASE_IDMAP, HOST_RPC_SERVER_SOCKET, LxcConfig, LxcContainer, service_filesystem};
 use crate::net::net_controller::NetService;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
@@ -96,6 +95,7 @@ pub struct Subcontainer {
 }
 
 impl Subcontainer {
+    /// The caller must finish shared-volume cleanup first.
     pub(super) async fn unmount(self) -> Result<(), Error> {
         let mut errors = ErrorCollection::new();
         if let Some(mounts) = self.proxy_mounts {
@@ -171,6 +171,18 @@ impl PersistentContainer {
                 },
             )
             .await?;
+        let shared_volumes = if s9pk.as_manifest().shared_volumes {
+            crate::shared_volumes::mounts::SharedVolumeMounts::new(lxc_container.rootfs_dir())
+                .boxed()
+                .await?
+        } else {
+            Default::default()
+        };
+        let shared_volumes = Arc::new(Mutex::new(shared_volumes));
+        if s9pk.as_manifest().shared_volumes {
+            ctx.shared_volume_access
+                .register(&s9pk.as_manifest().id, &shared_volumes);
+        }
         let proxy_mounts = if s9pk
             .as_manifest()
             .metadata
@@ -217,9 +229,9 @@ impl PersistentContainer {
                 .join("media/startos/volumes")
                 .join(volume);
             let mount = MountGuard::mount(
-                &IdMapped::new(
+                &service_filesystem(
                     Bind::new(data_dir(DATA_DIR, &s9pk.as_manifest().id, volume)),
-                    vec![BASE_IDMAP],
+                    &[],
                 ),
                 mountpoint,
                 MountType::ReadWrite,
@@ -237,7 +249,7 @@ impl PersistentContainer {
         {
             vec![
                 MountGuard::mount(
-                    &IdMapped::new(LoopDev::from(&**sqfs), vec![BASE_IDMAP]),
+                    &service_filesystem(LoopDev::from(&**sqfs), &[]),
                     mountpoint,
                     MountType::ReadWrite,
                 )
@@ -261,7 +273,7 @@ impl PersistentContainer {
                 };
                 assets.push(
                     MountGuard::mount(
-                        &IdMapped::new(LoopDev::from(&**sqfs), vec![BASE_IDMAP]),
+                        &service_filesystem(LoopDev::from(&**sqfs), &[]),
                         mountpoint,
                         MountType::ReadWrite,
                     )
@@ -295,7 +307,7 @@ impl PersistentContainer {
                 image.clone(),
                 Arc::new(
                     MountGuard::mount(
-                        &IdMapped::new(LoopDev::from(&**sqfs), vec![BASE_IDMAP]),
+                        &service_filesystem(LoopDev::from(&**sqfs), &[]),
                         &mountpoint,
                         ReadOnly,
                     )
@@ -328,14 +340,13 @@ impl PersistentContainer {
             lxc_container: OnceCell::new_with(Some(lxc_container)),
             rpc_client,
             rpc_server: watch::channel(None).0,
-            // procedures: Default::default(),
             js_mount,
             volumes,
             assets,
             proxy_mounts,
             images,
             subcontainers: Arc::new(Mutex::new(BTreeMap::new())),
-            shared_volumes: Arc::new(Mutex::new(Default::default())),
+            shared_volumes,
             state: Arc::new(watch::channel(ServiceState::new()).0),
             net_service: None,
             destroyed: false,
@@ -362,7 +373,7 @@ impl PersistentContainer {
             .join("media/startos/backup");
         tokio::fs::create_dir_all(&mountpoint).await?;
         tokio::fs::create_dir_all(backup_path).await?;
-        let bind = IdMapped::new(Bind::new(backup_path), vec![BASE_IDMAP]);
+        let bind = service_filesystem(Bind::new(backup_path), &[]);
         MountGuard::mount(&bind, &mountpoint, mount_type).await
     }
 
@@ -493,7 +504,7 @@ impl PersistentContainer {
                 )
                 .await;
             }
-            shared_volumes.lock().await.clear();
+            errs.handle(shared_volumes.lock().await.clear().await);
             if let Some(net_service) = net_service {
                 net_service.remove_all().await.log_err();
             }
