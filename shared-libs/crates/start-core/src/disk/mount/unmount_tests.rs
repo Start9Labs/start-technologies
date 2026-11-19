@@ -7,6 +7,86 @@ use crate::disk::mount::filesystem::{FileSystem, ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 
 #[tokio::test]
+async fn native_mount_inspection_decodes_paths_and_rejects_uninspectable_bytes() {
+    let directory = tempfile::tempdir().unwrap();
+    let table = directory.path().join("mountinfo");
+    tokio::fs::write(&table, b"19 1 0:1 / /owned/with\\040space rw - tmpfs tmpfs rw\n20 1 0:2 / /owned/line\\012break\\134slash rw - tmpfs tmpfs rw\n")
+        .await.unwrap();
+    assert_eq!(
+        read_mountpoints(&table).await.unwrap(),
+        vec![
+            PathBuf::from("/owned/with space"),
+            PathBuf::from("/owned/line\nbreak\\slash"),
+        ]
+    );
+    tokio::fs::write(
+        &table,
+        b"19 1 0:1 / /owned/invalid-\xff rw - tmpfs tmpfs rw\n",
+    )
+    .await
+    .unwrap();
+    assert!(read_mountpoints(&table).await.is_err());
+    tokio::fs::write(&table, b"not a kernel mount table\n")
+        .await
+        .unwrap();
+    assert!(read_mountpoints(&table).await.is_err());
+}
+
+#[tokio::test]
+#[ignore = "requires exclusive managed guest and mount privileges"]
+async fn native_failed_temporary_teardown_preserves_mounted_contents() {
+    assert_eq!(
+        std::env::var("STARTOS_TEST_MANAGED_GUEST").as_deref(),
+        Ok("1")
+    );
+    use futures::StreamExt;
+    use inotify::{Inotify, WatchMask};
+
+    use crate::util::io::TmpDir;
+
+    let directory = tempfile::tempdir().unwrap();
+    let temporary = TmpDir::new_in(directory.path()).await.unwrap();
+    let temporary_path = temporary.to_path_buf();
+    let mounted = temporary_path.join("busy child\nwith space");
+    PrivateTmpfs::new()
+        .mount(&mounted, ReadWrite)
+        .await
+        .unwrap();
+    std::fs::write(mounted.join("witness"), b"mounted contents").unwrap();
+    let notify = Inotify::init().unwrap();
+    notify.watches().add(&mounted, WatchMask::DELETE).unwrap();
+    let mut events = notify.into_event_stream([0u8; 1024]).unwrap();
+    let mut child = std::process::Command::new("/bin/sleep")
+        .arg("60")
+        .current_dir(&mounted)
+        .spawn()
+        .unwrap();
+    let cleanup_mount = mounted.clone();
+    let cleanup = crate::util::GeneralBoxedGuard::new(move || {
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = std::process::Command::new("/usr/bin/umount")
+            .arg("--")
+            .arg(cleanup_mount)
+            .output();
+    });
+    assert!(temporary.unmount_and_delete().await.is_err());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), events.next())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        std::fs::read(mounted.join("witness")).unwrap(),
+        b"mounted contents"
+    );
+    assert!(temporary_path.is_dir());
+    drop(cleanup);
+    assert!(!is_mountpoint(&mounted).await.unwrap());
+    crate::util::io::delete_dir(&temporary_path).await.unwrap();
+}
+
+#[tokio::test]
 #[ignore = "requires exclusive managed guest with native mount/idmap privileges and STARTOS_TEST_USERNS_HELPER"]
 async fn recursive_file_bind_retirement_preserves_source() {
     let directory = tempfile::tempdir().unwrap();

@@ -1021,10 +1021,13 @@ impl TmpDir {
         std::mem::take(&mut self.path);
     }
 
-    pub async fn unmount_and_delete(self) -> Result<(), Error> {
-        crate::disk::mount::util::unmount_all_under(&self.path, false).await?;
-        tokio::fs::remove_dir_all(&self.path).await?;
-        Ok(())
+    /// Failed or abandoned teardown leaves the directory for explicit recovery.
+    pub fn unmount_and_delete(mut self) -> impl Future<Output = Result<(), Error>> + Send {
+        let path = std::mem::take(&mut self.path);
+        async move {
+            crate::disk::mount::util::unmount_all_under(&path, false).await?;
+            delete_dir(path).await
+        }
     }
 
     pub async fn gc(self: Arc<Self>) -> Result<(), Error> {
@@ -1060,6 +1063,34 @@ impl Drop for TmpDir {
 #[cfg(test)]
 mod tmp_dir_tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn unpolled_teardown_preserves_the_directory_without_scheduling_deletion() {
+        use futures::StreamExt;
+        use inotify::WatchMask;
+
+        let parent = tempfile::tempdir().unwrap();
+        let directory = TmpDir::new_in(parent.path()).await.unwrap();
+        let path = directory.to_path_buf();
+        tokio::fs::write(path.join("witness"), b"keep")
+            .await
+            .unwrap();
+        let notify = Inotify::init().unwrap();
+        notify.watches().add(&path, WatchMask::DELETE).unwrap();
+        let mut events = notify.into_event_stream([0u8; 1024]).unwrap();
+        drop(directory.unmount_and_delete());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), events.next())
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            tokio::fs::read(path.join("witness")).await.unwrap(),
+            b"keep"
+        );
+        delete_dir(path).await.unwrap();
+    }
 
     #[tokio::test]
     async fn selected_parent_owns_only_the_temporary_directory() {

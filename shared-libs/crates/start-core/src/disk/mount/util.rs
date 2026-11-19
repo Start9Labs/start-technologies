@@ -5,8 +5,10 @@ mod namespace_tests;
 #[path = "unmount_tests.rs"]
 mod tests;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use serde::Deserialize;
 use tracing::instrument;
 
 use crate::Error;
@@ -134,39 +136,58 @@ async fn unmount_command(
 
 /// Unmounts all mountpoints under (and including) the given path, in reverse
 /// depth order so that nested mounts are unmounted before their parents.
+/// The caller keeps paths and mount membership stable through completion.
 #[instrument(skip_all)]
 pub async fn unmount_all_under<P: AsRef<Path>>(path: P, lazy: bool) -> Result<(), Error> {
-    let path = path.as_ref();
-    let canonical_path = tokio::fs::canonicalize(path)
-        .await
-        .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("canonicalize {path:?}")))?;
-
-    let mounts_content = tokio::fs::read_to_string("/proc/mounts")
-        .await
-        .with_ctx(|_| (ErrorKind::Filesystem, "read /proc/mounts"))?;
-
-    // Collect all mountpoints under our path
-    let mut mountpoints: Vec<&str> = mounts_content
-        .lines()
-        .filter_map(|line| {
-            let mountpoint = line.split_whitespace().nth(1)?;
-            // Check if this mountpoint is under our target path
-            let mp_path = Path::new(mountpoint);
-            if mp_path.starts_with(&canonical_path) {
-                Some(mountpoint)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // Sort by path length descending so we unmount deepest first
-    mountpoints.sort_by(|a, b| b.len().cmp(&a.len()));
-
-    for mountpoint in mountpoints {
-        tracing::debug!("Unmounting nested mountpoint: {}", mountpoint);
+    for mountpoint in mountpoints_under(path.as_ref()).await? {
+        tracing::debug!("Unmounting nested mountpoint: {}", mountpoint.display());
         unmount(mountpoint, lazy).await?;
     }
 
     Ok(())
+}
+
+pub(crate) async fn mountpoints_under(path: &Path) -> Result<Vec<PathBuf>, Error> {
+    let root = tokio::fs::canonicalize(path).await?;
+    let mut mountpoints = read_mountpoints(Path::new("/proc/self/mountinfo"))
+        .await?
+        .into_iter()
+        .filter(|target| target.starts_with(&root))
+        .collect::<Vec<_>>();
+    mountpoints.sort_by_key(|target| std::cmp::Reverse(target.components().count()));
+    Ok(mountpoints)
+}
+
+async fn read_mountpoints(table: &Path) -> Result<Vec<PathBuf>, Error> {
+    #[derive(Deserialize)]
+    struct Mounts {
+        filesystems: Vec<Mount>,
+    }
+    #[derive(Deserialize)]
+    struct Mount {
+        target: PathBuf,
+    }
+    let bytes = tokio::process::Command::new("/usr/bin/findmnt")
+        .current_dir("/")
+        .env_clear()
+        .env("LC_ALL", "C")
+        .args(["--kernel", "--tab-file"])
+        .arg(table)
+        .args(["--nocanonicalize", "--list", "--json", "--output", "TARGET"])
+        .timeout(Some(Duration::from_secs(10)))
+        .invoke(ErrorKind::Filesystem)
+        .await?;
+    let mounts: Mounts = serde_json::from_slice(&bytes).with_kind(ErrorKind::Filesystem)?;
+    if mounts
+        .filesystems
+        .iter()
+        .any(|mount| !mount.target.is_absolute())
+    {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidData).into());
+    }
+    Ok(mounts
+        .filesystems
+        .into_iter()
+        .map(|mount| mount.target)
+        .collect())
 }
