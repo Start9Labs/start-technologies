@@ -34,7 +34,7 @@ Yes. StartWRT is built on OpenWrt, and the full CLI is accessible over [SSH](ssh
 
 You have two options:
 
-1. **Factory reset** — Perform a [factory reset](factory-reset.md) from the web interface (if you are still logged in). This wipes all settings; Wi-Fi comes back up with the sticker password.
+1. **Factory reset** — Perform a [factory reset](factory-reset.md) from the web interface (if you are still logged in) or, on the four-port Start9 Router, with the factory-reset button. This wipes all settings; Wi-Fi comes back up with the sticker password.
 2. **Reflash** — Boot from a microSD card and choose "Keep settings" to reinstall the firmware while preserving settings. You will be prompted to create a new admin password. See [Installing StartWRT](installing.md).
 
 ## What if I lose my Wi-Fi sticker password?
