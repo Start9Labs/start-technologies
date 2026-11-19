@@ -6,18 +6,19 @@ source <(awk '/^SUBCOMMAND=/{exit} {print}' "$ROOT/scripts/manage-release.sh")
 REPO_ROOT=$ROOT
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-HOME=$TMP/home
 PROJECT=start-os
 KIND=os
 VERSION=1.2.3
 TAG=start-os/v1.2.3
 OS_PLATFORMS=raspberrypi
-PUBLISHED=startos-1.2.3-abc_raspberrypi.img.gz
 mkdir -p "$TMP/published"
-printf 'published image\n' | gzip -c > "$TMP/published/$PUBLISHED"
 
 b3sum() {
-    if [ "$#" -eq 2 ]; then sha256sum "$2"; else sha256sum; fi | cut -d' ' -f1
+    if [ "${1:-}" = --no-names ]; then
+        sha256sum "$2" | cut -d' ' -f1
+    else
+        sha256sum "$@"
+    fi
 }
 load_registry_index() { :; }
 resolve_os_commit() { :; }
@@ -31,7 +32,6 @@ start-cli() {
     cp "$TMP/published/$PUBLISHED" "${@: -1}/startos-${VERSION}_raspberrypi.img"
 }
 
-# pull lands the indexed img.gz under its published name, and the release signs it.
 cmd_pre_check() {
     DONE[tag]=1
     DONE[create-gh-release]=1
@@ -42,9 +42,27 @@ cmd_sign() {
     [ "$(release_files)" = "$PUBLISHED" ]
     cmp "$TMP/published/$PUBLISHED" "$(release_dir)/$PUBLISHED"
 }
-cmd_release
+for ext in img.gz img; do
+    HOME=$TMP/$ext/home
+    PUBLISHED=startos-1.2.3-abc_raspberrypi.$ext
+    case "$ext" in
+        img.gz) printf 'published image\n' | gzip -c > "$TMP/published/$PUBLISHED" ;;
+        img) printf 'published image\n' > "$TMP/published/$PUBLISHED" ;;
+    esac
+    DONE=()
+    cmd_release
+    notes=$(generated_sections)
+    grep -Fq "$S3_CDN/v$VERSION/$PUBLISHED" <<< "$notes"
+    grep -Fq "  $PUBLISHED" <<< "$notes"
+    if [ "$ext" = img.gz ]; then
+        grep -Fq 'gzip-compressed' <<< "$notes"
+    else
+        [[ "$notes" != *gzip-compressed* ]]
+    fi
+done
 
-# pull-gha keeps CI's img.gz as the release file.
+HOME=$TMP/gha/home
+PUBLISHED=startos-1.2.3-abc_raspberrypi.img.gz
 resolve_gha_run() { RUN_ID=1; RUN_SHA=abc; ensure_release_dir; }
 SCRIPT_DIR=$TMP/bin
 mkdir -p "$SCRIPT_DIR"
