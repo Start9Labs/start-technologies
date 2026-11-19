@@ -702,19 +702,27 @@ impl Drop for FileLock {
     }
 }
 impl FileLock {
+    /// Retains the same kernel lease independently of this guard.
+    pub(crate) fn share(&self) -> Result<std::fs::File, Error> {
+        use std::os::fd::FromRawFd;
+
+        let descriptor = nix::fcntl::fcntl(
+            self.1.as_ref().unwrap(),
+            nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(3),
+        )
+        .with_kind(ErrorKind::Filesystem)?;
+        Ok(unsafe { std::fs::File::from_raw_fd(descriptor) })
+    }
+
     /// Shares the native lease with an exec child; retain this guard until the child exits.
     pub(crate) fn inherit(
         &self,
         command: &mut tokio::process::Command,
         variable: &str,
     ) -> Result<(), Error> {
-        use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-        let descriptor = nix::fcntl::fcntl(
-            self.1.as_ref().unwrap(),
-            nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(3),
-        )
-        .with_kind(ErrorKind::Filesystem)?;
-        let descriptor = unsafe { OwnedFd::from_raw_fd(descriptor) };
+        use std::os::fd::AsRawFd;
+
+        let descriptor = self.share()?;
         command.env(variable, descriptor.as_raw_fd().to_string());
         unsafe {
             command.pre_exec(move || {

@@ -1,5 +1,5 @@
 use std::mem::ManuallyDrop;
-use std::os::unix::ffi::OsStringExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
@@ -265,6 +265,16 @@ fn unit() -> String {
     std::env::var("FDE_CAPTURE_UNIT").expect("owned native operation unit")
 }
 
+fn lease_path() -> PathBuf {
+    PathBuf::from(std::env::var_os("FDE_CAPTURE_TEST_ROOT").unwrap()).join("image-store.lock")
+}
+
+async fn image_lease() -> crate::util::FileLock {
+    crate::util::FileLock::new(lease_path(), false)
+        .await
+        .unwrap()
+}
+
 async fn gate_opened<T>(
     events: &mut (impl futures::Stream<Item = Result<inotify::EventOwned, std::io::Error>> + Unpin),
     operation: &mut std::pin::Pin<Box<impl std::future::Future<Output = T>>>,
@@ -314,7 +324,8 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
     assert!(futures::poll!(&mut write).is_pending());
     let executable = executable();
     let unit = unit();
-    let mut capture = Box::pin(capture_in_unit(&epoch, &executable, &unit));
+    let images = image_lease().await;
+    let mut capture = Box::pin(capture_in_unit(&epoch, &executable, &unit, &images));
     gate_opened(&mut events, &mut capture).await;
     assert_eq!(
         db.get_value(&patch_db::json_ptr::ROOT).await,
@@ -473,7 +484,8 @@ async fn native_profile_capture_failure_thaws_before_returning_without_projectio
     let (mut gate, mut events) = fixture.gate().await;
     let executable = executable();
     let unit = unit();
-    let mut capture = Box::pin(capture_in_unit(&epoch, &executable, &unit));
+    let images = image_lease().await;
+    let mut capture = Box::pin(capture_in_unit(&epoch, &executable, &unit, &images));
     gate_opened(&mut events, &mut capture).await;
     gate.write_all(b"HostKey \"/custom/key\xff\"\n")
         .await
@@ -512,7 +524,8 @@ async fn native_capture_helper_death_restores_owned_sources_and_preserves_readon
     let (gate, mut events) = fixture.gate().await;
     let executable = executable();
     let unit = unit();
-    let mut capture = Box::pin(capture_in_unit(&epoch, &executable, &unit));
+    let images = image_lease().await;
+    let mut capture = Box::pin(capture_in_unit(&epoch, &executable, &unit, &images));
     gate_opened(&mut events, &mut capture).await;
     let pid = Command::new("systemctl")
         .args(["show", "--value", "--property=MainPID", &unit])
@@ -559,7 +572,8 @@ async fn native_capture_stop_thaws_before_waiting_for_a_blocked_owned_writer() {
     let (gate, mut events) = fixture.gate().await;
     let executable = executable();
     let unit = unit();
-    let mut capture = Box::pin(capture_in_unit(&epoch, &executable, &unit));
+    let images = image_lease().await;
+    let mut capture = Box::pin(capture_in_unit(&epoch, &executable, &unit, &images));
     gate_opened(&mut events, &mut capture).await;
     let mut writer = Command::new("/bin/sh")
         .arg("-c")
@@ -627,7 +641,8 @@ async fn native_capture_requester_subprocess_fixture() {
     let path =
         PathBuf::from(std::env::var_os("FDE_CAPTURE_REQUESTER_REQUEST").expect("owned request"));
     let epoch = request(&path).await.unwrap();
-    capture_in_unit(&epoch, &executable(), &unit())
+    let images = image_lease().await;
+    capture_in_unit(&epoch, &executable(), &unit(), &images)
         .await
         .unwrap();
     panic!("requester must be killed during the native query");
@@ -643,6 +658,39 @@ async fn native_capture_requester_death_leaves_cleanup_owned_by_pid1() {
     write_file_private_atomic(&request, serde_json::to_vec(&epoch).unwrap())
         .await
         .unwrap();
+    let root = PathBuf::from(std::env::var_os("FDE_CAPTURE_TEST_ROOT").unwrap());
+    assert!(
+        root.as_os_str()
+            .as_bytes()
+            .iter()
+            .all(|byte| { byte.is_ascii_alphanumeric() || b"/._-".contains(byte) })
+    );
+    let release = root.join("release-gate");
+    nix::unistd::mkfifo(
+        &release,
+        nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
+    )
+    .unwrap();
+    let mut release_gate = tokio::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&release)
+        .await
+        .unwrap();
+    let release_events = Inotify::init().unwrap();
+    release_events
+        .watches()
+        .add(&release, WatchMask::OPEN)
+        .unwrap();
+    let mut release_events = release_events.into_event_stream([0; 4096]).unwrap();
+    let wrapper = root.join("capture-wrapper");
+    tokio::fs::write(&wrapper, format!(
+        "#!/bin/sh\nif [ \"$1\" = start-fde-release ]; then\n IFS= read -r _ < {}\nfi\nexec {} \"$@\"\n",
+        release.display(), executable().display(),
+    )).await.unwrap();
+    tokio::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700))
+        .await
+        .unwrap();
     let (gate, mut events) = fixture.gate().await;
     let mut requester = Command::new(std::env::current_exe().unwrap())
         .args([
@@ -652,26 +700,51 @@ async fn native_capture_requester_death_leaves_cleanup_owned_by_pid1() {
             "--nocapture",
         ])
         .env("FDE_CAPTURE_REQUESTER_REQUEST", &request)
+        .env("FDE_CAPTURE_EXECUTABLE", &wrapper)
+        .process_group(0)
         .kill_on_drop(true)
         .spawn()
         .unwrap();
     let mut completion = Box::pin(requester.wait());
     gate_opened(&mut events, &mut completion).await;
     drop(completion);
-    requester.start_kill().unwrap();
+    nix::sys::signal::killpg(
+        nix::unistd::Pid::from_raw(requester.id().unwrap().try_into().unwrap()),
+        nix::sys::signal::Signal::SIGKILL,
+    )
+    .unwrap();
     assert!(!requester.wait().await.unwrap().success());
+    assert!(
+        crate::util::FileLock::new(lease_path(), false)
+            .await
+            .is_err()
+    );
     assert!(
         tokio::fs::write(fixture.working.path().join("before-stop"), b"blocked")
             .await
             .is_err()
     );
-    Command::new("systemctl")
-        .arg("stop")
-        .arg(unit())
-        .timeout(Some(Duration::from_secs(15)))
-        .invoke(ErrorKind::Filesystem)
-        .await
-        .unwrap();
+    let mut stop = Box::pin(async {
+        Command::new("systemctl")
+            .arg("stop")
+            .arg(unit())
+            .timeout(Some(Duration::from_secs(15)))
+            .invoke(ErrorKind::Filesystem)
+            .await
+    });
+    gate_opened(&mut release_events, &mut stop).await;
+    assert!(
+        crate::util::FileLock::new(lease_path(), false)
+            .await
+            .is_err()
+    );
+    release_gate.write_all(b"restore\n").await.unwrap();
+    stop.await.unwrap();
+    assert!(
+        crate::util::FileLock::new(lease_path(), false)
+            .await
+            .is_ok()
+    );
     drop(gate);
     tokio::fs::write(
         fixture.volume.path().join("after-requester-death"),

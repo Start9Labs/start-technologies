@@ -561,10 +561,12 @@ fn receive_archive(
 }
 
 /// Executable and request paths must be literal systemd arguments.
+/// PID1 retains the shared stdin lease through stop-post, including requester death.
 async fn capture_in_unit(
     epoch: &ReadEpoch,
     executable: &Path,
     unit: &str,
+    images: &crate::util::FileLock,
 ) -> Result<
     (
         tokio::fs::File,
@@ -573,6 +575,9 @@ async fn capture_in_unit(
     ),
     Error,
 > {
+    let input = Stdio::from(images.share()?);
+    let archive = anonymous_file()?;
+    let output = Stdio::from(archive.try_clone().await?.into_std().await);
     tokio::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -584,7 +589,6 @@ async fn capture_in_unit(
         serde_json::to_vec(&epoch).with_kind(ErrorKind::Serialization)?,
     )
     .await?;
-    let archive = anonymous_file()?;
     let result = Command::new("/usr/bin/systemd-run")
         .args(["--quiet", "--wait", "--pipe", "--collect"])
         .arg(format!("--unit={unit}"))
@@ -613,8 +617,8 @@ async fn capture_in_unit(
         .arg(executable)
         .arg("start-fde-capture")
         .arg(&path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(archive.try_clone().await?.into_std().await))
+        .stdin(input)
+        .stdout(output)
         .stderr(Stdio::piped())
         .capture(false)
         .invoke(ErrorKind::Filesystem)
@@ -690,7 +694,7 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<(), Error> {
     let mut credentials =
         super::credentials::Credentials::capture(&ctx.db.peek().await, ctx.disk_guid.clone())?;
     let unit = format!("startos-fde-capture-{}", Guid::new());
-    let captured = capture_in_unit(&epoch, Path::new("/usr/bin/startbox"), &unit).await;
+    let captured = capture_in_unit(&epoch, Path::new("/usr/bin/startbox"), &unit, &images).await;
     drop(pause);
     let (image, keys, profiles) = captured?;
     credentials.network_profiles = profiles;

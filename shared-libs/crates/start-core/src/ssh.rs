@@ -38,6 +38,7 @@ pub(crate) async fn query_host_key_files(
     command: &mut Command,
 ) -> Result<Vec<std::path::PathBuf>, Error> {
     let output = command
+        .stdin(std::process::Stdio::null())
         .timeout(Some(HOST_KEY_QUERY_TIMEOUT))
         .invoke(ErrorKind::Filesystem)
         .await?;
@@ -136,7 +137,6 @@ impl std::str::FromStr for SshPubKey {
     }
 }
 
-// #[command(subcommands(add, delete, list,))]
 pub fn ssh<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
@@ -391,6 +391,33 @@ pub async fn sync_pubkeys<P: AsRef<Path>>(pubkeys: &SshKeys, ssh_dir: P) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn host_key_queries_exclude_supplied_standard_input() {
+        use std::io::{Seek, Write};
+        use std::path::PathBuf;
+        use std::process::Stdio;
+
+        let mut input = tempfile::tempfile().unwrap();
+        input.write_all(b"private-lease-input\n").unwrap();
+        input.rewind().unwrap();
+        let script = "if IFS= read -r value; then printf 'hostkey /unexpected-input\\n'; else printf 'hostkey /no-input\\n'; fi";
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", script])
+            .stdin(Stdio::from(input.try_clone().unwrap()));
+        assert_eq!(
+            command.invoke(ErrorKind::Filesystem).await.unwrap(),
+            b"hostkey /unexpected-input\n"
+        );
+        input.rewind().unwrap();
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", script]).stdin(Stdio::from(input));
+        assert_eq!(
+            query_host_key_files(&mut command).await.unwrap(),
+            vec![PathBuf::from("/no-input")]
+        );
+    }
 
     #[tokio::test]
     #[ignore = "requires native OpenSSH/OpenSSL and start9 identity"]

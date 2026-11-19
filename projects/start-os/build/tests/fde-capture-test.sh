@@ -25,6 +25,10 @@ cleanup() {
     if [ -n "$fixture" ] && mountpoint -q "$fixture/volume"; then
         fsfreeze --unfreeze "$fixture/volume" 2>/dev/null || true
     fi
+    if [ -n "$fixture" ] && [ -p "$fixture/release-gate" ]; then
+        exec {release}<> "$fixture/release-gate"
+        printf 'restore\n' >&"$release"
+    fi
     if [ -n "$unit" ]; then
         systemctl stop "$unit" 2>/dev/null || true
     fi

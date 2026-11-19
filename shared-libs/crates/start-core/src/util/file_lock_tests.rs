@@ -31,6 +31,33 @@ fn variable() -> &'static str {
 }
 
 #[tokio::test]
+async fn shared_descriptor_retains_the_kernel_lease_with_close_on_exec() {
+    use std::os::fd::AsRawFd;
+
+    const CHILD: &str = "STARTOS_TEST_SHARED_LEASE_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        tokio::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "util::file_lock_tests::shared_descriptor_retains_the_kernel_lease_with_close_on_exec", "--nocapture"])
+            .env(CHILD, "1")
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join(lock_name());
+    let lease = FileLock::new(&path, false).await.unwrap();
+    let shared = lease.share().unwrap();
+    assert!(shared.as_raw_fd() >= 3);
+    let flags = nix::fcntl::fcntl(&shared, nix::fcntl::FcntlArg::F_GETFD).unwrap();
+    assert_ne!(flags & libc::FD_CLOEXEC, 0);
+    drop(lease);
+    assert!(FileLock::new(&path, false).await.is_err());
+    drop(shared);
+    assert!(FileLock::new(&path, false).await.is_ok());
+}
+
+#[tokio::test]
 async fn inherited_child_keeps_the_lease_after_its_guard_is_released() {
     use std::process::Stdio;
 
