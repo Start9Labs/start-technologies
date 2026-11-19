@@ -5,7 +5,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use crate::disk::mount::filesystem::syscall::{
-    DetachedMount, MountNamespace, open_beneath, open_tree_clone_fd, same_mount, unmount_fd,
+    DetachedMount, MountNamespace, open_beneath, open_tree_attr_idmap_fd, open_tree_clone_fd,
+    same_mount, unmount_fd, userns_fd_from_idmap,
 };
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::prelude::*;
@@ -26,8 +27,12 @@ impl AttachedMount {
         destination: &OwnedFd,
         readonly: bool,
         namespace: Arc<MountNamespace>,
+        userns: Option<&OwnedFd>,
     ) -> Result<Self, Error> {
-        let detached = DetachedMount::from_fd(open_tree_clone_fd(source.as_fd(), false)?);
+        let detached = DetachedMount::from_fd(match userns {
+            Some(userns) => open_tree_attr_idmap_fd(source.as_fd(), userns.as_fd())?,
+            None => open_tree_clone_fd(source.as_fd(), false)?,
+        });
         detached.set_private()?;
         detached.set_readonly(readonly)?;
         let mount = namespace.run(|| detached.attach_to_fd(destination.as_fd()))?;
@@ -93,6 +98,8 @@ impl AsFd for PinnedDirectory {
 pub struct PreparedSource {
     directory: PinnedDirectory,
     guard: TmpMountGuard,
+    /// The host view holds container ids; attaching applies the container's map.
+    container_ids: bool,
 }
 
 impl PreparedSource {
@@ -100,11 +107,24 @@ impl PreparedSource {
         &self.guard
     }
 
+    pub(crate) fn storing_container_ids(mut self) -> Self {
+        self.container_ids = true;
+        self
+    }
+
+    pub(crate) fn stores_container_ids(&self) -> bool {
+        self.container_ids
+    }
+
     pub async fn open(guard: TmpMountGuard, subpath: Option<PathBuf>) -> Result<Self, Error> {
         tokio::task::spawn_blocking(move || {
             let directory =
                 PinnedDirectory::open(guard.path(), subpath.as_deref().unwrap_or(Path::new("")))?;
-            Ok(Self { directory, guard })
+            Ok(Self {
+                directory,
+                guard,
+                container_ids: false,
+            })
         })
         .await
         .with_kind(ErrorKind::Unknown)?
@@ -119,6 +139,7 @@ impl PreparedSource {
             Ok(Self {
                 directory,
                 guard: self.guard,
+                container_ids: self.container_ids,
             })
         })
         .await
@@ -193,13 +214,13 @@ impl SharedVolumeMounts {
         tokio::fs::create_dir_all(&target).await?;
         let destination = open_beneath(rootfs, Path::new(SERVICE_ROOT))?;
         let namespace = Arc::new(MountNamespace::for_process(std::process::id())?);
-        let mount = AttachedMount::bind(&source, &destination, false, namespace.clone())?;
+        let mount = AttachedMount::bind(&source, &destination, false, namespace.clone(), None)?;
         let directory = PinnedDirectory::open(&target, Path::new(""))?;
         let empty = directory.path().join("unavailable");
         tokio::fs::create_dir(&empty).await?;
         tokio::fs::set_permissions(&empty, std::fs::Permissions::from_mode(0)).await?;
         let empty = open_beneath(directory.path(), Path::new("unavailable"))?;
-        let unavailable = AttachedMount::bind(&empty, &empty, true, namespace)?;
+        let unavailable = AttachedMount::bind(&empty, &empty, true, namespace, None)?;
         Ok(Self {
             blocked: false,
             root: Some(StagingRoot {
@@ -293,11 +314,17 @@ impl SharedVolumeMounts {
         let path = root.directory.path().join(&relative);
         tokio::fs::create_dir_all(&path).await?;
         let destination = open_beneath(root.directory.path(), &relative)?;
+        let userns = if source.container_ids {
+            Some(userns_fd_from_idmap(&[crate::lxc::BASE_IDMAP]).await?)
+        } else {
+            None
+        };
         let mount = AttachedMount::bind(
             &source.directory,
             &destination,
             readonly,
             root._mount.namespace.clone(),
+            userns.as_ref(),
         )?;
         slot.stage = Some(StagedMount {
             id: id.clone(),

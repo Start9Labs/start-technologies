@@ -1,7 +1,6 @@
 use patch_db::json_ptr::ROOT;
 
 use super::*;
-use crate::shared_volumes::source::{LocalSubvolume, PreparedFilesystem};
 
 #[test]
 fn local_filesystem_uses_persisted_package_data_partition() {

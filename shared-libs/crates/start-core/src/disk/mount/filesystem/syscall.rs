@@ -124,6 +124,28 @@ pub fn open_tree_attr_idmap(
     fd_from_raw(r, "open_tree_attr IDMAP")
 }
 
+/// Clones a pinned directory without its child mounts, idmapped through the user namespace.
+pub fn open_tree_attr_idmap_fd(source: BorrowedFd, userns: BorrowedFd) -> Result<OwnedFd, Error> {
+    let empty = cstr_str("")?;
+    let attr = MountAttr {
+        attr_set: MOUNT_ATTR_IDMAP,
+        attr_clr: 0,
+        propagation: 0,
+        userns_fd: userns.as_raw_fd() as u64,
+    };
+    let raw = unsafe {
+        libc::syscall(
+            SYS_OPEN_TREE_ATTR,
+            source.as_raw_fd(),
+            empty.as_ptr(),
+            clone_flags(false) | AT_EMPTY_PATH as libc::c_uint,
+            &attr as *const _ as *const libc::c_void,
+            std::mem::size_of::<MountAttr>(),
+        )
+    };
+    fd_from_raw(raw, "open_tree_attr fd IDMAP")
+}
+
 /// A detached clone rooted at a pinned directory, optionally including submounts.
 pub fn open_tree_clone_fd(source: BorrowedFd, recursive: bool) -> Result<OwnedFd, Error> {
     let empty = cstr_str("")?;
