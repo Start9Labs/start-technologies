@@ -84,7 +84,7 @@ PLATFORM_CONFIG_EXTRAS=()
 if [ "${IB_TARGET_PLATFORM}" = "raspberrypi" ]; then
 	PLATFORM_CONFIG_EXTRAS+=( --firmware-binary false )
 	PLATFORM_CONFIG_EXTRAS+=( --firmware-chroot false )
-	RPI_KERNEL_VERSION=6.18.33+rpt
+	RPI_KERNEL_VERSION=6.18.60+rpt
 	PLATFORM_CONFIG_EXTRAS+=( --linux-packages linux-image-$RPI_KERNEL_VERSION )
 	PLATFORM_CONFIG_EXTRAS+=( --linux-flavours "rpi-v8 rpi-2712" )
 elif [ "${IB_TARGET_PLATFORM}" = "rockchip64" ]; then
@@ -127,6 +127,8 @@ lb config \
 mkdir -p config/packages.chroot/
 cp $RESULTS_DIR/$IMAGE_BASENAME.deb config/packages.chroot/
 dpkg-name config/packages.chroot/*.deb
+
+"$SOURCE_DIR/kernel-backports/stage.sh" "$IB_SUITE" "$IB_TARGET_PLATFORM" "$IB_TARGET_ARCH" "$RESULTS_DIR"
 
 mkdir -p config/includes.chroot/etc
 echo start > config/includes.chroot/etc/hostname
@@ -233,7 +235,7 @@ Pin-Priority: -1
 EOF
 else
 cat > config/archives/backports.pref <<-EOF
-Package: linux-image-* linux-headers-* linux-base *nvidia*
+Package: linux-image-* linux-headers-* linux-base* linux-binary-* linux-modules-* linux-kbuild-* *nvidia*
 Pin: release n=${IB_SUITE}-backports
 Pin-Priority: 500
 EOF
@@ -367,13 +369,14 @@ if [ "${NVIDIA}" = "1" ]; then
     echo "[nvidia-hook] Removed build dependencies." >&2
 fi
 
-# Install linux-kbuild for sign-file (Secure Boot module signing)
 KVER_ALL="\$(ls -1t /boot/vmlinuz-* 2>/dev/null | head -n1 | sed 's|.*/vmlinuz-||')"
 if [ -n "\${KVER_ALL}" ]; then
-    KBUILD_VER="\$(echo "\${KVER_ALL}" | grep -oP '^\d+\.\d+')"
-    if [ -n "\${KBUILD_VER}" ]; then
-        echo "[build] Installing linux-kbuild-\${KBUILD_VER} for Secure Boot support" >&2
-        apt-get install -y "linux-kbuild-\${KBUILD_VER}" || echo "[build] WARNING: linux-kbuild-\${KBUILD_VER} not available" >&2
+    KBUILD_PACKAGE="\$(apt-cache depends "linux-headers-\${KVER_ALL}" 2>/dev/null | awk '/Depends: linux-kbuild-/ { print \$2; exit }')"
+    if [ -n "\${KBUILD_PACKAGE}" ]; then
+        echo "[build] Installing \${KBUILD_PACKAGE} for Secure Boot support" >&2
+        apt-get install -y "\${KBUILD_PACKAGE}" || echo "[build] WARNING: \${KBUILD_PACKAGE} not available" >&2
+    else
+        echo "[build] WARNING: no kbuild dependency found for linux-headers-\${KVER_ALL}" >&2
     fi
 fi
 
@@ -423,6 +426,7 @@ else
 	exit $EXIT
 fi
 retry lb chroot
+"$SOURCE_DIR/kernel-backports/verify-kernel-backports.sh" chroot "$IB_TARGET_ARCH"
 
 # riscv64 binaries target RVA23, which the build host may lack.
 RUN_TARGET=()

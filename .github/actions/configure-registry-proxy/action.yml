@@ -1,0 +1,41 @@
+name: 'Configure Registry Proxy'
+description: |
+  Routes this runner's start-cli requests through a proxy, so registries can be
+  Tor (.onion) addresses. No proxy removes any proxy an earlier job configured.
+inputs:
+  proxy:
+    description: 'Proxy URL for start-cli, e.g. socks5h://proxy.example:9050. A .onion registry needs socks5h, which resolves names through the proxy.'
+    required: false
+    default: ''
+runs:
+  using: 'composite'
+  steps:
+    - name: Configure registry proxy
+      env:
+        PROXY: ${{ inputs.proxy }}
+      run: |
+        # Host-backed Forgejo jobs share this home directory across jobs and runs.
+        CONFIG=~/.startos/config.yaml
+        without_proxy() { grep -v '^proxy:' "$CONFIG" 2>/dev/null || true; }
+
+        if [ -z "$PROXY" ]; then
+          if [ -f "$CONFIG" ]; then
+            without_proxy > "$CONFIG.new"
+            mv "$CONFIG.new" "$CONFIG"
+          fi
+          exit 0
+        fi
+
+        case "$PROXY" in
+          *://*) ;;
+          *)
+            echo "::error::The registry proxy has no scheme; use e.g. socks5h://proxy.example:9050"
+            exit 1
+            ;;
+        esac
+
+        mkdir -p ~/.startos
+        { without_proxy; printf 'proxy: %s\n' "$(jq -n --arg p "$PROXY" '$p')"; } > "$CONFIG.new"
+        mv "$CONFIG.new" "$CONFIG"
+        echo "start-cli will reach registries through the configured proxy."
+      shell: bash
