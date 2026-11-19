@@ -1,0 +1,80 @@
+Subject: netifd: place USB network devices after every other device in packet steering
+
+packet-steering assigns CPUs from scratch on every run, in a single
+pass over Ethernet devices and then WLAN devices. A USB Ethernet adapter
+is an Ethernet device, so plugging one in takes the CPU the next device
+would have had and reshuffles everything after it. On the K1 the first
+adapter pushes the Wi-Fi NAPI threads onto the RPS CPU of the default
+WAN port; a user reported Wi-Fi throughput falling by about 40%.
+Unplugging the adapter does not rerun steering, so the move lasts until
+the next interface event or reboot.
+
+Assign every non-USB device first, then the USB devices with the same
+rules, so an adapter never moves another device. It gets the
+least-loaded CPUs that remain.
+
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: openwrt v25.12.6
+
+--- a/package/network/config/netifd/files/usr/libexec/network/packet-steering.uc
++++ b/package/network/config/netifd/files/usr/libexec/network/packet-steering.uc
+@@ -158,6 +158,7 @@
+ 		pdev = phys_devs[pdev_path] = {
+ 			path: pdev_path,
+ 			driver: basename(readlink(`${pdev_path}/driver`)),
++			usb: basename(readlink(`${pdev_path}/subsystem`)) == "usb",
+ 			netdev: [],
+ 			phy: [],
+ 			tasks: [],
+@@ -253,27 +254,33 @@
+ 	}
+ }
+ 
+-// Assign ethernet devices first
+-for (let devname in phys_devs) {
+-	let dev = phys_devs[devname];
+-	if (!length(dev.phy))
+-		assign_dev_cpu(dev);
+-}
++function assign_devs(usb) {
++	// Assign ethernet devices first
++	for (let devname in phys_devs) {
++		let dev = phys_devs[devname];
++		if (dev.usb == usb && !length(dev.phy))
++			assign_dev_cpu(dev);
++	}
+ 
+-// Add bias to avoid assigning other tasks to CPUs with ethernet NAPI
+-for (let devname in phys_devs) {
+-	let dev = phys_devs[devname];
+-	if (!length(dev.tasks) || dev.napi_cpu == null)
+-		continue;
+-	cpu_add_weight(dev.napi_cpu, eth_bias);
+-}
++	// Add bias to avoid assigning other tasks to CPUs with ethernet NAPI
++	for (let devname in phys_devs) {
++		let dev = phys_devs[devname];
++		if (dev.usb != usb || !length(dev.tasks) || dev.napi_cpu == null)
++			continue;
++		cpu_add_weight(dev.napi_cpu, eth_bias);
++	}
+ 
+-// Assign WLAN devices
+-for (let devname in phys_devs) {
+-	let dev = phys_devs[devname];
+-	if (length(dev.phy) > 0)
+-		assign_dev_cpu(dev);
++	// Assign WLAN devices
++	for (let devname in phys_devs) {
++		let dev = phys_devs[devname];
++		if (dev.usb == usb && length(dev.phy) > 0)
++			assign_dev_cpu(dev);
++	}
+ }
+ 
++// Placement of other devices never depends on USB devices.
++assign_devs(false);
++assign_devs(true);
++
+ if (debug > 1)
+ 	warn(sprintf("devices: %.J\ncpus: %.J\n", phys_devs, cpus));
