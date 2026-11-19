@@ -678,7 +678,7 @@ async fn stopped_unit(unit: &str) -> Result<bool, Error> {
 /// The image-store reservation excludes native update/pruning through manifest preparation.
 /// The operation request contains paths, never signing or unlock secrets.
 /// Unpublished preparation does not admit the base as a public builder source.
-/// Publishes nothing; hidden staging may remain after return.
+/// Publishes nothing; awaits candidate and fresh-backing disposal under the reservation.
 pub(crate) async fn prepare(ctx: &RpcContext) -> Result<(), Error> {
     let memory = ProcessSecretMemory::protect()?;
     let images = crate::os_overlay::reserve_image_store(false).await?;
@@ -712,18 +712,30 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<(), Error> {
     drop(credentials);
     let mut projected =
         ProjectedConfig::stage(snapshot, Path::new(crate::MAIN_DATA), &keys).await?;
-    projected.insert_bootstrap(sealed)?;
-    let store = super::boot::generation_store(Path::new("/media/startos/config"));
-    tokio::fs::create_dir_all(&store).await?;
-    let prepared = projected
-        .prepare_generation(&rootfs, &store, &enrollment.manifest_key)
-        .await?;
-    memory.check()?;
-    let descriptor = super::boot::Descriptor::for_generation(
-        &prepared,
-        super::tpm::public_key(&enrollment.policy_key)?,
-    )?;
-    super::public_image::stage(ctx, &prepared, &descriptor, &images).await?;
-    memory.check()?;
-    Ok(())
+    let prepared = async {
+        projected.insert_bootstrap(sealed)?;
+        let store = super::boot::generation_store(Path::new("/media/startos/config"));
+        tokio::fs::create_dir_all(&store).await?;
+        projected
+            .prepare_generation(&rootfs, &store, &enrollment.manifest_key)
+            .await
+    }
+    .await;
+    let prepared = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            return crate::util::future::finish_with_cleanup(Err(error), projected.discard().await);
+        }
+    };
+    let result = async {
+        memory.check()?;
+        let descriptor = super::boot::Descriptor::for_generation(
+            &prepared,
+            super::tpm::public_key(&enrollment.policy_key)?,
+        )?;
+        super::public_image::stage(ctx, &prepared, &descriptor, &images).await?;
+        memory.check()
+    }
+    .await;
+    crate::util::future::finish_with_cleanup(result, projected.discard_generation(prepared).await)
 }

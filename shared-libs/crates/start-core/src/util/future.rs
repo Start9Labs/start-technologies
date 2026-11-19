@@ -271,6 +271,38 @@ async fn complete_owned_operation_propagates_original_panic() {
     ));
 }
 
+/// Preserves the operation's failure, logging a secondary cleanup failure.
+pub(crate) fn finish_with_cleanup<T>(
+    result: Result<T, Error>,
+    cleanup: Result<(), Error>,
+) -> Result<T, Error> {
+    match result {
+        Ok(value) => cleanup.map(|()| value),
+        Err(error) => {
+            cleanup.log_err();
+            Err(error)
+        }
+    }
+}
+
+#[test]
+fn cleanup_failure_does_not_replace_the_operation_failure() {
+    let failure = || Error::new(eyre!("operation"), ErrorKind::InvalidRequest);
+    let cleanup = || Error::new(eyre!("cleanup"), ErrorKind::Filesystem);
+    assert_eq!(finish_with_cleanup(Ok(42), Ok(())).unwrap(), 42);
+    assert_eq!(
+        finish_with_cleanup(Ok(42), Err(cleanup()))
+            .unwrap_err()
+            .kind,
+        ErrorKind::Filesystem
+    );
+    for cleanup in [Ok(()), Err(cleanup())] {
+        let error = finish_with_cleanup::<()>(Err(failure()), cleanup).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+        assert_eq!(error.source.to_string(), "operation");
+    }
+}
+
 pub async fn make_send<F, Fut, T>(f: F) -> Result<T, Error>
 where
     F: FnOnce() -> Fut + Send + 'static,

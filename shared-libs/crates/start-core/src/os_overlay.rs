@@ -33,8 +33,8 @@ use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::merkle_archive::source::DynFileSource;
 pub use crate::util::crypto::gen_nistp256 as generate_signing_key;
-use crate::util::future::complete_owned_operation;
-use crate::util::io::{create_file_mod, open_file};
+use crate::util::future::{complete_owned_operation, finish_with_cleanup};
+use crate::util::io::{create_file_mod, delete_dir, open_file};
 use crate::util::squashfs::Squashfs;
 use crate::util::{HashWriter, Invoke};
 
@@ -663,43 +663,59 @@ impl PreparedGeneration {
             .create(&staging)
             .await
             .with_kind(ErrorKind::Filesystem)?;
-        let mut overlay = create_file_mod(staging.join(OVERLAY_FILE), 0o600).await?;
-        snapshot.serialize(&mut overlay).await?;
-        overlay.sync_all().await?;
-        let manifest = Manifest {
-            rootfs_sha256: digest_file(rootfs).await?,
-            overlay_sha256: digest_file(&staging.join(OVERLAY_FILE)).await?,
-            rootfs_verity: VerityImage::format(rootfs, &staging.join(ROOTFS_VERITY_FILE)).await?,
-            overlay_verity: VerityImage::format(
-                &staging.join(OVERLAY_FILE),
-                &staging.join(OVERLAY_VERITY_FILE),
-            )
-            .await?,
-        };
-        for (name, bytes) in [
-            (MANIFEST_FILE, manifest.to_bytes()),
-            (SIGNATURE_FILE, manifest.sign(key)?),
-        ] {
-            let mut file = create_file_mod(staging.join(name), 0o600).await?;
-            file.write_all(&bytes).await?;
-            file.sync_all().await?;
+        let result = async {
+            let mut overlay = create_file_mod(staging.join(OVERLAY_FILE), 0o600).await?;
+            snapshot.serialize(&mut overlay).await?;
+            overlay.sync_all().await?;
+            let manifest = Manifest {
+                rootfs_sha256: digest_file(rootfs).await?,
+                overlay_sha256: digest_file(&staging.join(OVERLAY_FILE)).await?,
+                rootfs_verity: VerityImage::format(rootfs, &staging.join(ROOTFS_VERITY_FILE))
+                    .await?,
+                overlay_verity: VerityImage::format(
+                    &staging.join(OVERLAY_FILE),
+                    &staging.join(OVERLAY_VERITY_FILE),
+                )
+                .await?,
+            };
+            for (name, bytes) in [
+                (MANIFEST_FILE, manifest.to_bytes()),
+                (SIGNATURE_FILE, manifest.sign(key)?),
+            ] {
+                let mut file = create_file_mod(staging.join(name), 0o600).await?;
+                file.write_all(&bytes).await?;
+                file.sync_all().await?;
+            }
+            open_file(staging.join(OVERLAY_FILE))
+                .await?
+                .sync_all()
+                .await?;
+            open_file(&staging).await?.sync_all().await?;
+            open_file(store).await?.sync_all().await?;
+            Ok(Self {
+                staging: staging.clone(),
+                destination: store.join(format!("{GENERATION_PREFIX}{id}")),
+                rootfs: rootfs.to_owned(),
+                manifest,
+                public_key: PKey::public_key_from_der(
+                    &key.public_key_to_der().with_kind(ErrorKind::OpenSsl)?,
+                )
+                .with_kind(ErrorKind::OpenSsl)?,
+            })
         }
-        open_file(staging.join(OVERLAY_FILE))
-            .await?
-            .sync_all()
-            .await?;
-        open_file(&staging).await?.sync_all().await?;
-        open_file(store).await?.sync_all().await?;
-        Ok(Self {
-            staging,
-            destination: store.join(format!("{GENERATION_PREFIX}{id}")),
-            rootfs: rootfs.to_owned(),
-            manifest,
-            public_key: PKey::public_key_from_der(
-                &key.public_key_to_der().with_kind(ErrorKind::OpenSsl)?,
-            )
-            .with_kind(ErrorKind::OpenSsl)?,
-        })
+        .await;
+        match result {
+            Ok(prepared) => Ok(prepared),
+            Err(error) => {
+                finish_with_cleanup(Err(error), remove_unpublished_directory(&staging).await)
+            }
+        }
+    }
+
+    /// The caller retires every reader, writer and mount before disposal.
+    /// Retain the image-store reservation through completion.
+    pub async fn discard(self) -> Result<(), Error> {
+        remove_unpublished_directory(&self.staging).await
     }
 
     /// Additional TPM authorization files may be added here before publication.
@@ -737,7 +753,6 @@ impl PreparedGeneration {
         )
         .await?;
         sync_tree(&self.staging).await?;
-        // Publication time, rather than preparation time, orders generations.
         open_file(&self.staging)
             .await?
             .into_std()
@@ -753,6 +768,16 @@ impl PreparedGeneration {
             .await?;
         Ok(self.destination)
     }
+}
+
+/// Requires an exclusively owned, unpublished directory with no remaining users or mounts.
+pub(crate) async fn remove_unpublished_directory(path: &Path) -> Result<(), Error> {
+    delete_dir(path).await?;
+    open_file(path.parent().ok_or_else(invalid_signature)?)
+        .await?
+        .sync_all()
+        .await?;
+    Ok(())
 }
 
 pub(crate) fn sync_tree(path: &Path) -> impl Future<Output = Result<(), Error>> + Send {
@@ -877,6 +902,10 @@ pub async fn prune(store: &Path, retain: &[PathBuf]) -> Result<(), Error> {
     open_file(store).await?.sync_all().await?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "os_overlay/reclamation_tests.rs"]
+mod reclamation_tests;
 
 #[cfg(test)]
 mod tests {

@@ -4,6 +4,8 @@ use super::*;
 
 #[path = "private_config_permission_tests.rs"]
 mod permissions;
+#[path = "private_config_reclamation_tests.rs"]
+mod reclamation;
 
 async fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
     let root = tempfile::tempdir().unwrap();
@@ -606,7 +608,7 @@ async fn unsupported_private_symlink_rejects_before_staging_or_legacy_changes() 
 }
 
 #[tokio::test]
-async fn failed_staging_keeps_legacy_boot_files_and_fences_partial_private_candidate() {
+async fn failed_staging_keeps_legacy_boot_files_and_reclaims_partial_private_candidate() {
     let (root, raw, _) = fixture().await;
     let data = root
         .path()
@@ -647,8 +649,7 @@ async fn failed_staging_keeps_legacy_boot_files_and_fences_partial_private_candi
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].metadata().unwrap().mode() & 0o777, 0o700);
+    assert!(entries.is_empty());
 }
 
 #[tokio::test]
