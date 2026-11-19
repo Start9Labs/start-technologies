@@ -917,12 +917,7 @@ impl Accept for VHostBindListener {
         for (&addr, (listener, gw_info)) in &self.listeners {
             match listener.poll_accept(cx) {
                 Poll::Ready(Ok((stream, peer_addr))) => {
-                    if let Err(e) = socket2::SockRef::from(&stream)
-                        .set_tcp_keepalive(&crate::net::utils::default_keepalive())
-                    {
-                        tracing::error!("Failed to set tcp keepalive: {e}");
-                        tracing::debug!("{e:?}");
-                    }
+                    crate::net::utils::set_default_keepalive(&stream);
                     return Poll::Ready(Ok((
                         NetworkInterfaceListenerAcceptMetadata {
                             inner: TcpMetadata {
@@ -1474,12 +1469,7 @@ where
     ) -> Option<(ServerConfig, Self::PreprocessRes)> {
         let peer = extract::<TcpMetadata, _>(metadata).map(|m| m.peer_addr);
         let (tcp_stream, deadline) = self.connect_backend(peer).await?;
-        if let Err(e) = socket2::SockRef::from(&tcp_stream)
-            .set_tcp_keepalive(&crate::net::utils::default_keepalive())
-        {
-            tracing::error!("Failed to set tcp keepalive: {e}");
-            tracing::debug!("{e:?}");
-        }
+        crate::net::utils::set_default_keepalive(&tcp_stream);
         let origin_registration = self.register_origin::<A>(metadata, &tcp_stream).ok()?;
         let client_alpn: Vec<Vec<u8>> = hello
             .alpn()

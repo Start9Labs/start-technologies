@@ -30,8 +30,18 @@ fn unproxied_service_tls_preserves_source_for_termination_rewrap_and_passthrough
         assert!(target.preserve_source_ip);
         assert_eq!(target.passthrough, !add_ssl);
         assert!(
-            !binding_proxy_target(&options, "127.0.0.1:80".parse().unwrap(), None, None)
-                .preserve_source_ip
+            !binding_proxy_target(
+                &options,
+                (crate::lxc::slot::OS_LISTEN_IP, 80).into(),
+                Some(SocketAddrV6::new(
+                    crate::lxc::slot::OS_LISTEN_IPV6,
+                    80,
+                    0,
+                    0
+                )),
+                None,
+            )
+            .preserve_source_ip
         );
         if add_ssl {
             options.proxy = Some(ProxyOptions::Http {

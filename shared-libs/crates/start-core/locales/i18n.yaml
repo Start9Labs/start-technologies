@@ -1739,13 +1739,6 @@ init.updating-server-info:
   fr_FR: "Mise à jour des informations du serveur"
   pl_PL: "Aktualizowanie informacji o serwerze"
 
-init.launching-service-intranet:
-  en_US: "Launching service intranet"
-  de_DE: "Starte Service-Intranet"
-  es_ES: "Iniciando intranet de servicios"
-  fr_FR: "Lancement de l'intranet de services"
-  pl_PL: "Uruchamianie intranetu usług"
-
 init.validating-database:
   en_US: "Validating database"
   de_DE: "Validiere Datenbank"

@@ -9,6 +9,7 @@ pub mod forward;
 pub mod gateway;
 pub mod host;
 pub mod http;
+pub(crate) mod ingress;
 pub mod keys;
 pub mod mdns;
 pub mod net_controller;
@@ -232,6 +233,8 @@ mod tests {
             .env("MAIN", MAIN_RULE_PRIORITY.to_string())
             .env("REPLY", REPLY_RULE_PRIORITY.to_string())
             .env("SOURCE", SOURCE_RULE_PRIORITY.to_string())
+            .env("OS_LISTEN_V4", crate::lxc::slot::OS_LISTEN_IP.to_string())
+            .env("OS_LISTEN_V6", crate::lxc::slot::OS_LISTEN_IPV6.to_string())
             .env("LOCAL_OUTBOUND_MARK", LOCAL_OUTBOUND_MARK.to_string())
             .env(
                 "SERVICE_OUTBOUND",

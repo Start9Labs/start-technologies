@@ -1184,13 +1184,18 @@ mod tests {
     fn internal_ingress_retains_plugin_names_but_localhost_requires_loopback() {
         let binding = ingress_binding();
         let bridge_v6 = crate::lxc::slot::HOST_IPV6.to_string();
+        let os_listen = crate::lxc::slot::OS_LISTEN_IP.to_string();
+        let os_listen_v6 = crate::lxc::slot::OS_LISTEN_IPV6.to_string();
         for (destination, peer, gateway, loopback) in [
-            ("127.0.0.1", "127.0.0.1", "lo", true),
-            ("::1", "::1", "lo", true),
-            ("172.16.0.1", "172.16.0.3", "lxcbr0", false),
-            (bridge_v6.as_str(), "fd00::2", "lxcbr0", false),
+            ("127.0.0.1", "127.0.0.1", Some("lo"), true),
+            ("::1", "::1", Some("lo"), true),
+            ("172.16.0.1", "172.16.0.3", Some("lxcbr0"), false),
+            (bridge_v6.as_str(), "fd00::2", Some("lxcbr0"), false),
+            (os_listen.as_str(), "172.16.0.3", None, false),
+            (os_listen_v6.as_str(), "fd00:3::3", None, false),
         ] {
-            let mut origin = ingress(gateway, false);
+            let mut origin = ingress("eth0", false);
+            origin.gateway = gateway.map(|gateway| gateway.parse().unwrap());
             origin.local_ip = Some(destination.parse().unwrap());
             origin.peer_ip = Some(peer.parse().unwrap());
             let identities = startos_signing_identities(Some(&binding), &origin);

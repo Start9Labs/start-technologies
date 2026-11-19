@@ -86,7 +86,6 @@ pub struct InitPhases {
     sync_clock: PhaseProgressTrackerHandle,
     enable_zram: PhaseProgressTrackerHandle,
     update_server_info: PhaseProgressTrackerHandle,
-    launch_service_network: PhaseProgressTrackerHandle,
     validate_db: PhaseProgressTrackerHandle,
     postinit: Option<PhaseProgressTrackerHandle>,
 }
@@ -111,8 +110,6 @@ impl InitPhases {
             sync_clock: handle.add_phase(t!("init.synchronizing-system-clock").into(), Some(10)),
             enable_zram: handle.add_phase(t!("init.enabling-zram").into(), Some(1)),
             update_server_info: handle.add_phase(t!("init.updating-server-info").into(), Some(1)),
-            launch_service_network: handle
-                .add_phase(t!("init.launching-service-intranet").into(), Some(1)),
             validate_db: handle.add_phase(t!("init.validating-database").into(), Some(1)),
             postinit: if Path::new("/media/startos/config/postinit.sh").exists() {
                 Some(handle.add_phase(t!("init.running-postinit").into(), Some(5)))
@@ -184,7 +181,6 @@ pub async fn init(
         mut sync_clock,
         mut enable_zram,
         mut update_server_info,
-        mut launch_service_network,
         mut validate_db,
         postinit,
     }: InitPhases,
@@ -467,10 +463,6 @@ pub async fn init(
     .await
     .result?;
     update_server_info.complete();
-
-    launch_service_network.start();
-    crate::lxc::network::ensure().await?;
-    launch_service_network.complete();
 
     validate_db.start();
     db.mutate(|d| {

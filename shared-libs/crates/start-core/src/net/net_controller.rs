@@ -17,7 +17,7 @@ use tracing::instrument;
 use crate::db::model::Database;
 use crate::db::model::public::NetworkInterfaceInfo;
 use crate::hostname::ServerHostname;
-use crate::lxc::slot::VETH_PREFIX;
+use crate::lxc::slot::{OS_LISTEN_IP, OS_LISTEN_IPV6, VETH_PREFIX, is_os_listen};
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
@@ -79,6 +79,7 @@ impl NetController {
         webserver: &WebServerAcceptorSetter<WildcardListener>,
         max_proxy_conns_per_target: usize,
     ) -> Result<Self, Error> {
+        crate::lxc::network::ensure().await?;
         let net_iface = Arc::new(NetworkInterfaceController::new(db.clone()));
         dns.activate(net_iface.clone());
         webserver.send_modify(|listener| listener.set_ip_info(net_iface.watcher.subscribe()));
@@ -238,8 +239,8 @@ impl NetController {
 
         let service = NetService::new(NetServiceData {
             id: None,
-            ip: [127, 0, 0, 1].into(),
-            ipv6: None,
+            ip: OS_LISTEN_IP,
+            ipv6: Some(OS_LISTEN_IPV6),
             _dns: dns,
             controller: Arc::downgrade(self),
             binds: BTreeMap::new(),
@@ -409,6 +410,14 @@ fn forwarded_lan_ips<'a>(
     ips
 }
 
+/// Loopback reaches an OS listen target untranslated, keeping the client's loopback source.
+fn forwarded_to(target: Ipv4Addr, mut requirements: ForwardRequirements) -> ForwardRequirements {
+    if is_os_listen(target.into()) {
+        requirements.private_ips.retain(|ip| !ip.is_loopback());
+    }
+    requirements
+}
+
 fn binding_proxy_target(
     options: &BindOptions,
     addr: SocketAddr,
@@ -427,7 +436,7 @@ fn binding_proxy_target(
         connect_ssl,
         alpn: options.add_ssl.as_ref().and_then(|ssl| ssl.alpn.clone()),
         passthrough: options.serves_own_tls(),
-        preserve_source_ip: !addr.ip().is_loopback() && options.proxy.is_none(),
+        preserve_source_ip: !is_os_listen(addr.ip()) && options.proxy.is_none(),
     }
 }
 
@@ -528,8 +537,7 @@ struct HostBinds {
 pub struct NetServiceData {
     id: Option<PackageId>,
     ip: Ipv4Addr,
-    /// The container's SLAAC ULA, DNAT target for a non-SSL GUA forward. `None`
-    /// until the container has a v6 (or for the OS's own bindings).
+    /// DNAT target for a non-SSL GUA forward.
     ipv6: Option<Ipv6Addr>,
     _dns: Arc<()>,
     controller: Weak<NetController>,
@@ -734,13 +742,14 @@ impl NetServiceData {
                     );
                     continue;
                 }
-                // Loopback DNAT is martian-dropped on ingress.
-                if !self.ip.is_loopback() {
-                    forwards.insert(
-                        external,
-                        (SocketAddrV4::new(self.ip, *port), 1, requirements.clone()),
-                    );
-                }
+                forwards.insert(
+                    external,
+                    (
+                        SocketAddrV4::new(self.ip, *port),
+                        1,
+                        forwarded_to(self.ip, requirements.clone()),
+                    ),
+                );
 
                 // No listener of ours answers here, so DNAT the host's
                 // GUA:external to the container's v6:internal. A LAN-only GUA is
@@ -843,12 +852,15 @@ impl NetServiceData {
                 (
                     SocketAddrV4::new(self.ip, internal_start),
                     range.number_of_ports,
-                    ForwardRequirements {
-                        public_gateways,
-                        private_ips,
-                        secure: true,
-                        transport: range.transport.clone(),
-                    },
+                    forwarded_to(
+                        self.ip,
+                        ForwardRequirements {
+                            public_gateways,
+                            private_ips,
+                            secure: true,
+                            transport: range.transport.clone(),
+                        },
+                    ),
                 ),
             );
         }
@@ -2236,6 +2248,29 @@ mod tests {
             !lan_ip("fe80::1", true, 443, "lxcbr0").is_internal(),
             "a link-local address is the kernel's, not one the bridge is given"
         );
+    }
+
+    #[test]
+    fn an_os_listen_forward_leaves_loopback_untranslated() {
+        let requirements = ForwardRequirements {
+            public_gateways: BTreeSet::from([gw("eth0")]),
+            private_ips: BTreeSet::from([
+                ip("127.0.0.1"),
+                ip("::1"),
+                ip("172.16.0.1"),
+                ip("192.168.1.5"),
+            ]),
+            secure: false,
+            transport: Default::default(),
+        };
+        let os = forwarded_to(OS_LISTEN_IP, requirements.clone());
+        assert_eq!(
+            os.private_ips,
+            BTreeSet::from([ip("172.16.0.1"), ip("192.168.1.5")])
+        );
+        assert_eq!(os.public_gateways, requirements.public_gateways);
+        let container = crate::lxc::slot::ContainerSlot::new(0).unwrap().ipv4();
+        assert_eq!(forwarded_to(container, requirements.clone()), requirements);
     }
 
     fn host_id(s: &str) -> HostId {

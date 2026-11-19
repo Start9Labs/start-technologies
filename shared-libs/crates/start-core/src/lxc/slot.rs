@@ -5,7 +5,7 @@
 //! is first installed and freed only by uninstall.
 
 use std::collections::BTreeSet;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use ipnet::{Ipv4Net, Ipv6Net};
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,15 @@ pub const HOST_IPV6: Ipv6Addr = Ipv6Addr::new(0xfd00, 3, 0, 0, 0, 0, 0, 1);
 /// The server's own listeners that forwards and the TLS proxy target, such as the StartOS UI.
 pub const OS_LISTEN_IP: Ipv4Addr = Ipv4Addr::new(172, 16, 0, 2);
 pub const OS_LISTEN_IPV6: Ipv6Addr = Ipv6Addr::new(0xfd00, 3, 0, 0, 0, 0, 0, 2);
+
+/// Whether the address is one of the server's own listen addresses. Never an operator-visible
+/// address: interface observation omits it.
+pub fn is_os_listen(ip: IpAddr) -> bool {
+    match ip.to_canonical() {
+        IpAddr::V4(ip) => ip == OS_LISTEN_IP,
+        IpAddr::V6(ip) => ip == OS_LISTEN_IPV6,
+    }
+}
 
 /// Every address a container or the server holds on the container network.
 pub const CONTAINER_NET: Ipv4Net = Ipv4Net::new_assert(Ipv4Addr::new(172, 16, 0, 0), 16);
@@ -200,6 +209,28 @@ mod test {
             assert_ne!(slot.ipv4(), OS_LISTEN_IP);
             assert_ne!(slot.ipv6(), HOST_IPV6);
             assert_ne!(slot.ipv6(), OS_LISTEN_IPV6);
+        }
+    }
+
+    #[test]
+    fn os_listen_matches_both_families_and_mapped_ipv4_only() {
+        for ip in [
+            IpAddr::V4(OS_LISTEN_IP),
+            IpAddr::V6(OS_LISTEN_IPV6),
+            IpAddr::V6(OS_LISTEN_IP.to_ipv6_mapped()),
+        ] {
+            assert!(is_os_listen(ip), "{ip}");
+        }
+        let slot = ContainerSlot::new(0).unwrap();
+        for ip in [
+            IpAddr::V4(HOST_IP),
+            IpAddr::V6(HOST_IPV6),
+            IpAddr::V4(slot.ipv4()),
+            IpAddr::V6(slot.ipv6()),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ] {
+            assert!(!is_os_listen(ip), "{ip}");
         }
     }
 
