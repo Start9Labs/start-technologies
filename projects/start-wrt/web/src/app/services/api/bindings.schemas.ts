@@ -1695,6 +1695,12 @@ export const ActivityListResponse: z.ZodObject<{
 }).meta({
   id: 'ActivityListResponse',
 })
+export const AddKeyParams: z.ZodObject<{
+  name: z.ZodString
+  key: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({ name: z.string(), key: AnyVerifyingKey }).meta({
+  id: 'AddKeyParams',
+})
 
 /**
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
@@ -2618,6 +2624,10 @@ export const PublishedPortInput: z.ZodObject<{
 }).meta({
   id: 'PublishedPortInput',
 })
+export const RemoveKeyParams: z.ZodObject<{ key: typeof AnyVerifyingKey }> =
+  /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
+    id: 'RemoveKeyParams',
+  })
 export const ScheduleWindows: z.ZodObject<{
   interface: z.ZodString
   windows: z.ZodArray<typeof ScheduleWindow>
@@ -3412,6 +3422,40 @@ export const Api = {
           _RETURN: /* @__PURE__ */ CheckInitializedRes,
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
+        },
+        key: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ AddKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ AuthKeys,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ RemoveKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+          },
         },
         login: {
           _PARAMS: /* @__PURE__ */ LoginParams,

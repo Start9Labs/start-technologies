@@ -294,6 +294,7 @@ export type WanIpv6ModeInput = z.input<typeof schemas.WanIpv6Mode>
 export type WifiRadio = z.output<typeof schemas.WifiRadio>
 export type WifiRadioInput = z.input<typeof schemas.WifiRadio>
 export type ActivityListResponse = z.output<typeof schemas.ActivityListResponse>
+export type AddKeyParamsInput = z.input<typeof schemas.AddKeyParams>
 
 /**
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
@@ -346,6 +347,7 @@ export type ProfileSetRequestInput = z.input<typeof schemas.ProfileSetRequest>
 export type Progress = z.output<typeof schemas.Progress>
 export type PublishedPort = z.output<typeof schemas.PublishedPort>
 export type PublishedPortInputInput = z.input<typeof schemas.PublishedPortInput>
+export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
 export type ScheduleWindowsInput = z.input<typeof schemas.ScheduleWindows>
 export type SetArgsInput = z.input<typeof schemas.SetArgs>
 export type SetupStatusRes = z.output<typeof schemas.SetupStatusRes>

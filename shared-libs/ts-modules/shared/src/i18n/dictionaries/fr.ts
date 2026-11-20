@@ -1096,4 +1096,8 @@ export default {
   1300: 'Serveur injoignable',
   1301: 'Les listes peuvent ne pas être à jour',
   1302: 'StartOS ne parvient pas à joindre ce registre pour le moment.',
+  1303: 'Connectez-vous sans mot de passe en exécutant cette commande dans un terminal sur le serveur, puis sélectionnez Continuer.',
+  1304: "Ce navigateur n'est pas encore enregistré",
+  1305: 'Se connecter depuis la ligne de commande',
+  1306: 'Enregistrer ce navigateur',
 } satisfies i18n

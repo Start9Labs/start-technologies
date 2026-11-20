@@ -29,4 +29,7 @@ export abstract class ApiService {
   }
 
   abstract openWebsocket$<T>(guid: string): Observable<T>
+
+  /** Rejects while this browser's key is not enrolled, without signing out. */
+  abstract checkEnrollment(): Promise<unknown>
 }

@@ -15,6 +15,97 @@
     }
   },
   {
+    "name": "auth.key.add",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "AddKeyParams": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "key": { "$ref": "#/$defs/AnyVerifyingKey" }
+          },
+          "required": ["name", "key"],
+          "additionalProperties": true
+        },
+        "AnyVerifyingKey": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "key": { "$ref": "#/$defs/AnyVerifyingKey" }
+      },
+      "required": ["name", "key"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "auth.key.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "AuthKeys": {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/Session" },
+          "description": "Enrolled sign-ins indexed by canonical DER64 SPKI."
+        },
+        "Session": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "description": "A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.",
+              "type": ["string", "null"]
+            },
+            "loggedIn": { "type": "string" },
+            "lastActive": { "type": "string" },
+            "userAgent": { "type": ["string", "null"] }
+          },
+          "required": ["name", "loggedIn", "lastActive", "userAgent"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "propertyNames": { "type": "string" },
+      "additionalProperties": { "$ref": "#/$defs/Session" },
+      "description": "Enrolled sign-ins indexed by canonical DER64 SPKI."
+    }
+  },
+  {
+    "name": "auth.key.remove",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RemoveKeyParams": {
+          "type": "object",
+          "properties": { "key": { "$ref": "#/$defs/AnyVerifyingKey" } },
+          "required": ["key"],
+          "additionalProperties": true
+        },
+        "AnyVerifyingKey": { "type": "string" }
+      },
+      "type": "object",
+      "properties": { "key": { "$ref": "#/$defs/AnyVerifyingKey" } },
+      "required": ["key"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "auth.login",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

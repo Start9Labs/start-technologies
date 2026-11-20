@@ -7,7 +7,7 @@ use patch_db::HasModel;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
-use crate::auth::{AuthKeys, LoginContext, Session, check_password};
+use crate::auth::{AuthKeys, LoginContext, check_password};
 use crate::context::CliContext;
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::LocalAuthContext;
@@ -17,10 +17,8 @@ use crate::middleware::auth::signature::{
 };
 use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
-use crate::sign::AnyVerifyingKey;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::TunnelDatabase;
-use crate::util::serde::{HandlerExtSerde, display_serializable};
 
 impl DbContext for TunnelContext {
     type Database = TunnelDatabase;
@@ -181,102 +179,6 @@ pub fn auth_api<C: Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_about("about.reset-user-interface-password"),
         )
-        .subcommand(
-            "key",
-            ParentHandler::<C>::new()
-                .subcommand(
-                    "add",
-                    from_fn_async(add_key)
-                        .with_metadata("sync_db", Value::Bool(true))
-                        .no_display()
-                        .with_about("about.add-new-authorized-key")
-                        .with_call_remote::<CliContext>(),
-                )
-                .subcommand(
-                    "remove",
-                    from_fn_async(remove_key)
-                        .with_metadata("sync_db", Value::Bool(true))
-                        .no_display()
-                        .with_about("about.remove-authorized-key")
-                        .with_call_remote::<CliContext>(),
-                )
-                .subcommand(
-                    "list",
-                    from_fn_async(list_keys)
-                        .with_metadata("sync_db", Value::Bool(true))
-                        .with_display_serializable()
-                        .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
-                            use prettytable::*;
-                            if let Some(format) = params.format {
-                                return display_serializable(format, res);
-                            }
-                            let mut table = Table::new();
-                            table.add_row(row![bc => "NAME", "KEY"]);
-                            for (key, info) in res.0 {
-                                table.add_row(row![info.name.as_deref().unwrap_or("-"), key]);
-                            }
-                            print_table(&table)?;
-                            Ok(())
-                        })
-                        .with_about("about.list-authorized-keys")
-                        .with_call_remote::<CliContext>(),
-                )
-                .with_about("about.commands-authorized-keys"),
-        )
-}
-
-#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
-#[group(skip)]
-#[serde(rename_all = "camelCase")]
-pub struct AddKeyParams {
-    pub name: InternedString,
-    pub key: AnyVerifyingKey,
-}
-
-rpc_toolkit::reflect_ts!(AddKeyParams);
-rpc_toolkit::ts_export!(AddKeyParams, namespaces = ["tunnel"]);
-
-pub async fn add_key(
-    ctx: TunnelContext,
-    AddKeyParams { name, key }: AddKeyParams,
-) -> Result<(), Error> {
-    ctx.db
-        .mutate(|db| {
-            db.as_session_pubkeys_mut().mutate(|session_pubkeys| {
-                session_pubkeys.0.insert(
-                    key.interned_der64(),
-                    Session {
-                        name: Some(name),
-                        ..Default::default()
-                    },
-                );
-                Ok(())
-            })
-        })
-        .await
-        .result
-}
-
-#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
-#[group(skip)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveKeyParams {
-    pub key: AnyVerifyingKey,
-}
-
-rpc_toolkit::reflect_ts!(RemoveKeyParams);
-rpc_toolkit::ts_export!(RemoveKeyParams, namespaces = ["tunnel"]);
-
-pub async fn remove_key(
-    ctx: TunnelContext,
-    RemoveKeyParams { key }: RemoveKeyParams,
-) -> Result<(), Error> {
-    ctx.unenroll([key.interned_der64()]).await?;
-    Ok(())
-}
-
-pub async fn list_keys(ctx: TunnelContext) -> Result<AuthKeys, Error> {
-    ctx.db.peek().await.into_session_pubkeys().de()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]

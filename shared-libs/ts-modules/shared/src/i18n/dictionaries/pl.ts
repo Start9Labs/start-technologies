@@ -1096,4 +1096,8 @@ export default {
   1300: 'Serwer nieosiągalny',
   1301: 'Listy mogą być nieaktualne',
   1302: 'StartOS nie może teraz połączyć się z tym rejestrem.',
+  1303: 'Zaloguj się bez hasła, uruchamiając to polecenie w terminalu na serwerze, a następnie wybierz Kontynuuj.',
+  1304: 'Ta przeglądarka nie jest jeszcze zarejestrowana',
+  1305: 'Zaloguj się z wiersza poleceń',
+  1306: 'Zarejestruj tę przeglądarkę',
 } satisfies i18n

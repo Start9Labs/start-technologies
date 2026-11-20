@@ -1096,4 +1096,8 @@ export default {
   1300: 'Servidor inaccesible',
   1301: 'Es posible que los listados estén desactualizados',
   1302: 'StartOS no puede conectar con este registro en este momento.',
+  1303: 'Inicie sesión sin contraseña ejecutando este comando en una terminal del servidor y luego seleccione Continuar.',
+  1304: 'Este navegador aún no está registrado',
+  1305: 'Iniciar sesión desde la línea de comandos',
+  1306: 'Registrar este navegador',
 } satisfies i18n

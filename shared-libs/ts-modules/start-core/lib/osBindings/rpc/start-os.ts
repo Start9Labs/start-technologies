@@ -469,6 +469,7 @@ export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
 export type AddAdminParamsInput = z.input<typeof schemas.AddAdminParams>
 export type AddAssetParamsInput = z.input<typeof schemas.AddAssetParams>
 export type AddCategoryParamsInput = z.input<typeof schemas.AddCategoryParams>
+export type AddKeyParamsInput = z.input<typeof schemas.AddKeyParams>
 export type AddMirrorParamsInput = z.input<typeof schemas.AddMirrorParams>
 export type AddPackageParamsInput = z.input<typeof schemas.AddPackageParams>
 export type AddPackageSignerParamsInput = z.input<
@@ -653,6 +654,7 @@ export type RebuildParamsInput = z.input<typeof schemas.RebuildParams>
 export type RegistryIdentity = z.output<typeof schemas.RegistryIdentity>
 export type RemoveAcmeParamsInput = z.input<typeof schemas.RemoveAcmeParams>
 export type RemoveAdminParamsInput = z.input<typeof schemas.RemoveAdminParams>
+export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
 export type RemoveMirrorParamsInput = z.input<typeof schemas.RemoveMirrorParams>
 export type RemovePackageFromCategoryParamsInput = z.input<
   typeof schemas.RemovePackageFromCategoryParams

@@ -2082,6 +2082,12 @@ export const AddCategoryParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ id: z.string(), name: LocaleString }).meta({
   id: 'AddCategoryParams',
 })
+export const AddKeyParams: z.ZodObject<{
+  name: z.ZodString
+  key: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({ name: z.string(), key: AnyVerifyingKey }).meta({
+  id: 'AddKeyParams',
+})
 export const AddMirrorParams: z.ZodObject<{
   url: z.ZodString
   commitment: typeof MerkleArchiveCommitment
@@ -3890,6 +3896,10 @@ export const RemoveAcmeParams: z.ZodObject<{ provider: typeof AcmeProvider }> =
 export const RemoveAdminParams: z.ZodObject<{ signer: typeof Guid }> =
   /* @__PURE__ */ object({ signer: Guid }).meta({
     id: 'RemoveAdminParams',
+  })
+export const RemoveKeyParams: z.ZodObject<{ key: typeof AnyVerifyingKey }> =
+  /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
+    id: 'RemoveKeyParams',
   })
 export const RemoveMirrorParams: z.ZodObject<{
   id: typeof PackageId
@@ -6476,6 +6486,40 @@ export const Api = {
           _RETURN: /* @__PURE__ */ z.record(z.string(), z.unknown()),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
+        },
+        key: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ AddKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ AuthKeys,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ RemoveKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+          },
         },
         login: {
           _PARAMS: /* @__PURE__ */ LoginParams,

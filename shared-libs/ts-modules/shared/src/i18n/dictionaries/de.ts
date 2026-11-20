@@ -1096,4 +1096,8 @@ export default {
   1300: 'Server nicht erreichbar',
   1301: 'Einträge sind möglicherweise veraltet',
   1302: 'StartOS kann diese Registry gerade nicht erreichen.',
+  1303: 'Melden Sie sich ohne Passwort an, indem Sie diesen Befehl in einem Terminal auf dem Server ausführen, und wählen Sie dann Weiter.',
+  1304: 'Dieser Browser ist noch nicht registriert',
+  1305: 'Über die Befehlszeile anmelden',
+  1306: 'Diesen Browser registrieren',
 } satisfies i18n

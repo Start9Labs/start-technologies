@@ -49,7 +49,15 @@ export class LiveApiService extends ApiService {
     ).pipe(catchError(error => this.raiseError(error)))
   }
 
+  checkEnrollment(): Promise<unknown> {
+    return this.request({ method: 'auth.session.list', params: {} })
+  }
+
   private rpcRequest<T>(options: RPCOptions): Promise<T> {
+    return this.request<T>(options).catch(error => this.raiseError(error))
+  }
+
+  private request<T>(options: RPCOptions): Promise<T> {
     return localRpcRequest<T>(
       this.http,
       this.sockets,
@@ -57,7 +65,7 @@ export class LiveApiService extends ApiService {
       this.identity,
       this.cache$,
       options,
-    ).catch(error => this.raiseError(error))
+    )
   }
 
   private raiseError(error: unknown): never {

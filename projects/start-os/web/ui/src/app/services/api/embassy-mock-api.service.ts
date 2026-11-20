@@ -2219,6 +2219,11 @@ export class MockApiService extends ApiService implements StartupApiService {
 
   // state
 
+  async checkEnrollment(): Promise<unknown> {
+    await pauseFor(1000)
+    return null
+  }
+
   async echo(params: Params<'echo'>, url: string): Promise<string> {
     if (url) {
       const num = Math.floor(Math.random() * 10) + 1

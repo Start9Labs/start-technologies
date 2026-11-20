@@ -1097,4 +1097,8 @@ export const ENGLISH: Record<string, number> = {
   "Can't reach server": 1300,
   'Listings may be out of date': 1301,
   "StartOS can't reach this registry right now.": 1302,
+  'Sign in without a password by running this command in a terminal on the server, then select Continue.': 1303,
+  'This browser is not enrolled yet': 1304,
+  'Sign in from the command line': 1305,
+  'Enroll this browser': 1306,
 }

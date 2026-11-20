@@ -68,6 +68,20 @@ Create a bearer token for an API client that cannot sign requests. The token is 
 
 An MCP client authenticates with the same token to use the server's API as tools at `https://<server-address>/mcp`, over the streamable HTTP transport.
 
+### `start-cli auth key add <NAME> <KEY>`
+
+Enroll a device key under a name, without a password or the login rate limit. The web UI shows this command, with its own key, when too many login attempts block signing in.
+
+### `start-cli auth key list`
+
+List enrolled device keys with their names.
+
+- `--format` — Output format
+
+### `start-cli auth key remove <KEY>`
+
+Remove an enrolled device key.
+
 ## Server
 
 Restart, shut down, update, and configure the server.
