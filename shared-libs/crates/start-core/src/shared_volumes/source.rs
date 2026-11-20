@@ -160,7 +160,7 @@ pub(crate) enum PreparedFilesystem<L, D, C> {
     Cifs(C),
 }
 /// Host views carry no idmap: local and disk files keep container ids, which attachment maps.
-/// CIFS cannot be idmapped and presents its forced service owner instead.
+/// CIFS cannot be idmapped and presents host root, `nobody` inside every container.
 pub(crate) type SourceFilesystem =
     PreparedFilesystem<LocalSubvolume, BlockDev<PathBuf>, SharedCifs>;
 impl SourceFilesystem {

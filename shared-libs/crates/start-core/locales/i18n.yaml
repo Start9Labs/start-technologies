@@ -6025,11 +6025,11 @@ help.arg.ssh-fingerprint:
   pl_PL: "Odcisk palca klucza SSH"
 
 help.arg.ssh-public-key:
-  en_US: "SSH public key"
-  de_DE: "Öffentlicher SSH-Schlüssel"
-  es_ES: "Clave pública SSH"
-  fr_FR: "Clé publique SSH"
-  pl_PL: "Klucz publiczny SSH"
+  en_US: "SSH public key, passed as one quoted argument, e.g. \"$(cat ~/.ssh/id_ed25519.pub)\""
+  de_DE: "Öffentlicher SSH-Schlüssel, als ein Argument in Anführungszeichen übergeben, z. B. \"$(cat ~/.ssh/id_ed25519.pub)\""
+  es_ES: "Clave pública SSH, pasada como un único argumento entre comillas, p. ej. \"$(cat ~/.ssh/id_ed25519.pub)\""
+  fr_FR: "Clé publique SSH, passée comme un seul argument entre guillemets, p. ex. \"$(cat ~/.ssh/id_ed25519.pub)\""
+  pl_PL: "Klucz publiczny SSH, przekazany jako jeden argument w cudzysłowie, np. \"$(cat ~/.ssh/id_ed25519.pub)\""
 
 help.arg.tunnel-ip-address:
   en_US: "Tunnel server IP address"
