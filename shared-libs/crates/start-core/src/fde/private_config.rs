@@ -39,7 +39,8 @@ use crate::util::squashfs::{
 pub(super) const DIRECTORY: &str = "fde-private-config";
 pub(crate) const RUNTIME: &str = "/run/startos-private-config";
 
-/// Preserves shadow-group traversal; `disk::main::unmount_fs` releases the view.
+/// Preserves writable credentials and shadow-group traversal until `disk::main::unmount_fs`.
+/// Reclamation must independently exclude backing readers and writers.
 pub(crate) async fn mount_runtime(data: &Path) -> Result<(), Error> {
     mount_view(data, Path::new(RUNTIME)).await
 }

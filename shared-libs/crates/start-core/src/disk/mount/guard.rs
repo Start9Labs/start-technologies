@@ -17,6 +17,10 @@ use crate::util::sync::SyncMutex;
 use crate::util::{Invoke, Never};
 use crate::{Error, ErrorKind, ResultExt};
 
+#[cfg(all(test, target_os = "linux"))]
+#[path = "source_reservation_tests.rs"]
+mod source_reservation_tests;
+
 pub const TMP_MOUNTPOINT: &'static str = "/media/startos/tmp";
 
 pub trait GenericMountGuard: std::fmt::Debug + Send + Sync + 'static {
@@ -338,14 +342,22 @@ impl TmpMountGuard {
         Ok(TmpMountGuard { guard })
     }
 
+    /// Excludes cached mounts through source removal, including residual kernel subtrees.
+    /// Independent aliases and handles require their own reader lifetime.
     pub(crate) async fn reserve_unmounted(
         filesystem: &impl FileSystem,
         mount_type: MountType,
     ) -> Result<UnusedMountSource, Error> {
-        let slot = mount_slot(tmp_mountpoint(filesystem, mount_type).await?, mount_type)
+        let mountpoint = tmp_mountpoint(filesystem, mount_type).await?;
+        let slot = mount_slot(mountpoint.clone(), mount_type)
             .lock_owned()
             .await;
-        if slot.1.upgrade().is_some() {
+        if slot.1.upgrade().is_some()
+            || (tokio::fs::try_exists(&mountpoint).await?
+                && !super::util::mountpoints_under(&mountpoint)
+                    .await?
+                    .is_empty())
+        {
             return Err(Error::new(
                 eyre!(t!("disk.mount.guard.in-use")),
                 ErrorKind::InvalidRequest,
