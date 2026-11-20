@@ -487,6 +487,7 @@ fn publish_snapshot(
                 },
             )?)?;
             refresh_registry(db, url, &info)?;
+            crate::update::security::notify_package_updates(db, url, index.as_package(), device)?;
             db.as_private_mut()
                 .as_registry_indexes_mut()
                 .insert(url, &index.de()?)?;

@@ -8535,6 +8535,20 @@ update.security.available-title:
   fr_FR: "Mise à jour de sécurité de StartOS disponible"
   pl_PL: "Dostępna aktualizacja bezpieczeństwa StartOS"
 
+update.security.package-message:
+  en_US: "Security updates are available for installed services: %{packages}. Visit the Updates tab to review them."
+  de_DE: "Für installierte Dienste sind Sicherheitsupdates verfügbar: %{packages}. Öffnen Sie den Tab „Updates“, um sie zu prüfen."
+  es_ES: "Hay actualizaciones de seguridad disponibles para servicios instalados: %{packages}. Visite la pestaña Actualizaciones para revisarlas."
+  fr_FR: "Des mises à jour de sécurité sont disponibles pour des services installés : %{packages}. Consultez l’onglet Mises à jour pour les examiner."
+  pl_PL: "Dostępne są aktualizacje bezpieczeństwa zainstalowanych usług: %{packages}. Przejdź do karty Uaktualnienia, aby je przejrzeć."
+
+update.security.package-title:
+  en_US: "Service security updates available"
+  de_DE: "Sicherheitsupdates für Dienste verfügbar"
+  es_ES: "Actualizaciones de seguridad de servicios disponibles"
+  fr_FR: "Mises à jour de sécurité des services disponibles"
+  pl_PL: "Dostępne aktualizacje bezpieczeństwa usług"
+
 update.security.selected-registry:
   en_US: "your selected OS registry"
   de_DE: "Ihrer ausgewählten OS-Registry"

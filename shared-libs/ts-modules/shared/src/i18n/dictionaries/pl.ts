@@ -1096,4 +1096,5 @@ export default {
   1300: 'Serwer nieosiągalny',
   1301: 'Listy mogą być nieaktualne',
   1302: 'StartOS nie może teraz połączyć się z tym rejestrem.',
+  1303: 'Aktualizacja bezpieczeństwa',
 } satisfies i18n

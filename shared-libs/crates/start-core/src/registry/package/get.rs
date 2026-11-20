@@ -60,6 +60,12 @@ pub struct PackageInfoShort {
     /// `PackageMetadata::default_locale`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_locale: Option<InternedString>,
+    /// `PackageMetadata::security`.
+    #[serde(default)]
+    pub security: bool,
+    /// A newer revision of this upstream version and flavor covers its hardware.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub superseded: bool,
 }
 
 rpc_toolkit::reflect_ts!(PackageInfoShort);
@@ -257,7 +263,7 @@ fn covers(newer: &HardwareRequirements, older: &HardwareRequirements) -> bool {
 fn hide_superseded_revisions(
     best: Option<&BTreeMap<VersionString, Model<PackageVersionInfo>>>,
     other: &mut BTreeMap<VersionString, Model<PackageVersionInfo>>,
-) -> Result<(), Error> {
+) -> Result<BTreeMap<VersionString, Model<PackageVersionInfo>>, Error> {
     let group = |v: &VersionString| (v.flavor().map(str::to_owned), v.upstream().clone());
     let hardware = |info: &Model<PackageVersionInfo>| {
         from_value::<Vec<(HardwareRequirements, Value)>>(info.as_s9pks().clone().into())
@@ -279,8 +285,27 @@ fn hide_superseded_revisions(
         }
         seen.push(hw);
     }
-    other.retain(|v, _| !hidden.contains(v));
-    Ok(())
+    Ok(other.extract_if(.., |v, _| hidden.contains(v)).collect())
+}
+
+fn short_versions(
+    other: BTreeMap<VersionString, Model<PackageVersionInfo>>,
+    superseded: BTreeMap<VersionString, Model<PackageVersionInfo>>,
+) -> Result<BTreeMap<VersionString, PackageInfoShort>, Error> {
+    other
+        .into_iter()
+        .map(|(k, i)| (k, i, false))
+        .chain(superseded.into_iter().map(|(k, i)| (k, i, true)))
+        .map(|(k, i, superseded)| {
+            Ok((
+                k,
+                PackageInfoShort {
+                    superseded,
+                    ..from_value(i.into())?
+                },
+            ))
+        })
+        .collect()
 }
 
 pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Result<Value, Error> {
@@ -348,9 +373,13 @@ pub(crate) fn select_packages(
             package_other.insert(version.into(), info);
         }
     }
+    let mut superseded = BTreeMap::new();
     if !params.all_revisions {
         for (id, package_other) in &mut other {
-            hide_superseded_revisions(best.get(id), package_other)?;
+            superseded.insert(
+                id.clone(),
+                hide_superseded_revisions(best.get(id), package_other)?,
+            );
         }
     }
     if let Some(id) = &params.id {
@@ -371,12 +400,10 @@ pub(crate) fn select_packages(
             PackageDetailLevel::Short => to_value(&GetPackageResult::Package(GetPackageResponse {
                 categories,
                 best,
-                other_versions: Some(
-                    other
-                        .into_iter()
-                        .map(|(k, i)| from_value(i.into()).map(|v| (k, v)))
-                        .try_collect()?,
-                ),
+                other_versions: Some(short_versions(
+                    other,
+                    superseded.remove(id).unwrap_or_default(),
+                )?),
             })),
             PackageDetailLevel::Full => {
                 to_value(&GetPackageResult::PackageFull(GetPackageResponseFull {
@@ -413,7 +440,10 @@ pub(crate) fn select_packages(
                 best.into_iter()
                     .map(|(id, best)| {
                         let categories = categories_for(&id)?;
-                        let other = other.remove(&id).unwrap_or_default();
+                        let other = short_versions(
+                            other.remove(&id).unwrap_or_default(),
+                            superseded.remove(&id).unwrap_or_default(),
+                        )?;
                         Ok::<_, Error>((
                             id,
                             GetPackageResponse {
@@ -422,12 +452,7 @@ pub(crate) fn select_packages(
                                     .into_iter()
                                     .map(|(k, i)| Ok::<_, Error>((k, i.de()?)))
                                     .try_collect()?,
-                                other_versions: Some(
-                                    other
-                                        .into_iter()
-                                        .map(|(k, i)| from_value(i.into()).map(|v| (k, v)))
-                                        .try_collect()?,
-                                ),
+                                other_versions: Some(other),
                             },
                         ))
                     })
@@ -832,6 +857,29 @@ mod tests {
     }
 
     #[test]
+    fn short_versions_keep_superseded_revisions_marked() {
+        let mut other = versions(&["1.0.0:0", "1.0.0:1", "2.0.0:0"]);
+        let superseded = hide_superseded_revisions(None, &mut other).unwrap();
+        let short = short_versions(other, superseded).unwrap();
+        let marked: Vec<_> = short
+            .iter()
+            .map(|(v, info)| (v.to_string(), info.superseded))
+            .collect();
+        assert_eq!(
+            marked,
+            [
+                ("1.0.0:0".to_owned(), true),
+                ("1.0.0:1".to_owned(), false),
+                ("2.0.0:0".to_owned(), false),
+            ]
+        );
+        assert_eq!(
+            to_value(&short.values().next().unwrap().release_notes).unwrap(),
+            json!("1.0.0:0")
+        );
+    }
+
+    #[test]
     fn hide_superseded_revisions_accepts_empty_maps() {
         let best = BTreeMap::new();
         let mut other = BTreeMap::new();
@@ -900,6 +948,7 @@ fn check_matching_info_short() {
             hardware_virtualization: false,
             plugins: BTreeSet::new(),
             satisfies: BTreeSet::new(),
+            security: false,
         },
         icon: Some(crate::registry::package::icon::PackageIcon::Stored(
             "blake3/icon.png".into(),

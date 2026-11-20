@@ -216,6 +216,17 @@ When making changes to the StartOS wrapper without upstream changes:
 
 **Release notes are the only home for what an update asks of the user.** A step to take before or after updating, a warning, a credential to rotate, a client to upgrade: each goes here and nowhere else. `instructions.md` and `README.md` describe the service as it is to someone who never ran an older version, so an update adds nothing to them unless it changes that description ([Writing Instructions — What does not belong](./writing-instructions.md#what-does-not-belong-in-instructions)).
 
+**Set `security: true` on a version that fixes a security vulnerability**, in the service or in the package. StartOS notifies users who have the service installed, marks the update as a security update, and prefixes its release notes with a security label, so a version earns the flag only when it closes a vulnerability. The flag applies to that version alone; a user updating past it still sees the update marked.
+
+```ts
+export const current = VersionInfo.of({
+  version: '6.38.0:0',
+  releaseNotes: { en_US: 'Updated Ghost to 6.38.0. Patches a moderate XSS vulnerability in the editor.' },
+  security: true,
+  migrations: {},
+})
+```
+
 **Match the length to the content.** A small release is a sentence or two; a larger one earns bullets, and bold section headers (`**Features**`, `**Fixes**`, `**Security**`) once it spans more than one category. Localize prose and headers in every locale; don't leave them in English.
 
 ```ts

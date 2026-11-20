@@ -182,3 +182,23 @@ test('the default locale is the given package i18n default language', () => {
     }).defaultLocale,
   ).toBe('fr_FR')
 })
+
+test('the current version security flag reaches the built manifest', () => {
+  const build = (security?: boolean) =>
+    buildManifest({
+      versionGraph: VersionGraph.of({
+        current: VersionInfo.of<'1.0.0:0'>({
+          version: '1.0.0:0',
+          releaseNotes: '',
+          ...(security === undefined ? {} : { security }),
+          migrations: {},
+        }),
+        other: [],
+      }),
+      manifest: manifest(),
+      dependencies: Dependencies.of(),
+      i18n,
+    }).security
+  expect(build()).toBe(false)
+  expect(build(true)).toBe(true)
+})

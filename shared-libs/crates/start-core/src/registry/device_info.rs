@@ -227,6 +227,7 @@ pub struct WireCompatibility {
     inline_icons: bool,
     legacy_os_notes: bool,
     legacy_os_headlines: bool,
+    hide_superseded: bool,
 }
 
 impl WireCompatibility {
@@ -246,6 +247,7 @@ impl WireCompatibility {
             wire.legacy_os_notes = wire.legacy_pem;
             wire.legacy_os_headlines = startwrt || requires_os_headline(version)?;
             wire.inline_icons = reads_inline_icons(version)?;
+            wire.hide_superseded = predates_superseded_revisions(version)?;
         }
         Ok(wire)
     }
@@ -264,6 +266,9 @@ impl WireCompatibility {
             project_legacy_os_notes(method, res)?;
         }
         project_os_headlines(method, res, self.legacy_os_headlines);
+        if self.hide_superseded {
+            hide_superseded_revisions(method, params, res);
+        }
         if self.legacy_signatures {
             crate::sign::compat::downgrade_signatures(res);
         }
@@ -371,6 +376,30 @@ fn project_legacy_os_notes(method: &str, res: &mut Value) -> Result<(), Error> {
         info["releaseNotes"] = Value::String(notes.localized_for(Some("en_US"), None).into());
     }
     Ok(())
+}
+
+fn predates_superseded_revisions(version: &Version) -> Result<bool, Error> {
+    Ok(version < &"0.4.3".parse::<Version>()?)
+}
+
+fn hide_superseded_revisions(method: &str, params: &Value, res: &mut Value) {
+    if method != "package.get" {
+        return;
+    }
+    let responses: Vec<&mut Value> = if params["id"].is_null() {
+        res.as_object_mut()
+            .into_iter()
+            .flat_map(|o| o.iter_mut().map(|(_, v)| v))
+            .collect()
+    } else {
+        vec![res]
+    };
+    for other in responses
+        .into_iter()
+        .filter_map(|r| r.as_object_mut()?.get_mut("otherVersions")?.as_object_mut())
+    {
+        other.retain(|_, info| info["superseded"].as_bool() != Some(true));
+    }
 }
 
 fn reads_legacy_signatures(version: &Version) -> Result<bool, Error> {
@@ -783,6 +812,33 @@ mod tests {
         let mut unrelated = stored.clone();
         project_os_headlines("package.index", &mut unrelated, true);
         assert_eq!(unrelated, stored);
+    }
+
+    #[test]
+    fn superseded_revisions_are_hidden_from_startos_before_0_4_3() {
+        let package = json!({ "best": {}, "otherVersions": {
+            "1.0.0:0": { "releaseNotes": "a", "superseded": true },
+            "1.0.0:1": { "releaseNotes": "b" },
+        }});
+        for (version, kept) in [("0.4.2.1", 1), ("0.4.3", 2)] {
+            let wire = WireCompatibility::for_startos(&version.parse().unwrap()).unwrap();
+            assert_eq!(wire.hide_superseded, kept == 1);
+            for id in [Some("pkg"), None] {
+                let mut res = if id.is_some() {
+                    package.clone()
+                } else {
+                    json!({ "pkg": package })
+                };
+                if wire.hide_superseded {
+                    hide_superseded_revisions("package.get", &json!({ "id": id }), &mut res);
+                }
+                let res = if id.is_some() { &res } else { &res["pkg"] };
+                assert_eq!(res["otherVersions"].as_object().unwrap().len(), kept);
+            }
+        }
+        let mut none = json!({ "best": {} });
+        hide_superseded_revisions("package.get", &json!({ "id": "pkg" }), &mut none);
+        assert_eq!(none, json!({ "best": {} }));
     }
 
     #[test]

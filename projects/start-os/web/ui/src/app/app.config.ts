@@ -63,7 +63,10 @@ import {
 } from '@taiga-ui/kit'
 import { PatchDB } from 'patch-db-client'
 import { filter, identity, merge, pairwise } from 'rxjs'
-import { FilterUpdatesPipe } from 'src/app/routes/portal/routes/updates/filter-updates.pipe'
+import {
+  FilterUpdatesPipe,
+  HasSecurityUpdatePipe,
+} from 'src/app/routes/portal/routes/updates/filter-updates.pipe'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { LiveApiService } from 'src/app/services/api/embassy-live-api.service'
 import { MockApiService } from 'src/app/services/api/embassy-mock-api.service'
@@ -119,6 +122,7 @@ export const APP_CONFIG: ApplicationConfig = {
     I18N_PROVIDERS,
     FilterPackagesPipe,
     FilterUpdatesPipe,
+    HasSecurityUpdatePipe,
     UntypedFormBuilder,
     tuiNumberFormatProvider({ decimalSeparator: '.', thousandSeparator: '' }),
     tuiButtonOptionsProvider({ size: 'm' }),

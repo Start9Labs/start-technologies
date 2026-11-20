@@ -1097,4 +1097,5 @@ export const ENGLISH: Record<string, number> = {
   "Can't reach server": 1300,
   'Listings may be out of date': 1301,
   "StartOS can't reach this registry right now.": 1302,
+  'Security update': 1303,
 }

@@ -1,7 +1,11 @@
 import { inject, Pipe, PipeTransform } from '@angular/core'
-import { MarketplacePkg } from '@start9labs/marketplace'
+import { MarketplacePkg, pendingReleases } from '@start9labs/marketplace'
 import { Exver } from '@start9labs/shared'
-import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
+import {
+  InstalledState,
+  PackageDataEntry,
+  UpdatingState,
+} from 'src/app/services/patch-db/data-model'
 
 @Pipe({
   name: 'filterUpdates',
@@ -28,5 +32,28 @@ export class FilterUpdatesPipe implements PipeTransform {
         !hidden[id]?.includes(version)
       )
     })
+  }
+}
+
+@Pipe({
+  name: 'hasSecurityUpdate',
+})
+export class HasSecurityUpdatePipe implements PipeTransform {
+  private readonly exver = inject(Exver)
+
+  transform(
+    updates: MarketplacePkg[],
+    local: Record<
+      string,
+      PackageDataEntry<InstalledState | UpdatingState>
+    > = {},
+  ): boolean {
+    return updates.some(pkg =>
+      pendingReleases(
+        this.exver,
+        pkg,
+        local[pkg.id]?.stateInfo.manifest.version,
+      ).some(({ security }) => security),
+    )
   }
 }

@@ -110,6 +110,7 @@ export function buildManifest<
     sdkVersion: sdkPackage.version,
     version: versions.current.options.version,
     releaseNotes: versions.current.options.releaseNotes,
+    security: !!versions.current.options.security,
     satisfies: versions.current.options.satisfies || [],
     canMigrateTo: versions.canMigrateTo().toString(),
     canMigrateFrom: versions.canMigrateFrom().toString(),

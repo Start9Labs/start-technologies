@@ -65,9 +65,14 @@ export class NotificationService {
     }
   }
 
-  getLink(notification: ServerNotification<number>): string | null {
-    return schemas.OsUpdateAvailable.safeParse(notification.data).success
-      ? '/system/general'
+  getLink(
+    notification: ServerNotification<number>,
+  ): { path: string; label: i18nKey } | null {
+    if (schemas.OsUpdateAvailable.safeParse(notification.data).success) {
+      return { path: '/system/general', label: 'Software Update' }
+    }
+    return schemas.PackageSecurityUpdate.safeParse(notification.data).success
+      ? { path: '/updates', label: 'Updates' }
       : null
   }
 

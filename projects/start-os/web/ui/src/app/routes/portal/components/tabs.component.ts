@@ -79,6 +79,7 @@ const FILTER = ['services', 'system', 'marketplace']
               @if (item.badge(); as badge) {
                 <tui-badge-notification
                   [appUpdatesCount]="item.routerLink === 'updates'"
+                  [security]="item.security()"
                 >
                   {{ badge }}
                 </tui-badge-notification>

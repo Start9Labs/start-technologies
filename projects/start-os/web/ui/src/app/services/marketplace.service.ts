@@ -36,6 +36,7 @@ import {
   switchMap,
 } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { LocalPackagesService } from 'src/app/services/local-packages.service'
 import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { StorageService } from 'src/app/services/storage.service'
@@ -49,6 +50,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
+  private readonly localPackages = inject(LocalPackagesService)
 
   private readonly registryCache$ = this.patch.watch$('registryCache')
 
@@ -156,6 +158,13 @@ export class MarketplaceService extends AbstractMarketplaceService {
               ),
             ),
       ),
+    )
+  }
+
+  override installedVersion$(id: string): Observable<string | null> {
+    return this.localPackages.pipe(
+      map(local => local[id]?.stateInfo.manifest.version ?? null),
+      distinctUntilChanged(),
     )
   }
 

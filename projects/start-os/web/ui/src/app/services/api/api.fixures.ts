@@ -384,6 +384,7 @@ export namespace Mock {
       ram: null,
     },
     hardwareAcceleration: false,
+    security: false,
     userspaceFilesystems: false,
     virtualNetworking: false,
     hardwareVirtualization: false,
@@ -441,6 +442,7 @@ export namespace Mock {
       ram: null,
     },
     hardwareAcceleration: false,
+    security: false,
     userspaceFilesystems: false,
     virtualNetworking: false,
     hardwareVirtualization: false,
@@ -484,6 +486,7 @@ export namespace Mock {
       ram: null,
     },
     hardwareAcceleration: false,
+    security: false,
     userspaceFilesystems: false,
     virtualNetworking: false,
     hardwareVirtualization: false,
@@ -534,6 +537,7 @@ export namespace Mock {
       ram: null,
     },
     hardwareAcceleration: false,
+    security: false,
     userspaceFilesystems: false,
     virtualNetworking: false,
     hardwareVirtualization: false,
@@ -606,6 +610,7 @@ export namespace Mock {
               ],
             ],
             hardwareAcceleration: false,
+            security: false,
             userspaceFilesystems: false,
             virtualNetworking: false,
             hardwareVirtualization: false,
@@ -644,6 +649,7 @@ export namespace Mock {
               ],
             ],
             hardwareAcceleration: false,
+            security: false,
             userspaceFilesystems: false,
             virtualNetworking: false,
             hardwareVirtualization: false,
@@ -654,9 +660,11 @@ export namespace Mock {
         otherVersions: {
           '27.0.0:1.0.0': {
             releaseNotes: 'Even better support for Bitcoin and wallets!',
+            security: false,
           },
           '#knots:27.1.0:0': {
             releaseNotes: 'Even better support for Bitcoin and wallets!',
+            security: false,
           },
         },
       },
@@ -692,6 +700,7 @@ export namespace Mock {
               ],
             ],
             hardwareAcceleration: false,
+            security: false,
             userspaceFilesystems: false,
             virtualNetworking: false,
             hardwareVirtualization: false,
@@ -730,6 +739,7 @@ export namespace Mock {
               ],
             ],
             hardwareAcceleration: false,
+            security: false,
             userspaceFilesystems: false,
             virtualNetworking: false,
             hardwareVirtualization: false,
@@ -740,9 +750,11 @@ export namespace Mock {
         otherVersions: {
           '27.0.0:1.0.0': {
             releaseNotes: 'Even better support for Bitcoin and wallets!',
+            security: false,
           },
           '#knots:27.1.0:0': {
             releaseNotes: 'Even better support for Bitcoin and wallets!',
+            security: false,
           },
         },
       },
@@ -783,6 +795,7 @@ export namespace Mock {
               ],
             ],
             hardwareAcceleration: false,
+            security: false,
             userspaceFilesystems: false,
             virtualNetworking: false,
             hardwareVirtualization: false,
@@ -793,9 +806,11 @@ export namespace Mock {
         otherVersions: {
           '0.18.0:0.0.1': {
             releaseNotes: 'Upstream release and minor fixes.',
+            security: true,
           },
           '0.17.4-beta:1.0-alpha': {
             releaseNotes: 'Upstream release to 0.17.4',
+            security: false,
           },
         },
       },
@@ -834,6 +849,7 @@ export namespace Mock {
               ],
             ],
             hardwareAcceleration: false,
+            security: false,
             userspaceFilesystems: false,
             virtualNetworking: false,
             hardwareVirtualization: false,
@@ -844,9 +860,11 @@ export namespace Mock {
         otherVersions: {
           '0.18.0:0.0.1': {
             releaseNotes: 'Upstream release and minor fixes.',
+            security: false,
           },
           '0.17.5:0': {
             releaseNotes: 'Upstream release to 0.17.5',
+            security: false,
           },
         },
       },
@@ -886,6 +904,7 @@ export namespace Mock {
               ],
             ],
             hardwareAcceleration: false,
+            security: false,
             userspaceFilesystems: false,
             virtualNetworking: false,
             hardwareVirtualization: false,
@@ -896,6 +915,7 @@ export namespace Mock {
         otherVersions: {
           '0.4.0:0': {
             releaseNotes: 'Major release with breaking changes.',
+            security: false,
           },
         },
       },
@@ -1010,6 +1030,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
             ],
           ],
           hardwareAcceleration: false,
+          security: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
           hardwareVirtualization: false,
@@ -1048,6 +1069,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
             ],
           ],
           hardwareAcceleration: false,
+          security: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
           hardwareVirtualization: false,
@@ -1058,9 +1080,11 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
       otherVersions: {
         '26.1.0:0.1.0': {
           releaseNotes: 'Even better support for Bitcoin and wallets!',
+          security: false,
         },
         '#knots:26.1.20240325:0': {
           releaseNotes: 'Even better Knots support for Bitcoin and wallets!',
+          security: false,
         },
       },
     },
@@ -1099,6 +1123,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
             ],
           ],
           hardwareAcceleration: false,
+          security: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
           hardwareVirtualization: false,
@@ -1109,9 +1134,11 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
       otherVersions: {
         '0.17.5:0': {
           releaseNotes: 'Upstream release to 0.17.5',
+          security: false,
         },
         '0.17.4-beta:1.0-alpha': {
           releaseNotes: 'Upstream release to 0.17.4',
+          security: false,
         },
       },
     },
@@ -1156,6 +1183,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
             ],
           ],
           hardwareAcceleration: false,
+          security: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
           hardwareVirtualization: false,
@@ -1193,6 +1221,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
             ],
           ],
           hardwareAcceleration: false,
+          security: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
           hardwareVirtualization: false,
@@ -1203,6 +1232,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
       otherVersions: {
         '0.3.2.7:0': {
           releaseNotes: 'Upstream release and minor fixes.',
+          security: false,
         },
       },
     },
@@ -2854,6 +2884,7 @@ PersistentKeepalive = 25`
     storeExposedDependents: [],
     outboundGateway: null,
     outboundDns: null,
+    securityNotified: null,
     registry: 'https://registry.start9.com/',
     developerKey: 'developer-key',
     plugin: { url: null },
@@ -2910,6 +2941,7 @@ PersistentKeepalive = 25`
     storeExposedDependents: [],
     outboundGateway: null,
     outboundDns: null,
+    securityNotified: null,
     registry: 'https://registry.start9.com/',
     developerKey: 'developer-key',
     plugin: { url: null },
@@ -2968,6 +3000,7 @@ PersistentKeepalive = 25`
     storeExposedDependents: [],
     outboundGateway: null,
     outboundDns: null,
+    securityNotified: null,
     registry: 'https://registry.start9.com/',
     developerKey: 'developer-key',
     plugin: { url: null },

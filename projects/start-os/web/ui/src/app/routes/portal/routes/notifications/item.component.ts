@@ -50,9 +50,9 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
           [content]="item.message"
           (overflownChange)="overflow = $event"
         />
-        @if (link(); as path) {
-          <a tuiLink [routerLink]="path" (click.stop)="(null)">
-            {{ 'Software Update' | i18n }}
+        @if (link(); as link) {
+          <a tuiLink [routerLink]="link.path" (click.stop)="(null)">
+            {{ link.label | i18n }}
           </a>
         }
         @switch (item.code) {

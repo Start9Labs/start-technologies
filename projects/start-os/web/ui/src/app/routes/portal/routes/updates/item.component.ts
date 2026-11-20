@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common'
+import { DatePipe, NgTemplateOutlet } from '@angular/common'
 import { Component, computed, inject, input, signal } from '@angular/core'
 import { RouterLink } from '@angular/router'
 import {
@@ -7,9 +7,11 @@ import {
   matchingTrustedKeys,
   MarketplaceSignerChipsComponent,
   packageSigners,
+  pendingReleases,
 } from '@start9labs/marketplace'
 import {
   DialogService,
+  Exver,
   i18nPipe,
   LocalizePipe,
   MarkdownPipe,
@@ -25,6 +27,7 @@ import {
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import {
   TuiAvatar,
+  TuiBadge,
   TuiButtonLoading,
   TuiChevron,
   TuiFade,
@@ -73,7 +76,7 @@ import UpdatesComponent from './updates.component'
                 {{ local().stateInfo.manifest.version }}
               </span>
               <tui-icon icon="@tui.arrow-right" />
-              <span class="g-positive">{{ item().version }}</span>
+              <ng-container *ngTemplateOutlet="target" />
             </span>
           </span>
         </div>
@@ -93,7 +96,7 @@ import UpdatesComponent from './updates.component'
             {{ local().stateInfo.manifest.version }}
           </span>
           <tui-icon icon="@tui.arrow-right" />
-          <span class="g-positive">{{ item().version }}</span>
+          <ng-container *ngTemplateOutlet="target" />
         </div>
       </td>
       <td class="desktop">{{ item().gitHash }}</td>
@@ -180,18 +183,42 @@ import UpdatesComponent from './updates.component'
               )
             </span>
           </p>
-          <p
-            safeLinks
-            [innerHTML]="
-              item().releaseNotes
-                | localize: item().defaultLocale
-                | markdown
-                | dompurify
-            "
-          ></p>
+          @for (release of releases(); track release.version) {
+            @if (releases().length > 1) {
+              <b>{{ release.version }}</b>
+            }
+            @if (release.security) {
+              <p>
+                <span
+                  tuiBadge
+                  appearance="negative"
+                  iconStart="@tui.shield-alert"
+                >
+                  {{ 'Security update' | i18n }}
+                </span>
+              </p>
+            }
+            <p
+              safeLinks
+              [innerHTML]="
+                release.releaseNotes
+                  | localize: release.defaultLocale
+                  | markdown
+                  | dompurify
+              "
+            ></p>
+          }
         </tui-expand>
       </td>
     </tr>
+    <ng-template #target>
+      @if (security()) {
+        <tui-icon icon="@tui.shield-alert" class="g-negative" />
+      }
+      <span [class]="security() ? 'g-negative' : 'g-positive'">
+        {{ item().version }}
+      </span>
+    </ng-template>
   `,
   styles: `
     :host {
@@ -326,9 +353,11 @@ import UpdatesComponent from './updates.component'
     MarketplaceIconDirective,
     MarketplaceSignerChipsComponent,
     NgDompurifyPipe,
+    NgTemplateOutlet,
     RouterLink,
     SafeLinksDirective,
     TuiAvatar,
+    TuiBadge,
     TuiButton,
     TuiButtonLoading,
     TuiChevron,
@@ -347,6 +376,7 @@ export class UpdatesItemComponent {
   private readonly dialog = inject(DialogService)
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
   private readonly alerts = inject(MarketplaceAlertsService)
+  private readonly exver = inject(Exver)
 
   private readonly trust = inject(TrustedKeysService)
   readonly parent = inject(UpdatesComponent)
@@ -359,6 +389,16 @@ export class UpdatesItemComponent {
     input.required<PackageDataEntry<InstalledState | UpdatingState>>()
   readonly pending = input.required<boolean>()
 
+  protected readonly releases = computed(() =>
+    pendingReleases(
+      this.exver,
+      this.item(),
+      this.local().stateInfo.manifest.version,
+    ),
+  )
+  protected readonly security = computed(() =>
+    this.releases().some(({ security }) => security),
+  )
   protected readonly signers = computed(() => packageSigners(this.item()))
   protected readonly trusted = computed(() =>
     matchingTrustedKeys(this.signers(), this.trust.keys() ?? {}, 'marketplace'),

@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use exver::{Version, VersionRange};
@@ -5,9 +6,15 @@ use imbl_value::InternedString;
 use url::Url;
 
 use crate::db::model::DatabaseModel;
-use crate::notifications::{NotificationLevel, OsUpdateAvailable, notify};
+use crate::db::model::package::{ManifestPreference, PackageStateMatchModelRef};
+use crate::notifications::{
+    NotificationLevel, NotificationType, OsUpdateAvailable, PackageSecurityRelease,
+    PackageSecurityUpdate, notify,
+};
 use crate::prelude::*;
+use crate::registry::device_info::DeviceInfo;
 use crate::registry::os::index::OsIndex;
+use crate::registry::package::index::PackageIndex;
 use crate::s9pk::git_hash::GitHash;
 
 pub type SecurityNotifications = BTreeMap<Url, BTreeMap<Version, Option<GitHash>>>;
@@ -104,6 +111,98 @@ fn notify_security_updates(
     db.as_private_mut()
         .as_os_security_notifications_mut()
         .ser(&notified)
+}
+
+/// Announces each installed service's security releases above the highest one already announced.
+pub(crate) fn notify_package_updates(
+    db: &mut DatabaseModel,
+    registry: &Url,
+    index: &Model<PackageIndex>,
+    device: &DeviceInfo,
+) -> Result<(), Error> {
+    let mut releases = Vec::new();
+    for (id, entry) in db.as_public_mut().as_package_data_mut().as_entries_mut()? {
+        if !matches!(
+            entry.as_state_info().as_match(),
+            PackageStateMatchModelRef::Installed(_) | PackageStateMatchModelRef::Updating(_)
+        ) {
+            continue;
+        }
+        let Some(versions) = index.as_packages().as_idx(&id) else {
+            continue;
+        };
+        let manifest = entry.as_state_info().as_manifest(ManifestPreference::Old);
+        let installed = manifest.as_version().de()?;
+        let title = manifest.as_metadata().as_title().de()?;
+        let notified = entry.as_security_notified().de()?;
+        let mut newest = None;
+        for (version, info) in versions.as_versions().as_entries()? {
+            if version.partial_cmp(&installed) != Some(Ordering::Greater)
+                || matches!(
+                    notified.as_ref().and_then(|n| version.partial_cmp(n)),
+                    Some(Ordering::Less | Ordering::Equal)
+                )
+                || !info.as_metadata().as_security().de()?
+                || !info.clone().for_device(device)?
+            {
+                continue;
+            }
+            releases.push(PackageSecurityRelease {
+                registry: registry.clone(),
+                id: id.clone(),
+                title: title.to_string(),
+                version: version.clone(),
+            });
+            newest = newest.max(Some(version));
+        }
+        if let Some(newest) = newest {
+            entry.as_security_notified_mut().ser(&Some(newest))?;
+        }
+    }
+    if releases.is_empty() {
+        return Ok(());
+    }
+    let mut unread = None;
+    for (id, notification) in db.as_private().as_notifications().as_entries()? {
+        if notification.as_code().de()? == PackageSecurityUpdate::CODE
+            && !notification.as_seen().de()?
+        {
+            unread = Some(id);
+        }
+    }
+    let Some(unread) = unread else {
+        return notify(
+            db,
+            None,
+            NotificationLevel::Warning,
+            t!("update.security.package-title").to_string(),
+            package_security_message(&releases),
+            PackageSecurityUpdate { releases },
+        );
+    };
+    let notification = db
+        .as_private_mut()
+        .as_notifications_mut()
+        .as_idx_mut(&unread)
+        .or_not_found(unread)?;
+    let mut update: PackageSecurityUpdate = from_value(notification.as_data().de()?)?;
+    update.releases.extend(releases);
+    notification
+        .as_message_mut()
+        .ser(&package_security_message(&update.releases))?;
+    notification.as_data_mut().ser(&to_value(&update)?)
+}
+
+fn package_security_message(releases: &[PackageSecurityRelease]) -> String {
+    t!(
+        "update.security.package-message",
+        packages = releases
+            .iter()
+            .map(|r| format!("{} {}", r.title, r.version))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+    .to_string()
 }
 
 #[cfg(test)]
@@ -321,5 +420,168 @@ mod tests {
         let other: Url = "https://other.test".parse().unwrap();
         notify_security_updates(&mut db, &other, &second, "installed-build", "x86_64").unwrap();
         assert_eq!(count(&db), 3);
+    }
+
+    fn package_db(installed: &str) -> DatabaseModel {
+        let mut db = database();
+        db.as_public_mut()
+            .as_package_data_mut()
+            .ser(&Default::default())
+            .unwrap();
+        db.as_public_mut()
+            .as_package_data_mut()
+            .as_value_mut()
+            .as_object_mut()
+            .unwrap()
+            .insert(
+                "pkg".into(),
+                json!({ "stateInfo": { "state": "installed", "manifest": {
+                    "id": "pkg", "title": "Pkg", "version": installed
+                }}}),
+            );
+        db
+    }
+
+    fn packages(versions: &[(&str, bool, &str)]) -> Model<PackageIndex> {
+        let versions: serde_json::Map<String, serde_json::Value> = versions
+            .iter()
+            .map(|(v, security, os)| {
+                (
+                    v.to_string(),
+                    serde_json::json!({ "security": security, "osVersion": os, "s9pks": [] }),
+                )
+            })
+            .collect();
+        Model::from_value(
+            to_value(
+                &serde_json::json!({ "categories": {}, "packages": { "pkg": {
+                    "authorized": {}, "categories": [], "versions": versions
+                }}}),
+            )
+            .unwrap(),
+        )
+    }
+
+    fn device() -> DeviceInfo {
+        DeviceInfo {
+            os: crate::registry::device_info::OsInfo {
+                version: "0.4.3".parse().unwrap(),
+                compat: ">=0.4.0 <0.5.0".parse().unwrap(),
+                platform: "x86_64".into(),
+                language: None,
+            },
+            hardware: None,
+        }
+    }
+
+    fn package_releases(db: &DatabaseModel) -> Vec<(bool, Vec<String>)> {
+        db.as_private()
+            .as_notifications()
+            .de()
+            .unwrap()
+            .0
+            .into_values()
+            .filter(|n| n.code == PackageSecurityUpdate::CODE)
+            .map(|n| {
+                let update: PackageSecurityUpdate = from_value(n.data).unwrap();
+                (
+                    n.seen,
+                    update
+                        .releases
+                        .into_iter()
+                        .map(|r| r.version.to_string())
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn package_security_releases_newer_than_installed_are_announced_once() {
+        let registry: Url = "https://registry.test/".parse().unwrap();
+        let mut db = package_db("1.0:0");
+        let index = packages(&[
+            ("0.9:0", true, "0.4.0"),
+            ("1.0:1", true, "0.4.0"),
+            ("1.0:2", false, "0.4.0"),
+            ("1.1:0", true, "0.4.0"),
+            ("1.2:0", true, "0.5.0"),
+            ("#knots:2.0:0", true, "0.4.0"),
+        ]);
+        notify_package_updates(&mut db, &registry, &index, &device()).unwrap();
+        assert_eq!(
+            package_releases(&db),
+            vec![(false, vec!["1.0:1".to_owned(), "1.1:0".to_owned()])]
+        );
+        let message = db.as_private().as_notifications().de().unwrap().0[&0]
+            .message
+            .clone();
+        assert!(message.contains("Pkg 1.0:1") && message.contains("Pkg 1.1:0"));
+        let other: Url = "https://other.test/".parse().unwrap();
+        notify_package_updates(&mut db, &other, &index, &device()).unwrap();
+        assert_eq!(package_releases(&db).len(), 1);
+        assert_eq!(package_releases(&db)[0].1.len(), 2);
+    }
+
+    #[test]
+    fn unread_notification_collects_releases_and_read_ones_are_never_repeated() {
+        let registry: Url = "https://registry.test/".parse().unwrap();
+        let mut db = package_db("1.0:0");
+        notify_package_updates(
+            &mut db,
+            &registry,
+            &packages(&[("1.1:0", true, "0.4.0")]),
+            &device(),
+        )
+        .unwrap();
+        let index = packages(&[("1.1:0", true, "0.4.0"), ("1.2:0", true, "0.4.0")]);
+        notify_package_updates(&mut db, &registry, &index, &device()).unwrap();
+        assert_eq!(
+            package_releases(&db),
+            vec![(false, vec!["1.1:0".to_owned(), "1.2:0".to_owned()])]
+        );
+        assert_eq!(
+            db.as_public()
+                .as_server_info()
+                .as_unread_notification_count()
+                .de()
+                .unwrap(),
+            1
+        );
+        db.as_private_mut()
+            .as_notifications_mut()
+            .as_idx_mut(&0)
+            .unwrap()
+            .as_seen_mut()
+            .ser(&true)
+            .unwrap();
+        notify_package_updates(&mut db, &registry, &index, &device()).unwrap();
+        assert_eq!(package_releases(&db).len(), 1);
+        let index = packages(&[("1.2:0", true, "0.4.0"), ("1.3:0", true, "0.4.0")]);
+        notify_package_updates(&mut db, &registry, &index, &device()).unwrap();
+        assert_eq!(
+            package_releases(&db),
+            vec![
+                (true, vec!["1.1:0".to_owned(), "1.2:0".to_owned()]),
+                (false, vec!["1.3:0".to_owned()]),
+            ]
+        );
+        db.as_private_mut()
+            .as_notifications_mut()
+            .ser(&crate::notifications::Notifications::new())
+            .unwrap();
+        notify_package_updates(&mut db, &registry, &index, &device()).unwrap();
+        assert!(package_releases(&db).is_empty());
+        assert_eq!(
+            db.as_public()
+                .as_package_data()
+                .as_idx(&"pkg".parse().unwrap())
+                .unwrap()
+                .as_security_notified()
+                .de()
+                .unwrap()
+                .map(|v| v.to_string()),
+            Some("1.3:0".to_owned())
+        );
     }
 }

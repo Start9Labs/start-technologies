@@ -9,7 +9,10 @@ import { OSService } from 'src/app/services/os.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { UpdatesRefinementService } from 'src/app/services/updates-refinement.service'
-import { FilterUpdatesPipe } from '../routes/portal/routes/updates/filter-updates.pipe'
+import {
+  FilterUpdatesPipe,
+  HasSecurityUpdatePipe,
+} from '../routes/portal/routes/updates/filter-updates.pipe'
 
 /** Counts tally pending items; warnings flag conditions that need attention. */
 @Injectable({
@@ -23,6 +26,7 @@ export class BadgeService {
     .watch$('serverInfo', 'ntpSynced')
     .pipe(map(synced => !synced))
   private readonly filterUpdatesPipe = inject(FilterUpdatesPipe)
+  private readonly hasSecurityUpdatePipe = inject(HasSecurityUpdatePipe)
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
   private readonly refinement = inject(UpdatesRefinementService)
 
@@ -36,16 +40,15 @@ export class BadgeService {
     inject(LocalPackagesService),
     this.hiddenUpdates.effective$,
   ]).pipe(
-    map(
-      ([refined, local, hidden]) =>
-        Object.entries(refined.marketplace).reduce(
-          (list, [_, store]) =>
-            this.filterUpdatesPipe
-              .transform(store?.packages || [], local, hidden)
-              .reduce((result, { id }) => result.add(id), list),
-          new Set<string>(),
-        ).size,
-    ),
+    map(([refined, local, hidden]) => {
+      const updates = Object.values(refined.marketplace).flatMap(store =>
+        this.filterUpdatesPipe.transform(store?.packages || [], local, hidden),
+      )
+      return {
+        count: new Set(updates.map(({ id }) => id)).size,
+        security: this.hasSecurityUpdatePipe.transform(updates, local),
+      }
+    }),
     shareReplay(1),
   )
 
@@ -81,10 +84,16 @@ export class BadgeService {
     }
   }
 
+  getSecurity(id: string): Observable<boolean> {
+    return id === 'updates'
+      ? this.updates$.pipe(map(({ security }) => security))
+      : of(false)
+  }
+
   getCount(id: string): Observable<number> {
     switch (id) {
       case 'updates':
-        return this.updates$
+        return this.updates$.pipe(map(({ count }) => count))
       case 'system':
         return this.system$
       case 'notifications':

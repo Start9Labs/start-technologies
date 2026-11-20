@@ -248,6 +248,9 @@ pub struct PackageMetadata {
     pub default_locale: Option<InternedString>,
     pub description: Description,
     pub release_notes: LocaleString,
+    /// Whether the release includes security fixes.
+    #[serde(default)]
+    pub security: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pre_download_alert: Option<PreDownloadAlert>,
     pub git_hash: Option<GitHash>,
@@ -702,6 +705,7 @@ pub(crate) mod tests {
             hardware_virtualization: true,
             plugins: BTreeSet::new(),
             satisfies: BTreeSet::new(),
+            security: false,
         };
         let mut old_manifest = serde_json::to_value(metadata).unwrap();
         assert_eq!(

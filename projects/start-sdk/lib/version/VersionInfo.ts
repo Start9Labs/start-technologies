@@ -48,6 +48,8 @@ export type VersionOptions<Version extends string> = {
   version: Version & ValidateExVer<Version>
   /** The release notes for this version */
   releaseNotes: T.LocaleString
+  /** Marks this version as fixing a security vulnerability. */
+  security?: boolean
   /** Data migrations for this version */
   migrations: {
     /**

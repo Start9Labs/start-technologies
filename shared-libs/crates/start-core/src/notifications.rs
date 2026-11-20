@@ -10,14 +10,15 @@ use imbl_value::InternedString;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
+use url::Url;
 
 use crate::PackageId;
 use crate::backup::BackupReport;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::DatabaseModel;
 use crate::prelude::*;
-use crate::util::FromStrParser;
 use crate::util::serde::{HandlerExtSerde, const_true};
+use crate::util::{FromStrParser, VersionString};
 
 pub mod push;
 
@@ -441,6 +442,33 @@ pub struct RegistryKeyDropped {
 rpc_toolkit::reflect_ts!(RegistryKeyDropped);
 rpc_toolkit::ts_export!(RegistryKeyDropped, namespaces = [""]);
 
+/// Security releases of installed services.
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
+#[serde(
+    tag = "kind",
+    rename = "package-security-update",
+    rename_all = "camelCase"
+)]
+#[visit(ts(rename = "PackageSecurityUpdate"))]
+pub struct PackageSecurityUpdate {
+    pub releases: Vec<PackageSecurityRelease>,
+}
+
+rpc_toolkit::reflect_ts!(PackageSecurityUpdate);
+rpc_toolkit::ts_export!(PackageSecurityUpdate, namespaces = [""]);
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageSecurityRelease {
+    pub registry: Url,
+    pub id: PackageId,
+    pub title: String,
+    pub version: VersionString,
+}
+
+rpc_toolkit::reflect_ts!(PackageSecurityRelease);
+rpc_toolkit::ts_export!(PackageSecurityRelease, namespaces = [""]);
+
 pub trait NotificationType:
     serde::Serialize + for<'de> serde::Deserialize<'de> + std::fmt::Debug
 {
@@ -464,6 +492,9 @@ impl NotificationType for RegistryKeyAdded {
 }
 impl NotificationType for RegistryKeyDropped {
     const CODE: u32 = 5;
+}
+impl NotificationType for PackageSecurityUpdate {
+    const CODE: u32 = 6;
 }
 
 #[instrument(skip(subtype, db))]

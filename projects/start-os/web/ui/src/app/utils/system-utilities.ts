@@ -46,5 +46,6 @@ export function getMenu() {
     routerLink: key,
     badge: toSignal(badge.getCount(key), { initialValue: 0 }),
     warning: toSignal(badge.getWarning(key), { initialValue: false }),
+    security: toSignal(badge.getSecurity(key), { initialValue: false }),
   }))
 }
