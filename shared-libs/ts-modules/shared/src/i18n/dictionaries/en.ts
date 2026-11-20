@@ -1095,6 +1095,4 @@ export const ENGLISH: Record<string, number> = {
   'Custom': 1297, // as in, a custom registry
   'Enter a domain or URL': 1298,
   'Syncing is taking longer than expected. Refresh to try again.': 1299,
-  'Duplicate SSH key': 1300,
-  'This SSH key has already been added. It matches this key:': 1301,
 }

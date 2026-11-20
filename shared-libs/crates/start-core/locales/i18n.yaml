@@ -3945,13 +3945,6 @@ middleware.db.error-writing-patch-sequence-header:
   pl_PL: "błąd zapisu nagłówka X-Patch-Sequence: %{error}"
 
 # ssh.rs
-ssh.key-already-added:
-  en_US: "This SSH key has already been added, with fingerprint %{fingerprint}"
-  de_DE: "Dieser SSH-Schlüssel wurde bereits hinzugefügt, mit dem Fingerabdruck %{fingerprint}"
-  es_ES: "Esta clave SSH ya se ha añadido, con la huella digital %{fingerprint}"
-  fr_FR: "Cette clé SSH a déjà été ajoutée, avec l'empreinte %{fingerprint}"
-  pl_PL: "Ten klucz SSH został już dodany, z odciskiem %{fingerprint}"
-
 ssh.key-not-found:
   en_US: "SSH Key Not Found"
   de_DE: "SSH-Schlüssel nicht gefunden"

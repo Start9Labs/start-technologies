@@ -920,16 +920,34 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
       return null
     },
-    'ssh.list': async params => {
+    'ssh.list': async () => {
       await pauseFor(2000)
-      return Mock.SshKeys
+      return Object.entries(mockPatchData.sshPubkeys).map(([fingerprint, key]) =>
+        this.mockSshKey(fingerprint, key),
+      )
     },
-    'ssh.add': async params => {
+    'ssh.add': async ({ key }) => {
       await pauseFor(2000)
-      return Mock.SshKey
+      const fingerprint = Mock.SshKey.fingerprint
+      const existing = mockPatchData.sshPubkeys[fingerprint]
+      const now = new Date().toISOString()
+      const stored = {
+        created_at: existing?.created_at ?? now,
+        updated_at: existing?.updated_at ?? now,
+        value: key,
+      }
+      mockPatchData.sshPubkeys[fingerprint] = stored
+      await this.mockRevision([
+        { op: PatchOp.ADD, path: `/sshPubkeys/${fingerprint}`, value: stored },
+      ])
+      return this.mockSshKey(fingerprint, stored)
     },
-    'ssh.remove': async params => {
+    'ssh.remove': async ({ fingerprint }) => {
       await pauseFor(2000)
+      delete mockPatchData.sshPubkeys[fingerprint]
+      await this.mockRevision([
+        { op: PatchOp.REMOVE, path: `/sshPubkeys/${fingerprint}` },
+      ])
       return null
     },
     'volumes.create': async ({ name, source }) => {
@@ -3261,6 +3279,19 @@ export class MockApiService extends ApiService implements StartupApiService {
     progress.complete()
     job.progress = progress.snapshot()
     await this.publishConversions()
+  }
+
+  private mockSshKey(
+    fingerprint: string,
+    key: DataModel['sshPubkeys'][string],
+  ): T.SshKeyResponse {
+    const [alg = '', , ...hostname] = key.value.split(/\s+/)
+    return {
+      fingerprint,
+      alg,
+      hostname: hostname.join(' '),
+      createdAt: key.created_at,
+    }
   }
 
   private mockData(path: string): any {

@@ -2,4 +2,4 @@
 release-notes: false
 ---
 
-- Adding an SSH key that is already authorized is refused, and StartOS shows which existing key it matches.
+- Re-adding an SSH key updates its existing entry without resetting its timestamps or duplicating its row. The SSH key list stays synchronized across browser sessions and CLI changes.

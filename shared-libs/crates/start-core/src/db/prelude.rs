@@ -525,12 +525,14 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for JsonKey<T> {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
 pub struct WithTimeData<T> {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub value: T,
 }
+rpc_toolkit::reflect_ts!(impl [T] for WithTimeData<T> where [T: rpc_toolkit::ts::TS]);
+
 impl<T> WithTimeData<T> {
     pub fn new(value: T) -> Self {
         let now = Utc::now();

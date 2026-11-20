@@ -1094,6 +1094,4 @@ export default {
   1297: 'Personalizado',
   1298: 'Introduce un dominio o una URL',
   1299: 'La sincronización está tardando más de lo esperado. Actualiza la página para volver a intentarlo.',
-  1300: 'Clave SSH duplicada',
-  1301: 'Esta clave SSH ya se ha añadido. Coincide con esta clave:',
 } satisfies i18n
