@@ -251,6 +251,8 @@ const NM_UPDATE2_TO_DISK: u32 = 0x1;
 const WG_DNS_PRIORITY: i32 = 10;
 const IPV4_MIN_MTU: u32 = 68;
 const IPV6_MIN_MTU: u32 = 1280;
+/// The MTU of a WireGuard tunnel whose configuration states none.
+pub(crate) const WIREGUARD_DEFAULT_MTU: u32 = IPV6_MIN_MTU;
 
 fn endpoint_domain(endpoint: &str) -> Option<InternedString> {
     let (host, port) = endpoint.rsplit_once(':')?;
@@ -321,8 +323,7 @@ struct WgConfig {
     addresses: Vec<(IpAddr, u8)>,
     dns: Vec<IpAddr>,
     listen_port: Option<u32>,
-    /// None selects NetworkManager's automatic MTU.
-    mtu: Option<u32>,
+    mtu: u32,
     peers: Vec<WgPeer>,
 }
 
@@ -426,8 +427,8 @@ impl WgConfig {
             }
         }
 
-        if mtu.is_some_and(|mtu| mtu < IPV6_MIN_MTU) && addresses.iter().any(|(ip, _)| ip.is_ipv6())
-        {
+        let mtu = mtu.unwrap_or(WIREGUARD_DEFAULT_MTU);
+        if mtu < IPV6_MIN_MTU && addresses.iter().any(|(ip, _)| ip.is_ipv6()) {
             return Err(invalid("MTU below 1280 with an IPv6 address"));
         }
 
@@ -469,9 +470,7 @@ impl WgConfig {
         if let Some(port) = self.listen_port {
             wg.insert("listen-port".into(), ov(port.into())?);
         }
-        if let Some(mtu) = self.mtu {
-            wg.insert("mtu".into(), ov(mtu.into())?);
-        }
+        wg.insert("mtu".into(), ov(self.mtu.into())?);
         let peers: Vec<HashMap<String, ZValue>> = self
             .peers
             .iter()
@@ -564,7 +563,7 @@ impl WgConfig {
         &self,
         applied: &HashMap<String, HashMap<String, OwnedValue>>,
     ) -> Result<bool, Error> {
-        Ok(settings_wireguard_mtu(applied)? != self.mtu)
+        Ok(settings_wireguard_mtu(applied)? != Some(self.mtu))
     }
 }
 
@@ -4712,7 +4711,7 @@ mod wg_config_tests {
         let config =
             "[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24, fd00::2/64\nMTU = 1320\n";
         let parsed = WgConfig::parse(config).unwrap();
-        assert_eq!(parsed.mtu, Some(1320));
+        assert_eq!(parsed.mtu, 1320);
         let settings = parsed.to_nm_settings("wg0", None).unwrap();
         assert_eq!(
             settings["wireguard"]["mtu"].downcast_ref::<u32>().unwrap(),
@@ -4722,13 +4721,13 @@ mod wg_config_tests {
     }
 
     #[test]
-    fn missing_mtu_stays_automatic() {
+    fn missing_mtu_uses_conservative_default() {
         let parsed =
-            WgConfig::parse("[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24\n").unwrap();
-        assert_eq!(parsed.mtu, None);
+            WgConfig::parse("[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24, fd00::2/64\n")
+                .unwrap();
+        assert_eq!(parsed.mtu, 1280);
         let settings = parsed.to_nm_settings("wg0", None).unwrap();
-        assert!(!settings["wireguard"].contains_key("mtu"));
-        assert_eq!(settings_wireguard_mtu(&settings).unwrap(), None);
+        assert_eq!(settings_wireguard_mtu(&settings).unwrap(), Some(1280));
 
         let auto = HashMap::from([(
             "wireguard".to_string(),
@@ -4745,20 +4744,22 @@ mod wg_config_tests {
             ))
             .unwrap()
         };
-        let auto = config("");
+        let default = config("");
         let explicit = config("MTU = 1320\n");
-        let applied_auto = auto.to_nm_settings("wg0", None).unwrap();
+        let applied_default = default.to_nm_settings("wg0", None).unwrap();
         let applied_explicit = explicit.to_nm_settings("wg0", None).unwrap();
+        let applied_auto = HashMap::from([("wireguard".to_string(), HashMap::new())]);
 
-        assert!(!auto.needs_reactivation(&applied_auto).unwrap());
-        assert!(explicit.needs_reactivation(&applied_auto).unwrap());
+        assert!(!default.needs_reactivation(&applied_default).unwrap());
+        assert!(default.needs_reactivation(&applied_auto).unwrap());
+        assert!(explicit.needs_reactivation(&applied_default).unwrap());
         assert!(!explicit.needs_reactivation(&applied_explicit).unwrap());
         assert!(
             config("MTU = 1400\n")
                 .needs_reactivation(&applied_explicit)
                 .unwrap()
         );
-        assert!(auto.needs_reactivation(&applied_explicit).unwrap());
+        assert!(default.needs_reactivation(&applied_explicit).unwrap());
     }
 
     #[test]
