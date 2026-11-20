@@ -10,13 +10,15 @@ import {
 } from '@start9labs/shared'
 import { ISB, T } from '@start9labs/start-core'
 import { TuiButton } from '@taiga-ui/core'
-import { filter } from 'rxjs'
+import { PatchDB } from 'patch-db-client'
+import { filter, map } from 'rxjs'
 import { FormComponent } from 'src/app/routes/portal/components/form.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { FormDialogService } from 'src/app/services/form-dialog.service'
+import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
-import { SshKeys } from './service'
+import { sshKeyRows } from 'src/app/utils/ssh-keys'
 import { SSHTableComponent } from './table.component'
 
 @Component({
@@ -102,7 +104,12 @@ export default class SystemSSHComponent {
   private readonly i18n = inject(i18nPipe)
   private readonly dialogs = inject(DialogService)
 
-  protected readonly keys = toSignal(inject(SshKeys), { initialValue: null })
+  protected readonly keys = toSignal(
+    inject<PatchDB<DataModel>>(PatchDB)
+      .watch$('sshPubkeys')
+      .pipe(map(sshKeyRows)),
+    { initialValue: null },
+  )
   protected readonly tableKeys =
     viewChild<SSHTableComponent<T.SshKeyResponse>>('table')
 
