@@ -1,0 +1,25 @@
+Subject: netifd: find SMT siblings by core_cpus_list in packet steering
+
+packet-steering treats CPUs that share a topology core_id as SMT
+siblings and adds load to both. core_id is numbered within a cluster,
+so on the K1 (two clusters of four cores, no SMT) cpu0 and cpu4, cpu1
+and cpu5, and so on look like siblings although the kernel lists none.
+The phantom load steers placement away from idle cores.
+
+Identify a core by its core_cpus_list, which names the CPUs that
+actually share it.
+
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: openwrt v25.12.6
+
+--- a/package/network/config/netifd/files/usr/libexec/network/packet-steering.uc
++++ b/package/network/config/netifd/files/usr/libexec/network/packet-steering.uc
+@@ -105,7 +105,7 @@
+ cpus = map(glob("/sys/bus/cpu/devices/*"), (path) => {
+ 	return {
+ 		id: int(match(path, /.*cpu(\d+)/)[1]),
+-		core: int(trim(readfile(`${path}/topology/core_id`))),
++		core: trim(readfile(`${path}/topology/core_cpus_list`)),
+ 		load: 0.0,
+ 	};
+ });
