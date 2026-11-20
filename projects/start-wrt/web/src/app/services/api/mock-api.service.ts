@@ -289,6 +289,7 @@ export class MockApiService extends ApiService {
     theme: 'system',
     remoteAccess: 'never',
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    wanOverlaps: [],
   }
 
   async systemInfo(_timeout?: number): Promise<SystemInfoRes> {

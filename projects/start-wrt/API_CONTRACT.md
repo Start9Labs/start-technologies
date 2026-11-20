@@ -219,6 +219,16 @@ struct SystemInfoResponse {
     theme: String,  // "dark" | "light" | "system"
     remote_access: String,  // wire: `remoteAccess`; "never" (default) | "behind-nat" | "always"
     timezone: String,  // IANA timezone name (e.g. "America/New_York")
+    wan_overlaps: Vec<WanOverlap>,  // wire: `wanOverlaps`; empty while the WAN has no IPv4 address
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WanOverlap {
+    profile: String,      // fullname
+    interface: String,
+    subnet: String,       // the profile's /24, e.g. "192.168.0.0/24"
+    wan_network: String,  // the overlapping WAN network, e.g. "192.168.0.0/24"
 }
 ```
 
@@ -2031,7 +2041,8 @@ struct Profile<ProfileIdOpt> {
 //   enabled: an unknown interface (or one that is a VPN server rather than a
 //   client) is ErrorKind::NotFound, a disabled one ErrorKind::VpnDisabled.
 //   A disabled VPN's tunnel never comes up, so routing a profile through it
-//   would blackhole that profile.
+//   would blackhole that profile. A gateway_ip whose /24 overlaps a WAN
+//   IPv4 network is InvalidRequest.
 ```
 
 On create and set, `lan_access: "ALL"` stores `access_to_new_profiles: true`,
@@ -2055,7 +2066,9 @@ struct ProfileSetRequest {
     force: bool,
 }
 // Response: ProfileId
-// Validation: same gateway_ip and outbound checks as profiles.create.
+// Validation: same gateway_ip and outbound checks as profiles.create; the WAN
+//   overlap check applies when gateway_ip changes, and to every profile when a
+//   LAN owner's change moves the network block.
 // Inbound VPN peers the new subnet would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
 ```
@@ -2134,6 +2147,22 @@ struct ScheduleWindows {
 // regenerates the crontab projection and firewall rules. Same wrap/overlap/
 // full-week validation as wifi.blackout-set (equal startTime/endTime = full
 // 24-hour window; InvalidValue on overlap or gapless full-week coverage).
+```
+
+### `profiles.resolve-wan-overlap`
+
+Internal endpoint, **not called from the frontend**. Run by the daemon at boot and by the
+`/etc/hotplug.d/iface/99-startwrt-wan-overlap` hook on `wan` `ifup`/`ifupdate`, in the
+`startwrt-cli` process.
+
+```rust
+// Request: {}
+// Response: null
+// Backend: for each profile whose /24 overlaps a WAN IPv4 network, moves the
+//   LAN owner, or a profile without a Wi-Fi password, LAN port, or inbound VPN
+//   server, to the lowest free /24 in the network block from .10 up, through
+//   profiles.set (force false). A move profiles.set refuses is logged to the
+//   Activity log and left for the user; system.info reports every overlap.
 ```
 
 ---

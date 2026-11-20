@@ -134,6 +134,10 @@ pub fn profiles<C: CtrlContext>() -> ParentHandler<C> {
             "schedule-set",
             from_fn_async_local(schedule_set::<C>).no_display(),
         )
+        .subcommand(
+            "resolve-wan-overlap",
+            from_fn_async_local(crate::wan_overlap::resolve::<C>).no_display(),
+        )
 }
 
 #[derive(
@@ -213,6 +217,28 @@ impl ProfileDeleteResult {
         }
         for port in &mut self.published_ports {
             port.name = names.get(&port.mac).cloned();
+        }
+    }
+}
+
+impl From<Profile> for Profile<ProfileIdOpt> {
+    fn from(profile: Profile) -> Self {
+        Profile {
+            id: profile.id.into(),
+            gateway_ip: profile.gateway_ip,
+            outbound: profile.outbound,
+            lan_access: match profile.lan_access {
+                LanAccess::All => LanAccess::All,
+                LanAccess::SameProfile => LanAccess::SameProfile,
+                LanAccess::OtherProfiles(set) => {
+                    LanAccess::OtherProfiles(set.into_iter().map(Into::into).collect())
+                }
+            },
+            wan_access: profile.wan_access,
+            dns_override: profile.dns_override,
+            dns_source: String::new(),
+            access_to_new_profiles: profile.access_to_new_profiles,
+            owns_lan: profile.owns_lan,
         }
     }
 }
@@ -1439,6 +1465,7 @@ pub async fn set<C: CtrlContext>(
                 profile.gateway_ip,
                 &pi,
             )?;
+            crate::wan_overlap::guard_all(&ctx, &cfgs)?;
             let mut v = vec![crate::lan::LAN_INTERFACE.to_string()];
             v.extend(pi);
             v
@@ -1449,6 +1476,7 @@ pub async fn set<C: CtrlContext>(
         // Guard: reject subnet change when DHCP static hosts exist in the old subnet
         if let Some(old_gw) = old_state.as_ref().and_then(|s| s.gateway_ip) {
             if old_gw != profile.gateway_ip {
+                crate::wan_overlap::guard(&ctx, profile.gateway_ip)?;
                 let o = old_gw.octets();
                 if block_changed {
                     crate::lan::guard_dhcp_static_hosts(&cfgs, &[o[0], o[1]])?;
@@ -1563,7 +1591,7 @@ pub async fn set<C: CtrlContext>(
 }
 
 /// Read the current LAN interface IP from parsed configs.
-fn get_lan_ip(cfgs: &uciedit::Configs) -> Option<Ipv4Addr> {
+pub(crate) fn get_lan_ip(cfgs: &uciedit::Configs) -> Option<Ipv4Addr> {
     for section in &cfgs["network"].sections {
         if section.name().as_deref() == Some(crate::lan::LAN_INTERFACE) {
             if let Ok(Some(iface)) = section.get_typed::<NetworkInterface>() {
@@ -1866,6 +1894,7 @@ pub async fn create<C: CtrlContext>(
     DeserializeStdin(profile): DeserializeStdin<Profile<ProfileIdOpt>>,
 ) -> Result<ProfileId, Error> {
     let name = profile.id.fullname.clone().unwrap_or_default();
+    crate::wan_overlap::guard(&ctx, profile.gateway_ip)?;
     // Pre-allocate the interface id before the retry loop to avoid holding the
     // !Send Arena across an .await point. Gather the ids already in use (in their
     // own arena scope, dropped before the loop) so the random allocation avoids
@@ -3578,24 +3607,7 @@ pub async fn edit<C: CtrlContext>(ctx: C, args: EditArgs) -> Result<ProfileId, E
         create(ctx, DeserializeStdin(modified_profile)).await
     } else {
         // Edit mode: get existing profile, edit, then set
-        let current_profile = get(ctx.clone(), args.get).await?;
-        let current_profile = Profile {
-            id: current_profile.id.into(),
-            gateway_ip: current_profile.gateway_ip,
-            outbound: current_profile.outbound,
-            lan_access: match current_profile.lan_access {
-                LanAccess::All => LanAccess::All,
-                LanAccess::SameProfile => LanAccess::SameProfile,
-                LanAccess::OtherProfiles(set) => {
-                    LanAccess::OtherProfiles(set.into_iter().map(Into::into).collect())
-                }
-            },
-            wan_access: current_profile.wan_access,
-            dns_override: current_profile.dns_override,
-            dns_source: String::new(),
-            access_to_new_profiles: current_profile.access_to_new_profiles,
-            owns_lan: current_profile.owns_lan,
-        };
+        let current_profile: Profile<ProfileIdOpt> = get(ctx.clone(), args.get).await?.into();
         let modified_profile = crate::utils::edit_in_editor(&current_profile)?;
         set(
             ctx,

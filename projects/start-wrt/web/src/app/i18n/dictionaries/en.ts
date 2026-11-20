@@ -599,4 +599,6 @@ export const ENGLISH: Record<string, number> = {
   "To disable this VPN, first change {vpns} to connect via something else.": 642,
   'Never (Default)': 643,
   'When behind NAT': 644,
+  '{profile} overlaps the upstream network {network}': 645,
+  'Devices on it can lose the Internet or this dashboard. Change its subnet to one outside that network.': 646,
 }

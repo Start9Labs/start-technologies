@@ -594,4 +594,6 @@ export default {
   642: 'Um dieses VPN zu deaktivieren, stellen Sie zuerst {vpns} so um, dass sie sich über etwas anderes verbinden.',
   643: 'Nie (Standard)',
   644: 'Wenn hinter NAT',
+  645: '{profile} überschneidet sich mit dem vorgelagerten Netzwerk {network}',
+  646: 'Geräte darin können das Internet oder dieses Dashboard verlieren. Ändern Sie sein Subnetz in eines außerhalb dieses Netzwerks.',
 } satisfies i18n

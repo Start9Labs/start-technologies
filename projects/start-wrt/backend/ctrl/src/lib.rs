@@ -56,6 +56,7 @@ pub mod verify;
 pub mod vpn_client;
 pub mod vpn_server;
 pub mod wan;
+pub mod wan_overlap;
 pub mod wg;
 pub mod wifi;
 
@@ -118,6 +119,14 @@ pub trait CtrlContext: Context + Clone {
     fn wan_ipv4_addrs(&self) -> Vec<std::net::Ipv4Addr> {
         if self.effectful() {
             crate::system::wan_ipv4_addrs()
+        } else {
+            Vec::new()
+        }
+    }
+    /// The router's WAN IPv4 networks. Empty when unknown.
+    fn wan_ipv4_networks(&self) -> Vec<crate::wan_overlap::Ipv4Net> {
+        if self.effectful() {
+            crate::system::read_wan_ipv4_networks().unwrap_or_default()
         } else {
             Vec::new()
         }

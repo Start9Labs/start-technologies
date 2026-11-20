@@ -594,4 +594,6 @@ export default {
   642: 'Pour désactiver ce VPN, modifiez d’abord {vpns} pour qu’ils se connectent via autre chose.',
   643: 'Jamais (par défaut)',
   644: 'Lorsque derrière un NAT',
+  645: '{profile} chevauche le réseau amont {network}',
+  646: 'Ses appareils peuvent perdre Internet ou ce tableau de bord. Changez son sous-réseau pour un sous-réseau hors de ce réseau.',
 } satisfies i18n

@@ -80,6 +80,11 @@ const MENU = {
           @if (route.link === 'settings' && system.updateAvailable()) {
             <tui-icon class="g-positive" icon="@tui.rocket" />
           }
+          @if (
+            route.link === 'profiles' && system.info()?.wanOverlaps?.length
+          ) {
+            <tui-icon class="g-warning" icon="@tui.triangle-alert" />
+          }
         </a>
       }
       @if (!$last) {

@@ -1400,25 +1400,6 @@ export const SshKeyResponse: z.ZodObject<{
 }).meta({
   id: 'SshKeyResponse',
 })
-export const SystemInfoResponse: z.ZodObject<{
-  version: z.ZodString
-  gitHash: z.ZodString
-  language: z.ZodString
-  date: z.ZodString
-  theme: z.ZodString
-  remoteAccess: z.ZodString
-  timezone: z.ZodString
-}> = /* @__PURE__ */ object({
-  version: z.string(),
-  gitHash: z.string(),
-  language: z.string(),
-  date: z.string(),
-  theme: z.string(),
-  remoteAccess: z.string(),
-  timezone: z.string(),
-}).meta({
-  id: 'SystemInfoResponse',
-})
 export const UpdateSystemParams: z.ZodObject<{
   registry: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1657,6 +1638,19 @@ export const WanIpv6Mode: z.ZodEnum<{
   .meta({
     id: 'WanIpv6Mode',
   })
+export const WanOverlap: z.ZodObject<{
+  profile: z.ZodString
+  interface: z.ZodString
+  subnet: z.ZodString
+  wanNetwork: z.ZodString
+}> = /* @__PURE__ */ object({
+  profile: z.string(),
+  interface: z.string(),
+  subnet: z.string(),
+  wanNetwork: z.string(),
+}).meta({
+  id: 'WanOverlap',
+})
 export const WifiRadio: z.ZodObject<{
   band: z.ZodString
   channel: z.ZodString
@@ -2657,6 +2651,27 @@ export const SetupStatusRes: z.ZodObject<{
   disk: typeof DiskState
 }> = /* @__PURE__ */ object({ setupMode: z.boolean(), disk: DiskState }).meta({
   id: 'SetupStatusRes',
+})
+export const SystemInfoResponse: z.ZodObject<{
+  version: z.ZodString
+  gitHash: z.ZodString
+  language: z.ZodString
+  date: z.ZodString
+  theme: z.ZodString
+  remoteAccess: z.ZodString
+  timezone: z.ZodString
+  wanOverlaps: z.ZodArray<typeof WanOverlap>
+}> = /* @__PURE__ */ object({
+  version: z.string(),
+  gitHash: z.string(),
+  language: z.string(),
+  date: z.string(),
+  theme: z.string(),
+  remoteAccess: z.string(),
+  timezone: z.string(),
+  wanOverlaps: z.array(WanOverlap),
+}).meta({
+  id: 'SystemInfoResponse',
 })
 export const UciFile: z.ZodObject<{
   sections: z.ZodArray<typeof Section>
@@ -3982,6 +3997,12 @@ export const Api = {
             empty,
           ),
           _RETURN: /* @__PURE__ */ z.array(ProfileId),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'resolve-wan-overlap': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _RETURN: /* @__PURE__ */ z.null(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },

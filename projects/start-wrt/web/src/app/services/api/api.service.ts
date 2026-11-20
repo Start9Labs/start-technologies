@@ -206,6 +206,7 @@ export type SetUciReq = RpcParamType<Api, 'uci.set'>
 export type SetUciRes = RpcReturnType<Api, 'uci.set'>
 
 export type SystemInfoRes = RpcReturnType<Api, 'system.info'>
+export type WanOverlap = Bindings.WanOverlap
 
 export type ConfigCheck = RpcReturnType<Api, 'config.check'>
 
