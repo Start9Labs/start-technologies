@@ -475,8 +475,26 @@ async fn bounce_changed_ports(old_ports: &HashMap<String, Option<u16>>, new_ethe
             to_bounce.push(name.clone());
         }
     }
+    bounce_ports(&to_bounce).await;
+}
+
+/// The bridge ports that carry any of the VLANs.
+pub(crate) fn ports_on_vlans(cfgs: &Configs, vlans: &HashSet<u16>) -> Vec<String> {
+    cfgs["network"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<NetworkBridgeVlan>().ok())
+        .filter(|vlan| vlans.contains(&vlan.vlan))
+        .flat_map(|vlan| vlan.ports.into_iter().map(|p| p.port))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// Takes the links down long enough for clients to notice, then up again.
+pub(crate) async fn bounce_ports(ports: &[String]) {
     let sys = crate::usb_ports::Sys::host();
-    let targets: Vec<crate::usb_ports::LinkTarget> = to_bounce
+    let targets: Vec<crate::usb_ports::LinkTarget> = ports
         .iter()
         .flat_map(|port| crate::usb_ports::link_targets(&sys, port))
         .collect();

@@ -707,7 +707,29 @@ pub fn update_profile_ips_for_block_change(
 /// `network reload` which restarts ALL interfaces including WAN, causing
 /// its DHCP client to lose its lease and breaking internet).
 /// Then reloads the firewall and dnsmasq once br-lan has the new IP.
+/// The LAN ports carrying the profiles behind the interfaces.
+pub(crate) async fn ports_of(interfaces: &[String]) -> Vec<String> {
+    let Ok(bytes) = uciedit::read_all("/etc/config", &["network", "startwrt"]).await else {
+        return Vec::new();
+    };
+    let arena = Arena::new();
+    let Ok(cfgs) = bytes.parse(&arena) else {
+        return Vec::new();
+    };
+    let vlans: HashSet<u16> = cfgs["startwrt"]
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<profiles::UciProfile>().ok())
+        .filter(|p| interfaces.contains(&p.interface))
+        .map(|p| p.vlan_tag)
+        .collect();
+    crate::ethernet::ports_on_vlans(&cfgs, &vlans)
+}
+
+/// Brings the interfaces up on their new subnets, then restarts Wi-Fi and
+/// bounces their LAN ports so every client renews.
 pub async fn restart_network_services(new_lan_ip: Ipv4Addr, interfaces: Vec<String>) {
+    let ports = ports_of(&interfaces).await;
     // Truncated, not unlinked: an instance the reload leaves running keeps
     // writing to the inode it opened.
     for path in crate::devices::dhcp_lease_files().await {
@@ -750,10 +772,14 @@ pub async fn restart_network_services(new_lan_ip: Ipv4Addr, interfaces: Vec<Stri
     // triggering fresh DHCP on the new subnet. Without this,
     // clients that stay connected keep stale leases from the
     // old network block.
+    if let Err(e) = crate::captive::refresh().await {
+        tracing::warn!("captive portal refresh failed: {e}");
+    }
     if let Err(e) = crate::wifi::reload_wifi("/etc/config", crate::wifi::WifiReload::Restart).await
     {
         tracing::warn!("WiFi restart failed: {e}");
     }
+    crate::ethernet::bounce_ports(&ports).await;
 }
 
 #[cfg(test)]

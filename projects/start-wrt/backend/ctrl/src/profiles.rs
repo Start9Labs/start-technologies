@@ -302,7 +302,7 @@ pub(crate) struct UciProfile {
 
 /// Snapshot of profile fields before an update, for activity log diffing.
 #[derive(Debug)]
-struct OldProfileState {
+pub(crate) struct OldProfileState {
     outbound: Option<String>,
     wan_access: Option<String>,
     access_to_new_profiles: bool,
@@ -1534,6 +1534,10 @@ pub async fn set<C: CtrlContext>(
                         // that flips IPv6 eligibility re-runs netifd prefix
                         // distribution (adds/removes the profile's /64).
                         reload_system_full().await?;
+                        if ip_changed {
+                            let ports = crate::lan::ports_of(&[out.interface.clone()]).await;
+                            crate::ethernet::bounce_ports(&ports).await;
+                        }
                     }
                     removed_vpns.apply_post_reload().await;
                 }
@@ -1599,7 +1603,7 @@ pub(crate) fn get_lan_ip(cfgs: &uciedit::Configs) -> Option<Ipv4Addr> {
     None
 }
 
-fn set_config<C: CtrlContext>(
+pub(crate) fn set_config<C: CtrlContext>(
     ctx: C,
     cfgs: &mut Configs,
     profile: &Profile<ProfileIdOpt>,

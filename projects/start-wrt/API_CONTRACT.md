@@ -2173,11 +2173,15 @@ Internal endpoint, **not called from the frontend**. Run by the daemon at boot a
 ```rust
 // Request: {}
 // Response: null
-// Backend: for each profile whose /24 overlaps a WAN IPv4 network, moves the
-//   LAN owner, or a profile without a Wi-Fi password, LAN port, or inbound VPN
-//   server, to the lowest free /24 in the network block from .10 up, through
-//   profiles.set (force false). A move profiles.set refuses is logged to the
-//   Activity log and left for the user; profiles.wan-overlaps reports every overlap.
+// Backend: under a lock shared by every run, moves each profile whose /24
+//   overlaps a WAN IPv4 network and is the LAN owner, or has no Wi-Fi password,
+//   LAN port, or inbound VPN server, to the lowest free /24 in the block from .10
+//   up. Every move is held to the Subnet rules and the inbound VPN peer guard; a
+//   refused move is logged to the Activity log and left for the user, and the
+//   rest proceed. All moves land in one write, then the moved interfaces are
+//   cycled, an active captive portal follows the LAN, and the LAN ports carrying
+//   the moved profiles are bounced. The WAN stays up. A run with nothing to move
+//   changes nothing. profiles.wan-overlaps reports every overlap.
 ```
 
 ---

@@ -15,10 +15,27 @@ use crate::prelude::*;
 use crate::ssl::ROUTER_HOSTNAME;
 
 const CAPTIVE_CONF_NAME: &str = "captive-portal.conf";
-const CAPTIVE_CONTENT: &str = "\
-    address=/#/192.168.0.1\n\
-    address=/#/::\n\
-    dhcp-option=114,http://192.168.0.1/\n";
+
+fn captive_content(lan: std::net::Ipv4Addr) -> String {
+    format!("address=/#/{lan}\naddress=/#/::\ndhcp-option=114,http://{lan}/\n")
+}
+
+/// The LAN's address, else the factory default.
+async fn lan_address() -> std::net::Ipv4Addr {
+    let lan = async {
+        let bytes = uciedit::read_all("/etc/config", &["network"]).await.ok()?;
+        let arena = uciedit::Arena::new();
+        let cfgs = bytes.parse(&arena).ok()?;
+        cfgs["network"]
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some(crate::lan::LAN_INTERFACE))?
+            .get::<uciedit::openwrt::NetworkInterface>()
+            .ok()?
+            .ipv4()
+    };
+    lan.await.unwrap_or(std::net::Ipv4Addr::new(192, 168, 0, 1))
+}
 
 /// Mirrors the presence of the dnsmasq drop-in.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -100,7 +117,7 @@ async fn enable_dns_hijack() -> Result<(), Error> {
             .map_err(|e| Error::new(eyre!("failed to create {dir}: {e}"), ErrorKind::Filesystem))?;
     }
 
-    fs::write(&conf, CAPTIVE_CONTENT).map_err(|e| {
+    fs::write(&conf, captive_content(lan_address().await)).map_err(|e| {
         Error::new(
             eyre!("failed to write {}: {e}", conf.display()),
             ErrorKind::Filesystem,
@@ -109,6 +126,14 @@ async fn enable_dns_hijack() -> Result<(), Error> {
     ACTIVE.store(true, Ordering::Relaxed);
 
     restart_dnsmasq(&instance).await
+}
+
+/// Points an active portal at the LAN's current address.
+pub async fn refresh() -> Result<(), Error> {
+    if is_captive_portal_active() {
+        enable_dns_hijack().await?;
+    }
+    Ok(())
 }
 
 async fn disable_dns_hijack() -> Result<(), Error> {
@@ -269,6 +294,15 @@ async fn restart_dnsmasq(instance: &str) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_portal_points_at_the_lan() {
+        assert_eq!(
+            super::captive_content(std::net::Ipv4Addr::new(192, 168, 10, 1)),
+            "address=/#/192.168.10.1\naddress=/#/::\ndhcp-option=114,http://192.168.10.1/\n"
+        );
+    }
+
     use axum::body::Body;
 
     use super::*;

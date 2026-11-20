@@ -12,12 +12,11 @@ use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
     DhcpHost, InterfaceProto, NetworkBridgeVlan, NetworkInterface, WifiStation,
 };
-use uciedit::{parse_all, Arena, Configs};
+use uciedit::{dump_all, parse_all, Arena, Configs};
 
 use crate::lan::LAN_INTERFACE;
 use crate::prelude::*;
-use crate::profiles::{self, Profile, ProfileIdOpt, ProfileSetRequest, UciProfile};
-use crate::utils::DeserializeStdin;
+use crate::profiles::{self, Profile, ProfileIdOpt, UciProfile};
 use crate::wan::WAN_INTERFACE;
 use crate::CtrlContext;
 
@@ -308,66 +307,196 @@ fn has_point_of_entry(cfgs: &Configs, interface: &str, vlan_tag: u16) -> bool {
     wifi || port || vpn
 }
 
-/// Moves each overlapping profile whose clients could not reach the dashboard to
-/// see a warning, the LAN owner and profiles nothing leads to, to a free subnet.
-#[instrument(skip_all)]
-pub async fn resolve<C: CtrlContext>(ctx: C) -> Result<(), Error> {
-    let live = ctx.wan_ipv4_networks();
-    let moves = {
-        let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["startwrt", "network", "wireless"]).await?;
-        let mut subnets = Subnets::of(&cfgs);
-        let wan = subnets.wan(live);
-        let found: Vec<(String, Member, Ipv4Net)> = subnets
-            .overlapping(&wan)
-            .filter(|(interface, member, _)| {
-                interface.as_str() == LAN_INTERFACE
-                    || !has_point_of_entry(&cfgs, interface, member.vlan_tag)
-            })
-            .map(|(i, m, w)| (i.clone(), m.clone(), w))
-            .collect();
-        let mut moves = Vec::new();
-        for (interface, member, wan_network) in found {
-            let Some(gateway) = subnets.free_gateway(&wan, []) else {
-                tracing::warn!("no free subnet for profile {}", member.fullname);
-                continue;
-            };
-            subnets.claim(&interface, gateway);
-            moves.push((interface, member, wan_network, gateway));
+const RESOLVE_LOCK: &str = "/var/lock/startwrt-subnets.lock";
+
+/// Serializes resolver runs across the daemon and the hotplug hook's CLI.
+async fn lock_resolver() -> Result<fd_lock_rs::FdLock<std::fs::File>, Error> {
+    tokio::task::spawn_blocking(|| {
+        if let Some(dir) = std::path::Path::new(RESOLVE_LOCK).parent() {
+            std::fs::create_dir_all(dir)?;
         }
-        moves
-    };
-    for (interface, member, wan_network, gateway) in moves {
-        let mut profile: Profile<ProfileIdOpt> = profiles::get(
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(RESOLVE_LOCK)?;
+        fd_lock_rs::FdLock::lock(file, fd_lock_rs::LockType::Exclusive, true)
+            .map_err(std::io::Error::from)
+    })
+    .await
+    .map_err(|e| {
+        Error::new(
+            eyre!("resolver lock task panicked: {e}"),
+            ErrorKind::Incoherent,
+        )
+    })?
+    .map_err(|e| Error::new(eyre!("locking {RESOLVE_LOCK}: {e}"), ErrorKind::Filesystem))
+}
+
+const RESOLVE_CONFIGS: &[&str] = &["startwrt", "network", "firewall", "dhcp", "wireless"];
+
+struct Move {
+    interface: String,
+    fullname: String,
+    from: Ipv4Net,
+    wan: Ipv4Net,
+    gateway: Ipv4Addr,
+}
+
+/// Each overlapping profile whose clients could not reach the dashboard to see
+/// a warning, the LAN owner and profiles nothing leads to, with a free subnet.
+fn plan(cfgs: &Configs, live: Vec<Ipv4Net>) -> Vec<Move> {
+    let mut subnets = Subnets::of(cfgs);
+    let wan = subnets.wan(live);
+    let found: Vec<(String, Member, Ipv4Net)> = subnets
+        .overlapping(&wan)
+        .filter(|(interface, member, _)| {
+            interface.as_str() == LAN_INTERFACE
+                || !has_point_of_entry(cfgs, interface, member.vlan_tag)
+        })
+        .map(|(i, m, w)| (i.clone(), m.clone(), w))
+        .collect();
+    let mut moves = Vec::new();
+    for (interface, member, wan_network) in found {
+        let Some(gateway) = subnets.free_gateway(&wan, []) else {
+            tracing::warn!("no free subnet for profile {}", member.fullname);
+            continue;
+        };
+        subnets.claim(&interface, gateway);
+        moves.push(Move {
+            interface,
+            fullname: member.fullname,
+            from: slash24(member.gateway),
+            wan: wan_network,
+            gateway,
+        });
+    }
+    moves
+}
+
+/// Applies the moves the way profiles.set would, held to the same checks.
+fn apply(ctx: &impl CtrlContext, cfgs: &mut Configs, moves: &[&Move]) -> Result<(), Error> {
+    let before = Subnets::of(cfgs);
+    for m in moves {
+        let mut profile: Profile<ProfileIdOpt> = profiles::get_config(
             ctx.clone(),
+            cfgs,
             ProfileIdOpt {
                 fullname: None,
-                interface: Some(interface),
+                interface: Some(m.interface.clone()),
                 vlan_tag: None,
             },
-        )
-        .await?
+        )?
         .into();
-        profile.gateway_ip = gateway;
-        let moved = profiles::set(
-            ctx.clone(),
-            DeserializeStdin(ProfileSetRequest {
-                profile,
-                force: false,
-            }),
-        )
-        .await;
+        profile.gateway_ip = m.gateway;
+        profile.owns_lan = m.interface == LAN_INTERFACE;
+        profiles::set_config(ctx.clone(), cfgs, &profile)?;
+    }
+    check(ctx, &before, cfgs)?;
+    let interfaces: Vec<&str> = moves.iter().map(|m| m.interface.as_str()).collect();
+    crate::vpn_server::guard_vpn_peers(cfgs, &interfaces, false)?;
+    Ok(())
+}
+
+/// Moves each profile [`plan`] picks in one write and one reload. A move the
+/// checks refuse is skipped and logged; one already applied plans nothing.
+#[instrument(skip_all)]
+pub async fn resolve<C: CtrlContext>(ctx: C) -> Result<(), Error> {
+    let _lock = if ctx.effectful() {
+        Some(lock_resolver().await?)
+    } else {
+        None
+    };
+    let live = ctx.wan_ipv4_networks();
+    let mut retries = 4;
+    let (accepted, lan_gateway) = loop {
+        let planned = {
+            let arena = Arena::new();
+            let cfgs = parse_all(ctx.uci_root(), &arena, RESOLVE_CONFIGS).await?;
+            plan(&cfgs, live.clone())
+        };
+        if planned.is_empty() {
+            return Ok(());
+        }
+        let mut accepted: Vec<&Move> = Vec::new();
+        for m in &planned {
+            let arena = Arena::new();
+            let mut cfgs = parse_all(ctx.uci_root(), &arena, RESOLVE_CONFIGS).await?;
+            let trial: Vec<&Move> = accepted.iter().copied().chain([m]).collect();
+            match apply(&ctx, &mut cfgs, &trial) {
+                Ok(()) => accepted.push(m),
+                Err(e) => crate::activity::log(
+                    "profile",
+                    "subnet-moved",
+                    false,
+                    &format!(
+                        "Could not move profile '{}' off the upstream network {}",
+                        m.fullname, m.wan
+                    ),
+                    Some(&e.to_string()),
+                ),
+            }
+        }
+        if accepted.is_empty() {
+            return Ok(());
+        }
+        let arena = Arena::new();
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, RESOLVE_CONFIGS).await?;
+        apply(&ctx, &mut cfgs, &accepted)?;
+        let lan_gateway = Subnets::of(&cfgs)
+            .profiles
+            .get(LAN_INTERFACE)
+            .map(|m| m.gateway);
+        let dumped = dump_all(ctx.uci_root(), cfgs).await;
+        drop(arena);
+        match dumped {
+            Err(uciedit::Error::Conflict { .. }) if retries > 0 => retries -= 1,
+            Err(e) => return Err(e.into()),
+            Ok(()) => {
+                break (
+                    accepted
+                        .iter()
+                        .map(|m| {
+                            (
+                                m.interface.clone(),
+                                m.fullname.clone(),
+                                m.from,
+                                m.wan,
+                                m.gateway,
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                    lan_gateway,
+                )
+            }
+        }
+    };
+    if ctx.effectful() {
+        let groups = crate::dns::load_smartdns_groups(ctx.uci_root()).await?;
+        crate::dns::apply_smartdns_groups(groups).await?;
+        if let Some(lan) = lan_gateway {
+            let interfaces = accepted.iter().map(|m| m.0.clone()).collect();
+            crate::lan::restart_network_services(lan, interfaces).await;
+        }
+    }
+    if let Err(e) = profiles::regenerate_schedule_crontab(&ctx).await {
+        tracing::error!("Failed to regenerate schedule crontab after moving profiles: {e}");
+    }
+    if ctx.effectful() {
+        let _ =
+            crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/cron").arg("restart"))
+                .await;
+    }
+    for (_, fullname, from, wan, gateway) in accepted {
         crate::activity::log(
             "profile",
             "subnet-moved",
-            moved.is_ok(),
+            true,
             &format!(
-                "Moved profile '{}' from {} to {}, off the upstream network {wan_network}",
-                member.fullname,
-                slash24(member.gateway),
-                slash24(gateway),
+                "Moved profile '{fullname}' from {from} to {}, off the upstream network {wan}",
+                slash24(gateway)
             ),
-            moved.as_ref().err().map(|e| e.to_string()).as_deref(),
+            None,
         );
     }
     Ok(())
@@ -382,7 +511,8 @@ mod tests {
     use tokio::runtime::Runtime;
 
     use super::*;
-    use crate::profiles::{LanAccess, WanAccess};
+    use crate::profiles::{LanAccess, ProfileSetRequest, WanAccess};
+    use crate::utils::DeserializeStdin;
 
     #[derive(Clone)]
     struct TestContext(PathBuf, Vec<Ipv4Net>);
@@ -671,6 +801,65 @@ mod tests {
         let err = set("192.168.2.50").await.unwrap_err();
         assert_eq!(err.kind, ErrorKind::InvalidRequest);
         set("203.0.113.9").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn one_run_moves_every_profile_and_a_second_run_does_nothing() {
+        let dir = router_with(&[("Guest", 2)]).await;
+        let ctx = TestContext(
+            dir.path().into(),
+            vec![net("192.168.0.37/24"), net("192.168.2.37/24")],
+        );
+
+        resolve(ctx.clone()).await.unwrap();
+        let moved: BTreeSet<Ipv4Addr> = gateways(&ctx).await.into_iter().map(|(_, g)| g).collect();
+        assert_eq!(
+            moved,
+            BTreeSet::from([
+                Ipv4Addr::new(192, 168, 10, 1),
+                Ipv4Addr::new(192, 168, 11, 1)
+            ])
+        );
+
+        let snapshot = |dir: &std::path::Path| {
+            RESOLVE_CONFIGS
+                .iter()
+                .map(|c| std::fs::read_to_string(dir.join(c)).unwrap_or_default())
+                .collect::<Vec<_>>()
+        };
+        let after_first = snapshot(dir.path());
+        resolve(ctx).await.unwrap();
+        assert_eq!(snapshot(dir.path()), after_first);
+    }
+
+    #[tokio::test]
+    async fn a_refused_move_does_not_hold_back_the_rest() {
+        let dir = router_with(&[("Guest", 2)]).await;
+        let dhcp = dir.path().join("dhcp");
+        let mut text = std::fs::read_to_string(&dhcp).unwrap();
+        text.push_str(
+            "\nconfig host 'nas'\n\toption mac '02:00:00:00:00:01'\n\toption ip '192.168.0.40'\n",
+        );
+        std::fs::write(&dhcp, text).unwrap();
+        let ctx = TestContext(
+            dir.path().into(),
+            vec![net("192.168.0.37/24"), net("192.168.2.37/24")],
+        );
+
+        resolve(ctx.clone()).await.unwrap();
+
+        let after = gateways(&ctx).await;
+        assert_eq!(after[0], ("Admin".into(), Ipv4Addr::new(192, 168, 0, 1)));
+        assert_eq!(after[1].0, "Guest");
+        assert!([10, 11].contains(&after[1].1.octets()[2]), "{after:?}");
+        let reported = overlaps(ctx).await.unwrap();
+        assert_eq!(
+            reported
+                .iter()
+                .map(|o| o.profile.as_str())
+                .collect::<Vec<_>>(),
+            ["Admin"]
+        );
     }
 
     #[tokio::test]
