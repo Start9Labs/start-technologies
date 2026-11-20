@@ -379,7 +379,7 @@ fn project_legacy_os_notes(method: &str, res: &mut Value) -> Result<(), Error> {
 }
 
 fn predates_superseded_revisions(version: &Version) -> Result<bool, Error> {
-    Ok(version < &"0.4.3".parse::<Version>()?)
+    Ok(version <= &"0.4.3".parse::<Version>()?)
 }
 
 fn hide_superseded_revisions(method: &str, params: &Value, res: &mut Value) {
@@ -815,12 +815,12 @@ mod tests {
     }
 
     #[test]
-    fn superseded_revisions_are_hidden_from_startos_before_0_4_3() {
+    fn superseded_revisions_are_hidden_from_startos_through_0_4_3() {
         let package = json!({ "best": {}, "otherVersions": {
             "1.0.0:0": { "releaseNotes": "a", "superseded": true },
             "1.0.0:1": { "releaseNotes": "b" },
         }});
-        for (version, kept) in [("0.4.2.1", 1), ("0.4.3", 2)] {
+        for (version, kept) in [("0.4.2.1", 1), ("0.4.3", 1), ("0.4.3.1", 2)] {
             let wire = WireCompatibility::for_startos(&version.parse().unwrap()).unwrap();
             assert_eq!(wire.hide_superseded, kept == 1);
             for id in [Some("pkg"), None] {
