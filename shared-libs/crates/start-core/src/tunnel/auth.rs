@@ -7,7 +7,7 @@ use patch_db::HasModel;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
-use crate::auth::{AuthKeys, LoginContext, check_password};
+use crate::auth::{AuthKeys, LoginContext};
 use crate::context::CliContext;
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::LocalAuthContext;
@@ -149,8 +149,8 @@ impl LoginContext for TunnelContext {
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys> {
         db.as_session_pubkeys_mut()
     }
-    fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error> {
-        check_password(&db.as_password().de()?.unwrap_or_default(), password)
+    fn password_hash(db: &Model<Self::Database>) -> Result<Option<String>, Error> {
+        db.as_password().de()
     }
 }
 

@@ -116,7 +116,14 @@ pub trait LoginContext: SignatureAuthorizationContext {
     fn auth_token_is_enrolled(&self, db: &Model<Self::Database>, token: &InternedString) -> bool {
         Self::access_tokens(&mut db.clone()).is_some_and(|tokens| tokens.as_idx(token).is_some())
     }
-    fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error>;
+    /// Database-owned password hash. External credential stores return `None`.
+    #[allow(unused_variables)]
+    fn password_hash(db: &Model<Self::Database>) -> Result<Option<String>, Error> {
+        Ok(None)
+    }
+    fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error> {
+        check_password(&Self::password_hash(db)?.unwrap_or_default(), password)
+    }
     /// Whether a sign-in has ended, judged by a trusted clock. Defaults to
     /// [`MAX_IDLE`] without use.
     fn sign_in_expired(session: &Session, now: DateTime<Utc>) -> bool {
@@ -192,8 +199,8 @@ impl LoginContext for RpcContext {
     fn access_tokens(db: &mut Model<Self::Database>) -> Option<&mut Model<TokenSessions>> {
         Some(db.as_private_mut().as_sessions_mut().as_tokens_mut())
     }
-    fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error> {
-        check_password(&db.as_private().as_password().de()?, password)
+    fn password_hash(db: &Model<Self::Database>) -> Result<Option<String>, Error> {
+        Ok(Some(db.as_private().as_password().de()?))
     }
     async fn post_login_hook(&self, password: &str) -> Result<(), Error> {
         if tokio::fs::metadata("/media/startos/config/overlay/etc/shadow")
@@ -794,13 +801,32 @@ pub async fn login_impl<C: LoginContext>(
     result
 }
 
-/// Holds no database lock while hashing.
-async fn verify_password<C: LoginContext>(ctx: &C, password: &str) -> Result<(), Error> {
+/// Returns the verified database hash; holds no database lock while hashing.
+async fn verify_password<C: LoginContext>(
+    ctx: &C,
+    password: &str,
+) -> Result<Option<String>, Error> {
     let db = ctx.db().peek().await;
     let password = password.to_owned();
-    tokio::task::spawn_blocking(move || C::check_password(&db, &password))
-        .await
-        .with_kind(ErrorKind::Unknown)?
+    tokio::task::spawn_blocking(move || {
+        C::check_password(&db, &password)?;
+        C::password_hash(&db)
+    })
+    .await
+    .with_kind(ErrorKind::Unknown)?
+}
+
+/// Enrollment rejects a replaced database password before inserting persistent or ephemeral keys.
+fn check_verified_password<C: LoginContext>(
+    db: &Model<C::Database>,
+    verified_hash: &Option<String>,
+) -> Result<(), Error> {
+    ensure_code!(
+        &C::password_hash(db)? == verified_hash,
+        ErrorKind::IncorrectPassword,
+        t!("auth.password-incorrect")
+    );
+    Ok(())
 }
 
 async fn enroll<C: LoginContext>(
@@ -818,27 +844,31 @@ async fn enroll<C: LoginContext>(
         last_active: now,
         user_agent,
     };
-    if ephemeral {
-        let Some(ephemeral_keys) = ctx.ephemeral_auth_keys() else {
-            return Err(Error::new(
+    let ephemeral_keys = if ephemeral {
+        Some(ctx.ephemeral_auth_keys().ok_or_else(|| {
+            Error::new(
                 eyre!("{}", t!("middleware.auth.ephemeral-unsupported")),
                 ErrorKind::InvalidRequest,
-            ));
-        };
-        verify_password::<C>(ctx, password).await?;
-        ephemeral_keys.mutate(|keys| {
-            keys.0.insert(pubkey.clone(), record);
-        });
+            )
+        })?)
     } else {
-        verify_password::<C>(ctx, password).await?;
-        ctx.db()
-            .mutate(|db| {
+        None
+    };
+    let verified_hash = verify_password::<C>(ctx, password).await?;
+    ctx.db()
+        .mutate(|db| {
+            check_verified_password::<C>(db, &verified_hash)?;
+            if let Some(ephemeral_keys) = ephemeral_keys {
+                ephemeral_keys.mutate(|keys| {
+                    keys.0.insert(pubkey.clone(), record);
+                });
+            } else {
                 C::access_auth_keys(db).insert(&pubkey, &record)?;
-                Ok(())
-            })
-            .await
-            .result?;
-    }
+            }
+            Ok(())
+        })
+        .await
+        .result?;
 
     ctx.post_login_hook(password).await
 }
@@ -1093,4 +1123,48 @@ pub async fn get_pubkey(ctx: RpcContext) -> Result<Jwk, RpcError> {
     let secret = <RpcContext as AsRef<Jwk>>::as_ref(&ctx).clone();
     let pub_key = secret.to_public_key()?;
     Ok(pub_key)
+}
+
+#[cfg(test)]
+mod password_snapshot_tests {
+    use super::*;
+    use crate::tunnel::context::TunnelContext;
+    use crate::tunnel::db::TunnelDatabase;
+
+    #[test]
+    fn startos_password_replacement_invalidates_verified_snapshot() {
+        let mut db = Model::<crate::db::model::Database>::from(imbl_value::json!({
+            "private": { "password": "verified" }
+        }));
+        let verified_hash = RpcContext::password_hash(&db).unwrap();
+        check_verified_password::<RpcContext>(&db, &verified_hash).unwrap();
+        db.as_private_mut()
+            .as_password_mut()
+            .ser(&"replacement".to_owned())
+            .unwrap();
+        assert_eq!(
+            check_verified_password::<RpcContext>(&db, &verified_hash)
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectPassword
+        );
+    }
+
+    #[test]
+    fn tunnel_password_replacement_or_removal_invalidates_verified_snapshot() {
+        let mut db = Model::<TunnelDatabase>::from(imbl_value::json!({
+            "password": "verified"
+        }));
+        let verified_hash = TunnelContext::password_hash(&db).unwrap();
+        check_verified_password::<TunnelContext>(&db, &verified_hash).unwrap();
+        for password in [Some("replacement".to_owned()), None] {
+            db.as_password_mut().ser(&password).unwrap();
+            assert_eq!(
+                check_verified_password::<TunnelContext>(&db, &verified_hash)
+                    .unwrap_err()
+                    .kind,
+                ErrorKind::IncorrectPassword
+            );
+        }
+    }
 }
