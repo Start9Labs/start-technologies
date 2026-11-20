@@ -121,16 +121,6 @@ function asRequiredParser<Type, Input extends { required: boolean }>(
   return parser.nullish().transform(v => v ?? null) as any
 }
 
-/** A required string field also rejects an empty value, as the form does. */
-function requireNonEmpty<T>(
-  parser: z.ZodType<T>,
-  input: { required: boolean },
-): z.ZodType<T> {
-  return input.required
-    ? parser.refine(v => v !== '', { message: 'Required' })
-    : parser
-}
-
 /**
  * Core builder class for defining a single form field in a service configuration spec.
  *
@@ -451,7 +441,10 @@ export class Value<
      */
     generate?: RandomString | null
   }) {
-    const validator = asRequiredParser(withPatterns(z.string(), a.patterns), a)
+    const validator = asRequiredParser(
+      withPatterns(z.string().min(1), a.patterns),
+      a,
+    )
     return new Value<AsRequired<string, Required>>(
       async () => ({
         spec: {
@@ -470,7 +463,7 @@ export class Value<
           generate: a.generate ?? null,
           ...a,
         },
-        validator: requireNonEmpty(validator, a),
+        validator,
       }),
       validator,
     )
@@ -517,13 +510,13 @@ export class Value<
             generate: a.generate ?? null,
             ...a,
           },
-          validator: requireNonEmpty(
-            asRequiredParser(withPatterns(z.string(), a.patterns), a),
+          validator: asRequiredParser(
+            withPatterns(z.string().min(1), a.patterns),
             a,
           ),
         }
       },
-      z.string().nullable(),
+      z.string().min(1).nullable(),
     )
   }
   /**
@@ -584,7 +577,10 @@ export class Value<
      */
     immutable?: boolean
   }) {
-    const validator = asRequiredParser(withPatterns(z.string(), a.patterns), a)
+    const validator = asRequiredParser(
+      withPatterns(z.string().min(1), a.patterns),
+      a,
+    )
     return new Value<AsRequired<string, Required>>(async () => {
       const built: ValueSpecTextarea = {
         description: null,
@@ -601,7 +597,7 @@ export class Value<
         immutable: a.immutable ?? false,
         ...a,
       }
-      return { spec: built, validator: requireNonEmpty(validator, a) }
+      return { spec: built, validator }
     }, validator)
   }
   /** Like {@link Value.textarea} but options are resolved lazily at runtime via a builder function. */
@@ -644,13 +640,13 @@ export class Value<
             immutable: false,
             ...a,
           },
-          validator: requireNonEmpty(
-            asRequiredParser(withPatterns(z.string(), a.patterns), a),
+          validator: asRequiredParser(
+            withPatterns(z.string().min(1), a.patterns),
             a,
           ),
         }
       },
-      z.string().nullable(),
+      z.string().min(1).nullable(),
     )
   }
   /**
@@ -818,7 +814,7 @@ export class Value<
      */
     immutable?: boolean
   }) {
-    const validator = asRequiredParser(z.string(), a)
+    const validator = asRequiredParser(z.string().min(1), a)
     return new Value<AsRequired<string, Required>>(
       () => ({
         spec: {
@@ -830,7 +826,7 @@ export class Value<
           immutable: a.immutable ?? false,
           ...a,
         },
-        validator: requireNonEmpty(validator, a),
+        validator,
       }),
       validator,
     )
@@ -864,10 +860,10 @@ export class Value<
             immutable: false,
             ...a,
           },
-          validator: requireNonEmpty(asRequiredParser(z.string(), a), a),
+          validator: asRequiredParser(z.string().min(1), a),
         }
       },
-      z.string().nullable(),
+      z.string().min(1).nullable(),
     )
   }
   /**
@@ -918,7 +914,7 @@ export class Value<
      */
     immutable?: boolean
   }) {
-    const validator = asRequiredParser(z.string(), a)
+    const validator = asRequiredParser(z.string().min(1), a)
     return new Value<AsRequired<string, Required>>(
       () => ({
         spec: {
@@ -934,7 +930,7 @@ export class Value<
           immutable: a.immutable ?? false,
           ...a,
         },
-        validator: requireNonEmpty(validator, a),
+        validator,
       }),
       validator,
     )
@@ -973,10 +969,10 @@ export class Value<
             immutable: false,
             ...a,
           },
-          validator: requireNonEmpty(asRequiredParser(z.string(), a), a),
+          validator: asRequiredParser(z.string().min(1), a),
         }
       },
-      z.string().nullable(),
+      z.string().min(1).nullable(),
     )
   }
   /**

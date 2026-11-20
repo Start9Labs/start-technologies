@@ -31,22 +31,19 @@ const fields = {
 }
 
 describe.each(Object.entries(fields))('%s', (_, field) => {
-  test('a required field refuses an empty value from its action input', async () => {
-    const { validator } = await field(true).build(options as any)
-    expect(() => validator.parse('')).toThrow()
-    expect(validator.parse('x')).toBe('x')
-  })
+  test.each([true, false])(
+    'refuses an empty value when required is %s',
+    async required => {
+      const value = field(required)
+      const { validator } = await value.build(options as any)
+      expect(() => validator.parse('')).toThrow()
+      expect(() => value.validator.parse('')).toThrow()
+      expect(validator.parse('x')).toBe('x')
+    },
+  )
 
-  test('an optional field still accepts an empty value', async () => {
+  test('an optional field accepts null', async () => {
     const { validator } = await field(false).build(options as any)
-    expect(validator.parse('')).toBe('')
+    expect(validator.parse(null)).toBeNull()
   })
-})
-
-test('the static validator a file model reads with keeps an empty value', () => {
-  expect(
-    Value.text({ name: 'T', required: true, default: null }).validator.parse(
-      '',
-    ),
-  ).toBe('')
 })

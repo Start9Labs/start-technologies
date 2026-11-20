@@ -18,9 +18,8 @@ function anchor(regex: string): RegExp {
  * holds for callers that never render the form — `start-cli`, RPC, anything
  * driving an action directly.
  *
- * An empty string passes every pattern and is left to `required`, matching the
- * form, where `Validators.pattern` short-circuits on an empty value. Without
- * that, an optional field left blank would fail its own pattern.
+ * An empty string passes every pattern, matching the form, where
+ * `Validators.pattern` short-circuits on an empty value.
  */
 export function withPatterns(
   parser: z.ZodType<string>,
