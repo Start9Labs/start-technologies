@@ -305,9 +305,9 @@ async fn partitions_in(sys_block: &Path) -> Result<BTreeMap<usize, MappedPartiti
 
 /// Removes the kernel's mapping of every partition on the disk but the one kept.
 /// Fails on a partition still open.
-pub async fn forget_partitions(disk_path: &Path, keep: Option<&Path>) -> Result<(), Error> {
+pub async fn forget_partitions(disk_path: &Path, keep: &Path) -> Result<(), Error> {
     for part in list_partitions(disk_path).await? {
-        if keep.is_some_and(|keep| same_device(&part, keep)) {
+        if same_device(&part, keep) {
             continue;
         }
         Command::new("partx")

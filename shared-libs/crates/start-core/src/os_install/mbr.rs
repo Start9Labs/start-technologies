@@ -20,16 +20,13 @@ const EFI_MIB: u32 = 100;
 const ROOT_TARGET_MIB: u32 = 14 * 1024;
 const ROOT_MIN_MIB: u32 = 12 * 1024;
 
-/// The target disk's logical sector size and its length in those sectors, saturating at the
-/// MBR limit.
 #[derive(Clone, Copy)]
 struct Geometry {
     sector_size: u32,
-    sectors: u32,
 }
 
 impl Geometry {
-    fn new(sector_size: u64, capacity: u64) -> Result<Self, Error> {
+    fn new(sector_size: u64) -> Result<Self, Error> {
         LogicalBlockSize::try_from(sector_size).map_err(|_| {
             Error::new(
                 eyre!(
@@ -41,7 +38,6 @@ impl Geometry {
         })?;
         Ok(Self {
             sector_size: sector_size as u32,
-            sectors: u32::try_from(capacity / sector_size).unwrap_or(u32::MAX),
         })
     }
 
@@ -144,7 +140,7 @@ fn protected_from_table(
 fn write_mbr_layout(
     file: &mut File,
     geometry: Geometry,
-    protected: Option<&Protected>,
+    protected: &Protected,
     use_efi: bool,
 ) -> Result<MBR, Error> {
     let mib = geometry.mib();
@@ -156,33 +152,27 @@ fn write_mbr_layout(
         boot_end
     };
     let root_min_end = root_start + ROOT_MIN_MIB * mib;
-    let root_end = match protected {
-        Some(p) if p.start < root_min_end => {
-            return Err(Error::new(
-                eyre!(
-                    "{}",
-                    t!(
-                        "os-install.protected-partition-overlaps-os-root-sectors",
-                        path = p.path.display(),
-                        first_lba = p.start,
-                        min_end_sector = root_min_end,
-                    )
-                ),
-                crate::ErrorKind::DiskManagement,
-            ));
-        }
-        Some(p) => p.start.min(root_start + ROOT_TARGET_MIB * mib),
-        None => root_start + ROOT_TARGET_MIB * mib,
-    };
-    let slots = Slots::around(protected.map_or(3, |p| p.slot));
+    if protected.start < root_min_end {
+        return Err(Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "os-install.protected-partition-overlaps-os-root-sectors",
+                    path = protected.path.display(),
+                    first_lba = protected.start,
+                    min_end_sector = root_min_end,
+                )
+            ),
+            crate::ErrorKind::DiskManagement,
+        ));
+    }
+    let root_end = protected.start.min(root_start + ROOT_TARGET_MIB * mib);
+    let slots = Slots::around(protected.slot);
 
     let mut mbr = MBR::new_from(file, geometry.sector_size, rand::random())?;
     mbr[slots.boot] = entry(0x80, 0x0b, boot_start, boot_end - boot_start);
     mbr[slots.root] = entry(0, 0x83, root_start, root_end - root_start);
-    mbr[slots.data] = match protected {
-        Some(p) => entry(0, 0x8e, p.start, p.sectors),
-        None => entry(0, 0x8e, root_end, geometry.sectors - root_end),
-    };
+    mbr[slots.data] = entry(0, 0x8e, protected.start, protected.sectors);
     if use_efi {
         mbr[slots.efi] = entry(0, 0xef, boot_end, EFI_MIB * mib);
     }
@@ -231,11 +221,10 @@ async fn selected_extent(
 
 pub async fn partition(
     disk_path: &Path,
-    capacity: u64,
-    protect: Option<&Path>,
+    protect: &Path,
     use_efi: bool,
 ) -> Result<OsPartitionInfo, Error> {
-    if protect == Some(disk_path) {
+    if protect == disk_path {
         return Err(Error::new(
             eyre!(
                 "Cannot protect the entire disk {}; must specify a partition",
@@ -245,22 +234,19 @@ pub async fn partition(
         ));
     }
 
-    let geometry = Geometry::new(get_logical_block_size(disk_path).await?, capacity)?;
+    let geometry = Geometry::new(get_logical_block_size(disk_path).await?)?;
 
     quiesce_disk(disk_path).await?;
 
-    let protected = match protect {
-        Some(protect) => Some(selected_extent(disk_path, protect, geometry).await?),
-        None => None,
-    };
-    let slots = Slots::around(protected.as_ref().map_or(3, |p| p.slot));
+    let protected = selected_extent(disk_path, protect, geometry).await?;
+    let slots = Slots::around(protected.slot);
 
     forget_partitions(disk_path, protect).await?;
 
     let disk = disk_path.to_owned();
     let mbr = tokio::task::spawn_blocking(move || {
         let mut file = File::options().read(true).write(true).open(&disk)?;
-        write_mbr_layout(&mut file, geometry, protected.as_ref(), use_efi)
+        write_mbr_layout(&mut file, geometry, &protected, use_efi)
     })
     .await
     .unwrap()?;
@@ -314,7 +300,11 @@ mod tests {
     const MARKER: [u8; 512] = [0xa5; 512];
 
     fn geometry(sector_size: u32) -> Geometry {
-        Geometry::new(u64::from(sector_size), DISK_BYTES).unwrap()
+        Geometry::new(u64::from(sector_size)).unwrap()
+    }
+
+    fn disk_sectors(g: Geometry) -> u32 {
+        (DISK_BYTES / u64::from(g.sector_size)) as u32
     }
 
     /// A StartOS 0.3.4.1 legacy-install MBR with the data partition at `data_start` in
@@ -328,7 +318,7 @@ mod tests {
         let mut os = (1..=4).filter(|&slot| slot != data_slot);
         mbr[os.next().unwrap()] = entry(0x80, 0x0b, mib, 1024 * mib);
         mbr[os.next().unwrap()] = entry(0, 0x83, 1025 * mib, data_start - 1025 * mib);
-        mbr[data_slot] = entry(0, 0x8e, data_start, g.sectors - data_start);
+        mbr[data_slot] = entry(0, 0x8e, data_start, disk_sectors(g) - data_start);
         mbr.write_into(&mut file).unwrap();
         for at in marker_offsets(g, data_start) {
             file.seek(SeekFrom::Start(at)).unwrap();
@@ -368,7 +358,7 @@ mod tests {
         let current = MBR::read_from(file, g.sector_size).unwrap();
         let protected =
             protected_from_table(&current, g, slot, kernel, PathBuf::from("/dev/sda3"))?;
-        write_mbr_layout(file, g, Some(&protected), use_efi)
+        write_mbr_layout(file, g, &protected, use_efi)
     }
 
     fn rewrite(
@@ -381,7 +371,7 @@ mod tests {
         let scale = u64::from(g.sector_size / 512);
         let kernel = (
             u64::from(data_start) * scale,
-            u64::from(g.sectors - data_start) * scale,
+            u64::from(disk_sectors(g) - data_start) * scale,
         );
         rewrite_checked(file, g, data_slot, kernel, use_efi)
     }
@@ -401,7 +391,10 @@ mod tests {
         assert_eq!(mbr[1], entry(0x80, 0x0b, 2048, 4194304));
         assert_eq!(mbr[4], entry(0, 0xef, 4196352, 204800));
         assert_eq!(mbr[2], entry(0, 0x83, 4401152, DATA_START - 4401152));
-        assert_eq!(mbr[3], entry(0, 0x8e, DATA_START, g.sectors - DATA_START));
+        assert_eq!(
+            mbr[3],
+            entry(0, 0x8e, DATA_START, disk_sectors(g) - DATA_START)
+        );
         assert_markers(&mut file, g, DATA_START);
     }
 
@@ -412,7 +405,10 @@ mod tests {
         let mbr = rewrite(&mut file, g, DATA_START, 3, false).unwrap();
         assert_eq!(mbr[1], entry(0x80, 0x0b, 2048, 4194304));
         assert_eq!(mbr[2], entry(0, 0x83, 4196352, DATA_START - 4196352));
-        assert_eq!(mbr[3], entry(0, 0x8e, DATA_START, g.sectors - DATA_START));
+        assert_eq!(
+            mbr[3],
+            entry(0, 0x8e, DATA_START, disk_sectors(g) - DATA_START)
+        );
         assert_eq!(mbr[4].sectors, 0);
         assert_markers(&mut file, g, DATA_START);
     }
@@ -441,7 +437,7 @@ mod tests {
                 );
                 assert_eq!(
                     mbr[data],
-                    entry(0, 0x8e, DATA_START, g.sectors - DATA_START),
+                    entry(0, 0x8e, DATA_START, disk_sectors(g) - DATA_START),
                     "data {data}"
                 );
                 if use_efi {
@@ -518,7 +514,7 @@ mod tests {
         assert_eq!(mbr[2], entry(0, 0x83, boot_end + 204800, root_min));
         assert_eq!(
             mbr[3],
-            entry(0, 0x8e, uefi_min_end, g.sectors - uefi_min_end)
+            entry(0, 0x8e, uefi_min_end, disk_sectors(g) - uefi_min_end)
         );
         assert_markers(&mut file, g, uefi_min_end);
     }
@@ -536,7 +532,7 @@ mod tests {
 
         let shifted = (
             u64::from(DATA_START) + 2048,
-            u64::from(g.sectors - DATA_START),
+            u64::from(disk_sectors(g) - DATA_START),
         );
         assert!(rewrite_checked(&mut file, g, 2, shifted, true).is_err());
 
@@ -551,7 +547,10 @@ mod tests {
         let mut file = legacy_disk(g, data_start, 3);
         let sector0 = read_at(&mut file, 0);
 
-        let raw = (u64::from(data_start), u64::from(g.sectors - data_start));
+        let raw = (
+            u64::from(data_start),
+            u64::from(disk_sectors(g) - data_start),
+        );
         assert!(rewrite_checked(&mut file, g, 3, raw, true).is_err());
         assert_eq!(read_at(&mut file, 0), sector0);
 
@@ -560,7 +559,10 @@ mod tests {
         assert_eq!(mbr[1], entry(0x80, 0x0b, 256, 524288));
         assert_eq!(mbr[4], entry(0, 0xef, 524544, 25600));
         assert_eq!(mbr[2], entry(0, 0x83, 550144, data_start - 550144));
-        assert_eq!(mbr[3], entry(0, 0x8e, data_start, g.sectors - data_start));
+        assert_eq!(
+            mbr[3],
+            entry(0, 0x8e, data_start, disk_sectors(g) - data_start)
+        );
         assert_eq!(
             u64::from(mbr[3].starting_lba) * 4096,
             u64::from(DATA_START) * 512
@@ -580,8 +582,8 @@ mod tests {
 
     #[test]
     fn unsupported_sector_size_is_rejected() {
-        assert!(Geometry::new(2048, DISK_BYTES).is_err());
-        assert!(Geometry::new(4096, DISK_BYTES).is_ok());
+        assert!(Geometry::new(2048).is_err());
+        assert!(Geometry::new(4096).is_ok());
     }
 
     #[test]

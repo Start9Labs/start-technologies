@@ -99,13 +99,11 @@ async fn partition(
     protect: Option<&Path>,
     use_efi: bool,
 ) -> Result<OsPartitionInfo, Error> {
-    let partition_type = match (protect.is_none(), partition_table) {
-        (true, _) | (_, None) => PartitionTable::Gpt,
-        (_, Some(t)) => t,
-    };
-    match partition_type {
-        PartitionTable::Gpt => gpt::partition(disk_path, capacity, protect, use_efi).await,
-        PartitionTable::Mbr => mbr::partition(disk_path, capacity, protect, use_efi).await,
+    match (partition_table, protect) {
+        (Some(PartitionTable::Mbr), Some(protect)) => {
+            mbr::partition(disk_path, protect, use_efi).await
+        }
+        _ => gpt::partition(disk_path, capacity, protect, use_efi).await,
     }
 }
 
