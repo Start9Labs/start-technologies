@@ -2810,7 +2810,8 @@ export const DepInfo: z.ZodIntersection<
   })
 export const DerivedAddressInfo: z.ZodObject<{
   /**
-   * Public IP opt-ins.
+   * Public-IP opt-ins name literal addresses and lapse when the gateway renumbers.
+   * An enabled plain public domain carries its group's public IPs across.
    */
   enabled: z.ZodArray<z.ZodString>
   /**
@@ -2874,10 +2875,12 @@ export const DerivedAddressInfo: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   /**
-   * Public IP opt-ins.
+   * Public-IP opt-ins name literal addresses and lapse when the gateway renumbers.
+   * An enabled plain public domain carries its group's public IPs across.
    */
   enabled: z.array(z.string()).meta({
-    description: 'Public IP opt-ins.',
+    description:
+      "Public-IP opt-ins name literal addresses and lapse when the gateway renumbers.\nAn enabled plain public domain carries its group's public IPs across.",
   }),
   /**
    * Named-address and private-IP opt-outs.

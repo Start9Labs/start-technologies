@@ -64,7 +64,8 @@ impl FromStr for BindId {
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct DerivedAddressInfo {
-    /// Public IP opt-ins.
+    /// Public-IP opt-ins name literal addresses and lapse when the gateway renumbers.
+    /// An enabled plain public domain carries its group's public IPs across.
     pub enabled: BTreeSet<SocketAddr>,
     /// Named-address and private-IP opt-outs.
     pub disabled: BTreeSet<(InternedString, u16)>,

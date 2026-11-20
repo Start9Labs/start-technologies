@@ -907,7 +907,7 @@ mod tests {
             ("0.4.1.3", "0.4.2", 0),
             ("0.4.2", "0.4.2.1", 2),
             ("0.4.2.1", "0.4.2.2", 0),
-            ("0.4.2.2", "0.4.3", 0),
+            ("0.4.2.2", "0.4.3", 1),
         ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
@@ -954,10 +954,13 @@ mod tests {
     #[tokio::test]
     async fn software_sharing_preserves_the_released_migration_chain() {
         for (from, expected_todos) in [
-            ("0.4.1.2", vec!["0.4.1.3", "0.4.2", "0.4.2.1", "0.4.3"]),
-            ("0.4.1.3", vec!["0.4.2", "0.4.2.1", "0.4.3"]),
-            ("0.4.2", vec!["0.4.2.1", "0.4.3"]),
-            ("0.4.2.1", vec!["0.4.3"]),
+            (
+                "0.4.1.2",
+                vec!["0.4.1.3", "0.4.2", "0.4.2.1", "0.4.2.2", "0.4.3"],
+            ),
+            ("0.4.1.3", vec!["0.4.2", "0.4.2.1", "0.4.2.2", "0.4.3"]),
+            ("0.4.2", vec!["0.4.2.1", "0.4.2.2", "0.4.3"]),
+            ("0.4.2.1", vec!["0.4.2.2", "0.4.3"]),
         ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
@@ -977,7 +980,10 @@ mod tests {
             upgrade.apply(&previous, &current, &mut db).unwrap();
             let info = &db["public"]["serverInfo"];
             assert_eq!(info["version"], json!("0.4.3"));
-            assert_eq!(info["latestMigrationRevision"], json!(0));
+            assert_eq!(
+                info["latestMigrationRevision"],
+                json!(current.migration_revision())
+            );
             assert_eq!(
                 info["bittorrent"],
                 json!({"downloads": false, "seeding": false})
@@ -1033,10 +1039,13 @@ mod tests {
             upgrade.apply(&previous, &current, &mut db).unwrap();
             let info = &db["public"]["serverInfo"];
             assert_eq!(info["version"], json!("0.4.3"));
-            assert_eq!(info["latestMigrationRevision"], json!(0));
+            assert_eq!(
+                info["latestMigrationRevision"],
+                json!(current.migration_revision())
+            );
             assert_eq!(
                 info["postInitMigrationTodos"],
-                json!({"0.4.2.1": null, "0.4.3": null})
+                json!({"0.4.2.1": null, "0.4.2.2": null, "0.4.3": null})
             );
             assert_eq!(
                 info["bittorrent"],
@@ -1074,7 +1083,10 @@ mod tests {
         assert_eq!(info["registries"], registries);
         assert_eq!(info["osRegistry"], os_registry);
         assert_eq!(info["bittorrent"], preferences);
-        assert_eq!(info["postInitMigrationTodos"], json!({"0.4.3": null}));
+        assert_eq!(
+            info["postInitMigrationTodos"],
+            json!({"0.4.2.2": null, "0.4.3": null})
+        );
         assert_eq!(db["public"]["ui"], ui);
     }
 
@@ -1165,7 +1177,10 @@ mod tests {
                 db["public"]["serverInfo"]["version"],
                 to_value(&current.semver()).unwrap()
             );
-            assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+            assert_eq!(
+                applied_migration_revision(&mut db).unwrap(),
+                current.migration_revision()
+            );
         }
     }
 

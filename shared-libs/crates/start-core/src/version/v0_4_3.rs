@@ -1,7 +1,10 @@
 use exver::VersionRange;
 
 use super::v0_3_5::V0_3_0_COMPAT;
+use super::v0_4_0_2::for_each_host;
 use super::{VersionT, v0_4_2_2};
+use crate::net::host::binding::{DerivedAddressInfo, set_nonssl_wan_group};
+use crate::net::service_interface::HostnameMetadata;
 use crate::prelude::*;
 
 lazy_static::lazy_static! {
@@ -21,6 +24,9 @@ impl VersionT for Version {
     fn semver(self) -> exver::Version {
         V0_4_3.clone()
     }
+    fn migration_revision(self) -> usize {
+        1
+    }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
     }
@@ -34,6 +40,16 @@ impl VersionT for Version {
                     .update(seeding, seeding),
             };
         info.insert("bittorrent".into(), to_value(&preferences)?);
+        for_each_host(db, |host| {
+            let Some(ranges) = host.get_mut("bindingRanges").and_then(Value::as_object_mut) else {
+                return;
+            };
+            for (_, range) in ranges.iter_mut() {
+                if let Some(addresses) = range.get_mut("addresses") {
+                    group_enabled_plain_domains(addresses);
+                }
+            }
+        });
         Ok(Value::Null)
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
@@ -53,8 +69,38 @@ fn server_info(
         .or_not_found("serverInfo")
 }
 
+/// Restores public IPs already exposed by enabled plain public domains of ranges.
+fn group_enabled_plain_domains(addresses: &mut Value) {
+    let Ok(mut info) = from_value::<DerivedAddressInfo>(addresses.clone()) else {
+        return;
+    };
+    let groups: Vec<_> = info
+        .enabled()
+        .into_iter()
+        .filter(|a| !a.ssl)
+        .filter_map(|a| match (&a.metadata, a.port) {
+            (HostnameMetadata::PublicDomain { gateway }, Some(port)) => {
+                Some((gateway.clone(), port))
+            }
+            _ => None,
+        })
+        .collect();
+    if groups.is_empty() {
+        return;
+    }
+    for (gateway, port) in groups {
+        set_nonssl_wan_group(&mut info, &gateway, port, true);
+    }
+    info.refresh_effective();
+    if let Ok(value) = to_value(&info) {
+        *addresses = value;
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use imbl_value::json;
+
     use super::*;
 
     #[test]
@@ -110,5 +156,102 @@ mod tests {
         );
         Version.down(&mut db).unwrap();
         assert_eq!(db, original);
+    }
+
+    fn row(hostname: &str, public: bool, metadata: Value) -> Value {
+        json!({
+            "ssl": false,
+            "public": public,
+            "hostname": hostname,
+            "port": 40000,
+            "metadata": metadata,
+        })
+    }
+
+    fn migrated(addresses: Value) -> Value {
+        let mut db = json!({
+            "public": {
+                "serverInfo": { "network": { "host": { "bindings": {} } } },
+                "packageData": { "service": { "hosts": { "p2p": {
+                    "bindings": {},
+                    "bindingRanges": { "28332": { "addresses": addresses } }
+                } } } }
+            }
+        });
+        db["public"]["serverInfo"]["bittorrent"] = json!({"downloads": true, "seeding": false});
+        Version.up(&mut db, ()).unwrap();
+        assert_eq!(
+            db["public"]["serverInfo"]["bittorrent"],
+            json!({"downloads": true, "seeding": false})
+        );
+        db["public"]["packageData"]["service"]["hosts"]["p2p"]["bindingRanges"]["28332"]
+            ["addresses"]
+            .clone()
+    }
+
+    fn range_on(addresses: Value) -> Vec<String> {
+        let info: DerivedAddressInfo = from_value(addresses).unwrap();
+        info.enabled()
+            .into_iter()
+            .filter(|a| a.public)
+            .map(|a| match a.to_socket_addr() {
+                Some(sa) => sa.to_string(),
+                None => a.hostname.to_string(),
+            })
+            .collect()
+    }
+
+    fn renumbered(domain_disabled: bool) -> Value {
+        let disabled = if domain_disabled {
+            json!([["smp.example.com", 40000]])
+        } else {
+            json!([])
+        };
+        json!({
+            "enabled": ["198.51.100.2:40000"],
+            "disabled": disabled,
+            "available": [
+                row("203.0.113.9", true, json!({ "kind": "ipv4", "gateway": "wg-in" })),
+                row(
+                    "smp.example.com",
+                    true,
+                    json!({ "kind": "public-domain", "gateway": "wg-in" }),
+                ),
+            ],
+        })
+    }
+
+    #[test]
+    fn a_renumbered_range_keeps_its_enabled_plain_domain_and_turns_its_ip_on() {
+        let addresses = migrated(renumbered(false));
+        assert_eq!(
+            range_on(addresses.clone()),
+            ["203.0.113.9:40000", "smp.example.com"]
+        );
+        let info: DerivedAddressInfo = from_value(addresses.clone()).unwrap();
+        assert_eq!(
+            info.effective,
+            info.enabled().into_iter().cloned().collect()
+        );
+        assert_eq!(migrated(addresses.clone()), addresses);
+    }
+
+    #[test]
+    fn a_default_off_range_requires_a_domain_opt_in_before_migration() {
+        let mut addresses = renumbered(false);
+        addresses["defaultOff"] = json!(true);
+        assert!(range_on(migrated(addresses.clone())).is_empty());
+        addresses["enabledNames"] = json!([["smp.example.com", 40000]]);
+        assert_eq!(
+            range_on(migrated(addresses.clone())),
+            ["203.0.113.9:40000", "smp.example.com"]
+        );
+        addresses["disabled"] = json!([["smp.example.com", 40000]]);
+        assert!(range_on(migrated(addresses)).is_empty());
+    }
+
+    #[test]
+    fn a_range_whose_plain_domain_is_off_keeps_its_ip_off() {
+        assert!(range_on(migrated(renumbered(true))).is_empty());
     }
 }

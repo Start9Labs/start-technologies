@@ -4385,7 +4385,7 @@
             "enabled": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "Public IP opt-ins."
+              "description": "Public-IP opt-ins name literal addresses and lapse when the gateway renumbers.\nAn enabled plain public domain carries its group's public IPs across."
             },
             "disabled": {
               "type": "array",
@@ -10735,7 +10735,7 @@
             "enabled": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "Public IP opt-ins."
+              "description": "Public-IP opt-ins name literal addresses and lapse when the gateway renumbers.\nAn enabled plain public domain carries its group's public IPs across."
             },
             "disabled": {
               "type": "array",
@@ -12170,7 +12170,7 @@
             "enabled": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "Public IP opt-ins."
+              "description": "Public-IP opt-ins name literal addresses and lapse when the gateway renumbers.\nAn enabled plain public domain carries its group's public IPs across."
             },
             "disabled": {
               "type": "array",
