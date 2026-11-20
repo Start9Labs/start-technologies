@@ -926,7 +926,14 @@ fn completing_a_migration_step_announces_the_cached_security_release_once() {
     install(&mut db, "0.9.0:0");
     refresh_update_targets(&mut db, &device()).unwrap();
     assert_eq!(update_target(&db).as_deref(), Some("1.0.0:0"));
-    assert!(db.as_private().as_notifications().de().unwrap().0.is_empty());
+    assert!(
+        db.as_private()
+            .as_notifications()
+            .de()
+            .unwrap()
+            .0
+            .is_empty()
+    );
 
     install(&mut db, "1.0.0:0");
     refresh_update_targets(&mut db, &device()).unwrap();
