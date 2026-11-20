@@ -13,6 +13,8 @@ Configure the router's IPv4 Internet connection. The default is DHCP, which work
   - **Subnet Prefix** — The subnet prefix (e.g. `/24`). The equivalent subnet mask is displayed alongside (e.g. `255.255.255.0`).
   - **Gateway IP** — The default gateway provided by your ISP.
 
+  A static address whose network overlaps one of your [Security Profiles](security-profiles.md) is refused.
+
 - **PPPoE** — Used by some DSL providers. Enter the credentials provided by your ISP:
   - **Username** — Your ISP account username.
   - **Password** — Your ISP account password.

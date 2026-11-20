@@ -213,7 +213,7 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::profiles::heal_ipv6_state("/etc/config").await {
             tracing::error!("IPv6 state repair failed: {e}");
         }
-        if let Err(e) = crate::wan_overlap::resolve(ctx.clone()).await {
+        if let Err(e) = crate::subnets::resolve(ctx.clone()).await {
             tracing::error!("WAN subnet overlap repair failed: {e}");
         }
         // Installs the hairpin accept and the IPv6 MAC binding, and re-derives

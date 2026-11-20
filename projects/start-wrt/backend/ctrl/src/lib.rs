@@ -46,6 +46,7 @@ pub use startos::sign;
 pub mod ssh_keys;
 pub mod ssh_sessions;
 pub mod ssl;
+pub mod subnets;
 pub mod system;
 pub mod tls;
 pub mod uci;
@@ -56,7 +57,6 @@ pub mod verify;
 pub mod vpn_client;
 pub mod vpn_server;
 pub mod wan;
-pub mod wan_overlap;
 pub mod wg;
 pub mod wifi;
 

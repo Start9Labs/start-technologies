@@ -474,6 +474,8 @@ struct WanIpv4SetRequest {
 }
 // Response: null
 // Backend: updates UCI network.wan, restarts network
+// Validation: a static address whose network overlaps any profile's /24 is
+//   InvalidRequest (see Subnet rules under profiles).
 ```
 
 ### `wan.ipv6-get`
@@ -711,22 +713,13 @@ struct LanIpv4SetRequest {
 // reloads the firewall and dnsmasq, and restarts Wi-Fi.
 // Inbound VPN peers the change would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
-// Validation: address must fall inside an RFC 1918 block at one of the
-//   selectable /16 boundaries, else ErrorKind::InvalidRequest:
+// Validation: the Subnet rules under profiles, for the LAN and, on a block
+//   change, every profile it moves. The LAN address must fall inside an
+//   RFC 1918 block at one of the selectable /16 boundaries:
 //     10.0.0.0/8     — second octet 0..=255
 //     172.16.0.0/12  — second octet 16..=31
 //     192.168.0.0/16 — second octet == 168
-//   (3rd/4th octets unconstrained.) The same rule is enforced on the admin
-//   profile via profiles.set/create; non-admin profiles must additionally
-//   share the admin LAN's first two octets (stay inside its /16).
-//   The target /24 must not collide with another profile's subnet, else
-//   ErrorKind::SubnetCollision (same guard as profiles.create/profiles.edit;
-//   on a block change the check applies post-move, since every profile keeps
-//   its 3rd octet). A re-set of the current subnet always passes.
-//   A changed subnet that overlaps a WAN IPv4 network is InvalidRequest;
-//   a block change checks every profile's resulting subnet.
-//   Changing the address while a DHCP reservation sits in the old /24 (the old
-//   /16 on a block change) is rejected with ErrorKind::DhcpStaticHostsInSubnet.
+//   (3rd/4th octets unconstrained.) A re-set of the current address always passes.
 ```
 
 ### `lan.ipv6-get`
@@ -2036,16 +2029,29 @@ struct Profile<ProfileIdOpt> {
     dns_source: String,
 }
 // Response: ProfileId
-// Validation: gateway_ip must stay inside the LAN network block (see
-//   lan.ipv4-set). owns_lan profiles must be a valid RFC 1918 selection;
-//   others must share the admin LAN's first two octets, else InvalidRequest.
-//   outbound must be "wan" or an outbound VPN that vpn-client.list reports as
+// Validation: the Subnet rules below. outbound must be "wan" or an outbound VPN that vpn-client.list reports as
 //   enabled: an unknown interface (or one that is a VPN server rather than a
 //   client) is ErrorKind::NotFound, a disabled one ErrorKind::VpnDisabled.
 //   A disabled VPN's tunnel never comes up, so routing a profile through it
-//   would blackhole that profile. A gateway_ip whose /24 overlaps a WAN
-//   IPv4 network is InvalidRequest.
+//   would blackhole that profile.
 ```
+
+### Subnet rules
+
+Every write that adds or moves a profile or LAN gateway (`profiles.create`,
+`profiles.set`, `lan.ipv4-set`, and the moves `profiles.resolve-wan-overlap`
+makes), or changes the static WAN address (`wan.ipv4-set`), is checked against
+the configuration it is about to save. Each added or moved `/24`:
+
+- stays inside the LAN network block; the LAN itself must be an RFC 1918
+  selection (`InvalidRequest`);
+- holds no other profile's `/24` (`SubnetCollision`);
+- overlaps no WAN IPv4 network, live or static (`InvalidRequest`);
+- leaves no DHCP reservation in the `/24` it moved off (`DhcpStaticHostsInSubnet`).
+
+A changed static WAN network is checked against every profile. Subnets the
+write leaves unchanged always pass, so an already conflicting configuration
+stays editable.
 
 On create and set, `lan_access: "ALL"` stores `access_to_new_profiles: true`,
 `"SAME_PROFILE"` stores `false`, and `other_profiles` preserves the supplied flag.
@@ -2068,9 +2074,8 @@ struct ProfileSetRequest {
     force: bool,
 }
 // Response: ProfileId
-// Validation: same gateway_ip and outbound checks as profiles.create; the WAN
-//   overlap check applies when gateway_ip changes, and to every profile when a
-//   LAN owner's change moves the network block.
+// Validation: same checks as profiles.create; a LAN owner's change that moves
+//   the network block applies the Subnet rules to every profile it moves.
 // Inbound VPN peers the new subnet would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
 ```

@@ -136,7 +136,7 @@ pub fn profiles<C: CtrlContext>() -> ParentHandler<C> {
         )
         .subcommand(
             "resolve-wan-overlap",
-            from_fn_async_local(crate::wan_overlap::resolve::<C>).no_display(),
+            from_fn_async_local(crate::subnets::resolve::<C>).no_display(),
         )
 }
 
@@ -1421,6 +1421,7 @@ pub async fn set<C: CtrlContext>(
             &["startwrt", "network", "firewall", "dhcp"],
         )
         .await?;
+        let before = crate::subnets::Subnets::of(&cfgs);
 
         // Capture old LAN IP before set_config modifies it
         let old_lan_ip = if profile.owns_lan {
@@ -1465,7 +1466,6 @@ pub async fn set<C: CtrlContext>(
                 profile.gateway_ip,
                 &pi,
             )?;
-            crate::wan_overlap::guard_all(&ctx, &cfgs)?;
             let mut v = vec![crate::lan::LAN_INTERFACE.to_string()];
             v.extend(pi);
             v
@@ -1473,18 +1473,7 @@ pub async fn set<C: CtrlContext>(
             vec![crate::lan::LAN_INTERFACE.to_string()]
         };
 
-        // Guard: reject subnet change when DHCP static hosts exist in the old subnet
-        if let Some(old_gw) = old_state.as_ref().and_then(|s| s.gateway_ip) {
-            if old_gw != profile.gateway_ip {
-                crate::wan_overlap::guard(&ctx, profile.gateway_ip)?;
-                let o = old_gw.octets();
-                if block_changed {
-                    crate::lan::guard_dhcp_static_hosts(&cfgs, &[o[0], o[1]])?;
-                } else {
-                    crate::lan::guard_dhcp_static_hosts(&cfgs, &[o[0], o[1], o[2]])?;
-                }
-            }
-        }
+        crate::subnets::check(&ctx, &before, &cfgs)?;
 
         // Guard: check if IP change would break VPN peers
         let ip_changed = old_state
@@ -1602,106 +1591,11 @@ pub(crate) fn get_lan_ip(cfgs: &uciedit::Configs) -> Option<Ipv4Addr> {
     None
 }
 
-/// Validate a profile's gateway IP stays within the allowed network block.
-///
-/// The LAN-owning (admin) profile defines the block, so it must itself be a
-/// valid RFC 1918 selection — the same rule `lan::ipv4_set` enforces (this is a
-/// second path that sets the LAN /16). Every other profile must live inside the
-/// admin LAN's /16 (matching first two octets) so VLAN subnets can't escape the
-/// chosen private range — `sync_cross_subnet_routes` assumes siblings share the
-/// block, and an out-of-block subnet would also dodge the LAN-level boundary.
-fn validate_profile_block(cfgs: &Configs, profile: &Profile<ProfileIdOpt>) -> Result<(), Error> {
-    if profile.owns_lan {
-        return crate::lan::validate_lan_block(profile.gateway_ip);
-    }
-    if let Some(lan) = get_lan_ip(cfgs) {
-        let g = profile.gateway_ip.octets();
-        let l = lan.octets();
-        if g[0] != l[0] || g[1] != l[1] {
-            return Err(Error::new(
-                eyre!(
-                    "profile subnet {} is outside the LAN network block {}.{}.0.0/16",
-                    profile.gateway_ip,
-                    l[0],
-                    l[1]
-                ),
-                ErrorKind::InvalidRequest,
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// Reject a profile gateway whose /24 collides with another profile's subnet.
-///
-/// Every profile — including the admin LAN (`owns_lan`) — must occupy a distinct
-/// /24 within the shared /16. Two interfaces on the same /24 produce overlapping
-/// connected routes and a duplicate gateway IP, which silently breaks L3
-/// reachability to the router. The web UI blocks this per-field
-/// (`duplicateSubnet`), but a direct RPC/CLI call bypasses that, so enforce it
-/// on the backend too. `self_interface` is the interface being changed; its own
-/// subnet is skipped so a no-op edit passes.
-pub(crate) fn guard_subnet_collision(
-    cfgs: &Configs,
-    gateway_ip: Ipv4Addr,
-    self_interface: Option<&str>,
-) -> Result<(), Error> {
-    let new = gateway_ip.octets();
-    // Read the current /24 of the interface being changed. Only enforce on an
-    // actual subnet change — a no-op edit (e.g. changing DNS) must not be blocked
-    // by a collision that already exists in the stored config.
-    let current_ip = self_interface.and_then(|iface| {
-        cfgs["network"]
-            .sections
-            .iter()
-            .find(|s| s.name().as_deref() == Some(iface))
-            .and_then(|s| s.get_typed::<NetworkInterface>().ok().flatten())
-            .and_then(|i| i.ipv4())
-    });
-    if let Some(cur) = current_ip {
-        let c = cur.octets();
-        if c[0] == new[0] && c[1] == new[1] && c[2] == new[2] {
-            return Ok(());
-        }
-    }
-    for section in &cfgs["startwrt"].sections {
-        let Ok(existing) = section.get::<UciProfile>() else {
-            continue;
-        };
-        if Some(existing.interface.as_str()) == self_interface {
-            continue;
-        }
-        let existing_ip = cfgs["network"]
-            .sections
-            .iter()
-            .find(|s| s.name().as_deref() == Some(existing.interface.as_str()))
-            .and_then(|s| s.get_typed::<NetworkInterface>().ok().flatten())
-            .and_then(|i| i.ipv4());
-        if let Some(ip) = existing_ip {
-            let o = ip.octets();
-            if o[0] == new[0] && o[1] == new[1] && o[2] == new[2] {
-                return Err(Error::new(
-                    eyre!(
-                        "subnet {}.{}.{}.0/24 is already in use by profile '{}'",
-                        new[0],
-                        new[1],
-                        new[2],
-                        existing.fullname
-                    ),
-                    ErrorKind::SubnetCollision,
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
 fn set_config<C: CtrlContext>(
     ctx: C,
     cfgs: &mut Configs,
     profile: &Profile<ProfileIdOpt>,
 ) -> Result<(ProfileId, Option<OldProfileState>), Error> {
-    validate_profile_block(cfgs, profile)?;
     crate::vpn_client::guard_outbound_available(cfgs, &profile.outbound)?;
     let ipv6 = is_ipv6_enabled(cfgs) && outbound_supports_ipv6(cfgs, &profile.outbound);
     // Check fullname uniqueness before renaming
@@ -1774,10 +1668,6 @@ fn set_config<C: CtrlContext>(
         &profile.lan_access,
         profile.access_to_new_profiles,
     )?;
-    // Reject a /24 that collides with a sibling (or the admin LAN). Runs on the
-    // resolved interface, before the network config is mutated below, so the
-    // profile's own current subnet is correctly skipped.
-    guard_subnet_collision(cfgs, profile.gateway_ip, Some(&profile.id.interface))?;
     let found_bridge = find_lan_bridge(cfgs)?.map(|dev| dev.name);
     let mut all_interfaces = BTreeSet::<String>::new();
     let mut found_interface = false;
@@ -1894,7 +1784,6 @@ pub async fn create<C: CtrlContext>(
     DeserializeStdin(profile): DeserializeStdin<Profile<ProfileIdOpt>>,
 ) -> Result<ProfileId, Error> {
     let name = profile.id.fullname.clone().unwrap_or_default();
-    crate::wan_overlap::guard(&ctx, profile.gateway_ip)?;
     // Pre-allocate the interface id before the retry loop to avoid holding the
     // !Send Arena across an .await point. Gather the ids already in use (in their
     // own arena scope, dropped before the loop) so the random allocation avoids
@@ -1920,12 +1809,15 @@ pub async fn create<C: CtrlContext>(
             &["startwrt", "network", "firewall", "dhcp", "wireless"],
         )
         .await?;
+        let before = crate::subnets::Subnets::of(&cfgs);
         let out = match create_config(
             ctx.clone(),
             &mut cfgs,
             &profile,
             pre_allocated_interface.clone(),
-        ) {
+        )
+        .and_then(|out| crate::subnets::check(&ctx, &before, &cfgs).map(|()| out))
+        {
             Ok(out) => out,
             Err(e) => {
                 crate::activity::log(
@@ -1986,11 +1878,7 @@ fn create_config(
     profile: &Profile<ProfileIdOpt>,
     pre_allocated_interface: Option<String>,
 ) -> Result<ProfileId, Error> {
-    validate_profile_block(cfgs, profile)?;
     crate::vpn_client::guard_outbound_available(cfgs, &profile.outbound)?;
-    // The new interface isn't in the config yet, so no self-exclusion is needed:
-    // reject if the requested /24 already belongs to any existing profile.
-    guard_subnet_collision(cfgs, profile.gateway_ip, None)?;
     let ipv6 = is_ipv6_enabled(cfgs) && outbound_supports_ipv6(cfgs, &profile.outbound);
     let interface = if profile.owns_lan {
         if Lookup::parse(ctx.clone(), cfgs)?.lan_owner.is_some() {
@@ -5388,98 +5276,19 @@ config dhcp 'lan'
     }
 
     #[tokio::test]
-    async fn set_config_rejects_out_of_block_subnet() {
+    async fn set_rejects_out_of_block_subnet() {
         let dir = tempfile::tempdir().unwrap();
         let ctx = TestContext(dir.path().to_path_buf());
         setup_configs(dir.path()); // LAN is 192.168.1.1
+        let network = std::fs::read_to_string(dir.path().join("network")).unwrap();
 
-        let arena = Arena::new();
-        let mut cfgs = parse_all(
-            ctx.uci_root(),
-            &arena,
-            &["startwrt", "network", "firewall", "dhcp"],
-        )
-        .await
-        .unwrap();
-
-        // Non-admin profile whose subnet escapes the LAN's 192.168.0.0/16 block.
-        let escaping = Profile {
+        let profile = |interface: &str, gateway_ip: Ipv4Addr, owns_lan: bool| Profile {
             id: ProfileIdOpt {
-                fullname: Some("Guest".into()),
-                interface: Some("guest".into()),
-                vlan_tag: Some(101),
+                fullname: None,
+                interface: Some(interface.into()),
+                vlan_tag: None,
             },
-            gateway_ip: Ipv4Addr::new(10, 0, 5, 1),
-            outbound: "wan".into(),
-            lan_access: LanAccess::SameProfile,
-            wan_access: WanAccess::All,
-            dns_override: Vec::new(),
-            dns_source: String::new(),
-            access_to_new_profiles: false,
-            owns_lan: false,
-        };
-        let err = set_config(ctx.clone(), &mut cfgs, &escaping).unwrap_err();
-        assert_eq!(
-            err.kind,
-            ErrorKind::InvalidRequest,
-            "non-admin subnet outside the LAN /16 must be rejected"
-        );
-
-        // The admin profile defines the block, so it must itself be a valid
-        // RFC 1918 selection — this is a second path that sets the LAN /16.
-        let bad_admin = Profile {
-            id: ProfileIdOpt {
-                fullname: Some("Admin".into()),
-                interface: Some("lan".into()),
-                vlan_tag: Some(99),
-            },
-            gateway_ip: Ipv4Addr::new(8, 8, 8, 8),
-            outbound: "wan".into(),
-            lan_access: LanAccess::All,
-            wan_access: WanAccess::All,
-            dns_override: Vec::new(),
-            dns_source: String::new(),
-            access_to_new_profiles: true,
-            owns_lan: true,
-        };
-        let err = set_config(ctx.clone(), &mut cfgs, &bad_admin).unwrap_err();
-        assert_eq!(
-            err.kind,
-            ErrorKind::InvalidRequest,
-            "admin gateway outside RFC 1918 ranges must be rejected"
-        );
-    }
-
-    #[tokio::test]
-    async fn validate_profile_block_accepts_alternate_rfc1918_block() {
-        // A LAN in 10.42.0.0/16 must accept siblings within that block and an
-        // admin keeping a valid RFC 1918 selection, while still rejecting a
-        // sibling that leaves the block. Locks in that non-192.168 blocks pass.
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("network"),
-            "\
-config interface 'lan'
-\toption device 'br-lan'
-\toption proto 'static'
-\toption ipaddr '10.42.1.1'
-\toption netmask '255.255.255.0'
-",
-        )
-        .unwrap();
-        let ctx = TestContext(dir.path().to_path_buf());
-        let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"])
-            .await
-            .unwrap();
-
-        let make = |gw: Ipv4Addr, owns_lan: bool| Profile {
-            id: ProfileIdOpt {
-                fullname: Some("X".into()),
-                interface: Some("guest".into()),
-                vlan_tag: Some(101),
-            },
-            gateway_ip: gw,
+            gateway_ip,
             outbound: "wan".into(),
             lan_access: LanAccess::SameProfile,
             wan_access: WanAccess::All,
@@ -5488,138 +5297,31 @@ config interface 'lan'
             access_to_new_profiles: false,
             owns_lan,
         };
-
-        // Sibling inside the LAN's 10.42.0.0/16 — accepted.
-        validate_profile_block(&cfgs, &make(Ipv4Addr::new(10, 42, 5, 1), false))
-            .expect("sibling in the LAN /16 should be accepted");
-        // Admin keeping a valid RFC 1918 selection — accepted.
-        validate_profile_block(&cfgs, &make(Ipv4Addr::new(10, 42, 1, 1), true))
-            .expect("admin in a valid RFC 1918 block should be accepted");
-        // Sibling escaping the block — still rejected.
-        let err =
-            validate_profile_block(&cfgs, &make(Ipv4Addr::new(192, 168, 5, 1), false)).unwrap_err();
-        assert_eq!(err.kind, ErrorKind::InvalidRequest);
-    }
-
-    #[tokio::test]
-    async fn guard_subnet_collision_detects_and_allows() {
-        // lan=10.0.0.1, guest=10.0.5.1. No profile (including the admin LAN) may
-        // land on another's /24, but a free /24 and a no-op self-edit both pass.
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("network"),
-            "\
-config interface 'lan'
-\toption device 'br-lan.1'
-\toption proto 'static'
-\toption ipaddr '10.0.0.1'
-\toption netmask '255.255.255.0'
-
-config interface 'guest'
-\toption device 'br-lan.101'
-\toption proto 'static'
-\toption ipaddr '10.0.5.1'
-\toption netmask '255.255.255.0'
-",
-        )
-        .unwrap();
-        std::fs::write(
-            dir.path().join("startwrt"),
-            "\
-config profile lan
-\toption fullname 'Admin'
-\toption interface 'lan'
-\toption vlan_tag '99'
-
-config profile guest
-\toption fullname 'Guest'
-\toption interface 'guest'
-\toption vlan_tag '101'
-",
-        )
-        .unwrap();
-        let ctx = TestContext(dir.path().to_path_buf());
-        let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["startwrt", "network"])
+        for (escaping, why) in [
+            (
+                profile("guest", Ipv4Addr::new(10, 0, 5, 1), false),
+                "non-admin subnet outside the LAN /16 must be rejected",
+            ),
+            (
+                profile("lan", Ipv4Addr::new(8, 8, 8, 8), true),
+                "admin gateway outside RFC 1918 ranges must be rejected",
+            ),
+        ] {
+            let err = set(
+                ctx.clone(),
+                DeserializeStdin(ProfileSetRequest {
+                    profile: escaping,
+                    force: false,
+                }),
+            )
             .await
-            .unwrap();
-
-        // New profile onto the guest's /24 — rejected.
-        let err = guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 5, 1), None).unwrap_err();
-        assert_eq!(err.kind, ErrorKind::SubnetCollision);
-
-        // New profile onto the admin LAN's /24 — also rejected.
-        let err = guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 0, 1), None).unwrap_err();
-        assert_eq!(err.kind, ErrorKind::SubnetCollision);
-
-        // Editing the admin LAN onto the guest's /24 — rejected (the reported bug).
-        let err =
-            guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 5, 1), Some("lan")).unwrap_err();
-        assert_eq!(err.kind, ErrorKind::SubnetCollision);
-
-        // A free /24 — accepted.
-        guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 9, 1), None)
-            .expect("an unused /24 must be accepted");
-
-        // No-op edits: a profile keeping its own /24 is skipped via self_interface.
-        guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 5, 1), Some("guest"))
-            .expect("a profile keeping its own subnet must be accepted");
-        guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 0, 1), Some("lan"))
-            .expect("the admin keeping its own subnet must be accepted");
-    }
-
-    #[tokio::test]
-    async fn guard_subnet_collision_allows_noop_edit_of_already_broken_config() {
-        // Two profiles already share a /24 (the stranded state). Editing one
-        // without changing its subnet (e.g. a DNS change) must NOT be blocked —
-        // the guard only prevents *introducing* a collision, so recovery edits
-        // stay possible.
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("network"),
-            "\
-config interface 'lan'
-\toption device 'br-lan.1'
-\toption proto 'static'
-\toption ipaddr '10.0.15.1'
-\toption netmask '255.255.255.0'
-
-config interface 'guest'
-\toption device 'br-lan.101'
-\toption proto 'static'
-\toption ipaddr '10.0.15.1'
-\toption netmask '255.255.255.0'
-",
-        )
-        .unwrap();
-        std::fs::write(
-            dir.path().join("startwrt"),
-            "\
-config profile lan
-\toption fullname 'Admin'
-\toption interface 'lan'
-\toption vlan_tag '99'
-
-config profile guest
-\toption fullname 'Guest'
-\toption interface 'guest'
-\toption vlan_tag '101'
-",
-        )
-        .unwrap();
-        let ctx = TestContext(dir.path().to_path_buf());
-        let arena = Arena::new();
-        let cfgs = parse_all(ctx.uci_root(), &arena, &["startwrt", "network"])
-            .await
-            .unwrap();
-
-        // No-op edit of the admin (subnet unchanged) — allowed despite the
-        // pre-existing collision with guest.
-        guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 15, 1), Some("lan"))
-            .expect("a no-op subnet edit must pass even when the config is already colliding");
-        // Moving the admin off the collision to a free /24 — allowed (recovery).
-        guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 20, 1), Some("lan"))
-            .expect("moving off a collision to a free /24 must be accepted");
+            .unwrap_err();
+            assert_eq!(err.kind, ErrorKind::InvalidRequest, "{why}");
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("network")).unwrap(),
+                network
+            );
+        }
     }
 
     #[tokio::test]

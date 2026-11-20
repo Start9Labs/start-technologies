@@ -4,10 +4,10 @@ use std::net::Ipv4Addr;
 use rpc_toolkit::{from_fn_async_local, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
-    Dhcp, DhcpHost, FirewallRedirect, FirewallRule, NetworkInterface, NetworkRoute, NetworkRule,
+    Dhcp, FirewallRedirect, FirewallRule, NetworkInterface, NetworkRoute, NetworkRule,
     ProfileDnsmasq,
 };
-use uciedit::{dump_all, parse_all, Arena, Configs};
+use uciedit::{dump_all, parse_all, Arena};
 
 use crate::invoke::Invoke;
 use crate::prelude::*;
@@ -27,23 +27,6 @@ pub const LAN_NETMASK: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);
 ///
 /// The third/fourth octets (subnet + host within the block) are intentionally
 /// unconstrained — they're the user's `routerOctet` and the fixed `.1` host.
-/// The gateway to collision-test when the LAN moves from `current` to `new`.
-///
-/// On a network-block change every profile keeps its 3rd octet (see
-/// [`update_profile_ips_for_block_change`]), so testing the new 3rd octet inside
-/// the *current* block is equivalent to testing the post-move state — and it
-/// lets the guard run before any config is mutated. With no current address
-/// there is nothing to translate; test the requested address as-is.
-fn subnet_guard_ip(current: Option<Ipv4Addr>, new: Ipv4Addr) -> Ipv4Addr {
-    match current {
-        Some(old) => {
-            let (o, n) = (old.octets(), new.octets());
-            Ipv4Addr::new(o[0], o[1], n[2], n[3])
-        }
-        None => new,
-    }
-}
-
 pub(crate) fn validate_lan_block(addr: Ipv4Addr) -> Result<(), Error> {
     if addr.is_private() {
         Ok(())
@@ -193,10 +176,6 @@ pub async fn ipv4_set<C: CtrlContext>(
             ErrorKind::ParseNetAddress,
         )
     })?;
-    // Enforce the RFC 1918 block boundaries the UI exposes — fail before
-    // touching any config so a bad value can't partially apply.
-    validate_lan_block(address)?;
-
     let mut retries = 4;
     loop {
         let arena = Arena::new();
@@ -207,22 +186,7 @@ pub async fn ipv4_set<C: CtrlContext>(
         )
         .await?;
 
-        // Reject a /24 owned by another profile before touching any config — a
-        // colliding LAN subnet strands the router (same guard as
-        // profiles.create/profiles.edit; the UI can no longer produce this, but
-        // a direct RPC/CLI call can). Must run before the mutation below: the
-        // guard reads the LAN's current address to allow no-op edits.
-        let current_lan_ip = cfgs["network"]
-            .sections
-            .iter()
-            .find(|s| s.name().as_deref() == Some(LAN_INTERFACE))
-            .and_then(|s| s.get_typed::<NetworkInterface>().ok().flatten())
-            .and_then(|i| i.ipv4());
-        profiles::guard_subnet_collision(
-            &cfgs,
-            subnet_guard_ip(current_lan_ip, address),
-            Some(LAN_INTERFACE),
-        )?;
+        let before = crate::subnets::Subnets::of(&cfgs);
 
         // Update LAN interface, capturing old IP to detect network block changes
         let mut old_address: Option<Ipv4Addr> = None;
@@ -267,17 +231,7 @@ pub async fn ipv4_set<C: CtrlContext>(
         };
 
         let ip_changed = old_address.map(|old| old != address).unwrap_or(false);
-        if block_changed {
-            crate::wan_overlap::guard_all(&ctx, &cfgs)?;
-            let old = old_address.unwrap().octets();
-            guard_dhcp_static_hosts(&cfgs, &[old[0], old[1]])?;
-        } else if ip_changed {
-            crate::wan_overlap::guard(&ctx, address)?;
-            if let Some(old) = old_address {
-                let o = old.octets();
-                guard_dhcp_static_hosts(&cfgs, &[o[0], o[1], o[2]])?;
-            }
-        }
+        crate::subnets::check(&ctx, &before, &cfgs)?;
 
         // Guard: check if IP change would break VPN peers
         let removed_vpns = if ip_changed {
@@ -626,38 +580,6 @@ pub async fn ipv6_set<C: CtrlContext>(
             }
         }
     }
-}
-
-/// Guard: reject subnet changes when DHCP static hosts exist in the affected subnet.
-/// `old_prefix` is 2 bytes for a block change (first two octets) or 3 bytes for a
-/// single-profile subnet change (first three octets).
-///
-/// Note: this must run after `update_profile_ips_for_block_change` is safe because
-/// that function does not touch DHCP host sections — the old static IPs are still present.
-pub(crate) fn guard_dhcp_static_hosts(cfgs: &Configs, old_prefix: &[u8]) -> Result<(), Error> {
-    let affected: Vec<String> = cfgs["dhcp"]
-        .sections
-        .iter()
-        .filter_map(|section| section.get::<DhcpHost>().ok())
-        .filter_map(|host| {
-            let ip: Ipv4Addr = host.ip.as_deref()?.parse().ok()?;
-            let octets = ip.octets();
-            if old_prefix.iter().enumerate().all(|(i, &p)| octets[i] == p) {
-                let label = host.name.as_deref().unwrap_or(&host.mac);
-                Some(format!("{} ({})", label, ip))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if !affected.is_empty() {
-        return Err(Error::new(
-            eyre!("cannot change subnet while devices have static IP reservations: {affected:?}"),
-            ErrorKind::DhcpStaticHostsInSubnet,
-        ));
-    }
-    Ok(())
 }
 
 /// Update all profile network interface IPs and routing rules when the network
@@ -1352,31 +1274,6 @@ config profile guest
         // Block change keeping the LAN's own 3rd octet — allowed.
         set("10.0.1.1").await.unwrap();
         assert_eq!(ipv4_get(ctx.clone()).await.unwrap().address, "10.0.1.1");
-    }
-
-    #[test]
-    fn subnet_guard_ip_translates_into_current_block() {
-        // Block change: test the new 3rd octet inside the current block.
-        assert_eq!(
-            subnet_guard_ip(
-                Some(Ipv4Addr::new(192, 168, 1, 1)),
-                Ipv4Addr::new(10, 0, 2, 1)
-            ),
-            Ipv4Addr::new(192, 168, 2, 1)
-        );
-        // Same block: passes through unchanged.
-        assert_eq!(
-            subnet_guard_ip(
-                Some(Ipv4Addr::new(192, 168, 1, 1)),
-                Ipv4Addr::new(192, 168, 5, 1)
-            ),
-            Ipv4Addr::new(192, 168, 5, 1)
-        );
-        // No current address: nothing to translate.
-        assert_eq!(
-            subnet_guard_ip(None, Ipv4Addr::new(10, 0, 2, 1)),
-            Ipv4Addr::new(10, 0, 2, 1)
-        );
     }
 
     // ── IPv6 tests ──────────────────────────────────────────────

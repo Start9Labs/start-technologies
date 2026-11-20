@@ -394,7 +394,8 @@ pub async fn ipv4_set<C: CtrlContext>(
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await?;
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "dhcp"]).await?;
+        let before = crate::subnets::Subnets::of(&cfgs);
 
         let mut found = false;
         for section in &mut cfgs["network"].sections {
@@ -452,6 +453,7 @@ pub async fn ipv4_set<C: CtrlContext>(
                 ErrorKind::MissingWanInterface,
             ));
         }
+        crate::subnets::check(&ctx, &before, &cfgs)?;
 
         let dump_result = dump_all(ctx.uci_root(), cfgs).await;
         drop(arena);

@@ -52,7 +52,7 @@ struct SystemInfoResponse {
     theme: String,
     remote_access: String,
     timezone: String,
-    wan_overlaps: Vec<crate::wan_overlap::WanOverlap>,
+    wan_overlaps: Vec<crate::subnets::WanOverlap>,
 }
 rpc_toolkit::reflect_ts!(SystemInfoResponse);
 
@@ -112,7 +112,7 @@ async fn info<C: CtrlContext>(ctx: C) -> Result<SystemInfoResponse, Error> {
         theme: prefs.theme,
         remote_access: prefs.remote_access,
         timezone,
-        wan_overlaps: crate::wan_overlap::overlaps(ctx).await.unwrap_or_else(|e| {
+        wan_overlaps: crate::subnets::overlaps(ctx).await.unwrap_or_else(|e| {
             tracing::warn!("Failed to check profile subnets against the WAN: {e}");
             Vec::new()
         }),
@@ -291,7 +291,7 @@ pub(crate) fn read_wan_ipv4_networks() -> Option<Vec<ipnet::Ipv4Net>> {
         return None;
     }
     let json = serde_json::from_slice::<serde_json::Value>(&out.stdout).ok()?;
-    Some(crate::wan_overlap::parse_ubus_ipv4(&json))
+    Some(crate::subnets::parse_ubus_ipv4(&json))
 }
 
 pub async fn get_wan_ipv6s() -> Result<Vec<Ipv6Addr>, Error> {
