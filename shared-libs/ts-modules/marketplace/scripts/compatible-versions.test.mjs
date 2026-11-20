@@ -16,6 +16,18 @@ const compilerOptions = ts.convertCompilerOptionsFromJson(
 ).options
 
 registerHooks({
+  resolve(specifier, context, next) {
+    if (specifier === '@start9labs/shared') {
+      return {
+        url: new URL(
+          '../../shared/src/services/exver.service.ts',
+          import.meta.url,
+        ).href,
+        shortCircuit: true,
+      }
+    }
+    return next(specifier, context)
+  },
   load(url, context, next) {
     if (!url.endsWith('.ts')) return next(url, context)
     return {
@@ -30,6 +42,7 @@ registerHooks({
 const { Exver } = await import('../../shared/src/services/exver.service.ts')
 const { compatibleVersions } =
   await import('../src/util/compatible-versions.ts')
+const { pendingReleases } = await import('../src/util/releases.ts')
 
 const exver = new Exver()
 const otherVersions = {
@@ -72,6 +85,37 @@ test('the best release matches by its own version or a satisfies alias', () => {
     '2.0.2-stable:3',
     '2.0.0:0',
   ])
+})
+
+test('pending notes include superseded security releases, newest first within the installed flavor and version interval', () => {
+  const pkg = {
+    version: '2.0.0:0',
+    flavor: null,
+    security: false,
+    otherVersions: {
+      '0.9.0:0': { releaseNotes: 'Before installed' },
+      '1.0.0:0': { releaseNotes: 'Installed' },
+      '1.0.0:1': {
+        releaseNotes: 'Security fix',
+        security: true,
+        superseded: true,
+      },
+      '1.5.0:0': { releaseNotes: 'Intermediate' },
+      '2.1.0:0': { releaseNotes: 'After target' },
+      '#quantum:1.5.0:0': { releaseNotes: 'Other flavor', security: true },
+    },
+  }
+  const releases = pendingReleases(exver, pkg, '1.0.0:0')
+  assert.deepEqual(
+    releases.map(release => release.version),
+    ['2.0.0:0', '1.5.0:0', '1.0.0:1'],
+  )
+  assert.equal(releases.at(-1).security, true)
+  assert.deepEqual(pendingReleases(exver, pkg), [pkg])
+})
+
+test('switching marketplace flavors does not present that flavor history as skipped updates', () => {
+  assert.deepEqual(pendingReleases(exver, flavors[1], '1.0.0:0'), [flavors[1]])
 })
 
 test('no flavor offers a version when no release satisfies the range', () => {

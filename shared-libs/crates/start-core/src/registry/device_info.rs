@@ -252,6 +252,12 @@ impl WireCompatibility {
         Ok(wire)
     }
 
+    /// Package-list-only compatibility must not split identical index mirrors.
+    pub(crate) fn for_index(mut self) -> Self {
+        self.hide_superseded = false;
+        self
+    }
+
     pub(crate) async fn project(
         &self,
         dir: &Path,

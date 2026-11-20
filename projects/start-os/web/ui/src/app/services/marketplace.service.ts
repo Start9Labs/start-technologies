@@ -230,7 +230,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
   ): Observable<MarketplacePkg | null> {
     return this.watchRegistry$(url).pipe(
       filter(registryReady),
-      switchMap(() =>
+      switchMap(entry =>
         defer(() =>
           this.api.rpc.registry.package
             .get({
@@ -240,7 +240,17 @@ export class MarketplaceService extends AbstractMarketplaceService {
               sourceVersion,
               otherVersions: 'short',
             })
-            .then(packageResponse),
+            .then(result => {
+              const pkg = packageResponse(result)
+              return {
+                ...pkg,
+                // Target and migration filters select candidates, not release-note history.
+                otherVersions: {
+                  ...packagesResponse(entry.packages)[id]?.otherVersions,
+                  ...pkg.otherVersions,
+                },
+              }
+            }),
         ),
       ),
       map(pkgInfo =>

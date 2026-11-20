@@ -4851,6 +4851,34 @@ test('marketplace lists and metadata stream from canonical cache keys without na
   assert.deepEqual(f.queries, [])
 })
 
+for (const [version, source] of [
+  ['2.0.0:0', null],
+  [null, '1.0.0:0'],
+]) {
+  test(`filtered package query retains cached release history (${version}, ${source})`, async t => {
+    const entry = registryEntry('3.0.0:0')
+    entry.packages.example.otherVersions = {
+      '1.1.0:0': { releaseNotes: 'Security fix', security: true },
+    }
+    const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+    const values = f.watch(
+      f.service.fetchPackage$(
+        'https://registry.test/',
+        'example',
+        version,
+        null,
+        source,
+      ),
+    )
+    f.responses[0].resolve(registryEntry('2.0.0:0').packages.example)
+    await tick()
+    assert.equal(values.at(-1).version, '2.0.0:0')
+    assert.deepEqual(values.at(-1).otherVersions, {
+      '1.1.0:0': { releaseNotes: 'Security fix', security: true },
+    })
+  })
+}
+
 test('connection changes do not refetch an unchanged exact package query', async t => {
   const entry = registryEntry()
   const f = marketplaceFixture(t, { 'https://registry.test/': entry })
