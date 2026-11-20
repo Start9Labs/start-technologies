@@ -4848,6 +4848,31 @@ export const SshAddParams: z.ZodObject<{ key: typeof SshPubKey }> =
   })
 
 /**
+ * Authorized-key intent shared by SSH mutations and subscribed clients.
+ */
+export const SshKeys: z.ZodRecord<
+  z.ZodString,
+  z.ZodObject<{
+    created_at: z.ZodString
+    updated_at: z.ZodString
+    value: typeof SshPubKey
+  }>
+> = /* @__PURE__ */ z
+  .record(
+    z.string(),
+    object({
+      created_at: z.string(),
+      updated_at: z.string(),
+      value: SshPubKey,
+    }),
+  )
+  .meta({
+    id: 'SshKeys',
+    description:
+      'Authorized-key intent shared by SSH mutations and subscribed clients.',
+  })
+
+/**
  * The public view of a backup found on a target: enough to identify it, and none of
  * [`BackupUnencryptedMetadata`]'s key material.
  */
@@ -8024,6 +8049,7 @@ export const AllPackageData: z.ZodRecord<z.ZodString, typeof PackageDataEntry> =
 export const Public: z.ZodObject<{
   serverInfo: typeof ServerInfo
   packageData: typeof AllPackageData
+  sshPubkeys: z.ZodCodec<z.ZodOptional<typeof SshKeys>, typeof SshKeys>
   registryCache: z.ZodCodec<
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof RegistryCache>>,
     z.ZodRecord<z.ZodString, typeof RegistryCache>
@@ -8051,6 +8077,7 @@ export const Public: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   serverInfo: ServerInfo,
   packageData: AllPackageData,
+  sshPubkeys: wire(SshKeys.optional(), SshKeys),
   registryCache: wire(
     z.record(z.string(), RegistryCache).optional(),
     z.record(z.string(), RegistryCache),

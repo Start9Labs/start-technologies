@@ -65,6 +65,7 @@ import { toAuthorityUrl } from 'src/app/utils/acme'
 import { getCurrentManifest, getManifest } from 'src/app/utils/get-package-data'
 import { getDriveName } from 'src/app/utils/get-drive-name'
 import { parsePemPublicKey, parsePublicKeys } from 'src/app/utils/public-keys'
+import { sshKeyRows } from 'src/app/utils/ssh-keys'
 import { BackupRun } from 'src/app/routes/portal/routes/system/routes/backups/backup.types'
 import { Mock } from './api.fixures'
 import { BTC_ICON, LND_ICON, PROXY_ICON } from './api-icons'
@@ -980,16 +981,32 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
       return null
     },
-    'ssh.list': async params => {
+    'ssh.list': async () => {
       await pauseFor(2000)
-      return Mock.SshKeys
+      return sshKeyRows(mockPatchData.sshPubkeys)
     },
-    'ssh.add': async params => {
+    'ssh.add': async ({ key }) => {
       await pauseFor(2000)
-      return Mock.SshKey
+      const fingerprint = Mock.SshKey.fingerprint
+      const existing = mockPatchData.sshPubkeys[fingerprint]
+      const now = new Date().toISOString()
+      const stored = {
+        created_at: existing?.created_at ?? now,
+        updated_at: now,
+        value: key,
+      }
+      mockPatchData.sshPubkeys[fingerprint] = stored
+      await this.mockRevision([
+        { op: PatchOp.ADD, path: `/sshPubkeys/${fingerprint}`, value: stored },
+      ])
+      return sshKeyRows({ [fingerprint]: stored })[0]!
     },
-    'ssh.remove': async params => {
+    'ssh.remove': async ({ fingerprint }) => {
       await pauseFor(2000)
+      delete mockPatchData.sshPubkeys[fingerprint]
+      await this.mockRevision([
+        { op: PatchOp.REMOVE, path: `/sshPubkeys/${fingerprint}` },
+      ])
       return null
     },
     'volumes.create': async ({ name, source }) => {
