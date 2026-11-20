@@ -8470,6 +8470,7 @@ dependencies = [
  "qrcode",
  "r3bl_tui",
  "rand 0.10.3",
+ "rayon",
  "rcgen",
  "regex",
  "reqwest",
@@ -8590,7 +8591,7 @@ dependencies = [
 
 [[package]]
 name = "startwrt-core"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "async_cell",
  "axum",

@@ -17,7 +17,7 @@ secrets.db
 /results
 /dpkg-workdir
 /compiled.tar
-/compiled-*.tar
+/compiled-*.tar.gz
 /projects/start-os/build/firmware
 /projects/start-os/build/lib/firmware
 tmp

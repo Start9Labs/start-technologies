@@ -170,7 +170,7 @@ async fn inner_main(
         Ok::<_, Error>((rpc_ctx, shutdown))
     }
     .await?;
-    rpc_ctx.shutdown().await?;
+    rpc_ctx.shutdown().await;
 
     Ok(shutdown)
 }

@@ -1060,7 +1060,7 @@ mod tests {
             ("0.4.1.3", "0.4.2", 0),
             ("0.4.2", "0.4.2.1", 2),
             ("0.4.2.1", "0.4.2.2", 0),
-            ("0.4.2.2", "0.4.3", 0),
+            ("0.4.2.2", "0.4.3", 1),
         ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
@@ -1192,9 +1192,14 @@ mod tests {
                 db["public"]["serverInfo"]["version"],
                 to_value(&current.semver()).unwrap()
             );
-            assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+            assert_eq!(
+                applied_migration_revision(&mut db).unwrap(),
+                current.migration_revision()
+            );
             let upgraded = db.clone();
-            let upgrade = Upgrade::load(&current, &current, 0).await.unwrap();
+            let upgrade = Upgrade::load(&current, &current, current.migration_revision())
+                .await
+                .unwrap();
             upgrade.apply(&current, &current, &mut db).unwrap();
             assert_eq!(db, upgraded);
         }

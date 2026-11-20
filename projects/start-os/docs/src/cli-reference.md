@@ -687,7 +687,11 @@ Manage authorized SSH keys for server access.
 
 ### `start-cli ssh add <KEY>`
 
-Add an SSH public key.
+Add an SSH public key. Pass the key's text, not its path, as a single quoted argument:
+
+```sh
+start-cli ssh add "$(cat ~/.ssh/id_ed25519.pub)"
+```
 
 ### `start-cli ssh list`
 
@@ -695,9 +699,9 @@ List authorized SSH keys.
 
 - `--format` — Output format
 
-### `start-cli ssh remove <KEY>`
+### `start-cli ssh remove <FINGERPRINT>`
 
-Remove an SSH key.
+Remove an SSH key by the fingerprint `start-cli ssh list` shows for it.
 
 ## WiFi
 

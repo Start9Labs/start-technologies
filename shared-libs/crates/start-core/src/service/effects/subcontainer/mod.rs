@@ -73,7 +73,8 @@ pub async fn destroy_subcontainer_fs(
             .shared_volumes
             .lock()
             .await
-            .remove_subcontainer(&guid);
+            .remove_subcontainer(&guid)
+            .await?;
         overlay.overlay.unmount(true).await?;
     } else {
         tracing::warn!(

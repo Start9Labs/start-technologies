@@ -5,7 +5,6 @@ use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::cifs::{Cifs, SharedCifs};
-use crate::disk::mount::filesystem::idmapped::IdMapped;
 use crate::disk::mount::filesystem::syscall::open_beneath;
 use crate::disk::mount::filesystem::{FileSystem, MountType, ReadOnly, ReadWrite};
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard, WeakMountGuard};
@@ -16,6 +15,9 @@ use crate::shared_volumes::{
     SharedVolumeSource, local_path,
 };
 
+mod ownership;
+pub(crate) use ownership::migrate_local_ownership;
+
 pub async fn create_local_directory(path: &Path) -> Result<(), Error> {
     tokio::fs::create_dir_all(path.parent().expect("managed volume root")).await?;
     crate::util::btrfs::create_subvolume(path).await?;
@@ -23,11 +25,7 @@ pub async fn create_local_directory(path: &Path) -> Result<(), Error> {
 }
 
 pub(crate) async fn set_local_permissions(path: &Path) -> Result<(), Error> {
-    std::os::unix::fs::chown(
-        path,
-        Some(crate::lxc::BASE_IDMAP.to_id),
-        Some(crate::lxc::BASE_IDMAP.to_id),
-    )?;
+    std::os::unix::fs::chown(path, Some(0), Some(0))?;
     tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o777)).await?;
     Ok(())
 }
@@ -115,10 +113,15 @@ impl SourceDefinition {
         }
     }
 
+    /// Whether the host view holds container ids, which attachment maps into a container.
+    pub(crate) fn stores_container_ids(&self) -> bool {
+        !matches!(self.source, SharedVolumeSource::Cifs { .. })
+    }
+
     pub(super) fn filesystem(&self, id: &SharedVolumeId) -> SourceFilesystem {
         match &self.source {
             SharedVolumeSource::Local => {
-                SourceFilesystem::Local(local_path(crate::PACKAGE_DATA, id))
+                SourceFilesystem::local(local_path(crate::PACKAGE_DATA, id))
             }
             SharedVolumeSource::Disk { logicalname, .. } => SourceFilesystem::external(logicalname),
             SharedVolumeSource::Cifs { .. } => {
@@ -128,36 +131,54 @@ impl SourceDefinition {
     }
 }
 
-pub(crate) enum PreparedFilesystem<D, C> {
-    Local(PathBuf),
+pub(crate) struct LocalSubvolume(pub(crate) PathBuf);
+
+impl FileSystem for LocalSubvolume {
+    async fn mount<P: AsRef<Path> + Send>(
+        &self,
+        mountpoint: P,
+        mount_type: MountType,
+    ) -> Result<(), Error> {
+        if !crate::util::btrfs::is_subvolume(&self.0).await {
+            return Err(Error::new(
+                eyre!(t!("shared-volumes.source-unavailable")),
+                ErrorKind::Filesystem,
+            ));
+        }
+        Bind::new(&self.0).mount(mountpoint, mount_type).await
+    }
+
+    async fn source_hash(&self) -> Result<digest::Output<sha2::Sha256>, Error> {
+        Bind::new(&self.0).source_hash().await
+    }
+}
+
+pub(crate) enum PreparedFilesystem<L, D, C> {
+    Local(L),
     Disk(D),
     Cifs(C),
 }
-pub(super) type SourceFilesystem = PreparedFilesystem<IdMapped<BlockDev<PathBuf>>, SharedCifs>;
+/// Host views carry no idmap: local and disk files keep container ids, which attachment maps.
+/// CIFS cannot be idmapped and presents host root, `nobody` inside every container.
+pub(crate) type SourceFilesystem =
+    PreparedFilesystem<LocalSubvolume, BlockDev<PathBuf>, SharedCifs>;
 impl SourceFilesystem {
+    pub(crate) fn local(path: PathBuf) -> Self {
+        Self::Local(LocalSubvolume(path))
+    }
+
     fn external(device: &Path) -> Self {
-        Self::Disk(IdMapped::new(
-            BlockDev::new(device.to_owned()),
-            vec![crate::lxc::BASE_IDMAP],
-        ))
+        Self::Disk(BlockDev::new(device.to_owned()))
     }
 }
-impl<D: FileSystem, C: FileSystem> FileSystem for PreparedFilesystem<D, C> {
+impl<L: FileSystem, D: FileSystem, C: FileSystem> FileSystem for PreparedFilesystem<L, D, C> {
     async fn mount<P: AsRef<Path> + Send>(
         &self,
         mountpoint: P,
         mount_type: MountType,
     ) -> Result<(), Error> {
         match self {
-            Self::Local(path) => {
-                if !crate::util::btrfs::is_subvolume(path).await {
-                    return Err(Error::new(
-                        eyre!(t!("shared-volumes.source-unavailable")),
-                        ErrorKind::Filesystem,
-                    ));
-                }
-                Bind::new(path).mount(mountpoint, mount_type).await
-            }
+            Self::Local(filesystem) => filesystem.mount(mountpoint, mount_type).await,
             Self::Disk(filesystem) => filesystem.mount(mountpoint, mount_type).await,
             Self::Cifs(filesystem) => filesystem.mount(mountpoint, mount_type).await,
         }
@@ -166,19 +187,19 @@ impl<D: FileSystem, C: FileSystem> FileSystem for PreparedFilesystem<D, C> {
         match self {
             Self::Cifs(filesystem) => filesystem.check_mount(mountpoint).await,
             Self::Disk(filesystem) => filesystem.check_mount(mountpoint).await,
-            Self::Local(_) => Ok(()),
+            Self::Local(filesystem) => filesystem.check_mount(mountpoint).await,
         }
     }
     async fn device(&self) -> Result<Option<PathBuf>, Error> {
         match self {
             Self::Disk(filesystem) => filesystem.device().await,
             Self::Cifs(filesystem) => filesystem.device().await,
-            Self::Local(_) => Ok(None),
+            Self::Local(filesystem) => filesystem.device().await,
         }
     }
     async fn source_hash(&self) -> Result<digest::Output<sha2::Sha256>, Error> {
         match self {
-            Self::Local(path) => Bind::new(path).source_hash().await,
+            Self::Local(filesystem) => filesystem.source_hash().await,
             Self::Disk(filesystem) => filesystem.source_hash().await,
             Self::Cifs(filesystem) => filesystem.source_hash().await,
         }
@@ -190,7 +211,7 @@ impl<D: FileSystem, C: FileSystem> FileSystem for PreparedFilesystem<D, C> {
         match self {
             Self::Cifs(filesystem) => filesystem.mount_hash(mount_type).await,
             Self::Disk(filesystem) => filesystem.mount_hash(mount_type).await,
-            Self::Local(path) => Bind::new(path).mount_hash(mount_type).await,
+            Self::Local(filesystem) => filesystem.mount_hash(mount_type).await,
         }
     }
 }
@@ -208,7 +229,12 @@ pub async fn open_source(
     let result = source_result(
         async {
             let mount = TmpMountGuard::mount(&filesystem, mount_type).await?;
-            prepared = Some(PreparedSource::open(mount, subpath).await?);
+            let source = PreparedSource::open(mount, subpath).await?;
+            prepared = Some(if definition.stores_container_ids() {
+                source.storing_container_ids()
+            } else {
+                source
+            });
             Ok(())
         }
         .await,

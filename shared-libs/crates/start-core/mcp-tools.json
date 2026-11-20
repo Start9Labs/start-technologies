@@ -4357,7 +4357,7 @@
             "enabled": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "User override: enable these addresses (only for public IP & port)"
+              "description": "User override: enable these addresses (only for public IP & port)\nAn opt-in names one literal address and lapses when the gateway renumbers.\nOnly an enabled plain public domain carries its group's public IPs across."
             },
             "disabled": {
               "type": "array",
@@ -11117,7 +11117,7 @@
             "enabled": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "User override: enable these addresses (only for public IP & port)"
+              "description": "User override: enable these addresses (only for public IP & port)\nAn opt-in names one literal address and lapses when the gateway renumbers.\nOnly an enabled plain public domain carries its group's public IPs across."
             },
             "disabled": {
               "type": "array",

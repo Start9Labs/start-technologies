@@ -118,6 +118,8 @@ export const OS_IMAGE_PATHS = [
   'projects/start-os/changelog/**',
   'projects/start-os/*.service',
   'projects/start-os/*.slice',
+  'projects/start-os/container-runtime/*.sh',
+  'projects/start-os/container-runtime/*.service',
   'scripts/changelog*.mjs',
   'shared-libs/crates/start-core/locales/release-notes.json',
   '.prettierrc.json',

@@ -17,6 +17,10 @@ fn unsupported<T>() -> Result<T, Error> {
     ))
 }
 
+pub(crate) fn same_mount(_left: BorrowedFd, _right: BorrowedFd) -> Result<bool, Error> {
+    unsupported()
+}
+
 pub(crate) struct MountNamespace;
 
 impl MountNamespace {
@@ -44,7 +48,11 @@ pub fn open_beneath(_base: &Path, _relative: &Path) -> Result<OwnedFd, Error> {
     unsupported()
 }
 
-pub fn open_tree_clone_fd(_source: BorrowedFd) -> Result<OwnedFd, Error> {
+pub fn open_tree_clone_fd(_source: BorrowedFd, _recursive: bool) -> Result<OwnedFd, Error> {
+    unsupported()
+}
+
+pub fn open_tree_attr_idmap_fd(_source: BorrowedFd, _userns: BorrowedFd) -> Result<OwnedFd, Error> {
     unsupported()
 }
 
@@ -65,6 +73,9 @@ impl DetachedMount {
         unsupported()
     }
     pub fn set_private(&self) -> Result<(), Error> {
+        unsupported()
+    }
+    pub fn configure_bind(&self, _readonly: bool) -> Result<(), Error> {
         unsupported()
     }
     pub fn attach(self, _mountpoint: &Path) -> Result<(), Error> {
