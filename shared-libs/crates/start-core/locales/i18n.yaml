@@ -1593,7 +1593,7 @@ os-install.partition-not-mapped-as-written:
 
 os-install.protected-partition-not-in-table:
   en_US: "The data partition %{partition} does not match the drive's partition table, so installation stopped before rewriting the partition table or formatting. Restart and try again."
-  de_DE: "Die Datenpartition %{partition} stimmt nicht mit der Partitionstabelle des Laufwerks überein, daher wurde die Installation angehalten, bevor die Partitionstabelle neu geschrieben oder formatiert wurde. Starten Sie neu und versuchen Sie es erneut."
+  de_DE: "Die Datenpartition %{partition} stimmt nicht mit der Partitionstabelle des Laufwerks überein, daher wurde die Installation angehalten, bevor die Partitionstabelle neu geschrieben oder eine Partition formatiert wurde. Starten Sie neu und versuchen Sie es erneut."
   es_ES: "La partición de datos %{partition} no coincide con la tabla de particiones de la unidad, por lo que la instalación se detuvo antes de reescribir la tabla de particiones o formatear. Reinicie e inténtelo de nuevo."
   fr_FR: "La partition de données %{partition} ne correspond pas à la table de partitions du disque : l'installation s'est arrêtée avant de réécrire la table de partitions ou de formater. Redémarrez et réessayez."
   pl_PL: "Partycja danych %{partition} nie odpowiada tablicy partycji dysku, więc instalacja zatrzymała się przed ponownym zapisem tablicy partycji i formatowaniem. Uruchom ponownie i spróbuj jeszcze raz."
