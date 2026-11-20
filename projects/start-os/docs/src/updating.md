@@ -8,7 +8,7 @@ StartOS notifies you when a security update arrives for a service you have insta
 
 1. Click the **Updates** tab in the top navigation bar.
 1. Updates are organized by registry. Click a registry to list its available updates. A registry offering a security update shows a red badge, and a security update shows its version in red with a shield icon.
-1. Click an update to expand it and see who signed it and the release notes of every version since the one you have installed, newest first. Notes from a version that fixes a security vulnerability begin with a **Security update** label. **View in Marketplace** opens its full listing. An update not signed by a key you trust shows a warning, and installing it asks you to confirm the risks first.
+1. Click an update to expand it and see who signed it and the release notes of every version since the one you have installed, newest first. When several versions are included, expand a version to read its notes; the newest starts open. Versions that fix a security vulnerability carry a **Security update** label. An update not signed by a key you trust shows a warning, and installing it asks you to confirm the risks first.
 1. Click **Update**, in the details or in the update's row. If the package has a pre-download alert for your installed version, read it and select **Continue** to start the download or **Cancel** to leave the service unchanged.
 
 ## Switching Registries
