@@ -904,3 +904,47 @@ fn update_targets_follow_the_installed_version_through_migration_and_os_ranges()
     refresh_update_targets(&mut db, &device).unwrap();
     assert_eq!(update_target(&db), None);
 }
+
+#[test]
+fn completing_a_migration_step_announces_the_cached_security_release_once() {
+    use crate::notifications::{NotificationType, PackageSecurityUpdate};
+
+    let mut db = database();
+    let mut index = index();
+    let security = index
+        .package
+        .packages
+        .get_mut(&"test".parse::<crate::PackageId>().unwrap())
+        .unwrap()
+        .versions
+        .get_mut(&"2.0.0:0".parse::<crate::util::VersionString>().unwrap())
+        .unwrap();
+    security.metadata.security = true;
+    security.source_version = Some(">=1.0.0:0".parse().unwrap());
+    let snapshot = to_value(&index).unwrap();
+    install(&mut db, "0.9.0:0");
+    publish_snapshot(&mut db, &Subscription::Index(url()), &snapshot, &device()).unwrap();
+    assert_eq!(update_target(&db).as_deref(), Some("1.0.0:0"));
+    assert!(db.as_private().as_notifications().de().unwrap().0.is_empty());
+
+    install(&mut db, "1.0.0:0");
+    refresh_update_targets(&mut db, &device()).unwrap();
+    assert_eq!(update_target(&db).as_deref(), Some("2.0.0:0"));
+    let notifications = db.as_private().as_notifications().de().unwrap();
+    assert_eq!(notifications.0.len(), 1);
+    let (id, notification) = notifications.0.iter().next().unwrap();
+    assert_eq!(notification.code, PackageSecurityUpdate::CODE);
+    let update: PackageSecurityUpdate = from_value(notification.data.clone()).unwrap();
+    assert_eq!(update.releases.len(), 1);
+    assert_eq!(update.releases[0].version.to_string(), "2.0.0:0");
+    db.as_private_mut()
+        .as_notifications_mut()
+        .as_idx_mut(id)
+        .unwrap()
+        .as_seen_mut()
+        .ser(&true)
+        .unwrap();
+    refresh_update_targets(&mut db, &device()).unwrap();
+    publish_snapshot(&mut db, &Subscription::Index(url()), &snapshot, &device()).unwrap();
+    assert_eq!(db.as_private().as_notifications().de().unwrap().0.len(), 1);
+}

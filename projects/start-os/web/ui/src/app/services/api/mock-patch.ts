@@ -74,7 +74,13 @@ function mockStart9Key(
   }
 }
 
-/** The community registry mocks an unreachable registry. */
+function mockUpdateTarget(
+  pkg: T.GetPackageResponse,
+  version: string,
+): T.PackageUpdateTarget {
+  return { version, ...pkg.best[version]! }
+}
+
 export function mockRegistryCache(
   url: string,
   info: T.RegistryInfo,
@@ -90,7 +96,17 @@ export function mockRegistryCache(
     : {
         info,
         packages: Mock.RegistryPackages,
-        updateTargets: {},
+        updateTargets: {
+          bitcoind: mockUpdateTarget(
+            Mock.OtherPackageVersions.bitcoind!['=26.1.0:0.1.0']!,
+            '26.1.0:0.1.0',
+          ),
+          lnd: mockUpdateTarget(Mock.RegistryPackages.lnd!, '0.18.0:0.0.1'),
+          'btc-rpc-proxy': mockUpdateTarget(
+            Mock.RegistryPackages['btc-rpc-proxy']!,
+            '0.4.0:0',
+          ),
+        },
         status: 'connected',
       }
 }
