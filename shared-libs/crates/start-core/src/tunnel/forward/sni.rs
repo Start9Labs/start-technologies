@@ -16,6 +16,9 @@ use tokio::time::timeout;
 
 use crate::net::port_map::pcp::RESULT_NO_RESOURCES;
 use crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN;
+use crate::net::request_origin::RequestOrigin;
+use crate::net::web_server::TcpMetadata;
+use crate::util::GeneralBoxedGuard;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::SyncMutex;
 
@@ -626,6 +629,7 @@ async fn handle_conn(
     let Some((target, transparent)) = selected else {
         return;
     };
+    let local = !transparent;
     let transparent = transparent && !is_hairpin(&local_prefix, *peer.ip(), *target.ip()).await;
     let mut upstream = if transparent {
         // A failed source-preserving connection must not fall back to gateway source.
@@ -650,10 +654,37 @@ async fn handle_conn(
             }
         }
     };
+    let _origin = if local {
+        match register_local_origin(&conn, peer, &upstream) {
+            Ok(guard) => Some(guard),
+            Err(e) => {
+                tracing::warn!("SNI demux origin registration for {peer} failed: {e}");
+                return;
+            }
+        }
+    } else {
+        None
+    };
     if upstream.write_all(&buf).await.is_err() {
         return;
     }
     let _ = copy_bidirectional(&mut conn, &mut upstream).await;
+}
+
+/// Exposes the client's address to the local backend for the relay's lifetime.
+fn register_local_origin(
+    conn: &TcpStream,
+    peer: SocketAddrV4,
+    upstream: &TcpStream,
+) -> std::io::Result<GeneralBoxedGuard> {
+    let origin = RequestOrigin::from_connection(
+        Some(&TcpMetadata {
+            peer_addr: SocketAddr::V4(peer),
+            local_addr: conn.local_addr()?,
+        }),
+        None,
+    );
+    Ok(origin.register_proxy(upstream.local_addr()?, upstream.peer_addr()?))
 }
 
 async fn is_hairpin(local_prefix: &Option<LocalPrefix>, peer: Ipv4Addr, target: Ipv4Addr) -> bool {
@@ -950,6 +981,53 @@ mod tests {
             let pb = p.get(&(ip, port)).unwrap();
             assert_eq!(pb.select(None, public), Some((ui, false)));
         });
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn local_fallback_exposes_the_client_address_to_the_backend() {
+        let demux = SniDemux::new();
+        let port = free_port();
+        let ui = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let SocketAddr::V4(ui_addr) = ui.local_addr().unwrap() else {
+            unreachable!()
+        };
+        demux
+            .register_local_fallback(Ipv4Addr::LOCALHOST, port, ui_addr, FallbackSource::Any)
+            .unwrap();
+        let client_ip = Ipv4Addr::new(127, 0, 0, 2);
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind(SocketAddr::new(client_ip.into(), 0)).unwrap();
+        let mut client = timeout(
+            Duration::from_secs(5),
+            socket.connect(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        client
+            .write_all(&real_client_hello("ui.example.com"))
+            .await
+            .unwrap();
+        let (mut backend, backend_peer) = timeout(Duration::from_secs(5), ui.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut relayed = [0u8; 1];
+        timeout(Duration::from_secs(5), backend.read_exact(&mut relayed))
+            .await
+            .unwrap()
+            .unwrap();
+        let mut extensions = http::Extensions::new();
+        extensions.insert(TcpMetadata {
+            peer_addr: backend_peer,
+            local_addr: SocketAddr::V4(ui_addr),
+        });
+        let origin = RequestOrigin::from_extensions(&extensions);
+        assert_eq!(origin.peer_ip, Some(client_ip.into()));
+        assert_eq!(origin.local_ip, Some(Ipv4Addr::LOCALHOST.into()));
     }
 
     #[tokio::test]
