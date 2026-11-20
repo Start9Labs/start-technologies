@@ -1,4 +1,7 @@
 use super::*;
+use crate::s9pk::merkle_archive::source::FileSource;
+use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
+use crate::util::squashfs::{Entry, NodeContents};
 
 #[tokio::test]
 async fn published_rootfs_bytes_survive_original_replacement_and_unlink() {
@@ -41,6 +44,68 @@ async fn published_rootfs_bytes_survive_original_replacement_and_unlink() {
             .path,
         published
     );
+}
+
+#[tokio::test]
+async fn prepared_generation_publishes_after_source_workspace_replacement_or_removal() {
+    let root = tempfile::tempdir().unwrap();
+    let store = root.path().join("store");
+    tokio::fs::create_dir(&store).await.unwrap();
+    let key = generate_signing_key().unwrap();
+    let public = PKey::public_key_from_der(&key.public_key_to_der().unwrap()).unwrap();
+    let bytes = vec![42; VERITY_BLOCK_SIZE as usize * 2];
+    for replace_source in [true, false] {
+        let source = tempfile::tempdir_in(root.path()).unwrap();
+        let raw = source.path().join("raw");
+        let rootfs = source.path().join("source.rootfs");
+        tokio::fs::create_dir(&raw).await.unwrap();
+        tokio::fs::write(raw.join("setting"), b"authorized configuration")
+            .await
+            .unwrap();
+        tokio::fs::write(&rootfs, &bytes).await.unwrap();
+        let prepared = PreparedGeneration::import_raw(&raw, &rootfs, &store, &key)
+            .await
+            .unwrap();
+        let expected = prepared.manifest().rootfs_sha256;
+        if replace_source {
+            tokio::fs::write(&rootfs, vec![21; bytes.len()])
+                .await
+                .unwrap();
+            tokio::fs::write(raw.join("setting"), b"changed configuration")
+                .await
+                .unwrap();
+        } else {
+            source.close().unwrap();
+        }
+        let published = prepared.publish().await.unwrap();
+        assert_eq!(
+            tokio::fs::read(published.join(ROOTFS_FILE)).await.unwrap(),
+            bytes
+        );
+        let verified = select_latest(&store, &published.join(ROOTFS_FILE), &public)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(verified.path, published);
+        assert_eq!(verified.manifest.rootfs_sha256, expected);
+        let snapshot = Squashfs::deserialize(
+            MultiCursorFile::open(&open_file(published.join(OVERLAY_FILE)).await.unwrap())
+                .await
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        let Some(Entry::Node(node)) = snapshot.contents().get_path(Path::new("setting")) else {
+            panic!("missing setting");
+        };
+        let NodeContents::File(contents) = &node.contents else {
+            panic!("setting is not a file");
+        };
+        assert_eq!(
+            contents.to_vec(None).await.unwrap(),
+            b"authorized configuration"
+        );
+    }
 }
 
 #[tokio::test]

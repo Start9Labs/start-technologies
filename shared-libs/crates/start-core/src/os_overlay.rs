@@ -613,13 +613,13 @@ async fn verify_generation(
 }
 
 /// A hidden, unpublished generation with its own rootfs bytes.
-/// Source replacement or deletion cannot change the retained image.
+/// Publication permits original rootfs path retirement.
+/// Callers keep staging stable through publication and referenced private backings through dependent use.
 /// Abandonment leaves it invisible to selection.
 #[must_use]
 pub struct PreparedGeneration {
     staging: PathBuf,
     destination: PathBuf,
-    rootfs: PathBuf,
     manifest: Manifest,
     public_key: PKey<Public>,
 }
@@ -723,7 +723,6 @@ impl PreparedGeneration {
             Ok(Self {
                 staging: staging.clone(),
                 destination: store.join(format!("{GENERATION_PREFIX}{id}")),
-                rootfs: rootfs.to_owned(),
                 manifest,
                 public_key: PKey::public_key_from_der(
                     &key.public_key_to_der().with_kind(ErrorKind::OpenSsl)?,
@@ -771,7 +770,7 @@ impl PreparedGeneration {
     pub async fn publish(self) -> Result<PathBuf, Error> {
         verify_generation(
             &self.staging,
-            &digest_file(&self.rootfs).await?,
+            &self.manifest.rootfs_sha256,
             &self.public_key,
         )
         .await?;
