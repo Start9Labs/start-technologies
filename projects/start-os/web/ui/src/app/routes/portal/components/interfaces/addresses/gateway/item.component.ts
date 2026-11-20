@@ -126,6 +126,15 @@ import { DomainHealthService } from './domain-health.service'
               "
             />
           }
+          @if (address.linked) {
+            <tui-icon
+              icon="@tui.link"
+              [tuiTooltip]="
+                'Changes to this address also apply to every IPv6 address here with the same interface ID'
+                  | i18n
+              "
+            />
+          }
           @if (address.masked) {
             <button
               tuiIconButton

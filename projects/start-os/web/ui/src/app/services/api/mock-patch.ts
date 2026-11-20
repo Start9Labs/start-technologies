@@ -1098,6 +1098,13 @@ export const mockPatchData: DataModel = {
                     port: 1234,
                     metadata: { kind: 'ipv6', gateway: 'eth0', scopeId: 0 },
                   },
+                  {
+                    ssl: true,
+                    public: true,
+                    hostname: '2001:db8:beef::a3b:2',
+                    port: 1234,
+                    metadata: { kind: 'ipv6', gateway: 'eth0', scopeId: 0 },
+                  },
                 ],
               }),
               options: {

@@ -1096,4 +1096,5 @@ export default {
   1300: 'Serveur injoignable',
   1301: 'Les listes peuvent ne pas être à jour',
   1302: 'StartOS ne parvient pas à joindre ce registre pour le moment.',
+  1303: "Les modifications de cette adresse s'appliquent aussi à toutes les adresses IPv6 d'ici ayant le même identifiant d'interface",
 } satisfies i18n
