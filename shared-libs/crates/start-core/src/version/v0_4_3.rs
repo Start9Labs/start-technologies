@@ -1,12 +1,27 @@
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::path::PathBuf;
+
 use exver::VersionRange;
 use imbl_value::json;
+use tokio::process::Command;
+use zbus::Connection;
+use zbus::zvariant::OwnedValue;
 
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::v0_4_0_2::for_each_host;
 use super::{VersionT, v0_4_2_2};
+use crate::backup::target::{BackupTarget, BackupTargetId};
+use crate::context::RpcContext;
+use crate::net::gateway::active_connection::ActiveConnectionProxy;
+use crate::net::gateway::{
+    ConnectionSettingsProxy, NetworkManagerProxy, NmSettingsProxy, WIREGUARD_DEFAULT_MTU,
+    settings_uuid, settings_wireguard_mtu,
+};
 use crate::net::host::binding::{DerivedAddressInfo, set_nonssl_wan_group};
 use crate::net::service_interface::HostnameMetadata;
 use crate::prelude::*;
+use crate::shared_volumes::SharedVolumeSource;
+use crate::util::Invoke;
 
 lazy_static::lazy_static! {
     static ref V0_4_3: exver::Version = exver::Version::new([0, 4, 3], []);
@@ -26,13 +41,13 @@ impl VersionT for Version {
         V0_4_3.clone()
     }
     fn migration_revision(self) -> usize {
-        3
+        4
     }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
     }
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
-        crate::backup::scheduled::register_legacy_disk_targets(db)?;
+        register_legacy_disk_targets(db)?;
         move_ssh_pubkeys(db, "private", "public")?;
         for_each_host(db, |host| {
             let Some(ranges) = host.get_mut("bindingRanges").and_then(Value::as_object_mut) else {
@@ -46,8 +61,131 @@ impl VersionT for Version {
         });
         Ok(Value::Null)
     }
+    async fn post_up(self, _ctx: &RpcContext, _input: Value) -> Result<(), Error> {
+        if let Err(error) = pin_automatic_wireguard_mtu().await {
+            tracing::warn!(?error, "{}", t!("migration.wireguard-mtu-failed"));
+        }
+        Ok(())
+    }
     fn down(self, db: &mut Value) -> Result<(), Error> {
         move_ssh_pubkeys(db, "public", "private")
+    }
+}
+
+fn register_legacy_disk_targets(db: &mut Value) -> Result<(), Error> {
+    let mut wire = serde_json::to_value(&*db).with_kind(ErrorKind::Serialization)?;
+    let mut legacy = BTreeSet::new();
+    if let Some(state) = wire.pointer("/public/scheduledBackups") {
+        collect_targets(state, &mut legacy);
+    }
+    if let Some(credentials) = wire
+        .pointer("/private/scheduledBackupCredentials")
+        .and_then(serde_json::Value::as_object)
+    {
+        legacy.extend(
+            credentials
+                .keys()
+                .filter(|id| id.starts_with("disk-"))
+                .cloned(),
+        );
+    }
+    if legacy.is_empty() {
+        return Ok(());
+    }
+    let targets = wire["public"]
+        .as_object_mut()
+        .expect("public database")
+        .entry("backupTargets")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .expect("backup target catalog");
+    let mut replacements = BTreeMap::new();
+    for old in legacy {
+        let logicalname = old.strip_prefix("disk-").expect("legacy disk identity");
+        let existing = targets
+            .iter()
+            .find(|(_, target)| {
+                target["source"]["kind"] == "disk"
+                    && target["source"]["logicalname"] == logicalname
+                    && target["source"]["path"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .is_empty()
+            })
+            .map(|(id, _)| id.clone());
+        let id = existing.unwrap_or_else(|| BackupTargetId::new().to_string());
+        targets.entry(id.clone()).or_insert(
+            serde_json::to_value(BackupTarget {
+                name: logicalname.to_owned(),
+                source: SharedVolumeSource::Disk {
+                    logicalname: PathBuf::from(logicalname),
+                    path: PathBuf::new(),
+                    drive: None,
+                },
+                inspection: Default::default(),
+                start_os: Default::default(),
+                legacy_backup: false,
+            })
+            .with_kind(ErrorKind::Serialization)?,
+        );
+        replacements.insert(old, id);
+    }
+    rewrite_targets(&mut wire["public"]["scheduledBackups"], &replacements);
+    if let Some(credentials) = wire.pointer_mut("/private/scheduledBackupCredentials") {
+        rewrite_targets(credentials, &replacements);
+    }
+    *db = to_value(&wire)?;
+    Ok(())
+}
+
+fn collect_targets(value: &serde_json::Value, targets: &mut BTreeSet<String>) {
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, value) in object {
+                if key == "targetId" {
+                    if let Some(id) = value.as_str().filter(|id| id.starts_with("disk-")) {
+                        targets.insert(id.to_owned());
+                    }
+                }
+                collect_targets(value, targets);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_targets(value, targets);
+            }
+        }
+        _ => (),
+    }
+}
+
+fn rewrite_targets(value: &mut serde_json::Value, replacements: &BTreeMap<String, String>) {
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, mut value) in std::mem::take(object) {
+                if key == "targetId" {
+                    if let Some(id) = value.as_str().and_then(|id| replacements.get(id)) {
+                        value = serde_json::Value::String(id.clone());
+                    }
+                }
+                rewrite_targets(&mut value, replacements);
+                let key = replacements
+                    .get(&key)
+                    .cloned()
+                    .or_else(|| {
+                        let (target, package) = key.split_once("::")?;
+                        Some(format!("{}::{package}", replacements.get(target)?))
+                    })
+                    .unwrap_or(key);
+                object.insert(key, value);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                rewrite_targets(value, replacements);
+            }
+        }
+        _ => (),
     }
 }
 
@@ -67,6 +205,73 @@ fn move_ssh_pubkeys(db: &mut Value, from: &str, to: &str) -> Result<(), Error> {
         .entry("sshPubkeys".into())
         .or_insert_with(|| keys.unwrap_or_else(|| json!({})));
     Ok(())
+}
+
+/// The uuid of a WireGuard profile on NetworkManager's automatic MTU.
+fn automatic_wireguard_mtu_uuid(
+    settings: &HashMap<String, HashMap<String, OwnedValue>>,
+) -> Result<Option<String>, Error> {
+    let is_wireguard = settings
+        .get("connection")
+        .and_then(|c| c.get("type"))
+        .and_then(|t| t.downcast_ref::<zbus::zvariant::Str>().ok())
+        .is_some_and(|t| t.as_str() == "wireguard");
+    if !is_wireguard || settings_wireguard_mtu(settings)?.is_some() {
+        return Ok(None);
+    }
+    Ok(settings_uuid(settings))
+}
+
+/// Sets every saved WireGuard profile on the automatic MTU to `WIREGUARD_DEFAULT_MTU`.
+/// Active profiles reconnect. Returns the first failure after attempting every profile.
+async fn pin_automatic_wireguard_mtu() -> Result<(), Error> {
+    let connection = Connection::system().await?;
+    let mut active = HashSet::new();
+    for path in NetworkManagerProxy::new(&connection)
+        .await?
+        .active_connections()
+        .await?
+    {
+        active.insert(
+            ActiveConnectionProxy::new(&connection, path)
+                .await?
+                .connection()
+                .await?,
+        );
+    }
+    let mut result = Ok(());
+    for path in NmSettingsProxy::new(&connection)
+        .await?
+        .list_connections()
+        .await?
+    {
+        let pinned = async {
+            let settings = ConnectionSettingsProxy::new(&connection, path.clone())
+                .await?
+                .get_settings()
+                .await?;
+            let Some(uuid) = automatic_wireguard_mtu_uuid(&settings)? else {
+                return Ok(());
+            };
+            Command::new("nmcli")
+                .args(["connection", "modify", "uuid", &uuid, "wireguard.mtu"])
+                .arg(WIREGUARD_DEFAULT_MTU.to_string())
+                .invoke(ErrorKind::Network)
+                .await?;
+            if active.contains(&path) {
+                Command::new("nmcli")
+                    .args(["connection", "up", "uuid", &uuid])
+                    .invoke(ErrorKind::Network)
+                    .await?;
+            }
+            Ok::<_, Error>(())
+        }
+        .await;
+        if result.is_ok() {
+            result = pinned;
+        }
+    }
+    result
 }
 
 /// Switches on the public IPs grouped with each enabled plain public domain of a range.
@@ -102,6 +307,156 @@ mod tests {
     use patch_db::json_ptr::ROOT;
 
     use super::*;
+
+    #[test]
+    fn disk_registration_preserves_schedules_checkpoints_and_unlock_credentials() {
+        let mut db = imbl_value::json!({"public": {"scheduledBackups": {
+            "jobs": {"job": {"targetId": "disk-/dev/sda1", "name": "Nightly"}},
+            "histories": {"disk-/dev/sda1::bitcoind": {"targetId": "disk-/dev/sda1", "snapshots": ["checkpoint"]}},
+            "runs": {"run": {"targetId": "disk-/dev/sda1"}},
+            "activities": {"activity": {"targetId": "disk-/dev/sda1"}},
+            "targetFailures": {"disk-/dev/sda1": {"failures": 2}},
+        }}, "private": {"scheduledBackupCredentials": {"disk-/dev/sda1": {"targetInstanceId": "original", "sealedKey": [1,2,3]}}}});
+        register_legacy_disk_targets(&mut db).unwrap();
+        let wire = serde_json::to_value(&db).unwrap();
+        let id = wire["public"]["scheduledBackups"]["jobs"]["job"]["targetId"]
+            .as_str()
+            .unwrap();
+        assert!(id.parse::<BackupTargetId>().is_ok());
+        let target: BackupTarget =
+            serde_json::from_value(wire["public"]["backupTargets"][id].clone()).unwrap();
+        assert!(
+            matches!(target.source, SharedVolumeSource::Disk { logicalname, .. } if logicalname == PathBuf::from("/dev/sda1"))
+        );
+        assert_eq!(
+            wire["public"]["scheduledBackups"]["histories"][format!("{id}::bitcoind")]["snapshots"],
+            serde_json::json!(["checkpoint"])
+        );
+        assert_eq!(
+            wire["public"]["scheduledBackups"]["runs"]["run"]["targetId"],
+            id
+        );
+        assert_eq!(
+            wire["public"]["scheduledBackups"]["activities"]["activity"]["targetId"],
+            id
+        );
+        assert_eq!(
+            wire["public"]["scheduledBackups"]["targetFailures"][id]["failures"],
+            2
+        );
+        assert_eq!(
+            wire["private"]["scheduledBackupCredentials"][id]["targetInstanceId"],
+            "original"
+        );
+        assert_eq!(
+            wire["private"]["scheduledBackupCredentials"][id]["sealedKey"],
+            serde_json::json!([1, 2, 3])
+        );
+        let saved = db.clone();
+        register_legacy_disk_targets(&mut db).unwrap();
+        assert_eq!(db, saved);
+    }
+    #[test]
+    fn disk_credentials_are_registered_after_the_last_schedule_is_deleted() {
+        let mut db = imbl_value::json!({
+            "public": {"scheduledBackups": {}},
+            "private": {"scheduledBackupCredentials": {
+                "disk-/dev/sdb1": {"targetInstanceId": "saved", "sealedKey": [4,5,6]}
+            }}
+        });
+        register_legacy_disk_targets(&mut db).unwrap();
+        let wire = serde_json::to_value(&db).unwrap();
+        let targets = wire["public"]["backupTargets"].as_object().unwrap();
+        let (id, target) = targets.iter().next().unwrap();
+        assert!(id.parse::<BackupTargetId>().is_ok());
+        assert_eq!(target["source"]["logicalname"], "/dev/sdb1");
+        assert_eq!(
+            wire["private"]["scheduledBackupCredentials"][id]["targetInstanceId"],
+            "saved"
+        );
+        assert!(
+            wire["private"]["scheduledBackupCredentials"]
+                .get("disk-/dev/sdb1")
+                .is_none()
+        );
+    }
+
+    fn profile(kind: &str, mtu: Option<u32>) -> HashMap<String, HashMap<String, OwnedValue>> {
+        let mut settings = HashMap::from([(
+            "connection".to_string(),
+            HashMap::from([
+                (
+                    "type".to_string(),
+                    OwnedValue::try_from(zbus::zvariant::Value::from(kind)).unwrap(),
+                ),
+                (
+                    "uuid".to_string(),
+                    OwnedValue::try_from(zbus::zvariant::Value::from("the-uuid")).unwrap(),
+                ),
+            ]),
+        )]);
+        let mut wg = HashMap::new();
+        if let Some(mtu) = mtu {
+            wg.insert("mtu".to_string(), OwnedValue::from(mtu));
+        }
+        settings.insert("wireguard".to_string(), wg);
+        settings
+    }
+
+    #[tokio::test]
+    async fn an_existing_0_4_3_server_queues_the_mtu_migration_once() {
+        let version = super::super::Version::from_exver_version(Version.semver())
+            .as_version_t()
+            .unwrap();
+        for applied in [0, 1, 2, 3] {
+            let mut db = json!({ "public": { "serverInfo": {
+                "version": "0.4.3",
+                "packageVersionCompat": ">=0.3.0 <0.5.0",
+                "postInitMigrationTodos": {},
+                "latestMigrationRevision": applied,
+            } } });
+            for queued in [true, false] {
+                db["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
+                let revision = super::super::applied_migration_revision(&mut db).unwrap();
+                super::super::Upgrade::load(&version, &version, revision)
+                    .await
+                    .unwrap()
+                    .apply(&version, &version, &mut db)
+                    .unwrap();
+                assert_eq!(
+                    db["public"]["serverInfo"]["postInitMigrationTodos"]
+                        .as_object()
+                        .unwrap()
+                        .contains_key("0.4.3"),
+                    queued
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn automatic_wireguard_profiles_are_selected() {
+        assert_eq!(
+            automatic_wireguard_mtu_uuid(&profile("wireguard", None)).unwrap(),
+            Some("the-uuid".to_string())
+        );
+        assert_eq!(
+            automatic_wireguard_mtu_uuid(&profile("wireguard", Some(0))).unwrap(),
+            Some("the-uuid".to_string())
+        );
+    }
+
+    #[test]
+    fn explicit_mtus_and_other_profiles_are_kept() {
+        assert_eq!(
+            automatic_wireguard_mtu_uuid(&profile("wireguard", Some(1420))).unwrap(),
+            None
+        );
+        assert_eq!(
+            automatic_wireguard_mtu_uuid(&profile("802-3-ethernet", None)).unwrap(),
+            None
+        );
+    }
 
     #[test]
     fn ssh_keys_move_without_changing_metadata_and_round_trip() {

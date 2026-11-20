@@ -126,7 +126,7 @@ async fn call_remote<P: Serialize + Send + Sync>(
 }
 
 fn read_password() -> Result<String, Error> {
-    crate::util::tui::read_password("BACKUP_PASSWORD", &t!("help.arg.backup-password"))
+    crate::util::tui::read_password("BACKUP_PASSWORD", &t!("backup.prompt-password"))
 }
 
 pub fn backup<C: Context>() -> ParentHandler<C> {
