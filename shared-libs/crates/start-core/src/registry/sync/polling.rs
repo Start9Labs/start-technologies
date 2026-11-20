@@ -63,6 +63,7 @@ pub(super) fn index(info: RegistryInfo, packages: GetPackagesResponseFull) -> Fu
         name: info.name,
         icon: info.icon,
         description: info.description,
+        default_locale: info.default_locale,
         package: PackageIndex {
             categories: info.categories,
             packages: packages

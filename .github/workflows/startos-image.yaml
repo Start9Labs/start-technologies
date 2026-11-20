@@ -17,7 +17,7 @@ on:
         type: string
         required: true
       compiled-run-id:
-        description: Run holding compiled-<arch>.tar; empty for this run
+        description: Run holding compiled-<arch>.tar.gz and rootfs.<arch>.squashfs; empty for this run
         type: string
         default: ''
       commit:
@@ -87,76 +87,39 @@ jobs:
       - name: Ensure hostedtoolcache exists
         run: sudo mkdir -p /opt/hostedtoolcache && sudo chown "$USER:$USER" /opt/hostedtoolcache
 
-      # Actions use the runner's bundled Node, not the Node on GITHUB_PATH.
-      # V8's background GC threads corrupt the heap on these runners during
-      # large artifact transfers, so the action host runs `--single-threaded`.
-      # Its wrapper is bash; dash drops hyphenated `INPUT_*` variables.
-      - name: Update RISC-V action runtime
-        if: ${{ env.ARCH == 'riscv64' }}
-        run: |
-          set -euo pipefail
-          worker="$(readlink -f "/proc/$PPID/exe")"
-          test "$(basename "$worker")" = Runner.Worker
-          runner_node="$(dirname "$worker")/../externals/node24/bin/node"
-          echo "Bundled action runtime: $("$runner_node" --version)"
-          base="https://unofficial-builds.nodejs.org/download/release/v${NODEJS_VERSION}"
-          tarball="node-v${NODEJS_VERSION}-linux-riscv64.tar.xz"
-          cd "$RUNNER_TEMP"
-          curl -fsSLO "$base/$tarball"
-          curl -fsSL "$base/SHASUMS256.txt" | grep " $tarball\$" | sha256sum -c -
-          tar -xJf "$tarball"
-          node_dir="$RUNNER_TEMP/${tarball%.tar.xz}"
-          test "$("$node_dir/bin/node" --version)" = "v${NODEJS_VERSION}"
-          "$node_dir/bin/node" --single-threaded -e 'require("node:crypto").createHash("sha256").update("action-runtime").digest(); console.log(process.versions)'
-          install -m 755 "$node_dir/bin/node" "$runner_node.real.next"
-          mv -f "$runner_node.real.next" "$runner_node.real"
-          printf '#!/bin/bash\nexec "%s" --single-threaded "$@"\n' "$runner_node.real" > "$runner_node.next"
-          chmod 755 "$runner_node.next"
-          mv -f "$runner_node.next" "$runner_node"
-          echo "Updated action runtime: $("$runner_node" --version)"
-          echo "$node_dir/bin" >> "$GITHUB_PATH"
-
-      - name: Set up docker QEMU
-        uses: docker/setup-qemu-action@v4
-
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.commit || github.sha }}
           fetch-depth: 0
 
+      # Precedes every JavaScript action after checkout.
+      - name: Update RISC-V action runtime
+        if: ${{ env.ARCH == 'riscv64' }}
+        uses: ./.github/actions/riscv-action-runtime
+        with:
+          nodejs-version: ${{ env.NODEJS_VERSION }}
+
+      - name: Set up docker QEMU
+        uses: docker/setup-qemu-action@v4
+
       - name: Free space
         run: .github/actions/setup-build/free-disk-space.sh
 
-      - name: Download compiled artifacts
+      - uses: ./.github/actions/use-compiled-artifacts
+        with:
+          arch: ${{ env.ARCH }}
+          run-id: ${{ inputs.compiled-run-id || github.run_id }}
+
+      - name: Download container runtime rootfs
         uses: actions/download-artifact@v8
         with:
-          name: compiled-${{ env.ARCH }}.tar
+          name: rootfs.${{ env.ARCH }}.squashfs
+          path: projects/start-os/container-runtime
           run-id: ${{ inputs.compiled-run-id || github.run_id }}
           github-token: ${{ github.token }}
 
-      - name: Extract compiled artifacts
-        run: tar -xvf compiled-${{ env.ARCH }}.tar
-
-      - name: Prevent rebuild of compiled artifacts
-        run: |
-          mkdir -p node_modules
-          mkdir -p projects/start-os/web/dist/raw
-          mkdir -p projects/start-tunnel/web/dist/raw
-          mkdir -p shared-libs/crates/start-core/bindings
-          mkdir -p shared-libs/ts-modules/start-core/lib/osBindings
-          mkdir -p projects/start-os/container-runtime/node_modules
-          mkdir -p projects/start-os/container-runtime/dist
-          mkdir -p projects/start-os/container-runtime/dist/node_modules
-          mkdir -p projects/start-sdk/dist
-          mkdir -p shared-libs/ts-modules/start-core/dist
-          mkdir -p shared-libs/crates/patch-db/client/node_modules
-          mkdir -p shared-libs/crates/patch-db/client/dist
-          mkdir -p .angular
-          mkdir -p projects/start-os/web/dist/raw/ui
-          mkdir -p projects/start-os/web/dist/raw/setup-wizard
-          mkdir -p projects/start-os/web/dist/static/ui
-          mkdir -p projects/start-os/web/dist/static/setup-wizard
-          make -t compiled-${{ env.ARCH }}.tar
+      - name: Prevent rebuild of the rootfs
+        run: make -t projects/start-os/container-runtime/rootfs.${{ env.ARCH }}.squashfs
 
       - run: git status
 
@@ -168,35 +131,46 @@ jobs:
         run: make start-os-img
         if: ${{ inputs.platform == 'raspberrypi' }}
 
-      # Images are already compressed, so the artifacts are stored as-is.
-      - uses: actions/upload-artifact@v7
+      - name: Compress img
+        run: gzip results/*.img
+        if: ${{ inputs.platform == 'raspberrypi' }}
+
+      - name: Archive kernel backport packages
+        uses: actions/upload-artifact@v7
+        if: ${{ inputs.platform == 'x86_64' || inputs.platform == 'aarch64' }}
         with:
-          name: ${{ inputs.platform }}.squashfs
-          path: results/*.squashfs
+          name: ${{ inputs.platform }}.kernel-backports
+          path: results/kernel-backports/
+          if-no-files-found: error
           retention-days: 14
           compression-level: 0
 
+      # Release tooling in scripts/ finds these artifacts by file name.
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.platform }}.iso
-          path: results/*.iso
+          path: results/*.squashfs
+          archive: false
           retention-days: 14
-          compression-level: 0
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: results/*.iso
+          archive: false
+          retention-days: 14
         if: ${{ inputs.platform != 'raspberrypi' }}
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.platform }}.img
-          path: results/*.img
+          path: results/*.img.gz
+          archive: false
           retention-days: 14
-          compression-level: 0
         if: ${{ inputs.platform == 'raspberrypi' }}
 
   # The OTA payload legacy (0.3.5.1) boxes pull via their frozen rsync updater:
   # the 0.4.0 base squashfs (built just above) repackaged onto the published
   # 0.3.5.1 rootfs. Pure repackaging (no OS compile), so it runs on x86_64 for
   # every platform. Only platforms that shipped in 0.3.5.1 (no nvidia/riscv);
-  # raspberrypi requires a reflash (#3443). The <platform>.migration.squashfs
+  # raspberrypi requires a reflash (#3443). The startos-*_<platform>.migration.squashfs
   # artifact is what ops publishes to the frozen registry as the version's OTA
   # image. See projects/start-os/build/assemble-migration-payload.sh and PR #3399.
   migration:
@@ -217,7 +191,8 @@ jobs:
       - name: Fetch the 0.4.0 base squashfs
         uses: actions/download-artifact@v8
         with:
-          name: ${{ inputs.platform }}.squashfs
+          pattern: startos-*_${{ inputs.platform }}.squashfs
+          merge-multiple: true
           path: base-new
 
       - name: Fetch the legacy (0.3.5.1) base image
@@ -251,8 +226,8 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.platform }}.migration.squashfs
           path: results/*.migration.squashfs
+          archive: false
           retention-days: 14
 
   deploy:
@@ -283,25 +258,20 @@ jobs:
           sparse-checkout: scripts/s3-put-once.sh
           sparse-checkout-cone-mode: false
 
-      - name: Download squashfs
+      - name: Download images
         uses: actions/download-artifact@v8
         with:
-          name: ${{ inputs.platform }}.squashfs
+          pattern: startos-*_${{ inputs.platform }}.{squashfs,iso,img.gz}
+          merge-multiple: true
           path: artifacts/
 
-      - name: Download ISO
-        if: ${{ inputs.platform != 'raspberrypi' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ inputs.platform }}.iso
-          path: artifacts/
-
-      - name: Download IMG
-        if: ${{ inputs.platform == 'raspberrypi' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ inputs.platform }}.img
-          path: artifacts/
+      - name: Check downloaded images
+        working-directory: artifacts
+        run: |
+          image=$([ "$PLATFORM" = raspberrypi ] && echo img.gz || echo iso)
+          for file in startos-*_"$PLATFORM".squashfs startos-*_"$PLATFORM".$image; do
+            [ -f "$file" ] || { echo "::error::No $file artifact in this run"; exit 1; }
+          done
 
       - name: Install start-cli
         uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master
@@ -330,7 +300,7 @@ jobs:
         run: |
           set -uo pipefail
           pids=()
-          for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img; do
+          for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img.gz; do
             [ -f "$file" ] || continue
             "$GITHUB_WORKSPACE/scripts/s3-put-once.sh" "$file" "$S3_BUCKET/v$VERSION/$file" &
             pids+=("$!")
@@ -351,8 +321,15 @@ jobs:
           registered_commit() {
             jq -er --arg version "$VERSION" '.versions | objects | .[$version].gitHash // ""' <<<"$1"
           }
+          # The registry slot a file fills.
+          slot() {
+            case "$1" in
+              *.img.gz) echo img ;;
+              *) echo "${1##*.}" ;;
+            esac
+          }
           files=()
-          for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img; do
+          for file in *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img.gz; do
             [ -f "$file" ] && files+=("$file")
           done
 
@@ -368,16 +345,22 @@ jobs:
 
           index() {
             if [ "$FORCE_OVERWRITE" = true ]; then
-              start-cli --registry="$REGISTRY" registry os asset remove "${1##*.}" "$VERSION" "$PLATFORM" || return 1
+              start-cli --registry="$REGISTRY" registry os asset remove "$(slot "$1")" "$VERSION" "$PLATFORM" || return 1
+            fi
+            # `asset add` takes the slot from the file extension. The img is
+            # indexed gzipped, through a hardlink named for its slot.
+            local indexed=$1 attempt
+            if [ "$(slot "$1")" = img ]; then
+              indexed=${1%.gz}
+              ln -f "$1" "$indexed" || return 1
             fi
             # Adding a file that is already indexed is a no-op, so a failure retries.
-            local attempt
             for attempt in 1 2 3; do
               echo "Indexing $1 for platform $PLATFORM (attempt $attempt)..."
               start-cli --registry="$REGISTRY" registry os asset add \
                 --platform="$PLATFORM" \
                 --version="$VERSION" \
-                "$1" \
+                "$indexed" \
                 "$S3_CDN/v$VERSION/$1" && return 0
               [ "$attempt" -eq 3 ] || sleep $((attempt * 30))
             done
@@ -401,11 +384,11 @@ jobs:
           fi
           if [ "$commit" != "$COMMIT" ]; then
             for file in "${files[@]}"; do
-              jq -e --arg version "$VERSION" --arg kind "${file##*.}" --arg platform "$PLATFORM" \
+              jq -e --arg version "$VERSION" --arg kind "$(slot "$file")" --arg platform "$PLATFORM" \
                 --arg url "$S3_CDN/v$VERSION/$file" \
                 '.versions[$version][$kind][$platform].urls // [] | any(.[]; . == $url)' \
                 <<<"$index_json" > /dev/null || continue
-              start-cli --registry="$REGISTRY" registry os asset remove "${file##*.}" "$VERSION" "$PLATFORM" \
+              start-cli --registry="$REGISTRY" registry os asset remove "$(slot "$file")" "$VERSION" "$PLATFORM" \
                 || echo "::error::could not remove $file from v$VERSION in $REGISTRY"
             done
             echo "::error::v$VERSION in $REGISTRY was registered for ${commit:-no commit} while $PLATFORM indexed; this leg's images were withdrawn."
@@ -417,7 +400,7 @@ jobs:
         working-directory: artifacts
         run: |
           shopt -s nullglob
-          printf '%s\n' *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img > "$RUNNER_TEMP/published-$PLATFORM.txt"
+          printf '%s\n' *_"$PLATFORM".squashfs *_"$PLATFORM".iso *_"$PLATFORM".img.gz > "$RUNNER_TEMP/published-$PLATFORM.txt"
 
       - uses: actions/upload-artifact@v7
         with:

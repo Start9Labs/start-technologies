@@ -183,7 +183,7 @@ export type EffectMethod<T extends StringObject = Effects> = {
 
 /** Options for rsync-based file synchronization (used in backup/restore). */
 export type SyncOptions = {
-  /** delete files that exist in the target directory, but not in the source directory */
+  /** delete files that exist in the target directory, but not in the source directory, including paths matching `exclude` */
   delete: boolean
   /** do not sync files with paths that match these patterns */
   exclude: string[]

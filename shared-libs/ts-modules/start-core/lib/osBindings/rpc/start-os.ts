@@ -395,6 +395,9 @@ export type ServiceInterfaceId = z.output<typeof schemas.ServiceInterfaceId>
 export type ServiceInterfaceType = z.output<typeof schemas.ServiceInterfaceType>
 export type Session = z.output<typeof schemas.Session>
 export type SetCountryParamsInput = z.input<typeof schemas.SetCountryParams>
+export type SetDefaultLocaleParamsInput = z.input<
+  typeof schemas.SetDefaultLocaleParams
+>
 export type SetEchoipUrlsParamsInput = z.input<
   typeof schemas.SetEchoipUrlsParams
 >

@@ -15,7 +15,7 @@ use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard, WeakMountGuard
 use crate::disk::util::{StartOsRecoveryInfo, has_legacy_backup, recovery_info};
 use crate::prelude::*;
 use crate::shared_volumes::mounts::PreparedSource;
-use crate::shared_volumes::source::{self, PreparedFilesystem, SourceDefinition};
+use crate::shared_volumes::source::{self, LocalSubvolume, PreparedFilesystem, SourceDefinition};
 use crate::shared_volumes::{
     CreateSharedVolumeParams, CreateSharedVolumeSource, SharedVolumeDrive, SharedVolumeInspection,
     SharedVolumeSource,
@@ -64,9 +64,11 @@ pub(crate) struct BackupTargetSource {
 pub(crate) fn filesystem(
     id: &BackupTargetId,
     definition: &SourceDefinition,
-) -> PreparedFilesystem<BlockDev<PathBuf>, Cifs> {
+) -> PreparedFilesystem<LocalSubvolume, BlockDev<PathBuf>, Cifs> {
     match definition.source() {
-        SharedVolumeSource::Local => PreparedFilesystem::Local(local_path(crate::PACKAGE_DATA, id)),
+        SharedVolumeSource::Local => {
+            PreparedFilesystem::Local(LocalSubvolume(local_path(crate::PACKAGE_DATA, id)))
+        }
         SharedVolumeSource::Disk { logicalname, .. } => {
             PreparedFilesystem::Disk(BlockDev::new(logicalname.clone()))
         }

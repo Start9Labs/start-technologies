@@ -129,12 +129,27 @@ pub(crate) async fn convert_directory(
     if !tokio::fs::try_exists(path).await? || is_subvolume(path).await {
         return Ok(());
     }
-    let (temporary, original) = conversion_paths(path);
+    prepare_conversion(path, path, counter).await?;
+    commit_conversion(path).await
+}
+
+pub(crate) async fn prepare_conversion(
+    path: &Path,
+    source: &Path,
+    counter: std::sync::Arc<crate::util::io::Counter>,
+) -> Result<(), Error> {
+    let (temporary, _) = conversion_paths(path);
     create_subvolume(&temporary).await?;
-    if let Err(error) = crate::util::clone::clone_tree(path, &temporary, counter).await {
+    if let Err(error) = crate::util::clone::clone_tree(source, &temporary, counter).await {
         delete_tree(&temporary).await.log_err();
         return Err(error);
     }
+    crate::disk::mount::util::sync_filesystem(&temporary).await
+}
+
+/// Publishes a prepared replacement; the caller must exclude mounts and writers.
+pub(crate) async fn commit_conversion(path: &Path) -> Result<(), Error> {
+    let (temporary, original) = conversion_paths(path);
     if let Err(error) = crate::util::io::rename(path, &original).await {
         delete_tree(&temporary).await.log_err();
         return Err(error);
@@ -144,5 +159,6 @@ pub(crate) async fn convert_directory(
         delete_tree(&temporary).await.log_err();
         return Err(error);
     }
+    crate::disk::mount::util::sync_filesystem(path).await?;
     delete_tree(&original).await
 }

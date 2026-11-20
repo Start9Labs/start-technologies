@@ -182,7 +182,12 @@ import UpdatesComponent from './updates.component'
           </p>
           <p
             safeLinks
-            [innerHTML]="item().releaseNotes | localize | markdown | dompurify"
+            [innerHTML]="
+              item().releaseNotes
+                | localize: item().defaultLocale
+                | markdown
+                | dompurify
+            "
           ></p>
         </tui-expand>
       </td>
@@ -364,12 +369,11 @@ export class UpdatesItemComponent {
     if (trust && !(await this.alerts.alertUntrusted())) return
 
     const pkg = this.item()
-    const { preDownloadAlert } = pkg
     const url = this.parent.current()?.url || ''
 
     if (
       !(await this.alerts.alertPreDownload(
-        preDownloadAlert,
+        pkg,
         this.local().stateInfo.manifest.version,
       ))
     ) {

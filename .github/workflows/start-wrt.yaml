@@ -40,6 +40,8 @@ concurrency:
 
 env:
   NODEJS_VERSION: '24.17.0'
+  # Compiling the riscv64 binary outgrows the RAM of runners without swap.
+  BUILD_SWAP_SIZE: 8G
 
 jobs:
   changes:
@@ -78,6 +80,7 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
+          swap-size: ${{ env.BUILD_SWAP_SIZE }}
 
       - name: Make start-wrt
         run: make start-wrt
@@ -133,6 +136,7 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
+          swap-size: ${{ env.BUILD_SWAP_SIZE }}
 
       # Host deps for the OpenWrt build, restored from the old standalone
       # repo's setup-build action (the monorepo's shared setup-build serves
@@ -165,13 +169,17 @@ jobs:
       - name: Build image
         run: make start-wrt-image
 
-      - uses: actions/upload-artifact@v7
+      - name: Verify the image trust store
+        run: make start-wrt-ca-test
+
+      # Mirrors build.mk's STARTWRT_BASENAME: the image rule renames the raw
+      # OpenWrt outputs to startwrt-<version>-<githash7>_spacemit-k1-*.img.gz.
+      - uses: ./.github/actions/upload-each
         with:
-          name: startwrt-openwrt-image
-          # Mirrors build.mk's STARTWRT_BASENAME: the image rule renames the raw
-          # OpenWrt outputs to startwrt-<version>-<githash7>_spacemit-k1-*.
-          path: results/startwrt-*
+          pattern: results/startwrt-*.img.gz
+          archive: false
           retention-days: 14
+          if-no-files-found: error
 
   # Publish path: upload the built images to shared S3 (the registry CDN serves
   # them from here) and register + index the version into the beta registry,
@@ -247,11 +255,19 @@ jobs:
         run: |
           CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh registry-notes start-wrt > "$RUNNER_TEMP/release-notes.json"
 
-      - name: Download image artifact
+      - name: Download images
         uses: actions/download-artifact@v8
         with:
-          name: startwrt-openwrt-image
+          pattern: startwrt-*.img.gz
+          merge-multiple: true
           path: artifacts/
+
+      - name: Check downloaded images
+        working-directory: artifacts
+        run: |
+          for file in startwrt-*-sdcard.img.gz startwrt-*-sysupgrade.img.gz; do
+            [ -f "$file" ] || { echo "::error::No $file artifact in this run"; exit 1; }
+          done
 
       - name: Install start-cli
         uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master

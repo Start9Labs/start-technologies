@@ -1,0 +1,21 @@
+Subject: ca-certificates: blacklist "emSign ECC Root CA - G3"
+
+Backport of openwrt/openwrt 4a686570eb6495635279273f034caa2a0f37f36e
+from openwrt-25.12, with its package patch in
+openwrt-overlay/package/system/ca-certificates/patches/. Drop both once
+the pinned release includes that commit.
+
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: openwrt v25.12.6
+
+--- a/package/system/ca-certificates/Makefile
++++ b/package/system/ca-certificates/Makefile
+@@ -8,7 +8,7 @@
+ 
+ PKG_NAME:=ca-certificates
+ PKG_VERSION:=20260816
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ PKG_MAINTAINER:=
+ 
+ PKG_LICENSE:=GPL-2.0-or-later MPL-2.0

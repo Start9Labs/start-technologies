@@ -6,6 +6,7 @@ use crate::prelude::*;
 use crate::service::effects::callbacks::CallbackHandler;
 use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
+use crate::shared_volumes::mounts::MountSourceError;
 use crate::shared_volumes::source::SourceDefinition;
 use crate::shared_volumes::{SharedVolume, SharedVolumeAvailability, SharedVolumeId};
 
@@ -190,7 +191,31 @@ async fn authorize_mount(
         )
 }
 
+/// Source preparation reports unavailability; request and attachment failures reject.
+fn mount_failure(error: MountSourceError) -> Result<SharedVolumeMountResult, Error> {
+    match error {
+        MountSourceError::Source(error) => Ok(SharedVolumeMountResult::Unavailable {
+            reason: if matches!(error.kind, ErrorKind::Timeout) {
+                SharedVolumeUnavailableReason::Timeout
+            } else {
+                SharedVolumeUnavailableReason::SourceUnavailable
+            },
+        }),
+        MountSourceError::Attachment(error) => Err(error),
+    }
+}
+
+/// Owns authorization, placeholder installation and data attachment through cancellation.
 pub async fn mount_shared_volume(
+    context: EffectContext,
+    params: MountSharedVolumeParams,
+) -> Result<SharedVolumeMountResult, Error> {
+    tokio::spawn(mount_shared_volume_owned(context, params))
+        .await
+        .with_kind(ErrorKind::Cancelled)?
+}
+
+async fn mount_shared_volume_owned(
     context: EffectContext,
     MountSharedVolumeParams {
         id,
@@ -203,7 +228,7 @@ pub async fn mount_shared_volume(
     use crate::disk::mount::filesystem::syscall::MountNamespace;
     use crate::disk::mount::filesystem::{ReadOnly, ReadWrite};
     use crate::disk::mount::guard::GenericMountGuard;
-    use crate::shared_volumes::mounts::{PreparedTarget, confined_relative};
+    use crate::shared_volumes::mounts::confined_relative;
     let service = context.deref()?;
     let container = &service.seed.persistent_container;
     container.shared_volumes.lock().await.check_allowed()?;
@@ -228,47 +253,50 @@ pub async fn mount_shared_volume(
         Ok(source) => Ok(source.into_subpath(subpath).await),
         Err(error) => Err(error),
     };
-    let lxc = container
-        .lxc_container
-        .get()
-        .or_not_found("lxc container")?;
-    let pid = lxc.pid().await?;
-    let namespace = std::sync::Arc::new(MountNamespace::for_process(pid)?);
-    let root = {
-        let subcontainers = container.subcontainers.lock().await;
-        std::path::PathBuf::from(format!("/proc/{pid}/root")).join(
-            subcontainers
-                .get(&subcontainer)
-                .or_not_found("subcontainer")?
-                .overlay
-                .path()
-                .strip_prefix(lxc.rootfs_dir())
-                .with_kind(ErrorKind::Incoherent)?,
-        )
-    };
-    let target = PreparedTarget::open(root, mountpoint, namespace).await?;
+    let _admission = service
+        .seed
+        .ctx
+        .shared_volume_access
+        .management
+        .read()
+        .await;
     let mut mounts = container.shared_volumes.lock().await;
     mounts.check_allowed()?;
     authorize_mount(&service, &id, readonly).await?;
     let subcontainers = container.subcontainers.lock().await;
-    subcontainers
+    let lxc = container
+        .lxc_container
+        .get()
+        .or_not_found("lxc container")?;
+    let root = subcontainers
         .get(&subcontainer)
-        .or_not_found("subcontainer")?;
-    let location = mounts.prepare(&subcontainer, target).await?;
+        .or_not_found("subcontainer")?
+        .overlay
+        .path()
+        .strip_prefix(lxc.rootfs_dir())
+        .with_kind(ErrorKind::Incoherent)?;
+    let pid = lxc.pid().await?;
+    let service_root = std::path::PathBuf::from(format!("/proc/{pid}/root"));
+    let namespace = std::sync::Arc::new(MountNamespace::for_process(pid)?);
+    mounts
+        .prepare_target(&subcontainer, &mountpoint, &service_root, root, namespace)
+        .await?;
     let source = match source {
         Ok(prepared) => prepared?,
-        Err(error) => {
-            return Ok(SharedVolumeMountResult::Unavailable {
-                reason: if matches!(error.kind, ErrorKind::Timeout) {
-                    SharedVolumeUnavailableReason::Timeout
-                } else {
-                    SharedVolumeUnavailableReason::SourceUnavailable
-                },
-            });
-        }
+        Err(error) => return mount_failure(MountSourceError::Source(error)),
     };
-    mounts.attach(&subcontainer, location, id, source, readonly)?;
-    Ok(SharedVolumeMountResult::Mounted)
+    mounts
+        .mount_source(
+            &subcontainer,
+            &mountpoint,
+            &id,
+            source,
+            readonly,
+            &service_root,
+        )
+        .await
+        .map(|()| SharedVolumeMountResult::Mounted)
+        .or_else(mount_failure)
 }
 
 #[cfg(test)]
@@ -277,6 +305,39 @@ mod tests {
     use crate::shared_volumes::{
         SharedVolumeCredentials, SharedVolumeDrive, SharedVolumeGrant, SharedVolumeSource,
     };
+
+    #[test]
+    fn source_preparation_failures_return_optional_unavailability() {
+        for (kind, reason) in [
+            (ErrorKind::Filesystem, "sourceUnavailable"),
+            (ErrorKind::Timeout, "timeout"),
+        ] {
+            let outcome = mount_failure(MountSourceError::Source(Error::new(
+                eyre!("source preparation failed"),
+                kind,
+            )))
+            .unwrap();
+            assert_eq!(
+                serde_json::to_value(outcome).unwrap(),
+                serde_json::json!({"kind": "unavailable", "reason": reason})
+            );
+        }
+    }
+
+    #[test]
+    fn attachment_failures_keep_their_error_even_for_source_like_kinds() {
+        for kind in [
+            ErrorKind::Authorization,
+            ErrorKind::InvalidRequest,
+            ErrorKind::Filesystem,
+            ErrorKind::Timeout,
+        ] {
+            let error =
+                mount_failure(Error::new(eyre!("attachment failed"), kind).into()).unwrap_err();
+            assert_eq!(error.kind, kind);
+            assert!(error.to_string().contains("attachment failed"));
+        }
+    }
 
     #[test]
     fn consumers_are_notified_only_when_their_mount_inputs_change() {
