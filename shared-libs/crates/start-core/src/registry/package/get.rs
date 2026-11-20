@@ -904,7 +904,7 @@ mod tests {
         first.s9pks[0].1.published_at = "2026-01-01T00:00:00Z".parse().unwrap();
         let (_, mut second) = version_info_signed_by(2);
         second.s9pks[0].1.published_at = "2026-03-01T00:00:00Z".parse().unwrap();
-        let index: Model<PackageIndex> = Model::from_value(json!({
+        let index: Model<PackageIndex> = json!({
             "categories": {},
             "packages": { "demo": {
                 "authorized": {},
@@ -914,7 +914,8 @@ mod tests {
                     "2.0.0:0": to_value(&second).unwrap(),
                 },
             } },
-        }));
+        })
+        .into();
         let expected = json!("2026-01-01T00:00:00Z");
 
         let one = GetPackageParams::try_parse_from(["get", "demo"]).unwrap();
