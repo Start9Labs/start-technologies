@@ -1212,6 +1212,16 @@ export type SshAddParams = z.output<typeof schemas.SshAddParams>
 export type SshAddParamsInput = z.input<typeof schemas.SshAddParams>
 
 /**
+ * Authorized-key intent shared by SSH mutations and subscribed clients.
+ */
+export type SshKeys = z.output<typeof schemas.SshKeys>
+
+/**
+ * Authorized-key intent shared by SSH mutations and subscribed clients.
+ */
+export type SshKeysInput = z.input<typeof schemas.SshKeys>
+
+/**
  * The public view of a backup found on a target: enough to identify it, and none of
  * [`BackupUnencryptedMetadata`]'s key material.
  */
