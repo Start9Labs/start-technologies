@@ -223,6 +223,86 @@ pub async fn quiesce_disk(disk_path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// A partition the kernel exposes, with its start and size in 512-byte sectors.
+pub struct MappedPartition {
+    pub dev: PathBuf,
+    pub extent: (u64, u64),
+}
+
+async fn read_sysfs_number<T: std::str::FromStr>(path: &Path) -> Result<T, Error> {
+    let text = tokio::fs::read_to_string(path)
+        .await
+        .with_ctx(|_| (ErrorKind::BlockDevice, path.display().to_string()))?;
+    text.trim().parse().map_err(|_| {
+        Error::new(
+            eyre!("unreadable value in {}", path.display()),
+            ErrorKind::BlockDevice,
+        )
+    })
+}
+
+/// Every partition the kernel exposes on the disk, by partition number. Any unreadable entry
+/// fails the call.
+pub async fn mapped_partitions(
+    disk_path: &Path,
+) -> Result<BTreeMap<usize, MappedPartition>, Error> {
+    let canonical = tokio::fs::canonicalize(disk_path)
+        .await
+        .with_ctx(|_| (ErrorKind::BlockDevice, disk_path.display().to_string()))?;
+    let disk_name = canonical.file_name().ok_or_else(|| {
+        Error::new(
+            eyre!("invalid disk path: {}", disk_path.display()),
+            ErrorKind::BlockDevice,
+        )
+    })?;
+    partitions_in(&Path::new("/sys/block").join(disk_name)).await
+}
+
+/// Partitions under a disk's sysfs directory: its subdirectories that hold a `partition` file.
+async fn partitions_in(sys_block: &Path) -> Result<BTreeMap<usize, MappedPartition>, Error> {
+    let mut entries = tokio::fs::read_dir(sys_block)
+        .await
+        .with_ctx(|_| (ErrorKind::BlockDevice, sys_block.display().to_string()))?;
+    let mut out = BTreeMap::new();
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .with_ctx(|_| (ErrorKind::BlockDevice, sys_block.display().to_string()))?
+    {
+        let is_dir = entry
+            .file_type()
+            .await
+            .with_ctx(|_| (ErrorKind::BlockDevice, entry.path().display().to_string()))?
+            .is_dir();
+        if !is_dir {
+            continue;
+        }
+        let dir = entry.path();
+        let number = dir.join("partition");
+        match tokio::fs::metadata(&number).await {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                return Err(Error::new(
+                    eyre!("{}: {e}", number.display()),
+                    ErrorKind::BlockDevice,
+                ));
+            }
+        }
+        out.insert(
+            read_sysfs_number(&number).await?,
+            MappedPartition {
+                dev: Path::new("/dev").join(entry.file_name()),
+                extent: (
+                    read_sysfs_number(&dir.join("start")).await?,
+                    read_sysfs_number(&dir.join("size")).await?,
+                ),
+            },
+        );
+    }
+    Ok(out)
+}
+
 /// Removes the kernel's mapping of every partition on the disk but the one kept.
 /// Fails on a partition still open.
 pub async fn forget_partitions(disk_path: &Path, keep: Option<&Path>) -> Result<(), Error> {
@@ -269,4 +349,50 @@ pub async fn update_partition_table(disk_path: &Path) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(path: &Path, text: &str) {
+        std::fs::write(path, text).unwrap();
+    }
+
+    fn partition(sys_block: &Path, name: &str, number: usize, start: u64, size: u64) {
+        let dir = sys_block.join(name);
+        std::fs::create_dir(&dir).unwrap();
+        write(&dir.join("partition"), &format!("{number}\n"));
+        write(&dir.join("start"), &format!("{start}\n"));
+        write(&dir.join("size"), &format!("{size}\n"));
+    }
+
+    #[tokio::test]
+    async fn partitions_are_the_subdirectories_with_a_partition_number() {
+        let root = tempfile::tempdir().unwrap();
+        let disk = root.path();
+        write(&disk.join("uevent"), "MAJOR=259\nDEVNAME=nvme0n1\n");
+        write(&disk.join("size"), "134217728\n");
+        std::fs::create_dir(disk.join("queue")).unwrap();
+        std::fs::create_dir(disk.join("holders")).unwrap();
+        std::os::unix::fs::symlink(disk.join("queue"), disk.join("device")).unwrap();
+        partition(disk, "nvme0n1p1", 1, 2048, 4194304);
+        partition(disk, "nvme0n1p3", 3, 33556480, 100661248);
+
+        let found = partitions_in(disk).await.unwrap();
+        let view: Vec<_> = found
+            .iter()
+            .map(|(n, p)| (*n, p.dev.clone(), p.extent))
+            .collect();
+        assert_eq!(
+            view,
+            [
+                (1, PathBuf::from("/dev/nvme0n1p1"), (2048, 4194304)),
+                (3, PathBuf::from("/dev/nvme0n1p3"), (33556480, 100661248)),
+            ]
+        );
+
+        write(&disk.join("nvme0n1p3").join("size"), "unreadable\n");
+        assert!(partitions_in(disk).await.is_err());
+    }
 }

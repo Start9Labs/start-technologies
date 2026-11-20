@@ -1591,6 +1591,13 @@ os-install.partition-not-mapped-as-written:
   fr_FR: "La partition %{partition} ne correspond pas à la table de partitions qui vient d'être écrite : l'installation s'est arrêtée avant le formatage. Redémarrez et réessayez."
   pl_PL: "Partycja %{partition} nie odpowiada właśnie zapisanej tablicy partycji, więc instalacja zatrzymała się przed formatowaniem. Uruchom ponownie i spróbuj jeszcze raz."
 
+os-install.protected-partition-not-in-table:
+  en_US: "The data partition %{partition} does not match the drive's partition table, so installation stopped before rewriting the partition table or formatting. Restart and try again."
+  de_DE: "Die Datenpartition %{partition} stimmt nicht mit der Partitionstabelle des Laufwerks überein, daher wurde die Installation angehalten, bevor die Partitionstabelle neu geschrieben oder formatiert wurde. Starten Sie neu und versuchen Sie es erneut."
+  es_ES: "La partición de datos %{partition} no coincide con la tabla de particiones de la unidad, por lo que la instalación se detuvo antes de reescribir la tabla de particiones o formatear. Reinicie e inténtelo de nuevo."
+  fr_FR: "La partition de données %{partition} ne correspond pas à la table de partitions du disque : l'installation s'est arrêtée avant de réécrire la table de partitions ou de formater. Redémarrez et réessayez."
+  pl_PL: "Partycja danych %{partition} nie odpowiada tablicy partycji dysku, więc instalacja zatrzymała się przed ponownym zapisem tablicy partycji i formatowaniem. Uruchom ponownie i spróbuj jeszcze raz."
+
 os-install.protected-partition-overlaps-os-root-sectors:
   en_US: "Protected partition %{path} starts at sector %{first_lba}, leaving less than the minimum room for the OS root partition (must end at or before sector %{first_lba}, minimum end sector is %{min_end_sector})"
   de_DE: "Geschützte Partition %{path} beginnt bei Sektor %{first_lba} und lässt weniger als den Mindestplatz für die OS-Root-Partition (muss am oder vor Sektor %{first_lba} enden, Mindest-Endsektor ist %{min_end_sector})"
