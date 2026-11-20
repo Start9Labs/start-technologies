@@ -20,6 +20,7 @@ import { MarketplaceService } from 'src/app/services/marketplace.service'
 type PreDownloadDialogData = TuiConfirmData & {
   content: PolymorpheusComponent<PreDownloadMessage>
   message: T.LocaleString
+  defaultLocale?: string | null
 }
 
 @Component({
@@ -28,7 +29,9 @@ type PreDownloadDialogData = TuiConfirmData & {
       <div
         class="g-markdown"
         safeLinks
-        [innerHTML]="message | localize | markdown | dompurify"
+        [innerHTML]="
+          data.message | localize: data.defaultLocale | markdown | dompurify
+        "
       ></div>
     </div>
   `,
@@ -41,9 +44,8 @@ type PreDownloadDialogData = TuiConfirmData & {
   ],
 })
 class PreDownloadMessage {
-  protected readonly message =
+  protected readonly data =
     injectContext<TuiDialogContext<boolean, PreDownloadDialogData>>().data
-      .message
 }
 
 const PRE_DOWNLOAD_MESSAGE = new PolymorpheusComponent(PreDownloadMessage)
@@ -86,7 +88,10 @@ export class MarketplaceAlertsService {
   }
 
   async alertPreDownload(
-    alert: T.PreDownloadAlert | null | undefined,
+    {
+      preDownloadAlert: alert,
+      defaultLocale,
+    }: Pick<T.PackageVersionInfo, 'preDownloadAlert' | 'defaultLocale'>,
     sourceVersion: string | null,
   ): Promise<boolean> {
     if (
@@ -100,6 +105,7 @@ export class MarketplaceAlertsService {
     const data: PreDownloadDialogData = {
       content: PRE_DOWNLOAD_MESSAGE,
       message: alert.message,
+      defaultLocale,
       yes: 'Continue',
       no: 'Cancel',
     }

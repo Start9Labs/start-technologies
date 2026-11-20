@@ -12,11 +12,17 @@ name: Release
         type: boolean
         default: false
       RELEASE_REGISTRY:
-        description: The registry to publish to
+        description: The registry to publish to. Defaults to the caller's RELEASE_REGISTRY variable.
         type: string
+        default: ${{ vars.RELEASE_REGISTRY }}
       S3_S9PKS_BASE_URL:
-        description: S3 base URL for package uploads (e.g. https://bucket.region.digitaloceanspaces.com)
+        description: S3 base URL for package uploads (e.g. https://bucket.region.digitaloceanspaces.com). Defaults to the caller's S3_S9PKS_BASE_URL variable.
         type: string
+        default: ${{ vars.S3_S9PKS_BASE_URL }}
+      REGISTRY_PROXY:
+        description: Proxy URL start-cli uses to reach the registries, e.g. socks5h://proxy.example:9050 for .onion registries. The proxy must already be reachable from the runner. Defaults to the caller's REGISTRY_PROXY variable.
+        type: string
+        default: ${{ vars.REGISTRY_PROXY }}
     secrets:
       DEV_KEY:
         description: Developer signing key
@@ -93,14 +99,14 @@ jobs:
         uses: https://github.com/Start9Labs/start-technologies/.github/actions/build-s9pk@master
         with:
           target: ${{ matrix.target }}
-      - name: Upload s9pks for Publish stage
+      - name: Upload s9pks
         uses: https://data.forgejo.org/forgejo/upload-artifact@v4
         with:
-          name: build-${{ matrix.target || 'default' }}
-          path: ./*.s9pk
           if-no-files-found: error
+          retention-days: 14
           compression-level: 0
-          retention-days: 1
+          name: s9pks-${{ matrix.target || 'default' }}
+          path: '*.s9pk'
   Publish:
     needs: BuildMatrix
     runs-on: ubuntu-latest
@@ -109,6 +115,10 @@ jobs:
     steps:
       - name: Setup publish environment
         uses: https://github.com/Start9Labs/start-technologies/.forgejo/actions/setup-publish-env@master
+      - name: Configure registry proxy
+        uses: https://github.com/Start9Labs/start-technologies/.github/actions/configure-registry-proxy@master
+        with:
+          proxy: ${{ inputs.REGISTRY_PROXY }}
       - name: Checkout services repository
         uses: https://github.com/actions/checkout@v6
         with:
@@ -121,7 +131,6 @@ jobs:
       - name: Collect s9pks from BuildMatrix
         uses: https://data.forgejo.org/forgejo/download-artifact@v4
         with:
-          pattern: build-*
           merge-multiple: true
           path: .
       - name: Verify s9pks
@@ -302,10 +311,3 @@ jobs:
             start-cli --registry "$REGISTRY" registry package add "$s9pk" --url "${GH_URL}/${s9pk}"
           done
         shell: bash
-      - name: Upload s9pks
-        uses: https://data.forgejo.org/forgejo/upload-artifact@v4
-        with:
-          retention-days: 14
-          compression-level: 0
-          name: s9pks
-          path: '*.s9pk'

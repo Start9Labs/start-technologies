@@ -33,7 +33,7 @@
   `@angular/core`, members alphabetized (normalized by hand in review).
 - Umbrella Taiga imports over granular: `TuiDataList, TuiDropdown` — not
   `TuiDataListComponent, TuiDropdownDirective, TuiDropdownOpen, …`.
-- Comments explain the non-obvious present — measured values (`// 1120 = 938px of buttons + …`),
-  deviations (`// Deliberately NOT tui-root._mobile`), honest placeholders. Attributed TODOs
-  mark known debt (`// TODO @Alex refactor this to declarative validation`); divergence from
-  canon gets a named owner, not silence.
+- Comments follow the repo's comment rules (`start-technologies/AGENTS.md` § Code style): none
+  unless a fact can't be recovered from the code, such as a measured value
+  (`// 1120 = 938px of buttons + …`) or a deliberate divergence
+  (`// Deliberately NOT tui-root._mobile`). Known debt goes in an issue, not a TODO.

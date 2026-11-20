@@ -92,13 +92,15 @@ test('remote calls and their inner jobs select the x86 runner for emulated build
 test('Forgejo artifacts use compatible actions and preserve the build-to-publish handoff', () => {
   const release = document('.forgejo/workflows/release.yml')
   const upload = release.jobs.BuildMatrix.steps.find(
-    step => step.name === 'Upload s9pks for Publish stage',
+    step => step.name === 'Upload s9pks',
   )
   assert.equal(
     upload.uses,
     'https://data.forgejo.org/forgejo/upload-artifact@v4',
   )
-  assert.equal(upload.with.name, "build-${{ matrix.target || 'default' }}")
+  assert.equal(upload.with.name, "s9pks-${{ matrix.target || 'default' }}")
+  assert.equal(upload.with.archive, undefined)
+  assert.equal(upload.with['compression-level'], 0)
   const download = release.jobs.Publish.steps.find(
     step => step.name === 'Collect s9pks from BuildMatrix',
   )
@@ -106,7 +108,7 @@ test('Forgejo artifacts use compatible actions and preserve the build-to-publish
     download.uses,
     'https://data.forgejo.org/forgejo/download-artifact@v4',
   )
-  assert.equal(download.with.pattern, 'build-*')
+  assert.equal(download.with.pattern, undefined)
   assert.equal(download.with['merge-multiple'], true)
   const build = document('.forgejo/workflows/build.yml')
   assert.equal(
@@ -117,6 +119,8 @@ test('Forgejo artifacts use compatible actions and preserve the build-to-publish
     build.jobs.BuildMatrix.steps.at(-1).with.name,
     "s9pks-${{ matrix.target || 'default' }}",
   )
+  assert.equal(build.jobs.BuildMatrix.steps.at(-1).with.archive, undefined)
+  assert.equal(build.jobs.BuildMatrix.steps.at(-1).with['compression-level'], 0)
 })
 
 test('Forgejo releases use the in-place Forgejo publisher and caller credentials', () => {

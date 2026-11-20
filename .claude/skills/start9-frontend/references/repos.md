@@ -1,5 +1,8 @@
 # Per-repo deltas & commands
 
+Each repo's own `AGENTS.md` carries its project facts; read it on the way in. What follows is
+only what this skill's rules need to know about each one.
+
 - **start-technologies (monorepo)** — workspace root = repo root; `npm ci` then
   `npm run build:deps` **must** run before anything type-checks. Dev: `npm run start:ui`
   (mocks; needs `config.json` copied from `shared-libs/ts-modules/config-sample.json`),
@@ -7,21 +10,10 @@
   `npm run check:i18n`. UIs are embedded into Rust binaries at compile time — web build
   precedes cargo. `brochure-marketplace` **auto-deploys to marketplace.start9.com on merge to
   `master`**.
-- **start9-store** — SSR; browser APIs only via tokens/`afterNextRender`;
-  the header collapses to its drawer below `TUI_MEDIA.tablet` (1024), so a new nav item means
-  re-checking that the row still fits at 1024; light theme is a
-  deliberate deferral of design; checkout is a redirect in Phase 1 (Shopify) — multi-step
-  checkout is Phase 2 (Vendure).
-- **ops-server** — admin-only actions check `adminService.isAdmin()`. Never commit `.env`.
-- **support-server** (`portal/web/`) — the support portal, not a dashboard: one
-  app with the customer chat at `/` and the staff inbox at `/staff`, sharing components and a
-  store base and never branching on the role outside the shell and the route guards.
-  Same-origin RPC and socket.io, only through `ApiService` and `RealtimeService`; the contract
-  is the repo's `portal/web/ARCHITECTURE.md`. No environments — `ng serve` proxies to `mock/`,
-  an Express + socket.io server that is the dev backend (there is no `MockApiService`; extend
-  the mock). Inline `canMatch` guards on `SessionService.user()` and its `role`. Both themes: the account's
-  appearance setting drives `TUI_DARK_MODE` (`provideTaiga()` with no `mode` seeds from the OS,
-  StartOS tokens for dark). Local i18n machinery with `en.ts` only. No commit hook:
-  `npm run check` runs the compiler, `check-i18n`, the logic tests in `scripts/*.test.ts`
-  (`tsx --test`), the mock's type-check, and `prettier --check`. Its `web/AGENTS.md` carries
-  the portal-specific rules.
+- **start9-store** — SSR: browser APIs only through tokens or `afterNextRender`. Its header
+  collapses at `TUI_MEDIA.tablet`, not `mobile`, so `tui-root._mobile` applies below 1024px.
+- **ops-server** — admin-only actions check `adminService.isAdmin()`.
+- **support-server** (`portal/web/`) — one app for customers (`/`) and staff (`/staff`) that
+  never branches on the role outside the shell and the route guards. There is no
+  `MockApiService`: the dev backend is the Express + socket.io server in `mock/`, so extend
+  that. Its `web/AGENTS.md` carries the rest.

@@ -12,6 +12,10 @@ inputs:
     description: 'Zip compression level passed to @actions/artifact (0-9).'
     required: false
     default: '6'
+  archive:
+    description: 'Zip each file before upload. When false, each artifact is the file itself and compression-level is ignored.'
+    required: false
+    default: 'true'
   if-no-files-found:
     description: 'Behavior when the glob matches nothing: warn | error | ignore.'
     required: false

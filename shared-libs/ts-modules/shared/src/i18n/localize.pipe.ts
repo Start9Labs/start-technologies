@@ -12,8 +12,9 @@ export class LocalizePipe implements PipeTransform {
   private readonly i18nService = inject(i18nService)
   private readonly i18n = inject(I18N)
 
-  transform(string: T.LocaleString): string {
+  /** Takes the owning package's or registry's `defaultLocale`. */
+  transform(string: T.LocaleString, defaultLocale?: string | null): string {
     this.i18n() // read signal to trigger change detection on language switch
-    return this.i18nService.localize(string)
+    return this.i18nService.localize(string, defaultLocale)
   }
 }

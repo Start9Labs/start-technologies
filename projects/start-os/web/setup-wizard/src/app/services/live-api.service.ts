@@ -38,12 +38,15 @@ export class LiveApiService extends ApiService {
       })
       const lease = await this.authKeys.admissionLease()
       options?.signal?.throwIfAborted()
-      return this.sockets.stream(body, lease, options)
+      return this.sockets.stream(body, lease, {
+        ...options,
+        allowTemporaryIdentity: true,
+      })
     },
   })
 
   openWebsocket$<T>(guid: string): Observable<T> {
-    return this.sockets.open<T>(guid)
+    return this.sockets.open<T>(guid, { allowTemporaryIdentity: true })
   }
 
   async echo(params: Params<'echo'>, url: string): Promise<string> {
@@ -59,7 +62,7 @@ export class LiveApiService extends ApiService {
       ? (await this.http.rpcMessage<T>(request, opts, url)).body
       : await this.sockets.message<T>(
           request,
-          opts,
+          { ...opts, allowTemporaryIdentity: true },
           await this.authKeys.admissionLease(),
         )
 

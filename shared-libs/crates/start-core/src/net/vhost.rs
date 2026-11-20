@@ -57,7 +57,7 @@ use crate::util::collections::EqSet;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::ReadWriter;
 use crate::util::serde::{HandlerExtSerde, MaybeUtf8String, display_serializable};
-use crate::util::sync::{SyncMutex, Watch};
+use crate::util::sync::{SyncMutex, SyncRwLock, Watch};
 use crate::{GatewayId, HOST_IP, HostId, PackageId, ResultExt};
 
 /// Identifies which service+host contributed a set of SNI hostname mappings, so
@@ -332,6 +332,28 @@ impl VHostController {
                 self.create_server(external)
             };
             let rc = server.add(hostname, target, self.max_proxy_conns_per_target);
+            writable.insert(external, server);
+            Ok(rc?)
+        })
+    }
+
+    /// The owner must be the one `add` returned for the replaced target.
+    #[instrument(skip_all)]
+    pub fn replace(
+        &self,
+        hostname: Option<InternedString>,
+        external: u16,
+        prev: &DynVHostTarget<VHostBindListener>,
+        owner: Arc<()>,
+        next: DynVHostTarget<VHostBindListener>,
+    ) -> Result<Arc<()>, Error> {
+        self.servers.mutate(|writable| {
+            let server = if let Some(server) = writable.remove(&external) {
+                server
+            } else {
+                self.create_server(external)
+            };
+            let rc = server.replace(hostname, prev, owner, next, self.max_proxy_conns_per_target);
             writable.insert(external, server);
             Ok(rc?)
         })
@@ -935,6 +957,16 @@ pub trait VHostTarget<A: Accept>: std::fmt::Debug + Eq {
     fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool {
         false
     }
+    /// Whether an established stream may stay on this target.
+    #[allow(unused_variables)]
+    fn admits(&self, arrival: &Arrival) -> bool {
+        true
+    }
+    /// Whether the two relay a stream identically.
+    #[allow(unused_variables)]
+    fn routes_like(&self, other: &Self) -> bool {
+        false
+    }
     fn acme(&self) -> Option<&AcmeProvider> {
         None
     }
@@ -963,6 +995,8 @@ pub trait VHostTarget<A: Accept>: std::fmt::Debug + Eq {
 pub trait DynVHostTargetT<A: Accept>: std::fmt::Debug + Any {
     fn filter(&self, metadata: &<A as Accept>::Metadata) -> bool;
     fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool;
+    fn admits(&self, arrival: &Arrival) -> bool;
+    fn routes_like(&self, other: &dyn DynVHostTargetT<A>) -> bool;
     fn acme(&self) -> Option<&AcmeProvider>;
     fn bind_requirements(&self) -> (BTreeSet<GatewayId>, BTreeSet<IpAddr>);
     fn is_passthrough(&self) -> bool;
@@ -989,6 +1023,14 @@ impl<A: Accept, T: VHostTarget<A> + 'static> DynVHostTargetT<A> for T {
     }
     fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool {
         VHostTarget::filter_private(self, metadata)
+    }
+    fn admits(&self, arrival: &Arrival) -> bool {
+        <T as VHostTarget<A>>::admits(self, arrival)
+    }
+    fn routes_like(&self, other: &dyn DynVHostTargetT<A>) -> bool {
+        (other as &dyn Any)
+            .downcast_ref()
+            .is_some_and(|other| <T as VHostTarget<A>>::routes_like(self, other))
     }
     fn acme(&self) -> Option<&AcmeProvider> {
         VHostTarget::acme(self)
@@ -1116,19 +1158,11 @@ pub struct ProxyTarget {
 }
 impl PartialEq for ProxyTarget {
     fn eq(&self, other: &Self) -> bool {
-        self.public_v4 == other.public_v4
+        self.same_route(other)
+            && self.public_v4 == other.public_v4
             && self.public_v6 == other.public_v6
             && self.public_v6_gateways == other.public_v6_gateways
             && self.private == other.private
-            && self.acme == other.acme
-            && self.addr == other.addr
-            && self.addr_v6 == other.addr_v6
-            && self.proxy == other.proxy
-            && self.passthrough == other.passthrough
-            && self.preserve_source_ip == other.preserve_source_ip
-            && self.alpn == other.alpn
-            && self.connect_ssl.as_ref().map(Arc::as_ptr)
-                == other.connect_ssl.as_ref().map(Arc::as_ptr)
     }
 }
 impl Eq for ProxyTarget {}
@@ -1190,6 +1224,23 @@ impl ProxyTarget {
             }
         };
         wan || self.accepts_as_private(subnets, src, dst)
+    }
+
+    fn accepts_arrival(&self, at: &Arrival) -> bool {
+        self.accepts(&at.gateway, &at.subnets, at.src, at.dst)
+    }
+
+    /// Whether the two differ at most in which arrivals they accept.
+    fn same_route(&self, other: &Self) -> bool {
+        self.acme == other.acme
+            && self.addr == other.addr
+            && self.addr_v6 == other.addr_v6
+            && self.proxy == other.proxy
+            && self.passthrough == other.passthrough
+            && self.preserve_source_ip == other.preserve_source_ip
+            && self.alpn == other.alpn
+            && self.connect_ssl.as_ref().map(Arc::as_ptr)
+                == other.connect_ssl.as_ref().map(Arc::as_ptr)
     }
 
     /// A dial of one of our own private addresses from that address's network.
@@ -1351,7 +1402,8 @@ impl ProxyTarget {
     }
 }
 
-struct Arrival {
+#[derive(Debug)]
+pub struct Arrival {
     gateway: GatewayId,
     subnets: OrdSet<IpNet>,
     src: IpAddr,
@@ -1390,16 +1442,19 @@ where
 {
     type PreprocessRes = (AcceptStream, Option<crate::util::GeneralBoxedGuard>);
     fn filter(&self, metadata: &<A as Accept>::Metadata) -> bool {
-        let Some(at) = arrival::<A>(metadata) else {
-            return false;
-        };
-        self.accepts(&at.gateway, &at.subnets, at.src, at.dst)
+        arrival::<A>(metadata).is_some_and(|at| self.accepts_arrival(&at))
     }
     fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool {
         let Some(at) = arrival::<A>(metadata) else {
             return false;
         };
         self.accepts_as_private(&at.subnets, at.src, at.dst)
+    }
+    fn admits(&self, arrival: &Arrival) -> bool {
+        self.accepts_arrival(arrival)
+    }
+    fn routes_like(&self, other: &Self) -> bool {
+        self.same_route(other)
     }
     fn acme(&self) -> Option<&AcmeProvider> {
         self.acme.as_ref()
@@ -1501,7 +1556,8 @@ where
         ctx: ProxyContext,
     ) {
         let target = self.clone();
-        let (stream, registration, conn_cancel) = ctx.track_with(stream);
+        let (stream, registration, conn_cancel) =
+            ctx.track_with(stream, arrival::<A>(&metadata.inner));
         tokio::spawn(async move {
             let _registration = registration;
             let _origin_registration = origin_registration;
@@ -1604,30 +1660,56 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for ActivityStream<S> {
 struct ConnEntry {
     last_active: Arc<AtomicU64>,
     cancel: CancellationToken,
+    arrival: Option<Arrival>,
+}
+
+type Admission = Arc<dyn Fn(&Arrival) -> bool + Send + Sync>;
+
+#[derive(Default)]
+struct Conns {
+    entries: HashMap<u64, ConnEntry>,
+    admission: Option<Admission>,
 }
 
 /// Per-target proxy-task registry with LRU eviction at the cap.
-#[derive(Debug)]
 pub struct ConnRegistry {
     cap: usize,
     next_id: AtomicU64,
-    entries: SyncMutex<HashMap<u64, ConnEntry>>,
+    conns: SyncMutex<Conns>,
+}
+impl fmt::Debug for ConnRegistry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConnRegistry")
+            .field("cap", &self.cap)
+            .finish_non_exhaustive()
+    }
 }
 impl ConnRegistry {
     pub fn new(cap: usize) -> Arc<Self> {
         Arc::new(Self {
             cap,
             next_id: AtomicU64::new(0),
-            entries: SyncMutex::new(HashMap::new()),
+            conns: SyncMutex::new(Conns::default()),
         })
     }
     fn register(
         self: &Arc<Self>,
         last_active: Arc<AtomicU64>,
         cancel: CancellationToken,
+        arrival: Option<Arrival>,
     ) -> ConnRegHandle {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        self.entries.mutate(|m| {
+        self.conns.mutate(|conns| {
+            let admitted = match (&conns.admission, &arrival) {
+                (None, _) => true,
+                (Some(admits), Some(at)) => admits(at),
+                (Some(_), None) => false,
+            };
+            if !admitted {
+                cancel.cancel();
+                return;
+            }
+            let m = &mut conns.entries;
             if m.len() >= self.cap {
                 if let Some((victim_id, victim)) = m
                     .iter()
@@ -1643,6 +1725,7 @@ impl ConnRegistry {
                 ConnEntry {
                     last_active,
                     cancel,
+                    arrival,
                 },
             );
         });
@@ -1651,9 +1734,22 @@ impl ConnRegistry {
             registry: Arc::downgrade(self),
         }
     }
+    /// Cancels each stream the predicate rejects, including streams registered later.
+    fn readmit(&self, admits: Admission) {
+        self.conns.mutate(|conns| {
+            conns.entries.retain(|_, entry| {
+                let kept = entry.arrival.as_ref().is_some_and(|at| admits(at));
+                if !kept {
+                    entry.cancel.cancel();
+                }
+                kept
+            });
+            conns.admission = Some(admits);
+        });
+    }
     #[cfg(test)]
     fn len(&self) -> usize {
-        self.entries.peek(|m| m.len())
+        self.conns.peek(|c| c.entries.len())
     }
 }
 
@@ -1664,8 +1760,8 @@ pub struct ConnRegHandle {
 impl Drop for ConnRegHandle {
     fn drop(&mut self) {
         if let Some(r) = self.registry.upgrade() {
-            r.entries.mutate(|m| {
-                m.remove(&self.id);
+            r.conns.mutate(|c| {
+                c.entries.remove(&self.id);
             });
         }
     }
@@ -1687,18 +1783,19 @@ impl ProxyContext {
         let last_active = Arc::new(AtomicU64::new(monotonic_millis()));
         let handle = self
             .registry
-            .register(last_active.clone(), self.cancel.child_token());
+            .register(last_active.clone(), self.cancel.child_token(), None);
         (ActivityStream::new(stream, last_active), handle)
     }
     pub fn track_with(
         &self,
         stream: AcceptStream,
+        arrival: Option<Arrival>,
     ) -> (AcceptStream, ConnRegHandle, CancellationToken) {
         let last_active = Arc::new(AtomicU64::new(monotonic_millis()));
         let conn_cancel = self.cancel.child_token();
         let handle = self
             .registry
-            .register(last_active.clone(), conn_cancel.clone());
+            .register(last_active.clone(), conn_cancel.clone(), arrival);
         let wrapped: Pin<Box<dyn ReadWriter + Send + 'static>> =
             Box::pin(ActivityStream::new(stream, last_active));
         (wrapped, handle, conn_cancel)
@@ -1706,7 +1803,9 @@ impl ProxyContext {
 }
 
 pub struct PlainHttpProxy {
-    cancel: CancellationToken,
+    target: Arc<SyncRwLock<ProxyTarget>>,
+    requirements: Watch<VHostBindRequirements>,
+    ctx: ProxyContext,
     _thread: NonDetachingJoinHandle<()>,
 }
 
@@ -1725,12 +1824,7 @@ impl PlainHttpProxy {
         target: ProxyTarget,
         max_connections: usize,
     ) -> Self {
-        let (public_gateways, private_ips) =
-            VHostTarget::<VHostBindListener>::bind_requirements(&target);
-        let requirements = Watch::new(VHostBindRequirements {
-            public_gateways,
-            private_ips,
-        });
+        let requirements = Watch::new(Self::requirements(&target));
         Self::serve(
             VHostBindListener::new(interfaces, port, requirements),
             target,
@@ -1738,10 +1832,38 @@ impl PlainHttpProxy {
         )
     }
 
+    fn requirements(target: &ProxyTarget) -> VHostBindRequirements {
+        let (public_gateways, private_ips) =
+            VHostTarget::<VHostBindListener>::bind_requirements(target);
+        VHostBindRequirements {
+            public_gateways,
+            private_ips,
+        }
+    }
+
+    /// Swaps in a target that routes like the current one, cancelling the
+    /// streams it does not accept. Any other target is refused.
+    pub fn retarget(&self, next: &ProxyTarget) -> bool {
+        if !self.target.peek(|target| target.same_route(next)) {
+            return false;
+        }
+        self.target.replace(next.clone());
+        self.requirements.send(Self::requirements(next));
+        let admits = next.clone();
+        self.ctx
+            .registry
+            .readmit(Arc::new(move |at| admits.accepts_arrival(at)));
+        true
+    }
+
     fn serve(mut listener: VHostBindListener, target: ProxyTarget, max_connections: usize) -> Self {
         let ctx = ProxyContext::new(max_connections);
-        let cancel = ctx.cancel.clone();
+        let requirements = listener.bind_reqs.clone();
+        let target = Arc::new(SyncRwLock::new(target));
+        let current = target.clone();
+        let accepting = ctx.clone();
         let thread = tokio::spawn(async move {
+            let ctx = accepting;
             loop {
                 let accepted = futures::future::poll_fn(|cx| listener.poll_accept(cx)).await;
                 let (metadata, stream) = match accepted {
@@ -1751,11 +1873,14 @@ impl PlainHttpProxy {
                         continue;
                     }
                 };
-                if !VHostTarget::<VHostBindListener>::filter(&target, &metadata) {
+                let Some(target) = current.peek(|target| {
+                    VHostTarget::<VHostBindListener>::filter(target, &metadata)
+                        .then(|| target.clone())
+                }) else {
                     continue;
-                }
-                let target = target.clone();
-                let (stream, registration, conn_cancel) = ctx.track_with(stream);
+                };
+                let (stream, registration, conn_cancel) =
+                    ctx.track_with(stream, arrival::<VHostBindListener>(&metadata));
                 tokio::spawn(async move {
                     let _registration = registration;
                     let work = async {
@@ -1781,7 +1906,9 @@ impl PlainHttpProxy {
             }
         });
         Self {
-            cancel,
+            target,
+            requirements,
+            ctx,
             _thread: thread.into(),
         }
     }
@@ -1789,7 +1916,7 @@ impl PlainHttpProxy {
 
 impl Drop for PlainHttpProxy {
     fn drop(&mut self) {
-        self.cancel.cancel();
+        self.ctx.cancel.cancel();
     }
 }
 
@@ -2268,6 +2395,50 @@ impl<A: Accept> VHostServer<A> {
                 crate::ErrorKind::Network,
             ))
         }
+    }
+    /// Keeps the streams the new target admits when it routes like a solely
+    /// owned entry; otherwise drops the owner, then adds the new target.
+    fn replace(
+        &self,
+        hostname: Option<InternedString>,
+        prev: &DynVHostTarget<A>,
+        owner: Arc<()>,
+        next: DynVHostTarget<A>,
+        max_proxy_conns_per_target: usize,
+    ) -> Result<Arc<()>, Error> {
+        if prev == &next {
+            return Ok(owner);
+        }
+        let moved = self.mapping.watcher_count() > 1
+            && Arc::strong_count(&owner) == 1
+            && prev.0.routes_like(&*next.0)
+            && self.mapping.send_if_modified(|writable| {
+                let Some(targets) = writable.get_mut(&hostname) else {
+                    return false;
+                };
+                let owned = targets
+                    .get(prev)
+                    .is_some_and(|entry| Weak::ptr_eq(&entry.rc, &Arc::downgrade(&owner)));
+                if !owned || targets.contains_key(&next) {
+                    return false;
+                }
+                let Some(entry) = targets.remove(prev) else {
+                    return false;
+                };
+                let admits = next.clone();
+                entry
+                    .ctx
+                    .registry
+                    .readmit(Arc::new(move |at| admits.0.admits(at)));
+                targets.insert(next.clone(), entry);
+                self.update_bind_reqs(writable);
+                true
+            });
+        if moved {
+            return Ok(owner);
+        }
+        drop(owner);
+        self.add(hostname, next, max_proxy_conns_per_target)
     }
     fn gc(&self, hostname: Option<InternedString>) {
         self.mapping.send_if_modified(|writable| {
@@ -2823,6 +2994,7 @@ mod accept_filter_tests {
 
 #[cfg(test)]
 mod conn_cap_tests {
+    use std::net::Ipv4Addr;
     use std::time::Duration;
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -2834,11 +3006,11 @@ mod conn_cap_tests {
         let registry = ConnRegistry::new(2);
 
         let cancel1 = CancellationToken::new();
-        let _h1 = registry.register(Arc::new(AtomicU64::new(100)), cancel1.clone());
+        let _h1 = registry.register(Arc::new(AtomicU64::new(100)), cancel1.clone(), None);
         let cancel2 = CancellationToken::new();
-        let _h2 = registry.register(Arc::new(AtomicU64::new(200)), cancel2.clone());
+        let _h2 = registry.register(Arc::new(AtomicU64::new(200)), cancel2.clone(), None);
         let cancel3 = CancellationToken::new();
-        let _h3 = registry.register(Arc::new(AtomicU64::new(300)), cancel3.clone());
+        let _h3 = registry.register(Arc::new(AtomicU64::new(300)), cancel3.clone(), None);
 
         assert!(cancel1.is_cancelled());
         assert!(!cancel2.is_cancelled());
@@ -2853,11 +3025,12 @@ mod conn_cap_tests {
         let _stale = registry.register(
             Arc::new(AtomicU64::new(monotonic_millis())),
             stale_cancel.clone(),
+            None,
         );
 
         let busy_active = Arc::new(AtomicU64::new(monotonic_millis()));
         let busy_cancel = CancellationToken::new();
-        let _busy = registry.register(busy_active.clone(), busy_cancel.clone());
+        let _busy = registry.register(busy_active.clone(), busy_cancel.clone(), None);
 
         let (a, mut b) = tokio::io::duplex(64);
         let mut wrapped = ActivityStream::new(a, busy_active.clone());
@@ -2870,6 +3043,7 @@ mod conn_cap_tests {
         let _new = registry.register(
             Arc::new(AtomicU64::new(monotonic_millis())),
             new_cancel.clone(),
+            None,
         );
 
         assert!(stale_cancel.is_cancelled());
@@ -2883,10 +3057,46 @@ mod conn_cap_tests {
             let _h = registry.register(
                 Arc::new(AtomicU64::new(monotonic_millis())),
                 CancellationToken::new(),
+                None,
             );
             assert_eq!(registry.len(), 1);
         }
         assert_eq!(registry.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn readmission_cancels_rejected_streams_including_later_ones() {
+        let registry = ConnRegistry::new(8);
+        let arrival = |dst: [u8; 4]| Arrival {
+            gateway: "eth0".parse().unwrap(),
+            subnets: OrdSet::new(),
+            src: Ipv4Addr::new(192, 168, 1, 9).into(),
+            dst: Ipv4Addr::from(dst).into(),
+        };
+        let track = |arrival: Option<Arrival>| {
+            let cancel = CancellationToken::new();
+            let handle = registry.register(
+                Arc::new(AtomicU64::new(monotonic_millis())),
+                cancel.clone(),
+                arrival,
+            );
+            (cancel, handle)
+        };
+        let (earlier_kept, _h1) = track(Some(arrival([192, 168, 1, 2])));
+        let (earlier_dropped, _h2) = track(Some(arrival([10, 0, 0, 2])));
+
+        let kept: IpAddr = Ipv4Addr::new(192, 168, 1, 2).into();
+        registry.readmit(Arc::new(move |at| at.dst == kept));
+        assert!(!earlier_kept.is_cancelled());
+        assert!(earlier_dropped.is_cancelled());
+
+        let (later_kept, _h3) = track(Some(arrival([192, 168, 1, 2])));
+        let (later_dropped, _h4) = track(Some(arrival([10, 0, 0, 2])));
+        let (unknown, _h5) = track(None);
+        assert!(!later_kept.is_cancelled());
+        assert!(later_dropped.is_cancelled());
+        assert!(unknown.is_cancelled());
+        assert_eq!(registry.len(), 2);
     }
 
     #[tokio::test]
@@ -3264,7 +3474,7 @@ mod upstream_alpn_tests {
     }
 
     #[tokio::test]
-    async fn disabling_an_address_disconnects_its_stream_and_gates_new_arrivals() {
+    async fn disabling_an_address_disconnects_only_its_streams_and_gates_new_arrivals() {
         tokio::time::timeout(Duration::from_secs(10), async {
             let backend = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
             let backend_addr = backend.local_addr().unwrap();
@@ -3341,41 +3551,51 @@ mod upstream_alpn_tests {
             let owner = server
                 .add(None, DynVHostTarget::new(before.clone()), 4)
                 .unwrap();
-            let connector =
-                TlsConnector::from(Arc::new(client_config_no_verify(provider()).unwrap()));
-            let name = ServerName::IpAddress(Ipv4Addr::LOCALHOST.into());
-            let mut established = connector
-                .connect(name.clone(), TcpStream::connect(old_addr).await.unwrap())
-                .await
-                .unwrap();
-            established.write_all(b"a").await.unwrap();
-            established.flush().await.unwrap();
-            let mut byte = [0];
-            established.read_exact(&mut byte).await.unwrap();
-            assert_eq!(&byte, b"a");
-            let mut after = before;
+            let mut disabled = dial(old_addr).await.unwrap();
+            let mut kept = dial(new_addr).await.unwrap();
+            assert!(echoes(&mut disabled, b'a').await);
+            assert!(echoes(&mut kept, b'b').await);
+            let mut after = before.clone();
             after.private = BTreeSet::from([new_addr.ip()]);
-            drop(owner);
-            let _replacement_owner = server.add(None, DynVHostTarget::new(after), 4).unwrap();
-            assert!(
-                established.read_exact(&mut byte).await.is_err(),
-                "disabling an address ends the established stream"
-            );
-            let refused = TcpStream::connect(old_addr)
-                .await
-                .expect("the old address remains bound");
-            assert!(connector.connect(name.clone(), refused).await.is_err());
-            let mut fresh = connector
-                .connect(name, TcpStream::connect(new_addr).await.unwrap())
-                .await
+            let _owner = server
+                .replace(
+                    None,
+                    &DynVHostTarget::new(before),
+                    owner,
+                    DynVHostTarget::new(after),
+                    4,
+                )
                 .unwrap();
-            fresh.write_all(b"c").await.unwrap();
-            fresh.flush().await.unwrap();
-            fresh.read_exact(&mut byte).await.unwrap();
-            assert_eq!(&byte, b"c");
+            assert!(
+                !echoes(&mut disabled, b'c').await,
+                "disabling an address ends its established stream"
+            );
+            assert!(
+                echoes(&mut kept, b'd').await,
+                "a stream on a still-enabled address survives"
+            );
+            assert!(dial(old_addr).await.is_err());
+            assert!(echoes(&mut dial(new_addr).await.unwrap(), b'e').await);
         })
         .await
-        .expect("address disable disconnects the stream and gates arrivals within 10s");
+        .expect("address disable disconnects its stream and gates arrivals within 10s");
+    }
+
+    async fn dial(addr: SocketAddr) -> std::io::Result<tokio_rustls::client::TlsStream<TcpStream>> {
+        let tcp = TcpStream::connect(addr)
+            .await
+            .expect("the address remains bound");
+        TlsConnector::from(Arc::new(client_config_no_verify(provider()).unwrap()))
+            .connect(ServerName::IpAddress(Ipv4Addr::LOCALHOST.into()), tcp)
+            .await
+    }
+
+    async fn echoes(stream: &mut (impl AsyncRead + AsyncWrite + Unpin), byte: u8) -> bool {
+        let mut echoed = [0];
+        stream.write_all(&[byte]).await.is_ok()
+            && stream.flush().await.is_ok()
+            && stream.read_exact(&mut echoed).await.is_ok()
+            && echoed == [byte]
     }
 
     #[tokio::test]

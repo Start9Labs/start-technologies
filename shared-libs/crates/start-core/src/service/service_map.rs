@@ -102,7 +102,6 @@ fn uninit_target(data_ver: &str, prev: &Manifest, next: &Manifest) -> Result<Exi
     }
 }
 
-/// This is the structure to contain all the services
 #[derive(Default)]
 pub struct ServiceMap(SyncMutex<OrdMap<PackageId, Arc<RwLock<Option<ServiceRef>>>>>);
 impl ServiceMap {
@@ -143,6 +142,7 @@ impl ServiceMap {
         Ok(())
     }
 
+    /// Attempts replacement even if shutdown fails; a successful load can return a shutdown error.
     #[instrument(skip_all)]
     pub async fn load(
         &self,
@@ -522,10 +522,11 @@ impl ServiceMap {
     pub async fn shutdown_all(&self) -> Result<(), Error> {
         let futs = self.0.mutate(|lock| {
             let mut futs = Vec::with_capacity(lock.len());
-            for service in lock.values().cloned() {
+            for (id, service) in lock.iter() {
+                let (id, service) = (id.clone(), service.clone());
                 futs.push(async move {
                     if let Some(service) = service.write_owned().await.take() {
-                        service.shutdown(None).await?
+                        service.shutdown(None).await.with_ctx(|e| (e.kind, &id))?
                     }
                     Ok::<_, Error>(())
                 });
@@ -635,6 +636,7 @@ impl ServiceRefReloadInfo {
         self.ctx
             .services
             .load(&self.ctx, &self.id, LoadDisposition::Undo)
+            .boxed()
             .await
     }
 

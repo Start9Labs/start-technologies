@@ -53,7 +53,7 @@ pub(crate) fn notify_updates(
         db,
         registry,
         &feed,
-        crate::version::COMMIT_HASH.trim(),
+        crate::version::commit_hash(),
         &crate::PLATFORM,
     )
 }

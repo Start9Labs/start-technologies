@@ -28,6 +28,9 @@ import { SYSTEM_MENU } from './system.const'
                 @if (page.link === 'backup-targets' && backupsWarning()) {
                   <tui-icon icon="@tui.triangle-alert" class="warning" />
                 }
+                @if (page.link === 'registries' && registriesWarning()) {
+                  <tui-icon icon="@tui.triangle-alert" class="warning" />
+                }
               </span>
             </span>
           </a>
@@ -126,5 +129,8 @@ export class SystemComponent {
   readonly badge = toSignal(inject(BadgeService).getCount('system'))
   readonly backupsWarning = toSignal(
     inject(BadgeService).getWarning('backup-targets'),
+  )
+  readonly registriesWarning = toSignal(
+    inject(BadgeService).getWarning('registries'),
   )
 }

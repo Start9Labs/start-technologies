@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use clap::Parser;
+use futures::future::BoxFuture;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use imbl::{OrdMap, OrdSet};
 use imbl_value::{InternedString, Value};
@@ -19,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::process::Command;
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
 use url::Url;
 use visit_rs::{Visit, VisitFields};
 use zbus::proxy::{PropertyChanged, PropertyStream, SignalStream};
@@ -248,6 +249,8 @@ pub(crate) async fn wireguard_psk(interface: &str) -> Result<Option<[u8; 32]>, E
 /// Update2 flag: persist the change to disk (NM_SETTINGS_UPDATE2_FLAG_TO_DISK).
 const NM_UPDATE2_TO_DISK: u32 = 0x1;
 const WG_DNS_PRIORITY: i32 = 10;
+const IPV4_MIN_MTU: u32 = 68;
+const IPV6_MIN_MTU: u32 = 1280;
 
 fn endpoint_domain(endpoint: &str) -> Option<InternedString> {
     let (host, port) = endpoint.rsplit_once(':')?;
@@ -272,6 +275,17 @@ pub(crate) fn wireguard_config_domains(config: &str) -> Result<OrdSet<InternedSt
         .filter_map(|peer| peer.endpoint)
         .filter_map(|endpoint| endpoint_domain(&endpoint))
         .collect())
+}
+
+/// The explicit `wireguard.mtu` of NetworkManager settings; None for automatic.
+fn settings_wireguard_mtu(
+    settings: &HashMap<String, HashMap<String, OwnedValue>>,
+) -> Result<Option<u32>, Error> {
+    let Some(mtu) = settings.get("wireguard").and_then(|wg| wg.get("mtu")) else {
+        return Ok(None);
+    };
+    let mtu = mtu.downcast_ref::<u32>().with_kind(ErrorKind::Network)?;
+    Ok((mtu != 0).then_some(mtu))
 }
 
 fn settings_endpoint_domains(
@@ -307,6 +321,8 @@ struct WgConfig {
     addresses: Vec<(IpAddr, u8)>,
     dns: Vec<IpAddr>,
     listen_port: Option<u32>,
+    /// None selects NetworkManager's automatic MTU.
+    mtu: Option<u32>,
     peers: Vec<WgPeer>,
 }
 
@@ -328,6 +344,7 @@ impl WgConfig {
         let mut addresses = Vec::new();
         let mut dns = Vec::new();
         let mut listen_port = None;
+        let mut mtu = None;
         let mut peers: Vec<WgPeer> = Vec::new();
 
         for raw in config.lines() {
@@ -383,6 +400,15 @@ impl WgConfig {
                         }
                     }
                     "listenport" => listen_port = val.parse().ok(),
+                    "mtu" => {
+                        mtu = Some(
+                            val.parse::<u16>()
+                                .ok()
+                                .map(u32::from)
+                                .filter(|mtu| *mtu >= IPV4_MIN_MTU)
+                                .ok_or_else(|| invalid("MTU"))?,
+                        )
+                    }
                     _ => {}
                 },
                 Section::Peer => {
@@ -400,11 +426,17 @@ impl WgConfig {
             }
         }
 
+        if mtu.is_some_and(|mtu| mtu < IPV6_MIN_MTU) && addresses.iter().any(|(ip, _)| ip.is_ipv6())
+        {
+            return Err(invalid("MTU below 1280 with an IPv6 address"));
+        }
+
         Ok(Self {
             private_key: private_key.ok_or_else(|| invalid("missing PrivateKey"))?,
             addresses,
             dns,
             listen_port,
+            mtu,
             peers,
         })
     }
@@ -436,6 +468,9 @@ impl WgConfig {
         wg.insert("private-key".into(), ov(self.private_key.as_str().into())?);
         if let Some(port) = self.listen_port {
             wg.insert("listen-port".into(), ov(port.into())?);
+        }
+        if let Some(mtu) = self.mtu {
+            wg.insert("mtu".into(), ov(mtu.into())?);
         }
         let peers: Vec<HashMap<String, ZValue>> = self
             .peers
@@ -523,13 +558,19 @@ impl WgConfig {
 
         Ok(settings)
     }
+
+    /// NetworkManager cannot Reapply a WireGuard MTU change.
+    fn needs_reactivation(
+        &self,
+        applied: &HashMap<String, HashMap<String, OwnedValue>>,
+    ) -> Result<bool, Error> {
+        Ok(settings_wireguard_mtu(applied)? != self.mtu)
+    }
 }
 
-/// Apply a re-issued WireGuard config to `interface`'s existing NM connection in
-/// place via D-Bus Update2 + Device.Reapply. The wg device is never deleted, so
-/// the tunnel — and the request that triggered the update, when it rides this
-/// same tunnel — is not torn down. Reapply applies the change to the live device
-/// without bringing the interface down (NM supports this for WireGuard).
+/// Replaces the saved profile and applies it to the live gateway.
+/// MTU changes reconnect the gateway and wait for activation to finish.
+/// Other changes preserve the active connection.
 pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Result<(), Error> {
     let parsed = WgConfig::parse(config)?;
 
@@ -575,6 +616,19 @@ pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Re
             HashMap::new(),
         )
         .await?;
+    let (applied, _) = device_proxy.get_applied_connection(0).await?;
+    if parsed.needs_reactivation(&applied)? {
+        Command::new("nmcli")
+            .arg("connection")
+            .arg("up")
+            .arg("uuid")
+            .arg(&uuid)
+            .arg("ifname")
+            .arg(interface)
+            .invoke(ErrorKind::Network)
+            .await?;
+        return Ok(());
+    }
     // Full settings so Reapply doesn't strip the connection's other peer fields.
     device_proxy
         .reapply(parsed.to_nm_settings(interface, Some(uuid.as_str()))?, 0, 0)
@@ -1403,6 +1457,12 @@ mod device {
             flags: u32,
         ) -> Result<(), Error>;
 
+        /// The settings the device is running with, and their version id.
+        fn get_applied_connection(
+            &self,
+            flags: u32,
+        ) -> Result<(HashMap<String, HashMap<String, OwnedValue>>, u64), Error>;
+
         #[zbus(property)]
         fn ip_interface(&self) -> Result<String, Error>;
 
@@ -1450,6 +1510,21 @@ impl<'a> StubStream<'a> for SignalStream<'a> {
     }
 }
 
+/// Resolves once the device's `IpInterface` differs from the observed name.
+///
+/// NetworkManager leaves `IpInterface` empty until activation reaches `IP_CHECK`, and announces
+/// the name only on the device itself. A scan that skips an unnamed device depends on this to
+/// rescan it.
+async fn ip_interface_changed(device_proxy: &DeviceProxy<'_>, observed: &str) -> Result<(), Error> {
+    let mut changes = device_proxy.receive_ip_interface_changed().await;
+    while let Some(change) = changes.next().await {
+        if change.get().await? != observed {
+            return Ok(());
+        }
+    }
+    futures::future::pending().await
+}
+
 #[instrument(skip_all)]
 async fn watcher(
     watch_ip_info: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
@@ -1468,7 +1543,16 @@ async fn watcher(
 
             let netman_proxy = NetworkManagerProxy::new(&connection).await?;
 
+            let rescan = Notify::new();
+            let rescan = &rescan;
             let mut until = Until::new()
+                .with_async_fn(move || {
+                    async move {
+                        rescan.notified().await;
+                        Ok(())
+                    }
+                    .fuse()
+                })
                 .with_stream(netman_proxy.receive_all_devices_changed().await.stub())
                 .with_stream(
                     netman_proxy
@@ -1504,13 +1588,21 @@ async fn watcher(
                         );
                         let mut ifaces = BTreeSet::new();
                         let mut policy_ifaces: BTreeMap<GatewayId, u32> = BTreeMap::new();
-                        let mut jobs = Vec::new();
+                        let mut jobs: Vec<(String, BoxFuture<'_, Result<(), Error>>)> = Vec::new();
                         for device in devices {
-                            use futures::future::Either;
-
                             let device_proxy =
                                 device::DeviceProxy::new(&connection, device.clone()).await?;
                             let iface = InternedString::intern(device_proxy.ip_interface().await?);
+                            jobs.push((device.to_string(), {
+                                let device_proxy = device_proxy.clone();
+                                let observed = iface.clone();
+                                async move {
+                                    ip_interface_changed(&device_proxy, &observed).await?;
+                                    rescan.notify_one();
+                                    Ok(())
+                                }
+                                .boxed()
+                            }));
                             if iface.is_empty() {
                                 continue;
                             }
@@ -1529,25 +1621,27 @@ async fn watcher(
                             }
                             if watch_activation.peek(|a| a.contains_key(&iface)) {
                                 jobs.push((
-                                    iface.clone(),
-                                    Either::Left(watch_activated(
+                                    iface.to_string(),
+                                    watch_activated(
                                         &connection,
                                         device_proxy.clone(),
                                         iface.clone(),
                                         &watch_activation,
-                                    )),
+                                    )
+                                    .boxed(),
                                 ));
                             }
 
                             jobs.push((
-                                iface.clone(),
-                                Either::Right(watch_ip(
+                                iface.to_string(),
+                                watch_ip(
                                     &connection,
                                     device_proxy.clone(),
                                     iface.clone(),
                                     &watch_ip_info,
                                     db.as_ref(),
-                                )),
+                                )
+                                .boxed(),
                             ));
                             ifaces.insert(iface);
                         }
@@ -3701,6 +3795,127 @@ mod policy_rule_tests {
 }
 
 #[cfg(test)]
+mod ip_interface_tests {
+    use super::*;
+
+    const DEVICE_PATH: &str = "/org/freedesktop/NetworkManager/Devices/7";
+
+    struct FakeDevice {
+        ip_interface: String,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.NetworkManager.Device")]
+    impl FakeDevice {
+        #[zbus(property)]
+        fn ip_interface(&self) -> String {
+            self.ip_interface.clone()
+        }
+    }
+
+    /// A NetworkManager stand-in serving one device, and a client connected to it.
+    #[allow(deprecated)]
+    async fn fake_network_manager(ip_interface: &str) -> (Connection, Connection) {
+        let (server, client) = std::os::unix::net::UnixStream::pair().unwrap();
+        let device = FakeDevice {
+            ip_interface: ip_interface.to_owned(),
+        };
+        let (server, client) = tokio::join!(
+            async {
+                zbus::connection::Builder::unix_stream(server)
+                    .server(zbus::Guid::generate())
+                    .unwrap()
+                    .p2p()
+                    .serve_at(DEVICE_PATH, device)
+                    .unwrap()
+                    .build()
+                    .await
+                    .unwrap()
+            },
+            async {
+                zbus::connection::Builder::unix_stream(client)
+                    .p2p()
+                    .build()
+                    .await
+                    .unwrap()
+            },
+        );
+        (server, client)
+    }
+
+    async fn rename(server: &Connection, ip_interface: &str) {
+        let device = server
+            .object_server()
+            .interface::<_, FakeDevice>(DEVICE_PATH)
+            .await
+            .unwrap();
+        device.get_mut().await.ip_interface = ip_interface.to_owned();
+        device
+            .get()
+            .await
+            .ip_interface_changed(device.signal_emitter())
+            .await
+            .unwrap();
+    }
+
+    async fn observe(client: &Connection) -> (DeviceProxy<'_>, String) {
+        let device = DeviceProxy::new(client, DEVICE_PATH).await.unwrap();
+        let observed = device.ip_interface().await.unwrap();
+        (device, observed)
+    }
+
+    #[tokio::test]
+    async fn an_unnamed_device_is_reported_once_it_gains_an_ip_interface() {
+        let (server, client) = fake_network_manager("").await;
+        let (device, observed) = observe(&client).await;
+        assert_eq!(observed, "");
+
+        let changed = ip_interface_changed(&device, &observed);
+        tokio::pin!(changed);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), &mut changed)
+                .await
+                .is_err(),
+            "an unchanged interface must not trigger a rescan"
+        );
+
+        rename(&server, "wg1").await;
+        tokio::time::timeout(Duration::from_secs(5), changed)
+            .await
+            .expect("the new interface name must trigger a rescan")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_rename_before_the_wait_begins_is_not_lost() {
+        let (server, client) = fake_network_manager("").await;
+        let (device, observed) = observe(&client).await;
+
+        rename(&server, "wg1").await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while device
+                .inner()
+                .cached_property::<String>("IpInterface")
+                .unwrap()
+                .as_deref()
+                != Some("wg1")
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            ip_interface_changed(&device, &observed),
+        )
+        .await
+        .expect("a rename the scan missed must trigger a rescan")
+        .unwrap();
+    }
+}
+
+#[cfg(test)]
 mod lookup_tests {
     use super::*;
 
@@ -4490,6 +4705,79 @@ mod wg_config_tests {
     fn rejects_out_of_range_prefix() {
         assert!(WgConfig::parse("[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/40\n").is_err());
         assert!(WgConfig::parse("[Interface]\nPrivateKey = k=\nAddress = fd00::2/200\n").is_err());
+    }
+
+    #[test]
+    fn explicit_mtu_reaches_nm_settings() {
+        let config =
+            "[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24, fd00::2/64\nMTU = 1320\n";
+        let parsed = WgConfig::parse(config).unwrap();
+        assert_eq!(parsed.mtu, Some(1320));
+        let settings = parsed.to_nm_settings("wg0", None).unwrap();
+        assert_eq!(
+            settings["wireguard"]["mtu"].downcast_ref::<u32>().unwrap(),
+            1320
+        );
+        assert_eq!(settings_wireguard_mtu(&settings).unwrap(), Some(1320));
+    }
+
+    #[test]
+    fn missing_mtu_stays_automatic() {
+        let parsed =
+            WgConfig::parse("[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24\n").unwrap();
+        assert_eq!(parsed.mtu, None);
+        let settings = parsed.to_nm_settings("wg0", None).unwrap();
+        assert!(!settings["wireguard"].contains_key("mtu"));
+        assert_eq!(settings_wireguard_mtu(&settings).unwrap(), None);
+
+        let auto = HashMap::from([(
+            "wireguard".to_string(),
+            HashMap::from([("mtu".to_string(), OwnedValue::from(0u32))]),
+        )]);
+        assert_eq!(settings_wireguard_mtu(&auto).unwrap(), None);
+    }
+
+    #[test]
+    fn mtu_changes_reactivate_and_other_updates_reapply() {
+        let config = |mtu: &str| {
+            WgConfig::parse(&format!(
+                "[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24\n{mtu}"
+            ))
+            .unwrap()
+        };
+        let auto = config("");
+        let explicit = config("MTU = 1320\n");
+        let applied_auto = auto.to_nm_settings("wg0", None).unwrap();
+        let applied_explicit = explicit.to_nm_settings("wg0", None).unwrap();
+
+        assert!(!auto.needs_reactivation(&applied_auto).unwrap());
+        assert!(explicit.needs_reactivation(&applied_auto).unwrap());
+        assert!(!explicit.needs_reactivation(&applied_explicit).unwrap());
+        assert!(
+            config("MTU = 1400\n")
+                .needs_reactivation(&applied_explicit)
+                .unwrap()
+        );
+        assert!(auto.needs_reactivation(&applied_explicit).unwrap());
+    }
+
+    #[test]
+    fn rejects_invalid_mtu() {
+        for mtu in ["abc", "0", "67", "65536", "-1"] {
+            let config =
+                format!("[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24\nMTU = {mtu}\n");
+            assert!(WgConfig::parse(&config).is_err(), "MTU = {mtu}");
+        }
+        assert!(
+            WgConfig::parse("[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24\nMTU = 1200\n")
+                .is_ok()
+        );
+        assert!(
+            WgConfig::parse(
+                "[Interface]\nPrivateKey = k=\nAddress = 10.0.0.2/24, fd00::2/64\nMTU = 1200\n"
+            )
+            .is_err()
+        );
     }
 
     // add() lets NM generate the uuid; update() preserves the existing one so the

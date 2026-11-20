@@ -675,7 +675,11 @@ Manage authorized SSH keys for server access.
 
 ### `start-cli ssh add <KEY>`
 
-Add an SSH public key.
+Add an SSH public key. Pass the key's text, not its path, as a single quoted argument:
+
+```sh
+start-cli ssh add "$(cat ~/.ssh/id_ed25519.pub)"
+```
 
 ### `start-cli ssh list`
 
@@ -683,9 +687,9 @@ List authorized SSH keys.
 
 - `--format` — Output format
 
-### `start-cli ssh remove <KEY>`
+### `start-cli ssh remove <FINGERPRINT>`
 
-Remove an SSH key.
+Remove an SSH key by the fingerprint `start-cli ssh list` shows for it.
 
 ## WiFi
 
@@ -975,6 +979,14 @@ Set the registry's description (markdown), shown above its services in the marke
 - `--clear` — Remove the registry's description
 
 Over RPC, pass `null` in the setter's `description` field to clear it; a value sets it.
+
+### `start-cli registry info set-default-locale [DEFAULT_LOCALE] [--clear]`
+
+Set the locale, such as `en_US`, that the registry's own description, category names and OS release notes fall back to when a reader's language is missing. Supply either `DEFAULT_LOCALE` or `--clear`, but not both.
+
+- `--clear` — Remove the registry's default locale
+
+Over RPC, pass `null` in the setter's `defaultLocale` field to clear it; a value sets it.
 
 ### `start-cli registry info set-trust-signers [SIGNER...]`
 

@@ -40,7 +40,9 @@ import { TRUSTED_KEYS_LINK } from '../../system.const'
         }
         <div
           safeLinks
-          [innerHTML]="v.notes | localize | markdown | dompurify"
+          [innerHTML]="
+            v.notes | localize: v.defaultLocale | markdown | dompurify
+          "
         ></div>
       }
     </tui-scrollbar>
