@@ -107,7 +107,11 @@ export default class SystemSSHComponent {
   protected readonly keys = toSignal(
     inject<PatchDB<DataModel>>(PatchDB)
       .watch$('sshPubkeys')
-      .pipe(map(sshKeyRows)),
+      .pipe(
+        // Cached snapshots can predate `sshPubkeys`.
+        filter(Boolean),
+        map(sshKeyRows),
+      ),
     { initialValue: null },
   )
   protected readonly tableKeys =
