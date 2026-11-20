@@ -33,12 +33,12 @@ export interface CliEnrollOptions {
       <textarea
         tuiTextarea
         [readonly]="true"
-        [minRows]="3"
+        [minRows]="4"
         [value]="command()"
       ></textarea>
       <tui-icon tuiCopy />
     </tui-textfield>
-    <tui-error [error]="error() | i18n" />
+    <tui-error [error]="(error() | i18n) || null" />
     <footer class="g-buttons">
       <button
         tuiButton
