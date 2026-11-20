@@ -34,6 +34,7 @@ import { UpdatesCount } from '../updates-count'
               tuiSlot="top"
               size="s"
               [appUpdatesCount]="item.routerLink === 'updates'"
+              [security]="item.security()"
             >
               {{ badge }}
             </tui-badge-notification>

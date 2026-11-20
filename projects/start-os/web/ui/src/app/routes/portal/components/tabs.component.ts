@@ -81,6 +81,7 @@ const FILTER = ['services', 'system', 'marketplace']
               @if (item.badge(); as badge) {
                 <tui-badge-notification
                   [appUpdatesCount]="item.routerLink === 'updates'"
+                  [security]="item.security()"
                 >
                   {{ badge }}
                 </tui-badge-notification>
@@ -175,7 +176,9 @@ export class TabsComponent {
   readonly status = computed(() => {
     const statuses = this.menu.map(item => {
       if (item.badge()) {
-        return item.routerLink !== 'updates' ? 'negative' : 'positive'
+        return item.routerLink !== 'updates' || item.security()
+          ? 'negative'
+          : 'positive'
       }
       return item.warning() ? 'warning' : null
     })

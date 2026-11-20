@@ -4857,15 +4857,17 @@ test('marketplace lists the update target as the installable update and keeps th
   entry.packages.example.best['3.0.0:0'] = {
     title: '3.0.0:0',
     releaseNotes: 'Latest',
+    security: false,
   }
   entry.packages.example.otherVersions = {
-    '2.0.0:0': { releaseNotes: 'Stepping stone' },
+    '2.0.0:0': { releaseNotes: 'Stepping stone', security: true },
   }
   entry.updateTargets = {
     example: {
       version: '2.0.0:0',
       title: '2.0.0:0',
       releaseNotes: 'Stepping stone',
+      security: true,
     },
   }
   const f = marketplaceFixture(t, { 'https://registry.test/': entry })
@@ -4879,7 +4881,11 @@ test('marketplace lists the update target as the installable update and keeps th
   assert.equal(pkg.version, '2.0.0:0')
   assert.equal(pkg.title, '2.0.0:0')
   assert.deepEqual(pkg.otherVersions, {
-    '3.0.0:0': { releaseNotes: 'Latest', defaultLocale: undefined },
+    '3.0.0:0': {
+      releaseNotes: 'Latest',
+      defaultLocale: undefined,
+      security: false,
+    },
   })
   assert.deepEqual(f.queries, [])
 })

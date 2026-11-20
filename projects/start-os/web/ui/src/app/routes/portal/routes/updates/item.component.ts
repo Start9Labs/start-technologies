@@ -21,6 +21,7 @@ import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import {
   TuiAccordion,
   TuiAvatar,
+  TuiBadge,
   TuiButtonLoading,
   TuiChevron,
   TuiFade,
@@ -69,7 +70,7 @@ import UpdatesComponent from './updates.component'
                 {{ local().stateInfo.manifest.version }}
               </span>
               <tui-icon icon="@tui.arrow-right" />
-              <span class="g-positive">{{ item().version }}</span>
+              <ng-container *ngTemplateOutlet="target" />
             </span>
           </span>
         </div>
@@ -89,7 +90,7 @@ import UpdatesComponent from './updates.component'
             {{ local().stateInfo.manifest.version }}
           </span>
           <tui-icon icon="@tui.arrow-right" />
-          <span class="g-positive">{{ item().version }}</span>
+          <ng-container *ngTemplateOutlet="target" />
         </div>
       </td>
       <td class="desktop">{{ item().gitHash }}</td>
@@ -162,6 +163,9 @@ import UpdatesComponent from './updates.component'
               @for (release of releases(); track release.version) {
                 <button [tuiAccordion]="$first">
                   {{ release.version }}
+                  @if (release.security) {
+                    <ng-container *ngTemplateOutlet="securityBadge" />
+                  }
                 </button>
                 <tui-expand>
                   <ng-container
@@ -171,6 +175,9 @@ import UpdatesComponent from './updates.component'
               }
             </tui-accordion>
           } @else {
+            @if (item().security) {
+              <p><ng-container *ngTemplateOutlet="securityBadge" /></p>
+            }
             <ng-container
               *ngTemplateOutlet="notes; context: { $implicit: item() }"
             />
@@ -178,6 +185,11 @@ import UpdatesComponent from './updates.component'
         </tui-expand>
       </td>
     </tr>
+    <ng-template #securityBadge>
+      <span tuiBadge appearance="negative" iconStart="@tui.shield-alert">
+        {{ 'Security update' | i18n }}
+      </span>
+    </ng-template>
     <ng-template #notes let-release>
       <p
         safeLinks
@@ -188,6 +200,14 @@ import UpdatesComponent from './updates.component'
             | dompurify
         "
       ></p>
+    </ng-template>
+    <ng-template #target>
+      @if (security()) {
+        <tui-icon icon="@tui.shield-alert" class="g-negative" />
+      }
+      <span [class]="security() ? 'g-negative' : 'g-positive'">
+        {{ item().version }}
+      </span>
     </ng-template>
   `,
   styles: `
@@ -269,6 +289,10 @@ import UpdatesComponent from './updates.component'
       margin-block-end: 1rem;
     }
 
+    [tuiAccordion] [tuiBadge] {
+      margin-inline-start: 0.5rem;
+    }
+
     .mobile {
       display: none;
     }
@@ -326,6 +350,7 @@ import UpdatesComponent from './updates.component'
     SafeLinksDirective,
     TuiAccordion,
     TuiAvatar,
+    TuiBadge,
     TuiButton,
     TuiButtonLoading,
     TuiChevron,
@@ -361,6 +386,9 @@ export class UpdatesItemComponent {
       this.item(),
       this.local().stateInfo.manifest.version,
     ),
+  )
+  protected readonly security = computed(() =>
+    this.releases().some(({ security }) => security),
   )
   protected readonly signers = computed(() => packageSigners(this.item()))
   protected readonly trusted = computed(() =>

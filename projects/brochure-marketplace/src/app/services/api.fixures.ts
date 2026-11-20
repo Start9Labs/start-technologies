@@ -162,6 +162,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
             ],
           ],
           hardwareAcceleration: false,
+          security: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
           hardwareVirtualization: false,
@@ -200,6 +201,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
             ],
           ],
           hardwareAcceleration: false,
+          security: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
           hardwareVirtualization: false,
@@ -210,9 +212,11 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
       otherVersions: {
         '26.1.0:0.1.0': {
           releaseNotes: 'Even better support for Bitcoin and wallets!',
+          security: false,
         },
         '#knots:26.1.20240325:0': {
           releaseNotes: 'Even better Knots support for Bitcoin and wallets!',
+          security: false,
         },
       },
     },
@@ -251,6 +255,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
             ],
           ],
           hardwareAcceleration: false,
+          security: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
           hardwareVirtualization: false,
@@ -261,9 +266,11 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
       otherVersions: {
         '0.17.5:0': {
           releaseNotes: 'Upstream release to 0.17.5',
+          security: false,
         },
         '0.17.4-beta:1.0-alpha': {
           releaseNotes: 'Upstream release to 0.17.4',
+          security: false,
         },
       },
     },
@@ -301,6 +308,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
             ],
           ],
           hardwareAcceleration: false,
+          security: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
           hardwareVirtualization: false,
@@ -338,6 +346,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
             ],
           ],
           hardwareAcceleration: false,
+          security: false,
           userspaceFilesystems: false,
           virtualNetworking: false,
           hardwareVirtualization: false,
@@ -348,6 +357,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
       otherVersions: {
         '0.3.2.7:0': {
           releaseNotes: 'Upstream release and minor fixes.',
+          security: false,
         },
       },
     },

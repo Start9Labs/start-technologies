@@ -1095,6 +1095,7 @@ export default {
   1300: 'Serveur injoignable',
   1301: 'Les listes peuvent ne pas être à jour',
   1302: 'StartOS ne parvient pas à joindre ce registre pour le moment.',
+  1303: 'Mise à jour de sécurité',
   1304: 'Nouveautés',
   1305: "Cette version nécessite une version plus récente de StartOS. Mettez à jour votre serveur pour l'installer.",
   1306: 'Votre version installée ne peut pas être mise à jour directement vers cette version.',

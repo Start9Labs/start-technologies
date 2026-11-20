@@ -6719,6 +6719,10 @@
             },
             "description": { "$ref": "#/$defs/Description" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
+            "security": {
+              "description": "Whether the release includes security fixes.",
+              "type": "boolean"
+            },
             "preDownloadAlert": {
               "anyOf": [
                 { "$ref": "#/$defs/PreDownloadAlert" },
@@ -6761,6 +6765,7 @@
             "title",
             "description",
             "releaseNotes",
+            "security",
             "gitHash",
             "license",
             "packageRepo",
@@ -9918,6 +9923,10 @@
             },
             "description": { "$ref": "#/$defs/Description" },
             "releaseNotes": { "$ref": "#/$defs/LocaleString" },
+            "security": {
+              "description": "Whether the release includes security fixes.",
+              "type": "boolean"
+            },
             "preDownloadAlert": {
               "anyOf": [
                 { "$ref": "#/$defs/PreDownloadAlert" },
@@ -9960,6 +9969,7 @@
             "title",
             "description",
             "releaseNotes",
+            "security",
             "gitHash",
             "license",
             "packageRepo",

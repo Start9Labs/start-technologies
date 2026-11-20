@@ -51,10 +51,11 @@ classes('src/app/routes/portal/components/placeholder.component', [
 ])
 classes('src/app/routes/portal/components/table.component', ['TableComponent'])
 classes('./item.component', ['UpdatesItemComponent'])
-classes('./filter-updates.pipe', ['FilterUpdatesPipe'])
+classes('./filter-updates.pipe', ['FilterUpdatesPipe', 'HasSecurityUpdatePipe'])
 boundaries.set(
   '../routes/portal/routes/updates/filter-updates.pipe',
-  'export class FilterUpdatesPipe { transform(packages) { return packages } }',
+  'export class FilterUpdatesPipe { transform(packages) { return packages } }' +
+    'export class HasSecurityUpdatePipe { transform() { return false } }',
 )
 boundaries.set(
   'src/app/routes/portal/routes/system/routes/backups/conversion-state',
@@ -72,7 +73,7 @@ const { MarketplaceService } =
 const { NotificationService } =
   await import('src/app/services/notification.service')
 const { OSService } = await import('src/app/services/os.service')
-const { FilterUpdatesPipe } =
+const { FilterUpdatesPipe, HasSecurityUpdatePipe } =
   await import('../routes/portal/routes/updates/filter-updates.pipe')
 const { BadgeService } = await import('../src/app/services/badge.service.ts')
 const { default: Updates } =
@@ -115,6 +116,7 @@ function fixture(t, mobile = false) {
       },
     },
     { provide: FilterUpdatesPipe, useValue: new FilterUpdatesPipe() },
+    { provide: HasSecurityUpdatePipe, useValue: new HasSecurityUpdatePipe() },
   ])
   t.after(() => injector.destroy())
   return {

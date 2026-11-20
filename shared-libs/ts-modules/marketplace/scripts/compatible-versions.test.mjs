@@ -88,17 +88,22 @@ test('the best release matches by its own version or a satisfies alias', () => {
   ])
 })
 
-test('pending notes include superseded revisions, newest first within the installed flavor and version interval', () => {
+test('pending notes include superseded security releases, newest first within the installed flavor and version interval', () => {
   const pkg = {
     version: '2.0.0:0',
     flavor: null,
+    security: false,
     otherVersions: {
       '0.9.0:0': { releaseNotes: 'Before installed' },
       '1.0.0:0': { releaseNotes: 'Installed' },
-      '1.0.0:1': { releaseNotes: 'Revision', superseded: true },
+      '1.0.0:1': {
+        releaseNotes: 'Security fix',
+        security: true,
+        superseded: true,
+      },
       '1.5.0:0': { releaseNotes: 'Intermediate' },
       '2.1.0:0': { releaseNotes: 'After target' },
-      '#quantum:1.5.0:0': { releaseNotes: 'Other flavor' },
+      '#quantum:1.5.0:0': { releaseNotes: 'Other flavor', security: true },
     },
   }
   const releases = pendingReleases(exver, pkg, '1.0.0:0')
@@ -106,6 +111,7 @@ test('pending notes include superseded revisions, newest first within the instal
     releases.map(release => release.version),
     ['2.0.0:0', '1.5.0:0', '1.0.0:1'],
   )
+  assert.equal(releases.at(-1).security, true)
   assert.deepEqual(pendingReleases(exver, pkg), [pkg])
 })
 

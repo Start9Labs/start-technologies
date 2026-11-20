@@ -28,7 +28,7 @@ import {
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
-import { FilterUpdatesPipe } from './filter-updates.pipe'
+import { FilterUpdatesPipe, HasSecurityUpdatePipe } from './filter-updates.pipe'
 import { UpdatesItemComponent } from './item.component'
 
 interface UpdatesData {
@@ -71,15 +71,15 @@ interface UpdatesData {
               <b tuiFade>{{ registry.name }}</b>
               <span tuiSubtitle tuiFade>{{ clear(registry.url) }}</span>
             </span>
-            @if (
-              (
-                data()?.marketplace?.[registry.url]?.updates || []
-                | filterUpdates: data()?.localPkgs : data()?.hidden
-              ).length;
-              as length
-            ) {
-              <tui-badge-notification appUpdatesCount>
-                {{ length }}
+            @let updates =
+              data()?.marketplace?.[registry.url]?.updates || []
+                | filterUpdates: data()?.localPkgs : data()?.hidden;
+            @if (updates.length) {
+              <tui-badge-notification
+                appUpdatesCount
+                [security]="updates | hasSecurityUpdate: data()?.localPkgs"
+              >
+                {{ updates.length }}
               </tui-badge-notification>
             }
           </button>
@@ -236,6 +236,7 @@ interface UpdatesData {
     TuiButton,
     StoreIconDirective,
     FilterUpdatesPipe,
+    HasSecurityUpdatePipe,
     UpdatesItemComponent,
     TitleDirective,
     TableComponent,

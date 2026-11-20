@@ -1014,6 +1014,12 @@ export type PackageReaderParams = z.output<typeof schemas.PackageReaderParams>
 export type PackageReaderParamsInput = z.input<
   typeof schemas.PackageReaderParams
 >
+export type PackageSecurityRelease = z.output<
+  typeof schemas.PackageSecurityRelease
+>
+export type PackageSecurityReleaseInput = z.input<
+  typeof schemas.PackageSecurityRelease
+>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
 export type PassthroughInfoInput = z.input<typeof schemas.PassthroughInfo>
 export type PasswordType = z.output<typeof schemas.PasswordType>
@@ -1388,6 +1394,20 @@ export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
 export type PackageMetadataInput = z.input<typeof schemas.PackageMetadata>
 export type PackagePlugin = z.output<typeof schemas.PackagePlugin>
 export type PackagePluginInput = z.input<typeof schemas.PackagePlugin>
+
+/**
+ * Security releases of installed services.
+ */
+export type PackageSecurityUpdate = z.output<
+  typeof schemas.PackageSecurityUpdate
+>
+
+/**
+ * Security releases of installed services.
+ */
+export type PackageSecurityUpdateInput = z.input<
+  typeof schemas.PackageSecurityUpdate
+>
 export type PartitionInfo = z.output<typeof schemas.PartitionInfo>
 export type PartitionInfoInput = z.input<typeof schemas.PartitionInfo>
 export type Progress = z.output<typeof schemas.Progress>

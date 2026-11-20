@@ -1,14 +1,16 @@
 # Updating
 
-StartOS makes it easy to keep your services up to date. When updates are available, a badge appears on the **Updates** tab in the top navigation bar showing the number of pending updates.
+StartOS makes it easy to keep your services up to date. When updates are available, a badge appears on the **Updates** tab in the top navigation bar showing the number of pending updates. The badge turns red when any of them is a security update.
 
 The Updates tab lists, for each installed service, the newest version you can install now. A version that needs a newer StartOS, or that your installed version cannot migrate to directly, is not listed; when a service must update in steps, the tab offers the next step.
+
+StartOS notifies you when a security update arrives for a service you have installed, once you can install a version that includes it. Until you read that notification, later security updates are added to it rather than sent as new ones. These notifications also use [browser push](notifications.md) when enabled. Use the notification's **Updates** link to open the Updates tab.
 
 ## Using the Updates Tab
 
 1. Click the **Updates** tab in the top navigation bar.
-1. Updates are organized by registry. Click a registry to list its available updates.
-1. Click an update to expand it and see who signed it and the release notes of every version since the one you have installed, newest first. When several versions are included, expand a version to read its notes; the newest starts open. An update not signed by a key you trust shows a warning, and installing it asks you to confirm the risks first.
+1. Updates are organized by registry. Click a registry to list its available updates. A registry offering a security update shows a red badge, and a security update shows its version in red with a shield icon.
+1. Click an update to expand it and see who signed it and the release notes of every version since the one you have installed, newest first. When several versions are included, expand a version to read its notes; the newest starts open. Versions that fix a security vulnerability carry a **Security update** label. An update not signed by a key you trust shows a warning, and installing it asks you to confirm the risks first.
 1. Click **Update**, in the details or in the update's row. If the package has a pre-download alert for your installed version, read it and select **Continue** to start the download or **Cancel** to leave the service unchanged.
 
 ## Switching Registries

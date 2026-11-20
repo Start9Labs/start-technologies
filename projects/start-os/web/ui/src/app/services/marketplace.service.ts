@@ -356,6 +356,7 @@ function withUpdateTarget(
     otherVersions[listed] = {
       releaseNotes: release.releaseNotes,
       defaultLocale: release.defaultLocale,
+      security: release.security,
     }
   }
   delete otherVersions[version]

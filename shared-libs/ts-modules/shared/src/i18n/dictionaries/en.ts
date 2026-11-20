@@ -1096,6 +1096,7 @@ export const ENGLISH: Record<string, number> = {
   "Can't reach server": 1300,
   'Listings may be out of date': 1301,
   "StartOS can't reach this registry right now.": 1302,
+  'Security update': 1303,
   'New Arrivals': 1304,
   'This version requires a newer version of StartOS. Update your server to install it.': 1305,
   'Your installed version cannot update directly to this version.': 1306,

@@ -60,6 +60,9 @@ pub struct PackageInfoShort {
     /// `PackageMetadata::default_locale`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_locale: Option<InternedString>,
+    /// `PackageMetadata::security`.
+    #[serde(default)]
+    pub security: bool,
     /// A newer revision of this upstream version and flavor covers its hardware.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub superseded: bool,
@@ -1005,6 +1008,7 @@ fn check_matching_info_short() {
             hardware_virtualization: false,
             plugins: BTreeSet::new(),
             satisfies: BTreeSet::new(),
+            security: false,
         },
         icon: Some(crate::registry::package::icon::PackageIcon::Stored(
             "blake3/icon.png".into(),

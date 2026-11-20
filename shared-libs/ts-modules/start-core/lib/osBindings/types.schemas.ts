@@ -4042,6 +4042,10 @@ export const PackageInfoShort: z.ZodObject<{
    */
   defaultLocale: z.ZodOptional<z.ZodNullable<z.ZodString>>
   /**
+   * `PackageMetadata::security`.
+   */
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  /**
    * A newer revision of this upstream version and flavor covers its hardware.
    */
   superseded: z.ZodOptional<z.ZodBoolean>
@@ -4052,6 +4056,12 @@ export const PackageInfoShort: z.ZodObject<{
    */
   defaultLocale: z.string().nullable().optional().meta({
     description: '`PackageMetadata::default_locale`.',
+  }),
+  /**
+   * `PackageMetadata::security`.
+   */
+  security: wire(z.boolean().optional(), z.boolean()).meta({
+    description: '`PackageMetadata::security`.',
   }),
   /**
    * A newer revision of this upstream version and flavor covers its hardware.
@@ -4068,6 +4078,19 @@ export const PackageReaderParams: z.ZodObject<{
   signer: typeof Guid
 }> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
   id: 'PackageReaderParams',
+})
+export const PackageSecurityRelease: z.ZodObject<{
+  registry: z.ZodString
+  id: typeof PackageId
+  title: z.ZodString
+  version: typeof Version
+}> = /* @__PURE__ */ object({
+  registry: z.string(),
+  id: PackageId,
+  title: z.string(),
+  version: Version,
+}).meta({
+  id: 'PackageSecurityRelease',
 })
 export const PassthroughInfo: z.ZodObject<{
   hostname: z.ZodString
@@ -5783,6 +5806,10 @@ export const PackageMetadata: z.ZodObject<{
   defaultLocale: z.ZodOptional<z.ZodNullable<z.ZodString>>
   description: typeof Description
   releaseNotes: typeof LocaleString
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   preDownloadAlert: z.ZodOptional<z.ZodNullable<typeof PreDownloadAlert>>
   gitHash: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof GitHash>>,
@@ -5836,6 +5863,12 @@ export const PackageMetadata: z.ZodObject<{
   }),
   description: Description,
   releaseNotes: LocaleString,
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Whether the release includes security fixes.',
+  }),
   preDownloadAlert: PreDownloadAlert.nullable().optional(),
   gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
   license: z.string(),
@@ -5883,6 +5916,32 @@ export const PackagePlugin: z.ZodObject<{
 }).meta({
   id: 'PackagePlugin',
 })
+
+/**
+ * Security releases of installed services.
+ */
+export const PackageSecurityUpdate: z.ZodIntersection<
+  z.ZodObject<{
+    kind: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'package-security-update'>>,
+      z.ZodLiteral<'package-security-update'>
+    >
+  }>,
+  z.ZodObject<{ releases: z.ZodArray<typeof PackageSecurityRelease> }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      kind: wire(
+        z.literal('package-security-update').optional(),
+        z.literal('package-security-update'),
+      ),
+    }),
+    object({ releases: z.array(PackageSecurityRelease) }),
+  )
+  .meta({
+    id: 'PackageSecurityUpdate',
+    description: 'Security releases of installed services.',
+  })
 export const PartitionInfo: z.ZodObject<{
   logicalname: z.ZodString
   stablePath: z.ZodString

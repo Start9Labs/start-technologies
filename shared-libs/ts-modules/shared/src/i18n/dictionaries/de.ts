@@ -1095,6 +1095,7 @@ export default {
   1300: 'Server nicht erreichbar',
   1301: 'Einträge sind möglicherweise veraltet',
   1302: 'StartOS kann diese Registry gerade nicht erreichen.',
+  1303: 'Sicherheitsupdate',
   1304: 'Neuzugänge',
   1305: 'Diese Version erfordert eine neuere Version von StartOS. Aktualisieren Sie Ihren Server, um sie zu installieren.',
   1306: 'Ihre installierte Version kann nicht direkt auf diese Version aktualisiert werden.',
