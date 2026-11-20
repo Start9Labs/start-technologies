@@ -285,6 +285,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
             CallRemoteHandler::<RpcContext, _, _, RegistryUrlParams>::new(
                 registry::registry_api::<RegistryContext>(),
             )
+            .with_metadata("authenticated", Value::Bool(true))
             .no_cli(),
         )
         .subcommand(

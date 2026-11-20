@@ -375,3 +375,42 @@ async fn legacy_json_reply_limit_covers_chunked_responses() {
         json!("x".repeat(64))
     );
 }
+
+#[tokio::test]
+async fn legacy_reply_limit_covers_error_bodies() {
+    use crate::middleware::auth::signature::send_http;
+    let router = Router::new().route(
+        "/rpc/v0",
+        any(|| async {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "registry-failure".repeat(4),
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url: Url = format!("http://{}/rpc/v0", listener.local_addr().unwrap())
+        .parse()
+        .unwrap();
+    let _server: NonDetachingJoinHandle<()> =
+        tokio::spawn(async move { axum::serve(listener, router).await.unwrap() }).into();
+    let failure = |limit: usize| {
+        let url = url.clone();
+        async move {
+            format!(
+                "{:?}",
+                send_http(
+                    reqwest::Client::new(),
+                    url,
+                    http::HeaderMap::new(),
+                    "{}".into(),
+                    limit
+                )
+                .await
+                .unwrap_err()
+            )
+        }
+    };
+    assert!(failure(128).await.contains("registry-failure"));
+    assert!(!failure(32).await.contains("registry-failure"));
+}

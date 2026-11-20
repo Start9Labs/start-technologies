@@ -656,6 +656,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn server_proxy_requires_authentication_for_public_registry_methods() {
+        use rpc_toolkit::HandlerFor;
+
+        let registry = crate::registry::registry_api::<RegistryContext>();
+        let server = crate::main_api::<RpcContext>();
+        let public: [&[&str]; 13] = [
+            &["index"],
+            &["info"],
+            &["db", "subscribe"],
+            &["package", "index"],
+            &["package", "get"],
+            &["package", "category", "list"],
+            &["package", "signer", "list"],
+            &["os", "index"],
+            &["os", "version", "get"],
+            &["os", "version", "signer", "list"],
+            &["os", "asset", "get", "iso"],
+            &["os", "asset", "get", "img"],
+            &["os", "asset", "get", "squashfs"],
+        ];
+        for method in public {
+            assert_eq!(
+                registry
+                    .metadata(method.iter().copied().collect())
+                    .get("authenticated"),
+                Some(&Value::Bool(false)),
+                "{method:?}"
+            );
+            assert_eq!(
+                server
+                    .metadata(["registry"].iter().chain(method).copied().collect())
+                    .get("authenticated"),
+                Some(&Value::Bool(true)),
+                "{method:?}"
+            );
+        }
+    }
+
+    #[test]
     fn startup_preserves_mirror_signatures_and_normalizes_each_return_to_authority() {
         use crate::registry::package::index::tests::{signers_with, version_info_signed_by};
 
