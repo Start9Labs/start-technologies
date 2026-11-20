@@ -52,7 +52,6 @@ struct SystemInfoResponse {
     theme: String,
     remote_access: String,
     timezone: String,
-    wan_overlaps: Vec<crate::subnets::WanOverlap>,
 }
 rpc_toolkit::reflect_ts!(SystemInfoResponse);
 
@@ -112,10 +111,6 @@ async fn info<C: CtrlContext>(ctx: C) -> Result<SystemInfoResponse, Error> {
         theme: prefs.theme,
         remote_access: prefs.remote_access,
         timezone,
-        wan_overlaps: crate::subnets::overlaps(ctx).await.unwrap_or_else(|e| {
-            tracing::warn!("Failed to check profile subnets against the WAN: {e}");
-            Vec::new()
-        }),
     })
 }
 

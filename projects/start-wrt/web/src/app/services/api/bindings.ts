@@ -262,6 +262,7 @@ export type SpeedData = z.output<typeof schemas.SpeedData>
 export type SshKeyAddParamsInput = z.input<typeof schemas.SshKeyAddParams>
 export type SshKeyDeleteParamsInput = z.input<typeof schemas.SshKeyDeleteParams>
 export type SshKeyResponse = z.output<typeof schemas.SshKeyResponse>
+export type SystemInfoResponse = z.output<typeof schemas.SystemInfoResponse>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type UpdateSystemRes = z.output<typeof schemas.UpdateSystemRes>
 export type UsbPortStatus = z.output<typeof schemas.UsbPortStatus>
@@ -349,7 +350,6 @@ export type PublishedPortInputInput = z.input<typeof schemas.PublishedPortInput>
 export type ScheduleWindowsInput = z.input<typeof schemas.ScheduleWindows>
 export type SetArgsInput = z.input<typeof schemas.SetArgs>
 export type SetupStatusRes = z.output<typeof schemas.SetupStatusRes>
-export type SystemInfoResponse = z.output<typeof schemas.SystemInfoResponse>
 export type UciFile = z.output<typeof schemas.UciFile>
 export type UciFileInput = z.input<typeof schemas.UciFile>
 

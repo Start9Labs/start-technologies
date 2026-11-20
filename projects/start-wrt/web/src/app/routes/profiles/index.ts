@@ -25,7 +25,7 @@ import {
   WanOverlap,
 } from 'src/app/services/api/api.service'
 import { ConnectionService } from 'src/app/services/connection.service'
-import { SystemService } from 'src/app/services/system.service'
+import { WanOverlapsService } from 'src/app/services/wan-overlaps.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { fill } from 'src/app/i18n/validation-errors'
 import { confirmVpnExposedPort } from 'src/app/services/vpn-exposed-port'
@@ -45,7 +45,7 @@ import { ProfilesService } from './service'
         </button>
       </aside>
     </header>
-    @for (overlap of system.info()?.wanOverlaps; track overlap.interface) {
+    @for (overlap of wanOverlaps.overlaps(); track overlap.interface) {
       <div tuiNotification appearance="warning">
         <div tuiTitle>
           {{ describe(overlap) }}
@@ -186,7 +186,7 @@ class Profiles {
   private readonly alerts = inject(TuiNotificationService)
   private readonly window = inject(WA_WINDOW)
   private readonly i18n = inject(i18nPipe)
-  protected readonly system = inject(SystemService)
+  protected readonly wanOverlaps = inject(WanOverlapsService)
 
   protected describe({ profile, wanNetwork }: WanOverlap): string {
     return fill(

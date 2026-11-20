@@ -135,6 +135,10 @@ pub fn profiles<C: CtrlContext>() -> ParentHandler<C> {
             from_fn_async_local(schedule_set::<C>).no_display(),
         )
         .subcommand(
+            "wan-overlaps",
+            from_fn_async_local(crate::subnets::overlaps::<C>).with_display_serializable(),
+        )
+        .subcommand(
             "resolve-wan-overlap",
             from_fn_async_local(crate::subnets::resolve::<C>).no_display(),
         )
@@ -1404,12 +1408,13 @@ fn ensure_vlan_filtering(cfgs: &mut Configs, bridge_name: &str) -> Result<(), Er
     Ok(())
 }
 
+/// Updates retain the resolved interface's LAN ownership.
 #[instrument(skip_all)]
 pub async fn set<C: CtrlContext>(
     ctx: C,
     DeserializeStdin(req): DeserializeStdin<ProfileSetRequest>,
 ) -> Result<ProfileId, Error> {
-    let profile = req.profile;
+    let mut profile = req.profile;
     let force = req.force;
     let name = profile.id.fullname.clone().unwrap_or_default();
     let mut retries = 4;
@@ -1422,8 +1427,11 @@ pub async fn set<C: CtrlContext>(
         )
         .await?;
         let before = crate::subnets::Subnets::of(&cfgs);
+        profile.owns_lan = Lookup::parse(ctx.clone(), &cfgs)?
+            .resolve(&profile.id)?
+            .interface
+            == crate::lan::LAN_INTERFACE;
 
-        // Capture old LAN IP before set_config modifies it
         let old_lan_ip = if profile.owns_lan {
             get_lan_ip(&cfgs)
         } else {

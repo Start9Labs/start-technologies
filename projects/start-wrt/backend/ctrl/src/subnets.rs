@@ -181,11 +181,12 @@ fn validate(
         after.wan(live_wan)
     };
     let block = after.block();
+    let block_changed = before.block() != block;
     for (interface, member) in &after.profiles {
         let subnet = slash24(member.gateway);
         let old = before.profiles.get(interface).map(|m| m.gateway);
-        let moved = old != Some(member.gateway);
-        if moved {
+        let moved = old.map(slash24) != Some(subnet);
+        if moved || block_changed {
             if interface == LAN_INTERFACE {
                 crate::lan::validate_lan_block(member.gateway)?;
             } else if let Some([a, b]) = block {
@@ -196,6 +197,8 @@ fn validate(
                     )));
                 }
             }
+        }
+        if moved {
             if let Some((_, other)) = after
                 .profiles
                 .iter()
@@ -593,6 +596,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lan_ownership_is_resolved_before_block_changes() {
+        let dir = router_with(&[("Guest", 2)]).await;
+        let ctx = TestContext(dir.path().into(), Vec::new());
+        let mut profile: Profile<ProfileIdOpt> = profiles::get(
+            ctx.clone(),
+            ProfileIdOpt {
+                fullname: Some("Admin".into()),
+                interface: None,
+                vlan_tag: None,
+            },
+        )
+        .await
+        .unwrap()
+        .into();
+        profile.owns_lan = false;
+        profile.gateway_ip = "10.42.0.1".parse().unwrap();
+
+        profiles::set(
+            ctx.clone(),
+            DeserializeStdin(ProfileSetRequest {
+                profile,
+                force: false,
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            gateways(&ctx).await,
+            [
+                ("Admin".into(), Ipv4Addr::new(10, 42, 0, 1)),
+                ("Guest".into(), Ipv4Addr::new(10, 42, 2, 1)),
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn an_existing_overlap_does_not_block_a_lan_noop() {
         let dir = router_with(&[]).await;
         let ctx = TestContext(dir.path().into(), vec![net("192.168.0.37/24")]);
@@ -784,6 +824,37 @@ mod tests {
         assert_eq!(kind(validate(&broken, &broken, wan.clone(), &[])), None);
         let recovered = subnets(&[("lan", [10, 0, 20, 1]), ("guest", [10, 0, 15, 1])], None);
         assert_eq!(kind(validate(&broken, &recovered, wan, &[])), None);
+    }
+
+    #[test]
+    fn a_block_change_must_take_every_profile_with_it() {
+        let before = subnets(
+            &[("lan", [192, 168, 0, 1]), ("guest", [192, 168, 2, 1])],
+            None,
+        );
+        let stranded = subnets(
+            &[("lan", [10, 42, 0, 1]), ("guest", [192, 168, 2, 1])],
+            None,
+        );
+        assert_eq!(
+            kind(validate(&before, &stranded, Vec::new(), &[])),
+            Some(ErrorKind::InvalidRequest)
+        );
+        let moved = subnets(&[("lan", [10, 42, 0, 1]), ("guest", [10, 42, 2, 1])], None);
+        assert_eq!(kind(validate(&before, &moved, Vec::new(), &[])), None);
+    }
+
+    #[test]
+    fn an_unchanged_subnet_allows_a_gateway_host_change() {
+        let before = subnets(&[("lan", [10, 0, 15, 1]), ("guest", [10, 0, 15, 2])], None);
+        let after = subnets(
+            &[("lan", [10, 0, 15, 254]), ("guest", [10, 0, 15, 2])],
+            None,
+        );
+        assert_eq!(
+            kind(validate(&before, &after, vec![net("10.0.15.37/24")], &[])),
+            None
+        );
     }
 
     #[test]

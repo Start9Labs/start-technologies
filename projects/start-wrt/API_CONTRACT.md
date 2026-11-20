@@ -219,16 +219,6 @@ struct SystemInfoResponse {
     theme: String,  // "dark" | "light" | "system"
     remote_access: String,  // wire: `remoteAccess`; "never" (default) | "behind-nat" | "always"
     timezone: String,  // IANA timezone name (e.g. "America/New_York")
-    wan_overlaps: Vec<WanOverlap>,  // wire: `wanOverlaps`; empty while the WAN has no IPv4 address
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WanOverlap {
-    profile: String,      // fullname
-    interface: String,
-    subnet: String,       // the profile's /24, e.g. "192.168.0.0/24"
-    wan_network: String,  // the overlapping WAN network, e.g. "192.168.0.0/24"
 }
 ```
 
@@ -2076,6 +2066,7 @@ struct ProfileSetRequest {
 // Response: ProfileId
 // Validation: same checks as profiles.create; a LAN owner's change that moves
 //   the network block applies the Subnet rules to every profile it moves.
+// LAN ownership comes from the resolved interface; owns_lan is ignored on update.
 // Inbound VPN peers the new subnet would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
 ```
@@ -2156,6 +2147,23 @@ struct ScheduleWindows {
 // 24-hour window; InvalidValue on overlap or gapless full-week coverage).
 ```
 
+### `profiles.wan-overlaps`
+
+```rust
+// Request: {}
+// Response: Vec<WanOverlap>, empty while the WAN has no IPv4 address
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WanOverlap {
+    profile: String,      // fullname
+    interface: String,
+    subnet: String,       // the profile's /24, e.g. "192.168.0.0/24"
+    wan_network: String,  // the overlapping WAN network, e.g. "192.168.0.0/24"
+}
+// Backend: every profile whose /24 overlaps a live or static WAN IPv4 network.
+```
+
 ### `profiles.resolve-wan-overlap`
 
 Internal endpoint, **not called from the frontend**. Run by the daemon at boot and by the
@@ -2169,7 +2177,7 @@ Internal endpoint, **not called from the frontend**. Run by the daemon at boot a
 //   LAN owner, or a profile without a Wi-Fi password, LAN port, or inbound VPN
 //   server, to the lowest free /24 in the network block from .10 up, through
 //   profiles.set (force false). A move profiles.set refuses is logged to the
-//   Activity log and left for the user; system.info reports every overlap.
+//   Activity log and left for the user; profiles.wan-overlaps reports every overlap.
 ```
 
 ---

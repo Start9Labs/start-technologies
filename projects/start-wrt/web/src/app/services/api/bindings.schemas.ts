@@ -1400,6 +1400,25 @@ export const SshKeyResponse: z.ZodObject<{
 }).meta({
   id: 'SshKeyResponse',
 })
+export const SystemInfoResponse: z.ZodObject<{
+  version: z.ZodString
+  gitHash: z.ZodString
+  language: z.ZodString
+  date: z.ZodString
+  theme: z.ZodString
+  remoteAccess: z.ZodString
+  timezone: z.ZodString
+}> = /* @__PURE__ */ object({
+  version: z.string(),
+  gitHash: z.string(),
+  language: z.string(),
+  date: z.string(),
+  theme: z.string(),
+  remoteAccess: z.string(),
+  timezone: z.string(),
+}).meta({
+  id: 'SystemInfoResponse',
+})
 export const UpdateSystemParams: z.ZodObject<{
   registry: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -2651,27 +2670,6 @@ export const SetupStatusRes: z.ZodObject<{
   disk: typeof DiskState
 }> = /* @__PURE__ */ object({ setupMode: z.boolean(), disk: DiskState }).meta({
   id: 'SetupStatusRes',
-})
-export const SystemInfoResponse: z.ZodObject<{
-  version: z.ZodString
-  gitHash: z.ZodString
-  language: z.ZodString
-  date: z.ZodString
-  theme: z.ZodString
-  remoteAccess: z.ZodString
-  timezone: z.ZodString
-  wanOverlaps: z.ZodArray<typeof WanOverlap>
-}> = /* @__PURE__ */ object({
-  version: z.string(),
-  gitHash: z.string(),
-  language: z.string(),
-  date: z.string(),
-  theme: z.string(),
-  remoteAccess: z.string(),
-  timezone: z.string(),
-  wanOverlaps: z.array(WanOverlap),
-}).meta({
-  id: 'SystemInfoResponse',
 })
 export const UciFile: z.ZodObject<{
   sections: z.ZodArray<typeof Section>
@@ -4052,6 +4050,23 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ ProfileId,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'wan-overlaps': {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
+          _RETURN: /* @__PURE__ */ z.array(WanOverlap),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },

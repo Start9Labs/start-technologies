@@ -92,6 +92,7 @@ import {
   BackupCreateRes,
   BackupRestoreRes,
   DiagnosticsCreateRes,
+  WanOverlap,
 } from './api.service'
 import { DhcpHostSection, UciFile, UciSection } from './types'
 import { dhcpLanSlaacDhcpv6 } from 'src/app/routes/lan/routes/ipv6/uci/mocks'
@@ -289,12 +290,16 @@ export class MockApiService extends ApiService {
     theme: 'system',
     remoteAccess: 'never',
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    wanOverlaps: [],
   }
 
   async systemInfo(_timeout?: number): Promise<SystemInfoRes> {
     await pauseFor(250)
     return { ...this.mockSystemInfo, date: new Date().toISOString() }
+  }
+
+  async profilesWanOverlaps(): Promise<WanOverlap[]> {
+    await pauseFor(100)
+    return []
   }
 
   async configCheck(): Promise<ConfigCheck> {

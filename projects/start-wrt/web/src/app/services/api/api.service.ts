@@ -17,6 +17,7 @@ export abstract class ApiService {
   abstract setUci(params: SetUciReq): Promise<SetUciRes>
   abstract systemInfo(timeout?: number): Promise<SystemInfoRes>
   abstract configCheck(): Promise<ConfigCheck>
+  abstract profilesWanOverlaps(): Promise<WanOverlap[]>
   abstract systemNewerVersions(): Promise<VersionInfo[]>
   /** Cancels observation, never an accepted update. A successful terminal precedes the reboot. */
   abstract systemUpdate(
