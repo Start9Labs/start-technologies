@@ -24,4 +24,5 @@ unstable = ["start-core/unstable"]
 
 [dependencies]
 include_dir = "0.7.3"
+mimalloc = "0.1"
 start-core = { path = "../../shared-libs/crates/start-core" }

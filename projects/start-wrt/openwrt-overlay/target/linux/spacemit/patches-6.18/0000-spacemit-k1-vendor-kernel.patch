@@ -1,7 +1,7 @@
 Subject: spacemit: SpaceMiT K1 vendor kernel
 
-The https://gitlab.com/jmontleon/kernel-ark.git tree at b9f88a74901a71a6bdf666c90d86ee7027f56b7d,
-as a diff against mainline v6.18.57, without its Fedora packaging and
+The https://gitlab.com/jmontleon/kernel-ark.git tree at 421ac7d4996cadeef8a6df5d867e008adfcadd6f,
+as a diff against mainline v6.18.64, without its Fedora packaging and
 patches or these vendor drivers:
 
   drivers/gpu/drm/img-rogue
@@ -37157,7 +37157,7 @@ index 795b2e815ac9..d92de11b8f74 100644
  	return 0;
  }
 diff --git a/arch/riscv/kernel/traps.c b/arch/riscv/kernel/traps.c
-index 47afea4ff1a8..ee711131623c 100644
+index e7e45cbb0899..b7745880f672 100644
 --- a/arch/riscv/kernel/traps.c
 +++ b/arch/riscv/kernel/traps.c
 @@ -170,12 +170,39 @@ DO_ERROR_INFO(do_trap_insn_misaligned,
@@ -37251,7 +37251,7 @@ index 557bf160b503..1896a756ef94 100644
  		hugetlb_cma_reserve(PUD_SHIFT - PAGE_SHIFT);
  }
 diff --git a/block/blk-mq.c b/block/blk-mq.c
-index ba0c48d58e13..26db01994089 100644
+index 82df2f6073d8..1f4066c992fe 100644
 --- a/block/blk-mq.c
 +++ b/block/blk-mq.c
 @@ -1316,6 +1316,7 @@ static void blk_mq_complete_send_ipi(struct request *rq)
@@ -37262,7 +37262,7 @@ index ba0c48d58e13..26db01994089 100644
  }
  
  static void blk_mq_raise_softirq(struct request *rq)
-@@ -3603,6 +3604,7 @@ static int blk_mq_init_request(struct blk_mq_tag_set *set, struct request *rq,
+@@ -3605,6 +3606,7 @@ static int blk_mq_init_request(struct blk_mq_tag_set *set, struct request *rq,
  	}
  
  	WRITE_ONCE(rq->state, MQ_RQ_IDLE);
@@ -37284,7 +37284,7 @@ index f6fa4d8d75e0..6d70e323eb8c 100644
  $(obj)/signing_key.pem: $(obj)/x509.genkey FORCE
  	$(call if_changed,gen_key)
 diff --git a/drivers/ata/libata-pmp.c b/drivers/ata/libata-pmp.c
-index 299b1823e0d0..6d7a4e9453ad 100644
+index c3b3af28d17c..e9b743bd5fea 100644
 --- a/drivers/ata/libata-pmp.c
 +++ b/drivers/ata/libata-pmp.c
 @@ -458,7 +458,8 @@ static void sata_pmp_quirks(struct ata_port *ap)
@@ -44487,10 +44487,10 @@ index cfc4d83c42c0..339b2cac3442 100644
  	error = cpuhp_setup_state(CPUHP_AP_RISCV_TIMER_STARTING,
  			 "clockevents/riscv/timer:starting",
 diff --git a/drivers/cpufreq/Kconfig b/drivers/cpufreq/Kconfig
-index 78702a08364f..c78240439d9b 100644
+index 73c1b62c1b37..0d46d3e2d200 100644
 --- a/drivers/cpufreq/Kconfig
 +++ b/drivers/cpufreq/Kconfig
-@@ -337,6 +337,15 @@ config QORIQ_CPUFREQ
+@@ -338,6 +338,15 @@ config QORIQ_CPUFREQ
  	  This adds the CPUFreq driver support for Freescale QorIQ SoCs
  	  which are capable of changing the CPU's frequency dynamically.
  
@@ -48787,7 +48787,7 @@ index 000000000000..90b3c46343e8
 +};
 +module_rpmsg_driver(rpmsg_adma_client);
 diff --git a/drivers/dma/dw-axi-dmac/dw-axi-dmac-platform.c b/drivers/dma/dw-axi-dmac/dw-axi-dmac-platform.c
-index ea4e47ee0d71..8a0d89aaf4b0 100644
+index 343d32eeaa29..9059c39319e9 100644
 --- a/drivers/dma/dw-axi-dmac/dw-axi-dmac-platform.c
 +++ b/drivers/dma/dw-axi-dmac/dw-axi-dmac-platform.c
 @@ -48,7 +48,7 @@
@@ -76099,7 +76099,7 @@ index 000000000000..1094d1759c5b
 +MODULE_DESCRIPTION("SPACEMIT adc driver");
 +MODULE_LICENSE("GPL v2");
 diff --git a/drivers/iio/light/stk3310.c b/drivers/iio/light/stk3310.c
-index 3be693421886..2ebb9eb1df0b 100644
+index ca1cb5dd776a..4cbd21ff1c65 100644
 --- a/drivers/iio/light/stk3310.c
 +++ b/drivers/iio/light/stk3310.c
 @@ -16,6 +16,7 @@
@@ -116688,10 +116688,10 @@ index 000000000000..43b7a6c150d5
 +MODULE_LICENSE("GPL");
 +MODULE_AUTHOR("Spacemit");
 diff --git a/drivers/mfd/Kconfig b/drivers/mfd/Kconfig
-index 55a9fea95195..edcdfacbcfde 100644
+index ae39cbf31710..5fff341e0838 100644
 --- a/drivers/mfd/Kconfig
 +++ b/drivers/mfd/Kconfig
-@@ -2393,6 +2393,16 @@ config MFD_QCOM_PM8008
+@@ -2395,6 +2395,16 @@ config MFD_QCOM_PM8008
  	  under it in the device tree. Additional drivers must be enabled in
  	  order to use the functionality of the device.
  
@@ -121477,10 +121477,10 @@ index 5dd9c35f6b6f..cd9320cda798 100644
  obj-$(CONFIG_MTD_SPI_NOR)	+= spi-nor.o
  
 diff --git a/drivers/mtd/spi-nor/core.c b/drivers/mtd/spi-nor/core.c
-index 037407fc2e11..e801d08bab46 100644
+index 512d0e4e3b1f..0a4719e14dc6 100644
 --- a/drivers/mtd/spi-nor/core.c
 +++ b/drivers/mtd/spi-nor/core.c
-@@ -1954,6 +1954,7 @@ static const struct spi_nor_manufacturer *manufacturers[] = {
+@@ -1963,6 +1963,7 @@ static const struct spi_nor_manufacturer *manufacturers[] = {
  	&spi_nor_sst,
  	&spi_nor_winbond,
  	&spi_nor_xmc,
@@ -147341,7 +147341,7 @@ index ab25419f56c6..4f46f8235580 100644
  obj-$(CONFIG_RTW89)		+= rtw89/
 -
 diff --git a/drivers/nvme/host/pci.c b/drivers/nvme/host/pci.c
-index 4efb55f1e383..152800ceb785 100644
+index 9245fae71321..8ef7e5fa106f 100644
 --- a/drivers/nvme/host/pci.c
 +++ b/drivers/nvme/host/pci.c
 @@ -2350,7 +2350,7 @@ static void nvme_free_host_mem_multi(struct nvme_dev *dev)
@@ -147591,7 +147591,7 @@ index 000000000000..282ecc8977c3
 +MODULE_LICENSE("GPL v2");
 +
 diff --git a/drivers/opp/core.c b/drivers/opp/core.c
-index a179d57a5a15..9065b256f3d0 100644
+index fc2a7ee936ba..61e6c6361791 100644
 --- a/drivers/opp/core.c
 +++ b/drivers/opp/core.c
 @@ -763,8 +763,13 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_find_freq_exact_indexed);
@@ -147620,7 +147620,7 @@ index a179d57a5a15..9065b256f3d0 100644
  }
  EXPORT_SYMBOL_GPL(dev_pm_opp_find_freq_ceil);
  
-@@ -2641,6 +2650,111 @@ int dev_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config)
+@@ -2637,6 +2646,111 @@ int dev_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config)
  }
  EXPORT_SYMBOL_GPL(dev_pm_opp_set_config);
  
@@ -147807,10 +147807,10 @@ index 48e4a887bb1b..d969d690a77f 100644
  		msi_vaddr = dmam_alloc_coherent(dev, sizeof(u64), &pp->msi_data,
  						GFP_KERNEL);
 diff --git a/drivers/pci/controller/dwc/pcie-designware.h b/drivers/pci/controller/dwc/pcie-designware.h
-index aa27211b68dd..19ffc62a585a 100644
+index c01634c0211f..3842211c90e5 100644
 --- a/drivers/pci/controller/dwc/pcie-designware.h
 +++ b/drivers/pci/controller/dwc/pcie-designware.h
-@@ -422,6 +422,7 @@ struct dw_pcie_rp {
+@@ -423,6 +423,7 @@ struct dw_pcie_rp {
  	const struct dw_pcie_host_ops *ops;
  	int			msi_irq[MAX_MSI_CTRLS];
  	struct irq_domain	*irq_domain;
@@ -152776,7 +152776,7 @@ index 000000000000..82203d02aa47
 +MODULE_DESCRIPTION("CW2015 FGADC Device Driver V3.0");
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/power/supply/sbs-battery.c b/drivers/power/supply/sbs-battery.c
-index 3947429f6f81..8c1d1bd90afc 100644
+index b190a4a89952..73a6ab4272d1 100644
 --- a/drivers/power/supply/sbs-battery.c
 +++ b/drivers/power/supply/sbs-battery.c
 @@ -609,6 +609,21 @@ static int sbs_get_battery_presence_and_health(
@@ -184298,10 +184298,10 @@ index 074d9c731639..3877e39170c2 100644
  	 */
  	of_match = of_match_device(pdev->dev.driver->of_match_table, &pdev->dev);
 diff --git a/drivers/usb/host/xhci.c b/drivers/usb/host/xhci.c
-index 14eeb16f668b..177f3e4e5d3d 100644
+index b894ba988a3d..3c815435bf51 100644
 --- a/drivers/usb/host/xhci.c
 +++ b/drivers/usb/host/xhci.c
-@@ -5535,6 +5535,10 @@ int xhci_gen_setup(struct usb_hcd *hcd, xhci_get_quirks_t get_quirks)
+@@ -5536,6 +5536,10 @@ int xhci_gen_setup(struct usb_hcd *hcd, xhci_get_quirks_t get_quirks)
  		xhci_dbg(xhci, "Enabling %u-bit DMA addresses.\n",
  			 xhci->dma_mask_bits);
  		dma_set_coherent_mask(dev, DMA_BIT_MASK(xhci->dma_mask_bits));
@@ -184312,7 +184312,7 @@ index 14eeb16f668b..177f3e4e5d3d 100644
  	} else {
  		/*
  		 * This is to avoid error in cases where a 32-bit USB
-@@ -5547,6 +5551,12 @@ int xhci_gen_setup(struct usb_hcd *hcd, xhci_get_quirks_t get_quirks)
+@@ -5548,6 +5552,12 @@ int xhci_gen_setup(struct usb_hcd *hcd, xhci_get_quirks_t get_quirks)
  		dma_set_coherent_mask(dev, DMA_BIT_MASK(32));
  	}
  
@@ -188190,7 +188190,7 @@ index 000000000000..c854ab926e52
 +MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
 +MODULE_ALIAS("platform:soc-wdt");
 diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
-index d66681ce2b3d..90265b7ad206 100644
+index 204edb659304..3410e98c3786 100644
 --- a/fs/btrfs/sysfs.c
 +++ b/fs/btrfs/sysfs.c
 @@ -655,7 +655,7 @@ static const struct attribute_group btrfs_debug_feature_attr_group = {
@@ -192541,10 +192541,10 @@ index 91fe08b7e886..8e9969a00cf2 100644
  		return NULL;
  
 diff --git a/net/wireless/reg.c b/net/wireless/reg.c
-index 15e56dfad00f..848e17e9ed80 100644
+index 3f685b1396ff..8f6358c06df6 100644
 --- a/net/wireless/reg.c
 +++ b/net/wireless/reg.c
-@@ -1008,7 +1008,7 @@ static void regdb_fw_cb(const struct firmware *fw, void *context)
+@@ -1011,7 +1011,7 @@ static void regdb_fw_cb(const struct firmware *fw, void *context)
  	void *db;
  
  	if (!fw) {

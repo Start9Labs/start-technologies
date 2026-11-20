@@ -374,9 +374,18 @@ impl<A: Accept> Deref for WebServerAcceptorSetter<A> {
     }
 }
 
+/// Upgraded sessions end when their selected router is replaced.
+#[derive(Clone)]
+pub(crate) struct RouterEpoch(tokio::sync::watch::Receiver<Router>);
+impl RouterEpoch {
+    pub async fn changed(mut self) {
+        let _ = self.0.changed().await;
+    }
+}
+
 pub struct WebServer<A: Accept> {
     shutdown: oneshot::Sender<()>,
-    router: Watch<Router>,
+    router: tokio::sync::watch::Sender<Router>,
     acceptor: Watch<A>,
     thread: NonDetachingJoinHandle<()>,
 }
@@ -393,8 +402,7 @@ where
 
     pub fn new(mut acceptor: Acceptor<A>, router: Router) -> Self {
         let acceptor_send = acceptor.acceptor.clone();
-        let router = Watch::new(router);
-        let service = router.clone_unseen();
+        let (router, service) = tokio::sync::watch::channel(router);
         let (shutdown, shutdown_recv) = oneshot::channel();
         let thread = NonDetachingJoinHandle::from(tokio::spawn(async move {
             #[derive(Clone)]
@@ -425,7 +433,7 @@ where
             }
 
             struct SwappableRouter<M> {
-                router: Watch<Router>,
+                router: tokio::sync::watch::Receiver<Router>,
                 metadata: M,
             }
             impl<M: for<'a> Visit<ExtensionVisitor<'a>> + Send + Sync + 'static>
@@ -448,7 +456,10 @@ where
                     self.metadata
                         .visit(&mut ExtensionVisitor(req.extensions_mut()));
 
-                    self.router.read().call(req)
+                    let mut epoch = self.router.clone();
+                    let mut router = epoch.borrow_and_update().clone();
+                    req.extensions_mut().insert(RouterEpoch(epoch));
+                    router.call(req)
                 }
             }
 
@@ -539,7 +550,7 @@ where
     }
 
     pub fn serve_router(&mut self, router: Router) {
-        self.router.send(router)
+        let _ = self.router.send_replace(router);
     }
 
     pub fn serve_ui_for<C: UiContext>(&mut self, ctx: C) {

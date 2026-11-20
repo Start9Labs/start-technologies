@@ -8,9 +8,11 @@
 use std::net::{Ipv6Addr, SocketAddrV6};
 
 use crate::net::forward::nft_rule_v6;
+use crate::net::transport::Transport;
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::{Pinhole, Pinholes6};
+use crate::tunnel::forward::address::PinholeAddress;
 use crate::tunnel::wg6::host_v6;
 
 /// nft dport token for `count` ports counting up from `base`: `8443` or `8000-8009`.
@@ -24,8 +26,11 @@ fn port_span(base: u16, count: u16) -> String {
 
 /// Comment tag shared by every nft rule of one pinhole, keyed by its exposed
 /// `[GUA]:external_port` — so the whole entry tears down by that tag.
-fn tag(gua: Ipv6Addr, external_port: u16) -> String {
-    format!("pinhole:{}", SocketAddrV6::new(gua, external_port, 0, 0))
+fn tag(gua: Ipv6Addr, external_port: u16, transport: Transport) -> String {
+    format!(
+        "pinhole:{}",
+        PinholeAddress::new(SocketAddrV6::new(gua, external_port, 0, 0), transport)
+    )
 }
 
 /// Install (reconciling both chains) the nft rules for a pinhole at
@@ -37,35 +42,48 @@ pub async fn apply_pinhole(
     external_port: u16,
     internal_port: u16,
     count: u16,
+    transport: Transport,
 ) -> Result<(), Error> {
-    let comment = tag(gua, external_port);
+    let comment = tag(gua, external_port, transport.clone());
+    let protocols = l4proto(&transport);
     let ext = port_span(external_port, count);
     let int = port_span(internal_port, count);
     if internal_port == external_port {
-        let accept = format!(
-            "ip6 daddr {gua} meta l4proto {{ tcp, udp }} th dport {ext} ct state new accept"
-        );
+        let accept =
+            format!("ip6 daddr {gua} meta l4proto {protocols} th dport {ext} ct state new accept");
         nft_rule_v6("forward", &comment, false, false, &accept).await?;
         // Pure pinhole: ensure no stale DNAT lingers from a prior remap.
         nft_rule_v6("prerouting", &comment, true, false, "").await?;
     } else {
         let dnat = format!(
-            "ip6 daddr {gua} meta l4proto {{ tcp, udp }} th dport {ext} dnat to [{gua}]:{int}"
+            "ip6 daddr {gua} meta l4proto {protocols} th dport {ext} dnat to [{gua}]:{int}"
         );
         nft_rule_v6("prerouting", &comment, false, false, &dnat).await?;
-        let accept = format!(
-            "ip6 daddr {gua} meta l4proto {{ tcp, udp }} th dport {int} ct state new accept"
-        );
+        let accept =
+            format!("ip6 daddr {gua} meta l4proto {protocols} th dport {int} ct state new accept");
         nft_rule_v6("forward", &comment, false, false, &accept).await?;
     }
     Ok(())
 }
 
+/// Matches nft's printed form for `nft_rule_v6` no-op detection.
+fn l4proto(transport: &Transport) -> String {
+    let protocols: Vec<_> = transport.protocols().iter().map(|p| p.as_str()).collect();
+    match protocols.as_slice() {
+        [protocol] => protocol.to_string(),
+        _ => format!("{{ {} }}", protocols.join(", ")),
+    }
+}
+
 /// Remove every nft rule for the pinhole at `[gua]:external_port` (undo is by
 /// comment tag, so it needs no rule text and covers both the pinhole and remap
 /// shapes).
-pub async fn remove_pinhole_rules(gua: Ipv6Addr, external_port: u16) -> Result<(), Error> {
-    let comment = tag(gua, external_port);
+pub async fn remove_pinhole_rules(
+    gua: Ipv6Addr,
+    external_port: u16,
+    transport: Transport,
+) -> Result<(), Error> {
+    let comment = tag(gua, external_port, transport);
     nft_rule_v6("prerouting", &comment, true, false, "").await?;
     nft_rule_v6("forward", &comment, true, false, "").await?;
     Ok(())
@@ -100,19 +118,19 @@ pub async fn is_known_gua(ctx: &TunnelContext, gua: Ipv6Addr) -> bool {
 /// and enabled state.
 fn upsert_pinhole(
     pinholes: &mut Pinholes6,
-    key: SocketAddrV6,
+    key: PinholeAddress,
     internal_port: u16,
     count: u16,
     label: Option<String>,
     auto: bool,
 ) -> Result<bool, Error> {
-    if let Some(conflict) = pinholes.overlapping(key, count) {
+    if let Some(conflict) = pinholes.overlapping(key.clone(), count) {
         return Err(Error::new(
             eyre!("{key} overlaps an existing pinhole at {conflict}"),
             ErrorKind::InvalidRequest,
         ));
     }
-    let pinhole = pinholes.0.entry(key).or_insert_with(|| Pinhole {
+    let pinhole = pinholes.0.entry(key.clone()).or_insert_with(|| Pinhole {
         label: auto.then(|| "PCP".to_string()),
         enabled: true,
         count,
@@ -144,9 +162,13 @@ pub async fn add_pinhole(
     count: u16,
     label: Option<String>,
     auto: bool,
+    transport: Transport,
 ) -> Result<(), Error> {
     let _guard = ctx.forward_write_lock.lock().await;
-    let key = SocketAddrV6::new(gua, external_port, 0, 0);
+    let key = PinholeAddress::new(
+        SocketAddrV6::new(gua, external_port, 0, 0),
+        transport.clone(),
+    );
     let enabled = ctx
         .db
         .mutate(|db| {
@@ -156,7 +178,7 @@ pub async fn add_pinhole(
         .await
         .result?;
     if enabled {
-        apply_pinhole(gua, external_port, internal_port, count).await?;
+        apply_pinhole(gua, external_port, internal_port, count, transport).await?;
     }
     Ok(())
 }
@@ -167,55 +189,82 @@ pub async fn set_pinhole_enabled(
     gua: Ipv6Addr,
     external_port: u16,
     enabled: bool,
+    transport: Transport,
 ) -> Result<(), Error> {
     let _guard = ctx.forward_write_lock.lock().await;
-    let key = SocketAddrV6::new(gua, external_port, 0, 0);
-    ctx.db
+    let entries = ctx
+        .db
         .mutate(|db| {
             db.as_pinholes6_mut().mutate(|ph| {
-                let e = ph
-                    .0
-                    .get_mut(&key)
-                    .ok_or_else(|| Error::new(eyre!("no pinhole at {key}"), ErrorKind::NotFound))?;
-                e.enabled = enabled;
-                Ok(())
+                let mut changed = Vec::new();
+                for (key, entry) in &mut ph.0 {
+                    if matches_key(key, gua, external_port, &transport) {
+                        entry.enabled = enabled;
+                        changed.push((key.clone(), entry.clone()));
+                    }
+                }
+                if changed.is_empty() {
+                    return Err(Error::new(
+                        eyre!("no pinhole at {gua}:{external_port}"),
+                        ErrorKind::NotFound,
+                    ));
+                }
+                Ok(changed)
             })
         })
         .await
         .result?;
-    if enabled {
-        let ph = ctx.db.peek().await.as_pinholes6().de()?;
-        if let Some(e) = ph.0.get(&key) {
-            apply_pinhole(gua, external_port, e.internal_port(external_port), e.count).await?;
+    for (key, entry) in entries {
+        if enabled {
+            apply_pinhole(
+                gua,
+                external_port,
+                entry.internal_port(external_port),
+                entry.count,
+                key.transport,
+            )
+            .await?;
+        } else {
+            remove_pinhole_rules(gua, external_port, key.transport.clone()).await?;
         }
-    } else {
-        remove_pinhole_rules(gua, external_port).await?;
     }
     Ok(())
 }
 
-/// Relabel a pinhole (no dataplane change).
 pub async fn set_pinhole_label(
     ctx: &TunnelContext,
     gua: Ipv6Addr,
     external_port: u16,
     label: Option<String>,
+    transport: Transport,
 ) -> Result<(), Error> {
-    let key = SocketAddrV6::new(gua, external_port, 0, 0);
     ctx.db
         .mutate(|db| {
             db.as_pinholes6_mut().mutate(|ph| {
-                let e = ph
-                    .0
-                    .get_mut(&key)
-                    .ok_or_else(|| Error::new(eyre!("no pinhole at {key}"), ErrorKind::NotFound))?;
-                e.label = label.clone();
+                let mut found = false;
+                for (key, entry) in &mut ph.0 {
+                    if matches_key(key, gua, external_port, &transport) {
+                        entry.label = label.clone();
+                        found = true;
+                    }
+                }
+                if !found {
+                    return Err(Error::new(
+                        eyre!("no pinhole at {gua}:{external_port}"),
+                        ErrorKind::NotFound,
+                    ));
+                }
                 Ok(())
             })
         })
         .await
-        .result?;
-    Ok(())
+        .result
+}
+
+fn matches_key(key: &PinholeAddress, gua: Ipv6Addr, port: u16, transport: &Transport) -> bool {
+    *key.ip() == gua
+        && key.port() == port
+        && (transport == &Transport::default() || &key.transport == transport)
 }
 
 /// Returns whether a pinhole was removed.
@@ -224,33 +273,50 @@ pub async fn remove_pinhole(
     gua: Ipv6Addr,
     external_port: u16,
     auto_only: bool,
+    transport: Transport,
 ) -> bool {
     let _guard = ctx.forward_write_lock.lock().await;
-    let key = SocketAddrV6::new(gua, external_port, 0, 0);
     let removed = ctx
         .db
         .mutate(|db| {
             db.as_pinholes6_mut().mutate(|ph| {
-                let matches = ph.0.get(&key).is_some_and(|p| !auto_only || p.auto);
-                if matches {
-                    ph.0.remove(&key);
+                let keys: Vec<_> =
+                    ph.0.iter()
+                        .filter(|(key, entry)| {
+                            matches_key(key, gua, external_port, &transport)
+                                && (!auto_only || entry.auto)
+                        })
+                        .map(|(key, _)| key.clone())
+                        .collect();
+                for key in &keys {
+                    ph.0.remove(key);
                 }
-                Ok(matches)
+                Ok(keys)
             })
         })
         .await
         .result
         .log_err()
-        .unwrap_or(false);
-    if removed {
-        remove_pinhole_rules(gua, external_port).await.log_err();
+        .unwrap_or_default();
+    for key in &removed {
+        remove_pinhole_rules(gua, external_port, key.transport.clone())
+            .await
+            .log_err();
+        crate::tunnel::forward::lease::forget(
+            ctx,
+            &crate::tunnel::forward::lease::LeaseKey::Pinhole(key.clone()),
+        );
     }
-    removed
+    !removed.is_empty()
 }
 
 /// Reinstall every enabled pinhole's nft rules from the db (startup / resync).
 pub async fn seed_pinholes(ctx: &TunnelContext) -> Result<(), Error> {
     for (key, ph) in ctx.db.peek().await.as_pinholes6().de()?.0 {
+        // Upgrades retain socket-only pinhole tags in the kernel.
+        if key.transport != Transport::default() {
+            remove_pinhole_rules(*key.ip(), key.port(), Transport::default()).await?;
+        }
         if !ph.enabled {
             continue;
         }
@@ -259,6 +325,7 @@ pub async fn seed_pinholes(ctx: &TunnelContext) -> Result<(), Error> {
             key.port(),
             ph.internal_port(key.port()),
             ph.count,
+            key.transport,
         )
         .await?;
     }
@@ -268,6 +335,36 @@ pub async fn seed_pinholes(ctx: &TunnelContext) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn l4proto_matches_the_nft_listing() {
+        assert_eq!(l4proto(&Transport::tcp()), "tcp");
+        assert_eq!(l4proto(&Transport::udp()), "udp");
+        assert_eq!(l4proto(&Transport::default()), "{ tcp, udp }");
+    }
+
+    #[test]
+    fn protocol_pinhole_updates_preserve_the_other_transport() {
+        let address = "[2001:db8::2]:5000".parse().unwrap();
+        let tcp = PinholeAddress::new(address, Transport::tcp());
+        let udp = PinholeAddress::new(address, Transport::udp());
+        let mut pinholes = Pinholes6::default();
+        upsert_pinhole(&mut pinholes, tcp.clone(), 6000, 2, None, true).unwrap();
+        upsert_pinhole(&mut pinholes, udp.clone(), 7000, 2, None, true).unwrap();
+        pinholes.0.get_mut(&udp).unwrap().enabled = false;
+        upsert_pinhole(&mut pinholes, tcp.clone(), 8000, 2, None, true).unwrap();
+        assert!(!pinholes.0[&udp].enabled);
+        assert_eq!(pinholes.0[&udp].internal_port(5000), 7000);
+        assert_eq!(pinholes.0[&tcp].internal_port(5000), 8000);
+        assert!(matches_key(&tcp, *address.ip(), 5000, &Transport::tcp()));
+        assert!(!matches_key(&udp, *address.ip(), 5000, &Transport::tcp()));
+        assert!(matches_key(
+            &udp,
+            *address.ip(),
+            5000,
+            &Transport::default()
+        ));
+    }
 
     const KEY: &str = "[2001:db8::2]:443";
 

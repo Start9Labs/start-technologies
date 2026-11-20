@@ -16,7 +16,7 @@ use crate::prelude::*;
 use crate::progress::{FullProgressTracker, ProgressUnits};
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
-use crate::registry::package::index::{PackageIndex, PackageVersionInfo};
+use crate::registry::package::index::{PackageIndex, PackageVersionInfo, ReaderParams};
 use crate::s9pk::manifest::{HardwareRequirements, LocaleString};
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::v2::SIG_CONTEXT;
@@ -57,6 +57,9 @@ impl Default for PackageDetailLevel {
 #[serde(rename_all = "camelCase")]
 pub struct PackageInfoShort {
     pub release_notes: LocaleString,
+    /// `PackageMetadata::default_locale`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_locale: Option<InternedString>,
 }
 
 rpc_toolkit::reflect_ts!(PackageInfoShort);
@@ -83,6 +86,9 @@ pub struct GetPackageParams {
     #[arg(long, help = "help.arg.all-revisions")]
     #[serde(default)]
     pub all_revisions: bool,
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub reader: ReaderParams,
 }
 
 rpc_toolkit::reflect_ts!(GetPackageParams);
@@ -123,7 +129,7 @@ impl GetPackageResponse {
                 for (version, info) in lesser_versions {
                     table.add_row(row![
                         AsRef::<str>::as_ref(&version),
-                        &info.release_notes.localized()
+                        &info.release_notes.localized(info.default_locale.as_deref())
                     ]);
                 }
             }
@@ -279,11 +285,51 @@ fn hide_superseded_revisions(
 
 pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Result<Value, Error> {
     let peek = ctx.db.peek().await;
+    let reader = params.reader.reader(&peek)?;
+    let mut index = peek.as_index().as_package().clone();
+    index.retain_visible(reader.as_ref())?;
+    let result = select_packages(&index, &params)?;
+    if let Some(id) = &params.id {
+        if params.target_version.is_some() {
+            let created_at = Utc::now().to_rfc3339();
+            let pkg_id = id.to_string();
+            let version = from_value::<GetPackageResponse>(result.clone())?
+                .best
+                .keys()
+                .last()
+                .map(ToString::to_string);
+            tokio::task::spawn_blocking(move || {
+                ctx.metrics_db.mutate(|conn| {
+                    if let Err(e) = conn.execute(
+                        "INSERT INTO package_request (created_at, pkg_id, version) VALUES (?1, ?2, ?3)",
+                        params![created_at, pkg_id, version],
+                    ) {
+                        warn!("failed to record package request metric: {e}");
+                    }
+                });
+            });
+        }
+    }
+    Ok(result)
+}
+
+pub(crate) fn select_packages(
+    index: &Model<PackageIndex>,
+    params: &GetPackageParams,
+) -> Result<Value, Error> {
+    let categories_for = |id: &PackageId| -> Result<BTreeSet<InternedString>, Error> {
+        index
+            .as_packages()
+            .as_idx(id)
+            .map(|p| p.as_categories().de())
+            .transpose()
+            .map(Option::unwrap_or_default)
+    };
     let mut best: BTreeMap<PackageId, BTreeMap<VersionString, Model<PackageVersionInfo>>> =
         Default::default();
     let mut other: BTreeMap<PackageId, BTreeMap<VersionString, Model<PackageVersionInfo>>> =
         Default::default();
-    for (id, version, info) in get_matching_models(&peek.as_index().as_package(), &params)? {
+    for (id, version, info) in get_matching_models(index, params)? {
         let package_best = best.entry(id.clone()).or_default();
         let package_other = other.entry(id.clone()).or_default();
         if package_best.keys().all(|k| !(**k > version)) {
@@ -308,33 +354,7 @@ pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Resu
         }
     }
     if let Some(id) = &params.id {
-        if params.target_version.is_some() {
-            let created_at = Utc::now().to_rfc3339();
-            let pkg_id = id.to_string();
-            let version = best
-                .get(id)
-                .and_then(|b| b.keys().last())
-                .map(|v| v.to_string());
-            let ctx = ctx.clone();
-            tokio::task::spawn_blocking(move || {
-                ctx.metrics_db.mutate(|conn| {
-                    if let Err(e) = conn.execute(
-                        "INSERT INTO package_request (created_at, pkg_id, version) VALUES (?1, ?2, ?3)",
-                        params![created_at, pkg_id, version],
-                    ) {
-                        warn!("failed to record package request metric: {e}");
-                    }
-                });
-            });
-        }
-        let categories = peek
-            .as_index()
-            .as_package()
-            .as_packages()
-            .as_idx(id)
-            .map(|p| p.as_categories().de())
-            .transpose()?
-            .unwrap_or_default();
+        let categories = categories_for(id)?;
         let best: BTreeMap<VersionString, PackageVersionInfo> = best
             .remove(id)
             .unwrap_or_default()
@@ -374,14 +394,7 @@ pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Resu
             PackageDetailLevel::None => to_value(&GetPackageResult::Packages(
                 best.into_iter()
                     .map(|(id, best)| {
-                        let categories = peek
-                            .as_index()
-                            .as_package()
-                            .as_packages()
-                            .as_idx(&id)
-                            .map(|p| p.as_categories().de())
-                            .transpose()?
-                            .unwrap_or_default();
+                        let categories = categories_for(&id)?;
                         Ok::<_, Error>((
                             id,
                             GetPackageResponse {
@@ -399,14 +412,7 @@ pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Resu
             PackageDetailLevel::Short => to_value(&GetPackageResult::Packages(
                 best.into_iter()
                     .map(|(id, best)| {
-                        let categories = peek
-                            .as_index()
-                            .as_package()
-                            .as_packages()
-                            .as_idx(&id)
-                            .map(|p| p.as_categories().de())
-                            .transpose()?
-                            .unwrap_or_default();
+                        let categories = categories_for(&id)?;
                         let other = other.remove(&id).unwrap_or_default();
                         Ok::<_, Error>((
                             id,
@@ -430,14 +436,7 @@ pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Resu
             PackageDetailLevel::Full => to_value(&GetPackageResult::PackagesFull(
                 best.into_iter()
                     .map(|(id, best)| {
-                        let categories = peek
-                            .as_index()
-                            .as_package()
-                            .as_packages()
-                            .as_idx(&id)
-                            .map(|p| p.as_categories().de())
-                            .transpose()?
-                            .unwrap_or_default();
+                        let categories = categories_for(&id)?;
                         let other = other.remove(&id).unwrap_or_default();
                         Ok::<_, Error>((
                             id,
@@ -880,6 +879,7 @@ fn check_matching_info_short() {
     let info = PackageVersionInfo {
         metadata: PackageMetadata {
             title: "Test Package".into(),
+            default_locale: None,
             description: Description {
                 short: lang_map("A short description"),
                 long: lang_map("A longer description of the test package"),

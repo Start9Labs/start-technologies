@@ -1,1 +1,0 @@
-- El nombre de un dispositivo con dirección reservada deja de resolverse desde redes cuyo perfil de seguridad no permite acceder a él.

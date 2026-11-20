@@ -17,21 +17,20 @@ use crate::db::DbAccessByKey;
 use crate::db::model::Database;
 use crate::db::model::package::AllPackageData;
 use crate::net::acme::AcmeProvider;
-use crate::net::host::binding::{
-    AddSslOptions, BindInfo, BindOptions, Bindings, DerivedAddressInfo, NetInfo,
-};
+use crate::net::host::binding::{BindInfo, BindOptions, Bindings, DerivedAddressInfo, NetInfo};
 use crate::net::host::{Host, SERVER_UI_SSL_PORT};
 use crate::net::ssl::x509_sha256_fingerprint;
-use crate::net::vhost::{AlpnInfo, PassthroughInfo};
+use crate::net::vhost::PassthroughInfo;
+use crate::nut::NutConfig;
 use crate::prelude::*;
 use crate::progress::FullProgress;
+use crate::ssh::SshKeys;
 use crate::system::{KeyboardOptions, SmtpValue};
 use crate::trusted_keys::{
     Registries, TrustedKeys, initial_os_registry, initial_registries, initial_trusted_keys,
 };
 use crate::util::cpupower::{Epp, Governor};
 use crate::util::lshw::LshwDevice;
-use crate::util::serde::MaybeUtf8String;
 use crate::version::{Current, VersionT};
 use crate::{GatewayId, PLATFORM};
 
@@ -44,6 +43,12 @@ pub struct Public {
     pub server_info: ServerInfo,
     pub package_data: AllPackageData,
     #[serde(default)]
+    pub ssh_pubkeys: SshKeys,
+    #[serde(default)]
+    pub registry_cache: BTreeMap<Url, crate::registry::sync::RegistryCache>,
+    #[serde(default)]
+    pub os_update_cache: Option<crate::registry::sync::OsUpdateCache>,
+    #[serde(default)]
     pub disks: Vec<crate::disk::util::DiskInfo>,
     #[serde(default)]
     pub shared_volumes:
@@ -51,8 +56,7 @@ pub struct Public {
     #[serde(default)]
     pub backup_targets:
         BTreeMap<crate::backup::target::BackupTargetId, crate::backup::target::BackupTarget>,
-    /// UI-owned state. Outside `version` migrations, the backend never reads or
-    /// modifies its contents.
+    /// UI-owned state; backend domain logic accesses its contents only during migrations.
     pub ui: Value,
 }
 
@@ -69,6 +73,7 @@ impl Public {
             server_info: ServerInfo {
                 id: account.server_id.clone(),
                 version: Current::default().semver(),
+                git_hash: crate::version::commit_hash().into(),
                 hostname: (*account.hostname).clone(),
                 last_backup: None,
                 package_version_compat: Current::default().compat().clone(),
@@ -81,19 +86,7 @@ impl Public {
                                 80,
                                 BindInfo {
                                     enabled: false,
-                                    options: BindOptions {
-                                        preferred_external_port: 80,
-                                        add_ssl: Some(AddSslOptions {
-                                            preferred_external_port: SERVER_UI_SSL_PORT,
-                                            alpn: Some(AlpnInfo(vec![
-                                                MaybeUtf8String("h2".into()),
-                                                MaybeUtf8String("http/1.1".into()),
-                                            ])),
-                                            upstream_cert_validation: Default::default(),
-                                        }),
-                                        secure: None,
-                                        proxy: None,
-                                    },
+                                    options: BindOptions::server_ui(),
                                     net: NetInfo {
                                         assigned_port: None,
                                         assigned_ssl_port: Some(SERVER_UI_SSL_PORT),
@@ -158,6 +151,7 @@ impl Public {
                 governor: None,
                 epp: None,
                 smtp: None,
+                nut: NutConfig::default(),
                 echoip_urls: default_echoip_urls(),
                 ram: 0,
                 devices: Vec::new(),
@@ -166,6 +160,9 @@ impl Public {
                 keyboard,
             },
             package_data: AllPackageData::default(),
+            ssh_pubkeys: SshKeys::new(),
+            registry_cache: BTreeMap::new(),
+            os_update_cache: None,
             disks: Vec::new(),
             shared_volumes: BTreeMap::new(),
             backup_targets: BTreeMap::new(),
@@ -189,6 +186,9 @@ pub struct ServerInfo {
     pub id: String,
     pub hostname: InternedString,
     pub version: Version,
+    /// Commit of the running StartOS build, rewritten on every boot.
+    #[serde(default)]
+    pub git_hash: InternedString,
     pub package_version_compat: VersionRange,
     #[visit(ts(type = "z.record(z.string(), z.unknown())"))]
     pub post_init_migration_todos: BTreeMap<Version, Value>,
@@ -220,6 +220,8 @@ pub struct ServerInfo {
     #[serde(default)]
     pub epp: Option<Epp>,
     pub smtp: Option<SmtpValue>,
+    #[serde(default)]
+    pub nut: NutConfig,
     #[serde(default = "default_echoip_urls")]
     pub echoip_urls: Vec<Url>,
     pub ram: u64,

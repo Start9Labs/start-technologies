@@ -1,1 +1,0 @@
-- **Dostęp zdalny jest domyślnie ustawiony na „Nigdy”.** Routery z dotychczasowym ustawieniem domyślnym „Gdy za NAT” przełączają się po tej aktualizacji na „Nigdy”. Aby nadal zarządzać routerem z sieci nadrzędnej, wybierz „Gdy za NAT” w Ustawienia > Ogólne > Dostęp zdalny.

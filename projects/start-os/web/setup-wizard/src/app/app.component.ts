@@ -1,4 +1,4 @@
-import { Component, DOCUMENT, inject, OnInit } from '@angular/core'
+import { Component, DOCUMENT, inject } from '@angular/core'
 import { Router, RouterOutlet } from '@angular/router'
 import { ErrorService } from '@start9labs/shared'
 import { TuiRoot } from '@taiga-ui/core'
@@ -11,20 +11,22 @@ import { StateService } from './services/state.service'
   template: '<tui-root><router-outlet /></tui-root>',
   imports: [TuiRoot, RouterOutlet],
 })
-export class AppComponent implements OnInit {
+export class AppComponent {
   private readonly api = inject(ApiService)
   private readonly errorService = inject(ErrorService)
   private readonly router = inject(Router)
   private readonly stateService = inject(StateService)
   private readonly document = inject(DOCUMENT)
 
-  async ngOnInit() {
+  constructor() {
+    void this.initialize()
+  }
+
+  private async initialize() {
     try {
       this.stateService.kiosk = ['localhost', '127.0.0.1'].includes(
         this.document.location.hostname,
       )
-
-      await this.api.loadPubKey()
 
       const status = await this.api.rpc.setup.status({})
 
@@ -51,7 +53,7 @@ export class AppComponent implements OnInit {
           await this.router.navigate(['/success'])
           break
       }
-    } catch (e: any) {
+    } catch (e) {
       this.errorService.handleError(e)
     }
   }

@@ -1,7 +1,10 @@
 import { FullKeyboard, Languages } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 
-export type DataModel = {
+export type DataModel = Pick<
+  T.Public,
+  'registryCache' | 'osUpdateCache' | 'sshPubkeys'
+> & {
   ui: UIData
   serverInfo: T.ServerInfo & {
     language: Languages

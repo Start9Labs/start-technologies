@@ -32,6 +32,13 @@ touch:
 
 metadata: $(VERSION_FILE) $(PLATFORM_FILE) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE)
 
+# The binaries of every product in RUST_PRODUCTS, from one cargo invocation for ARCH.
+RUST_PRODUCTS ?= start-os start-cli start-registry start-tunnel
+.PHONY: rust-products
+rust-products: $(sort $(foreach product,$(RUST_PRODUCTS),$(RUST_INPUTS_$(product))))
+	ARCH=$(ARCH) PROFILE=$(PROFILE) ./build/build-rust-bins.sh $(foreach product,$(RUST_PRODUCTS),$(RUST_BINS_$(product)))
+	touch -c $(foreach product,$(RUST_PRODUCTS),$(RUST_OUTPUTS_$(product)))
+
 # Per-project cleans live in each build.mk; this only aggregates them.
 clean: start-core-clean web-clean start-sdk-clean start-cli-clean start-registry-clean start-tunnel-clean start-os-clean start-wrt-clean start-docs-clean
 
@@ -52,7 +59,7 @@ format-check:
 .PHONY: release-notes-test package-ci-test
 release-notes-test:
 	node --test scripts/tests/*-test.mjs
-	bash scripts/tests/release-resume-test.sh
+	bash scripts/tests/release-images-test.sh
 	bash scripts/tests/apt-publish-test.sh
 
 package-ci-test:

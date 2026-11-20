@@ -1,5 +1,6 @@
 import type { Api, RpcParamType, RpcReturnType } from './bindings'
 import { inject, Injectable } from '@angular/core'
+import type { RpcStreamOptions } from '@start9labs/start-core'
 import { pauseFor, RPCErrorDetails, RpcError } from '@start9labs/shared'
 import { GIT_HASH } from 'src/app/utils/workspace-config'
 import {
@@ -18,7 +19,8 @@ import {
   SetUciRes,
   VersionInfo,
   SystemUpdateReq,
-  SystemUpdateRes,
+  SystemUpdateStream,
+  LogsFollowStream,
   SetPasswordReq,
   SetPreferencesReq,
   VpnServer,
@@ -43,6 +45,8 @@ import {
   CheckInitializedRes,
   SetInitialPasswordReq,
   SetupStatusRes,
+  SetupFlashReq,
+  SetupFlashStream,
   LogEntry,
   LogsResponse,
   DeviceFromApi,
@@ -322,9 +326,22 @@ export class MockApiService extends ApiService {
     ]
   }
 
-  async systemUpdate(params: SystemUpdateReq): Promise<SystemUpdateRes> {
-    await pauseFor(500)
-    return { target: '1.5.0', progress: 'mock-guid-1234' }
+  async systemUpdate(
+    params: SystemUpdateReq,
+    options?: RpcStreamOptions,
+  ): Promise<SystemUpdateStream> {
+    await pauseFor(500, options?.signal)
+    const target = params.targetVersion ?? '1.5.0'
+    this.mockSystemInfo.version = target
+    return {
+      initial: { target, progress: null },
+      items: (async function* () {
+        options?.signal?.throwIfAborted()
+        yield { overall: true, phases: [] }
+        options?.signal?.throwIfAborted()
+        return null
+      })(),
+    }
   }
 
   async systemRestart(): Promise<null> {
@@ -1174,13 +1191,28 @@ export class MockApiService extends ApiService {
     return { setupMode: false, disk: { emmcFound: true, hasFirmware: true } }
   }
 
-  async getPubkey(): Promise<RpcReturnType<Api, 'setup.get-pubkey'>> {
-    await pauseFor(250)
+  async setupFlash(
+    params: SetupFlashReq,
+    options?: RpcStreamOptions,
+  ): Promise<SetupFlashStream> {
+    options?.signal?.throwIfAborted()
+    await pauseFor(250, options?.signal)
+    options?.signal?.throwIfAborted()
     return {
-      kty: 'EC',
-      crv: 'P-256',
-      x: 'yHTDYSfjU809fkSv9MmN4wuojf5c3cnD7ZDN13n-jz4',
-      y: '8Mpkn744A5KDag0DmX2YivB63srjbugYZzWc3JOpQXI',
+      initial: null,
+      items: (async function* () {
+        for (let step = 1; step <= 3; step++) {
+          await pauseFor(250, options?.signal)
+          options?.signal?.throwIfAborted()
+          yield {
+            phase: 'status' as const,
+            message: 'Configuring system...',
+            step,
+            totalSteps: 3,
+          }
+        }
+        return null
+      })(),
     }
   }
 
@@ -1189,9 +1221,20 @@ export class MockApiService extends ApiService {
     return null
   }
 
-  async followLogs(): Promise<RpcReturnType<Api, 'system.logs-follow'>> {
-    await pauseFor(250)
-    return { guid: 'MOCKLOGSFOLLOWGUIDAAAAAAAAAAAAAA' }
+  async followLogs(options?: RpcStreamOptions): Promise<LogsFollowStream> {
+    await pauseFor(250, options?.signal)
+    const signal = options?.signal
+    return {
+      initial: { guid: null },
+      items: (async function* () {
+        signal?.throwIfAborted()
+        await new Promise(resolve =>
+          signal?.addEventListener('abort', resolve, { once: true }),
+        )
+        signal?.throwIfAborted()
+        return null
+      })(),
+    }
   }
 
   async systemLogs(): Promise<LogsResponse> {

@@ -105,9 +105,7 @@ async fn info<C: CtrlContext>(ctx: C) -> Result<SystemInfoResponse, Error> {
 
     Ok(SystemInfoResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        // Same stamp the web build bakes into config.json (check-git-hash.sh
-        // format); the UI compares the two to detect a stale cached bundle.
-        git_hash: env!("STARTWRT_GIT_HASH").to_string(),
+        git_hash: crate::rpc::GIT_HASH.to_string(),
         language: prefs.language,
         date: Utc::now().to_rfc3339(),
         theme: prefs.theme,
@@ -145,7 +143,7 @@ async fn newer_versions(_ctx: ServerContext) -> Result<Vec<VersionInfo>, Error> 
         })
         .map(|(ver, info)| VersionInfo {
             version: ver,
-            release_notes: info.release_notes.localized_for("en_US"),
+            release_notes: info.release_notes.localized_for(Some("en_US"), None),
         })
         .collect();
     // Sort ascending by semver precedence. The map above iterates in
@@ -748,13 +746,25 @@ async fn set_preferences<C: CtrlContext>(
     }
 }
 
-#[instrument(skip_all)]
-async fn factory_reset(_ctx: ServerContext) -> Result<(), Error> {
-    if let Err(e) = tokio::process::Command::new("firstboot")
+/// Must not open the activity log: the wipe deletes its directory.
+pub(crate) async fn wipe_overlay_and_reboot() -> Result<(), Error> {
+    run_firstboot().await?;
+    tokio::process::Command::new("reboot")
+        .invoke(ErrorKind::Filesystem.into())
+        .await?;
+    Ok(())
+}
+
+async fn run_firstboot() -> Result<(), Error> {
+    tokio::process::Command::new("firstboot")
         .arg("-y")
         .invoke(ErrorKind::Filesystem.into())
-        .await
-    {
+        .await?;
+    Ok(())
+}
+
+async fn wipe_overlay() -> Result<(), Error> {
+    if let Err(e) = run_firstboot().await {
         crate::activity::log(
             "system",
             "factory-reset",
@@ -762,7 +772,7 @@ async fn factory_reset(_ctx: ServerContext) -> Result<(), Error> {
             "Failed to initiate factory reset",
             Some(&e.to_string()),
         );
-        return Err(e.into());
+        return Err(e);
     }
 
     crate::activity::log(
@@ -772,6 +782,13 @@ async fn factory_reset(_ctx: ServerContext) -> Result<(), Error> {
         "Factory reset initiated",
         None,
     );
+
+    Ok(())
+}
+
+#[instrument(skip_all)]
+async fn factory_reset(_ctx: ServerContext) -> Result<(), Error> {
+    wipe_overlay().await?;
 
     // Spawn reboot after a short delay so the HTTP response can reach the client
     tokio::spawn(async {
@@ -975,6 +992,7 @@ pub fn system<C: CtrlContext>() -> ParentHandler<C> {
         .subcommand(
             "update",
             from_fn_async(crate::update::update_system)
+                .with_metadata("get_signer", Value::Bool(true))
                 .with_display_serializable()
                 .with_call_remote::<CliContext>(),
         )

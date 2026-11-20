@@ -64,7 +64,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
           </tr>
         </thead>
         <tbody>
-          @for (forward of manual() | tuiTableSort; track $index) {
+          @for (forward of manual() | tuiTableSort; track key(forward)) {
             <tr>
               <td tuiTd>
                 <tui-loader
@@ -88,7 +88,7 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
               <td tuiTd>{{ forward.sni || '—' }}</td>
               <td tuiTd>{{ span(forward.externalport, forward.count) }}</td>
               <td tuiTd>{{ span(forward.internalport, forward.count) }}</td>
-              <td tuiTd>{{ 'TCP/UDP' | i18n }}</td>
+              <td tuiTd>{{ transportLabel(forward.transport) }}</td>
               <td tuiTd>{{ forward.externalip }}</td>
               <td tuiTd [style.padding-inline-end.rem]="0.625">
                 <button
@@ -164,13 +164,13 @@ import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
           </tr>
         </thead>
         <tbody>
-          @for (forward of automatic() | tuiTableSort; track $index) {
+          @for (forward of automatic() | tuiTableSort; track key(forward)) {
             <tr>
               <td tuiTd>{{ forward.device.name }}</td>
               <td tuiTd>{{ forward.sni || '—' }}</td>
               <td tuiTd>{{ span(forward.externalport, forward.count) }}</td>
               <td tuiTd>{{ span(forward.internalport, forward.count) }}</td>
-              <td tuiTd>{{ 'TCP/UDP' | i18n }}</td>
+              <td tuiTd>{{ transportLabel(forward.transport) }}</td>
               <td tuiTd>{{ forward.externalip }}</td>
             </tr>
           } @empty {
@@ -267,6 +267,7 @@ export default class PublishedPorts {
     { initialValue: [] },
   )
 
+  protected readonly transportLabel = utils.transportLabel
   protected readonly portForwards = toSignal(this.patch.watch$('portForwards'))
   protected readonly pinholes = toSignal(this.patch.watch$('pinholes6'))
   protected readonly forwards = computed(() => [
@@ -296,7 +297,7 @@ export default class PublishedPorts {
     Number(a.internalport) - Number(b.internalport)
 
   protected key(forward: MappedForward): string {
-    return `${forward.ipVersion}:${forward.externalip}:${forward.externalport}:${forward.hostname ?? ''}`
+    return `${forward.ipVersion}:${forward.source}:${forward.hostname ?? ''}`
   }
 
   // Renders a forwarded port span: a single port when count is 1, else `start-end`.
@@ -313,11 +314,12 @@ export default class PublishedPorts {
         await this.api.rpc.pinhole.setEnabled({
           gua: forward.externalip,
           externalPort: Number(forward.externalport),
+          transport: forward.transport,
           enabled: !forward.enabled,
         })
       } else {
         await this.api.rpc.portForward.setEnabled({
-          source: `${forward.externalip}:${forward.externalport}`,
+          source: forward.source,
           enabled: !forward.enabled,
           hostname: forward.hostname,
         })
@@ -343,7 +345,7 @@ export default class PublishedPorts {
       .open(PUBLISHED_PORTS_EDIT_LABEL, {
         label: this.i18n.transform('Edit label'),
         data: {
-          source: `${forward.externalip}:${forward.externalport}`,
+          source: forward.source,
           label: forward.label,
           hostname: forward.hostname,
           pinhole:
@@ -351,6 +353,7 @@ export default class PublishedPorts {
               ? {
                   gua: forward.externalip,
                   externalPort: Number(forward.externalport),
+                  transport: forward.transport,
                 }
               : undefined,
         },
@@ -368,10 +371,11 @@ export default class PublishedPorts {
             await this.api.rpc.pinhole.remove({
               gua: forward.externalip,
               externalPort: Number(forward.externalport),
+              transport: forward.transport,
             })
           } else {
             await this.api.rpc.portForward.remove({
-              source: `${forward.externalip}:${forward.externalport}`,
+              source: forward.source,
               hostname: forward.hostname,
             })
           }

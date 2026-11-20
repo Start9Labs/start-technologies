@@ -41,7 +41,6 @@ impl Map for OsVersionInfoMap {
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct OsVersionInfo {
-    pub headline: String,
     pub release_notes: LocaleString,
     pub source_version: VersionRange,
     /// Commit that produced the OS image, if recorded at publication.
@@ -94,13 +93,22 @@ mod tests {
     }
 
     #[test]
-    fn notes_round_trip_and_promote_without_rewriting_legacy_records() {
+    fn legacy_headlines_are_ignored() {
+        let mut legacy = to_value(&OsVersionInfo::default()).unwrap();
+        legacy["headline"] = "Old headline".into();
+        let info: OsVersionInfo = from_value(legacy).unwrap();
+        assert!(to_value(&info).unwrap().get("headline").is_none());
+        let promotion = AddVersionParams::from_info("0.4.0.5".parse().unwrap(), &info);
+        assert!(to_value(&promotion).unwrap().get("headline").is_none());
+    }
+
+    #[test]
+    fn notes_round_trip_and_promote_without_headlines() {
         for notes in [
             json!("English notes"),
             json!({ "en_US": "English notes", "pl_PL": "Polskie informacje" }),
         ] {
             let wire = json!({
-                "headline": "v0.4.0.5",
                 "releaseNotes": notes,
                 "sourceVersion": "*",
                 "authorized": [],

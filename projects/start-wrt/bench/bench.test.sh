@@ -140,6 +140,56 @@ assert.deepEqual(req.params, {})
 JS
 }
 
+rpc_remote_authorization_retry() {
+	local bin=$TEST_DIR/bin
+	mkdir -p "$bin"
+	cat >"$bin/curl" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+count=$(<"$BENCH_TEST_DIR/curl-count")
+count=$((count + 1))
+printf '%s\n' "$count" >"$BENCH_TEST_DIR/curl-count"
+printf '%s\n' "$@" >"$BENCH_TEST_DIR/curl-$count"
+if [ "$count" = 1 ] && [ "$BENCH_TEST_AUTH" = 1 ]; then
+	printf '{"error":{"code":34}}\n'
+else
+	printf '{"result":"fixture-output"}\n'
+fi
+SH
+	chmod +x "$bin/curl"
+	export PATH=$bin:$PATH BENCH_TEST_DIR=$TEST_DIR BENCH_TEST_AUTH=1
+	BENCH_STATE_DIR=$TEST_DIR/remote-state
+	SNAPSHOT_DIR=$BENCH_STATE_DIR/snapshots
+	UI_KEY=$BENCH_STATE_DIR/ui-key.pem
+	wrt() {
+		if [ "$1" = 'uci -q get network.lan.ipaddr' ]; then echo 192.0.2.1/24; else bash -c "$1"; fi
+	}
+	printf '0\n' >"$TEST_DIR/curl-count"
+	[ "$(ui_rpc fixture.method '{"value":"request"}')" = '{"result":"fixture-output"}' ]
+	node - "$TEST_DIR" "$BENCH_PASSWORD_FILE" <<'JS'
+const fs = require('node:fs')
+const assert = require('node:assert/strict')
+const [dir, passwordFile] = process.argv.slice(2)
+const methods = ['fixture.method', 'auth.login', 'fixture.method']
+for (let i = 1; i <= 3; i++) {
+	const args = fs.readFileSync(`${dir}/curl-${i}`, 'utf8').trimEnd().split('\n')
+	assert.deepEqual(args.slice(0, 6), ['-sk', '-m', '60', 'https://192.0.2.1/rpc/v1', '-H', 'Content-Type: application/json'])
+	assert.equal(args[6], '-H')
+	assert.match(args[7], /^X-Start-Auth-Sig: commitment=request&/)
+	assert.equal(args[8], '--data-binary')
+	const body = JSON.parse(args[9])
+	assert.equal(body.method, methods[i - 1])
+	if (i === 2) assert.equal(body.params.password, fs.readFileSync(passwordFile, 'utf8').trimEnd())
+	else assert.deepEqual(body.params, { value: 'request' })
+}
+JS
+	[ "$(<"$TEST_DIR/curl-count")" = 3 ]
+	export BENCH_TEST_AUTH=0
+	printf '0\n' >"$TEST_DIR/curl-count"
+	[ "$(ui_rpc fixture.method)" = '{"result":"fixture-output"}' ]
+	[ "$(<"$TEST_DIR/curl-count")" = 1 ]
+}
+
 invalid_rpc_json() {
 	wrt() { echo 'unexpected SSH call' >&2; return 99; }
 	ui_rpc fixture.method '{invalid'
@@ -167,5 +217,6 @@ check 1 missing_veth
 check 1 failed_router_probe
 check 0 smoke_vlan_client
 check 0 rpc_json_encoding
+check 0 rpc_remote_authorization_retry
 check 1 invalid_rpc_json
 [ "$FAILURES" = 0 ]

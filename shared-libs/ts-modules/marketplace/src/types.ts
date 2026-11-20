@@ -47,14 +47,16 @@ export function packagesResponse(result: PackageResult): GetPackagesRes {
   )
 }
 
-export type StoreIdentity = {
+type RegistryObservation = Partial<Pick<T.RegistryCache, 'status' | 'error'>>
+
+export type StoreIdentity = RegistryObservation & {
   url: string
   name: string
 }
 
 export type Marketplace = Record<string, StoreDataWithUrl | null>
 
-export type StoreData = {
+export type StoreData = RegistryObservation & {
   info: T.RegistryInfo
   packages: MarketplacePkg[]
 }

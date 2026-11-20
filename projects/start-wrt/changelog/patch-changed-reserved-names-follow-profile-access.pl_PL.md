@@ -1,1 +1,0 @@
-- Nazwa urządzenia z zarezerwowanym adresem nie jest już rozwiązywana z sieci, których profil bezpieczeństwa nie pozwala na dostęp do niego.

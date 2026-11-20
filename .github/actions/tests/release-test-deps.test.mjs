@@ -10,22 +10,21 @@ const workflow = yaml.load(
   readFileSync(join(REPO, '.github/workflows/test.yaml'), 'utf8'),
 )
 
-for (const command of ['make test', 'make release-notes-test']) {
-  test(`${command} installs release-tooling dependencies before running`, () => {
-    const callers = Object.values(workflow.jobs).filter(job =>
-      job.steps?.some(step => step.run === command),
+test('make release-notes-test installs release-tooling dependencies before running', () => {
+  const command = 'make release-notes-test'
+  const callers = Object.values(workflow.jobs).filter(job =>
+    job.steps?.some(step => step.run === command),
+  )
+  assert.ok(callers.length > 0)
+  for (const { steps } of callers) {
+    const install = steps.findIndex(step => step.uses === setup)
+    assert.ok(
+      install >
+        steps.findIndex(step => step.uses?.startsWith('actions/checkout@')),
     )
-    assert.ok(callers.length > 0)
-    for (const { steps } of callers) {
-      const install = steps.findIndex(step => step.uses === setup)
-      assert.ok(
-        install >
-          steps.findIndex(step => step.uses?.startsWith('actions/checkout@')),
-      )
-      assert.ok(install < steps.findIndex(step => step.run === command))
-    }
-  })
-}
+    assert.ok(install < steps.findIndex(step => step.run === command))
+  }
+})
 
 test('release-tooling setup installs the real archive and signing tools', () => {
   const action = yaml.load(

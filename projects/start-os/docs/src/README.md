@@ -63,6 +63,7 @@ The [Overview](overview.md) introduces the main StartOS concepts.
 - [Shared Volumes](shared-volumes.md)
 - [Backups](backups.md)
 - [WiFi](wifi.md)
+- [UPS Monitor](ups-monitor.md)
 - [Internationalization](internationalization.md)
 - [Kiosk Mode](kiosk-mode.md)
 - [Updating StartOS](updating-startos.md)

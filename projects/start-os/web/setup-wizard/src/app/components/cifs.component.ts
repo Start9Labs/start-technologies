@@ -148,7 +148,7 @@ export class CifsComponent {
         ...this.form.getRawValue(),
         path: normalizeCifsPath(this.form.getRawValue().path),
         password: this.form.value.password
-          ? await this.api.encrypt(String(this.form.value.password))
+          ? String(this.form.value.password)
           : null,
       })
 

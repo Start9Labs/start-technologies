@@ -1,5 +1,0 @@
-- Cambiar el perfil de seguridad de un puerto Ethernet o de una contraseña Wi-Fi, o eliminar la última contraseña Wi-Fi de un perfil, ya no elimina las reservas ni los puertos publicados de sus dispositivos. La confirmación nombra los dispositivos que los conservan.
-- Al eliminar un perfil de seguridad también se eliminan sus reservas y puertos publicados. La confirmación los enumera.
-- Una nueva reserva debe estar en la subred del perfil en el que está el dispositivo y no estar reservada para otro dispositivo. Las reservas de perfiles en los que el dispositivo no está aparecen como inactivas en su página de detalles, donde se pueden eliminar.
-- Un puerto publicado de un perfil en el que su dispositivo no está se muestra como inactivo.
-- Un reenvío de puertos automático ya no permanece abierto en la dirección reservada de un dispositivo cuando este obtiene una dirección en otro perfil.

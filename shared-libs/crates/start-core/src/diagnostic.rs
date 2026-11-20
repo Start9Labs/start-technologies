@@ -23,7 +23,10 @@ pub fn diagnostic<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "logs",
-            crate::system::logs::<DiagnosticContext>().with_about("about.display-os-logs"),
+            crate::system::logs::<DiagnosticContext>(
+                crate::rpc_continuations::WebSocketPolicy::Public,
+            )
+            .with_about("about.display-os-logs"),
         )
         .subcommand(
             "logs",
@@ -34,8 +37,10 @@ pub fn diagnostic<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "kernel-logs",
-            crate::system::kernel_logs::<DiagnosticContext>()
-                .with_about("about.display-kernel-logs"),
+            crate::system::kernel_logs::<DiagnosticContext>(
+                crate::rpc_continuations::WebSocketPolicy::Public,
+            )
+            .with_about("about.display-kernel-logs"),
         )
         .subcommand(
             "kernel-logs",
@@ -119,6 +124,6 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
 
 pub async fn forget_disk<C: Context>(_: C) -> Result<(), Error> {
     delete_file("/media/startos/config/overlay/etc/hostname").await?;
-    delete_file("/media/startos/config/disk.guid").await?;
+    crate::context::startup::forget_identity().await?;
     Ok(())
 }

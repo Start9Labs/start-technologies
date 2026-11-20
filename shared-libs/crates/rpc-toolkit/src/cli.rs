@@ -245,6 +245,8 @@ where
     type InheritedParams = RemoteHandler::InheritedParams;
     type Ok = RemoteHandler::Ok;
     type Err = RemoteHandler::Err;
+    type Item = RemoteHandler::Item;
+    type Final = RemoteHandler::Final;
 }
 
 impl<Context, RemoteContext, RemoteHandler, Extra> Adapter

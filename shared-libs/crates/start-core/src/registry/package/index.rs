@@ -3,6 +3,7 @@ use std::path::Path;
 use std::u32;
 
 use chrono::Utc;
+use clap::Parser;
 use exver::{Version, VersionRange};
 use imbl_value::InternedString;
 use patch_db::ModelExt;
@@ -12,19 +13,22 @@ use url::Url;
 use crate::PackageId;
 use crate::db::model::package::CurrentDependencyKind;
 use crate::prelude::*;
+use crate::registry::RegistryDatabase;
 use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::package::icon::{PackageIcon, store_icon_async};
+use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::S9pk;
 use crate::s9pk::git_hash::GitHash;
 use crate::s9pk::manifest::{Description, HardwareRequirements, LocaleString, current_version};
 use crate::s9pk::merkle_archive::source::FileSource;
 use crate::service::effects::plugin::PluginId;
-use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 #[cfg(test)]
-use crate::sign::{AnySignature, AnyVerifyingKey};
+use crate::sign::AnySignature;
+use crate::sign::AnyVerifyingKey;
+use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::util::VersionString;
 
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
@@ -38,6 +42,16 @@ pub struct PackageIndex {
 rpc_toolkit::reflect_ts!(PackageIndex);
 rpc_toolkit::ts_export!(PackageIndex, namespaces = [""]);
 
+impl PackageIndex {
+    pub fn retain_registered_signatures(&mut self, signers: &BTreeMap<Guid, SignerInfo>) {
+        for package in self.packages.values_mut() {
+            for version in package.versions.values_mut() {
+                version.retain_registered_signatures(signers);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
@@ -45,10 +59,133 @@ pub struct PackageInfo {
     pub authorized: BTreeMap<Guid, VersionRange>,
     pub versions: BTreeMap<VersionString, PackageVersionInfo>,
     pub categories: BTreeSet<InternedString>,
+    #[serde(flatten)]
+    pub access: PackageAccessControl,
 }
 
+#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
+#[serde(rename_all = "camelCase")]
+#[model = "Model<Self>"]
+pub struct PackageAccessControl {
+    #[serde(default)]
+    pub private: bool,
+    #[serde(default)]
+    pub readers: BTreeSet<Guid>,
+}
+
+rpc_toolkit::reflect_ts!(PackageAccessControl);
 rpc_toolkit::reflect_ts!(PackageInfo);
 rpc_toolkit::ts_export!(PackageInfo, namespaces = [""]);
+
+#[derive(Clone, Debug)]
+pub struct Reader {
+    pub signer: Guid,
+    pub admin: bool,
+}
+
+impl Reader {
+    pub fn resolve(
+        db: &Model<RegistryDatabase>,
+        key: Option<&AnyVerifyingKey>,
+    ) -> Result<Option<Self>, Error> {
+        let Some(key) = key else {
+            return Ok(None);
+        };
+        let Some(signer) = db.as_index().as_signers().find_signer(key)? else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
+            admin: db.as_admins().de()?.contains(&signer),
+            signer,
+        }))
+    }
+}
+
+impl Model<PackageInfo> {
+    pub fn is_visible_to(&self, reader: Option<&Reader>) -> Result<bool, Error> {
+        let access = self.as_access().de()?;
+        if !access.private {
+            return Ok(true);
+        }
+        let Some(reader) = reader else {
+            return Ok(false);
+        };
+        Ok(reader.admin
+            || access.readers.contains(&reader.signer)
+            || self.as_authorized().contains_key(&reader.signer)?)
+    }
+}
+
+impl Model<PackageInfo> {
+    pub(crate) fn for_each_locale_string(
+        &mut self,
+        f: &mut impl FnMut(&mut LocaleString),
+    ) -> Result<(), Error> {
+        for (_, version) in self.as_versions_mut().as_entries_mut()? {
+            version.for_each_locale_string(f)?;
+        }
+        Ok(())
+    }
+}
+
+impl Model<PackageIndex> {
+    pub fn visible_package(
+        &self,
+        id: &PackageId,
+        reader: Option<&Reader>,
+    ) -> Result<Option<&Model<PackageInfo>>, Error> {
+        match self.as_packages().as_idx(id) {
+            Some(info) if info.is_visible_to(reader)? => Ok(Some(info)),
+            _ => Ok(None),
+        }
+    }
+
+    pub fn grants_private_access(&self, reader: &Reader) -> Result<bool, Error> {
+        for (_, info) in self.as_packages().as_entries()? {
+            if info.as_access().de()?.private && info.is_visible_to(Some(reader))? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Filters package visibility and redacts reader lists for non-admins.
+    pub fn retain_visible(&mut self, reader: Option<&Reader>) -> Result<(), Error> {
+        self.as_packages_mut()
+            .retain(|_, info| info.is_visible_to(reader))?;
+        if !reader.is_some_and(|reader| reader.admin) {
+            for (_, info) in self.as_packages_mut().as_entries_mut()? {
+                info.as_access_mut()
+                    .as_readers_mut()
+                    .ser(&BTreeSet::new())?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn de_visible_to(&self, reader: Option<&Reader>) -> Result<PackageIndex, Error> {
+        let mut index = self.clone();
+        index.retain_visible(reader)?;
+        index.de()
+    }
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, VisitFields, Parser)]
+#[group(skip)]
+pub struct ReaderParams {
+    #[arg(skip)]
+    #[visit(ts(skip))]
+    #[serde(rename = "__Auth_signer")]
+    pub signer: Option<AnyVerifyingKey>,
+}
+
+rpc_toolkit::reflect_ts!(ReaderParams);
+
+impl ReaderParams {
+    pub fn reader(&self, db: &Model<RegistryDatabase>) -> Result<Option<Reader>, Error> {
+        Reader::resolve(db, self.signer.as_ref())
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -78,13 +215,6 @@ pub struct DependencyMetadata {
 rpc_toolkit::reflect_ts!(DependencyMetadata);
 rpc_toolkit::ts_export!(DependencyMetadata, namespaces = [""]);
 
-impl DependencyMetadata {
-    pub fn localize_for(&mut self, locale: &str) {
-        self.title.as_mut().map(|t| t.localize_for(locale));
-        self.description.as_mut().map(|d| d.localize_for(locale));
-    }
-}
-
 fn placeholder_url() -> Url {
     "https://example.com".parse().unwrap()
 }
@@ -113,6 +243,9 @@ rpc_toolkit::ts_export!(PreDownloadAlert, namespaces = [""]);
 #[model = "Model<Self>"]
 pub struct PackageMetadata {
     pub title: InternedString,
+    /// Locale this package's `LocaleString`s fall back to when a requested one is missing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_locale: Option<InternedString>,
     pub description: Description,
     pub release_notes: LocaleString,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -203,6 +336,13 @@ impl PackageVersionInfo {
             )],
         })
     }
+    /// Authoritative indexes retain signatures from keys in `FullIndex.signers`.
+    pub fn retain_registered_signatures(&mut self, signers: &BTreeMap<Guid, SignerInfo>) {
+        let keys: BTreeSet<&AnyVerifyingKey> = signers.values().flat_map(|s| &s.keys).collect();
+        for (_, asset) in &mut self.s9pks {
+            asset.signatures.retain(|key, _| keys.contains(key));
+        }
+    }
     pub fn merge_with(&mut self, other: Self, replace_urls: bool) -> Result<(), Error> {
         if self.metadata != other.metadata {
             return Err(Error::new(
@@ -261,13 +401,13 @@ impl PackageVersionInfo {
 
         table.add_row(row![bc => &self.metadata.title]);
         table.add_row(row![br -> "VERSION", AsRef::<str>::as_ref(version)]);
-        table.add_row(row![br -> "RELEASE NOTES", &self.metadata.release_notes.localized()]);
+        table.add_row(row![br -> "RELEASE NOTES", &self.metadata.release_notes.localized(self.metadata.default_locale.as_deref())]);
         table.add_row(
-            row![br -> "ABOUT", &textwrap::wrap(&self.metadata.description.short.localized(), 80).join("\n")],
+            row![br -> "ABOUT", &textwrap::wrap(&self.metadata.description.short.localized(self.metadata.default_locale.as_deref()), 80).join("\n")],
         );
         table.add_row(row![
             br -> "DESCRIPTION",
-            &textwrap::wrap(&self.metadata.description.long.localized(), 80).join("\n")
+            &textwrap::wrap(&self.metadata.description.long.localized(self.metadata.default_locale.as_deref()), 80).join("\n")
         ]);
         table.add_row(row![br -> "GIT HASH", self.metadata.git_hash.as_deref().unwrap_or("N/A")]);
         table.add_row(row![br -> "LICENSE", &self.metadata.license]);
@@ -313,40 +453,125 @@ impl Model<PackageVersionInfo> {
             }
 
             if let Some(locale) = device_info.os.language.as_deref() {
-                self.as_dependency_metadata_mut()
-                    .as_entries_mut()?
-                    .into_iter()
-                    .try_for_each(|(_, d)| d.mutate(|d| Ok(d.localize_for(locale))))?;
-                self.as_metadata_mut()
-                    .as_description_mut()
-                    .mutate(|d| Ok(d.localize_for(locale)))?;
-                self.as_metadata_mut()
-                    .as_release_notes_mut()
-                    .mutate(|r| Ok(r.localize_for(locale)))?;
-                self.as_metadata_mut()
-                    .as_pre_download_alert_mut()
-                    .mutate(|alert| {
-                        if let Some(alert) = alert {
-                            alert.message.localize_for(locale);
-                        }
-                        Ok(())
-                    })?;
+                self.localize_for(Some(locale))?;
             }
         }
 
         Ok(true)
     }
+
+    /// Resolves every `LocaleString` with `LocaleString::localize_for` and the declared default.
+    pub fn localize_for(&mut self, locale: Option<&str>) -> Result<(), Error> {
+        let default = self.as_metadata().as_default_locale().de()?;
+        self.for_each_locale_string(&mut |s| s.localize_for(locale, default.as_deref()))
+    }
+
+    pub(crate) fn for_each_locale_string(
+        &mut self,
+        f: &mut impl FnMut(&mut LocaleString),
+    ) -> Result<(), Error> {
+        for (_, dependency) in self.as_dependency_metadata_mut().as_entries_mut()? {
+            dependency.mutate(|d| {
+                d.title
+                    .iter_mut()
+                    .chain(&mut d.description)
+                    .for_each(&mut *f);
+                Ok(())
+            })?;
+        }
+        let metadata = self.as_metadata_mut();
+        metadata.as_description_mut().mutate(|d| {
+            f(&mut d.short);
+            f(&mut d.long);
+            Ok(())
+        })?;
+        metadata.as_release_notes_mut().mutate(|r| Ok(f(r)))?;
+        metadata.as_pre_download_alert_mut().mutate(|alert| {
+            if let Some(alert) = alert {
+                f(&mut alert.message);
+            }
+            Ok(())
+        })
+    }
 }
 
-pub async fn get_package_index(ctx: RegistryContext) -> Result<PackageIndex, Error> {
-    ctx.db.peek().await.into_index().into_package().de()
+pub async fn get_package_index(
+    ctx: RegistryContext,
+    params: ReaderParams,
+) -> Result<PackageIndex, Error> {
+    let db = ctx.db.peek().await;
+    let reader = params.reader(&db)?;
+    db.as_index().as_package().de_visible_to(reader.as_ref())
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn version_info_signed_by(seed: u8) -> (AnyVerifyingKey, PackageVersionInfo) {
+    #[test]
+    fn private_packages_admit_admins_publishers_and_readers() {
+        let reader = Guid::new();
+        let publisher = Guid::new();
+        let index: Model<PackageIndex> = imbl_value::json!({
+            "categories": {}, "packages": {
+                "public": {"authorized": {}, "categories": [], "versions": {}, "readers": [reader]},
+                "secret": {"authorized": {publisher.as_ref(): "*"}, "categories": [],
+                    "versions": {}, "private": true, "readers": [reader]}
+            }
+        })
+        .into();
+        let visible =
+            |reader: Option<Reader>| index.de_visible_to(reader.as_ref()).unwrap().packages;
+        assert_eq!(visible(None).len(), 1);
+        let listed = |admin| {
+            visible(Some(Reader {
+                signer: reader.clone(),
+                admin,
+            }))["secret"]
+                .access
+                .readers
+                .len()
+        };
+        assert_eq!(listed(false), 0);
+        assert_eq!(listed(true), 1);
+        assert_eq!(
+            visible(Some(Reader {
+                signer: Guid::new(),
+                admin: false
+            }))
+            .len(),
+            1
+        );
+        for reader in [
+            Reader {
+                signer: reader,
+                admin: false,
+            },
+            Reader {
+                signer: publisher,
+                admin: false,
+            },
+            Reader {
+                signer: Guid::new(),
+                admin: true,
+            },
+        ] {
+            let packages = visible(Some(reader.clone()));
+            assert_eq!(packages.len(), 2);
+            for package in packages.values() {
+                assert_eq!(package.access.readers.len(), usize::from(reader.admin));
+            }
+        }
+        assert_eq!(
+            index.de().unwrap().packages["public"].access.readers.len(),
+            1
+        );
+        let public = &visible(None)["public"];
+        assert!(!public.access.private);
+        assert!(public.access.readers.is_empty());
+    }
+
+    pub(crate) fn version_info_signed_by(seed: u8) -> (AnyVerifyingKey, PackageVersionInfo) {
         use ed25519_dalek::Signer;
 
         let key = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
@@ -396,6 +621,35 @@ mod tests {
         );
     }
 
+    pub(crate) fn signers_with(
+        keys: impl IntoIterator<Item = AnyVerifyingKey>,
+    ) -> BTreeMap<Guid, SignerInfo> {
+        [(
+            Guid::new(),
+            SignerInfo {
+                name: "Publisher".into(),
+                contact: vec![],
+                keys: keys.into_iter().collect(),
+                gpg_exports: BTreeSet::new(),
+            },
+        )]
+        .into()
+    }
+
+    #[test]
+    fn unregistered_signatures_are_dropped() {
+        let (publisher, mut info) = version_info_signed_by(1);
+        let (_, ci_signed) = version_info_signed_by(2);
+        info.merge_with(ci_signed, true).unwrap();
+
+        info.retain_registered_signatures(&signers_with([publisher.clone()]));
+
+        assert_eq!(
+            info.s9pks[0].1.signatures.keys().collect::<BTreeSet<_>>(),
+            [&publisher].into()
+        );
+    }
+
     #[test]
     fn registry_dependency_metadata_preserves_base_requirement() {
         let metadata: DependencyMetadata = serde_json::from_str(
@@ -422,6 +676,7 @@ mod tests {
     fn old_manifest_defaults_hardware_virtualization_to_false() {
         let metadata = PackageMetadata {
             title: "Test Package".into(),
+            default_locale: None,
             description: Description {
                 short: LocaleString::Translated("Short".into()),
                 long: LocaleString::Translated("Long".into()),
@@ -491,7 +746,7 @@ mod tests {
         );
         let mut localized = serde_json::from_value::<PreDownloadAlert>(encoded).unwrap();
         assert_eq!(localized, alert);
-        localized.message.localize_for("fr_FR");
+        localized.message.localize_for(Some("fr_FR"), None);
         assert_eq!(
             localized.message,
             LocaleString::Translated("Sauvegardez avant la mise à jour".into())

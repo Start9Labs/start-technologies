@@ -7,10 +7,12 @@ lockstep with the other apps). Build/serve/check it from the repo root: `npm run
 `npm run start:wrt`, `npm run check:wrt`. It uses `@start9labs/shared` for `RELATIVE_URL`,
 `pauseFor`, the markdown pipe, and the `CaWizard` login screen. Its own strings come from the
 local dictionaries; `i18nService.setLangLocal` also loads the shared dictionary that shared
-components translate through, so change the language only through it. It deliberately keeps its own HTTP/RPC/connection stack
-(`HttpService`/`RpcService`/`ConnectionService`): the aborting per-request timeout that surfaces a
-code-0 network error drives the reconnect UX and differs from shared's non-aborting timeout, so
-don't swap it for shared's `HttpService`. Error surfacing is bespoke too — `ActionService`/
+components translate through, so change the language only through it. Its `RpcService` uses shared
+`RpcSocketService` for signed-DH RPC, including unpersisted anonymous bootstrap admission.
+Response deadlines surface code-0 errors. `ConnectionService` and update recovery discard the
+stalled RPC session before probing again; retain those existing reconnect owners. Firmware
+identity arrives through authenticated generated RPC metadata, fed to `StaleUiService`.
+The HTTP compatibility header remains available to legacy clients. Error surfacing is bespoke too — `ActionService`/
 `FormService` route network drops into the global reconnect indicator with per-action copy rather
 than the shared `ErrorService`. `WorkspaceConfig` (start-wrt's flat `config.json`), the WebSocket
 progress types, and the i18n-routed `validation-errors` provider also stay local where the shared
@@ -20,7 +22,7 @@ shapes don't fit.
 
 - **Follow the `start9-frontend` skill** at the repo root (`.claude/skills/start9-frontend/`) — the house style for all Start9 Angular/Taiga work: components, styling, forms, overlays, state, the antipattern catalog, and a verified Taiga 5 reference. Read it before writing frontend code; where this file, neighbours, or older docs disagree with the skill, the skill wins.
 - **Pattern-match this app's structure.** `routes/published-ports/` is the reference route folder (`index.ts` page + `table.ts` + `dialog.ts` + `service.ts`).
-- **Derive API contracts from generated bindings.** `services/api/bindings.ts` owns the `Api` types and `bindings.schemas.ts` their zod schemas; `events.ts` and `events.schemas.ts` own the streaming types and schemas. Run `make start-wrt-rpc-bindings` after backend schema/handler changes. `RpcService.request` infers params and results from method literals; public facade aliases select those generated types. UI-only constraints and preferences remain local. Preserve the app's aborting HTTP transport.
+- **Derive API contracts from generated bindings.** `services/api/bindings.ts` owns the `Api` types and `bindings.schemas.ts` their zod schemas; `events.ts` and `events.schemas.ts` own the streaming types and schemas. Run `make start-wrt-rpc-bindings` after backend schema/handler changes. `RpcService.request` infers params and results from method literals; public facade aliases select those generated types. UI-only constraints and preferences remain local. Preserve RPC deadlines and session teardown during reconnect. Anonymous bootstrap never records normal-product peer history; enrolled-device calls attach the shared verified-peer observer. Typed setup flash reuses that transport and the wizard's component-scoped progress service; its successful terminal, not progress or closure, confirms provisioning. Cancellation stops observation without aborting accepted firmware writes.
 
 ## Getting Started
 

@@ -1,21 +1,23 @@
-import { Component, inject, signal } from '@angular/core'
+import { Component, computed, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import {
   Marketplace,
   MarketplacePkg,
   StoreIconDirective,
   StoreIdentity,
+  isRegistryLoading,
 } from '@start9labs/marketplace'
-import { i18nPipe } from '@start9labs/shared'
-import { TuiButton, TuiCell, TuiNotification, TuiTitle } from '@taiga-ui/core'
+import { i18nPipe, isDefaultRegistry } from '@start9labs/shared'
+import { TUI_BREAKPOINT, TuiButton, TuiCell, TuiTitle } from '@taiga-ui/core'
 import {
   TuiAvatar,
   TuiBadgeNotification,
   TuiFade,
   TuiSkeleton,
 } from '@taiga-ui/kit'
-import { combineLatest, map, tap } from 'rxjs'
+import { combineLatest, map } from 'rxjs'
+import { UpdatesCount } from 'src/app/routes/portal/components/updates-count'
+import { RegistryNotice } from 'src/app/routes/portal/components/registry-notice'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { TableComponent } from 'src/app/routes/portal/components/table.component'
 import { HiddenUpdatesService } from 'src/app/services/hidden-updates.service'
@@ -38,7 +40,6 @@ interface UpdatesData {
   hosts: StoreIdentity[]
   marketplace: Marketplace
   localPkgs: Record<string, PackageDataEntry<InstalledState | UpdatingState>>
-  errors: string[]
   hidden: Record<string, string[]>
   pending: Set<string>
 }
@@ -51,7 +52,7 @@ interface UpdatesData {
         <button
           tuiIconButton
           iconStart="@tui.arrow-left"
-          (click)="current.set(null)"
+          (click)="selectedRegistry.set('')"
         >
           {{ 'Back' | i18n }}
         </button>
@@ -59,57 +60,54 @@ interface UpdatesData {
       }
     </ng-container>
     <aside class="g-aside">
-      @if ((data()?.hosts || []).length > 2) {
-        <h4 tuiTitle>{{ 'Default Registries' | i18n }}</h4>
-      }
-      @for (registry of data()?.hosts; track $index) {
-        @if ($index === 2 && (data()?.hosts || []).length > 2) {
-          <h4 tuiTitle>{{ 'Custom Registries' | i18n }}</h4>
+      @for (group of groups(); track group.title) {
+        @if (group.title) {
+          <h4 tuiTitle>{{ group.title | i18n }}</h4>
         }
-        <button
-          tuiCell
-          [class.g-secondary]="current()?.url !== registry.url"
-          (click)="current.set(registry)"
-        >
-          <span tuiAvatar appearance="action-grayscale">
-            <img [storeIcon]="registry.url" />
-          </span>
-          <span tuiTitle>
-            <b tuiFade>{{ registry.name }}</b>
-            <span tuiSubtitle tuiFade>{{ clear(registry.url) }}</span>
-          </span>
-          @if (
-            (
-              data()?.marketplace?.[registry.url]?.packages || []
-              | filterUpdates: data()?.localPkgs : data()?.hidden
-            ).length;
-            as length
-          ) {
-            <tui-badge-notification>
-              {{ length }}
-            </tui-badge-notification>
-          }
-        </button>
+        @for (registry of group.hosts; track registry.url) {
+          <button
+            tuiCell
+            [class.g-secondary]="current()?.url !== registry.url"
+            (click)="selectedRegistry.set(registry.url)"
+          >
+            <span tuiAvatar appearance="action-grayscale">
+              <img [storeIcon]="registry.url" />
+            </span>
+            <span tuiTitle>
+              <b tuiFade>{{ registry.name }}</b>
+              <span tuiSubtitle tuiFade>{{ clear(registry.url) }}</span>
+            </span>
+            @if (
+              (
+                data()?.marketplace?.[registry.url]?.packages || []
+                | filterUpdates: data()?.localPkgs : data()?.hidden
+              ).length;
+              as length
+            ) {
+              <tui-badge-notification appUpdatesCount>
+                {{ length }}
+              </tui-badge-notification>
+            }
+          </button>
+        }
       }
     </aside>
     <section class="g-subpage">
-      @if (data()?.errors?.includes(current()?.url || '')) {
-        <div
-          tuiNotification
-          appearance="negative"
-          [style.margin-block-end.rem]="1"
-        >
-          {{ 'Request failed' | i18n }}
-        </div>
+      @if (current(); as registry) {
+        @if (registry.status === 'error') {
+          <registry-notice [url]="registry.url" />
+        }
       }
       <section class="g-card">
-        <header>{{ current()?.name }}</header>
+        <header>
+          {{ current()?.name }}
+        </header>
         <table
           [appTable]="['Name', 'Version', 'Package Hash', 'Published', null]"
         >
+          @let packages = data()?.marketplace?.[current()?.url || '']?.packages;
           @if (
-            data()?.marketplace?.[current()?.url || '']?.packages;
-            as packages
+            packages && !isRegistryLoading(current()?.status, packages.length)
           ) {
             @if (
               packages | filterUpdates: data()?.localPkgs : data()?.hidden;
@@ -147,6 +145,10 @@ interface UpdatesData {
     :host {
       display: flex;
       padding: 0;
+    }
+
+    registry-notice {
+      margin-block-end: 1rem;
     }
 
     aside {
@@ -231,9 +233,10 @@ interface UpdatesData {
     TuiCell,
     TuiAvatar,
     TuiTitle,
-    TuiNotification,
     TuiSkeleton,
     TuiBadgeNotification,
+    UpdatesCount,
+    RegistryNotice,
     TuiFade,
     TuiButton,
     StoreIconDirective,
@@ -246,12 +249,31 @@ interface UpdatesData {
   ],
 })
 export default class UpdatesComponent {
-  private readonly isMobile = inject(WA_IS_MOBILE)
+  private readonly breakpoint = inject(TUI_BREAKPOINT)
   private readonly marketplaceService = inject(MarketplaceService)
   private readonly hiddenUpdatesService = inject(HiddenUpdatesService)
   private readonly refinementService = inject(UpdatesRefinementService)
 
-  readonly current = signal<StoreIdentity | null>(null)
+  protected readonly isRegistryLoading = isRegistryLoading
+  protected readonly selectedRegistry = signal('')
+  protected readonly groups = computed(() => {
+    const hosts = this.data()?.hosts || []
+    const standard = hosts.filter(({ url }) => isDefaultRegistry(url))
+    const custom = hosts.filter(({ url }) => !isDefaultRegistry(url))
+    return standard.length && custom.length
+      ? [
+          { title: 'Default Registries' as const, hosts: standard },
+          { title: 'Custom Registries' as const, hosts: custom },
+        ]
+      : [{ title: null, hosts }]
+  })
+  readonly current = computed(() => {
+    const hosts = this.data()?.hosts || []
+    return (
+      hosts.find(registry => registry.url === this.selectedRegistry()) ||
+      (this.breakpoint() !== 'mobile' ? hosts[0] : null)
+    )
+  })
 
   // The registry's "best" version can be unreachable from the user's installed
   // version — e.g. NextCloud major updates must be sequential, so v30 users
@@ -262,23 +284,16 @@ export default class UpdatesComponent {
   // flash on each navigation.
   readonly data = toSignal<UpdatesData>(
     combineLatest({
-      hosts: this.marketplaceService.registries$.pipe(
-        tap(
-          ([registry]) =>
-            !this.isMobile && registry && this.current.set(registry),
-        ),
-      ),
+      hosts: this.marketplaceService.registries$,
       refined: this.refinementService.refined$,
       localPkgs: inject(LocalPackagesService),
-      errors: this.marketplaceService.requestErrors$,
       hidden: this.hiddenUpdatesService.effective$,
     }).pipe(
-      map(({ hosts, refined, localPkgs, errors, hidden }) => ({
+      map(({ hosts, refined, localPkgs, hidden }) => ({
         hosts,
         marketplace: refined.marketplace,
         pending: refined.pending,
         localPkgs,
-        errors,
         hidden,
       })),
     ),

@@ -4,6 +4,7 @@ use openssl::pkey::{PKey, Private};
 use openssl::x509::X509;
 
 use crate::db::model::DatabaseModel;
+use crate::db::model::private::generate_server_identity_key;
 use crate::hostname::{ServerHostname, generate_hostname, generate_id};
 use crate::net::ssl::{CertBranding, gen_nistp256, make_root_cert};
 use crate::prelude::*;
@@ -26,13 +27,28 @@ pub struct AccountInfo {
     pub root_ca_key: PKey<Private>,
     pub root_ca_cert: X509,
     pub ssh_key: ssh_key::PrivateKey,
-    pub developer_key: ed25519_dalek::SigningKey,
+    /// Identifies this server.
+    pub server_identity_key: ed25519_dalek::SigningKey,
 }
 impl AccountInfo {
     pub fn new(
         password: &str,
         start_time: SystemTime,
         hostname: Option<ServerHostname>,
+    ) -> Result<Self, Error> {
+        Self::new_with_identity(
+            password,
+            start_time,
+            hostname,
+            generate_server_identity_key().0,
+        )
+    }
+
+    pub fn new_with_identity(
+        password: &str,
+        start_time: SystemTime,
+        hostname: Option<ServerHostname>,
+        server_identity_key: ed25519_dalek::SigningKey,
     ) -> Result<Self, Error> {
         let server_id = generate_id();
         let hostname = hostname.unwrap_or_else(generate_hostname);
@@ -42,7 +58,6 @@ impl AccountInfo {
         let ssh_key = ssh_key::PrivateKey::from(ssh_key::private::Ed25519Keypair::random(
             &mut crate::util::crypto::os_rng(),
         ));
-        let developer_key = ed25519_dalek::SigningKey::generate(&mut crate::util::crypto::os_rng());
         Ok(Self {
             server_id,
             hostname,
@@ -50,7 +65,7 @@ impl AccountInfo {
             root_ca_key,
             root_ca_cert,
             ssh_key,
-            developer_key,
+            server_identity_key,
         })
     }
 
@@ -63,7 +78,7 @@ impl AccountInfo {
         let root_ca_key = cert_store.as_root_key().de()?.0;
         let root_ca_cert = cert_store.as_root_cert().de()?.0;
         let ssh_key = db.as_private().as_ssh_privkey().de()?.0;
-        let compat_s9pk_key = db.as_private().as_developer_key().de()?.0;
+        let server_identity_key = db.as_private().as_server_identity_key().de()?.0;
 
         Ok(Self {
             server_id,
@@ -72,7 +87,7 @@ impl AccountInfo {
             root_ca_key,
             root_ca_cert,
             ssh_key,
-            developer_key: compat_s9pk_key,
+            server_identity_key,
         })
     }
 
@@ -88,8 +103,8 @@ impl AccountInfo {
             .as_ssh_privkey_mut()
             .ser(Pem::new_ref(&self.ssh_key))?;
         db.as_private_mut()
-            .as_developer_key_mut()
-            .ser(Der64::new_ref(&self.developer_key))?;
+            .as_server_identity_key_mut()
+            .ser(Der64::new_ref(&self.server_identity_key))?;
         let cert_store = db.as_private_mut().as_key_store_mut().as_local_certs_mut();
         if cert_store.as_root_cert().de()?.0 != self.root_ca_cert {
             cert_store.install_root(
@@ -106,3 +121,6 @@ impl AccountInfo {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

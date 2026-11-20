@@ -6,22 +6,19 @@ cd "$(git rev-parse --show-toplevel)"
 
 PROJECT_DIR=projects/start-wrt
 source "$PROJECT_DIR/build/builder-alias.sh"
+source ./build/rust-build-profile.sh
 
 trap 'rust-zig-builder sh -c "chown -R $UID:$UID target /usr/local/cargo 2>/dev/null || true"' EXIT
 
 ARCH=${ARCH:-riscv64}
 RUST_ARCH=${RUST_ARCH:-riscv64gc}
-PROFILE=${PROFILE:-release}
+set_build_profile
 if [ -z "$STARTWRT_GIT_HASH" ]; then
     # The UI compares this stamp to detect stale cached bundles.
     "$PROJECT_DIR/build/env/check-git-hash.sh" >/dev/null || true
     STARTWRT_GIT_HASH=$(cat "$PROJECT_DIR/build/env/GIT_HASH.txt" 2>/dev/null || echo unknown)
 fi
 export STARTWRT_GIT_HASH
-
-if [ "${PROFILE}" = "release" ]; then
-	BUILD_FLAGS="--release"
-fi
 
 if [ "$RUST_ARCH" = "riscv64gc" ]; then
 	# K1 traps on misaligned vector accesses; its kernel cannot emulate them.
@@ -38,7 +35,7 @@ ENVIRONMENT="${ENVIRONMENT:-}" ./build/env/check-environment.sh >/dev/null
 echo "==> Building Rust binaries (arch=$RUST_ARCH, profile=$PROFILE)..."
 rust-zig-builder cargo zigbuild \
     --manifest-path=./$PROJECT_DIR/backend/ctrl/Cargo.toml \
-    $BUILD_FLAGS \
+    "${BUILD_FLAGS[@]}" \
     --locked \
     --target=${RUST_ARCH}-unknown-linux-musl
 

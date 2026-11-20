@@ -34,7 +34,7 @@ Yes. StartWRT is built on OpenWrt, and the full CLI is accessible over [SSH](ssh
 
 You have two options:
 
-1. **Factory reset** — Perform a [factory reset](factory-reset.md) from the web interface (if you are still logged in). This wipes all settings; Wi-Fi comes back up with the sticker password.
+1. **Factory reset** — Perform a [factory reset](factory-reset.md) from the web interface (if you are still logged in) or, on the four-port Start9 Router, with the factory-reset button. This wipes all settings; Wi-Fi comes back up with the sticker password.
 2. **Reflash** — Boot from a microSD card and choose "Keep settings" to reinstall the firmware while preserving settings. You will be prompted to create a new admin password. See [Installing StartWRT](installing.md).
 
 ## What if I lose my Wi-Fi sticker password?
@@ -160,6 +160,29 @@ If the network you are visiting uses the same addresses as your home network, yo
 
 StartWRT's default addresses (`192.168.0.x` for the Admin profile, then `192.168.1.x` for the next profile) are among the most common on home, hotel, and office networks. To avoid the overlap, choose a less common **Network Block** in [LAN Settings](lan.md#ipv4), such as `10.47`. Changing the Network Block removes your existing [Inbound VPN](inbound-vpn.md) servers, so do it before setting up remote access, or recreate the servers and re-import their client configurations afterward.
 
+### Why does the Internet stop every few minutes while Wi-Fi stays connected?
+
+If StartWRT sits behind another router (for example an ISP router or gateway), check that none of your [Security Profiles](security-profiles.md) overlaps that router's LAN subnet. Many ISP routers use `192.168.1.1` or `192.168.0.1`, and StartWRT's Admin profile defaults to `192.168.0.x`, with the next profile you add defaulting to `192.168.1.x`. An overlap can interrupt IPv4 Internet access for a minute or two at a time while Wi-Fi stays connected, and make devices on the upstream LAN unreachable. If a profile's gateway is also the upstream router's address, StartWRT may ignore that router's DNS servers.
+
+To check, look at **Assigned IP** under **IPv4** in [WAN Settings](wan.md), and check the upstream router's LAN subnet mask in its own settings. For an upstream `/24` (`255.255.255.0`), the first three numbers must match a profile's full subnet: `192.168.1.221` overlaps `192.168.1.0/24`, not `10.47.1.0/24`. The first two numbers of a profile's subnet come from StartWRT's **Network Block** in [LAN Settings](lan.md#ipv4), and the third is the profile's **Subnet**. If the upstream mask is not `/24`, compare the full address ranges instead. If any profile overlaps, do one of the following:
+
+- Change that profile's **Subnet** to an unused number outside the upstream LAN range, such as `10` when the upstream LAN is `192.168.1.0/24`. See [Editing a Profile](security-profiles.md#editing-a-profile). If that profile is **Admin**, which overlaps an upstream router at `192.168.0.1` by default, this also changes the router's own address, for example to `192.168.10.1`. Reconnect your device if needed, then open the web interface at the new address or at `router.lan`.
+- Change StartWRT's **Network Block** in [LAN Settings](lan.md#ipv4) to a range outside the upstream LAN, such as `10.47` behind a `192.168.x.x` network. This moves every profile, including the router's own address.
+- Change the other router's LAN address to a range StartWRT does not use.
+
+Changing a profile's subnet or the Network Block is blocked while affected devices have static IP reservations, so remove those first. If affected profiles have [Inbound VPN](inbound-vpn.md) clients, saving asks for confirmation to delete their VPN servers. Recreate those servers and import new client configurations afterward.
+
 ### Why doesn't the router get an Internet address after I replaced my old router?
 
 Some ISPs only give an address to the device they already know, which they identify by its MAC address. In [WAN Settings](wan.md#mac-address), set **MAC Address** to **Custom** and enter the MAC address of your old router's Internet port. Take it from the old router's admin page, not its label, which usually shows a different port's address. Then disconnect the old router.
+
+### Why is the router unresponsive with its green light on but not blinking?
+
+The red light shows that the router has power. The green light comes on with it and, within a minute, starts blinking in a heartbeat rhythm, which shows that the router's Linux kernel is running. StartWRT starts after that, and the router is ready once the web interface loads. If the green light is still on without blinking after a minute, the router never got past early startup: there is no Wi-Fi, devices connected by Ethernet get no address, and `router.lan` does not load. The Ethernet port lights can stay on regardless: they show a cable link, not that StartWRT is running.
+
+Check these in order, and watch the green light for a minute after each:
+
+1. **Restart** — Unplug the router, wait ten seconds, and plug it back in.
+2. **Power supply** — Run the router from the 12 V power supply that came with it, plugged firmly into the router. A USB cable from a computer or phone charger may not supply enough power.
+3. **Wi-Fi module** — A poor connection between the Wi-Fi module and its slot can stop the router from starting, even when the module looks firmly screwed down. To check, start the router without it. Open the router as described in [Installing the Wi-Fi Module](wifi-module.md#installing-the-module), and follow the static precautions in [Before You Start](wifi-module.md#before-you-start). Remove the two screws holding the module, lift each antenna connector straight up off its socket without pulling on the wire, and slide the module out of its slot. Close the case and power on the router. Connect a computer to the router's LAN port with an Ethernet cable, and open `http://router.lan/` in its browser. If the green light blinks and the web interface loads, the module was stopping the router from starting. If the green light still doesn't blink, the module is not the cause: [get help](https://start9.com/help).
+4. **Reseat** — Install the module again as described in [Installing the Wi-Fi Module](wifi-module.md#installing-the-module): attach the antenna wires, slide it in until the gold contacts disappear, press it flat, and screw it down. If the green light blinks and Wi-Fi comes back, the module had a poor connection. If the green light stays on without blinking again, the module or its slot is faulty: [get help](https://start9.com/help), and tell us what you tried.

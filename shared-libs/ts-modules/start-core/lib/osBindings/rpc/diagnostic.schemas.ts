@@ -126,6 +126,17 @@ export const LogEntry: z.ZodObject<{
 }).meta({
   id: 'LogEntry',
 })
+export const NamedProgress: z.ZodObject<{
+  name: z.ZodString
+  progress: typeof Progress
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  get progress(): typeof Progress {
+    return Progress
+  },
+}).meta({
+  id: 'NamedProgress',
+})
 export const NetworkInterfaceType: z.ZodEnum<{
   ethernet: 'ethernet'
   wireless: 'wireless'
@@ -140,6 +151,10 @@ export const NetworkInterfaceType: z.ZodEnum<{
 export const PackageId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'PackageId',
 })
+export const ProgressUnits: z.ZodEnum<{ bytes: 'bytes'; steps: 'steps' }> =
+  /* @__PURE__ */ z.enum(['bytes', 'steps']).meta({
+    id: 'ProgressUnits',
+  })
 export const QueryDnsParams: z.ZodObject<{ fqdn: z.ZodString }> =
   /* @__PURE__ */ object({ fqdn: z.string() }).meta({
     id: 'QueryDnsParams',
@@ -191,6 +206,17 @@ export const DnsSettings: z.ZodObject<{
   id: 'DnsSettings',
   description:
     'Per-gateway DNS intent and effective upstreams. `static_servers` is the persisted\noverride; `servers` and `source` are derived from it and the link configuration.\nWithout an override or gateway-provided resolvers, the public fallback is used.',
+})
+export const FullProgress: z.ZodObject<{
+  overall: typeof Progress
+  phases: z.ZodArray<typeof NamedProgress>
+}> = /* @__PURE__ */ object({
+  get overall(): typeof Progress {
+    return Progress
+  },
+  phases: z.array(NamedProgress),
+}).meta({
+  id: 'FullProgress',
 })
 
 /**
@@ -289,10 +315,22 @@ export const LogFollowResponse: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
-  guid: typeof Guid
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Guid>>,
+    z.ZodNullable<typeof Guid>
+  >
 }> = /* @__PURE__ */ object({
   startCursor: wire(z.string().nullable().optional(), z.string().nullable()),
-  guid: Guid,
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Present for ordinary replies; typed observations use same-ID events.',
+  }),
 }).meta({
   id: 'LogFollowResponse',
 })
@@ -326,13 +364,22 @@ export const UpdateSystemRes: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
   progress: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof Guid>>,
     z.ZodNullable<typeof Guid>
   >
 }> = /* @__PURE__ */ object({
   target: wire(z.string().nullable().optional(), z.string().nullable()),
-  progress: wire(Guid.nullable().optional(), Guid.nullable()),
+  /**
+   * Legacy progress continuation, absent for rpcstream observers.
+   */
+  progress: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+    description:
+      'Legacy progress continuation, absent for rpcstream observers.',
+  }),
 }).meta({
   id: 'UpdateSystemRes',
 })
@@ -429,6 +476,43 @@ export const NetworkInterfaceInfo: z.ZodCodec<
 ).meta({
   id: 'NetworkInterfaceInfo',
 })
+export const Progress: z.ZodUnion<
+  readonly [
+    z.ZodNull,
+    z.ZodBoolean,
+    z.ZodObject<{
+      done: z.ZodInt
+      total: z.ZodCodec<
+        z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+        z.ZodNullable<z.ZodInt>
+      >
+      units: z.ZodCodec<
+        z.ZodOptional<z.ZodNullable<typeof ProgressUnits>>,
+        z.ZodNullable<typeof ProgressUnits>
+      >
+    }>,
+    typeof FullProgress,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.null(),
+    z.boolean(),
+    object({
+      done: z.int(),
+      total: wire(z.int().nullable().optional(), z.int().nullable()),
+      units: wire(
+        ProgressUnits.nullable().optional(),
+        ProgressUnits.nullable(),
+      ),
+    }),
+    FullProgress.meta({
+      description:
+        'A sub-tree of progress. Used by `NamedProgress.progress` so a phase\ncan carry its own `FullProgress` with sub-phases. Producers are\nexpected to keep `FullProgress.overall` scalar (not nested again).',
+    }),
+  ])
+  .meta({
+    id: 'Progress',
+  })
 export const NetworkGatewayInfo: z.ZodObject<{
   id: typeof GatewayId
   info: typeof NetworkInterfaceInfo
@@ -509,10 +593,14 @@ export const Api = {
             forget: {
               _PARAMS: /* @__PURE__ */ empty,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             repair: {
               _PARAMS: /* @__PURE__ */ empty,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -523,6 +611,8 @@ export const Api = {
             message: z.string(),
             data: z.unknown().optional(),
           }),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'kernel-logs': {
           _PARAMS: /* @__PURE__ */ z.intersection(
@@ -533,14 +623,27 @@ export const Api = {
                 z.string().nullable(),
               ),
               boot: wire(
-                z.union([z.number(), z.string()]).nullable().optional(),
-                z.union([z.number(), z.string()]).nullable(),
+                z
+                  .union([
+                    z.number().int().min(-2147483648).max(2147483647),
+                    z.string(),
+                  ])
+                  .nullable()
+                  .optional(),
+                z
+                  .union([
+                    z.number().int().min(-2147483648).max(2147483647),
+                    z.string(),
+                  ])
+                  .nullable(),
               ),
               before: wire(z.boolean().optional(), z.boolean()),
             }),
             empty,
           ),
           _RETURN: /* @__PURE__ */ LogResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
           _CHILDREN: {
             follow: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -554,14 +657,27 @@ export const Api = {
                     z.string().nullable(),
                   ),
                   boot: wire(
-                    z.union([z.number(), z.string()]).nullable().optional(),
-                    z.union([z.number(), z.string()]).nullable(),
+                    z
+                      .union([
+                        z.number().int().min(-2147483648).max(2147483647),
+                        z.string(),
+                      ])
+                      .nullable()
+                      .optional(),
+                    z
+                      .union([
+                        z.number().int().min(-2147483648).max(2147483647),
+                        z.string(),
+                      ])
+                      .nullable(),
                   ),
                   before: wire(z.boolean().optional(), z.boolean()),
                 }),
                 empty,
               ),
               _RETURN: /* @__PURE__ */ LogFollowResponse,
+              _ITEM: /* @__PURE__ */ LogEntry,
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -574,14 +690,27 @@ export const Api = {
                 z.string().nullable(),
               ),
               boot: wire(
-                z.union([z.number(), z.string()]).nullable().optional(),
-                z.union([z.number(), z.string()]).nullable(),
+                z
+                  .union([
+                    z.number().int().min(-2147483648).max(2147483647),
+                    z.string(),
+                  ])
+                  .nullable()
+                  .optional(),
+                z
+                  .union([
+                    z.number().int().min(-2147483648).max(2147483647),
+                    z.string(),
+                  ])
+                  .nullable(),
               ),
               before: wire(z.boolean().optional(), z.boolean()),
             }),
             empty,
           ),
           _RETURN: /* @__PURE__ */ LogResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
           _CHILDREN: {
             follow: {
               _PARAMS: /* @__PURE__ */ z.intersection(
@@ -595,28 +724,47 @@ export const Api = {
                     z.string().nullable(),
                   ),
                   boot: wire(
-                    z.union([z.number(), z.string()]).nullable().optional(),
-                    z.union([z.number(), z.string()]).nullable(),
+                    z
+                      .union([
+                        z.number().int().min(-2147483648).max(2147483647),
+                        z.string(),
+                      ])
+                      .nullable()
+                      .optional(),
+                    z
+                      .union([
+                        z.number().int().min(-2147483648).max(2147483647),
+                        z.string(),
+                      ])
+                      .nullable(),
                   ),
                   before: wire(z.boolean().optional(), z.boolean()),
                 }),
                 empty,
               ),
               _RETURN: /* @__PURE__ */ LogFollowResponse,
+              _ITEM: /* @__PURE__ */ LogEntry,
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
         rebuild: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         restart: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         update: {
           _PARAMS: /* @__PURE__ */ DiagnosticUpdateSystemParams,
           _RETURN: /* @__PURE__ */ UpdateSystemRes,
+          _ITEM: /* @__PURE__ */ FullProgress,
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
@@ -626,12 +774,16 @@ export const Api = {
         repair: {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
       },
     },
     'git-info': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     init: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
     kiosk: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
@@ -656,10 +808,14 @@ export const Api = {
                 QueryDnsParams,
               ),
               _RETURN: /* @__PURE__ */ QueryDnsRes,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
             status: {
               _PARAMS: /* @__PURE__ */ empty,
               _RETURN: /* @__PURE__ */ DnsStatus,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
             },
           },
         },
@@ -778,6 +934,8 @@ export const Api = {
     state: {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ ApiState,
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
     },
     util: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
     volumes: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },

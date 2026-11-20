@@ -1,1 +1,0 @@
-- **Fernzugriff steht standardmäßig auf „Nie“.** Router mit der bisherigen Standardeinstellung „Wenn hinter NAT“ wechseln mit diesem Update zu „Nie“. Um den Router weiterhin aus dem vorgelagerten Netzwerk zu verwalten, wählen Sie unter Einstellungen > Allgemein > Fernzugriff „Wenn hinter NAT“.

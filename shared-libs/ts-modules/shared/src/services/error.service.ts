@@ -1,12 +1,11 @@
 import { ErrorHandler, inject, Service } from '@angular/core'
 import { TuiNotificationService } from '@taiga-ui/core'
-import { HttpError } from '../classes/http-error'
 
 @Service()
 export class ErrorService extends ErrorHandler {
   private readonly alerts = inject(TuiNotificationService)
 
-  override handleError(error: HttpError | string, link?: string) {
+  override handleError(error: unknown, link?: string) {
     console.error(error)
 
     this.alerts
@@ -18,13 +17,23 @@ export class ErrorService extends ErrorHandler {
   }
 }
 
+/** Returns whether an RPC failure represents an unreachable transport. */
+export function isNetworkError(error: unknown): error is { code: 0 } {
+  return (
+    error !== null &&
+    typeof error === 'object' &&
+    'code' in error &&
+    error.code === 0
+  )
+}
+
 export function getErrorMessage(e: unknown, link?: string): string {
   const error = e !== null && typeof e === 'object' ? e : null
   let message = ''
 
   if (typeof e === 'string') {
     message = e
-  } else if (error && 'code' in error && error.code === 0) {
+  } else if (isNetworkError(e)) {
     message =
       "Request Error. Your browser couldn't reach your server (network or browser blocked the connection). Common causes: a VPN or firewall blocking loopback/LAN; the server is still starting; or the page is loaded from a different origin than the API. Try refreshing this page; if you're using a VPN, allow LAN connections or disconnect briefly."
   } else if (

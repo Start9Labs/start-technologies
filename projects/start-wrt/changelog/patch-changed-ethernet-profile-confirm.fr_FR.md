@@ -1,1 +1,0 @@
-- Le changement de profil de sécurité d’un port Ethernet demande une confirmation et explique comment reconnecter les appareils qui perdent leur connexion, notamment ceux derrière un commutateur.

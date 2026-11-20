@@ -10,7 +10,15 @@ import {
   signal,
 } from '@angular/core'
 import { FormBuilder, NonNullableFormBuilder, Validators } from '@angular/forms'
-import { BehaviorSubject, EMPTY, firstValueFrom, map, of, Subject } from 'rxjs'
+import {
+  BehaviorSubject,
+  EMPTY,
+  firstValueFrom,
+  map,
+  of,
+  Subject,
+  switchMap,
+} from 'rxjs'
 
 const boundaries = new Map()
 function boundary(specifier, names, extra = '') {
@@ -40,7 +48,11 @@ boundary(
     'ExverComparesPipe',
     'LeafProgressPipe',
   ],
-  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const sameUrl = (a, b) => a === b; export const registryUrl = value => value; export const convertBytes = value => String(value); export const getErrorMessage = error => error.message; export const leafProgress = progress => progress;',
+  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const isDefaultRegistry = url => Object.values(defaultRegistries).some(known => defaultUrl(known, url)); export const convertBytes = value => String(value); export const getErrorMessage = error => error.message; export const leafProgress = progress => progress; ' +
+    `export { sameUrl, registryUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
+    `import { sameUrl as defaultUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
+    `export { legacyDatabaseSubscription } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/services/database-subscription.ts', import.meta.url).href)};` +
+    `export { withAbortSignal } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/with-abort.ts', import.meta.url).href)};`,
 )
 boundary(
   '@taiga-ui/core',
@@ -66,7 +78,7 @@ boundary(
     'TuiLink',
     'TuiExpand',
   ],
-  'export const TUI_BREAKPOINT = Symbol("breakpoint"); export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => []; export const tuiIconStart = value => value;',
+  'export const TUI_ICON_START = Symbol("iconStart"); export const tuiButtonOptionsProvider = () => []; export const TUI_BREAKPOINT = Symbol("breakpoint"); export const tuiCellOptionsProvider = () => []; export const tuiValidationErrorsProvider = () => []; export const tuiIconStart = value => value;',
 )
 boundary(
   '@taiga-ui/kit',
@@ -99,7 +111,14 @@ boundary(
   ['TuiAnimated', 'TuiMapperPipe', 'TuiAutoFocus', 'TuiValidator'],
   'export const tuiMarkControlAsTouchedAndValidate = () => {}; export const tuiProvide = () => []; export const tuiIsString = value => typeof value === "string";',
 )
-boundary('@taiga-ui/layout', ['TuiCardLarge', 'TuiHeader', 'TuiForm'])
+boundary('@taiga-ui/layout', [
+  'TuiCardLarge',
+  'TuiHeader',
+  'TuiForm',
+  'TuiBlockStatus',
+  'TuiNavigation',
+])
+boundary('./components/controls.component', ['MarketplaceControlsComponent'])
 boundary('@taiga-ui/addon-table', [
   'TuiTable',
   'TuiTableDirective',
@@ -148,13 +167,17 @@ boundary('src/app/routes/portal/components/table.component', ['TableComponent'])
 boundary(
   'src/app/services/patch-db/patch-db-source',
   [],
-  'export const PATCH_CACHE = Symbol("patch cache");',
+  'export const PATCH_CACHE = Symbol("patch cache"); export const PATCH_LIVE = Symbol("patch live");',
 )
 boundary('src/app/services/config.service', ['ConfigService'])
 boundary('src/app/services/state.service', ['StateService'])
 boundary('src/app/services/trusted-keys.service', ['TrustedKeysService'])
 boundary('src/app/services/package-icon.service', ['PackageIconService'])
 boundary('src/app/services/storage.service', ['StorageService'])
+boundaries.set(
+  '../storage.service',
+  "export { StorageService } from 'src/app/services/storage.service';",
+)
 boundary('src/app/routes/portal/pipes/to-manifest', ['ToManifestPipe'])
 boundary('../services/alerts.service', ['MarketplaceAlertsService'])
 boundary('src/app/services/title.service', ['TitleDirective'])
@@ -185,6 +208,7 @@ boundaries.set(
     'trust.ts',
     'key-identity.ts',
     'types.ts',
+    'registry-state.ts',
     'services/abstract-marketplace.service.ts',
     'util/icon.ts',
   ]
@@ -193,11 +217,12 @@ boundaries.set(
         `export * from ${JSON.stringify(new URL(`../../../../../shared-libs/ts-modules/marketplace/src/${file}`, import.meta.url).href)};`,
     )
     .join('\n') +
-    '\nexport class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {} export class MarketplaceSignerChipsComponent {} export class MarketplaceAboutComponent {} export class MarketplaceDependenciesComponent {} export class MarketplaceLinksComponent {} export class MarketplaceReleaseNotesComponent {}',
+    '\nexport class RegistryConnectionStatus {} export class RegistryStatus {} export class StoreIconDirective {} export class MarketplaceComponent {} export class MarketplaceRegistrySelectComponent {} export class MarketplaceTileComponent {} export class MarketplacePackageLinkComponent {} export class MarketplaceSignersComponent {} export class MarketplaceSignerChipsComponent {} export class MarketplaceAboutComponent {} export class MarketplaceDependenciesComponent {} export class MarketplaceLinksComponent {} export class MarketplaceReleaseNotesComponent {}',
 )
 loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
-const { ActivatedRoute, Router } = await import('@angular/router')
+const { ActivatedRoute, convertToParamMap, Router } =
+  await import('@angular/router')
 const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
 const { PatchDB } = await import('patch-db-client')
@@ -217,11 +242,14 @@ const {
   i18nPipe,
   i18nService,
 } = await import('@start9labs/shared')
+const { TUI_BREAKPOINT } = await import('@taiga-ui/core')
 const { CONTEXT } = await import('@taiga-ui/polymorpheus')
 const { WA_WINDOW } = await import('@ng-web-apis/common')
 const { UiUpdateService } = await import('src/app/services/ui-update.service')
 const { ConfigService } = await import('src/app/services/config.service')
 const { StateService } = await import('src/app/services/state.service')
+const { ConnectionService } =
+  await import('src/app/services/connection.service')
 const { TrustedKeysService } =
   await import('src/app/services/trusted-keys.service')
 const { TrustedKeysService: ProductionTrustedKeysService } =
@@ -272,13 +300,16 @@ const catalog = {
   '0.4.0.3': { releaseNotes: 'newer', squashfs },
 }
 const candidates = [
-  { version: '0.4.0.4', notes: 'newest', squashfs },
-  { version: '0.4.0.3', notes: 'newer', squashfs },
+  { version: '0.4.0.4', notes: 'newest', squashfs, defaultLocale: 'pl_PL' },
+  { version: '0.4.0.3', notes: 'newer', squashfs, defaultLocale: 'pl_PL' },
 ]
 const state = version => ({
+  registryCache: {},
+  osUpdateCache: null,
   serverInfo: {
     id: 'server-id',
     version,
+    gitHash: runningGitHash,
     statusInfo: {},
     trustedKeys: trustedSigners,
     osRegistry: 'https://registry.test',
@@ -295,6 +326,7 @@ function fixture(t, cachedVersion, providers = []) {
   )
   const patch = new PatchDB(source, cache)
   patch.start()
+  let osUpdateCache = null
   let revision = cachedVersion ? 1 : 0
   const requests = [],
     submissions = [],
@@ -307,17 +339,15 @@ function fixture(t, cachedVersion, providers = []) {
   let completed = 0
   const api = {
     rpc: {
-      async gitInfo(params) {
-        assert.deepEqual(params, {})
-        return `${runningGitHash}\n`
+      gitInfo() {
+        assert.fail('The running build hash comes from PatchDB')
       },
       registry: {
         os: {
           version: {
             get(params) {
-              const response = deferred()
-              requests.push({ params, ...response })
-              return response.promise
+              requests.push(params)
+              assert.fail('Normal OS loads must not query a registry')
             },
           },
         },
@@ -397,7 +427,7 @@ function fixture(t, cachedVersion, providers = []) {
   const availability = [],
     shown = []
   const subs = [
-    os.updateAvailable$.subscribe(value => availability.push(value)),
+    os.updateCandidates$.subscribe(value => availability.push(!!value.length)),
     os.showUpdate$.subscribe(value => shown.push(value)),
   ]
   t.after(() => {
@@ -425,7 +455,9 @@ function fixture(t, cachedVersion, providers = []) {
     make: Class => runInInjectionContext(injector, () => new Class()),
     get: token => injector.get(token),
     live(version) {
-      source.next([{ id: ++revision, value: state(version) }])
+      source.next([
+        { id: ++revision, value: { ...state(version), osUpdateCache } },
+      ])
     },
     trust(signers) {
       source.next([
@@ -451,18 +483,65 @@ function fixture(t, cachedVersion, providers = []) {
         },
       ])
     },
+    restartFor(reason) {
+      source.next([
+        {
+          id: ++revision,
+          patch: [
+            {
+              op: 'replace',
+              path: '/serverInfo/statusInfo/restart',
+              value: reason,
+            },
+          ],
+        },
+      ])
+    },
+    build(gitHash) {
+      source.next([
+        {
+          id: ++revision,
+          patch: [
+            gitHash === undefined
+              ? { op: 'remove', path: '/serverInfo/gitHash' }
+              : { op: 'replace', path: '/serverInfo/gitHash', value: gitHash },
+          ],
+        },
+      ])
+    },
+    publish(
+      versions = catalog,
+      { registry = 'https://registry.test/', status = 'connected' } = {},
+    ) {
+      osUpdateCache = { registry, versions, defaultLocale: 'pl_PL', status }
+      source.next([
+        {
+          id: ++revision,
+          patch: [
+            { op: 'replace', path: '/osUpdateCache', value: osUpdateCache },
+          ],
+        },
+      ])
+    },
+    selectRegistry(registry) {
+      source.next([
+        {
+          id: ++revision,
+          patch: [
+            { op: 'replace', path: '/serverInfo/osRegistry', value: registry },
+          ],
+        },
+      ])
+    },
     async load(response = catalog) {
-      const loading = os.loadOS()
-      await tick()
-      requests.at(-1).resolve(response)
-      await loading
+      this.publish(response)
+      await os.checkForUpdates()
     },
   }
 }
 
 function uiFixture(t, { enabled = true, controlled = true } = {}) {
-  const serverState = new BehaviorSubject(null)
-  let serverGitHash = runningGitHash
+  const connection = new BehaviorSubject(false)
   const events = new Subject()
   const unrecoverable = new Subject()
   const checks = []
@@ -522,17 +601,16 @@ function uiFixture(t, { enabled = true, controlled = true } = {}) {
       },
     },
     { provide: ConfigService, useValue: { gitHash: runningGitHash } },
-    { provide: StateService, useValue: serverState },
+    { provide: ConnectionService, useValue: connection },
     { provide: WA_WINDOW, useValue: win },
   ])
-  f.api.rpc.gitInfo = async () => `${serverGitHash}\n`
   const ui = f.get(UiUpdateService)
   return {
     ...f,
-    serverState,
-    async rebuild(state = 'running') {
-      serverGitHash = nextGitHash
-      serverState.next(state)
+    connection,
+    async rebuild(live = true) {
+      f.build(nextGitHash)
+      connection.next(live)
       await tick()
     },
     ui,
@@ -656,19 +734,19 @@ test('a matching build is current whatever server version the database reports',
   const f = uiFixture(t)
   const component = f.make(RefreshAlertComponent)
   f.version('0.4.0.5')
-  f.serverState.next('running')
+  f.connection.next(true)
   await tick()
   assert.equal(f.ui.outdated(), false)
   assert.equal(f.checks.length, 0)
   assert.equal(component.show(), false)
 })
 
-test('a different server build is announced only once the server is running', async t => {
+test('a different server build is announced only once the database is live', async t => {
   const f = uiFixture(t)
-  await f.rebuild('initializing')
+  await f.rebuild(false)
   assert.equal(f.ui.outdated(), false)
   assert.equal(f.checks.length, 0)
-  f.serverState.next('running')
+  f.connection.next(true)
   await tick()
   assert.equal(f.ui.outdated(), true)
   assert.equal(f.checks.length, 1)
@@ -758,6 +836,98 @@ test('a retry syncs matching server/UI versions without reloading on no-new-vers
   assert.equal(f.reloads, 1)
 })
 
+for (const stalled of ['checking', 'updating']) {
+  test(`a sync the worker never settles offers Refresh after its deadline: ${stalled}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const f = uiFixture(t)
+    await f.rebuild()
+    if (stalled === 'updating') {
+      t.mock.timers.tick(30_000)
+      f.events.next(detected)
+    }
+    t.mock.timers.tick(59_999)
+    assert.equal(f.ui.state().status, stalled)
+    f.ui.refresh()
+    assert.equal(f.reloads, 0)
+    t.mock.timers.tick(1)
+    assert.equal(f.ui.state().status, 'stalled')
+    assert.equal(f.ui.phase(), 'stalled')
+    assert.equal(f.ui.canRefresh(), true)
+    assert.equal(f.reloads, 0)
+    f.ui.refresh()
+    assert.equal(f.reloads, 1)
+  })
+}
+
+test('a worker report after the sync deadline still decides the outcome', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = uiFixture(t)
+  await f.rebuild()
+  t.mock.timers.tick(60_000)
+  assert.equal(f.ui.state().status, 'stalled')
+  f.events.next(failed)
+  assert.equal(f.ui.state().status, 'error')
+  f.ui.refresh()
+  assert.equal(f.reloads, 0)
+})
+
+for (const found of [true, false]) {
+  test(`a check completing after its deadline still decides the outcome: ${found}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const f = uiFixture(t)
+    await f.rebuild()
+    t.mock.timers.tick(60_000)
+    f.checks[0].resolve(found)
+    await tick()
+    assert.equal(f.ui.state().status, found ? 'ready' : 'error')
+    assert.equal(f.ui.canRefresh(), found)
+    assert.equal(f.reloads, 0)
+    f.ui.refresh()
+    assert.equal(f.reloads, found ? 1 : 0)
+  })
+}
+
+test('a cached-update report after the deadline wins over its false check result', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = uiFixture(t)
+  await f.rebuild()
+  t.mock.timers.tick(60_000)
+  f.events.next(noUpdate)
+  f.checks[0].resolve(false)
+  await tick()
+  assert.equal(f.ui.state().status, 'ready')
+  assert.equal(f.ui.phase(), 'ready')
+  assert.equal(f.reloads, 0)
+})
+
+test('an installation failure cancels the sync deadline', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = uiFixture(t)
+  await f.rebuild()
+  f.events.next(detected)
+  f.events.next(failed)
+  t.mock.timers.tick(60_000)
+  assert.equal(f.ui.state().status, 'error')
+  assert.equal(f.ui.canRefresh(), false)
+  assert.equal(f.reloads, 0)
+})
+
+test('a stalled sync retains cache-reset recovery without claiming completion', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = uiFixture(t)
+  await f.rebuild()
+  t.mock.timers.tick(60_000)
+  assert.equal(f.ui.phase(), 'stalled')
+  assert.equal(f.ui.busy(), false)
+  await f.ui.resetCache()
+  assert.equal(f.ui.state().status, 'reloading')
+  assert.equal(f.reloads, 1)
+  assert.deepEqual(
+    [...f.caches.keys()],
+    ['ngsw:/other/:db:control', 'other-cache'],
+  )
+})
+
 test('Refresh before sync completion never queues a reload', async t => {
   const f = uiFixture(t)
   f.ui.refresh()
@@ -842,7 +1012,7 @@ test('cache-reset failure preserves the UI and exposes the error without an auto
   assert.equal(f.caches.size, 5)
 })
 
-test('syncing remains dismissible; only a completed sync can start non-dismissible navigation', async t => {
+test('syncing remains dismissible; explicit navigation blocks dismissal', async t => {
   const f = uiFixture(t)
   const component = f.make(RefreshAlertComponent)
   await f.rebuild()
@@ -888,16 +1058,13 @@ test('dismissing an update dialog does not hide the next state', async t => {
 })
 
 for (const liveBeforeResponse of [true, false]) {
-  test(`cached older version is replaced by live current ${liveBeforeResponse ? 'before' : 'after'} registry response`, async t => {
+  test(`cached older version is replaced by live current ${liveBeforeResponse ? 'before' : 'after'} cache publication`, async t => {
     const f = fixture(t, '0.4.0.1')
-    const loading = f.os.loadOS()
+    const loading = f.os.checkForUpdates()
     await tick()
-    assert.deepEqual(f.requests[0].params, {
-      registry: 'https://registry.test',
-      serverId: 'server-id',
-    })
+    assert.deepEqual(f.requests, [])
     if (liveBeforeResponse) f.live('0.4.0.2')
-    f.requests[0].resolve({ '0.4.0.2': { releaseNotes: 'installed' } })
+    f.publish({ '0.4.0.2': { releaseNotes: 'installed' } })
     await loading
     if (!liveBeforeResponse) {
       assert.equal(f.os.updateCandidates()[0].version, '0.4.0.2')
@@ -906,40 +1073,42 @@ for (const liveBeforeResponse of [true, false]) {
     assert.deepEqual(f.os.updateCandidates(), [])
     assert.equal(f.availability.at(-1), false)
     assert.equal(f.shown.at(-1), false)
-    assert.equal(f.requests.length, 1)
+    assert.equal(f.requests.length, 0)
   })
 }
 
-test('a slower catalog response cannot replace a later registry selection', async t => {
+test('a registry switch releases a load waiting for the previous source without publishing an error', async t => {
   const f = fixture(t, '0.4.0.2')
-  const first = f.os.loadOS('https://first.test')
+  f.selectRegistry('https://first.test')
+  const first = f.os.checkForUpdates()
   await tick()
-  const second = f.os.loadOS('https://second.test')
-  await tick()
-  assert.deepEqual(
-    f.requests.map(({ params }) => params.registry),
-    ['https://first.test', 'https://second.test'],
-  )
-  f.requests[1].resolve({
-    '0.4.0.3': { releaseNotes: 'second registry', squashfs },
-  })
-  await second
-  f.requests[0].resolve(catalog)
+  f.selectRegistry('https://second.test')
   await first
+  assert.deepEqual(f.os.updateCandidates(), [])
+  f.publish(
+    { '0.4.0.3': { releaseNotes: 'selected', squashfs } },
+    { registry: 'https://second.test' },
+  )
+  await f.os.checkForUpdates()
   assert.deepEqual(f.os.updateCandidates(), [
-    { version: '0.4.0.3', notes: 'second registry', squashfs },
+    {
+      version: '0.4.0.3',
+      notes: 'selected',
+      squashfs,
+      defaultLocale: 'pl_PL',
+    },
   ])
 })
 
 test('without a cache, load waits for the first live state', async t => {
   const f = fixture(t)
-  const loading = f.os.loadOS()
+  const loading = f.os.checkForUpdates()
   await tick()
   assert.equal(f.requests.length, 0)
   assert.deepEqual(f.os.updateCandidates(), [])
   f.live('0.4.0.2')
   await tick()
-  f.requests[0].resolve({ '0.4.0.2': { releaseNotes: 'installed' } })
+  f.publish({ '0.4.0.2': { releaseNotes: 'installed' } })
   await loading
   assert.deepEqual(f.os.updateCandidates(), [])
   assert.equal(f.availability.at(-1), false)
@@ -958,27 +1127,29 @@ test('an empty catalog clears availability and cannot be submitted', async t => 
   assert.equal(f.tasks.length, 0)
 })
 
-test('strictly newer candidates sort descending; refresh failure preserves catalog; version updates do not refetch', async t => {
+test('strictly newer candidates sort descending; offline cache remains readable; version updates do not refetch', async t => {
   const f = fixture(t, '0.4.0.2')
   await f.load()
   assert.deepEqual(f.os.updateCandidates(), candidates)
   assert.equal(f.availability.at(-1), true)
   assert.equal(f.shown.at(-1), true)
-  const refresh = f.os.loadOS()
-  await tick()
-  assert.equal(f.requests.length, 2)
-  assert.deepEqual(f.os.updateCandidates(), candidates)
-  f.requests[1].reject(new Error('registry unavailable'))
-  await assert.rejects(refresh, /registry unavailable/)
+  f.publish(catalog, { status: 'error' })
+  assert.equal(await firstValueFrom(f.os.registryStatus$), 'error')
+  await assert.rejects(f.os.checkForUpdates(), /registry unavailable/)
   assert.deepEqual(f.os.updateCandidates(), candidates)
   f.version('0.4.0.3')
   assert.deepEqual(f.os.updateCandidates(), [candidates[0]])
   f.version('0.4.0.4')
   assert.deepEqual(f.os.updateCandidates(), [])
-  assert.equal(f.requests.length, 2)
+  assert.equal(f.requests.length, 0)
   await f.load({ '0.4.0.5': { releaseNotes: 'refreshed', squashfs } })
   assert.deepEqual(f.os.updateCandidates(), [
-    { version: '0.4.0.5', notes: 'refreshed', squashfs },
+    {
+      version: '0.4.0.5',
+      notes: 'refreshed',
+      squashfs,
+      defaultLocale: 'pl_PL',
+    },
   ])
 })
 
@@ -991,7 +1162,12 @@ test('a different image at the installed version is offered and submitted', asyn
   })
   assert.deepEqual(f.os.updateCandidates(), [
     ...candidates,
-    { version: '0.4.0.2', notes: 'next image', squashfs },
+    {
+      version: '0.4.0.2',
+      notes: 'next image',
+      squashfs,
+      defaultLocale: 'pl_PL',
+    },
   ])
 
   await f.load({
@@ -1019,6 +1195,17 @@ for (const gitHash of [runningGitHash, null, undefined]) {
   })
 }
 
+test('a downloaded update is no longer offered and blocks another update until restart', async t => {
+  const f = fixture(t, '0.4.0.2')
+  await f.load()
+  assert.equal(f.shown.at(-1), true)
+  assert.equal(await firstValueFrom(f.os.updateDisabled$), false)
+  f.restartFor('update')
+  assert.equal(f.availability.at(-1), true)
+  assert.equal(f.shown.at(-1), false)
+  assert.equal(await firstValueFrom(f.os.updateDisabled$), true)
+})
+
 test('a refreshed same-version listing clears availability when its image matches the running build', async t => {
   const f = fixture(t, '0.4.0.2')
   await f.load({
@@ -1035,34 +1222,32 @@ test('a refreshed same-version listing clears availability when its image matche
   assert.deepEqual(f.submissions, [])
 })
 
-test('catalog publication waits for the running build hash', async t => {
+test('a same-version image is offered from the synced catalog without a manual check', async t => {
   const f = fixture(t, '0.4.0.2')
-  const hash = deferred()
-  f.api.rpc.gitInfo = () => hash.promise
-  const loading = f.os.loadOS()
-  await tick()
-  f.requests[0].resolve({
-    '0.4.0.2': { releaseNotes: 'installed', squashfs, gitHash: runningGitHash },
+  f.publish({
+    '0.4.0.2': { releaseNotes: 'next image', squashfs, gitHash: nextGitHash },
   })
-  await tick()
+  assert.deepEqual(f.os.updateCandidates(), [
+    {
+      version: '0.4.0.2',
+      notes: 'next image',
+      squashfs,
+      defaultLocale: 'pl_PL',
+    },
+  ])
+  assert.equal(f.availability.at(-1), true)
+  f.build(nextGitHash)
   assert.deepEqual(f.os.updateCandidates(), [])
-  hash.resolve(`${runningGitHash}\n`)
-  await loading
-  assert.deepEqual(f.os.updateCandidates(), [])
-  assert.deepEqual(f.availability, [false])
+  assert.equal(f.availability.at(-1), false)
 })
 
-test('git-info failure preserves the last successful catalog', async t => {
+test('a database without the running build hash offers no same-version image', async t => {
   const f = fixture(t, '0.4.0.2')
-  await f.load()
-  f.api.rpc.gitInfo = async () => {
-    throw new Error('git-info unavailable')
-  }
-  const refresh = f.os.loadOS()
-  const rejected = assert.rejects(refresh, /git-info unavailable/)
-  await tick()
-  f.requests.at(-1).resolve({})
-  await rejected
+  f.build(undefined)
+  f.publish({
+    ...catalog,
+    '0.4.0.2': { releaseNotes: 'next image', squashfs, gitHash: nextGitHash },
+  })
   assert.deepEqual(f.os.updateCandidates(), candidates)
 })
 
@@ -1097,7 +1282,7 @@ test('release notes select the live UI language without refetching or changing r
   assert.equal(pipe.transform(notes), 'English notes')
   locale.language = 'english'
   assert.equal(pipe.transform(notes), 'English notes')
-  assert.equal(f.requests.length, 1)
+  assert.equal(f.requests.length, 0)
   assert.deepEqual(info, original)
 
   await f.load({ '0.4.0.3': { releaseNotes: 'Legacy English', squashfs } })
@@ -1113,7 +1298,7 @@ test('General checks but does not open a modal without candidates', async t => {
   const general = f.make(General)
   general.onUpdate()
   await tick()
-  f.requests[0].resolve(catalog)
+  f.publish(catalog)
   await Promise.all(f.tasks)
   await tick()
   assert.deepEqual(f.opened, [])
@@ -1130,7 +1315,7 @@ test('General opens a modal after a successful manual check finds candidates', a
   f.make(General).onUpdate()
   await tick()
   assert.deepEqual(f.opened, [])
-  f.requests[0].resolve(catalog)
+  f.publish(catalog)
   await Promise.all(f.tasks)
   await tick()
   assert.deepEqual(f.opened, [UPDATE])
@@ -1141,7 +1326,7 @@ test('General does not announce up-to-date after a failed manual check', async t
   const f = fixture(t, '0.4.0.2')
   f.make(General).onUpdate()
   await tick()
-  f.requests[0].reject(new Error('registry unavailable'))
+  f.publish({}, { status: 'error' })
   await Promise.all(f.tasks)
   await tick()
   assert.deepEqual(f.opened, [])
@@ -1153,7 +1338,7 @@ test('General opens the update modal and submission targets exactly the newest c
   await f.load()
   f.make(General).onUpdate()
   assert.deepEqual(f.opened, [UPDATE])
-  assert.equal(f.requests.length, 1)
+  assert.equal(f.requests.length, 0)
   await f.make(SystemUpdateModal).update()
   await Promise.all(f.tasks)
   assert.equal(f.confirmations.length, 0)
@@ -1750,6 +1935,7 @@ function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
   const injector = createEnvironmentInjector([
     AddSourceService,
     BackupService,
+    { provide: TUI_BREAKPOINT, useValue: () => 'desktopLarge' },
     { provide: OSService, useValue: { backingUp$: of(false) } },
     {
       provide: ActivatedRoute,
@@ -2650,6 +2836,7 @@ test('production mocks support inspection, independent failed backups and new-lo
     { provide: WA_SESSION_STORAGE, useValue: {} },
     { provide: PATCH_CACHE, useValue: cache },
     { provide: ConfigService, useValue: { gitHash: runningGitHash } },
+    { provide: i18nPipe, useValue: { transform: value => value } },
   ])
   const api = runInInjectionContext(injector, () => new MockApiService())
   const patch = new PatchDB(
@@ -2902,7 +3089,6 @@ const { MarketplaceControlsComponent: Controls } =
   await import('src/app/routes/portal/routes/marketplace/components/controls.component')
 const { MarketplaceService } =
   await import('src/app/services/marketplace.service')
-
 const pkg = {
   id: 'hello-world',
   version: '1.0.0:0',
@@ -3856,29 +4042,39 @@ test('connecting a registry asks for no approvals and resolves to the keys it tr
   assert.deepEqual(calls, [{ url: 'https://registry.test', name: null }])
 })
 
-test('a late registry metadata response cannot restore a removed registry', async t => {
+test('a late registry cache update cannot restore a removed registry', async t => {
   const { Exver } = await import('@start9labs/shared')
   const { StorageService } = await import('src/app/services/storage.service')
   const { PackageIconService } =
     await import('src/app/services/package-icon.service')
-  const metadata = deferred()
+  const metadata = new BehaviorSubject({})
   const registries = new BehaviorSubject({
     'https://registry.test': 'Old name',
   })
   const writes = []
   const injector = createEnvironmentInjector(
     [
-      { provide: PatchDB, useValue: { watch$: () => registries } },
+      {
+        provide: PatchDB,
+        useValue: {
+          watch$: (...path) =>
+            path[0] === 'registryCache' ? metadata : registries,
+        },
+      },
       { provide: Exver, useValue: {} },
       { provide: StorageService, useValue: { get: () => null } },
       { provide: PackageIconService, useValue: {} },
       { provide: ErrorService, useValue: { handleError: assert.fail } },
+      { provide: ConnectionService, useValue: of(true) },
       {
         provide: ApiService,
         useValue: {
           rpc: {
             registry: {
-              info: () => metadata.promise,
+              info: () =>
+                assert.fail(
+                  'Registry metadata must come from the shared cache',
+                ),
               package: { get: async () => ({}) },
             },
             server: {
@@ -3905,11 +4101,131 @@ test('a late registry metadata response cannot restore a removed registry', asyn
   )
   const subscription = service.marketplace$.subscribe()
   t.after(() => subscription.unsubscribe())
-  await service.delete('https://registry.test')
-  metadata.resolve({ name: 'New name', categories: {} })
+  await service.removeRegistry('https://registry.test')
+  metadata.next({
+    'https://registry.test/': {
+      status: 'connected',
+      info: { name: 'New name' },
+      packages: {},
+    },
+  })
   await new Promise(setImmediate)
   assert.deepEqual(await firstValueFrom(service.registries$), [])
   assert.deepEqual(writes, [])
+})
+
+test('registry status keeps its last known observation while the server is disconnected', async t => {
+  const { Exver } = await import('@start9labs/shared')
+  const { StorageService } = await import('src/app/services/storage.service')
+  const { PackageIconService } =
+    await import('src/app/services/package-icon.service')
+  const connected = new BehaviorSubject(true)
+  const cache = new BehaviorSubject({
+    'https://registry.test/': {
+      status: 'error',
+      error: 'connection timed out',
+      info: { name: 'Test' },
+      packages: {},
+    },
+  })
+  const registries = of({ 'https://registry.test': 'Test' })
+  const injector = createEnvironmentInjector(
+    [
+      {
+        provide: PatchDB,
+        useValue: {
+          watch$: (...path) =>
+            path[0] === 'registryCache' ? cache : registries,
+        },
+      },
+      { provide: Exver, useValue: {} },
+      { provide: StorageService, useValue: { get: () => null } },
+      { provide: PackageIconService, useValue: {} },
+      { provide: ApiService, useValue: {} },
+      { provide: ConnectionService, useValue: connected },
+    ],
+    null,
+  )
+  t.after(() => injector.destroy())
+  const service = runInInjectionContext(
+    injector,
+    () => new MarketplaceService(),
+  )
+  service.currentRegistryUrl$.next('https://registry.test/')
+  const catalogs = []
+  const subscription = service.marketplace$.subscribe(m => catalogs.push(m))
+  t.after(() => subscription.unsubscribe())
+  const current = async () => firstValueFrom(service.currentRegistry$)
+
+  assert.deepEqual(await firstValueFrom(service.requestErrors$), [
+    'https://registry.test/',
+  ])
+  assert.equal((await current()).status, 'error')
+
+  connected.next(false)
+  const [registry] = await firstValueFrom(service.registries$)
+  assert.equal(registry.status, 'error')
+  assert.equal(registry.error, 'connection timed out')
+  assert.deepEqual(await firstValueFrom(service.requestErrors$), [
+    'https://registry.test/',
+  ])
+  assert.equal((await current()).status, 'error')
+  assert.equal(catalogs.length, 1)
+})
+
+test('header status separates offline, unreachable server, connecting, restarting and live', async t => {
+  const { STATUS } = await import('src/app/services/status.service')
+  const { NetworkService } = await import('src/app/services/network.service')
+  const { PATCH_LIVE } =
+    await import('src/app/services/patch-db/patch-db-source')
+  const network = new BehaviorSubject(true)
+  const reachable = new BehaviorSubject(null)
+  const state = Object.assign(new BehaviorSubject('running'), {
+    reachable$: reachable,
+  })
+  const live = new BehaviorSubject(false)
+  const statusInfo = new BehaviorSubject({
+    restarting: false,
+    shuttingDown: false,
+  })
+  const { ɵINJECTOR_SCOPE } = await import('@angular/core')
+  const injector = createEnvironmentInjector(
+    [
+      { provide: ɵINJECTOR_SCOPE, useValue: 'root' },
+      { provide: NetworkService, useValue: network },
+      { provide: StateService, useValue: state },
+      { provide: PATCH_LIVE, useValue: live },
+      { provide: PatchDB, useValue: { watch$: () => statusInfo } },
+    ],
+    null,
+  )
+  t.after(() => injector.destroy())
+  const status = injector.get(STATUS)
+  const connected = []
+  const subscription = injector
+    .get(ConnectionService)
+    .subscribe(value => connected.push(value))
+  t.after(() => subscription.unsubscribe())
+
+  assert.equal(status().message, 'Connecting')
+  reachable.next(false)
+  assert.equal(status().message, "Can't reach server")
+  reachable.next(true)
+  assert.equal(status().message, 'Connecting')
+  live.next(true)
+  assert.equal(status().message, 'Connected')
+  live.next(false)
+  assert.equal(state.value, 'running')
+  assert.equal(status().message, 'Connecting')
+  reachable.next(false)
+  assert.equal(status().message, "Can't reach server")
+  statusInfo.next({ restarting: true, shuttingDown: false })
+  assert.equal(status().message, 'Restarting')
+  statusInfo.next({ restarting: false, shuttingDown: true })
+  assert.equal(status().message, 'Shutting down')
+  network.next(false)
+  assert.equal(status().message, 'No Internet')
+  assert.deepEqual(connected, [false, true, false])
 })
 
 test('registry removal uses the authoritative endpoint, clears a matching selected registry, and reports unoffered keys', async () => {
@@ -4000,4 +4316,767 @@ test('clearing a pending sideload validation keeps its eventual result hidden', 
   assert.equal(page.file, null)
   assert.equal(page.package(), null)
   assert.equal(page.error(), null)
+})
+
+test('OS first sync waits through Connecting and distinguishes empty success from failure', async t => {
+  const f = fixture(t, '0.4.0.2')
+  f.publish({}, { status: 'connecting' })
+  let settled = false
+  const loading = f.os.checkForUpdates().then(() => {
+    settled = true
+  })
+  await tick()
+  assert.equal(settled, false)
+  assert.equal(await firstValueFrom(f.os.registryStatus$), 'connecting')
+  f.publish({})
+  await loading
+  assert.deepEqual(f.os.updateCandidates(), [])
+  assert.equal(await firstValueFrom(f.os.registryStatus$), 'connected')
+  f.publish(catalog, { status: 'connecting' })
+  const retry = f.os.checkForUpdates()
+  await tick()
+  assert.deepEqual(f.os.updateCandidates(), candidates)
+  f.publish(catalog, { status: 'error' })
+  await assert.rejects(retry, /registry unavailable/)
+  assert.deepEqual(f.os.updateCandidates(), candidates)
+})
+
+test('switching the OS registry discards the old catalog until the matching cache arrives', async t => {
+  const f = fixture(t, '0.4.0.2')
+  await f.load()
+  f.selectRegistry('https://other.test')
+  assert.deepEqual(f.os.updateCandidates(), [])
+  assert.equal(await firstValueFrom(f.os.registryStatus$), 'connecting')
+  const loading = f.os.checkForUpdates()
+  f.publish(catalog)
+  assert.deepEqual(f.os.updateCandidates(), [])
+  f.publish(
+    { '0.4.0.3': catalog['0.4.0.3'] },
+    { registry: 'https://other.test/' },
+  )
+  await loading
+  assert.deepEqual(f.os.updateCandidates(), [candidates[1]])
+  assert.equal(await firstValueFrom(f.os.registryStatus$), 'connected')
+  assert.deepEqual(f.requests, [])
+})
+
+test('a same-version candidate from another OS registry cannot replace an update during device lookup', async t => {
+  const f = fixture(t, '0.4.0.2')
+  await f.load()
+  const modal = f.make(SystemUpdateModal)
+  const device = deferred()
+  f.api.rpc.server.deviceInfo = () => device.promise
+  const updating = modal.update()
+  await tick()
+  f.selectRegistry('https://other.test')
+  f.publish(catalog, { registry: 'https://other.test/' })
+  device.resolve({ os: { platform: 'x86_64' } })
+  await updating
+  await Promise.all(f.tasks)
+  assert.deepEqual(f.submissions, [])
+})
+
+const { Exver } = await import('@start9labs/shared')
+const { StorageService } = await import('src/app/services/storage.service')
+const { PackageIconService } =
+  await import('src/app/services/package-icon.service')
+const { PackageIconService: ProductionPackageIconService } =
+  await import('../src/app/services/package-icon.service.ts')
+const { default: MarketplacePage } =
+  await import('../src/app/routes/portal/routes/marketplace/marketplace.component.ts')
+const { RegistryRefresh } =
+  await import('../src/app/routes/portal/components/registry-retry.ts')
+
+const registryEntry = (version = '1.0.0:0', status = 'connected') => ({
+  status,
+  info: {
+    name: 'Cached registry',
+    categories: { bitcoin: { name: 'Bitcoin' } },
+    icon: null,
+  },
+  packages: {
+    example: {
+      categories: ['bitcoin'],
+      otherVersions: {},
+      best: { [version]: { title: version } },
+    },
+  },
+})
+
+function marketplaceFixture(t, entries = {}) {
+  const source = new Subject()
+  const connection = new BehaviorSubject(true)
+  const cache = new BehaviorSubject({
+    id: 1,
+    value: {
+      ui: {},
+      serverInfo: { registries: { 'https://registry.test': 'Saved name' } },
+      registryCache: entries,
+    },
+  })
+  const patch = new PatchDB(source, cache)
+  patch.start()
+  const queries = []
+  const responses = []
+  const refreshes = []
+  const connections = []
+  const iconRequests = []
+  const iconResponses = []
+  const storage = new Map()
+  const routes = []
+  const routeParams = new BehaviorSubject(
+    convertToParamMap({ registry: 'https://registry.test' }),
+  )
+  const injector = createEnvironmentInjector([
+    { provide: PatchDB, useValue: patch },
+    { provide: Exver, useValue: { getFlavor: () => null } },
+    {
+      provide: StorageService,
+      useValue: {
+        set: (key, value) => storage.set(key, value),
+        get: key => storage.get(key),
+      },
+    },
+    {
+      provide: ConfigService,
+      useValue: { defaultRegistry: 'https://registry.test' },
+    },
+    {
+      provide: Router,
+      useValue: { navigate: (_, extras) => routes.push(extras?.queryParams) },
+    },
+    { provide: ActivatedRoute, useValue: { queryParamMap: routeParams } },
+    {
+      provide: TaskService,
+      useValue: {
+        run: async task => {
+          await task()
+          return true
+        },
+      },
+    },
+    {
+      provide: PackageIconService,
+      useFactory: () => new ProductionPackageIconService(),
+    },
+    { provide: ConnectionService, useValue: connection },
+    { provide: MarketplaceService, useFactory: () => new MarketplaceService() },
+    {
+      provide: ApiService,
+      useValue: {
+        getStaticObjectUrl(url) {
+          iconRequests.push(url)
+          const response = deferred()
+          iconResponses.push(response)
+          return response.promise
+        },
+        rpc: {
+          server: {
+            registries: {
+              refresh: async params => {
+                refreshes.push(params)
+              },
+              add: async params => {
+                connections.push(params)
+                return []
+              },
+            },
+          },
+          registry: {
+            info: () => assert.fail('Registry info must come from PatchDB'),
+            package: {
+              get: params => {
+                queries.push(params)
+                const response = deferred()
+                responses.push(response)
+                return response.promise
+              },
+            },
+          },
+        },
+      },
+    },
+  ])
+  const service = injector.get(MarketplaceService)
+  let revision = 1
+  const subscriptions = []
+  t.after(() => {
+    subscriptions.forEach(subscription => subscription.unsubscribe())
+    injector.destroy()
+    patch.stop()
+  })
+  return {
+    service,
+    injector,
+    source,
+    cache,
+    connection,
+    queries,
+    responses,
+    refreshes,
+    connections,
+    iconRequests,
+    iconResponses,
+    storage,
+    routes,
+    routeParams,
+    makePage: () =>
+      runInInjectionContext(injector, () => new MarketplacePage()),
+    makeRefresh(url) {
+      const refresh = runInInjectionContext(
+        injector,
+        () => new RegistryRefresh(),
+      )
+      refresh.registryRefresh = () => url
+      return refresh
+    },
+    watch(observable) {
+      const values = []
+      subscriptions.push(observable.subscribe(value => values.push(value)))
+      return values
+    },
+    replace(path, value) {
+      source.next([{ id: ++revision, patch: [{ op: 'replace', path, value }] }])
+    },
+  }
+}
+
+test('registry availability distinguishes first sync, empty success and cached reconnect/error', async t => {
+  const { isRegistryLoading } = await import('@start9labs/marketplace')
+  const f = marketplaceFixture(t)
+  f.makePage()
+  const rows = f.watch(f.service.registries$)
+  const errors = f.watch(f.service.requestErrors$)
+  const stores = f.watch(f.service.currentRegistry$)
+  const info = f.watch(f.service.fetchInfo$('https://registry.test/'))
+  const packages = f.watch(f.service.getPackage$('missing', null, null))
+  assert.equal(rows.at(-1)[0].status, 'connecting')
+  assert.deepEqual(errors.at(-1), [])
+  const entry = { ...registryEntry(), status: 'connecting', packages: {} }
+  f.replace('/registryCache', { 'https://registry.test/': entry })
+  assert.equal(
+    isRegistryLoading(stores.at(-1).status, stores.at(-1).packages.length),
+    true,
+  )
+  assert.deepEqual(info, [])
+  assert.deepEqual(packages, [])
+  f.replace('/registryCache', {
+    'https://registry.test/': { ...entry, status: 'connected' },
+  })
+  assert.equal(
+    isRegistryLoading(stores.at(-1).status, stores.at(-1).packages.length),
+    false,
+  )
+  assert.equal(packages.at(-1), null)
+  assert.equal(info.length, 1)
+  for (const status of ['connected', 'connecting', 'error']) {
+    f.replace('/registryCache', {
+      'https://registry.test/': { ...registryEntry(), status },
+    })
+    assert.equal(stores.at(-1).packages.length, 1)
+    assert.equal(stores.at(-1).status, status)
+    assert.equal(
+      isRegistryLoading(status, stores.at(-1).packages.length),
+      false,
+    )
+    assert.deepEqual(
+      errors.at(-1),
+      status === 'error' ? ['https://registry.test/'] : [],
+    )
+  }
+  f.replace('/registryCache', {
+    'https://registry.test/': { ...entry, status: 'error' },
+  })
+  assert.equal(isRegistryLoading(stores.at(-1).status, 0), true)
+  assert.equal(rows.at(-1)[0].status, 'error')
+  f.replace('/registryCache', { 'https://registry.test/': entry })
+  assert.equal(rows.at(-1)[0].status, 'connecting')
+  assert.deepEqual(errors.at(-1), [])
+  assert.deepEqual(f.queries, [])
+})
+
+test('saved registries list the defaults first, in their declared order', t => {
+  const f = marketplaceFixture(t)
+  const rows = f.watch(f.service.registries$)
+  f.replace('/serverInfo/registries', {
+    'https://alpha.test/': 'Alpha',
+    'https://community.test/': 'Community',
+    'https://custom.test/': 'Custom',
+    'https://registry.test/': 'Start9',
+  })
+  assert.deepEqual(
+    rows.at(-1).map(row => row.name),
+    ['Start9', 'Community', 'Alpha', 'Custom'],
+  )
+})
+
+test('registry failures project exact details to both the current catalog and management rows', t => {
+  const f = marketplaceFixture(t)
+  f.makePage()
+  const rows = f.watch(f.service.registries$)
+  const stores = f.watch(f.service.currentRegistry$)
+  const message =
+    'TLS certificate verification failed\n<img src=x onerror=alert(1)>'
+  f.replace('/registryCache', {
+    'https://registry.test/': {
+      ...registryEntry(),
+      status: 'error',
+      error: message,
+    },
+  })
+  assert.equal(rows.at(-1)[0].error, message)
+  assert.equal(stores.at(-1).error, message)
+  assert.equal(stores.at(-1).packages.length, 1)
+  f.replace('/registryCache', {
+    'https://registry.test/': { ...registryEntry(), status: 'connecting' },
+  })
+  assert.equal(rows.at(-1)[0].error, undefined)
+  assert.equal(stores.at(-1).error, undefined)
+  assert.equal(stores.at(-1).packages.length, 1)
+  assert.deepEqual(f.queries, [])
+})
+
+test('malformed saved registries do not terminate valid registry listings or cache updates', async t => {
+  const entry = registryEntry()
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  const page = f.makePage()
+  const saved = f.watch(f.service.registries$)
+  const stores = f.watch(f.service.currentRegistry$)
+  f.replace('/serverInfo/registries', {
+    'https://user@invalid.test': 'Legacy URL',
+    'ftp://invalid.test': 'Invalid scheme',
+    'https://registry.test': 'Saved name',
+  })
+  await tick()
+  assert.deepEqual(saved.at(-1), [
+    {
+      url: 'https://registry.test/',
+      name: 'Saved name',
+      status: 'connected',
+      error: undefined,
+    },
+  ])
+  assert.equal(page.isRegistrySaved(), true)
+  assert.equal(stores.at(-1).packages.length, 1)
+
+  f.replace('/serverInfo/registries', { 'https://registry.test': 'Renamed' })
+  f.replace('/registryCache', {
+    'https://registry.test/': registryEntry('2.0.0:0'),
+  })
+  await tick()
+  assert.equal(saved.at(-1)[0].name, 'Renamed')
+  assert.equal(stores.at(-1).packages[0].version, '2.0.0:0')
+  assert.deepEqual(f.queries, [])
+})
+
+for (const status of ['connected', 'connecting', 'error']) {
+  test(`manual refresh queues synchronization while ${status} without connecting or querying`, async t => {
+    const url = 'https://registry.test/'
+    const f = marketplaceFixture(t, { [url]: registryEntry('1.0.0:0', status) })
+    await f.makeRefresh(url).refresh()
+    assert.deepEqual(f.refreshes, [{ url }])
+    assert.deepEqual(f.connections, [])
+    assert.deepEqual(f.queries, [])
+  })
+}
+
+test('the visible refresh action retries failed icons when the refreshed cache arrives and shares successful loads', async t => {
+  const entry = registryEntry()
+  const icon = 'blake3/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png'
+  entry.packages.example.best['1.0.0:0'].icon = icon
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  f.makePage()
+  const refresh = f.makeRefresh('https://registry.test/')
+  const visible = f.watch(
+    f.service.currentRegistry$.pipe(
+      switchMap(store =>
+        f.service.fetchIcon$(store.url, store.packages[0].icon),
+      ),
+    ),
+  )
+  assert.equal(f.iconRequests.length, 1)
+  f.iconResponses[0].reject(new Error('Icon temporarily unavailable'))
+  await tick()
+  assert.equal(visible.at(-1), 'fallback.png')
+  await refresh.refresh()
+  assert.deepEqual(f.refreshes, [{ url: 'https://registry.test/' }])
+  assert.deepEqual(f.connections, [])
+  assert.equal(f.iconRequests.length, 1)
+
+  f.replace('/registryCache', {
+    'https://registry.test/': { ...entry, status: 'error' },
+  })
+  assert.equal(f.iconRequests.length, 2)
+  assert.equal(f.iconRequests[1], f.iconRequests[0])
+  f.iconResponses[1].resolve('blob:recovered-icon')
+  await tick()
+  assert.equal(visible.at(-1), 'blob:recovered-icon')
+  f.replace('/registryCache', {
+    'https://registry.test/': { ...entry, status: 'connected' },
+  })
+  await tick()
+  assert.equal(visible.at(-1), 'blob:recovered-icon')
+  assert.equal(f.iconRequests.length, 2)
+  assert.deepEqual(f.queries, [])
+})
+
+test('unsaved registry navigation requires explicit connection and malformed URLs do not end route updates', async t => {
+  const f = marketplaceFixture(t)
+  f.routeParams.next(
+    convertToParamMap({ registry: 'https://unsaved.test/catalog' }),
+  )
+  const page = f.makePage()
+  assert.equal(page.invalidRegistry(), false)
+  assert.equal(page.isRegistrySaved(), false)
+  assert.equal(page.selectedRegistry(), 'https://unsaved.test/catalog/')
+  assert.deepEqual(f.connections, [])
+  assert.deepEqual(f.queries, [])
+  await page.connectRegistry()
+  assert.deepEqual(f.connections, [
+    { url: 'https://unsaved.test/catalog/', name: null },
+  ])
+  assert.equal(page.isRegistrySaved(), false)
+  assert.equal(
+    f.storage.get('selectedRegistry'),
+    'https://unsaved.test/catalog/',
+  )
+  f.replace('/serverInfo/registries', {
+    'https://unsaved.test/catalog/': 'Saved',
+  })
+  assert.equal(page.isRegistrySaved(), true)
+
+  for (const registry of [
+    'https://user:password@bad.test/',
+    'ftp://bad.test',
+    'https://bad.test/?query',
+  ]) {
+    f.routeParams.next(convertToParamMap({ registry }))
+    assert.equal(page.invalidRegistry(), true)
+  }
+  f.routeParams.next(
+    convertToParamMap({ registry: 'https://unsaved.test/catalog' }),
+  )
+  assert.equal(page.invalidRegistry(), false)
+  assert.equal(page.isRegistrySaved(), true)
+  assert.equal(f.connections.length, 1)
+})
+
+test('a remembered registry the server no longer saves falls back to the default', async t => {
+  const f = marketplaceFixture(t)
+  f.storage.set('selectedRegistry', 'https://removed.test/')
+  f.routeParams.next(convertToParamMap({}))
+  f.makePage()
+  await tick()
+  assert.deepEqual(f.routes.at(-1), { registry: 'https://registry.test' })
+  assert.equal(f.storage.get('selectedRegistry'), null)
+
+  f.storage.set('selectedRegistry', 'https://registry.test/')
+  f.routeParams.next(convertToParamMap({}))
+  await tick()
+  assert.deepEqual(f.routes.at(-1), { registry: 'https://registry.test/' })
+  assert.equal(f.storage.get('selectedRegistry'), 'https://registry.test/')
+})
+
+test('a pending remembered-registry fallback yields to an explicit route selection', async t => {
+  const f = marketplaceFixture(t)
+  const dump = f.cache.value
+  f.cache.next({ id: 0, value: {} })
+  f.storage.set('selectedRegistry', 'https://removed.test/')
+  f.routeParams.next(convertToParamMap({}))
+  const page = f.makePage()
+  assert.deepEqual(f.routes, [])
+
+  f.routeParams.next(convertToParamMap({ registry: 'https://explicit.test/' }))
+  f.source.next([dump])
+  await tick()
+  assert.equal(page.selectedRegistry(), 'https://explicit.test/')
+  assert.deepEqual(f.routes, [])
+  assert.equal(f.storage.get('selectedRegistry'), 'https://removed.test/')
+})
+
+test('destroying the marketplace page cancels its pending remembered-registry fallback', async t => {
+  const f = marketplaceFixture(t)
+  const dump = f.cache.value
+  f.cache.next({ id: 0, value: {} })
+  f.storage.set('selectedRegistry', 'https://removed.test/')
+  f.routeParams.next(convertToParamMap({}))
+  const pageInjector = createEnvironmentInjector([], f.injector)
+  t.after(() => {
+    if (!pageInjector.destroyed) pageInjector.destroy()
+  })
+  runInInjectionContext(pageInjector, () => new MarketplacePage())
+  pageInjector.destroy()
+
+  f.source.next([dump])
+  await tick()
+  assert.deepEqual(f.routes, [])
+  assert.equal(f.storage.get('selectedRegistry'), 'https://removed.test/')
+})
+
+test('marketplace lists and metadata stream from canonical cache keys without navigation fetches', async t => {
+  const f = marketplaceFixture(t)
+  const stores = f.watch(f.service.marketplace$)
+  const errors = f.watch(f.service.requestErrors$)
+  const current = f.watch(f.service.currentRegistry$)
+  await f.service.connect('https://registry.test')
+  assert.deepEqual(stores.at(-1), { 'https://registry.test/': null })
+  assert.deepEqual(errors.at(-1), [])
+  assert.deepEqual(current, [])
+  f.replace('/registryCache', { 'https://registry.test/': registryEntry() })
+  assert.equal(
+    stores.at(-1)['https://registry.test/'].packages[0].version,
+    '1.0.0:0',
+  )
+  assert.equal(current.at(-1).info.name, 'Cached registry')
+  assert.deepEqual(
+    (await firstValueFrom(f.service.fetchInfo$('https://registry.test/')))
+      .categories.all,
+    { name: 'All' },
+  )
+  assert.equal(
+    (await firstValueFrom(f.service.getPackage$('example', null, null)))
+      .version,
+    '1.0.0:0',
+  )
+  f.replace('/registryCache', {
+    'https://registry.test/': registryEntry('2.0.0:0', 'error'),
+  })
+  assert.equal(current.at(-1).packages[0].version, '2.0.0:0')
+  assert.deepEqual(errors.at(-1), ['https://registry.test/'])
+  f.replace('/registryCache/https:~1~1registry.test~1/status', 'connected')
+  assert.deepEqual(errors.at(-1), [])
+  await f.service.connect('https://registry.test')
+  f.replace('/serverInfo/registries', {})
+  assert.deepEqual(stores.at(-1), {})
+  assert.deepEqual(f.queries, [])
+})
+
+test('connection changes do not refetch an unchanged exact package query', async t => {
+  const entry = registryEntry()
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  const values = f.watch(
+    f.service.fetchPackage$(
+      'https://registry.test/',
+      'example',
+      '1.0.0:0',
+      null,
+    ),
+  )
+  assert.equal(f.queries.length, 1)
+  f.responses[0].resolve(entry.packages.example)
+  await tick()
+  assert.equal(values.at(-1).version, '1.0.0:0')
+  f.connection.next(false)
+  assert.equal(f.queries.length, 1)
+  f.connection.next(true)
+  assert.equal(f.queries.length, 1)
+})
+
+test('exact/source package queries wait for and track their registry cache, ignoring other registry changes and stale responses', async t => {
+  const f = marketplaceFixture(t)
+  const values = f.watch(
+    f.service.fetchPackage$(
+      'https://registry.test',
+      'example',
+      '1.0.0:0',
+      null,
+      '0.9.0:0',
+    ),
+  )
+  assert.deepEqual(f.queries, [])
+  const initial = registryEntry()
+  f.replace('/registryCache', { 'https://registry.test/': initial })
+  assert.deepEqual(f.queries, [
+    {
+      registry: 'https://registry.test',
+      id: 'example',
+      targetVersion: '=1.0.0:0',
+      sourceVersion: '0.9.0:0',
+      otherVersions: 'short',
+    },
+  ])
+  f.replace('/registryCache', {
+    'https://registry.test/': initial,
+    'https://other.test/': registryEntry(),
+  })
+  assert.equal(f.queries.length, 1)
+  f.replace(
+    '/registryCache/https:~1~1registry.test~1',
+    registryEntry('2.0.0:0', 'error'),
+  )
+  assert.equal(f.queries.length, 2)
+  f.responses[1].resolve(registryEntry().packages.example)
+  await tick()
+  assert.equal(values.at(-1).version, '1.0.0:0')
+  f.responses[0].resolve({ ...registryEntry().packages.example, best: {} })
+  await tick()
+  assert.equal(values.at(-1).version, '1.0.0:0')
+})
+
+function fakeIndexedDb() {
+  let data = { values: new Map(), meta: new Map() }
+  const control = { fail: false, puts: [] }
+  const db = {
+    transaction(_, mode) {
+      const staged = { values: new Map(data.values), meta: new Map(data.meta) }
+      const tx = {
+        objectStore: name => ({
+          get: key => {
+            const request = { result: staged[name].get(key) }
+            queueMicrotask(() => request.onsuccess?.())
+            return request
+          },
+          getAll: () => ({ result: [...staged[name].values()] }),
+          getAllKeys: () => ({ result: [...staged[name].keys()] }),
+          put: (value, key) => {
+            if (name === 'values') control.puts.push(key)
+            staged[name].set(key, structuredClone(value))
+          },
+          delete: key => staged[name].delete(key),
+          clear: () => staged[name].clear(),
+        }),
+      }
+      queueMicrotask(() => {
+        queueMicrotask(() => {
+          if (mode === 'readwrite' && control.fail) {
+            control.fail = false
+            tx.error = new Error('quota')
+            tx.onerror()
+          } else {
+            if (mode === 'readwrite') data = staged
+            tx.oncomplete()
+          }
+        })
+      })
+      return tx
+    },
+  }
+  const win = {
+    indexedDB: {
+      open: () => {
+        const request = {}
+        queueMicrotask(() => {
+          request.result = db
+          request.onsuccess()
+        })
+        return request
+      },
+    },
+  }
+  return { win, control }
+}
+
+async function patchDbCache(t, win) {
+  const { PatchDbCache } =
+    await import('src/app/services/patch-db/patch-db-cache')
+  const injector = createEnvironmentInjector([
+    { provide: WA_WINDOW, useValue: win },
+  ])
+  t.after(() => injector.destroy())
+  return runInInjectionContext(injector, () => new PatchDbCache())
+}
+
+test('patch cache rewrites only replaced top-level values', async t => {
+  const { win, control } = fakeIndexedDb()
+  t.mock.method(console, 'error', () => {})
+  const writer = await patchDbCache(t, win)
+  assert.deepEqual(await writer.read(), { id: 0, value: {} })
+  writer.epoch = 'boot'
+  await writer.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
+  assert.deepEqual(control.puts, ['ui', 'packageData'])
+
+  const reader = await patchDbCache(t, win)
+  const cached = await reader.read()
+  assert.deepEqual(cached, {
+    id: 3,
+    value: { ui: { a: 1 }, packageData: {} },
+  })
+  assert.equal(reader.epoch, 'boot')
+  control.puts = []
+  await reader.write({
+    id: 4,
+    value: { ...cached.value, packageData: { x: 1 } },
+  })
+  assert.deepEqual(control.puts, ['packageData'])
+  await reader.write({ id: 5, value: { ui: cached.value.ui } })
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 5,
+    value: { ui: { a: 1 } },
+  })
+})
+
+test('patch cache keeps a complete snapshot when another tab advances the stored revision', async t => {
+  const { win } = fakeIndexedDb()
+  const fast = await patchDbCache(t, win)
+  const slow = await patchDbCache(t, win)
+  await fast.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
+  const cached = await slow.read()
+  await fast.write({
+    id: 5,
+    value: { ui: { a: 3 }, packageData: { x: 1 } },
+  })
+  const delayed = {
+    id: 4,
+    value: { ui: { a: 2 }, packageData: cached.value.packageData },
+  }
+  await slow.write(delayed)
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), delayed)
+})
+
+test('patch cache rewrites every key when another tab stored the same revision from another epoch', async t => {
+  const { win } = fakeIndexedDb()
+  const rebooted = await patchDbCache(t, win)
+  const stale = await patchDbCache(t, win)
+  rebooted.epoch = 'boot-1'
+  await rebooted.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
+  const cached = await stale.read()
+  rebooted.epoch = 'boot-2'
+  await rebooted.write({
+    id: 3,
+    value: { ui: { a: 9 }, packageData: { x: 9 } },
+  })
+  const delayed = {
+    id: 4,
+    value: { ui: { a: 2 }, packageData: cached.value.packageData },
+  }
+  await stale.write(delayed)
+  const reader = await patchDbCache(t, win)
+  assert.deepEqual(await reader.read(), delayed)
+  assert.equal(reader.epoch, 'boot-1')
+})
+
+test('patch cache restores every key after another tab clears the snapshot', async t => {
+  const { win } = fakeIndexedDb()
+  const active = await patchDbCache(t, win)
+  const other = await patchDbCache(t, win)
+  const value = { ui: { a: 1 }, packageData: { x: 1 } }
+  await active.write({ id: 3, value })
+  await other.clear()
+  const next = { id: 4, value: { ...value, ui: { a: 2 } } }
+  await active.write(next)
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), next)
+})
+
+test('patch cache discards its snapshot after a failed write and clears on demand', async t => {
+  const { win, control } = fakeIndexedDb()
+  t.mock.method(console, 'error', () => {})
+  const cache = await patchDbCache(t, win)
+  cache.epoch = 'boot'
+  const value = { ui: { a: 1 }, packageData: {} }
+  await cache.write({ id: 3, value })
+  control.fail = true
+  await cache.write({ id: 4, value: { ...value, ui: { a: 2 } } })
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 0,
+    value: {},
+  })
+  control.puts = []
+  await cache.write({ id: 5, value })
+  assert.deepEqual(control.puts, ['ui', 'packageData'])
+  await cache.clear()
+  assert.equal(cache.epoch, null)
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 0,
+    value: {},
+  })
 })

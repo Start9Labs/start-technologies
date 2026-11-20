@@ -189,10 +189,6 @@ concurrency:
 jobs:
   tag:
     uses: Start9Labs/start-technologies/.github/workflows/tagAndRelease.yml@master
-    with:
-      REFERENCE_REGISTRY: ${{ vars.REFERENCE_REGISTRY }}
-      RELEASE_REGISTRY: ${{ vars.RELEASE_REGISTRY }}
-      S3_S9PKS_BASE_URL: ${{ vars.S3_S9PKS_BASE_URL }}
     secrets:
       DEV_KEY: ${{ secrets.DEV_KEY }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
@@ -200,6 +196,8 @@ jobs:
     permissions:
       contents: write
 ```
+
+The reusable workflows read `REFERENCE_REGISTRY`, `RELEASE_REGISTRY`, `S3_S9PKS_BASE_URL` and `REGISTRY_PROXY` from the calling repository's variables, including organization variables. Set them there; pass an input of the same name under `with:` only to override one for a single repo's workflow. Secrets are not read this way and must still be passed.
 
 **release.yml** -- publishes on manual tag push, for re-releases or testing. This workflow only triggers on manually pushed tags — tags created by tagAndRelease (via `GITHUB_TOKEN`) do not trigger it:
 
@@ -214,9 +212,6 @@ on:
 jobs:
   release:
     uses: Start9Labs/start-technologies/.github/workflows/release.yml@master
-    with:
-      RELEASE_REGISTRY: ${{ vars.RELEASE_REGISTRY }}
-      S3_S9PKS_BASE_URL: ${{ vars.S3_S9PKS_BASE_URL }}
     secrets:
       DEV_KEY: ${{ secrets.DEV_KEY }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
@@ -224,6 +219,8 @@ jobs:
     permissions:
       contents: write
 ```
+
+To publish to registries served over Tor, run a Tor SOCKS proxy the runners can reach and set `REGISTRY_PROXY` to its URL, such as `socks5h://tor-proxy.example:9050`. The `socks5h` scheme resolves names through the proxy, which `.onion` addresses require. Both workflows then route every `start-cli` registry request through it. The workflows do not start a proxy themselves.
 
 **syncNext.yml** -- carries every change that lands on the base branch onto the paired `next` iteration branch, so `next` never falls behind what has already shipped:
 
@@ -243,7 +240,7 @@ jobs:
       pull-requests: write
 ```
 
-The paired branch is derived rather than configured: an explicit `next/<base>` is used where one exists — that is how the multi-branch packages keep one iteration branch per major line or flavor — and otherwise the repo's default branch pairs with a plain `next`. **A repo with no `next` gets one created at the base tip on the first run**, so a package never has to be seeded by hand.
+The paired branch is derived rather than configured: a repo with any `next/<line>` branch pairs every base with its own `next/<base>` — that is how the multi-branch packages keep one iteration branch per major line or flavor, including a new line that just became the default branch — and otherwise the repo's default branch pairs with a plain `next`. **A repo with no `next` gets one created at the base tip on the first run**, so a package never has to be seeded by hand.
 
 Neither `next` nor the base branch is force-pushed or rewritten. `next` is fast-forwarded when it is merely behind, given a merge commit when it carries unmerged work, and left untouched with a pull request opened for a human only when that merge conflicts. That pull request is headed by a throwaway `sync-next/<base>` branch rather than the base itself, so resolving its conflicts in GitHub's web editor — which commits to the head branch — cannot land on the base. **Merge it with a merge commit rather than a squash**, so `next` comes out with the base as an ancestor; a squash leaves equivalent content under a fresh commit and the following sync conflicts all over again. `workflow_dispatch` is there so a package can be brought into line without waiting for its next merge.
 

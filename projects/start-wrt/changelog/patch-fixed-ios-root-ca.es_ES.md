@@ -1,1 +1,0 @@
-- Los iPhone y iPad pueden instalar la CA raíz de un router configurado antes de StartWRT 1.2.0. Su huella digital cambia con la actualización, y los dispositivos que ya confían en ella siguen confiando en el router.

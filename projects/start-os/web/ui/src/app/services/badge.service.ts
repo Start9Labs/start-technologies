@@ -6,31 +6,31 @@ import { HiddenUpdatesService } from 'src/app/services/hidden-updates.service'
 import { LocalPackagesService } from 'src/app/services/local-packages.service'
 import { NotificationService } from 'src/app/services/notification.service'
 import { OSService } from 'src/app/services/os.service'
+import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { UpdatesRefinementService } from 'src/app/services/updates-refinement.service'
 import { FilterUpdatesPipe } from '../routes/portal/routes/updates/filter-updates.pipe'
 
+/** Counts tally pending items; warnings flag conditions that need attention. */
 @Injectable({
   providedIn: 'root',
 })
 export class BadgeService {
   private readonly notifications = inject(NotificationService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-  private readonly system$ = inject(OSService).updateAvailable$.pipe(
-    map(Number),
-  )
+  private readonly system$ = inject(OSService).showUpdate$.pipe(map(Number))
   private readonly metrics$ = this.patch
     .watch$('serverInfo', 'ntpSynced')
-    .pipe(map(synced => Number(!synced)))
+    .pipe(map(synced => !synced))
   private readonly filterUpdatesPipe = inject(FilterUpdatesPipe)
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
   private readonly refinement = inject(UpdatesRefinementService)
 
-  // Counts over the *refined* marketplace so the badge reflects the same
-  // reachable-updates set the Updates tab displays. Subscribing here also
-  // keeps the refinement pipeline warm for the lifetime of the navbar, which
-  // is what lets the Updates tab replay the already-resolved state on mount
-  // instead of running refinement again on each navigation.
+  private readonly registryErrors$ = inject(
+    MarketplaceService,
+  ).requestErrors$.pipe(map(errors => errors.length > 0))
+
+  // The navbar keeps refinement warm across Updates navigation.
   private readonly updates$ = combineLatest([
     this.refinement.refined$,
     inject(LocalPackagesService),
@@ -65,9 +65,20 @@ export class BadgeService {
   )
 
   getWarning(id: string): Observable<boolean> {
-    return id === 'system' || id === 'backup-targets'
-      ? this.backups$
-      : of(false)
+    switch (id) {
+      case 'system':
+        return combineLatest([this.backups$, this.registryErrors$]).pipe(
+          map(([backups, registries]) => backups || registries),
+        )
+      case 'backup-targets':
+        return this.backups$
+      case 'registries':
+        return this.registryErrors$
+      case 'metrics':
+        return this.metrics$
+      default:
+        return of(false)
+    }
   }
 
   getCount(id: string): Observable<number> {
@@ -76,8 +87,6 @@ export class BadgeService {
         return this.updates$
       case 'system':
         return this.system$
-      case 'metrics':
-        return this.metrics$
       case 'notifications':
         return this.notifications.unreadCount$
       default:
