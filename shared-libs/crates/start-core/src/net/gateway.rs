@@ -280,7 +280,7 @@ pub(crate) fn wireguard_config_domains(config: &str) -> Result<OrdSet<InternedSt
 }
 
 /// The explicit `wireguard.mtu` of NetworkManager settings; None for automatic.
-fn settings_wireguard_mtu(
+pub(crate) fn settings_wireguard_mtu(
     settings: &HashMap<String, HashMap<String, OwnedValue>>,
 ) -> Result<Option<u32>, Error> {
     let Some(mtu) = settings.get("wireguard").and_then(|wg| wg.get("mtu")) else {
@@ -288,6 +288,17 @@ fn settings_wireguard_mtu(
     };
     let mtu = mtu.downcast_ref::<u32>().with_kind(ErrorKind::Network)?;
     Ok((mtu != 0).then_some(mtu))
+}
+
+pub(crate) fn settings_uuid(
+    settings: &HashMap<String, HashMap<String, OwnedValue>>,
+) -> Option<String> {
+    settings
+        .get("connection")?
+        .get("uuid")?
+        .downcast_ref::<zbus::zvariant::Str>()
+        .ok()
+        .map(|uuid| uuid.to_string())
 }
 
 fn settings_endpoint_domains(
@@ -595,18 +606,12 @@ pub(crate) async fn update_wireguard_config(interface: &str, config: &str) -> Re
 
     // Preserve the connection's uuid so this updates the existing profile rather
     // than defining a new one.
-    let existing = settings.get_settings().await?;
-    let uuid = existing
-        .get("connection")
-        .and_then(|c| c.get("uuid"))
-        .and_then(|u| u.downcast_ref::<zbus::zvariant::Str>().ok())
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            Error::new(
-                eyre!("{interface} connection is missing its uuid"),
-                ErrorKind::Network,
-            )
-        })?;
+    let uuid = settings_uuid(&settings.get_settings().await?).ok_or_else(|| {
+        Error::new(
+            eyre!("{interface} connection is missing its uuid"),
+            ErrorKind::Network,
+        )
+    })?;
 
     settings
         .update2(
@@ -1253,7 +1258,7 @@ impl SetOutboundGatewayParams {
     default_service = "org.freedesktop.NetworkManager",
     default_path = "/org/freedesktop/NetworkManager"
 )]
-trait NetworkManager {
+pub(crate) trait NetworkManager {
     fn get_device_by_ip_iface(&self, iface: &str) -> Result<OwnedObjectPath, Error>;
 
     /// Add a persistent connection from the given settings and activate it in one
@@ -1270,6 +1275,9 @@ trait NetworkManager {
     fn all_devices(&self) -> Result<Vec<OwnedObjectPath>, Error>;
 
     #[zbus(property)]
+    fn active_connections(&self) -> Result<Vec<OwnedObjectPath>, Error>;
+
+    #[zbus(property)]
     fn startup(&self) -> Result<bool, Error>;
 
     #[zbus(signal)]
@@ -1282,7 +1290,7 @@ trait NetworkManager {
     fn state_changed(&self) -> Result<(), Error>;
 }
 
-mod active_connection {
+pub(crate) mod active_connection {
     use zbus::proxy;
     use zbus::zvariant::OwnedObjectPath;
 
@@ -1314,10 +1322,19 @@ mod active_connection {
 }
 
 #[proxy(
+    interface = "org.freedesktop.NetworkManager.Settings",
+    default_service = "org.freedesktop.NetworkManager",
+    default_path = "/org/freedesktop/NetworkManager/Settings"
+)]
+pub(crate) trait NmSettings {
+    fn list_connections(&self) -> Result<Vec<OwnedObjectPath>, Error>;
+}
+
+#[proxy(
     interface = "org.freedesktop.NetworkManager.Settings.Connection",
     default_service = "org.freedesktop.NetworkManager"
 )]
-trait ConnectionSettings {
+pub(crate) trait ConnectionSettings {
     fn delete(&self) -> Result<(), Error>;
 
     fn get_settings(&self) -> Result<HashMap<String, HashMap<String, OwnedValue>>, Error>;
