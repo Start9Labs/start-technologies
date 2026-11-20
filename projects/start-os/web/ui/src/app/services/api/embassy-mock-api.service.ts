@@ -923,8 +923,8 @@ export class MockApiService extends ApiService implements StartupApiService {
     },
     'ssh.list': async () => {
       await pauseFor(2000)
-      return Object.entries(mockPatchData.sshPubkeys).map(([fingerprint, key]) =>
-        this.mockSshKey(fingerprint, key),
+      return Object.entries(mockPatchData.sshPubkeys).map(
+        ([fingerprint, key]) => this.mockSshKey(fingerprint, key),
       )
     },
     'ssh.add': async ({ key }) => {

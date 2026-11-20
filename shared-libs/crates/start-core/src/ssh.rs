@@ -344,7 +344,8 @@ pub async fn sync_pubkeys<P: AsRef<Path>>(pubkeys: &SshKeys, ssh_dir: P) -> Resu
 mod tests {
     use super::*;
 
-    const KEY: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMcFf+jmv4w+tRbA1aXDvovqViM0NVRu86Hk5kcQItfI laptop";
+    const KEY: &str =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMcFf+jmv4w+tRbA1aXDvovqViM0NVRu86Hk5kcQItfI laptop";
 
     #[test]
     fn reauthorization_updates_the_comment_without_changing_timestamps() {
@@ -355,9 +356,10 @@ mod tests {
             created_at: "2020-01-01T00:00:00Z".parse().unwrap(),
             updated_at: "2021-01-01T00:00:00Z".parse().unwrap(),
         };
-        let mut keys = Model::new(&SshKeys::from(BTreeMap::from([
-            (fingerprint.clone(), original.clone()),
-        ])))
+        let mut keys = Model::new(&SshKeys::from(BTreeMap::from([(
+            fingerprint.clone(),
+            original.clone(),
+        )])))
         .unwrap();
         let response = keys
             .authorize(KEY.replace("laptop", "desktop").parse().unwrap())
@@ -386,7 +388,9 @@ mod tests {
         assert_eq!(first.created_at, retry.created_at);
         assert_eq!(keys.de().unwrap().0.len(), 1);
         assert_eq!(
-            tokio::fs::read_to_string(ssh_dir.join("authorized_keys")).await.unwrap(),
+            tokio::fs::read_to_string(ssh_dir.join("authorized_keys"))
+                .await
+                .unwrap(),
             format!("{KEY}\n")
         );
     }

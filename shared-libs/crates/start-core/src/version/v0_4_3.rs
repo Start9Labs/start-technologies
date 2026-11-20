@@ -76,7 +76,10 @@ mod tests {
         });
         let original = db.clone();
         Version.up(&mut db, ()).unwrap();
-        assert_eq!(db["public"]["sshPubkeys"], original["private"]["sshPubkeys"]);
+        assert_eq!(
+            db["public"]["sshPubkeys"],
+            original["private"]["sshPubkeys"]
+        );
         assert!(db["private"].get("sshPubkeys").is_none());
         assert_eq!(db["private"]["sshPrivkey"], json!("private-key"));
         assert_eq!(db["public"]["ui"], original["public"]["ui"]);
@@ -91,14 +94,14 @@ mod tests {
     async fn same_version_upgrade_moves_legacy_keys_before_database_decode() {
         use crate::db::model::Database;
 
-        let account = crate::account::AccountInfo::new(
-            "password",
-            std::time::SystemTime::now(),
-            None,
-        )
-        .unwrap();
+        let account =
+            crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
+                .unwrap();
         let mut fixture = to_value(&Database::init(&account, false, None, None).unwrap()).unwrap();
-        fixture["public"].as_object_mut().unwrap().remove("sshPubkeys");
+        fixture["public"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sshPubkeys");
         fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(0);
         fixture["private"]["sshPubkeys"] = json!({});
         let db = PatchDb::in_memory();
@@ -107,7 +110,10 @@ mod tests {
         let migrated = db.dump(&ROOT).await.value;
         assert_eq!(migrated["public"]["sshPubkeys"], json!({}));
         assert!(migrated["private"].get("sshPubkeys").is_none());
-        assert_eq!(migrated["public"]["serverInfo"]["latestMigrationRevision"], json!(1));
+        assert_eq!(
+            migrated["public"]["serverInfo"]["latestMigrationRevision"],
+            json!(1)
+        );
         Version.pre_init(&db).await.unwrap();
         assert_eq!(db.dump(&ROOT).await.value, migrated);
     }
