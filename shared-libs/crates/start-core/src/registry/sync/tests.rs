@@ -808,3 +808,99 @@ async fn watch_applies_scoped_revisions_and_answers_heartbeats_on_reconnect() {
         );
     }
 }
+
+fn install(db: &mut DatabaseModel, version: &str) {
+    db.as_public_mut()
+        .as_package_data_mut()
+        .as_value_mut()
+        .as_object_mut()
+        .unwrap()
+        .insert(
+            "test".into(),
+            json!({ "stateInfo": { "state": "installed", "manifest": {
+                "id": "test", "title": "Test", "version": version
+            }}}),
+        );
+}
+
+fn update_target(db: &DatabaseModel) -> Option<String> {
+    db.as_public()
+        .as_registry_cache()
+        .as_idx(&url())
+        .unwrap()
+        .de()
+        .unwrap()
+        .update_targets
+        .get(&"test".parse::<crate::PackageId>().unwrap())
+        .map(|target| target.version.to_string())
+}
+
+#[test]
+fn update_targets_follow_the_installed_version_through_migration_and_os_ranges() {
+    let mut db = database();
+    let mut index = index();
+    let mut newer_os: crate::registry::package::index::PackageVersionInfo = serde_json::from_value(
+        serde_json::to_value(
+            &index.package.packages[&"test".parse::<crate::PackageId>().unwrap()].versions
+                [&"2.0.0:0".parse::<crate::util::VersionString>().unwrap()],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    newer_os.metadata.os_version = "0.5.0".parse().unwrap();
+    newer_os.source_version = None;
+    index
+        .package
+        .packages
+        .get_mut(&"test".parse::<crate::PackageId>().unwrap())
+        .unwrap()
+        .versions
+        .insert("3.0.0:0".parse().unwrap(), newer_os);
+    let mut device = device();
+    device.os.compat = "<=0.4.0.5".parse().unwrap();
+    publish_snapshot(
+        &mut db,
+        &Subscription::Index(url()),
+        &to_value(&index).unwrap(),
+        &device,
+    )
+    .unwrap();
+    let cache = db
+        .as_public()
+        .as_registry_cache()
+        .as_idx(&url())
+        .unwrap()
+        .de()
+        .unwrap();
+    assert!(
+        cache.packages["test"]
+            .best
+            .contains_key(&"3.0.0:0".parse::<crate::util::VersionString>().unwrap())
+    );
+    let listed = cached_response(
+        &db,
+        &url(),
+        "package.get",
+        &json!({"id":"test", "targetVersion":"=3.0.0:0", "otherVersions":"none"}),
+        Some(&device),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(listed["best"]["3.0.0:0"].is_object());
+    for (installed, target) in [
+        ("0.9.0:0", Some("1.0.0:0")),
+        ("1.0.0:0", None),
+        ("1.6.0:0", Some("2.0.0:0")),
+        ("#knots:1.6.0:0", None),
+    ] {
+        install(&mut db, installed);
+        refresh_update_targets(&mut db, &device).unwrap();
+        assert_eq!(update_target(&db).as_deref(), target, "{installed}");
+    }
+    db.as_public_mut()
+        .as_package_data_mut()
+        .ser(&Default::default())
+        .unwrap();
+    refresh_update_targets(&mut db, &device).unwrap();
+    assert_eq!(update_target(&db), None);
+}

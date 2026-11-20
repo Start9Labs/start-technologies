@@ -45,6 +45,19 @@ impl DeviceInfo {
             hardware: Some(HardwareInfo::load(ctx).await?),
         })
     }
+
+    /// Also admits releases built for a newer StartOS, which listings show but install rejects.
+    pub fn for_listing(&self) -> Self {
+        let mut device = self.clone();
+        device.os.compat = exver::VersionRange::or(
+            device.os.compat,
+            exver::VersionRange::anchor(
+                exver::GT,
+                exver::ExtendedVersion::new(device.os.version.clone(), Default::default()),
+            ),
+        );
+        device
+    }
 }
 impl DeviceInfo {
     pub fn to_header_value(&self) -> HeaderValue {

@@ -7292,6 +7292,14 @@ export const PackageInfo: z.ZodIntersection<
   .meta({
     id: 'PackageInfo',
   })
+export const PackageUpdateTarget: z.ZodIntersection<
+  z.ZodObject<{ version: typeof Version }>,
+  typeof PackageVersionInfo
+> = /* @__PURE__ */ z
+  .intersection(object({ version: Version }), PackageVersionInfo)
+  .meta({
+    id: 'PackageUpdateTarget',
+  })
 
 /**
  * A contiguous binding keyed by its internal start port in [`BindingRanges`].
@@ -7459,6 +7467,13 @@ export const RegistryCache: z.ZodObject<{
    * Failure of the latest synchronization attempt; absent while connecting or connected.
    */
   error: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  /**
+   * Newest installable release of each installed package's flavor that its installed version can migrate to.
+   */
+  updateTargets: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof PackageUpdateTarget>>,
+    z.ZodRecord<z.ZodString, typeof PackageUpdateTarget>
+  >
 }> = /* @__PURE__ */ object({
   info: RegistryInfo,
   packages: z.record(z.string(), GetPackageResponse),
@@ -7469,6 +7484,16 @@ export const RegistryCache: z.ZodObject<{
   error: z.string().nullable().optional().meta({
     description:
       'Failure of the latest synchronization attempt; absent while connecting or connected.',
+  }),
+  /**
+   * Newest installable release of each installed package's flavor that its installed version can migrate to.
+   */
+  updateTargets: wire(
+    z.record(z.string(), PackageUpdateTarget).optional(),
+    z.record(z.string(), PackageUpdateTarget),
+  ).meta({
+    description:
+      "Newest installable release of each installed package's flavor that its installed version can migrate to.",
   }),
 }).meta({
   id: 'RegistryCache',

@@ -1602,6 +1602,10 @@ export type LegacyProxySslOptionsInput = z.input<
 >
 export type PackageInfo = z.output<typeof schemas.PackageInfo>
 export type PackageInfoInput = z.input<typeof schemas.PackageInfo>
+export type PackageUpdateTarget = z.output<typeof schemas.PackageUpdateTarget>
+export type PackageUpdateTargetInput = z.input<
+  typeof schemas.PackageUpdateTarget
+>
 
 /**
  * A contiguous binding keyed by its internal start port in [`BindingRanges`].

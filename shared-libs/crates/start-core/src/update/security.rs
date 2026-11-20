@@ -5,6 +5,7 @@ use exver::{Version, VersionRange};
 use imbl_value::InternedString;
 use url::Url;
 
+use crate::PackageId;
 use crate::db::model::DatabaseModel;
 use crate::db::model::package::{ManifestPreference, PackageStateMatchModelRef};
 use crate::notifications::{
@@ -14,6 +15,7 @@ use crate::notifications::{
 use crate::prelude::*;
 use crate::registry::os::index::OsIndex;
 use crate::registry::package::get::{GetPackageResponse, GetPackagesResponse};
+use crate::registry::sync::UpdateTargets;
 use crate::s9pk::git_hash::GitHash;
 use crate::util::VersionString;
 
@@ -133,12 +135,34 @@ fn security_versions(response: Option<&GetPackageResponse>) -> BTreeSet<&Version
         .collect()
 }
 
-/// Announces each installed service's security releases absent from the registry's previous cache.
+/// Security releases an update to the package's update target would install.
+fn pending_security<'a>(
+    packages: &'a GetPackagesResponse,
+    targets: &UpdateTargets,
+    id: &PackageId,
+    installed: &VersionString,
+) -> BTreeSet<&'a VersionString> {
+    let Some(target) = targets.get(id) else {
+        return BTreeSet::new();
+    };
+    security_versions(packages.get(id))
+        .into_iter()
+        .filter(|v| {
+            (**v).partial_cmp(installed) == Some(Ordering::Greater)
+                && matches!(
+                    (**v).partial_cmp(&target.version),
+                    Some(Ordering::Less | Ordering::Equal)
+                )
+        })
+        .collect()
+}
+
+/// Announces each installed service's pending security releases that the registry's previous cache did not.
 pub(crate) fn notify_package_updates(
     db: &mut DatabaseModel,
     registry: &Url,
-    previous: &GetPackagesResponse,
-    packages: &GetPackagesResponse,
+    (previous, previous_targets): (&GetPackagesResponse, &UpdateTargets),
+    (packages, targets): (&GetPackagesResponse, &UpdateTargets),
 ) -> Result<(), Error> {
     let mut releases = Vec::new();
     for (id, entry) in db.as_public().as_package_data().as_entries()? {
@@ -148,18 +172,17 @@ pub(crate) fn notify_package_updates(
         ) {
             continue;
         }
-        let current = security_versions(packages.get(&id));
+        let manifest = entry.as_state_info().as_manifest(ManifestPreference::Old);
+        let installed = manifest.as_version().de()?;
+        let current = pending_security(packages, targets, &id, &installed);
         if current.is_empty() {
             continue;
         }
-        let announced = security_versions(previous.get(&id));
-        let manifest = entry.as_state_info().as_manifest(ManifestPreference::Old);
-        let installed = manifest.as_version().de()?;
+        let announced = pending_security(previous, previous_targets, &id, &installed);
         let title = manifest.as_metadata().as_title().de()?;
         releases.extend(
             current
                 .difference(&announced)
-                .filter(|v| (**v).partial_cmp(&installed) == Some(Ordering::Greater))
                 .map(|version| PackageSecurityRelease {
                     registry: registry.clone(),
                     id: id.clone(),
@@ -486,6 +509,18 @@ mod tests {
         [("pkg".parse().unwrap(), response)].into()
     }
 
+    fn targets(version: &str) -> UpdateTargets {
+        let (_, info) = crate::registry::package::index::tests::version_info_signed_by(1);
+        [(
+            "pkg".parse().unwrap(),
+            crate::registry::sync::PackageUpdateTarget {
+                version: version.parse().unwrap(),
+                info,
+            },
+        )]
+        .into()
+    }
+
     fn package_releases(db: &DatabaseModel) -> Vec<(bool, Vec<String>)> {
         db.as_private()
             .as_notifications()
@@ -508,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn security_releases_newer_than_installed_are_announced() {
+    fn security_releases_up_to_the_update_target_are_announced() {
         let registry: Url = "https://registry.test/".parse().unwrap();
         let mut db = package_db("1.0:0");
         let cache = packages(
@@ -517,11 +552,13 @@ mod tests {
                 ("1.0:1", true),
                 ("1.0:2", false),
                 ("1.1:0", true),
+                ("1.3:0", true),
                 ("#knots:2.0:0", true),
             ],
             &[("1.2:0", true)],
         );
-        notify_package_updates(&mut db, &registry, &Default::default(), &cache).unwrap();
+        let none = (&Default::default(), &Default::default());
+        notify_package_updates(&mut db, &registry, none, (&cache, &targets("1.2:0"))).unwrap();
         assert_eq!(
             package_releases(&db),
             vec![(
@@ -534,7 +571,7 @@ mod tests {
             .clone();
         assert!(message.contains("Pkg 1.0:1") && message.contains("Pkg 1.2:0"));
         let other: Url = "https://other.test/".parse().unwrap();
-        notify_package_updates(&mut db, &other, &Default::default(), &cache).unwrap();
+        notify_package_updates(&mut db, &other, none, (&cache, &targets("1.2:0"))).unwrap();
         assert_eq!(package_releases(&db)[0].1.len(), 3);
     }
 
@@ -542,10 +579,17 @@ mod tests {
     fn releases_in_the_previous_cache_are_not_announced_again() {
         let registry: Url = "https://registry.test/".parse().unwrap();
         let mut db = package_db("1.0:0");
+        let target = targets("1.2:0");
         let first = packages(&[("1.1:0", true), ("1.2:0", false)], &[]);
-        notify_package_updates(&mut db, &registry, &Default::default(), &first).unwrap();
+        notify_package_updates(
+            &mut db,
+            &registry,
+            (&Default::default(), &Default::default()),
+            (&first, &target),
+        )
+        .unwrap();
         let second = packages(&[("1.1:0", true), ("1.2:0", true)], &[]);
-        notify_package_updates(&mut db, &registry, &first, &second).unwrap();
+        notify_package_updates(&mut db, &registry, (&first, &target), (&second, &target)).unwrap();
         assert_eq!(
             package_releases(&db),
             vec![(false, vec!["1.1:0".to_owned(), "1.2:0".to_owned()])]
@@ -565,10 +609,17 @@ mod tests {
             .as_seen_mut()
             .ser(&true)
             .unwrap();
-        notify_package_updates(&mut db, &registry, &second, &second).unwrap();
+        notify_package_updates(&mut db, &registry, (&second, &target), (&second, &target)).unwrap();
         assert_eq!(package_releases(&db).len(), 1);
         let third = packages(&[("1.2:0", true), ("1.3:0", true)], &[]);
-        notify_package_updates(&mut db, &registry, &second, &third).unwrap();
+        let third_target = targets("1.3:0");
+        notify_package_updates(
+            &mut db,
+            &registry,
+            (&second, &target),
+            (&third, &third_target),
+        )
+        .unwrap();
         assert_eq!(
             package_releases(&db),
             vec![
@@ -580,7 +631,34 @@ mod tests {
             .as_notifications_mut()
             .ser(&crate::notifications::Notifications::new())
             .unwrap();
-        notify_package_updates(&mut db, &registry, &third, &third).unwrap();
+        notify_package_updates(
+            &mut db,
+            &registry,
+            (&third, &third_target),
+            (&third, &third_target),
+        )
+        .unwrap();
         assert!(package_releases(&db).is_empty());
+    }
+
+    #[test]
+    fn security_releases_are_announced_once_they_become_reachable() {
+        let registry: Url = "https://registry.test/".parse().unwrap();
+        let mut db = package_db("1.0:0");
+        let cache = packages(&[("1.1:0", false), ("2.0:0", true)], &[]);
+        let none = (&Default::default(), &Default::default());
+        notify_package_updates(&mut db, &registry, none, (&cache, &targets("1.1:0"))).unwrap();
+        assert!(package_releases(&db).is_empty());
+        notify_package_updates(
+            &mut db,
+            &registry,
+            (&cache, &targets("1.1:0")),
+            (&cache, &targets("2.0:0")),
+        )
+        .unwrap();
+        assert_eq!(
+            package_releases(&db),
+            vec![(false, vec!["2.0:0".to_owned()])]
+        );
     }
 }
