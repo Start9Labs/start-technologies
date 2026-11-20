@@ -2469,17 +2469,31 @@ async fn apply_policy_routing(
         })
         .copied();
 
+    let v4_capable = carries_v4(subnets.iter().filter_map(|n| match n {
+        IpNet::V4(v4n) => Some(v4n.addr()),
+        _ => None,
+    }));
+
+    // A selected outbound gateway without v4 drops v4.
     let mut cmd = Command::new("ip");
-    cmd.arg("route").arg("replace").arg("default");
-    if let Some(gw) = ipv4_gateway {
-        cmd.arg("via").arg(gw.to_string());
-    }
-    cmd.arg("dev")
-        .arg(iface.as_str())
-        .arg("table")
-        .arg(&table_str);
-    if ipv4_gateway.is_none() {
-        cmd.arg("scope").arg("link");
+    cmd.arg("route").arg("replace");
+    if v4_capable {
+        cmd.arg("default");
+        if let Some(gw) = ipv4_gateway {
+            cmd.arg("via").arg(gw.to_string());
+        }
+        cmd.arg("dev")
+            .arg(iface.as_str())
+            .arg("table")
+            .arg(&table_str);
+        if ipv4_gateway.is_none() {
+            cmd.arg("scope").arg("link");
+        }
+    } else {
+        cmd.arg("blackhole")
+            .arg("default")
+            .arg("table")
+            .arg(&table_str);
     }
     cmd.invoke(ErrorKind::Network).await.log_err();
 
@@ -2510,6 +2524,11 @@ async fn apply_policy_routing(
     reconcile_source_rules(false, table_id, &own_v4, &rules_output).await;
 
     Ok(())
+}
+
+/// Sending needs an address of the interface's own beyond link-local.
+fn carries_v4(addrs: impl IntoIterator<Item = Ipv4Addr>) -> bool {
+    addrs.into_iter().any(|addr| !addr.is_link_local())
 }
 
 /// Sending needs an address of the interface's own beyond link-local; without
@@ -4090,6 +4109,14 @@ mod carries_v6_tests {
     #[test]
     fn a_ula_address_without_a_router_carries_nothing() {
         assert!(!carries_v6(None, [v6("fd00::5")]));
+    }
+
+    #[test]
+    fn only_a_non_link_local_address_carries_v4() {
+        let v4 = |s: &str| s.parse::<Ipv4Addr>().unwrap();
+        assert!(carries_v4([v4("10.59.0.2")]));
+        assert!(!carries_v4([v4("169.254.3.4")]));
+        assert!(!carries_v4([]));
     }
 }
 
