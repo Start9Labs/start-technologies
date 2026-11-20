@@ -5,7 +5,7 @@ use rpc_toolkit::Empty;
 use super::*;
 use crate::db::model::public::{IpInfo, NetworkInterfaceInfo};
 use crate::net::host::address::PublicDomainConfig;
-use crate::net::host::binding::{AddSslOptions, BindOptions, RangeBindInfo, Security};
+use crate::net::host::binding::{AddSslOptions, BindOptions, PublicIpKey, RangeBindInfo, Security};
 use crate::net::host::{ForPackage, ForServer, Host};
 use crate::net::service_interface::{
     AddressInfo, HostnameInfo, ServiceInterface, ServiceInterfaceType,
@@ -130,7 +130,7 @@ fn reassignment_preserves_binding_intent_and_rekeys_ip_overrides() {
     let interfaces = to_value(&bind.interfaces).unwrap();
     bind.addresses
         .enabled
-        .insert("198.51.100.2:8080".parse().unwrap());
+        .insert(PublicIpKey::at("eth0", "198.51.100.2:8080"));
     bind.addresses
         .disabled
         .insert(("server.local".into(), 8080));
@@ -139,10 +139,10 @@ fn reassignment_preserves_binding_intent_and_rekeys_ip_overrides() {
         .insert(("192.0.2.2".into(), 8080));
     bind.addresses
         .gua_wan
-        .insert("[2001:db8::1]:8080".parse().unwrap());
+        .insert(PublicIpKey::at("eth0", "[2001:db8::1]:8080"));
     bind.addresses
         .enabled
-        .insert("[2001:db8::1]:8080".parse().unwrap());
+        .insert(PublicIpKey::at("eth0", "[2001:db8::1]:8080"));
     bind.addresses
         .disabled
         .insert(("server.local".into(), 8443));
@@ -160,13 +160,13 @@ fn reassignment_preserves_binding_intent_and_rekeys_ip_overrides() {
     assert!(
         bind.addresses
             .enabled
-            .contains(&"198.51.100.2:9000".parse().unwrap())
+            .contains(&PublicIpKey::at("eth0", "198.51.100.2:9000"))
     );
     assert!(
         !bind
             .addresses
             .enabled
-            .contains(&"198.51.100.2:8080".parse().unwrap())
+            .contains(&PublicIpKey::at("eth0", "198.51.100.2:8080"))
     );
     assert!(
         bind.addresses
@@ -186,7 +186,7 @@ fn reassignment_preserves_binding_intent_and_rekeys_ip_overrides() {
     assert!(
         bind.addresses
             .gua_wan
-            .contains(&"[2001:db8::1]:9000".parse().unwrap())
+            .contains(&PublicIpKey::at("eth0", "[2001:db8::1]:9000"))
     );
     assert!(
         host.port_forwards
@@ -221,7 +221,7 @@ fn ssl_reassignment_keeps_shared_domain_ports_and_preferences() {
         .insert(("shared.example".into(), 443));
     bind.addresses
         .enabled
-        .insert(format!("198.51.100.2:{old}").parse().unwrap());
+        .insert(PublicIpKey::at("eth0", &format!("198.51.100.2:{old}")));
     let mut host = host_with(bind);
     host.private_domains.insert(
         "shared.example".into(),
@@ -252,7 +252,7 @@ fn ssl_reassignment_keeps_shared_domain_ports_and_preferences() {
     assert!(
         bind.addresses
             .enabled
-            .contains(&"198.51.100.2:9443".parse().unwrap())
+            .contains(&PublicIpKey::at("eth0", "198.51.100.2:9443"))
     );
     let mut ports = db.as_private().as_available_ports().de().unwrap();
     assert!(ports.is_ssl(443));
@@ -327,7 +327,7 @@ fn assigning_a_shared_preferred_port_does_not_move_a_siblings_ip_overrides() {
         .insert(("private.example".into(), 8444));
     bind.addresses
         .enabled
-        .insert("198.51.100.2:9443".parse().unwrap());
+        .insert(PublicIpKey::at("eth0", "198.51.100.2:9443"));
     let mut host = host_with(bind);
     host.bindings.insert(8001, listener);
     host.private_domains.insert(
@@ -343,12 +343,12 @@ fn assigning_a_shared_preferred_port_does_not_move_a_siblings_ip_overrides() {
     assert!(
         addresses
             .enabled
-            .contains(&"198.51.100.2:9443".parse().unwrap())
+            .contains(&PublicIpKey::at("eth0", "198.51.100.2:9443"))
     );
     assert!(
         !addresses
             .enabled
-            .contains(&"198.51.100.2:8444".parse().unwrap())
+            .contains(&PublicIpKey::at("eth0", "198.51.100.2:8444"))
     );
     let domain = addresses
         .available
@@ -484,7 +484,7 @@ fn reassignment_does_not_enable_a_dormant_binding_or_advertise_its_forwards() {
     bind.enabled = false;
     bind.addresses
         .enabled
-        .insert("198.51.100.2:8080".parse().unwrap());
+        .insert(PublicIpKey::at("eth0", "198.51.100.2:8080"));
     let mut db = database(host_with(bind), Host::default(), ports);
     assert!(package_host(&mut db).de().unwrap().port_forwards.is_empty());
     reassign::<ForPackage>(&mut db, &params(8000, 9000, false), &inheritance()).unwrap();

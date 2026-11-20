@@ -3846,6 +3846,42 @@ export const PublicDomainConfig: z.ZodObject<{
 }).meta({
   id: 'PublicDomainConfig',
 })
+
+/**
+ * A public IP opt-in, resolved against the gateway's current addresses.
+ *
+ * Opt-ins persist across a new WAN lease, a moved IPv6 prefix and a link drop:
+ * the gateway's next public address on the port is on without operator action.
+ * A GUA key matches every GUA on the gateway and port sharing its interface identifier.
+ */
+export const PublicIpKey: z.ZodObject<{
+  gateway: typeof GatewayId
+  port: z.ZodInt
+  /**
+   * The low 64 bits of a GUA, with its prefix zeroed. Null for the gateway's WAN IPv4.
+   */
+  interfaceId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  gateway: GatewayId,
+  port: z.int(),
+  /**
+   * The low 64 bits of a GUA, with its prefix zeroed. Null for the gateway's WAN IPv4.
+   */
+  interfaceId: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description:
+      "The low 64 bits of a GUA, with its prefix zeroed. Null for the gateway's WAN IPv4.",
+  }),
+}).meta({
+  id: 'PublicIpKey',
+  description:
+    "A public IP opt-in, resolved against the gateway's current addresses.\n\nOpt-ins persist across a new WAN lease, a moved IPv6 prefix and a link drop:\nthe gateway's next public address on the port is on without operator action.\nA GUA key matches every GUA on the gateway and port sharing its interface identifier.",
+})
 export const PushSubscription: z.ZodObject<{
   /**
    * HTTP(S) push resource selected by the browser, including LAN endpoints.
@@ -5891,9 +5927,9 @@ export const BindingSetGuaWanParams: z.ZodObject<{
 })
 export const DerivedAddressInfo: z.ZodObject<{
   /**
-   * User override: enable these addresses (only for public IP & port)
+   * User override: enable these public IPs and published GUAs.
    */
-  enabled: z.ZodArray<z.ZodString>
+  enabled: z.ZodArray<typeof PublicIpKey>
   /**
    * User override: disable these addresses (only for domains and private IP & port)
    */
@@ -5905,8 +5941,8 @@ export const DerivedAddressInfo: z.ZodObject<{
    * selection, upstream pinholes). A GUA not in this set is LAN-only.
    */
   guaWan: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
+    z.ZodOptional<z.ZodArray<typeof PublicIpKey>>,
+    z.ZodArray<typeof PublicIpKey>
   >
   /**
    * User override: enable these private IPs regardless of their mDNS address.
@@ -5947,11 +5983,10 @@ export const DerivedAddressInfo: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   /**
-   * User override: enable these addresses (only for public IP & port)
+   * User override: enable these public IPs and published GUAs.
    */
-  enabled: z.array(z.string()).meta({
-    description:
-      'User override: enable these addresses (only for public IP & port)',
+  enabled: z.array(PublicIpKey).meta({
+    description: 'User override: enable these public IPs and published GUAs.',
   }),
   /**
    * User override: disable these addresses (only for domains and private IP & port)
@@ -5966,7 +6001,7 @@ export const DerivedAddressInfo: z.ZodObject<{
    * stays the single source of truth for WAN reachability (P2P address
    * selection, upstream pinholes). A GUA not in this set is LAN-only.
    */
-  guaWan: wire(z.array(z.string()).optional(), z.array(z.string())).meta({
+  guaWan: wire(z.array(PublicIpKey).optional(), z.array(PublicIpKey)).meta({
     description:
       'User override: IPv6 global-unicast addresses opted into WAN exposure.\nProjected into `HostnameInfo.public` by `update_addresses`, so `public`\nstays the single source of truth for WAN reachability (P2P address\nselection, upstream pinholes). A GUA not in this set is LAN-only.',
   }),
