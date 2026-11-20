@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core'
+import { Component, computed, inject } from '@angular/core'
 import { ActivatedRoute, RouterLink } from '@angular/router'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import { TuiTable } from '@taiga-ui/addon-table'
@@ -7,14 +7,14 @@ import {
   TuiDataList,
   TuiDropdown,
   TuiLink,
+  TuiNotification,
   TuiTitle,
 } from '@taiga-ui/core'
 import { TUI_CONFIRM, TuiBadge, TuiSkeleton } from '@taiga-ui/kit'
 import { TuiHeader } from '@taiga-ui/layout'
 import { filter } from 'rxjs'
 import { Placeholder } from 'src/app/components/placeholder'
-import { DevicesApiService } from 'src/app/routes/devices/service'
-import { InboundService, VpnServer, VpnServerPeer } from '../../service'
+import { InboundService, VpnServerPeer } from '../../service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
 import { CLIENT_CONFIG, ClientConfigData } from './dialog-config'
@@ -44,19 +44,27 @@ import { RENAME_CLIENT } from './dialog-rename'
         <button
           tuiButton
           iconStart="@tui.plus"
-          [disabled]="!deviceIps()"
+          [disabled]="!server()"
           (click)="add()"
         >
           {{ 'Add' | i18n }}
         </button>
       </aside>
     </header>
+    @if (hasLegacy()) {
+      <div tuiNotification appearance="warning">
+        {{
+          'Devices marked “Old address” can lose their connection while they are also on this network. Reissue their config to fix it.'
+            | i18n
+        }}
+      </div>
+    }
     <table tuiTable class="g-table" [tuiSkeleton]="!server()">
       <thead>
         <tr>
           <th tuiTh [sorter]="'name' | tuiSorter">{{ 'Name' | i18n }}</th>
           <th tuiTh [sorter]="'ip' | tuiSorter">
-            {{ 'LAN IP Address' | i18n }}
+            {{ 'IP Address' | i18n }}
           </th>
           <th tuiTh>{{ 'Routing' | i18n }}</th>
           <th tuiTh></th>
@@ -66,7 +74,14 @@ import { RENAME_CLIENT } from './dialog-rename'
         @for (item of server()?.peers | tuiTableSort; track item.public_key) {
           <tr>
             <td tuiTd>{{ item.name }}</td>
-            <td tuiTd>{{ item.ip }}</td>
+            <td tuiTd>
+              {{ item.ip }}
+              @if (item.legacy_address) {
+                <span tuiBadge appearance="warning">
+                  {{ 'Old address' | i18n }}
+                </span>
+              }
+            </td>
             <td tuiTd>
               <span tuiBadge [appearance]="item.route_all ? 'info' : 'neutral'">
                 {{ (item.route_all ? 'All traffic' : 'LAN only') | i18n }}
@@ -113,6 +128,13 @@ import { RENAME_CLIENT } from './dialog-rename'
                     (click)="viewConfig(item)"
                   >
                     {{ 'View Config' | i18n }}
+                  </button>
+                  <button
+                    tuiOption
+                    iconStart="@tui.refresh-cw"
+                    (click)="reissue(item)"
+                  >
+                    {{ 'Reissue config' | i18n }}
                   </button>
                   <button
                     tuiOption
@@ -165,29 +187,25 @@ import { RENAME_CLIENT } from './dialog-rename'
     TuiDataList,
     TuiDropdown,
     TuiBadge,
+    TuiNotification,
     Placeholder,
     i18nPipe,
   ],
 })
 export default class InboundClients {
   private readonly service = inject(InboundService)
-  private readonly devices = inject(DevicesApiService)
   private readonly dialogs = inject(TuiResponsiveDialogService)
   private readonly i18n = inject(i18nPipe)
   private readonly listenPort = Number(
     inject(ActivatedRoute).snapshot.queryParams['port'],
   )
 
-  protected readonly deviceIps = signal<string[] | null>(null)
   protected readonly server = computed(() =>
     this.service.data()?.find(item => item.listen_port === this.listenPort),
   )
-
-  constructor() {
-    this.devices.get().then(devices => {
-      this.deviceIps.set(devices.map(d => d.ipv4).filter(Boolean) as string[])
-    })
-  }
+  protected readonly hasLegacy = computed(() =>
+    this.server()?.peers.some(peer => peer.legacy_address),
+  )
 
   add() {
     const server = this.server()
@@ -197,8 +215,8 @@ export default class InboundClients {
       .open<VpnServerPeer>(ADD_CLIENT, {
         label: this.i18n.transform('Add client device'),
         data: {
-          serverAddress: server.server_address,
-          usedIps: this.usedIps(server),
+          peerSubnet: server.peer_subnet,
+          peers: server.peers,
         } satisfies ClientDialogData,
       })
       .subscribe(peer => this.addAndShowConfig(server.profile, peer))
@@ -219,35 +237,32 @@ export default class InboundClients {
       })
   }
 
-  viewConfig(peer: VpnServerPeer) {
-    const server = this.server()
-    if (!server) return
+  async viewConfig(peer: VpnServerPeer) {
+    const profile = this.server()?.profile
+    if (!profile || !peer.public_key) return
 
-    const subnet = server.server_address.replace(/\.\d+$/, '')
-    const gateway = `${subnet}.1`
-    const allowedIPs = peer.route_all ? '0.0.0.0/0, ::/0' : `${subnet}.0/24`
+    const config = await this.service.peerConfig(profile, peer.public_key)
+    if (config) this.showConfig(peer.name, config, true)
+  }
 
-    const config = [
-      '[Interface]',
-      'PrivateKey = <PRIVATE_KEY>',
-      `Address = ${peer.ip}/32`,
-      `DNS = ${gateway}`,
-      '',
-      '[Peer]',
-      `PublicKey = ${server.public_key}`,
-      `Endpoint = ${server.endpoint}:${server.listen_port}`,
-      `AllowedIPs = ${allowedIPs}`,
-    ].join('\n')
+  reissue(peer: VpnServerPeer) {
+    const profile = this.server()?.profile
+    const publicKey = peer.public_key
+    if (!profile || !publicKey) return
 
     this.dialogs
-      .open(CLIENT_CONFIG, {
+      .open<boolean>(TUI_CONFIRM, {
+        label: this.i18n.transform('Reissue config?'),
         data: {
-          name: peer.name,
-          config,
-          placeholderKey: true,
-        } satisfies ClientConfigData,
+          content: this.i18n.transform(
+            "This replaces the device's keys and address. Its current configuration stops working until you import the new one on the device.",
+          ),
+          yes: this.i18n.transform('Reissue'),
+          no: this.i18n.transform('Cancel'),
+        },
       })
-      .subscribe()
+      .pipe(filter(Boolean))
+      .subscribe(() => this.reissueAndShowConfig(profile, publicKey, peer.name))
   }
 
   toggleDnsInjection(peer: VpnServerPeer) {
@@ -289,29 +304,27 @@ export default class InboundClients {
       })
   }
 
-  private usedIps(server: VpnServer): string[] {
-    const peerIps = server.peers.map(p => p.ip).filter(Boolean) as string[]
-    return [
-      ...new Set([
-        server.server_address,
-        ...(this.deviceIps() ?? []),
-        ...peerIps,
-      ]),
-    ]
-  }
-
   private async addAndShowConfig(profile: string, peer: VpnServerPeer) {
     const response = await this.service.addPeer(profile, peer)
     if (response) {
-      this.dialogs
-        .open(CLIENT_CONFIG, {
-          data: {
-            name: peer.name,
-            config: response.client_config,
-            placeholderKey: !!peer.public_key,
-          } satisfies ClientConfigData,
-        })
-        .subscribe()
+      this.showConfig(peer.name, response.client_config, !!peer.public_key)
     }
+  }
+
+  private async reissueAndShowConfig(
+    profile: string,
+    publicKey: string,
+    name: string,
+  ) {
+    const response = await this.service.reissuePeer(profile, publicKey)
+    if (response) this.showConfig(name, response.client_config, false)
+  }
+
+  private showConfig(name: string, config: string, placeholderKey: boolean) {
+    this.dialogs
+      .open(CLIENT_CONFIG, {
+        data: { name, config, placeholderKey } satisfies ClientConfigData,
+      })
+      .subscribe()
   }
 }

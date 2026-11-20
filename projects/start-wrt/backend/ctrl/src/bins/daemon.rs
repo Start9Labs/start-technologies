@@ -222,6 +222,9 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::lan_guard::heal_ra_allow("/etc/config").await {
             tracing::error!("LAN guard repair failed: {e}");
         }
+        if let Err(e) = crate::vpn_server::heal_vpn_peer_guard("/etc/config").await {
+            tracing::error!("LAN guard VPN peer repair failed: {e}");
+        }
         if let Err(e) = crate::vpn_client::heal_vpn_clients("/etc/config").await {
             tracing::error!("Outbound VPN repair failed: {e}");
         }

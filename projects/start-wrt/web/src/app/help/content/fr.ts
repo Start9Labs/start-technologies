@@ -113,9 +113,9 @@ Gérez les appareils clients de ce serveur VPN.
 
 Un nom choisi pour identifier facilement la fonction de l’appareil client.
 
-### Adresse IP LAN
+### Adresse IP
 
-L’adresse IP attribuée sur le réseau local. Elle a été configurée lors de la mise en place de l’appareil client.
+L’adresse de l’appareil client sur le VPN. Les appareils marqués « Ancienne adresse » ont été ajoutés avant que le VPN ait son propre sous-réseau et utilisent une adresse du réseau du profil ; ils peuvent perdre leur connexion lorsqu’ils sont aussi sur ce réseau. Sélectionnez « Réémettre la configuration » pour en déplacer un vers le sous-réseau du VPN ; l’appareil a ensuite besoin de sa nouvelle configuration.
 
 ### Acheminement
 
@@ -126,9 +126,9 @@ Affiche le mode d’acheminement du trafic du client. « Tout le trafic » achem
 
 Un nom clair et descriptif pour l’appareil client, tel que « Portable de Jean » ou « Téléphone du bureau », afin de le distinguer des autres appareils.
 
-### Adresse IP LAN
+### Adresse IP
 
-L’adresse IP LAN souhaitée pour l’appareil client, en veillant à ce qu’elle se situe dans la plage d’IP allouée au VPN. Garantit que l’appareil client dispose d’une adresse IP unique au sein du réseau VPN, lui permettant de communiquer avec les autres appareils.
+L’adresse de l’appareil client dans le sous-réseau propre au VPN. La prochaine adresse libre est proposée.
 
 ### Clé publique
 

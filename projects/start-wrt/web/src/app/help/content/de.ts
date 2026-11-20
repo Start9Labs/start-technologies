@@ -113,9 +113,9 @@ Client-Geräte für diesen VPN-Server verwalten.
 
 Ein gewählter Name, um den Zweck des Client-Geräts einfach zu identifizieren.
 
-### LAN-IP-Adresse
+### IP-Adresse
 
-Die zugewiesene IP-Adresse im lokalen Netzwerk. Diese wurde beim Einrichten des Client-Geräts konfiguriert.
+Die Adresse des Client-Geräts im VPN. Mit „Alte Adresse“ markierte Geräte wurden hinzugefügt, bevor das VPN ein eigenes Subnetz hatte, und verwenden eine Adresse aus dem Netzwerk des Profils; sie können ihre Verbindung verlieren, während sie auch mit diesem Netzwerk verbunden sind. Wählen Sie „Konfiguration neu ausstellen“, um ein Gerät in das Subnetz des VPN zu verschieben; das Gerät benötigt dann seine neue Konfiguration.
 
 ### Routing
 
@@ -126,9 +126,9 @@ Zeigt den Routing-Modus des Client-Datenverkehrs an. „Gesamter Datenverkehr“
 
 Ein klarer und aussagekräftiger Name für das Client-Gerät, etwa „Johns Laptop“ oder „Büro-Telefon“, um es von anderen Geräten zu unterscheiden.
 
-### LAN-IP-Adresse
+### IP-Adresse
 
-Die gewünschte LAN-IP-Adresse für das Client-Gerät; stellen Sie sicher, dass sie innerhalb des für das VPN zugewiesenen IP-Bereichs liegt. Stellt sicher, dass das Client-Gerät eine eindeutige IP-Adresse innerhalb des VPN-Netzwerks erhält, sodass es mit anderen Geräten kommunizieren kann.
+Die Adresse des Client-Geräts im eigenen Subnetz des VPN. Die nächste freie Adresse wird vorgeschlagen.
 
 ### Öffentlicher Schlüssel
 

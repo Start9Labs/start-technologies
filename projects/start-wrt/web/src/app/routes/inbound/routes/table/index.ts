@@ -23,7 +23,6 @@ import {
   CLIENT_CONFIG,
   ClientConfigData,
 } from 'src/app/routes/inbound/routes/client/dialog-config'
-import { DevicesApiService } from 'src/app/routes/devices/service'
 import {
   ApiService,
   ProfileId,
@@ -183,7 +182,6 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 export default class InboundTable {
   private readonly api = inject(ApiService)
   private readonly router = inject(Router)
-  private readonly devices = inject(DevicesApiService)
   protected readonly dialogs = inject(TuiResponsiveDialogService)
   protected readonly service = inject(InboundService)
   private readonly i18n = inject(i18nPipe)
@@ -250,20 +248,14 @@ export default class InboundTable {
   }
 
   private async addFirstClient(profile: string, listenPort: number) {
-    const [devices, server] = await Promise.all([
-      this.devices.get(),
-      this.waitForServer(listenPort),
-    ])
-
-    const deviceIps = devices.map(d => d.ipv4).filter(Boolean) as string[]
-    const usedIps = [...new Set([server.server_address, ...deviceIps])]
+    const server = await this.waitForServer(listenPort)
 
     this.dialogs
       .open<VpnServerPeer>(ADD_CLIENT, {
         label: this.i18n.transform('Add client device'),
         data: {
-          serverAddress: server.server_address,
-          usedIps,
+          peerSubnet: server.peer_subnet,
+          peers: server.peers,
         } satisfies ClientDialogData,
       })
       .subscribe(async peer => {

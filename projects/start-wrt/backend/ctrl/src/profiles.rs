@@ -940,6 +940,9 @@ pub async fn delete<C: CtrlContext>(
                     )
                     .await;
                     crate::published_ports::sync_v6_mac_bind_logged(ctx.uci_root()).await;
+                    crate::vpn_server::warn_guard(
+                        crate::vpn_server::sync_vpn_peer_guard(ctx.uci_root()).await,
+                    );
                     reload_system_and_wifi().await?;
                 }
                 // Regenerate schedule crontab to remove deleted profile's entries
@@ -1159,6 +1162,8 @@ fn delete_config(
 
     // Remove WireGuard WAN firewall rule (src: "wan", not caught by zone cleanup above)
     crate::vpn_server::remove_wireguard_firewall_rule(cfgs, &wg_interface_name)?;
+    // With the profile gone, this only drops its server's routes and rules.
+    crate::vpn_server::sync_peer_policy_routes(cfgs, &id.interface)?;
 
     // Rebuild cross-subnet routes (the deleted profile's subnet is removed,
     // and remaining VPN profiles no longer need a route to it)
@@ -1604,7 +1609,8 @@ fn validate_profile_block(cfgs: &Configs, profile: &Profile<ProfileIdOpt>) -> Re
     Ok(())
 }
 
-/// Reject a profile gateway whose /24 collides with another profile's subnet.
+/// Reject a profile gateway whose /24 collides with another profile's subnet
+/// or an inbound VPN's peer subnet.
 ///
 /// Every profile — including the admin LAN (`owns_lan`) — must occupy a distinct
 /// /24 within the shared /16. Two interfaces on the same /24 produce overlapping
@@ -1664,6 +1670,24 @@ pub(crate) fn guard_subnet_collision(
                 ));
             }
         }
+    }
+    if let Some(owner) = crate::vpn_server::peer_subnet_owner(cfgs, gateway_ip) {
+        let owner = cfgs["startwrt"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get::<UciProfile>().ok())
+            .find(|p| p.interface == owner)
+            .map_or(owner, |p| p.fullname);
+        return Err(Error::new(
+            eyre!(
+                "subnet {}.{}.{}.0/24 is already in use by the inbound VPN for profile '{}'",
+                new[0],
+                new[1],
+                new[2],
+                owner
+            ),
+            ErrorKind::SubnetCollision,
+        ));
     }
     Ok(())
 }
@@ -2736,8 +2760,7 @@ pub(crate) fn rewrite_routing(
     //    egress while wan6's GUA path and inbound port-forwards stay intact.
     ensure_vpn_outbound_zone(cfgs, &profile.outbound)?;
 
-    // 8. Add /32 peer routes so locally-generated responses (DNS, HTTP) reach
-    //    VPN clients via wg_X instead of being caught by the /24 subnet route
+    // 8. The inbound server's routes and rule in this table.
     crate::vpn_server::sync_peer_policy_routes(cfgs, &profile.id.interface)?;
 
     Ok(())
@@ -5523,6 +5546,14 @@ config profile guest
 \toption fullname 'Guest'
 \toption interface 'guest'
 \toption vlan_tag '101'
+
+config vpn_server 'wg_guest'
+\toption interface 'wg_guest'
+\toption profile_interface 'guest'
+\toption label 'Guest VPN'
+\toption listen_port '51820'
+\toption endpoint 'vpn.example.com'
+\toption peer_subnet '10.0.255.0/24'
 ",
         )
         .unwrap();
@@ -5531,6 +5562,14 @@ config profile guest
         let cfgs = parse_all(ctx.uci_root(), &arena, &["startwrt", "network"])
             .await
             .unwrap();
+
+        // New profile, or the admin LAN, onto the inbound VPN's peer subnet — rejected.
+        let err = guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 255, 1), None).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::SubnetCollision);
+        assert!(err.to_string().contains("inbound VPN for profile 'Guest'"));
+        let err =
+            guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 255, 1), Some("lan")).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::SubnetCollision);
 
         // New profile onto the guest's /24 — rejected.
         let err = guard_subnet_collision(&cfgs, Ipv4Addr::new(10, 0, 5, 1), None).unwrap_err();

@@ -113,9 +113,9 @@ Zarządzaj urządzeniami klienckimi dla tego serwera VPN.
 
 Wybrana nazwa ułatwiająca identyfikację przeznaczenia urządzenia klienckiego.
 
-### Adres IP LAN
+### Adres IP
 
-Przypisany adres IP w sieci lokalnej. Został on skonfigurowany podczas konfigurowania urządzenia klienckiego.
+Adres urządzenia klienckiego w sieci VPN. Urządzenia oznaczone jako „Stary adres” zostały dodane, zanim sieć VPN miała własną podsieć, i używają adresu z sieci profilu; mogą tracić połączenie, gdy są również w tej sieci. Wybierz „Wystaw konfigurację ponownie”, aby przenieść urządzenie do podsieci VPN; urządzenie potrzebuje wtedy nowej konfiguracji.
 
 ### Routing
 
@@ -126,9 +126,9 @@ Pokazuje tryb routingu ruchu klienta. „Cały ruch” kieruje cały ruch intern
 
 Jasna i opisowa nazwa urządzenia klienckiego, taka jak „Laptop Jana” lub „Telefon biurowy”, aby odróżnić je od innych urządzeń.
 
-### Adres IP LAN
+### Adres IP
 
-Pożądany adres IP LAN urządzenia klienckiego, mieszczący się w zakresie IP przydzielonym dla VPN. Zapewnia, że urządzenie klienckie ma unikalny adres IP w sieci VPN, umożliwiając mu komunikację z innymi urządzeniami.
+Adres urządzenia klienckiego we własnej podsieci VPN. Proponowany jest następny wolny adres.
 
 ### Klucz publiczny
 

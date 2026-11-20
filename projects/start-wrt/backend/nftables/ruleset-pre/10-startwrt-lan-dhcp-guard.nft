@@ -1,7 +1,8 @@
-# Drops DHCP and DHCPv6 server replies, and router advertisements from a
-# device outside @ra_allow, switched between bridge ports. The router's own
-# leave through the output hook. startwrt fills @ra_allow from
-# 11-startwrt-lan-ra-allow.nft.
+# Drops DHCP and DHCPv6 server replies, router advertisements from a device
+# outside @ra_allow, and ARP claiming an inbound VPN peer's address in
+# @vpn_peers, switched between bridge ports. The router's own leave through
+# the output hook. startwrt fills @ra_allow from 11-startwrt-lan-ra-allow.nft
+# and @vpn_peers from 12-startwrt-lan-vpn-peers.nft.
 #
 # USB bridge uplinks carry router-originated or already-guarded frames.
 # USB adapter traffic remains guarded on br-lan after VLAN decapsulation.
@@ -13,11 +14,15 @@ table bridge startwrt_lan_guard {
 	set ra_allow {
 		type ether_addr
 	}
+	set vpn_peers {
+		type ipv4_addr
+	}
 	chain forward {
 		type filter hook forward priority filter; policy accept;
 		meta ibrname "br-usb_eth*" iifname "usb_eth*" accept
 		ether type ip meta l4proto udp udp sport 67 udp dport 68 counter drop
 		ether type ip6 meta l4proto udp udp sport 547 udp dport 546 counter drop
 		ether type ip6 meta l4proto ipv6-icmp icmpv6 type nd-router-advert ether saddr != @ra_allow counter drop
+		arp saddr ip @vpn_peers counter drop
 	}
 }

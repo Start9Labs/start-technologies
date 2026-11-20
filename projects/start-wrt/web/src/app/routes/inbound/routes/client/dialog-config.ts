@@ -52,7 +52,7 @@ export interface ClientConfigData {
     @if (context.data.placeholderKey) {
       <div tuiNotification appearance="info">
         {{
-          'Replace the PrivateKey placeholder with the private key of this device before using this configuration.'
+          "Replace the placeholders in angle brackets with this device's keys before using this configuration."
             | i18n
         }}
       </div>

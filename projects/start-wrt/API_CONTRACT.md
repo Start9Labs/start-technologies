@@ -1616,7 +1616,11 @@ struct VpnServer {
     listen_port: u16,
     endpoint: String,
     public_key: String,
+    /// The router's address in the peer subnet; without one, its address in the profile's subnet.
     server_address: String,
+    /// The `/24` in the LAN block new peers are addressed from. Allocated from the top
+    /// of the block when the server is saved or gains a peer; profiles may not take it.
+    peer_subnet: Option<String>,
     peers: Vec<VpnServerPeer>,
 }
 
@@ -1630,6 +1634,9 @@ struct VpnServerPeer {
     route_all: Option<bool>,
     /// May publish DNS records into the router's resolver. Default/absent = denied.
     allow_dns_injection: Option<bool>,
+    /// Listed only: the address sits in the profile's own subnet, from before peer subnets.
+    /// The router proxy-ARPs for it and the LAN guard drops ARP claiming it from LAN ports.
+    legacy_address: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -1686,6 +1693,10 @@ struct PeerAddResponse {
 }
 ```
 
+`ip` must lie in the server's peer subnet, host `.2`–`.254`, with a host octet no other
+peer of the server uses (it is also the peer's IPv6 host id). Absent, the next free host is
+taken. A server without a peer subnet is given one first.
+
 ### `vpn-server.peer-delete`
 
 ```rust
@@ -1711,6 +1722,40 @@ struct PeerRenameArgs {
     name: String,
 }
 // Response: null
+```
+
+### `vpn-server.peer-config`
+
+A peer's client configuration, rendered from the saved settings, with `<PRIVATE_KEY>` and
+`<PRESHARED_KEY>` placeholders. It carries IPv6 only when the server routes the peer's
+IPv6 address to it. Fails with `NotFound` if the peer does not exist.
+
+```rust
+#[derive(Deserialize)]
+struct PeerConfigArgs {
+    profile: String,
+    public_key: String,
+}
+
+#[derive(Serialize)]
+struct PeerConfigResponse {
+    client_config: String,
+}
+```
+
+### `vpn-server.peer-reissue`
+
+Replaces a peer's keys, preshared key and address, keeping its name, routing and DNS
+permission. The new address is in the server's peer subnet, so this moves a legacy peer
+out of the profile's subnet. Records the old key published are dropped.
+
+```rust
+#[derive(Deserialize)]
+struct PeerReissueArgs {
+    profile: String,
+    public_key: String,
+}
+// Response: PeerAddResponse, with the generated private key in `client_config`
 ```
 
 ### `vpn-server.peer-set-dns-injection`
@@ -2547,6 +2592,8 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | `vpn-server.peer-delete`            | Inbound VPN     |                             |
 | `vpn-server.peer-rename`            | Inbound VPN     |                             |
 | `vpn-server.peer-set-dns-injection` | Inbound VPN     |                             |
+| `vpn-server.peer-config`            | Inbound VPN     |                             |
+| `vpn-server.peer-reissue`           | Inbound VPN     |                             |
 | `wifi.get`                          | WiFi            |                             |
 | `wifi.set`                          | WiFi            |                             |
 | `wifi.edit`                         | WiFi            | CLI editor                  |
