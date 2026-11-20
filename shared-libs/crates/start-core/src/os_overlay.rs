@@ -759,10 +759,6 @@ impl PreparedGeneration {
         &self.manifest
     }
 
-    pub(crate) fn rootfs(&self) -> &Path {
-        &self.rootfs
-    }
-
     pub(crate) fn verification_key(&self) -> &PKey<Public> {
         &self.public_key
     }
@@ -909,16 +905,16 @@ impl VerifiedGeneration {
         self.path.join(OVERLAY_FILE)
     }
 
-    /// Opens the authenticated public image with retained read-only verity protection.
-    pub async fn mount_rootfs(
-        &self,
-        rootfs: &Path,
-        mountpoint: &Path,
-    ) -> Result<VerityMount, Error> {
+    pub fn rootfs_path(&self) -> PathBuf {
+        self.path.join(ROOTFS_FILE)
+    }
+
+    /// Opens generation-owned bytes with retained read-only verity protection.
+    pub async fn mount_rootfs(&self, mountpoint: &Path) -> Result<VerityMount, Error> {
         self.manifest
             .rootfs_verity
             .mount(
-                rootfs,
+                &self.rootfs_path(),
                 &self.path.join(ROOTFS_VERITY_FILE),
                 &format!("startos-fde-root-{}", Guid::new()),
                 mountpoint,
@@ -930,8 +926,8 @@ impl VerifiedGeneration {
 /// Selects the newest valid complete generation by directory modification time.
 ///
 /// Hidden staging directories and invalid candidates are ignored. Equal timestamps
-/// use the directory name as a deterministic tie-breaker. The rootfs is hashed in
-/// full once; every candidate's overlay is hashed in full before it can be selected.
+/// use the directory name as a deterministic tie-breaker. The supplied image pins
+/// the expected digest; each candidate verifies both generation-owned images.
 pub async fn select_latest(
     store: &Path,
     rootfs: &Path,
@@ -951,7 +947,17 @@ pub async fn verified_generations(
     key: &PKeyRef<Public>,
 ) -> Result<Vec<VerifiedGeneration>, Error> {
     require_p256(key)?;
-    let rootfs_sha256 = digest_file(rootfs).await?;
+    verified_generations_for_digest(store, &digest_file(rootfs).await?, key).await
+}
+
+/// Returns complete generations bound to the authenticated rootfs digest, newest first.
+/// The caller retains every returned path through its last dependent use.
+pub(crate) async fn verified_generations_for_digest(
+    store: &Path,
+    rootfs_sha256: &[u8; 32],
+    key: &PKeyRef<Public>,
+) -> Result<Vec<VerifiedGeneration>, Error> {
+    require_p256(key)?;
     let mut entries = read_generation_directory(store).await?;
     let mut verified = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
@@ -959,7 +965,7 @@ pub async fn verified_generations(
             continue;
         }
         let path = entry.path();
-        let Ok(manifest) = verify_generation(&path, &rootfs_sha256, key).await else {
+        let Ok(manifest) = verify_generation(&path, rootfs_sha256, key).await else {
             continue;
         };
         let timestamp = entry.metadata().await?.modified()?;

@@ -22,17 +22,17 @@ use crate::util::future::complete_owned_operation;
 use crate::util::io::write_file_private_atomic;
 use crate::util::serde::Der64;
 
-const DESCRIPTOR_VERSION: u8 = 1;
+const DESCRIPTOR_VERSION: u8 = 2;
 const GENERATIONS_DIR: &str = "fde/generations";
 const POLICIES_DIR: &str = "policies";
 const MAX_PROFILE_BYTES: usize = 8192;
 
-/// A rootfs reference and verification keys authenticated by the containing UKI.
+/// Exact rootfs bytes and verification keys authenticated by the containing UKI.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Descriptor {
     version: u8,
-    rootfs: String,
+    rootfs_sha256: [u8; 32],
     overlay_key: Der64<PKey<Public>>,
     policy_key: Der64<PKey<Public>>,
 }
@@ -75,25 +75,20 @@ impl Descriptor {
         policy_key: PKey<Public>,
     ) -> Result<Self, Error> {
         Self::new(
-            generation
-                .rootfs()
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(invalid)?
-                .to_owned(),
+            generation.manifest().rootfs_sha256,
             generation.verification_key().clone(),
             policy_key,
         )
     }
 
     pub fn new(
-        rootfs: String,
+        rootfs_sha256: [u8; 32],
         overlay_key: PKey<Public>,
         policy_key: PKey<Public>,
     ) -> Result<Self, Error> {
         let descriptor = Self {
             version: DESCRIPTOR_VERSION,
-            rootfs,
+            rootfs_sha256,
             overlay_key: Der64(overlay_key),
             policy_key: Der64(policy_key),
         };
@@ -102,20 +97,20 @@ impl Descriptor {
     }
 
     fn validate(&self) -> Result<(), Error> {
-        if self.version != DESCRIPTOR_VERSION
-            || Path::new(&self.rootfs)
-                .file_name()
-                .and_then(|name| name.to_str())
-                != Some(self.rootfs.as_str())
-        {
+        if self.version != DESCRIPTOR_VERSION {
             return Err(invalid());
         }
         Ok(())
     }
 
-    pub fn rootfs_path(&self, images: &Path) -> Result<PathBuf, Error> {
+    async fn verified_generations(&self, config: &Path) -> Result<Vec<VerifiedGeneration>, Error> {
         self.validate()?;
-        Ok(images.join(&self.rootfs))
+        os_overlay::verified_generations_for_digest(
+            &generation_store(config),
+            &self.rootfs_sha256,
+            &self.overlay_key,
+        )
+        .await
     }
 
     /// Adds an authenticated filesystem policy before the enclosing generation publishes.
@@ -128,11 +123,12 @@ impl Descriptor {
         self.validate()?;
         let manifest =
             os_overlay::read_manifest(generation.staging_path(), &self.overlay_key).await?;
-        if profile.measurements.files
-            != tpm::filesystem_pcr(&tpm::filesystem_event(
-                &manifest.rootfs_sha256,
-                &manifest.overlay_sha256,
-            ))
+        if manifest.rootfs_sha256 != self.rootfs_sha256
+            || profile.measurements.files
+                != tpm::filesystem_pcr(&tpm::filesystem_event(
+                    &manifest.rootfs_sha256,
+                    &manifest.overlay_sha256,
+                ))
             || !profile.verify(&self.policy_key).await?
         {
             return Err(invalid());
@@ -151,13 +147,10 @@ impl Descriptor {
 
     /// Selects the newest authenticated generation authorized for this pre-filesystem boot.
     /// Missing, malformed or unauthenticated policies do not make a candidate eligible.
-    pub async fn select(&self, images: &Path, config: &Path) -> Result<Option<Generation>, Error> {
-        let rootfs = self.rootfs_path(images)?;
+    pub async fn select(&self, _images: &Path, config: &Path) -> Result<Option<Generation>, Error> {
+        let generations = self.verified_generations(config).await?;
         let observed = tpm::read_measurements().await?;
-        for generation in
-            os_overlay::verified_generations(&generation_store(config), &rootfs, &self.overlay_key)
-                .await?
-        {
+        for generation in generations {
             let expected = observed.with_filesystems(
                 &generation.manifest.rootfs_sha256,
                 &generation.manifest.overlay_sha256,
@@ -213,20 +206,14 @@ impl Descriptor {
 
     async fn mount_source_inner(
         &self,
-        images: &Path,
+        _images: &Path,
         config: &Path,
         mountpoint: &Path,
     ) -> Result<Option<super::source::BuildSource>, Error> {
-        let rootfs = self.rootfs_path(images)?;
-        let Some(generation) =
-            os_overlay::select_latest(&generation_store(config), &rootfs, &self.overlay_key)
-                .await?
-        else {
+        let Some(generation) = self.verified_generations(config).await?.into_iter().next() else {
             return Ok(None);
         };
-        let verified = generation
-            .mount_rootfs(&rootfs, &mountpoint.join("rootfs"))
-            .await?;
+        let verified = generation.mount_rootfs(&mountpoint.join("rootfs")).await?;
         super::source::BuildSource::mount(
             verified,
             &mountpoint.join("runtime"),
@@ -249,7 +236,7 @@ impl Descriptor {
         };
         let rootfs = generation
             .generation
-            .mount_rootfs(&self.rootfs_path(images)?, &mountpoint.join("rootfs"))
+            .mount_rootfs(&mountpoint.join("rootfs"))
             .await?;
         let overlay = generation
             .manifest()
@@ -313,6 +300,10 @@ impl MountedGeneration {
 
     pub fn rootfs(&self) -> &Path {
         self.rootfs.path()
+    }
+
+    pub(crate) fn rootfs_image(&self) -> &Path {
+        self.rootfs.image_path()
     }
 
     pub fn overlay(&self) -> &Path {
@@ -445,36 +436,31 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_pins_keys_and_a_single_image_without_public_mode_overrides() {
+    fn descriptor_pins_exact_image_bytes_and_keys_without_public_mode_overrides() {
         let overlay = crate::util::crypto::gen_nistp256().unwrap();
         let policy = crate::util::crypto::gen_nistp256().unwrap();
-        for name in [
-            "",
-            ".",
-            "..",
-            "/image.rootfs",
-            "../image.rootfs",
-            "images/image.rootfs",
-        ] {
-            assert!(Descriptor::new(name.into(), public(&overlay), public(&policy)).is_err());
-        }
-        let descriptor =
-            Descriptor::new("image.rootfs".into(), public(&overlay), public(&policy)).unwrap();
+        let descriptor = Descriptor::new([0x42; 32], public(&overlay), public(&policy)).unwrap();
         let json = serde_json::to_value(&descriptor).unwrap();
         let decoded: Descriptor = serde_json::from_value(json.clone()).unwrap();
-        assert_eq!(
-            decoded.rootfs_path(Path::new("/images")).unwrap(),
-            Path::new("/images/image.rootfs")
-        );
+        assert_eq!(decoded.rootfs_sha256, [0x42; 32]);
+        for bytes in [
+            serde_json::json!([]),
+            serde_json::json!(vec![0; 31]),
+            serde_json::json!("image.rootfs"),
+        ] {
+            let mut invalid = json.clone();
+            invalid["rootfsSha256"] = bytes;
+            assert!(serde_json::from_value::<Descriptor>(invalid).is_err());
+        }
         assert!(decoded.overlay_key.public_eq(&overlay));
         assert!(decoded.policy_key.public_eq(&policy));
         let mut extra = json.clone();
         extra["enabled"] = serde_json::json!(false);
         assert!(serde_json::from_value::<Descriptor>(extra).is_err());
         let mut version = json;
-        version["version"] = serde_json::json!(2);
+        version["version"] = serde_json::json!(1);
         let unsupported: Descriptor = serde_json::from_value(version).unwrap();
-        assert!(unsupported.rootfs_path(Path::new("/images")).is_err());
+        assert!(unsupported.validate().is_err());
     }
 
     async fn prepare(
@@ -492,6 +478,66 @@ mod tests {
         PreparedGeneration::import_raw(raw.path(), rootfs, &store, key)
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn descriptor_keeps_exact_retained_rootfs_binding_after_legacy_name_replacement_and_unlink()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let original = root.path().join("image.rootfs");
+        let config = root.path().join("config");
+        let key = os_overlay::generate_signing_key().unwrap();
+        let policy = os_overlay::generate_signing_key().unwrap();
+        tokio::fs::write(&original, vec![0x42; 8192]).await.unwrap();
+        let first = prepare(&config, &original, &key, b"first").await;
+        let descriptor = Descriptor::for_generation(&first, public(&policy)).unwrap();
+        let first = first.publish().await.unwrap();
+        tokio::fs::write(&original, vec![0x43; 8192]).await.unwrap();
+        let other = prepare(&config, &original, &key, b"other rootfs").await;
+        let other_descriptor = Descriptor::for_generation(&other, public(&policy)).unwrap();
+        let other = other.publish().await.unwrap();
+        tokio::fs::remove_file(&original).await.unwrap();
+        let selected = descriptor.verified_generations(&config).await.unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].path, first);
+        assert_eq!(
+            selected[0].rootfs_path(),
+            first.join(os_overlay::ROOTFS_FILE)
+        );
+        let selected = other_descriptor
+            .verified_generations(&config)
+            .await
+            .unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].path, other);
+        tokio::fs::write(first.join(os_overlay::ROOTFS_FILE), vec![0x43; 8192])
+            .await
+            .unwrap();
+        assert!(
+            descriptor
+                .verified_generations(&config)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            other_descriptor
+                .verified_generations(&config)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        tokio::fs::remove_file(first.join(os_overlay::ROOTFS_FILE))
+            .await
+            .unwrap();
+        assert!(
+            descriptor
+                .verified_generations(&config)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -513,7 +559,10 @@ mod tests {
             .unwrap();
         let descriptor =
             Descriptor::for_generation(&generation, tpm::public_key(&policy_key).unwrap()).unwrap();
-        assert_eq!(descriptor.rootfs_path(temp.path()).unwrap(), rootfs);
+        assert_eq!(
+            descriptor.rootfs_sha256,
+            generation.manifest().rootfs_sha256
+        );
         assert!(descriptor.overlay_key.public_eq(&manifest_key));
         assert!(descriptor.policy_key.public_eq(&policy_key));
         assert!(!descriptor.policy_key.public_eq(&manifest_key));
@@ -525,7 +574,7 @@ mod tests {
         );
         let bytes = serde_json::to_vec(&descriptor).unwrap();
         let decoded: Descriptor = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(decoded.rootfs_path(temp.path()).unwrap(), rootfs);
+        assert_eq!(decoded.rootfs_sha256, generation.manifest().rootfs_sha256);
         assert!(decoded.overlay_key.public_eq(&manifest_key));
         assert!(decoded.policy_key.public_eq(&policy_key));
     }
@@ -593,7 +642,7 @@ mod tests {
         let overlay_key = crate::util::crypto::gen_nistp256().unwrap();
         let authority = crate::util::crypto::gen_nistp256().unwrap();
         let descriptor = Descriptor::new(
-            "image.rootfs".into(),
+            os_overlay::digest_file(&rootfs).await.unwrap(),
             public(&overlay_key),
             public(&authority),
         )
@@ -634,6 +683,7 @@ mod tests {
             .unwrap();
         descriptor.stage_profile(&prepared, &profile).await.unwrap();
         prepared.publish().await.unwrap();
+        std::fs::remove_file(&rootfs).unwrap();
         let sealed = tpm::seal(
             &[42; 32],
             &authority,
@@ -700,8 +750,12 @@ mod tests {
         std::fs::copy(&image, &rootfs).unwrap();
         let key = crate::util::crypto::gen_nistp256().unwrap();
         let authority = crate::util::crypto::gen_nistp256().unwrap();
-        let descriptor =
-            Descriptor::new(rootfs_name.into(), public(&key), public(&authority)).unwrap();
+        let descriptor = Descriptor::new(
+            os_overlay::digest_file(&rootfs).await.unwrap(),
+            public(&key),
+            public(&authority),
+        )
+        .unwrap();
         std::fs::create_dir_all(generation_store(&config)).unwrap();
         let prepared =
             PreparedGeneration::import_raw(&raw, &rootfs, &generation_store(&config), &key)
@@ -794,7 +848,7 @@ mod tests {
         } = source_fixture().await;
         let images = temp.path().join("images");
         let config = temp.path().join("config");
-        let rootfs = descriptor.rootfs_path(&images).unwrap();
+        let rootfs = images.join("image.rootfs");
         let expected = tpm::read_measurements()
             .await
             .unwrap()
@@ -808,6 +862,7 @@ mod tests {
             .unwrap();
         descriptor.stage_profile(&prepared, &profile).await.unwrap();
         let generation = prepared.publish().await.unwrap();
+        std::fs::remove_file(&rootfs).unwrap();
         let mappings = boot_mappings();
         let mounted_at = temp.path().join("verified");
         let mounted = descriptor
@@ -822,7 +877,7 @@ mod tests {
         assert!(descriptor.select(&images, &config).await.is_err());
         std::fs::remove_dir_all(generation.join(POLICIES_DIR)).unwrap();
         let wrong = Descriptor::new(
-            "image.rootfs".into(),
+            descriptor.rootfs_sha256,
             public(&authority),
             public(&authority),
         )
@@ -898,7 +953,7 @@ mod tests {
         use std::io::Write;
         std::fs::OpenOptions::new()
             .append(true)
-            .open(&rootfs)
+            .open(generation.join(os_overlay::ROOTFS_FILE))
             .unwrap()
             .write_all(b"tamper")
             .unwrap();
@@ -979,8 +1034,19 @@ mod tests {
             serde_json::to_value(&super::super::credentials::test_credentials()).unwrap()
         );
         let configuration = super::super::initramfs::load_configuration().await.unwrap();
+        assert!(!temp.path().join("images/image.rootfs").exists());
+        assert_eq!(
+            configuration.rootfs_image.file_name().unwrap(),
+            os_overlay::ROOTFS_FILE
+        );
+        assert_eq!(
+            os_overlay::digest_file(&configuration.rootfs_image)
+                .await
+                .unwrap(),
+            configuration.rootfs_sha256
+        );
         let metadata = serde_json::to_value(&configuration).unwrap();
-        assert_eq!(metadata.as_object().unwrap().len(), 6);
+        assert_eq!(metadata.as_object().unwrap().len(), 7);
         assert!(metadata.get("credentials").is_none());
         assert!(configuration.profile.verify(&_authority).await.unwrap());
         super::super::initramfs::finish_handoff().await.unwrap();
@@ -1042,7 +1108,7 @@ mod tests {
         let snapshot = PreparedGeneration::prepare_working(
             &configuration.overlay,
             &configuration.working_upper,
-            &temp.path().join("images/image.rootfs"),
+            &configuration.rootfs_image,
             &generation_store(&temp.path().join("config")),
             &signing_key,
         )
@@ -1201,14 +1267,14 @@ mod tests {
         tokio::fs::create_dir_all(&images).await.unwrap();
         let overlay_key = crate::util::crypto::gen_nistp256().unwrap();
         let authority = crate::util::crypto::gen_nistp256().unwrap();
+        let rootfs = images.join("image.rootfs");
+        tokio::fs::write(&rootfs, vec![0x42; 8192]).await.unwrap();
         let descriptor = Descriptor::new(
-            "image.rootfs".into(),
+            os_overlay::digest_file(&rootfs).await.unwrap(),
             public(&overlay_key),
             public(&authority),
         )
         .unwrap();
-        let rootfs = descriptor.rootfs_path(&images).unwrap();
-        tokio::fs::write(&rootfs, vec![0x42; 8192]).await.unwrap();
         let observed = tpm::read_measurements().await.unwrap();
 
         let first = prepare(&config, &rootfs, &overlay_key, b"first").await;
@@ -1408,14 +1474,14 @@ mod tests {
 
         let wrong_key = crate::util::crypto::gen_nistp256().unwrap();
         let wrong = Descriptor::new(
-            "image.rootfs".into(),
+            descriptor.rootfs_sha256,
             public(&overlay_key),
             public(&wrong_key),
         )
         .unwrap();
         assert!(wrong.select(&images, &config).await.unwrap().is_none());
         let wrong = Descriptor::new(
-            "image.rootfs".into(),
+            descriptor.rootfs_sha256,
             public(&wrong_key),
             public(&authority),
         )
@@ -1423,8 +1489,25 @@ mod tests {
         assert!(wrong.select(&images, &config).await.unwrap().is_none());
 
         tokio::fs::write(&rootfs, vec![0x43; 8192]).await.unwrap();
-        assert!(descriptor.select(&images, &config).await.unwrap().is_none());
-        tokio::fs::write(&rootfs, vec![0x42; 8192]).await.unwrap();
+        assert_eq!(
+            descriptor
+                .select(&images, &config)
+                .await
+                .unwrap()
+                .unwrap()
+                .path(),
+            first
+        );
+        tokio::fs::remove_file(&rootfs).await.unwrap();
+        assert_eq!(
+            descriptor
+                .select(&images, &config)
+                .await
+                .unwrap()
+                .unwrap()
+                .path(),
+            first
+        );
         let manifest = selected.manifest();
         tpm::measure_filesystems(&tpm::filesystem_event(
             &manifest.rootfs_sha256,

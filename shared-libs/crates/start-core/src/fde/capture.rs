@@ -545,7 +545,7 @@ fn device_name(device: u64) -> String {
 async fn running_image() -> Result<PathBuf, Error> {
     if BootMode::current().await? == BootMode::Protected {
         let configuration = load_configuration().await?;
-        let image = configuration.descriptor.rootfs_path(Path::new(IMAGES))?;
+        let image = configuration.rootfs_image;
         if crate::os_overlay::digest_file(&image).await? != configuration.rootfs_sha256 {
             return Err(invalid_source());
         }

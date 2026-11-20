@@ -110,6 +110,7 @@ pub struct BootHandoff {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BootConfiguration {
+    pub rootfs_image: PathBuf,
     pub rootfs: PathBuf,
     pub overlay: PathBuf,
     pub working_upper: PathBuf,
@@ -141,6 +142,7 @@ async fn prepare_mounted(
     match mounted.verified().release_bootstrap(&memory, runtime).await {
         Ok(credentials) => {
             let configuration = BootConfiguration {
+                rootfs_image: mounted.verified().rootfs_image().to_owned(),
                 rootfs: mounted.verified().rootfs().to_owned(),
                 overlay: mounted.verified().overlay().to_owned(),
                 working_upper: mounted.working_upper().to_owned(),
