@@ -27,11 +27,6 @@ export abstract class AbstractMarketplaceService {
     registryUrl?: string,
   ): Observable<MarketplacePkg | null>
 
-  /** The version of a package installed on this server, if any. */
-  installedVersion$(_id: string): Observable<string | null> {
-    return of(null)
-  }
-
   /** Loads a package or dependency icon through the app's transport. */
   fetchIcon$(registry: string, icon: string): Observable<string> {
     return of(registryIconUrl(registry, icon))
