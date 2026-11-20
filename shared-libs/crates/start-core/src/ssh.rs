@@ -31,14 +31,15 @@ impl SshKeys {
 }
 
 impl Model<SshKeys> {
-    /// Reauthorizing a fingerprint replaces its key without changing either timestamp.
+    /// Reauthorizing a fingerprint replaces its key and keeps its `created_at`.
     fn authorize(&mut self, key: SshPubKey) -> Result<SshKeyResponse, Error> {
         let fingerprint = InternedString::intern(key.0.fingerprint_md5());
         let key = match self.as_idx(&fingerprint) {
-            Some(existing) => WithTimeData {
-                value: key,
-                ..existing.de()?
-            },
+            Some(existing) => {
+                let mut existing = existing.de()?;
+                *existing = key;
+                existing
+            }
             None => WithTimeData::new(key),
         };
         self.insert(&fingerprint, &key)?;
@@ -348,7 +349,7 @@ mod tests {
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMcFf+jmv4w+tRbA1aXDvovqViM0NVRu86Hk5kcQItfI laptop";
 
     #[test]
-    fn reauthorization_updates_the_comment_without_changing_timestamps() {
+    fn reauthorization_updates_the_comment_and_updated_at_but_not_created_at() {
         let key: SshPubKey = KEY.parse().unwrap();
         let fingerprint = InternedString::intern(key.0.fingerprint_md5());
         let original = WithTimeData {
@@ -370,7 +371,7 @@ mod tests {
         assert_eq!(response.hostname, "desktop");
         assert_eq!(response.created_at, original.created_at.to_rfc3339());
         assert_eq!(saved.created_at, original.created_at);
-        assert_eq!(saved.updated_at, original.updated_at);
+        assert!(saved.updated_at > original.updated_at);
         assert_eq!(saved.0.comment.as_deref(), Some("desktop"));
     }
 

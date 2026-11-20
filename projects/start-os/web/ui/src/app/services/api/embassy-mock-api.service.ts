@@ -934,7 +934,7 @@ export class MockApiService extends ApiService implements StartupApiService {
       const now = new Date().toISOString()
       const stored = {
         created_at: existing?.created_at ?? now,
-        updated_at: existing?.updated_at ?? now,
+        updated_at: now,
         value: key,
       }
       mockPatchData.sshPubkeys[fingerprint] = stored
