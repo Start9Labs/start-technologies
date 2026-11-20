@@ -113,9 +113,9 @@ Gestiona los dispositivos cliente de este servidor VPN.
 
 Un nombre elegido para identificar fácilmente la función del dispositivo cliente.
 
-### Dirección IP LAN
+### Dirección IP
 
-La dirección IP asignada en la red de área local. Se configuró cuando se dio de alta el dispositivo cliente.
+La dirección del dispositivo cliente en la VPN. Los dispositivos marcados como «Dirección antigua» se añadieron antes de que la VPN tuviera su propia subred y usan una dirección de la red del perfil; pueden perder la conexión mientras también están en esa red. Seleccione «Reemitir configuración» para mover uno a la subred de la VPN; después, el dispositivo necesita su nueva configuración.
 
 ### Enrutamiento
 
@@ -126,9 +126,9 @@ Muestra el modo de enrutamiento del tráfico del cliente. «Todo el tráfico» e
 
 Un nombre claro y descriptivo para el dispositivo cliente, como «Portátil de Juan» o «Teléfono de la oficina», para diferenciarlo de otros dispositivos.
 
-### Dirección IP LAN
+### Dirección IP
 
-La dirección IP LAN deseada para el dispositivo cliente, asegurándote de que esté dentro del rango de IP asignado a la VPN. Garantiza que el dispositivo cliente tenga una dirección IP única dentro de la red VPN, permitiéndole comunicarse con otros dispositivos.
+La dirección del dispositivo cliente en la subred propia de la VPN. Se sugiere la siguiente dirección libre.
 
 ### Clave pública
 

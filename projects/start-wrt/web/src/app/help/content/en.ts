@@ -113,9 +113,9 @@ Manage client devices for this VPN Server.
 
 A chosen name to easily identify the purpose of the client device.
 
-### LAN IP Address
+### IP Address
 
-The assigned IP address on the local area network. This was configured when the client device was setup.
+The client device's address on the VPN. Devices marked "Old address" were added before the VPN had its own subnet and use an address from the profile's network; they can lose their connection while they are also on that network. Select "Reissue config" to move one to the VPN's subnet; the device then needs its new configuration.
 
 ### Routing
 
@@ -126,9 +126,9 @@ Shows the client's traffic routing mode. "All traffic" routes all internet traff
 
 A clear and descriptive name for the client device, such as "John's Laptop" or "Office Phone," to differentiate it from other devices.
 
-### LAN IP Address
+### IP Address
 
-The desired LAN IP address for the client device, ensuring it is within the IP range allocated for the VPN. Ensures the client device has a unique IP address within the VPN network, allowing it to communicate with other devices.
+The client device's address in the VPN's own subnet. The next free address is suggested.
 
 ### Public Key
 

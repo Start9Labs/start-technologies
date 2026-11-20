@@ -39,6 +39,12 @@ export abstract class ApiService {
   abstract vpnServerPeerSetDnsInjection(
     params: RpcParamType<Api, 'vpn-server.peer-set-dns-injection'>,
   ): Promise<RpcReturnType<Api, 'vpn-server.peer-set-dns-injection'>>
+  abstract vpnServerPeerConfig(
+    params: RpcParamType<Api, 'vpn-server.peer-config'>,
+  ): Promise<RpcReturnType<Api, 'vpn-server.peer-config'>>
+  abstract vpnServerPeerReissue(
+    params: RpcParamType<Api, 'vpn-server.peer-reissue'>,
+  ): Promise<VpnServerPeerAddResponse>
   abstract wifiGet(): Promise<WifiConfig>
   abstract wifiSet(params: WifiConfig): Promise<WifiSetResult>
   abstract wifiGeneratePassword(): Promise<string>

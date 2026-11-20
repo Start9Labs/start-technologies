@@ -660,7 +660,8 @@ pub(crate) fn guard_dhcp_static_hosts(cfgs: &Configs, old_prefix: &[u8]) -> Resu
 }
 
 /// Update all profile network interface IPs and routing rules when the network
-/// block (first two octets) changes. Preserves each profile's 3rd/4th octets.
+/// block (first two octets) changes. Preserves each profile's 3rd/4th octets,
+/// and the 3rd octet of each inbound VPN's peer subnet.
 pub fn update_profile_ips_for_block_change(
     cfgs: &mut uciedit::Configs,
     old_address: Ipv4Addr,
@@ -776,7 +777,7 @@ pub fn update_profile_ips_for_block_change(
         }
     }
 
-    Ok(())
+    crate::vpn_server::move_peer_subnets(cfgs, [new_oct[0], new_oct[1]])
 }
 
 /// Reload network services after an IP change.

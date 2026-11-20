@@ -527,8 +527,8 @@ fn host_names(snapshot: &NetSnapshot, leases: &[crate::devices::DhcpLease]) -> H
     hosts
 }
 
-/// Which profile's /24 contains `ip`. Every profile subnet is a /24, and
-/// inbound-VPN peers are allocated inside their profile's.
+/// Which profile's /24 contains `ip`. Every profile subnet is a /24. An
+/// inbound-VPN peer's address may lie outside it, in its server's peer subnet.
 fn profile_for(profiles: &[ProfileNet], ip: Ipv4Addr) -> Option<&ProfileNet> {
     profiles
         .iter()

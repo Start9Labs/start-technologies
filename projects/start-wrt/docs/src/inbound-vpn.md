@@ -38,7 +38,7 @@ Each VPN server row has an actions menu:
 
 ## Managing Clients
 
-Each VPN server has a client management page listing all peers. Navigate to a VPN server and click "Manage clients" from the actions menu to view the client list, which shows each peer's name, LAN IP address, and routing mode.
+Each VPN server has a client management page listing all peers. Navigate to a VPN server and click "Manage clients" from the actions menu to view the client list, which shows each peer's name, IP address, and routing mode.
 
 ### Adding a Client
 
@@ -46,7 +46,7 @@ Each VPN server has a client management page listing all peers. Navigate to a VP
 
 1. Configure the client:
    - **Label** — A name for the client (e.g. "My iPhone", "Work Laptop").
-   - **LAN IP Address** — The IP address assigned to this client on the VPN subnet. The next available address is suggested; it must fall within the `.200`–`.253` host range of the subnet.
+   - **IP Address** — The client's address in the VPN's own subnet, a `/24` the router takes from the top of your [Network Block](lan.md) when you create the VPN. Profiles cannot use that subnet. The next available address is suggested.
    - **Public Key** — (Optional) Enter an existing WireGuard public key if the device already has a keypair configured. Leave empty to auto-generate a keypair.
    - **Route all traffic through tunnel** — When enabled, all of the client's Internet traffic routes through the VPN (full tunnel). When disabled (the default), only LAN traffic uses the tunnel and the client uses its own Internet connection for everything else (split tunnel).
 
@@ -65,11 +65,17 @@ Right after a client is created, its full configuration is displayed in two form
 If you entered the device's own public key, the configuration is shown as text only, with a placeholder where the private key belongs. Replace the placeholder with the device's private key, or copy the other values, including the preshared key, into the device's existing WireGuard tunnel.
 
 > [!IMPORTANT]
-> This is the only time the full configuration is available. The auto-generated private key is never stored on the router, so download or copy the configuration (or scan the QR code) before closing the dialog. The "View Config" action on the client list later shows the configuration without its private key or preshared key. If you lose the configuration, delete the client and create a new one.
+> This is the only time the full configuration is available. The auto-generated private key is never stored on the router, so download or copy the configuration (or scan the QR code) before closing the dialog. The "View Config" action on the client list later shows the configuration with placeholders for its private and preshared keys. If you lose the configuration, [reissue it](#reissuing-a-clients-configuration).
 
 ### Changing Client Routing
 
 A client's routing is set when it is created. To change it, delete the client and add it again with "Route all traffic through tunnel" set the way you want, then import the new configuration on the device.
+
+### Reissuing a Client's Configuration
+
+Select "Reissue config" from the client's actions menu to give the client new keys and an address in the VPN's subnet. Its new configuration is displayed once, as when adding a client; its name, routing, and DNS record publishing permission are kept. The old configuration stops working, so import the new one on the device.
+
+Clients added before each VPN had its own subnet are marked "Old address": their address is inside the Security Profile's own subnet. Such a client can lose its connection while it is also connected to your home network. Reissue its configuration to move it into the VPN's subnet.
 
 ### Renaming a Client
 

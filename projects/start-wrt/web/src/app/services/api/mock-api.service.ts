@@ -25,6 +25,7 @@ import {
   SetPreferencesReq,
   VpnServer,
   VpnServerDeleteArgs,
+  VpnServerPeer,
   VpnServerPeerAddArgs,
   VpnServerPeerAddResponse,
   VpnServerPeerDeleteArgs,
@@ -375,10 +376,9 @@ export class MockApiService extends ApiService {
   }
 
   private mockVpnServers: VpnServer[] = this.loadVpnServers()
-  private mockNextIpCounter = this.loadIpCounter()
 
   private loadVpnServers(): VpnServer[] {
-    const stored = localStorage.getItem('mock:vpn-servers')
+    const stored = localStorage.getItem('mock:vpn-servers-v2')
     if (stored) {
       try {
         return JSON.parse(stored)
@@ -392,16 +392,18 @@ export class MockApiService extends ApiService {
         listen_port: 51820,
         endpoint: 'myhost.dyndns.org',
         public_key: 'xY5zA7bC9daB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3=',
-        server_address: '192.168.1.1',
+        server_address: '192.168.255.1',
+        peer_subnet: '192.168.255.0/24',
         peers: [
           {
             name: 'Phone',
             ip: '192.168.1.200',
             public_key: '2JIBoK+Bxe7MJzX9zV+lFjqHxLTvehLp3piEROaNJjw=',
+            legacy_address: true,
           },
           {
             name: 'Laptop',
-            ip: '192.168.1.201',
+            ip: '192.168.255.2',
             public_key: 'bZIOgRYRGTX9x0OQsN1K+R63EhT2Pgo0WzYatTmzdDU=',
           },
         ],
@@ -413,26 +415,53 @@ export class MockApiService extends ApiService {
         listen_port: 51821,
         endpoint: '100.65.227.234',
         public_key: 'aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5zA7bC9d=',
-        server_address: '192.168.2.1',
+        server_address: '192.168.254.1',
+        peer_subnet: '192.168.254.0/24',
         peers: [],
       },
     ]
   }
 
-  private loadIpCounter(): number {
-    const stored = localStorage.getItem('mock:vpn-ip-counter')
-    return stored ? parseInt(stored, 10) : 202
-  }
-
   private persistVpnServers(): void {
     localStorage.setItem(
-      'mock:vpn-servers',
+      'mock:vpn-servers-v2',
       JSON.stringify(this.mockVpnServers),
     )
   }
 
-  private persistIpCounter(): void {
-    localStorage.setItem('mock:vpn-ip-counter', String(this.mockNextIpCounter))
+  private mockPeerSubnet(): string {
+    const taken = [
+      ...this.mockVpnServers.map(s => s.peer_subnet),
+      ...this.mockProfiles.map(p => p.gateway_ip),
+    ].map(ip => Number(ip?.split('.')[2]))
+    const octet = [...Array(256).keys()].reverse().find(o => !taken.includes(o))
+    return `192.168.${octet}.0/24`
+  }
+
+  private mockPeerIp(server: VpnServer): string {
+    const prefix = (server.peer_subnet ?? '').replace(/\.0\/24$/, '')
+    const used = server.peers.map(p => Number(p.ip?.split('.')[3]))
+    const host = [...Array(253).keys()]
+      .map(i => i + 2)
+      .find(h => !used.includes(h))
+    return `${prefix}.${host}`
+  }
+
+  private mockClientConfig(
+    server: VpnServer | undefined,
+    peer: VpnServerPeer,
+    privateKey = '<PRIVATE_KEY>',
+    presharedKey = '<PRESHARED_KEY>',
+  ): string {
+    const profile = this.mockProfiles.find(p => p.interface === server?.profile)
+    const gateway = profile?.gateway_ip ?? '192.168.1.1'
+    const lan = gateway.replace(/\.\d+$/, '.0/24')
+    const allowed = peer.route_all
+      ? '0.0.0.0/0, ::/0'
+      : peer.legacy_address
+        ? lan
+        : `${lan}, ${server?.peer_subnet}`
+    return `[Interface]\nPrivateKey = ${privateKey}\nAddress = ${peer.ip}/24\nDNS = ${gateway}\n\n[Peer]\nPublicKey = ${server?.public_key ?? 'mockServerKey'}\nPresharedKey = ${presharedKey}\nEndpoint = ${server?.endpoint ?? 'mock'}:${server?.listen_port ?? 51820}\nAllowedIPs = ${allowed}\nPersistentKeepalive = 25\n`
   }
 
   async vpnServerList(): Promise<VpnServers> {
@@ -452,16 +481,15 @@ export class MockApiService extends ApiService {
           : s,
       )
     } else {
-      const profile = this.mockProfiles.find(
-        p => p.interface === params.profile,
-      )
+      const peer_subnet = this.mockPeerSubnet()
       this.mockVpnServers = [
         ...this.mockVpnServers,
         {
           profile: params.profile,
           ...params.config,
           public_key: 'mock' + btoa(String(Date.now())).slice(0, 40) + '=',
-          server_address: profile?.gateway_ip ?? '192.168.1.1',
+          server_address: peer_subnet.replace(/\.0\/24$/, '.1'),
+          peer_subnet,
           peers: [],
         },
       ]
@@ -496,12 +524,10 @@ export class MockApiService extends ApiService {
   ): Promise<VpnServerPeerAddResponse> {
     await pauseFor(250)
     const server = this.mockVpnServers.find(s => s.profile === params.profile)
+    if (!server) throw new Error(`VPN server not found: ${params.profile}`)
     const generatedKey =
       params.peer.public_key || btoa(String(Date.now())).slice(0, 40) + '='
-    const ip =
-      params.peer.ip ||
-      `${server?.server_address.replace(/\.\d+$/, '')}.${this.mockNextIpCounter++}`
-    this.persistIpCounter()
+    const ip = params.peer.ip || this.mockPeerIp(server)
     const peer = { ...params.peer, public_key: generatedKey, ip }
     this.mockVpnServers = this.mockVpnServers.map(s =>
       s.profile === params.profile ? { ...s, peers: [...s.peers, peer] } : s,
@@ -515,7 +541,61 @@ export class MockApiService extends ApiService {
     return {
       public_key: generatedKey,
       ip,
-      client_config: `[Interface]\nPrivateKey = ${params.peer.public_key ? '<PRIVATE_KEY>' : 'MOCK_PRIVATE_KEY'}\nAddress = ${ip}/32\nDNS = ${server?.server_address.replace(/\.\d+$/, '.1') ?? '192.168.1.1'}\n\n[Peer]\nPublicKey = ${server?.public_key ?? 'mockServerKey'}\nPresharedKey = MOCK_PRESHARED_KEY\nEndpoint = ${server?.endpoint ?? 'mock'}:${server?.listen_port ?? 51820}\nAllowedIPs = ${params.peer.route_all ? '0.0.0.0/0, ::/0' : (server?.server_address.replace(/\.\d+$/, '.0/24') ?? '192.168.1.0/24')}`,
+      client_config: this.mockClientConfig(
+        server,
+        peer,
+        params.peer.public_key ? undefined : 'MOCK_PRIVATE_KEY',
+        'MOCK_PRESHARED_KEY',
+      ),
+    }
+  }
+
+  async vpnServerPeerConfig(
+    params: RpcParamType<Api, 'vpn-server.peer-config'>,
+  ): Promise<RpcReturnType<Api, 'vpn-server.peer-config'>> {
+    await pauseFor(250)
+    const server = this.mockVpnServers.find(s => s.profile === params.profile)
+    const peer = server?.peers.find(p => p.public_key === params.public_key)
+    if (!peer) throw new Error(`Peer ${params.public_key} not found`)
+    return { client_config: this.mockClientConfig(server, peer) }
+  }
+
+  async vpnServerPeerReissue(
+    params: RpcParamType<Api, 'vpn-server.peer-reissue'>,
+  ): Promise<VpnServerPeerAddResponse> {
+    await pauseFor(250)
+    const server = this.mockVpnServers.find(s => s.profile === params.profile)
+    const old = server?.peers.find(p => p.public_key === params.public_key)
+    if (!server || !old) throw new Error(`Peer ${params.public_key} not found`)
+    const remaining = {
+      ...server,
+      peers: server.peers.filter(p => p !== old),
+    }
+    const peer: VpnServerPeer = {
+      name: old.name,
+      route_all: old.route_all,
+      allow_dns_injection: old.allow_dns_injection,
+      public_key: btoa(String(Date.now())).slice(0, 40) + '=',
+      ip: this.mockPeerIp(remaining),
+    }
+    this.mockVpnServers = this.mockVpnServers.map(s =>
+      s === server ? { ...remaining, peers: [...remaining.peers, peer] } : s,
+    )
+    this.persistVpnServers()
+    this.logActivity(
+      'vpn-server',
+      'peer-reissued',
+      `Reissued peer '${peer.name}' of inbound VPN`,
+    )
+    return {
+      public_key: peer.public_key!,
+      ip: peer.ip!,
+      client_config: this.mockClientConfig(
+        server,
+        peer,
+        'MOCK_PRIVATE_KEY',
+        'MOCK_PRESHARED_KEY',
+      ),
     }
   }
 

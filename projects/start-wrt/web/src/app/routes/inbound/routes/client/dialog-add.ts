@@ -23,10 +23,12 @@ import { provideHelp } from 'src/app/help/help'
 import { ModalHelp } from 'src/app/help/modal-help'
 import { VpnServerPeer } from 'src/app/routes/inbound/service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { provideTranslatedValidationErrors } from 'src/app/i18n/validation-errors'
 
 export interface ClientDialogData {
-  serverAddress: string
-  usedIps: string[]
+  /** Without one, the router picks the address. */
+  peerSubnet?: string | null
+  peers: readonly VpnServerPeer[]
 }
 
 @Component({
@@ -41,11 +43,13 @@ export interface ClientDialogData {
         />
       </tui-textfield>
       <tui-error formControlName="name" />
-      <tui-textfield>
-        <label tuiLabel>{{ 'LAN IP Address' | i18n }}</label>
-        <input tuiInput formControlName="ip" />
-      </tui-textfield>
-      <tui-error formControlName="ip" />
+      @if (prefix) {
+        <tui-textfield>
+          <label tuiLabel>{{ 'IP Address' | i18n }}</label>
+          <input tuiInput formControlName="ip" />
+        </tui-textfield>
+        <tui-error formControlName="ip" />
+      }
       <tui-textfield>
         <label tuiLabel>{{ 'Public Key (optional)' | i18n }}</label>
         <input tuiInput formControlName="public_key" />
@@ -71,6 +75,13 @@ export interface ClientDialogData {
   providers: [
     provideHelp('/inbound/client/dialog-add'),
     tuiTextfieldOptionsProvider({ cleaner: signal(false) }),
+    provideTranslatedValidationErrors({
+      required: 'Required',
+      ipv4: 'Enter a valid IPv4 address',
+      outsideProfile: 'Outside the subnet of this VPN',
+      notHost: 'Not a usable host address',
+      uniqueIp: 'Already used by another client of this VPN',
+    }),
   ],
   imports: [
     ReactiveFormsModule,
@@ -87,51 +98,43 @@ class AddClient {
   protected readonly context =
     injectContext<TuiDialogContext<VpnServerPeer, ClientDialogData>>()
 
-  private readonly serverAddress = this.context.data.serverAddress
-  private readonly usedIps = this.context.data.usedIps
+  protected readonly prefix = this.context.data.peerSubnet?.replace(
+    /\.0\/24$/,
+    '',
+  )
+  // Unique across subnets: each is also the peer's IPv6 host id.
+  private readonly usedHosts = this.context.data.peers
+    .map(peer => Number(peer.ip?.split('.')[3]))
+    .filter(Number.isInteger)
 
   protected readonly form = inject(NonNullableFormBuilder).group({
     name: ['', Validators.required],
     ip: [
-      this.nextAvailableIp(),
-      [
-        Validators.required,
-        CustomValidators.ipv4(),
-        this.peerIpRange(),
-        this.uniqueIp(),
-      ],
+      this.prefix ? this.nextAvailableIp(this.prefix) : '',
+      this.prefix
+        ? [
+            Validators.required,
+            CustomValidators.ipv4(),
+            CustomValidators.ipv4HostIn(`${this.prefix}.1/24`),
+            this.uniqueHost(),
+          ]
+        : [],
     ],
     public_key: [''],
     route_all: [false],
   })
 
-  private nextAvailableIp(): string {
-    const prefix = this.serverAddress.replace(/\.\d+$/, '')
-    for (let i = 200; i <= 253; i++) {
-      const candidate = `${prefix}.${i}`
-      if (!this.usedIps.includes(candidate)) return candidate
-    }
-    return `${prefix}.200`
+  private nextAvailableIp(prefix: string): string {
+    const host = [...Array(253).keys()]
+      .map(i => i + 2)
+      .find(host => !this.usedHosts.includes(host))
+    return host ? `${prefix}.${host}` : ''
   }
 
-  private peerIpRange(): ValidatorFn {
+  private uniqueHost(): ValidatorFn {
     return (control: AbstractControl) => {
-      if (!control.value) return null
-      const prefix = this.serverAddress.replace(/\.\d+$/, '')
-      const match = control.value.match(/^(.+)\.(\d+)$/)
-      if (!match) return { peerIpRange: true }
-      const octet = parseInt(match[2], 10)
-      if (match[1] !== prefix || octet < 200 || octet > 253) {
-        return { peerIpRange: true }
-      }
-      return null
-    }
-  }
-
-  private uniqueIp(): ValidatorFn {
-    return (control: AbstractControl) => {
-      if (!control.value) return null
-      return this.usedIps.includes(control.value) ? { uniqueIp: true } : null
+      const host = Number(control.value?.split('.')[3])
+      return this.usedHosts.includes(host) ? { uniqueIp: true } : null
     }
   }
 
@@ -142,7 +145,7 @@ class AddClient {
       const { name, ip, public_key, route_all } = this.form.getRawValue()
       this.context.completeWith({
         name,
-        ip,
+        ip: ip || undefined,
         public_key: public_key || undefined,
         route_all: route_all || undefined,
       })

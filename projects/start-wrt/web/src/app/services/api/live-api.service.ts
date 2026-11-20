@@ -200,6 +200,18 @@ export class LiveApiService extends ApiService {
     })
   }
 
+  async vpnServerPeerConfig(
+    params: RpcParamType<Api, 'vpn-server.peer-config'>,
+  ): Promise<RpcReturnType<Api, 'vpn-server.peer-config'>> {
+    return this.rpc.request({ method: 'vpn-server.peer-config', params })
+  }
+
+  async vpnServerPeerReissue(
+    params: RpcParamType<Api, 'vpn-server.peer-reissue'>,
+  ): Promise<VpnServerPeerAddResponse> {
+    return this.rpc.request({ method: 'vpn-server.peer-reissue', params })
+  }
+
   async wifiGet(): Promise<WifiConfig> {
     return this.rpc.request({ method: 'wifi.get', params: {} })
   }

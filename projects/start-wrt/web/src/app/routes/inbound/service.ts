@@ -110,6 +110,43 @@ export class InboundService extends FormService<VpnServer[]> {
     )
   }
 
+  async peerConfig(
+    profile: string,
+    public_key: string,
+  ): Promise<string | undefined> {
+    let config: string | undefined
+    await this.actions.run(
+      async () => {
+        const response = await this.api.vpnServerPeerConfig({
+          profile,
+          public_key,
+        })
+        config = response.client_config
+      },
+      { loading: this.i18n.transform('Loading...') },
+    )
+    return config
+  }
+
+  async reissuePeer(
+    profile: string,
+    public_key: string,
+  ): Promise<VpnServerPeerAddResponse | undefined> {
+    let response: VpnServerPeerAddResponse | undefined
+    await this.actions.run(
+      async () => {
+        response = await this.api.vpnServerPeerReissue({ profile, public_key })
+        this.refresh()
+      },
+      {
+        loading: this.i18n.transform('Reissuing configuration...'),
+        success: this.i18n.transform('Configuration reissued'),
+        restart: true,
+      },
+    )
+    return response
+  }
+
   async deletePeer(profile: string, public_key: string) {
     await this.actions.run(
       async () => {

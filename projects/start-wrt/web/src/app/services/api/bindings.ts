@@ -219,7 +219,14 @@ export type OutboundVpnUpdateRequestInput = z.input<
  * Response from adding a peer
  */
 export type PeerAddResponse = z.output<typeof schemas.PeerAddResponse>
+export type PeerConfigArgsInput = z.input<typeof schemas.PeerConfigArgs>
+
+/**
+ * A peer's client configuration, without its keys
+ */
+export type PeerConfigResponse = z.output<typeof schemas.PeerConfigResponse>
 export type PeerDeleteArgsInput = z.input<typeof schemas.PeerDeleteArgs>
+export type PeerReissueArgsInput = z.input<typeof schemas.PeerReissueArgs>
 export type PeerRenameArgsInput = z.input<typeof schemas.PeerRenameArgs>
 export type PeerSetDnsInjectionArgsInput = z.input<
   typeof schemas.PeerSetDnsInjectionArgs

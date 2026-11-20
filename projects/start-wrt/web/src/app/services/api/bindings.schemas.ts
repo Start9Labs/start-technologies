@@ -986,6 +986,52 @@ export const PeerAddResponse: z.ZodObject<{
   id: 'PeerAddResponse',
   description: 'Response from adding a peer',
 })
+export const PeerConfigArgs: z.ZodObject<{
+  /**
+   * Profile interface name
+   */
+  profile: z.ZodString
+  /**
+   * Public key of the peer
+   */
+  public_key: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * Profile interface name
+   */
+  profile: z.string().meta({
+    description: 'Profile interface name',
+  }),
+  /**
+   * Public key of the peer
+   */
+  public_key: z.string().meta({
+    description: 'Public key of the peer',
+  }),
+}).meta({
+  id: 'PeerConfigArgs',
+})
+
+/**
+ * A peer's client configuration, without its keys
+ */
+export const PeerConfigResponse: z.ZodObject<{
+  /**
+   * WireGuard client configuration with placeholders for the private and preshared keys
+   */
+  client_config: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * WireGuard client configuration with placeholders for the private and preshared keys
+   */
+  client_config: z.string().meta({
+    description:
+      'WireGuard client configuration with placeholders for the private and preshared keys',
+  }),
+}).meta({
+  id: 'PeerConfigResponse',
+  description: "A peer's client configuration, without its keys",
+})
 export const PeerDeleteArgs: z.ZodObject<{
   /**
    * Profile interface name
@@ -1010,6 +1056,31 @@ export const PeerDeleteArgs: z.ZodObject<{
   }),
 }).meta({
   id: 'PeerDeleteArgs',
+})
+export const PeerReissueArgs: z.ZodObject<{
+  /**
+   * Profile interface name
+   */
+  profile: z.ZodString
+  /**
+   * Public key of the peer to replace
+   */
+  public_key: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * Profile interface name
+   */
+  profile: z.string().meta({
+    description: 'Profile interface name',
+  }),
+  /**
+   * Public key of the peer to replace
+   */
+  public_key: z.string().meta({
+    description: 'Public key of the peer to replace',
+  }),
+}).meta({
+  id: 'PeerReissueArgs',
 })
 export const PeerRenameArgs: z.ZodObject<{
   /**
@@ -1558,7 +1629,7 @@ export const VpnServerPeer: z.ZodObject<{
    */
   name: z.ZodString
   /**
-   * Assigned IP address within the profile's subnet (auto-allocated if not specified)
+   * Assigned IP address within the server's peer subnet (auto-allocated if not specified)
    */
   ip: z.ZodOptional<z.ZodNullable<z.ZodString>>
   /**
@@ -1577,6 +1648,11 @@ export const VpnServerPeer: z.ZodObject<{
    * May publish DNS records into the router's resolver. Default (false/absent) = denied.
    */
   allow_dns_injection: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>
+  /**
+   * Listed only: the address sits in the profile's own subnet, from before peer
+   * subnets. Reissuing the config moves it. Ignored on add.
+   */
+  legacy_address: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>
 }> = /* @__PURE__ */ object({
   /**
    * Human-readable name for the peer
@@ -1585,11 +1661,11 @@ export const VpnServerPeer: z.ZodObject<{
     description: 'Human-readable name for the peer',
   }),
   /**
-   * Assigned IP address within the profile's subnet (auto-allocated if not specified)
+   * Assigned IP address within the server's peer subnet (auto-allocated if not specified)
    */
   ip: z.string().nullable().optional().meta({
     description:
-      "Assigned IP address within the profile's subnet (auto-allocated if not specified)",
+      "Assigned IP address within the server's peer subnet (auto-allocated if not specified)",
   }),
   /**
    * Public key. If not provided when adding a peer, a key pair will be generated.
@@ -1617,6 +1693,14 @@ export const VpnServerPeer: z.ZodObject<{
   allow_dns_injection: z.boolean().nullable().optional().meta({
     description:
       "May publish DNS records into the router's resolver. Default (false/absent) = denied.",
+  }),
+  /**
+   * Listed only: the address sits in the profile's own subnet, from before peer
+   * subnets. Reissuing the config moves it. Ignored on add.
+   */
+  legacy_address: z.boolean().nullable().optional().meta({
+    description:
+      "Listed only: the address sits in the profile's own subnet, from before peer\nsubnets. Reissuing the config moves it. Ignored on add.",
   }),
 }).meta({
   id: 'VpnServerPeer',
@@ -2700,9 +2784,13 @@ export const VpnServer: z.ZodObject<{
    */
   public_key: z.ZodString
   /**
-   * Server's VPN address (derived from profile's gateway)
+   * The router's address in the peer subnet; without one, its address in the profile's subnet
    */
   server_address: z.ZodString
+  /**
+   * The `/24` new peers are addressed from. Absent until the server is saved or gains a peer.
+   */
+  peer_subnet: z.ZodOptional<z.ZodNullable<z.ZodString>>
   /**
    * Connected peers
    */
@@ -2747,10 +2835,18 @@ export const VpnServer: z.ZodObject<{
     description: "Server's public key",
   }),
   /**
-   * Server's VPN address (derived from profile's gateway)
+   * The router's address in the peer subnet; without one, its address in the profile's subnet
    */
   server_address: z.string().meta({
-    description: "Server's VPN address (derived from profile's gateway)",
+    description:
+      "The router's address in the peer subnet; without one, its address in the profile's subnet",
+  }),
+  /**
+   * The `/24` new peers are addressed from. Absent until the server is saved or gains a peer.
+   */
+  peer_subnet: z.string().nullable().optional().meta({
+    description:
+      'The `/24` new peers are addressed from. Absent until the server is saved or gains a peer.',
   }),
   /**
    * Connected peers
@@ -4528,6 +4624,23 @@ export const Api = {
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
+        'peer-config': {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            PeerConfigArgs,
+          ),
+          _RETURN: /* @__PURE__ */ PeerConfigResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
         'peer-delete': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
@@ -4542,6 +4655,23 @@ export const Api = {
             PeerDeleteArgs,
           ),
           _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'peer-reissue': {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            PeerReissueArgs,
+          ),
+          _RETURN: /* @__PURE__ */ PeerAddResponse,
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
