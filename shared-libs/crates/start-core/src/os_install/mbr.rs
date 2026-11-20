@@ -80,12 +80,30 @@ fn entry(boot: u8, sys: u8, starting_lba: u32, sectors: u32) -> MBRPartitionEntr
     }
 }
 
-/// Data keeps slot 4 when it was there; otherwise it takes 3.
-fn data_and_efi_slots(protected_slot: Option<usize>) -> (usize, usize) {
-    if protected_slot == Some(4) {
-        (4, 3)
-    } else {
-        (3, 4)
+/// Table entry numbers. Data keeps its entry; boot, root and the EFI partition take the
+/// others in order.
+#[derive(Clone, Copy)]
+struct Slots {
+    boot: usize,
+    root: usize,
+    efi: usize,
+    data: usize,
+}
+
+impl Slots {
+    fn around(data: usize) -> Self {
+        let [boot, root, efi] = match data {
+            1 => [2, 3, 4],
+            2 => [1, 3, 4],
+            4 => [1, 2, 3],
+            _ => [1, 2, 4],
+        };
+        Self {
+            boot,
+            root,
+            efi,
+            data,
+        }
     }
 }
 
@@ -156,17 +174,17 @@ fn write_mbr_layout(
         Some(p) => p.start.min(root_start + ROOT_TARGET_MIB * mib),
         None => root_start + ROOT_TARGET_MIB * mib,
     };
-    let (data_slot, efi_slot) = data_and_efi_slots(protected.map(|p| p.slot));
+    let slots = Slots::around(protected.map_or(3, |p| p.slot));
 
     let mut mbr = MBR::new_from(file, geometry.sector_size, rand::random())?;
-    mbr[1] = entry(0x80, 0x0b, boot_start, boot_end - boot_start);
-    mbr[2] = entry(0, 0x83, root_start, root_end - root_start);
-    mbr[data_slot] = match protected {
+    mbr[slots.boot] = entry(0x80, 0x0b, boot_start, boot_end - boot_start);
+    mbr[slots.root] = entry(0, 0x83, root_start, root_end - root_start);
+    mbr[slots.data] = match protected {
         Some(p) => entry(0, 0x8e, p.start, p.sectors),
         None => entry(0, 0x8e, root_end, geometry.sectors - root_end),
     };
     if use_efi {
-        mbr[efi_slot] = entry(0, 0xef, boot_end, EFI_MIB * mib);
+        mbr[slots.efi] = entry(0, 0xef, boot_end, EFI_MIB * mib);
     }
     mbr.write_into(file)?;
     Ok(mbr)
@@ -235,7 +253,7 @@ pub async fn partition(
         Some(protect) => Some(selected_extent(disk_path, protect, geometry).await?),
         None => None,
     };
-    let (data_slot, efi_slot) = data_and_efi_slots(protected.as_ref().map(|p| p.slot));
+    let slots = Slots::around(protected.as_ref().map_or(3, |p| p.slot));
 
     forget_partitions(disk_path, protect).await?;
 
@@ -269,14 +287,17 @@ pub async fn partition(
 
     let mut extra_boot = BTreeMap::new();
     if use_efi {
-        extra_boot.insert("efi".to_string(), partition_for(disk_path, efi_slot as u32));
+        extra_boot.insert(
+            "efi".to_string(),
+            partition_for(disk_path, slots.efi as u32),
+        );
     }
     Ok(OsPartitionInfo {
         bios: None,
-        boot: partition_for(disk_path, 1),
-        root: partition_for(disk_path, 2),
+        boot: partition_for(disk_path, slots.boot as u32),
+        root: partition_for(disk_path, slots.root as u32),
         extra_boot,
-        data: Some(partition_for(disk_path, data_slot as u32)),
+        data: Some(partition_for(disk_path, slots.data as u32)),
     })
 }
 
@@ -297,14 +318,16 @@ mod tests {
     }
 
     /// A StartOS 0.3.4.1 legacy-install MBR with the data partition at `data_start` in
-    /// `data_slot`, running to the last sector and marked at its first and last bytes.
+    /// `data_slot`, running to the last sector and marked at its first and last bytes. Boot
+    /// and root take the first two other entries.
     fn legacy_disk(g: Geometry, data_start: u32, data_slot: usize) -> File {
         let mut file = tempfile::tempfile().unwrap();
         file.set_len(DISK_BYTES).unwrap();
         let mut mbr = MBR::new_from(&mut file, g.sector_size, [1, 2, 3, 4]).unwrap();
         let mib = g.mib();
-        mbr[1] = entry(0x80, 0x0b, mib, 1024 * mib);
-        mbr[2] = entry(0, 0x83, 1025 * mib, data_start - 1025 * mib);
+        let mut os = (1..=4).filter(|&slot| slot != data_slot);
+        mbr[os.next().unwrap()] = entry(0x80, 0x0b, mib, 1024 * mib);
+        mbr[os.next().unwrap()] = entry(0, 0x83, 1025 * mib, data_start - 1025 * mib);
         mbr[data_slot] = entry(0, 0x8e, data_start, g.sectors - data_start);
         mbr.write_into(&mut file).unwrap();
         for at in marker_offsets(g, data_start) {
@@ -394,14 +417,78 @@ mod tests {
         assert_markers(&mut file, g, DATA_START);
     }
 
+    /// Data entry, then the boot, root and EFI entries.
+    const SLOTS: [(usize, [usize; 3]); 4] = [
+        (1, [2, 3, 4]),
+        (2, [1, 3, 4]),
+        (3, [1, 2, 4]),
+        (4, [1, 2, 3]),
+    ];
+
     #[test]
-    fn data_in_slot_4_keeps_its_slot_under_uefi() {
+    fn data_keeps_its_entry_number_in_every_slot() {
         let g = geometry(512);
-        let mut file = legacy_disk(g, DATA_START, 4);
-        let mbr = rewrite(&mut file, g, DATA_START, 4, true).unwrap();
-        assert_eq!(mbr[4], entry(0, 0x8e, DATA_START, g.sectors - DATA_START));
-        assert_eq!(mbr[3], entry(0, 0xef, 4196352, 204800));
-        assert_markers(&mut file, g, DATA_START);
+        for (data, [boot, root, efi]) in SLOTS {
+            for use_efi in [true, false] {
+                let mut file = legacy_disk(g, DATA_START, data);
+                let mbr = rewrite(&mut file, g, DATA_START, data, use_efi).unwrap();
+                let root_start = if use_efi { 4401152 } else { 4196352 };
+                assert_eq!(mbr[boot], entry(0x80, 0x0b, 2048, 4194304), "data {data}");
+                assert_eq!(
+                    mbr[root],
+                    entry(0, 0x83, root_start, DATA_START - root_start),
+                    "data {data}"
+                );
+                assert_eq!(
+                    mbr[data],
+                    entry(0, 0x8e, DATA_START, g.sectors - DATA_START),
+                    "data {data}"
+                );
+                if use_efi {
+                    assert_eq!(mbr[efi], entry(0, 0xef, 4196352, 204800), "data {data}");
+                } else {
+                    assert_eq!(mbr[efi].sectors, 0, "data {data}");
+                }
+                assert_markers(&mut file, g, DATA_START);
+            }
+        }
+    }
+
+    #[test]
+    fn a_busy_data_mapping_already_matches_the_new_table() {
+        let g = geometry(512);
+        for (data, _) in SLOTS {
+            let mut file = legacy_disk(g, DATA_START, data);
+            let held = g
+                .kernel_extent(&MBR::read_from(&mut file, 512).unwrap()[data])
+                .unwrap();
+            let mbr = rewrite(&mut file, g, DATA_START, data, true).unwrap();
+
+            // `partx --update` cannot move or delete the open data partition.
+            let mut after = mapped(&mbr, g);
+            after.insert(data, held);
+            assert_eq!(mismatched_slot(&mbr, g, &after), None, "data {data}");
+        }
+    }
+
+    #[test]
+    fn every_data_slot_is_rejected_before_sector_0_changes() {
+        let g = geometry(512);
+        let too_close = 2048 + 4194304 + 204800 + 12 * 1024 * 2048 - 1;
+        for (data, _) in SLOTS {
+            let mut file = legacy_disk(g, too_close, data);
+            let sector0 = read_at(&mut file, 0);
+            assert!(rewrite(&mut file, g, too_close, data, true).is_err());
+            assert_eq!(read_at(&mut file, 0), sector0, "data {data}");
+            assert_markers(&mut file, g, too_close);
+
+            let mut file = legacy_disk(g, DATA_START, data);
+            let sector0 = read_at(&mut file, 0);
+            let stale = (4401152, 29155328);
+            assert!(rewrite_checked(&mut file, g, data, stale, true).is_err());
+            assert_eq!(read_at(&mut file, 0), sector0, "data {data}");
+            assert_markers(&mut file, g, DATA_START);
+        }
     }
 
     #[test]
