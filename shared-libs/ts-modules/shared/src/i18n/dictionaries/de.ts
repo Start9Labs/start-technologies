@@ -1097,4 +1097,5 @@ export default {
   1301: 'Einträge sind möglicherweise veraltet',
   1302: 'StartOS kann diese Registry gerade nicht erreichen.',
   1303: 'Sicherheitsupdate',
+  1304: 'Neuzugänge',
 } satisfies i18n

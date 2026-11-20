@@ -1097,4 +1097,5 @@ export default {
   1301: 'Es posible que los listados estén desactualizados',
   1302: 'StartOS no puede conectar con este registro en este momento.',
   1303: 'Actualización de seguridad',
+  1304: 'Novedades',
 } satisfies i18n
