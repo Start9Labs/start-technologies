@@ -358,6 +358,107 @@ pub fn auth<C: Context, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>() -
             "session",
             session::<C, AC, CC>().with_about("about.list-or-kill-auth-sessions"),
         )
+        .subcommand(
+            "key",
+            key::<C, AC, CC>().with_about("about.commands-authorized-keys"),
+        )
+}
+
+fn key<C: Context, AC: LoginContext, CC: CallRemote<AC>>() -> ParentHandler<C> {
+    ParentHandler::new()
+        .subcommand(
+            "add",
+            from_fn_async(add_key::<AC>)
+                .with_metadata("sync_db", Value::Bool(true))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .no_display()
+                .with_about("about.add-new-authorized-key")
+                .with_call_remote::<CC>(),
+        )
+        .subcommand(
+            "remove",
+            from_fn_async(remove_key::<AC>)
+                .with_metadata("sync_db", Value::Bool(true))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .no_display()
+                .with_about("about.remove-authorized-key")
+                .with_call_remote::<CC>(),
+        )
+        .subcommand(
+            "list",
+            from_fn_async(list_keys::<AC>)
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .with_display_serializable()
+                .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
+                    use prettytable::*;
+                    if let Some(format) = params.format {
+                        return display_serializable(format, res);
+                    }
+                    let mut table = Table::new();
+                    table.add_row(row![bc => "NAME", "KEY"]);
+                    for (key, info) in res.0 {
+                        table.add_row(row![info.name.as_deref().unwrap_or("-"), key]);
+                    }
+                    crate::util::output::print_table(&table)?;
+                    Ok(())
+                })
+                .with_about("about.list-authorized-keys")
+                .with_call_remote::<CC>(),
+        )
+}
+
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+pub struct AddKeyParams {
+    pub name: InternedString,
+    pub key: AnyVerifyingKey,
+}
+
+rpc_toolkit::reflect_ts!(AddKeyParams);
+rpc_toolkit::ts_export!(AddKeyParams, namespaces = [""]);
+
+/// Enrolls a key without a password or the login rate limit.
+pub async fn add_key<C: LoginContext>(
+    ctx: C,
+    AddKeyParams { name, key }: AddKeyParams,
+) -> Result<(), Error> {
+    let now = Utc::now();
+    let record = Session {
+        name: Some(name),
+        logged_in: now,
+        last_active: now,
+        user_agent: None,
+    };
+    ctx.db()
+        .mutate(|db| {
+            C::access_auth_keys(db).insert(&key.interned_der64(), &record)?;
+            Ok(())
+        })
+        .await
+        .result
+}
+
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveKeyParams {
+    pub key: AnyVerifyingKey,
+}
+
+rpc_toolkit::reflect_ts!(RemoveKeyParams);
+rpc_toolkit::ts_export!(RemoveKeyParams, namespaces = [""]);
+
+pub async fn remove_key<C: LoginContext>(
+    ctx: C,
+    RemoveKeyParams { key }: RemoveKeyParams,
+) -> Result<(), Error> {
+    ctx.unenroll([key.interned_der64()]).await?;
+    Ok(())
+}
+
+pub async fn list_keys<C: LoginContext>(ctx: C) -> Result<AuthKeys, Error> {
+    C::access_auth_keys(&mut ctx.db().peek().await).de()
 }
 
 /// Bearer-token commands; a token is a named session, listed and revoked with `auth.session`.
@@ -693,6 +794,15 @@ pub async fn login_impl<C: LoginContext>(
     result
 }
 
+/// Holds no database lock while hashing.
+async fn verify_password<C: LoginContext>(ctx: &C, password: &str) -> Result<(), Error> {
+    let db = ctx.db().peek().await;
+    let password = password.to_owned();
+    tokio::task::spawn_blocking(move || C::check_password(&db, &password))
+        .await
+        .with_kind(ErrorKind::Unknown)?
+}
+
 async fn enroll<C: LoginContext>(
     ctx: &C,
     password: &str,
@@ -715,14 +825,14 @@ async fn enroll<C: LoginContext>(
                 ErrorKind::InvalidRequest,
             ));
         };
-        C::check_password(&ctx.db().peek().await, password)?;
+        verify_password::<C>(ctx, password).await?;
         ephemeral_keys.mutate(|keys| {
             keys.0.insert(pubkey.clone(), record);
         });
     } else {
+        verify_password::<C>(ctx, password).await?;
         ctx.db()
             .mutate(|db| {
-                C::check_password(db, password)?;
                 C::access_auth_keys(db).insert(&pubkey, &record)?;
                 Ok(())
             })
