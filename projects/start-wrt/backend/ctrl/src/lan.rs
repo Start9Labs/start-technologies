@@ -293,7 +293,7 @@ pub async fn ipv4_set<C: CtrlContext>(
                             .filter(|i| *i != LAN_INTERFACE)
                             .cloned(),
                     );
-                    restart_network_services(address, ifaces).await;
+                    restart_network_services(ifaces).await;
                     removed_vpns.apply_post_reload().await;
                 }
                 return Ok(());
@@ -702,36 +702,38 @@ pub fn update_profile_ips_for_block_change(
     Ok(())
 }
 
-/// Reload network services after an IP change.
-/// Cycles only the specified interfaces via ifdown/ifup (instead of
-/// `network reload` which restarts ALL interfaces including WAN, causing
-/// its DHCP client to lose its lease and breaking internet).
-/// Then reloads the firewall and dnsmasq once br-lan has the new IP.
-/// The LAN ports carrying the profiles behind the interfaces.
 pub(crate) async fn ports_of(interfaces: &[String]) -> Vec<String> {
-    let Ok(bytes) = uciedit::read_all("/etc/config", &["network", "startwrt"]).await else {
+    let Ok(bytes) = uciedit::read_all("/etc/config", &["network"]).await else {
         return Vec::new();
     };
     let arena = Arena::new();
     let Ok(cfgs) = bytes.parse(&arena) else {
         return Vec::new();
     };
-    let vlans: HashSet<u16> = cfgs["startwrt"]
-        .sections
-        .iter()
-        .filter_map(|s| s.get::<profiles::UciProfile>().ok())
-        .filter(|p| interfaces.contains(&p.interface))
-        .map(|p| p.vlan_tag)
-        .collect();
-    crate::ethernet::ports_on_vlans(&cfgs, &vlans)
+    crate::ethernet::ports_for_interfaces(&cfgs, interfaces).unwrap_or_default()
 }
 
-/// Brings the interfaces up on their new subnets, then restarts Wi-Fi and
-/// bounces their LAN ports so every client renews.
-pub async fn restart_network_services(new_lan_ip: Ipv4Addr, interfaces: Vec<String>) {
+fn interface_targets(
+    cfgs: &uciedit::Configs,
+    interfaces: &[String],
+) -> Result<Vec<(String, Ipv4Addr)>, Error> {
+    let mut targets = Vec::new();
+    cfgs["network"].try_each(|name, iface: NetworkInterface| {
+        if name.is_some_and(|name| interfaces.iter().any(|i| i == name)) {
+            if let Some(address) = iface.ipv4() {
+                targets.push((iface.device, address));
+            }
+        }
+        Ok::<_, Error>(())
+    })?;
+    Ok(targets)
+}
+
+/// Refreshes LAN discovery and drops affected wired carrier after renumbering.
+/// The caller must exclude WAN interfaces.
+pub async fn restart_network_services(interfaces: Vec<String>) {
     let ports = ports_of(&interfaces).await;
-    // Truncated, not unlinked: an instance the reload leaves running keeps
-    // writing to the inode it opened.
+    // Truncation preserves the inode an existing dnsmasq instance writes.
     for path in crate::devices::dhcp_lease_files().await {
         let _ = tokio::fs::write(&path, "").await;
     }
@@ -743,36 +745,46 @@ pub async fn restart_network_services(new_lan_ip: Ipv4Addr, interfaces: Vec<Stri
     for iface in &interfaces {
         let _ = crate::run_quiet_async(tokio::process::Command::new("ifup").arg(iface)).await;
     }
-    // Safety: wait for br-lan to have the new IP before reloading
-    // dependent services. ifup should be synchronous for static
-    // interfaces, but poll as a safety net.
-    let expected = new_lan_ip.to_string();
-    for _ in 0..30 {
-        if let Ok(out) = tokio::process::Command::new("ip")
-            .args(["-4", "-o", "addr", "show", "br-lan"])
-            .invoke(ErrorKind::Network.into())
-            .await
-        {
-            if String::from_utf8_lossy(&out).contains(&expected) {
-                break;
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let targets = async {
+        let bytes = uciedit::read_all("/etc/config", &["network"]).await?;
+        let arena = Arena::new();
+        let cfgs = bytes.parse(&arena)?;
+        interface_targets(&cfgs, &interfaces)
     }
-    // Regenerate nftables rules so masquerade/NAT covers the new subnets.
+    .await;
+    let targets = match targets {
+        Ok(targets) => targets,
+        Err(error) => {
+            tracing::warn!("cannot read renumbered interface targets: {error}");
+            Vec::new()
+        }
+    };
+    for (device, address) in targets {
+        let expected = address.to_string();
+        for _ in 0..30 {
+            if let Ok(out) = tokio::process::Command::new("ip")
+                .args(["-4", "-o", "addr", "show", "dev", &device])
+                .invoke(ErrorKind::Network.into())
+                .await
+            {
+                if String::from_utf8_lossy(&out)
+                    .split_whitespace()
+                    .any(|value| value.split('/').next() == Some(expected.as_str()))
+                {
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+    }
     let _ =
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("reload"))
             .await;
-    // Reload restarts each instance whose generated config changed. A restart
-    // unregisters dnsmasq's interface triggers until every pool is probed.
+    // Reload preserves interface triggers while changed instances restart.
     let _ =
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("reload"))
             .await;
-    // Bounce WiFi so all clients disassociate and reassociate,
-    // triggering fresh DHCP on the new subnet. Without this,
-    // clients that stay connected keep stale leases from the
-    // old network block.
-    if let Err(e) = crate::captive::refresh().await {
+    if let Err(e) = crate::captive::ensure_captive_portal_state().await {
         tracing::warn!("captive portal refresh failed: {e}");
     }
     if let Err(e) = crate::wifi::reload_wifi("/etc/config", crate::wifi::WifiReload::Restart).await
@@ -791,6 +803,33 @@ mod tests {
     use tokio::runtime::Runtime;
 
     use super::*;
+
+    #[tokio::test]
+    async fn renumbering_waits_on_each_configured_vlan_device() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config interface 'lan'
+    option device 'br-lan.1'
+    option ipaddr '192.168.10.1'
+
+config interface 'guest'
+    option device 'br-lan.3'
+    option ipaddr '192.168.11.1'
+",
+        )
+        .unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network"]).await.unwrap();
+        assert_eq!(
+            interface_targets(&cfgs, &["lan".into(), "guest".into()]).unwrap(),
+            [
+                ("br-lan.1".into(), Ipv4Addr::new(192, 168, 10, 1)),
+                ("br-lan.3".into(), Ipv4Addr::new(192, 168, 11, 1)),
+            ]
+        );
+    }
 
     #[derive(Clone)]
     struct TestContext(PathBuf);
