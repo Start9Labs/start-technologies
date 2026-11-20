@@ -5,6 +5,7 @@ release-notes: true
 - Services can no longer reach each other's containers directly; they connect through StartOS, as dependencies already do. Each service container also runs under its own range of user and group ids.
 - A server holds up to 1024 installed services. Installing beyond that is refused before anything is downloaded.
 - StartOS no longer runs its own SOCKS proxy on port 1080. Services that need Tor use the Tor service's proxy.
+- StartOS no longer resolves `<service>.startos` or `<service>.embassy` names. Services reach each other through StartOS bridge addresses, and StartOS reaches Tor through the Tor service's SOCKS binding.
 - The StartOS UI serves plain HTTP only on private addresses that are switched on, never on public ones. They are on by default on every network, so downloading the Root CA over your LAN keeps working, and each can be switched off.
 - Services' plain ports are reachable on their IPv6 ULA and loopback addresses.
 - IPv6 link-local addresses are no longer listed or served for the StartOS UI or services.

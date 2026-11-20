@@ -39,7 +39,7 @@ use crate::init::{InitResult, check_time_is_synchronized};
 use crate::install::PKG_ARCHIVE_DIR;
 use crate::lxc::LxcManager;
 use crate::middleware::auth::signature::NonceCache;
-use crate::net::dial::{OsResolver, TOR_SOCKS, dial, is_onion};
+use crate::net::dial::{OsResolver, TorSocks, dial, is_onion};
 use crate::net::gateway::WildcardListener;
 use crate::net::net_controller::{NetController, NetService};
 use crate::net::web_server::WebServerAcceptorSetter;
@@ -190,16 +190,16 @@ struct HttpClients {
 /// The SOCKS proxy a connection goes through, if any.
 #[derive(Clone, Debug)]
 enum ProxyRoute {
-    /// Onions through Tor; everything else directly.
-    Tor,
+    /// Onions through Tor's SOCKS binding; everything else directly.
+    Tor(TorSocks),
     #[cfg(test)]
     All(Url),
 }
 impl ProxyRoute {
     fn proxy_for(&self, host: &str) -> Option<Url> {
         match self {
-            Self::Tor => is_onion(host).then(|| {
-                format!("socks5h://{TOR_SOCKS}")
+            Self::Tor(tor) => is_onion(host).then(|| tor.get()).flatten().map(|socks| {
+                format!("socks5h://{socks}")
                     .parse()
                     .expect("valid Tor proxy URL")
             }),
@@ -210,8 +210,8 @@ impl ProxyRoute {
 }
 
 impl ReloadableHttpClient {
-    pub(crate) fn new() -> Result<Self, Error> {
-        Self::with_route(ProxyRoute::Tor)
+    pub(crate) fn new(tor: TorSocks) -> Result<Self, Error> {
+        Self::with_route(ProxyRoute::Tor(tor))
     }
 
     #[cfg(test)]
@@ -540,6 +540,7 @@ impl RpcContext {
         }
 
         let (registry_refresh, registry_refreshes) = mpsc::channel(8);
+        let tor_socks = TorSocks::new();
         let seed = Arc::new(RpcContextSeed {
             is_closed: AtomicBool::new(false),
             closed: watch::Sender::new(false),
@@ -580,12 +581,13 @@ impl RpcContext {
                     )
                 })?,
             ),
-            client: ReloadableHttpClient::new()?,
+            client: ReloadableHttpClient::new(tor_socks.clone())?,
             start_time: Instant::now(),
             crons,
         });
 
         let res = Self(seed.clone(), None);
+        res.add_cron(tor_socks.follow(res.db.clone()));
         crate::update::signer_files::initialize(&res.db).await?;
         res.cleanup_and_initialize(cleanup_init).await?;
         #[cfg(target_os = "linux")]
@@ -1035,11 +1037,14 @@ mod tests {
 
     #[test]
     fn only_onions_go_through_tor() {
-        let tor = "socks5h://tor.startos:9050".parse::<Url>().unwrap();
+        let onion = "registryxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.onion";
+        let tor = TorSocks::new();
+        let route = ProxyRoute::Tor(tor.clone());
+        assert_eq!(route.proxy_for(onion), None);
+        tor.set("172.16.0.1:9050".parse().unwrap());
         assert_eq!(
-            ProxyRoute::Tor
-                .proxy_for("registryxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.onion"),
-            Some(tor)
+            route.proxy_for(onion),
+            Some("socks5h://172.16.0.1:9050".parse::<Url>().unwrap())
         );
         for host in [
             "registry.start9.com",
@@ -1047,7 +1052,7 @@ mod tests {
             "192.168.1.5",
             "[::1]",
         ] {
-            assert_eq!(ProxyRoute::Tor.proxy_for(host), None);
+            assert_eq!(route.proxy_for(host), None);
         }
     }
 

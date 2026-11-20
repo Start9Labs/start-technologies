@@ -187,7 +187,7 @@ impl RegistryContext {
             .tor_proxy
             .clone()
             .map(Ok)
-            .unwrap_or_else(|| "socks5h://tor.startos:9050".parse())?;
+            .unwrap_or_else(|| "socks5h://127.0.0.1:9050".parse())?;
         let metrics_db_path = datadir.join("metrics.db");
         let metrics_db = Connection::open(&metrics_db_path).with_kind(ErrorKind::Database)?;
         metrics_db

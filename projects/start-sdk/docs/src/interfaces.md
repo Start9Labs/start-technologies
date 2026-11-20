@@ -625,7 +625,7 @@ The container IP is fixed for the installation, so `.once()` reads it.
 Most daemons read their TLS pair once at startup, so reissuing the file is only half the job — something has to restart the service, or it keeps serving the old certificate against the new address set. Whatever you key that restart on must not blink: a value that momentarily reads empty will restart the daemon for nothing, and if the restart can feed back into the value, it will not converge.
 
 > [!WARNING]
-> Do **not** add a `<package-id>.startos` DNS name to the SANs. That overlay DNS is deprecated and slated for removal, and it resolves to the container IP rather than the bridge — so it bypasses the platform entirely. Dependents reach you through the bridge; see [Service-to-Service Networking](service-to-service.md).
+> Do **not** add a `<package-id>.startos` DNS name to the SANs. StartOS does not resolve those names. Dependents reach you through the bridge; see [Service-to-Service Networking](service-to-service.md).
 
 A passthrough port carries its external port in `net.assignedSslPort`, the same as an `addSsl` port — which of the two fields is populated says whether the port speaks TLS, not who terminates it. Dependents should read neither field directly; `sdk.host.getBridgeAddress` resolves the binding's derived address and is correct under every arrangement on this page.
 

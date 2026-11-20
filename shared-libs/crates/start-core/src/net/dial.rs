@@ -1,25 +1,71 @@
 use std::collections::VecDeque;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 
-use fast_socks5::client::{Config as ClientConfig, Socks5Stream};
 use futures::stream::FuturesUnordered;
 use futures::{Stream, StreamExt};
 use tokio::net::TcpStream;
 use tokio::time::Instant;
 
+use crate::db::model::Database;
+use crate::net::host::binding::{DerivedAddressInfo, bridge_address};
 use crate::net::mdns::resolve_mdns;
 use crate::prelude::*;
+use crate::util::sync::SyncRwLock;
 
-/// Tor's internal SOCKS endpoint, independent of its reassigned bridge port.
-pub const TOR_SOCKS: &str = "tor.startos:9050";
+/// The addresses of the Tor package's SOCKS binding: host `socks`, internal port 9050.
+/// tor-startos publishes both as a contract.
+const TOR_SOCKS_ADDRESSES: &str = "/public/packageData/tor/hosts/socks/bindings/9050/addresses";
 
 const CONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(250);
 const RESOLUTION_DELAY: Duration = Duration::from_millis(50);
 
 pub fn is_onion(host: &str) -> bool {
     host.ends_with(".onion")
+}
+
+fn tor_unavailable(host: &str) -> Error {
+    Error::new(
+        eyre!("{}", t!("net.dial.tor-unavailable", host = host)),
+        ErrorKind::Network,
+    )
+}
+
+/// The bridge address of Tor's SOCKS binding. `None` while Tor has not bound it.
+#[derive(Clone, Debug, Default)]
+pub struct TorSocks(Arc<SyncRwLock<Option<SocketAddr>>>);
+
+impl TorSocks {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn get(&self) -> Option<SocketAddr> {
+        self.0.read()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set(&self, socks: SocketAddr) {
+        self.0.replace(Some(socks));
+    }
+
+    /// Tracks the binding until the database closes.
+    pub async fn follow(self, db: TypedPatchDb<Database>) {
+        let mut watch = db.watch(TOR_SOCKS_ADDRESSES.parse().unwrap()).await;
+        while let Ok(addresses) = watch.peek_and_mark_seen() {
+            self.0.replace(
+                from_value::<Option<DerivedAddressInfo>>(addresses)
+                    .ok()
+                    .flatten()
+                    .and_then(|addresses| bridge_address(&addresses, false)),
+            );
+            if watch.changed().await.is_err() {
+                break;
+            }
+        }
+    }
 }
 
 /// Uses libc resolution; musl reads `/etc/hosts` and `/etc/resolv.conf`.
@@ -137,15 +183,10 @@ where
         .unwrap_or_else(|| Error::new(eyre!("no address to connect to"), ErrorKind::Network)))
 }
 
-/// Connects through Tor for an onion and through Avahi for `.local`; other names use libc resolution.
+/// Connects through Avahi for `.local`; other names use libc resolution. Refuses an onion.
 pub async fn dial(host: &str, port: u16) -> Result<TcpStream, Error> {
     if is_onion(host) {
-        Ok(
-            Socks5Stream::connect(TOR_SOCKS, host.to_owned(), port, ClientConfig::default())
-                .await
-                .with_kind(ErrorKind::Network)?
-                .get_socket(),
-        )
+        Err(tor_unavailable(host))
     } else if let Ok(ip) = host.trim_matches(['[', ']']).parse::<IpAddr>() {
         TcpStream::connect((ip, port))
             .await
@@ -160,12 +201,16 @@ pub async fn dial(host: &str, port: u16) -> Result<TcpStream, Error> {
 }
 
 /// Resolves `.local` through Avahi and other names through libc, both families.
+/// Refuses an onion, which never reaches DNS.
 pub struct OsResolver;
 
 impl reqwest::dns::Resolve for OsResolver {
     fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
         let name = name.as_str().to_owned();
         Box::pin(async move {
+            if is_onion(&name) {
+                return Err(tor_unavailable(&name).source.into());
+            }
             let addrs: Vec<SocketAddr> = if name.ends_with(".local") {
                 vec![SocketAddr::new(
                     resolve_mdns(&name).await.map_err(|e| e.source)?.into(),
@@ -192,6 +237,78 @@ impl reqwest::dns::Resolve for OsResolver {
 
 #[cfg(test)]
 mod test {
+    use imbl_value::InternedString;
+
+    use super::{Database, TorSocks};
+    use crate::net::forward::START9_BRIDGE_IFACE;
+    use crate::net::host::binding::DerivedAddressInfo;
+    use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
+
+    #[tokio::test]
+    async fn tor_socks_follows_the_tor_bridge_binding() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::prelude::TypedPatchDb::<Database>::load_unchecked(
+            patch_db::PatchDb::open(temp.path().join("db"))
+                .await
+                .unwrap(),
+        );
+        db.put(
+            &patch_db::json_ptr::ROOT,
+            &imbl_value::json!({ "public": { "packageData": {} } }),
+        )
+        .await
+        .unwrap();
+        let tor = TorSocks::new();
+        let follower = tokio::spawn(tor.clone().follow(db.clone()));
+        let settled = |want: Option<std::net::SocketAddr>| {
+            let tor = tor.clone();
+            async move {
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while tor.get() != want {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .is_ok()
+            }
+        };
+        let row = |hostname: &str, port, gateway: &str| HostnameInfo {
+            ssl: false,
+            public: false,
+            hostname: InternedString::intern(hostname),
+            port: Some(port),
+            metadata: HostnameMetadata::Ipv4 {
+                gateway: gateway.parse().unwrap(),
+            },
+        };
+        let addresses = DerivedAddressInfo {
+            available: [
+                row("192.168.1.5", 9050, "eth0"),
+                row("172.16.0.1", 9051, START9_BRIDGE_IFACE),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        db.put(
+            &"/public/packageData/tor".parse().unwrap(),
+            &imbl_value::json!({ "hosts": { "socks": { "bindings": { "9050": {
+                "addresses": imbl_value::to_value(&addresses).unwrap()
+            } } } } }),
+        )
+        .await
+        .unwrap();
+        assert!(settled(Some("172.16.0.1:9051".parse().unwrap())).await);
+        db.put(
+            &"/public/packageData".parse().unwrap(),
+            &imbl_value::json!({}),
+        )
+        .await
+        .unwrap();
+        assert!(settled(None).await);
+        follower.abort();
+    }
+
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
 
     use futures::FutureExt;

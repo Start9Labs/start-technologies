@@ -1153,7 +1153,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
 }
 
 /// The row `sdk.host.getBridgeAddress` resolves: IPv4 on the `lxcbr0` gateway.
-fn bridge_address(addresses: &DerivedAddressInfo, ssl: bool) -> Option<SocketAddr> {
+pub(crate) fn bridge_address(addresses: &DerivedAddressInfo, ssl: bool) -> Option<SocketAddr> {
     addresses
         .available
         .iter()

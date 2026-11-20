@@ -2774,6 +2774,14 @@ net.gateway.no-configured-echoip-urls:
   fr_FR: "Aucune URL echoip configurée"
   pl_PL: "Brak skonfigurowanych adresów URL echoip"
 
+# net/dial.rs
+net.dial.tor-unavailable:
+  en_US: "Cannot reach %{host}: the Tor service is not running"
+  de_DE: "%{host} ist nicht erreichbar: Der Tor-Dienst läuft nicht"
+  es_ES: "No se puede acceder a %{host}: el servicio Tor no está en ejecución"
+  fr_FR: "Impossible de joindre %{host} : le service Tor n'est pas en cours d'exécution"
+  pl_PL: "Nie można połączyć się z %{host}: usługa Tor nie jest uruchomiona"
+
 # net/dns.rs
 net.dns.could-not-determine-source-interface:
   en_US: "Could not determine source interface of %{src}"

@@ -192,7 +192,7 @@ This is a fallback for addresses you cannot resolve. When you _do_ know the targ
 
 Three patterns that older packages used are being removed. Do not introduce them:
 
-- **`<package-id>.startos` DNS names** (`http://bitcoind.startos:8332`). The overlay DNS that resolved these is deprecated and will be removed. Resolve the bridge address instead.
+- **`<package-id>.startos` DNS names** (`http://bitcoind.startos:8332`). StartOS does not resolve them. Resolve the bridge address instead.
 - **Cross-package container IPs.** Containers cannot reach each other directly; every connection to a dependency goes through the bridge.
 - **Reading `net.assignedPort` / `net.assignedSslPort` directly, or matching `metadata.gateway === 'lxcbr0'` by hand.** Which of the two is populated is a property of how the dependency bound the port — not something a caller may assume. Read the binding's bridge address, which is correct either way.
 
