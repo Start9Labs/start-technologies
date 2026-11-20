@@ -3176,19 +3176,35 @@ impl Lookup {
     }
 }
 
-/// Bootstrap the default Admin security profile on first boot.
-///
-/// Registers the existing LAN infrastructure (network interface, firewall zone,
-/// DHCP server) as the "Admin" profile in the `startwrt` UCI config. This is a
-/// lightweight operation — it only writes the `startwrt` config entry and does
-/// not create VLANs, bridge-vlans, or modify network topology.
-///
-/// Idempotent: returns immediately if a LAN owner profile already exists.
-/// Returns whether the config held no profile at all, as on a fresh install.
-pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<bool, Error> {
-    let arena = Arena::new();
-    let mut cfgs = parse_all(uci_root, &arena, &["startwrt"]).await?;
+/// Seeds defaults on a profile-free configuration; later deletions stay deleted.
+pub async fn bootstrap_profiles<C: CtrlContext>(ctx: C) -> Result<(), Error> {
+    let fresh = {
+        let arena = Arena::new();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["startwrt"]).await?;
+        !cfgs["startwrt"]
+            .sections
+            .iter()
+            .any(|section| section.ty() == UciProfile::TY)
+    };
+    if fresh {
+        match seed_default_profiles(ctx.clone()).await {
+            Ok(()) => return Ok(()),
+            Err(e) => tracing::error!("Default profile creation failed: {e}"),
+        }
+    }
+    bootstrap_admin_profile(ctx.uci_root()).await
+}
 
+async fn bootstrap_admin_profile(uci_root: impl AsRef<std::path::Path>) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root.as_ref(), &arena, &["startwrt"]).await?;
+    if bootstrap_admin_profile_config(&mut cfgs)? {
+        dump_all(uci_root, cfgs).await?;
+    }
+    Ok(())
+}
+
+fn bootstrap_admin_profile_config(cfgs: &mut Configs) -> Result<bool, Error> {
     // Read without the typed reader, which a hand-edited owner would fail.
     let owns_lan = |section: &uciedit::Section| {
         section.ty() == UciProfile::TY
@@ -3202,12 +3218,6 @@ pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<bool, Error> {
     if cfgs["startwrt"].sections.iter().any(owns_lan) {
         return Ok(false);
     }
-    let fresh = !cfgs["startwrt"]
-        .sections
-        .iter()
-        .any(|section| section.ty() == UciProfile::TY);
-
-    // Register the existing LAN as the Admin profile
     cfgs["startwrt"].append(
         &UciProfile {
             fullname: "Admin".into(),
@@ -3225,11 +3235,8 @@ pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<bool, Error> {
         Some("lan"),
     )?;
 
-    // Write default preferences so the frontend has values on first load
     cfgs["startwrt"].append(&UciPreferences::default(), Some("preferences"))?;
-
-    dump_all(uci_root, cfgs).await?;
-    Ok(fresh)
+    Ok(true)
 }
 
 struct DefaultProfile {
@@ -3260,9 +3267,8 @@ const DEFAULT_PROFILES: [DefaultProfile; 3] = [
     },
 ];
 
-/// Creates the profiles a fresh install starts with beside Admin.
 #[instrument(skip_all)]
-pub async fn seed_default_profiles<C: CtrlContext>(ctx: C) -> Result<(), Error> {
+async fn seed_default_profiles<C: CtrlContext>(ctx: C) -> Result<(), Error> {
     let mut taken = {
         let arena = Arena::new();
         let cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt"]).await?;
@@ -3291,6 +3297,7 @@ pub async fn seed_default_profiles<C: CtrlContext>(ctx: C) -> Result<(), Error> 
                 )
             })?
             .octets();
+        bootstrap_admin_profile_config(&mut cfgs)?;
         for (default, interface) in DEFAULT_PROFILES.iter().zip(&interfaces) {
             let profile = Profile {
                 id: ProfileIdOpt {
@@ -4271,21 +4278,28 @@ config dhcp 'iot'
         assert_eq!(after, startwrt);
     }
 
+    fn setup_firstboot_configs(dir: &std::path::Path) {
+        let firstboot = concat!(env!("CARGO_MANIFEST_DIR"), "/../firstboot_config");
+        for config in ["network", "firewall", "dhcp", "wireless"] {
+            std::fs::copy(format!("{firstboot}/{config}"), dir.join(config)).unwrap();
+        }
+        std::fs::write(dir.join("startwrt"), "").unwrap();
+    }
+
     #[tokio::test]
     async fn a_fresh_install_gets_the_default_profiles_once() {
         let dir = tempfile::tempdir().unwrap();
-        let firstboot = concat!(env!("CARGO_MANIFEST_DIR"), "/../firstboot_config");
-        for config in ["network", "firewall", "dhcp", "wireless"] {
-            std::fs::copy(format!("{firstboot}/{config}"), dir.path().join(config)).unwrap();
-        }
-        std::fs::write(dir.path().join("startwrt"), "").unwrap();
+        setup_firstboot_configs(dir.path());
         let root = dir.path().to_str().unwrap();
+        let ctx = TestContext(dir.path().into());
 
-        assert!(bootstrap_admin_profile(root).await.unwrap());
-        seed_default_profiles(TestContext(dir.path().into()))
-            .await
-            .unwrap();
-        assert!(!bootstrap_admin_profile(root).await.unwrap());
+        bootstrap_profiles(ctx.clone()).await.unwrap();
+        let first_boot = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
+        bootstrap_profiles(ctx).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("startwrt")).unwrap(),
+            first_boot
+        );
 
         let arena = Arena::new();
         let cfgs = parse_all(root, &arena, &["startwrt", "network"])
@@ -4336,9 +4350,60 @@ config dhcp 'iot'
             "config profile 'guest'\n\toption fullname 'Guest'\n\toption interface 'guest'\n\toption vlan_tag '101'\n",
         )
         .unwrap();
-        assert!(!bootstrap_admin_profile(dir.path().to_str().unwrap())
+        bootstrap_profiles(TestContext(dir.path().into()))
             .await
-            .unwrap());
+            .unwrap();
+        let startwrt = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
+        assert!(!startwrt.contains("Children"));
+        assert!(!startwrt.contains("Smart Devices"));
+    }
+
+    #[tokio::test]
+    async fn bootstrap_keeps_a_deleted_default_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firstboot_configs(dir.path());
+        let ctx = TestContext(dir.path().into());
+        bootstrap_profiles(ctx.clone()).await.unwrap();
+        delete(
+            ctx.clone(),
+            ProfileDeleteRequest {
+                id: ProfileIdOpt {
+                    fullname: Some("Guest".into()),
+                    interface: None,
+                    vlan_tag: None,
+                },
+                preview: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        bootstrap_profiles(ctx.clone()).await.unwrap();
+        let profiles = list(ctx).await.unwrap();
+        assert_eq!(profiles.len(), 3);
+        assert!(profiles.iter().all(|profile| profile.fullname != "Guest"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_seed_still_registers_admin() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firstboot_configs(dir.path());
+        std::fs::write(
+            dir.path().join("wireless"),
+            "config wifi-iface 'unterminated",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().into());
+
+        bootstrap_profiles(ctx.clone()).await.unwrap();
+        let profiles = list(ctx).await.unwrap();
+        assert_eq!(
+            profiles
+                .iter()
+                .map(|p| p.fullname.as_str())
+                .collect::<Vec<_>>(),
+            ["Admin"]
+        );
     }
 
     #[tokio::test]

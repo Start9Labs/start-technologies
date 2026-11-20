@@ -27,7 +27,7 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
 
 ## Default Profiles
 
-A new router, or one that has been factory reset, comes with four profiles. Updating StartWRT never adds them to an existing router. None has a Wi-Fi password or Ethernet port until you assign one.
+A new router, or one that has been factory reset, comes with four profiles. Updating StartWRT never adds them to an existing router. Admin owns the LAN Ethernet port and the factory Wi-Fi password, when provisioned. Guest, Children and Smart Devices have no Wi-Fi password or Ethernet port until assigned one.
 
 | Profile           | Subnet           | WAN Access | LAN Access   | DNS                                            | WAN Blackout      |
 | ----------------- | ---------------- | ---------- | ------------ | ---------------------------------------------- | ----------------- |
@@ -36,7 +36,7 @@ A new router, or one that has been factory reset, comes with four profiles. Upda
 | **Children**      | `192.168.3.0/24` | All        | Same profile | Cloudflare for Families (`1.1.1.3`, `1.0.0.3`) | 9 PM - 7 AM daily |
 | **Smart Devices** | `192.168.4.0/24` | All        | Same profile | Inherit                                        | —                 |
 
-All four route directly to the Internet. Edit or delete them like any other profile.
+All four route directly to the Internet. All four can be edited; Guest, Children and Smart Devices can also be deleted.
 
 ## Creating a Profile
 
