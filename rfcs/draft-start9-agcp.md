@@ -59,6 +59,16 @@ normative:
         org: Start9
     target: https://github.com/Start9Labs/start-technologies/blob/master/rfcs/draft-start9-pcp-hostname.md
 informative:
+  AGCP-TUNNEL-ENCAP:
+    title: AGCP Tunnel Encapsulation Extension
+    seriesinfo:
+      Internet-Draft: draft-start9-agcp-tunnel-encap-00
+    date: 2026-11-20
+    author:
+      - ins: A. McClelland
+        name: Aiden McClelland
+        org: Start9
+    target: https://github.com/Start9Labs/start-technologies/blob/master/rfcs/draft-start9-agcp-tunnel-encap.md
   RFC4033:
   RFC4862:
   RFC6335:
@@ -868,7 +878,7 @@ Parameters: `id`. Result: an empty object.
 ## grant.list
 
 Parameters: `kind` (optional), one of `"mapping"`, `"sni-route"`, `"pinhole"`,
-`"filter"`, or `"dns-record"`. Result: `epoch`, and `grants`, an array of objects each
+`"filter"`, `"dns-record"`, or a kind an extension defines ({{extensions}}). Result: `epoch`, and `grants`, an array of objects each
 carrying `kind`, the parameters of the grant's most recent `*.set` call,
 the external values granted, and `remaining`, its remaining lease in
 seconds. Only the caller's own grants are listed.
@@ -933,6 +943,19 @@ below, and MAY carry further detail.
 Every AGCP method other than `gateway.info`, `enrollment.enroll`, and
 `enrollment.status` fails with NOT_ENROLLED or ENROLLMENT_PENDING for a
 caller that is not enrolled.
+
+# Extensions {#extensions}
+
+An extension document MAY add capabilities, methods, grant kinds, event
+types, error codes, and members of the `gateway.info` result and its
+`limits` object. An extension's methods and grant kinds require a
+capability it defines, and its grants follow {{grants}}. A gateway
+reports an extension's capability only to an enrollment it permits to use
+that extension. Clients MUST ignore capabilities, result members, grant
+kinds, and event types they do not implement.
+
+The AGCP Tunnel Encapsulation Extension {{AGCP-TUNNEL-ENCAP}} is one such
+extension.
 
 # Discovery {#discovery}
 
