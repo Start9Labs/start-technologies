@@ -10,10 +10,19 @@ repo=$1
 glob=$2
 branch=$3
 declare -A seen=()
+# One page of the listing. GitHub intermittently answers it with an empty 500.
+list_page() {
+    local attempt
+    for attempt in 1 2 3 4 5; do
+        gh api "repos/$repo/actions/artifacts?per_page=100&page=$1" \
+            --jq '.artifacts[] | [.name, .expired, .workflow_run.head_branch, .workflow_run.id,
+                ((.created_at | fromdateiso8601) < (now - 15 * 86400))] | @tsv' && return 0
+        [ "$attempt" -eq 5 ] || sleep $((attempt * 5))
+    done
+    return 1
+}
 for ((page = 1; ; page++)); do
-    rows=$(gh api "repos/$repo/actions/artifacts?per_page=100&page=$page" \
-        --jq '.artifacts[] | [.name, .expired, .workflow_run.head_branch, .workflow_run.id,
-            ((.created_at | fromdateiso8601) < (now - 15 * 86400))] | @tsv')
+    rows=$(list_page "$page")
     [ -n "$rows" ] || break
     while IFS=$'\t' read -r name expired head_branch run_id stale; do
         [ "$stale" = false ] || exit 0
