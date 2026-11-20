@@ -2932,6 +2932,14 @@ migration.initial-balance-failed:
   fr_FR: "Impossible de lancer l’équilibrage Btrfs initial ; le démarrage continue"
   pl_PL: "Nie udało się uruchomić początkowego równoważenia Btrfs; uruchamianie systemu jest kontynuowane"
 
+# version/v0_4_3.rs
+migration.wireguard-mtu-failed:
+  en_US: "Could not set the default MTU on every WireGuard gateway; continuing startup"
+  de_DE: "Die Standard-MTU konnte nicht für alle WireGuard-Gateways festgelegt werden; der Systemstart wird fortgesetzt"
+  es_ES: "No se pudo establecer la MTU predeterminada en todas las puertas de enlace WireGuard; el arranque continúa"
+  fr_FR: "Impossible de définir la MTU par défaut sur toutes les passerelles WireGuard ; le démarrage continue"
+  pl_PL: "Nie udało się ustawić domyślnego MTU na wszystkich bramach WireGuard; uruchamianie systemu jest kontynuowane"
+
 # registry/admin.rs
 registry.admin.unknown-signer:
   en_US: "Unknown signer"
