@@ -10,7 +10,6 @@ use crate::net::forward::AvailablePorts;
 use crate::net::keys::KeyStore;
 use crate::notifications::Notifications;
 use crate::prelude::*;
-use crate::ssh::SshKeys;
 use crate::update::security::SecurityNotifications;
 use crate::util::serde::{Der64, Pem};
 
@@ -26,7 +25,6 @@ pub struct Private {
     #[serde(default = "generate_server_identity_key", rename = "developerKey")]
     pub server_identity_key: Der64<ed25519_dalek::SigningKey>,
     pub ssh_privkey: Pem<ssh_key::PrivateKey>,
-    pub ssh_pubkeys: SshKeys,
     pub available_ports: AvailablePorts,
     pub notifications: Notifications,
     #[serde(default)]
