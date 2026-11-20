@@ -69,6 +69,8 @@ Each table has the following columns:
 >
 > A **Public** GUA stays on when you switch `.local` off. On an interface served without TLS, `.local` resolves to that address, so it still reaches the service from your local network while its switch reads off.
 >
+> A GUA's settings follow its interface ID, the last half of the address, so they carry over when your ISP changes the prefix. Other GUAs in the same table with the same interface ID, such as one from a second prefix, share the settings and show a link icon. Changing one changes them all.
+>
 > This only applies to IPv6 GUAs on ports eligible for public exposure. A plain-HTTP leg whose SSL StartOS terminates stays private and has no Public option. IPv6 ULAs (private) are always local, and IPv4 keeps its separate LAN and WAN address rows.
 
 ### Plain-HTTP Private Addresses
