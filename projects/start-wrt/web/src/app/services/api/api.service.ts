@@ -10,6 +10,8 @@ import type { Api, RpcParamType, RpcReturnType } from './bindings'
 export abstract class ApiService {
   abstract login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>>
   abstract logout(): Promise<RpcReturnType<Api, 'auth.logout'>>
+  /** Rejects while this browser's key is not enrolled, without signing out. */
+  abstract checkEnrollment(): Promise<unknown>
   abstract exec(params: ExecReq): Promise<ExecRes>
   abstract getFile(params: GetFileReq): Promise<GetFileRes>
   abstract setFile(params: SetFileReq): Promise<null>

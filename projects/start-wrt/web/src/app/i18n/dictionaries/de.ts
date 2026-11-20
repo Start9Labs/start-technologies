@@ -594,4 +594,6 @@ export default {
   642: 'Um dieses VPN zu deaktivieren, stellen Sie zuerst {vpns} so um, dass sie sich über etwas anderes verbinden.',
   643: 'Nie (Standard)',
   644: 'Wenn hinter NAT',
+  645: 'Über die Befehlszeile anmelden',
+  646: 'Diesen Browser registrieren',
 } satisfies i18n
