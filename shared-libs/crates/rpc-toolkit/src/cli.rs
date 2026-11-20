@@ -203,6 +203,7 @@ pub async fn call_remote_socket(
 pub struct CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra = Empty> {
     _phantom: PhantomData<(Context, RemoteContext, Extra)>,
     handler: RemoteHandler,
+    metadata: OrdMap<&'static str, Value>,
 }
 impl<Context, RemoteContext, RemoteHandler, Extra>
     CallRemoteHandler<Context, RemoteContext, RemoteHandler, Extra>
@@ -211,7 +212,13 @@ impl<Context, RemoteContext, RemoteHandler, Extra>
         Self {
             _phantom: PhantomData::new(),
             handler: handler,
+            metadata: OrdMap::new(),
         }
+    }
+    /// Overrides the remote handler's metadata for the calling server's middleware.
+    pub fn with_metadata(mut self, key: &'static str, value: Value) -> Self {
+        self.metadata.insert(key, value);
+        self
     }
 }
 impl<Context, RemoteContext, RemoteHandler: Clone, Extra> Clone
@@ -221,6 +228,7 @@ impl<Context, RemoteContext, RemoteHandler: Clone, Extra> Clone
         Self {
             _phantom: PhantomData::new(),
             handler: self.handler.clone(),
+            metadata: self.metadata.clone(),
         }
     }
 }
@@ -306,7 +314,7 @@ where
         }
     }
     fn metadata(&self, method: VecDeque<&'static str>) -> OrdMap<&'static str, Value> {
-        self.handler.metadata(method)
+        self.metadata.clone().union(self.handler.metadata(method))
     }
     fn method_from_dots(&self, method: &str) -> Option<VecDeque<&'static str>> {
         self.handler.method_from_dots(method)
