@@ -2,7 +2,9 @@
 
 StartOS makes it easy to keep your services up to date. When updates are available, a badge appears on the **Updates** tab in the top navigation bar showing the number of pending updates. The badge turns red when any of them is a security update.
 
-StartOS notifies you when a security update arrives for a service you have installed. Until you read that notification, later security updates are added to it rather than sent as new ones. These notifications also use [browser push](notifications.md) when enabled. Use the notification's **Updates** link to open the Updates tab.
+The Updates tab lists, for each installed service, the newest version you can install now. A version that needs a newer StartOS, or that your installed version cannot migrate to directly, is not listed; when a service must update in steps, the tab offers the next step.
+
+StartOS notifies you when a security update arrives for a service you have installed, once you can install a version that includes it. Until you read that notification, later security updates are added to it rather than sent as new ones. These notifications also use [browser push](notifications.md) when enabled. Use the notification's **Updates** link to open the Updates tab.
 
 ## Using the Updates Tab
 
@@ -17,4 +19,4 @@ It is possible to update a service from a different registry than the one it was
 
 ## Updating from the Marketplace
 
-You can also update a service directly from the [Marketplace](marketplace.md). Navigate to the service's page and click **Update**. The same pre-download alert appears there when it applies.
+You can also update a service directly from the [Marketplace](marketplace.md). Navigate to the service's page and click **Update**. The same pre-download alert appears there when it applies. The service's page opens on the version you can update to. You can still select a newer version, but its **Update** button is disabled with a note explaining why: your installed version cannot update to it directly, or it needs a newer version of StartOS, in which case update your server first.

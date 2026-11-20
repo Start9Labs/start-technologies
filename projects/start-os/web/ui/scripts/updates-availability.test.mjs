@@ -43,14 +43,9 @@ for (const [file, name] of [
   ['marketplace', 'MarketplaceService'],
   ['notification', 'NotificationService'],
   ['os', 'OSService'],
-  ['updates-refinement', 'UpdatesRefinementService'],
   ['title', 'TitleDirective'],
 ])
-  classes(
-    `src/app/services/${file}.service`,
-    [name],
-    file === 'updates-refinement' ? ';export const refinementKey=()=>"";' : '',
-  )
+  classes(`src/app/services/${file}.service`, [name])
 classes('src/app/routes/portal/components/placeholder.component', [
   'PlaceholderComponent',
 ])
@@ -78,8 +73,6 @@ const { MarketplaceService } =
 const { NotificationService } =
   await import('src/app/services/notification.service')
 const { OSService } = await import('src/app/services/os.service')
-const { UpdatesRefinementService } =
-  await import('src/app/services/updates-refinement.service')
 const { FilterUpdatesPipe, HasSecurityUpdatePipe } =
   await import('../routes/portal/routes/updates/filter-updates.pipe')
 const { BadgeService } = await import('../src/app/services/badge.service.ts')
@@ -92,9 +85,11 @@ function fixture(t, mobile = false) {
     { url: 'https://two.test/', name: 'Two', status: 'connected' },
   ])
   const errors = new BehaviorSubject([])
-  const refined = new BehaviorSubject({
-    marketplace: { 'https://one.test/': { packages: [{ id: 'one' }] } },
-    pending: new Set(),
+  const marketplace = new BehaviorSubject({
+    'https://one.test/': {
+      packages: [{ id: 'one' }],
+      updates: [{ id: 'one' }],
+    },
   })
   const local = new BehaviorSubject({})
   const injector = createEnvironmentInjector([
@@ -104,9 +99,12 @@ function fixture(t, mobile = false) {
     },
     {
       provide: MarketplaceService,
-      useValue: { registries$: hosts, requestErrors$: errors },
+      useValue: {
+        registries$: hosts,
+        requestErrors$: errors,
+        marketplace$: marketplace,
+      },
     },
-    { provide: UpdatesRefinementService, useValue: { refined$: refined } },
     { provide: LocalPackagesService, useValue: local },
     { provide: HiddenUpdatesService, useValue: { effective$: of({}) } },
     { provide: NotificationService, useValue: { unreadCount$: of(0) } },
@@ -124,7 +122,7 @@ function fixture(t, mobile = false) {
   return {
     hosts,
     errors,
-    refined,
+    marketplace,
     make: type => runInInjectionContext(injector, () => new type()),
   }
 }
@@ -157,11 +155,11 @@ test('registry errors warn on System and Registries while the Updates count stay
     system: true,
     registries: true,
   })
-  f.refined.next({
-    marketplace: {
-      'https://one.test/': { packages: [{ id: 'one' }, { id: 'two' }] },
+  f.marketplace.next({
+    'https://one.test/': {
+      packages: [{ id: 'one' }, { id: 'two' }],
+      updates: [{ id: 'one' }, { id: 'two' }],
     },
-    pending: new Set(),
   })
   assert.equal(latest.count, 2)
   f.errors.next([])

@@ -685,7 +685,6 @@ export default {
   813: 'SO + datos combinados requieren al menos 38 GB',
   814: '¿Ocultar actualización?',
   815: 'Esta actualización se ocultará. Aún puede instalar esta versión desde el Marketplace.',
-  816: 'Buscando versión adecuada...',
   817: 'Un dominio de clearnet accesible desde cualquier lugar en Internet.',
   818: 'Ideal para',
   819: 'Sitios web y API públicos',
@@ -1098,4 +1097,6 @@ export default {
   1302: 'StartOS no puede conectar con este registro en este momento.',
   1303: 'Actualización de seguridad',
   1304: 'Novedades',
+  1305: 'Esta versión requiere una versión más reciente de StartOS. Actualice su servidor para instalarla.',
+  1306: 'Su versión instalada no puede actualizarse directamente a esta versión.',
 } satisfies i18n

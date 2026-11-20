@@ -685,7 +685,6 @@ export default {
   813: 'Système + données combinés nécessitent au moins 38 Go',
   814: 'Masquer la mise à jour ?',
   815: 'Cette mise à jour sera masquée. Vous pouvez toujours installer cette version depuis le Marketplace.',
-  816: "Recherche d'une version compatible...",
   817: 'Un domaine clearnet accessible depuis partout sur Internet.',
   818: 'Idéal pour',
   819: 'Sites web et API publics',
@@ -1098,4 +1097,6 @@ export default {
   1302: 'StartOS ne parvient pas à joindre ce registre pour le moment.',
   1303: 'Mise à jour de sécurité',
   1304: 'Nouveautés',
+  1305: "Cette version nécessite une version plus récente de StartOS. Mettez à jour votre serveur pour l'installer.",
+  1306: 'Votre version installée ne peut pas être mise à jour directement vers cette version.',
 } satisfies i18n

@@ -42,7 +42,8 @@ registerHooks({
 const { Exver } = await import('../../shared/src/services/exver.service.ts')
 const { compatibleVersions } =
   await import('../src/util/compatible-versions.ts')
-const { pendingReleases } = await import('../src/util/releases.ts')
+const { canMigrateFrom, pendingReleases, requiresOsUpdate } =
+  await import('../src/util/releases.ts')
 
 const exver = new Exver()
 const otherVersions = {
@@ -125,4 +126,22 @@ test('no flavor offers a version when no release satisfies the range', () => {
       undefined,
     )
   }
+})
+
+test('a release accepts an installed version within its source range, and any version without one', () => {
+  assert.equal(
+    canMigrateFrom(exver, { sourceVersion: '>=1.5.0' }, '1.6.0:0'),
+    true,
+  )
+  assert.equal(
+    canMigrateFrom(exver, { sourceVersion: '>=1.5.0' }, '1.0.0:0'),
+    false,
+  )
+  assert.equal(canMigrateFrom(exver, { sourceVersion: null }, '0.1.0:0'), true)
+})
+
+test('a release built for a StartOS beyond the compatibility range requires an OS update', () => {
+  const compat = '>=0.3.0:0 <=0.4.3:0'
+  assert.equal(requiresOsUpdate(exver, { osVersion: '0.4.3' }, compat), false)
+  assert.equal(requiresOsUpdate(exver, { osVersion: '0.4.4' }, compat), true)
 })

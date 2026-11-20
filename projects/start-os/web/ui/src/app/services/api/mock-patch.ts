@@ -83,10 +83,16 @@ export function mockRegistryCache(
     ? {
         info,
         packages: {},
+        updateTargets: {},
         status: 'error',
         error: `error sending request for url (${registryUrl(url)}): connection timed out`,
       }
-    : { info, packages: Mock.RegistryPackages, status: 'connected' }
+    : {
+        info,
+        packages: Mock.RegistryPackages,
+        updateTargets: {},
+        status: 'connected',
+      }
 }
 
 export function mockOsUpdateCache(
@@ -682,7 +688,7 @@ export const mockPatchData: DataModel = {
       outboundDns: null,
     },
     unreadNotificationCount: 5,
-    packageVersionCompat: '>=0.3.0 <=0.3.6',
+    packageVersionCompat: '>=0.3.0 <=0.4.0',
     postInitMigrationTodos: {},
     latestMigrationRevision: 0,
     statusInfo: {

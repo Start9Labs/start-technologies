@@ -688,7 +688,6 @@ export const ENGLISH: Record<string, number> = {
   'OS + data combined require at least 38 GB': 813,
   'Hide Update?': 814,
   'This update will be hidden. You can still install this version from the Marketplace.': 815,
-  'Finding suitable version...': 816,
   'A clearnet domain reachable from anywhere on the Internet.': 817,
   'Best for': 818,
   'Public websites & APIs': 819,
@@ -1099,4 +1098,6 @@ export const ENGLISH: Record<string, number> = {
   "StartOS can't reach this registry right now.": 1302,
   'Security update': 1303,
   'New Arrivals': 1304,
+  'This version requires a newer version of StartOS. Update your server to install it.': 1305,
+  'Your installed version cannot update directly to this version.': 1306,
 }

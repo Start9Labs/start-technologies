@@ -211,6 +211,7 @@ boundaries.set(
     'registry-state.ts',
     'services/abstract-marketplace.service.ts',
     'util/icon.ts',
+    'util/releases.ts',
   ]
     .map(
       file =>
@@ -4851,33 +4852,43 @@ test('marketplace lists and metadata stream from canonical cache keys without na
   assert.deepEqual(f.queries, [])
 })
 
-for (const [version, source] of [
-  ['2.0.0:0', null],
-  [null, '1.0.0:0'],
-]) {
-  test(`filtered package query retains cached release history (${version}, ${source})`, async t => {
-    const entry = registryEntry('3.0.0:0')
-    entry.packages.example.otherVersions = {
-      '1.1.0:0': { releaseNotes: 'Security fix', security: true },
-    }
-    const f = marketplaceFixture(t, { 'https://registry.test/': entry })
-    const values = f.watch(
-      f.service.fetchPackage$(
-        'https://registry.test/',
-        'example',
-        version,
-        null,
-        source,
-      ),
-    )
-    f.responses[0].resolve(registryEntry('2.0.0:0').packages.example)
-    await tick()
-    assert.equal(values.at(-1).version, '2.0.0:0')
-    assert.deepEqual(values.at(-1).otherVersions, {
-      '1.1.0:0': { releaseNotes: 'Security fix', security: true },
-    })
+test('marketplace lists the update target as the installable update and keeps the newer release selectable', async t => {
+  const entry = registryEntry('3.0.0:0')
+  entry.packages.example.best['3.0.0:0'] = {
+    title: '3.0.0:0',
+    releaseNotes: 'Latest',
+    security: false,
+  }
+  entry.packages.example.otherVersions = {
+    '2.0.0:0': { releaseNotes: 'Stepping stone', security: true },
+  }
+  entry.updateTargets = {
+    example: {
+      version: '2.0.0:0',
+      title: '2.0.0:0',
+      releaseNotes: 'Stepping stone',
+      security: true,
+    },
+  }
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  await f.service.connect('https://registry.test')
+  const store = await firstValueFrom(f.service.currentRegistry$)
+  assert.deepEqual(
+    store.updates.map(({ version }) => version),
+    ['2.0.0:0'],
+  )
+  const pkg = await firstValueFrom(f.service.getPackage$('example', null, null))
+  assert.equal(pkg.version, '2.0.0:0')
+  assert.equal(pkg.title, '2.0.0:0')
+  assert.deepEqual(pkg.otherVersions, {
+    '3.0.0:0': {
+      releaseNotes: 'Latest',
+      defaultLocale: undefined,
+      security: false,
+    },
   })
-}
+  assert.deepEqual(f.queries, [])
+})
 
 test('connection changes do not refetch an unchanged exact package query', async t => {
   const entry = registryEntry()
@@ -4900,7 +4911,7 @@ test('connection changes do not refetch an unchanged exact package query', async
   assert.equal(f.queries.length, 1)
 })
 
-test('exact/source package queries wait for and track their registry cache, ignoring other registry changes and stale responses', async t => {
+test('exact package queries wait for and track their registry cache, ignoring other registry changes and stale responses', async t => {
   const f = marketplaceFixture(t)
   const values = f.watch(
     f.service.fetchPackage$(
@@ -4908,7 +4919,6 @@ test('exact/source package queries wait for and track their registry cache, igno
       'example',
       '1.0.0:0',
       null,
-      '0.9.0:0',
     ),
   )
   assert.deepEqual(f.queries, [])
@@ -4919,7 +4929,6 @@ test('exact/source package queries wait for and track their registry cache, igno
       registry: 'https://registry.test',
       id: 'example',
       targetVersion: '=1.0.0:0',
-      sourceVersion: '0.9.0:0',
       otherVersions: 'short',
     },
   ])

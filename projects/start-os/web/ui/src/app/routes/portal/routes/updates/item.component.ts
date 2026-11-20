@@ -115,10 +115,6 @@ import UpdatesComponent from './updates.component'
                 | installingProgress) || 0
             "
           />
-        } @else if (pending()) {
-          <span class="g-secondary pending">
-            {{ 'Finding suitable version...' | i18n }}
-          </span>
         } @else {
           <button
             tuiIconButton
@@ -297,11 +293,6 @@ import UpdatesComponent from './updates.component'
       margin-inline-start: 0.5rem;
     }
 
-    .pending {
-      margin-right: 0.5rem;
-      font-style: italic;
-    }
-
     .mobile {
       display: none;
     }
@@ -388,7 +379,6 @@ export class UpdatesItemComponent {
   readonly item = input.required<MarketplacePkg>()
   readonly local =
     input.required<PackageDataEntry<InstalledState | UpdatingState>>()
-  readonly pending = input.required<boolean>()
 
   protected readonly releases = computed(() =>
     pendingReleases(

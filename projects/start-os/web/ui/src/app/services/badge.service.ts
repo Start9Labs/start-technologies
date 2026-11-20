@@ -8,7 +8,6 @@ import { NotificationService } from 'src/app/services/notification.service'
 import { OSService } from 'src/app/services/os.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
-import { UpdatesRefinementService } from 'src/app/services/updates-refinement.service'
 import {
   FilterUpdatesPipe,
   HasSecurityUpdatePipe,
@@ -28,21 +27,20 @@ export class BadgeService {
   private readonly filterUpdatesPipe = inject(FilterUpdatesPipe)
   private readonly hasSecurityUpdatePipe = inject(HasSecurityUpdatePipe)
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
-  private readonly refinement = inject(UpdatesRefinementService)
 
-  private readonly registryErrors$ = inject(
-    MarketplaceService,
-  ).requestErrors$.pipe(map(errors => errors.length > 0))
+  private readonly marketplace = inject(MarketplaceService)
+  private readonly registryErrors$ = this.marketplace.requestErrors$.pipe(
+    map(errors => errors.length > 0),
+  )
 
-  // The navbar keeps refinement warm across Updates navigation.
   private readonly updates$ = combineLatest([
-    this.refinement.refined$,
+    this.marketplace.marketplace$,
     inject(LocalPackagesService),
     this.hiddenUpdates.effective$,
   ]).pipe(
-    map(([refined, local, hidden]) => {
-      const updates = Object.values(refined.marketplace).flatMap(store =>
-        this.filterUpdatesPipe.transform(store?.packages || [], local, hidden),
+    map(([marketplace, local, hidden]) => {
+      const updates = Object.values(marketplace).flatMap(store =>
+        this.filterUpdatesPipe.transform(store?.updates || [], local, hidden),
       )
       return {
         count: new Set(updates.map(({ id }) => id)).size,

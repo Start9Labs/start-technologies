@@ -685,7 +685,6 @@ export default {
   813: 'OS + Daten zusammen erfordern mindestens 38 GB',
   814: 'Update ausblenden?',
   815: 'Dieses Update wird ausgeblendet. Sie können diese Version weiterhin aus dem Marketplace installieren.',
-  816: 'Passende Version wird gesucht...',
   817: 'Eine Clearnet-Domain, die von überall im Internet erreichbar ist.',
   818: 'Am besten für',
   819: 'Öffentliche Websites und APIs',
@@ -1098,4 +1097,6 @@ export default {
   1302: 'StartOS kann diese Registry gerade nicht erreichen.',
   1303: 'Sicherheitsupdate',
   1304: 'Neuzugänge',
+  1305: 'Diese Version erfordert eine neuere Version von StartOS. Aktualisieren Sie Ihren Server, um sie zu installieren.',
+  1306: 'Ihre installierte Version kann nicht direkt auf diese Version aktualisiert werden.',
 } satisfies i18n

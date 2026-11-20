@@ -27,3 +27,21 @@ export function pendingReleases(
       : []
   return [pkg, ...pending]
 }
+
+/** Whether the installed version may migrate to this release. */
+export function canMigrateFrom(
+  exver: Exver,
+  pkg: Pick<T.PackageVersionInfo, 'sourceVersion'>,
+  installed: string,
+): boolean {
+  return exver.satisfies(installed, pkg.sourceVersion || '*')
+}
+
+/** Whether this release needs a StartOS outside the server's package compatibility range. */
+export function requiresOsUpdate(
+  exver: Exver,
+  pkg: Pick<T.PackageVersionInfo, 'osVersion'>,
+  packageVersionCompat: string,
+): boolean {
+  return !exver.versionSatisfies(pkg.osVersion, packageVersionCompat)
+}
