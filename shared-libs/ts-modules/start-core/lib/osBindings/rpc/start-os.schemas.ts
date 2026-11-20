@@ -3594,6 +3594,14 @@ export const PackageInfoShort: z.ZodObject<{
    * `PackageMetadata::default_locale`.
    */
   defaultLocale: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  /**
+   * `PackageMetadata::security`.
+   */
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  /**
+   * A newer revision of this upstream version and flavor covers its hardware.
+   */
+  superseded: z.ZodOptional<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   releaseNotes: LocaleString,
   /**
@@ -3601,6 +3609,19 @@ export const PackageInfoShort: z.ZodObject<{
    */
   defaultLocale: z.string().nullable().optional().meta({
     description: '`PackageMetadata::default_locale`.',
+  }),
+  /**
+   * `PackageMetadata::security`.
+   */
+  security: wire(z.boolean().optional(), z.boolean()).meta({
+    description: '`PackageMetadata::security`.',
+  }),
+  /**
+   * A newer revision of this upstream version and flavor covers its hardware.
+   */
+  superseded: z.boolean().optional().meta({
+    description:
+      'A newer revision of this upstream version and flavor covers its hardware.',
   }),
 }).meta({
   id: 'PackageInfoShort',
@@ -5217,6 +5238,10 @@ export const PackageMetadata: z.ZodObject<{
   defaultLocale: z.ZodOptional<z.ZodNullable<z.ZodString>>
   description: typeof Description
   releaseNotes: typeof LocaleString
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   preDownloadAlert: z.ZodOptional<z.ZodNullable<typeof PreDownloadAlert>>
   gitHash: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof GitHash>>,
@@ -5270,6 +5295,12 @@ export const PackageMetadata: z.ZodObject<{
   }),
   description: Description,
   releaseNotes: LocaleString,
+  /**
+   * Whether the release includes security fixes.
+   */
+  security: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Whether the release includes security fixes.',
+  }),
   preDownloadAlert: PreDownloadAlert.nullable().optional(),
   gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
   license: z.string(),
