@@ -324,7 +324,6 @@ impl ServiceMap {
                                         outbound_gateway: None,
                                         outbound_dns: None,
                                         plugin: Default::default(),
-                                        security_notified: None,
                                     },
                                 )?;
                             };

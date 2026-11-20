@@ -15,7 +15,6 @@ use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::s9pk::manifest::{LocaleString, Manifest};
 use crate::status::StatusInfo;
-use crate::util::VersionString;
 use crate::util::serde::{Der64, is_partial_of};
 use crate::{ActionId, GatewayId, HealthCheckId, HostId, PackageId, ReplayId};
 
@@ -415,9 +414,6 @@ pub struct PackageDataEntry {
     pub outbound_dns: Option<VecDeque<SocketAddr>>,
     #[serde(default)]
     pub plugin: PackagePlugin,
-    /// Highest security release a notification has announced.
-    #[serde(default)]
-    pub security_notified: Option<VersionString>,
 }
 
 rpc_toolkit::reflect_ts!(PackageDataEntry);

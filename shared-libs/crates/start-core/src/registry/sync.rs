@@ -486,8 +486,15 @@ fn publish_snapshot(
                     reader: Default::default(),
                 },
             )?)?;
+            let previous: GetPackagesResponse = db
+                .as_public()
+                .as_registry_cache()
+                .as_idx(url)
+                .map(|cache| cache.as_packages().de())
+                .transpose()?
+                .unwrap_or_default();
             refresh_registry(db, url, &info)?;
-            crate::update::security::notify_package_updates(db, url, index.as_package(), device)?;
+            crate::update::security::notify_package_updates(db, url, &previous, &packages)?;
             db.as_private_mut()
                 .as_registry_indexes_mut()
                 .insert(url, &index.de()?)?;
