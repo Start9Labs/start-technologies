@@ -25,6 +25,7 @@ use crate::net::vhost::PassthroughInfo;
 use crate::nut::NutConfig;
 use crate::prelude::*;
 use crate::progress::FullProgress;
+use crate::ssh::SshKeys;
 use crate::system::{KeyboardOptions, SmtpValue};
 use crate::trusted_keys::{
     Registries, TrustedKeys, initial_os_registry, initial_registries, initial_trusted_keys,
@@ -44,6 +45,8 @@ pub struct Public {
     pub package_data: AllPackageData,
     #[serde(default)]
     pub scheduled_backups: ScheduledBackupState,
+    #[serde(default)]
+    pub ssh_pubkeys: SshKeys,
     #[serde(default)]
     pub registry_cache: BTreeMap<Url, crate::registry::sync::RegistryCache>,
     #[serde(default)]
@@ -161,6 +164,7 @@ impl Public {
             },
             package_data: AllPackageData::default(),
             scheduled_backups: ScheduledBackupState::default(),
+            ssh_pubkeys: SshKeys::new(),
             registry_cache: BTreeMap::new(),
             os_update_cache: None,
             disks: Vec::new(),
