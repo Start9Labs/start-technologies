@@ -67,11 +67,31 @@ pub(crate) fn parse_host_key_files(output: &[u8]) -> Vec<std::path::PathBuf> {
         .collect()
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+/// Authorized-key intent shared by SSH mutations and subscribed clients.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, VisitFields)]
 pub struct SshKeys(BTreeMap<InternedString, WithTimeData<SshPubKey>>);
+
+rpc_toolkit::reflect_ts!(SshKeys);
 impl SshKeys {
     pub fn new() -> Self {
         Self(BTreeMap::new())
+    }
+}
+
+impl Model<SshKeys> {
+    /// Reauthorizing a fingerprint replaces its key and keeps its `created_at`.
+    fn authorize(&mut self, key: SshPubKey) -> Result<SshKeyResponse, Error> {
+        let fingerprint = InternedString::intern(key.0.fingerprint_md5());
+        let key = match self.as_idx(&fingerprint) {
+            Some(existing) => {
+                let mut existing = existing.de()?;
+                *existing = key;
+                existing
+            }
+            None => WithTimeData::new(key),
+        };
+        self.insert(&fingerprint, &key)?;
+        Ok(SshKeyResponse::new(fingerprint, &key))
     }
 }
 
@@ -118,6 +138,16 @@ pub struct SshKeyResponse {
 
 rpc_toolkit::reflect_ts!(SshKeyResponse);
 rpc_toolkit::ts_export!(SshKeyResponse, namespaces = [""]);
+impl SshKeyResponse {
+    fn new(fingerprint: InternedString, key: &WithTimeData<SshPubKey>) -> Self {
+        Self {
+            alg: key.0.keytype().to_owned(),
+            fingerprint,
+            hostname: key.0.comment.clone().unwrap_or_default(),
+            created_at: key.created_at.to_rfc3339(),
+        }
+    }
+}
 impl std::fmt::Display for SshKeyResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
@@ -182,24 +212,12 @@ pub async fn add(
     ctx: RpcContext,
     SshAddParams { key }: SshAddParams,
 ) -> Result<SshKeyResponse, Error> {
-    let mut key = WithTimeData::new(key);
-    let fingerprint = InternedString::intern(key.0.fingerprint_md5());
     let (keys, res) = ctx
         .db
         .mutate(move |m| {
-            m.as_private_mut()
-                .as_ssh_pubkeys_mut()
-                .insert(&fingerprint, &key)?;
-
-            Ok((
-                m.as_private().as_ssh_pubkeys().de()?,
-                SshKeyResponse {
-                    alg: key.0.keytype().to_owned(),
-                    fingerprint,
-                    hostname: key.0.comment.take().unwrap_or_default(),
-                    created_at: key.created_at.to_rfc3339(),
-                },
-            ))
+            let keys = m.as_public_mut().as_ssh_pubkeys_mut();
+            let res = keys.authorize(key)?;
+            Ok((keys.de()?, res))
         })
         .await
         .result?;
@@ -227,7 +245,7 @@ pub async fn remove(
     let keys = ctx
         .db
         .mutate(|m| {
-            let keys_ref = m.as_private_mut().as_ssh_pubkeys_mut();
+            let keys_ref = m.as_public_mut().as_ssh_pubkeys_mut();
             if keys_ref.remove(&fingerprint)?.is_some() {
                 keys_ref.de()
             } else {
@@ -278,19 +296,11 @@ pub async fn list(ctx: RpcContext) -> Result<Vec<SshKeyResponse>, Error> {
     ctx.db
         .peek()
         .await
-        .into_private()
+        .into_public()
         .into_ssh_pubkeys()
         .into_entries()?
         .into_iter()
-        .map(|(fingerprint, key)| {
-            let mut key = key.de()?;
-            Ok(SshKeyResponse {
-                alg: key.0.keytype().to_owned(),
-                fingerprint,
-                hostname: key.0.comment.take().unwrap_or_default(),
-                created_at: key.created_at.to_rfc3339(),
-            })
-        })
+        .map(|(fingerprint, key)| Ok(SshKeyResponse::new(fingerprint, &key.de()?)))
         .collect()
 }
 
@@ -354,11 +364,7 @@ pub async fn sync_keys<P: AsRef<Path>>(
     f.write_all(b"\n").await?;
     f.sync_all().await?;
 
-    let mut f = create_file(ssh_dir.join("authorized_keys")).await?;
-    for key in pubkeys.0.values() {
-        f.write_all(key.0.to_key_format().as_bytes()).await?;
-        f.write_all(b"\n").await?;
-    }
+    sync_pubkeys(pubkeys, ssh_dir).await?;
 
     Command::new("chown")
         .arg("-R")
@@ -534,5 +540,56 @@ mod tests {
         use std::os::unix::ffi::OsStringExt;
         assert_eq!(parse_host_key_files(b"port 22\nhostkey /keys/with space\nhostcertificate /public/cert\nhostkey /keys/\xff\n"),
             vec![std::path::PathBuf::from("/keys/with space"), std::ffi::OsString::from_vec(b"/keys/\xff".to_vec()).into()]);
+    }
+
+    const KEY: &str =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMcFf+jmv4w+tRbA1aXDvovqViM0NVRu86Hk5kcQItfI laptop";
+
+    #[test]
+    fn reauthorization_updates_the_comment_and_updated_at_but_not_created_at() {
+        let key: SshPubKey = KEY.parse().unwrap();
+        let fingerprint = InternedString::intern(key.0.fingerprint_md5());
+        let original = WithTimeData {
+            value: key,
+            created_at: "2020-01-01T00:00:00Z".parse().unwrap(),
+            updated_at: "2021-01-01T00:00:00Z".parse().unwrap(),
+        };
+        let mut keys = Model::new(&SshKeys::from(BTreeMap::from([(
+            fingerprint.clone(),
+            original.clone(),
+        )])))
+        .unwrap();
+        let response = keys
+            .authorize(KEY.replace("laptop", "desktop").parse().unwrap())
+            .unwrap();
+        let saved = keys.as_idx(&fingerprint).unwrap().de().unwrap();
+        assert_eq!(keys.de().unwrap().0.len(), 1);
+        assert_eq!(response.fingerprint, fingerprint);
+        assert_eq!(response.hostname, "desktop");
+        assert_eq!(response.created_at, original.created_at.to_rfc3339());
+        assert_eq!(saved.created_at, original.created_at);
+        assert!(saved.updated_at > original.updated_at);
+        assert_eq!(saved.0.comment.as_deref(), Some("desktop"));
+    }
+
+    #[tokio::test]
+    async fn reauthorizing_after_a_failed_sync_can_repair_authorized_keys() {
+        let mut keys = Model::new(&SshKeys::new()).unwrap();
+        let first = keys.authorize(KEY.parse().unwrap()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let ssh_dir = dir.path().join("ssh");
+        tokio::fs::write(&ssh_dir, "not a directory").await.unwrap();
+        assert!(sync_pubkeys(&keys.de().unwrap(), &ssh_dir).await.is_err());
+        tokio::fs::remove_file(&ssh_dir).await.unwrap();
+        let retry = keys.authorize(KEY.parse().unwrap()).unwrap();
+        sync_pubkeys(&keys.de().unwrap(), &ssh_dir).await.unwrap();
+        assert_eq!(first.created_at, retry.created_at);
+        assert_eq!(keys.de().unwrap().0.len(), 1);
+        assert_eq!(
+            tokio::fs::read_to_string(ssh_dir.join("authorized_keys"))
+                .await
+                .unwrap(),
+            format!("{KEY}\n")
+        );
     }
 }

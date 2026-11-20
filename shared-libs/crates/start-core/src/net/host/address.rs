@@ -807,6 +807,7 @@ mod test {
                 "disks": [],
                 "sharedVolumes": {},
                 "backupTargets": {},
+                "sshPubkeys": {},
                 "serverInfo": {
                     "hostname": "server",
                     "network": {

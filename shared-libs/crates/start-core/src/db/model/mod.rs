@@ -12,7 +12,6 @@ use crate::net::forward::AvailablePorts;
 use crate::net::keys::KeyStore;
 use crate::notifications::Notifications;
 use crate::prelude::*;
-use crate::ssh::SshKeys;
 use crate::system::KeyboardOptions;
 use crate::util::serde::{Der64, Pem};
 
@@ -43,7 +42,6 @@ impl Database {
                 fde_enrollment: None,
                 sessions: Sessions::default(),
                 ssh_privkey: Pem(account.ssh_key.clone()),
-                ssh_pubkeys: SshKeys::new(),
                 available_ports: AvailablePorts::new(),
                 notifications: Notifications::new(),
                 os_security_notifications: BTreeMap::new(),

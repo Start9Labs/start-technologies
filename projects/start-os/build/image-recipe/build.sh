@@ -425,7 +425,13 @@ else
 	cat ./chroot/debootstrap/debootstrap.log
 	exit $EXIT
 fi
-retry lb chroot
+# live-build's failure cleanup unmounts the local archives but keeps the
+# `chroot_archives` stagefile, which would skip binding them again.
+lb_chroot() {
+	rm -f .build/chroot_archives
+	lb chroot
+}
+retry lb_chroot
 "$SOURCE_DIR/kernel-backports/verify-kernel-backports.sh" chroot "$IB_TARGET_ARCH"
 
 # riscv64 binaries target RVA23, which the build host may lack.
