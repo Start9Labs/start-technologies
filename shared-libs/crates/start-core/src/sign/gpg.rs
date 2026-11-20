@@ -217,7 +217,7 @@ mod tests {
     use pgp::ser::Serialize as _;
 
     use super::*;
-    use crate::update::signers::initial_signers;
+    use crate::trusted_keys::initial_signer_labels;
 
     fn armored(source: &impl pgp::ser::Serialize) -> String {
         let mut result = Vec::new();
@@ -425,9 +425,9 @@ mod tests {
         let keys = parse_public_keys(&[include_str!("fixtures/start9-public.asc").into()])
             .unwrap()
             .keys;
-        let expected = initial_signers()
+        let expected = initial_signer_labels()
             .into_iter()
-            .find(|(_, info)| info.label == "Start9")
+            .find(|(_, label)| *label == "Start9")
             .unwrap()
             .0
             .parse::<AnyVerifyingKey>()
@@ -583,9 +583,9 @@ mod tests {
 
     #[test]
     fn preserves_pem_inputs_and_accepts_mixed_formats() {
-        let pem = initial_signers()
+        let pem = initial_signer_labels()
             .into_iter()
-            .find(|(_, signer)| signer.label == "matthill")
+            .find(|(_, label)| *label == "matthill")
             .unwrap()
             .0;
         let keys = parse_public_keys(&[

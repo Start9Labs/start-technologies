@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use const_format::formatcp;
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{EXPANDED_SECRET_KEY_LENGTH, SecretKey, SigningKey};
 use exver::{PreReleaseSegment, VersionRange};
 use imbl_value::{InternedString, json};
 use itertools::Itertools;
@@ -33,7 +33,9 @@ use crate::ssh::{SshKeys, SshPubKey};
 use crate::util::Invoke;
 use crate::util::io::write_file_atomic;
 use crate::util::serde::Pem;
-use crate::volume::PKG_VOLUME_DIR;
+use crate::volume::{
+    PKG_VOLUME_DIR, convert_directory_to_subvolume, needs_subvolume_conversion, pkg_volume_dir,
+};
 use crate::{DATA_DIR, PACKAGE_DATA, PackageId, ReplayId};
 
 lazy_static::lazy_static! {
@@ -554,7 +556,7 @@ impl VersionT for Version {
                         }
                     };
 
-                    if let Err(e) = crate::volume::convert_package_to_subvolume(&new_id).await {
+                    if let Err(e) = convert_package_to_subvolume(&new_id).await {
                         tracing::error!("Error preparing volumes for {id}: {e}");
                         tracing::debug!("{e:?}");
                         failures.insert(new_id.clone(), (title, Some(e.to_string())));
@@ -831,7 +833,7 @@ async fn previous_tor_keys(
         if let Ok(seed) = <[u8; 32]>::try_from(net_key) {
             keys.insert(
                 ("start-os".to_owned(), "admin".to_owned()),
-                crate::util::crypto::ed25519_expand_key(&seed),
+                ed25519_expand_key(&seed),
             );
         }
     }
@@ -852,10 +854,7 @@ async fn previous_tor_keys(
                 continue;
             };
             if let Ok(seed) = <[u8; 32]>::try_from(key_bytes) {
-                keys.insert(
-                    (package, interface),
-                    crate::util::crypto::ed25519_expand_key(&seed),
-                );
+                keys.insert((package, interface), ed25519_expand_key(&seed));
             }
         }
     }
@@ -884,6 +883,21 @@ async fn previous_tor_keys(
     }
 
     Ok(keys)
+}
+
+fn ed25519_expand_key(key: &SecretKey) -> [u8; EXPANDED_SECRET_KEY_LENGTH] {
+    ed25519_dalek_v1::ExpandedSecretKey::from(
+        &ed25519_dalek_v1::SecretKey::from_bytes(key).unwrap(),
+    )
+    .to_bytes()
+}
+
+async fn convert_package_to_subvolume(id: &PackageId) -> Result<(), Error> {
+    let src = pkg_volume_dir(id);
+    if needs_subvolume_conversion(&src).await {
+        convert_directory_to_subvolume(&src, None).await?;
+    }
+    Ok(())
 }
 
 /// Derive the tor v3 onion address (without .onion suffix) from a 64-byte
@@ -961,7 +975,6 @@ mod test {
         use openssl::hash::MessageDigest;
         use patch_db::json_ptr::ROOT;
 
-        use crate::util::crypto::ed25519_expand_key;
         use crate::version::Current;
 
         let account = AccountInfo::new("password", std::time::SystemTime::now(), None).unwrap();
