@@ -3089,8 +3089,6 @@ const { MarketplaceControlsComponent: Controls } =
   await import('src/app/routes/portal/routes/marketplace/components/controls.component')
 const { MarketplaceService } =
   await import('src/app/services/marketplace.service')
-const { LocalPackagesService } =
-  await import('src/app/services/local-packages.service')
 const pkg = {
   id: 'hello-world',
   version: '1.0.0:0',
@@ -4063,7 +4061,6 @@ test('a late registry cache update cannot restore a removed registry', async t =
             path[0] === 'registryCache' ? metadata : registries,
         },
       },
-      { provide: LocalPackagesService, useValue: of({}) },
       { provide: Exver, useValue: {} },
       { provide: StorageService, useValue: { get: () => null } },
       { provide: PackageIconService, useValue: {} },
@@ -4141,7 +4138,6 @@ test('registry status keeps its last known observation while the server is disco
             path[0] === 'registryCache' ? cache : registries,
         },
       },
-      { provide: LocalPackagesService, useValue: of({}) },
       { provide: Exver, useValue: {} },
       { provide: StorageService, useValue: { get: () => null } },
       { provide: PackageIconService, useValue: {} },
@@ -4434,7 +4430,6 @@ function marketplaceFixture(t, entries = {}) {
   const injector = createEnvironmentInjector([
     { provide: PatchDB, useValue: patch },
     { provide: Exver, useValue: { getFlavor: () => null } },
-    { provide: LocalPackagesService, useValue: of({}) },
     {
       provide: StorageService,
       useValue: {
