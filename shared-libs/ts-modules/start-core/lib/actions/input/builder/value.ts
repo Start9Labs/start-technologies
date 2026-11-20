@@ -121,6 +121,16 @@ function asRequiredParser<Type, Input extends { required: boolean }>(
   return parser.nullish().transform(v => v ?? null) as any
 }
 
+/** A required string field also rejects an empty value, as the form does. */
+function requireNonEmpty<T>(
+  parser: z.ZodType<T>,
+  input: { required: boolean },
+): z.ZodType<T> {
+  return input.required
+    ? parser.refine(v => v !== '', { message: 'Required' })
+    : parser
+}
+
 /**
  * Core builder class for defining a single form field in a service configuration spec.
  *
@@ -460,7 +470,7 @@ export class Value<
           generate: a.generate ?? null,
           ...a,
         },
-        validator,
+        validator: requireNonEmpty(validator, a),
       }),
       validator,
     )
@@ -507,7 +517,10 @@ export class Value<
             generate: a.generate ?? null,
             ...a,
           },
-          validator: asRequiredParser(withPatterns(z.string(), a.patterns), a),
+          validator: requireNonEmpty(
+            asRequiredParser(withPatterns(z.string(), a.patterns), a),
+            a,
+          ),
         }
       },
       z.string().nullable(),
@@ -588,7 +601,7 @@ export class Value<
         immutable: a.immutable ?? false,
         ...a,
       }
-      return { spec: built, validator }
+      return { spec: built, validator: requireNonEmpty(validator, a) }
     }, validator)
   }
   /** Like {@link Value.textarea} but options are resolved lazily at runtime via a builder function. */
@@ -631,7 +644,10 @@ export class Value<
             immutable: false,
             ...a,
           },
-          validator: asRequiredParser(withPatterns(z.string(), a.patterns), a),
+          validator: requireNonEmpty(
+            asRequiredParser(withPatterns(z.string(), a.patterns), a),
+            a,
+          ),
         }
       },
       z.string().nullable(),
@@ -814,7 +830,7 @@ export class Value<
           immutable: a.immutable ?? false,
           ...a,
         },
-        validator,
+        validator: requireNonEmpty(validator, a),
       }),
       validator,
     )
@@ -848,7 +864,7 @@ export class Value<
             immutable: false,
             ...a,
           },
-          validator: asRequiredParser(z.string(), a),
+          validator: requireNonEmpty(asRequiredParser(z.string(), a), a),
         }
       },
       z.string().nullable(),
@@ -918,7 +934,7 @@ export class Value<
           immutable: a.immutable ?? false,
           ...a,
         },
-        validator,
+        validator: requireNonEmpty(validator, a),
       }),
       validator,
     )
@@ -957,7 +973,7 @@ export class Value<
             immutable: false,
             ...a,
           },
-          validator: asRequiredParser(z.string(), a),
+          validator: requireNonEmpty(asRequiredParser(z.string(), a), a),
         }
       },
       z.string().nullable(),
