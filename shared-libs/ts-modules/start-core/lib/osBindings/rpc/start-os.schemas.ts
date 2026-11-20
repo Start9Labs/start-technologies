@@ -5928,6 +5928,7 @@ export const BindingSetGuaWanParams: z.ZodObject<{
 export const DerivedAddressInfo: z.ZodObject<{
   /**
    * User override: enable these public IPs and published GUAs.
+   * A service's `getHostInfo` lists the enabled ones as socket addresses instead.
    */
   enabled: z.ZodArray<typeof PublicIpKey>
   /**
@@ -5984,9 +5985,11 @@ export const DerivedAddressInfo: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   /**
    * User override: enable these public IPs and published GUAs.
+   * A service's `getHostInfo` lists the enabled ones as socket addresses instead.
    */
   enabled: z.array(PublicIpKey).meta({
-    description: 'User override: enable these public IPs and published GUAs.',
+    description:
+      "User override: enable these public IPs and published GUAs.\nA service's `getHostInfo` lists the enabled ones as socket addresses instead.",
   }),
   /**
    * User override: disable these addresses (only for domains and private IP & port)

@@ -1,4 +1,8 @@
+use std::collections::BTreeSet;
+use std::net::SocketAddr;
+
 use crate::net::host::Host;
+use crate::net::host::binding::DerivedAddressInfo;
 use crate::service::effects::callbacks::CallbackHandler;
 use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
@@ -23,14 +27,14 @@ pub async fn get_host_info(
         package_id,
         callback,
     }: GetHostInfoParams,
-) -> Result<Option<Host>, Error> {
+) -> Result<Value, Error> {
     let context = context.deref()?;
     let package_id = package_id.unwrap_or_else(|| context.seed.id.clone());
 
     // `start-os` is the server: its single `admin` host lives in serverInfo.
     let ptr = if package_id.is_start_os() {
         if host_id != HostId::admin() {
-            return Ok(None);
+            return Ok(Value::Null);
         }
         "/public/serverInfo/network/host".to_owned()
     } else {
@@ -40,11 +44,7 @@ pub async fn get_host_info(
     .expect("valid json pointer");
     let mut watch = context.seed.ctx.db.watch(ptr).await.typed::<Host>();
 
-    let res = watch
-        .peek_and_mark_seen()?
-        .de()
-        .ok()
-        .map(Host::into_service_view);
+    let res = service_host_info(watch.peek_and_mark_seen()?.de().ok())?;
 
     if let Some(callback) = callback {
         let callback = callback.register(&context.seed.persistent_container);
@@ -60,17 +60,46 @@ pub async fn get_host_info(
 }
 
 pub(in crate::service::effects) fn project_host_info(value: Value) -> Result<Value, Error> {
-    let host: Option<Host> = imbl_value::from_value(value)?;
-    Ok(imbl_value::to_value(&host.map(Host::into_service_view))?)
+    service_host_info(imbl_value::from_value(value)?)
+}
+
+/// The host as service SDKs of every version read it: `Host::into_service_view`, with
+/// each binding's and range's `enabled` holding socket addresses instead of keys.
+fn service_host_info(host: Option<Host>) -> Result<Value, Error> {
+    let Some(host) = host.map(Host::into_service_view) else {
+        return Ok(Value::Null);
+    };
+    let mut value = imbl_value::to_value(&host)?;
+    let bindings = host
+        .bindings
+        .iter()
+        .map(|(port, binding)| ("bindings", port, &binding.addresses));
+    let ranges = host
+        .binding_ranges
+        .iter()
+        .map(|(port, range)| ("bindingRanges", port, &range.addresses));
+    for (table, port, addresses) in bindings.chain(ranges) {
+        value[table][&*port.to_string()]["addresses"]["enabled"] =
+            imbl_value::to_value(&legacy_enabled(addresses))?;
+    }
+    Ok(value)
+}
+
+/// The enabled public IPs in the form SDKs predating `PublicIpKey` match.
+fn legacy_enabled(addresses: &DerivedAddressInfo) -> BTreeSet<SocketAddr> {
+    addresses
+        .enabled()
+        .into_iter()
+        .filter(|a| a.public && a.metadata.is_ip())
+        .filter_map(|a| a.to_socket_addr())
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use super::*;
     use crate::net::forward::AvailablePorts;
-    use crate::net::host::binding::{BindInfo, BindOptions};
+    use crate::net::host::binding::{BindInfo, BindOptions, PublicIpKey, RangeBindInfo};
     use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
 
     #[test]
@@ -162,5 +191,74 @@ mod tests {
             imbl_value::to_value(&enabled).unwrap()
         );
         assert_eq!(project_host_info(Value::Null).unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn service_readers_see_enabled_public_ips_as_socket_addresses() {
+        let public = |port: u16, hostname: &str, metadata: HostnameMetadata| HostnameInfo {
+            hostname: hostname.into(),
+            port: Some(port),
+            ssl: false,
+            public: true,
+            metadata,
+        };
+        let eth0 = || "eth0".parse().unwrap();
+        let addresses = |port: u16| {
+            let wan = public(
+                port,
+                "203.0.113.7",
+                HostnameMetadata::Ipv4 { gateway: eth0() },
+            );
+            let gua = public(
+                port,
+                "2001:db8::7",
+                HostnameMetadata::Ipv6 {
+                    gateway: eth0(),
+                    scope_id: 2,
+                },
+            );
+            DerivedAddressInfo {
+                enabled: BTreeSet::from([PublicIpKey::of(&wan).unwrap()]),
+                available: BTreeSet::from([wan, gua]),
+                ..Default::default()
+            }
+        };
+        let mut host = Host::default();
+        let mut ports = AvailablePorts::new();
+        let mut bind = BindInfo::new(
+            &mut ports,
+            BindOptions {
+                transport: Default::default(),
+                preferred_external_port: 8080,
+                add_ssl: None,
+                secure: None,
+                proxy: None,
+            },
+            false,
+        )
+        .unwrap();
+        bind.addresses = addresses(8080);
+        host.bindings.insert(80, bind);
+        host.binding_ranges.insert(
+            40000,
+            RangeBindInfo {
+                enabled: true,
+                transport: Default::default(),
+                external_start_port: 40000,
+                number_of_ports: 10,
+                addresses: addresses(40000),
+                interface: None,
+            },
+        );
+
+        let view = project_host_info(imbl_value::to_value(&host).unwrap()).unwrap();
+        assert_eq!(
+            view["bindings"]["80"]["addresses"]["enabled"],
+            imbl_value::json!(["203.0.113.7:8080"])
+        );
+        assert_eq!(
+            view["bindingRanges"]["40000"]["addresses"]["enabled"],
+            imbl_value::json!(["203.0.113.7:40000"])
+        );
     }
 }

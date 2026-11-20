@@ -1097,5 +1097,5 @@ export const ENGLISH: Record<string, number> = {
   "Can't reach server": 1300,
   'Listings may be out of date': 1301,
   "StartOS can't reach this registry right now.": 1302,
-  'Changes to this address also apply to every IPv6 address here with the same interface ID': 1303,
+  'The Local/Public setting of this address, and its toggle while Public, also apply to every IPv6 address here with the same interface ID': 1303,
 }

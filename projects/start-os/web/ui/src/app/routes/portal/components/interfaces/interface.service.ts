@@ -415,7 +415,7 @@ export type GatewayAddress = {
   // An IPv6 GUA gets a Local/Public dropdown in the access column (its WAN
   // opt-in, carried by `hostnameInfo.public`); other addresses are read-only.
   gua: boolean
-  // A GUA sharing its `PublicIpKey` with another row here; the two switch together.
+  // A GUA sharing its `PublicIpKey`, and so its public opt-in, with another row here.
   linked: boolean
   type: string
   transport: T.Transport

@@ -1096,5 +1096,5 @@ export default {
   1300: 'Servidor inaccesible',
   1301: 'Es posible que los listados estén desactualizados',
   1302: 'StartOS no puede conectar con este registro en este momento.',
-  1303: 'Los cambios en esta dirección también se aplican a todas las direcciones IPv6 de aquí con el mismo identificador de interfaz',
+  1303: 'La opción Local/Público de esta dirección, y su interruptor mientras es Público, también se aplican a todas las direcciones IPv6 de aquí con el mismo identificador de interfaz',
 } satisfies i18n

@@ -204,7 +204,26 @@ async fn forget_iface(
     ctx: RpcContext,
     ForgetGatewayParams { gateway }: ForgetGatewayParams,
 ) -> Result<(), Error> {
-    ctx.net_controller.net_iface.forget(&gateway).await
+    ctx.net_controller.net_iface.forget(&gateway).await?;
+    ctx.db
+        .mutate(|db| {
+            let hostname = crate::hostname::ServerHostname::load(db.as_public().as_server_info())?;
+            let gateways = db
+                .as_public()
+                .as_server_info()
+                .as_network()
+                .as_gateways()
+                .de()?;
+            let ports = db.as_private().as_available_ports().de()?;
+            for host in crate::net::host::all_hosts(db) {
+                let host = host?;
+                host.forget_gateway(&gateway)?;
+                host.update_addresses(&hostname, &gateways, &ports)?;
+            }
+            Ok(())
+        })
+        .await
+        .result
 }
 
 /// The WireGuard preshared key NetworkManager holds for `interface`'s peer, if

@@ -4357,7 +4357,7 @@
             "enabled": {
               "type": "array",
               "items": { "$ref": "#/$defs/PublicIpKey" },
-              "description": "User override: enable these public IPs and published GUAs."
+              "description": "User override: enable these public IPs and published GUAs.\nA service's `getHostInfo` lists the enabled ones as socket addresses instead."
             },
             "disabled": {
               "type": "array",
@@ -11126,7 +11126,7 @@
             "enabled": {
               "type": "array",
               "items": { "$ref": "#/$defs/PublicIpKey" },
-              "description": "User override: enable these public IPs and published GUAs."
+              "description": "User override: enable these public IPs and published GUAs.\nA service's `getHostInfo` lists the enabled ones as socket addresses instead."
             },
             "disabled": {
               "type": "array",

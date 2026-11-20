@@ -64,6 +64,7 @@ impl FromStr for BindId {
 #[model = "Model<Self>"]
 pub struct DerivedAddressInfo {
     /// User override: enable these public IPs and published GUAs.
+    /// A service's `getHostInfo` lists the enabled ones as socket addresses instead.
     pub enabled: BTreeSet<PublicIpKey>,
     /// User override: disable these addresses (only for domains and private IP & port)
     pub disabled: BTreeSet<(InternedString, u16)>,

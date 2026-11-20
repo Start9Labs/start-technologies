@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
 
 use exver::VersionRange;
@@ -52,31 +53,41 @@ impl VersionT for Version {
     }
 }
 
-/// Rewrites socket-address opt-ins as `PublicIpKey`s of the rows they select.
+/// Rewrites socket-address opt-ins as the `PublicIpKey`s of every row they select.
 /// An opt-in matching no current row is dropped; an already-keyed one is kept.
 fn key_public_ip_opt_ins(addresses: &mut Value) {
     let available: Vec<HostnameInfo> = addresses
         .get("available")
-        .and_then(|available| from_value(available.clone()).ok())
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| from_value::<HostnameInfo>(row.clone()).ok())
+                .collect()
+        })
         .unwrap_or_default();
     for field in ["enabled", "guaWan"] {
         let Some(opt_ins) = addresses.get(field).and_then(Value::as_array) else {
             continue;
         };
-        let keys: Vec<Value> = opt_ins
+        let keys: BTreeSet<PublicIpKey> = opt_ins
             .iter()
-            .filter_map(|opt_in| {
-                if opt_in.is_object() {
-                    return Some(opt_in.clone());
-                }
-                let socket: SocketAddr = opt_in.as_str()?.parse().ok()?;
-                let row = available
+            .flat_map(|opt_in| -> Vec<PublicIpKey> {
+                let Some(socket) = opt_in.as_str() else {
+                    return from_value::<PublicIpKey>(opt_in.clone())
+                        .into_iter()
+                        .collect();
+                };
+                let socket = socket.parse::<SocketAddr>().ok();
+                available
                     .iter()
-                    .find(|row| row.to_socket_addr() == Some(socket))?;
-                to_value(&PublicIpKey::of(row)?).ok()
+                    .filter(|row| socket.is_some() && row.to_socket_addr() == socket)
+                    .filter_map(PublicIpKey::of)
+                    .collect()
             })
             .collect();
-        addresses[field] = Value::Array(keys.into_iter().collect());
+        if let Ok(keys) = to_value(&keys) {
+            addresses[field] = keys;
+        }
     }
 }
 
@@ -139,6 +150,22 @@ mod tests {
         for addresses in migrated(addresses) {
             assert_eq!(addresses["enabled"], json!([wan.clone(), gua.clone()]));
             assert_eq!(addresses["guaWan"], json!([gua.clone()]));
+        }
+    }
+
+    #[test]
+    fn a_wan_ip_shared_by_two_gateways_keeps_its_opt_in_on_both() {
+        let addresses = json!({
+            "enabled": ["203.0.113.7:42000"],
+            "guaWan": [],
+            "available": [
+                row("203.0.113.7", 42000, true, json!({ "kind": "ipv4", "gateway": "eth0" })),
+                row("203.0.113.7", 42000, true, json!({ "kind": "ipv4", "gateway": "wlan0" })),
+            ],
+        });
+        let key = |gateway: &str| to_value(&PublicIpKey::at(gateway, "203.0.113.7:42000")).unwrap();
+        for addresses in migrated(addresses) {
+            assert_eq!(addresses["enabled"], json!([key("eth0"), key("wlan0")]));
         }
     }
 

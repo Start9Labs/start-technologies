@@ -173,6 +173,22 @@ impl Model<Host> {
         self.derive_addresses(mdns, gateways, available_ports)
     }
 
+    /// Drops a removed gateway's selections from every binding and range.
+    pub fn forget_gateway(&mut self, gateway: &GatewayId) -> Result<(), Error> {
+        self.as_bindings_mut().mutate(|bindings| {
+            for info in bindings.values_mut() {
+                info.addresses.forget_gateway(gateway);
+            }
+            Ok(())
+        })?;
+        self.as_binding_ranges_mut().mutate(|ranges| {
+            for info in ranges.values_mut() {
+                info.addresses.forget_gateway(gateway);
+            }
+            Ok(())
+        })
+    }
+
     /// Rebuilds the address rows and port forwards from the stored selections.
     fn derive_addresses(
         &mut self,
@@ -1720,14 +1736,7 @@ mod tests {
         converge(&mut host, &gateways, &ports);
 
         gateways.remove(&gw("wg-in"));
-        host.as_bindings_mut()
-            .mutate(|b| {
-                for binding in b.values_mut() {
-                    binding.addresses.forget_gateway(&gw("wg-in"));
-                }
-                Ok(())
-            })
-            .unwrap();
+        host.forget_gateway(&gw("wg-in")).unwrap();
         converge(&mut host, &gateways, &ports);
         assert!(forward_srcs(&host).is_empty());
 

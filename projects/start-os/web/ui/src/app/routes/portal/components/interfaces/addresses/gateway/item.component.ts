@@ -130,7 +130,7 @@ import { DomainHealthService } from './domain-health.service'
             <tui-icon
               icon="@tui.link"
               [tuiTooltip]="
-                'Changes to this address also apply to every IPv6 address here with the same interface ID'
+                'The Local/Public setting of this address, and its toggle while Public, also apply to every IPv6 address here with the same interface ID'
                   | i18n
               "
             />

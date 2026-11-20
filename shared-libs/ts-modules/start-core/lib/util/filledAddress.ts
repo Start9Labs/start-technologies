@@ -393,7 +393,7 @@ type AddressSelections = Pick<
   'disabled' | 'lanEnabled' | 'available'
 > &
   Partial<Pick<DerivedAddressInfo, 'effective'>> & {
-    /** Socket-address strings on servers that predate `PublicIpKey`. */
+    /** Socket-address strings in `getHostInfo` and on servers predating `PublicIpKey`. */
     enabled: readonly (PublicIpKey | string)[]
   }
 

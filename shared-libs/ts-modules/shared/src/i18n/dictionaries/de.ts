@@ -1096,5 +1096,5 @@ export default {
   1300: 'Server nicht erreichbar',
   1301: 'Einträge sind möglicherweise veraltet',
   1302: 'StartOS kann diese Registry gerade nicht erreichen.',
-  1303: 'Änderungen an dieser Adresse gelten auch für jede IPv6-Adresse hier mit derselben Schnittstellen-ID',
+  1303: 'Die Einstellung Lokal/Öffentlich dieser Adresse und ihr Schalter im Modus Öffentlich gelten auch für jede IPv6-Adresse hier mit derselben Schnittstellen-ID',
 } satisfies i18n
