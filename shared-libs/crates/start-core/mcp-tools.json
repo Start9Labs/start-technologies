@@ -4356,8 +4356,8 @@
           "properties": {
             "enabled": {
               "type": "array",
-              "items": { "$ref": "#/$defs/PublicIpKey" },
-              "description": "User override: enable these public IPs and published GUAs.\nA service's `getHostInfo` lists the enabled ones as socket addresses instead."
+              "items": { "type": "string" },
+              "description": "User override: enable these addresses (only for public IP & port)"
             },
             "disabled": {
               "type": "array",
@@ -4380,7 +4380,7 @@
             "guaWan": {
               "description": "User override: IPv6 global-unicast addresses opted into WAN exposure.\nProjected into `HostnameInfo.public` by `update_addresses`, so `public`\nstays the single source of truth for WAN reachability (P2P address\nselection, upstream pinholes). A GUA not in this set is LAN-only.",
               "type": "array",
-              "items": { "$ref": "#/$defs/PublicIpKey" }
+              "items": { "type": "string" }
             },
             "lanEnabled": {
               "description": "User override: enable these private IPs regardless of their mDNS address.",
@@ -4460,24 +4460,6 @@
             "effective"
           ],
           "additionalProperties": true
-        },
-        "PublicIpKey": {
-          "type": "object",
-          "properties": {
-            "gateway": { "$ref": "#/$defs/GatewayId" },
-            "port": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "interfaceId": {
-              "description": "The low 64 bits of a GUA, with its prefix zeroed. Null for the gateway's WAN IPv4.",
-              "type": ["string", "null"]
-            }
-          },
-          "required": ["gateway", "port", "interfaceId"],
-          "additionalProperties": true,
-          "description": "A public IP opt-in, resolved against the gateway's current addresses.\n\nOpt-ins persist across a new WAN lease, a moved IPv6 prefix and a link drop:\nthe gateway's next public address on the port is on without operator action.\nA GUA key matches every GUA on the gateway and port sharing its interface identifier."
         },
         "GatewayId": { "type": "string" },
         "HostnameInfo": {
@@ -11125,8 +11107,8 @@
           "properties": {
             "enabled": {
               "type": "array",
-              "items": { "$ref": "#/$defs/PublicIpKey" },
-              "description": "User override: enable these public IPs and published GUAs.\nA service's `getHostInfo` lists the enabled ones as socket addresses instead."
+              "items": { "type": "string" },
+              "description": "User override: enable these addresses (only for public IP & port)"
             },
             "disabled": {
               "type": "array",
@@ -11149,7 +11131,7 @@
             "guaWan": {
               "description": "User override: IPv6 global-unicast addresses opted into WAN exposure.\nProjected into `HostnameInfo.public` by `update_addresses`, so `public`\nstays the single source of truth for WAN reachability (P2P address\nselection, upstream pinholes). A GUA not in this set is LAN-only.",
               "type": "array",
-              "items": { "$ref": "#/$defs/PublicIpKey" }
+              "items": { "type": "string" }
             },
             "lanEnabled": {
               "description": "User override: enable these private IPs regardless of their mDNS address.",
@@ -11229,24 +11211,6 @@
             "effective"
           ],
           "additionalProperties": true
-        },
-        "PublicIpKey": {
-          "type": "object",
-          "properties": {
-            "gateway": { "$ref": "#/$defs/GatewayId" },
-            "port": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "interfaceId": {
-              "description": "The low 64 bits of a GUA, with its prefix zeroed. Null for the gateway's WAN IPv4.",
-              "type": ["string", "null"]
-            }
-          },
-          "required": ["gateway", "port", "interfaceId"],
-          "additionalProperties": true,
-          "description": "A public IP opt-in, resolved against the gateway's current addresses.\n\nOpt-ins persist across a new WAN lease, a moved IPv6 prefix and a link drop:\nthe gateway's next public address on the port is on without operator action.\nA GUA key matches every GUA on the gateway and port sharing its interface identifier."
         },
         "GatewayId": { "type": "string" },
         "HostnameInfo": {

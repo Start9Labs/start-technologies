@@ -2,11 +2,8 @@ import { Host, HostnameInfo } from '../osBindings'
 import { deepEqual } from '../util'
 import {
   fillHost,
-  getEnabledAddresses,
   isAddressEnabled,
   isAddressInsecure,
-  publicIpKey,
-  samePublicIpKey,
 } from '../util/filledAddress'
 
 const host = (fingerprint: string): Host =>
@@ -217,41 +214,12 @@ describe('legacy server LAN address overrides', () => {
   test('an enabled public GUA leaves a disabled mDNS address off', () => {
     const { addresses } = lan(gua)
     addresses.available = addresses.available.map(a => ({ ...a, ssl: false }))
-    addresses.enabled = [publicIpKey(gua)!]
+    addresses.enabled = ['[2001:db8::10]:5223']
     addresses.disabled = [['relay.local', 5223]]
     const mdns = addresses.available.find(a => a.metadata.kind === 'mdns')!
 
     expect(isAddressEnabled(addresses, gua)).toBe(true)
     expect(isAddressEnabled(addresses, mdns)).toBe(false)
-  })
-})
-
-describe('public IP opt-in keys', () => {
-  const gua = (hostname: string): HostnameInfo => ({
-    ssl: false,
-    public: true,
-    hostname,
-    port: 5223,
-    metadata: { kind: 'ipv6', gateway: 'eth0', scopeId: 0 },
-  })
-
-  test('a GUA key follows its interface identifier to a new prefix', () => {
-    const key = publicIpKey(gua('2001:db8:1::a3b:2'))!
-    expect(key).toEqual({ gateway: 'eth0', port: 5223, interfaceId: '::a3b:2' })
-    expect(samePublicIpKey(key, publicIpKey(gua('2001:db8:9::a3b:2'))!)).toBe(
-      true,
-    )
-    expect(samePublicIpKey(key, publicIpKey(gua('2001:db8:1::a3b:3'))!)).toBe(
-      false,
-    )
-  })
-
-  test('a server predating keys still matches its socket-address opt-ins', () => {
-    const { effective: _, ...addresses } =
-      host('AAAA=').bindings[5223].addresses
-    addresses.available.push(gua('2001:db8::10'))
-    const legacy = { ...addresses, enabled: ['[2001:db8::10]:5223'] }
-    expect(getEnabledAddresses(legacy)).toContainEqual(gua('2001:db8::10'))
   })
 })
 

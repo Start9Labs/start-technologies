@@ -209,9 +209,7 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "get-host-info",
-            from_fn_async(net::host::get_host_info)
-                .override_return_ts_as::<Option<crate::net::host::Host>>()
-                .no_cli(),
+            from_fn_async(net::host::get_host_info).no_cli(),
         )
         .subcommand(
             "get-container-ip",

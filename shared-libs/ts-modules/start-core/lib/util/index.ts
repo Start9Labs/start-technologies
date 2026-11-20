@@ -3,8 +3,6 @@ export {
   isAddressEnabled,
   isAddressInsecure,
   getEnabledAddresses,
-  publicIpKey,
-  samePublicIpKey,
   filledAddress,
   filterNonLocal,
 } from './filledAddress'

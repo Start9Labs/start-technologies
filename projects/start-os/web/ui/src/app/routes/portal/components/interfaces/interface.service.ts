@@ -12,6 +12,22 @@ import {
 import { toAuthorityName } from 'src/app/utils/acme'
 import { getManifest } from 'src/app/utils/get-package-data'
 
+// An IPv6 global-unicast address (GUA) — not loopback / ULA (fc00::/7) /
+// link-local (fe80::/10). Mirrors the backend's `ipv6_is_local` complement, so
+// the UI offers the Local/Public dropdown for exactly the addresses the
+// backend treats as GUAs. A GUA's WAN opt-in lives in its `public` flag
+// (projected from `gua_wan`); enable/disable uses the generic rules.
+function isGua(h: T.HostnameInfo): boolean {
+  if (h.metadata.kind !== 'ipv6') return false
+  const first = h.hostname.split(':')[0]
+  if (!first) return false // leading "::" (loopback/unspecified) is not a GUA
+  const hextet = parseInt(first, 16)
+  if (Number.isNaN(hextet)) return false
+  const isUla = (hextet & 0xfe00) === 0xfc00
+  const isLinkLocal = (hextet & 0xffc0) === 0xfe80
+  return !isUla && !isLinkLocal
+}
+
 // A public IPv6 row is a GUA, which the name resolves to like any LAN IP.
 function servesMdns(h: T.HostnameInfo): boolean {
   return h.metadata.kind === 'ipv6' || (h.metadata.kind === 'ipv4' && !h.public)
@@ -255,10 +271,7 @@ export class InterfaceService {
         list.push({
           enabled,
           allIpsDisabled: false,
-          gua:
-            !!utils.publicIpKey(h)?.interfaceId &&
-            (options.secure !== null || h.ssl),
-          linked: false,
+          gua: isGua(h) && (options.secure !== null || h.ssl),
           type: getAddressType(h),
           transport: utils.addressTransport(options, h),
           access: h.public ? 'public' : 'private',
@@ -286,19 +299,6 @@ export class InterfaceService {
       .filter(g => (groupMap.get(g.id)?.length ?? 0) > 0)
       .map(g => {
         const addresses = groupMap.get(g.id)!.sort(sortDomainsFirst)
-
-        for (const gua of addresses.filter(a => a.gua)) {
-          const key = utils.publicIpKey(gua.hostnameInfo)!
-          gua.linked = addresses.some(
-            other =>
-              other !== gua &&
-              other.gua &&
-              utils.samePublicIpKey(
-                key,
-                utils.publicIpKey(other.hostnameInfo)!,
-              ),
-          )
-        }
 
         for (const mdns of addresses) {
           if (
@@ -415,8 +415,6 @@ export type GatewayAddress = {
   // An IPv6 GUA gets a Local/Public dropdown in the access column (its WAN
   // opt-in, carried by `hostnameInfo.public`); other addresses are read-only.
   gua: boolean
-  // A GUA sharing its `PublicIpKey`, and so its public opt-in, with another row here.
-  linked: boolean
   type: string
   transport: T.Transport
   access: 'public' | 'private'

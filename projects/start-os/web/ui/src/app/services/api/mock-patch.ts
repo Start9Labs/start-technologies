@@ -991,14 +991,9 @@ export const mockPatchData: DataModel = {
                 assignedSslPort: 42443,
               },
               addresses: mockAddresses({
-                enabled: [
-                  { gateway: 'eth0', port: 42443, interfaceId: null },
-                  { gateway: 'eth0', port: 1234, interfaceId: '::a3b:2' },
-                ],
+                enabled: ['203.0.113.45:42443', '[2001:db8:abcd::a3b:2]:1234'],
                 disabled: [],
-                guaWan: [
-                  { gateway: 'eth0', port: 1234, interfaceId: '::a3b:2' },
-                ],
+                guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
                 lanEnabled: [],
                 available: [
                   {
@@ -1098,13 +1093,6 @@ export const mockPatchData: DataModel = {
                     port: 1234,
                     metadata: { kind: 'ipv6', gateway: 'eth0', scopeId: 0 },
                   },
-                  {
-                    ssl: true,
-                    public: true,
-                    hostname: '2001:db8:beef::a3b:2',
-                    port: 1234,
-                    metadata: { kind: 'ipv6', gateway: 'eth0', scopeId: 0 },
-                  },
                 ],
               }),
               options: {
@@ -1183,7 +1171,7 @@ export const mockPatchData: DataModel = {
               // public WAN IP is seeded into `enabled` (WAN is opt-in); LAN /
               // mDNS / domains are enabled by default.
               addresses: mockAddresses({
-                enabled: [{ gateway: 'eth0', port: 49152, interfaceId: null }],
+                enabled: ['203.0.113.45:49152'],
                 disabled: [],
                 guaWan: [],
                 lanEnabled: [],

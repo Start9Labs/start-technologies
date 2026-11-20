@@ -1060,24 +1060,6 @@ export type PublicDomainConfig = z.output<typeof schemas.PublicDomainConfig>
 export type PublicDomainConfigInput = z.input<typeof schemas.PublicDomainConfig>
 
 /**
- * A public IP opt-in, resolved against the gateway's current addresses.
- *
- * Opt-ins persist across a new WAN lease, a moved IPv6 prefix and a link drop:
- * the gateway's next public address on the port is on without operator action.
- * A GUA key matches every GUA on the gateway and port sharing its interface identifier.
- */
-export type PublicIpKey = z.output<typeof schemas.PublicIpKey>
-
-/**
- * A public IP opt-in, resolved against the gateway's current addresses.
- *
- * Opt-ins persist across a new WAN lease, a moved IPv6 prefix and a link drop:
- * the gateway's next public address on the port is on without operator action.
- * A GUA key matches every GUA on the gateway and port sharing its interface identifier.
- */
-export type PublicIpKeyInput = z.input<typeof schemas.PublicIpKey>
-
-/**
  * The single restricted service interface a port-range binding may export.
  *
  * Unlike [`ServiceInterface`], a range interface is always `api`-typed and

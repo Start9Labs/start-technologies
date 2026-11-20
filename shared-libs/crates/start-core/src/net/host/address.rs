@@ -15,9 +15,7 @@ use crate::net::gateway::{
     CheckDnsParams, CheckPortParams, CheckPortRes, CheckPortV6Res, check_dns, check_port,
     check_port_v6,
 };
-use crate::net::host::binding::{
-    DerivedAddressInfo, PublicIpKey, set_nonssl_lan_group, set_nonssl_wan_group,
-};
+use crate::net::host::binding::{DerivedAddressInfo, set_nonssl_lan_group, set_nonssl_wan_group};
 use crate::net::host::{Host, HostApiKind, all_hosts};
 use crate::net::service_interface::HostnameMetadata;
 use crate::net::vhost::ACME_CHALLENGE_PORT;
@@ -281,8 +279,9 @@ fn reconcile_public_domain_on_sibling(
                         | HostnameMetadata::Ipv6 { gateway: gw2, .. }
                     if gw2 == gateway
                 )
-                && PublicIpKey::of(b)
-                    .is_some_and(|key| key.port == port && addresses.enabled.contains(&key))
+                && b.to_socket_addr().map_or(false, |sa| {
+                    sa.port() == port && addresses.enabled.contains(&sa)
+                })
         });
         set_nonssl_wan_group(addresses, gateway, port, wan_enabled);
     }
@@ -864,7 +863,7 @@ mod test {
         assert!(
             addresses
                 .enabled
-                .contains(&PublicIpKey::at("wg1", "64.23.194.12:42000"))
+                .contains(&"64.23.194.12:42000".parse().unwrap())
         );
         assert!(addresses.gua_wan.is_empty());
         let forward = host.port_forwards.iter().next().unwrap();
@@ -883,7 +882,7 @@ mod test {
         exposed
             .addresses
             .enabled
-            .insert(PublicIpKey::at("wg1", "64.23.194.12:44000"));
+            .insert("64.23.194.12:44000".parse().unwrap());
         host.binding_ranges.insert(21121, exposed);
         host.bindings.insert(8080, single(8080, Some(8443)));
         let mut db = database(host);
@@ -925,7 +924,7 @@ mod test {
                 let sibling = &mut ranges.get_mut(&21118).unwrap().addresses;
                 sibling
                     .enabled
-                    .insert(PublicIpKey::at("wg1", "64.23.194.12:43000"));
+                    .insert("64.23.194.12:43000".parse().unwrap());
                 sibling
                     .disabled
                     .remove(&(InternedString::intern(FQDN), 43000));
@@ -948,14 +947,13 @@ mod test {
     #[test]
     fn adding_a_domain_preserves_an_already_public_plain_sibling() {
         for selected in ["64.23.194.12:9090", "[2001:db8::1]:9090"] {
-            let is_ipv6 = selected.starts_with('[');
-            let selected = PublicIpKey::at("wg1", selected);
+            let selected: std::net::SocketAddr = selected.parse().unwrap();
             let mut host = Host::default();
             host.bindings.insert(8080, single(8080, Some(8443)));
             let mut sibling = single(9090, None);
-            sibling.addresses.enabled.insert(selected.clone());
-            if is_ipv6 {
-                sibling.addresses.gua_wan.insert(selected.clone());
+            sibling.addresses.enabled.insert(selected);
+            if let std::net::SocketAddr::V6(gua) = selected {
+                sibling.addresses.gua_wan.insert(gua);
             }
             host.bindings.insert(9090, sibling);
             let mut db = database(host);
@@ -967,7 +965,7 @@ mod test {
                 .as_gateways()
                 .de()
                 .unwrap();
-            if is_ipv6 {
+            if selected.is_ipv6() {
                 let gateway = gateways.get_mut(&gw("wg1")).unwrap();
                 Arc::make_mut(gateway.ip_info.as_mut().unwrap()).wan_ip = None;
                 db.as_public_mut()
@@ -1005,7 +1003,7 @@ mod test {
         mixed
             .addresses
             .enabled
-            .insert(PublicIpKey::at("wg1", "64.23.194.12:9090"));
+            .insert("64.23.194.12:9090".parse().unwrap());
         host.bindings.insert(9090, mixed);
         host.bindings.insert(7070, single(7070, None));
         let mut db = database(host);
@@ -1029,12 +1027,12 @@ mod test {
         assert!(
             mixed
                 .enabled
-                .contains(&PublicIpKey::at("wg1", "64.23.194.12:9090"))
+                .contains(&"64.23.194.12:9090".parse().unwrap())
         );
         assert!(
             mixed
                 .gua_wan
-                .contains(&PublicIpKey::at("wg1", "[2001:db8::1]:9090"))
+                .contains(&"[2001:db8::1]:9090".parse().unwrap())
         );
         assert!(mixed.enabled().contains(&domain(false, 9090, "wg1")));
         let off = &host.bindings[&7070].addresses;
@@ -1056,12 +1054,12 @@ mod test {
         assert!(
             addresses
                 .enabled
-                .contains(&PublicIpKey::at("wg1", "64.23.194.12:8080"))
+                .contains(&"64.23.194.12:8080".parse().unwrap())
         );
         assert!(
             addresses
                 .gua_wan
-                .contains(&PublicIpKey::at("wg1", "[2001:db8::1]:8080"))
+                .contains(&"[2001:db8::1]:8080".parse().unwrap())
         );
         assert!(addresses.enabled().contains(&domain(true, 8443, "wg1")));
         assert!(domain_disabled(
@@ -1203,8 +1201,7 @@ mod test {
         let mut a = DerivedAddressInfo::default();
         a.available.insert(domain(false, 42000, "wg1"));
         a.available.insert(wan_ip(42000, "wg1"));
-        a.enabled
-            .insert(PublicIpKey::of(&wan_ip(42000, "wg1")).unwrap());
+        a.enabled.insert("64.23.194.12:42000".parse().unwrap());
 
         reconcile_public_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
 
@@ -1220,8 +1217,7 @@ mod test {
         let mut a = DerivedAddressInfo::default();
         a.available.insert(domain(false, 42000, "wg1"));
         a.available.insert(gua(42000, "wg1"));
-        a.enabled
-            .insert(PublicIpKey::of(&gua(42000, "wg1")).unwrap());
+        a.enabled.insert("[2001:db8::1]:42000".parse().unwrap());
 
         reconcile_public_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
 
@@ -1238,17 +1234,19 @@ mod test {
         a.available.insert(domain(false, 42000, "wg1"));
         a.available.insert(wan_ip(42000, "wg1"));
         a.available.insert(gua(42000, "wg1"));
-        a.enabled
-            .insert(PublicIpKey::of(&wan_ip(42000, "wg1")).unwrap());
+        a.enabled.insert("64.23.194.12:42000".parse().unwrap());
 
         reconcile_public_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
 
-        let gua_key = PublicIpKey::of(&gua(42000, "wg1")).unwrap();
+        let gua_v6: std::net::SocketAddrV6 = "[2001:db8::1]:42000".parse().unwrap();
         assert!(
-            a.gua_wan.contains(&gua_key),
+            a.gua_wan.contains(&gua_v6),
             "the GUA must be published to WAN (gua_wan) when v4 + a domain are on"
         );
-        assert!(a.enabled.contains(&gua_key), "the GUA must be enabled");
+        assert!(
+            a.enabled.contains(&"[2001:db8::1]:42000".parse().unwrap()),
+            "the GUA must be enabled"
+        );
         assert!(!domain_disabled(&a, 42000), "domain enabled");
     }
 
@@ -1273,8 +1271,7 @@ mod test {
         let mut a = DerivedAddressInfo::default();
         a.available.insert(domain(true, 5349, "wg1"));
         a.available.insert(wan_ip(5349, "wg1"));
-        a.enabled
-            .insert(PublicIpKey::of(&wan_ip(5349, "wg1")).unwrap());
+        a.enabled.insert("64.23.194.12:5349".parse().unwrap());
 
         reconcile_public_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
 
@@ -1287,8 +1284,7 @@ mod test {
         let mut a = DerivedAddressInfo::default();
         a.available.insert(domain(false, 42000, "wg1"));
         a.available.insert(wan_ip(42000, "eth0"));
-        a.enabled
-            .insert(PublicIpKey::of(&wan_ip(42000, "eth0")).unwrap());
+        a.enabled.insert("64.23.194.12:42000".parse().unwrap());
 
         reconcile_public_domain_on_sibling(&mut a, &fqdn, &gw("wg1"));
 

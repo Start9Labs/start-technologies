@@ -126,15 +126,6 @@ import { DomainHealthService } from './domain-health.service'
               "
             />
           }
-          @if (address.linked) {
-            <tui-icon
-              icon="@tui.link"
-              [tuiTooltip]="
-                'The Local/Public setting of this address, and its toggle while Public, also apply to every IPv6 address here with the same interface ID'
-                  | i18n
-              "
-            />
-          }
           @if (address.masked) {
             <button
               tuiIconButton

@@ -647,15 +647,6 @@ export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
  */
 export type ProxyAuth = z.output<typeof schemas.ProxyAuth>
 export type PublicDomainConfig = z.output<typeof schemas.PublicDomainConfig>
-
-/**
- * A public IP opt-in, resolved against the gateway's current addresses.
- *
- * Opt-ins persist across a new WAN lease, a moved IPv6 prefix and a link drop:
- * the gateway's next public address on the port is on without operator action.
- * A GUA key matches every GUA on the gateway and port sharing its interface identifier.
- */
-export type PublicIpKey = z.output<typeof schemas.PublicIpKey>
 export type PushSubscription = z.output<typeof schemas.PushSubscription>
 export type PushSubscriptionInput = z.input<typeof schemas.PushSubscription>
 export type RebuildParamsInput = z.input<typeof schemas.RebuildParams>

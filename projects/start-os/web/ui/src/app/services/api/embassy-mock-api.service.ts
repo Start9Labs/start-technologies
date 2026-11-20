@@ -2802,11 +2802,20 @@ export class MockApiService extends ApiService implements StartupApiService {
     const current = this.mockData(basePath) as T.DerivedAddressInfo
 
     if (isPublicIp) {
-      const key = utils.publicIpKey(h)
-      if (key === null) return
+      if (h.port === null) return
+      const sa =
+        h.metadata.kind === 'ipv6'
+          ? `[${h.hostname}]:${h.port}`
+          : `${h.hostname}:${h.port}`
 
-      const arr = current.enabled.filter(k => !utils.samePublicIpKey(k, key))
-      if (enabled) arr.push(key)
+      const arr = [...current.enabled]
+
+      if (enabled) {
+        if (!arr.includes(sa)) arr.push(sa)
+      } else {
+        const idx = arr.indexOf(sa)
+        if (idx >= 0) arr.splice(idx, 1)
+      }
 
       current.enabled = arr
       this.mockRevision([
@@ -2880,12 +2889,12 @@ export class MockApiService extends ApiService implements StartupApiService {
     h: T.HostnameInfoInput,
     wan: boolean,
   ): void {
-    const key = utils.publicIpKey(h)
-    if (h.metadata.kind !== 'ipv6' || key === null) return
+    if (h.metadata.kind !== 'ipv6' || h.port === null) return
 
+    const key = `[${h.hostname}]:${h.port}`
     const current = this.mockData(basePath) as T.DerivedAddressInfo
-    const guaWan = current.guaWan.filter(k => !utils.samePublicIpKey(k, key))
-    let enabled = current.enabled.filter(k => !utils.samePublicIpKey(k, key))
+    const guaWan = current.guaWan.filter(k => k !== key)
+    let enabled = current.enabled.filter(k => k !== key)
     if (wan) {
       guaWan.push(key)
       const off = current.disabled.some(

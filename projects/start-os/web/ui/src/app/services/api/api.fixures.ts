@@ -2669,11 +2669,9 @@ PersistentKeepalive = 25`
               assignedSslPort: 443,
             },
             addresses: mockAddresses({
-              enabled: [
-                { gateway: 'eth0', port: 1234, interfaceId: '::a3b:2' },
-              ],
+              enabled: ['[2001:db8:abcd::a3b:2]:1234'],
               disabled: [],
-              guaWan: [{ gateway: 'eth0', port: 1234, interfaceId: '::a3b:2' }],
+              guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
               lanEnabled: [],
               available: [
                 {

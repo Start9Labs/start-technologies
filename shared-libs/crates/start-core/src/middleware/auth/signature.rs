@@ -855,7 +855,6 @@ mod tests {
     use http::HeaderValue;
 
     use super::*;
-    use crate::net::host::binding::PublicIpKey;
     use crate::sign::AnySigningKey;
 
     /// TypeScript-generated proof for seed 0102…1f20 and `BODY`.
@@ -1086,8 +1085,8 @@ mod tests {
                 .into_iter()
                 .collect(),
                 enabled: [
-                    PublicIpKey::at("eth0", "203.0.113.2:443"),
-                    PublicIpKey::at("eth0", "[2001:db8:1::3]:443"),
+                    "203.0.113.2:443".parse().unwrap(),
+                    "[2001:db8:1::3]:443".parse().unwrap(),
                 ]
                 .into_iter()
                 .collect(),
@@ -1169,7 +1168,7 @@ mod tests {
         binding
             .addresses
             .enabled
-            .remove(&PublicIpKey::at("eth0", "203.0.113.2:443"));
+            .remove(&"203.0.113.2:443".parse().unwrap());
         let identities = startos_signing_identities(Some(&binding), &origin);
         assert!(!identities.contains("private.example"));
         assert!(!identities.contains("203.0.113.2"));

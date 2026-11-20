@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 
@@ -63,9 +63,8 @@ impl FromStr for BindId {
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct DerivedAddressInfo {
-    /// User override: enable these public IPs and published GUAs.
-    /// A service's `getHostInfo` lists the enabled ones as socket addresses instead.
-    pub enabled: BTreeSet<PublicIpKey>,
+    /// User override: enable these addresses (only for public IP & port)
+    pub enabled: BTreeSet<SocketAddr>,
     /// User override: disable these addresses (only for domains and private IP & port)
     pub disabled: BTreeSet<(InternedString, u16)>,
     /// User override: IPv6 global-unicast addresses opted into WAN exposure.
@@ -73,7 +72,7 @@ pub struct DerivedAddressInfo {
     /// stays the single source of truth for WAN reachability (P2P address
     /// selection, upstream pinholes). A GUA not in this set is LAN-only.
     #[serde(default)]
-    pub gua_wan: BTreeSet<PublicIpKey>,
+    pub gua_wan: BTreeSet<SocketAddrV6>,
     /// User override: enable these private IPs regardless of their mDNS address.
     #[serde(default)]
     pub lan_enabled: BTreeSet<(InternedString, u16)>,
@@ -93,65 +92,6 @@ pub struct DerivedAddressInfo {
 
 rpc_toolkit::reflect_ts!(DerivedAddressInfo);
 rpc_toolkit::ts_export!(DerivedAddressInfo, namespaces = [""]);
-
-/// A public IP opt-in, resolved against the gateway's current addresses.
-///
-/// Opt-ins persist across a new WAN lease, a moved IPv6 prefix and a link drop:
-/// the gateway's next public address on the port is on without operator action.
-/// A GUA key matches every GUA on the gateway and port sharing its interface identifier.
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, VisitFields,
-)]
-#[serde(rename_all = "camelCase")]
-pub struct PublicIpKey {
-    pub gateway: GatewayId,
-    pub port: u16,
-    /// The low 64 bits of a GUA, with its prefix zeroed. Null for the gateway's WAN IPv4.
-    pub interface_id: Option<Ipv6Addr>,
-}
-
-rpc_toolkit::reflect_ts!(PublicIpKey);
-rpc_toolkit::ts_export!(PublicIpKey, namespaces = [""]);
-
-impl PublicIpKey {
-    /// `None` for a row that carries no public opt-in.
-    pub fn of(address: &HostnameInfo) -> Option<Self> {
-        let port = address.port?;
-        match &address.metadata {
-            HostnameMetadata::Ipv4 { gateway } if address.public => Some(Self {
-                gateway: gateway.clone(),
-                port,
-                interface_id: None,
-            }),
-            HostnameMetadata::Ipv6 { gateway, .. } => address.gua().map(|gua| Self {
-                gateway: gateway.clone(),
-                port,
-                interface_id: Some(interface_id(*gua.ip())),
-            }),
-            _ => None,
-        }
-    }
-}
-
-#[cfg(test)]
-impl PublicIpKey {
-    /// The key a row at this socket address on this gateway carries.
-    pub fn at(gateway: &str, socket: &str) -> Self {
-        let socket: SocketAddr = socket.parse().unwrap();
-        Self {
-            gateway: gateway.parse().unwrap(),
-            port: socket.port(),
-            interface_id: match socket.ip() {
-                IpAddr::V4(_) => None,
-                IpAddr::V6(ip) => Some(interface_id(ip)),
-            },
-        }
-    }
-}
-
-fn interface_id(ip: Ipv6Addr) -> Ipv6Addr {
-    Ipv6Addr::from(u128::from(ip) & u128::from(u64::MAX))
-}
 
 fn override_key(address: &HostnameInfo) -> (InternedString, u16) {
     // disablable addresses will always have a port
@@ -257,11 +197,10 @@ impl DerivedAddressInfo {
             .filter(|a| (a.public && a.metadata.is_ip()) || a.gua().is_some() || is_domain(a))
         {
             // `gua_wan` is current; a GUA's `public` flag waits for `set_available`.
-            let public = if address.gua().is_some() {
-                previous.gua_published(address) && previous.public_ip_on(address)
-            } else {
-                enabled.contains(address)
-            };
+            let public = address.gua().map_or_else(
+                || enabled.contains(address),
+                |gua| previous.gua_wan.contains(&gua) && previous.public_ip_on(address),
+            );
             for gateway in address.metadata.gateways() {
                 *all_public
                     .entry((gateway.clone(), address.ssl))
@@ -299,22 +238,18 @@ impl DerivedAddressInfo {
         self.available = available
             .into_iter()
             .map(|mut address| {
-                if address.gua().is_some() {
-                    address.public = self.gua_published(&address);
+                if let Some(gua) = address.gua() {
+                    address.public = self.gua_wan.contains(&gua);
                 }
                 address
             })
             .collect();
     }
 
-    fn gua_published(&self, address: &HostnameInfo) -> bool {
-        PublicIpKey::of(address).is_some_and(|key| self.gua_wan.contains(&key))
-    }
-
     fn public_ip_on(&self, address: &HostnameInfo) -> bool {
-        PublicIpKey::of(address).map_or(
+        address.to_socket_addr().map_or(
             true, // should never happen, but would rather see them if it does
-            |key| self.enabled.contains(&key),
+            |sa| self.enabled.contains(&sa),
         )
     }
 
@@ -448,17 +383,15 @@ impl DerivedAddressInfo {
         if old == new {
             return;
         }
-        for overrides in [&mut self.enabled, &mut self.gua_wan] {
-            *overrides = std::mem::take(overrides)
-                .into_iter()
-                .map(|mut key| {
-                    if key.port == old {
-                        key.port = new;
-                    }
-                    key
-                })
-                .collect();
-        }
+        self.enabled = std::mem::take(&mut self.enabled)
+            .into_iter()
+            .map(|mut sa| {
+                if sa.port() == old {
+                    sa.set_port(new);
+                }
+                sa
+            })
+            .collect();
         for overrides in [&mut self.disabled, &mut self.lan_enabled] {
             *overrides = std::mem::take(overrides)
                 .into_iter()
@@ -471,14 +404,21 @@ impl DerivedAddressInfo {
                 .map(|(h, p, g)| (h, if p == old { new } else { p }, g))
                 .collect();
         }
+        self.gua_wan = std::mem::take(&mut self.gua_wan)
+            .into_iter()
+            .map(|mut sa| {
+                if sa.port() == old {
+                    sa.set_port(new);
+                }
+                sa
+            })
+            .collect();
     }
 
-    /// Drops this gateway's public opt-ins and the IP overrides only its addresses carry.
+    /// Drops IP overrides whose available addresses belong exclusively to this gateway.
     pub fn forget_gateway(&mut self, gateway: &GatewayId) {
         self.insecure.retain(|(_, _, g)| g != gateway);
         self.insecure_enabled.retain(|(_, _, g)| g != gateway);
-        self.enabled.retain(|key| &key.gateway != gateway);
-        self.gua_wan.retain(|key| &key.gateway != gateway);
         let available = &self.available;
         for address in available
             .iter()
@@ -491,6 +431,12 @@ impl DerivedAddressInfo {
                 })
             })
         {
+            if let Some(sa) = address.to_socket_addr() {
+                self.enabled.remove(&sa);
+            }
+            if let Some(gua) = address.gua() {
+                self.gua_wan.remove(&gua);
+            }
             let key = override_key(address);
             self.disabled.remove(&key);
             self.lan_enabled.remove(&key);
@@ -1319,23 +1265,32 @@ fn nonssl_lan_on(addresses: &DerivedAddressInfo, gateway: &GatewayId, port: u16)
 /// `gua_wan`.
 fn resolve_nonssl_gua(addresses: &mut DerivedAddressInfo, gateway: &GatewayId, port: u16) {
     let lan_on = nonssl_lan_on(addresses, gateway, port);
-    let guas: Vec<(PublicIpKey, InternedString)> = addresses
+    let guas: Vec<(SocketAddrV6, InternedString)> = addresses
         .available
         .iter()
-        .filter(|a| !a.ssl && a.gua().is_some())
-        .filter_map(|a| Some((PublicIpKey::of(a)?, a.hostname.clone())))
-        .filter(|(key, _)| key.port == port && &key.gateway == gateway)
+        .filter_map(|a| {
+            if a.ssl || a.port != Some(port) {
+                return None;
+            }
+            match &a.metadata {
+                HostnameMetadata::Ipv6 { gateway: gw, .. } if gw == gateway => {
+                    a.gua().map(|g| (g, a.hostname.clone()))
+                }
+                _ => None,
+            }
+        })
         .collect();
-    for (public_key, host) in guas {
+    for (g, host) in guas {
         let key = (host, port);
-        if addresses.gua_wan.contains(&public_key) {
+        let sa = SocketAddr::V6(g);
+        if addresses.gua_wan.contains(&g) {
             // Public (operator WAN opt-in): reachable on WAN and LAN.
-            addresses.enabled.insert(public_key);
+            addresses.enabled.insert(sa);
             addresses.disabled.remove(&key);
             addresses.lan_enabled.remove(&key);
         } else {
             // Local: LAN-only, following the LAN level.
-            addresses.enabled.remove(&public_key);
+            addresses.enabled.remove(&sa);
             addresses.set_lan_ip(key, lan_on);
         }
     }
@@ -1362,13 +1317,14 @@ pub(crate) fn set_nonssl_wan_group(
             HostnameMetadata::PublicDomain { gateway: gw } if gw == gateway => {
                 domain_keys.push((a.hostname.clone(), port));
             }
-            HostnameMetadata::Ipv4 { gateway: gw } | HostnameMetadata::Ipv6 { gateway: gw, .. }
-                if gw == gateway =>
-            {
-                match PublicIpKey::of(a) {
-                    Some(key) if key.interface_id.is_some() => guas.push(key),
-                    Some(key) => ipv4.push(key),
-                    None => {}
+            HostnameMetadata::Ipv4 { gateway: gw } if a.public && gw == gateway => {
+                if let Some(sa) = a.to_socket_addr() {
+                    ipv4.push(sa);
+                }
+            }
+            HostnameMetadata::Ipv6 { gateway: gw, .. } if gw == gateway => {
+                if let Some(g) = a.gua() {
+                    guas.push(g);
                 }
             }
             _ => {}
@@ -1381,20 +1337,20 @@ pub(crate) fn set_nonssl_wan_group(
             addresses.disabled.insert(k);
         }
     }
-    for key in ipv4 {
+    for sa in ipv4 {
         if enabled {
-            addresses.enabled.insert(key);
+            addresses.enabled.insert(sa);
         } else {
-            addresses.enabled.remove(&key);
+            addresses.enabled.remove(&sa);
         }
     }
     // The public domain flips the GUA's WAN opt-in (the stored `gua_wan` /
     // `public` flag) with it; `resolve_nonssl_gua` then derives its reachability.
-    for key in guas {
+    for g in guas {
         if enabled {
-            addresses.gua_wan.insert(key);
+            addresses.gua_wan.insert(g);
         } else {
-            addresses.gua_wan.remove(&key);
+            addresses.gua_wan.remove(&g);
         }
     }
     resolve_nonssl_gua(addresses, gateway, port);
@@ -1474,7 +1430,7 @@ pub(crate) fn set_nonssl_lan_group(
 }
 
 /// Toggle one address on/off for a binding's `DerivedAddressInfo`. Public IPs
-/// live in the `enabled` set (keyed by [`PublicIpKey`]); domains live in the
+/// live in the `enabled` set (keyed by `SocketAddr`); domains live in the
 /// `disabled` set and private IPs in `disabled` or `lan_enabled` (keyed by
 /// `(hostname, port)`). On a non-SSL port a dual-stack public domain links the
 /// WAN IPv4 and IPv6 GUA, so toggling any one of {IPv4, domain, GUA} moves the
@@ -1487,17 +1443,17 @@ fn set_address_enabled_on(
     enabled: bool,
 ) -> Result<(), Error> {
     if address.public && address.metadata.is_ip() {
-        let key = PublicIpKey::of(address).ok_or_else(|| {
+        // Public IPs: toggle via SocketAddr in `enabled` set
+        let sa = address.to_socket_addr().ok_or_else(|| {
             Error::new(
-                eyre!("cannot derive a public IP key for this address"),
+                eyre!("cannot convert address to socket addr"),
                 ErrorKind::InvalidRequest,
             )
         })?;
-        let port = key.port;
         if enabled {
-            addresses.enabled.insert(key);
+            addresses.enabled.insert(sa);
         } else {
-            addresses.enabled.remove(&key);
+            addresses.enabled.remove(&sa);
         }
         // Non-SSL: a dual-stack public domain links IPv4 and GUA, so when one is
         // present move the whole {IPv4, domain, GUA} group together (no domain =>
@@ -1506,6 +1462,7 @@ fn set_address_enabled_on(
             if let HostnameMetadata::Ipv4 { gateway } | HostnameMetadata::Ipv6 { gateway, .. } =
                 &address.metadata
             {
+                let port = sa.port();
                 if has_nonssl_public_domain(addresses, gateway, port) {
                     set_nonssl_wan_group(addresses, gateway, port, enabled);
                 }
@@ -1771,14 +1728,12 @@ pub async fn set_gua_wan<Kind: HostApiKind>(
     }: BindingSetGuaWanParams,
     inheritance: Kind::Inheritance,
 ) -> Result<(), Error> {
-    let gua = PublicIpKey::of(&address)
-        .filter(|key| key.interface_id.is_some())
-        .ok_or_else(|| {
-            Error::new(
-                eyre!("address is not an IPv6 global-unicast address"),
-                ErrorKind::InvalidRequest,
-            )
-        })?;
+    let gua = address.gua().ok_or_else(|| {
+        Error::new(
+            eyre!("address is not an IPv6 global-unicast address"),
+            ErrorKind::InvalidRequest,
+        )
+    })?;
     ctx.db
         .mutate(|db| {
             Kind::host_for(&inheritance, db)?
@@ -1793,6 +1748,7 @@ pub async fn set_gua_wan<Kind: HostApiKind>(
                             ErrorKind::InvalidRequest,
                         ));
                     }
+                    let sa = SocketAddr::V6(gua);
                     // A GUA's WAN opt-in is the stored `gua_wan` / `public` flag.
                     // With a co-located public domain, flipping the GUA drives the
                     // whole WAN level (the public domain and bare WAN IPv4 follow —
@@ -1806,25 +1762,25 @@ pub async fn set_gua_wan<Kind: HostApiKind>(
                         _ => None,
                     };
                     match gua_gw {
-                        Some(gateway) if has_nonssl_public_domain(addrs, &gateway, gua.port) => {
-                            set_nonssl_wan_group(addrs, &gateway, gua.port, wan);
+                        Some(gateway) if has_nonssl_public_domain(addrs, &gateway, gua.port()) => {
+                            set_nonssl_wan_group(addrs, &gateway, gua.port(), wan);
                         }
                         Some(gateway) => {
                             if wan {
-                                addrs.gua_wan.insert(gua.clone());
+                                addrs.gua_wan.insert(gua);
                             } else {
                                 addrs.gua_wan.remove(&gua);
                             }
-                            resolve_nonssl_gua(addrs, &gateway, gua.port);
+                            resolve_nonssl_gua(addrs, &gateway, gua.port());
                         }
                         None => {
                             // SSL / non-linkable GUA: a plain WAN opt-in toggle.
                             if wan {
-                                addrs.gua_wan.insert(gua.clone());
-                                addrs.enabled.insert(gua);
+                                addrs.gua_wan.insert(gua);
+                                addrs.enabled.insert(sa);
                             } else {
                                 addrs.gua_wan.remove(&gua);
-                                addrs.enabled.remove(&gua);
+                                addrs.enabled.remove(&sa);
                             }
                         }
                     }
@@ -2607,23 +2563,23 @@ mod test {
         assert!(has_nonssl_public_domain(&info, &gw, 42000));
         assert!(!has_nonssl_public_domain(&info, &gw, 9999));
 
-        let v4_key = PublicIpKey::at("wg1", "64.23.194.12:42000");
-        let gua_key = PublicIpKey::at("wg1", "[2001:db8::1]:42000");
+        let v4_sa: SocketAddr = "64.23.194.12:42000".parse().unwrap();
+        let gua_v6: SocketAddrV6 = "[2001:db8::1]:42000".parse().unwrap();
         let dom_key = (InternedString::intern("turn.start9.dev"), 42000u16);
 
         // Enable: domain un-disabled, v4 enabled, GUA published (gua_wan+enabled).
         set_nonssl_wan_group(&mut info, &gw, 42000, true);
         assert!(!info.disabled.contains(&dom_key));
-        assert!(info.enabled.contains(&v4_key));
-        assert!(info.gua_wan.contains(&gua_key));
-        assert!(info.enabled.contains(&gua_key));
+        assert!(info.enabled.contains(&v4_sa));
+        assert!(info.gua_wan.contains(&gua_v6));
+        assert!(info.enabled.contains(&SocketAddr::V6(gua_v6)));
 
         // Disable: all three off together.
         set_nonssl_wan_group(&mut info, &gw, 42000, false);
         assert!(info.disabled.contains(&dom_key));
-        assert!(!info.enabled.contains(&v4_key));
-        assert!(!info.gua_wan.contains(&gua_key));
-        assert!(!info.enabled.contains(&gua_key));
+        assert!(!info.enabled.contains(&v4_sa));
+        assert!(!info.gua_wan.contains(&gua_v6));
+        assert!(!info.enabled.contains(&SocketAddr::V6(gua_v6)));
     }
 
     #[test]
@@ -2724,8 +2680,7 @@ mod test {
         let mut info = DerivedAddressInfo::default();
         info.available.insert(tls.clone());
         info.disabled.insert(override_key(&tls));
-        info.enabled
-            .insert(PublicIpKey::of(&public_v4(5223)).unwrap());
+        info.enabled.insert("203.0.113.1:5223".parse().unwrap());
         let refreshed: BTreeSet<_> = plain_wan_rows(5223)
             .into_iter()
             .chain([domain_row("smp.example.com", false, 5223)])
@@ -2850,11 +2805,11 @@ mod test {
 
     #[test]
     fn a_new_plain_domain_follows_public_addresses_that_are_all_on() {
-        let bare = PublicIpKey::of(&public_v4(5223)).unwrap();
+        let bare = "203.0.113.1:5223".parse().unwrap();
         let plain = domain_row("smp.example.com", false, 5223);
         let mut info = DerivedAddressInfo::default();
         info.available.insert(public_v4(5223));
-        info.enabled.insert(bare.clone());
+        info.enabled.insert(bare);
 
         refresh(
             &mut info,
@@ -2891,8 +2846,7 @@ mod test {
         let plain = domain_row("smp.example.com", false, 5223);
         let mut info = DerivedAddressInfo::default();
         info.available.extend([public_v4(5223), off.clone()]);
-        info.enabled
-            .insert(PublicIpKey::of(&public_v4(5223)).unwrap());
+        info.enabled.insert("203.0.113.1:5223".parse().unwrap());
         info.disabled.insert(override_key(&off));
 
         refresh(
@@ -2935,8 +2889,7 @@ mod test {
             .collect();
         let mut info = DerivedAddressInfo::default();
         info.available = rows.clone();
-        info.enabled
-            .insert(PublicIpKey::of(&public_v4(5223)).unwrap());
+        info.enabled.insert("203.0.113.1:5223".parse().unwrap());
 
         refresh(&mut info, rows);
         assert_wan_group_off(&info);
@@ -2957,13 +2910,13 @@ mod test {
         };
         let mut info = DerivedAddressInfo::default();
         info.available.extend([plain.clone(), old_gua.clone()]);
-        info.enabled.insert(PublicIpKey::of(&old_gua).unwrap());
-        info.gua_wan.insert(PublicIpKey::of(&old_gua).unwrap());
+        info.enabled.insert(old_gua.to_socket_addr().unwrap());
+        info.gua_wan.insert(old_gua.gua().unwrap());
 
         refresh(&mut info, BTreeSet::from([plain.clone(), new_gua.clone()]));
         assert!(info.enabled().contains(&plain));
-        assert!(info.gua_wan.contains(&PublicIpKey::of(&new_gua).unwrap()));
-        assert!(info.enabled.contains(&PublicIpKey::of(&new_gua).unwrap()));
+        assert!(info.gua_wan.contains(&new_gua.gua().unwrap()));
+        assert!(info.enabled.contains(&new_gua.to_socket_addr().unwrap()));
     }
 
     #[test]
@@ -2971,8 +2924,7 @@ mod test {
         let plain = domain_row("smp.example.com", false, 5223);
         let mut info = DerivedAddressInfo::default();
         info.available.extend(plain_wan_rows(5223));
-        info.enabled
-            .insert(PublicIpKey::of(&public_v4(5223)).unwrap());
+        info.enabled.insert("203.0.113.1:5223".parse().unwrap());
 
         refresh(
             &mut info,
@@ -2994,10 +2946,10 @@ mod test {
         let mut info = DerivedAddressInfo::default();
         info.available
             .extend([domain_row("smp.example.com", true, 5223), gua.clone()]);
-        info.gua_wan.insert(PublicIpKey::of(&gua).unwrap());
+        info.gua_wan.insert(gua.gua().unwrap());
         set_address_enabled_on(&mut info, &gua, true).unwrap();
         set_address_enabled_on(&mut info, &gua, false).unwrap();
-        assert!(info.gua_wan.contains(&PublicIpKey::of(&gua).unwrap()));
+        assert!(info.gua_wan.contains(&gua.gua().unwrap()));
         assert!(!info.enabled().contains(&gua));
 
         refresh(
@@ -3013,7 +2965,7 @@ mod test {
     #[test]
     fn a_domain_enabled_over_tls_stays_on_a_plain_port_with_public_bare_ips() {
         let plain = domain_row("smp.example.com", false, 5223);
-        let tls_bare = PublicIpKey::at("eth0", "203.0.113.1:5224");
+        let tls_bare = "203.0.113.1:5224".parse().unwrap();
         let mut info = DerivedAddressInfo::default();
         info.available.extend([
             domain_row("smp.example.com", true, 5224),
@@ -3037,10 +2989,7 @@ mod test {
                 .collect(),
         );
         assert!(info.enabled().contains(&plain));
-        assert!(
-            info.enabled
-                .contains(&PublicIpKey::of(&public_v4(5223)).unwrap())
-        );
+        assert!(info.enabled.contains(&"203.0.113.1:5223".parse().unwrap()));
         assert_eq!(info.gua_wan.len(), 1);
     }
 
@@ -3061,13 +3010,13 @@ mod test {
 
             set_address_enabled_on(&mut info, member, true).unwrap();
             assert!(info.enabled().contains(&plain));
-            assert!(info.enabled.contains(&PublicIpKey::of(&v4).unwrap()));
-            assert!(info.gua_wan.contains(&PublicIpKey::of(&gua).unwrap()));
+            assert!(info.enabled.contains(&v4.to_socket_addr().unwrap()));
+            assert!(info.gua_wan.contains(&gua.gua().unwrap()));
 
             set_address_enabled_on(&mut info, member, false).unwrap();
             assert!(!info.enabled().contains(&plain));
-            assert!(!info.enabled.contains(&PublicIpKey::of(&v4).unwrap()));
-            assert!(!info.gua_wan.contains(&PublicIpKey::of(&gua).unwrap()));
+            assert!(!info.enabled.contains(&v4.to_socket_addr().unwrap()));
+            assert!(!info.gua_wan.contains(&gua.gua().unwrap()));
         }
     }
 
@@ -3202,19 +3151,19 @@ mod test {
             },
         ));
 
-        let gua_wan_key = PublicIpKey::at("wg1", "[2001:db8::1]:42000");
+        let gua_v6: SocketAddrV6 = "[2001:db8::1]:42000".parse().unwrap();
         let gua_key = (InternedString::intern("2001:db8::1"), 42000u16);
 
         // WAN level on -> GUA public (public is inclusive of LAN, so it wins).
         set_nonssl_wan_group(&mut info, &gw, 42000, true);
         assert!(
-            info.gua_wan.contains(&gua_wan_key),
+            info.gua_wan.contains(&gua_v6),
             "public domain on => GUA public"
         );
 
         // WAN level off, LAN level still on -> GUA drops to local, not off.
         set_nonssl_wan_group(&mut info, &gw, 42000, false);
-        assert!(!info.gua_wan.contains(&gua_wan_key), "GUA no longer public");
+        assert!(!info.gua_wan.contains(&gua_v6), "GUA no longer public");
         assert!(
             !info.disabled.contains(&gua_key),
             "GUA is local (on), not off, because the LAN level is still up"
@@ -3270,7 +3219,7 @@ mod test {
         assert!(
             !info
                 .gua_wan
-                .contains(&PublicIpKey::at("wg1", "[2001:db8::1]:42000")),
+                .contains(&"[2001:db8::1]:42000".parse().unwrap()),
             "GUA is local, not public"
         );
     }
@@ -3305,11 +3254,11 @@ mod test {
                 scope_id: 0,
             },
         ));
-        let gua_v6 = PublicIpKey::at("wg1", "[2001:db8::1]:42000");
+        let gua_v6: SocketAddrV6 = "[2001:db8::1]:42000".parse().unwrap();
         // Operator opted this GUA into WAN directly (stored preference) — there is
         // no public domain to link it.
-        info.gua_wan.insert(gua_v6.clone());
-        info.enabled.insert(gua_v6.clone());
+        info.gua_wan.insert(gua_v6);
+        info.enabled.insert(SocketAddr::V6(gua_v6));
 
         // A LAN-level change must NOT un-publish the GUA's stored WAN opt-in.
         set_nonssl_lan_group(&mut info, &gw, 42000, false);
@@ -3327,13 +3276,13 @@ mod test {
     #[test]
     fn gua_enabled_follows_public_flag() {
         let local = ipv6_addr("2001:db8::1", 443);
-        let key = PublicIpKey::of(&local).unwrap();
+        let key = local.gua().unwrap();
         let mut info = DerivedAddressInfo::default();
         info.available.insert(local.clone());
 
         // A local (non-WAN) GUA follows the private rule: on unless disabled.
         assert!(info.enabled().contains(&local));
-        info.disabled.insert((local.hostname.clone(), key.port));
+        info.disabled.insert((local.hostname.clone(), key.port()));
         assert!(!info.enabled().contains(&local));
         info.disabled.clear();
 
@@ -3346,7 +3295,7 @@ mod test {
         info.available.clear();
         info.available.insert(public.clone());
         assert!(!info.enabled().contains(&public));
-        info.enabled.insert(key);
+        info.enabled.insert(SocketAddr::V6(key));
         assert!(info.enabled().contains(&public));
     }
 
@@ -3473,7 +3422,7 @@ mod test {
             ..mdns.clone()
         };
         info.available.insert(gua.clone());
-        info.enabled.insert(PublicIpKey::of(&gua).unwrap());
+        info.enabled.insert(gua.to_socket_addr().unwrap());
 
         set_address_enabled_on(&mut info, &mdns, false).unwrap();
 
@@ -3650,11 +3599,12 @@ mod test {
 
     #[test]
     fn rekey_port_carries_range_overrides() {
+        use std::net::SocketAddr;
         let mut info = DerivedAddressInfo::default();
-        let wan = PublicIpKey::at("wg0", "1.2.3.4:49152");
-        let unrelated = PublicIpKey::at("wg0", "1.2.3.4:8443");
-        info.enabled.insert(wan.clone());
-        info.enabled.insert(unrelated.clone());
+        let wan: SocketAddr = "1.2.3.4:49152".parse().unwrap();
+        let unrelated: SocketAddr = "1.2.3.4:8443".parse().unwrap();
+        info.enabled.insert(wan);
+        info.enabled.insert(unrelated);
         info.disabled
             .insert((InternedString::intern("example.com"), 49152));
         info.lan_enabled
@@ -3684,10 +3634,7 @@ mod test {
             BTreeSet::from([(InternedString::intern("192.0.2.10"), 5000)])
         );
 
-        assert!(
-            info.enabled
-                .contains(&PublicIpKey::at("wg0", "1.2.3.4:5000"))
-        );
+        assert!(info.enabled.contains(&"1.2.3.4:5000".parse().unwrap()));
         assert!(!info.enabled.contains(&wan));
         assert!(info.enabled.contains(&unrelated)); // unrelated port untouched
         assert!(
@@ -3739,12 +3686,12 @@ mod test {
             ),
         ]);
         info.enabled.extend([
-            PublicIpKey::at("wg0", "64.23.194.12:3478"),
-            PublicIpKey::at("wg0", "[2604:a880:4:1d0:0:3:145f:5]:3478"),
-            PublicIpKey::at("eno0", "73.34.87.9:3478"),
+            "64.23.194.12:3478".parse::<SocketAddr>().unwrap(),
+            "[2604:a880:4:1d0:0:3:145f:5]:3478".parse().unwrap(),
+            "73.34.87.9:3478".parse().unwrap(),
         ]);
         info.gua_wan
-            .insert(PublicIpKey::at("wg0", "[2604:a880:4:1d0:0:3:145f:5]:3478"));
+            .insert("[2604:a880:4:1d0:0:3:145f:5]:3478".parse().unwrap());
         info.disabled
             .insert((InternedString::intern("demo.local"), 3478));
         info.lan_enabled
@@ -3754,7 +3701,7 @@ mod test {
 
         assert_eq!(
             info.enabled,
-            BTreeSet::from([PublicIpKey::at("eno0", "73.34.87.9:3478")])
+            BTreeSet::from(["73.34.87.9:3478".parse().unwrap()])
         );
         assert!(info.gua_wan.is_empty());
         assert!(info.lan_enabled.is_empty());
@@ -3767,8 +3714,8 @@ mod test {
     #[test]
     fn forget_gateway_preserves_overrides_shared_with_another_gateway() {
         let mut info = DerivedAddressInfo::default();
-        let enabled = BTreeSet::from([PublicIpKey::at("eno0", "64.23.194.12:3478")]);
-        let gua_wan = BTreeSet::from([PublicIpKey::at("eno0", "[2001:db8::1]:3478")]);
+        let enabled = BTreeSet::from(["64.23.194.12:3478".parse().unwrap()]);
+        let gua_wan = BTreeSet::from(["[2001:db8::1]:3478".parse().unwrap()]);
         let disabled = BTreeSet::from([(InternedString::intern("10.0.0.1"), 3478)]);
         let lan_enabled = BTreeSet::from([(InternedString::intern("10.0.0.2"), 3478)]);
         info.enabled = enabled.clone();

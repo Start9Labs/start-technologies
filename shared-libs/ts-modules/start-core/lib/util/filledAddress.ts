@@ -7,8 +7,6 @@ import {
   Host,
   Hostname,
   HostnameInfo,
-  HostnameInfoInput,
-  PublicIpKey,
   ServiceInterface,
 } from '../types'
 import { IpAddress, IPV6_LINK_LOCAL } from './ip'
@@ -357,45 +355,11 @@ export function isAddressInsecure(
   return insecureOverride(addr.insecure ?? [], h)
 }
 
-/** The opt-in key a row carries, as `PublicIpKey::of` derives it; null for none. */
-export function publicIpKey(
-  h: HostnameInfo | HostnameInfoInput,
-): PublicIpKey | null {
-  if (h.port == null) return null
-  if (h.metadata.kind === 'ipv4') {
-    return h.public
-      ? { gateway: h.metadata.gateway, port: h.port, interfaceId: null }
-      : null
-  }
-  if (h.metadata.kind !== 'ipv6') return null
-  const ip = IpAddress.parse(h.hostname)
-  if (!ip.isGua()) return null
-  const interfaceId = IpAddress.fromOctets([
-    ...new Array(8).fill(0),
-    ...ip.octets.slice(8),
-  ]).address
-  return { gateway: h.metadata.gateway, port: h.port, interfaceId }
-}
-
-/** Whether two keys select the same addresses. */
-export function samePublicIpKey(a: PublicIpKey, b: PublicIpKey): boolean {
-  return (
-    a.gateway === b.gateway &&
-    a.port === b.port &&
-    (a.interfaceId === null || b.interfaceId === null
-      ? a.interfaceId === b.interfaceId
-      : IpAddress.parse(a.interfaceId).cmp(b.interfaceId) === 0)
-  )
-}
-
 type AddressSelections = Pick<
   DerivedAddressInfo,
-  'disabled' | 'lanEnabled' | 'available'
+  'enabled' | 'disabled' | 'lanEnabled' | 'available'
 > &
-  Partial<Pick<DerivedAddressInfo, 'effective'>> & {
-    /** Socket-address strings in `getHostInfo` and on servers predating `PublicIpKey`. */
-    enabled: readonly (PublicIpKey | string)[]
-  }
+  Partial<Pick<DerivedAddressInfo, 'effective'>>
 
 /** Uses server-owned selections, with compatibility for servers lacking `effective`. */
 export function isAddressEnabled(
@@ -431,15 +395,10 @@ function legacyAddressEnabled(
     mdns.metadata.gateways.includes(ip.metadata.gateway)
   if (h.public && (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6')) {
     if (h.port === null) return true
-    const socket =
+    return addr.enabled.includes(
       h.metadata.kind === 'ipv6'
         ? `[${h.hostname}]:${h.port}`
-        : `${h.hostname}:${h.port}`
-    const key = publicIpKey(h)
-    return addr.enabled.some(opted =>
-      typeof opted === 'string'
-        ? opted === socket
-        : key !== null && samePublicIpKey(opted, key),
+        : `${h.hostname}:${h.port}`,
     )
   }
   if (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6') {

@@ -160,6 +160,7 @@ impl Model<Host> {
         available_ports: &AvailablePorts,
     ) -> Result<(), Error> {
         let previous = self.as_bindings().de()?;
+        let previous_ranges = self.as_binding_ranges().de()?;
         self.derive_addresses(mdns, gateways, available_ports)?;
         self.as_bindings_mut().mutate(|bindings| {
             for (port, binding) in bindings.iter_mut() {
@@ -170,23 +171,16 @@ impl Model<Host> {
             }
             Ok(())
         })?;
-        self.derive_addresses(mdns, gateways, available_ports)
-    }
-
-    /// Drops a removed gateway's selections from every binding and range.
-    pub fn forget_gateway(&mut self, gateway: &GatewayId) -> Result<(), Error> {
-        self.as_bindings_mut().mutate(|bindings| {
-            for info in bindings.values_mut() {
-                info.addresses.forget_gateway(gateway);
+        self.as_binding_ranges_mut().mutate(|ranges| {
+            for (port, range) in ranges.iter_mut() {
+                let addresses = previous_ranges
+                    .get(port)
+                    .map_or_else(Default::default, |info| info.addresses.clone());
+                range.addresses.resolve_address_groups(&addresses);
             }
             Ok(())
         })?;
-        self.as_binding_ranges_mut().mutate(|ranges| {
-            for info in ranges.values_mut() {
-                info.addresses.forget_gateway(gateway);
-            }
-            Ok(())
-        })
+        self.derive_addresses(mdns, gateways, available_ports)
     }
 
     /// Rebuilds the address rows and port forwards from the stored selections.
@@ -374,7 +368,7 @@ impl Model<Host> {
             if !opt.allows_public_address(false) {
                 addresses
                     .gua_wan
-                    .retain(|key| Some(key.port) != net.assigned_port);
+                    .retain(|g| Some(g.port()) != net.assigned_port);
             }
             let mut split = BTreeSet::new();
             for address in available {
@@ -1013,7 +1007,7 @@ mod tests {
     };
     use crate::hostname::ServerHostname;
     use crate::net::forward::AvailablePorts;
-    use crate::net::host::binding::{BindOptions, PublicIpKey};
+    use crate::net::host::binding::{BindOptions, DerivedAddressInfo};
     use crate::net::service_interface::HostnameMetadata;
     use crate::prelude::*;
 
@@ -1508,6 +1502,8 @@ mod tests {
         }
     }
 
+    const DOMAIN: &str = "smp.example.com";
+
     fn exported_host(ports: &mut AvailablePorts, port: u16) -> Model<Host> {
         use crate::net::service_interface::{AddressInfo, ServiceInterface, ServiceInterfaceType};
 
@@ -1541,6 +1537,18 @@ mod tests {
         host
     }
 
+    fn add_public_domain(host: &mut Model<Host>) {
+        host.as_public_domains_mut()
+            .insert(
+                &InternedString::intern(DOMAIN),
+                &PublicDomainConfig {
+                    gateway: gw("wg-in"),
+                    acme: None,
+                },
+            )
+            .unwrap();
+    }
+
     fn converge(
         host: &mut Model<Host>,
         gateways: &OrdMap<GatewayId, NetworkInterfaceInfo>,
@@ -1570,18 +1578,20 @@ mod tests {
         Arc::make_mut(info.ip_info.as_mut().unwrap()).wan_ip = wan_ip;
     }
 
-    fn public_on(addresses: &crate::net::host::binding::DerivedAddressInfo) -> Vec<String> {
+    fn on(addresses: &DerivedAddressInfo) -> Vec<String> {
         addresses
             .enabled()
             .into_iter()
-            .filter(|a| a.public && a.metadata.is_ip())
-            .filter_map(|a| a.to_socket_addr())
-            .map(|sa| sa.to_string())
+            .filter(|a| a.public)
+            .map(|a| match a.to_socket_addr() {
+                Some(sa) => sa.to_string(),
+                None => a.hostname.to_string(),
+            })
             .collect()
     }
 
-    fn binding_public_on(host: &Model<Host>, port: u16) -> Vec<String> {
-        public_on(&host.de().unwrap().bindings[&port].addresses)
+    fn binding_on(host: &Model<Host>, port: u16) -> Vec<String> {
+        on(&host.de().unwrap().bindings[&port].addresses)
     }
 
     fn forward_srcs(host: &Model<Host>) -> Vec<String> {
@@ -1593,14 +1603,24 @@ mod tests {
             .collect()
     }
 
-    fn opt_in(host: &mut Model<Host>, port: u16, key: PublicIpKey) {
+    /// The operator's switch on the plain public domain, which groups its gateway's public IPs.
+    fn switch_domain(addresses: &mut DerivedAddressInfo, port: u16, enabled: bool) {
+        let address = addresses
+            .available
+            .iter()
+            .find(|a| &*a.hostname == DOMAIN && a.port == Some(port))
+            .unwrap()
+            .clone();
+        crate::net::host::binding::set_address_enabled_with_consent(
+            addresses, &address, enabled, false,
+        )
+        .unwrap();
+    }
+
+    fn switch_binding_domain(host: &mut Model<Host>, port: u16, enabled: bool) {
         host.as_bindings_mut()
             .mutate(|b| {
-                let addresses = &mut b.get_mut(&port).unwrap().addresses;
-                if key.interface_id.is_some() {
-                    addresses.gua_wan.insert(key.clone());
-                }
-                addresses.enabled.insert(key);
+                switch_domain(&mut b.get_mut(&port).unwrap().addresses, port, enabled);
                 Ok(())
             })
             .unwrap();
@@ -1613,16 +1633,84 @@ mod tests {
     }
 
     #[test]
-    fn an_enabled_wan_address_follows_a_new_lease_with_its_forward() {
+    fn an_enabled_plain_domain_keeps_its_wan_ip_on_through_a_new_lease() {
+        let mut gateways = single_gateway();
+        let mut ports = AvailablePorts::new();
+        let mut host = exported_host(&mut ports, 5223);
+        add_public_domain(&mut host);
+        converge(&mut host, &gateways, &ports);
+        switch_binding_domain(&mut host, 5223, true);
+        converge(&mut host, &gateways, &ports);
+        assert_eq!(binding_on(&host, 5223), ["198.51.100.2:5223", DOMAIN]);
+
+        reconnect(&mut host, &mut gateways, &ports, |info| {
+            set_wan_ip(info, Some(Ipv4Addr::new(203, 0, 113, 9)))
+        });
+
+        assert_eq!(binding_on(&host, 5223), ["203.0.113.9:5223", DOMAIN]);
+        assert_eq!(forward_srcs(&host), ["203.0.113.9:5223"]);
+    }
+
+    #[test]
+    fn an_enabled_plain_domain_keeps_its_wan_ip_on_through_a_lan_first_reconnect() {
+        let mut gateways = single_gateway();
+        let mut ports = AvailablePorts::new();
+        let mut host = exported_host(&mut ports, 5223);
+        add_public_domain(&mut host);
+        converge(&mut host, &gateways, &ports);
+        switch_binding_domain(&mut host, 5223, true);
+        converge(&mut host, &gateways, &ports);
+
+        reconnect(&mut host, &mut gateways, &ports, |info| info.ip_info = None);
+        assert_eq!(binding_on(&host, 5223), [DOMAIN]);
+        reconnect(&mut host, &mut gateways, &ports, |info| {
+            *info = wireguard(GatewayType::InboundOutbound);
+            set_wan_ip(info, None);
+        });
+        assert_eq!(binding_on(&host, 5223), [DOMAIN]);
+        reconnect(&mut host, &mut gateways, &ports, |info| {
+            set_wan_ip(info, Some(Ipv4Addr::new(203, 0, 113, 9)))
+        });
+
+        assert_eq!(binding_on(&host, 5223), ["203.0.113.9:5223", DOMAIN]);
+        assert_eq!(forward_srcs(&host), ["203.0.113.9:5223"]);
+    }
+
+    #[test]
+    fn a_disabled_plain_domain_leaves_the_new_wan_ip_off() {
+        let mut gateways = single_gateway();
+        let mut ports = AvailablePorts::new();
+        let mut host = exported_host(&mut ports, 5223);
+        add_public_domain(&mut host);
+        converge(&mut host, &gateways, &ports);
+        switch_binding_domain(&mut host, 5223, true);
+        converge(&mut host, &gateways, &ports);
+        switch_binding_domain(&mut host, 5223, false);
+        converge(&mut host, &gateways, &ports);
+
+        reconnect(&mut host, &mut gateways, &ports, |info| {
+            set_wan_ip(info, Some(Ipv4Addr::new(203, 0, 113, 9)))
+        });
+
+        assert!(binding_on(&host, 5223).is_empty());
+        assert!(forward_srcs(&host).is_empty());
+    }
+
+    #[test]
+    fn a_bare_wan_ip_opt_in_does_not_follow_a_new_lease() {
         let mut gateways = single_gateway();
         let mut ports = AvailablePorts::new();
         let mut host = exported_host(&mut ports, 9735);
         converge(&mut host, &gateways, &ports);
-        opt_in(
-            &mut host,
-            9735,
-            PublicIpKey::at("wg-in", "198.51.100.2:9735"),
-        );
+        host.as_bindings_mut()
+            .mutate(|b| {
+                let addresses = &mut b.get_mut(&9735).unwrap().addresses;
+                addresses
+                    .enabled
+                    .insert("198.51.100.2:9735".parse().unwrap());
+                Ok(())
+            })
+            .unwrap();
         converge(&mut host, &gateways, &ports);
         assert_eq!(forward_srcs(&host), ["198.51.100.2:9735"]);
 
@@ -1630,82 +1718,29 @@ mod tests {
             set_wan_ip(info, Some(Ipv4Addr::new(203, 0, 113, 9)))
         });
 
-        assert_eq!(binding_public_on(&host, 9735), ["203.0.113.9:9735"]);
-        assert_eq!(forward_srcs(&host), ["203.0.113.9:9735"]);
-    }
-
-    #[test]
-    fn a_new_lease_leaves_another_gateways_wan_address_off() {
-        let mut other = wireguard(GatewayType::InboundOutbound);
-        set_wan_ip(&mut other, Some(Ipv4Addr::new(192, 0, 2, 50)));
-        let mut gateways = single_gateway();
-        gateways.insert(gw("wg-other"), other);
-        let mut ports = AvailablePorts::new();
-        let mut host = exported_host(&mut ports, 9735);
-        converge(&mut host, &gateways, &ports);
-        opt_in(
-            &mut host,
-            9735,
-            PublicIpKey::at("wg-in", "198.51.100.2:9735"),
-        );
-
-        reconnect(&mut host, &mut gateways, &ports, |info| {
-            set_wan_ip(info, Some(Ipv4Addr::new(203, 0, 113, 9)))
-        });
-
-        assert_eq!(binding_public_on(&host, 9735), ["203.0.113.9:9735"]);
-        assert_eq!(forward_srcs(&host), ["203.0.113.9:9735"]);
-    }
-
-    #[test]
-    fn an_enabled_wan_address_returns_after_a_link_drop_and_lan_first_reconnect() {
-        let mut gateways = single_gateway();
-        let mut ports = AvailablePorts::new();
-        let mut host = exported_host(&mut ports, 9735);
-        converge(&mut host, &gateways, &ports);
-        opt_in(
-            &mut host,
-            9735,
-            PublicIpKey::at("wg-in", "198.51.100.2:9735"),
-        );
-        converge(&mut host, &gateways, &ports);
-
-        reconnect(&mut host, &mut gateways, &ports, |info| info.ip_info = None);
-        assert!(binding_public_on(&host, 9735).is_empty());
+        assert!(binding_on(&host, 9735).is_empty());
         assert!(forward_srcs(&host).is_empty());
-
-        reconnect(&mut host, &mut gateways, &ports, |info| {
-            *info = wireguard(GatewayType::InboundOutbound);
-            set_wan_ip(info, None);
-        });
-        assert!(binding_public_on(&host, 9735).is_empty());
-        assert!(forward_srcs(&host).is_empty());
-
-        reconnect(&mut host, &mut gateways, &ports, |info| {
-            set_wan_ip(info, Some(Ipv4Addr::new(203, 0, 113, 9)))
-        });
-        assert_eq!(binding_public_on(&host, 9735), ["203.0.113.9:9735"]);
-        assert_eq!(forward_srcs(&host), ["203.0.113.9:9735"]);
     }
 
     #[test]
-    fn a_range_keeps_its_wan_opt_in_across_a_link_drop_and_new_lease() {
+    fn an_enabled_plain_domain_keeps_its_range_wan_ip_on_through_a_link_drop() {
         let mut gateways = single_gateway();
         let mut ports = AvailablePorts::new();
         let mut host = host();
+        add_public_domain(&mut host);
         host.add_binding_range(&mut ports, 28332, 40000, 4, false, Default::default())
             .unwrap();
         converge(&mut host, &gateways, &ports);
         host.as_binding_ranges_mut()
             .mutate(|r| {
-                r.get_mut(&28332)
-                    .unwrap()
-                    .addresses
-                    .enabled
-                    .insert(PublicIpKey::at("wg-in", "198.51.100.2:40000"));
+                switch_domain(&mut r.get_mut(&28332).unwrap().addresses, 40000, true);
                 Ok(())
             })
             .unwrap();
+        converge(&mut host, &gateways, &ports);
+        let range_on =
+            |host: &Model<Host>| on(&host.de().unwrap().binding_ranges[&28332].addresses);
+        assert_eq!(range_on(&host), ["198.51.100.2:40000", DOMAIN]);
 
         reconnect(&mut host, &mut gateways, &ports, |info| info.ip_info = None);
         reconnect(&mut host, &mut gateways, &ports, |info| {
@@ -1716,97 +1751,12 @@ mod tests {
             set_wan_ip(info, Some(Ipv4Addr::new(203, 0, 113, 9)))
         });
 
-        assert_eq!(
-            public_on(&host.de().unwrap().binding_ranges[&28332].addresses),
-            ["203.0.113.9:40000"]
-        );
-    }
-
-    #[test]
-    fn a_forgotten_gateway_does_not_restore_its_opt_in_under_the_same_id() {
-        let mut gateways = single_gateway();
-        let mut ports = AvailablePorts::new();
-        let mut host = exported_host(&mut ports, 9735);
-        converge(&mut host, &gateways, &ports);
-        opt_in(
-            &mut host,
-            9735,
-            PublicIpKey::at("wg-in", "198.51.100.2:9735"),
-        );
-        converge(&mut host, &gateways, &ports);
-
-        gateways.remove(&gw("wg-in"));
-        host.forget_gateway(&gw("wg-in")).unwrap();
-        converge(&mut host, &gateways, &ports);
-        assert!(forward_srcs(&host).is_empty());
-
-        gateways = single_gateway();
-        converge(&mut host, &gateways, &ports);
-        assert!(binding_public_on(&host, 9735).is_empty());
-        assert!(forward_srcs(&host).is_empty());
-    }
-
-    #[test]
-    fn a_plain_public_domain_stays_on_with_its_renumbered_address() {
-        let mut gateways = single_gateway();
-        let mut ports = AvailablePorts::new();
-        let mut host = exported_host(&mut ports, 5223);
-        let domain = InternedString::intern("smp.example.com");
-        host.as_public_domains_mut()
-            .insert(
-                &domain,
-                &PublicDomainConfig {
-                    gateway: gw("wg-in"),
-                    acme: None,
-                },
-            )
-            .unwrap();
-        converge(&mut host, &gateways, &ports);
-        opt_in(
-            &mut host,
-            5223,
-            PublicIpKey::at("wg-in", "198.51.100.2:5223"),
-        );
-        host.as_bindings_mut()
-            .mutate(|b| {
-                b.get_mut(&5223)
-                    .unwrap()
-                    .addresses
-                    .disabled
-                    .remove(&(domain.clone(), 5223));
-                Ok(())
-            })
-            .unwrap();
-        converge(&mut host, &gateways, &ports);
-        let domain_on = |host: &Model<Host>| {
-            host.de().unwrap().bindings[&5223]
-                .addresses
-                .enabled()
-                .iter()
-                .any(|a| a.hostname == domain)
-        };
-        assert!(domain_on(&host));
-
-        for change in [
-            (|info: &mut NetworkInterfaceInfo| info.ip_info = None)
-                as fn(&mut NetworkInterfaceInfo),
-            |info| {
-                *info = wireguard(GatewayType::InboundOutbound);
-                set_wan_ip(info, None);
-            },
-            |info| set_wan_ip(info, Some(Ipv4Addr::new(203, 0, 113, 9))),
-        ] {
-            reconnect(&mut host, &mut gateways, &ports, change);
-            assert!(domain_on(&host), "the domain's group stays on");
-        }
-        assert_eq!(binding_public_on(&host, 5223), ["203.0.113.9:5223"]);
-        assert_eq!(forward_srcs(&host), ["203.0.113.9:5223"]);
+        assert_eq!(range_on(&host), ["203.0.113.9:40000", DOMAIN]);
     }
 
     fn dual_stack(guas: &[&str]) -> NetworkInterfaceInfo {
         let mut info = wireguard(GatewayType::InboundOutbound);
         let ip_info = Arc::make_mut(info.ip_info.as_mut().unwrap());
-        ip_info.wan_ip = None;
         ip_info.subnets = ["192.0.2.2/24"]
             .iter()
             .chain(guas)
@@ -1816,59 +1766,33 @@ mod tests {
     }
 
     #[test]
-    fn a_gua_opt_in_follows_a_moved_prefix_through_an_ipv4_first_reconnect() {
+    fn an_enabled_plain_domain_keeps_its_gua_public_through_a_prefix_move() {
         let mut gateways: OrdMap<GatewayId, NetworkInterfaceInfo> =
             [(gw("wg-in"), dual_stack(&["2001:db8:1::5/64"]))]
                 .into_iter()
                 .collect();
         let mut ports = AvailablePorts::new();
-        let mut host = exported_host(&mut ports, 9735);
+        let mut host = exported_host(&mut ports, 5223);
+        add_public_domain(&mut host);
         converge(&mut host, &gateways, &ports);
-        opt_in(
-            &mut host,
-            9735,
-            PublicIpKey::at("wg-in", "[2001:db8:1::5]:9735"),
+        switch_binding_domain(&mut host, 5223, true);
+        converge(&mut host, &gateways, &ports);
+        assert_eq!(
+            binding_on(&host, 5223),
+            ["198.51.100.2:5223", "[2001:db8:1::5]:5223", DOMAIN]
         );
-        converge(&mut host, &gateways, &ports);
-        assert_eq!(binding_public_on(&host, 9735), ["[2001:db8:1::5]:9735"]);
 
         reconnect(&mut host, &mut gateways, &ports, |info| info.ip_info = None);
         reconnect(&mut host, &mut gateways, &ports, |info| {
-            *info = dual_stack(&[])
+            *info = dual_stack(&[]);
         });
-        assert!(binding_public_on(&host, 9735).is_empty());
-
         reconnect(&mut host, &mut gateways, &ports, |info| {
-            *info = dual_stack(&["2001:db8:2::5/64"])
+            *info = dual_stack(&["2001:db8:2::5/64"]);
         });
-        assert_eq!(binding_public_on(&host, 9735), ["[2001:db8:2::5]:9735"]);
-    }
 
-    #[test]
-    fn a_gua_opt_in_stays_off_other_guas_on_its_gateway() {
-        let gateways: OrdMap<GatewayId, NetworkInterfaceInfo> = [(
-            gw("wg-in"),
-            dual_stack(&["2001:db8:1::5/64", "2001:db8:1::9/64"]),
-        )]
-        .into_iter()
-        .collect();
-        let mut ports = AvailablePorts::new();
-        let mut host = exported_host(&mut ports, 9735);
-        converge(&mut host, &gateways, &ports);
-        opt_in(
-            &mut host,
-            9735,
-            PublicIpKey::at("wg-in", "[2001:db8:1::5]:9735"),
-        );
-        converge(&mut host, &gateways, &ports);
-
-        assert_eq!(binding_public_on(&host, 9735), ["[2001:db8:1::5]:9735"]);
-        let addresses = host.de().unwrap().bindings[&9735].addresses.clone();
-        assert!(
-            addresses
-                .available
-                .iter()
-                .any(|a| &*a.hostname == "2001:db8:1::9" && !a.public)
+        assert_eq!(
+            binding_on(&host, 5223),
+            ["198.51.100.2:5223", "[2001:db8:2::5]:5223", DOMAIN]
         );
     }
 }
