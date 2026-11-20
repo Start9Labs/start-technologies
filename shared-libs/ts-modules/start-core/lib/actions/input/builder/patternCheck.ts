@@ -17,9 +17,6 @@ function anchor(regex: string): RegExp {
  * Applies a text field's declared `patterns` to its parser, so the guarantee
  * holds for callers that never render the form — `start-cli`, RPC, anything
  * driving an action directly.
- *
- * An empty string passes every pattern, matching the form, where
- * `Validators.pattern` short-circuits on an empty value.
  */
 export function withPatterns(
   parser: z.ZodType<string>,
@@ -27,7 +24,7 @@ export function withPatterns(
 ): z.ZodType<string> {
   return (patterns ?? []).reduce((acc, { regex, description }) => {
     const anchored = anchor(regex)
-    return acc.refine(value => value === '' || anchored.test(value), {
+    return acc.refine(value => anchored.test(value), {
       message: description,
     })
   }, parser)

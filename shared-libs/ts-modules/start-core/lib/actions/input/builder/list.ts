@@ -84,7 +84,7 @@ export class List<
       generate?: null | RandomString
     },
   ) {
-    const validator = z.array(withPatterns(z.string(), aSpec.patterns))
+    const validator = z.array(withPatterns(z.string().min(1), aSpec.patterns))
     return new List<string[]>(() => {
       const spec = {
         type: 'text' as const,
@@ -136,7 +136,7 @@ export class List<
       OuterType
     >,
   ) {
-    const validator = z.array(z.string())
+    const validator = z.array(z.string().min(1))
     return new List<string[], string[], OuterType>(async options => {
       const { spec: aSpec, ...a } = await getA(options)
       const spec = {
@@ -164,7 +164,7 @@ export class List<
 
       return {
         spec: built,
-        validator: z.array(withPatterns(z.string(), aSpec.patterns)),
+        validator: z.array(withPatterns(z.string().min(1), aSpec.patterns)),
       }
     }, validator)
   }

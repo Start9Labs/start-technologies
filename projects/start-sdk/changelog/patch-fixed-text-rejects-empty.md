@@ -2,4 +2,4 @@
 release-notes: false
 ---
 
-- Text, textarea, color and datetime fields reject an empty string from any caller, required or not; an optional field's empty value is `null`.
+- Text, textarea, color and datetime fields, and text list items, reject an empty string from any caller, matching the form; an optional field's empty value is `null`.

@@ -1,4 +1,5 @@
 import { Effects } from '../Effects'
+import { List } from '../actions/input/builder/list'
 import { Value } from '../actions/input/builder/value'
 
 const options = { effects: {} as Effects, prefill: null }
@@ -45,5 +46,21 @@ describe.each(Object.entries(fields))('%s', (_, field) => {
   test('an optional field accepts null', async () => {
     const { validator } = await field(false).build(options as any)
     expect(validator.parse(null)).toBeNull()
+  })
+})
+
+describe.each([
+  ['list text', () => List.text({ name: 'L' }, {})],
+  [
+    'list dynamicText',
+    () => List.dynamicText(async () => ({ name: 'L', spec: {} })),
+  ],
+])('%s', (_, list) => {
+  test('refuses an empty item', async () => {
+    const value = list()
+    const { validator } = await value.build(options as any)
+    expect(() => validator.parse([''])).toThrow()
+    expect(() => value.validator.parse([''])).toThrow()
+    expect(validator.parse(['x'])).toEqual(['x'])
   })
 })
