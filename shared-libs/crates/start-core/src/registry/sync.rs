@@ -520,6 +520,7 @@ fn update_targets(
     Ok(targets)
 }
 
+/// Announces newly reachable security releases before advancing the cached discovery range.
 fn refresh_update_targets(db: &mut DatabaseModel, device: &DeviceInfo) -> Result<(), Error> {
     let installed = installed_versions(db)?;
     let targets = db
@@ -530,6 +531,17 @@ fn refresh_update_targets(db: &mut DatabaseModel, device: &DeviceInfo) -> Result
         .map(|(url, index)| Ok((url, update_targets(index.as_package(), &installed, device)?)))
         .collect::<Result<Vec<_>, Error>>()?;
     for (url, targets) in targets {
+        let Some(cache) = db.as_public().as_registry_cache().as_idx(&url) else {
+            continue;
+        };
+        let packages = cache.as_packages().de()?;
+        let previous_targets = cache.as_update_targets().de()?;
+        crate::update::security::notify_package_updates(
+            db,
+            &url,
+            (&packages, &previous_targets),
+            (&packages, &targets),
+        )?;
         if let Some(cache) = db.as_public_mut().as_registry_cache_mut().as_idx_mut(&url) {
             cache.as_update_targets_mut().ser(&targets)?;
         }
