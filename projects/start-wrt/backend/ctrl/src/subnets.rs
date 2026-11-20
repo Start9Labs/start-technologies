@@ -107,7 +107,8 @@ impl Subnets {
         }
     }
 
-    fn wan(&self, live: Vec<Ipv4Net>) -> Vec<Ipv4Net> {
+    /// The live WAN networks plus the static one.
+    pub(crate) fn wan(&self, live: Vec<Ipv4Net>) -> Vec<Ipv4Net> {
         live.into_iter().chain(self.static_wan).collect()
     }
 
@@ -860,6 +861,30 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["Admin"]
         );
+    }
+
+    #[tokio::test]
+    async fn seeded_defaults_avoid_the_upstream_network() {
+        let dir = tempfile::tempdir().unwrap();
+        let firstboot = concat!(env!("CARGO_MANIFEST_DIR"), "/../firstboot_config");
+        for config in ["network", "firewall", "dhcp", "wireless"] {
+            std::fs::copy(format!("{firstboot}/{config}"), dir.path().join(config)).unwrap();
+        }
+        std::fs::write(dir.path().join("startwrt"), "").unwrap();
+        let ctx = TestContext(dir.path().into(), vec![net("192.168.2.37/24")]);
+
+        profiles::bootstrap_profiles(ctx.clone()).await.unwrap();
+
+        assert_eq!(
+            gateways(&ctx).await,
+            [
+                ("Admin".into(), Ipv4Addr::new(192, 168, 0, 1)),
+                ("Children".into(), Ipv4Addr::new(192, 168, 3, 1)),
+                ("Guest".into(), Ipv4Addr::new(192, 168, 10, 1)),
+                ("Smart Devices".into(), Ipv4Addr::new(192, 168, 4, 1)),
+            ]
+        );
+        assert!(overlaps(ctx).await.unwrap().is_empty());
     }
 
     #[tokio::test]

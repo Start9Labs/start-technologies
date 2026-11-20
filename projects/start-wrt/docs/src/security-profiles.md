@@ -36,7 +36,7 @@ A new router, or one that has been factory reset, comes with four profiles. Upda
 | **Children**      | `192.168.3.0/24` | All        | Same profile | Cloudflare for Families (`1.1.1.3`, `1.0.0.3`) | 9 PM - 7 AM daily |
 | **Smart Devices** | `192.168.4.0/24` | All        | Same profile | Inherit                                        | —                 |
 
-All four route directly to the Internet. All four can be edited; Guest, Children and Smart Devices can also be deleted.
+A default whose subnet overlaps the network the router's WAN is on gets the next free subnet instead, from `.10` up. All four route directly to the Internet. All four can be edited; Guest, Children and Smart Devices can also be deleted.
 
 ## Creating a Profile
 

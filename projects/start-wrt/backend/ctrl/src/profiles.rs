@@ -1592,7 +1592,7 @@ pub async fn set<C: CtrlContext>(
 }
 
 /// Read the current LAN interface IP from parsed configs.
-pub(crate) fn get_lan_ip(cfgs: &uciedit::Configs) -> Option<Ipv4Addr> {
+fn get_lan_ip(cfgs: &uciedit::Configs) -> Option<Ipv4Addr> {
     for section in &cfgs["network"].sections {
         if section.name().as_deref() == Some(crate::lan::LAN_INTERFACE) {
             if let Ok(Some(iface)) = section.get_typed::<NetworkInterface>() {
@@ -3177,6 +3177,7 @@ impl Lookup {
 }
 
 /// Seeds defaults on a profile-free configuration; later deletions stay deleted.
+/// A pre-write seed failure registers Admin alone and ends default initialization.
 pub async fn bootstrap_profiles<C: CtrlContext>(ctx: C) -> Result<(), Error> {
     let fresh = {
         let arena = Arena::new();
@@ -3195,7 +3196,9 @@ pub async fn bootstrap_profiles<C: CtrlContext>(ctx: C) -> Result<(), Error> {
     bootstrap_admin_profile(ctx.uci_root()).await
 }
 
-async fn bootstrap_admin_profile(uci_root: impl AsRef<std::path::Path>) -> Result<(), Error> {
+pub(crate) async fn bootstrap_admin_profile(
+    uci_root: impl AsRef<std::path::Path>,
+) -> Result<(), Error> {
     let arena = Arena::new();
     let mut cfgs = parse_all(uci_root.as_ref(), &arena, &["startwrt"]).await?;
     if bootstrap_admin_profile_config(&mut cfgs)? {
@@ -3289,23 +3292,26 @@ async fn seed_default_profiles<C: CtrlContext>(ctx: C) -> Result<(), Error> {
             &["startwrt", "network", "firewall", "dhcp", "wireless"],
         )
         .await?;
-        let [a, b, ..] = get_lan_ip(&cfgs)
-            .ok_or_else(|| {
-                Error::new(
-                    eyre!("missing LAN interface"),
-                    ErrorKind::MissingLanInterface,
-                )
-            })?
-            .octets();
+        let before = crate::subnets::Subnets::of(&cfgs);
+        let live_wan = ctx.wan_ipv4_networks();
         bootstrap_admin_profile_config(&mut cfgs)?;
         for (default, interface) in DEFAULT_PROFILES.iter().zip(&interfaces) {
+            let subnets = crate::subnets::Subnets::of(&cfgs);
+            let gateway_ip = subnets
+                .free_gateway(&subnets.wan(live_wan.clone()), [default.subnet])
+                .ok_or_else(|| {
+                    Error::new(
+                        eyre!("no free subnet for profile {}", default.fullname),
+                        ErrorKind::InvalidRequest,
+                    )
+                })?;
             let profile = Profile {
                 id: ProfileIdOpt {
                     fullname: Some(default.fullname.into()),
                     interface: None,
                     vlan_tag: None,
                 },
-                gateway_ip: Ipv4Addr::new(a, b, default.subnet, 1),
+                gateway_ip,
                 outbound: DEFAULT_WAN_ZONE.into(),
                 lan_access: LanAccess::SameProfile,
                 wan_access: WanAccess::All,
@@ -3338,6 +3344,7 @@ async fn seed_default_profiles<C: CtrlContext>(ctx: C) -> Result<(), Error> {
                 }
             }
         }
+        crate::subnets::check(&ctx, &before, &cfgs)?;
         let dump_result = dump_all(ctx.uci_root(), cfgs).await;
         drop(arena);
         match dump_result {
