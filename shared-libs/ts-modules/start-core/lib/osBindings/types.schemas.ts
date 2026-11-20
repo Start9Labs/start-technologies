@@ -6682,6 +6682,8 @@ export const DepInfo: z.ZodIntersection<
 export const DerivedAddressInfo: z.ZodObject<{
   /**
    * User override: enable these addresses (only for public IP & port)
+   * An opt-in names one literal address and lapses when the gateway renumbers.
+   * Only an enabled plain public domain carries its group's public IPs across.
    */
   enabled: z.ZodArray<z.ZodString>
   /**
@@ -6738,10 +6740,12 @@ export const DerivedAddressInfo: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   /**
    * User override: enable these addresses (only for public IP & port)
+   * An opt-in names one literal address and lapses when the gateway renumbers.
+   * Only an enabled plain public domain carries its group's public IPs across.
    */
   enabled: z.array(z.string()).meta({
     description:
-      'User override: enable these addresses (only for public IP & port)',
+      "User override: enable these addresses (only for public IP & port)\nAn opt-in names one literal address and lapses when the gateway renumbers.\nOnly an enabled plain public domain carries its group's public IPs across.",
   }),
   /**
    * User override: disable these addresses (only for domains and private IP & port)
