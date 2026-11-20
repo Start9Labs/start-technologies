@@ -2100,6 +2100,10 @@ export const EthernetInfo: z.ZodIntersection<
           z.ZodOptional<z.ZodNullable<typeof ProfileId>>,
           z.ZodNullable<typeof ProfileId>
         >
+        /**
+         * Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.
+         */
+        trunk: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
       }>
     >
   }>
@@ -2120,6 +2124,13 @@ export const EthernetInfo: z.ZodIntersection<
         z.string(),
         object({
           profile: wire(ProfileId.nullable().optional(), ProfileId.nullable()),
+          /**
+           * Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.
+           */
+          trunk: wire(z.boolean().optional(), z.boolean()).meta({
+            description:
+              "Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.",
+          }),
         }),
       ),
     }),
@@ -2150,6 +2161,10 @@ export const EthernetSetRequest: z.ZodIntersection<
           z.ZodOptional<z.ZodNullable<typeof ProfileIdOpt>>,
           z.ZodNullable<typeof ProfileIdOpt>
         >
+        /**
+         * Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.
+         */
+        trunk: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
       }>
     >
   }>
@@ -2166,6 +2181,13 @@ export const EthernetSetRequest: z.ZodIntersection<
             ProfileIdOpt.nullable().optional(),
             ProfileIdOpt.nullable(),
           ),
+          /**
+           * Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.
+           */
+          trunk: wire(z.boolean().optional(), z.boolean()).meta({
+            description:
+              "Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.",
+          }),
         }),
       ),
     }),

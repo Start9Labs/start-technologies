@@ -594,4 +594,11 @@ export default {
   642: 'Para desactivar esta VPN, primero cambia {vpns} para que se conecten a través de otra cosa.',
   643: 'Nunca (predeterminado)',
   644: 'Cuando está detrás de NAT',
+  645: 'Switch gestionado',
+  646: '¿Delegar {port}?',
+  647: 'Cada perfil de seguridad se enviará a {port} como una VLAN etiquetada, y un switch gestionado conectado a él decide a qué perfil pertenece cada uno de sus propios puertos. Cualquiera que pueda iniciar sesión en el switch puede acceder a todos los perfiles, así que proteja su contraseña y termine de configurar sus VLAN antes de conectarlo.',
+  648: 'Delegar',
+  649: 'IDs de VLAN',
+  650: 'ID de VLAN',
+  651: '{port} envía cada perfil de seguridad al switch etiquetado con su ID de VLAN. Configura las VLAN del switch con estos IDs.',
 } satisfies i18n

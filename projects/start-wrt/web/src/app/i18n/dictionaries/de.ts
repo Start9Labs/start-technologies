@@ -594,4 +594,11 @@ export default {
   642: 'Um dieses VPN zu deaktivieren, stellen Sie zuerst {vpns} so um, dass sie sich über etwas anderes verbinden.',
   643: 'Nie (Standard)',
   644: 'Wenn hinter NAT',
+  645: 'Managed Switch',
+  646: '{port} delegieren?',
+  647: 'Jedes Sicherheitsprofil wird als getaggtes VLAN an {port} gesendet, und ein daran angeschlossener Managed Switch entscheidet, zu welchem Profil jeder seiner eigenen Ports gehört. Wer sich am Switch anmelden kann, erreicht jedes Profil. Schützen Sie daher sein Passwort und schließen Sie seine VLAN-Einrichtung ab, bevor Sie ihn anschließen.',
+  648: 'Delegieren',
+  649: 'VLAN-IDs',
+  650: 'VLAN-ID',
+  651: '{port} sendet jedes Sicherheitsprofil mit seiner VLAN-ID getaggt an den Switch. Richten Sie die VLANs des Switches mit diesen IDs ein.',
 } satisfies i18n
