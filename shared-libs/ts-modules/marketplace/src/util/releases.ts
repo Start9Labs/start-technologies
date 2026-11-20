@@ -1,5 +1,4 @@
-import { inject, Pipe, PipeTransform } from '@angular/core'
-import { Exver } from '@start9labs/shared'
+import type { Exver } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { GetPackageRes, MarketplacePkgBase } from '../types'
 
@@ -26,13 +25,4 @@ export function pendingReleases(
         .sort((a, b) => exver.compareExver(b.version, a.version) || 0)
     : []
   return [pkg, ...pending]
-}
-
-@Pipe({ name: 'releases' })
-export class ReleasesPipe implements PipeTransform {
-  private readonly exver = inject(Exver)
-
-  transform(pkg: ReleasesOf, installed?: string | null): Release[] {
-    return pendingReleases(this.exver, pkg, installed)
-  }
 }

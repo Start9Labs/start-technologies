@@ -1134,7 +1134,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
       otherVersions: {
         '0.17.5:0': {
           releaseNotes: 'Upstream release to 0.17.5',
-          security: false,
+          security: true,
         },
         '0.17.4-beta:1.0-alpha': {
           releaseNotes: 'Upstream release to 0.17.4',
@@ -1331,6 +1331,40 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
         kind: 'registry-key-dropped',
         registry: 'https://registry.start9.com/',
         key: 'MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=',
+      },
+      seen: false,
+    },
+    {
+      id: 8,
+      packageId: null,
+      createdAt: '2019-12-29T08:30:00.000Z',
+      code: 6,
+      level: 'warning',
+      title: 'Service security updates available',
+      message:
+        'Security updates are available for installed services: Lightning Network Daemon 0.17.5:0, Bitcoin Core 27.0.0:1.0.0, Tor 0.4.9:0. Visit the Updates tab to review them.',
+      data: {
+        kind: 'package-security-update',
+        releases: [
+          {
+            registry: 'https://registry.start9.com/',
+            id: 'lnd',
+            title: 'Lightning Network Daemon',
+            version: '0.17.5:0',
+          },
+          {
+            registry: 'https://registry.start9.com/',
+            id: 'bitcoind',
+            title: 'Bitcoin Core',
+            version: '27.0.0:1.0.0',
+          },
+          {
+            registry: 'https://registry.start9.com/',
+            id: 'tor',
+            title: 'Tor',
+            version: '0.4.9:0',
+          },
+        ],
       },
       seen: false,
     },

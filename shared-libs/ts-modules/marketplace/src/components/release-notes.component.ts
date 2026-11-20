@@ -1,5 +1,4 @@
-import { Component, inject, input } from '@angular/core'
-import { toObservable, toSignal } from '@angular/core/rxjs-interop'
+import { Component, input } from '@angular/core'
 import {
   i18nPipe,
   LocalizePipe,
@@ -9,32 +8,27 @@ import {
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiBadge } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
-import { switchMap } from 'rxjs'
-import { ReleasesPipe } from '../pipes/releases.pipe'
-import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
-import { GetPackageRes, MarketplacePkgBase } from '../types'
+import { MarketplacePkgBase } from '../types'
 
 @Component({
   selector: 'marketplace-release-notes',
   template: `
-    @for (release of pkg() | releases: installed(); track release.version) {
-      <header tuiHeader>New in {{ release.version }}</header>
-      @if (release.security) {
-        <span tuiBadge appearance="negative" iconStart="@tui.shield-alert">
-          {{ 'Security update' | i18n }}
-        </span>
-      }
-      <div
-        class="g-markdown"
-        safeLinks
-        [innerHTML]="
-          release.releaseNotes
-            | localize: release.defaultLocale
-            | markdown
-            | dompurify
-        "
-      ></div>
+    <header tuiHeader>New in {{ pkg().version }}</header>
+    @if (pkg().security) {
+      <span tuiBadge appearance="negative" iconStart="@tui.shield-alert">
+        {{ 'Security update' | i18n }}
+      </span>
     }
+    <div
+      class="g-markdown"
+      safeLinks
+      [innerHTML]="
+        pkg().releaseNotes
+          | localize: pkg().defaultLocale
+          | markdown
+          | dompurify
+      "
+    ></div>
   `,
   styles: `
     .g-markdown {
@@ -50,7 +44,6 @@ import { GetPackageRes, MarketplacePkgBase } from '../types'
     NgDompurifyPipe,
     MarkdownPipe,
     LocalizePipe,
-    ReleasesPipe,
     SafeLinksDirective,
     TuiBadge,
     TuiHeader,
@@ -58,15 +51,5 @@ import { GetPackageRes, MarketplacePkgBase } from '../types'
   ],
 })
 export class MarketplaceReleaseNotesComponent {
-  private readonly marketplace = inject(AbstractMarketplaceService)
-
-  readonly pkg = input.required<
-    MarketplacePkgBase & Partial<Pick<GetPackageRes, 'otherVersions'>>
-  >()
-
-  protected readonly installed = toSignal(
-    toObservable(this.pkg).pipe(
-      switchMap(({ id }) => this.marketplace.installedVersion$(id)),
-    ),
-  )
+  readonly pkg = input.required<MarketplacePkgBase>()
 }

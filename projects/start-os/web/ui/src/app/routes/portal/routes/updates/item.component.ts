@@ -1,6 +1,5 @@
 import { DatePipe, NgTemplateOutlet } from '@angular/common'
 import { Component, computed, inject, input, signal } from '@angular/core'
-import { RouterLink } from '@angular/router'
 import {
   MarketplaceIconDirective,
   MarketplacePkg,
@@ -17,15 +16,10 @@ import {
   MarkdownPipe,
   SafeLinksDirective,
 } from '@start9labs/shared'
-import {
-  TuiButton,
-  TuiExpand,
-  TuiIcon,
-  TuiLink,
-  TuiTitle,
-} from '@taiga-ui/core'
+import { TuiButton, TuiExpand, TuiIcon, TuiTitle } from '@taiga-ui/core'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import {
+  TuiAccordion,
   TuiAvatar,
   TuiBadge,
   TuiButtonLoading,
@@ -166,51 +160,51 @@ import UpdatesComponent from './updates.component'
             <marketplace-signer-chips [keys]="signers()" />
           </p>
           <p tuiTitle>
-            <span>
-              <b>{{ 'Release notes' | i18n }}</b>
-              (
-              <a
-                tuiLink
-                iconEnd="@tui.external-link"
-                routerLink="/marketplace"
-                [queryParams]="{
-                  registry: parent.current()?.url,
-                  id: item().id,
-                  flavor: item().flavor,
-                }"
-                [textContent]="'View in Marketplace' | i18n"
-              ></a>
-              )
-            </span>
+            <b>{{ 'Release notes' | i18n }}</b>
           </p>
-          @for (release of releases(); track release.version) {
-            @if (releases().length > 1) {
-              <b>{{ release.version }}</b>
+          @if (releases().length > 1) {
+            <tui-accordion size="s" [closeOthers]="false">
+              @for (release of releases(); track release.version) {
+                <button [tuiAccordion]="$first">
+                  {{ release.version }}
+                  @if (release.security) {
+                    <ng-container *ngTemplateOutlet="securityBadge" />
+                  }
+                </button>
+                <tui-expand>
+                  <ng-container
+                    *ngTemplateOutlet="notes; context: { $implicit: release }"
+                  />
+                </tui-expand>
+              }
+            </tui-accordion>
+          } @else {
+            @if (item().security) {
+              <p><ng-container *ngTemplateOutlet="securityBadge" /></p>
             }
-            @if (release.security) {
-              <p>
-                <span
-                  tuiBadge
-                  appearance="negative"
-                  iconStart="@tui.shield-alert"
-                >
-                  {{ 'Security update' | i18n }}
-                </span>
-              </p>
-            }
-            <p
-              safeLinks
-              [innerHTML]="
-                release.releaseNotes
-                  | localize: release.defaultLocale
-                  | markdown
-                  | dompurify
-              "
-            ></p>
+            <ng-container
+              *ngTemplateOutlet="notes; context: { $implicit: item() }"
+            />
           }
         </tui-expand>
       </td>
     </tr>
+    <ng-template #securityBadge>
+      <span tuiBadge appearance="negative" iconStart="@tui.shield-alert">
+        {{ 'Security update' | i18n }}
+      </span>
+    </ng-template>
+    <ng-template #notes let-release>
+      <p
+        safeLinks
+        [innerHTML]="
+          release.releaseNotes
+            | localize: release.defaultLocale
+            | markdown
+            | dompurify
+        "
+      ></p>
+    </ng-template>
     <ng-template #target>
       @if (security()) {
         <tui-icon icon="@tui.shield-alert" class="g-negative" />
@@ -295,6 +289,14 @@ import UpdatesComponent from './updates.component'
       margin: 1rem 0;
     }
 
+    tui-accordion {
+      margin-block-end: 1rem;
+    }
+
+    [tuiAccordion] [tuiBadge] {
+      margin-inline-start: 0.5rem;
+    }
+
     .pending {
       margin-right: 0.5rem;
       font-style: italic;
@@ -354,8 +356,8 @@ import UpdatesComponent from './updates.component'
     MarketplaceSignerChipsComponent,
     NgDompurifyPipe,
     NgTemplateOutlet,
-    RouterLink,
     SafeLinksDirective,
+    TuiAccordion,
     TuiAvatar,
     TuiBadge,
     TuiButton,
@@ -364,7 +366,6 @@ import UpdatesComponent from './updates.component'
     TuiExpand,
     TuiFade,
     TuiIcon,
-    TuiLink,
     TuiProgressCircle,
     TuiSkeleton,
     TuiTitle,
