@@ -26,7 +26,7 @@ impl VersionT for Version {
         V0_4_3.clone()
     }
     fn migration_revision(self) -> usize {
-        1
+        2
     }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
@@ -143,7 +143,7 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("sshPubkeys");
-        fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(0);
+        fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(1);
         fixture["private"]["sshPubkeys"] = json!({});
         let db = PatchDb::in_memory();
         db.put(&ROOT, &fixture).await.unwrap();
@@ -153,7 +153,7 @@ mod tests {
         assert!(migrated["private"].get("sshPubkeys").is_none());
         assert_eq!(
             migrated["public"]["serverInfo"]["latestMigrationRevision"],
-            json!(1)
+            json!(Version.migration_revision())
         );
         Version.pre_init(&db).await.unwrap();
         assert_eq!(db.dump(&ROOT).await.value, migrated);
