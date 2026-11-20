@@ -37,7 +37,7 @@ impl VersionT for Version {
         V0_4_3.clone()
     }
     fn migration_revision(self) -> usize {
-        1
+        2
     }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
@@ -194,27 +194,29 @@ mod tests {
         let version = super::super::Version::from_exver_version(Version.semver())
             .as_version_t()
             .unwrap();
-        let mut db = imbl_value::json!({ "public": { "serverInfo": {
-            "version": "0.4.3",
-            "packageVersionCompat": ">=0.3.0 <0.5.0",
-            "postInitMigrationTodos": {},
-            "latestMigrationRevision": 0,
-        } } });
-        for queued in [true, false] {
-            db["public"]["serverInfo"]["postInitMigrationTodos"] = imbl_value::json!({});
-            let revision = super::super::applied_migration_revision(&mut db).unwrap();
-            super::super::Upgrade::load(&version, &version, revision)
-                .await
-                .unwrap()
-                .apply(&version, &version, &mut db)
-                .unwrap();
-            assert_eq!(
-                db["public"]["serverInfo"]["postInitMigrationTodos"]
-                    .as_object()
+        for applied in [0, 1] {
+            let mut db = json!({ "public": { "serverInfo": {
+                "version": "0.4.3",
+                "packageVersionCompat": ">=0.3.0 <0.5.0",
+                "postInitMigrationTodos": {},
+                "latestMigrationRevision": applied,
+            } } });
+            for queued in [true, false] {
+                db["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
+                let revision = super::super::applied_migration_revision(&mut db).unwrap();
+                super::super::Upgrade::load(&version, &version, revision)
+                    .await
                     .unwrap()
-                    .contains_key("0.4.3"),
-                queued
-            );
+                    .apply(&version, &version, &mut db)
+                    .unwrap();
+                assert_eq!(
+                    db["public"]["serverInfo"]["postInitMigrationTodos"]
+                        .as_object()
+                        .unwrap()
+                        .contains_key("0.4.3"),
+                    queued
+                );
+            }
         }
     }
 
