@@ -621,6 +621,7 @@ fn gateways_sharing_a_dns_address_each_resolve_through_their_own_interface() {
     use std::process::Command;
     use std::str::FromStr;
 
+    use hyper_util::client::legacy::connect::dns::Name;
     use tower_service::Service;
 
     const NAME: &str = "gateways_sharing_a_dns_address_each_resolve_through_their_own_interface";
@@ -660,9 +661,7 @@ fn gateways_sharing_a_dns_address_each_resolve_through_their_own_interface() {
     let servers = VecDeque::from(["10.64.0.1:5353".parse().unwrap()]);
     let index = |iface| nix::net::if_::if_nametoindex(iface).unwrap();
     let resolve = |iface: &str, index: u32| {
-        let mut dns = GatewayDns(Arc::new(
-            gateway_resolver(iface.parse().unwrap(), index, &servers).unwrap(),
-        ));
+        let mut dns = GatewayDns::new(iface.parse().unwrap(), index, &servers).unwrap();
         async move {
             dns.call(Name::from_str("acme.test").unwrap())
                 .await

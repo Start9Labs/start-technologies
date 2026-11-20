@@ -492,24 +492,60 @@ fn gateway_catalog(
     Ok(Arc::new(catalog))
 }
 
-/// Resolves through the given servers, over one gateway alone.
-pub(crate) fn gateway_resolver(
-    gateway: GatewayId,
-    index: u32,
-    servers: &VecDeque<SocketAddr>,
-) -> Result<hickory_server::resolver::Resolver<GatewayRuntime>, Error> {
-    hickory_server::resolver::Resolver::builder_with_config(
-        ResolverConfig::from_name_servers(
-            servers
+/// Resolves names through one gateway's DNS servers, over that gateway alone.
+#[derive(Clone)]
+pub(crate) struct GatewayDns(Arc<hickory_server::resolver::Resolver<GatewayRuntime>>);
+
+impl GatewayDns {
+    pub(crate) fn new(
+        gateway: GatewayId,
+        index: u32,
+        servers: &VecDeque<SocketAddr>,
+    ) -> Result<Self, Error> {
+        hickory_server::resolver::Resolver::builder_with_config(
+            ResolverConfig::from_name_servers(
+                servers
+                    .iter()
+                    .map(|addr| forward_name_server(*addr))
+                    .collect(),
+            ),
+            GatewayRuntime::new(gateway, index),
+        )
+        .with_options(forward_options())
+        .build()
+        .map(|resolver| Self(Arc::new(resolver)))
+        .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Network))
+    }
+}
+
+impl tower_service::Service<hyper_util::client::legacy::connect::dns::Name> for GatewayDns {
+    type Response = std::vec::IntoIter<SocketAddr>;
+    type Error = std::io::Error;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
+
+    fn poll_ready(
+        &mut self,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, name: hyper_util::client::legacy::connect::dns::Name) -> Self::Future {
+        let resolver = self.0.clone();
+        Box::pin(async move {
+            let lookup = resolver
+                .lookup_ip(name.as_str())
+                .await
+                .map_err(std::io::Error::other)?;
+            Ok(lookup
                 .iter()
-                .map(|addr| forward_name_server(*addr))
-                .collect(),
-        ),
-        GatewayRuntime::new(gateway, index),
-    )
-    .with_options(forward_options())
-    .build()
-    .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Network))
+                .map(|ip| SocketAddr::new(ip, 0))
+                .collect::<Vec<_>>()
+                .into_iter())
+        })
+    }
 }
 
 /// How a query should be answered.

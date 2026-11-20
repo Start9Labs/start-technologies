@@ -1,15 +1,11 @@
 use std::collections::{BTreeSet, VecDeque};
 use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
-use hickory_server::resolver::Resolver;
 use http_body_util::{BodyExt, Full};
 use hyper_util::client::legacy::Client;
-use hyper_util::client::legacy::connect::dns::Name;
 use hyper_util::client::legacy::connect::{Connect, HttpConnector};
 use hyper_util::rt::TokioExecutor;
 use instant_acme::{
@@ -28,8 +24,7 @@ use super::{AcmeCert, AcmeCertCache, AcmeCertStore, certified_key};
 use crate::GatewayId;
 use crate::db::DbAccessMut;
 use crate::error::ErrorData;
-use crate::net::dns::gateway_resolver;
-use crate::net::dns::upstream::GatewayRuntime;
+use crate::net::dns::GatewayDns;
 use crate::net::gateway::gateway_connector;
 use crate::prelude::*;
 use crate::util::serde::{Der64, Pem};
@@ -45,10 +40,10 @@ impl AcmeHttpClient {
         index: u32,
         dns_servers: &VecDeque<SocketAddr>,
     ) -> Result<Self, AcmeError> {
-        let resolver = gateway_resolver(gateway.clone(), index, dns_servers)
+        let dns = GatewayDns::new(gateway.clone(), index, dns_servers)
             .map_err(|e| other_error(ErrorData::from(e)))?;
         Self::new(
-            gateway_connector(gateway.as_str(), GatewayDns(Arc::new(resolver)))
+            gateway_connector(gateway.as_str(), dns)
                 .map_err(|e| other_error(ErrorData::from(e)))?,
             native_tls::TlsConnector::new().map_err(other_error)?,
         )
@@ -63,35 +58,6 @@ where
         Ok(Self(Client::builder(TokioExecutor::new()).build(
             hyper_tls::HttpsConnector::from((connector, tls.into())),
         )))
-    }
-}
-
-/// Resolves through one gateway's DNS servers, over that gateway alone.
-#[derive(Clone)]
-pub(super) struct GatewayDns(Arc<Resolver<GatewayRuntime>>);
-
-impl tower_service::Service<Name> for GatewayDns {
-    type Response = std::vec::IntoIter<SocketAddr>;
-    type Error = std::io::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, name: Name) -> Self::Future {
-        let resolver = self.0.clone();
-        Box::pin(async move {
-            let lookup = resolver
-                .lookup_ip(name.as_str())
-                .await
-                .map_err(std::io::Error::other)?;
-            Ok(lookup
-                .iter()
-                .map(|ip| SocketAddr::new(ip, 0))
-                .collect::<Vec<_>>()
-                .into_iter())
-        })
     }
 }
 

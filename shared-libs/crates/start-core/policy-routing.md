@@ -129,7 +129,7 @@ Host source matching retains the interface zone of IPv6 link-local addresses; th
 
 Host-originated lookups of exact configured WireGuard endpoint names use the automatic non-WireGuard underlay's DNS pool. The interface watcher owns that allowlist, retained while a tunnel is disconnected and seeded before importing a tunnel configuration. Service-originated queries for the same names retain their selected gateway. An unavailable underlay fails bootstrap rather than trying another tunnel.
 
-An ACME order resolves its certificate authority without the StartOS DNS server: it queries the DNS servers of the gateway its domain is published on, over sockets bound and marked for that gateway like the upstream sockets above. An unavailable gateway fails the order.
+An ACME order and the WAN address probe resolve names without the StartOS DNS server: each queries the DNS servers of the gateway it leaves through (the gateway an ACME order's domain is published on, or the gateway being probed), over sockets bound and marked for that gateway like the upstream sockets above. An unavailable gateway fails the request.
 
 `src/net/dns/transport_test.sh` runs the production socket provider in a throwaway network namespace, against IPv4 and IPv6 UDP/TCP peers, with competing on-link and default routes. It checks device containment with an empty table, a down device, and a recreated interface.
 
