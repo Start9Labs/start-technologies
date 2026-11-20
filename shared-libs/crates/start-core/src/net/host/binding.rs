@@ -64,6 +64,8 @@ impl FromStr for BindId {
 #[model = "Model<Self>"]
 pub struct DerivedAddressInfo {
     /// User override: enable these addresses (only for public IP & port)
+    /// An opt-in names one literal address and lapses when the gateway renumbers.
+    /// Only an enabled plain public domain carries its group's public IPs across.
     pub enabled: BTreeSet<SocketAddr>,
     /// User override: disable these addresses (only for domains and private IP & port)
     pub disabled: BTreeSet<(InternedString, u16)>,

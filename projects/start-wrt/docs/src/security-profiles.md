@@ -32,7 +32,7 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
 1. Enter a **Name** at the top of the dialog (e.g. "Admin", "Guest", "Children", "Smart Devices"). The Name field sits above three tabs — **LAN**, **WAN / Internet**, and **DNS**.
 
 1. On the **LAN** tab, configure local-network settings:
-   - **Subnet** — Set the third octet of the profile's `/24` subnet. The first two octets are shown but locked; for example, a value of `2` creates the subnet `192.168.2.0/24`. They are locked because every profile must stay within the primary [LAN network block](lan.md)'s `/16` for cross-subnet routing to work — changing the LAN network block moves all profiles with it. Each profile must have a unique subnet. The gateway address is always `.1` within the subnet (e.g. `192.168.2.1`).
+   - **Subnet** — Set the third octet of the profile's `/24` subnet. The first two octets are shown but locked; for example, a value of `2` creates the subnet `192.168.2.0/24`. They are locked because every profile must stay within the primary [LAN network block](lan.md)'s `/16` for cross-subnet routing to work — changing the LAN network block moves all profiles with it. Each profile must have a unique subnet. The gateway address is always `.1` within the subnet (e.g. `192.168.2.1`). Don't choose a subnet that overlaps your ISP router's LAN subnet or another upstream network. An overlap can interrupt Internet access. See the [FAQ](faq.md#why-does-the-internet-stop-every-few-minutes-while-wi-fi-stays-connected).
 
    - **Access** — Controls which other profiles this profile can communicate with on the local network:
      - **All** — Full access to devices on all profiles.

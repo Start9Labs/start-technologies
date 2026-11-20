@@ -178,25 +178,11 @@ export class Variants<
           }
           validators[key] = built.validator
         }
-        const other = z
-          .looseObject(
-            Object.fromEntries(
-              Object.entries(validators).map(([k, v]) => [
-                k,
-                z.any().optional(),
-              ]),
-            ),
-          )
-          .optional()
         return {
           spec: variants,
           validator: z.union(
             Object.entries(validators).map(([k, v]) =>
-              z.looseObject({
-                selection: z.literal(k),
-                value: v,
-                other,
-              }),
+              z.object({ selection: z.literal(k), value: v }),
             ) as [z.ZodObject<any>, z.ZodObject<any>, ...z.ZodObject<any>[]],
           ) as any,
         }
