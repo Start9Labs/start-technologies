@@ -142,6 +142,8 @@ export class FormService {
       case 'triState':
         value = currentValue === undefined ? spec.default : currentValue
         return this.formBuilder.control(value)
+      case 'acknowledgement':
+        return this.formBuilder.control(false, [Validators.requiredTrue])
       case 'select':
         value = currentValue === undefined ? spec.default : currentValue
         return this.formBuilder.control(value, [Validators.required])

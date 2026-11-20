@@ -99,10 +99,10 @@ export function mockRegistryCache(
         packages: Mock.RegistryPackages,
         updateTargets: {
           bitcoind: mockUpdateTarget(
-            Mock.OtherPackageVersions.bitcoind!['=26.1.0:0.1.0']!,
+            Mock.OtherPackageVersions['bitcoind']!['=26.1.0:0.1.0']!,
             '26.1.0:0.1.0',
           ),
-          lnd: mockUpdateTarget(Mock.RegistryPackages.lnd!, '0.18.0:0.0.1'),
+          lnd: mockUpdateTarget(Mock.RegistryPackages['lnd']!, '0.18.0:0.0.1'),
           'btc-rpc-proxy': mockUpdateTarget(
             Mock.RegistryPackages['btc-rpc-proxy']!,
             '0.4.0:0',

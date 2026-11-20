@@ -195,7 +195,7 @@ export class List<
   ) {
     return new List<Type[], StaticValidatedAs[]>(async options => {
       const { spec: previousSpecSpec, ...restSpec } = aSpec
-      const built = await previousSpecSpec.build(options)
+      const built = await previousSpecSpec.buildNested(options)
       const spec = {
         type: 'object' as const,
         displayAs: null,

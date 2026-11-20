@@ -2027,6 +2027,14 @@ backup.trash.reclaimed-title:
   fr_FR: "Espace de sauvegarde récupéré"
   pl_PL: "Odzyskano miejsce po kopii zapasowej"
 
+# backup/mod.rs
+backup.prompt-password:
+  en_US: "Backup Password: "
+  de_DE: "Backup-Passwort: "
+  es_ES: "Contraseña de copia de seguridad: "
+  fr_FR: "Mot de passe de sauvegarde : "
+  pl_PL: "Hasło kopii zapasowej: "
+
 # backup/restore.rs
 backup.restore.package-error:
   en_US: "Error restoring package %{id}: %{error}"
@@ -2040,6 +2048,13 @@ backup.restore.package-installed:
   es_ES: "No se puede restaurar %{id}: ya está instalado. Desinstálalo primero."
   fr_FR: "Impossible de restaurer %{id} : il est déjà installé. Désinstallez-le d’abord."
   pl_PL: "Nie można przywrócić %{id}: jest już zainstalowany. Najpierw go odinstaluj."
+
+backup.target.cifs.prompt-password:
+  en_US: "CIFS Password: "
+  de_DE: "CIFS-Passwort: "
+  es_ES: "Contraseña CIFS: "
+  fr_FR: "Mot de passe CIFS : "
+  pl_PL: "Hasło CIFS: "
 
 backup.target.partial-mount:
   en_US: "The base filesystem mounted successfully at %{path}."
