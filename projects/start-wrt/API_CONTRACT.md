@@ -1811,7 +1811,7 @@ struct WifiSetResult {
 // A call that changes `country` instead rejects any width above 80 MHz; once the
 // new country is in force, it moves a radio off a channel that country forbids
 // to "auto" and narrows a width its channel cannot carry, as the daemon does at
-// boot.
+// boot. Country changes apply even when a blackout defers the Wi-Fi reload.
 ```
 
 ### `wifi.blackout-get`

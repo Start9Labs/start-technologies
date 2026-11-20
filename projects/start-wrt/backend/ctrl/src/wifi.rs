@@ -1286,10 +1286,13 @@ pub async fn set<C: CtrlContext>(
             }
             Ok(()) => {
                 if ctx.effectful() {
-                    if country_changed && wifi.country.is_none() {
-                        crate::run_quiet_async(
-                            tokio::process::Command::new("iw").args(["reg", "set", "00"]),
-                        )
+                    if country_changed {
+                        // Blackouts defer Wi-Fi reloads, not regulatory-domain changes.
+                        crate::run_quiet_async(tokio::process::Command::new("iw").args([
+                            "reg",
+                            "set",
+                            wifi.country.as_deref().unwrap_or("00"),
+                        ]))
                         .await
                         .map_err(|e| Error::new(eyre!("iw reg set: {e}"), ErrorKind::Network))?;
                     }
