@@ -461,20 +461,24 @@ fn configured_dns_profiles(
     Ok(profiles)
 }
 
+fn forward_options() -> ResolverOpts {
+    let mut options = ResolverOpts::default();
+    options.timeout = Duration::from_secs(5);
+    options
+}
+
 fn gateway_catalog(
     gateway: GatewayId,
     index: u32,
     servers: &VecDeque<SocketAddr>,
 ) -> Result<Arc<Catalog>, Error> {
-    let mut options = ResolverOpts::default();
-    options.timeout = Duration::from_secs(5);
     let forwarder = ForwardZoneHandler::builder_with_config(
         ForwardConfig {
             name_servers: servers
                 .iter()
                 .map(|addr| forward_name_server(*addr))
                 .collect(),
-            options: Some(options),
+            options: Some(forward_options()),
         },
         GatewayRuntime::new(gateway, index),
     )
@@ -487,6 +491,27 @@ fn gateway_catalog(
     );
     Ok(Arc::new(catalog))
 }
+
+/// Resolves through the given servers, over one gateway alone.
+pub(crate) fn gateway_resolver(
+    gateway: GatewayId,
+    index: u32,
+    servers: &VecDeque<SocketAddr>,
+) -> Result<hickory_server::resolver::Resolver<GatewayRuntime>, Error> {
+    hickory_server::resolver::Resolver::builder_with_config(
+        ResolverConfig::from_name_servers(
+            servers
+                .iter()
+                .map(|addr| forward_name_server(*addr))
+                .collect(),
+        ),
+        GatewayRuntime::new(gateway, index),
+    )
+    .with_options(forward_options())
+    .build()
+    .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Network))
+}
+
 /// How a query should be answered.
 enum Resolution {
     /// Answers locally; an absent address family returns NODATA.

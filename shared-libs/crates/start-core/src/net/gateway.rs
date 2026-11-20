@@ -1730,16 +1730,31 @@ async fn get_wan_ipv4(
     parse_echoip(&text)
 }
 
-async fn get_via_gateway(iface: &str, url: &Url, local_ipv4: Ipv4Addr) -> Result<String, Error> {
-    let mut connector = hyper_util::client::legacy::connect::HttpConnector::new();
+/// Connects through one gateway alone, whatever outbound gateway is selected.
+pub(crate) fn gateway_connector<R>(
+    iface: &str,
+    resolver: R,
+) -> Result<hyper_util::client::legacy::connect::HttpConnector<R>, Error> {
+    let mut connector =
+        hyper_util::client::legacy::connect::HttpConnector::new_with_resolver(resolver);
     connector.enforce_http(false);
-    connector.set_local_address(Some(local_ipv4.into()));
     #[cfg(target_os = "linux")]
     {
         let index = if_nametoindex(iface).with_kind(ErrorKind::Network)?;
         connector.set_interface(iface);
         connector.set_mark(Some(gateway_table_id(index)));
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = iface;
+    Ok(connector)
+}
+
+async fn get_via_gateway(iface: &str, url: &Url, local_ipv4: Ipv4Addr) -> Result<String, Error> {
+    let mut connector = gateway_connector(
+        iface,
+        hyper_util::client::legacy::connect::dns::GaiResolver::new(),
+    )?;
+    connector.set_local_address(Some(local_ipv4.into()));
     let tls = native_tls::TlsConnector::new().with_kind(ErrorKind::Network)?;
     let connector = hyper_tls::HttpsConnector::from((connector, tls.into()));
     let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
