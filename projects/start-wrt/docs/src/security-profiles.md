@@ -27,7 +27,7 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
 
 ## Default Profiles
 
-A new router, or one that has been factory reset, comes with four profiles. Updating StartWRT never adds them to an existing router. Admin owns the LAN Ethernet port and the factory Wi-Fi password, when provisioned. Guest, Children and Smart Devices have no Wi-Fi password or Ethernet port until assigned one.
+StartWRT 1.5.0 or later creates four profiles on the first boot of a fresh installation or after a factory reset. Updating from an earlier release preserves the router's existing profiles. Admin owns the LAN Ethernet port and the factory Wi-Fi password, when provisioned. Guest, Children and Smart Devices have no Wi-Fi password or Ethernet port until assigned one.
 
 | Profile           | Subnet           | WAN Access | LAN Access   | DNS                                            | WAN Blackout      |
 | ----------------- | ---------------- | ---------- | ------------ | ---------------------------------------------- | ----------------- |
