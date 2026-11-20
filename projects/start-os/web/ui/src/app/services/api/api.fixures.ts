@@ -795,7 +795,7 @@ export namespace Mock {
               ],
             ],
             hardwareAcceleration: false,
-            security: false,
+            security: true,
             userspaceFilesystems: false,
             virtualNetworking: false,
             hardwareVirtualization: false,
@@ -806,7 +806,7 @@ export namespace Mock {
         otherVersions: {
           '0.18.0:0.0.1': {
             releaseNotes: 'Upstream release and minor fixes.',
-            security: true,
+            security: false,
           },
           '0.17.4-beta:1.0-alpha': {
             releaseNotes: 'Upstream release to 0.17.4',
@@ -864,7 +864,7 @@ export namespace Mock {
           },
           '0.17.5:0': {
             releaseNotes: 'Upstream release to 0.17.5',
-            security: false,
+            security: true,
           },
         },
       },
