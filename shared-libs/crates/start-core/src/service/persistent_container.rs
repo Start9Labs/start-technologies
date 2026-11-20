@@ -27,9 +27,7 @@ use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::source::FileSource;
 use crate::service::effects::context::EffectContext;
 use crate::service::effects::handler;
-use crate::service::rpc::{
-    CallbackHandle, CallbackId, CallbackParams, ExitParams, InitKind, InitParams,
-};
+use crate::service::rpc::{CallbackHandle, CallbackId, ExitParams, InitKind, InitParams};
 use crate::service::{ProcedureName, Service, rpc};
 use crate::util::Invoke;
 use crate::util::cleanup::spawn_filesystem_cleanup;
@@ -42,6 +40,7 @@ use crate::{ARCH, DATA_DIR, ImageId, PACKAGE_DATA, VolumeId};
 const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(120);
 const DROP_RPC_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Effects remain available through `uninit`; server completion precedes resource teardown.
 async fn shutdown_rpc_server<ExitFuture, ExitError, Shutdown, ServerFuture>(
     exit: ExitFuture,
     shutdown: Shutdown,
@@ -567,16 +566,24 @@ impl PersistentContainer {
     }
 
     #[instrument(skip_all)]
-    pub async fn callback(&self, handle: CallbackHandle, args: Vector<Value>) -> Result<(), Error> {
+    /// Returns a transport-only notification future without retaining service resources.
+    pub fn callback(
+        &self,
+        handle: CallbackHandle,
+        args: Vector<Value>,
+    ) -> impl Future<Output = Result<(), Error>> + Send + 'static + use<> {
         let mut params = None;
         self.state.send_if_modified(|s| {
             params = handle.params(&mut s.callbacks, args);
             params.is_some()
         });
-        if let Some(params) = params {
-            self._callback(params).await?;
+        let client = self.rpc_client.clone();
+        async move {
+            if let Some(params) = params {
+                client.notify(rpc::Callback, params).await?;
+            }
+            Ok(())
         }
-        Ok(())
     }
 
     #[instrument(skip_all)]
@@ -622,12 +629,6 @@ impl PersistentContainer {
             fut.await?
         })
     }
-
-    #[instrument(skip_all)]
-    async fn _callback(&self, params: CallbackParams) -> Result<(), Error> {
-        self.rpc_client.notify(rpc::Callback, params).await?;
-        Ok(())
-    }
 }
 
 impl Drop for PersistentContainer {
@@ -639,6 +640,9 @@ impl Drop for PersistentContainer {
         }
     }
 }
+
+#[cfg(test)]
+mod uninit_tests;
 
 #[cfg(test)]
 mod tests {

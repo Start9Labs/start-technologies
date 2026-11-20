@@ -20,6 +20,8 @@ impl ShutdownHandle {
 }
 
 impl<Context: crate::Context> Server<Context> {
+    /// Shutdown stops accepting connections and drains existing connections and their requests.
+    /// Input EOF does not cancel accepted requests.
     pub fn run_socket<'a, T: AsyncRead + AsyncWrite + Send>(
         &'a self,
         listener: impl Stream<Item = std::io::Result<T>> + 'a,

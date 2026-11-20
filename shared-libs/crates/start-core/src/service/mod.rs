@@ -233,6 +233,7 @@ impl ServiceRef {
         }
         .boxed())
     }
+    /// Keeps effects available through `uninit` and joins their server before resource teardown.
     pub async fn shutdown(self, uninit: Option<ExitParams>) -> Result<(), Error> {
         if let Some((hdl, shutdown)) = self.seed.persistent_container.rpc_server.send_replace(None)
         {
@@ -262,7 +263,7 @@ impl ServiceRef {
         })?;
         service
             .actor
-            .shutdown(crate::util::actor::PendingMessageStrategy::FinishAll { timeout: None }) // TODO timeout
+            .shutdown(crate::util::actor::PendingMessageStrategy::FinishAll { timeout: None })
             .await;
         Arc::try_unwrap(service.seed)
             .map_err(|_| {
