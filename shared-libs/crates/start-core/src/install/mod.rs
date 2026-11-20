@@ -159,24 +159,35 @@ pub async fn install(
         .await?,
     )?;
 
-    let (_, asset) = package
-        .best
-        .get(&version)
-        .and_then(|i| i.s9pks.first())
-        .ok_or_else(|| {
-            Error::new(
-                eyre!(
-                    "{}",
-                    t!(
-                        "install.version-not-found-on-registry",
-                        id = id,
-                        version = version,
-                        registry = registry
-                    )
-                ),
-                ErrorKind::NotFound,
-            )
-        })?;
+    let info = package.best.get(&version);
+    if info.is_some_and(|info| {
+        !info
+            .metadata
+            .os_version
+            .satisfies(&crate::registry::device_info::OsInfo::from(&ctx).compat)
+    }) {
+        return Err(Error::new(
+            eyre!(
+                "{}",
+                t!("install.requires-os-update", id = id, version = version)
+            ),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    let (_, asset) = info.and_then(|i| i.s9pks.first()).ok_or_else(|| {
+        Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "install.version-not-found-on-registry",
+                    id = id,
+                    version = version,
+                    registry = registry
+                )
+            ),
+            ErrorKind::NotFound,
+        )
+    })?;
 
     let policy = trusted_keys::signer_policy(
         trusted_keys::required(&ctx, TrustContext::Marketplace, trust).await?,

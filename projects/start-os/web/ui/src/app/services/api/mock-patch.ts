@@ -74,6 +74,13 @@ function mockStart9Key(
   }
 }
 
+function mockUpdateTarget(
+  pkg: T.GetPackageResponse,
+  version: string,
+): T.PackageUpdateTarget {
+  return { version, ...pkg.best[version]! }
+}
+
 /** The community registry mocks an unreachable registry. */
 export function mockRegistryCache(
   url: string,
@@ -83,10 +90,26 @@ export function mockRegistryCache(
     ? {
         info,
         packages: {},
+        updateTargets: {},
         status: 'error',
         error: `error sending request for url (${registryUrl(url)}): connection timed out`,
       }
-    : { info, packages: Mock.RegistryPackages, status: 'connected' }
+    : {
+        info,
+        packages: Mock.RegistryPackages,
+        updateTargets: {
+          bitcoind: mockUpdateTarget(
+            Mock.OtherPackageVersions['bitcoind']!['=26.1.0:0.1.0']!,
+            '26.1.0:0.1.0',
+          ),
+          lnd: mockUpdateTarget(Mock.RegistryPackages['lnd']!, '0.18.0:0.0.1'),
+          'btc-rpc-proxy': mockUpdateTarget(
+            Mock.RegistryPackages['btc-rpc-proxy']!,
+            '0.4.0:0',
+          ),
+        },
+        status: 'connected',
+      }
 }
 
 export function mockOsUpdateCache(
@@ -682,7 +705,7 @@ export const mockPatchData: DataModel = {
       outboundDns: null,
     },
     unreadNotificationCount: 5,
-    packageVersionCompat: '>=0.3.0 <=0.3.6',
+    packageVersionCompat: '>=0.3.0 <=0.4.0',
     postInitMigrationTodos: {},
     latestMigrationRevision: 0,
     statusInfo: {

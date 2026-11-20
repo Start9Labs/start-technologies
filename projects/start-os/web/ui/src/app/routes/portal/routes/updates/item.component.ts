@@ -1,29 +1,25 @@
-import { DatePipe } from '@angular/common'
+import { DatePipe, NgTemplateOutlet } from '@angular/common'
 import { Component, computed, inject, input, signal } from '@angular/core'
-import { RouterLink } from '@angular/router'
 import {
   MarketplaceIconDirective,
   MarketplacePkg,
   matchingTrustedKeys,
   MarketplaceSignerChipsComponent,
   packageSigners,
+  pendingReleases,
 } from '@start9labs/marketplace'
 import {
   DialogService,
+  Exver,
   i18nPipe,
   LocalizePipe,
   MarkdownPipe,
   SafeLinksDirective,
 } from '@start9labs/shared'
-import {
-  TuiButton,
-  TuiExpand,
-  TuiIcon,
-  TuiLink,
-  TuiTitle,
-} from '@taiga-ui/core'
+import { TuiButton, TuiExpand, TuiIcon, TuiTitle } from '@taiga-ui/core'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import {
+  TuiAccordion,
   TuiAvatar,
   TuiButtonLoading,
   TuiChevron,
@@ -118,10 +114,6 @@ import UpdatesComponent from './updates.component'
                 | installingProgress) || 0
             "
           />
-        } @else if (pending()) {
-          <span class="g-secondary pending">
-            {{ 'Finding suitable version...' | i18n }}
-          </span>
         } @else {
           <button
             tuiIconButton
@@ -163,35 +155,40 @@ import UpdatesComponent from './updates.component'
             <marketplace-signer-chips [keys]="signers()" />
           </p>
           <p tuiTitle>
-            <span>
-              <b>{{ 'Release notes' | i18n }}</b>
-              (
-              <a
-                tuiLink
-                iconEnd="@tui.external-link"
-                routerLink="/marketplace"
-                [queryParams]="{
-                  registry: parent.current()?.url,
-                  id: item().id,
-                  flavor: item().flavor,
-                }"
-                [textContent]="'View in Marketplace' | i18n"
-              ></a>
-              )
-            </span>
+            <b>{{ 'Release notes' | i18n }}</b>
           </p>
-          <p
-            safeLinks
-            [innerHTML]="
-              item().releaseNotes
-                | localize: item().defaultLocale
-                | markdown
-                | dompurify
-            "
-          ></p>
+          @if (releases().length > 1) {
+            <tui-accordion size="s" [closeOthers]="false">
+              @for (release of releases(); track release.version) {
+                <button [tuiAccordion]="$first">
+                  {{ release.version }}
+                </button>
+                <tui-expand>
+                  <ng-container
+                    *ngTemplateOutlet="notes; context: { $implicit: release }"
+                  />
+                </tui-expand>
+              }
+            </tui-accordion>
+          } @else {
+            <ng-container
+              *ngTemplateOutlet="notes; context: { $implicit: item() }"
+            />
+          }
         </tui-expand>
       </td>
     </tr>
+    <ng-template #notes let-release>
+      <p
+        safeLinks
+        [innerHTML]="
+          release.releaseNotes
+            | localize: release.defaultLocale
+            | markdown
+            | dompurify
+        "
+      ></p>
+    </ng-template>
   `,
   styles: `
     :host {
@@ -268,9 +265,8 @@ import UpdatesComponent from './updates.component'
       margin: 1rem 0;
     }
 
-    .pending {
-      margin-right: 0.5rem;
-      font-style: italic;
+    tui-accordion {
+      margin-block-end: 1rem;
     }
 
     .mobile {
@@ -326,8 +322,9 @@ import UpdatesComponent from './updates.component'
     MarketplaceIconDirective,
     MarketplaceSignerChipsComponent,
     NgDompurifyPipe,
-    RouterLink,
+    NgTemplateOutlet,
     SafeLinksDirective,
+    TuiAccordion,
     TuiAvatar,
     TuiButton,
     TuiButtonLoading,
@@ -335,7 +332,6 @@ import UpdatesComponent from './updates.component'
     TuiExpand,
     TuiFade,
     TuiIcon,
-    TuiLink,
     TuiProgressCircle,
     TuiSkeleton,
     TuiTitle,
@@ -347,6 +343,7 @@ export class UpdatesItemComponent {
   private readonly dialog = inject(DialogService)
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
   private readonly alerts = inject(MarketplaceAlertsService)
+  private readonly exver = inject(Exver)
 
   private readonly trust = inject(TrustedKeysService)
   readonly parent = inject(UpdatesComponent)
@@ -357,8 +354,14 @@ export class UpdatesItemComponent {
   readonly item = input.required<MarketplacePkg>()
   readonly local =
     input.required<PackageDataEntry<InstalledState | UpdatingState>>()
-  readonly pending = input.required<boolean>()
 
+  protected readonly releases = computed(() =>
+    pendingReleases(
+      this.exver,
+      this.item(),
+      this.local().stateInfo.manifest.version,
+    ),
+  )
   protected readonly signers = computed(() => packageSigners(this.item()))
   protected readonly trusted = computed(() =>
     matchingTrustedKeys(this.signers(), this.trust.keys() ?? {}, 'marketplace'),

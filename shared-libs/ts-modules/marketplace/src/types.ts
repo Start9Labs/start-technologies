@@ -59,6 +59,8 @@ export type Marketplace = Record<string, StoreDataWithUrl | null>
 export type StoreData = RegistryObservation & {
   info: T.RegistryInfo
   packages: MarketplacePkg[]
+  /** Installable updates of installed packages; absent outside StartOS. */
+  updates?: MarketplacePkg[]
 }
 
 export type MarketplacePkgBase = T.PackageVersionInfo & {

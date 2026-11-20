@@ -377,6 +377,12 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
 
     let snapshot = fixture.main.peek().await;
     let locales = IndexLocales::of(snapshot.as_index()).unwrap();
+    for language in ["pl_PL", "en_US"] {
+        assert_eq!(
+            IndexView::localized(&snapshot, &locales, None, wire("0.4.3"), language).unwrap(),
+            IndexView::localized(&snapshot, &locales, None, wire("0.4.1.3"), language).unwrap()
+        );
+    }
     let mirrors = IndexMirrors::default();
     let reader_mirror =
         |key: Option<AnyVerifyingKey>, wire: WireCompatibility, language: Option<&str>| {

@@ -50,7 +50,7 @@ impl IndexView {
             None => ViewLanguage::Default,
         };
         Ok(Self {
-            wire,
+            wire: wire.for_index(),
             language: Some(language),
         })
     }
@@ -59,7 +59,7 @@ impl IndexView {
 impl From<WireCompatibility> for IndexView {
     fn from(wire: WireCompatibility) -> Self {
         Self {
-            wire,
+            wire: wire.for_index(),
             language: None,
         }
     }

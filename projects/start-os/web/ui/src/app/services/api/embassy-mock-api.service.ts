@@ -1412,9 +1412,7 @@ export class MockApiService extends ApiService implements StartupApiService {
       if (existing && existing.stateInfo.state === 'installed') {
         // Updating: preserve the installed manifest so LocalPackagesService
         // keeps the row visible and the item component renders its progress
-        // circle. Previously we always used the 'installing' state here, which
-        // dropped the row out of localPkgs mid-update and left the Updates tab
-        // briefly showing "Finding suitable version..." before the row vanished.
+        // circle.
         const manifest = existing.stateInfo.manifest
         finalManifest = { ...manifest, version: params.version }
         value = {

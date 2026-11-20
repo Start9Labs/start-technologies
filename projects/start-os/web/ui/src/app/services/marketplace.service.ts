@@ -201,22 +201,31 @@ export class MarketplaceService extends AbstractMarketplaceService {
     url: string,
     entry: T.Public['registryCache'][string],
   ): StoreDataWithUrl {
-    const packages = packagesResponse(entry.packages)
+    const listings = packagesResponse(entry.packages)
+    const packages = Object.entries(listings).flatMap(([id, listed]) => {
+      const pkgInfo = withUpdateTarget(
+        this.exver,
+        listed,
+        entry.updateTargets?.[id],
+      )
+      return Object.keys(pkgInfo.best).flatMap(version => {
+        const pkg = this.convertRegistryPkgToMarketplacePkg(
+          id,
+          version,
+          this.exver.getFlavor(version),
+          pkgInfo,
+        )
+        return pkg ? [pkg] : []
+      })
+    })
     return {
       url,
       info: this.registryInfo(entry.info),
       status: registryStatus(entry),
       error: entry.error,
-      packages: Object.entries(packages).flatMap(([id, pkgInfo]) =>
-        Object.keys(pkgInfo.best).flatMap(version => {
-          const pkg = this.convertRegistryPkgToMarketplacePkg(
-            id,
-            version,
-            this.exver.getFlavor(version),
-            pkgInfo,
-          )
-          return pkg ? [pkg] : []
-        }),
+      packages,
+      updates: packages.filter(
+        pkg => entry.updateTargets?.[pkg.id]?.version === pkg.version,
       ),
     }
   }
@@ -226,7 +235,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
     id: string,
     version: string | null,
     flavor: string | null,
-    sourceVersion: string | null = null,
   ): Observable<MarketplacePkg | null> {
     return this.watchRegistry$(url).pipe(
       filter(registryReady),
@@ -237,7 +245,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
               registry: url,
               id,
               targetVersion: version ? `=${version}` : null,
-              sourceVersion,
               otherVersions: 'short',
             })
             .then(packageResponse),
@@ -330,6 +337,29 @@ export class MarketplaceService extends AbstractMarketplaceService {
   async setOsRegistry(url: string): Promise<string[]> {
     return this.api.rpc.server.registries.setOs({ url })
   }
+}
+
+/** Lists the update target in place of its flavor's best release, which stays selectable. */
+function withUpdateTarget(
+  exver: Exver,
+  pkgInfo: GetPackageRes,
+  target: T.PackageUpdateTarget | undefined,
+): GetPackageRes {
+  if (!target) return pkgInfo
+  const { version, ...info } = target
+  const flavor = exver.getFlavor(version)
+  const best = { ...pkgInfo.best }
+  const otherVersions = { ...pkgInfo.otherVersions }
+  for (const [listed, release] of Object.entries(pkgInfo.best)) {
+    if (exver.getFlavor(listed) !== flavor) continue
+    delete best[listed]
+    otherVersions[listed] = {
+      releaseNotes: release.releaseNotes,
+      defaultLocale: release.defaultLocale,
+    }
+  }
+  delete otherVersions[version]
+  return { ...pkgInfo, best: { ...best, [version]: info }, otherVersions }
 }
 
 function toStoreIdentity(url: string, name?: string | null): StoreIdentity {

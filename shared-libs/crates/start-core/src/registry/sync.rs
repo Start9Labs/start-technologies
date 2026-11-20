@@ -11,7 +11,9 @@ use patch_db::ModelExt;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::PackageId;
 use crate::context::RpcContext;
+use crate::db::model::package::{ManifestPreference, PackageStateMatchModelRef};
 use crate::db::model::public::ServerInfo;
 use crate::db::model::{Database, DatabaseModel};
 use crate::middleware::auth::signature::SigningContext;
@@ -20,10 +22,14 @@ use crate::registry::FullIndex;
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::info::RegistryInfo;
 use crate::registry::os::index::{OsIndex, OsVersionInfo};
-use crate::registry::package::get::{GetPackageParams, GetPackagesResponse, select_packages};
+use crate::registry::package::get::{
+    GetPackageParams, GetPackageResponse, GetPackagesResponse, PackageDetailLevel, select_packages,
+};
+use crate::registry::package::index::{PackageIndex, PackageVersionInfo};
 use crate::trusted_keys::connection::{
     connected_registry_urls, is_connected, refresh_registry, registry_url, same_registry,
 };
+use crate::util::VersionString;
 use crate::util::future::NonDetachingJoinHandle;
 
 pub(crate) mod connection;
@@ -52,9 +58,24 @@ pub struct RegistryCache {
     /// Failure of the latest synchronization attempt; absent while connecting or connected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Newest installable release of each installed package's flavor that its installed version can migrate to.
+    #[serde(default)]
+    pub update_targets: UpdateTargets,
 }
 
+pub type UpdateTargets = BTreeMap<PackageId, PackageUpdateTarget>;
+
 rpc_toolkit::reflect_ts!(RegistryCache);
+
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageUpdateTarget {
+    pub version: VersionString,
+    #[serde(flatten)]
+    pub info: PackageVersionInfo,
+}
+
+rpc_toolkit::reflect_ts!(PackageUpdateTarget);
 
 /// Compatible releases from the selected StartOS update source.
 #[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
@@ -200,6 +221,8 @@ pub async fn watch_registries(
     context: impl Fn() -> Option<RpcContext> + Send + Sync + 'static,
 ) {
     let context: ContextProvider = Arc::new(context);
+    let _update_targets: NonDetachingJoinHandle<()> =
+        tokio::spawn(watch_installed_versions(db.clone(), context.clone())).into();
     let mut watch = RegistrySettingsWatch::new(&db).await;
     let mut tasks = RegistryTasks::new();
     loop {
@@ -417,6 +440,7 @@ fn set_status(
                         packages: BTreeMap::new(),
                         status,
                         error: None,
+                        update_targets: BTreeMap::new(),
                     });
                     cache.status = status;
                     cache.error = error.map(str::to_owned);
@@ -444,6 +468,107 @@ fn set_status(
         }
     }
     sync_os_default_locale(db)
+}
+
+fn installed_versions(db: &DatabaseModel) -> Result<BTreeMap<PackageId, VersionString>, Error> {
+    let mut installed = BTreeMap::new();
+    for (id, entry) in db.as_public().as_package_data().as_entries()? {
+        if matches!(
+            entry.as_state_info().as_match(),
+            PackageStateMatchModelRef::Installed(_) | PackageStateMatchModelRef::Updating(_)
+        ) {
+            let manifest = entry.as_state_info().as_manifest(ManifestPreference::Old);
+            installed.insert(id, manifest.as_version().de()?);
+        }
+    }
+    Ok(installed)
+}
+
+/// Reachability follows the target's `sourceVersion`, as in `package.get`.
+fn update_targets(
+    index: &Model<PackageIndex>,
+    installed: &BTreeMap<PackageId, VersionString>,
+    device: &DeviceInfo,
+) -> Result<UpdateTargets, Error> {
+    let mut targets = BTreeMap::new();
+    for (id, version) in installed {
+        let response: GetPackageResponse = from_value(select_packages(
+            index,
+            &GetPackageParams {
+                id: Some(id.clone()),
+                target_version: None,
+                source_version: Some(version.clone()),
+                device_info: Some(device.clone()),
+                other_versions: Some(PackageDetailLevel::None),
+                all_revisions: false,
+                reader: Default::default(),
+            },
+        )?)?;
+        if let Some((target, info)) = response.best.into_iter().find(|(target, _)| {
+            target.flavor() == version.flavor()
+                && target.partial_cmp(version) == Some(std::cmp::Ordering::Greater)
+        }) {
+            targets.insert(
+                id.clone(),
+                PackageUpdateTarget {
+                    version: target,
+                    info,
+                },
+            );
+        }
+    }
+    Ok(targets)
+}
+
+fn refresh_update_targets(db: &mut DatabaseModel, device: &DeviceInfo) -> Result<(), Error> {
+    let installed = installed_versions(db)?;
+    let targets = db
+        .as_private()
+        .as_registry_indexes()
+        .as_entries()?
+        .into_iter()
+        .map(|(url, index)| Ok((url, update_targets(index.as_package(), &installed, device)?)))
+        .collect::<Result<Vec<_>, Error>>()?;
+    for (url, targets) in targets {
+        if let Some(cache) = db.as_public_mut().as_registry_cache_mut().as_idx_mut(&url) {
+            cache.as_update_targets_mut().ser(&targets)?;
+        }
+    }
+    Ok(())
+}
+
+/// Recomputes update targets whenever an installed package's version changes.
+async fn watch_installed_versions(db: TypedPatchDb<Database>, context: ContextProvider) {
+    let mut watch = db.watch("/public/packageData".parse().unwrap()).await;
+    let mut last = None;
+    loop {
+        if watch.peek_and_mark_seen().is_err() {
+            return;
+        }
+        let result = async {
+            let installed = installed_versions(&db.peek().await)?;
+            if last.as_ref() == Some(&installed) {
+                return Ok(());
+            }
+            let Some(ctx) = context() else {
+                return Ok(());
+            };
+            let mut device = DeviceInfo::load(&ctx).await?;
+            device.os.language = None;
+            db.mutate(|db| refresh_update_targets(db, &device))
+                .await
+                .result?;
+            last = Some(installed);
+            Ok::<_, Error>(())
+        }
+        .await;
+        if let Err(error) = result {
+            tracing::warn!(?error, "Could not refresh package update targets");
+        }
+        if watch.changed().await.is_err() {
+            return;
+        }
+    }
 }
 
 async fn publish(
@@ -480,12 +605,17 @@ fn publish_snapshot(
                     id: None,
                     target_version: None,
                     source_version: None,
-                    device_info: Some(package_device),
-                    other_versions: Some(crate::registry::package::get::PackageDetailLevel::Short),
+                    device_info: Some(package_device.for_listing()),
+                    other_versions: Some(PackageDetailLevel::Short),
                     all_revisions: false,
                     reader: Default::default(),
                 },
             )?)?;
+            let update_targets = update_targets(
+                index.as_package(),
+                &installed_versions(db)?,
+                &package_device,
+            )?;
             refresh_registry(db, url, &info)?;
             db.as_private_mut()
                 .as_registry_indexes_mut()
@@ -497,6 +627,7 @@ fn publish_snapshot(
                     packages,
                     status: RegistryStatus::Connected,
                     error: None,
+                    update_targets,
                 },
             )?;
         }
@@ -565,7 +696,7 @@ fn cached_response(
         }
         "package.get" => {
             let mut params: GetPackageParams = from_value(params.clone())?;
-            params.device_info = device.cloned();
+            params.device_info = device.map(DeviceInfo::for_listing);
             let empty = Model::new(&crate::registry::package::index::PackageIndex::default())?;
             let index = snapshot.as_private().as_registry_indexes().as_idx(url);
             Ok(Some(select_packages(

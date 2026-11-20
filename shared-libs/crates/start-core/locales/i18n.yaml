@@ -1529,6 +1529,13 @@ install.invalid-min-max:
   fr_FR: 'Doit être "min" ou "max".'
   pl_PL: 'Musi to być "min" lub "max".'
 
+install.requires-os-update:
+  en_US: "%{id} %{version} requires a newer version of StartOS. Update your server to install it."
+  de_DE: "%{id} %{version} erfordert eine neuere Version von StartOS. Aktualisieren Sie Ihren Server, um es zu installieren."
+  es_ES: "%{id} %{version} requiere una versión más reciente de StartOS. Actualice su servidor para instalarlo."
+  fr_FR: "%{id} %{version} nécessite une version plus récente de StartOS. Mettez à jour votre serveur pour l'installer."
+  pl_PL: "%{id} %{version} wymaga nowszej wersji StartOS. Zaktualizuj serwer, aby go zainstalować."
+
 install.select-version:
   en_US: "Multiple flavors of %{id} found. Please select one of the following versions to install:"
   de_DE: "Mehrere Varianten von %{id} gefunden. Bitte eine der folgenden Versionen zur Installation auswählen:"
