@@ -1040,7 +1040,7 @@ mod tests {
             );
             assert_eq!(
                 applied_migration_revision(&mut db).unwrap(),
-                VersionT::migration_revision(current)
+                current.migration_revision()
             );
         }
     }
