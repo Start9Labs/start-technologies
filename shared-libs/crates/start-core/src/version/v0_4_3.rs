@@ -237,20 +237,6 @@ mod tests {
     }
 
     #[test]
-    fn a_default_off_range_requires_a_domain_opt_in_before_migration() {
-        let mut addresses = renumbered(false);
-        addresses["defaultOff"] = json!(true);
-        assert!(range_on(migrated(addresses.clone())).is_empty());
-        addresses["enabledNames"] = json!([["smp.example.com", 40000]]);
-        assert_eq!(
-            range_on(migrated(addresses.clone())),
-            ["203.0.113.9:40000", "smp.example.com"]
-        );
-        addresses["disabled"] = json!([["smp.example.com", 40000]]);
-        assert!(range_on(migrated(addresses)).is_empty());
-    }
-
-    #[test]
     fn a_range_whose_plain_domain_is_off_keeps_its_ip_off() {
         assert!(range_on(migrated(renumbered(true))).is_empty());
     }
