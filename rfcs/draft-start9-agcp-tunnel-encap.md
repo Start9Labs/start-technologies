@@ -62,8 +62,9 @@ informative:
 This document extends the Authenticated Gateway Control Protocol (AGCP)
 for hosts that reach their gateway through an authenticated tunnel, such
 as WireGuard. The two endpoints of the tunnel measure the largest packet
-the tunnel's path delivers, and may agree to carry the host's traffic in a
-GRE encapsulation that they fragment and reassemble inside the tunnel.
+the tunnel's path delivers, and agree to carry the host's traffic in a
+GRE encapsulation that they fragment and reassemble inside the tunnel
+when that path is narrow.
 Traffic through the tunnel then sees a fixed MTU while delivery packet
 fragments are sized to the tunnel's measured delivery capacity. The
 underlying tunnel transport retains its own fragmentation behavior.
@@ -121,8 +122,8 @@ reassemble at the egress. The two endpoints of an AGCP tunnel binding:
    relying on no unauthenticated signal ({{measurement}});
 2. size their tunnel to the measurement, clamping forwarded TCP to it
    ({{sizing}}); and
-3. optionally agree, through an AGCP grant, to carry the binding's
-   traffic in GRE {{RFC2784}} with a fixed MTU, fragmenting the GRE
+3. when the path needs it, agree through an AGCP grant to carry the
+   binding's traffic in GRE {{RFC2784}} with a fixed MTU, fragmenting the GRE
    delivery packets before the tunnel encrypts them
    ({{encapsulation}}).
 
@@ -191,9 +192,9 @@ This section is informative.
 2. Each sizes its sending path into the tunnel to the measurement, and
    the gateway clamps forwarded TCP to it ({{sizing}}).
 3. The host reads the gateway's capabilities with `gateway.info`. When
-   the gateway offers `tunnel-encap`, the host MAY call
-   `tunnel-encap.set`, reporting its measurement and requesting a shim
-   MTU ({{m-encap-set}}).
+   the gateway offers `tunnel-encap` and the path needs it
+   ({{capability}}), the host calls `tunnel-encap.set`, reporting its
+   measurement and requesting a shim MTU ({{m-encap-set}}).
 4. Both endpoints create the shim, route the binding's traffic through
    it, and fragment delivery packets larger than the tunnel path MTU
    before the tunnel encrypts them ({{encapsulation}}).
@@ -289,9 +290,8 @@ bypasses that limit. Raising the probe ceiling MUST NOT raise the limit
 on ordinary traffic before a larger probe succeeds.
 
 An endpoint with IPv6 tunnel addresses MUST NOT size an interface or
-route below 1280. When its tunnel path MTU is below 1280, it keeps 1280
-for IPv6 and uses the shim ({{encapsulation}}) or reports that IPv6
-through the tunnel is unusable.
+route below 1280. A tunnel path MTU below 1280 is carried by the shim
+({{capability}}), and endpoints do not report it to the user.
 
 An endpoint that forwards TCP over the binding MUST clamp the MSS in
 both directions, including SYN-ACKs, to fit the tunnel's ordinary-traffic
@@ -402,8 +402,9 @@ active grant.
 
 This extension adds the capability `"tunnel-encap"`. A gateway MUST NOT
 grant it to an enrollment whose binding is not a tunnel binding. A host
-SHOULD request a shim only when its tunnel path MTU is below the shim
-MTU plus the delivery headers, or below 1280 when it carries IPv6.
+whose enrollment has the capability MUST request a shim when its tunnel
+path MTU is below 1280, and SHOULD request one when its tunnel path MTU is
+below the shim MTU plus the delivery headers.
 
 The `gateway.info` result's `limits` object adds `maxShimMtu`, the
 largest shim MTU the gateway grants, for an enrollment with the
