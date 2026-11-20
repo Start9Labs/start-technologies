@@ -64,9 +64,9 @@ for hosts that reach their gateway through an authenticated tunnel, such
 as WireGuard. The two endpoints of the tunnel measure the largest packet
 the tunnel's path delivers, and may agree to carry the host's traffic in a
 GRE encapsulation that they fragment and reassemble inside the tunnel.
-Traffic through the tunnel then sees a fixed MTU, independent of how many
-other tunnels or narrow links the path crosses, and the public network
-sees only tunnel packets that fit the path.
+Traffic through the tunnel then sees a fixed MTU while delivery packet
+fragments are sized to the tunnel's measured delivery capacity. The
+underlying tunnel transport retains its own fragmentation behavior.
 
 --- middle
 
@@ -127,10 +127,11 @@ reassemble at the egress. The two endpoints of an AGCP tunnel binding:
    ({{encapsulation}}).
 
 Delivery packet fragments travel only inside the authenticated tunnel.
-Every packet the public network carries is a tunnel packet no larger
-than the measured path MTU, so the hazards of {{RFC8900}} that arise from
-middleboxes do not apply. The hosts and services beyond the tunnel see a
-fixed MTU, IPv6 included, however narrow the path.
+The hosts and services beyond the tunnel see a fixed MTU, IPv6 included,
+provided the tunnel carries those delivery fragments. This does not
+exclude fragmentation of the tunnel transport's outer packets
+({{probes}}); those fragments remain subject to the hazards of
+{{RFC8900}}.
 
 ## Scope {#scope}
 
@@ -206,36 +207,48 @@ Steps 1 and 2 need no AGCP exchange and improve the tunnel on their own.
 ## Probes {#probes}
 
 An endpoint measures the tunnel path MTU with ICMP Echo Requests
-{{RFC792}}, or ICMPv6 Echo Requests {{RFC4443}} when it has no IPv4 tunnel
-address, sent through the tunnel to the peer's tunnel address. A probe of
-size N is an Echo Request whose IP packet is N bytes long. IPv4 probes
-MUST set the Don't Fragment flag. A probe succeeds when the matching Echo
+{{RFC792}} when both endpoints have IPv4 tunnel addresses, or ICMPv6 Echo
+Requests {{RFC4443}} otherwise, sent through the tunnel to the peer's
+tunnel address of the common family. A probe of size N is an Echo Request
+whose IP packet is N bytes long. A probe succeeds when the matching Echo
 Reply arrives.
 
-Because the reply is the same size as the request, a successful probe
-shows that packets of N bytes cross the tunnel in both directions.
-Probes and their replies travel through the tunnel, never through the
-shim.
+Requests and replies MUST enter the tunnel as single, unfragmented IP
+packets. Both IPv4 messages MUST set the Don't Fragment flag; neither
+IPv6 message may contain a Fragment header. Probes and their replies
+travel through the tunnel, never through the shim.
 
-Tunnel endpoints implementing this extension MUST reply to Echo Requests
-that arrive through the tunnel from their peer, up to the MTU of their
-tunnel interface. They MUST NOT rate-limit those replies below one per
-probe interval that {{search}} permits.
+Endpoints MUST provide a probe path that can send and receive packets up
+to the local maximum of {{search}}, independently of the ordinary-traffic
+limit of {{sizing}} and cached PMTU limits. A local send rejection MUST
+NOT count as a failed path probe. Tunnel endpoints implementing this
+extension MUST reply to Echo Requests from their peer up to that local
+maximum, even when their ordinary-traffic limit is smaller. They MUST
+NOT rate-limit those replies below one per probe interval that
+{{search}} permits.
+
+Because the reply is the same size as the request, a successful probe
+shows that packets of N bytes cross the tunnel in both directions
+without fragmentation of those inner IP packets. Their fragmentation
+restrictions do not apply to the tunnel's outer packets or those of a
+nested tunnel. A successful probe therefore measures delivery capacity,
+not the absence of outer IP fragmentation.
 
 ## Search {#search}
 
-The search range is from 1280 to the endpoint's local maximum, the MTU
-of the interface that carries the tunnel's outer packets minus the
-tunnel's per-packet overhead for that interface's address family.
+The endpoint's local maximum is the MTU of the interface that carries the
+tunnel's outer packets minus the tunnel's per-packet overhead for that
+interface's address family. The initial probe size is the lower of 1280
+and that local maximum. The endpoint searches toward the local maximum
+when the initial size succeeds, for example by bisection.
 
-An endpoint searches the range, for example by bisection. A size fails
-only after three consecutive probes of that size go unanswered, each
-sent at least one second after the previous one. A single lost probe is
+A size fails only after three consecutive probes of that size go
+unanswered, each sent at least one second after the previous one. A single lost probe is
 not evidence of an MTU limit. The result is the largest size that
 succeeded.
 
-When probes of every size in the range fail, including 1280, the
-endpoint repeats the search below 1280, down to 576 for IPv4 probes. When
+When the initial size fails, the endpoint searches below it, down to 576
+for either probe address family. When the local maximum is below 576 or
 no probe of any size succeeds, the result is unknown: the endpoint keeps
 its previous tunnel sizing and MUST NOT treat the failure as a
 measurement. Some tunnel peers, such as a phone's WireGuard client,
@@ -256,31 +269,37 @@ An endpoint MUST measure again:
 - at least every 600 seconds, starting from the current result, to
   detect a path MTU increase.
 
-Re-measurement after black-hole detection starts from 1280.
+Re-measurement after black-hole detection starts with the initial probe
+size of {{search}}.
 
 Probing a size above the current result does not change the sizing in
 use until the probe succeeds.
 
 # Tunnel Sizing {#sizing}
 
-An endpoint sizes its sending path into the tunnel to its current tunnel
-path MTU:
+An endpoint limits ordinary traffic sent to a peer through the tunnel to
+its current tunnel path MTU. The limit MUST cover every destination
+routed through that peer, including networks behind a router acting as
+the host, not just the peer's own tunnel addresses.
 
-- An endpoint whose tunnel has one peer sets the tunnel interface's MTU.
-- A gateway whose tunnel interface serves several peers sets the MTU of
-  the routes to each peer's tunnel addresses. The interface MTU is then
-  the largest of those route MTUs.
+The tunnel interface MUST remain large enough for the probes and replies
+of {{probes}}. Endpoints can apply the ordinary-traffic limit with
+per-peer routes or equivalent forwarding controls, while the probe path
+bypasses that limit. Raising the probe ceiling MUST NOT raise the limit
+on ordinary traffic before a larger probe succeeds.
 
 An endpoint with IPv6 tunnel addresses MUST NOT size an interface or
 route below 1280. When its tunnel path MTU is below 1280, it keeps 1280
 for IPv6 and uses the shim ({{encapsulation}}) or reports that IPv6
 through the tunnel is unusable.
 
-A gateway that forwards TCP into the tunnel MUST clamp the MSS of
-forwarded TCP SYN segments to fit the MTU of the route each segment
-takes. When the shim is in use, the gateway SHOULD clamp to the lower of
-the shim MTU and the tunnel path MTU, so that TCP does not depend on
-fragmentation.
+An endpoint that forwards TCP over the binding MUST clamp the MSS in
+both directions, including SYN-ACKs, to fit the tunnel's ordinary-traffic
+limit. When the shim is in use, the endpoint SHOULD instead clamp to the
+lower of the shim MTU and the delivery-packet limit of {{m-encap-set}}
+minus the delivery IP and GRE headers, to avoid delivery fragmentation.
+The MSS also excludes the inner IP and TCP headers. Other path constraints can require a smaller
+MSS.
 
 Endpoints SHOULD enable packetization-layer path MTU discovery
 {{RFC4821}} for TCP connections they terminate themselves, including AGCP
@@ -332,7 +351,8 @@ path MTU. Hosts SHOULD request 1376: a delivery packet carrying a
 tunnel with WireGuard's customary 1420-byte MTU carries without
 fragmentation.
 
-A shim MTU at or above 1280 carries IPv6 however narrow the tunnel path.
+A shim MTU at or above 1280 carries IPv6 when the tunnel can deliver the
+resulting fragments.
 
 ## Routing {#routing}
 
@@ -340,15 +360,28 @@ While a grant is active:
 
 - Each endpoint MUST accept, from its peer through the tunnel, both
   delivery packets and packets without the shim.
-- The host routes the binding's traffic, other than delivery packets,
-  into the shim once `tunnel-encap.set` succeeds.
+- The host routes the binding's traffic into the shim once
+  `tunnel-encap.set` succeeds and its receive-side shim is ready.
 - The gateway routes the binding's traffic into the shim once it has
   received a valid delivery packet from the host under the grant, and
   until the grant ends.
 
 The binding's traffic is everything the endpoint would otherwise route to
-the peer through the tunnel. At a router acting as the host, that
-includes traffic it forwards for the hosts on its networks.
+the peer through the tunnel, except AGCP connections, path-MTU probes and
+their replies, and delivery packets. Both directions of every AGCP
+connection MUST bypass the shim, whether or not either endpoint retains
+a grant. At a router acting as the host, the binding's traffic includes
+traffic it forwards for the hosts on its networks.
+
+After each successful `tunnel-encap.set`, the host MUST send an ICMP Echo
+Request inside the shim once its receive-side shim is ready, without
+waiting for ordinary traffic. This activation request is distinct from a
+path-MTU probe. The gateway MUST reply inside the shim; the host retries
+an unanswered activation request at intervals of at least one second
+until it receives the matching reply or the grant ends. An activation
+exchange MUST obey the shim MTU and the delivery fragmentation rules of
+{{fragmentation}}. The gateway's first valid delivery packet from the
+host can be an activation request.
 
 When a grant ends, each endpoint stops sending delivery packets to its
 peer. The host removes the grant, with `tunnel-encap.remove`, only after
@@ -422,8 +455,10 @@ unknown.
 : the delivery packet addresses of the host and of the gateway, both
 of the same family, chosen from the endpoints' tunnel addresses.
 
-Each endpoint fragments at its own measurement, and SHOULD use the lower
-of the two when both are known.
+Each endpoint fragments at its own measurement, or its previous tunnel
+sizing when that measurement is unknown, following {{search}}. It SHOULD
+use the lower of that limit and the peer's measurement when the latter
+is known.
 
 A set that repeats the parameters of the held grant renews it; `pathMtu`
 is not part of that comparison.
@@ -436,7 +471,8 @@ Parameters: `id`. Result: an empty object.
 
 A gateway that may have lost the grant changes its epoch, per {{AGCP}}.
 Until the host sets the grant again, the gateway discards the host's
-delivery packets. A host that observes an epoch change MUST stop routing
+delivery packets. Direct AGCP connections remain available under
+{{routing}}. A host that observes an epoch change MUST stop routing
 traffic into the shim until `tunnel-encap.set` succeeds again.
 
 # Security Considerations {#security}
@@ -466,7 +502,7 @@ fragmented traffic, an identifier can recur before an earlier datagram's
 fragments are reassembled, and fragments can be misassembled
 {{RFC4963}}. Encapsulating endpoints SHOULD keep a separate
 identification counter for each peer, and the gateway's TCP clamp
-({{sizing}}) keeps TCP from fragmenting. Inner transport checksums detect
+({{sizing}}) reduces TCP fragmentation. Inner transport checksums detect
 most misassembly.
 
 Loss amplification:
