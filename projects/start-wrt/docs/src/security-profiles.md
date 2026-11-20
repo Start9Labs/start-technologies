@@ -25,6 +25,19 @@ A device's Security Profile is determined by its **point of entry** — how it c
 
 One SSID, multiple passwords. One router, multiple isolated networks. The profile abstraction keeps it simple.
 
+## Default Profiles
+
+A new router, or one that has been factory reset, comes with four profiles. Updating StartWRT never adds them to an existing router. None has a Wi-Fi password or Ethernet port until you assign one.
+
+| Profile           | Subnet           | WAN Access | LAN Access   | DNS                                            | WAN Blackout      |
+| ----------------- | ---------------- | ---------- | ------------ | ---------------------------------------------- | ----------------- |
+| **Admin**         | `192.168.0.0/24` | All        | All          | Inherit                                        | —                 |
+| **Guest**         | `192.168.2.0/24` | All        | Same profile | Inherit                                        | —                 |
+| **Children**      | `192.168.3.0/24` | All        | Same profile | Cloudflare for Families (`1.1.1.3`, `1.0.0.3`) | 9 PM - 7 AM daily |
+| **Smart Devices** | `192.168.4.0/24` | All        | Same profile | Inherit                                        | —                 |
+
+All four route directly to the Internet. Edit or delete them like any other profile.
+
 ## Creating a Profile
 
 1. Navigate to `Security Profiles` and click "Add".

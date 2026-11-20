@@ -3183,8 +3183,9 @@ impl Lookup {
 /// lightweight operation — it only writes the `startwrt` config entry and does
 /// not create VLANs, bridge-vlans, or modify network topology.
 ///
-/// Idempotent: returns `Ok(())` immediately if a LAN owner profile already exists.
-pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<(), Error> {
+/// Idempotent: returns immediately if a LAN owner profile already exists.
+/// Returns whether the config held no profile at all, as on a fresh install.
+pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<bool, Error> {
     let arena = Arena::new();
     let mut cfgs = parse_all(uci_root, &arena, &["startwrt"]).await?;
 
@@ -3199,8 +3200,12 @@ pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<(), Error> {
                 }))
     };
     if cfgs["startwrt"].sections.iter().any(owns_lan) {
-        return Ok(());
+        return Ok(false);
     }
+    let fresh = !cfgs["startwrt"]
+        .sections
+        .iter()
+        .any(|section| section.ty() == UciProfile::TY);
 
     // Register the existing LAN as the Admin profile
     cfgs["startwrt"].append(
@@ -3224,6 +3229,135 @@ pub async fn bootstrap_admin_profile(uci_root: &str) -> Result<(), Error> {
     cfgs["startwrt"].append(&UciPreferences::default(), Some("preferences"))?;
 
     dump_all(uci_root, cfgs).await?;
+    Ok(fresh)
+}
+
+struct DefaultProfile {
+    fullname: &'static str,
+    subnet: u8,
+    dns_override: &'static [&'static str],
+    wan_schedule: Option<(&'static str, &'static str)>,
+}
+
+const DEFAULT_PROFILES: [DefaultProfile; 3] = [
+    DefaultProfile {
+        fullname: "Guest",
+        subnet: 2,
+        dns_override: &[],
+        wan_schedule: None,
+    },
+    DefaultProfile {
+        fullname: "Children",
+        subnet: 3,
+        dns_override: &["1.1.1.3", "1.0.0.3"],
+        wan_schedule: Some(("21:00", "07:00")),
+    },
+    DefaultProfile {
+        fullname: "Smart Devices",
+        subnet: 4,
+        dns_override: &[],
+        wan_schedule: None,
+    },
+];
+
+/// Creates the profiles a fresh install starts with beside Admin.
+#[instrument(skip_all)]
+pub async fn seed_default_profiles<C: CtrlContext>(ctx: C) -> Result<(), Error> {
+    let mut taken = {
+        let arena = Arena::new();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt"]).await?;
+        reserved_interface_names(&cfgs)
+    };
+    let mut interfaces = Vec::with_capacity(DEFAULT_PROFILES.len());
+    for _ in &DEFAULT_PROFILES {
+        let interface = allocate_interface_name(&ctx, &taken).await?;
+        taken.insert(interface.clone());
+        interfaces.push(interface);
+    }
+    let mut retries = 4;
+    loop {
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await?;
+        let [a, b, ..] = get_lan_ip(&cfgs)
+            .ok_or_else(|| {
+                Error::new(
+                    eyre!("missing LAN interface"),
+                    ErrorKind::MissingLanInterface,
+                )
+            })?
+            .octets();
+        for (default, interface) in DEFAULT_PROFILES.iter().zip(&interfaces) {
+            let profile = Profile {
+                id: ProfileIdOpt {
+                    fullname: Some(default.fullname.into()),
+                    interface: None,
+                    vlan_tag: None,
+                },
+                gateway_ip: Ipv4Addr::new(a, b, default.subnet, 1),
+                outbound: DEFAULT_WAN_ZONE.into(),
+                lan_access: LanAccess::SameProfile,
+                wan_access: WanAccess::All,
+                dns_override: default
+                    .dns_override
+                    .iter()
+                    .map(|address| DnsServer {
+                        address: (*address).into(),
+                        ssl: false,
+                    })
+                    .collect(),
+                dns_source: String::new(),
+                access_to_new_profiles: false,
+                owns_lan: false,
+            };
+            create_config(ctx.clone(), &mut cfgs, &profile, Some(interface.clone()))?;
+            if let Some((start_time, end_time)) = default.wan_schedule {
+                let wan_schedule = serialize_schedule_windows(&[ScheduleWindow {
+                    start_time: start_time.into(),
+                    end_time: end_time.into(),
+                    days: [true; 7],
+                }]);
+                for section in &mut cfgs["startwrt"].sections {
+                    if let Some(mut uci) = section.get_typed::<UciProfile>()? {
+                        if &uci.interface == interface {
+                            uci.wan_schedule = wan_schedule.clone();
+                            section.set(&uci)?;
+                        }
+                    }
+                }
+            }
+        }
+        let dump_result = dump_all(ctx.uci_root(), cfgs).await;
+        drop(arena);
+        match dump_result {
+            Err(uciedit::Error::Conflict { .. }) if retries > 0 => retries -= 1,
+            Err(err) => return Err(err.into()),
+            Ok(()) => break,
+        }
+    }
+    regenerate_schedule_crontab(&ctx).await?;
+    if ctx.effectful() {
+        dns::apply_smartdns_groups(dns::load_smartdns_groups(ctx.uci_root()).await?).await?;
+        for interface in &interfaces {
+            crate::dns_inject::ensure_hosts_file(interface).await;
+        }
+        reload_system_and_wifi_full().await?;
+        evaluate_and_apply_schedules(&ctx).await?;
+        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/cron").arg("restart"))
+            .await
+            .map_err(|e| Error::new(eyre!("restarting cron: {e}"), ErrorKind::Filesystem))?;
+    }
+    crate::activity::log(
+        "profile",
+        "created",
+        true,
+        "Created the default Guest, Children and Smart Devices profiles",
+        None,
+    );
     Ok(())
 }
 
@@ -4135,6 +4269,76 @@ config dhcp 'iot'
             .unwrap();
         let after = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
         assert_eq!(after, startwrt);
+    }
+
+    #[tokio::test]
+    async fn a_fresh_install_gets_the_default_profiles_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let firstboot = concat!(env!("CARGO_MANIFEST_DIR"), "/../firstboot_config");
+        for config in ["network", "firewall", "dhcp", "wireless"] {
+            std::fs::copy(format!("{firstboot}/{config}"), dir.path().join(config)).unwrap();
+        }
+        std::fs::write(dir.path().join("startwrt"), "").unwrap();
+        let root = dir.path().to_str().unwrap();
+
+        assert!(bootstrap_admin_profile(root).await.unwrap());
+        seed_default_profiles(TestContext(dir.path().into()))
+            .await
+            .unwrap();
+        assert!(!bootstrap_admin_profile(root).await.unwrap());
+
+        let arena = Arena::new();
+        let cfgs = parse_all(root, &arena, &["startwrt", "network"])
+            .await
+            .unwrap();
+        let profiles: BTreeMap<String, UciProfile> = cfgs["startwrt"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get_typed::<UciProfile>().unwrap())
+            .map(|p| (p.fullname.clone(), p))
+            .collect();
+        assert_eq!(
+            profiles.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["Admin", "Children", "Guest", "Smart Devices"]
+        );
+        let gateways: BTreeSet<Ipv4Addr> = cfgs["network"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get::<NetworkInterface>().ok()?.ipaddr.map(|ip| *ip))
+            .collect();
+        for subnet in [0, 2, 3, 4] {
+            assert!(
+                gateways.contains(&Ipv4Addr::new(192, 168, subnet, 1)),
+                "{gateways:?}"
+            );
+        }
+        let children = &profiles["Children"];
+        assert_eq!(children.dns_override.len(), 2);
+        assert_eq!(
+            parse_schedule_windows(&children.wan_schedule)
+                .iter()
+                .map(|w| (w.start_time.as_str(), w.end_time.as_str(), w.days))
+                .collect::<Vec<_>>(),
+            [("21:00", "07:00", [true; 7])]
+        );
+        for name in ["Guest", "Smart Devices"] {
+            assert!(profiles[name].dns_override.is_empty());
+            assert!(profiles[name].wan_schedule.is_empty());
+            assert_eq!(profiles[name].wan_access.as_deref(), Some("all"));
+        }
+    }
+
+    #[tokio::test]
+    async fn bootstrap_reports_an_upgraded_router_as_not_fresh() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("startwrt"),
+            "config profile 'guest'\n\toption fullname 'Guest'\n\toption interface 'guest'\n\toption vlan_tag '101'\n",
+        )
+        .unwrap();
+        assert!(!bootstrap_admin_profile(dir.path().to_str().unwrap())
+            .await
+            .unwrap());
     }
 
     #[tokio::test]

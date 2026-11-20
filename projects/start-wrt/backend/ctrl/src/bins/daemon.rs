@@ -205,8 +205,14 @@ async fn inner_main() -> Result<(), Error> {
             Ok(false) => {}
             Err(e) => tracing::error!("Failed to apply WiFi blackout at boot: {e}"),
         }
-        if let Err(e) = crate::profiles::bootstrap_admin_profile("/etc/config").await {
-            tracing::error!("Admin profile bootstrap failed: {e}");
+        match crate::profiles::bootstrap_admin_profile("/etc/config").await {
+            Ok(true) => {
+                if let Err(e) = crate::profiles::seed_default_profiles(ctx.clone()).await {
+                    tracing::error!("Default profile creation failed: {e}");
+                }
+            }
+            Ok(false) => {}
+            Err(e) => tracing::error!("Admin profile bootstrap failed: {e}"),
         }
         // Must follow bootstrap_admin_profile: the heal enumerates profiles from
         // the `startwrt` config, so the admin profile has to be registered first.
