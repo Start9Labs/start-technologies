@@ -17,7 +17,10 @@ loadTypeScript(
     ['@start9labs/start-core', 'export const ISB = {}'],
     ['@taiga-ui/core', 'export class TuiButton {}'],
     ['src/app/services/api/embassy-api.service', 'export class ApiService {}'],
-    ['src/app/services/form-dialog.service', 'export class FormDialogService {}'],
+    [
+      'src/app/services/form-dialog.service',
+      'export class FormDialogService {}',
+    ],
     ['src/app/services/title.service', 'export class TitleDirective {}'],
     [
       'src/app/routes/portal/components/form.component',
@@ -96,9 +99,13 @@ test('an older cached snapshot stays loading until the SSH collection arrives', 
   updates.next([{ id: 7, value: { serverInfo: {} } }])
   const injector = createEnvironmentInjector([
     { provide: PatchDB, useValue: patch },
-    ...[ApiService, TaskService, FormDialogService, i18nPipe, DialogService].map(
-      provide => ({ provide, useValue: {} }),
-    ),
+    ...[
+      ApiService,
+      TaskService,
+      FormDialogService,
+      i18nPipe,
+      DialogService,
+    ].map(provide => ({ provide, useValue: {} })),
   ])
   t.after(() => {
     injector.destroy()

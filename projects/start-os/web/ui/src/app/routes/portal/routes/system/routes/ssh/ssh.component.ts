@@ -105,13 +105,11 @@ export default class SystemSSHComponent {
   private readonly dialogs = inject(DialogService)
 
   protected readonly keys = toSignal(
-    inject<PatchDB<DataModel>>(PatchDB)
-      .watch$('sshPubkeys')
-      .pipe(
-        // Cached snapshots can predate `sshPubkeys`.
-        filter(Boolean),
-        map(sshKeyRows),
-      ),
+    inject<PatchDB<DataModel>>(PatchDB).watch$('sshPubkeys').pipe(
+      // Cached snapshots can predate `sshPubkeys`.
+      filter(Boolean),
+      map(sshKeyRows),
+    ),
     { initialValue: null },
   )
   protected readonly tableKeys =
