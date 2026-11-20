@@ -221,6 +221,7 @@ export class InputSpec<
     deepPartial(this.validator)
   /**
    * Builds the runtime form specification and combined Zod validator from this InputSpec's fields.
+   * The validator drops every key the form doesn't declare; `validator` and `partialValidator` keep them, for file models.
    *
    * @returns An object containing the resolved `spec` (field specs keyed by name) and a combined `validator`
    */
@@ -243,7 +244,7 @@ export class InputSpec<
     }
     return {
       spec: answer,
-      validator: z.looseObject(validator) as any,
+      validator: z.object(validator) as any,
     }
   }
 
