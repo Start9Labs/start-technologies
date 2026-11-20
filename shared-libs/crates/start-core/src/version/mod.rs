@@ -931,7 +931,10 @@ mod tests {
             db["public"]["serverInfo"]["postInitMigrationTodos"],
             json!({ "0.4.1": null, "0.4.1.1": null, "0.4.1.2": null, "0.4.1.3": null, "0.4.2": null, "0.4.2.1": null, "0.4.2.2": null, "0.4.3": null })
         );
-        assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+        assert_eq!(
+            applied_migration_revision(&mut db).unwrap(),
+            current.migration_revision()
+        );
         assert_eq!(db["public"]["packageData"], packages);
         rollback_to_unchecked(&target, &previous, &mut db).unwrap();
         assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.0.5"));
@@ -1032,7 +1035,10 @@ mod tests {
             let upgrade = Upgrade::load(&previous, &current, revision).await.unwrap();
             upgrade.apply(&previous, &current, &mut db).unwrap();
             assert_eq!(db["public"]["serverInfo"]["version"], json!("0.4.3"));
-            assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+            assert_eq!(
+                applied_migration_revision(&mut db).unwrap(),
+                current.migration_revision()
+            );
             assert_eq!(
                 db["public"]["serverInfo"]["packageVersionCompat"],
                 to_value(current.compat()).unwrap()
