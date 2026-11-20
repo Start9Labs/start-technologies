@@ -193,7 +193,8 @@ struct SetInitialPasswordParams {
 }
 // Response: null
 // Backend: decrypts the password, writes the root hash to /etc/shadow, revokes
-// every enrolled key, applies the timezone, disables the captive portal
+// every enrolled key, applies the timezone, disables the captive portal across
+// all dnsmasq instances. Subnet-triggered reconciliation cannot undo this cleanup.
 ```
 
 ---
@@ -700,7 +701,9 @@ struct LanIpv4SetRequest {
 // Backend: updates UCI network.lan ipaddr (netmask /24) — and every profile's
 // addresses on a /16 block change — then clears DHCP leases, cycles only the LAN
 // interface (plus every profile interface on a block change) with ifdown/ifup,
-// reloads the firewall and dnsmasq, and restarts Wi-Fi.
+// reloads the firewall and dnsmasq, refreshes captive discovery, restarts Wi-Fi,
+// and drops carrier on the affected wired LAN ports. Readiness checks use each
+// interface's configured device, including VLAN devices.
 // Inbound VPN peers the change would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
 // Validation: the Subnet rules under profiles, for the LAN and, on a block
@@ -2067,6 +2070,7 @@ struct ProfileSetRequest {
 // Validation: same checks as profiles.create; a LAN owner's change that moves
 //   the network block applies the Subnet rules to every profile it moves.
 // LAN ownership comes from the resolved interface; owns_lan is ignored on update.
+// VPN peer protection also uses the resolved interface for fullname-only lookups.
 // Inbound VPN peers the new subnet would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
 ```
@@ -2181,7 +2185,10 @@ Internal endpoint, **not called from the frontend**. Run by the daemon at boot a
 //   rest proceed. All moves land in one write, then the moved interfaces are
 //   cycled, an active captive portal follows the LAN, and the LAN ports carrying
 //   the moved profiles are bounced. The WAN stays up. A run with nothing to move
-//   changes nothing. profiles.wan-overlaps reports every overlap.
+//   changes nothing. Eligibility, trial validation and publication share one
+//   UCI snapshot; concurrent assignments conflict and replan from fresh intent.
+//   Refused moves do not reserve free subnets. profiles.wan-overlaps reports
+//   every overlap.
 ```
 
 ---

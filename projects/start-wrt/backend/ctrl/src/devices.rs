@@ -433,20 +433,34 @@ pub(crate) fn dnsmasq_instance_option(option: &str) -> Vec<(String, String)> {
     )
 }
 
-fn dnsmasq_instance_option_in(
+/// Includes stopped instances whose drop-ins survive a restart.
+pub(crate) fn generated_dnsmasq_instance_option(option: &str) -> Vec<(String, String)> {
+    generated_dnsmasq_instance_option_in(std::path::Path::new(DNSMASQ_GENERATED_DIR), option)
+}
+
+fn generated_dnsmasq_instance_option_in(
     dir: &std::path::Path,
-    run_dir: &std::path::Path,
     option: &str,
 ) -> Vec<(String, String)> {
     generated_dnsmasq_configs_in(dir)
         .into_iter()
-        .filter(|(instance, _)| run_dir.join(format!("dnsmasq.{instance}.pid")).exists())
         .filter_map(|(instance, contents)| {
             Some((
                 instance,
                 dnsmasq_option_value(&contents, option)?.to_string(),
             ))
         })
+        .collect()
+}
+
+fn dnsmasq_instance_option_in(
+    dir: &std::path::Path,
+    run_dir: &std::path::Path,
+    option: &str,
+) -> Vec<(String, String)> {
+    generated_dnsmasq_instance_option_in(dir, option)
+        .into_iter()
+        .filter(|(instance, _)| run_dir.join(format!("dnsmasq.{instance}.pid")).exists())
         .collect()
 }
 
@@ -2866,10 +2880,22 @@ mod tests {
             "dnsmasq.conf.dns_deleted",
             "conf-dir=/tmp/dnsmasq.dns_deleted.d\ndhcp-leasefile=/tmp/dhcp.leases.dns_deleted\n",
         );
+        write("dnsmasq.conf.dns_lan", "conf-dir=/tmp/dnsmasq.dns_lan.d\n");
         write("dnsmasq.conf.dns_guest.tmp", "dhcp-leasefile=/tmp/stale\n");
         write("resolv.conf", "dhcp-leasefile=/tmp/unrelated\n");
         running("cfg01411c");
         running("dns_guest");
+
+        let mut generated = generated_dnsmasq_instance_option_in(dir.path(), "conf-dir");
+        generated.sort();
+        assert_eq!(
+            generated,
+            [
+                ("cfg01411c".into(), "/tmp/dnsmasq.cfg01411c.d".into()),
+                ("dns_deleted".into(), "/tmp/dnsmasq.dns_deleted.d".into()),
+                ("dns_lan".into(), "/tmp/dnsmasq.dns_lan.d".into()),
+            ]
+        );
 
         let mut leases = dnsmasq_instance_option_in(dir.path(), run.path(), "dhcp-leasefile");
         leases.sort();

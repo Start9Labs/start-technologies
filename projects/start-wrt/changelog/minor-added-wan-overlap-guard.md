@@ -2,5 +2,5 @@
 release-notes: true
 ---
 
-- A security profile whose subnet overlaps the network the WAN is on no longer knocks the router offline. StartWRT moves Admin, or a profile with nothing assigned to it, to a free subnet, warns on Security Profiles about any other, and refuses a new subnet, or a static WAN address, that overlaps.
-- Changing a security profile's subnet briefly takes down the LAN ports that carry it, so wired devices renew their addresses straight away.
+- Detects security-profile subnets that overlap the WAN network, moves eligible profiles to free subnets, warns about unresolved overlaps, and rejects conflicting new subnets or static WAN addresses.
+- Changing a security profile's subnet briefly reconnects its wired LAN ports to prompt address renewal. Devices behind a switch may still need reconnecting.

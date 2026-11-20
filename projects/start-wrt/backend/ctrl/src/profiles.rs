@@ -1483,7 +1483,6 @@ pub async fn set<C: CtrlContext>(
 
         crate::subnets::check(&ctx, &before, &cfgs)?;
 
-        // Guard: check if IP change would break VPN peers
         let ip_changed = old_state
             .as_ref()
             .and_then(|s| s.gateway_ip)
@@ -1492,10 +1491,8 @@ pub async fn set<C: CtrlContext>(
         let removed_vpns = if ip_changed || block_changed {
             let affected: Vec<&str> = if block_changed {
                 restart_ifaces.iter().map(|s| s.as_str()).collect()
-            } else if let Some(ref iface) = profile.id.interface {
-                vec![iface.as_str()]
             } else {
-                vec![]
+                vec![out.interface.as_str()]
             };
             crate::vpn_server::guard_vpn_peers(&mut cfgs, &affected, force)?
         } else {
@@ -1527,8 +1524,7 @@ pub async fn set<C: CtrlContext>(
                     dns::apply_smartdns_groups(smartdns_groups).await?;
 
                     if admin_ip_changed {
-                        crate::lan::restart_network_services(profile.gateway_ip, restart_ifaces)
-                            .await;
+                        crate::lan::restart_network_services(restart_ifaces).await;
                     } else {
                         // Full network restart (not reload) so an outbound change
                         // that flips IPv6 eligibility re-runs netifd prefix
@@ -5285,6 +5281,52 @@ config dhcp 'lan'
             Some("br-lan.200"),
             "set_config should prefer br-lan even when br-guest appears first"
         );
+    }
+
+    #[tokio::test]
+    async fn fullname_only_gateway_updates_preserve_vpn_peers() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().into());
+        setup_configs(dir.path());
+        let startwrt = dir.path().join("startwrt");
+        let mut metadata = std::fs::read_to_string(&startwrt).unwrap();
+        metadata.push_str(
+            "\nconfig vpn_server 'guest_server'\n option interface 'wg_guest'\n option profile_interface 'guest'\n option label 'Guest'\n option listen_port '51820'\n option endpoint 'vpn.example.com'\n",
+        );
+        std::fs::write(startwrt, metadata).unwrap();
+        let network_path = dir.path().join("network");
+        let mut network = std::fs::read_to_string(&network_path).unwrap();
+        network.push_str(
+            "\nconfig interface 'wg_guest'\n option proto 'wireguard'\n option private_key 'aGkmAm6PEDDjyZx/Lwc8AfwlVWuJOaKB6E5Hp+JqgVc='\n option listen_port '51820'\n list addresses '192.168.101.254/32'\n\nconfig wireguard_wg_guest 'guest_peer'\n option public_key 'aGkmAm6PEDDjyZx/Lwc8AfwlVWuJOaKB6E5Hp+JqgVc='\n list allowed_ips '192.168.101.200/32'\n",
+        );
+        std::fs::write(&network_path, &network).unwrap();
+        let mut profile: Profile<ProfileIdOpt> = get(
+            ctx.clone(),
+            ProfileIdOpt {
+                fullname: Some("Guest".into()),
+                interface: None,
+                vlan_tag: None,
+            },
+        )
+        .await
+        .unwrap()
+        .into();
+        profile.id.interface = None;
+        profile.id.vlan_tag = None;
+        profile.gateway_ip = Ipv4Addr::new(192, 168, 102, 1);
+
+        let error = set(
+            ctx,
+            DeserializeStdin(ProfileSetRequest {
+                profile,
+                force: false,
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.kind, ErrorKind::VpnPeersWouldBreak);
+        assert_eq!(std::fs::read_to_string(network_path).unwrap(), network);
     }
 
     #[tokio::test]
