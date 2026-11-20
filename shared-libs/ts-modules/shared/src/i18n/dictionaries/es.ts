@@ -1096,4 +1096,5 @@ export default {
   1300: 'Servidor inaccesible',
   1301: 'Es posible que los listados estén desactualizados',
   1302: 'StartOS no puede conectar con este registro en este momento.',
+  1303: 'Novedades',
 } satisfies i18n

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use clap::{Parser, ValueEnum};
 use exver::{ExtendedVersion, VersionRange};
 use imbl_value::{InternedString, json};
@@ -99,6 +99,9 @@ rpc_toolkit::ts_export!(GetPackageParams, namespaces = [""]);
 #[model = "Model<Self>"]
 pub struct GetPackageResponse {
     pub categories: BTreeSet<InternedString>,
+    /// When this registry first published any version it still carries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_published_at: Option<DateTime<Utc>>,
     pub best: BTreeMap<VersionString, PackageVersionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub other_versions: Option<BTreeMap<VersionString, PackageInfoShort>>,
@@ -146,6 +149,9 @@ impl GetPackageResponse {
 #[model = "Model<Self>"]
 pub struct GetPackageResponseFull {
     pub categories: BTreeSet<InternedString>,
+    /// When this registry first published any version it still carries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_published_at: Option<DateTime<Utc>>,
     pub best: BTreeMap<VersionString, PackageVersionInfo>,
     pub other_versions: BTreeMap<VersionString, PackageVersionInfo>,
 }
@@ -325,6 +331,19 @@ pub(crate) fn select_packages(
             .transpose()
             .map(Option::unwrap_or_default)
     };
+    let first_published_for = |id: &PackageId| -> Result<Option<DateTime<Utc>>, Error> {
+        let Some(package) = index.as_packages().as_idx(id) else {
+            return Ok(None);
+        };
+        package
+            .as_versions()
+            .as_entries()?
+            .into_iter()
+            .map(|(_, info)| info.as_s9pks().de())
+            .flatten_ok()
+            .map_ok(|(_, asset)| asset.published_at)
+            .process_results(|times| times.min())
+    };
     let mut best: BTreeMap<PackageId, BTreeMap<VersionString, Model<PackageVersionInfo>>> =
         Default::default();
     let mut other: BTreeMap<PackageId, BTreeMap<VersionString, Model<PackageVersionInfo>>> =
@@ -355,6 +374,7 @@ pub(crate) fn select_packages(
     }
     if let Some(id) = &params.id {
         let categories = categories_for(id)?;
+        let first_published_at = first_published_for(id)?;
         let best: BTreeMap<VersionString, PackageVersionInfo> = best
             .remove(id)
             .unwrap_or_default()
@@ -364,11 +384,13 @@ pub(crate) fn select_packages(
         let other = other.remove(id).unwrap_or_default();
         match params.other_versions.unwrap_or_default() {
             PackageDetailLevel::None => to_value(&GetPackageResult::Package(GetPackageResponse {
+                first_published_at,
                 categories,
                 best,
                 other_versions: None,
             })),
             PackageDetailLevel::Short => to_value(&GetPackageResult::Package(GetPackageResponse {
+                first_published_at,
                 categories,
                 best,
                 other_versions: Some(
@@ -380,6 +402,7 @@ pub(crate) fn select_packages(
             })),
             PackageDetailLevel::Full => {
                 to_value(&GetPackageResult::PackageFull(GetPackageResponseFull {
+                    first_published_at,
                     categories,
                     best,
                     other_versions: other
@@ -395,9 +418,11 @@ pub(crate) fn select_packages(
                 best.into_iter()
                     .map(|(id, best)| {
                         let categories = categories_for(&id)?;
+                        let first_published_at = first_published_for(&id)?;
                         Ok::<_, Error>((
                             id,
                             GetPackageResponse {
+                                first_published_at,
                                 categories,
                                 best: best
                                     .into_iter()
@@ -413,10 +438,12 @@ pub(crate) fn select_packages(
                 best.into_iter()
                     .map(|(id, best)| {
                         let categories = categories_for(&id)?;
+                        let first_published_at = first_published_for(&id)?;
                         let other = other.remove(&id).unwrap_or_default();
                         Ok::<_, Error>((
                             id,
                             GetPackageResponse {
+                                first_published_at,
                                 categories,
                                 best: best
                                     .into_iter()
@@ -437,10 +464,12 @@ pub(crate) fn select_packages(
                 best.into_iter()
                     .map(|(id, best)| {
                         let categories = categories_for(&id)?;
+                        let first_published_at = first_published_for(&id)?;
                         let other = other.remove(&id).unwrap_or_default();
                         Ok::<_, Error>((
                             id,
                             GetPackageResponseFull {
+                                first_published_at,
                                 categories,
                                 best: best
                                     .into_iter()
@@ -865,6 +894,36 @@ mod tests {
 
         let params = GetPackageParams::try_parse_from(["get", "--all-revisions"]).unwrap();
         assert!(params.all_revisions);
+    }
+
+    #[test]
+    fn first_published_at_is_the_earliest_asset_of_any_version() {
+        use crate::registry::package::index::tests::version_info_signed_by;
+
+        let (_, mut first) = version_info_signed_by(1);
+        first.s9pks[0].1.published_at = "2026-01-01T00:00:00Z".parse().unwrap();
+        let (_, mut second) = version_info_signed_by(2);
+        second.s9pks[0].1.published_at = "2026-03-01T00:00:00Z".parse().unwrap();
+        let index: Model<PackageIndex> = Model::from_value(json!({
+            "categories": {},
+            "packages": { "demo": {
+                "authorized": {},
+                "categories": [],
+                "versions": {
+                    "1.0.0:0": to_value(&first).unwrap(),
+                    "2.0.0:0": to_value(&second).unwrap(),
+                },
+            } },
+        }));
+        let expected = json!("2026-01-01T00:00:00Z");
+
+        let one = GetPackageParams::try_parse_from(["get", "demo"]).unwrap();
+        let one = select_packages(&index, &one).unwrap();
+        assert_eq!(one["firstPublishedAt"], expected);
+
+        let all = GetPackageParams::try_parse_from(["get"]).unwrap();
+        let all = select_packages(&index, &all).unwrap();
+        assert_eq!(all["demo"]["firstPublishedAt"], expected);
     }
 }
 
