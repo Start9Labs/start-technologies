@@ -1,7 +1,8 @@
 #!/bin/bash
 # Model of the StartOS policy-routing ladder, checked against the invariants in
 # policy-routing.md. Runs inside `unshare -rn`; the priorities arrive in the
-# environment from the constants in net/mod.rs.
+# environment from the constants in net/mod.rs, and NON_PUBLIC_V4 from the
+# list in net/gateway.rs.
 #
 #   eth0    LAN gateway, v4 + GUA + ULA        wg0  tunnel gateway, v4 + GUA
 #   lxcbr0  container bridge, 10.0.3.5 pinned   wg1  tunnel gateway, v4 only
@@ -45,12 +46,18 @@ ip -6 route add local default dev lo table $DIVERT_TABLE
 
 for family in -4 -6; do
   ip $family rule add fwmark $DIVERT_MARK lookup $DIVERT_TABLE priority $DIVERT
-  ip $family rule add lookup main suppress_prefixlength 0 priority $MAIN
   for t in $T_ETH $T_WG0 $T_WG1; do
     ip $family rule add fwmark $t lookup $t priority $REPLY
   done
   ip $family rule add lookup main priority $AUTO_MAIN
   ip $family rule add lookup default priority $AUTO_DEFAULT
+done
+for net in $NON_PUBLIC_V4; do
+  ip rule add to $net lookup main suppress_prefixlength 0 priority $MAIN
+done
+ip -6 rule add not to 2000::/3 lookup main suppress_prefixlength 0 priority $MAIN
+for net in 2001:db8:1::/64 2001:db8:59::/124; do
+  ip -6 rule add to $net lookup main suppress_prefixlength 0 priority $MAIN
 done
 ip -6 rule add fwmark $T_WG0 to 2000::/3 lookup $T_WG0 priority $TUNNEL_REPLY
 ip rule add from 192.168.1.5 fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
@@ -171,6 +178,46 @@ expect v6-leak-guard REJECT 2001:db8:99::9
 expect v6-leak-guard REJECT 2001:db8:99::9 $from_container_v6
 expect local-outbound REJECT 2001:db8:99::9 from 2001:db8:1::5 mark $LOCAL_OUTBOUND_MARK
 unpin_system
+
+# The LAN pushes routes for public destinations into main, as DHCP option 121 or
+# a static route can.
+ip route add 0.0.0.0/1 via 192.168.1.1 dev eth0
+ip route add 128.0.0.0/1 via 192.168.1.1 dev eth0
+ip -6 route add 2000::/3 via 2001:db8:1::1 dev eth0
+
+state="LAN routes public space, auto"
+every_state
+expect auto eth0 203.0.113.9
+expect auto eth0 2001:db8:99::9
+
+state="LAN routes public space, system pinned to wg0"
+pin_system $T_WG0
+every_state
+expect route-injection wg0 203.0.113.9
+expect route-injection wg0 2001:db8:99::9
+expect route-injection wg0 203.0.113.9 $from_container
+expect route-injection wg0 2001:db8:99::9 $from_container_v6
+expect route-injection wg0 203.0.113.9 from 192.168.1.5 mark $LOCAL_OUTBOUND_MARK
+unpin_system
+
+state="LAN routes public space, system pinned, gateway gone"
+pin_system ""
+every_state
+expect route-injection REJECT 203.0.113.9
+expect route-injection REJECT 2001:db8:99::9
+expect route-injection REJECT 203.0.113.9 $from_container
+unpin_system
+
+state="LAN routes public space, service pinned to wg0"
+pin_service $T_WG0
+every_state
+expect route-injection wg0 203.0.113.9 $from_container
+expect route-injection wg0 2001:db8:99::9 $from_container_v6
+unpin_service
+
+ip route del 0.0.0.0/1
+ip route del 128.0.0.0/1
+ip -6 route del 2000::/3
 
 state="service pinned to wg0"
 pin_service $T_WG0
