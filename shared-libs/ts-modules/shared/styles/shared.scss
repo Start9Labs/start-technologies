@@ -139,3 +139,44 @@ tui-dialog :not([tuiForm]) > [tuiNotification]:not(:last-child) {
     }
   }
 }
+
+.g-wrap-content {
+  min-inline-size: 0;
+
+  [tuiTitle],
+  [tuiCell] {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    overflow-wrap: anywhere;
+    box-sizing: border-box;
+  }
+}
+
+.g-wrap-accordion,
+.g-wrap-accordion > button {
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.g-wrap-accordion > button {
+  block-size: auto;
+  min-block-size: 3.5rem;
+  color: var(--tui-text-primary);
+  white-space: normal;
+}
+
+.g-wrap-accordion > button [tuiTitle] {
+  display: block;
+  flex: 1;
+  inline-size: auto;
+  min-inline-size: 0;
+  color: var(--tui-text-primary);
+  visibility: visible;
+  overflow-wrap: anywhere;
+}
+
+.g-wrap-accordion > button [tuiSubtitle] {
+  display: block;
+  white-space: normal;
+  overflow: visible;
+}

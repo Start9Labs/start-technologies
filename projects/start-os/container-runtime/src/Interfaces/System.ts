@@ -23,7 +23,10 @@ export type System = {
   start(effects: T.Effects): Promise<void>
   stop(): Promise<void>
 
-  createBackup(effects: T.Effects, timeoutMs: number | null): Promise<void>
+  createBackup(
+    effects: T.Effects,
+    timeoutMs: number | null,
+  ): Promise<T.PackageBackupOutput | void>
   runAction(
     effects: Effects,
     actionId: string,

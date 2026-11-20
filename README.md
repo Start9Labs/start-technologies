@@ -69,7 +69,7 @@ git clone https://github.com/Start9Labs/start-technologies.git
 cd start-technologies
 ```
 
-See [AGENTS.md](AGENTS.md) for the shared toolchain and development workflow, and [projects/start-os/AGENTS.md](projects/start-os/AGENTS.md#contributor-workflow) to build a StartOS image.
+See [AGENTS.md](AGENTS.md) for the shared toolchain and development workflow, and [projects/start-os/AGENTS.md](projects/start-os/AGENTS.md) to build a StartOS image.
 
 ## The rest of the monorepo
 

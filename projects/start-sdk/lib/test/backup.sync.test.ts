@@ -13,6 +13,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import {
   DEFAULT_OPTIONS,
+  parseRsyncTransferredBytes,
   pruneBackupVolumes,
   rsyncArgs,
 } from '../backup/Backups'
@@ -39,12 +40,14 @@ describe('rsyncArgs exclusions', () => {
     execFileSync(
       'rsync',
       rsyncArgs(src, dst, { ...DEFAULT_OPTIONS, ...options }),
+      { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } },
     )
 
   it('removes an excluded path already in the target', () => {
-    sync({ exclude: ['/cache/'] })
+    const output = sync({ exclude: ['/cache/'] })
     expect(existsSync(join(dst, 'data'))).toBe(true)
     expect(existsSync(join(dst, 'cache'))).toBe(false)
+    expect(parseRsyncTransferredBytes(output)).toBe(1)
   })
 
   it('leaves the target untouched without delete', () => {

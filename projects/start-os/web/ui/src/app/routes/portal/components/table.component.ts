@@ -30,6 +30,10 @@ import {
     <ng-content select="caption" />
   `,
   styles: `
+    thead {
+      display: var(--app-table-header-display, table-header-group);
+    }
+
     :host:has(app-placeholder) thead {
       display: none;
     }

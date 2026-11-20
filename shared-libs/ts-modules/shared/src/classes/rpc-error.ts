@@ -1,12 +1,15 @@
 import type { RPCErrorDetails, RPCResponse } from '../types/rpc.types'
 import { getRpcErrorMessage } from '../util/rpc.util'
 
-export class RpcError {
-  constructor(
-    private readonly error: RPCErrorDetails,
-    readonly meta?: RPCResponse<unknown>['meta'],
-  ) {}
+export class RpcError extends Error {
+  readonly code: number
 
-  readonly code = this.error.code
-  readonly message = `RPC ERROR: ${getRpcErrorMessage(this.error)}`
+  constructor(
+    error: RPCErrorDetails,
+    readonly meta?: RPCResponse<unknown>['meta'],
+  ) {
+    super(`RPC ERROR: ${getRpcErrorMessage(error)}`)
+    this.name = 'RpcError'
+    this.code = error.code
+  }
 }

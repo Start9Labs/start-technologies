@@ -1,3 +1,5 @@
+MCP_TOOLS := shared-libs/crates/start-core/mcp-tools.json
+
 start-core-test: $(CORE_SRC) $(ENVIRONMENT_FILE)
 	./shared-libs/crates/start-core/run-tests.sh
 
@@ -5,7 +7,8 @@ start-core-ts-bindings: shared-libs/crates/start-core/bindings/index.ts
 	mkdir -p shared-libs/ts-modules/start-core/lib/osBindings
 	rsync -ac --delete shared-libs/crates/start-core/bindings/ shared-libs/ts-modules/start-core/lib/osBindings/
 
-shared-libs/crates/start-core/bindings/index.ts: $(CORE_SRC) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE)
+# The MCP catalog is derived from these bindings; it cannot also be their input.
+shared-libs/crates/start-core/bindings/index.ts: $(filter-out $(MCP_TOOLS),$(CORE_SRC)) Cargo.toml Cargo.lock $(ENVIRONMENT_FILE)
 	rm -rf shared-libs/crates/start-core/bindings
 	./shared-libs/crates/start-core/build/build-ts.sh
 	npm --prefix shared-libs/ts-modules/start-core exec -- prettier --config .prettierrc.json -w './shared-libs/crates/start-core/bindings/**/*.ts'
@@ -19,7 +22,6 @@ start-core-mcp-tools: start-core-ts-bindings
 # --- generated-artifact freshness (CI gates: regenerate, then fail on any diff) ---
 MAN_DIRS := projects/start-cli/man projects/start-registry/man projects/start-tunnel/man projects/start-os/man
 OSBINDINGS_DIR := shared-libs/ts-modules/start-core/lib/osBindings
-MCP_TOOLS := shared-libs/crates/start-core/mcp-tools.json
 
 .PHONY: generated-artifacts-check manpages manpages-check start-core-ts-bindings-check start-core-mcp-tools start-core-mcp-tools-check
 generated-artifacts-check: manpages-check start-core-ts-bindings-check start-core-mcp-tools-check

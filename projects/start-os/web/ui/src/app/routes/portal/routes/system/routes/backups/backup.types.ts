@@ -1,11 +1,8 @@
 import { T } from '@start9labs/start-core'
 import { TuiDialogContext } from '@taiga-ui/core'
-import { Result } from 'src/app/services/api/api.types'
 
 export type BackupContext = TuiDialogContext<void, { id: string }>
 export type BackupRun = T.BackupRun
-export type BackupHistory = Result<'backup.history.list'>
-export const EMPTY_HISTORY: BackupHistory = { runs: [], total: 0 }
 
 export type RecoverOption =
   | (T.PackageBackupInfo & {

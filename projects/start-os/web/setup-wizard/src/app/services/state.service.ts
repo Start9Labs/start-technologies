@@ -23,6 +23,7 @@ export type RecoverySource =
           }
       serverId: string
       password: string
+      scheduled: boolean
     }
 
 @Injectable({
@@ -88,6 +89,7 @@ export class StateService {
               : target,
           serverId: this.recoverySource.serverId,
           password: this.recoverySource.password,
+          scheduled: this.recoverySource.scheduled,
         }
       }
     }

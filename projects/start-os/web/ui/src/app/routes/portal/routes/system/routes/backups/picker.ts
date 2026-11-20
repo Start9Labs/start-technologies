@@ -22,7 +22,7 @@ import {
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { BackupService } from './backup.service'
 
-export type PickerMode = 'create' | 'restore'
+export type PickerMode = 'create' | 'restore' | 'checkpoint'
 
 export interface Picked {
   targetId: string
@@ -225,16 +225,21 @@ class BackupPicker {
   protected readonly backups = computed(() =>
     Object.entries(this.service.targets())
       .flatMap(([targetId, target]) =>
-        Object.entries(target.startOs).map(([serverId, backup]) => ({
-          ...backup,
-          targetId,
-          serverId,
-          targetName: volumeName(target),
-          source: target.source,
-          usable:
-            target.availability !== 'unavailable' &&
-            backup.formatStatus !== 'interrupted',
-        })),
+        Object.entries(target.startOs)
+          .filter(
+            ([, backup]) =>
+              this.context.data === 'checkpoint' || !backup.scheduled,
+          )
+          .map(([serverId, backup]) => ({
+            ...backup,
+            targetId,
+            serverId,
+            targetName: volumeName(target),
+            source: target.source,
+            usable:
+              target.availability !== 'unavailable' &&
+              backup.formatStatus !== 'interrupted',
+          })),
       )
       .sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? '')),
   )

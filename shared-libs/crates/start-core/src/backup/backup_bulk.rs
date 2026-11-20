@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -9,14 +8,16 @@ use color_eyre::eyre::eyre;
 use imbl::OrdSet;
 use imbl_value::InternedString;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
 use super::PackageBackupReport;
 use super::target::{BackupTargetId, BackupTargetSource, PackageBackupInfo, TargetMount};
 use crate::PackageId;
 use crate::auth::LoginContext;
-use crate::backup::os::OsBackup;
+use crate::backup::scheduled::{
+    BackupActivityId, BackupActivityKind, BackupRunState, complete_activity, insert_activity,
+    running_activity,
+};
 use crate::backup::{BackupReport, ServerBackupReport, volume};
 use crate::context::RpcContext;
 use crate::db::model::{Database, DatabaseModel};
@@ -27,8 +28,7 @@ use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, PhaseProgressTrackerHandle};
 use crate::shared_volumes::SharedVolumeId;
 use crate::util::future::NonDetachingJoinHandle;
-use crate::util::io::{AtomicFile, dir_copy};
-use crate::util::serde::IoFormat;
+use crate::util::io::dir_size;
 use crate::version::VersionT;
 
 #[cfg(test)]
@@ -56,14 +56,21 @@ rpc_toolkit::ts_export!(BackupParams, namespaces = [""]);
 
 struct BackupStatusGuard {
     db: Option<TypedPatchDb<Database>>,
+    activity_id: BackupActivityId,
     target_id: BackupTargetId,
     target_name: String,
     started_at: chrono::DateTime<chrono::Utc>,
 }
 impl BackupStatusGuard {
-    fn new(db: TypedPatchDb<Database>, target_id: BackupTargetId, target_name: String) -> Self {
+    fn new(
+        db: TypedPatchDb<Database>,
+        target_id: BackupTargetId,
+        target_name: String,
+        activity_id: BackupActivityId,
+    ) -> Self {
         Self {
             db: Some(db),
+            activity_id,
             target_id,
             target_name,
             started_at: chrono::Utc::now(),
@@ -72,6 +79,7 @@ impl BackupStatusGuard {
 
     /// Backup outcomes belong in history rather than notifications.
     async fn handle_result(mut self, result: Result<BackupReport, Error>) -> Result<(), Error> {
+        let failed = result.is_err();
         let report = match result {
             Ok(report) => report,
             Err(error) => {
@@ -97,6 +105,31 @@ impl BackupStatusGuard {
             .as_ref()
             .unwrap()
             .mutate(|db| {
+                let has_successes = run.report.server.error.is_none()
+                    || run
+                        .report
+                        .packages
+                        .values()
+                        .any(|item| item.error.is_none())
+                    || run
+                        .report
+                        .shared_volumes
+                        .values()
+                        .any(|item| item.result.error.is_none());
+                let state = if failed || (run.report.has_failures() && !has_successes) {
+                    BackupRunState::Failed
+                } else if run.report.has_failures() {
+                    BackupRunState::PartiallyFailed
+                } else {
+                    BackupRunState::Succeeded
+                };
+                complete_activity(
+                    db,
+                    &self.activity_id,
+                    state,
+                    run.report.packages.clone(),
+                    run.report.server.error.clone(),
+                )?;
                 super::history::record(db, &run)?;
                 clear_backup_progress(db)
             })
@@ -118,8 +151,21 @@ fn clear_backup_progress(db: &mut DatabaseModel) -> Result<(), Error> {
 impl Drop for BackupStatusGuard {
     fn drop(&mut self) {
         if let Some(db) = self.db.take() {
+            let activity_id = self.activity_id.clone();
             tokio::spawn(async move {
-                db.mutate(clear_backup_progress).await.result.log_err();
+                db.mutate(|db| {
+                    clear_backup_progress(db)?;
+                    complete_activity(
+                        db,
+                        &activity_id,
+                        BackupRunState::Failed,
+                        BTreeMap::new(),
+                        Some(t!("backup.activity.manual-interrupted").to_string()),
+                    )
+                })
+                .await
+                .result
+                .log_err();
             });
         }
     }
@@ -136,6 +182,8 @@ pub async fn backup_all(
         password,
     }: BackupParams,
 ) -> Result<(), Error> {
+    let backup_coordinator = crate::backup::try_backup_coordinator(ctx.backup_coordinator.clone())?;
+    crate::backup::scheduled::reconcile_interrupted_backup_state(&ctx).await?;
     let old_password_decrypted = old_password
         .as_ref()
         .unwrap_or(&password)
@@ -152,12 +200,12 @@ pub async fn backup_all(
     // Watch channels cannot cross Patch-DB's catch_unwind boundary.
     let init_progress = progress.snapshot();
 
-    let (fs, package_ids, shared_volume_ids, server_id) = ctx
+    let (fs, package_ids, shared_volume_ids, server_id, activity_id) = ctx
         .db
         .mutate(|db| {
             <RpcContext as LoginContext>::check_password(db, &password)?;
             let fs = target_id.clone().load(db)?;
-            let package_ids = if let Some(ids) = package_ids {
+            let package_ids: OrdSet<PackageId> = if let Some(ids) = package_ids {
                 ids.into_iter().collect()
             } else {
                 db.as_public()
@@ -172,13 +220,27 @@ pub async fn backup_all(
                 shared_volume_ids,
                 db.as_public().as_shared_volumes().de()?.into_keys(),
             );
-            let server_id = db.as_public().as_server_info().as_id().de()?;
+            let server_id: String = db.as_public().as_server_info().as_id().de()?;
             assure_backing_up(db, &init_progress, &target_id, &server_id)?;
-            Ok((fs, package_ids, shared_volume_ids, server_id))
+            let activity = running_activity(
+                BackupActivityKind::Manual,
+                target_id.clone(),
+                Some(server_id.clone()),
+                None,
+                None,
+                package_ids.iter().cloned().collect(),
+            );
+            insert_activity(db, &activity)?;
+            Ok((fs, package_ids, shared_volume_ids, server_id, activity.id))
         })
         .await
         .result?;
-    let status_guard = BackupStatusGuard::new(ctx.db.clone(), target_id.clone(), fs.name.clone());
+    let status_guard = BackupStatusGuard::new(
+        ctx.db.clone(),
+        target_id.clone(),
+        fs.name.clone(),
+        activity_id,
+    );
 
     let disk_guard = fs.mount(BackupWrite).await?;
     let disk_refresh = target_id.refresh_disks_on_drop(ctx.disk_updates.clone());
@@ -214,6 +276,7 @@ pub async fn backup_all(
     )));
 
     tokio::task::spawn(async move {
+        let _backup_coordinator = backup_coordinator;
         let _disk_refresh = disk_refresh;
         let _progress_db_sync = progress_db_sync;
         let result = async {
@@ -347,16 +410,12 @@ async fn perform_backup(
         phase.start();
         let started = Instant::now();
         if let Some(service) = &*ctx.services.get(id).await {
-            let backup_result = async {
-                service
-                    .backup(backup_guard.package_backup(id).await?, phase)
-                    .await
-            }
-            .await
-            .err()
-            .map(|e: Error| e.to_string());
+            let package_guard = backup_guard.package_backup(id).await?;
+            let package_path = package_guard.path().to_owned();
+            let backup_result = service.backup(package_guard, phase).await;
             let duration_ms = started.elapsed().as_millis() as u64;
-            if backup_result.is_none() {
+            let measured_at = backup_result.as_ref().ok().map(|_| Utc::now());
+            if backup_result.is_ok() {
                 let manifest = db
                     .as_public()
                     .as_package_data()
@@ -379,8 +438,16 @@ async fn perform_backup(
             backup_report.insert(
                 id.clone(),
                 PackageBackupReport {
-                    error: backup_result,
+                    error: backup_result.as_ref().err().map(|e| e.to_string()),
                     duration_ms,
+                    logical_size: if backup_result.is_ok() {
+                        Some(dir_size(&package_path, None).await?)
+                    } else {
+                        None
+                    },
+                    physical_size: None,
+                    changed_bytes: backup_result.ok().and_then(|result| result.changed_bytes),
+                    measured_at,
                 },
             );
         } else {
@@ -390,6 +457,10 @@ async fn perform_backup(
                 PackageBackupReport {
                     error: Some(t!("backup.bulk.service-not-ready").to_string()),
                     duration_ms: started.elapsed().as_millis() as u64,
+                    logical_size: None,
+                    physical_size: None,
+                    changed_bytes: None,
+                    measured_at: None,
                 },
             );
         }
@@ -417,28 +488,7 @@ async fn perform_backup(
 
     os_data_phase.start();
 
-    let ui = ctx.db.peek().await.into_public().into_ui().de()?;
-
-    let mut os_backup_file =
-        AtomicFile::new(backup_guard.path().join("os-backup.json"), None::<PathBuf>).await?;
-    os_backup_file
-        .write_all(&IoFormat::Json.to_vec(&OsBackup {
-            account: ctx.account.peek(|a| a.clone()),
-            ui,
-        })?)
-        .await?;
-    os_backup_file.save().await?;
-
-    let luks_folder_old = backup_guard.path().join("luks.old");
-    crate::util::io::delete_dir(&luks_folder_old).await?;
-    let luks_folder_bak = backup_guard.path().join("luks");
-    if tokio::fs::metadata(&luks_folder_bak).await.is_ok() {
-        tokio::fs::rename(&luks_folder_bak, &luks_folder_old).await?;
-    }
-    let luks_folder = Path::new("/media/startos/config/luks");
-    if tokio::fs::metadata(&luks_folder).await.is_ok() {
-        dir_copy(luks_folder, &luks_folder_bak, None).await?;
-    }
+    crate::backup::os::backup_system(ctx, backup_guard.path()).await?;
 
     os_data_phase.complete();
     progress.complete();
@@ -472,9 +522,7 @@ async fn perform_backup(
     ctx.db
         .mutate(|v| {
             for (id, timestamp) in &package_timestamps {
-                if let Some(pde) = v.as_public_mut().as_package_data_mut().as_idx_mut(id) {
-                    pde.as_last_backup_mut().ser(&Some(*timestamp))?;
-                }
+                super::record_package_backup(v, id, *timestamp)?;
             }
             v.as_public_mut()
                 .as_server_info_mut()

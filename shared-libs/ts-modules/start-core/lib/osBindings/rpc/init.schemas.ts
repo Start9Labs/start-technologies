@@ -524,7 +524,12 @@ export const Api = {
     backup: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        activity: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        checkpoint: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         history: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        job: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        policy: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        review: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         target: {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {

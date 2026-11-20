@@ -35,10 +35,12 @@ protected readonly form = inject(NonNullableFormBuilder).group({
 </form>
 ```
 
-Password reveal: `<tui-icon tuiPassword />` inside the textfield — **import `TuiIcon`
-alongside `TuiPassword`**, or `TuiPassword` matches the bare element name, `TuiIcons`
-never applies, and the page dies at runtime with `NG0201: No provider for TuiIcons`
-that `strictTemplates` cannot see. Selects:
+Password reveal: use a real `button[tuiIconButton]` inside the textfield with `type="button"`,
+an eye icon, and a translated label that switches between “Show password” and “Hide
+password”. The control must remain keyboard-focusable.
+When using `<tui-icon tuiPassword />`, import `TuiIcon` alongside `TuiPassword`:
+without it, the page fails at runtime with `NG0201: No provider for TuiIcons`,
+which `strictTemplates` cannot detect. Selects:
 `<tui-textfield tuiChevron [stringify]="fn"><input tuiSelect /><tui-data-list *tuiDropdown>…`
 (or `<tui-data-list-wrapper *tuiDropdown [items]="…" />`). A radio group is one
 `<tui-radio-list formControlName="x" [items]="…" [itemContent]="tpl" />` (kit) — never a
@@ -65,5 +67,10 @@ tuiMapper: match"` with a `match(pw): ValidatorFn` factory — or plain validato
   a full-page form's Cancel is `type="reset"` disabled on `form.pristine`.
 - **Single ad-hoc fields skip reactive forms**: `[(ngModel)]="signal"`
   (+ `[ngModelOptions]="{standalone: true}"` inside a formGroup context), `linkedSignal`
-  clearing the error on edit.
+  clearing the error on edit. The one known exception is a Taiga checkbox inside a dialog on
+  iOS WebKit: its native update can arrive after the overlay's event pass, leaving Angular-bound
+  text stale until another interaction. Keep `ngModel` to back the Taiga control, but use the
+  native checkbox as the source of truth: read a plain-element template reference's native
+  `.checked` value when submitting and use `:host:has(input:checked)` to switch dependent text
+  without another render pass.
 - **Masking**: Maskito (`@maskito/*`) where real masking is needed (start-wrt IP masks).

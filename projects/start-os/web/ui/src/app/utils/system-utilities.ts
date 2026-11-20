@@ -1,6 +1,7 @@
 import { inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { i18nKey } from '@start9labs/shared'
+
 import { BadgeService } from 'src/app/services/badge.service'
 
 export const SYSTEM_UTILITIES: Record<
