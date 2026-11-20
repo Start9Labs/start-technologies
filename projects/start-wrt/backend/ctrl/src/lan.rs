@@ -266,12 +266,13 @@ pub async fn ipv4_set<C: CtrlContext>(
             HashSet::new()
         };
 
-        // Guard: reject subnet change when DHCP static hosts exist in the old subnet
         let ip_changed = old_address.map(|old| old != address).unwrap_or(false);
         if block_changed {
+            crate::wan_overlap::guard_all(&ctx, &cfgs)?;
             let old = old_address.unwrap().octets();
             guard_dhcp_static_hosts(&cfgs, &[old[0], old[1]])?;
         } else if ip_changed {
+            crate::wan_overlap::guard(&ctx, address)?;
             if let Some(old) = old_address {
                 let o = old.octets();
                 guard_dhcp_static_hosts(&cfgs, &[o[0], o[1], o[2]])?;

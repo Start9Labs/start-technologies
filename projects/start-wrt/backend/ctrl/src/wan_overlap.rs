@@ -1,8 +1,10 @@
-//! Profile subnets that overlap a network the WAN is on.
+//! Subnet changes reject WAN overlaps; block changes reject overlaps in every moved profile.
+//! Existing overlaps do not block edits that leave the subnets unchanged.
 
 use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
 
+use ipnet::Ipv4Net;
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{NetworkBridgeVlan, NetworkInterface, WifiStation};
 use uciedit::{parse_all, Arena, Configs};
@@ -12,40 +14,8 @@ use crate::profiles::{self, Lookup, Profile, ProfileId, ProfileIdOpt, ProfileSet
 use crate::utils::DeserializeStdin;
 use crate::CtrlContext;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Ipv4Net {
-    pub addr: Ipv4Addr,
-    pub prefix: u8,
-}
-
-impl Ipv4Net {
-    pub fn new(addr: Ipv4Addr, prefix: u8) -> Self {
-        Self {
-            addr,
-            prefix: prefix.min(32),
-        }
-    }
-
-    fn mask(self) -> u32 {
-        u32::MAX
-            .checked_shl(32 - u32::from(self.prefix))
-            .unwrap_or(0)
-    }
-
-    pub fn network(self) -> Ipv4Addr {
-        Ipv4Addr::from(u32::from(self.addr) & self.mask())
-    }
-
-    pub fn overlaps(self, other: Self) -> bool {
-        let mask = self.mask() & other.mask();
-        u32::from(self.addr) & mask == u32::from(other.addr) & mask
-    }
-}
-
-impl std::fmt::Display for Ipv4Net {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}/{}", self.network(), self.prefix)
-    }
+fn subnets_overlap(a: Ipv4Net, b: Ipv4Net) -> bool {
+    a.contains(&b.addr()) || b.contains(&a.addr())
 }
 
 /// Reads `ipv4-address` from a `network.interface.<name> status` reply.
@@ -59,7 +29,7 @@ pub(crate) fn parse_ubus_ipv4(status: &serde_json::Value) -> Vec<Ipv4Net> {
                 .filter_map(|e| {
                     let addr = e.get("address")?.as_str()?.parse().ok()?;
                     let prefix = e.get("mask").and_then(|m| m.as_u64()).unwrap_or(32);
-                    Some(Ipv4Net::new(addr, prefix.min(32) as u8))
+                    Ipv4Net::new(addr, prefix.min(32) as u8).ok()
                 })
                 .collect()
         })
@@ -88,7 +58,7 @@ fn profile_subnet(cfgs: &Configs, interface: &str) -> Option<Ipv4Net> {
         .iter()
         .find(|s| s.name().as_deref() == Some(interface))
         .and_then(|s| s.get::<NetworkInterface>().ok()?.ipv4())
-        .map(|gateway| Ipv4Net::new(gateway, 24))
+        .map(|gateway| Ipv4Net::new(gateway, 24).unwrap().trunc())
 }
 
 fn find(cfgs: &Configs, lookup: &Lookup, wan: &[Ipv4Net]) -> Vec<Found> {
@@ -97,11 +67,11 @@ fn find(cfgs: &Configs, lookup: &Lookup, wan: &[Ipv4Net]) -> Vec<Found> {
         .iter()
         .filter_map(|id| {
             let subnet = profile_subnet(cfgs, &id.interface)?;
-            let wan = *wan.iter().find(|w| w.overlaps(subnet))?;
+            let wan = *wan.iter().find(|w| subnets_overlap(**w, subnet))?;
             Some(Found {
                 id: id.clone(),
                 subnet,
-                wan,
+                wan: wan.trunc(),
             })
         })
         .collect()
@@ -135,8 +105,8 @@ fn moves_automatically(cfgs: &Configs, id: &ProfileId) -> bool {
 fn free_gateway(block: [u8; 2], taken: &BTreeSet<u8>, wan: &[Ipv4Net]) -> Option<Ipv4Addr> {
     (10..=254u8).chain(1..10).find_map(|third| {
         let gateway = Ipv4Addr::new(block[0], block[1], third, 1);
-        let free =
-            !taken.contains(&third) && !wan.iter().any(|w| w.overlaps(Ipv4Net::new(gateway, 24)));
+        let subnet = Ipv4Net::new(gateway, 24).unwrap();
+        let free = !taken.contains(&third) && !wan.iter().any(|w| subnets_overlap(*w, subnet));
         free.then_some(gateway)
     })
 }
@@ -162,14 +132,17 @@ pub async fn overlaps<C: CtrlContext>(ctx: C) -> Result<Vec<WanOverlap>, Error> 
 
 /// Rejects a profile gateway whose `/24` overlaps a WAN network.
 pub(crate) fn guard(ctx: &impl CtrlContext, gateway: Ipv4Addr) -> Result<(), Error> {
-    let subnet = Ipv4Net::new(gateway, 24);
+    let subnet = Ipv4Net::new(gateway, 24).unwrap().trunc();
     match ctx
         .wan_ipv4_networks()
         .into_iter()
-        .find(|w| w.overlaps(subnet))
+        .find(|w| subnets_overlap(*w, subnet))
     {
         Some(wan) => Err(Error::new(
-            eyre!("subnet {subnet} overlaps the upstream network {wan}"),
+            eyre!(
+                "subnet {subnet} overlaps the upstream network {}",
+                wan.trunc()
+            ),
             ErrorKind::InvalidRequest,
         )),
         None => Ok(()),
@@ -216,8 +189,8 @@ pub async fn resolve<C: CtrlContext>(ctx: C) -> Result<(), Error> {
             .list()
             .iter()
             .filter_map(|id| profile_subnet(&cfgs, &id.interface))
-            .filter(|subnet| subnet.addr.octets()[..2] == [a, b])
-            .map(|subnet| subnet.addr.octets()[2])
+            .filter(|subnet| subnet.addr().octets()[..2] == [a, b])
+            .map(|subnet| subnet.addr().octets()[2])
             .collect();
         let mut moves = Vec::new();
         for found in find(&cfgs, &lookup, &wan) {
@@ -251,9 +224,9 @@ pub async fn resolve<C: CtrlContext>(ctx: C) -> Result<(), Error> {
             "subnet-moved",
             moved.is_ok(),
             &format!(
-                "Moved profile '{name}' from {} to {}/24, off the upstream network {}",
+                "Moved profile '{name}' from {} to {}, off the upstream network {}",
                 found.subnet,
-                Ipv4Net::new(gateway, 24),
+                Ipv4Net::new(gateway, 24).unwrap().trunc(),
                 found.wan
             ),
             moved.as_ref().err().map(|e| e.to_string()).as_deref(),
@@ -402,6 +375,107 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lan_subnet_change_on_the_upstream_network_is_refused() {
+        let dir = router_with(&[]).await;
+        let ctx = TestContext(dir.path().into(), vec![net("192.168.5.37/24")]);
+        let before = gateways(&ctx).await;
+
+        let err = crate::lan::ipv4_set(
+            ctx.clone(),
+            DeserializeStdin(crate::lan::LanIpv4SetRequest {
+                address: "192.168.5.1".into(),
+                force: false,
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+        assert_eq!(gateways(&ctx).await, before);
+    }
+
+    #[tokio::test]
+    async fn lan_block_change_checks_sibling_subnets() {
+        let dir = router_with(&[("Guest", 5)]).await;
+        let ctx = TestContext(dir.path().into(), vec![net("10.47.5.37/24")]);
+        let before = gateways(&ctx).await;
+
+        let err = crate::lan::ipv4_set(
+            ctx.clone(),
+            DeserializeStdin(crate::lan::LanIpv4SetRequest {
+                address: "10.47.0.1".into(),
+                force: false,
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+        assert_eq!(gateways(&ctx).await, before);
+
+        crate::lan::ipv4_set(
+            ctx.clone(),
+            DeserializeStdin(crate::lan::LanIpv4SetRequest {
+                address: "10.48.0.1".into(),
+                force: false,
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(overlaps(ctx).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn profile_block_change_checks_sibling_subnets() {
+        let dir = router_with(&[("Guest", 5)]).await;
+        let ctx = TestContext(dir.path().into(), vec![net("10.47.5.37/24")]);
+        let before = gateways(&ctx).await;
+        let mut profile: Profile<ProfileIdOpt> = profiles::get(
+            ctx.clone(),
+            ProfileIdOpt {
+                fullname: Some("Admin".into()),
+                interface: None,
+                vlan_tag: None,
+            },
+        )
+        .await
+        .unwrap()
+        .into();
+        profile.gateway_ip = "10.47.0.1".parse().unwrap();
+
+        let err = profiles::set(
+            ctx.clone(),
+            DeserializeStdin(ProfileSetRequest {
+                profile,
+                force: false,
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+        assert_eq!(gateways(&ctx).await, before);
+    }
+
+    #[tokio::test]
+    async fn an_existing_overlap_does_not_block_a_lan_noop() {
+        let dir = router_with(&[]).await;
+        let ctx = TestContext(dir.path().into(), vec![net("192.168.0.37/24")]);
+
+        crate::lan::ipv4_set(
+            ctx.clone(),
+            DeserializeStdin(crate::lan::LanIpv4SetRequest {
+                address: "192.168.0.1".into(),
+                force: false,
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(overlaps(ctx).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
     async fn a_new_subnet_on_the_upstream_network_is_refused() {
         let dir = router_with(&[]).await;
         let ctx = TestContext(dir.path().into(), vec![net("192.168.5.37/24")]);
@@ -428,18 +502,29 @@ mod tests {
     }
 
     fn net(s: &str) -> Ipv4Net {
-        let (addr, prefix) = s.split_once('/').unwrap();
-        Ipv4Net::new(addr.parse().unwrap(), prefix.parse().unwrap())
+        s.parse().unwrap()
     }
 
     #[test]
     fn overlap_follows_the_shorter_prefix() {
-        assert!(net("192.168.0.50/24").overlaps(net("192.168.0.1/24")));
-        assert!(net("192.168.0.1/16").overlaps(net("192.168.7.1/24")));
-        assert!(net("192.168.7.1/24").overlaps(net("192.168.0.1/16")));
-        assert!(!net("192.168.1.50/24").overlaps(net("192.168.0.1/24")));
-        assert!(!net("10.0.0.2/30").overlaps(net("10.0.0.5/30")));
-        assert!(net("100.64.3.9/10").overlaps(net("100.127.0.1/24")));
+        assert!(subnets_overlap(
+            net("192.168.0.50/24"),
+            net("192.168.0.1/24")
+        ));
+        assert!(subnets_overlap(
+            net("192.168.0.1/16"),
+            net("192.168.7.1/24")
+        ));
+        assert!(subnets_overlap(
+            net("192.168.7.1/24"),
+            net("192.168.0.1/16")
+        ));
+        assert!(!subnets_overlap(
+            net("192.168.1.50/24"),
+            net("192.168.0.1/24")
+        ));
+        assert!(!subnets_overlap(net("10.0.0.2/30"), net("10.0.0.5/30")));
+        assert!(subnets_overlap(net("100.64.3.9/10"), net("100.127.0.1/24")));
     }
 
     #[test]

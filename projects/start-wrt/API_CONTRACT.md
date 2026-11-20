@@ -723,6 +723,8 @@ struct LanIpv4SetRequest {
 //   ErrorKind::SubnetCollision (same guard as profiles.create/profiles.edit;
 //   on a block change the check applies post-move, since every profile keeps
 //   its 3rd octet). A re-set of the current subnet always passes.
+//   A changed subnet that overlaps a WAN IPv4 network is InvalidRequest;
+//   a block change checks every profile's resulting subnet.
 //   Changing the address while a DHCP reservation sits in the old /24 (the old
 //   /16 on a block change) is rejected with ErrorKind::DhcpStaticHostsInSubnet.
 ```

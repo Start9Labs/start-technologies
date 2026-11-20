@@ -124,7 +124,7 @@ pub trait CtrlContext: Context + Clone {
         }
     }
     /// The router's WAN IPv4 networks. Empty when unknown.
-    fn wan_ipv4_networks(&self) -> Vec<crate::wan_overlap::Ipv4Net> {
+    fn wan_ipv4_networks(&self) -> Vec<ipnet::Ipv4Net> {
         if self.effectful() {
             crate::system::read_wan_ipv4_networks().unwrap_or_default()
         } else {

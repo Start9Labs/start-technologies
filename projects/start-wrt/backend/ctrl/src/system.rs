@@ -275,14 +275,14 @@ pub(crate) fn read_wan_ipv4_addrs() -> Option<Vec<Ipv4Addr>> {
     Some(
         read_wan_ipv4_networks()?
             .into_iter()
-            .map(|net| net.addr)
+            .map(|net| net.addr())
             .collect(),
     )
 }
 
 /// Every IPv4 address on the `wan` interface with its prefix length, in ubus
 /// order. `None` when ubus is unavailable; empty when the interface is down.
-pub(crate) fn read_wan_ipv4_networks() -> Option<Vec<crate::wan_overlap::Ipv4Net>> {
+pub(crate) fn read_wan_ipv4_networks() -> Option<Vec<ipnet::Ipv4Net>> {
     let out = StdCommand::new("ubus")
         .args(["call", "network.interface.wan", "status"])
         .output()
