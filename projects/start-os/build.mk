@@ -45,9 +45,12 @@ start-os-scripts-test: start-os-grub-test start-os-forward-transport-test start-
 	./projects/start-os/build/tests/init-resize-test.sh
 	./projects/start-os/build/tests/backports-pref-test.sh
 	./projects/start-os/build/tests/crash-diagnostics-test.sh
+	./projects/start-os/build/tests/sysctl-config-test.sh
 	./projects/start-os/build/tests/dns-config-test.sh
 	./projects/start-os/build/tests/btrfsmaintenance-test.sh
 	./projects/start-os/build/tests/runtime-package-upgrade-test.sh
+
+start-os-scripts-test: projects/start-os/build/tests/sysctl-config-test.sh
 
 .PHONY: start-os-forward-transport-test
 start-os-forward-transport-test: build/lib/scripts/forward-port build/lib/scripts/forward-port6 projects/start-os/build/tests/forward-transport-test.sh
