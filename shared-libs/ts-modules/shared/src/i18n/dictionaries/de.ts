@@ -1122,4 +1122,8 @@ export default {
   1327: 'Neuzugänge',
   1328: 'Diese Version erfordert eine neuere Version von StartOS. Aktualisieren Sie Ihren Server, um sie zu installieren.',
   1329: 'Ihre installierte Version kann nicht direkt auf diese Version aktualisiert werden.',
+  1330: 'Melden Sie sich ohne Passwort an, indem Sie diesen Befehl in einem Terminal auf dem Server ausführen, und wählen Sie dann Weiter.',
+  1331: 'Dieser Browser ist noch nicht registriert',
+  1332: 'Über die Befehlszeile anmelden',
+  1333: 'Diesen Browser registrieren',
 } satisfies i18n

@@ -1122,4 +1122,8 @@ export default {
   1327: 'Novedades',
   1328: 'Esta versión requiere una versión más reciente de StartOS. Actualice su servidor para instalarla.',
   1329: 'Su versión instalada no puede actualizarse directamente a esta versión.',
+  1330: 'Inicie sesión sin contraseña ejecutando este comando en una terminal del servidor y luego seleccione Continuar.',
+  1331: 'Este navegador aún no está registrado',
+  1332: 'Iniciar sesión desde la línea de comandos',
+  1333: 'Registrar este navegador',
 } satisfies i18n

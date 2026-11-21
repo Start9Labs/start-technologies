@@ -1,5 +1,6 @@
 import { forwardRef } from '@angular/core'
 import {
+  I18N_IDS,
   I18N_LOADER,
   I18N_STORAGE,
   i18nService,
@@ -61,6 +62,7 @@ export const TUNNEL_I18N_PROVIDERS = [
       }
     },
   },
+  { provide: I18N_IDS, useValue: ENGLISH },
   {
     provide: I18N_STORAGE,
     useValue: (language: Languages): Promise<void> => {

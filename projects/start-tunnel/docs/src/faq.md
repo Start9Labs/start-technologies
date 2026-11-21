@@ -36,6 +36,10 @@ SSH into your VPS and, as `root`, run:
 start-tunnel auth reset-password
 ```
 
+## Login says there have been too many attempts
+
+StartTunnel limits password attempts, and someone guessing your password can use them all up. Select **Sign in from the command line** under the error. Run the command it shows on your VPS as `root`, then select **Continue**. The command enrolls this browser without a password, so the UI works normally even while the guessing continues.
+
 ## What if Start9 goes away?
 
 StartTunnel keeps working. It is fully self-hosted with no dependency on Start9 infrastructure. There is no coordination server, no telemetry, and no phone-home. The binary runs entirely on your VPS.
