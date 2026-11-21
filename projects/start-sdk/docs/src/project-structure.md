@@ -282,9 +282,10 @@ second workflow, so tag-and-release calls the release workflow directly.
 Forgejo artifacts group the `.s9pk` files by build target rather than creating an
 artifact for each file. Release assets remain individual `.s9pk` downloads, and
 re-running a release updates its notes and replaces same-named assets in place.
-The shared release workflow retains its 2 GiB per-asset ceiling; configure S3 for
-larger files and ensure the Forgejo instance's upload limit permits the remaining
-assets.
+Release assets keep a 2 GiB per-file ceiling. Without S3, a larger public `.s9pk`
+goes to the owner's generic package registry, which requires the `PACKAGES_TOKEN`
+secret; the release notes link it under **Downloads** and the registry indexes it
+from there. Ensure the Forgejo instance's upload limit permits the remaining assets.
 
 ### AGENTS.md and CLAUDE.md
 

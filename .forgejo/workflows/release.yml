@@ -185,23 +185,38 @@ jobs:
         uses: https://github.com/Start9Labs/start-technologies/.github/actions/extract-version@master
       - name: Filter s9pk files for GitHub release
         id: filter_s9pk
+        env:
+          S3_BASE: ${{ inputs.S3_S9PKS_BASE_URL }}
+          PRIVATE_REPOSITORY: ${{ github.event.repository.private }}
+          ON_GITHUB: ${{ github.server_url == 'https://github.com' }}
+          HAS_PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN != '' }}
         run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${VERSION#\#}"
+          echo "packages_base=${{ github.server_url }}/api/packages/${{ github.repository_owner }}/generic/${{ steps.version.outputs.package_id }}/${VERSION//:/_}" >> "$GITHUB_OUTPUT"
           GH_MAX_SIZE=$((2 * 1024 * 1024 * 1024))
           OVERSIZE_FOUND=false
           RELEASE_FILES=""
+          : > .package_files
           for s9pk in *.s9pk; do
             SIZE=$(stat --format=%s "$s9pk")
-            if [ "$SIZE" -ge "$GH_MAX_SIZE" ]; then
-              SIZE_HUMAN=$(numfmt --to=iec-i --suffix=B "$SIZE")
-              if [ -z "${{ inputs.S3_S9PKS_BASE_URL }}" ]; then
-                echo "::error::${s9pk} (${SIZE_HUMAN}) exceeds GitHub's 2 GiB release-asset limit and no S3 hosting is configured. Either shrink the .s9pk or set S3_S9PKS_BASE_URL to host large packages via S3."
-                OVERSIZE_FOUND=true
-              else
-                echo "::warning::${s9pk} (${SIZE_HUMAN}) exceeds GitHub's 2 GiB limit and will not be uploaded to the release (S3 will be used as its sole download URL)"
-              fi
-            else
+            if [ "$SIZE" -lt "$GH_MAX_SIZE" ]; then
               RELEASE_FILES="${RELEASE_FILES}./${s9pk}"$'\n'
               echo "$s9pk" >> .gh_release_files
+              continue
+            fi
+            SIZE_HUMAN=$(numfmt --to=iec-i --suffix=B "$SIZE")
+            if [ -n "$S3_BASE" ]; then
+              echo "::warning::${s9pk} (${SIZE_HUMAN}) exceeds the 2 GiB release-asset limit and will not be attached to the release (S3 will be used as its sole download URL)"
+            elif [ "$ON_GITHUB" != true ] && [ "$HAS_PACKAGES_TOKEN" = true ]; then
+              echo "::notice::${s9pk} (${SIZE_HUMAN}) exceeds the 2 GiB release-asset limit and will be hosted in the owner's Forgejo packages"
+              [ "$PRIVATE_REPOSITORY" = true ] || echo "$s9pk" >> .package_files
+            elif [ "$ON_GITHUB" = true ]; then
+              echo "::error::${s9pk} (${SIZE_HUMAN}) exceeds GitHub's 2 GiB release-asset limit and no S3 hosting is configured. Either shrink the .s9pk or set S3_S9PKS_BASE_URL to host large packages via S3."
+              OVERSIZE_FOUND=true
+            else
+              echo "::error::${s9pk} (${SIZE_HUMAN}) exceeds the 2 GiB release-asset limit and neither S3_S9PKS_BASE_URL nor a PACKAGES_TOKEN secret is configured to host it."
+              OVERSIZE_FOUND=true
             fi
           done
           if [ "$OVERSIZE_FOUND" = true ]; then
@@ -213,30 +228,45 @@ jobs:
             echo "RELEASE_FILES_EOF"
           } >> "$GITHUB_OUTPUT"
         shell: bash
+      - name: Upload large s9pks to Forgejo packages
+        if: ${{ !github.event.repository.private && github.server_url != 'https://github.com' }}
+        env:
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: |
+          BASE="${{ steps.filter_s9pk.outputs.packages_base }}"
+          while read -r s9pk; do
+            echo "Uploading ${s9pk} to Forgejo packages..."
+            curl -sS -o /dev/null -X DELETE -H "Authorization: token ${PACKAGES_TOKEN}" "${BASE}/${s9pk}" || true
+            curl -fsS --upload-file "$s9pk" -H "Authorization: token ${PACKAGES_TOKEN}" "${BASE}/${s9pk}"
+          done < .package_files
+        shell: bash
       - name: Generate changelog
         run: |
           FIRST_S9PK=$(ls *.s9pk | head -1)
           RELEASE_NOTES=$(start-cli s9pk inspect "$FIRST_S9PK" manifest | jq -r '.releaseNotes | if type == "object" then (.en_US // first(.[]) // "") else . end')
-          S3_ONLY=()
+          S3_BASE="${{ inputs.S3_S9PKS_BASE_URL }}"
+          S3_BASE="${S3_BASE%/}"
+          PKG_ID="${{ steps.version.outputs.package_id }}"
+          PKG_VER="${{ steps.version.outputs.version }}"
+          PKG_VER="${PKG_VER#\#}"
+          DOWNLOADS=()
           for s9pk in *.s9pk; do
-            grep -qxF "$s9pk" .gh_release_files 2>/dev/null || S3_ONLY+=("$s9pk")
+            grep -qxF "$s9pk" .gh_release_files 2>/dev/null && continue
+            if grep -qxF "$s9pk" .package_files 2>/dev/null; then
+              DOWNLOADS+=("- [${s9pk}](${{ steps.filter_s9pk.outputs.packages_base }}/${s9pk})")
+            elif [ -n "$S3_BASE" ]; then
+              DOWNLOADS+=("- [${s9pk}](${S3_BASE}/${PKG_ID}/${PKG_VER}/${s9pk})")
+            fi
           done
           {
             echo "## What's Changed"
             echo ""
             echo "${RELEASE_NOTES}"
             echo ""
-            S3_BASE="${{ inputs.S3_S9PKS_BASE_URL }}"
-            if [ -n "$S3_BASE" ] && [ ${#S3_ONLY[@]} -gt 0 ]; then
-              S3_BASE="${S3_BASE%/}"
-              PKG_ID="${{ steps.version.outputs.package_id }}"
-              PKG_VER="${{ steps.version.outputs.version }}"
-              PKG_VER="${PKG_VER#\#}"
+            if [ ${#DOWNLOADS[@]} -gt 0 ]; then
               echo "## Downloads"
               echo ""
-              for s9pk in "${S3_ONLY[@]}"; do
-                echo "- [${s9pk}](${S3_BASE}/${PKG_ID}/${PKG_VER}/${s9pk})"
-              done
+              printf '%s\n' "${DOWNLOADS[@]}"
               echo ""
             fi
             echo "## SHA256 Hashes"
@@ -328,10 +358,7 @@ jobs:
           PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
         run: |
           REGISTRY="${{ inputs.RELEASE_REGISTRY }}"
-          PACKAGE_ID="${{ steps.version.outputs.package_id }}"
-          VERSION="${{ steps.version.outputs.version }}"
-          VERSION="${VERSION#\#}"
-          BASE="${{ github.server_url }}/api/packages/${{ github.repository_owner }}/generic/${PACKAGE_ID}/${VERSION//:/_}"
+          BASE="${{ steps.filter_s9pk.outputs.packages_base }}"
           mapfile -t PRIVATE_ARGS < .private_args
           for s9pk in *.s9pk; do
             echo "Publishing ${s9pk} encrypted via Forgejo packages..."
@@ -375,7 +402,11 @@ jobs:
           TAG="${{ inputs.TAG || github.ref_name }}"
           GH_URL="${{ github.server_url }}/${{ github.repository }}/releases/download/${TAG}"
           for s9pk in *.s9pk; do
-            echo "Publishing ${s9pk} via GitHub release..."
-            start-cli --registry "$REGISTRY" registry package add "$s9pk" --url "${GH_URL}/${s9pk}"
+            URL="${GH_URL}/${s9pk}"
+            if grep -qxF "$s9pk" .package_files; then
+              URL="${{ steps.filter_s9pk.outputs.packages_base }}/${s9pk}"
+            fi
+            echo "Publishing ${s9pk} from ${URL}..."
+            start-cli --registry "$REGISTRY" registry package add "$s9pk" --url "$URL"
           done
         shell: bash

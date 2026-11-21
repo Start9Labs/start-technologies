@@ -163,6 +163,72 @@ fi
     )
   })
 
+  test(`${forge} hosts oversize public s9pks in Forgejo packages and links them`, t => {
+    const cwd = mkdtempSync(join(tmpdir(), 'oversize-s9pk-'))
+    t.after(() => rmSync(cwd, { recursive: true, force: true }))
+    execFileSync('truncate', ['-s', '2G', join(cwd, 'big.s9pk')])
+    writeFileSync(join(cwd, 'small.s9pk'), 'small')
+    writeFileSync(
+      join(cwd, 'start-cli'),
+      `#!/bin/bash\nprintf '%s' '{"releaseNotes":"notes"}'\n`,
+      { mode: 0o755 },
+    )
+    const steps = document('release').jobs.Publish.steps
+    const step = name => steps.find(step => step.name === name)
+    const base = `${serverUrls[forge]}/api/packages/owner/generic/demo/1.0.0_0`
+    const values = {
+      'steps.version.outputs.version': '1.0.0:0',
+      'steps.version.outputs.package_id': 'demo',
+      'github.server_url': serverUrls[forge],
+      'github.repository_owner': 'owner',
+      'steps.filter_s9pk.outputs.packages_base': base,
+      'inputs.S3_S9PKS_BASE_URL': '',
+    }
+    const env = {
+      CWD: cwd,
+      PATH: `${cwd}:${process.env.PATH}`,
+      GITHUB_OUTPUT: join(cwd, 'output'),
+      S3_BASE: '',
+      PRIVATE_REPOSITORY: 'false',
+      ON_GITHUB: String(forge === 'github'),
+      HAS_PACKAGES_TOKEN: 'true',
+    }
+    const filter = runStep(
+      step('Filter s9pk files for GitHub release'),
+      env,
+      values,
+    )
+    if (forge === 'github') {
+      assert.equal(filter.status, 1)
+      return
+    }
+    assert.equal(filter.status, 0, filter.stderr)
+    assert.equal(
+      readFileSync(join(cwd, '.package_files'), 'utf8'),
+      'big.s9pk\n',
+    )
+    assert.equal(
+      readFileSync(join(cwd, '.gh_release_files'), 'utf8'),
+      'small.s9pk\n',
+    )
+    const changelog = runStep(step('Generate changelog'), env, values)
+    assert.equal(changelog.status, 0, changelog.stderr)
+    assert.match(
+      readFileSync(join(cwd, 'change-log.txt'), 'utf8'),
+      new RegExp(
+        `## Downloads\\n\\n- \\[big\\.s9pk\\]\\(${base.replace(/[.]/g, '\\.')}/big\\.s9pk\\)`,
+      ),
+    )
+    assert.equal(
+      runStep(
+        step('Filter s9pk files for GitHub release'),
+        { ...env, HAS_PACKAGES_TOKEN: 'false' },
+        values,
+      ).status,
+      1,
+    )
+  })
+
   for (const [privateRepository, s3, expected] of [
     [true, 'https://bucket.example', ['Publish to Registry via S3']],
     [
