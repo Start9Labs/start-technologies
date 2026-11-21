@@ -15,6 +15,7 @@ const WEB = ['start-os', 'start-tunnel', 'start-wrt']
 
 for (const [path, push, pullRequest = push, osImage = false] of [
   ['shared-libs/crates/start-core/src/lib.rs', ALL],
+  ['shared-libs/crates/pi-beep/src/main.rs', ALL],
   ['Cargo.lock', ALL],
   ['build/env/check-platform.sh', ALL, ALL, true],
   ['debian/build.sh', BUILD_PRODUCTS, BUILD_PRODUCTS, true],

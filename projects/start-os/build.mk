@@ -9,11 +9,11 @@ STARTD_SRC := projects/start-os/startd.service projects/start-os/services.slice 
 STARTOS_RELEASE_NOTES := projects/start-os/release-notes/$(shell cat $(VERSION_FILE)).md
 STARTOS_RELEASE_NOTES_SRC := scripts/changelog.mjs scripts/changelog-version.mjs shared-libs/crates/start-core/locales/release-notes.json .prettierrc.json package.json $(wildcard $(STARTOS_RELEASE_NOTES)) $(call ls-files, projects/start-os/changelog)
 COMPILED_TARGETS := target/$(RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startbox target/$(RUST_ARCH)-unknown-linux-musl/release/start-container target/$(RUST_ARCH)-unknown-linux-musl/release/startos-backup-fs
+ifeq ($(ARCH),aarch64)
+COMPILED_TARGETS += target/aarch64-unknown-linux-musl/release/pi-beep
+endif
 CONTAINER_RUNTIME_DIST := projects/start-os/container-runtime/dist/index.js projects/start-os/container-runtime/dist/node_modules/.package-lock.json
 STARTOS_TARGETS := $(STARTD_SRC) $(ENVIRONMENT_FILE) $(GIT_HASH_FILE) $(VERSION_FILE) $(STARTOS_RELEASE_NOTES_SRC) $(COMPILED_TARGETS) projects/start-os/container-runtime/rootfs.$(ARCH).squashfs $(PLATFORM_FILE) \
-	$(shell if [ "$(PLATFORM)" = "raspberrypi" ]; then \
-		echo target/aarch64-unknown-linux-musl/release/pi-beep; \
-	fi) \
 	$(shell /bin/bash -c 'if [[ "${ENVIRONMENT}" =~ (^|-)unstable($$|-) ]]; then \
 		echo target/$(RUST_ARCH)-unknown-linux-musl/release/flamegraph; \
 	fi') \
