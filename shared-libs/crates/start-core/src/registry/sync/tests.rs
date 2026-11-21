@@ -444,6 +444,139 @@ fn synced_package_queries_keep_target_and_source_selection_while_offline() {
 }
 
 #[test]
+fn cached_assets_keep_ordered_mirrors_and_peer_metadata() {
+    let mut db = database();
+    assert!(
+        crate::registry::package::get::advertised_asset(
+            &db,
+            &url(),
+            &"test".parse().unwrap(),
+            &"1.0.0:0".parse().unwrap(),
+            &device(),
+        )
+        .unwrap()
+        .is_none()
+    );
+    let mut index = index();
+    let commitment = crate::sign::commitment::merkle_archive::MerkleArchiveCommitment {
+        root_sighash: crate::util::serde::Base64([7; 32]),
+        root_maxsize: 1024,
+    };
+    let asset = crate::registry::asset::RegistryAsset {
+        published_at: chrono::Utc::now(),
+        urls: vec![
+            "https://first.test/package.s9pk".parse().unwrap(),
+            "https://second.test/package.s9pk".parse().unwrap(),
+        ],
+        torrent: Some("https://first.test/package.torrent".parse().unwrap()),
+        commitment,
+        signatures: Default::default(),
+    };
+    let versions = &mut index.package.packages.get_mut("test").unwrap().versions;
+    let installed = versions.get_mut(&"1.0.0:0".parse().unwrap()).unwrap();
+    installed.s9pks.push((Default::default(), asset));
+    let mut revision: crate::registry::package::index::PackageVersionInfo =
+        from_value(to_value(&*installed).unwrap()).unwrap();
+    revision.s9pks[0].1.commitment.root_sighash = crate::util::serde::Base64([8; 32]);
+    versions.insert("1.0.0:1".parse().unwrap(), revision);
+    publish_snapshot(
+        &mut db,
+        &Subscription::Index(url()),
+        &to_value(&index).unwrap(),
+        &device(),
+    )
+    .unwrap();
+    let advertised = crate::registry::package::get::advertised_asset(
+        &db,
+        &url(),
+        &"test".parse().unwrap(),
+        &"1.0.0:0".parse().unwrap(),
+        &device(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(advertised.commitment, commitment);
+    assert_eq!(
+        advertised
+            .urls
+            .iter()
+            .map(|url| url.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "https://first.test/package.s9pk",
+            "https://second.test/package.s9pk"
+        ]
+    );
+    assert_eq!(
+        advertised.torrent.as_ref().map(|url| url.as_str()),
+        Some("https://first.test/package.torrent")
+    );
+    assert!(
+        crate::registry::package::get::advertised_asset(
+            &db,
+            &url(),
+            &"test".parse().unwrap(),
+            &"0.9.0:0".parse().unwrap(),
+            &device(),
+        )
+        .unwrap()
+        .is_none()
+    );
+    let result = select(
+        &db,
+        &url(),
+        json!({"id":"test", "targetVersion":"=1.0.0:0"}),
+    )
+    .unwrap();
+    let asset = &result["best"]["1.0.0:0"]["s9pks"][0][1];
+    assert_eq!(
+        asset["urls"],
+        json!([
+            "https://first.test/package.s9pk",
+            "https://second.test/package.s9pk"
+        ])
+    );
+    assert_eq!(
+        asset["torrent"].as_str(),
+        Some("https://first.test/package.torrent")
+    );
+    set_status(
+        &mut db,
+        &Subscription::Index(url()),
+        RegistryStatus::Error,
+        None,
+    )
+    .unwrap();
+    let cached = crate::registry::package::get::advertised_asset(
+        &db,
+        &url(),
+        &"test".parse().unwrap(),
+        &"1.0.0:0".parse().unwrap(),
+        &device(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(cached.commitment, advertised.commitment);
+    assert_eq!(cached.urls, advertised.urls);
+    assert_eq!(cached.torrent, advertised.torrent);
+    db.as_public_mut()
+        .as_server_info_mut()
+        .as_registries_mut()
+        .ser(&Default::default())
+        .unwrap();
+    assert!(
+        crate::registry::package::get::advertised_asset(
+            &db,
+            &url(),
+            &"test".parse().unwrap(),
+            &"1.0.0:0".parse().unwrap(),
+            &device(),
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn connecting_registries_select_nothing_and_first_failures_are_unreachable() {
     let mut db = database();
     for subscription in [Subscription::Index(url()), Subscription::Os(url())] {

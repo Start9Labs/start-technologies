@@ -1,6 +1,7 @@
 use rpc_toolkit::{Context, HandlerExt, ParentHandler};
 
 pub mod acme;
+pub mod bridge;
 pub mod dns;
 pub mod dns_update;
 pub mod domain_redirect;
@@ -8,6 +9,7 @@ pub mod forward;
 pub mod gateway;
 pub mod host;
 pub mod http;
+pub(crate) mod ingress;
 pub mod keys;
 pub mod mdns;
 pub mod net_controller;
@@ -232,6 +234,8 @@ mod tests {
             .env("MAIN", MAIN_RULE_PRIORITY.to_string())
             .env("REPLY", REPLY_RULE_PRIORITY.to_string())
             .env("SOURCE", SOURCE_RULE_PRIORITY.to_string())
+            .env("OS_TARGET_V4", bridge::OS_TARGET_IPV4.to_string())
+            .env("OS_TARGET_V6", bridge::OS_TARGET_IPV6.to_string())
             .env("LOCAL_OUTBOUND_MARK", LOCAL_OUTBOUND_MARK.to_string())
             .env(
                 "SERVICE_OUTBOUND",

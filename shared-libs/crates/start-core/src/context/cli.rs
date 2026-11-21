@@ -84,6 +84,7 @@ pub struct CliContextSeed {
     pub tunnel_addr: Option<SocketAddr>,
     pub tunnel_listen: Option<SocketAddr>,
     pub client: Client,
+    pub torrents: crate::registry::bittorrent::TorrentClient,
     pub websocket_client: Client,
     pub rpc_client: crate::middleware::auth::session::client::SessionClient,
     pub id_key_path: PathBuf,
@@ -170,6 +171,21 @@ impl CliContext {
             tunnel_addr: config.tunnel,
             tunnel_listen: config.tunnel_listen,
             host_identity,
+            torrents: crate::registry::bittorrent::TorrentClient::download_only(
+                config.torrent_downloads,
+                config.proxy.is_some()
+                    || config.socks_listen.is_some()
+                    || [
+                        "HTTP_PROXY",
+                        "HTTPS_PROXY",
+                        "ALL_PROXY",
+                        "http_proxy",
+                        "https_proxy",
+                        "all_proxy",
+                    ]
+                    .iter()
+                    .any(|key| std::env::var_os(key).is_some_and(|value| !value.is_empty())),
+            ),
             client,
             rpc_client: crate::middleware::auth::session::client::SessionClient::new(
                 websocket_client.clone(),
@@ -179,6 +195,15 @@ impl CliContext {
             id_key_gpg: config.id_key_gpg,
             id_key: OnceCell::new(),
         })))
+    }
+
+    pub fn registry_torrents(
+        &self,
+    ) -> Result<Option<&crate::registry::bittorrent::TorrentClient>, Error> {
+        Ok(match &self.registry_url {
+            Some(registry) => self.torrents.for_source(registry.get()?),
+            None => Some(&self.torrents),
+        })
     }
 
     /// BLOCKING

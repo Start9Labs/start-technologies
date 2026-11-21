@@ -56,7 +56,7 @@ cargo build -p start-registry --bin registrybox
 ./target/debug/registrybox start-registry --help
 ```
 
-Defaults: listen `127.0.0.1:5959`, datadir `/var/lib/startos` (state in `<datadir>/registry.db` + a SQLite metrics DB + hosted assets). Useful flags: `-l/--listen`, `-H/--hostname`, `-p/--tor-proxy`, `-d/--datadir`, `-c/--config`.
+Defaults: listen `127.0.0.1:5959`, datadir `/var/lib/startos` (metadata in `<datadir>/registry.db`, metrics in `<datadir>/metrics.db`). Useful flags: `-l/--listen`, `-H/--hostname`, `-p/--tor-proxy`, `-d/--datadir`, `-c/--config`.
 
 ## Documentation
 

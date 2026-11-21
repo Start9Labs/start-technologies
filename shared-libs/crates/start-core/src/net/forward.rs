@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, SocketAddrV6};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -17,6 +17,8 @@ use tokio::sync::mpsc;
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::NetworkInterfaceInfo;
+pub use crate::net::bridge::START9_BRIDGE_IFACE;
+pub(crate) use crate::net::bridge::START9_BRIDGE_V6_ADDR;
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::transport::{Transport, TransportProtocol};
 use crate::prelude::*;
@@ -24,8 +26,6 @@ use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::serde::{HandlerExtSerde, display_serializable};
 use crate::util::sync::Watch;
-
-pub const START9_BRIDGE_IFACE: &str = "lxcbr0";
 /// The host's `ip_local_port_range` ends below this; see `projects/start-os/debian/postinst`.
 const DYNAMIC_PORT_START: u16 = 49152;
 // Reserved by/for host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11
@@ -38,7 +38,7 @@ const RESTRICTED_PORTS: &[u16] = &[5353, 5355, 5432, 6010];
 /// Only a privileged claimant — StartOS itself, which runs as root — may take a
 /// port below 1024. A host daemon already holds RESTRICTED_PORTS, whoever asks.
 fn may_claim(port: u16, privileged: bool) -> bool {
-    !RESTRICTED_PORTS.contains(&port) && (privileged || port > 1024)
+    port != 0 && !RESTRICTED_PORTS.contains(&port) && (privileged || port > 1024)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -100,6 +100,21 @@ impl AvailablePorts {
             ErrorKind::Network,
         ))
     }
+    /// First claimable preference, otherwise a dynamic port.
+    pub fn alloc_preferred(
+        &mut self,
+        preferences: impl IntoIterator<Item = u16>,
+        ssl: bool,
+        privileged: bool,
+    ) -> Result<u16, Error> {
+        for port in preferences {
+            if let Some(port) = self.try_alloc(port, ssl, privileged) {
+                return Ok(port);
+            }
+        }
+        self.alloc(ssl)
+    }
+
     /// Allocate a specific port; `None` if taken or not the caller's to claim.
     pub fn try_alloc(&mut self, port: u16, ssl: bool, privileged: bool) -> Option<u16> {
         if !may_claim(port, privileged) || self.0.contains_key(&port) {
@@ -1239,13 +1254,8 @@ async fn unforward(
     Ok(())
 }
 
-/// The lxcbr0 IPv6 bridge subnet (a ULA), assigned by lxc-net (see
-/// `debian/postinst`). Containers get a SLAAC address in it.
+/// The IPv6 prefix lxc-net advertises to containers.
 pub(crate) const START9_BRIDGE_V6_SUBNET: &str = "fd00:3::/64";
-
-/// The host's own address on the lxcbr0 bridge, pinned in `debian/postinst`
-/// beside the subnet above. The IPv6 counterpart of [`crate::HOST_IP`].
-pub(crate) const START9_BRIDGE_V6_ADDR: Ipv6Addr = Ipv6Addr::new(0xfd00, 3, 0, 0, 0, 0, 0, 1);
 
 /// IPv6 counterpart of [`forward`]: DNAT `source` (a host GUA:port) to `target`
 /// (the container's ULA:port) via the `forward-port6` script. `src_filter`
@@ -1435,6 +1445,32 @@ mod tests {
         assert!(!is_forward_script_tag("base-established"));
         assert!(!is_forward_script_tag("pinhole:2001:db8::1:443"));
         assert!(!is_forward_script_tag("sni-divert"));
+    }
+
+    #[test]
+    fn zero_is_not_allocatable_even_for_the_os() {
+        let mut ports = AvailablePorts::new();
+        for privileged in [false, true] {
+            assert!(ports.try_alloc(0, false, privileged).is_none());
+            assert!(ports.try_alloc_range(0, 1, privileged).is_err());
+        }
+        assert!(ports.0.is_empty());
+        let assigned = ports.alloc_preferred([0], true, true).unwrap();
+        assert!((DYNAMIC_PORT_START..u16::MAX).contains(&assigned));
+        assert!(ports.is_ssl(assigned));
+        assert!(!ports.0.contains_key(&0));
+    }
+
+    #[test]
+    fn ordered_preferences_fall_back_to_the_first_claimable_port() {
+        let mut ports = AvailablePorts::new();
+        ports.try_alloc(6881, false, false).unwrap();
+        assert_eq!(
+            ports.alloc_preferred([6881, 45678], true, false).unwrap(),
+            45678
+        );
+        assert!(!ports.is_ssl(6881));
+        assert!(ports.is_ssl(45678));
     }
 
     #[test]

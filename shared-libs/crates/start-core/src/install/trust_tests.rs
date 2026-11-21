@@ -22,6 +22,7 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
     let mut asset = RegistryAsset {
         published_at: chrono::Utc::now(),
         urls: vec![],
+        torrent: None,
         commitment,
         signatures: SignatureMap::from([(public.clone(), AnySignature::Ed25519ph(signature))]),
     };
@@ -149,6 +150,7 @@ async fn package_request_pins_use_update_policy_and_remain_required_with_overrid
     let asset = RegistryAsset {
         published_at: chrono::Utc::now(),
         urls: vec![],
+        torrent: None,
         commitment: package.as_archive().commitment().await.unwrap(),
         signatures,
     };

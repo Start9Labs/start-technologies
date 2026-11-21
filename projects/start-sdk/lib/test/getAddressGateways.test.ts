@@ -42,6 +42,7 @@ const host = (
       options: {
         transport: ['tcp', 'udp'],
         preferredExternalPort: 3478,
+        defaultOff: false,
         addSsl: null,
         secure: null,
         proxy: null,
@@ -118,6 +119,23 @@ describe('getAddressGateways', () => {
         { address: 'TURN.example.com', gateway: 'wg1' },
       ],
     })
+  })
+
+  it('consumes server-projected public selections', async () => {
+    const projected = addresses([tunnelV4, routerV4], ['134.199.220.102:3478'])
+    projected.defaultOff = true
+    projected.effective = [tunnelV4]
+    expect(
+      (
+        await getAddressGateways(effects('wg1', host(projected)), 'turn', [
+          '134.199.220.102',
+          '73.34.87.9',
+        ])
+      ).addresses,
+    ).toEqual([
+      { address: '134.199.220.102', gateway: 'wg1' },
+      { address: '73.34.87.9', gateway: null },
+    ])
   })
 
   it('gives no gateway to an address that is disabled or absent', async () => {

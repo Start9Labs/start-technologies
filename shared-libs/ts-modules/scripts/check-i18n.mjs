@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'fs'
 import { dirname, join, relative } from 'path'
 import { fileURLToPath } from 'url'
 import { dictionaryEntries } from './i18n-dictionary.mjs'
+import { uniqueDictionaryIds } from './i18n-ids.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const english = dictionaryEntries(
@@ -58,7 +59,7 @@ if (errors.length) {
   console.error()
 }
 
-const numericKeys = new Set(english.values())
+const numericKeys = uniqueDictionaryIds(english.values())
 const dictErrors = []
 for (const lang of ['de', 'es', 'fr', 'pl']) {
   const entries = dictionaryEntries(

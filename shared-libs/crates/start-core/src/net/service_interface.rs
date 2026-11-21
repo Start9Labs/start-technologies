@@ -70,10 +70,8 @@ impl HostnameInfo {
             .is_ok_and(crate::net::utils::is_internal_ip)
     }
 
-    /// If this address is an IPv6 **global unicast** address (a GUA — not
-    /// loopback / ULA / link-local), return it as a `SocketAddrV6`. GUAs are the
-    /// only addresses that carry the Disabled / LAN / LAN+WAN tri-state.
-    pub fn gua(&self) -> Option<SocketAddrV6> {
+    /// Global-unicast IPv6 address, independent of port assignment.
+    pub(crate) fn gua_ip(&self) -> Option<Ipv6Addr> {
         if !matches!(self.metadata, HostnameMetadata::Ipv6 { .. }) {
             return None;
         }
@@ -81,7 +79,12 @@ impl HostnameInfo {
         if crate::net::utils::ipv6_is_local(ip) {
             return None;
         }
-        Some(SocketAddrV6::new(ip, self.port?, 0, 0))
+        Some(ip)
+    }
+
+    /// Assigned global-unicast IPv6 endpoint.
+    pub fn gua(&self) -> Option<SocketAddrV6> {
+        Some(SocketAddrV6::new(self.gua_ip()?, self.port?, 0, 0))
     }
 }
 

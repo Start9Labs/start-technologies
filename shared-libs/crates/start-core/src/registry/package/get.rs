@@ -12,14 +12,17 @@ use tracing::warn;
 
 use crate::PackageId;
 use crate::context::CliContext;
+use crate::db::model::DatabaseModel;
 use crate::prelude::*;
 use crate::progress::{FullProgressTracker, ProgressUnits};
+use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::package::index::{PackageIndex, PackageVersionInfo, ReaderParams};
 use crate::s9pk::manifest::{HardwareRequirements, LocaleString};
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::v2::SIG_CONTEXT;
+use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::util::VersionString;
 use crate::util::io::{TrackingIO, to_tmp_path};
 use crate::util::serde::{WithIoFormat, display_serializable};
@@ -105,6 +108,40 @@ pub struct GetPackageResponse {
     pub best: BTreeMap<VersionString, PackageVersionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub other_versions: Option<BTreeMap<VersionString, PackageInfoShort>>,
+}
+
+/// The requested revision's asset, even once superseded.
+pub(crate) fn advertised_asset(
+    db: &DatabaseModel,
+    registry: &reqwest::Url,
+    id: &PackageId,
+    version: &VersionString,
+    device: &DeviceInfo,
+) -> Result<Option<RegistryAsset<MerkleArchiveCommitment>>, Error> {
+    let package: GetPackageResponseFull = from_value(crate::registry::sync::synced_packages(
+        db,
+        registry,
+        &GetPackageParams {
+            id: Some(id.clone()),
+            target_version: None,
+            source_version: None,
+            device_info: Some(device.clone()),
+            other_versions: Some(PackageDetailLevel::Full),
+            all_revisions: true,
+            reader: Default::default(),
+        },
+    )?)?;
+    Ok(package
+        .best
+        .get(version)
+        .or_else(|| package.other_versions.get(version))
+        .and_then(first_asset))
+}
+
+pub(crate) fn first_asset(
+    info: &PackageVersionInfo,
+) -> Option<RegistryAsset<MerkleArchiveCommitment>> {
+    info.s9pks.first().map(|(_, asset)| asset.clone())
 }
 
 rpc_toolkit::reflect_ts!(GetPackageResponse);
@@ -786,7 +823,12 @@ pub async fn cli_download(
     let dest = dest.unwrap_or_else(|| Path::new(".").join(id).with_extension("s9pk"));
     let dest_tmp = to_tmp_path(&dest)?;
     let (mut parsed, source) = s9pk
-        .download_to(&dest_tmp, ctx.client.clone(), download_progress)
+        .download_to(
+            &dest_tmp,
+            ctx.client.clone(),
+            ctx.registry_torrents()?,
+            download_progress,
+        )
         .await?;
     if let Some(size) = source.size().await {
         verify_progress.set_total(size);

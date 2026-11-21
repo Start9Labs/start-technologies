@@ -49,6 +49,7 @@ import { GatewayItemComponent } from './item.component'
         tuiButton
         iconStart="@tui.plus"
         [style.margin-inline-start]="'auto'"
+        [disabled]="value()?.pendingPort ?? false"
         (click)="openDomainTypePicker()"
       >
         {{ 'Add Domain' | i18n }}

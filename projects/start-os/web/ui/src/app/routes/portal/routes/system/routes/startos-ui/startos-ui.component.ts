@@ -47,8 +47,13 @@ export default class StartOsUiComponent {
   private readonly interfaceService = inject(InterfaceService)
   private readonly gatewayService = inject(GatewayService)
   private readonly i18n = inject(i18nPipe)
+  private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
+  private readonly network = toSignal(
+    this.patch.watch$('serverInfo', 'network'),
+  )
+  private readonly allPackageData = toSignal(this.patch.watch$('packageData'))
 
-  readonly iface: T.ServiceInterface = {
+  protected readonly iface: T.ServiceInterface = {
     id: 'admin-ui',
     name: 'StartOS UI',
     description: this.i18n.transform(
@@ -67,33 +72,17 @@ export default class StartOsUiComponent {
     },
   }
 
-  private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-
-  readonly network = toSignal(this.patch.watch$('serverInfo', 'network'))
-
-  readonly allPackageData = toSignal(this.patch.watch$('packageData'))
-
-  readonly ui = computed(() => {
+  protected readonly ui = computed(() => {
     const network = this.network()
     const gateways = this.gatewayService.gateways()
 
     if (!network || !gateways) return
 
-    return {
-      ...this.iface,
-      gatewayGroups: this.interfaceService.getGatewayGroups(
-        this.iface,
-        network.host,
-        gateways,
-      ),
-      pluginGroups: this.interfaceService.getPluginGroups(
-        this.iface,
-        network.host,
-        this.allPackageData(),
-      ),
-      anyAddSsl: true,
-      addSsl: true,
-      sharedHostNames: [],
-    }
+    return this.interfaceService.mapServiceInterface(
+      this.iface,
+      network.host,
+      gateways,
+      this.allPackageData(),
+    )
   })
 }

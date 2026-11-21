@@ -217,7 +217,11 @@ fn app() -> CliApp<CliContext, ClientConfig> {
         ),
     )
     .mutate_command(super::translate_cli)
-    .mutate_command(|cmd| cmd.name("start-tunnel").version(super::product_version()))
+    .mutate_command(|cmd| {
+        cmd.name("start-tunnel")
+            .version(super::product_version())
+            .mut_arg("bittorrent", |arg| arg.hide(true))
+    })
 }
 
 fn completions(_: CliContext, params: CompletionsParams) -> Result<(), Error> {

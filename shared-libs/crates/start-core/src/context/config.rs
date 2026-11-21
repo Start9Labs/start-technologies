@@ -146,6 +146,9 @@ pub trait ContextConfig: DeserializeOwned + Default {
 #[command(rename_all = "kebab-case")]
 #[command(version = crate::version::Current::default().semver().to_string())]
 pub struct ClientConfig {
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub torrent_downloads: crate::registry::bittorrent::TorrentDownloadConfig,
     #[arg(short = 'c', long, help = "help.arg.config-file-path")]
     pub config: Option<PathBuf>,
     /// The `host` namespace — named profiles from every config source, merged in
@@ -204,6 +207,7 @@ impl ContextConfig for ClientConfig {
         self.config.take()
     }
     fn merge_with(&mut self, other: Self) {
+        self.torrent_downloads.merge_with(other.torrent_downloads);
         merge_profiles(&mut self.host, other.host);
         merge_profiles(&mut self.registry, other.registry);
         self.registry_hostname = self.registry_hostname.take().or(other.registry_hostname);
@@ -307,6 +311,11 @@ pub fn resolve_profile<'a>(
 #[serde(rename_all = "kebab-case")]
 #[command(rename_all = "kebab-case")]
 pub struct ServerConfig {
+    #[arg(skip)]
+    pub bittorrent_seed: Option<crate::registry::bittorrent::TorrentSeedConfig>,
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub torrent_downloads: crate::registry::bittorrent::TorrentDownloadConfig,
     #[arg(short, long, help = "help.arg.config-file-path")]
     pub config: Option<PathBuf>,
     #[arg(long, help = "help.arg.socks-listen-address")]
@@ -328,7 +337,9 @@ impl ContextConfig for ServerConfig {
         self.config.take()
     }
     fn merge_with(&mut self, other: Self) {
+        self.torrent_downloads.merge_with(other.torrent_downloads);
         self.socks_listen = self.socks_listen.take().or(other.socks_listen);
+        self.bittorrent_seed = self.bittorrent_seed.take().or(other.bittorrent_seed);
         self.revision_cache_size = self
             .revision_cache_size
             .take()
@@ -364,6 +375,65 @@ impl ServerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_http_only_downloads_override_configured_bittorrent() {
+        let mut cli = ClientConfig::try_parse_from([
+            "cli",
+            "--bittorrent",
+            "false",
+            "-H",
+            "default",
+            "-r",
+            "default",
+        ])
+        .unwrap();
+        let configured: ClientConfig = serde_json::from_value(serde_json::json!({
+            "bittorrent": true,
+            "host": "https://host/",
+            "registry": "https://registry/",
+        }))
+        .unwrap();
+        cli.merge_with(configured);
+        assert_eq!(cli.torrent_downloads.bittorrent, Some(false));
+        assert_eq!(
+            resolve_target(cli.host.as_ref()).unwrap().unwrap().as_str(),
+            "https://host/"
+        );
+        assert_eq!(
+            resolve_target(cli.registry.as_ref())
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "https://registry/"
+        );
+        assert!(
+            ClientConfig::default()
+                .torrent_downloads
+                .bittorrent
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn sharing_metadata_configuration_does_not_activate_peer_connections() {
+        let configured: ServerConfig =
+            serde_json::from_value(serde_json::json!({"bittorrent-seed": {}})).unwrap();
+        let seed = configured.bittorrent_seed.unwrap();
+        assert_eq!(
+            seed.directory,
+            Path::new("/media/startos/data/package-data/registry-torrents")
+        );
+        let server: ServerConfig = serde_json::from_value(
+            serde_json::json!({"bittorrent-seed": {"directory": "/custom-metadata"}}),
+        )
+        .unwrap();
+        assert_eq!(
+            server.bittorrent_seed.unwrap().directory,
+            Path::new("/custom-metadata")
+        );
+        assert!(ServerConfig::default().bittorrent_seed.is_none());
+    }
 
     fn profiles(pairs: &[(&str, &str)]) -> Profiles {
         Profiles(

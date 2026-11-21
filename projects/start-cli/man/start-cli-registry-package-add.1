@@ -4,13 +4,16 @@
 .SH NAME
 start\-cli\-registry\-package\-add \- Add package to registry index
 .SH SYNOPSIS
-\fBstart\-cli registry package add\fR [\fB\-\-url\fR] [\fB\-\-no\-verify\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE\fR>
+\fBstart\-cli registry package add\fR [\fB\-\-url\fR] [\fB\-\-torrent\fR] [\fB\-\-no\-verify\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE\fR>
 .SH DESCRIPTION
 Add package to registry index
 .SH OPTIONS
 .TP
 \fB\-\-url\fR \fI<URL>\fR
 URL of the package
+.TP
+\fB\-\-torrent\fR \fI<TORRENT>\fR
+Magnet link or HTTP(S) torrent metadata URL; seed the asset separately
 .TP
 \fB\-\-no\-verify\fR
 Skip signature verification

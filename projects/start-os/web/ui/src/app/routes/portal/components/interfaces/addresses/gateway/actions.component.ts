@@ -87,6 +87,7 @@ import { DomainHealthService } from './domain-health.service'
         tuiIconButton
         appearance="flat-grayscale"
         iconStart="@tui.qr-code"
+        [disabled]="value()?.pendingPort ?? false"
         (click)="showQR()"
       >
         {{ 'Show QR' | i18n }}
@@ -95,6 +96,7 @@ import { DomainHealthService } from './domain-health.service'
         tuiIconButton
         appearance="flat-grayscale"
         iconStart="@tui.copy"
+        [disabled]="value()?.pendingPort ?? false"
         (click)="copyService.copy(address().url)"
       >
         {{ 'Copy URL' | i18n }}
@@ -142,12 +144,18 @@ import { DomainHealthService } from './domain-health.service'
               {{ 'Open UI' | i18n }}
             </a>
           }
-          <button tuiOption iconStart="@tui.qr-code" (click)="showQR()">
+          <button
+            tuiOption
+            iconStart="@tui.qr-code"
+            [disabled]="value()?.pendingPort ?? false"
+            (click)="showQR()"
+          >
             {{ 'Show QR' | i18n }}
           </button>
           <button
             tuiOption
             iconStart="@tui.copy"
+            [disabled]="value()?.pendingPort ?? false"
             (click)="copyService.copy(address().url)"
           >
             {{ 'Copy URL' | i18n }}

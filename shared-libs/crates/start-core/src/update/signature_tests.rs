@@ -17,6 +17,7 @@ fn signed_asset(key: &SigningKey) -> RegistryAsset<Blake3Commitment> {
     RegistryAsset {
         published_at: Utc::now(),
         urls: Vec::new(),
+        torrent: None,
         commitment,
         signatures: SignatureMap::from([(
             AnyVerifyingKey::Ed25519(key.verifying_key()),

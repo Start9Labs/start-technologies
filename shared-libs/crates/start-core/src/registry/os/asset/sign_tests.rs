@@ -73,6 +73,7 @@ async fn squashfs_signing_requires_version_authorization_or_admin() {
                 RegistryAsset {
                     published_at: Utc::now(),
                     urls: vec![],
+                    torrent: None,
                     commitment: commitment.clone(),
                     signatures: Default::default(),
                 },
