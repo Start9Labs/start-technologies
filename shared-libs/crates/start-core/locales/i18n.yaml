@@ -4254,6 +4254,13 @@ auth.password-incorrect:
   fr_FR: "Mot de passe incorrect"
   pl_PL: "Nieprawidłowe hasło"
 
+auth.passkey.invalid-credential-id:
+  en_US: "Invalid passkey credential ID"
+  de_DE: "Ungültige Passkey-Anmeldedaten-ID"
+  es_ES: "ID de credencial de llave de acceso no válido"
+  fr_FR: "Identifiant d’identification de clé d’accès invalide"
+  pl_PL: "Nieprawidłowy identyfikator poświadczenia klucza dostępu"
+
 auth.prompt-new-password:
   en_US: "New Password: "
   de_DE: "Neues Passwort: "
@@ -5494,6 +5501,13 @@ help.arg.trusted-public-keys:
   fr_FR: "Clés publiques Ed25519 ou P-256 au format PEM, ou clés Ed25519 au format GPG armuré ; placer les options avant -- et les clés après"
   pl_PL: "Klucze publiczne Ed25519 lub P-256 w formacie PEM albo klucze Ed25519 w formacie GPG z pancerzem ASCII; opcje podaj przed --, a klucze po nim"
 
+help.arg.passkey-public-key:
+  en_US: "The passkey’s public key in PEM or DER Base64"
+  de_DE: "Öffentlicher Schlüssel des Passkeys in PEM oder DER-Base64"
+  es_ES: "Clave pública de la llave de acceso en PEM o DER Base64"
+  fr_FR: "Clé publique de la clé d’accès en PEM ou DER Base64"
+  pl_PL: "Klucz publiczny klucza dostępu w PEM lub DER Base64"
+
 help.arg.tunnel-address:
   en_US: "Tunnel server address"
   de_DE: "Tunnel-Server-Adresse"
@@ -6533,6 +6547,13 @@ about.commands-authentication:
   fr_FR: "Commandes liées à l'authentification, comme connexion, déconnexion"
   pl_PL: "Polecenia związane z uwierzytelnianiem, np. logowanie, wylogowanie"
 
+about.commands-passkeys:
+  en_US: "Passkey commands"
+  de_DE: "Passkey-Befehle"
+  es_ES: "Comandos de llaves de acceso"
+  fr_FR: "Commandes des clés d’accès"
+  pl_PL: "Polecenia kluczy dostępu"
+
 about.commands-authorized-keys:
   en_US: "Commands for managing authorized keys"
   de_DE: "Befehle zur Verwaltung autorisierter Schlüssel"
@@ -7464,6 +7485,20 @@ about.list-or-kill-auth-sessions:
   es_ES: "Listar o terminar sesiones de autenticación"
   fr_FR: "Lister ou terminer les sessions d'authentification"
   pl_PL: "Wyświetl lub zakończ sesje uwierzytelniania"
+
+about.list-passkeys:
+  en_US: "List registered passkeys"
+  de_DE: "Registrierte Passkeys auflisten"
+  es_ES: "Listar las llaves de acceso registradas"
+  fr_FR: "Lister les clés d’accès enregistrées"
+  pl_PL: "Wyświetl zarejestrowane klucze dostępu"
+
+about.remove-passkey:
+  en_US: "Remove a passkey and close its connections"
+  de_DE: "Einen Passkey entfernen und seine Verbindungen schließen"
+  es_ES: "Eliminar una llave de acceso y cerrar sus conexiones"
+  fr_FR: "Supprimer une clé d’accès et fermer ses connexions"
+  pl_PL: "Usuń klucz dostępu i zamknij jego połączenia"
 
 about.list-os-versions-index:
   en_US: "List OS versions index"

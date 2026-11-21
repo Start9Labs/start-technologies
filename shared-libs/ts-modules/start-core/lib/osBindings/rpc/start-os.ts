@@ -318,6 +318,11 @@ export type PackageDetailLevelInput = z.input<typeof schemas.PackageDetailLevel>
 export type PackageId = z.output<typeof schemas.PackageId>
 export type PackageIdInput = z.input<typeof schemas.PackageId>
 export type PackageVersionCount = z.output<typeof schemas.PackageVersionCount>
+
+/**
+ * A WebAuthn credential that signs each encrypted RPC connection in place of a session key.
+ */
+export type Passkey = z.output<typeof schemas.Passkey>
 export type Percentage = z.output<typeof schemas.Percentage>
 export type PluginId = z.output<typeof schemas.PluginId>
 export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
@@ -477,6 +482,7 @@ export type AddPackageSignerParamsInput = z.input<
 export type AddPackageToCategoryParamsInput = z.input<
   typeof schemas.AddPackageToCategoryParams
 >
+export type AddPasskeyParamsInput = z.input<typeof schemas.AddPasskeyParams>
 export type AddPassthroughParamsInput = z.input<
   typeof schemas.AddPassthroughParams
 >
@@ -622,6 +628,11 @@ export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PackageReaderParamsInput = z.input<
   typeof schemas.PackageReaderParams
 >
+
+/**
+ * What an unauthenticated browser needs to request and attribute a passkey signature.
+ */
+export type PasskeyCredential = z.output<typeof schemas.PasskeyCredential>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
 export type PasswordTypeInput = z.input<typeof schemas.PasswordType>
 
@@ -662,6 +673,9 @@ export type RemovePackageParamsInput = z.input<
 >
 export type RemovePackageSignerParamsInput = z.input<
   typeof schemas.RemovePackageSignerParams
+>
+export type RemovePasskeyParamsInput = z.input<
+  typeof schemas.RemovePasskeyParams
 >
 export type RemoveSignerParamsInput = z.input<typeof schemas.RemoveSignerParams>
 export type RemoveTunnelParamsInput = z.input<typeof schemas.RemoveTunnelParams>

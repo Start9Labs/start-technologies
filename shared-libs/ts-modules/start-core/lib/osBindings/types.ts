@@ -338,6 +338,16 @@ export type PackageVersionCountInput = z.input<
 >
 export type PartitionTable = z.output<typeof schemas.PartitionTable>
 export type PartitionTableInput = z.input<typeof schemas.PartitionTable>
+
+/**
+ * A WebAuthn credential that signs each encrypted RPC connection in place of a session key.
+ */
+export type Passkey = z.output<typeof schemas.Passkey>
+
+/**
+ * A WebAuthn credential that signs each encrypted RPC connection in place of a session key.
+ */
+export type PasskeyInput = z.input<typeof schemas.Passkey>
 export type PathOrUrl = z.output<typeof schemas.PathOrUrl>
 export type PathOrUrlInput = z.input<typeof schemas.PathOrUrl>
 export type Pem = z.output<typeof schemas.Pem>
@@ -640,6 +650,8 @@ export type AddPackageToCategoryParams = z.output<
 export type AddPackageToCategoryParamsInput = z.input<
   typeof schemas.AddPackageToCategoryParams
 >
+export type AddPasskeyParams = z.output<typeof schemas.AddPasskeyParams>
+export type AddPasskeyParamsInput = z.input<typeof schemas.AddPasskeyParams>
 export type AddPrivateDomainParams = z.output<
   typeof schemas.AddPrivateDomainParams
 >
@@ -1014,6 +1026,16 @@ export type PackageReaderParams = z.output<typeof schemas.PackageReaderParams>
 export type PackageReaderParamsInput = z.input<
   typeof schemas.PackageReaderParams
 >
+
+/**
+ * What an unauthenticated browser needs to request and attribute a passkey signature.
+ */
+export type PasskeyCredential = z.output<typeof schemas.PasskeyCredential>
+
+/**
+ * What an unauthenticated browser needs to request and attribute a passkey signature.
+ */
+export type PasskeyCredentialInput = z.input<typeof schemas.PasskeyCredential>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
 export type PassthroughInfoInput = z.input<typeof schemas.PassthroughInfo>
 export type PasswordType = z.output<typeof schemas.PasswordType>
@@ -1111,6 +1133,10 @@ export type RemovePackageSignerParams = z.output<
 >
 export type RemovePackageSignerParamsInput = z.input<
   typeof schemas.RemovePackageSignerParams
+>
+export type RemovePasskeyParams = z.output<typeof schemas.RemovePasskeyParams>
+export type RemovePasskeyParamsInput = z.input<
+  typeof schemas.RemovePasskeyParams
 >
 export type RemoveSignerParams = z.output<typeof schemas.RemoveSignerParams>
 export type RemoveSignerParamsInput = z.input<typeof schemas.RemoveSignerParams>

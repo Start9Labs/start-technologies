@@ -1,0 +1,20 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-auth-passkey 1  "passkey "
+.SH NAME
+start\-cli\-auth\-passkey \- Passkey commands
+.SH SYNOPSIS
+\fBstart\-cli auth passkey\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Passkey commands
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-auth\-passkey\-list(1)
+List registered passkeys
+.TP
+start\-cli\-auth\-passkey\-remove(1)
+Remove a passkey and close its connections

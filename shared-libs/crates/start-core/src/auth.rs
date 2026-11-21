@@ -105,12 +105,7 @@ pub trait LoginContext: SignatureAuthorizationContext {
         db: &Model<Self::Database>,
         key: &InternedString,
     ) -> Result<bool, Error> {
-        Ok(self
-            .ephemeral_auth_keys()
-            .is_some_and(|keys| keys.peek(|keys| keys.0.contains_key(&**key)))
-            || Self::access_auth_keys(&mut db.clone())
-                .as_idx(key)
-                .is_some())
+        Ok(session_key_is_enrolled(self, db, key))
     }
     /// Current bearer membership in the context's authoritative token store.
     fn auth_token_is_enrolled(&self, db: &Model<Self::Database>, token: &InternedString) -> bool {
@@ -135,6 +130,17 @@ pub trait LoginContext: SignatureAuthorizationContext {
     ) -> impl Future<Output = ()> + Send {
         async {}
     }
+}
+
+/// Whether the key holds a persisted or ephemeral login session.
+fn session_key_is_enrolled<C: LoginContext + ?Sized>(
+    ctx: &C,
+    db: &Model<C::Database>,
+    key: &InternedString,
+) -> bool {
+    ctx.ephemeral_auth_keys()
+        .is_some_and(|keys| keys.peek(|keys| keys.0.contains_key(&**key)))
+        || C::access_auth_keys(&mut db.clone()).as_idx(key).is_some()
 }
 
 /// Where a login came from.
@@ -188,6 +194,14 @@ pub fn revoke_tokens<C: LoginContext>(
 impl LoginContext for RpcContext {
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys> {
         db.as_private_mut().as_sessions_mut().as_pubkeys_mut()
+    }
+    /// Registered passkeys authorize without a session and survive logout and idle expiry.
+    fn auth_key_is_enrolled(
+        &self,
+        db: &Model<Self::Database>,
+        key: &InternedString,
+    ) -> Result<bool, Error> {
+        Ok(passkey::is_registered(db, key) || session_key_is_enrolled(self, db, key))
     }
     fn access_tokens(db: &mut Model<Self::Database>) -> Option<&mut Model<TokenSessions>> {
         Some(db.as_private_mut().as_sessions_mut().as_tokens_mut())
@@ -307,6 +321,7 @@ impl std::str::FromStr for PasswordType {
         })
     }
 }
+pub mod passkey;
 #[cfg(test)]
 mod password_tests;
 

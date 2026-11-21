@@ -563,6 +563,7 @@ export const Api = {
     auth: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        passkey: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         session: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         token: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
       },

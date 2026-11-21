@@ -1170,6 +1170,32 @@ export const PackageVersionCount: z.ZodObject<{
 }).meta({
   id: 'PackageVersionCount',
 })
+
+/**
+ * A WebAuthn credential that signs each encrypted RPC connection in place of a session key.
+ */
+export const Passkey: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * Base64url credential ID, for the browser's `allowCredentials`.
+   */
+  credentialId: z.ZodString
+  addedAt: z.ZodString
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * Base64url credential ID, for the browser's `allowCredentials`.
+   */
+  credentialId: z.string().meta({
+    description:
+      "Base64url credential ID, for the browser's `allowCredentials`.",
+  }),
+  addedAt: z.string(),
+}).meta({
+  id: 'Passkey',
+  description:
+    'A WebAuthn credential that signs each encrypted RPC connection in place of a session key.',
+})
 export const Percentage: typeof literal_6 = /* @__PURE__ */ literal_6.meta({
   id: 'Percentage',
 })
@@ -2141,6 +2167,36 @@ export const AddPackageToCategoryParams: z.ZodObject<{
   package: typeof PackageId
 }> = /* @__PURE__ */ object({ id: z.string(), package: PackageId }).meta({
   id: 'AddPackageToCategoryParams',
+})
+export const AddPasskeyParams: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.ZodString
+  publicKey: typeof AnyVerifyingKey
+  /**
+   * The server password, confirming a credential that will outlive every session.
+   */
+  password: z.ZodString
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.string().meta({
+    description: 'Base64url credential ID.',
+  }),
+  publicKey: AnyVerifyingKey,
+  /**
+   * The server password, confirming a credential that will outlive every session.
+   */
+  password: z.string().meta({
+    description:
+      'The server password, confirming a credential that will outlive every session.',
+  }),
+}).meta({
+  id: 'AddPasskeyParams',
 })
 export const AddPassthroughParams: z.ZodObject<{
   hostname: z.ZodString
@@ -3614,6 +3670,29 @@ export const PackageReaderParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
   id: 'PackageReaderParams',
 })
+
+/**
+ * What an unauthenticated browser needs to request and attribute a passkey signature.
+ */
+export const PasskeyCredential: z.ZodObject<{
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.ZodString
+  publicKey: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.string().meta({
+    description: 'Base64url credential ID.',
+  }),
+  publicKey: AnyVerifyingKey,
+}).meta({
+  id: 'PasskeyCredential',
+  description:
+    'What an unauthenticated browser needs to request and attribute a passkey signature.',
+})
 export const PassthroughInfo: z.ZodObject<{
   hostname: z.ZodString
   listenPort: z.ZodInt
@@ -3935,6 +4014,11 @@ export const RemovePackageSignerParams: z.ZodObject<{
   signer: typeof Guid
 }> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
   id: 'RemovePackageSignerParams',
+})
+export const RemovePasskeyParams: z.ZodObject<{
+  publicKey: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({ publicKey: AnyVerifyingKey }).meta({
+  id: 'RemovePasskeyParams',
 })
 export const RemoveSignerParams: z.ZodObject<{ id: typeof Guid }> =
   /* @__PURE__ */ object({ id: Guid }).meta({
@@ -6502,6 +6586,46 @@ export const Api = {
           _RETURN: /* @__PURE__ */ HasUnenrolledKeys.nullable(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
+        },
+        passkey: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ AddPasskeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            credentials: {
+              _PARAMS: /* @__PURE__ */ empty,
+              _RETURN: /* @__PURE__ */ z.array(PasskeyCredential),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ z.record(z.string(), Passkey),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ RemovePasskeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+          },
         },
         'reset-password': {
           _PARAMS: /* @__PURE__ */ ResetPasswordParams,

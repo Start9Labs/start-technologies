@@ -1280,6 +1280,32 @@ export const PartitionTable: z.ZodEnum<{ mbr: 'mbr'; gpt: 'gpt' }> =
   /* @__PURE__ */ z.enum(['mbr', 'gpt']).meta({
     id: 'PartitionTable',
   })
+
+/**
+ * A WebAuthn credential that signs each encrypted RPC connection in place of a session key.
+ */
+export const Passkey: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * Base64url credential ID, for the browser's `allowCredentials`.
+   */
+  credentialId: z.ZodString
+  addedAt: z.ZodString
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * Base64url credential ID, for the browser's `allowCredentials`.
+   */
+  credentialId: z.string().meta({
+    description:
+      "Base64url credential ID, for the browser's `allowCredentials`.",
+  }),
+  addedAt: z.string(),
+}).meta({
+  id: 'Passkey',
+  description:
+    'A WebAuthn credential that signs each encrypted RPC connection in place of a session key.',
+})
 export const PathOrUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'PathOrUrl',
 })
@@ -2430,6 +2456,36 @@ export const AddPackageToCategoryParams: z.ZodObject<{
   package: typeof PackageId
 }> = /* @__PURE__ */ object({ id: z.string(), package: PackageId }).meta({
   id: 'AddPackageToCategoryParams',
+})
+export const AddPasskeyParams: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.ZodString
+  publicKey: typeof AnyVerifyingKey
+  /**
+   * The server password, confirming a credential that will outlive every session.
+   */
+  password: z.ZodString
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.string().meta({
+    description: 'Base64url credential ID.',
+  }),
+  publicKey: AnyVerifyingKey,
+  /**
+   * The server password, confirming a credential that will outlive every session.
+   */
+  password: z.string().meta({
+    description:
+      'The server password, confirming a credential that will outlive every session.',
+  }),
+}).meta({
+  id: 'AddPasskeyParams',
 })
 export const AddPrivateDomainParams: z.ZodObject<{
   fqdn: z.ZodString
@@ -4058,6 +4114,29 @@ export const PackageReaderParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
   id: 'PackageReaderParams',
 })
+
+/**
+ * What an unauthenticated browser needs to request and attribute a passkey signature.
+ */
+export const PasskeyCredential: z.ZodObject<{
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.ZodString
+  publicKey: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.string().meta({
+    description: 'Base64url credential ID.',
+  }),
+  publicKey: AnyVerifyingKey,
+}).meta({
+  id: 'PasskeyCredential',
+  description:
+    'What an unauthenticated browser needs to request and attribute a passkey signature.',
+})
 export const PassthroughInfo: z.ZodObject<{
   hostname: z.ZodString
   listenPort: z.ZodInt
@@ -4360,6 +4439,11 @@ export const RemovePackageSignerParams: z.ZodObject<{
   signer: typeof Guid
 }> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
   id: 'RemovePackageSignerParams',
+})
+export const RemovePasskeyParams: z.ZodObject<{
+  publicKey: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({ publicKey: AnyVerifyingKey }).meta({
+  id: 'RemovePasskeyParams',
 })
 export const RemoveSignerParams: z.ZodObject<{ id: typeof Guid }> =
   /* @__PURE__ */ object({ id: Guid }).meta({
