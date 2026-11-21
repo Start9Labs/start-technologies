@@ -1,0 +1,37 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-registry-metrics-subscriptions 1  "subscriptions " 
+.SH NAME
+start\-registry\-metrics\-subscriptions \- Count package index subscriptions by StartOS version within a time range
+.SH SYNOPSIS
+\fBstart\-registry metrics subscriptions\fR [\fB\-\-after\fR] [\fB\-\-before\fR] [\fB\-\-interval\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Count package index subscriptions by StartOS version within a time range
+.SH OPTIONS
+.TP
+\fB\-\-after\fR \fI<AFTER>\fR
+Start of time range (RFC 3339 timestamp)
+.TP
+\fB\-\-before\fR \fI<BEFORE>\fR
+End of time range (RFC 3339 timestamp)
+.TP
+\fB\-\-interval\fR \fI<INTERVAL>\fR
+Also count each day, week (from Monday) or month in the range, in UTC
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+day
+.IP \(bu 2
+week
+.IP \(bu 2
+month
+.RE
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

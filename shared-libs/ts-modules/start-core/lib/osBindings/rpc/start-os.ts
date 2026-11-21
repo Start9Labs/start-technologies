@@ -201,10 +201,8 @@ export type GenerateCertificateParamsInput = z.input<
 export type GenerateCertificateResponse = z.output<
   typeof schemas.GenerateCertificateResponse
 >
-export type GetDownloadsParamsInput = z.input<typeof schemas.GetDownloadsParams>
 export type GetOsAssetParamsInput = z.input<typeof schemas.GetOsAssetParams>
 export type GetOsVersionParamsInput = z.input<typeof schemas.GetOsVersionParams>
-export type GetUsersParamsInput = z.input<typeof schemas.GetUsersParams>
 export type GigaBytes = z.output<typeof schemas.GigaBytes>
 export type GitHash = z.output<typeof schemas.GitHash>
 export type GitHashInput = z.input<typeof schemas.GitHash>
@@ -271,6 +269,7 @@ export type MerkleArchiveCommitmentInput = z.input<
 export type MetricsFollowParamsInput = z.input<
   typeof schemas.MetricsFollowParams
 >
+export type MetricsIntervalInput = z.input<typeof schemas.MetricsInterval>
 export type MiB = z.output<typeof schemas.MiB>
 export type ModifyNotificationBeforeParamsInput = z.input<
   typeof schemas.ModifyNotificationBeforeParams
@@ -319,6 +318,8 @@ export type PackageId = z.output<typeof schemas.PackageId>
 export type PackageIdInput = z.input<typeof schemas.PackageId>
 export type PackageVersionCount = z.output<typeof schemas.PackageVersionCount>
 export type Percentage = z.output<typeof schemas.Percentage>
+export type PeriodCount = z.output<typeof schemas.PeriodCount>
+export type PeriodUsers = z.output<typeof schemas.PeriodUsers>
 export type PluginId = z.output<typeof schemas.PluginId>
 export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
 export type ProgressUnits = z.output<typeof schemas.ProgressUnits>
@@ -457,7 +458,6 @@ export type UpdateTrustedKeyParamsInput = z.input<
 export type UpstreamCertValidation = z.output<
   typeof schemas.UpstreamCertValidation
 >
-export type UsersResponse = z.output<typeof schemas.UsersResponse>
 export type Version = z.output<typeof schemas.Version>
 export type VersionInput = z.input<typeof schemas.Version>
 export type WifiAddParamsInput = z.input<typeof schemas.WifiAddParams>
@@ -572,10 +572,12 @@ export type GatewayPortMapCapabilities = z.output<
 export type GetActionInputParamsInput = z.input<
   typeof schemas.GetActionInputParams
 >
+export type GetDownloadsParamsInput = z.input<typeof schemas.GetDownloadsParams>
 export type GetPackageAccessParamsInput = z.input<
   typeof schemas.GetPackageAccessParams
 >
 export type GetPackageParamsInput = z.input<typeof schemas.GetPackageParams>
+export type GetUsersParamsInput = z.input<typeof schemas.GetUsersParams>
 export type GovernorInfo = z.output<typeof schemas.GovernorInfo>
 export type GovernorParamsInput = z.input<typeof schemas.GovernorParams>
 export type HardwareRequirements = z.output<typeof schemas.HardwareRequirements>
@@ -586,6 +588,7 @@ export type InitAcmeParamsInput = z.input<typeof schemas.InitAcmeParams>
 export type InstalledVersionParamsInput = z.input<
   typeof schemas.InstalledVersionParams
 >
+export type InstallsResponse = z.output<typeof schemas.InstallsResponse>
 export type IpInfo = z.output<typeof schemas.IpInfo>
 export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LegacyAlpnInfo = z.output<typeof schemas.LegacyAlpnInfo>
@@ -650,6 +653,9 @@ export type PublicDomainConfig = z.output<typeof schemas.PublicDomainConfig>
 export type PushSubscription = z.output<typeof schemas.PushSubscription>
 export type PushSubscriptionInput = z.input<typeof schemas.PushSubscription>
 export type RebuildParamsInput = z.input<typeof schemas.RebuildParams>
+export type RecordInstallParamsInput = z.input<
+  typeof schemas.RecordInstallParams
+>
 export type RegistryIdentity = z.output<typeof schemas.RegistryIdentity>
 export type RemoveAcmeParamsInput = z.input<typeof schemas.RemoveAcmeParams>
 export type RemoveAdminParamsInput = z.input<typeof schemas.RemoveAdminParams>
@@ -733,6 +739,9 @@ export type SubscribeIndexParamsInput = z.input<
 >
 export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
+export type SubscriptionsResponse = z.output<
+  typeof schemas.SubscriptionsResponse
+>
 export type TargetParamsInput = z.input<typeof schemas.TargetParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
 export type TransportWire = z.output<typeof schemas.TransportWire>
@@ -749,6 +758,7 @@ export type UpdateCifsTargetParamsInput = z.input<
 >
 export type UpdateSystemRes = z.output<typeof schemas.UpdateSystemRes>
 export type UpdateTunnelParamsInput = z.input<typeof schemas.UpdateTunnelParams>
+export type UsersResponse = z.output<typeof schemas.UsersResponse>
 export type VersionSignerParamsInput = z.input<
   typeof schemas.VersionSignerParams
 >

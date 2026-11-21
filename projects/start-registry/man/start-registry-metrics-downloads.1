@@ -2,11 +2,11 @@
 .el .ds Aq '
 .TH start-registry-metrics-downloads 1  "downloads " 
 .SH NAME
-start\-registry\-metrics\-downloads \- Count package download requests with optional filters
+start\-registry\-metrics\-downloads \- Count requests for a specific package version that reached the registry, with optional filters
 .SH SYNOPSIS
-\fBstart\-registry metrics downloads\fR [\fB\-\-pkg\-id\fR] [\fB\-\-version\fR] [\fB\-\-after\fR] [\fB\-\-before\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBstart\-registry metrics downloads\fR [\fB\-\-pkg\-id\fR] [\fB\-\-version\fR] [\fB\-\-after\fR] [\fB\-\-before\fR] [\fB\-\-interval\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
-Count package download requests with optional filters
+Count requests for a specific package version that reached the registry, with optional filters
 .SH OPTIONS
 .TP
 \fB\-\-pkg\-id\fR \fI<PKG_ID>\fR
@@ -20,6 +20,21 @@ Start of time range (RFC 3339 timestamp)
 .TP
 \fB\-\-before\fR \fI<BEFORE>\fR
 End of time range (RFC 3339 timestamp)
+.TP
+\fB\-\-interval\fR \fI<INTERVAL>\fR
+Also count each day, week (from Monday) or month in the range, in UTC
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+day
+.IP \(bu 2
+week
+.IP \(bu 2
+month
+.RE
 .TP
 \fB\-\-format\fR
 

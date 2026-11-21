@@ -7537,9 +7537,20 @@
             "before": {
               "description": "End of time range (RFC 3339)",
               "type": ["string", "null"]
+            },
+            "interval": {
+              "description": "Also report each period in the range",
+              "anyOf": [
+                { "$ref": "#/$defs/MetricsInterval" },
+                { "type": "null" }
+              ]
             }
           },
           "additionalProperties": true
+        },
+        "MetricsInterval": {
+          "type": "string",
+          "enum": ["day", "week", "month"]
         }
       },
       "type": "object"
@@ -7562,6 +7573,10 @@
             "byPackageVersion": {
               "type": "array",
               "items": { "$ref": "#/$defs/PackageVersionCount" }
+            },
+            "series": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/PeriodCount" }
             }
           },
           "required": ["totalRequests", "byPackage", "byPackageVersion"],
@@ -7593,6 +7608,19 @@
           },
           "required": ["pkgId", "version", "count"],
           "additionalProperties": true
+        },
+        "PeriodCount": {
+          "type": "object",
+          "properties": {
+            "period": { "type": "string" },
+            "count": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["period", "count"],
+          "additionalProperties": true
         }
       },
       "type": "object",
@@ -7609,9 +7637,299 @@
         "byPackageVersion": {
           "type": "array",
           "items": { "$ref": "#/$defs/PackageVersionCount" }
+        },
+        "series": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PeriodCount" }
         }
       },
       "required": ["totalRequests", "byPackage", "byPackageVersion"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "registry.metrics.installs",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RegistryUrlParams" },
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/GetDownloadsParams" }
+      ],
+      "$defs": {
+        "RegistryUrlParams": {
+          "type": "object",
+          "properties": { "registry": { "type": "string" } },
+          "required": ["registry"],
+          "additionalProperties": true
+        },
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "GetDownloadsParams": {
+          "type": "object",
+          "properties": {
+            "pkgId": {
+              "description": "Filter by package ID",
+              "type": ["string", "null"]
+            },
+            "version": {
+              "description": "Filter by version",
+              "type": ["string", "null"]
+            },
+            "after": {
+              "description": "Start of time range (RFC 3339)",
+              "type": ["string", "null"]
+            },
+            "before": {
+              "description": "End of time range (RFC 3339)",
+              "type": ["string", "null"]
+            },
+            "interval": {
+              "description": "Also report each period in the range",
+              "anyOf": [
+                { "$ref": "#/$defs/MetricsInterval" },
+                { "type": "null" }
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        "MetricsInterval": {
+          "type": "string",
+          "enum": ["day", "week", "month"]
+        }
+      },
+      "type": "object"
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "InstallsResponse": {
+          "type": "object",
+          "properties": {
+            "totalInstalls": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "byPackage": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/CountEntry" }
+            },
+            "byPackageVersion": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/PackageVersionCount" }
+            },
+            "series": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/PeriodCount" }
+            }
+          },
+          "required": ["totalInstalls", "byPackage", "byPackageVersion"],
+          "additionalProperties": true
+        },
+        "CountEntry": {
+          "type": "object",
+          "properties": {
+            "label": { "type": "string" },
+            "count": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["label", "count"],
+          "additionalProperties": true
+        },
+        "PackageVersionCount": {
+          "type": "object",
+          "properties": {
+            "pkgId": { "type": "string" },
+            "version": { "type": "string" },
+            "count": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["pkgId", "version", "count"],
+          "additionalProperties": true
+        },
+        "PeriodCount": {
+          "type": "object",
+          "properties": {
+            "period": { "type": "string" },
+            "count": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["period", "count"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "totalInstalls": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "byPackage": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CountEntry" }
+        },
+        "byPackageVersion": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PackageVersionCount" }
+        },
+        "series": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PeriodCount" }
+        }
+      },
+      "required": ["totalInstalls", "byPackage", "byPackageVersion"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "registry.metrics.subscriptions",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RegistryUrlParams" },
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/GetUsersParams" }
+      ],
+      "$defs": {
+        "RegistryUrlParams": {
+          "type": "object",
+          "properties": { "registry": { "type": "string" } },
+          "required": ["registry"],
+          "additionalProperties": true
+        },
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "GetUsersParams": {
+          "type": "object",
+          "properties": {
+            "after": {
+              "description": "Start of time range (RFC 3339)",
+              "type": ["string", "null"]
+            },
+            "before": {
+              "description": "End of time range (RFC 3339)",
+              "type": ["string", "null"]
+            },
+            "interval": {
+              "description": "Also report each period in the range",
+              "anyOf": [
+                { "$ref": "#/$defs/MetricsInterval" },
+                { "type": "null" }
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        "MetricsInterval": {
+          "type": "string",
+          "enum": ["day", "week", "month"]
+        }
+      },
+      "type": "object"
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SubscriptionsResponse": {
+          "type": "object",
+          "properties": {
+            "totalSubscriptions": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "byOsVersion": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/CountEntry" }
+            },
+            "series": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/PeriodCount" }
+            }
+          },
+          "required": ["totalSubscriptions", "byOsVersion"],
+          "additionalProperties": true
+        },
+        "CountEntry": {
+          "type": "object",
+          "properties": {
+            "label": { "type": "string" },
+            "count": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["label", "count"],
+          "additionalProperties": true
+        },
+        "PeriodCount": {
+          "type": "object",
+          "properties": {
+            "period": { "type": "string" },
+            "count": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["period", "count"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "totalSubscriptions": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "byOsVersion": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CountEntry" }
+        },
+        "series": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PeriodCount" }
+        }
+      },
+      "required": ["totalSubscriptions", "byOsVersion"],
       "additionalProperties": true
     }
   },
@@ -7669,6 +7987,16 @@
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
             },
+            "totalInstalls": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "totalSubscriptions": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
             "byArch": {
               "type": "array",
               "items": { "$ref": "#/$defs/CountEntry" }
@@ -7682,6 +8010,8 @@
             "totalCheckins",
             "uniqueServers",
             "totalPackageRequests",
+            "totalInstalls",
+            "totalSubscriptions",
             "byArch",
             "byOsVersion"
           ],
@@ -7718,6 +8048,16 @@
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
         },
+        "totalInstalls": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "totalSubscriptions": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
         "byArch": {
           "type": "array",
           "items": { "$ref": "#/$defs/CountEntry" }
@@ -7731,6 +8071,8 @@
         "totalCheckins",
         "uniqueServers",
         "totalPackageRequests",
+        "totalInstalls",
+        "totalSubscriptions",
         "byArch",
         "byOsVersion"
       ],
@@ -7777,9 +8119,20 @@
             "before": {
               "description": "End of time range (RFC 3339)",
               "type": ["string", "null"]
+            },
+            "interval": {
+              "description": "Also report each period in the range",
+              "anyOf": [
+                { "$ref": "#/$defs/MetricsInterval" },
+                { "type": "null" }
+              ]
             }
           },
           "additionalProperties": true
+        },
+        "MetricsInterval": {
+          "type": "string",
+          "enum": ["day", "week", "month"]
         }
       },
       "type": "object"
@@ -7799,9 +8152,31 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
+            },
+            "series": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/PeriodUsers" }
             }
           },
           "required": ["uniqueServers", "totalCheckins"],
+          "additionalProperties": true
+        },
+        "PeriodUsers": {
+          "type": "object",
+          "properties": {
+            "period": { "type": "string" },
+            "uniqueServers": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "checkins": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["period", "uniqueServers", "checkins"],
           "additionalProperties": true
         }
       },
@@ -7816,6 +8191,10 @@
           "type": "integer",
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
+        },
+        "series": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PeriodUsers" }
         }
       },
       "required": ["uniqueServers", "totalCheckins"],
@@ -10030,6 +10409,37 @@
       },
       "required": ["categories", "packages"],
       "additionalProperties": true
+    }
+  },
+  {
+    "name": "registry.package.record-install",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/RegistryUrlParams" },
+        { "$ref": "#/$defs/RecordInstallParams" }
+      ],
+      "$defs": {
+        "RegistryUrlParams": {
+          "type": "object",
+          "properties": { "registry": { "type": "string" } },
+          "required": ["registry"],
+          "additionalProperties": true
+        },
+        "RecordInstallParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/PackageId" },
+            "version": { "$ref": "#/$defs/Version" }
+          },
+          "required": ["id", "version"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" },
+        "Version": { "type": "string" }
+      },
+      "type": "object"
     }
   },
   {

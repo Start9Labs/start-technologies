@@ -128,10 +128,8 @@ export type DataUrlInput = z.input<typeof schemas.DataUrl>
 export type DeviceFilter = z.output<typeof schemas.DeviceFilter>
 export type Dump = z.output<typeof schemas.Dump>
 export type DumpParamsInput = z.input<typeof schemas.DumpParams>
-export type GetDownloadsParamsInput = z.input<typeof schemas.GetDownloadsParams>
 export type GetOsAssetParamsInput = z.input<typeof schemas.GetOsAssetParams>
 export type GetOsVersionParamsInput = z.input<typeof schemas.GetOsVersionParams>
-export type GetUsersParamsInput = z.input<typeof schemas.GetUsersParams>
 export type GitHash = z.output<typeof schemas.GitHash>
 export type GitHashInput = z.input<typeof schemas.GitHash>
 
@@ -159,6 +157,7 @@ export type MerkleArchiveCommitment = z.output<
 export type MerkleArchiveCommitmentInput = z.input<
   typeof schemas.MerkleArchiveCommitment
 >
+export type MetricsIntervalInput = z.input<typeof schemas.MetricsInterval>
 
 /**
  * JSON Patch 'move' operation representation
@@ -167,6 +166,8 @@ export type MoveOperation = z.output<typeof schemas.MoveOperation>
 export type PackageDetailLevelInput = z.input<typeof schemas.PackageDetailLevel>
 export type PackageIdInput = z.input<typeof schemas.PackageId>
 export type PackageVersionCount = z.output<typeof schemas.PackageVersionCount>
+export type PeriodCount = z.output<typeof schemas.PeriodCount>
+export type PeriodUsers = z.output<typeof schemas.PeriodUsers>
 export type PluginId = z.output<typeof schemas.PluginId>
 export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
 export type ReaderParamsInput = z.input<typeof schemas.ReaderParams>
@@ -203,7 +204,6 @@ export type SetNameParamsInput = z.input<typeof schemas.SetNameParams>
  * JSON Patch 'test' operation representation
  */
 export type TestOperation = z.output<typeof schemas.TestOperation>
-export type UsersResponse = z.output<typeof schemas.UsersResponse>
 export type Version = z.output<typeof schemas.Version>
 export type VersionInput = z.input<typeof schemas.Version>
 export type AddAdminParamsInput = z.input<typeof schemas.AddAdminParams>
@@ -234,11 +234,14 @@ export type EditSignerParamsInput = z.input<typeof schemas.EditSignerParams>
  * Edits an existing release; omitted fields, assets and authorized signers remain unchanged.
  */
 export type EditVersionParamsInput = z.input<typeof schemas.EditVersionParams>
+export type GetDownloadsParamsInput = z.input<typeof schemas.GetDownloadsParams>
 export type GetPackageAccessParamsInput = z.input<
   typeof schemas.GetPackageAccessParams
 >
 export type GetPackageParamsInput = z.input<typeof schemas.GetPackageParams>
+export type GetUsersParamsInput = z.input<typeof schemas.GetUsersParams>
 export type HardwareRequirements = z.output<typeof schemas.HardwareRequirements>
+export type InstallsResponse = z.output<typeof schemas.InstallsResponse>
 export type ListPackageSignersParamsInput = z.input<
   typeof schemas.ListPackageSignersParams
 >
@@ -260,6 +263,9 @@ export type PackageReaderParamsInput = z.input<
  */
 export type PatchOperation = z.output<typeof schemas.PatchOperation>
 export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
+export type RecordInstallParamsInput = z.input<
+  typeof schemas.RecordInstallParams
+>
 export type RemoveAdminParamsInput = z.input<typeof schemas.RemoveAdminParams>
 export type RemoveMirrorParamsInput = z.input<typeof schemas.RemoveMirrorParams>
 export type RemovePackageFromCategoryParamsInput = z.input<
@@ -289,6 +295,10 @@ export type SubscribeIndexParamsInput = z.input<
   typeof schemas.SubscribeIndexParams
 >
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
+export type SubscriptionsResponse = z.output<
+  typeof schemas.SubscriptionsResponse
+>
+export type UsersResponse = z.output<typeof schemas.UsersResponse>
 export type VersionSignerParamsInput = z.input<
   typeof schemas.VersionSignerParams
 >
