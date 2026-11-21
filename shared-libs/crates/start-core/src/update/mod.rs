@@ -1,12 +1,9 @@
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
 use clap::{ArgAction, Parser};
 use color_eyre::eyre::{Result, eyre};
 use exver::{Version, VersionRange};
-use imbl::OrdMap;
-use imbl_value::json;
 use itertools::Itertools;
 use reqwest::{Client, Url};
 use rpc_toolkit::HandlerArgs;
@@ -32,7 +29,6 @@ use crate::progress::{
     progress_until_complete, with_cli_progress,
 };
 use crate::registry::asset::RegistryAsset;
-use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::registry::os::SIG_CONTEXT;
 use crate::registry::os::index::OsVersionInfo;
 use crate::registry::signer::AcceptSigners;
@@ -301,18 +297,10 @@ async fn maybe_do_update(
 ) -> Result<Option<StartedUpdate>, Error> {
     let peeked = ctx.db.peek().await;
     let current_version = peeked.as_public().as_server_info().as_version().de()?;
-    let mut available = from_value::<BTreeMap<Version, OsVersionInfo>>(
-        ctx.call_remote_with::<RegistryContext, _>(
-            "os.version.get",
-            OrdMap::new(),
-            json!({
-                "sourceVersion": current_version,
-                "targetVersion": target,
-            }),
-            RegistryUrlParams { registry },
-        )
-        .await?,
-    )?;
+    let mut available = crate::registry::sync::synced_os_versions(&peeked, &registry)?;
+    available.retain(|version, info| {
+        version.satisfies(&target) && current_version.satisfies(&info.source_version)
+    });
     let Some((target_version, asset, notes)) = available.pop_last().and_then(target_asset) else {
         return Ok(None);
     };

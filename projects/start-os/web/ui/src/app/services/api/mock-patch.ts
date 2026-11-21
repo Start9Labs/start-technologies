@@ -74,11 +74,28 @@ function mockStart9Key(
   }
 }
 
-function mockUpdateTarget(
-  pkg: T.GetPackageResponse,
-  version: string,
-): T.PackageUpdateTarget {
-  return { version, ...pkg.best[version]! }
+const MOCK_UPDATE_TARGETS: Record<string, string> = {
+  bitcoind: '26.1.0:0.1.0',
+  lnd: '0.18.0:0.0.1',
+  'btc-rpc-proxy': '0.4.0:0',
+}
+
+function mockCatalog(): T.RegistryCache['catalog'] {
+  return Object.fromEntries(
+    Object.entries(Mock.RegistryPackages).map(([id, pkg]) => [
+      id,
+      {
+        categories: pkg.categories,
+        versions: Object.fromEntries([
+          ...Object.values(Mock.OtherPackageVersions[id] ?? {}).flatMap(res =>
+            Object.entries(res.best),
+          ),
+          ...Object.entries(pkg.best),
+        ]),
+        updateTarget: MOCK_UPDATE_TARGETS[id] ?? null,
+      },
+    ]),
+  )
 }
 
 /** The community registry mocks an unreachable registry. */
@@ -89,25 +106,15 @@ export function mockRegistryCache(
   return sameUrl(url, defaultRegistries.community)
     ? {
         info,
-        packages: {},
-        updateTargets: {},
+        catalog: {},
+        publishesOsUpdates: false,
         status: 'error',
         error: `error sending request for url (${registryUrl(url)}): connection timed out`,
       }
     : {
         info,
-        packages: Mock.RegistryPackages,
-        updateTargets: {
-          bitcoind: mockUpdateTarget(
-            Mock.OtherPackageVersions['bitcoind']!['=26.1.0:0.1.0']!,
-            '26.1.0:0.1.0',
-          ),
-          lnd: mockUpdateTarget(Mock.RegistryPackages['lnd']!, '0.18.0:0.0.1'),
-          'btc-rpc-proxy': mockUpdateTarget(
-            Mock.RegistryPackages['btc-rpc-proxy']!,
-            '0.4.0:0',
-          ),
-        },
+        catalog: mockCatalog(),
+        publishesOsUpdates: true,
         status: 'connected',
       }
 }

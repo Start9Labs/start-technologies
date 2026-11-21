@@ -23,9 +23,10 @@ use crate::registry::device_info::DeviceInfo;
 use crate::registry::info::RegistryInfo;
 use crate::registry::os::index::{OsIndex, OsVersionInfo};
 use crate::registry::package::get::{
-    GetPackageParams, GetPackageResponse, GetPackagesResponse, PackageDetailLevel, select_packages,
+    GetPackageParams, GetPackageResponse, PackageDetailLevel, PackageReleases, select_packages,
+    select_releases,
 };
-use crate::registry::package::index::{PackageIndex, PackageVersionInfo};
+use crate::registry::package::index::PackageIndex;
 use crate::trusted_keys::connection::{
     connected_registry_urls, is_connected, refresh_registry, registry_url, same_registry,
 };
@@ -52,30 +53,22 @@ rpc_toolkit::reflect_ts!(RegistryStatus);
 #[model = "Model<Self>"]
 pub struct RegistryCache {
     pub info: RegistryInfo,
-    pub packages: GetPackagesResponse,
+    /// Releases this server can run, read by the UI in place of `package.get`.
+    #[serde(default)]
+    pub catalog: Catalog,
+    /// Whether the registry offers StartOS releases for this server's platform.
+    #[serde(default)]
+    pub publishes_os_updates: bool,
     #[serde(default)]
     pub status: RegistryStatus,
     /// Failure of the latest synchronization attempt; absent while connecting or connected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// Newest installable release of each installed package's flavor that its installed version can migrate to.
-    #[serde(default)]
-    pub update_targets: UpdateTargets,
 }
 
-pub type UpdateTargets = BTreeMap<PackageId, PackageUpdateTarget>;
+pub type Catalog = BTreeMap<PackageId, PackageReleases>;
 
 rpc_toolkit::reflect_ts!(RegistryCache);
-
-#[derive(Debug, Deserialize, Serialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
-pub struct PackageUpdateTarget {
-    pub version: VersionString,
-    #[serde(flatten)]
-    pub info: PackageVersionInfo,
-}
-
-rpc_toolkit::reflect_ts!(PackageUpdateTarget);
 
 /// Compatible releases from the selected StartOS update source.
 #[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
@@ -437,10 +430,10 @@ fn set_status(
                 .mutate(|caches| {
                     let cache = caches.entry(url.clone()).or_insert_with(|| RegistryCache {
                         info: RegistryInfo::default(),
-                        packages: BTreeMap::new(),
+                        catalog: BTreeMap::new(),
+                        publishes_os_updates: false,
                         status,
                         error: None,
-                        update_targets: BTreeMap::new(),
                     });
                     cache.status = status;
                     cache.error = error.map(str::to_owned);
@@ -489,7 +482,7 @@ fn update_targets(
     index: &Model<PackageIndex>,
     installed: &BTreeMap<PackageId, VersionString>,
     device: &DeviceInfo,
-) -> Result<UpdateTargets, Error> {
+) -> Result<BTreeMap<PackageId, VersionString>, Error> {
     let mut targets = BTreeMap::new();
     for (id, version) in installed {
         let response: GetPackageResponse = from_value(select_packages(
@@ -504,17 +497,11 @@ fn update_targets(
                 reader: Default::default(),
             },
         )?)?;
-        if let Some((target, info)) = response.best.into_iter().find(|(target, _)| {
+        if let Some(target) = response.best.into_keys().find(|target| {
             target.flavor() == version.flavor()
                 && target.partial_cmp(version) == Some(std::cmp::Ordering::Greater)
         }) {
-            targets.insert(
-                id.clone(),
-                PackageUpdateTarget {
-                    version: target,
-                    info,
-                },
-            );
+            targets.insert(id.clone(), target);
         }
     }
     Ok(targets)
@@ -529,9 +516,11 @@ fn refresh_update_targets(db: &mut DatabaseModel, device: &DeviceInfo) -> Result
         .into_iter()
         .map(|(url, index)| Ok((url, update_targets(index.as_package(), &installed, device)?)))
         .collect::<Result<Vec<_>, Error>>()?;
-    for (url, targets) in targets {
+    for (url, mut targets) in targets {
         if let Some(cache) = db.as_public_mut().as_registry_cache_mut().as_idx_mut(&url) {
-            cache.as_update_targets_mut().ser(&targets)?;
+            for (id, package) in cache.as_catalog_mut().as_entries_mut()? {
+                package.as_update_target_mut().ser(&targets.remove(&id))?;
+            }
         }
     }
     Ok(())
@@ -594,28 +583,29 @@ fn publish_snapshot(
     match subscription {
         Subscription::Index(url) => {
             let mut index: FullIndex = from_value(value.clone())?;
+            let publishes_os_updates = !from_value::<BTreeMap<exver::Version, OsVersionInfo>>(
+                crate::registry::os::version::select_versions(
+                    &Model::from_value(to_value(&index.os)?),
+                    None,
+                    None,
+                    Some(&device.os.platform),
+                )?,
+            )?
+            .is_empty();
             index.os = OsIndex::default();
             let index = Model::from_value(to_value(&index)?);
             let info = crate::registry::info::from_index(&index)?;
             let mut package_device = device.clone();
             package_device.os.language = None;
-            let packages = from_value(select_packages(
-                index.as_package(),
-                &GetPackageParams {
-                    id: None,
-                    target_version: None,
-                    source_version: None,
-                    device_info: Some(package_device.for_listing()),
-                    other_versions: Some(PackageDetailLevel::Short),
-                    all_revisions: false,
-                    reader: Default::default(),
-                },
-            )?)?;
-            let update_targets = update_targets(
+            let mut catalog = select_releases(index.as_package(), &package_device.for_listing())?;
+            let mut targets = update_targets(
                 index.as_package(),
                 &installed_versions(db)?,
                 &package_device,
             )?;
+            for (id, package) in &mut catalog {
+                package.update_target = targets.remove(id);
+            }
             refresh_registry(db, url, &info)?;
             db.as_private_mut()
                 .as_registry_indexes_mut()
@@ -624,10 +614,10 @@ fn publish_snapshot(
                 url,
                 &RegistryCache {
                     info,
-                    packages,
+                    catalog,
+                    publishes_os_updates,
                     status: RegistryStatus::Connected,
                     error: None,
-                    update_targets,
                 },
             )?;
         }
@@ -661,51 +651,52 @@ fn publish_snapshot(
     sync_os_default_locale(db)
 }
 
-pub(crate) async fn cached_call(
-    ctx: &RpcContext,
-    registry: &Url,
-    method: &str,
-    params: &Value,
-    device: Option<&DeviceInfo>,
-) -> Result<Option<Value>, Error> {
-    let url = registry_url(registry.as_str())?;
-    cached_response(&ctx.db.peek().await, &url, method, params, device)
+fn not_synchronized(registry: &Url) -> Error {
+    Error::new(
+        eyre!(
+            "{}",
+            t!(
+                "registry.sync.not-synchronized",
+                registry = registry.as_str()
+            )
+        ),
+        ErrorKind::NotFound,
+    )
 }
 
-fn cached_response(
-    snapshot: &DatabaseModel,
-    url: &Url,
-    method: &str,
-    params: &Value,
-    device: Option<&DeviceInfo>,
-) -> Result<Option<Value>, Error> {
+/// Selects packages from a saved registry's synchronized index.
+pub(crate) fn synced_packages(
+    db: &DatabaseModel,
+    registry: &Url,
+    params: &GetPackageParams,
+) -> Result<Value, Error> {
+    let url = registry_url(registry.as_str())?;
     if !is_connected(
-        &snapshot.as_public().as_server_info().as_registries().de()?,
+        &db.as_public().as_server_info().as_registries().de()?,
         url.as_str(),
     ) {
-        return Ok(None);
+        return Err(not_synchronized(registry));
     }
-    match method {
-        "info" => {
-            let cache = snapshot
-                .as_public()
-                .as_registry_cache()
-                .as_idx(url)
-                .or_not_found("registry cache")?;
-            Ok(Some(to_value(&cache.as_info().de()?)?))
-        }
-        "package.get" => {
-            let mut params: GetPackageParams = from_value(params.clone())?;
-            params.device_info = device.map(DeviceInfo::for_listing);
-            let empty = Model::new(&crate::registry::package::index::PackageIndex::default())?;
-            let index = snapshot.as_private().as_registry_indexes().as_idx(url);
-            Ok(Some(select_packages(
-                index.map_or(&empty, |index| index.as_package()),
-                &params,
-            )?))
-        }
-        _ => Ok(None),
-    }
+    let index = db
+        .as_private()
+        .as_registry_indexes()
+        .as_idx(&url)
+        .ok_or_else(|| not_synchronized(registry))?;
+    select_packages(index.as_package(), params)
+}
+
+/// The selected StartOS update source's synchronized releases for this server.
+pub(crate) fn synced_os_versions(
+    db: &DatabaseModel,
+    registry: &Url,
+) -> Result<BTreeMap<exver::Version, OsVersionInfo>, Error> {
+    db.as_public()
+        .as_os_update_cache()
+        .de()?
+        .filter(|cache| cache.status != RegistryStatus::Connecting || !cache.versions.is_empty())
+        .filter(|cache| same_registry(cache.registry.as_str(), registry.as_str()))
+        .map(|cache| cache.versions)
+        .ok_or_else(|| not_synchronized(registry))
 }
 
 #[cfg(test)]

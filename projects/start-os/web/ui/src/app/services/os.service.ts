@@ -12,15 +12,12 @@ import {
   map,
   shareReplay,
 } from 'rxjs'
-import { ApiService } from 'src/app/services/api/embassy-api.service'
-import { getServerInfo } from 'src/app/utils/get-server-info'
 import { DataModel } from './patch-db/data-model'
 
 @Injectable({
   providedIn: 'root',
 })
 export class OSService {
-  private readonly api = inject(ApiService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly registry$ = this.patch
     .watch$('serverInfo', 'osRegistry')
@@ -114,13 +111,10 @@ export class OSService {
   )
 
   async publishesUpdates(registry: string): Promise<boolean> {
-    const { id } = await getServerInfo(this.patch)
-    const versions = await this.api.rpc.registry.os.version.get({
-      registry,
-      serverId: id,
-    })
-
-    return Object.keys(versions).length > 0
+    const cache = await firstValueFrom(this.patch.watch$('registryCache'))
+    return Object.entries(cache).some(
+      ([url, entry]) => sameUrl(url, registry) && entry.publishesOsUpdates,
+    )
   }
 
   /** Settles once the selected registry's cache is published; a registry switch releases it. */
