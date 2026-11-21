@@ -709,6 +709,7 @@ pub(crate) fn synced_packages(
 }
 
 /// The selected StartOS update source's synchronized releases for this server.
+/// Selection follows `serverInfo.osRegistry`, independently of cache reconciliation.
 /// An empty cache whose synchronization failed is unreachable, not evidence of no updates.
 pub(crate) fn synced_os_versions(
     db: &DatabaseModel,
