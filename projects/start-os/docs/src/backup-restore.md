@@ -2,6 +2,9 @@
 
 Restore previously created backups to recover individual services or your entire server. This is for disaster recovery when a service is accidentally uninstalled or when your data drive is lost or corrupted.
 
+> [!IMPORTANT]
+> A restore brings back your data, not your StartOS settings. Public domains on a restored service's interfaces must be enabled again, for example. See [What a Backup Does Not Include](./backup-create.md#what-a-backup-does-not-include).
+
 ## Backup Filesystem Formats
 
 Existing format-1 backups remain available for backups and restores without conversion. Conversion is optional, but once started, it must finish before that server backup can be restored. Other server backups on the same target remain independent.
