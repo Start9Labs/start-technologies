@@ -4,11 +4,9 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::PackageId;
 use crate::context::CliContext;
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
-use crate::util::VersionString;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 
 pub fn metrics_api<C: Context>() -> ParentHandler<C> {
@@ -41,15 +39,6 @@ pub fn metrics_api<C: Context>() -> ParentHandler<C> {
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
-            "installs",
-            from_fn_async(get_installs)
-                .with_metadata("admin", Value::Bool(true))
-                .with_display_serializable()
-                .with_custom_display_fn(|handle, result| display_installs(handle.params, result))
-                .with_about("about.get-metrics-installs")
-                .with_call_remote::<CliContext>(),
-        )
-        .subcommand(
             "subscriptions",
             from_fn_async(get_subscriptions)
                 .with_metadata("admin", Value::Bool(true))
@@ -62,55 +51,14 @@ pub fn metrics_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-#[derive(Debug, Deserialize, Serialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
-pub struct RecordInstallParams {
-    pub id: PackageId,
-    pub version: VersionString,
-}
-
-rpc_toolkit::reflect_ts!(RecordInstallParams);
-rpc_toolkit::ts_export!(RecordInstallParams, namespaces = [""]);
-
-/// Counts a completed install or update. Answers the same whether or not the version exists.
-pub async fn record_install(
-    ctx: RegistryContext,
-    RecordInstallParams { id, version }: RecordInstallParams,
-) -> Result<(), Error> {
-    let listed = ctx
-        .db
-        .peek()
-        .await
-        .as_index()
-        .as_package()
-        .as_packages()
-        .as_idx(&id)
-        .map_or(false, |package| {
-            package.as_versions().as_idx(&version).is_some()
-        });
-    if listed {
-        record(
-            ctx,
-            "INSERT INTO package_install (created_at, pkg_id, version) VALUES (?1, ?2, ?3)",
-            vec![Some(id.to_string()), Some(version.to_string())],
-        );
-    }
-    Ok(())
-}
-
 pub(crate) fn record_subscription(ctx: &RegistryContext, os_version: Option<String>) {
-    record(
-        ctx.clone(),
-        "INSERT INTO index_subscription (created_at, os_version) VALUES (?1, ?2)",
-        vec![os_version],
-    );
-}
-
-fn record(ctx: RegistryContext, sql: &'static str, values: Vec<Option<String>>) {
+    let ctx = ctx.clone();
     tokio::task::spawn_blocking(move || {
         ctx.metrics_db.mutate(|conn| {
-            let row = std::iter::once(Some(Utc::now().to_rfc3339())).chain(values);
-            if let Err(e) = conn.execute(sql, rusqlite::params_from_iter(row)) {
+            if let Err(e) = conn.execute(
+                "INSERT INTO index_subscription (created_at, os_version) VALUES (?1, ?2)",
+                rusqlite::params![Utc::now().to_rfc3339(), os_version],
+            ) {
                 warn!("failed to record metric: {e}");
             }
         });
@@ -360,7 +308,6 @@ pub struct MetricsSummary {
     pub total_checkins: u64,
     pub unique_servers: u64,
     pub total_package_requests: u64,
-    pub total_installs: u64,
     pub total_subscriptions: u64,
     pub by_arch: Vec<CountEntry>,
     pub by_os_version: Vec<CountEntry>,
@@ -380,7 +327,6 @@ pub async fn get_summary(ctx: RegistryContext) -> Result<MetricsSummary, Error> 
                 &all,
             )?,
             total_package_requests: count(conn, "SELECT COUNT(*) FROM package_request", &all)?,
-            total_installs: count(conn, "SELECT COUNT(*) FROM package_install", &all)?,
             total_subscriptions: count(conn, "SELECT COUNT(*) FROM index_subscription", &all)?,
             by_arch: count_entries(conn, "user_activity", "arch", &all)?,
             by_os_version: count_entries(conn, "user_activity", "os_version", &all)?,
@@ -397,7 +343,6 @@ fn display_summary<T>(params: WithIoFormat<T>, summary: MetricsSummary) -> Resul
     println!("Total check-ins:        {}", summary.total_checkins);
     println!("Unique servers:         {}", summary.unique_servers);
     println!("Total package requests: {}", summary.total_package_requests);
-    println!("Total installs:         {}", summary.total_installs);
     println!("Total subscriptions:    {}", summary.total_subscriptions);
     print_counts("ARCHITECTURE", &summary.by_arch)?;
     print_counts("OS VERSION", &summary.by_os_version)
@@ -594,49 +539,6 @@ fn display_downloads(
 
 #[derive(Debug, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-pub struct InstallsResponse {
-    pub total_installs: u64,
-    pub by_package: Vec<CountEntry>,
-    pub by_package_version: Vec<PackageVersionCount>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub series: Vec<PeriodCount>,
-}
-
-rpc_toolkit::reflect_ts!(InstallsResponse);
-rpc_toolkit::ts_export!(InstallsResponse, namespaces = [""]);
-
-pub async fn get_installs(
-    ctx: RegistryContext,
-    params: GetDownloadsParams,
-) -> Result<InstallsResponse, Error> {
-    query(ctx, move |conn| {
-        let filter = params.filter()?;
-        Ok(InstallsResponse {
-            total_installs: count(conn, "SELECT COUNT(*) FROM package_install", &filter)?,
-            by_package: count_entries(conn, "package_install", "pkg_id", &filter)?,
-            by_package_version: package_version_counts(conn, "package_install", &filter)?,
-            series: series(conn, "package_install", &filter, params.interval)?,
-        })
-    })
-    .await
-}
-
-fn display_installs(
-    params: WithIoFormat<GetDownloadsParams>,
-    response: InstallsResponse,
-) -> Result<(), Error> {
-    if let Some(format) = params.format {
-        return display_serializable(format, response);
-    }
-
-    println!("Total installs: {}", response.total_installs);
-    print_counts("PACKAGE", &response.by_package)?;
-    print_package_versions(&response.by_package_version)?;
-    print_series(&response.series)
-}
-
-#[derive(Debug, Serialize, Deserialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
 pub struct SubscriptionsResponse {
     pub total_subscriptions: u64,
     pub by_os_version: Vec<CountEntry>,
@@ -688,7 +590,7 @@ mod tests {
     fn db() -> rusqlite::Connection {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch(
-            "CREATE TABLE package_install (id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, pkg_id TEXT NOT NULL, version TEXT NOT NULL);",
+            "CREATE TABLE package_request (id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, pkg_id TEXT NOT NULL, version TEXT NOT NULL);",
         )
         .unwrap();
         for (at, id) in [
@@ -699,7 +601,7 @@ mod tests {
             ("2026-12-01T00:00:00+00:00", "nextcloud"),
         ] {
             conn.execute(
-                "INSERT INTO package_install (created_at, pkg_id, version) VALUES (?1, ?2, '1.0:0')",
+                "INSERT INTO package_request (created_at, pkg_id, version) VALUES (?1, ?2, '1.0:0')",
                 params![at, id],
             )
             .unwrap();
@@ -708,7 +610,7 @@ mod tests {
     }
 
     fn periods(interval: MetricsInterval, filter: &Filter) -> Vec<(String, u64)> {
-        series(&db(), "package_install", filter, Some(interval))
+        series(&db(), "package_request", filter, Some(interval))
             .unwrap()
             .into_iter()
             .map(|p| (p.period, p.count))
@@ -756,7 +658,7 @@ mod tests {
             let filter =
                 Filter::range(&after.map(str::to_owned), &before.map(str::to_owned)).unwrap();
             assert_eq!(
-                count(&conn, "SELECT COUNT(*) FROM package_install", &filter).unwrap(),
+                count(&conn, "SELECT COUNT(*) FROM package_request", &filter).unwrap(),
                 expected,
             );
         }
@@ -766,7 +668,7 @@ mod tests {
             "2026-11-03T00:00:00.123000000+00:00",
         ] {
             conn.execute(
-                "INSERT INTO package_install (created_at, pkg_id, version) VALUES (?1, 'nextcloud', '1.0:0')",
+                "INSERT INTO package_request (created_at, pkg_id, version) VALUES (?1, 'nextcloud', '1.0:0')",
                 params![at],
             )
             .unwrap();
@@ -777,7 +679,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            count(&conn, "SELECT COUNT(*) FROM package_install", &filter).unwrap(),
+            count(&conn, "SELECT COUNT(*) FROM package_request", &filter).unwrap(),
             3,
         );
         assert!(Filter::range(&Some("invalid".into()), &None).is_err());
@@ -789,11 +691,11 @@ mod tests {
             .unwrap()
             .with("pkg_id =", &Some("nextcloud".into()));
         assert_eq!(
-            count(&db(), "SELECT COUNT(*) FROM package_install", &filter).unwrap(),
+            count(&db(), "SELECT COUNT(*) FROM package_request", &filter).unwrap(),
             2
         );
         assert!(
-            series(&db(), "package_install", &filter, None)
+            series(&db(), "package_request", &filter, None)
                 .unwrap()
                 .is_empty()
         );

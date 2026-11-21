@@ -11,7 +11,7 @@ This directory is a thin product wrapper inside the `start-technologies` monorep
 - Redirects visitors at `/` to `https://marketplace.start9.com/` with the registry selected.
 - Exposes a JSON-RPC API over HTTP, WebSocket, and a REST continuation channel.
 - Tracks **admins** and package **signers**, verifies signatures on uploaded content, and proposes administrator-selected signers for Marketplace trust when users connect.
-- Records anonymous **metrics** for its admins: installs and updates StartOS reports (package and version only), active servers from OS update checks, index subscriptions, and package lookups, each as totals or a day/week/month series (`start-registry metrics`).
+- Records anonymous **metrics** for its admins: active servers from OS update checks, index subscriptions, and package lookups, each as totals or a day/week/month series (`start-registry metrics`).
 
 ## Package trust proposals
 

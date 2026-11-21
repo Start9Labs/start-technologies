@@ -46,15 +46,15 @@ Defined in `shared-libs/crates/start-core/src/registry/mod.rs`:
 
 Subcommands (same module), each available over RPC and to the `start-registry` CLI via `with_call_remote`:
 
-| Command   | Module                | Purpose                                                                                                                    |
-| --------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `index`   | `mod::get_full_index` | full combined index (name, icon, packages, OS, signers)                                                                    |
-| `info`    | `registry/info.rs`    | set/get registry info and categories                                                                                       |
-| `os`      | `registry/os/`        | OS version index + asset (image) management                                                                                |
-| `package` | `registry/package/`   | add/get/list packages, versions, assets                                                                                    |
-| `admin`   | `registry/admin.rs`   | manage admins, signers and reader keys                                                                                     |
-| `db`      | `registry/db.rs`      | dump/inspect the registry database; subscribe to `/index` or any subpath                                                   |
-| `metrics` | `registry/metrics.rs` | install, user, subscription and lookup metrics, with time series (admin-only); `package record-install` records an install |
+| Command   | Module                | Purpose                                                                  |
+| --------- | --------------------- | ------------------------------------------------------------------------ |
+| `index`   | `mod::get_full_index` | full combined index (name, icon, packages, OS, signers)                  |
+| `info`    | `registry/info.rs`    | set/get registry info and categories                                     |
+| `os`      | `registry/os/`        | OS version index + asset (image) management                              |
+| `package` | `registry/package/`   | add/get/list packages, versions, assets                                  |
+| `admin`   | `registry/admin.rs`   | manage admins, signers and reader keys                                   |
+| `db`      | `registry/db.rs`      | dump/inspect the registry database; subscribe to `/index` or any subpath |
+| `metrics` | `registry/metrics.rs` | user, subscription and lookup metrics, with time series (admin-only)     |
 
 ### Registry index subscriptions
 

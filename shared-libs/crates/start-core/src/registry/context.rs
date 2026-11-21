@@ -207,14 +207,6 @@ impl RegistryContext {
                 CREATE INDEX IF NOT EXISTS idx_user_activity_created_at ON user_activity(created_at);
                 CREATE INDEX IF NOT EXISTS idx_package_request_created_at ON package_request(created_at);
                 CREATE INDEX IF NOT EXISTS idx_package_request_pkg_id ON package_request(pkg_id);
-                CREATE TABLE IF NOT EXISTS package_install (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    created_at TEXT NOT NULL,
-                    pkg_id TEXT NOT NULL,
-                    version TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_package_install_created_at ON package_install(created_at);
-                CREATE INDEX IF NOT EXISTS idx_package_install_pkg_id ON package_install(pkg_id);
                 CREATE TABLE IF NOT EXISTS index_subscription (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_at TEXT NOT NULL,
@@ -595,13 +587,12 @@ mod tests {
         use rpc_toolkit::HandlerFor;
 
         let registry = crate::registry::registry_api::<RegistryContext>();
-        let public: [&[&str]; 14] = [
+        let public: [&[&str]; 13] = [
             &["index"],
             &["info"],
             &["db", "subscribe"],
             &["package", "index"],
             &["package", "get"],
-            &["package", "record-install"],
             &["package", "category", "list"],
             &["package", "signer", "list"],
             &["os", "index"],

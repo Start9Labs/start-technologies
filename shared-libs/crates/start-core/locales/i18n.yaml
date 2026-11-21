@@ -7401,13 +7401,6 @@ about.get-metrics-downloads:
   fr_FR: "Compter les demandes d'une version précise d'un paquet parvenues au registre, avec filtres optionnels"
   pl_PL: "Zlicz żądania konkretnej wersji pakietu, które dotarły do rejestru, z opcjonalnymi filtrami"
 
-about.get-metrics-installs:
-  en_US: "Count package installs and updates reported by StartOS, with optional filters"
-  de_DE: "Von StartOS gemeldete Paketinstallationen und -aktualisierungen zählen, mit optionalen Filtern"
-  es_ES: "Contar las instalaciones y actualizaciones de paquetes notificadas por StartOS, con filtros opcionales"
-  fr_FR: "Compter les installations et mises à jour de paquets signalées par StartOS, avec filtres optionnels"
-  pl_PL: "Zlicz instalacje i aktualizacje pakietów zgłoszone przez StartOS, z opcjonalnymi filtrami"
-
 about.get-metrics-subscriptions:
   en_US: "Count package index subscriptions by StartOS version within a time range"
   de_DE: "Abonnements des Paketindex nach StartOS-Version in einem Zeitraum zählen"

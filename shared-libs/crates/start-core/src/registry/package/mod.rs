@@ -115,13 +115,6 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
             version::version_api::<C>().with_about("about.commands-package-version"),
         )
         .subcommand(
-            "record-install",
-            from_fn_async(crate::registry::metrics::record_install)
-                .with_metadata("authenticated", Value::Bool(false))
-                .with_metadata(crate::mcp::MCP, Value::Bool(false))
-                .no_cli(),
-        )
-        .subcommand(
             "get",
             from_fn_async(get::get_package)
                 .with_metadata("authenticated", Value::Bool(false))
