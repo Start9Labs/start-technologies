@@ -623,7 +623,7 @@ describe('HealthDaemon check loop', () => {
       await hd.updateStatus()
       await jest.advanceTimersByTimeAsync(60_000)
       expect(fn).toHaveBeenCalledTimes(1)
-      const signal: AbortSignal = (hd as any).session.abort.signal
+      const signal: AbortSignal = (hd as any).session.signal
 
       // Under fake timers the pending tick only ends through the abort.
       await hd.term()
@@ -656,6 +656,44 @@ describe('HealthDaemon check loop', () => {
     )
     logged.mockRestore()
     await hd.term()
+  })
+})
+
+describe('HealthDaemon.term with a hung health check', () => {
+  it('terminates the daemon without waiting, aborting the check', async () => {
+    let signal: AbortSignal | undefined
+    const daemon = {
+      start: jest.fn(async () => {}),
+      term: jest.fn(async () => {}),
+      onExit: () => {},
+      isOneshot: () => false,
+    }
+    const hd = new HealthDaemon<Manifest>(
+      daemon as any,
+      [],
+      'svc',
+      {
+        display: 'Svc',
+        trigger: cooldownTrigger(1),
+        fn: s => {
+          signal = s
+          return new Promise<never>(() => {})
+        },
+      },
+      fakeEffects(),
+    )
+    await hd.updateStatus()
+    while (!signal) await tick()
+    expect(signal.aborted).toBe(false)
+
+    const outcome = await Promise.race([
+      hd.term().then(() => 'stopped'),
+      new Promise(resolve => setTimeout(() => resolve('hung'), 500)),
+    ])
+
+    expect(outcome).toBe('stopped')
+    expect(daemon.term).toHaveBeenCalledTimes(1)
+    expect(signal.aborted).toBe(true)
   })
 })
 
@@ -1573,5 +1611,118 @@ describe('HealthDaemon ready-check hysteresis and display-null logging', () => {
     await expect(app.term()).resolves.toBeUndefined()
     await expect(dep.term()).resolves.toBeUndefined()
     expect(depDaemon.term).toHaveBeenCalledTimes(1)
+  })
+
+  it('pauses without awaiting a hung ready.fn and ignores its late rejection across resume and active hysteresis', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const rootDaemon = controllableDaemon()
+    const midDaemon = controllableDaemon()
+    const leafDaemon = controllableDaemon()
+    let rootResult: HealthCheckResult = { result: 'success', message: null }
+    let rejectOldProbe: ((err: Error) => void) | null = null
+    let firstSignal: AbortSignal | undefined
+    let secondSignal: AbortSignal | undefined
+    let midPoll = 0
+
+    const root = new HealthDaemon<Manifest>(
+      rootDaemon as unknown as Daemon<Manifest>,
+      [],
+      'root',
+      { display: null, fn: () => rootResult },
+      fakeEffects(),
+    )
+    const mid = new HealthDaemon<Manifest>(
+      midDaemon as unknown as Daemon<Manifest>,
+      [root],
+      'mid',
+      {
+        display: null,
+        gracePeriod: 0,
+        fn: signal => {
+          midPoll++
+          if (midPoll === 1) {
+            firstSignal = signal
+            return { result: 'success', message: null }
+          }
+          if (midPoll === 2) {
+            return new Promise<HealthCheckResult>((_resolve, reject) => {
+              rejectOldProbe = reject
+            })
+          }
+          if (midPoll === 3) {
+            secondSignal = signal
+            return { result: 'success', message: null }
+          }
+          if (midPoll === 4 || midPoll === 5) {
+            return { result: 'failure', message: `session2 blip ${midPoll}` }
+          }
+          return { result: 'success', message: null }
+        },
+      },
+      fakeEffects(),
+    )
+    const leaf = new HealthDaemon<Manifest>(
+      leafDaemon as unknown as Daemon<Manifest>,
+      [mid],
+      'leaf',
+      EXIT_SUCCESS,
+      fakeEffects(),
+    )
+
+    await root.updateStatus()
+    await mid.updateStatus()
+    await leaf.updateStatus()
+    await jest.advanceTimersByTimeAsync(2_000)
+    expect(leafDaemon.start).toHaveBeenCalledTimes(1)
+    expect(firstSignal?.aborted).toBe(false)
+
+    // Start second poll on mid that stays hung in-flight
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(midPoll).toBe(2)
+    expect(rejectOldProbe).not.toBeNull()
+
+    // Crash root: mid must stop immediately without waiting for the hung probe
+    rootDaemon.emitExit(false, new Error('killed'))
+    await jest.advanceTimersByTimeAsync(0)
+    expect(firstSignal?.aborted).toBe(true)
+    expect(midDaemon.stop).toHaveBeenCalledTimes(1)
+    expect(leafDaemon.stop).toHaveBeenCalledTimes(1)
+
+    // Root recovers on its next 30s tick -> mid resumes with a fresh signal and leaf relaunches
+    rootResult = { result: 'success', message: null }
+    await jest.advanceTimersByTimeAsync(29_000)
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(midPoll).toBe(3)
+    expect(secondSignal).toBeDefined()
+    expect(secondSignal).not.toBe(firstSignal)
+    expect(secondSignal?.aborted).toBe(false)
+    expect(leafDaemon.start).toHaveBeenCalledTimes(2)
+
+    // Two transient failures in session 2 (hysteresis counter = 2, below threshold 3)
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(midPoll).toBe(4)
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(midPoll).toBe(5)
+    expect(leafDaemon.stop).toHaveBeenCalledTimes(1)
+
+    // Now the aborted session-1 probe finally rejects: must not log, increment
+    // session 2's failure count, or trigger post-loop dependentsReady reset.
+    rejectOldProbe!(new Error('aborted old exec'))
+    await jest.advanceTimersByTimeAsync(0)
+    expect(leafDaemon.stop).toHaveBeenCalledTimes(1)
+    expect(logged).not.toHaveBeenCalledWith(
+      'Health Check mid failed:',
+      'aborted old exec',
+    )
+
+    // Session 2 recovers on next poll; leaf stayed running throughout
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(midPoll).toBe(6)
+    expect(leafDaemon.stop).toHaveBeenCalledTimes(1)
+    expect(leafDaemon.start).toHaveBeenCalledTimes(2)
+
+    await leaf.term()
+    await mid.term()
+    await root.term()
   })
 })

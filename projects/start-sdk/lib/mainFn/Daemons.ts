@@ -85,8 +85,10 @@ export type Ready = {
    *     errorMessage: 'Web server is not listening',
    *   })
    * ```
+   *
+   * The signal aborts when the check stops; its result is then discarded.
    */
-  fn: () => Promise<HealthCheckResult> | HealthCheckResult
+  fn: (signal: AbortSignal) => Promise<HealthCheckResult> | HealthCheckResult
   /**
    * Duration in milliseconds during which `failure` results are reported
    * as `starting` instead, giving the daemon time to initialize without
