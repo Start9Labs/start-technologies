@@ -457,7 +457,7 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 
 1. Choose a target. Unavailable targets cannot be selected.
 
-1. Select the services and volumes to back up, or click "Toggle all", then click "Done".
+1. Select the services and volumes to back up. Use the checkbox next to "Shared Volumes" or "Services" to select everything in that group. Then click "Done".
 
 1. Enter your master password.
 
