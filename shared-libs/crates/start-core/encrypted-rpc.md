@@ -38,9 +38,11 @@ or activation, it copies an existing `/run/startos/id.key.pem` into config atomi
 diagnostic updates. Initialization without a usable account copy defers admission until the
 database supplies it. Diagnostics never fail solely for lack of an identity: they use the
 available startup key with its admission scope, otherwise a signed `temporary: true` identity
-held only by that context. Browser normal-product encrypted RPC and continuations reject temporary peers before
+held only by that context. Protected unlock likewise retains an unpersisted temporary identity
+for its locked context; unverified disk configuration cannot select that proof identity.
+Browser normal-product encrypted RPC and continuations reject temporary peers before
 sending application payloads, including reuse of a startup probe's session. Explicit setup,
-init and diagnostic clients may admit them; temporary peers never enter fingerprint history
+init, diagnostic and protected-unlock clients may admit them; temporary peers never enter fingerprint history
 or identity-change notices. Registry CLI administration also rejects temporary peers before
 sending requests or observing fingerprints. Older clients reject the unfamiliar temporary
 field, including provisional setup proofs; committed-account handshakes keep their existing shape. Server identity is separate from
@@ -225,7 +227,7 @@ HKDF-SHA256 and AES-256-GCM on both HTTP and HTTPS. Browser randomness comes fro
 `crypto.getRandomValues`; the existing UUID library supplies correlation IDs without requiring
 secure-context `crypto.randomUUID`. Persisted enrollment keys remain nonextractable WebCrypto
 keys. Missing-key startup admission uses an opaque, unpersisted Ed25519 `RequestSigner`, sharing
-the existing commitment/proof owner rather than an enrolled-key shape. Setup/state/init/diagnostic
+the existing commitment/proof owner rather than an enrolled-key shape. Setup/state/init/diagnostic/unlock
 browser calls and GUIDs use that admission lease; their peers never enter normal-product advisory
 history. Normal product API owners attach verified-open observers, including on healthy reuse
 and authorization rejection. A key/provider lease may persist; each
@@ -248,7 +250,7 @@ that completion owner. Authenticated observers retain the
 signer's revocation lifetime.
 
 Normal keyed browser RPC and secure-origin GUIDs cannot downgrade from unauthenticated
-state replies or failed admission. Startup/state/init/diagnostic callers use
+state replies or failed admission. Startup/state/init/diagnostic/unlock callers use
 their explicitly selected transport contracts, with legacy HTTP callers still supported.
 Resource HTTP headers, MCP and firmware metadata retain
 their separate owners. Application encryption does not protect unrelated HTTP resources.

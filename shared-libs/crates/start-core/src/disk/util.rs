@@ -27,6 +27,15 @@ use crate::util::serde::IoFormat;
 #[cfg(test)]
 mod tests;
 
+/// Does not exclude later events or external device users.
+pub(crate) async fn settle_udev() -> Result<(), Error> {
+    Command::new("udevadm")
+        .arg("settle")
+        .invoke(ErrorKind::DiskManagement)
+        .await?;
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, VisitVariants)]
 #[serde(rename_all = "camelCase")]
 pub enum PartitionTable {

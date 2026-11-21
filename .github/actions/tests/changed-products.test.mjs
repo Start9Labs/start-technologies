@@ -12,9 +12,21 @@ const ALL = Object.keys(PRODUCTS)
 const DEBS = ['start-cli', 'start-registry', 'start-tunnel']
 const BUILD_PRODUCTS = ['start-os', ...DEBS]
 const WEB = ['start-os', 'start-tunnel', 'start-wrt']
+const NATIVE_OS_INPUTS = [
+  'projects/start-os/build/lib/scripts/fde-boot-mode',
+  'projects/start-os/build/lib/scripts/fde-initramfs-control.mjs',
+  'projects/start-os/build/dpkg-deps/uefi.platforms',
+]
 
 for (const [path, push, pullRequest = push, osImage = false] of [
   ['shared-libs/crates/start-core/src/lib.rs', ALL],
+  ...NATIVE_OS_INPUTS.map(path => [path, ALL, ALL, true]),
+  [
+    'projects/start-os/build/dpkg-deps/uefi.depends',
+    ['start-os'],
+    undefined,
+    true,
+  ],
   ['Cargo.lock', ALL],
   ['build/env/check-platform.sh', ALL, ALL, true],
   ['debian/build.sh', BUILD_PRODUCTS, BUILD_PRODUCTS, true],
@@ -75,6 +87,25 @@ for (const [path, push, pullRequest = push, osImage = false] of [
   })
 }
 
+test('StartWRT rebuilds when native OS inputs change', () => {
+  for (const event of ['push', 'pull_request']) {
+    for (const path of NATIVE_OS_INPUTS) {
+      assert.deepEqual(classify([path], event, 'start-wrt.yaml'), {
+        affected: ['start-wrt'],
+        osImage: false,
+      })
+    }
+    assert.deepEqual(
+      classify(
+        ['projects/start-os/build/image-recipe/build.sh'],
+        event,
+        'start-wrt.yaml',
+      ),
+      { affected: [], osImage: false },
+    )
+  }
+})
+
 test('the script prints step outputs for the changed paths on stdin', () => {
   const script = join(REPO, '.github/scripts/changed-products.mjs')
   const run = (args, input) =>
@@ -97,6 +128,33 @@ test('the script prints step outputs for the changed paths on stdin', () => {
       'products=start-cli start-registry',
       '',
     ].join('\n'),
+  )
+  const nativeInputs = NATIVE_OS_INPUTS.join('\n')
+  const native = run(
+    ['--workflow', 'build-products.yaml', '--event', 'push'],
+    nativeInputs,
+  )
+  assert.equal(native.status, 0, native.stderr)
+  assert.equal(
+    native.stdout,
+    [
+      'start-os=true',
+      'start-cli=true',
+      'start-registry=true',
+      'start-tunnel=true',
+      'os-image=true',
+      'products=start-os start-cli start-registry start-tunnel',
+      '',
+    ].join('\n'),
+  )
+  const nativeWrt = run(
+    ['--workflow', 'start-wrt.yaml', '--event', 'push'],
+    nativeInputs,
+  )
+  assert.equal(nativeWrt.status, 0, nativeWrt.stderr)
+  assert.equal(
+    nativeWrt.stdout,
+    'start-wrt=true\nos-image=false\nproducts=start-wrt\n',
   )
   const all = run(['--workflow', 'build-products.yaml', '--all'], '')
   assert.equal(all.status, 0, all.stderr)

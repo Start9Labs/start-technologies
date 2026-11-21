@@ -17,7 +17,6 @@ use rpc_toolkit::{
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
@@ -203,22 +202,38 @@ impl LoginContext for RpcContext {
         Ok(Some(db.as_private().as_password().de()?))
     }
     async fn post_login_hook(&self, password: &str) -> Result<(), Error> {
-        if tokio::fs::metadata("/media/startos/config/overlay/etc/shadow")
-            .await
-            .is_err()
-        {
-            write_shadow(&password).await?;
+        if shadow_overlay_exists().await {
+            return Ok(());
         }
-        Ok(())
+        let ctx = self.clone();
+        let password = zeroize::Zeroizing::new(password.to_owned());
+        crate::util::future::complete_owned_operation(async move {
+            let _exclusive = ctx.password_changes.lock().await;
+            if shadow_overlay_exists().await
+                || Self::check_password(&ctx.db.peek().await, &password).is_err()
+            {
+                return Ok(());
+            }
+            write_shadow(&password).await
+        })
+        .await
     }
 }
 
+pub(crate) const SHADOW_PATH: &str = "/etc/shadow";
+const SAVED_SHADOW_PATH: &str =
+    const_format::formatcp!("/media/startos/config/overlay{SHADOW_PATH}");
+
+async fn shadow_overlay_exists() -> bool {
+    tokio::fs::metadata(SAVED_SHADOW_PATH).await.is_ok()
+}
+
 pub async fn write_shadow(password: &str) -> Result<(), Error> {
-    let hash: String = sha_crypt::sha512_simple(password, &sha_crypt::Sha512Params::default())
-        .map_err(|e| Error::new(eyre!("{e:?}"), ErrorKind::Serialization))?;
-    let shadow_contents = tokio::fs::read_to_string("/etc/shadow").await?;
-    let mut shadow_file =
-        create_file_mod("/media/startos/config/overlay/etc/shadow", 0o640).await?;
+    let hash = zeroize::Zeroizing::new(crate::util::crypto::shadow_password_hash(password)?);
+    let shadow_bytes =
+        crate::util::io::read_secret_file(crate::util::io::open_file(SHADOW_PATH).await?).await?;
+    let shadow_contents = std::str::from_utf8(&shadow_bytes).with_kind(ErrorKind::ParseSysInfo)?;
+    let shadow_file = create_file_mod(SAVED_SHADOW_PATH, 0o640).await?;
     for line in shadow_contents.lines() {
         match line.split_once(":") {
             Some((user, rest)) if user == "start9" || user == "kiosk" => {
@@ -228,20 +243,34 @@ pub async fn write_shadow(password: &str) -> Result<(), Error> {
                         ErrorKind::ParseSysInfo,
                     )
                 })?;
-                shadow_file
-                    .write_all(format!("{user}:{hash}:{rest}\n").as_bytes())
-                    .await?;
+                crate::util::io::write_secret_file(
+                    &shadow_file,
+                    zeroize::Zeroizing::new(
+                        [
+                            user.as_bytes(),
+                            b":",
+                            hash.as_bytes(),
+                            b":",
+                            rest.as_bytes(),
+                            b"\n",
+                        ]
+                        .concat(),
+                    ),
+                )
+                .await?;
             }
             _ => {
-                shadow_file.write_all(line.as_bytes()).await?;
-                shadow_file.write_all(b"\n").await?;
+                crate::util::io::write_secret_file(
+                    &shadow_file,
+                    zeroize::Zeroizing::new([line.as_bytes(), b"\n"].concat()),
+                )
+                .await?;
             }
         }
     }
     shadow_file.sync_all().await?;
-    tokio::fs::copy("/media/startos/config/overlay/etc/shadow", "/etc/shadow").await?;
+    crate::util::io::copy_file(SAVED_SHADOW_PATH, SHADOW_PATH).await?;
 
-    // MOK enrollment requires the password established during setup.
     crate::util::mok::enroll_mok(std::path::Path::new("/"))
         .await
         .log_err();
@@ -1092,20 +1121,14 @@ pub(crate) async fn cli_reset_password(
     Ok(())
 }
 
+/// An authorized session replaces the password without the old plaintext.
 #[instrument(skip_all)]
 pub async fn reset_password_impl(
     ctx: RpcContext,
     ResetPasswordParams { new_password }: ResetPasswordParams,
 ) -> Result<(), Error> {
-    let new_password = new_password.unwrap_or_default().decrypt(&ctx)?;
-
-    let account = ctx.account.mutate(|account| {
-        account.set_password(&new_password)?;
-        Ok::<_, Error>(account.clone())
-    })?;
-    ctx.db.mutate(|d| account.save(d)).await.result?;
-    write_shadow(&new_password).await?;
-    Ok(())
+    let new_password = zeroize::Zeroizing::new(new_password.unwrap_or_default().decrypt(&ctx)?);
+    crate::account::reset_password(ctx, new_password).await
 }
 
 #[instrument(skip_all)]

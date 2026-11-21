@@ -1,12 +1,15 @@
+//! Verification covers the complete resource and its exact length, including trailing bytes.
+
 use blake3::Hash;
 use digest::Update;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncWrite, copy};
+use tokio::io::AsyncWrite;
 
 use crate::CAP_10_MiB;
 use crate::prelude::*;
 use crate::s9pk::merkle_archive::hash::VerifyingWriter;
 use crate::s9pk::merkle_archive::source::ArchiveSource;
+use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::commitment::{Commitment, Digestable, SignedCommitment};
 use crate::util::io::{ParallelBlake3Writer, TrackingIO, open_file};
 use crate::util::serde::Base64;
@@ -30,11 +33,8 @@ impl Blake3Commitment {
 
     /// Checks the entire file, including trailing bytes.
     pub async fn verify_file(&self, path: impl AsRef<std::path::Path>) -> Result<(), Error> {
-        let mut file = open_file(path).await?;
-        let mut writer = self.verifying_writer(tokio::io::sink());
-        copy(&mut file, &mut writer).await?;
-        writer.verify().await?;
-        Ok(())
+        let file = open_file(path).await?;
+        self.check(&MultiCursorFile::open(&file).await?).await
     }
 }
 
@@ -63,8 +63,12 @@ impl<'a, Resource: ArchiveSource> Commitment<&'a Resource> for Blake3Commitment 
         writer: W,
     ) -> Result<(), Error> {
         let mut hasher = self.verifying_writer(writer);
-        resource.copy_to(0, self.size, &mut hasher).await?;
+        resource.copy_all_to(&mut hasher).await?;
         hasher.verify().await?;
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "blake3_tests.rs"]
+mod tests;

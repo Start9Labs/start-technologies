@@ -1,0 +1,264 @@
+From: Start9 Labs <support@start9.com>
+Subject: Preserve shared requests and refresh their native authentication independently
+
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (C) 2012-2020 Gary Lin <glin@suse.com>
+Copyright (C) 2012 Matthew Garrett <mjg@redhat.com>
+Copyright (C) 2026 Start9 Labs
+
+The upstream OpenSSL linking exception applies to these modifications.
+
+--- a/src/mokutil.c
++++ b/src/mokutil.c
+@@ -89,6 +89,7 @@
+ #define UNTRUST_MOK        (1 << 28)
+ #define SET_SBAT           (1 << 29)
+ #define SET_SSP            (1 << 30)
++#define REFRESH_IMPORT_AUTH (1U << 31)
+ 
+ #define DEFAULT_CRYPT_METHOD SHA512_BASED
+ #define DEFAULT_SALT_SIZE    SHA512_SALT_MAX
+@@ -121,6 +122,7 @@
+ 	printf ("  --list-delete, -D\t\t\tList the keys to be deleted\n");
+ 	printf ("  --import, -i <der file...>\t\tImport keys\n");
+ 	printf ("  --delete, -D <der file...>\t\tDelete specific keys\n");
++	printf ("  --refresh-import-auth\t\t\tRefresh the pending import password\n");
+ 	printf ("  --revoke-import\t\t\tRevoke the import request\n");
+ 	printf ("  --revoke-delete\t\t\tRevoke the delete request\n");
+ 	printf ("  --export, -x\t\t\t\tExport keys to files\n");
+@@ -446,107 +448,108 @@
+ }
+ 
+ static int
+-update_request (void *new_list, const int list_len, const MokRequest req,
+-		const char *pw_hash_file, const int root_pw)
++prepare_request_auth (pw_crypt_t *pw_crypt, const char *pw_hash_file,
++		      const int root_pw)
+ {
+-	const char *req_name, *auth_name;
+-	pw_crypt_t pw_crypt;
+ 	char *password = NULL;
+ 	unsigned int pw_len;
+-	int auth_ret;
+ 	int ret = -1;
+-	uint32_t attributes = EFI_VARIABLE_NON_VOLATILE
+-			      | EFI_VARIABLE_BOOTSERVICE_ACCESS
+-			      | EFI_VARIABLE_RUNTIME_ACCESS;
+ 
+-	bzero (&pw_crypt, sizeof(pw_crypt_t));
+-	pw_crypt.method = DEFAULT_CRYPT_METHOD;
+-
+-	switch (req) {
+-	case ENROLL_MOK:
+-		req_name = "MokNew";
+-		auth_name = "MokAuth";
+-		break;
+-	case DELETE_MOK:
+-		req_name = "MokDel";
+-		auth_name = "MokDelAuth";
+-		break;
+-	case ENROLL_BLACKLIST:
+-		req_name = "MokXNew";
+-		auth_name = "MokXAuth";
+-		break;
+-	case DELETE_BLACKLIST:
+-		req_name = "MokXDel";
+-		auth_name = "MokXDelAuth";
+-		break;
+-	default:
+-		return -1;
+-	}
++	bzero (pw_crypt, sizeof (*pw_crypt));
++	pw_crypt->method = DEFAULT_CRYPT_METHOD;
+ 
+ 	if (pw_hash_file) {
+-		if (get_pw_hash_from_file (pw_hash_file, &pw_crypt) < 0) {
++		if (get_pw_hash_from_file (pw_hash_file, pw_crypt) < 0) {
+ 			fprintf (stderr, "Failed to read hash\n");
+-			goto error;
++			goto done;
+ 		}
+ 	} else if (root_pw) {
+-		if (get_password_from_shadow (&pw_crypt) < 0) {
++		if (get_password_from_shadow (pw_crypt) < 0) {
+ 			fprintf (stderr, "Failed to get root password hash\n");
+-			goto error;
++			goto done;
+ 		}
+ 	} else {
+ 		if (get_password (&password, &pw_len, PASSWORD_MIN, PASSWORD_MAX) < 0) {
+ 			fprintf (stderr, "Abort\n");
+-			goto error;
++			goto done;
+ 		}
+-
+-		auth_ret = generate_pw_crypt (&pw_crypt, password, pw_len);
+-		if (auth_ret < 0) {
++		if (generate_pw_crypt (pw_crypt, password, pw_len) < 0) {
+ 			fprintf (stderr, "Couldn't generate hash\n");
+-			goto error;
++			goto done;
+ 		}
+ 	}
++	ret = 0;
++done:
++	if (password)
++		free (password);
++	return ret;
++}
+ 
+-	if (new_list) {
+-		/* Write MokNew, MokDel, MokXNew, or MokXDel*/
+-		ret = efi_set_variable (efi_guid_shim, req_name,
+-					new_list, list_len, attributes,
+-					S_IRUSR | S_IWUSR);
+-		if (ret < 0) {
+-			switch (req) {
+-			case ENROLL_MOK:
+-				fprintf (stderr, "Failed to enroll new keys\n");
+-				break;
+-			case ENROLL_BLACKLIST:
+-				fprintf (stderr, "Failed to enroll blacklist\n");
+-				break;
+-			case DELETE_MOK:
+-				fprintf (stderr, "Failed to delete keys\n");
+-				break;
+-			case DELETE_BLACKLIST:
+-				fprintf (stderr, "Failed to delete blacklist\n");
+-				break;
+-			}
+-			goto error;
+-		}
+-	} else {
+-		test_and_delete_mok_var (req_name);
+-	}
++static int
++write_request_auth (const MokRequest req, const pw_crypt_t *pw_crypt)
++{
++	const char *auth_name = get_req_auth_var_name (req);
++	uint32_t attributes = EFI_VARIABLE_NON_VOLATILE
++			      | EFI_VARIABLE_BOOTSERVICE_ACCESS
++			      | EFI_VARIABLE_RUNTIME_ACCESS;
++	int ret;
+ 
+-	/* Write MokAuth, MokDelAuth, MokXAuth, or MokXDelAuth */
+-	ret = efi_set_variable (efi_guid_shim, auth_name, (void *)&pw_crypt,
++	if (!auth_name)
++		return -1;
++	ret = efi_set_variable (efi_guid_shim, auth_name, (uint8_t *)pw_crypt,
+ 				PASSWORD_CRYPT_SIZE, attributes,
+ 				S_IRUSR | S_IWUSR);
+-	if (ret < 0) {
++	if (ret < 0)
+ 		fprintf (stderr, "Failed to write %s\n", auth_name);
++	return ret;
++}
++
++static int
++update_request (void *new_list, const int list_len, const MokRequest req,
++		const char *pw_hash_file, const int root_pw)
++{
++	const char *req_name = get_req_var_name (req);
++	pw_crypt_t pw_crypt;
++	uint32_t attributes = EFI_VARIABLE_NON_VOLATILE
++			      | EFI_VARIABLE_BOOTSERVICE_ACCESS
++			      | EFI_VARIABLE_RUNTIME_ACCESS;
++
++	if (!req_name || prepare_request_auth (&pw_crypt, pw_hash_file, root_pw) < 0)
++		return -1;
++
++	if (new_list) {
++		if (efi_set_variable (efi_guid_shim, req_name,
++				      new_list, list_len, attributes,
++				      S_IRUSR | S_IWUSR) < 0) {
++			fprintf (stderr, "Failed to write %s\n", req_name);
++			return -1;
++		}
++	} else {
+ 		test_and_delete_mok_var (req_name);
+-		goto error;
+ 	}
+ 
+-	ret = 0;
+-error:
+-	if (password)
+-		free (password);
+-	return ret;
++	/* Authentication failure retains the shared request for retry. */
++	return write_request_auth (req, &pw_crypt);
++}
++
++static int
++refresh_import_auth (const char *pw_hash_file, const int root_pw)
++{
++	pw_crypt_t pw_crypt;
++	size_t size;
++
++	if (efi_get_variable_size (efi_guid_shim, get_req_var_name (ENROLL_MOK),
++				   &size) < 0) {
++		fprintf (stderr, "Failed to access pending MOK import\n");
++		return -1;
++	}
++	if (size == 0) {
++		fprintf (stderr, "Empty pending MOK import\n");
++		return -1;
++	}
++	if (prepare_request_auth (&pw_crypt, pw_hash_file, root_pw) < 0)
++		return -1;
++	return write_request_auth (ENROLL_MOK, &pw_crypt);
+ }
+ 
+ static int
+@@ -1847,6 +1850,7 @@
+ 			{"list-delete",	       no_argument,       0, 'D'},
+ 			{"import",             required_argument, 0, 'i'},
+ 			{"delete",             required_argument, 0, 'd'},
++			{"refresh-import-auth", no_argument,       0, 0  },
+ 			{"revoke-import",      no_argument,       0, 0  },
+ 			{"revoke-delete",      no_argument,       0, 0  },
+ 			{"export",             no_argument,       0, 'x'},
+@@ -1898,7 +1902,9 @@
+ 		switch (c) {
+ 		case 0:
+ 			option = long_options[option_index].name;
+-			if (strcmp (option, "revoke-import") == 0) {
++			if (strcmp (option, "refresh-import-auth") == 0) {
++				command |= REFRESH_IMPORT_AUTH;
++			} else if (strcmp (option, "revoke-import") == 0) {
+ 				command |= REVOKE_IMPORT;
+ 			} else if (strcmp (option, "revoke-delete") == 0) {
+ 				command |= REVOKE_DELETE;
+@@ -2222,6 +2228,9 @@
+ 			ret = issue_hash_request (hash_str, DELETE_MOK,
+ 						  pw_hash_file, use_root_pw);
+ 			break;
++		case REFRESH_IMPORT_AUTH:
++			ret = refresh_import_auth (pw_hash_file, use_root_pw);
++			break;
+ 		case REVOKE_IMPORT:
+ 			ret = revoke_request (ENROLL_MOK);
+ 			break;
+--- a/man/mokutil.1
++++ b/man/mokutil.1
+@@ -21,6 +21,9 @@
+         ([--hash-file \fIhashfile\fR | -f \fIhashfile\fR] | [--root-pw | -P] |
+          [--mokx |- X])
+ .br
++\fBmokutil\fR [--refresh-import-auth]
++        ([--hash-file \fIhashfile\fR | -f \fIhashfile\fR] | [--root-pw | -P])
++.br
+ \fBmokutil\fR [--revoke-import]
+         ([--mokx | -X])
+ .br
+@@ -109,6 +112,11 @@
+ Collect the following files and form a deleting request to shim. The files must be
+ in DER format.
+ .TP
++\fB--refresh-import-auth\fR
++Update the password for a nonempty pending import request. All pending request
++bytes remain unchanged, including unrecognized signature lists. A failed
++firmware write requires retry; pending membership does not confirm authentication.
++.TP
+ \fB--revoke-import\fR
+ Revoke the current import request (MokNew)
+ .TP

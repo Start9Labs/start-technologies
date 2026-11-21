@@ -1,0 +1,7 @@
+_version: 2
+os-overlay.public-source.unavailable:
+  en_US: 'An authenticated public OS source is unavailable'
+  de_DE: 'Eine authentifizierte öffentliche Betriebssystemquelle ist nicht verfügbar'
+  es_ES: 'No hay una fuente pública autenticada del sistema operativo disponible'
+  fr_FR: 'Aucune source publique authentifiée du système d’exploitation n’est disponible'
+  pl_PL: 'Uwierzytelnione publiczne źródło systemu operacyjnego jest niedostępne'

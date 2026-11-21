@@ -66,8 +66,8 @@ impl ValueParserFactory for IdMap {
 /// `TmpMountGuard`), cloned into a detached fd via
 /// `open_tree(OPEN_TREE_CLONE | AT_RECURSIVE)`, idmapped, and finally
 /// `move_mount`-ed onto the requested mountpoint. The staging mount is
-/// released when this method returns; the detached clone holds independent
-/// mount state.
+/// released when this method returns. Nonempty idmapped mount-tree views retain
+/// existing child mounts across staging retirement, but not later source mounts.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IdMapped<Fs: FileSystem> {
@@ -77,6 +77,18 @@ pub struct IdMapped<Fs: FileSystem> {
 impl<Fs: FileSystem> IdMapped<Fs> {
     pub fn new(filesystem: Fs, idmap: Vec<IdMap>) -> Self {
         Self { filesystem, idmap }
+    }
+    fn idmapped_hash(&self, source: digest::Output<Sha256>) -> digest::Output<Sha256> {
+        let mut sha = Sha256::new();
+        sha.update("IdMapped");
+        sha.update(source);
+        sha.update(usize::to_be_bytes(self.idmap.len()));
+        for i in &self.idmap {
+            sha.update(u32::to_be_bytes(i.from_id));
+            sha.update(u32::to_be_bytes(i.to_id));
+            sha.update(u32::to_be_bytes(i.range));
+        }
+        sha.finalize()
     }
 }
 impl<Fs: FileSystem> FileSystem for IdMapped<Fs> {
@@ -91,48 +103,38 @@ impl<Fs: FileSystem> FileSystem for IdMapped<Fs> {
             return self.filesystem.mount(mp, mount_type).await;
         }
 
-        tokio::fs::create_dir_all(mp).await?;
+        self.filesystem.pre_mount(mp, mount_type).await?;
 
         let staging = TmpMountGuard::mount(&self.filesystem, mount_type).await?;
 
-        // open_tree_attr atomically clones the staging mount and applies
-        // the idmap — required so the kernel doesn't see (and reject) a
-        // window where the cloned mount exists without the idmap, which
-        // is the recursive-idmap failure mode for inners that are
-        // themselves idmapped.
         let userns = userns_fd_from_idmap(&self.idmap).await?;
         let fd = open_tree_attr_idmap(staging.path(), true, userns.as_fd())?;
         drop(userns);
         let detached = DetachedMount::from_fd(fd);
 
+        if self.filesystem.is_mount_tree() {
+            detached.set_private()?;
+        }
         if matches!(mount_type, MountType::ReadOnly) {
             detached.set_readonly(true)?;
         }
 
         detached.attach(mp)?;
 
-        // The detached clone we just attached is independent of `staging`,
-        // so unmounting the staging copy here doesn't disturb it. Unmount
-        // explicitly (rather than relying on Drop's fire-and-forget spawn)
-        // so the staging mount is gone before we return and any failure is
-        // surfaced.
         staging.unmount().await?;
 
         Ok(())
+    }
+    fn is_mount_tree(&self) -> bool {
+        self.filesystem.is_mount_tree()
     }
     async fn device(&self) -> Result<Option<std::path::PathBuf>, Error> {
         self.filesystem.device().await
     }
     async fn source_hash(&self) -> Result<digest::Output<Sha256>, Error> {
-        let mut sha = Sha256::new();
-        sha.update("IdMapped");
-        sha.update(self.filesystem.source_hash().await?);
-        sha.update(usize::to_be_bytes(self.idmap.len()));
-        for i in &self.idmap {
-            sha.update(u32::to_be_bytes(i.from_id));
-            sha.update(u32::to_be_bytes(i.to_id));
-            sha.update(u32::to_be_bytes(i.range));
-        }
-        Ok(sha.finalize())
+        Ok(self.idmapped_hash(self.filesystem.source_hash().await?))
+    }
+    async fn mount_hash(&self, mount_type: MountType) -> Result<digest::Output<Sha256>, Error> {
+        Ok(self.idmapped_hash(self.filesystem.mount_hash(mount_type).await?))
     }
 }

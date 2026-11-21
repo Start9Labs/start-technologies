@@ -1,0 +1,7 @@
+_version: 2
+fde.loader.unsupported-route:
+  en_US: 'Unsupported or inconsistent direct-shim boot measurements; trusted local recovery is required'
+  de_DE: 'Nicht unterstützte oder inkonsistente Messwerte für den direkten Shim-Start; eine vertrauenswürdige lokale Wiederherstellung ist erforderlich'
+  es_ES: 'Mediciones de arranque directo mediante shim no compatibles o incoherentes; se requiere una recuperación local de confianza'
+  fr_FR: 'Mesures de démarrage direct par shim non prises en charge ou incohérentes ; une récupération locale de confiance est nécessaire'
+  pl_PL: 'Nieobsługiwane lub niespójne pomiary bezpośredniego rozruchu przez shim; wymagane jest zaufane odzyskiwanie lokalne'

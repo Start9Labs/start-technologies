@@ -199,7 +199,14 @@ pub async fn recover_full_server(
 
     let config = ctx.config.peek(|c| c.clone());
 
-    let init_result = init(&ctx.webserver, ctx.dns.clone(), &config, init_phases).await?;
+    let init_result = init(
+        &ctx.webserver,
+        ctx.dns.clone(),
+        &config,
+        &disk_guid,
+        init_phases,
+    )
+    .await?;
 
     let rpc_ctx = RpcContext::init(
         &ctx.webserver,

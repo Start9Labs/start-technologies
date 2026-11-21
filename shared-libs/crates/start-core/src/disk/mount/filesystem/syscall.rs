@@ -1,5 +1,5 @@
 //! Detached Linux bind mounts with optional idmaps and read-only attributes.
-//! `open_tree_attr` requires Linux 6.15+ for cloning an already-idmapped source.
+//! Atomic clone attributes require Linux 6.15 or later.
 
 use std::ffi::{CStr, CString, OsString};
 use std::io;
@@ -24,10 +24,7 @@ const MOVE_MOUNT_BENEATH: libc::c_uint = 0x00000200;
 const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
 const RESOLVE_BENEATH: u64 = 0x08;
 
-// open_tree_attr(2) — added in Linux 6.15. libc 0.2 only defines
-// SYS_open_tree_attr for m68k, but the number is unified at 467 across
-// x86_64 / aarch64 / riscv64 / armv7 / i686, covering every arch start-os
-// targets.
+// libc omits this syscall on supported StartOS architectures.
 const SYS_OPEN_TREE_ATTR: libc::c_long = 467;
 
 #[repr(C)]
@@ -122,23 +119,53 @@ fn open_tree_attr_idmap_at(
     flags: libc::c_uint,
     userns: BorrowedFd,
 ) -> Result<OwnedFd, Error> {
-    let attr = MountAttr {
-        attr_set: MOUNT_ATTR_IDMAP,
-        attr_clr: 0,
-        propagation: 0,
-        userns_fd: userns.as_raw_fd() as u64,
-    };
+    open_tree_attr(
+        source,
+        path,
+        flags,
+        &MountAttr {
+            attr_set: MOUNT_ATTR_IDMAP,
+            userns_fd: userns.as_raw_fd() as u64,
+            ..Default::default()
+        },
+        "open_tree_attr IDMAP",
+    )
+}
+
+/// Clones with private propagation and access flags atomically; requires Linux 6.15.
+pub fn open_tree_private(path: &Path, recursive: bool, readonly: bool) -> Result<OwnedFd, Error> {
+    open_tree_attr(
+        AT_FDCWD,
+        &cstr_path(path)?,
+        clone_flags(recursive),
+        &MountAttr {
+            attr_set: if readonly { MOUNT_ATTR_RDONLY } else { 0 },
+            attr_clr: if readonly { 0 } else { MOUNT_ATTR_RDONLY },
+            propagation: libc::MS_PRIVATE as u64,
+            ..Default::default()
+        },
+        "open_tree_attr private",
+    )
+}
+
+fn open_tree_attr(
+    source: RawFd,
+    path: &CStr,
+    flags: libc::c_uint,
+    attr: &MountAttr,
+    context: &'static str,
+) -> Result<OwnedFd, Error> {
     let raw = unsafe {
         libc::syscall(
             SYS_OPEN_TREE_ATTR,
             source,
             path.as_ptr(),
             flags,
-            &attr as *const _ as *const libc::c_void,
+            attr as *const _ as *const libc::c_void,
             std::mem::size_of::<MountAttr>(),
         )
     };
-    fd_from_raw(raw, "open_tree_attr IDMAP")
+    fd_from_raw(raw, context)
 }
 
 /// A detached clone rooted at a pinned directory, optionally including submounts.
@@ -315,6 +342,16 @@ fn mount_setattr(fd: BorrowedFd, attr: &MountAttr) -> Result<(), Error> {
     check(r, "mount_setattr")
 }
 
+fn set_propagation(fd: BorrowedFd, propagation: libc::c_ulong) -> Result<(), Error> {
+    mount_setattr(
+        fd,
+        &MountAttr {
+            propagation: propagation as u64,
+            ..Default::default()
+        },
+    )
+}
+
 /// A detached mount fd (from `open_tree`/`open_tree_attr`). Not visible at any
 /// path until [`DetachedMount::attach`]; dropping the fd discards it.
 #[derive(Debug)]
@@ -338,7 +375,11 @@ impl DetachedMount {
     }
     /// Isolates the detached tree from source propagation.
     pub fn set_private(&self) -> Result<(), Error> {
-        self.set_propagation(libc::MS_PRIVATE as u64)
+        set_propagation(self.fd.as_fd(), libc::MS_PRIVATE)
+    }
+    /// Receives the source's propagation without propagating back to it.
+    pub fn set_slave(&self) -> Result<(), Error> {
+        set_propagation(self.fd.as_fd(), libc::MS_SLAVE)
     }
 
     /// Source-slave for writable trees; private and recursively read-only otherwise.
@@ -348,18 +389,8 @@ impl DetachedMount {
             self.set_private()?;
             self.set_readonly(true)
         } else {
-            self.set_propagation(libc::MS_SLAVE as u64)
+            self.set_slave()
         }
-    }
-
-    fn set_propagation(&self, propagation: u64) -> Result<(), Error> {
-        mount_setattr(
-            self.fd.as_fd(),
-            &MountAttr {
-                propagation,
-                ..Default::default()
-            },
-        )
     }
     /// Attach the detached mount at the requested path.
     pub fn attach(self, mountpoint: &Path) -> Result<(), Error> {

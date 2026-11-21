@@ -16,7 +16,7 @@ use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{CallRemote, Context, Empty};
 use tokio::net::TcpStream;
 use tokio::process::Command;
-use tokio::sync::{RwLock, broadcast, mpsc, oneshot, watch};
+use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot, watch};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
@@ -72,6 +72,8 @@ pub struct RpcContextSeed {
     registry_refresh: mpsc::Sender<Url>,
     pub disk_updates: watch::Sender<()>,
     pub account: SyncRwLock<AccountInfo>,
+    /// Callers hold through credential and managed-swap changes.
+    pub password_changes: Mutex<()>,
     pub os_net_service: NetService,
     pub net_controller: Arc<NetController>,
     pub s9pk_arch: Option<&'static str>,
@@ -297,7 +299,15 @@ impl RpcContext {
         let db = if let Some(InitResult { net_ctrl, .. }) = &init_result {
             net_ctrl.db.clone()
         } else {
-            TypedPatchDb::<Database>::load(config.db().await?).await?
+            TypedPatchDb::<Database>::load_unchecked(config.db().await?)
+        };
+        let secret_memory = crate::fde::memory::protect_authorities(&db.peek().await)?;
+        crate::fde::enable::restore_pending_keys(&db, &disk_guid).await?;
+        crate::fde::private_config::mount_runtime(Path::new(crate::MAIN_DATA)).await?;
+        let db = if init_result.is_none() {
+            TypedPatchDb::<Database>::load((*db).clone()).await?
+        } else {
+            db
         };
         db.mutate(|db| {
             db.as_public_mut().as_disks_mut().ser(&Vec::new())?;
@@ -518,6 +528,7 @@ impl RpcContext {
             disk_updates: watch::Sender::new(()),
             db,
             account: SyncRwLock::new(account),
+            password_changes: Mutex::new(()),
             callbacks: net_controller.callbacks.clone(),
             net_controller,
             os_net_service,
@@ -592,6 +603,9 @@ impl RpcContext {
                 }
             }
         });
+        if let Some(memory) = secret_memory {
+            memory.check()?;
+        }
         Ok(res)
     }
 

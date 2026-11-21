@@ -174,7 +174,7 @@ echo "Upgrading..."
 # an `upgrade` that only compares when a second positional argument is present,
 # so CHECKSUM alone would be silently ignored there; the current script keys off
 # CHECKSUM and ignores $2. Passing both verifies on either.
-remote_sh "sudo CHECKSUM=$SQFS_SUM /usr/lib/startos/scripts/upgrade /media/startos/images/next.rootfs $SQFS_SUM"
+remote_sh "if test -x /usr/lib/startos/scripts/with-os-image-store; then sudo CHECKSUM=$SQFS_SUM /usr/lib/startos/scripts/with-os-image-store /usr/lib/startos/scripts/upgrade /media/startos/images/next.rootfs $SQFS_SUM; else sudo CHECKSUM=$SQFS_SUM /usr/lib/startos/scripts/upgrade /media/startos/images/next.rootfs $SQFS_SUM; fi"
 
 echo
 echo "Done — $REMOTE will run ${RUN_SHA:0:7} after it reboots."

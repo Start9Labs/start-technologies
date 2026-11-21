@@ -11,7 +11,6 @@ use imbl_value::InternedString;
 use libc::time_t;
 use openssl::asn1::{Asn1Integer, Asn1Time, Asn1TimeRef};
 use openssl::bn::{BigNum, MsbOption};
-use openssl::ec::{EcGroup, EcKey};
 use openssl::error::ErrorStack;
 use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private};
@@ -43,6 +42,7 @@ use crate::net::tls::{TlsHandler, TlsHandlerAction};
 use crate::net::utils::is_global_ip;
 use crate::net::web_server::{Accept, ExtractVisitor, TcpMetadata, extract};
 use crate::prelude::*;
+pub use crate::util::crypto::gen_nistp256;
 use crate::util::serde::{Der64, HandlerExtSerde, Pem};
 
 pub(crate) fn x509_sha256_fingerprint(cert: &X509Ref) -> Result<String, ErrorStack> {
@@ -156,51 +156,24 @@ impl Model<CertStore> {
         hostnames: &BTreeSet<InternedString>,
         branding: &CertBranding,
     ) -> Result<FullchainCertData, Error> {
-        let keys = if let Some(cert_data) = self
+        let issuer = self.issuer()?;
+        let cached = self
             .as_leaves()
             .as_idx(JsonKey::new_ref(hostnames))
             .map(|m| m.de())
-            .transpose()?
-        {
-            if should_use_cert(&cert_data.certs.ed25519)?
-                && should_use_cert(&cert_data.certs.nistp256)?
-            {
-                return Ok(FullchainCertData {
-                    root: self.as_root_cert().de()?.0,
-                    int: self.as_int_cert().de()?.0,
-                    leaf: cert_data,
-                });
-            }
-            cert_data.keys
-        } else {
-            PKeyPair {
-                ed25519: PKey::generate_ed25519()?,
-                nistp256: gen_nistp256()?,
-            }
-        };
-        let int_key = self.as_int_key().de()?.0;
-        let int_cert = self.as_int_cert().de()?.0;
-        let cert_data = CertData {
-            certs: CertPair {
-                ed25519: make_leaf_cert(
-                    (&int_key, &int_cert),
-                    (&keys.ed25519, &SANInfo::new(hostnames)),
-                    branding,
-                )?,
-                nistp256: make_leaf_cert(
-                    (&int_key, &int_cert),
-                    (&keys.nistp256, &SANInfo::new(hostnames)),
-                    branding,
-                )?,
-            },
-            keys,
-        };
+            .transpose()?;
+        let cert = issuer.cert_for(hostnames, cached, branding)?;
         self.as_leaves_mut()
-            .insert(JsonKey::new_ref(hostnames), &cert_data)?;
-        Ok(FullchainCertData {
-            root: self.as_root_cert().de()?.0,
-            int: self.as_int_cert().de()?.0,
-            leaf: cert_data,
+            .insert(JsonKey::new_ref(hostnames), &cert.leaf)?;
+        Ok(cert)
+    }
+
+    /// Captures intermediate signing authority, never the root private key.
+    pub fn issuer(&self) -> Result<LocalIssuer, Error> {
+        Ok(LocalIssuer {
+            intermediate_key: self.as_int_key().de()?,
+            intermediate_cert: self.as_int_cert().de()?,
+            root_cert: self.as_root_cert().de()?,
         })
     }
 }
@@ -212,6 +185,143 @@ impl DbAccess<CertStore> for Database {
 impl DbAccessMut<CertStore> for Database {
     fn access_mut<'a>(db: &'a mut Model<Self>) -> &'a mut Model<CertStore> {
         db.as_private_mut().as_key_store_mut().as_local_certs_mut()
+    }
+}
+
+/// Intermediate signing authority and its public trust chain; contains no root signing key.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalIssuer {
+    pub intermediate_key: Der64<PKey<Private>>,
+    pub intermediate_cert: Pem<X509>,
+    pub root_cert: Pem<X509>,
+}
+
+impl LocalIssuer {
+    fn cert_for(
+        &self,
+        hostnames: &BTreeSet<InternedString>,
+        cached: Option<CertData>,
+        branding: &CertBranding,
+    ) -> Result<FullchainCertData, Error> {
+        let leaf = match cached {
+            Some(cert)
+                if should_use_cert(&cert.certs.ed25519)?
+                    && should_use_cert(&cert.certs.nistp256)? =>
+            {
+                cert
+            }
+            cached => {
+                let keys = match cached {
+                    Some(cert) => cert.keys,
+                    None => PKeyPair {
+                        ed25519: PKey::generate_ed25519()?,
+                        nistp256: gen_nistp256()?,
+                    },
+                };
+                let san_info = SANInfo::new(hostnames);
+                CertData {
+                    certs: CertPair {
+                        ed25519: make_leaf_cert(
+                            (&self.intermediate_key.0, &self.intermediate_cert.0),
+                            (&keys.ed25519, &san_info),
+                            branding,
+                        )?,
+                        nistp256: make_leaf_cert(
+                            (&self.intermediate_key.0, &self.intermediate_cert.0),
+                            (&keys.nistp256, &san_info),
+                            branding,
+                        )?,
+                    },
+                    keys,
+                }
+            }
+        };
+        Ok(FullchainCertData {
+            root: self.root_cert.0.clone(),
+            int: self.intermediate_cert.0.clone(),
+            leaf,
+        })
+    }
+}
+
+/// In-memory leaf cache scoped to one captured intermediate issuer.
+/// Replace the cache and its handlers when the authoritative CA changes.
+#[derive(Clone)]
+pub struct LocalIssuerCache {
+    issuer: LocalIssuer,
+    leaves: Arc<tokio::sync::Mutex<BTreeMap<JsonKey<BTreeSet<InternedString>>, CertData>>>,
+}
+
+impl LocalIssuerCache {
+    pub fn new(issuer: LocalIssuer) -> Self {
+        Self {
+            issuer,
+            leaves: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+        }
+    }
+}
+
+/// The caller must establish entitlement to every requested name.
+pub trait LocalCertificateSource: Clone + Send + Sync {
+    fn certificate_for(
+        &self,
+        hostnames: BTreeSet<InternedString>,
+        branding: CertBranding,
+    ) -> impl Future<Output = Result<FullchainCertData, Error>> + Send;
+}
+
+impl<M> LocalCertificateSource for TypedPatchDb<M>
+where
+    M: HasModel<Model = Model<M>> + DbAccessMut<CertStore> + Send + Sync,
+{
+    async fn certificate_for(
+        &self,
+        hostnames: BTreeSet<InternedString>,
+        branding: CertBranding,
+    ) -> Result<FullchainCertData, Error> {
+        self.mutate(move |db| M::access_mut(db).cert_for(&hostnames, &branding))
+            .await
+            .result
+    }
+}
+
+impl LocalCertificateSource for LocalIssuerCache {
+    async fn certificate_for(
+        &self,
+        hostnames: BTreeSet<InternedString>,
+        branding: CertBranding,
+    ) -> Result<FullchainCertData, Error> {
+        let mut leaves = self.leaves.lock().await;
+        let key = JsonKey::new(hostnames);
+        let cert = self
+            .issuer
+            .cert_for(&key, leaves.get(&key).cloned(), &branding)?;
+        leaves.insert(key, cert.leaf.clone());
+        Ok(cert)
+    }
+}
+
+/// A leaf private key and its public certificate chain.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CertificateIdentity {
+    pub key: Der64<PKey<Private>>,
+    pub fullchain: Vec<Pem<X509>>,
+}
+
+impl CertificateIdentity {
+    pub fn server_config(
+        &self,
+        crypto_provider: Arc<CryptoProvider>,
+    ) -> Result<ServerConfig, Error> {
+        crate::net::tls::server_config(
+            crypto_provider,
+            self.fullchain
+                .iter()
+                .map(|certificate| Ok(CertificateDer::from(certificate.0.to_der()?)))
+                .collect::<Result<Vec<_>, Error>>()?,
+            PrivateKeyDer::from(PrivatePkcs8KeyDer::from(self.key.0.private_key_to_pkcs8()?)),
+        )
     }
 }
 
@@ -251,7 +361,7 @@ impl FullchainCertData {
     }
 }
 
-static CERTIFICATE_VERSION: i32 = 2; // X509 version 3 is actually encoded as '2' in the cert because fuck you.
+static CERTIFICATE_VERSION: i32 = 2; // X.509 encodes version 3 as 2.
 
 fn unix_time(time: SystemTime) -> time_t {
     time.duration_since(UNIX_EPOCH)
@@ -322,11 +432,6 @@ pub async fn root_ca_start_time() -> SystemTime {
     }
 }
 
-const EC_CURVE_NAME: nid::Nid = nid::Nid::X9_62_PRIME256V1;
-lazy_static::lazy_static! {
-    static ref EC_GROUP: EcGroup = EcGroup::from_curve_name(EC_CURVE_NAME).unwrap();
-}
-
 pub async fn export_key(key: &PKey<Private>, target: &Path) -> Result<(), Error> {
     tokio::fs::write(target, key.private_key_to_pem_pkcs8()?)
         .map(|res| res.with_ctx(|_| (ErrorKind::Filesystem, target.display().to_string())))
@@ -352,11 +457,6 @@ fn rand_serial() -> Result<Asn1Integer, Error> {
     let asn1 = Asn1Integer::from_bn(&bn)?;
     Ok(asn1)
 }
-#[instrument(skip_all)]
-pub fn gen_nistp256() -> Result<PKey<Private>, Error> {
-    Ok(PKey::from_ec_key(EcKey::generate(EC_GROUP.as_ref())?)?)
-}
-
 /// Appends a hashed `subjectKeyIdentifier` and an `authorityKeyIdentifier` carrying
 /// only that key identifier, the form CA/B Forum BR 7.1.2.1.3 requires on a root.
 fn append_self_signed_key_identifiers(
@@ -792,7 +892,7 @@ pub async fn generate_certificate(
     })
 }
 
-fn served_name(
+pub fn served_name(
     server_name: Option<&str>,
     tcp: Option<TcpMetadata>,
     gateway: Option<&IpInfo>,
@@ -816,22 +916,16 @@ fn served_name(
     Some(InternedString::from_display(&dialed))
 }
 
-pub struct RootCaTlsHandler<M: HasModel> {
-    pub db: TypedPatchDb<M>,
+pub type RootCaTlsHandler<M> = LocalCaTlsHandler<TypedPatchDb<M>>;
+
+#[derive(Clone)]
+pub struct LocalCaTlsHandler<S> {
+    pub db: S,
     pub crypto_provider: Arc<CryptoProvider>,
     pub branding: CertBranding,
 }
-impl<M: HasModel> Clone for RootCaTlsHandler<M> {
-    fn clone(&self) -> Self {
-        Self {
-            db: self.db.clone(),
-            crypto_provider: self.crypto_provider.clone(),
-            branding: self.branding.clone(),
-        }
-    }
-}
 
-impl<'a, A, M> TlsHandler<'a, A> for RootCaTlsHandler<M>
+impl<'a, A, S> TlsHandler<'a, A> for LocalCaTlsHandler<S>
 where
     A: Accept + 'a,
     <A as Accept>::Metadata: Visit<ExtractVisitor<TcpMetadata>>
@@ -840,7 +934,7 @@ where
         + Send
         + Sync
         + 'static,
-    M: HasModel<Model = Model<M>> + DbAccessMut<CertStore> + Send + Sync,
+    S: LocalCertificateSource,
 {
     async fn get_config(
         &mut self,
@@ -855,7 +949,7 @@ where
         )?]
         .into_iter()
         .collect();
-        root_ca_config(
+        local_ca_config(
             &self.db,
             &self.crypto_provider,
             &self.branding,
@@ -879,11 +973,19 @@ pub async fn root_ca_config<M>(
 where
     M: HasModel<Model = Model<M>> + DbAccessMut<CertStore> + Send + Sync,
 {
-    let branding = branding.clone();
-    let cert = db
-        .mutate(move |db| M::access_mut(db).cert_for(&hostnames, &branding))
+    local_ca_config(db, crypto_provider, branding, hello, hostnames).await
+}
+
+async fn local_ca_config<S: LocalCertificateSource>(
+    source: &S,
+    crypto_provider: &Arc<CryptoProvider>,
+    branding: &CertBranding,
+    hello: &ClientHello<'_>,
+    hostnames: BTreeSet<InternedString>,
+) -> Option<ServerConfig> {
+    let cert = source
+        .certificate_for(hostnames, branding.clone())
         .await
-        .result
         .log_err()?;
     let (chain, key) = if hello
         .signature_schemes()
@@ -893,20 +995,12 @@ where
     } else {
         (cert.fullchain_nistp256(), &cert.leaf.keys.nistp256)
     };
-    let chain = chain
-        .into_iter()
-        .map(|c| Ok(CertificateDer::from(c.to_der()?)))
-        .collect::<Result<Vec<_>, Error>>()
-        .log_err()?;
-    let key = PrivateKeyDer::from(PrivatePkcs8KeyDer::from(
-        key.private_key_to_pkcs8().log_err()?,
-    ));
-    ServerConfig::builder_with_provider(crypto_provider.clone())
-        .with_safe_default_protocol_versions()
-        .log_err()?
-        .with_no_client_auth()
-        .with_single_cert(chain, key)
-        .log_err()
+    CertificateIdentity {
+        key: Der64(key.clone()),
+        fullchain: chain.into_iter().cloned().map(Pem).collect(),
+    }
+    .server_config(crypto_provider.clone())
+    .log_err()
 }
 
 #[cfg(test)]
@@ -1087,8 +1181,6 @@ mod cert_validity_tests {
         builder.build()
     }
 
-    /// The renewal window: too old to serve without trying to renew, still
-    /// good enough to serve while that renewal is failing.
     #[test]
     fn the_renewal_window_is_unexpired_but_due_for_renewal() {
         let fresh = cert_expiring_in(60);
@@ -1332,5 +1424,191 @@ mod cert_store_tests {
             first.leaf.keys.ed25519.private_key_to_der().unwrap(),
             second.leaf.keys.ed25519.private_key_to_der().unwrap()
         );
+    }
+}
+
+#[cfg(test)]
+mod bootstrap_issuer_tests {
+    use openssl::stack::Stack;
+    use openssl::x509::X509StoreContext;
+    use openssl::x509::store::X509StoreBuilder;
+    use tokio_rustls::rustls::pki_types::ServerName;
+    use tokio_rustls::rustls::{ClientConfig, RootCertStore};
+    use tokio_rustls::{LazyConfigAcceptor, TlsConnector};
+
+    use super::*;
+
+    fn store() -> (Model<CertStore>, CertBranding) {
+        let branding = CertBranding::start_os("bootstrap-test");
+        let root_key = gen_nistp256().unwrap();
+        let root = make_root_cert(&root_key, &branding, SystemTime::now()).unwrap();
+        let int_key = gen_nistp256().unwrap();
+        let int_cert = make_int_cert((&root_key, &root), &int_key, &branding).unwrap();
+        (
+            Model::new(&CertStore {
+                root_key: Der64(root_key),
+                root_cert: Pem(root),
+                int_key: Der64(int_key),
+                int_cert: Pem(int_cert),
+                leaves: BTreeMap::new(),
+            })
+            .unwrap(),
+            branding,
+        )
+    }
+
+    fn names(name: &str) -> BTreeSet<InternedString> {
+        [InternedString::from(name)].into_iter().collect()
+    }
+
+    fn trusted(cert: &FullchainCertData) {
+        let mut roots = X509StoreBuilder::new().unwrap();
+        roots.add_cert(cert.root.clone()).unwrap();
+        let roots = roots.build();
+        let mut chain = Stack::new().unwrap();
+        chain.push(cert.int.clone()).unwrap();
+        for leaf in [&cert.leaf.certs.ed25519, &cert.leaf.certs.nistp256] {
+            assert!(
+                X509StoreContext::new()
+                    .unwrap()
+                    .init(&roots, leaf, &chain, |ctx| ctx.verify_cert())
+                    .unwrap()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn normal_and_bootstrap_issuance_trust_the_same_root_and_cache_by_san() {
+        let (mut store, branding) = store();
+        let issuer = store.issuer().unwrap();
+        let root_private_key = serde_json::to_value(store.as_root_key().de().unwrap()).unwrap();
+        let snapshot = serde_json::to_value(&issuer).unwrap();
+        assert_eq!(snapshot.as_object().unwrap().len(), 3);
+        assert!(
+            !snapshot
+                .as_object()
+                .unwrap()
+                .values()
+                .any(|v| v == &root_private_key)
+        );
+        let bootstrap = LocalIssuerCache::new(serde_json::from_value(snapshot).unwrap());
+        let normal = store.cert_for(&names("192.168.1.2"), &branding).unwrap();
+        let first = bootstrap
+            .certificate_for(names("192.168.1.2"), branding.clone())
+            .await
+            .unwrap();
+        let reused = bootstrap
+            .certificate_for(names("192.168.1.2"), branding.clone())
+            .await
+            .unwrap();
+        let changed = bootstrap
+            .certificate_for(names("192.168.1.3"), branding)
+            .await
+            .unwrap();
+        for cert in [&normal, &first, &changed] {
+            trusted(cert);
+        }
+        assert_eq!(normal.root, first.root);
+        assert_eq!(first, reused);
+        assert_ne!(first.leaf.keys, changed.leaf.keys);
+        assert_eq!(
+            changed
+                .leaf
+                .certs
+                .nistp256
+                .subject_alt_names()
+                .unwrap()
+                .iter()
+                .filter_map(|n| n.ipaddress().map(<[u8]>::to_vec))
+                .collect::<Vec<_>>(),
+            vec![vec![192, 168, 1, 3]]
+        );
+    }
+
+    #[test]
+    fn renewal_reuses_keys_and_root_rotation_discards_old_leaves() {
+        let (mut store, branding) = store();
+        let names = names("bootstrap-test.local");
+        let first = store.cert_for(&names, &branding).unwrap();
+        let mut expiring = first.leaf.clone();
+        let expired_key = gen_nistp256().unwrap();
+        let expired = make_root_cert(&expired_key, &branding, SystemTime::UNIX_EPOCH).unwrap();
+        expiring.certs = CertPair {
+            ed25519: expired.clone(),
+            nistp256: expired,
+        };
+        store
+            .as_leaves_mut()
+            .insert(JsonKey::new_ref(&names), &expiring)
+            .unwrap();
+        let renewed = store.cert_for(&names, &branding).unwrap();
+        assert_eq!(renewed.leaf.keys, first.leaf.keys);
+        assert_ne!(renewed.leaf.certs, expiring.certs);
+        trusted(&renewed);
+        let key = gen_nistp256().unwrap();
+        let root = make_root_cert(&key, &branding, SystemTime::now()).unwrap();
+        store.install_root(&key, &root, &branding).unwrap();
+        let rotated = store.cert_for(&names, &branding).unwrap();
+        trusted(&rotated);
+        assert_ne!(rotated.root, first.root);
+        assert_ne!(rotated.leaf.keys, first.leaf.keys);
+    }
+
+    async fn handshake<S: LocalCertificateSource>(
+        source: &S,
+        root: &X509,
+        branding: &CertBranding,
+        name: &str,
+    ) {
+        let crypto = Arc::new(tokio_rustls::rustls::crypto::ring::default_provider());
+        let mut roots = RootCertStore::empty();
+        roots
+            .add(CertificateDer::from(root.to_der().unwrap()))
+            .unwrap();
+        let config = ClientConfig::builder_with_provider(crypto.clone())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let (client, server) = tokio::io::duplex(65536);
+        let connect = TlsConnector::from(Arc::new(config));
+        let server_name = ServerName::try_from(name.to_owned()).unwrap();
+        let client = connect.connect(server_name, client);
+        let server = async {
+            let hello = LazyConfigAcceptor::new(Default::default(), server)
+                .await
+                .unwrap();
+            let config = local_ca_config(
+                source,
+                &crypto,
+                branding,
+                &hello.client_hello(),
+                names(name),
+            )
+            .await
+            .unwrap();
+            hello.into_stream(Arc::new(config)).await.unwrap()
+        };
+        let (client, _) = tokio::join!(client, server);
+        client.unwrap();
+    }
+
+    #[tokio::test]
+    async fn normal_and_bootstrap_sources_complete_trusted_tls_handshakes() {
+        let (store, branding) = store();
+        let issuer = store.issuer().unwrap();
+        let root = issuer.root_cert.0.clone();
+        let bootstrap = LocalIssuerCache::new(issuer);
+        let normal = TypedPatchDb::<Database>::load_unchecked(patch_db::PatchDb::in_memory());
+        normal
+            .put(
+                &patch_db::json_ptr::ROOT,
+                &imbl_value::json!({"private": {"keyStore": {"localCerts": store.de().unwrap()}}}),
+            )
+            .await
+            .unwrap();
+        handshake(&normal, &root, &branding, "bootstrap-test.local").await;
+        handshake(&bootstrap, &root, &branding, "bootstrap-test.local").await;
+        handshake(&bootstrap, &root, &branding, "192.168.1.3").await;
     }
 }

@@ -6,6 +6,12 @@ export const TRUSTED_KEYS_MENU_ITEM = {
 
 export const TRUSTED_KEYS_LINK = ['/system', TRUSTED_KEYS_MENU_ITEM.link]
 
+export const FDE_MENU_ITEM = {
+  icon: '@tui.shield',
+  item: 'Full-disk encryption',
+  link: 'fde',
+} as const
+
 export const SYSTEM_MENU = [
   [
     {
@@ -89,6 +95,7 @@ export const SYSTEM_MENU = [
       item: 'Change Password',
       link: 'password',
     },
+    FDE_MENU_ITEM,
   ],
   [
     {

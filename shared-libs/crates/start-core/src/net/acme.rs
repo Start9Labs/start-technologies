@@ -10,8 +10,6 @@ use futures::{FutureExt, StreamExt};
 use imbl_value::InternedString;
 use instant_acme::{Error as AcmeError, LetsEncrypt};
 use itertools::Itertools;
-use openssl::pkey::{PKey, Private};
-use openssl::x509::X509;
 use regex::Regex;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
@@ -37,7 +35,7 @@ use crate::net::vhost::ACME_CHALLENGE_PORT;
 use crate::net::web_server::Accept;
 use crate::prelude::*;
 use crate::util::FromStrParser;
-use crate::util::serde::{Der64, HandlerExtSerde, Pem};
+use crate::util::serde::{Der64, HandlerExtSerde};
 use crate::util::sync::{SyncMutex, Watch};
 
 mod order;
@@ -124,12 +122,7 @@ where
             .and_then(|p| p.as_idx(JsonKey::new_ref(san_info)))
             .and_then(|cert| cert.de().log_err());
         if let Some(cert) = &cached {
-            if cert
-                .fullchain
-                .get(0)
-                .and_then(|c| should_use_cert(&c.0).log_err())
-                .unwrap_or(false)
-            {
+            if usable(cert) {
                 self.in_progress
                     .send_if_modified(|map| map.remove(san_info).is_some());
                 return certified_key(cert, &self.crypto_provider).log_err();
@@ -283,6 +276,13 @@ where
     }
 }
 
+fn usable(cert: &AcmeCert) -> bool {
+    cert.fullchain
+        .first()
+        .and_then(|certificate| should_use_cert(&certificate.0).log_err())
+        .unwrap_or(false)
+}
+
 fn unexpired(cert: &AcmeCert) -> bool {
     cert.fullchain
         .get(0)
@@ -404,11 +404,151 @@ impl DbAccessMut<AcmeCertStore> for Database {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct AcmeCert {
-    pub key: Der64<PKey<Private>>,
-    pub fullchain: Vec<Pem<X509>>,
+/// Standalone ACME authority for caller-authorized SAN sets.
+#[derive(Default, Deserialize, Serialize, HasModel)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[model = "Model<Self>"]
+pub struct BootstrapAcme {
+    pub providers: BTreeMap<JsonKey<BTreeSet<InternedString>>, AcmeProvider>,
+    pub settings: BTreeMap<AcmeProvider, AcmeSettings>,
+    pub cache: AcmeCertStore,
 }
+
+impl BootstrapAcme {
+    /// The caller supplies only enabled SAN/provider bindings owned by the bootstrap host.
+    pub fn capture(
+        db: &DatabaseModel,
+        providers: BTreeMap<JsonKey<BTreeSet<InternedString>>, AcmeProvider>,
+    ) -> Result<Self, Error> {
+        let mut snapshot = Self {
+            providers,
+            ..Self::default()
+        };
+        let store = <Database as DbAccess<AcmeCertStore>>::access(db);
+        for (sans, provider) in &snapshot.providers {
+            if let Some(settings) =
+                <Database as DbAccessByKey<AcmeSettings>>::access_by_key(db, provider)
+            {
+                let settings = settings.de()?;
+                let contacts = JsonKey::new(settings.contact.clone());
+                if let Some(account) = store.as_accounts().as_idx(&contacts) {
+                    snapshot.cache.accounts.insert(contacts, account.de()?);
+                }
+                snapshot.settings.insert(provider.clone(), settings);
+            }
+            if let Some(cert) = store
+                .as_certs()
+                .as_idx(&provider.0)
+                .and_then(|certs| certs.as_idx(sans))
+            {
+                snapshot
+                    .cache
+                    .certs
+                    .entry(provider.0.clone())
+                    .or_default()
+                    .insert(sans.clone(), cert.de()?);
+            }
+        }
+        Ok(snapshot)
+    }
+
+    /// Retains authoritative settings, accounts and healthy cached identities.
+    pub(crate) fn merge_cache_into(&self, db: &mut DatabaseModel) -> Result<(), Error> {
+        for (sans, provider) in &self.providers {
+            let Some(expected) = self.settings.get(provider) else {
+                continue;
+            };
+            let Some(current) =
+                <Database as DbAccessByKey<AcmeSettings>>::access_by_key(db, provider)
+            else {
+                continue;
+            };
+            if serde_json::to_value(current.de()?).with_kind(ErrorKind::Serialization)?
+                != serde_json::to_value(expected).with_kind(ErrorKind::Serialization)?
+            {
+                continue;
+            }
+            let store = <Database as DbAccessMut<AcmeCertStore>>::access_mut(db);
+            let contacts = JsonKey::new(expected.contact.clone());
+            if store.as_accounts().as_idx(&contacts).is_none() {
+                if let Some(account) = self.cache.accounts.get(&contacts) {
+                    store.as_accounts_mut().insert(&contacts, account)?;
+                }
+            }
+            let current = store
+                .as_certs()
+                .as_idx(&provider.0)
+                .and_then(|certs| certs.as_idx(sans))
+                .map(|cert| cert.de())
+                .transpose()?;
+            if current.as_ref().is_some_and(usable) {
+                continue;
+            }
+            if let Some(cert) = self
+                .cache
+                .certs
+                .get(&provider.0)
+                .and_then(|certs| certs.get(sans))
+                .filter(|cert| usable(cert))
+            {
+                store
+                    .as_certs_mut()
+                    .upsert(&provider.0, || Ok(BTreeMap::new()))?
+                    .insert(sans, cert)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Materializes a mutable RAM cache; callers persist renewed records at handoff.
+    pub async fn materialize(self) -> Result<TypedPatchDb<Self>, Error> {
+        let db = TypedPatchDb::load_unchecked(patch_db::PatchDb::in_memory());
+        db.mutate(move |db: &mut Model<Self>| db.ser(&self))
+            .await
+            .result?;
+        Ok(db)
+    }
+}
+
+impl DbAccess<AcmeCertStore> for BootstrapAcme {
+    fn access(db: &Model<Self>) -> &Model<AcmeCertStore> {
+        db.as_cache()
+    }
+}
+impl DbAccessMut<AcmeCertStore> for BootstrapAcme {
+    fn access_mut(db: &mut Model<Self>) -> &mut Model<AcmeCertStore> {
+        db.as_cache_mut()
+    }
+}
+impl DbAccessByKey<AcmeSettings> for BootstrapAcme {
+    type Key<'a> = &'a AcmeProvider;
+    fn access_by_key<'a>(
+        db: &'a Model<Self>,
+        key: &AcmeProvider,
+    ) -> Option<&'a Model<AcmeSettings>> {
+        db.as_settings().as_idx(key)
+    }
+}
+
+#[derive(Clone)]
+pub struct BootstrapAcmeProvider(pub TypedPatchDb<BootstrapAcme>);
+
+impl GetAcmeProvider for BootstrapAcmeProvider {
+    async fn get_provider<'a, 'b: 'a>(
+        &'b self,
+        san_info: &'a BTreeSet<InternedString>,
+    ) -> Option<impl AsRef<AcmeProvider> + Send + 'b> {
+        self.0
+            .peek()
+            .await
+            .as_providers()
+            .as_idx(JsonKey::new_ref(san_info))?
+            .de()
+            .log_err()
+    }
+}
+
+pub type AcmeCert = crate::net::ssl::CertificateIdentity;
 
 pub struct AcmeCertCache<'a, M: HasModel>(pub &'a TypedPatchDb<M>);
 impl<'a, M> AcmeCertCache<'a, M>
@@ -562,12 +702,7 @@ fn challenge_pending(
     else {
         return Ok(true);
     };
-    Ok(!cert
-        .de()?
-        .fullchain
-        .first()
-        .and_then(|c| should_use_cert(&c.0).log_err())
-        .unwrap_or(false))
+    Ok(!usable(&cert.de()?))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, VisitFields)]
@@ -860,5 +995,278 @@ mod tests {
         assert!(normalize_contact("not an email".into()).is_err());
         assert!(normalize_contact("https://example.com".into()).is_err());
         assert!(normalize_contact("".into()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod bootstrap_tests {
+    use patch_db::ModelExt;
+
+    use super::*;
+    use crate::net::ssl::{CertBranding, gen_nistp256, make_root_cert};
+    use crate::util::serde::Pem;
+
+    fn names(name: &str) -> BTreeSet<InternedString> {
+        [InternedString::from(name)].into_iter().collect()
+    }
+
+    fn certificate(days_left: u64) -> AcmeCert {
+        let key = gen_nistp256().unwrap();
+        let start = SystemTime::now() - Duration::from_secs((10 * 364 - days_left) * 86400);
+        let cert = make_root_cert(&key, &CertBranding::start_os("test"), start).unwrap();
+        AcmeCert {
+            key: Der64(key),
+            fullchain: vec![Pem(cert)],
+        }
+    }
+
+    fn provider() -> AcmeProvider {
+        "https://ca.invalid/directory".parse().unwrap()
+    }
+
+    fn snapshot(cert: AcmeCert) -> BootstrapAcme {
+        let provider = provider();
+        BootstrapAcme {
+            providers: [(JsonKey::new(names("unlock.example.com")), provider.clone())]
+                .into_iter()
+                .collect(),
+            settings: [(
+                provider.clone(),
+                AcmeSettings {
+                    contact: vec!["mailto:admin@example.com".into()],
+                },
+            )]
+            .into_iter()
+            .collect(),
+            cache: AcmeCertStore {
+                accounts: BTreeMap::new(),
+                certs: [(
+                    provider.0,
+                    [(JsonKey::new(names("unlock.example.com")), cert)]
+                        .into_iter()
+                        .collect(),
+                )]
+                .into_iter()
+                .collect(),
+            },
+        }
+    }
+
+    fn handler(
+        db: TypedPatchDb<BootstrapAcme>,
+    ) -> AcmeTlsHandler<BootstrapAcme, BootstrapAcmeProvider> {
+        AcmeTlsHandler {
+            get_provider: BootstrapAcmeProvider(db.clone()),
+            db,
+            acme_cache: Arc::new(SyncMutex::new(BTreeMap::new())),
+            crypto_provider: Arc::new(tokio_rustls::rustls::crypto::ring::default_provider()),
+            in_progress: Watch::new(BTreeMap::new()),
+            report_failure: None,
+        }
+    }
+
+    #[test]
+    fn bootstrap_handoff_preserves_healthy_cache_and_replaces_due_certificates() {
+        for (days_left, replace) in [(10, true), (100, false)] {
+            let account =
+                crate::account::AccountInfo::new("cache-test-password", SystemTime::now(), None)
+                    .unwrap();
+            let mut db = Model::new(&Database::init(&account, false, None, None).unwrap()).unwrap();
+            let renewed = snapshot(certificate(365));
+            db.as_public_mut()
+                .as_server_info_mut()
+                .as_network_mut()
+                .as_acme_mut()
+                .ser(&renewed.settings)
+                .unwrap();
+            let existing = snapshot(certificate(days_left));
+            let sans = JsonKey::new(names("unlock.example.com"));
+            let expected = if replace {
+                &renewed.cache.certs[&provider().0][&sans]
+            } else {
+                &existing.cache.certs[&provider().0][&sans]
+            }
+            .key
+            .0
+            .public_key_to_der()
+            .unwrap();
+            <Database as DbAccessMut<AcmeCertStore>>::access_mut(&mut db)
+                .ser(&existing.cache)
+                .unwrap();
+            renewed.merge_cache_into(&mut db).unwrap();
+            let stored = <Database as DbAccess<AcmeCertStore>>::access(&db)
+                .as_certs()
+                .as_idx(&provider().0)
+                .unwrap()
+                .as_idx(&sans)
+                .unwrap()
+                .de()
+                .unwrap();
+            assert_eq!(stored.key.0.public_key_to_der().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn bootstrap_handoff_cannot_override_changed_provider_settings() {
+        let account =
+            crate::account::AccountInfo::new("cache-test-password", SystemTime::now(), None)
+                .unwrap();
+        let mut db = Model::new(&Database::init(&account, false, None, None).unwrap()).unwrap();
+        let renewed = snapshot(certificate(365));
+        db.as_public_mut()
+            .as_server_info_mut()
+            .as_network_mut()
+            .as_acme_mut()
+            .ser(&BTreeMap::from([(
+                provider(),
+                AcmeSettings {
+                    contact: vec!["mailto:replacement@example.com".into()],
+                },
+            )]))
+            .unwrap();
+        renewed.merge_cache_into(&mut db).unwrap();
+        let stored = <Database as DbAccess<AcmeCertStore>>::access(&db)
+            .de()
+            .unwrap();
+        assert!(stored.accounts.is_empty());
+        assert!(stored.certs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn snapshot_limits_authority_and_reuses_the_account_and_certificate_cache() {
+        let mut original = snapshot(certificate(100));
+        let contacts = JsonKey::new(vec!["mailto:admin@example.com".into()]);
+        let account = gen_nistp256().unwrap().private_key_to_pkcs8().unwrap();
+        original.cache.accounts.insert(
+            contacts.clone(),
+            Der64(pkcs8::Document::try_from(account.as_slice()).unwrap()),
+        );
+        original.cache.accounts.insert(
+            JsonKey::new(vec!["mailto:other@example.com".into()]),
+            Der64(
+                pkcs8::Document::try_from(
+                    gen_nistp256()
+                        .unwrap()
+                        .private_key_to_pkcs8()
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap(),
+            ),
+        );
+        original
+            .cache
+            .certs
+            .get_mut(&provider().0)
+            .unwrap()
+            .insert(JsonKey::new(names("other.example.com")), certificate(100));
+        original.cache.certs.insert(
+            "https://other-ca.invalid/directory".parse().unwrap(),
+            [(JsonKey::new(names("unlock.example.com")), certificate(100))]
+                .into_iter()
+                .collect(),
+        );
+        let db = Model::<Database>::from_value(imbl_value::json!({
+            "private": {"keyStore": {"acme": original.cache}},
+            "public": {"serverInfo": {"network": {"acme": original.settings}}},
+        }));
+        let captured = BootstrapAcme::capture(&db, original.providers).unwrap();
+        assert_eq!(captured.settings.len(), 1);
+        assert_eq!(captured.cache.accounts.len(), 1);
+        assert_eq!(captured.cache.certs.len(), 1);
+        assert_eq!(captured.cache.certs[&provider().0].len(), 1);
+        let serialized = serde_json::to_vec(&captured).unwrap();
+        let db = serde_json::from_slice::<BootstrapAcme>(&serialized)
+            .unwrap()
+            .materialize()
+            .await
+            .unwrap();
+        let cache = AcmeCertCache(&db);
+        assert_eq!(
+            cache
+                .read_account(&["mailto:admin@example.com"])
+                .await
+                .unwrap()
+                .unwrap(),
+            account
+        );
+        let tls = handler(db.clone());
+        assert!(tls.get_cert(&names("unlock.example.com")).await.is_some());
+        assert!(tls.get_cert(&names("other.example.com")).await.is_none());
+        let replacement = certificate(200);
+        let replacement_der = replacement.fullchain[0].0.to_der().unwrap();
+        cache
+            .write_certificate(
+                &names("unlock.example.com"),
+                provider().as_ref(),
+                &replacement,
+            )
+            .await
+            .unwrap();
+        cache
+            .write_account(&["mailto:admin@example.com"], &account)
+            .await
+            .unwrap();
+        let handoff = db.peek().await.de().unwrap();
+        let restored =
+            serde_json::from_slice::<BootstrapAcme>(&serde_json::to_vec(&handoff).unwrap())
+                .unwrap()
+                .materialize()
+                .await
+                .unwrap();
+        assert_eq!(
+            restored
+                .peek()
+                .await
+                .as_cache()
+                .as_certs()
+                .as_idx(&provider().0)
+                .unwrap()
+                .as_idx(JsonKey::new_ref(&names("unlock.example.com")))
+                .unwrap()
+                .de()
+                .unwrap()
+                .fullchain[0]
+                .0
+                .to_der()
+                .unwrap(),
+            replacement_der
+        );
+        assert_eq!(
+            AcmeCertCache(&restored)
+                .read_account(&["mailto:admin@example.com"])
+                .await
+                .unwrap()
+                .unwrap(),
+            account
+        );
+    }
+
+    #[tokio::test]
+    async fn renewal_backoff_serves_unexpired_cache_but_never_expired_cache() {
+        for (days, expected) in [(10, true), (0, false)] {
+            let tls = handler(snapshot(certificate(days)).materialize().await.unwrap());
+            let sans = names("unlock.example.com");
+            tls.in_progress.send_modify(|map| {
+                map.insert(
+                    sans.clone(),
+                    OrderEntry {
+                        backoff_until: Some(Instant::now() + Duration::from_secs(60)),
+                        ..OrderEntry::default()
+                    },
+                );
+            });
+            assert_eq!(tls.get_cert(&sans).await.is_some(), expected);
+            assert!(tls.acme_cache.peek(|cache| cache.is_empty()));
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_settings_still_serves_unexpired_cache_without_starting_an_order() {
+        let mut snapshot = snapshot(certificate(10));
+        snapshot.settings.clear();
+        let tls = handler(snapshot.materialize().await.unwrap());
+        assert!(tls.get_cert(&names("unlock.example.com")).await.is_some());
+        assert!(tls.in_progress.peek(|map| map.is_empty()));
     }
 }

@@ -241,12 +241,16 @@ Pin-Priority: 500
 EOF
 fi
 
-# Hooks
+mkdir -p config/includes.chroot/usr/src/startos-image-build/mokutil
+cp -a "$SOURCE_DIR/mokutil/." config/includes.chroot/usr/src/startos-image-build/mokutil/
+cp "$SOURCE_DIR/setup-user" config/includes.chroot/usr/src/startos-image-build/setup-user
 
 cat > config/hooks/normal/9000-install-startos.hook.chroot << EOF
 #!/bin/bash
 
 set -e
+
+/usr/src/startos-image-build/mokutil/install
 
 if [ "${IB_TARGET_PLATFORM}" != "raspberrypi" ]; then
     /usr/lib/startos/scripts/enable-kiosk
@@ -392,27 +396,18 @@ if [ "${IB_TARGET_PLATFORM}" = "raspberrypi" ]; then
     cp /usr/lib/u-boot/rpi_arm64/u-boot.bin /boot/firmware/u-boot.bin
 fi
 
-useradd --shell /bin/bash -G startos -m start9
-echo start9:embassy | chpasswd
-usermod -aG sudo start9
-usermod -aG systemd-journal start9
-
-echo "start9 ALL=(ALL:ALL) NOPASSWD: ALL" | sudo tee "/etc/sudoers.d/010_start9-nopasswd"
-
-if ! [[ "${IB_OS_ENV}" =~ (^|-)dev($|-) ]]; then
-    passwd -l start9
-fi
+/usr/src/startos-image-build/setup-user "${IB_OS_ENV}"
 
 mkdir -p /media/startos
 chmod 750 /media/startos
 chown root:startos /media/startos
+rm -rf /usr/src/startos-image-build
 
 EOF
 
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(date '+%s')}"
 
-# Retries a step a transient mirror or registry error can fail. A retried
-# live-build stage resumes from its stagefiles but reruns a failed hook from its start.
+# Failed hooks restart in the same build root.
 retry() {
 	local attempt
 	for attempt in 1 2 3; do

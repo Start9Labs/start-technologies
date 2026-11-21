@@ -1,0 +1,7 @@
+_version: 2
+system.zram-disabled-by-fde:
+  en_US: 'FDE enrollment or encrypted-disk credentials require swap to remain disabled'
+  de_DE: 'FDE-Registrierung oder Zugangsdaten für verschlüsselte Datenträger erfordern deaktivierten Swap'
+  es_ES: 'La inscripción FDE o las credenciales del disco cifrado requieren mantener desactivado el intercambio'
+  fr_FR: 'L’inscription FDE ou les identifiants du disque chiffré nécessitent de désactiver le swap'
+  pl_PL: 'Rejestracja FDE lub dane uwierzytelniania zaszyfrowanego dysku wymagają wyłączonej pamięci wymiany'

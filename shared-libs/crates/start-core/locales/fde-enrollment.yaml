@@ -1,0 +1,25 @@
+_version: 2
+fde.enrollment.hardware-required:
+  en_US: 'Enabling FDE requires UEFI Secure Boot and TPM 2.0'
+  de_DE: 'Das Aktivieren von FDE erfordert UEFI Secure Boot und TPM 2.0'
+  es_ES: 'Activar FDE requiere UEFI Secure Boot y TPM 2.0'
+  fr_FR: 'L’activation du chiffrement intégral nécessite UEFI Secure Boot et TPM 2.0'
+  pl_PL: 'Włączenie FDE wymaga UEFI Secure Boot i TPM 2.0'
+fde.enrollment.offline-acknowledgment:
+  en_US: 'Confirm that after every restart, your server and its services will remain offline until you unlock it with your password'
+  de_DE: 'Bestätigen Sie, dass Ihr Server und seine Dienste nach jedem Neustart offline bleiben, bis Sie ihn mit Ihrem Passwort entsperren'
+  es_ES: 'Confirme que después de cada reinicio, su servidor y sus servicios permanecerán desconectados hasta que lo desbloquee con su contraseña'
+  fr_FR: 'Confirmez qu’après chaque redémarrage, votre serveur et ses services resteront hors ligne jusqu’à son déverrouillage avec votre mot de passe'
+  pl_PL: 'Potwierdź, że po każdym ponownym uruchomieniu serwer i jego usługi pozostaną offline do czasu odblokowania go hasłem'
+fde.enrollment.request-not-recorded:
+  en_US: 'The firmware enrollment request was not recorded'
+  de_DE: 'Die Firmware-Registrierungsanfrage wurde nicht gespeichert'
+  es_ES: 'No se registró la solicitud de inscripción del firmware'
+  fr_FR: 'La demande d’inscription du micrologiciel n’a pas été enregistrée'
+  pl_PL: 'Żądanie rejestracji w oprogramowaniu układowym nie zostało zapisane'
+fde.enrollment.trusted-reenrollment:
+  en_US: 'The signing key requires explicit trusted re-enrollment'
+  de_DE: 'Der Signaturschlüssel erfordert eine ausdrückliche erneute Registrierung aus einer vertrauenswürdigen Umgebung'
+  es_ES: 'La clave de firma requiere una reinscripción explícita desde un entorno de confianza'
+  fr_FR: 'La clé de signature nécessite une réinscription explicite depuis un environnement de confiance'
+  pl_PL: 'Klucz podpisujący wymaga jawnej ponownej rejestracji w zaufanym środowisku'

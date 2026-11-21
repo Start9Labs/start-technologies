@@ -1,12 +1,12 @@
 import { Component, inject } from '@angular/core'
-import { i18nPipe } from '@start9labs/shared'
+import { i18nPipe, MokEnrollmentSteps } from '@start9labs/shared'
 import { TuiButton, TuiDialogContext, TuiIcon } from '@taiga-ui/core'
 import { injectContext } from '@taiga-ui/polymorpheus'
 import { StateService } from '../services/state.service'
 
 @Component({
   standalone: true,
-  imports: [TuiButton, TuiIcon, i18nPipe],
+  imports: [TuiButton, TuiIcon, i18nPipe, MokEnrollmentSteps],
   template: `
     @if (!stateService.kiosk) {
       <div class="animation-container">
@@ -40,28 +40,9 @@ import { StateService } from '../services/state.service'
             | i18n
         }}
       </p>
-      <p>
-        {{
-          'On the next boot, a blue screen (MokManager) will appear. You will have 10 seconds to select "Enroll MOK" before it dismisses.'
-            | i18n
-        }}
-      </p>
-      <p>
-        {{
-          'If you miss the window, simply reboot to try again. The blue screen will appear on every boot until the key is enrolled.'
-            | i18n
-        }}
-      </p>
-      <p class="steps-label">
-        {{ 'After clicking "Enroll MOK":' | i18n }}
-      </p>
-      <ol>
-        <li>Click "Continue"</li>
-        <li>
-          {{ 'When prompted, enter your StartOS password' | i18n }}
-        </li>
-        <li>Click "Reboot"</li>
-      </ol>
+      <mok-enrollment-steps>
+        {{ 'When prompted, enter your StartOS password' | i18n }}
+      </mok-enrollment-steps>
     </div>
 
     <footer>
@@ -170,21 +151,6 @@ import { StateService } from '../services/state.service'
       p {
         margin: 0 0 0.75rem;
         color: var(--tui-text-secondary);
-      }
-
-      .steps-label {
-        margin-bottom: 0.25rem;
-        font-weight: 500;
-        color: var(--tui-text-primary);
-      }
-
-      ol {
-        margin: 0 0 1rem;
-        padding-left: 1.5rem;
-
-        li {
-          margin-bottom: 0.25rem;
-        }
       }
     }
 
