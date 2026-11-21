@@ -432,19 +432,23 @@ mod test {
     fn is_running(pid: i32) -> bool {
         std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
             stat.rsplit_once(") ")
-                .is_some_and(|(_, rest)| !rest.starts_with('Z'))
+                .is_some_and(|(_, rest)| !matches!(rest.chars().next(), Some('Z' | 'X')))
         })
     }
 
-    /// Output EOF can precede process exit after `SIGKILL`.
-    async fn stops_running_soon(pid: i32) -> bool {
-        for _ in 0..200 {
-            if !is_running(pid) {
-                return true;
+    async fn assert_command_stopped(pid: i32) {
+        let stopped = tokio::time::timeout(Duration::from_secs(1), async {
+            while is_running(pid) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            tokio::time::sleep(Duration::from_millis(5)).await;
+        })
+        .await
+        .is_ok();
+        let state = std::fs::read_to_string(format!("/proc/{pid}/stat"));
+        if !stopped {
+            nix::sys::signal::kill(Pid::from_raw(pid), Signal::SIGKILL).ok();
         }
-        false
+        assert!(stopped, "command {pid} survives the timeout: {state:?}");
     }
 
     #[tokio::test]
@@ -457,10 +461,8 @@ mod test {
         .await
         .unwrap();
         let command = res.stdout.trim().parse().unwrap();
-        let stopped = stops_running_soon(command).await;
-        nix::sys::signal::kill(Pid::from_raw(command), Signal::SIGKILL).ok();
+        assert_command_stopped(command).await;
         assert!(res.timed_out);
-        assert!(stopped, "the command survives the timeout");
     }
 
     #[tokio::test]
@@ -474,10 +476,8 @@ mod test {
         .await
         .unwrap();
         let command = res.stdout.trim().parse().unwrap();
-        let stopped = stops_running_soon(command).await;
-        nix::sys::signal::kill(Pid::from_raw(command), Signal::SIGKILL).ok();
+        assert_command_stopped(command).await;
         assert!(res.timed_out);
-        assert!(stopped, "the command survives the timeout");
         assert!(started.elapsed() < TERMINATION_GRACE + Duration::from_secs(3));
     }
 

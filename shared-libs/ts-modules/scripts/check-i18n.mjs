@@ -58,7 +58,14 @@ if (errors.length) {
   console.error()
 }
 
-const numericKeys = new Set(english.values())
+const numericKeys = new Set()
+for (const id of english.values()) {
+  if (numericKeys.has(id)) {
+    console.error(`Duplicate i18n dictionary ID: ${id}`)
+    process.exit(1)
+  }
+  numericKeys.add(id)
+}
 const dictErrors = []
 for (const lang of ['de', 'es', 'fr', 'pl']) {
   const entries = dictionaryEntries(

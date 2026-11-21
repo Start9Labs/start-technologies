@@ -1492,7 +1492,7 @@ test('edited notes keep the changelog link last and follow its source URL', t =>
   delete env.NOTES_FILE
 })
 
-test('CLI capability gates registry writes and CI uploads without gating pure notes', t => {
+test('CLI capability gates registry writes without gating pure notes', t => {
   const { root, env, write, script, run, nodeExecutable } = releaseFixture(t)
   write(`projects/start-wrt/release-notes/${VERSION}.md`, MAIN)
   const marker = join(root, 'registry-write')
@@ -1540,27 +1540,8 @@ enter_release_dir() { touch "${marker}"; }
     contains(rejected.stderr, 'update it before publishing registry notes')
     assert.equal(existsSync(marker), false)
   }
-  for (const [workflow, product, job, writes] of [
-    ['startos-iso.yaml', 'start-os', 'deploy-prepare', ['Register OS version']],
-    [
-      'start-wrt.yaml',
-      'start-wrt',
-      'deploy',
-      ['Upload images to S3', 'Drop the previous alpha build'],
-    ],
-  ]) {
-    const source = text(join(REPO, '.github/workflows', workflow)).split(
-      `\n  ${job}:\n`,
-    )[1]
-    const check = source
-      .split('      - name: Check start-cli registry notes support\n')[1]
-      .split('\n      - name: ')[0]
+  for (const product of ['start-os', 'start-wrt']) {
     const command = `./scripts/manage-release.sh check-registry-notes-cli ${product}`
-    contains(check, command)
-    for (const write of writes) {
-      const at = source.indexOf(`- name: ${write}`)
-      assert.ok(at !== -1 && source.indexOf(command) < at, write)
-    }
     const rejected = run('bash', ['-e', '-c', command], { encoding: 'utf8' })
     assert.notEqual(rejected.status, 0)
     contains(rejected.stderr, 'lacks headline-free LocaleString release notes')

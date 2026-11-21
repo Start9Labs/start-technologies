@@ -1,0 +1,1 @@
+- **Le redémarrage du daemon StartOS efface les indicateurs de sauvegarde, de mise à jour, de redémarrage et d’arrêt interrompus**, y compris toute action d’alimentation en attente. Une opération interrompue n’apparaît plus comme active après le démarrage du daemon.
