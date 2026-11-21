@@ -480,6 +480,15 @@ fn first_connection_failure_publishes_availability_and_unsynced_queries_fail() {
         RegistryStatus::Error
     );
     assert!(select(&db, &url(), json!({"id":"test"})).is_err());
+    assert!(synced_os_versions(&db, &url()).is_err());
+    publish_snapshot(
+        &mut db,
+        &Subscription::Os(url()),
+        &to_value(&OsIndex::default()).unwrap(),
+        &device(),
+    )
+    .unwrap();
+    assert!(synced_os_versions(&db, &url()).unwrap().is_empty());
     publish_snapshot(
         &mut db,
         &Subscription::Index(url()),
@@ -691,6 +700,10 @@ fn os_cache_excludes_other_platforms_and_incompatible_sources() {
         cache.versions.keys().collect::<Vec<_>>()
     );
     assert!(synced_os_versions(&db, &"https://other.test".parse().unwrap()).is_err());
+    for status in [RegistryStatus::Connecting, RegistryStatus::Error] {
+        set_status(&mut db, &Subscription::Os(url()), status, None).unwrap();
+        assert_eq!(synced_os_versions(&db, &url()).unwrap().len(), 1);
+    }
     let full = |os: OsIndex| FullIndex {
         os,
         ..super::tests::index()

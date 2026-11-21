@@ -524,6 +524,16 @@ function fixture(t, cachedVersion, providers = []) {
         },
       ])
     },
+    publishRegistries(registryCache) {
+      source.next([
+        {
+          id: ++revision,
+          patch: [
+            { op: 'replace', path: '/registryCache', value: registryCache },
+          ],
+        },
+      ])
+    },
     selectRegistry(registry) {
       source.next([
         {
@@ -1152,6 +1162,63 @@ test('strictly newer candidates sort descending; offline cache remains readable;
       defaultLocale: 'pl_PL',
     },
   ])
+})
+
+for (const publishes of [false, true]) {
+  test(`OS publication waits for synchronization before resolving ${publishes}`, async t => {
+    const f = fixture(t, '0.4.0.2')
+    let settled = false
+    const checking = f.os
+      .publishesUpdates('https://registry.test')
+      .then(value => {
+        settled = true
+        return value
+      })
+    await tick()
+    assert.equal(settled, false)
+    for (const entry of [
+      { status: 'connected' },
+      { status: 'connecting', publishesOsUpdates: false },
+    ]) {
+      f.publishRegistries({ 'https://registry.test/': entry })
+      await tick()
+      assert.equal(settled, false)
+    }
+    f.publishRegistries({
+      'https://registry.test/': {
+        status: 'connected',
+        publishesOsUpdates: publishes,
+      },
+    })
+    assert.equal(await checking, publishes)
+    assert.deepEqual(f.requests, [])
+  })
+}
+
+test('OS publication failure rejects instead of claiming the registry publishes no updates', async t => {
+  const f = fixture(t, '0.4.0.2')
+  const checking = assert.rejects(
+    f.os.publishesUpdates('https://registry.test'),
+    /connection timed out/,
+  )
+  f.publishRegistries({
+    'https://registry.test/': {
+      status: 'error',
+      error: 'connection timed out',
+      publishesOsUpdates: false,
+    },
+  })
+  await checking
+})
+
+test('an observed OS publication remains usable while reconnecting or offline', async t => {
+  const f = fixture(t, '0.4.0.2')
+  for (const status of ['connecting', 'error']) {
+    f.publishRegistries({
+      'https://registry.test/': { status, publishesOsUpdates: true },
+    })
+    assert.equal(await f.os.publishesUpdates('https://registry.test'), true)
+  }
 })
 
 test('a different image at the installed version is offered and submitted', async t => {
@@ -4855,6 +4922,35 @@ test('marketplace lists and metadata stream from canonical cache keys without na
   await f.service.connect('https://registry.test')
   f.replace('/serverInfo/registries', {})
   assert.deepEqual(stores.at(-1), {})
+  assert.deepEqual(f.queries, [])
+})
+
+test('marketplace tolerates browser snapshots without a catalog and consumes the live replacement', async t => {
+  const legacy = {
+    status: 'connected',
+    info: registryEntry().info,
+    packages: {
+      example: {
+        categories: ['bitcoin'],
+        best: { '1.0.0:0': { title: 'Legacy' } },
+        otherVersions: {},
+      },
+    },
+  }
+  const f = marketplaceFixture(t, { 'https://registry.test/': legacy })
+  const marketplace = f.watch(f.service.marketplace$)
+  await f.service.connect('https://registry.test')
+  const stores = f.watch(f.service.currentRegistry$)
+  const packages = f.watch(f.service.getPackage$('example', null, null))
+  assert.deepEqual(marketplace.at(-1)['https://registry.test/'].packages, [])
+  assert.deepEqual(stores.at(-1).packages, [])
+  assert.equal(packages.at(-1), null)
+  assert.equal(legacy.catalog, undefined)
+
+  f.replace('/registryCache', { 'https://registry.test/': registryEntry() })
+  assert.equal(marketplace.at(-1)['https://registry.test/'].packages.length, 1)
+  assert.equal(stores.at(-1).packages[0].version, '1.0.0:0')
+  assert.equal(packages.at(-1).version, '1.0.0:0')
   assert.deepEqual(f.queries, [])
 })
 

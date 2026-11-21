@@ -347,8 +347,12 @@ function registryReady(
   )
 }
 
+/** Browser snapshots can predate `RegistryCache.catalog`. */
 function findRegistryCache(cache: DataModel['registryCache'], url: string) {
-  return Object.entries(cache).find(([saved]) => sameUrl(saved, url))?.[1]
+  const entry = Object.entries(cache).find(([saved]) =>
+    sameUrl(saved, url),
+  )?.[1]
+  return entry && !entry.catalog ? { ...entry, catalog: {} } : entry
 }
 
 function defaultRank(url: string): number {

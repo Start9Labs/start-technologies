@@ -686,6 +686,7 @@ pub(crate) fn synced_packages(
 }
 
 /// The selected StartOS update source's synchronized releases for this server.
+/// An empty failed cache is unavailable, not evidence of no updates.
 pub(crate) fn synced_os_versions(
     db: &DatabaseModel,
     registry: &Url,
@@ -693,7 +694,7 @@ pub(crate) fn synced_os_versions(
     db.as_public()
         .as_os_update_cache()
         .de()?
-        .filter(|cache| cache.status != RegistryStatus::Connecting || !cache.versions.is_empty())
+        .filter(|cache| cache.status == RegistryStatus::Connected || !cache.versions.is_empty())
         .filter(|cache| same_registry(cache.registry.as_str(), registry.as_str()))
         .map(|cache| cache.versions)
         .ok_or_else(|| not_synchronized(registry))

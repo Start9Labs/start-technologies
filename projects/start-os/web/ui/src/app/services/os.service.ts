@@ -2,7 +2,7 @@ import { inject, Injectable } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { sameUrl } from '@start9labs/shared'
 import { registryStatus } from '@start9labs/marketplace'
-import { Version } from '@start9labs/start-core'
+import { T, Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
   combineLatest,
@@ -110,11 +110,27 @@ export class OSService {
     distinctUntilChanged(),
   )
 
+  /** False means synchronized absence; unavailable observations reject. */
   async publishesUpdates(registry: string): Promise<boolean> {
-    const cache = await firstValueFrom(this.patch.watch$('registryCache'))
-    return Object.entries(cache).some(
-      ([url, entry]) => sameUrl(url, registry) && entry.publishesOsUpdates,
+    const entry = await firstValueFrom(
+      this.patch.watch$('registryCache').pipe(
+        map(
+          cache =>
+            Object.entries(cache).find(([url]) => sameUrl(url, registry))?.[1],
+        ),
+        filter(
+          (entry): entry is T.RegistryCache =>
+            !!entry &&
+            (entry.publishesOsUpdates ||
+              registryStatus(entry) === 'error' ||
+              (entry.publishesOsUpdates === false &&
+                registryStatus(entry) === 'connected')),
+        ),
+      ),
     )
+    if (!entry.publishesOsUpdates && registryStatus(entry) === 'error')
+      throw registryError(entry)
+    return !!entry.publishesOsUpdates
   }
 
   /** Settles once the selected registry's cache is published; a registry switch releases it. */
@@ -130,7 +146,10 @@ export class OSService {
       ),
     )
     if (!sameUrl(selected, target)) return
-    if (registryStatus(cache) === 'error')
-      throw new Error('registry unavailable')
+    if (registryStatus(cache) === 'error') throw registryError(cache)
   }
+}
+
+function registryError(cache: Pick<T.RegistryCache, 'error'> | null): Error {
+  return new Error(cache?.error || 'registry unavailable')
 }
