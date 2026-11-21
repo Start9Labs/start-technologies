@@ -150,19 +150,21 @@ pub async fn add(
         credential_id,
         added_at: Utc::now(),
     };
+    let verified_hash = crate::auth::verify_password::<RpcContext>(&ctx, &password).await?;
     ctx.db
-        .mutate(|db| register(db, &password, &public_key, &passkey))
+        .mutate(|db| register(db, &verified_hash, &public_key, &passkey))
         .await
         .result
 }
 
+/// Rejects a password changed since it was verified.
 fn register(
     db: &mut Model<Database>,
-    password: &str,
+    verified_hash: &Option<String>,
     public_key: &AnyVerifyingKey,
     passkey: &Passkey,
 ) -> Result<(), Error> {
-    RpcContext::check_password(db, password)?;
+    crate::auth::check_verified_password::<RpcContext>(db, verified_hash)?;
     db.as_private_mut()
         .as_passkeys_mut()
         .insert(&public_key.interned_der64(), passkey)?;
@@ -319,6 +321,12 @@ mod tests {
         TypedPatchDb::load(raw).await.unwrap()
     }
 
+    async fn current_hash(db: &TypedPatchDb<Database>) -> Option<String> {
+        let hash = RpcContext::password_hash(&db.peek().await).unwrap();
+        RpcContext::check_password(&db.peek().await, PASSWORD).unwrap();
+        hash
+    }
+
     fn passkey() -> (AnyVerifyingKey, Passkey) {
         let key = crate::sign::webauthn::test_util::p256_key();
         (
@@ -334,16 +342,17 @@ mod tests {
     #[tokio::test]
     async fn passkeys_survive_logout_until_revoked_with_their_session_keys() {
         let db = database().await;
+        let hash = current_hash(&db).await;
         let (public_key, passkey) = passkey();
         let id = public_key.interned_der64();
         assert!(
-            db.mutate(|db| register(db, "wrong", &public_key, &passkey))
+            db.mutate(|db| register(db, &Some("replaced".into()), &public_key, &passkey))
                 .await
                 .result
                 .is_err()
         );
         assert!(!is_registered(&db.peek().await, &id));
-        db.mutate(|db| register(db, PASSWORD, &public_key, &passkey))
+        db.mutate(|db| register(db, &hash, &public_key, &passkey))
             .await
             .result
             .unwrap();
@@ -398,9 +407,10 @@ mod tests {
     #[tokio::test]
     async fn revoked_passkeys_cannot_publish_a_session_from_prior_authorization() {
         let db = database().await;
+        let hash = current_hash(&db).await;
         let (public_key, passkey) = passkey();
         let id = public_key.interned_der64();
-        db.mutate(|db| register(db, PASSWORD, &public_key, &passkey))
+        db.mutate(|db| register(db, &hash, &public_key, &passkey))
             .await
             .result
             .unwrap();
@@ -427,9 +437,10 @@ mod tests {
     #[tokio::test]
     async fn passkey_removal_revokes_connected_and_unconnected_derived_keys() {
         let db = database().await;
+        let hash = current_hash(&db).await;
         let (public_key, passkey) = passkey();
         let id = public_key.interned_der64();
-        db.mutate(|db| register(db, PASSWORD, &public_key, &passkey))
+        db.mutate(|db| register(db, &hash, &public_key, &passkey))
             .await
             .result
             .unwrap();

@@ -835,7 +835,7 @@ pub async fn login_impl<C: LoginContext>(
 }
 
 /// Returns the verified database hash; holds no database lock while hashing.
-async fn verify_password<C: LoginContext>(
+pub(crate) async fn verify_password<C: LoginContext>(
     ctx: &C,
     password: &str,
 ) -> Result<Option<String>, Error> {
@@ -850,7 +850,7 @@ async fn verify_password<C: LoginContext>(
 }
 
 /// Enrollment rejects a replaced database password before inserting persistent or ephemeral keys.
-fn check_verified_password<C: LoginContext>(
+pub(crate) fn check_verified_password<C: LoginContext>(
     db: &Model<C::Database>,
     verified_hash: &Option<String>,
 ) -> Result<(), Error> {
