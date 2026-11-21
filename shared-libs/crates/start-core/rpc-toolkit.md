@@ -119,6 +119,8 @@ Metadata tags are processed by different middleware. Group them logically:
 | --------------- | ------- | ------------------------------------------------------------------------------ |
 | `authenticated` | `true`  | Whether endpoint requires authentication. Set to `false` for public endpoints. |
 
+A `CallRemoteHandler` mounted on a server context reports the remote tree's metadata to that server's middleware. State the server's own policy with `CallRemoteHandler::with_metadata`, which takes precedence over the remote tree's.
+
 ### Session Auth Middleware (`middleware/auth/session.rs`)
 
 | Metadata      | Default | Description                                                          |

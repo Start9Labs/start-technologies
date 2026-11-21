@@ -2020,6 +2020,14 @@ backup.trash.reclaimed-title:
   fr_FR: "Espace de sauvegarde récupéré"
   pl_PL: "Odzyskano miejsce po kopii zapasowej"
 
+# backup/mod.rs
+backup.prompt-password:
+  en_US: "Backup Password: "
+  de_DE: "Backup-Passwort: "
+  es_ES: "Contraseña de copia de seguridad: "
+  fr_FR: "Mot de passe de sauvegarde : "
+  pl_PL: "Hasło kopii zapasowej: "
+
 # backup/restore.rs
 backup.restore.package-error:
   en_US: "Error restoring package %{id}: %{error}"
@@ -2033,6 +2041,13 @@ backup.restore.package-installed:
   es_ES: "No se puede restaurar %{id}: ya está instalado. Desinstálalo primero."
   fr_FR: "Impossible de restaurer %{id} : il est déjà installé. Désinstallez-le d’abord."
   pl_PL: "Nie można przywrócić %{id}: jest już zainstalowany. Najpierw go odinstaluj."
+
+backup.target.cifs.prompt-password:
+  en_US: "CIFS Password: "
+  de_DE: "CIFS-Passwort: "
+  es_ES: "Contraseña CIFS: "
+  fr_FR: "Mot de passe CIFS : "
+  pl_PL: "Hasło CIFS: "
 
 backup.target.partial-mount:
   en_US: "The base filesystem mounted successfully at %{path}."
@@ -2939,6 +2954,14 @@ migration.initial-balance-failed:
   fr_FR: "Impossible de lancer l’équilibrage Btrfs initial ; le démarrage continue"
   pl_PL: "Nie udało się uruchomić początkowego równoważenia Btrfs; uruchamianie systemu jest kontynuowane"
 
+# version/v0_4_3.rs
+migration.wireguard-mtu-failed:
+  en_US: "Could not set the default MTU on every WireGuard gateway; continuing startup"
+  de_DE: "Die Standard-MTU konnte nicht für alle WireGuard-Gateways festgelegt werden; der Systemstart wird fortgesetzt"
+  es_ES: "No se pudo establecer la MTU predeterminada en todas las puertas de enlace WireGuard; el arranque continúa"
+  fr_FR: "Impossible de définir la MTU par défaut sur toutes les passerelles WireGuard ; le démarrage continue"
+  pl_PL: "Nie udało się ustawić domyślnego MTU na wszystkich bramach WireGuard; uruchamianie systemu jest kontynuowane"
+
 # registry/admin.rs
 registry.admin.unknown-signer:
   en_US: "Unknown signer"
@@ -2977,20 +3000,6 @@ registry.context.missing-hostname:
   es_ES: "Falta configuración requerida: registry-hostname"
   fr_FR: "Configuration requise manquante : registry-hostname"
   pl_PL: "Brak wymaganej konfiguracji: registry-hostname"
-
-registry.context.onion-tor-not-installed:
-  en_US: "Cannot reach this Tor (.onion) registry: the Tor service is not installed. Install and start it to use onion registries."
-  de_DE: "Diese Tor-(.onion-)Registry ist nicht erreichbar: Der Tor-Dienst ist nicht installiert. Installieren und starten Sie ihn, um Onion-Registries zu verwenden."
-  es_ES: "No se puede acceder a este registro Tor (.onion): el servicio Tor no está instalado. Instálalo e inícialo para usar registros onion."
-  fr_FR: "Impossible d'accéder à ce registre Tor (.onion) : le service Tor n'est pas installé. Installez-le et démarrez-le pour utiliser les registres onion."
-  pl_PL: "Nie można połączyć się z tym rejestrem Tor (.onion): usługa Tor nie jest zainstalowana. Zainstaluj ją i uruchom, aby korzystać z rejestrów onion."
-
-registry.context.onion-tor-not-running:
-  en_US: "Cannot reach this Tor (.onion) registry: the Tor service is not running. Start the Tor service to use onion registries."
-  de_DE: "Diese Tor-(.onion-)Registry ist nicht erreichbar: Der Tor-Dienst läuft nicht. Starten Sie den Tor-Dienst, um Onion-Registries zu verwenden."
-  es_ES: "No se puede acceder a este registro Tor (.onion): el servicio Tor no está en ejecución. Inicia el servicio Tor para usar registros onion."
-  fr_FR: "Impossible d'accéder à ce registre Tor (.onion) : le service Tor n'est pas démarré. Démarrez le service Tor pour utiliser les registres onion."
-  pl_PL: "Nie można połączyć się z tym rejestrem Tor (.onion): usługa Tor nie jest uruchomiona. Uruchom usługę Tor, aby korzystać z rejestrów onion."
 
 registry.context.registry-required:
   en_US: "`--registry` required"
@@ -3289,6 +3298,20 @@ registry.sync.closed:
   es_ES: "Conexión con el registro cerrada"
   fr_FR: "Connexion au registre fermée"
   pl_PL: "Połączenie z rejestrem zostało zamknięte"
+
+registry.sync.not-saved:
+  en_US: "%{registry} is not a saved registry"
+  de_DE: "%{registry} ist keine gespeicherte Registry"
+  es_ES: "%{registry} no es un registro guardado"
+  fr_FR: "%{registry} n'est pas un registre enregistré"
+  pl_PL: "%{registry} nie jest zapisanym rejestrem"
+
+registry.sync.unreachable:
+  en_US: "%{registry} is unreachable: %{error}"
+  de_DE: "%{registry} ist nicht erreichbar: %{error}"
+  es_ES: "%{registry} no está accesible: %{error}"
+  fr_FR: "%{registry} est injoignable : %{error}"
+  pl_PL: "%{registry} jest nieosiągalny: %{error}"
 
 # sign/commitment/request.rs
 sign.commitment.request.unsupported-type:
@@ -4489,6 +4512,20 @@ help.arg.address:
   pl_PL: "Jeden z adresów powiązania (IP, <nazwa>.local lub domena), z :port, gdy obsługuje kilka portów; przyjmowany jest też HostnameInfo w JSON"
 
 
+help.arg.auth-key:
+  en_US: "Device key to enroll, in DER64 or PEM form"
+  de_DE: "Zu registrierender Geräteschlüssel im DER64- oder PEM-Format"
+  es_ES: "Clave de dispositivo a registrar, en formato DER64 o PEM"
+  fr_FR: "Clé d'appareil à enregistrer, au format DER64 ou PEM"
+  pl_PL: "Klucz urządzenia do zarejestrowania, w formacie DER64 lub PEM"
+
+help.arg.auth-key-name:
+  en_US: "Name shown for the key in the key list"
+  de_DE: "Name des Schlüssels in der Schlüsselliste"
+  es_ES: "Nombre que se muestra para la clave en la lista de claves"
+  fr_FR: "Nom affiché pour la clé dans la liste des clés"
+  pl_PL: "Nazwa klucza wyświetlana na liście kluczy"
+
 help.arg.gua-wan:
   en_US: "Expose the IPv6 GUA to the WAN (false = LAN-only)"
   de_DE: "IPv6-GUA zum WAN freigeben (false = nur LAN)"
@@ -5415,11 +5452,11 @@ help.arg.to-registry-url:
   pl_PL: "URL lub nazwa profilu rejestru docelowego do promowania"
 
 help.arg.token-name:
-  en_US: "Name shown for the token in the session list"
-  de_DE: "Name des Tokens in der Sitzungsliste"
-  es_ES: "Nombre que se muestra para el token en la lista de sesiones"
-  fr_FR: "Nom affiché pour le jeton dans la liste des sessions"
-  pl_PL: "Nazwa tokenu wyświetlana na liście sesji"
+  en_US: "Name shown for the token in the token list"
+  de_DE: "Name des Tokens in der Token-Liste"
+  es_ES: "Nombre que se muestra para el token en la lista de tokens"
+  fr_FR: "Nom affiché pour le jeton dans la liste des jetons"
+  pl_PL: "Nazwa tokenu wyświetlana na liście tokenów"
 
 help.arg.tor-proxy-url:
   en_US: "Tor SOCKS proxy URL"
@@ -5504,6 +5541,13 @@ help.arg.use-efi-boot:
   es_ES: "Usar modo de arranque EFI"
   fr_FR: "Utiliser le mode de démarrage EFI"
   pl_PL: "Użyj trybu rozruchu EFI"
+
+help.arg.user-agent:
+  en_US: "User agent shown for the key in the key list"
+  de_DE: "User-Agent des Schlüssels in der Schlüsselliste"
+  es_ES: "Agente de usuario que se muestra para la clave en la lista de claves"
+  fr_FR: "Agent utilisateur affiché pour la clé dans la liste des clés"
+  pl_PL: "Agent użytkownika wyświetlany dla klucza na liście kluczy"
 
 help.arg.user-name:
   en_US: "User name to run as"
@@ -6039,11 +6083,11 @@ help.arg.ssh-fingerprint:
   pl_PL: "Odcisk palca klucza SSH"
 
 help.arg.ssh-public-key:
-  en_US: "SSH public key"
-  de_DE: "Öffentlicher SSH-Schlüssel"
-  es_ES: "Clave pública SSH"
-  fr_FR: "Clé publique SSH"
-  pl_PL: "Klucz publiczny SSH"
+  en_US: "SSH public key, passed as one quoted argument, e.g. \"$(cat ~/.ssh/id_ed25519.pub)\""
+  de_DE: "Öffentlicher SSH-Schlüssel, als ein Argument in Anführungszeichen übergeben, z. B. \"$(cat ~/.ssh/id_ed25519.pub)\""
+  es_ES: "Clave pública SSH, pasada como un único argumento entre comillas, p. ej. \"$(cat ~/.ssh/id_ed25519.pub)\""
+  fr_FR: "Clé publique SSH, passée comme un seul argument entre guillemets, p. ex. \"$(cat ~/.ssh/id_ed25519.pub)\""
+  pl_PL: "Klucz publiczny SSH, przekazany jako jeden argument w cudzysłowie, np. \"$(cat ~/.ssh/id_ed25519.pub)\""
 
 help.arg.tunnel-ip-address:
   en_US: "Tunnel server IP address"
@@ -6503,11 +6547,11 @@ about.commands-add-sign-remove-get-assets:
   pl_PL: "Polecenia dodania, podpisania, usunięcia lub pobrania zasobów rejestru"
 
 about.commands-auth-tokens:
-  en_US: "Create bearer tokens for API clients"
-  de_DE: "Bearer-Tokens für API-Clients erstellen"
-  es_ES: "Crear tokens de portador para clientes de la API"
-  fr_FR: "Créer des jetons porteurs pour les clients de l'API"
-  pl_PL: "Twórz tokeny okaziciela dla klientów API"
+  en_US: "Create, list and revoke bearer tokens for API clients"
+  de_DE: "Bearer-Tokens für API-Clients erstellen, auflisten und widerrufen"
+  es_ES: "Crear, listar y revocar tokens de portador para clientes de la API"
+  fr_FR: "Créer, lister et révoquer des jetons porteurs pour les clients de l'API"
+  pl_PL: "Twórz, wyświetlaj i unieważniaj tokeny okaziciela dla klientów API"
 
 about.commands-authentication:
   en_US: "Commands related to Authentication i.e. login, logout"
@@ -6900,13 +6944,6 @@ about.disable-webserver:
   es_ES: "Desactivar el servidor web"
   fr_FR: "Désactiver le serveur web"
   pl_PL: "Wyłącz serwer internetowy"
-
-about.display-all-auth-sessions:
-  en_US: "Display all auth sessions"
-  de_DE: "Alle Authentifizierungssitzungen anzeigen"
-  es_ES: "Mostrar todas las sesiones de autenticación"
-  fr_FR: "Afficher toutes les sessions d'authentification"
-  pl_PL: "Wyświetl wszystkie sesje uwierzytelniania"
 
 about.display-current-api:
   en_US: "Display the current api specification"
@@ -7357,6 +7394,13 @@ about.list-admin-signers:
   fr_FR: "Lister les signataires administrateurs"
   pl_PL: "Wyświetl sygnatariuszy administratorów"
 
+about.list-auth-tokens:
+  en_US: "List bearer tokens"
+  de_DE: "Bearer-Tokens auflisten"
+  es_ES: "Listar tokens de portador"
+  fr_FR: "Lister les jetons porteurs"
+  pl_PL: "Wyświetl tokeny okaziciela"
+
 about.list-authorized-keys:
   en_US: "List authorized keys"
   de_DE: "Autorisierte Schlüssel auflisten"
@@ -7440,13 +7484,6 @@ about.list-onion-services-with-keys-in-store:
   es_ES: "Listar servicios onion con claves en el almacén"
   fr_FR: "Lister les services onion avec des clés en stockage"
   pl_PL: "Wyświetl usługi onion z kluczami w magazynie"
-
-about.list-or-kill-auth-sessions:
-  en_US: "List or kill auth sessions"
-  de_DE: "Authentifizierungssitzungen auflisten oder beenden"
-  es_ES: "Listar o terminar sesiones de autenticación"
-  fr_FR: "Lister ou terminer les sessions d'authentification"
-  pl_PL: "Wyświetl lub zakończ sesje uwierzytelniania"
 
 about.list-os-versions-index:
   en_US: "List OS versions index"
@@ -7727,6 +7764,13 @@ about.remove-admin-signer:
   es_ES: "Eliminar firmante de administrador"
   fr_FR: "Supprimer le signataire administrateur"
   pl_PL: "Usuń sygnatariusza administratora"
+
+about.remove-auth-tokens:
+  en_US: "Revoke bearer tokens"
+  de_DE: "Bearer-Tokens widerrufen"
+  es_ES: "Revocar tokens de portador"
+  fr_FR: "Révoquer des jetons porteurs"
+  pl_PL: "Unieważnij tokeny okaziciela"
 
 about.remove-authorized-key:
   en_US: "Remove authorized key"
@@ -8351,13 +8395,6 @@ about.ssl-generate-certificate:
   es_ES: "Generar un certificado SSL desde la CA raíz del sistema"
   fr_FR: "Générer un certificat SSL depuis l'autorité racine du système"
   pl_PL: "Wygeneruj certyfikat SSL z głównego CA systemu"
-
-about.terminate-auth-sessions:
-  en_US: "Terminate auth sessions"
-  de_DE: "Authentifizierungssitzungen beenden"
-  es_ES: "Terminar sesiones de autenticación"
-  fr_FR: "Terminer les sessions d'authentification"
-  pl_PL: "Zakończ sesje uwierzytelniania"
 
 about.test-dns-configuration-for-domain:
   en_US: "Test DNS configuration for a domain"

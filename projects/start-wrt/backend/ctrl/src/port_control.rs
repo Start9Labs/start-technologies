@@ -106,7 +106,7 @@ use startos::net::port_map::server::igd::{
 };
 use startos::net::port_map::server::{handle, GatewayBackend, MappingEntry, PCP_PORT};
 use startos::net::transport::{Transport, TransportProtocol};
-use startos::tunnel::forward::sni::{FallbackSource, SniDemux, SniRoute};
+use startos::tunnel::forward::sni::{FallbackSource, LocalHandoff, LocalSink, SniDemux, SniRoute};
 use tokio::io::Interest;
 use tokio::net::UdpSocket;
 use uciedit::openwrt::{DhcpHost, FirewallRedirect, FirewallRule, FirewallTarget};
@@ -167,6 +167,9 @@ pub struct PortControl {
     /// each range stamped on its own.
     requests: Mutex<Recent<String, Recent<(u16, u16), (), MAX_REQUESTED_RANGES>>>,
     sni: Arc<SniDemux>,
+    /// Hands unmatched WAN 443 connections to the HTTPS listener.
+    ui: LocalSink,
+    ui_handoff: Mutex<Option<LocalHandoff>>,
 }
 
 #[derive(Clone, Debug)]
@@ -186,6 +189,7 @@ struct LanAddr {
 impl PortControl {
     /// Requires a tokio runtime: the demux's constructor spawns its prune task.
     pub fn new(uci_root: PathBuf) -> Arc<Self> {
+        let (ui, ui_handoff) = LocalHandoff::channel();
         Arc::new_cyclic(|weak: &std::sync::Weak<Self>| {
             let hairpin_weak = weak.clone();
             let weak = weak.clone();
@@ -198,6 +202,8 @@ impl PortControl {
                 lan_cache: Mutex::new(None),
                 client_cache: Mutex::new(HashMap::new()),
                 requests: Mutex::new(Recent::default()),
+                ui,
+                ui_handoff: Mutex::new(Some(ui_handoff)),
                 // Reconcile all live ports because callbacks may arrive out of order.
                 sni: SniDemux::with_on_change(
                     move |port, active| {
@@ -955,6 +961,11 @@ impl PortControl {
         }
     }
 
+    /// The receiving end of the Remote Access fallback; yields it once.
+    pub fn take_ui_handoff(&self) -> Option<LocalHandoff> {
+        self.ui_handoff.lock().unwrap().take()
+    }
+
     /// Mirrors Remote Access source policy for unknown SNI on port 443.
     pub(crate) async fn sync_sni_fallback(&self, wan: Ipv4Addr) {
         let has_443 = self
@@ -971,7 +982,6 @@ impl PortControl {
             })
             .await
         };
-        let ui = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 443);
         let source = match mode.as_ref() {
             Ok(mode) => remote_access_fallback_source(Ok(mode), wan),
             Err(e) => {
@@ -981,11 +991,14 @@ impl PortControl {
         };
         match (has_443, source) {
             (true, Some(source)) => {
-                if let Err(code) = self.sni.register_local_fallback(wan, 443, ui, source) {
+                if let Err(code) =
+                    self.sni
+                        .register_local_fallback(wan, 443, self.ui.clone(), source)
+                {
                     tracing::warn!("port-control: remote-access fallback on 443 refused ({code})");
                 }
             }
-            _ => self.sni.unregister_fallback(wan, 443, ui),
+            _ => self.sni.unregister_local_fallback(wan, 443, &self.ui),
         }
     }
 

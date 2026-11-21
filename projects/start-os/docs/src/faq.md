@@ -108,7 +108,7 @@ If you would rather not use a terminal, paste the domain into [dnschecker.org](h
 
 - **The domain is private.** A private domain has no public record, so a public resolver never answers for it. It resolves only through the DNS server of the gateway it was added to: on an Ethernet or WiFi gateway your router must hand out StartOS as its DNS server, and on a StartTunnel gateway your device must be connected to the tunnel _and_ using the tunnel's resolver, with [DNS injection](/start-tunnel/dns-records.html) enabled for the server (the default). A phone runs only one VPN at a time, so turning on a privacy VPN such as ProtonVPN or Mullvad disconnects your StartTunnel tunnel and takes its resolver with it; private domains stop resolving until you switch back. If your device is connected and still gets no answer, check that the record appears on StartTunnel's DNS Records page, then re-import a freshly generated config for the device: configs generated before StartTunnel 1.1.0 have no `DNS =` line, so the device keeps asking its usual resolver. If the private domain is also a real domain with public records, a device that is not using the gateway's resolver gets the public answer instead, which can look like the name works while it points somewhere else entirely.
 
-- **The answer is the right address, but the page still does not load.** The right address is your gateway's public IP for a public domain, and your server's LAN IP or tunnel address for a private one. DNS is not the problem. For a private domain, confirm the device is actually on that network (the tunnel is connected, or you are on the LAN) and that you have [trusted your Root CA](trust-ca.md). For a public domain, run the port-forwarding test from the address's **Settings** on the service's [Interfaces](interfaces.md) tab.
+- **The answer is the right address, but the page still does not load.** The right address is your gateway's public IP for a public domain, and your server's LAN IP or tunnel address for a private one. DNS is not the problem. For a private domain, confirm the device is actually on that network (the tunnel is connected, or you are on the LAN) and that you have [trusted your Root CA](trust-ca.md). For a public domain, run the port-forwarding test from the address's **Settings** on the service's [Interfaces](interfaces.md) tab. If the domain uses Let's Encrypt and has no certificate yet, see [Troubleshooting Let's Encrypt](clearnet.md#troubleshooting-lets-encrypt).
 
 ## A public domain still loads after disabling it
 
@@ -160,6 +160,10 @@ To recover:
 2. Make sure your device is on the same network as the server. If you use a VPN, disconnect it to test.
 3. Reload the page. If a plain reload still shows the saved copy, do a hard refresh — the key combinations for each browser are listed [above](#i-am-unable-to-connect-to-my-servers-server-namelocal-url). If you were using an IP address, use `https://server-name.local` instead: it follows the server even when its IP changes.
 
+## Login says there have been too many attempts
+
+StartOS limits password attempts, and someone guessing your password can use them all up. Select **Sign in from the command line** under the error. [SSH](ssh.md) into your server, run the command it shows, then select **Continue**. The command enrolls this browser without a password, so the UI works normally even while the guessing continues.
+
 ## Can I add a second drive to give a service more storage?
 
 Partly. StartOS keeps every service's own data on a single data drive, the one chosen at the Select Drives step when [installing StartOS](installing-startos.md), and that data cannot move to another drive. A service that supports [shared volumes](shared-volumes.md) can keep shared files, such as a media library, on an external drive or a network share. A drive plugged in after setup can also be a [backup target](backups.md#backup-targets).
@@ -196,7 +200,7 @@ No. StartOS has one administrator, protected by the master password, and no othe
 
 To let someone use a service without administering the server, give them the service's [address](interfaces.md) and an account in that service, never the master password.
 
-To revoke known administrative credentials, [change the master password](change-password.md) and remove their SSH keys under **System > SSH**. List web-interface and `start-cli` sessions with `start-cli auth session list`, then revoke each unwanted entry with `start-cli auth session kill --pubkey <ID>` for a `pubkey` entry or `start-cli auth session kill --token <ID>` for a `token` entry, using its ID from the list.
+To revoke known administrative credentials, [change the master password](change-password.md) and remove their SSH keys under **System > SSH**. List web-interface and `start-cli` sessions with `start-cli auth key list` and remove unwanted ones with `start-cli auth key remove <ID>`. List bearer tokens with `start-cli auth token list` and revoke unwanted ones with `start-cli auth token remove <ID>`.
 
 An SSH connection that is already open stays open until it ends; restarting the server closes it. Revoking credentials leaves in place any change they made to the server and any data they copied. If you no longer trust someone who had administrative access, [get help](https://start9.com/help) restoring trust in the server; changing credentials alone cannot establish that.
 

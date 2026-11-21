@@ -113,8 +113,6 @@ export class SystemUpdateModal {
   async update() {
     if (!this.os.updateCandidates().length) return
 
-    const { osRegistry } = await firstValueFrom(this.patch.watch$('serverInfo'))
-
     this.tasks.run(async () => {
       const latest = this.os.updateCandidates()[0]
       if (!latest) return
@@ -149,7 +147,6 @@ export class SystemUpdateModal {
 
       await this.embassyApi.rpc.server.update({
         targetVersion: `=${latest.version}`,
-        registry: osRegistry,
         progress: false,
         acceptSigners: acceptSignerPolicy(trusted),
       })

@@ -241,7 +241,7 @@ pub async fn init(
     crate::ssh::sync_keys(
         &hostname,
         &peek.as_private().as_ssh_privkey().de()?,
-        &peek.as_private().as_ssh_pubkeys().de()?,
+        &peek.as_public().as_ssh_pubkeys().de()?,
         SSH_DIR,
     )
     .await?;

@@ -6,13 +6,13 @@ import { WanIpv4Form, IPV4_LABELS, netmaskFromPrefix } from './utils'
 import { WanIpv4Service } from './service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
+// Summary rows must exclude the PPPoE password.
 const SUMMARY_FIELDS = [
   'wan',
   'prefix',
   'mask',
   'gateway',
   'username',
-  'password',
   'device',
 ] as const
 

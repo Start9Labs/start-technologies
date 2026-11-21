@@ -80,10 +80,24 @@ test('discovery stops paging at an artifact created over 15 days ago', t => {
   assert.equal(calls.length, 1)
 })
 
+test('artifact discovery retries a listing page GitHub fails transiently', t => {
+  const { result, calls } = discover(
+    t,
+    [run(1, 'master', [image('aaaaaaa')])],
+    { GH_FAIL_MATCH: '/actions/artifacts', GH_FAIL_TIMES: '2' },
+  )
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.equal(result.stdout.trim(), '1')
+  assert.equal(calls.length, 4)
+})
+
 test('artifact discovery propagates API failures', t => {
-  const { result } = discover(t, [run(1, 'master', [image('aaaaaaa')])], {
-    GH_FAIL_MATCH: '/actions/artifacts',
-  })
+  const { result, calls } = discover(
+    t,
+    [run(1, 'master', [image('aaaaaaa')])],
+    { GH_FAIL_MATCH: '/actions/artifacts' },
+  )
   assert.notEqual(result.status, 0)
   assert.equal(result.stdout, '')
+  assert.equal(calls.length, 5)
 })

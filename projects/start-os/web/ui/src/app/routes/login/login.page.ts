@@ -12,6 +12,8 @@ import {
   AuthKeyService,
   CA_TRUST_CHECK,
   CaWizard,
+  CLI_ENROLL,
+  DialogService,
   i18nKey,
   i18nPipe,
   RELATIVE_URL,
@@ -21,6 +23,7 @@ import {
   TuiError,
   TuiIcon,
   TuiInput,
+  TuiLink,
   TuiTitle,
 } from '@taiga-ui/core'
 import { TuiButtonLoading, TuiPassword } from '@taiga-ui/kit'
@@ -51,6 +54,11 @@ import { ConfigService } from 'src/app/services/config.service'
             <tui-icon tuiPassword />
           </tui-textfield>
           <tui-error [error]="(error() || authError() | i18n) || null" />
+          @if (rateLimited()) {
+            <button tuiLink type="button" (click)="enroll()">
+              {{ 'Sign in from the command line' | i18n }}
+            </button>
+          }
           <button tuiButton size="m" [loading]="loading()">
             {{ 'Login' | i18n }}
           </button>
@@ -98,6 +106,7 @@ import { ConfigService } from 'src/app/services/config.service'
     TuiCardLarge,
     TuiInput,
     TuiIcon,
+    TuiLink,
     TuiPassword,
     TuiError,
     i18nPipe,
@@ -122,6 +131,7 @@ export default class LoginPage {
   private readonly authService = inject(AuthService)
   private readonly authKeys = inject(AuthKeyService)
   private readonly api = inject(ApiService)
+  private readonly dialogs = inject(DialogService)
 
   protected readonly config = inject(ConfigService)
   protected readonly authError = this.authService.loginError
@@ -131,6 +141,10 @@ export default class LoginPage {
   readonly error = linkedSignal<string, i18nKey | null>({
     source: () => this.password(),
     computation: () => null,
+  })
+  readonly rateLimited = linkedSignal({
+    source: () => this.password(),
+    computation: () => false,
   })
 
   async submit() {
@@ -157,15 +171,34 @@ export default class LoginPage {
       }
 
       this.password.set('')
-      this.authService.setVerified(true)
       // Await navigation so the button keeps loading until the route actually
       // changes — otherwise `finally` clears it the moment navigate() is called.
-      await this.router.navigate([''], { replaceUrl: true })
+      await this.signedIn()
     } catch (e: any) {
+      this.rateLimited.set(e.code === 37)
       // code 7 is for incorrect password
       this.error.set(e.code === 7 ? 'Invalid password' : (e.message as i18nKey))
     } finally {
       this.loading.set(false)
     }
+  }
+
+  enroll() {
+    this.dialogs
+      .openComponent<boolean>(CLI_ENROLL, {
+        label: 'Enroll this browser',
+        data: {
+          command: 'start-cli auth key add',
+          probe: () => this.api.checkEnrollment(),
+        },
+      })
+      .subscribe(enrolled => {
+        if (enrolled) this.signedIn()
+      })
+  }
+
+  private signedIn() {
+    this.authService.setVerified(true)
+    return this.router.navigate([''], { replaceUrl: true })
   }
 }

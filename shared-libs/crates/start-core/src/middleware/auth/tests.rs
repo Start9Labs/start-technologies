@@ -104,7 +104,7 @@ async fn ordinary_local_requests_still_process_signatures() {
     for signature in [false, true] {
         let calls = Arc::new(AtomicUsize::new(0));
         auth(Some(true), Some(signature), &calls)
-            .process_rpc_request(&TestContext, json!({}), &mut request("auth.session.list"))
+            .process_rpc_request(&TestContext, json!({}), &mut request("auth.key.list"))
             .await
             .unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -115,7 +115,7 @@ async fn ordinary_local_requests_still_process_signatures() {
 async fn rejected_credentials_still_require_authorization() {
     let calls = Arc::new(AtomicUsize::new(0));
     let error = auth(Some(false), Some(false), &calls)
-        .process_rpc_request(&TestContext, json!({}), &mut request("auth.session.list"))
+        .process_rpc_request(&TestContext, json!({}), &mut request("auth.key.list"))
         .await
         .unwrap_err()
         .result

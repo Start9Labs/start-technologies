@@ -34,8 +34,12 @@ Yes. StartWRT is built on OpenWrt, and the full CLI is accessible over [SSH](ssh
 
 You have two options:
 
-1. **Factory reset** — Perform a [factory reset](factory-reset.md) from the web interface (if you are still logged in). This wipes all settings; Wi-Fi comes back up with the sticker password.
+1. **Factory reset** — Perform a [factory reset](factory-reset.md) from the web interface (if you are still logged in) or, on the four-port Start9 Router, with the factory-reset button. This wipes all settings; Wi-Fi comes back up with the sticker password.
 2. **Reflash** — Boot from a microSD card and choose "Keep settings" to reinstall the firmware while preserving settings. You will be prompted to create a new admin password. See [Installing StartWRT](installing.md).
+
+## Login says there have been too many attempts
+
+StartWRT limits password attempts, and someone guessing your password can use them all up. Select **Sign in from the command line** under the error. [SSH](ssh.md) into the router, run the command it shows, then select **Continue**. The command enrolls this browser without a password, so the web interface works normally even while the guessing continues.
 
 ## What if I lose my Wi-Fi sticker password?
 
@@ -159,6 +163,18 @@ With **HTTPS-Only Mode** on, Firefox tries `https://router.lan` first and shows 
 If the network you are visiting uses the same addresses as your home network, your device sends traffic for those addresses to the network it is on rather than through the tunnel. The WireGuard app shows the tunnel connected with a recent handshake, but your home addresses time out or open the visited network's own router page.
 
 StartWRT's default addresses (`192.168.0.x` for the Admin profile, then `192.168.1.x` for the next profile) are among the most common on home, hotel, and office networks. To avoid the overlap, choose a less common **Network Block** in [LAN Settings](lan.md#ipv4), such as `10.47`. Changing the Network Block removes your existing [Inbound VPN](inbound-vpn.md) servers, so do it before setting up remote access, or recreate the servers and re-import their client configurations afterward.
+
+### Why does the Internet stop every few minutes while Wi-Fi stays connected?
+
+If StartWRT sits behind another router (for example an ISP router or gateway), check that none of your [Security Profiles](security-profiles.md) overlaps that router's LAN subnet. Many ISP routers use `192.168.1.1` or `192.168.0.1`, and StartWRT's Admin profile defaults to `192.168.0.x`, with the next profile you add defaulting to `192.168.1.x`. An overlap can interrupt IPv4 Internet access for a minute or two at a time while Wi-Fi stays connected, and make devices on the upstream LAN unreachable. If a profile's gateway is also the upstream router's address, StartWRT may ignore that router's DNS servers.
+
+To check, look at **Assigned IP** under **IPv4** in [WAN Settings](wan.md), and check the upstream router's LAN subnet mask in its own settings. For an upstream `/24` (`255.255.255.0`), the first three numbers must match a profile's full subnet: `192.168.1.221` overlaps `192.168.1.0/24`, not `10.47.1.0/24`. The first two numbers of a profile's subnet come from StartWRT's **Network Block** in [LAN Settings](lan.md#ipv4), and the third is the profile's **Subnet**. If the upstream mask is not `/24`, compare the full address ranges instead. If any profile overlaps, do one of the following:
+
+- Change that profile's **Subnet** to an unused number outside the upstream LAN range, such as `10` when the upstream LAN is `192.168.1.0/24`. See [Editing a Profile](security-profiles.md#editing-a-profile). If that profile is **Admin**, which overlaps an upstream router at `192.168.0.1` by default, this also changes the router's own address, for example to `192.168.10.1`. Reconnect your device if needed, then open the web interface at the new address or at `router.lan`.
+- Change StartWRT's **Network Block** in [LAN Settings](lan.md#ipv4) to a range outside the upstream LAN, such as `10.47` behind a `192.168.x.x` network. This moves every profile, including the router's own address.
+- Change the other router's LAN address to a range StartWRT does not use.
+
+Changing a profile's subnet or the Network Block is blocked while affected devices have static IP reservations, so remove those first. If affected profiles have [Inbound VPN](inbound-vpn.md) clients, saving asks for confirmation to delete their VPN servers. Recreate those servers and import new client configurations afterward.
 
 ### Why doesn't the router get an Internet address after I replaced my old router?
 
