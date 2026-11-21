@@ -145,11 +145,6 @@ export const AddSubnetParams: z.ZodObject<{ name: z.ZodString }> =
   /* @__PURE__ */ object({ name: z.string() }).meta({
     id: 'AddSubnetParams',
   })
-export const AnyVerifyingKey: typeof literal_0 = /* @__PURE__ */ literal_0.meta(
-  {
-    id: 'AnyVerifyingKey',
-  },
-)
 export const Base64: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Base64',
 })
@@ -736,12 +731,6 @@ export const AddDeviceParams: z.ZodObject<{
 }).meta({
   id: 'AddDeviceParams',
 })
-export const AddKeyParams: z.ZodObject<{
-  name: z.ZodString
-  key: typeof AnyVerifyingKey
-}> = /* @__PURE__ */ object({ name: z.string(), key: AnyVerifyingKey }).meta({
-  id: 'AddKeyParams',
-})
 
 /**
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
@@ -978,10 +967,6 @@ export const PortForward: z.ZodUnion<
     id: 'PortForward',
     description:
       'One external-port forward: an nftables DNAT or an SNI-demultiplexed shared\nport. Mutually exclusive for a given external address.',
-  })
-export const RemoveKeyParams: z.ZodObject<{ key: typeof AnyVerifyingKey }> =
-  /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
-    id: 'RemoveKeyParams',
   })
 export const RemovePortForwardParams: z.ZodObject<{
   source: typeof ForwardAddress

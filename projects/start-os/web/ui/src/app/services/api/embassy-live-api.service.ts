@@ -12,6 +12,7 @@ import {
   HttpOptions,
   HttpService,
   RpcError,
+  RPCOptions,
   RpcSocketService,
   ServerIdentityService,
   rpcRequestBody,
@@ -49,18 +50,11 @@ export class LiveApiService extends ApiService {
   )
   readonly rpc = createRpcClient<ApiClient>({
     call: (method, params, options) =>
-      localRpcRequest(
-        this.http,
-        this.sockets,
-        this.authKeys,
-        this.identity,
-        this.cache$,
-        {
-          method,
-          params: params as Record<string, unknown>,
-          ...options,
-        },
-      ).catch(error => this.raiseError(error)),
+      this.request({
+        method,
+        params: params as Record<string, unknown>,
+        ...options,
+      }).catch(error => this.raiseError(error)),
   })
   readonly streams = createRpcStreamClient<ApiService['streams']>({
     stream: (method, params, options) =>
@@ -202,6 +196,21 @@ export class LiveApiService extends ApiService {
     } finally {
       lifetime.abort()
     }
+  }
+
+  checkEnrollment(): Promise<unknown> {
+    return this.request({ method: 'auth.key.list', params: {} })
+  }
+
+  private request<T>(options: RPCOptions): Promise<T> {
+    return localRpcRequest<T>(
+      this.http,
+      this.sockets,
+      this.authKeys,
+      this.identity,
+      this.cache$,
+      options,
+    )
   }
 
   async echo(params: Params<'echo'>, url: string): Promise<string> {
