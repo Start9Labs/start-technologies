@@ -3644,19 +3644,6 @@ export const InstalledVersionParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'InstalledVersionParams',
   })
-export const InstallsResponse: z.ZodObject<{
-  totalInstalls: z.ZodInt
-  byPackage: z.ZodArray<typeof CountEntry>
-  byPackageVersion: z.ZodArray<typeof PackageVersionCount>
-  series: z.ZodOptional<z.ZodArray<typeof PeriodCount>>
-}> = /* @__PURE__ */ object({
-  totalInstalls: z.int(),
-  byPackage: z.array(CountEntry),
-  byPackageVersion: z.array(PackageVersionCount),
-  series: z.array(PeriodCount).optional(),
-}).meta({
-  id: 'InstallsResponse',
-})
 export const IpInfo: z.ZodObject<{
   name: z.ZodString
   scopeId: z.ZodInt
@@ -3913,7 +3900,6 @@ export const MetricsSummary: z.ZodObject<{
   totalCheckins: z.ZodInt
   uniqueServers: z.ZodInt
   totalPackageRequests: z.ZodInt
-  totalInstalls: z.ZodInt
   totalSubscriptions: z.ZodInt
   byArch: z.ZodArray<typeof CountEntry>
   byOsVersion: z.ZodArray<typeof CountEntry>
@@ -3921,7 +3907,6 @@ export const MetricsSummary: z.ZodObject<{
   totalCheckins: z.int(),
   uniqueServers: z.int(),
   totalPackageRequests: z.int(),
-  totalInstalls: z.int(),
   totalSubscriptions: z.int(),
   byArch: z.array(CountEntry),
   byOsVersion: z.array(CountEntry),
@@ -4440,12 +4425,6 @@ export const RebuildParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'RebuildParams',
   })
-export const RecordInstallParams: z.ZodObject<{
-  id: typeof PackageId
-  version: typeof Version
-}> = /* @__PURE__ */ object({ id: PackageId, version: Version }).meta({
-  id: 'RecordInstallParams',
-})
 export const RegistryIdentity: z.ZodObject<{
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,

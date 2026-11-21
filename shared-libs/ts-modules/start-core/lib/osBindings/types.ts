@@ -958,8 +958,6 @@ export type InstalledVersionParams = z.output<
 export type InstalledVersionParamsInput = z.input<
   typeof schemas.InstalledVersionParams
 >
-export type InstallsResponse = z.output<typeof schemas.InstallsResponse>
-export type InstallsResponseInput = z.input<typeof schemas.InstallsResponse>
 export type IpInfo = z.output<typeof schemas.IpInfo>
 export type IpInfoInput = z.input<typeof schemas.IpInfo>
 export type LegacyAlpnInfo = z.output<typeof schemas.LegacyAlpnInfo>
@@ -1116,10 +1114,6 @@ export type ReaderKey = z.output<typeof schemas.ReaderKey>
 export type ReaderKeyInput = z.input<typeof schemas.ReaderKey>
 export type RebuildParams = z.output<typeof schemas.RebuildParams>
 export type RebuildParamsInput = z.input<typeof schemas.RebuildParams>
-export type RecordInstallParams = z.output<typeof schemas.RecordInstallParams>
-export type RecordInstallParamsInput = z.input<
-  typeof schemas.RecordInstallParams
->
 export type RegistryIdentity = z.output<typeof schemas.RegistryIdentity>
 export type RegistryIdentityInput = z.input<typeof schemas.RegistryIdentity>
 export type RemoveAcmeParams = z.output<typeof schemas.RemoveAcmeParams>

@@ -1126,19 +1126,6 @@ export const HardwareRequirements: z.ZodObject<{
 }).meta({
   id: 'HardwareRequirements',
 })
-export const InstallsResponse: z.ZodObject<{
-  totalInstalls: z.ZodInt
-  byPackage: z.ZodArray<typeof CountEntry>
-  byPackageVersion: z.ZodArray<typeof PackageVersionCount>
-  series: z.ZodOptional<z.ZodArray<typeof PeriodCount>>
-}> = /* @__PURE__ */ object({
-  totalInstalls: z.int(),
-  byPackage: z.array(CountEntry),
-  byPackageVersion: z.array(PackageVersionCount),
-  series: z.array(PeriodCount).optional(),
-}).meta({
-  id: 'InstallsResponse',
-})
 export const ListPackageSignersParams: z.ZodIntersection<
   z.ZodObject<{ id: typeof PackageId }>,
   typeof ReaderParams
@@ -1151,7 +1138,6 @@ export const MetricsSummary: z.ZodObject<{
   totalCheckins: z.ZodInt
   uniqueServers: z.ZodInt
   totalPackageRequests: z.ZodInt
-  totalInstalls: z.ZodInt
   totalSubscriptions: z.ZodInt
   byArch: z.ZodArray<typeof CountEntry>
   byOsVersion: z.ZodArray<typeof CountEntry>
@@ -1159,7 +1145,6 @@ export const MetricsSummary: z.ZodObject<{
   totalCheckins: z.int(),
   uniqueServers: z.int(),
   totalPackageRequests: z.int(),
-  totalInstalls: z.int(),
   totalSubscriptions: z.int(),
   byArch: z.array(CountEntry),
   byOsVersion: z.array(CountEntry),
@@ -1404,12 +1389,6 @@ export const ReaderKey: z.ZodObject<{
 }> = /* @__PURE__ */ object({ label: z.string(), key: AnyVerifyingKey }).meta({
   id: 'ReaderKey',
   description: 'A key allowed to read the private s9pks that list it.',
-})
-export const RecordInstallParams: z.ZodObject<{
-  id: typeof PackageId
-  version: typeof Version
-}> = /* @__PURE__ */ object({ id: PackageId, version: Version }).meta({
-  id: 'RecordInstallParams',
 })
 export const RemoveAdminParams: z.ZodObject<{ signer: typeof Guid }> =
   /* @__PURE__ */ object({ signer: Guid }).meta({
@@ -2365,23 +2344,6 @@ export const Api = {
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
-        installs: {
-          _PARAMS: /* @__PURE__ */ z.intersection(
-            z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
-              empty,
-            ),
-            GetDownloadsParams,
-          ),
-          _RETURN: /* @__PURE__ */ InstallsResponse,
-          _ITEM: /* @__PURE__ */ z.never(),
-          _FINAL: /* @__PURE__ */ z.null(),
-        },
         subscriptions: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
@@ -2720,12 +2682,6 @@ export const Api = {
             ReaderParams,
           ),
           _RETURN: /* @__PURE__ */ PackageIndex,
-          _ITEM: /* @__PURE__ */ z.never(),
-          _FINAL: /* @__PURE__ */ z.null(),
-        },
-        'record-install': {
-          _PARAMS: /* @__PURE__ */ RecordInstallParams,
-          _RETURN: /* @__PURE__ */ z.null(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },

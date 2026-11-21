@@ -257,7 +257,6 @@ export type GetDownloadsParamsInput = z.input<typeof schemas.GetDownloadsParams>
 export type GetPackageParamsInput = z.input<typeof schemas.GetPackageParams>
 export type GetUsersParamsInput = z.input<typeof schemas.GetUsersParams>
 export type HardwareRequirements = z.output<typeof schemas.HardwareRequirements>
-export type InstallsResponse = z.output<typeof schemas.InstallsResponse>
 export type ListPackageSignersParamsInput = z.input<
   typeof schemas.ListPackageSignersParams
 >
@@ -280,9 +279,6 @@ export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
  * A key allowed to read the private s9pks that list it.
  */
 export type ReaderKey = z.output<typeof schemas.ReaderKey>
-export type RecordInstallParamsInput = z.input<
-  typeof schemas.RecordInstallParams
->
 export type RemoveAdminParamsInput = z.input<typeof schemas.RemoveAdminParams>
 export type RemoveMirrorParamsInput = z.input<typeof schemas.RemoveMirrorParams>
 export type RemovePackageFromCategoryParamsInput = z.input<
