@@ -356,7 +356,7 @@ async fn private_s9pks_reach_only_their_readers_and_a_source_publisher_promotes_
         .unwrap()
     );
     let plaintext = temp.path().join("base.s9pk");
-    tokio::fs::write(&plaintext, fixture("base.s9pk"))
+    tokio::fs::write(&plaintext, fixture("endorsed.s9pk"))
         .await
         .unwrap();
     let mut encrypted = Vec::new();
@@ -369,8 +369,15 @@ async fn private_s9pks_reach_only_their_readers_and_a_source_publisher_promotes_
     .copy_all_to(&mut encrypted)
     .await
     .unwrap();
-    assert_ne!(encrypted, fixture("base.s9pk"));
-    let (host, _, host_task) = server([("private".into(), encrypted)].into()).await;
+    assert_ne!(encrypted, fixture("endorsed.s9pk"));
+    let (host, _, host_task) = server(
+        [
+            ("private".into(), encrypted.clone()),
+            ("private-mirror".into(), encrypted),
+        ]
+        .into(),
+    )
+    .await;
     let hosted = vec![host.join("private").unwrap()];
 
     assert!(
@@ -550,6 +557,83 @@ async fn private_s9pks_reach_only_their_readers_and_a_source_publisher_promotes_
             .len(),
         1
     );
+
+    let second_key = SigningKey::from_bytes(&[16; 32]);
+    let second_signer = AnyVerifyingKey::Ed25519(second_key.verifying_key());
+    let package_id: crate::PackageId = "trust-fixture".parse().unwrap();
+    target
+        .db
+        .mutate(|db| {
+            let signer = db.as_index_mut().as_signers_mut().add_signer(&SignerInfo {
+                name: "Second publisher".into(),
+                contact: vec![],
+                keys: [second_signer.clone()].into(),
+                gpg_exports: Default::default(),
+            })?;
+            db.as_index_mut()
+                .as_package_mut()
+                .as_packages_mut()
+                .as_idx_mut(&package_id)
+                .unwrap()
+                .as_authorized_mut()
+                .insert(&signer, &exver::VersionRange::Any)
+        })
+        .await
+        .result
+        .unwrap();
+    let second_key_path = temp.path().join("second.pem");
+    write_signing_key(&second_key, &second_key_path)
+        .await
+        .unwrap();
+    let second_cli = CliContext::init(ClientConfig {
+        id_key_path: Some(second_key_path),
+        registry: Some(Profiles(BTreeMap::from([(
+            "default".into(),
+            target_url.to_string(),
+        )]))),
+        ..Default::default()
+    })
+    .unwrap();
+    let download = temp.path().join("downloaded.s9pk");
+    crate::registry::package::get::cli_download(
+        second_cli.clone(),
+        crate::registry::package::get::CliDownloadParams {
+            id: package_id.clone(),
+            target_version: Some(version.parse().unwrap()),
+            dest: Some(download.clone()),
+            arch: None,
+        },
+    )
+    .await
+    .unwrap();
+    S9pk::open(&download, None).await.unwrap();
+    let mirror = host.join("private-mirror").unwrap();
+    let cli_server = rpc_toolkit::Server::new(
+        move || {
+            let cli = second_cli.clone();
+            async move { Ok(cli) }
+        },
+        crate::registry::registry_api(),
+    );
+    cli_server
+        .handle_command(
+            "package.add-mirror",
+            imbl_value::json!({
+                "file": &plaintext,
+                "url": &mirror,
+                "private": true,
+                "noVerify": false,
+            }),
+        )
+        .await
+        .unwrap();
+    let after_mirror = target.db.peek().await.as_index().de().unwrap();
+    let mirrored =
+        &after_mirror.package.packages[&package_id].versions[&version.parse().unwrap()].s9pks[0].1;
+    assert_eq!(mirrored.private.as_ref(), Some(&key));
+    assert_eq!(mirrored.urls, [hosted[0].clone(), mirror]);
+    assert_eq!(mirrored.readers, asset.readers);
+
     host_task.abort();
     source_task.abort();
     target_task.abort();

@@ -6048,6 +6048,13 @@ help.arg.private-s9pk:
   fr_FR: "Héberger le s9pk chiffré avec une clé dérivée de votre identité, visible uniquement par les administrateurs, les éditeurs et les lecteurs indiqués"
   pl_PL: "Hostuj s9pk zaszyfrowany kluczem pochodzącym z Twojej tożsamości, widoczny tylko dla administratorów, wydawców i wskazanych czytelników"
 
+help.arg.private-s9pk-mirror:
+  en_US: "Verify ciphertext with the registry's stored s9pk key"
+  de_DE: "Den Chiffretext mit dem im Registry gespeicherten s9pk-Schlüssel überprüfen"
+  es_ES: "Verificar el texto cifrado con la clave s9pk almacenada en el registro"
+  fr_FR: "Vérifier le texte chiffré avec la clé s9pk stockée dans le registre"
+  pl_PL: "Zweryfikuj szyfrogram za pomocą klucza s9pk przechowywanego w rejestrze"
+
 help.arg.s9pk-reader-key:
   en_US: "Registered reader key allowed to see the private s9pk, in PEM or DER Base64 format"
   de_DE: "Registrierter Leserschlüssel, der das private s9pk sehen darf, im PEM- oder DER-Base64-Format"

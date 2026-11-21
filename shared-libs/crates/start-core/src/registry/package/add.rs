@@ -16,6 +16,7 @@ use crate::progress::{FullProgressTracker, PhaseProgressTrackerHandle};
 use crate::registry::RegistryDatabase;
 use crate::registry::asset::BufferedHttpSource;
 use crate::registry::context::RegistryContext;
+use crate::registry::package::get::GetPackageResponse;
 use crate::registry::package::icon::icons_dir;
 use crate::registry::package::index::PackageVersionInfo;
 use crate::rpc_continuations::Guid;
@@ -539,11 +540,12 @@ pub struct CliAddMirrorParams {
     pub url: Url,
     #[arg(long, help = "help.arg.no-verify")]
     pub no_verify: bool,
-    #[arg(long, help = "help.arg.private-s9pk")]
+    #[arg(long, help = "help.arg.private-s9pk-mirror")]
     #[serde(default)]
     pub private: bool,
 }
 
+/// Mirror verification uses the stored keystream, independent of the caller's identity.
 pub async fn cli_add_mirror(
     HandlerArgs {
         context: ctx,
@@ -590,7 +592,26 @@ pub async fn cli_add_mirror(
         .sign_commitment(&commitment, SIG_CONTEXT)
         .await?;
     let private = if private {
-        Some(KeyStreamInfo::derive(ctx.id_key()?, &commitment).await?)
+        let manifest = s9pk.as_manifest();
+        let registered: GetPackageResponse = from_value(
+            ctx.call_remote::<RegistryContext>(
+                "package.get",
+                imbl_value::json!({
+                    "id": &manifest.id,
+                    "targetVersion": &manifest.version,
+                    "allRevisions": true,
+                }),
+            )
+            .await?,
+        )?;
+        registered
+            .best
+            .into_values()
+            .flat_map(|info| info.s9pks)
+            .map(|(_, asset)| asset)
+            .find(|asset| asset.commitment == commitment)
+            .or_not_found(&commitment.root_sighash)?
+            .private
     } else {
         None
     };

@@ -1,6 +1,5 @@
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 
 use clap::Parser;
@@ -445,7 +444,6 @@ async fn publish(
     cli_add_package_impl(ctx, s9pk, vec![s3url], false, private, readers).await
 }
 
-/// Uploads the file, streaming its ciphertext from the keystream when given one.
 async fn s3_put(file: &Path, key: Option<KeyStreamInfo>, dest: &Url) -> Result<(), Error> {
     let mut cmd = Command::new("s3cmd");
     cmd.arg("put").arg("-P");
@@ -458,26 +456,14 @@ async fn s3_put(file: &Path, key: Option<KeyStreamInfo>, dest: &Url) -> Result<(
             .await
             .map(|_| ());
     }
-    let mut child = cmd
-        .arg("-")
+    let mut input = keystream_file(file, key).await?.fetch_all().await?;
+    cmd.arg("-")
         .arg(dest.as_str())
-        .stdin(Stdio::piped())
-        .spawn()?;
-    let mut stdin = child.stdin.take().or_not_found("s3cmd stdin")?;
-    let copied = keystream_file(file, key)
-        .await?
-        .copy_all_to(&mut stdin)
-        .await;
-    drop(stdin);
-    let status = child.wait().await?;
-    copied?;
-    if !status.success() {
-        return Err(Error::new(
-            eyre!("s3cmd put exited with {status}"),
-            ErrorKind::Network,
-        ));
-    }
-    Ok(())
+        .input(Some(&mut input))
+        .capture(false)
+        .invoke(ErrorKind::Network)
+        .await
+        .map(|_| ())
 }
 
 async fn keystream_file(
