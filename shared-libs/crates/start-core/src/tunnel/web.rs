@@ -7,6 +7,7 @@ use imbl_value::{InternedString, json};
 use itertools::Itertools;
 use openssl::pkey::{PKey, Private};
 use openssl::x509::X509;
+use patch_db::Dump;
 use rpc_toolkit::{
     Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async, from_fn_async_local,
 };
@@ -698,7 +699,44 @@ fn is_valid_domain(domain: &str) -> bool {
     true
 }
 
+async fn web_is_initialized_disabled(ctx: &CliContext) -> Result<bool, Error> {
+    let enabled = from_value::<Dump>(
+        ctx.call_remote::<TunnelContext>("db.dump", json!({ "pointer": "/webserver/enabled" }))
+            .await?,
+    )?;
+    if from_value::<bool>(enabled.value)? {
+        return Ok(false);
+    }
+
+    let listen = from_value::<Option<SocketAddr>>(
+        ctx.call_remote::<TunnelContext>("web.get-listen", json!({}))
+            .await?,
+    )?;
+    if listen.is_none() {
+        return Ok(false);
+    }
+
+    if ctx
+        .call_remote::<TunnelContext>("web.get-certificate", json!({}))
+        .await?
+        .is_null()
+    {
+        return Ok(false);
+    }
+
+    let password = from_value::<Dump>(
+        ctx.call_remote::<TunnelContext>("db.dump", json!({ "pointer": "/password" }))
+            .await?,
+    )?;
+    Ok(!password.value.is_null())
+}
+
 pub async fn init_web(ctx: CliContext) -> Result<(), Error> {
+    if web_is_initialized_disabled(&ctx).await? {
+        println!("{}", t!("tunnel.web.already-initialized-disabled"));
+        return Ok(());
+    }
+
     let mut password = None;
     let mut cert_generated = false;
     loop {
@@ -918,6 +956,396 @@ pub async fn init_web(ctx: CliContext) -> Result<(), Error> {
                 println!();
             }
             Err(e) => return Err(e.into()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod init_tests {
+    use std::net::SocketAddr;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    use axum::body::Body;
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use rpc_toolkit::{HandlerExt, ParentHandler, Server, from_fn_async};
+    use tower_service::Service;
+
+    use super::*;
+    use crate::context::config::ClientConfig;
+    use crate::middleware::auth::session::RpcSessionUpgrader;
+    use crate::registry::context::{RegistryContext, test_context};
+    use crate::util::future::NonDetachingJoinHandle;
+
+    struct StubState {
+        enabled: bool,
+        listen: Option<SocketAddr>,
+        certificate: Option<String>,
+        password: Option<String>,
+        enable_calls: usize,
+        set_password_calls: usize,
+    }
+
+    impl StubState {
+        fn initialized(enabled: bool) -> Self {
+            Self {
+                enabled,
+                listen: Some("127.0.0.1:8443".parse().unwrap()),
+                certificate: Some(
+                    "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n".into(),
+                ),
+                password: Some("$argon2id$stub".into()),
+                enable_calls: 0,
+                set_password_calls: 0,
+            }
+        }
+    }
+
+    struct StubServer {
+        addr: SocketAddr,
+        state: Arc<Mutex<StubState>>,
+        ca_path: PathBuf,
+        id_key_path: PathBuf,
+        _temp: tempfile::TempDir,
+        _handle: NonDetachingJoinHandle<()>,
+    }
+
+    fn test_signing_key() -> crate::sign::AnySigningKey {
+        crate::sign::AnySigningKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(&[7; 32]))
+    }
+
+    fn build_cli_context(addr: SocketAddr, ca_path: PathBuf, id_key_path: PathBuf) -> CliContext {
+        let ctx = CliContext::init(ClientConfig {
+            id_key_path: Some(id_key_path),
+            root_ca: Some(vec![ca_path]),
+            tunnel: Some(addr),
+            ..Default::default()
+        })
+        .unwrap();
+        ctx.id_key
+            .set(crate::sign::Signer::Key(test_signing_key()))
+            .unwrap();
+        ctx
+    }
+
+    async fn spawn_stub_server(initial: StubState) -> StubServer {
+        let temp = tempfile::tempdir().unwrap();
+        let state = Arc::new(Mutex::new(initial));
+        let context = test_context(temp.path().into(), test_signing_key().verifying_key()).await;
+
+        let dump_state = state.clone();
+        let listen_state = state.clone();
+        let cert_state = state.clone();
+        let enable_state = state.clone();
+        let pw_state = state.clone();
+
+        let handler = ParentHandler::<RegistryContext>::new()
+            .subcommand(
+                "db",
+                ParentHandler::<RegistryContext>::new().subcommand(
+                    "dump",
+                    from_fn_async(move |_: RegistryContext, params: Value| {
+                        let dump_state = dump_state.clone();
+                        async move {
+                            let pointer = params
+                                .get("pointer")
+                                .and_then(Value::as_str)
+                                .ok_or_else(|| {
+                                    Error::new(eyre!("missing pointer"), ErrorKind::InvalidRequest)
+                                })?;
+                            let guard = dump_state.lock().unwrap();
+                            let value = match pointer {
+                                "/webserver/enabled" => Value::Bool(guard.enabled),
+                                "/password" => to_value(&guard.password)?,
+                                other => {
+                                    return Err(Error::new(
+                                        eyre!("unexpected pointer: {other}"),
+                                        ErrorKind::InvalidRequest,
+                                    ));
+                                }
+                            };
+                            Ok::<_, Error>(json!({ "id": 1, "value": value }))
+                        }
+                    })
+                    .no_cli()
+                    .no_ts(),
+                ),
+            )
+            .subcommand(
+                "web",
+                ParentHandler::<RegistryContext>::new()
+                    .subcommand(
+                        "get-listen",
+                        from_fn_async(move |_: RegistryContext| {
+                            let listen_state = listen_state.clone();
+                            async move {
+                                let listen = listen_state.lock().unwrap().listen;
+                                Ok::<_, Error>(listen)
+                            }
+                        })
+                        .no_cli()
+                        .no_ts(),
+                    )
+                    .subcommand(
+                        "get-certificate",
+                        from_fn_async(move |_: RegistryContext| {
+                            let cert_state = cert_state.clone();
+                            async move {
+                                let cert = cert_state.lock().unwrap().certificate.clone();
+                                Ok::<_, Error>(cert)
+                            }
+                        })
+                        .no_cli()
+                        .no_ts(),
+                    )
+                    .subcommand(
+                        "enable",
+                        from_fn_async(move |_: RegistryContext| {
+                            let enable_state = enable_state.clone();
+                            async move {
+                                let mut guard = enable_state.lock().unwrap();
+                                guard.enable_calls += 1;
+                                if guard.listen.is_none() {
+                                    return Err(Error::new(
+                                        eyre!("Listen is not set"),
+                                        ErrorKind::ParseNetAddress,
+                                    ));
+                                }
+                                if guard.certificate.is_none() {
+                                    return Err(Error::new(
+                                        eyre!("Certificate is not set"),
+                                        ErrorKind::OpenSsl,
+                                    ));
+                                }
+                                if guard.password.is_none() {
+                                    return Err(Error::new(
+                                        eyre!("Password is not set"),
+                                        ErrorKind::Authorization,
+                                    ));
+                                }
+                                guard.enabled = true;
+                                Ok::<_, Error>(())
+                            }
+                        })
+                        .no_cli()
+                        .no_ts(),
+                    ),
+            )
+            .subcommand(
+                "auth",
+                ParentHandler::<RegistryContext>::new().subcommand(
+                    "set-password",
+                    from_fn_async(move |_: RegistryContext, params: SetPasswordParams| {
+                        let pw_state = pw_state.clone();
+                        async move {
+                            let mut guard = pw_state.lock().unwrap();
+                            guard.set_password_calls += 1;
+                            guard.password = Some(params.password);
+                            Ok::<_, Error>(())
+                        }
+                    })
+                    .no_cli()
+                    .no_ts(),
+                ),
+            );
+
+        let server = Server::new(
+            move || {
+                let context = context.clone();
+                async move { Ok(context) }
+            },
+            handler,
+        )
+        .for_http();
+        let app =
+            axum::Router::new().route(RpcSessionUpgrader::PATH, RpcSessionUpgrader::route(server));
+
+        let (key, cert) = crate::net::tls::test::self_signed_for_loopback();
+        let mut tls_config = crate::net::tls::test::server_config(&key, &cert);
+        tls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls_config));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let ca_path = temp.path().join("ca.pem");
+        std::fs::write(&ca_path, cert.to_pem().unwrap()).unwrap();
+        let id_key_path = temp.path().join("id.pem");
+
+        let handle = tokio::spawn(async move {
+            let mut connections = tokio::task::JoinSet::new();
+            loop {
+                let Ok((socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let acceptor = acceptor.clone();
+                let app = app.clone();
+                connections.spawn(async move {
+                    let Ok(socket) = acceptor.accept(socket).await else {
+                        return;
+                    };
+                    let service = hyper::service::service_fn(
+                        move |request: http::Request<hyper::body::Incoming>| {
+                            let mut app = app.clone();
+                            async move { app.call(request.map(Body::new)).await }
+                        },
+                    );
+                    let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                        .serve_connection_with_upgrades(TokioIo::new(socket), service)
+                        .await;
+                });
+            }
+        })
+        .into();
+
+        StubServer {
+            addr,
+            state,
+            ca_path,
+            id_key_path,
+            _temp: temp,
+            _handle: handle,
+        }
+    }
+
+    async fn run_init_web_subprocess(test_name: &str, stub: &StubServer) -> std::process::Output {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            tokio::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", test_name, "--nocapture"])
+                .env("START_CORE_TEST_TUNNEL_INIT_ADDR", stub.addr.to_string())
+                .env("START_CORE_TEST_TUNNEL_INIT_CA", &stub.ca_path)
+                .env("START_CORE_TEST_TUNNEL_INIT_ID_KEY", &stub.id_key_path)
+                .env("LANG", "en_US.UTF-8")
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+    }
+
+    async fn maybe_run_subprocess_child() -> bool {
+        let Ok(addr) = std::env::var("START_CORE_TEST_TUNNEL_INIT_ADDR") else {
+            return false;
+        };
+        let ca_path = PathBuf::from(std::env::var("START_CORE_TEST_TUNNEL_INIT_CA").unwrap());
+        let id_key_path =
+            PathBuf::from(std::env::var("START_CORE_TEST_TUNNEL_INIT_ID_KEY").unwrap());
+        let ctx = build_cli_context(addr.parse().unwrap(), ca_path, id_key_path);
+        init_web(ctx).await.unwrap();
+        true
+    }
+
+    #[tokio::test]
+    async fn init_web_keeps_initialized_disabled_ui_off() {
+        if maybe_run_subprocess_child().await {
+            return;
+        }
+        let stub = spawn_stub_server(StubState::initialized(false)).await;
+        let output = run_init_web_subprocess(
+            "tunnel::web::init_tests::init_web_keeps_initialized_disabled_ui_off",
+            &stub,
+        )
+        .await;
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(output.status.success(), "stdout={stdout}\nstderr={stderr}");
+        let state = stub.state.lock().unwrap();
+        assert_eq!(state.enable_calls, 0);
+        assert!(!state.enabled);
+        assert!(
+            stdout
+                .contains(t!("tunnel.web.already-initialized-disabled", locale = "en_US").as_ref()),
+            "{stdout}"
+        );
+        assert!(!stdout.contains("Success"), "{stdout}");
+        assert!(!stdout.contains("https://"), "{stdout}");
+    }
+
+    #[tokio::test]
+    async fn init_web_preserves_already_enabled_ui_behavior() {
+        if maybe_run_subprocess_child().await {
+            return;
+        }
+        let stub = spawn_stub_server(StubState::initialized(true)).await;
+        let output = run_init_web_subprocess(
+            "tunnel::web::init_tests::init_web_preserves_already_enabled_ui_behavior",
+            &stub,
+        )
+        .await;
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(output.status.success(), "stdout={stdout}\nstderr={stderr}");
+        let state = stub.state.lock().unwrap();
+        assert_eq!(state.enable_calls, 1);
+        assert!(state.enabled);
+        assert!(stdout.contains("https://127.0.0.1:8443"), "{stdout}");
+    }
+
+    #[tokio::test]
+    async fn init_web_completes_partial_setup_when_disabled_and_missing_password() {
+        let mut initial = StubState::initialized(false);
+        initial.password = None;
+        let stub = spawn_stub_server(initial).await;
+        let ctx = build_cli_context(stub.addr, stub.ca_path.clone(), stub.id_key_path.clone());
+
+        init_web(ctx).await.unwrap();
+
+        let state = stub.state.lock().unwrap();
+        assert_eq!(state.enable_calls, 2);
+        assert_eq!(state.set_password_calls, 1);
+        assert!(state.enabled);
+        assert!(state.password.is_some());
+    }
+
+    #[tokio::test]
+    async fn web_is_initialized_disabled_matrix() {
+        let cases = [
+            ("enabled_all_set", StubState::initialized(true), false),
+            (
+                "fresh_uninitialized",
+                StubState {
+                    listen: None,
+                    certificate: None,
+                    password: None,
+                    ..StubState::initialized(false)
+                },
+                false,
+            ),
+            (
+                "missing_listen",
+                StubState {
+                    listen: None,
+                    ..StubState::initialized(false)
+                },
+                false,
+            ),
+            (
+                "missing_certificate",
+                StubState {
+                    certificate: None,
+                    ..StubState::initialized(false)
+                },
+                false,
+            ),
+            (
+                "missing_password",
+                StubState {
+                    password: None,
+                    ..StubState::initialized(false)
+                },
+                false,
+            ),
+            ("disabled_all_set", StubState::initialized(false), true),
+        ];
+
+        for (label, initial, expected) in cases {
+            let stub = spawn_stub_server(initial).await;
+            let ctx = build_cli_context(stub.addr, stub.ca_path.clone(), stub.id_key_path.clone());
+            assert_eq!(
+                web_is_initialized_disabled(&ctx).await.unwrap(),
+                expected,
+                "{label}"
+            );
         }
     }
 }
