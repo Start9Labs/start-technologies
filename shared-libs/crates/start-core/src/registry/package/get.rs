@@ -110,7 +110,7 @@ pub struct GetPackageResponse {
     pub other_versions: Option<BTreeMap<VersionString, PackageInfoShort>>,
 }
 
-/// Returns the exact installed revision’s asset, including superseded revisions.
+/// The requested revision's asset, even once superseded.
 pub(crate) fn advertised_asset(
     db: &DatabaseModel,
     registry: &reqwest::Url,
