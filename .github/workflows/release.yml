@@ -24,7 +24,7 @@ on:
         type: string
         default: ${{ vars.REGISTRY_PROXY }}
       PACKAGE_READER_KEYS:
-        description: "Public keys of the registered signers who may read the package, one per line, in DER Base64 or PEM. Setting it, or publishing from a private repository, publishes the package as private. Defaults to the caller's PACKAGE_READER_KEYS variable."
+        description: "Public keys of the registry reader keys (`start-cli registry admin reader add`) that may read a private repository's package, one per line, in DER Base64 or PEM. Defaults to the caller's PACKAGE_READER_KEYS variable."
         type: string
         default: ${{ vars.PACKAGE_READER_KEYS }}
     secrets:
@@ -54,11 +54,25 @@ jobs:
     outputs:
       matrix: ${{ steps.discover.outputs.matrix }}
     steps:
-      - name: Validate private repository hosting
-        if: ${{ inputs.RELEASE_REGISTRY && github.event.repository.private && !inputs.S3_S9PKS_BASE_URL }}
+      - name: Validate private publication
+        if: ${{ inputs.RELEASE_REGISTRY }}
+        env:
+          PRIVATE_REPOSITORY: ${{ github.event.repository.private }}
+          READER_KEYS: ${{ inputs.PACKAGE_READER_KEYS }}
+          S3_BASE: ${{ inputs.S3_S9PKS_BASE_URL }}
+          ON_GITHUB: ${{ github.server_url == 'https://github.com' }}
         run: |
-          echo "::error::Registry publication from a private repository requires S3_S9PKS_BASE_URL; release assets require forge credentials."
-          exit 1
+          if [ "$PRIVATE_REPOSITORY" != true ]; then
+            if [ -n "${READER_KEYS//[[:space:]]/}" ]; then
+              echo "::error::PACKAGE_READER_KEYS applies to private repositories only; a public repository's package is public."
+              exit 1
+            fi
+            exit 0
+          fi
+          if [ -z "$S3_BASE" ] && [ "$ON_GITHUB" = true ]; then
+            echo "::error::A private repository on GitHub publishes through S3: set S3_S9PKS_BASE_URL."
+            exit 1
+          fi
         shell: bash
 
       - name: Checkout services repository
@@ -303,16 +317,21 @@ jobs:
           EOF
         shell: bash
 
-      # Private packages must be restricted before registry writes.
-      - name: Restrict package access
-        if: ${{ inputs.RELEASE_REGISTRY && (github.event.repository.private || inputs.PACKAGE_READER_KEYS) }}
+      # A private repository's s9pks are published encrypted; `.private_args` holds the flags.
+      - name: Resolve private publication arguments
+        if: ${{ inputs.RELEASE_REGISTRY }}
         env:
+          PRIVATE_REPOSITORY: ${{ github.event.repository.private }}
           READER_KEYS: ${{ inputs.PACKAGE_READER_KEYS }}
         run: |
+          : > .private_args
+          [ "$PRIVATE_REPOSITORY" = true ] || exit 0
           mapfile -t KEYS < <(printf '%s\n' "$READER_KEYS" | grep -v -e '^-----' | tr -s ' \t\r' '\n' | sed '/^$/d')
-          echo "Publishing ${{ steps.version.outputs.package_id }} as private to ${#KEYS[@]} reader key(s)"
-          start-cli --registry "${{ inputs.RELEASE_REGISTRY }}" registry package access restrict \
-            "${{ steps.version.outputs.package_id }}" "${KEYS[@]}"
+          echo --private >> .private_args
+          for key in "${KEYS[@]}"; do
+            printf -- '--reader\n%s\n' "$key" >> .private_args
+          done
+          echo "Publishing ${{ steps.version.outputs.package_id }} encrypted, readable by ${#KEYS[@]} reader key(s)"
         shell: bash
 
       - name: Remove existing version from registry
@@ -340,10 +359,11 @@ jobs:
         run: |
           REGISTRY="${{ inputs.RELEASE_REGISTRY }}"
           S3_BASE="${{ inputs.S3_S9PKS_BASE_URL }}"
+          mapfile -t PRIVATE_ARGS < .private_args
           pids=()
           for s9pk in *.s9pk; do
             echo "Publishing ${s9pk} via S3..."
-            ( start-cli --registry "$REGISTRY" --s9pk-s3base "$S3_BASE" s9pk publish "$s9pk" 2>&1 \
+            ( start-cli --registry "$REGISTRY" --s9pk-s3base "$S3_BASE" s9pk publish "$s9pk" "${PRIVATE_ARGS[@]}" 2>&1 \
               | sed -u "s|^|[${s9pk}] |" ) &
             pids+=($!)
           done
@@ -352,6 +372,26 @@ jobs:
             wait "$pid" || rc=$?
           done
           exit $rc
+        shell: bash
+
+      - name: Publish to Registry via Forgejo packages
+        if: ${{ inputs.RELEASE_REGISTRY && !inputs.S3_S9PKS_BASE_URL && github.event.repository.private && github.server_url != 'https://github.com' }}
+        env:
+          PACKAGES_TOKEN: ${{ github.token }}
+        run: |
+          REGISTRY="${{ inputs.RELEASE_REGISTRY }}"
+          PACKAGE_ID="${{ steps.version.outputs.package_id }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${VERSION#\#}"
+          BASE="${{ github.server_url }}/api/packages/${{ github.repository_owner }}/generic/${PACKAGE_ID}/${VERSION//:/_}"
+          mapfile -t PRIVATE_ARGS < .private_args
+          for s9pk in *.s9pk; do
+            echo "Publishing ${s9pk} encrypted via Forgejo packages..."
+            curl -sS -o /dev/null -X DELETE -H "Authorization: token ${PACKAGES_TOKEN}" "${BASE}/${s9pk}" || true
+            start-cli s9pk encrypt "$s9pk" - \
+              | curl -fsS --upload-file - -H "Authorization: token ${PACKAGES_TOKEN}" "${BASE}/${s9pk}"
+            start-cli --registry "$REGISTRY" registry package add "$s9pk" --url "${BASE}/${s9pk}" "${PRIVATE_ARGS[@]}"
+          done
         shell: bash
 
       - name: Add GitHub release mirrors

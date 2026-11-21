@@ -24,7 +24,7 @@ name: Tag and Release
         type: string
         default: ${{ vars.REGISTRY_PROXY }}
       PACKAGE_READER_KEYS:
-        description: Public keys of the registered signers who may read the package, one per line, in DER Base64 or PEM. Setting it, or publishing from a private repository, publishes the package as private. Defaults to the caller's PACKAGE_READER_KEYS variable.
+        description: Public keys of the registry reader keys (`start-cli registry admin reader add`) that may read a private repository's package, one per line, in DER Base64 or PEM. Defaults to the caller's PACKAGE_READER_KEYS variable.
         type: string
         default: ${{ vars.PACKAGE_READER_KEYS }}
     secrets:

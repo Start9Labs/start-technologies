@@ -19,13 +19,33 @@ const developerKey = yaml.load(
   ),
 )
 
-function enabled(step, inputs, privateRepository) {
+const serverUrls = {
+  github: 'https://github.com',
+  forgejo: 'https://git.start9labs.com',
+}
+
+function enabled(step, inputs, privateRepository, forge) {
   return Boolean(
     new Function('inputs', 'github', `return (${step.if.slice(3, -2)})`)(
       inputs,
-      { event: { repository: { private: privateRepository } } },
+      {
+        event: { repository: { private: privateRepository } },
+        server_url: serverUrls[forge],
+      },
     ),
   )
+}
+
+function runStep(step, env, values = {}) {
+  const script = step.run.replace(/\$\{\{\s*(.*?)\s*\}\}/g, (_, key) => {
+    assert.ok(Object.hasOwn(values, key), key)
+    return values[key]
+  })
+  return spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], {
+    env: { ...process.env, ...env },
+    cwd: env.CWD,
+    encoding: 'utf8',
+  })
 }
 
 for (const forge of ['github', 'forgejo']) {
@@ -86,26 +106,68 @@ fi
     assert.match(readFileSync(output, 'utf8'), /^skip=true$/m)
   })
 
-  test(`${forge} private repository publication rejects credential-only release URLs`, () => {
-    const release = document('release')
-    const validation = release.jobs.DiscoverMatrix.steps.find(
-      step => step.name === 'Validate private repository hosting',
+  test(`${forge} validates private publication before building`, () => {
+    const validation = document('release').jobs.DiscoverMatrix.steps.find(
+      step => step.name === 'Validate private publication',
     )
-    const inputs = {
-      RELEASE_REGISTRY: 'https://registry.example',
-      S3_S9PKS_BASE_URL: '',
-    }
-    assert.equal(enabled(validation, inputs, true), true)
-    assert.equal(spawnSync('bash', ['-e', '-c', validation.run]).status, 1)
-    assert.equal(enabled(validation, inputs, false), false)
     assert.equal(
-      enabled(validation, { ...inputs, RELEASE_REGISTRY: '' }, true),
+      enabled(validation, { RELEASE_REGISTRY: '' }, true, forge),
       false,
+    )
+    const status = env =>
+      runStep(validation, {
+        PRIVATE_REPOSITORY: 'false',
+        READER_KEYS: '',
+        S3_BASE: '',
+        ON_GITHUB: String(forge === 'github'),
+        ...env,
+      }).status
+    assert.equal(status({}), 0)
+    assert.equal(status({ READER_KEYS: 'MCowBQYDK2VwAyEA' }), 1)
+    assert.equal(
+      status({ PRIVATE_REPOSITORY: 'true' }),
+      forge === 'github' ? 1 : 0,
+    )
+    assert.equal(
+      status({ PRIVATE_REPOSITORY: 'true', S3_BASE: 'https://bucket.example' }),
+      0,
+    )
+  })
+
+  test(`${forge} private repositories publish with --private and each reader key`, t => {
+    const cwd = mkdtempSync(join(tmpdir(), 'private-package-args-'))
+    t.after(() => rmSync(cwd, { recursive: true, force: true }))
+    const resolve = document('release').jobs.Publish.steps.find(
+      step => step.name === 'Resolve private publication arguments',
+    )
+    const values = { 'steps.version.outputs.package_id': 'private-fixture' }
+    const args = env => {
+      const result = runStep(
+        resolve,
+        { CWD: cwd, READER_KEYS: '', ...env },
+        values,
+      )
+      assert.equal(result.status, 0, result.stderr)
+      return readFileSync(join(cwd, '.private_args'), 'utf8')
+    }
+    assert.equal(args({ PRIVATE_REPOSITORY: 'false' }), '')
+    assert.equal(
+      args({
+        PRIVATE_REPOSITORY: 'true',
+        READER_KEYS:
+          'KEYA\r\n-----BEGIN PUBLIC KEY-----\nKEYB\n-----END PUBLIC KEY-----\n',
+      }),
+      '--private\n--reader\nKEYA\n--reader\nKEYB\n',
     )
   })
 
   for (const [privateRepository, s3, expected] of [
     [true, 'https://bucket.example', ['Publish to Registry via S3']],
+    [
+      true,
+      '',
+      forge === 'github' ? [] : ['Publish to Registry via Forgejo packages'],
+    ],
     [false, '', ['Publish to Registry via GitHub']],
     [
       false,
@@ -125,7 +187,7 @@ fi
       }
       assert.deepEqual(
         steps
-          .filter(step => enabled(step, inputs, privateRepository))
+          .filter(step => enabled(step, inputs, privateRepository, forge))
           .map(step => step.name),
         expected,
       )
