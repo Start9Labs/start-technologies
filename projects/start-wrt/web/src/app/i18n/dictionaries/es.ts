@@ -594,6 +594,8 @@ export default {
   642: 'Para desactivar esta VPN, primero cambia {vpns} para que se conecten a través de otra cosa.',
   643: 'Nunca (predeterminado)',
   644: 'Cuando está detrás de NAT',
-  645: '{profile} se superpone con la red superior {network}',
-  646: 'Sus dispositivos pueden perder Internet o este panel. Cambie su subred a una fuera de esa red.',
+  645: 'Iniciar sesión desde la línea de comandos',
+  646: 'Registrar este navegador',
+  647: '{profile} se superpone con la red superior {network}',
+  648: 'Sus dispositivos pueden perder Internet o este panel. Cambie su subred a una fuera de esa red.',
 } satisfies i18n

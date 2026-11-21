@@ -17,6 +17,7 @@ struct LoginScope {
     address: InternedString,
     gateway: Option<GatewayId>,
     public: bool,
+    loopback: bool,
 }
 
 struct Attempts {
@@ -41,6 +42,7 @@ impl LoginRateLimiter {
             address,
             gateway: origin.gateway.clone(),
             public: origin.public,
+            loopback: origin.peer_ip.is_some_and(|ip| ip.is_loopback()),
         };
         let attempts = self.0.entry(scope.clone()).or_insert(Attempts {
             count: 0,
@@ -105,7 +107,7 @@ mod tests {
     }
 
     #[test]
-    fn login_rate_limits_are_scoped_by_address_gateway_and_access_not_ip() {
+    fn login_rate_limits_are_scoped_by_address_gateway_access_and_loopback_not_ip() {
         let _tracing = TRACING_TEST_LOCK.lock().unwrap();
         let mut limiter = LoginRateLimiter::default();
         let now = Instant::now();
@@ -124,10 +126,13 @@ mod tests {
                 .kind,
             ErrorKind::RateLimited
         );
+        let mut loopback = origin("eth0", false);
+        loopback.peer_ip = Some("127.0.0.1".parse().unwrap());
         for (address, origin) in [
             ("other.example", public),
             ("server.example", origin("eth1", true)),
             ("server.example", origin("eth0", false)),
+            ("server.example", loopback),
         ] {
             for _ in 0..3 {
                 limiter.check(address.into(), &origin, now).unwrap();

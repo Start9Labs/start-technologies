@@ -594,6 +594,8 @@ export default {
   642: 'Aby wyłączyć ten VPN, najpierw zmień {vpns} tak, aby łączyły się przez coś innego.',
   643: 'Nigdy (domyślnie)',
   644: 'Gdy za NAT',
-  645: '{profile} nakłada się na sieć nadrzędną {network}',
-  646: 'Urządzenia w nim mogą stracić Internet lub dostęp do tego panelu. Zmień jego podsieć na leżącą poza tą siecią.',
+  645: 'Zaloguj się z wiersza poleceń',
+  646: 'Zarejestruj tę przeglądarkę',
+  647: '{profile} nakłada się na sieć nadrzędną {network}',
+  648: 'Urządzenia w nim mogą stracić Internet lub dostęp do tego panelu. Zmień jego podsieć na leżącą poza tą siecią.',
 } satisfies i18n

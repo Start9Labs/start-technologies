@@ -141,6 +141,11 @@ export class MockApiService extends ApiService {
     return null
   }
 
+  async checkEnrollment(): Promise<unknown> {
+    await pauseFor(1000)
+    return null
+  }
+
   async logout(): Promise<RpcReturnType<Api, 'auth.logout'>> {
     await pauseFor(250)
 

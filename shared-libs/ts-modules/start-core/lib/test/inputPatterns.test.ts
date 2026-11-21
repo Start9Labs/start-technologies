@@ -80,7 +80,7 @@ describe('action input patterns', () => {
     expect(() => parser.parse('ab')).toThrow('Too short')
   })
 
-  test('an empty value defers to required rather than failing the pattern', async () => {
+  test('an optional field takes null, never an empty string', async () => {
     const parser = await parserFor(
       Value.text({
         name: 'Timeout',
@@ -89,7 +89,7 @@ describe('action input patterns', () => {
         patterns: [goDuration],
       }),
     )
-    expect(parser.parse('')).toBe('')
+    expect(() => parser.parse('')).toThrow()
     expect(parser.parse(null)).toBe(null)
   })
 

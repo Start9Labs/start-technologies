@@ -336,7 +336,7 @@ export const CreateTokenParams: z.ZodObject<{ name: z.ZodString }> =
   })
 export const CreatedToken: z.ZodObject<{
   /**
-   * The session id the token authenticates as, for `auth.session.kill`.
+   * The session id the token authenticates as, for `auth.token.remove`.
    */
   id: z.ZodString
   /**
@@ -345,11 +345,11 @@ export const CreatedToken: z.ZodObject<{
   token: z.ZodString
 }> = /* @__PURE__ */ object({
   /**
-   * The session id the token authenticates as, for `auth.session.kill`.
+   * The session id the token authenticates as, for `auth.token.remove`.
    */
   id: z.string().meta({
     description:
-      'The session id the token authenticates as, for `auth.session.kill`.',
+      'The session id the token authenticates as, for `auth.token.remove`.',
   }),
   /**
    * The bearer secret. It is not stored and cannot be retrieved again.
@@ -1446,6 +1446,11 @@ export const RemoveDomainParams: z.ZodObject<{ fqdn: z.ZodString }> =
   /* @__PURE__ */ object({ fqdn: z.string() }).meta({
     id: 'RemoveDomainParams',
   })
+export const RemoveTokensParams: z.ZodObject<{
+  tokens: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({ tokens: z.array(z.string()) }).meta({
+  id: 'RemoveTokensParams',
+})
 export const RemoveVersionParams: z.ZodObject<{ version: z.ZodString }> =
   /* @__PURE__ */ object({ version: z.string() }).meta({
     id: 'RemoveVersionParams',
@@ -2370,6 +2375,23 @@ export const AddCategoryParams: z.ZodObject<{
   name: typeof LocaleString
 }> = /* @__PURE__ */ object({ id: z.string(), name: LocaleString }).meta({
   id: 'AddCategoryParams',
+})
+export const AddKeyParams: z.ZodObject<{
+  key: typeof AnyVerifyingKey
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  userAgent: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  key: AnyVerifyingKey,
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'AddKeyParams',
 })
 export const AddMirrorParams: z.ZodObject<{
   url: z.ZodString
@@ -3553,21 +3575,6 @@ export const IpInfo: z.ZodObject<{
 }).meta({
   id: 'IpInfo',
 })
-export const KillParams: z.ZodObject<{
-  pubkeys: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
-    z.ZodArray<typeof AnyVerifyingKey>
-  >
-  tokens: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pubkeys: wire(z.array(AnyVerifyingKey).optional(), z.array(AnyVerifyingKey)),
-  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
-}).meta({
-  id: 'KillParams',
-})
 export const LegacyAlpnInfo: z.ZodUnion<
   readonly [
     z.ZodLiteral<'reflect'>,
@@ -4319,6 +4326,11 @@ export const RemoveAdminParams: z.ZodObject<{ signer: typeof Guid }> =
   /* @__PURE__ */ object({ signer: Guid }).meta({
     id: 'RemoveAdminParams',
   })
+export const RemoveKeyParams: z.ZodObject<{
+  keys: z.ZodArray<typeof AnyVerifyingKey>
+}> = /* @__PURE__ */ object({ keys: z.array(AnyVerifyingKey) }).meta({
+  id: 'RemoveKeyParams',
+})
 export const RemoveMirrorParams: z.ZodObject<{
   id: typeof PackageId
   version: typeof Version
@@ -5519,6 +5531,23 @@ export const InstallParams: z.ZodObject<{
 }).meta({
   id: 'InstallParams',
 })
+
+/**
+ * Enrolled keys, including ephemeral ones, and the caller's own.
+ */
+export const KeyList: z.ZodObject<{
+  current: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  keys: typeof AuthKeys
+}> = /* @__PURE__ */ object({
+  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  keys: AuthKeys,
+}).meta({
+  id: 'KeyList',
+  description: "Enrolled keys, including ephemeral ones, and the caller's own.",
+})
 export const MetadataSrc: z.ZodUnion<
   readonly [
     z.ZodObject<{ metadata: typeof Metadata }>,
@@ -6358,7 +6387,14 @@ export const TrustedKey: z.ZodObject<{
     'Signing-key material and independent package and OS-update trust.',
 })
 export const UpdateSystemParams: z.ZodObject<{
-  registry: z.ZodString
+  /**
+   * Fetches once from this registry instead of using the selected update registry's
+   * synchronized releases.
+   */
+  registry: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   /**
    * Additional signer requirements checked before starting the update.
    */
@@ -6379,7 +6415,14 @@ export const UpdateSystemParams: z.ZodObject<{
    */
   progress: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
-  registry: z.string(),
+  /**
+   * Fetches once from this registry instead of using the selected update registry's
+   * synchronized releases.
+   */
+  registry: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      "Fetches once from this registry instead of using the selected update registry's\nsynchronized releases.",
+  }),
   /**
    * Additional signer requirements checked before starting the update.
    */
@@ -6984,18 +7027,6 @@ export const ServerStatus: z.ZodObject<{
 }).meta({
   id: 'ServerStatus',
 })
-export const SessionList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sessions: typeof Sessions
-}> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
-  sessions: Sessions,
-}).meta({
-  id: 'SessionList',
-})
 export const SetBackupProgress: z.ZodObject<{ progress: typeof Progress }> =
   /* @__PURE__ */ object({ progress: Progress }).meta({
     id: 'SetBackupProgress',
@@ -7139,12 +7170,23 @@ export const DnsStatus: z.ZodObject<{
 })
 export const GetPackageResponse: z.ZodObject<{
   categories: z.ZodArray<z.ZodString>
+  /**
+   * When this registry first published any version it still carries.
+   */
+  firstPublishedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>
   best: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
   otherVersions: z.ZodOptional<
     z.ZodNullable<z.ZodRecord<z.ZodString, typeof PackageInfoShort>>
   >
 }> = /* @__PURE__ */ object({
   categories: z.array(z.string()),
+  /**
+   * When this registry first published any version it still carries.
+   */
+  firstPublishedAt: z.string().nullable().optional().meta({
+    description:
+      'When this registry first published any version it still carries.',
+  }),
   best: z.record(z.string(), PackageVersionInfo),
   otherVersions: z.record(z.string(), PackageInfoShort).nullable().optional(),
 }).meta({
@@ -7152,10 +7194,21 @@ export const GetPackageResponse: z.ZodObject<{
 })
 export const GetPackageResponseFull: z.ZodObject<{
   categories: z.ZodArray<z.ZodString>
+  /**
+   * When this registry first published any version it still carries.
+   */
+  firstPublishedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>
   best: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
   otherVersions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
 }> = /* @__PURE__ */ object({
   categories: z.array(z.string()),
+  /**
+   * When this registry first published any version it still carries.
+   */
+  firstPublishedAt: z.string().nullable().optional().meta({
+    description:
+      'When this registry first published any version it still carries.',
+  }),
   best: z.record(z.string(), PackageVersionInfo),
   otherVersions: z.record(z.string(), PackageVersionInfo),
 }).meta({
@@ -7199,6 +7252,30 @@ export const PackageInfo: z.ZodIntersection<
   )
   .meta({
     id: 'PackageInfo',
+  })
+export const PackageRelease: z.ZodIntersection<
+  z.ZodObject<{
+    /**
+     * A newer revision of this upstream version and flavor covers its hardware.
+     */
+    superseded: z.ZodOptional<z.ZodBoolean>
+  }>,
+  typeof PackageVersionInfo
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      /**
+       * A newer revision of this upstream version and flavor covers its hardware.
+       */
+      superseded: z.boolean().optional().meta({
+        description:
+          'A newer revision of this upstream version and flavor covers its hardware.',
+      }),
+    }),
+    PackageVersionInfo,
+  )
+  .meta({
+    id: 'PackageRelease',
   })
 
 /**
@@ -7354,34 +7431,42 @@ export const PackageIndex: z.ZodObject<{
 })
 
 /**
- * Last synchronized package listings and registry trust proposals.
+ * Every release of a package that a device can run, as StartOS lists it in its registry cache.
  */
-export const RegistryCache: z.ZodObject<{
-  info: typeof RegistryInfo
-  packages: z.ZodRecord<z.ZodString, typeof GetPackageResponse>
-  status: z.ZodCodec<
-    z.ZodOptional<typeof RegistryStatus>,
-    typeof RegistryStatus
-  >
+export const PackageReleases: z.ZodObject<{
+  categories: z.ZodArray<z.ZodString>
   /**
-   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   * When this registry first published any version it still carries.
    */
-  error: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  firstPublishedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  versions: z.ZodRecord<z.ZodString, typeof PackageRelease>
+  /**
+   * Newest release of the installed flavor that the installed version can migrate to and this
+   * server can install.
+   */
+  updateTarget: z.ZodOptional<z.ZodNullable<typeof Version>>
 }> = /* @__PURE__ */ object({
-  info: RegistryInfo,
-  packages: z.record(z.string(), GetPackageResponse),
-  status: wire(RegistryStatus.optional(), RegistryStatus),
+  categories: z.array(z.string()),
   /**
-   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   * When this registry first published any version it still carries.
    */
-  error: z.string().nullable().optional().meta({
+  firstPublishedAt: z.string().nullable().optional().meta({
     description:
-      'Failure of the latest synchronization attempt; absent while connecting or connected.',
+      'When this registry first published any version it still carries.',
+  }),
+  versions: z.record(z.string(), PackageRelease),
+  /**
+   * Newest release of the installed flavor that the installed version can migrate to and this
+   * server can install.
+   */
+  updateTarget: Version.nullable().optional().meta({
+    description:
+      'Newest release of the installed flavor that the installed version can migrate to and this\nserver can install.',
   }),
 }).meta({
-  id: 'RegistryCache',
+  id: 'PackageReleases',
   description:
-    'Last synchronized package listings and registry trust proposals.',
+    'Every release of a package that a device can run, as StartOS lists it in its registry cache.',
 })
 export const BindOptions: z.ZodCodec<
   typeof CompatibleBindOptions,
@@ -7485,6 +7570,63 @@ export const InstallingInfo: z.ZodObject<{
   progress: FullProgress,
 }).meta({
   id: 'InstallingInfo',
+})
+
+/**
+ * Last synchronized package listings and registry trust proposals.
+ */
+export const RegistryCache: z.ZodObject<{
+  info: typeof RegistryInfo
+  /**
+   * Releases this server can run, read by the UI in place of `package.get`.
+   */
+  catalog: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof PackageReleases>>,
+    z.ZodRecord<z.ZodString, typeof PackageReleases>
+  >
+  /**
+   * Whether the registry offers StartOS releases for this server's platform.
+   */
+  publishesOsUpdates: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  status: z.ZodCodec<
+    z.ZodOptional<typeof RegistryStatus>,
+    typeof RegistryStatus
+  >
+  /**
+   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   */
+  error: z.ZodOptional<z.ZodNullable<z.ZodString>>
+}> = /* @__PURE__ */ object({
+  info: RegistryInfo,
+  /**
+   * Releases this server can run, read by the UI in place of `package.get`.
+   */
+  catalog: wire(
+    z.record(z.string(), PackageReleases).optional(),
+    z.record(z.string(), PackageReleases),
+  ).meta({
+    description:
+      'Releases this server can run, read by the UI in place of `package.get`.',
+  }),
+  /**
+   * Whether the registry offers StartOS releases for this server's platform.
+   */
+  publishesOsUpdates: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      "Whether the registry offers StartOS releases for this server's platform.",
+  }),
+  status: wire(RegistryStatus.optional(), RegistryStatus),
+  /**
+   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   */
+  error: z.string().nullable().optional().meta({
+    description:
+      'Failure of the latest synchronization attempt; absent while connecting or connected.',
+  }),
+}).meta({
+  id: 'RegistryCache',
+  description:
+    'Last synchronized package listings and registry trust proposals.',
 })
 export const BindInfo: z.ZodObject<{
   enabled: z.ZodBoolean

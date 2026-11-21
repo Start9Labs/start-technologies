@@ -59,7 +59,7 @@ A request is authorized through a verified encrypted peer or a compatibility cre
 
 Keyed CLI calls use the shared encrypted transport with `~/.startwrt/id.key.pem`; fresh hello signing precedes transport deadlines. Local-token calls and calls without an initialized key use a client-lifetime unpersisted proof identity on the same encrypted transport; local tokens remain loopback-only and grant their existing authority. A malformed key or rejected encrypted admission does not fall back to plaintext. CLI log/update commands return GUID responses for separate continuation consumers.
 
-Endpoints registered with `authenticated: false` metadata answer without either. Enrolled keys persist in `/etc/startwrt/auth.db`, which sysupgrade keeps, and stay valid until revoked by `auth.logout`, `auth.session.kill`, or a password change, or until 24 hours after their `loggedIn` time, however recently they were used. The microSD wizard's Keep settings reflash does not carry them over. An expired key is rejected as unauthorized (code 34) on its next request. Before ntpd reports valid time the check judges age alone; afterwards a `loggedIn` more than 5 minutes in the future also counts as expired. The sweep that unenrolls expired keys runs hourly and waits for ntpd to report valid time.
+Endpoints registered with `authenticated: false` metadata answer without either. Enrolled keys persist in `/etc/startwrt/auth.db`, which sysupgrade keeps, and stay valid until revoked by `auth.logout`, `auth.key.remove`, or a password change, or until 24 hours after their `loggedIn` time, however recently they were used. The microSD wizard's Keep settings reflash does not carry them over. An expired key is rejected as unauthorized (code 34) on its next request. Before ntpd reports valid time the check judges age alone; afterwards a `loggedIn` more than 5 minutes in the future also counts as expired. The sweep that unenrolls expired keys runs hourly and waits for ntpd to report valid time.
 
 ### `auth.login`
 
@@ -90,41 +90,50 @@ unsigned local-token request is rejected as unnecessary.
 // Response: null
 ```
 
-### `auth.session.list`
+### `auth.key.add`
+
+Enrolls a key without a password or the login rate limit. The login page shows
+`startwrt-cli auth key add` with the browser's key and user agent when login is
+rate limited.
+
+```rust
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AddKeyParams {
+    /// DER64 or PEM-encoded key to enroll
+    key: AnyVerifyingKey,
+    /// Shown in `auth.key.list`
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    user_agent: Option<String>,
+}
+// Response: null
+```
+
+### `auth.key.list`
 
 ```rust
 // Request: {}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SessionList {
+struct KeyList {
     /// The key that signed this request
     current: Option<String>,
-    sessions: Sessions,
-}
-
-struct Sessions {
     /// Enrolled keys by DER64 SPKI: { name, loggedIn, lastActive, userAgent }.
     /// `lastActive` is persisted at most hourly.
-    pubkeys: BTreeMap<String, Session>,
-    /// Empty on StartWRT.
-    tokens: BTreeMap<String, Session>,
+    keys: BTreeMap<String, Session>,
 }
 ```
 
-### `auth.session.kill`
-
-StartWRT revokes enrolled keys through `pubkeys`. The shared request also accepts
-`tokens`, but StartWRT has no bearer-token sessions.
+### `auth.key.remove`
 
 ```rust
 #[derive(Deserialize)]
-struct KillParams {
+struct RemoveKeyParams {
     /// DER64 or PEM-encoded keys to revoke
-    #[serde(default)]
-    pubkeys: Vec<AnyVerifyingKey>,
-    #[serde(default)]
-    tokens: Vec<String>,
+    keys: Vec<AnyVerifyingKey>,
 }
 // Response: null
 ```
@@ -2539,8 +2548,9 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | ----------------------------------- | --------------- | --------------------------- |
 | `auth.login`                        | Auth            | Rate-limited                |
 | `auth.logout`                       | Auth            |                             |
-| `auth.session.list`                 | Auth            |                             |
-| `auth.session.kill`                 | Auth            |                             |
+| `auth.key.add`                      | Auth            |                             |
+| `auth.key.list`                     | Auth            |                             |
+| `auth.key.remove`                   | Auth            |                             |
 | `auth.verify-password`              | Auth            |                             |
 | `auth.set-password`                 | Auth            |                             |
 | `auth.check-initialized`            | Auth            | No auth                     |

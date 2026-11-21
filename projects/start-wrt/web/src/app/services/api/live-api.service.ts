@@ -101,6 +101,10 @@ export class LiveApiService extends ApiService {
     return this.rpc.request({ method: 'auth.login', params })
   }
 
+  checkEnrollment(): Promise<unknown> {
+    return this.rpc.probe({ method: 'auth.key.list', params: {} })
+  }
+
   async setTimezone(params: { timezone: string }): Promise<null> {
     return this.rpc.request({ method: 'system.set-timezone', params })
   }

@@ -195,7 +195,10 @@ export class FormComponent<
 
   private process(operations: Operation[]) {
     operations.forEach(operation => {
-      const control = this.form.get(operation.path.substring(1).split('/'))
+      const path = operation.path.substring(1).split('/')
+      const [field = ''] = path
+      if (this.spec[field]?.type === 'acknowledgement') return
+      const control = this.form.get(path)
 
       if (!control || !control.parent) return
 
