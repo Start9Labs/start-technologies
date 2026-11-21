@@ -3225,14 +3225,14 @@ registry.package.promote.destination-admin-required:
   fr_FR: "La promotion d'un s9pk privé avec des lecteurs nécessite un accès administrateur aux lecteurs du registre de destination : %{error}"
   pl_PL: "Promowanie prywatnego s9pk z czytelnikami wymaga dostępu administratora do czytelników rejestru docelowego: %{error}"
 
-# registry/package/version.rs
-registry.package.version.export-unauthorized:
-  en_US: "Only admins and publishers of %{id} can export its versions"
-  de_DE: "Nur Administratoren und Herausgeber von %{id} können dessen Versionen exportieren"
-  es_ES: "Solo los administradores y publicadores de %{id} pueden exportar sus versiones"
-  fr_FR: "Seuls les administrateurs et les éditeurs de %{id} peuvent exporter ses versions"
-  pl_PL: "Tylko administratorzy i wydawcy %{id} mogą eksportować jego wersje"
+registry.package.promote.readers-unavailable:
+  en_US: "Promoting private s9pk %{commitment} without readers: only admins and the package's publishers can see its reader list"
+  de_DE: "Privates s9pk %{commitment} wird ohne Leser übertragen: Nur Administratoren und Herausgeber des Pakets sehen seine Leserliste"
+  es_ES: "Promoviendo el s9pk privado %{commitment} sin lectores: solo los administradores y publicadores del paquete ven su lista de lectores"
+  fr_FR: "Promotion du s9pk privé %{commitment} sans lecteurs : seuls les administrateurs et les éditeurs du paquet voient sa liste de lecteurs"
+  pl_PL: "Promowanie prywatnego s9pk %{commitment} bez czytelników: tylko administratorzy i wydawcy pakietu widzą jego listę czytelników"
 
+# registry/package/version.rs
 registry.package.cannot-remove-last-mirror:
   en_US: "Cannot remove last mirror from an s9pk"
   de_DE: "Letzter Spiegel kann nicht aus einem s9pk entfernt werden"

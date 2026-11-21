@@ -1849,34 +1849,46 @@ export const PackageInfo: z.ZodObject<{
 })
 
 /**
- * A package version as stored, for promotion to another registry.
+ * A package version as the requester sees it, for promotion to another registry.
  */
 export const PackageVersionExport: z.ZodObject<{
   /**
-   * Unprojected: every s9pk with its keystream and reader ids.
+   * The s9pks the requester can see, with their keystreams. Reader ids appear for admins and
+   * the package's publishers.
    */
   info: typeof PackageVersionInfo
   /**
-   * The reader directory entries the s9pks list.
+   * The reader directory entries the s9pks list. Null for requesters who cannot see reader
+   * lists.
    */
-  readers: z.ZodRecord<z.ZodString, typeof ReaderKey>
+  readers: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, typeof ReaderKey>>>,
+    z.ZodNullable<z.ZodRecord<z.ZodString, typeof ReaderKey>>
+  >
 }> = /* @__PURE__ */ object({
   /**
-   * Unprojected: every s9pk with its keystream and reader ids.
+   * The s9pks the requester can see, with their keystreams. Reader ids appear for admins and
+   * the package's publishers.
    */
   info: PackageVersionInfo.meta({
-    description: 'Unprojected: every s9pk with its keystream and reader ids.',
+    description:
+      "The s9pks the requester can see, with their keystreams. Reader ids appear for admins and\nthe package's publishers.",
   }),
   /**
-   * The reader directory entries the s9pks list.
+   * The reader directory entries the s9pks list. Null for requesters who cannot see reader
+   * lists.
    */
-  readers: z.record(z.string(), ReaderKey).meta({
-    description: 'The reader directory entries the s9pks list.',
+  readers: wire(
+    z.record(z.string(), ReaderKey).nullable().optional(),
+    z.record(z.string(), ReaderKey).nullable(),
+  ).meta({
+    description:
+      'The reader directory entries the s9pks list. Null for requesters who cannot see reader\nlists.',
   }),
 }).meta({
   id: 'PackageVersionExport',
   description:
-    'A package version as stored, for promotion to another registry.',
+    'A package version as the requester sees it, for promotion to another registry.',
 })
 export const Revision: z.ZodObject<{ id: z.ZodInt; patch: typeof DiffPatch }> =
   /* @__PURE__ */ object({ id: z.int(), patch: DiffPatch }).meta({

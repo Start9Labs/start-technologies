@@ -1600,12 +1600,12 @@ export type PackageRelease = z.output<typeof schemas.PackageRelease>
 export type PackageReleaseInput = z.input<typeof schemas.PackageRelease>
 
 /**
- * A package version as stored, for promotion to another registry.
+ * A package version as the requester sees it, for promotion to another registry.
  */
 export type PackageVersionExport = z.output<typeof schemas.PackageVersionExport>
 
 /**
- * A package version as stored, for promotion to another registry.
+ * A package version as the requester sees it, for promotion to another registry.
  */
 export type PackageVersionExportInput = z.input<
   typeof schemas.PackageVersionExport

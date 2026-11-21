@@ -467,15 +467,16 @@ async fn private_s9pks_reach_only_their_readers_and_a_source_publisher_promotes_
                         imbl_value::json!(ErrorKind::NotFound as i32),
                         "{missing}"
                     );
+                } else if visible {
+                    let exported = &export["result"];
+                    let asset = &exported["info"]["s9pks"][0][1];
+                    assert_eq!(asset["private"], to_value(&key).unwrap(), "{export}");
+                    assert!(asset.get("readers").is_none(), "{export}");
+                    assert!(exported["readers"].is_null(), "{export}");
                 } else {
-                    let expected = if visible {
-                        ErrorKind::Authorization
-                    } else {
-                        ErrorKind::NotFound
-                    };
                     assert_eq!(
                         export["error"]["code"],
-                        imbl_value::json!(expected as i32),
+                        imbl_value::json!(ErrorKind::NotFound as i32),
                         "{export}"
                     );
                 }

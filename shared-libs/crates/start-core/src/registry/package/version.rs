@@ -43,20 +43,22 @@ pub struct ExportPackageVersionParams {
 rpc_toolkit::reflect_ts!(ExportPackageVersionParams);
 rpc_toolkit::ts_export!(ExportPackageVersionParams, namespaces = [""]);
 
-/// A package version as stored, for promotion to another registry.
+/// A package version as the requester sees it, for promotion to another registry.
 #[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageVersionExport {
-    /// Unprojected: every s9pk with its keystream and reader ids.
+    /// The s9pks the requester can see, with their keystreams. Reader ids appear for admins and
+    /// the package's publishers.
     pub info: PackageVersionInfo,
-    /// The reader directory entries the s9pks list.
-    pub readers: BTreeMap<Guid, ReaderKey>,
+    /// The reader directory entries the s9pks list. Null for requesters who cannot see reader
+    /// lists.
+    #[serde(default)]
+    pub readers: Option<BTreeMap<Guid, ReaderKey>>,
 }
 
 rpc_toolkit::reflect_ts!(PackageVersionExport);
 rpc_toolkit::ts_export!(PackageVersionExport, namespaces = [""]);
 
-/// Restricted to admins and the package's publishers.
 pub async fn export_package_version(
     ctx: RegistryContext,
     ExportPackageVersionParams {
@@ -72,20 +74,22 @@ pub async fn export_package_version(
         .as_package()
         .visible_package(&id, reader.as_ref())?
         .or_not_found(&id)?;
-    if !package.is_managed_by(reader.as_ref())? {
-        return Err(Error::new(
-            eyre!(
-                "{}",
-                t!("registry.package.version.export-unauthorized", id = id)
-            ),
-            ErrorKind::Authorization,
-        ));
-    }
-    let info = package
+    let not_found = || Error::new(eyre!("{id}@{version}"), ErrorKind::NotFound);
+    let mut visible = package
         .as_versions()
         .as_idx(&version)
-        .or_not_found(&lazy_format!("{id}@{version}"))?
-        .de()?;
+        .ok_or_else(not_found)?
+        .clone();
+    if !visible.retain_visible(reader.as_ref(), package.is_publisher(reader.as_ref())?)? {
+        return Err(not_found());
+    }
+    let info = visible.de()?;
+    if !package.is_managed_by(reader.as_ref())? {
+        return Ok(PackageVersionExport {
+            info,
+            readers: None,
+        });
+    }
     let directory = db.as_index().as_readers();
     let mut readers = BTreeMap::new();
     for (_, asset) in &info.s9pks {
@@ -95,5 +99,8 @@ pub async fn export_package_version(
             }
         }
     }
-    Ok(PackageVersionExport { info, readers })
+    Ok(PackageVersionExport {
+        info,
+        readers: Some(readers),
+    })
 }

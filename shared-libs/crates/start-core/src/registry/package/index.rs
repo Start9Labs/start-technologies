@@ -137,7 +137,11 @@ impl Model<PackageVersionInfo> {
     /// publishers.
     ///
     /// False when the version had s9pks and none remain.
-    fn retain_visible(&mut self, reader: Option<&Reader>, publisher: bool) -> Result<bool, Error> {
+    pub(crate) fn retain_visible(
+        &mut self,
+        reader: Option<&Reader>,
+        publisher: bool,
+    ) -> Result<bool, Error> {
         let Some(s9pks) = ModelExt::as_value_mut(self.as_s9pks_mut()).as_array_mut() else {
             return Ok(true);
         };

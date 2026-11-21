@@ -78,7 +78,7 @@ start-cli registry package promote myservice 1.2.0:0 --from alpha --to productio
 
 At least one endpoint is required; an omitted endpoint uses the configured registry selected by `-r` or the `default` profile. `start-cli registry os promote <VERSION>` accepts the same endpoint options for OS versions.
 
-Promoting a private s9pk keeps it private on the destination with the same keystream and readers, adding any reader key the destination lacks with its label. Promote reads the version from the source with `start-cli registry package version export <PACKAGE_ID> <VERSION>`, which returns the stored version as JSON, keystreams and reader keys included, to admins and the package's publishers. Registering reader keys on the destination requires admin rights there.
+Promoting a private s9pk keeps it private on the destination with the same keystream and readers, adding any reader key the destination lacks with its label. Promote reads the version from the source with `start-cli registry package version export <PACKAGE_ID> <VERSION>`, which returns the version as JSON with the s9pks you can see and their keystreams; admins and the package's publishers also get each s9pk's reader keys. Registering reader keys on the destination requires admin rights there. A private s9pk promoted by someone who cannot see its readers arrives with none, with a warning; add them on the destination afterwards.
 
 ### Private packages
 

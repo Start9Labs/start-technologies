@@ -335,7 +335,7 @@ export type GetPackageResponseFull = z.output<
 export type PackageInfo = z.output<typeof schemas.PackageInfo>
 
 /**
- * A package version as stored, for promotion to another registry.
+ * A package version as the requester sees it, for promotion to another registry.
  */
 export type PackageVersionExport = z.output<typeof schemas.PackageVersionExport>
 export type Revision = z.output<typeof schemas.Revision>

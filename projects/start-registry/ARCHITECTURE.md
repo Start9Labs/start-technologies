@@ -166,8 +166,8 @@ directory for non-admins. `package.add` decrypts each URL
 with the submitted keystream before verifying it; `add-mirror` uses the stored keystream.
 `RegistryAsset` download helpers decrypt through `KeyStreamSource`. StartOS keeps keystreams in its
 private synced index and strips them from the UI-readable registry cache. `package.version.export` returns a
-stored version unprojected, with the reader-directory entries it lists, to admins and the package's
-publishers. Promotion reads it, forwards each keystream, and registers missing reader keys on the
+version as the requester sees it, with the reader-directory entries it lists for admins and the
+package's publishers. Promotion reads it, forwards each keystream, and registers missing reader keys on the
 destination with their labels. Migration
 `m_05_s9pk_access` removes the earlier package-level policy. Invalid resource proofs retain
 anonymous access to public icons; inaccessible private-only icons return 404.

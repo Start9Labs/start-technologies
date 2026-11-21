@@ -181,15 +181,27 @@ pub async fn cli_promote(
                         ErrorKind::InvalidRequest,
                     ));
                 }
-                (info.s9pks, BTreeMap::new())
+                (info.s9pks, Some(BTreeMap::new()))
             }
         };
     let mut destination_readers = None;
 
     for (_, asset) in &s9pks {
         let mut readers = Vec::new();
-        for id in &asset.readers {
-            readers.push(source_readers.get(id).or_not_found(id)?.clone());
+        match &source_readers {
+            Some(source_readers) => {
+                for id in &asset.readers {
+                    readers.push(source_readers.get(id).or_not_found(id)?.clone());
+                }
+            }
+            None if asset.private.is_some() => tracing::warn!(
+                "{}",
+                t!(
+                    "registry.package.promote.readers-unavailable",
+                    commitment = asset.commitment.root_sighash
+                )
+            ),
+            None => (),
         }
         if !readers.is_empty() {
             let mut registered = match destination_readers.take() {
