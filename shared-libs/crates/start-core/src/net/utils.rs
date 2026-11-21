@@ -95,6 +95,13 @@ pub fn default_keepalive() -> socket2::TcpKeepalive {
         .with_retries(6)
 }
 
+pub(crate) fn set_default_keepalive(stream: &TcpStream) {
+    if let Err(error) = socket2::SockRef::from(stream).set_tcp_keepalive(&default_keepalive()) {
+        tracing::error!("Failed to set tcp keepalive: {error}");
+        tracing::debug!("{error:?}");
+    }
+}
+
 pub async fn load_ip_info() -> Result<BTreeMap<GatewayId, IpInfo>, Error> {
     let output = String::from_utf8(
         Command::new("ip")
@@ -153,7 +160,8 @@ pub(crate) fn is_internal_ip(addr: IpAddr) -> bool {
     let addr = addr.to_canonical();
     addr.is_loopback()
         || addr == IpAddr::V4(crate::HOST_IP.into())
-        || addr == IpAddr::V6(crate::net::forward::START9_BRIDGE_V6_ADDR)
+        || addr == IpAddr::V6(crate::lxc::slot::HOST_IPV6)
+        || crate::lxc::slot::is_os_listen(addr)
 }
 
 pub fn is_private_ip(addr: IpAddr) -> bool {

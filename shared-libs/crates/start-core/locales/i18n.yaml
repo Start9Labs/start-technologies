@@ -1739,13 +1739,6 @@ init.updating-server-info:
   fr_FR: "Mise à jour des informations du serveur"
   pl_PL: "Aktualizowanie informacji o serwerze"
 
-init.launching-service-intranet:
-  en_US: "Launching service intranet"
-  de_DE: "Starte Service-Intranet"
-  es_ES: "Iniciando intranet de servicios"
-  fr_FR: "Lancement de l'intranet de services"
-  pl_PL: "Uruchamianie intranetu usług"
-
 init.validating-database:
   en_US: "Validating database"
   de_DE: "Validiere Datenbank"
@@ -2796,6 +2789,14 @@ net.gateway.no-configured-echoip-urls:
   fr_FR: "Aucune URL echoip configurée"
   pl_PL: "Brak skonfigurowanych adresów URL echoip"
 
+# net/dial.rs
+net.dial.tor-unavailable:
+  en_US: "Cannot reach %{host}: the Tor service is not running"
+  de_DE: "%{host} ist nicht erreichbar: Der Tor-Dienst läuft nicht"
+  es_ES: "No se puede acceder a %{host}: el servicio Tor no está en ejecución"
+  fr_FR: "Impossible de joindre %{host} : le service Tor n'est pas en cours d'exécution"
+  pl_PL: "Nie można połączyć się z %{host}: usługa Tor nie jest uruchomiona"
+
 # net/dns.rs
 net.dns.could-not-determine-source-interface:
   en_US: "Could not determine source interface of %{src}"
@@ -2847,13 +2848,6 @@ lxc.mod.rootfs-not-empty:
   fr_FR: "rootfs n'est pas vide, suppression refusée"
   pl_PL: "rootfs nie jest pusty, odmowa usunięcia"
 
-lxc.mod.dhcp-timeout:
-  en_US: "Timed out waiting for container to acquire DHCP lease"
-  de_DE: "Zeitüberschreitung beim Warten auf DHCP-Lease für Container"
-  es_ES: "Tiempo de espera agotado esperando que el contenedor adquiera lease DHCP"
-  fr_FR: "Délai d'attente dépassé pour l'acquisition du bail DHCP par le conteneur"
-  pl_PL: "Przekroczono limit czasu oczekiwania na uzyskanie dzierżawy DHCP przez kontener"
-
 lxc.mod.command-failed:
   en_US: "Command failed with exit code: %{code}\nMessage: %{message}"
   de_DE: "Befehl mit Exit-Code fehlgeschlagen: %{code}\nNachricht: %{message}"
@@ -2902,6 +2896,13 @@ lxc.mod.cleaned-up-containers:
   es_ES: "Contenedores LXC colgantes limpiados exitosamente"
   fr_FR: "Conteneurs LXC orphelins nettoyés avec succès"
   pl_PL: "Pomyślnie wyczyszczono wiszące kontenery LXC"
+
+lxc.slot.service-limit:
+  en_US: "This server already has the maximum of %{max} services installed"
+  de_DE: "Auf diesem Server ist bereits die Höchstzahl von %{max} Diensten installiert"
+  es_ES: "Este servidor ya tiene instalado el máximo de %{max} servicios"
+  fr_FR: "Ce serveur a déjà le maximum de %{max} services installés"
+  pl_PL: "Na tym serwerze zainstalowano już maksymalną liczbę %{max} usług"
 
 release-notes.welcome-message:
   en_US: "Click \"View details\" for what's new in this release."
@@ -3549,6 +3550,14 @@ service.effects.dependency.volume-missing:
   es_ES: "el volumen %{volume} de %{package} no existe — ¿está instalado %{package}?"
   fr_FR: "le volume %{volume} de %{package} n'existe pas — %{package} est-il installé ?"
   pl_PL: "wolumin %{volume} pakietu %{package} nie istnieje — czy %{package} jest zainstalowany?"
+
+# service/effects/net/info.rs
+service.effects.net.info.container-ip-is-self-only:
+  en_US: "getContainerIp returns the calling service's own address and takes no packageId"
+  de_DE: "getContainerIp gibt die eigene Adresse des aufrufenden Dienstes zurück und akzeptiert keine packageId"
+  es_ES: "getContainerIp devuelve la dirección del propio servicio que llama y no acepta packageId"
+  fr_FR: "getContainerIp renvoie l'adresse du service appelant lui-même et n'accepte pas de packageId"
+  pl_PL: "getContainerIp zwraca adres samej wywołującej usługi i nie przyjmuje packageId"
 
 service.effects.subcontainer.sync.unknown-group:
   en_US: "unknown group: %{group}"
@@ -5366,13 +5375,6 @@ help.arg.socket-path:
   es_ES: "Ruta al socket Unix"
   fr_FR: "Chemin vers le socket Unix"
   pl_PL: "Ścieżka do gniazda Unix"
-
-help.arg.socks-listen-address:
-  en_US: "SOCKS proxy listen address"
-  de_DE: "SOCKS-Proxy-Lausch-Adresse"
-  es_ES: "Dirección de escucha del proxy SOCKS"
-  fr_FR: "Adresse d'écoute du proxy SOCKS"
-  pl_PL: "Adres nasłuchiwania proxy SOCKS"
 
 help.arg.soft-uninstall:
   en_US: "Uninstall without deleting service data"

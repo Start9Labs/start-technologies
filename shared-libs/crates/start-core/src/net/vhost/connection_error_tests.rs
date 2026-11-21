@@ -250,7 +250,7 @@ async fn connections_without_a_transparent_leg_still_reach_the_backend() {
     for (preserve, peer) in [
         (false, Some("198.51.100.1:23456")),
         (true, Some("127.0.0.1:23456")),
-        (true, Some("10.0.3.2:23456")),
+        (true, Some("172.16.0.3:23456")),
         (true, Some("192.168.1.1:23456")),
     ] {
         let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();

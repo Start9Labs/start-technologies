@@ -16,7 +16,7 @@ use crate::net::gateway::{
     check_port_v6,
 };
 use crate::net::host::binding::{DerivedAddressInfo, set_nonssl_lan_group, set_nonssl_wan_group};
-use crate::net::host::{Host, HostApiKind, all_hosts};
+use crate::net::host::{Host, HostApiKind, HostOwner, all_hosts};
 use crate::net::service_interface::HostnameMetadata;
 use crate::net::vhost::ACME_CHALLENGE_PORT;
 use crate::prelude::*;
@@ -56,7 +56,7 @@ fn handle_duplicates(db: &mut DatabaseModel) -> Result<(), Error> {
     };
     let mut not_in_use = Vec::new();
     for host in all_hosts(db) {
-        let host = host?;
+        let (_, host) = host?;
         let in_use = host.as_bindings().de()?.values().any(|v| v.enabled)
             || host.as_binding_ranges().de()?.values().any(|v| v.enabled);
         if !in_use {
@@ -506,7 +506,12 @@ fn configure_public_domain<Kind: HostApiKind>(
     let available_ports = db.as_private().as_available_ports().de()?;
     let host = Kind::host_for(inheritance, db)?;
     // Adding a domain groups addresses by an operator action, which enables them.
-    host.derive_addresses(&hostname, &gateways, &available_ports)?;
+    host.derive_addresses(
+        Kind::owner(inheritance),
+        &hostname,
+        &gateways,
+        &available_ports,
+    )?;
 
     let ext_port = host.mutate(|host| {
         let (target, port) = host.public_domain_target(*internal_port, fqdn)?;
@@ -517,7 +522,12 @@ fn configure_public_domain<Kind: HostApiKind>(
         Ok(port)
     })?;
 
-    host.update_addresses(&hostname, &gateways, &available_ports)?;
+    host.update_addresses(
+        Kind::owner(inheritance),
+        &hostname,
+        &gateways,
+        &available_ports,
+    )?;
     Ok(ext_port)
 }
 
@@ -620,7 +630,12 @@ pub async fn remove_public_domain<Kind: HostApiKind>(
                 .as_gateways()
                 .de()?;
             let ports = db.as_private().as_available_ports().de()?;
-            Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
+            Kind::host_for(&inheritance, db)?.update_addresses(
+                Kind::owner(&inheritance),
+                &hostname,
+                &gateways,
+                &ports,
+            )
         })
         .await
         .result?;
@@ -667,7 +682,7 @@ pub async fn add_private_domain<Kind: HostApiKind>(
                 .de()?;
             let ports = db.as_private().as_available_ports().de()?;
             let host = Kind::host_for(&inheritance, db)?;
-            host.update_addresses(&hostname, &gateways, &ports)?;
+            host.update_addresses(Kind::owner(&inheritance), &hostname, &gateways, &ports)?;
             // A private domain stays on by default, but honor it across the host:
             // on every binding and range, take the private domain (and its LAN
             // group) down where the operator has disabled that binding's private
@@ -685,7 +700,12 @@ pub async fn add_private_domain<Kind: HostApiKind>(
                     }
                     Ok(())
                 })?;
-                Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)?;
+                Kind::host_for(&inheritance, db)?.update_addresses(
+                    Kind::owner(&inheritance),
+                    &hostname,
+                    &gateways,
+                    &ports,
+                )?;
             }
             Ok(())
         })
@@ -716,7 +736,12 @@ pub async fn remove_private_domain<Kind: HostApiKind>(
                 .as_gateways()
                 .de()?;
             let ports = db.as_private().as_available_ports().de()?;
-            Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
+            Kind::host_for(&inheritance, db)?.update_addresses(
+                Kind::owner(&inheritance),
+                &hostname,
+                &gateways,
+                &ports,
+            )
         })
         .await
         .result?;
@@ -978,7 +1003,7 @@ mod test {
             }
             let ports = db.as_private().as_available_ports().de().unwrap();
             package_host(&mut db)
-                .update_addresses(&hostname, &gateways, &ports)
+                .update_addresses(HostOwner::Package, &hostname, &gateways, &ports)
                 .unwrap();
 
             add_domain(&mut db, 8080).unwrap();
@@ -1018,7 +1043,7 @@ mod test {
             .unwrap();
         let ports = db.as_private().as_available_ports().de().unwrap();
         package_host(&mut db)
-            .update_addresses(&hostname, &gateways, &ports)
+            .update_addresses(HostOwner::Package, &hostname, &gateways, &ports)
             .unwrap();
 
         add_domain(&mut db, 8080).unwrap();

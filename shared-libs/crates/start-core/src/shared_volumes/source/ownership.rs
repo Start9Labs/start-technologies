@@ -5,7 +5,8 @@ use std::sync::Arc;
 use super::LocalSubvolume;
 use crate::disk::mount::filesystem::ReadOnly;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
-use crate::lxc::{BASE_IDMAP, unshifted_filesystem};
+use crate::lxc::slot::{ID_RANGE, LEGACY_HOST_ROOT};
+use crate::lxc::unshifted_filesystem;
 use crate::prelude::*;
 use crate::util::btrfs;
 use crate::util::io::Counter;
@@ -19,7 +20,7 @@ pub(crate) async fn migrate_local_ownership(path: &Path) -> Result<(), Error> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error.into()),
     };
-    let shifted = BASE_IDMAP.to_id..BASE_IDMAP.to_id + BASE_IDMAP.range;
+    let shifted = LEGACY_HOST_ROOT..LEGACY_HOST_ROOT + ID_RANGE;
     if !metadata.is_dir()
         || !(shifted.contains(&metadata.uid()) || shifted.contains(&metadata.gid()))
     {

@@ -151,7 +151,7 @@ pub async fn clear_urls(
         .db
         .mutate(|db| {
             for host in all_hosts(db) {
-                let host = host?;
+                let (_, host) = host?;
                 for (_, bind) in host.as_bindings_mut().as_entries_mut()? {
                     bind.as_addresses_mut()
                         .mutate_available(|available: &mut BTreeSet<_>| {

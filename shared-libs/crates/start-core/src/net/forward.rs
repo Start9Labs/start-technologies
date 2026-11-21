@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, SocketAddrV6};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::NetworkInterfaceInfo;
+use crate::lxc::slot::CONTAINER_NET_V6;
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::transport::{Transport, TransportProtocol};
 use crate::prelude::*;
@@ -28,11 +29,7 @@ use crate::util::sync::Watch;
 pub const START9_BRIDGE_IFACE: &str = "lxcbr0";
 /// The host's `ip_local_port_range` ends below this; see `projects/start-os/debian/postinst`.
 const DYNAMIC_PORT_START: u16 = 49152;
-// Reserved by/for host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11
-// forwarding 6010). 9050/9051 are claimable on purpose: they were the 0.3.x
-// host tor daemon's reservation (gone in 0.4.x), and the tor service now binds
-// 9050 without exporting an interface so its SOCKS proxy sits at a stable
-// 10.0.3.1:9050 on the bridge — do not re-restrict them.
+// Held by host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11 forwarding 6010).
 const RESTRICTED_PORTS: &[u16] = &[5353, 5355, 5432, 6010];
 
 /// Only a privileged claimant — StartOS itself, which runs as root — may take a
@@ -361,6 +358,16 @@ pub struct PortForwardController {
 /// separate tables on the shared nf_tables datapath.
 pub const NFT_TABLE: &str = "startos";
 
+pub async fn enable_forwarding() -> Result<(), Error> {
+    Command::new("sysctl")
+        .arg("-w")
+        .arg("net.ipv4.ip_forward=1")
+        .arg("net.ipv6.conf.all.forwarding=1")
+        .invoke(ErrorKind::Network)
+        .await?;
+    Ok(())
+}
+
 /// Ensure `table ip startos` and its base chains exist. Idempotent (nft's `add
 /// table`/`add chain` are no-ops if present). The forward chain defaults to
 /// `drop` (replacing `iptables -P FORWARD DROP`); callers add ACCEPT rules.
@@ -595,7 +602,7 @@ impl PortForwardController {
                 )
                 .await?;
                 // Same for the v6 forward chain (drop policy) so reply packets of
-                // a non-SSL GUA forward aren't dropped.
+                // a non-SSL v6 forward aren't dropped.
                 nft_rule_v6(
                     "forward",
                     "base-established",
@@ -604,16 +611,7 @@ impl PortForwardController {
                     "ct state established,related accept",
                 )
                 .await?;
-                Command::new("sysctl")
-                    .arg("-w")
-                    .arg("net.ipv4.ip_forward=1")
-                    .invoke(ErrorKind::Network)
-                    .await?;
-                Command::new("sysctl")
-                    .arg("-w")
-                    .arg("net.ipv6.conf.all.forwarding=1")
-                    .invoke(ErrorKind::Network)
-                    .await?;
+                enable_forwarding().await?;
                 Ok::<_, Error>(())
             }
             .await
@@ -1074,7 +1072,7 @@ impl InterfacePortForwardController {
         }
     }
 
-    /// DNAT a host GUA to a container ULA (v6 counterpart of a v4 forward) and, for
+    /// DNAT a host IPv6 address to a target's (v6 counterpart of a v4 forward) and, for
     /// a WAN forward (`src_filter == None`), open its upstream firewall pinhole —
     /// so the DNAT and its pinhole are owned together, as in the v4 path.
     /// `gateways` are the PCP candidates for the pinhole (ignored for a LAN-only
@@ -1239,17 +1237,9 @@ async fn unforward(
     Ok(())
 }
 
-/// The lxcbr0 IPv6 bridge subnet (a ULA), assigned by lxc-net (see
-/// `debian/postinst`). Containers get a SLAAC address in it.
-pub(crate) const START9_BRIDGE_V6_SUBNET: &str = "fd00:3::/64";
-
-/// The host's own address on the lxcbr0 bridge, pinned in `debian/postinst`
-/// beside the subnet above. The IPv6 counterpart of [`crate::HOST_IP`].
-pub(crate) const START9_BRIDGE_V6_ADDR: Ipv6Addr = Ipv6Addr::new(0xfd00, 3, 0, 0, 0, 0, 0, 1);
-
-/// IPv6 counterpart of [`forward`]: DNAT `source` (a host GUA:port) to `target`
-/// (the container's ULA:port) via the `forward-port6` script. `src_filter`
-/// restricts inbound to a LAN v6 subnet (a LAN-only GUA); `None` is WAN.
+/// IPv6 counterpart of [`forward`]: DNAT `source` (a host address:port) to `target`
+/// via the `forward-port6` script. `src_filter` restricts inbound to a LAN v6
+/// subnet; `None` is WAN.
 pub(crate) async fn forward6(
     source: SocketAddrV6,
     target: SocketAddrV6,
@@ -1264,7 +1254,7 @@ pub(crate) async fn forward6(
         .env("sport", source.port().to_string())
         .env("dport", target.port().to_string())
         .env("transport", transport.to_string())
-        .env("bridge_subnet", START9_BRIDGE_V6_SUBNET);
+        .env("bridge_subnet", CONTAINER_NET_V6.to_string());
     if let Some(subnet) = src_filter {
         cmd.env("src_subnet", subnet.to_string());
     }

@@ -25,7 +25,7 @@ pub(crate) async fn socks_client(
     use fast_socks5::server::Socks5ServerProtocol;
     use fast_socks5::util::target_addr::TargetAddr;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = crate::context::rpc::ReloadableHttpClient::new(format!(
+    let client = crate::context::rpc::ReloadableHttpClient::through_proxy(&format!(
         "socks5h://{}",
         listener.local_addr().unwrap()
     ))

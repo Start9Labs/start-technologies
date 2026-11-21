@@ -11,7 +11,7 @@ StartOS decides where every packet leaves the server with a ladder of `ip rule` 
 A rule can only match what the lookup carries: the input interface, the source address, the destination, and the packet mark. Three facts about _when_ those are known drive the whole design.
 
 - **A forwarded packet is marked before it is routed.** `mangle_prerouting` runs first, so a container's reply already carries its connection's mark.
-- **A locally generated reply is routed before it is marked.** The kernel routes a SYN-ACK, an ICMP reply, or a RST with mark 0 and only its source address known. `mangle_output` restores the mark afterwards and, being a `type route` chain, routes the packet a second time. If the first lookup fails, the packet is never built and there is nothing to route again.
+- **A locally generated reply is routed before it is marked.** The kernel routes an ICMP reply or a RST with mark 0 and only its source address known. `mangle_output` restores the mark afterwards and, being a `type route` chain, routes the packet a second time. If the first lookup fails, the packet is never built and there is nothing to route again. The gateway coordinator sets `tcp_fwmark_accept`, so a SYN-ACK and every packet of an accepted TCP connection carry the arriving packet's mark from the start, DNAT included.
 - **IPv6 retries a failed lookup with a source address.** When a connection the server opens finds no route, the kernel chooses a source address anyway and looks up again, and that second lookup matches the source rule of whichever gateway owns the address. IPv4 stops at the first failure. A `from <address>` rule is therefore not limited to replies unless something else limits it.
 - **The reverse-path filter routes too.** StartOS keeps Debian's default, `rp_filter=2` on every interface. For every inbound IPv4 packet the kernel looks up the way back, as a local packet from the packet's destination (after DNAT) to its source, and drops the packet if that lookup fails. It uses the packet's mark only where `src_valid_mark=1`. IPv6 has no such filter.
 
@@ -34,15 +34,16 @@ Each name is the label the model prints when that invariant breaks.
 ### Delivery
 
 - **`divert`** — A backend's reply to a source-preserving proxy socket is delivered to that socket, whatever its destination address. The destination is the client's address, which may be on-link, so this outranks every rule that routes by destination. (#3306, #3558)
-- **`specific`** — A destination with a specific route in `main` uses it, whatever the packet's mark, source, or outbound selection. LAN hosts, containers, and VPN peers stay reachable under any selection, including an engaged kill switch, and inbound packets forwarded to a container reach `lxcbr0` even though they carry their gateway's mark. `suppress_prefixlength 0` is what limits this to specific routes. `main` must therefore hold no `throw` route and no reject-type default. (#3911, replacing the route mirror of #3117)
+- **`specific`** — A destination with a specific route in `main` uses it, whatever the packet's mark, source, or outbound selection. LAN hosts, containers, and VPN peers stay reachable under any selection, including an engaged kill switch, and inbound packets forwarded to a container reach its veth even though they carry their gateway's mark. `suppress_prefixlength 0` is what limits this to specific routes. `main` must therefore hold no `throw` route and no reject-type default. (#3911, replacing the route mirror of #3117)
 
 ### Connection affinity
 
-A connection that arrived through a gateway is answered through that gateway, and no outbound selection or rejection may interfere. Nothing on an inbound path is NATed, so the client's address survives and the reply has to find its own way back. (#3117, #3234)
+A connection that arrived through a gateway is answered through that gateway, and no outbound selection or rejection may interfere. Nothing on an inbound path rewrites the client's address, so the reply has to find its own way back. (#3117, #3234)
 
 - **`reply-forwarded`** — A container's reply, marked in prerouting, takes its gateway's table.
 - **`reply-marked`** — A local reply, once `mangle_output` has restored its mark, takes its gateway's table. (#3307)
-- **`reply-unmarked`** — A local reply's first, unmarked lookup succeeds through the gateway that owns its source address. Without this the lookup falls into whatever comes later in the ladder: into a `blackhole default` (#3632) or into a kill-switch rejection (#4006), and the SYN-ACK is never sent. Every address of a gateway but a link-local one has a source rule, in both families. The rule matches mark zero so the repeated lookup of a newly marked outbound connection cannot use it.
+- **`reply-unmarked`** — A local reply's first, unmarked lookup succeeds through the gateway that owns its source address. Without this the lookup falls into whatever comes later in the ladder: into a `blackhole default` (#3632) or into a kill-switch rejection (#4006), and the reply is never sent. Every address of a gateway but a link-local one has a source rule, in both families. The rule matches mark zero so the repeated lookup of a newly marked outbound connection cannot use it, and `iif lo` so a forwarded packet claiming that source cannot either.
+- **`os-listen-reply-unmarked`** — A local reply from an OS listen address (`OS_LISTEN_IP`, `OS_LISTEN_IPV6`), which a forward DNATs gateway traffic to, gets its first, unmarked lookup through `main`, even under a kill switch. It holds no gateway address, so a source rule of its own at the same priority looks up `main`. `mangle_output` then restores the connection mark, and the repeated lookup obeys connection affinity. A connection the server opens from that address carries the local outbound mark and obeys the selection, and a forwarded packet claiming that source obeys its service's selection and kill switch.
 - **`reverse-path`** — The reverse-path lookup for an inbound packet succeeds through the gateway it arrived on. A packet forwarded to a container has the container's address as the source of that lookup, which an engaged kill switch rejects, so the lookup must carry the connection mark and use the reply rule. That takes two things: the first packet of a connection carries the mark, not only the conntrack entry, and each gateway interface sets `src_valid_mark=1`. It is set per interface because on `all` it would validate a diverted reply against its local-delivery route and drop it as a martian. (#4006)
 - **`tunnel-reply`** — A reply to a global IPv6 destination that arrived through a WireGuard gateway returns through the tunnel even when `main` has an on-link route to the client. IPv6 has no NAT, so a client on the server's own LAN arrives with an on-link address; answered directly, the tunnel server's conntrack never sees the handshake complete and drops the rest. This is the one exception to `specific`, and it is confined three ways: mark-keyed, because a forwarded reply's source is the container's; `to 2000::/3`, because inbound packets carry the mark too and those bound for a container's ULA must still reach `main`; and WireGuard-only, because a LAN table's default would send an on-link reply through the router. (#3996)
 
@@ -62,21 +63,22 @@ A connection that arrived through a gateway is answered through that gateway, an
 
 Both families carry every rule unless noted.
 
-| Priority | Rule                                          | Installed                                  | Serves                                     |
-| -------- | --------------------------------------------- | ------------------------------------------ | ------------------------------------------ |
-| 48       | `fwmark T to 2000::/3 lookup T` (IPv6)        | per WireGuard gateway that carries IPv6    | `tunnel-reply`                             |
-| 49       | `fwmark 0x540001 lookup 5344`                 | always                                     | `divert`                                   |
-| 50       | `lookup main suppress_prefixlength 0`         | always                                     | `specific`                                 |
-| 51       | `fwmark T lookup T`                           | per gateway                                | replies, `reverse-path`                    |
-| 60       | `from <address> fwmark 0 lookup T`            | per gateway address                        | `reply-unmarked`, `local-outbound`         |
-| 70       | `from <container> lookup T`                   | per address of a pinned service            | `service-selection`, `service-over-system` |
-| 71       | `from <container> unreachable`                | with 70                                    | `service-kill-switch`                      |
-| 74       | `fwmark <wg fwmark> lookup main`              | per tunnel, while a gateway is selected    | `wg-transport`                             |
-| 75       | `lookup T`                                    | while the selected gateway's device exists | `system-selection`                         |
-| 76       | `unreachable`                                 | while a gateway is selected                | `system-kill-switch`                       |
-| 1000     | `lookup main`                                 | always                                     | `auto`                                     |
-| 1100     | `lookup default`                              | always                                     | `auto`                                     |
-| ~30000   | NetworkManager's per-tunnel full-tunnel rules | by NetworkManager                          | never reached                              |
+| Priority | Rule                                           | Installed                                  | Serves                                     |
+| -------- | ---------------------------------------------- | ------------------------------------------ | ------------------------------------------ |
+| 48       | `fwmark T to 2000::/3 lookup T` (IPv6)         | per WireGuard gateway that carries IPv6    | `tunnel-reply`                             |
+| 49       | `fwmark 0x540001 lookup 5344`                  | always                                     | `divert`                                   |
+| 50       | `lookup main suppress_prefixlength 0`          | always                                     | `specific`                                 |
+| 51       | `fwmark T lookup T`                            | per gateway                                | replies, `reverse-path`                    |
+| 60       | `from <address> iif lo fwmark 0 lookup T`      | per gateway address                        | `reply-unmarked`, `local-outbound`         |
+| 60       | `from <OS listen> iif lo fwmark 0 lookup main` | per family                                 | `os-listen-reply-unmarked`                 |
+| 70       | `from <container> lookup T`                    | per address of a pinned service            | `service-selection`, `service-over-system` |
+| 71       | `from <container> unreachable`                 | with 70                                    | `service-kill-switch`                      |
+| 74       | `fwmark <wg fwmark> lookup main`               | per tunnel, while a gateway is selected    | `wg-transport`                             |
+| 75       | `lookup T`                                     | while the selected gateway's device exists | `system-selection`                         |
+| 76       | `unreachable`                                  | while a gateway is selected                | `system-kill-switch`                       |
+| 1000     | `lookup main`                                  | always                                     | `auto`                                     |
+| 1100     | `lookup default`                               | always                                     | `auto`                                     |
+| ~30000   | NetworkManager's per-tunnel full-tunnel rules  | by NetworkManager                          | never reached                              |
 
 ### Why this order
 
@@ -88,7 +90,7 @@ Two rules need an order only when some packet can match both and they would send
 | 49 divert            | 50, 70–71, 75–76, 1000 | `divert`: a diverted reply has a container's source and any destination, so every one of these matches it.                           |
 | 50 main              | 51, 60, 70–71, 75–76   | `specific`: each of these looks up a table that holds only a default, or rejects.                                                    |
 | 51 reply mark        | 70–71, 75–76, 1000     | Connection affinity: a container's marked reply also matches its service rules, and every marked reply matches the system-wide ones. |
-| 60 source address    | 75–76, 1000            | `reply-unmarked`. It never meets 70–71: their sources are containers'.                                                               |
+| 60 source address    | 75–76, 1000            | `reply-unmarked`, `os-listen-reply-unmarked`. It never meets 70–71: their sources are containers', and it matches local origin only. |
 | 70 service lookup    | 71, 75–76, 1000        | `service-selection`, `service-over-system`.                                                                                          |
 | 71 service rejection | 75, 1000               | `service-kill-switch`: a service whose gateway is gone must not fall to the system-wide selection or to `main`.                      |
 | 74 WireGuard fwmark  | 75–76                  | `wg-transport`.                                                                                                                      |
@@ -111,7 +113,7 @@ A rejection must never precede 51 or 60. A terminal blackhole at priority 1200 w
 
 A lookup is installed before the rejection that backs it and removed after it, so switching a selection on or off never leaves the rejection as the only match. A lookup that fails to install still gets its rejection. A selection that moves to another gateway adds the new lookup before deleting the old one: equal priorities evaluate in insertion order, so the old rule keeps routing until it is gone (#4005).
 
-Tables are written with `ip route replace`, never flushed and refilled (#3133). Nothing is cleaned up when an interface's watcher stops; `gc_policy_routing` removes the rules and tables of interfaces that no longer exist, finding them through priorities 51 and 60 (#2867). A reply rule found at the wrong priority is deleted. Kernel state does not survive a reboot and every OS update reboots, so no migration of old rules is carried.
+Tables are written with `ip route replace`, never flushed and refilled (#3133). Nothing is cleaned up when an interface's watcher stops; `gc_policy_routing` removes the rules and tables of interfaces that no longer exist, finding them through priorities 51 and 60 (#2867); it leaves the OS listen source rules alone, since `main` is no gateway's table. A reply rule found at the wrong priority is deleted. Kernel state does not survive a reboot and every OS update reboots, so no migration of old rules is carried.
 
 The mangle chains have one writer, the gateway coordinator, which rebuilds them in a single transaction (#3298). `mangle_output` restores the connection mark and then jumps to `mangle_local_outbound`, a chain of its own so that its one writer, the default-outbound reconciler, never races the coordinator. That chain starts marking before a selection's rules are installed and stops after they are removed. `restore-mark` acts only on an unmarked packet. The divert mark is set only in prerouting and only on a packet that matches a transparent socket; it never touches the connection mark or the output chain (#3306).
 

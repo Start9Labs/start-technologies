@@ -1,34 +1,32 @@
 use crate::disk::mount::filesystem::FileSystem;
 use crate::disk::mount::filesystem::idmapped::{IdMap, IdMapped};
+use crate::lxc::slot::{ID_RANGE, LEGACY_HOST_ROOT};
 
-pub(crate) const BASE_IDMAP: IdMap = IdMap {
-    from_id: 0,
-    to_id: 100000,
-    range: 65536,
-};
-
-/// Service views apply the LXC base map, followed by package-supplied remaps.
+/// Service views apply the container's base map, followed by package-supplied remaps.
 /// Raw filesystem owners remain unshifted on disk.
-pub(crate) fn service_filesystem<F: FileSystem>(filesystem: F, custom: &[IdMap]) -> IdMapped<F> {
-    IdMapped::new(filesystem, service_idmap(custom))
+pub(crate) fn service_filesystem<F: FileSystem>(
+    filesystem: F,
+    base: IdMap,
+    custom: &[IdMap],
+) -> IdMapped<F> {
+    IdMapped::new(filesystem, service_idmap(base, custom))
 }
 
-/// Removes the LXC offset from a service-owned filesystem view.
+/// Removes the legacy shared container offset from a filesystem view.
 pub(crate) fn unshifted_filesystem<F: FileSystem>(filesystem: F) -> IdMapped<F> {
     IdMapped::new(
         filesystem,
         vec![IdMap {
-            from_id: BASE_IDMAP.to_id,
-            to_id: BASE_IDMAP.from_id,
-            range: BASE_IDMAP.range,
+            from_id: LEGACY_HOST_ROOT,
+            to_id: 0,
+            range: ID_RANGE,
         }],
     )
 }
 
 // Re-idmapping replaces the source map; layered remaps require one composed map.
 // Explicit remaps win collisions; ties preserve the lowest on-disk ID.
-fn service_idmap(custom: &[IdMap]) -> Vec<IdMap> {
-    let base = BASE_IDMAP;
+fn service_idmap(base: IdMap, custom: &[IdMap]) -> Vec<IdMap> {
     if custom.is_empty() {
         return vec![base];
     }
@@ -91,6 +89,12 @@ fn service_idmap(custom: &[IdMap]) -> Vec<IdMap> {
 mod tests {
     use super::*;
 
+    const BASE_IDMAP: IdMap = IdMap {
+        from_id: 0,
+        to_id: 100000,
+        range: 65536,
+    };
+
     fn idmap(from_id: u32, to_id: u32, range: u32) -> IdMap {
         IdMap {
             from_id,
@@ -101,13 +105,13 @@ mod tests {
 
     #[test]
     fn empty_custom_is_just_the_base_map() {
-        assert_eq!(service_idmap(&[]), vec![BASE_IDMAP]);
+        assert_eq!(service_idmap(BASE_IDMAP, &[]), vec![BASE_IDMAP]);
     }
 
     #[test]
     fn override_is_layered_on_top_of_the_base_map() {
         assert_eq!(
-            service_idmap(&[idmap(0, 1000, 1)]),
+            service_idmap(BASE_IDMAP, &[idmap(0, 1000, 1)]),
             vec![
                 idmap(0, 101000, 1),
                 idmap(1, 100001, 999),
@@ -119,7 +123,7 @@ mod tests {
     #[test]
     fn chaining_idmaps_compose_sequentially() {
         let custom = [idmap(0, 1000, 1), idmap(1000, 2000, 1)];
-        let flat = service_idmap(&custom);
+        let flat = service_idmap(BASE_IDMAP, &custom);
         assert_eq!(apply(&flat, 0), Some(102000));
         assert_eq!(apply(&flat, 5), Some(100005));
         assert_eq!(compose_ref(&custom, 1000), Some(102000));
@@ -168,7 +172,7 @@ mod tests {
             custom in proptest::collection::vec((0u32..60_000, 0u32..60_000, 1u32..2_000), 0..4usize),
         ) {
             let custom: Vec<IdMap> = custom.into_iter().map(|(f, t, r)| idmap(f, t, r)).collect();
-            let flat = service_idmap(&custom);
+            let flat = service_idmap(BASE_IDMAP, &custom);
 
             proptest::prop_assert!(is_valid_uid_map(&flat), "invalid uid_map: {flat:?}");
 

@@ -14,4 +14,5 @@ sed -i '/\(^\|#\)ForwardToSyslog=/c\ForwardToSyslog=no' /etc/systemd/journald.co
 
 systemctl enable container-runtime.service
 
-echo "nameserver 10.0.3.1" > /etc/resolv.conf
+# LXC configures eth0's static address and routes; networkd would replace them.
+rm -f /etc/systemd/network/*.network

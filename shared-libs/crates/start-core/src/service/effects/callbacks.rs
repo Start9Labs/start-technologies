@@ -221,7 +221,6 @@ struct ServiceCallbackMap {
         (BTreeSet<InternedString>, FullchainCertData, Algorithm),
         (NonDetachingJoinHandle<()>, Vec<CallbackHandler>),
     >,
-    get_container_ip: BTreeMap<PackageId, Vec<CallbackHandler>>,
     get_outbound_gateway: BTreeMap<PackageId, (NonDetachingJoinHandle<()>, Vec<CallbackHandler>)>,
 }
 
@@ -354,25 +353,6 @@ impl ServiceCallbacks {
         handler: CallbackHandler,
     ) {
         self.get_status.add(package_id, watch, handler);
-    }
-
-    pub(super) fn add_get_container_ip(&self, package_id: PackageId, handler: CallbackHandler) {
-        self.mutate(|this| {
-            this.get_container_ip
-                .entry(package_id)
-                .or_default()
-                .push(handler)
-        })
-    }
-
-    #[must_use]
-    pub fn get_container_ip(&self, package_id: &PackageId) -> Option<CallbackHandlers> {
-        self.mutate(|this| {
-            this.get_container_ip
-                .remove(package_id)
-                .map(CallbackHandlers)
-                .filter(|cb| !cb.0.is_empty())
-        })
     }
 
     /// Register a callback for outbound gateway changes.

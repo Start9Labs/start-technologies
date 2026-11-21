@@ -18,7 +18,7 @@ fn options() -> BindOptions {
 
 #[test]
 fn unproxied_service_tls_preserves_source_for_termination_rewrap_and_passthrough() {
-    let address = "10.0.3.2:8080".parse().unwrap();
+    let address = "172.16.0.3:8080".parse().unwrap();
     let address_v6 = Some("[fd00::2]:8080".parse().unwrap());
     for (add_ssl, secure) in [(true, None), (true, Some(true)), (false, Some(true))] {
         let mut options = options();
@@ -30,8 +30,18 @@ fn unproxied_service_tls_preserves_source_for_termination_rewrap_and_passthrough
         assert!(target.preserve_source_ip);
         assert_eq!(target.passthrough, !add_ssl);
         assert!(
-            !binding_proxy_target(&options, "127.0.0.1:80".parse().unwrap(), None, None)
-                .preserve_source_ip
+            !binding_proxy_target(
+                &options,
+                (crate::lxc::slot::OS_LISTEN_IP, 80).into(),
+                Some(SocketAddrV6::new(
+                    crate::lxc::slot::OS_LISTEN_IPV6,
+                    80,
+                    0,
+                    0
+                )),
+                None,
+            )
+            .preserve_source_ip
         );
         if add_ssl {
             options.proxy = Some(ProxyOptions::Http {
@@ -58,7 +68,7 @@ fn plaintext_http_exposure_keeps_internal_and_explicit_private_addresses() {
     let gateway: GatewayId = "eth0".parse().unwrap();
     let ip: IpAddr = "192.0.2.10".parse().unwrap();
     let bridge = row(
-        "10.0.3.1",
+        "172.16.0.1",
         8080,
         false,
         false,
@@ -128,7 +138,8 @@ fn plaintext_http_exposure_keeps_internal_and_explicit_private_addresses() {
         )]
         .into_iter()
         .collect();
-        let target = binding_proxy_target(&options(), "10.0.3.2:8080".parse().unwrap(), None, None);
+        let target =
+            binding_proxy_target(&options(), "172.16.0.3:8080".parse().unwrap(), None, None);
         let target = plaintext_http_target(
             target,
             8080,
@@ -137,7 +148,7 @@ fn plaintext_http_exposure_keeps_internal_and_explicit_private_addresses() {
             &requirements,
         );
         let expected = BTreeSet::from([
-            "10.0.3.1".parse::<IpAddr>().unwrap(),
+            "172.16.0.1".parse::<IpAddr>().unwrap(),
             "127.0.0.1".parse().unwrap(),
             ip,
         ]);
@@ -208,7 +219,8 @@ fn plaintext_http_public_scope_is_per_family_and_private_domains_keep_their_lan_
         BTreeSet::from([&ipv4]),
         BTreeSet::from([&private]),
     ] {
-        let target = binding_proxy_target(&options(), "10.0.3.2:8080".parse().unwrap(), None, None);
+        let target =
+            binding_proxy_target(&options(), "172.16.0.3:8080".parse().unwrap(), None, None);
         let target = plaintext_http_target(target, 8080, &addresses, &interfaces, &requirements);
         if addresses.contains(&gua) {
             assert_eq!(

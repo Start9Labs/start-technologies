@@ -11,8 +11,19 @@ use std::ffi::OsString;
 
 use crate::disk::mount::filesystem::syscall::unshare_userns_main;
 
-pub fn main(_args: VecDeque<OsString>) {
-    if let Err(e) = unshare_userns_main() {
+pub fn main(args: VecDeque<OsString>) {
+    let owner = match args
+        .get(1)
+        .map(|owner| owner.to_string_lossy().parse::<u32>())
+    {
+        None => None,
+        Some(Ok(owner)) => Some(owner),
+        Some(Err(e)) => {
+            eprintln!("unshare-userns: owner: {e}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = unshare_userns_main(owner) {
         eprintln!("unshare-userns: {e}");
         std::process::exit(1);
     }

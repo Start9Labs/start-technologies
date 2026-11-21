@@ -907,7 +907,7 @@ mod tests {
             ("0.4.1.3", "0.4.2", 0),
             ("0.4.2", "0.4.2.1", 2),
             ("0.4.2.1", "0.4.2.2", 0),
-            ("0.4.2.2", "0.4.3", 3),
+            ("0.4.2.2", "0.4.3", 4),
         ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
@@ -944,7 +944,14 @@ mod tests {
                 1
             );
             assert_eq!(applied_migration_revision(&mut db).unwrap(), revision);
-            assert_eq!(db["public"]["packageData"], packages);
+            let mut migrated = packages.clone();
+            if to == "0.4.3" {
+                migrated["service"]
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("containerSlot".into(), json!(0));
+            }
+            assert_eq!(db["public"]["packageData"], migrated);
             rollback_to_unchecked(&current, &previous, &mut db).unwrap();
             assert_eq!(db["public"]["serverInfo"]["version"], json!(from));
             assert_eq!(db["public"]["packageData"], packages);

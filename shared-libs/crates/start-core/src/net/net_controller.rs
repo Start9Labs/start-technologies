@@ -17,19 +17,19 @@ use tracing::instrument;
 use crate::db::model::Database;
 use crate::db::model::public::NetworkInterfaceInfo;
 use crate::hostname::ServerHostname;
+use crate::lxc::slot::{OS_LISTEN_IP, OS_LISTEN_IPV6, VETH_PREFIX, is_os_listen};
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
-    ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, nft_rule, nft_rule_v6,
+    ForwardRequirements, InterfacePortForwardController, nft_rule, nft_rule_v6,
 };
 use crate::net::gateway::{NetworkInterfaceController, WildcardListener};
 use crate::net::host::binding::{BindId, BindOptions, UpstreamCertValidation};
-use crate::net::host::{Host, Hosts, host_for, host_for_existing};
+use crate::net::host::{Host, HostOwner, Hosts, host_for, host_for_existing};
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::service_interface::{
     AddressInfo, HostnameInfo, HostnameMetadata, ServiceInterface, ServiceInterfaceType,
 };
-use crate::net::socks::SocksController;
 use crate::net::transport::Transport;
 use crate::net::vhost::{DynVHostTarget, PlainHttpProxy, ProxyTarget, VHostController, VHostKey};
 use crate::net::web_server::WebServerAcceptorSetter;
@@ -44,6 +44,11 @@ use crate::{GatewayId, HOST_IP, HostId, Id, OptionExt, PackageId, ServiceInterfa
 #[cfg(test)]
 #[path = "net_controller/http_proxy_tests.rs"]
 mod http_proxy_tests;
+
+/// Accepts a container's new connections unless they target another container.
+fn container_egress() -> String {
+    format!("iifname \"{VETH_PREFIX}*\" oifname != \"{VETH_PREFIX}*\" ct state new accept")
+}
 
 pub struct NetController {
     pub(crate) db: TypedPatchDb<Database>,
@@ -64,8 +69,19 @@ pub struct NetController {
     _mdns_injection: NonDetachingJoinHandle<()>,
     pub(super) forward: InterfacePortForwardController,
     pub(crate) port_map: PortMapController,
-    pub(super) _socks: SocksController,
     pub(crate) callbacks: Arc<ServiceCallbacks>,
+    _ui_listen: UiListenGuard,
+}
+
+/// Returns the UI listener to the wildcard once the forwards reaching the OS listen addresses
+/// are gone.
+struct UiListenGuard(Watch<WildcardListener>);
+impl Drop for UiListenGuard {
+    fn drop(&mut self) {
+        self.0
+            .send_modify(WildcardListener::serve_wildcard)
+            .log_err();
+    }
 }
 
 impl NetController {
@@ -73,13 +89,16 @@ impl NetController {
         db: TypedPatchDb<Database>,
         dns: Arc<DnsController>,
         webserver: &WebServerAcceptorSetter<WildcardListener>,
-        socks_listen: SocketAddr,
         max_proxy_conns_per_target: usize,
     ) -> Result<Self, Error> {
+        crate::lxc::network::ensure().await?;
         let net_iface = Arc::new(NetworkInterfaceController::new(db.clone()));
         dns.activate(net_iface.clone());
-        webserver.send_modify(|listener| listener.set_ip_info(net_iface.watcher.subscribe()));
-        let socks = SocksController::new(socks_listen)?;
+        webserver.send_modify(|listener| {
+            listener.set_ip_info(net_iface.watcher.subscribe());
+            listener.serve_os_listen()
+        })?;
+        let ui_listen = UiListenGuard((**webserver).clone());
         let crypto_provider = Arc::new(tokio_rustls::rustls::crypto::ring::default_provider());
         let tls_client_config = Arc::new(crate::net::tls::client_config(
             crypto_provider.clone(),
@@ -98,18 +117,18 @@ impl NetController {
         )?);
         nft_rule(
             "forward",
-            "lxcbr0-egress",
+            "container-egress",
             false,
             false,
-            &format!("iifname \"{START9_BRIDGE_IFACE}\" ct state new accept"),
+            &container_egress(),
         )
         .await?;
         nft_rule_v6(
             "forward",
-            "lxcbr0-egress",
+            "container-egress",
             false,
             false,
-            &format!("iifname \"{START9_BRIDGE_IFACE}\" ct state new accept"),
+            &container_egress(),
         )
         .await?;
         let peek = db.peek().await;
@@ -168,8 +187,8 @@ impl NetController {
             ),
             port_map,
             net_iface,
-            _socks: socks,
             callbacks: Arc::new(ServiceCallbacks::default()),
+            _ui_listen: ui_listen,
         })
     }
 
@@ -237,8 +256,8 @@ impl NetController {
 
         let service = NetService::new(NetServiceData {
             id: None,
-            ip: [127, 0, 0, 1].into(),
-            ipv6: None,
+            ip: OS_LISTEN_IP,
+            ipv6: Some(OS_LISTEN_IPV6),
             _dns: dns,
             controller: Arc::downgrade(self),
             binds: BTreeMap::new(),
@@ -426,7 +445,7 @@ fn binding_proxy_target(
         connect_ssl,
         alpn: options.add_ssl.as_ref().and_then(|ssl| ssl.alpn.clone()),
         passthrough: options.serves_own_tls(),
-        preserve_source_ip: !addr.ip().is_loopback() && options.proxy.is_none(),
+        preserve_source_ip: !is_os_listen(addr.ip()) && options.proxy.is_none(),
     }
 }
 
@@ -517,18 +536,16 @@ struct HostBinds {
     forwards: BTreeMap<u16, (SocketAddrV4, u16, ForwardRequirements, Arc<()>)>,
     vhosts: BTreeMap<VHostKey, (ProxyTarget, ProxyHandle)>,
     private_dns: BTreeMap<InternedString, Arc<()>>,
-    /// Directly-forwarded v6: `(host GUA, external port) -> (container v6,
-    /// internal port, LAN source filter)`. A GUA on a port no listener of ours
-    /// answers is DNAT'd to the container (see `forward6`); tracked so a stale
-    /// forward is torn down when the GUA's exposure or target changes.
-    gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>, Transport)>,
+    /// Directly-forwarded v6: `(host address, external port) -> (target v6,
+    /// internal port, LAN source filter)`, DNAT'd by `forward6`; tracked so a stale
+    /// forward is torn down when the address's exposure or target changes.
+    v6_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>, Transport)>,
 }
 
 pub struct NetServiceData {
     id: Option<PackageId>,
     ip: Ipv4Addr,
-    /// The container's SLAAC ULA, DNAT target for a non-SSL GUA forward. `None`
-    /// until the container has a v6 (or for the OS's own bindings).
+    /// DNAT target for a non-SSL GUA forward.
     ipv6: Option<Ipv6Addr>,
     _dns: Arc<()>,
     controller: Weak<NetController>,
@@ -552,7 +569,7 @@ impl NetServiceData {
         // Non-SSL v6 DNAT forwards to the container — net_controller's concern (no
         // vhost owns them), but the forward controller opens their upstream pinhole
         // together with the DNAT (see the reconcile below).
-        let mut gua_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>, Transport)> =
+        let mut v6_forwards: BTreeMap<(Ipv6Addr, u16), (Ipv6Addr, u16, Option<IpNet>, Transport)> =
             BTreeMap::new();
         let binds = self.binds.entry(id.clone()).or_default();
 
@@ -568,7 +585,7 @@ impl NetServiceData {
                 continue;
             }
             // A binding with no exported interface is internal-only: it forwards
-            // to lo / lxcbr0 but never to a gateway (see `enabled_addresses`).
+            // to lo / the container network but never to a gateway (see `enabled_addresses`).
             let enabled_addresses = bind.enabled_addresses();
             let addr: SocketAddr = (self.ip, *port).into();
             // The container's bridge v6, for the source-preserving leg of a v6 client.
@@ -733,23 +750,20 @@ impl NetServiceData {
                     );
                     continue;
                 }
-                // Loopback DNAT is martian-dropped on ingress.
-                if !self.ip.is_loopback() {
-                    forwards.insert(
-                        external,
-                        (SocketAddrV4::new(self.ip, *port), 1, requirements.clone()),
-                    );
-                }
+                forwards.insert(
+                    external,
+                    (SocketAddrV4::new(self.ip, *port), 1, requirements.clone()),
+                );
 
                 // No listener of ours answers here, so DNAT the host's
-                // GUA:external to the container's v6:internal. A LAN-only GUA is
+                // v6:external to the target's v6:internal. A LAN address is
                 // source-restricted to its on-link subnet; a LAN+WAN GUA is
-                // unrestricted. Fail closed: skip a LAN-only GUA whose subnet we
+                // unrestricted. Fail closed: skip a LAN address whose subnet we
                 // can't determine rather than expose it unrestricted.
                 if let Some(container_v6) = self.ipv6 {
                     for a in enabled_addresses.iter() {
                         // A vhost's port is its listener's; DNAT only this one.
-                        let Some(gua) = a.gua().filter(|g| g.port() == external) else {
+                        let Some(source) = a.forwarded_v6().filter(|g| g.port() == external) else {
                             continue;
                         };
                         // Secure only when the underlying protocol is itself secure —
@@ -766,7 +780,7 @@ impl NetServiceData {
                                 .filter_map(|gw| net_ifaces.get(gw))
                                 .filter_map(|info| info.ip_info.as_ref())
                                 .flat_map(|ip| ip.subnets.iter())
-                                .find(|s| s.contains(&IpAddr::V6(*gua.ip())))
+                                .find(|s| s.contains(&IpAddr::V6(*source.ip())))
                                 .copied()
                             {
                                 Some(subnet) => Some(subnet),
@@ -777,8 +791,8 @@ impl NetServiceData {
                         // container — no vhost owns a non-TLS port. The forward
                         // controller opens its upstream pinhole together with the
                         // DNAT (see the reconcile below).
-                        gua_forwards.insert(
-                            (*gua.ip(), gua.port()),
+                        v6_forwards.insert(
+                            (*source.ip(), source.port()),
                             (
                                 container_v6,
                                 *port,
@@ -804,7 +818,7 @@ impl NetServiceData {
                 continue;
             }
             // A range with no exported interface is internal-only: it forwards
-            // to lo / lxcbr0 but never to a gateway (see `enabled_addresses`).
+            // to lo / the container network but never to a gateway (see `enabled_addresses`).
             let enabled_addresses = range.enabled_addresses();
 
             for addr_info in &enabled_addresses {
@@ -863,14 +877,14 @@ impl NetServiceData {
         // then install new/changed ones. The forward controller owns each forward's
         // DNAT *and* its upstream pinhole (WAN forwards only), just like the v4 path.
         // Best-effort — a nft failure on one forward is logged, not fatal.
-        for (key, spec) in &binds.gua_forwards {
-            if gua_forwards.get(key) != Some(spec) {
-                let &(gua, ext) = key;
+        for (key, spec) in &binds.v6_forwards {
+            if v6_forwards.get(key) != Some(spec) {
+                let &(source, ext) = key;
                 let (tgt, int, src, transport) = spec.clone();
                 if let Err(e) = ctrl
                     .forward
                     .unforward6(
-                        SocketAddrV6::new(gua, ext, 0, 0),
+                        SocketAddrV6::new(source, ext, 0, 0),
                         SocketAddrV6::new(tgt, int, 0, 0),
                         64,
                         src.clone(),
@@ -878,14 +892,14 @@ impl NetServiceData {
                     )
                     .await
                 {
-                    tracing::error!("failed to remove v6 forward [{gua}]:{ext}: {e}");
+                    tracing::error!("failed to remove v6 forward [{source}]:{ext}: {e}");
                     tracing::debug!("{e:?}");
                 }
             }
         }
-        for (key, spec) in &gua_forwards {
-            if binds.gua_forwards.get(key) != Some(spec) {
-                let &(gua, ext) = key;
+        for (key, spec) in &v6_forwards {
+            if binds.v6_forwards.get(key) != Some(spec) {
+                let &(source, ext) = key;
                 let (tgt, int, src, transport) = spec.clone();
                 // PCP candidates for the pinhole (only used for a WAN forward).
                 let gateways: Vec<(IpAddr, Option<u32>)> = if src.is_none() {
@@ -894,7 +908,7 @@ impl NetServiceData {
                         .map(|(_, i)| i)
                         .find(|info| {
                             info.ip_info.as_ref().map_or(false, |i| {
-                                i.subnets.iter().any(|s| s.addr() == IpAddr::V6(gua))
+                                i.subnets.iter().any(|s| s.addr() == IpAddr::V6(source))
                             })
                         })
                         .map(|info| {
@@ -910,7 +924,7 @@ impl NetServiceData {
                 if let Err(e) = ctrl
                     .forward
                     .forward6(
-                        SocketAddrV6::new(gua, ext, 0, 0),
+                        SocketAddrV6::new(source, ext, 0, 0),
                         SocketAddrV6::new(tgt, int, 0, 0),
                         64,
                         src.clone(),
@@ -919,12 +933,14 @@ impl NetServiceData {
                     )
                     .await
                 {
-                    tracing::error!("failed to add v6 forward [{gua}]:{ext} -> [{tgt}]:{int}: {e}");
+                    tracing::error!(
+                        "failed to add v6 forward [{source}]:{ext} -> [{tgt}]:{int}: {e}"
+                    );
                     tracing::debug!("{e:?}");
                 }
             }
         }
-        binds.gua_forwards = gua_forwards;
+        binds.v6_forwards = v6_forwards;
 
         // ── Phase 3: Reconcile ──
         let all = binds
@@ -1422,12 +1438,12 @@ impl NetService {
                 let host = host_for(db, &pkg_id, &id)?;
                 let is_new = !host.as_bindings().contains_key(&internal_port)?;
                 host.add_binding(&mut ports, internal_port, options, privileged)?;
-                host.update_addresses(&hostname, &gateways, &ports)?;
+                host.update_addresses(HostOwner::of(&pkg_id), &hostname, &gateways, &ports)?;
                 // Isolate a newly-bound binding from any pre-existing public
                 // domain on this host, then re-derive so port forwards match.
                 if is_new {
                     host.reconcile_public_domains_on_new_binding(internal_port)?;
-                    host.update_addresses(&hostname, &gateways, &ports)?;
+                    host.update_addresses(HostOwner::of(&pkg_id), &hostname, &gateways, &ports)?;
                 }
                 db.as_private_mut().as_available_ports_mut().ser(&ports)?;
                 Ok(())
@@ -1475,12 +1491,12 @@ impl NetService {
                     privileged,
                     transport,
                 )?;
-                host.update_addresses(&hostname, &gateways, &ports)?;
+                host.update_addresses(HostOwner::of(&pkg_id), &hostname, &gateways, &ports)?;
                 // Isolate a newly-bound range from any pre-existing public domain
                 // on this host, then re-derive so port forwards match.
                 if is_new {
                     host.reconcile_public_domains_on_new_range(internal_start_port)?;
-                    host.update_addresses(&hostname, &gateways, &ports)?;
+                    host.update_addresses(HostOwner::of(&pkg_id), &hostname, &gateways, &ports)?;
                 }
                 db.as_private_mut().as_available_ports_mut().ser(&ports)?;
                 Ok(())
@@ -1536,7 +1552,7 @@ impl NetService {
                             }
                             Ok(())
                         })?;
-                        host.update_addresses(&hostname, &gateways, &ports)?;
+                        host.update_addresses(HostOwner::Package, &hostname, &gateways, &ports)?;
                     }
                 } else {
                     let host = db
@@ -1566,7 +1582,7 @@ impl NetService {
                         }
                         Ok(())
                     })?;
-                    host.update_addresses(&hostname, &gateways, &ports)?;
+                    host.update_addresses(HostOwner::Server, &hostname, &gateways, &ports)?;
                 }
                 Ok(())
             })
@@ -1660,7 +1676,7 @@ impl NetService {
                 }
                 // `port_forwards` is computed from the bindings, so it still
                 // advertises the retired one until this re-derives it.
-                host.update_addresses(&hostname, &gateways, &ports)?;
+                host.update_addresses(HostOwner::Package, &hostname, &gateways, &ports)?;
                 db.as_private_mut().as_available_ports_mut().ser(&ports)?;
                 Ok(true)
             })
@@ -1865,8 +1881,8 @@ mod tests {
                 gateway: eth.clone(),
             },
         );
-        let bridge = row("10.0.3.1", true, false, 49443, ipv4());
-        let bridge_plain = row("10.0.3.1", false, false, 49080, ipv4());
+        let bridge = row("172.16.0.1", true, false, 49443, ipv4());
+        let bridge_plain = row("172.16.0.1", false, false, 49080, ipv4());
         let lan = row("192.0.2.10", true, false, 49443, ipv4());
 
         assert_eq!(named_vhost_leg(&onion, 49443), Some((49443, false)));
@@ -1874,7 +1890,7 @@ mod tests {
         assert_eq!(named_vhost_leg(&lan, 49443), None);
         assert_eq!(
             ssl_vhost_internal_ips([&onion, &bridge, &bridge_plain, &lan]),
-            BTreeSet::from(["10.0.3.1".parse::<IpAddr>().unwrap()])
+            BTreeSet::from(["172.16.0.1".parse::<IpAddr>().unwrap()])
         );
     }
 
@@ -1898,7 +1914,7 @@ mod tests {
             gateways: BTreeSet::from([eth.clone()]),
         };
         let bridge = row(
-            "10.0.3.1",
+            "172.16.0.1",
             false,
             49443,
             HostnameMetadata::Ipv4 {
@@ -1915,7 +1931,7 @@ mod tests {
                     public_v6_gateways: BTreeSet::new(),
                     private: BTreeSet::new(),
                     acme: None,
-                    addr: "10.0.3.2:443".parse().unwrap(),
+                    addr: "172.16.0.3:443".parse().unwrap(),
                     addr_v6: None,
                     proxy: None,
                     connect_ssl: None,
@@ -1929,7 +1945,7 @@ mod tests {
         let accepts = |vhosts: &BTreeMap<VHostKey, ProxyTarget>, name: &str, public| {
             let ProxyTarget { private, .. } =
                 &vhosts[&(Some(InternedString::intern(name)), 49443, public)];
-            private.contains(&"10.0.3.1".parse::<IpAddr>().unwrap())
+            private.contains(&"172.16.0.1".parse::<IpAddr>().unwrap())
         };
 
         let onion = row("example.onion", true, 443, plugin());
@@ -1972,7 +1988,7 @@ mod tests {
             },
         )]);
         let name = mdns(true, 8443, ["eth0"]);
-        let bridge = lan_ip("10.0.3.1", true, 8443, "lxcbr0");
+        let bridge = lan_ip("172.16.0.1", true, 8443, "lxcbr0");
         let enabled = BTreeSet::from([&name, &bridge]);
         let mut vhosts = BTreeMap::new();
         add_named_vhosts(&mut vhosts, &enabled, 8443, &ifaces, |_, _| {
@@ -1981,14 +1997,14 @@ mod tests {
         let target = &vhosts[&(Some(name.hostname.clone()), 8443, false)];
         assert_eq!(
             target.private,
-            BTreeSet::from([ip("10.0.3.1"), ip("192.0.2.10"), ip("192.0.2.11")]),
+            BTreeSet::from([ip("172.16.0.1"), ip("192.0.2.10"), ip("192.0.2.11")]),
         );
         assert!(target.public_v4.is_empty());
         assert!(target.public_v6.is_empty());
         assert!(target.public_v6_gateways.is_empty());
         assert_eq!(
             ssl_vhost_private_ips(enabled.iter().copied()),
-            BTreeSet::from([ip("10.0.3.1")]),
+            BTreeSet::from([ip("172.16.0.1")]),
         );
     }
 
@@ -2148,14 +2164,14 @@ mod tests {
     #[test]
     fn a_name_contributes_no_address_to_the_ssl_vhost() {
         let addrs = [
-            lan_ip("fe80::1", true, 443, "eth0"),
+            lan_ip("fd12::1", true, 443, "eth0"),
             mdns(true, 443, ["eth0"]),
-            lan_ip("10.0.3.1", true, 443, "lxcbr0"),
+            lan_ip("172.16.0.1", true, 443, "lxcbr0"),
         ];
 
         assert_eq!(
             ssl_vhost_private_ips(addrs.iter()),
-            BTreeSet::from([ip("fe80::1"), ip("10.0.3.1")]),
+            BTreeSet::from([ip("fd12::1"), ip("172.16.0.1")]),
             "only the addresses still enabled are served"
         );
     }
@@ -2220,20 +2236,16 @@ mod tests {
 
     #[test]
     fn the_container_bridges_own_addresses_are_internal() {
-        assert!(lan_ip("10.0.3.1", true, 443, "lxcbr0").is_internal());
+        assert!(lan_ip("172.16.0.1", true, 443, "lxcbr0").is_internal());
         assert!(lan_ip("fd00:3::1", true, 443, "lxcbr0").is_internal());
         assert!(lan_ip("127.0.0.1", true, 443, "lo").is_internal());
         assert!(lan_ip("::1", true, 443, "lo").is_internal());
 
         assert!(!lan_ip("192.168.1.5", true, 443, "eth0").is_internal());
         assert!(
-            !lan_ip("fd00:3::5", true, 443, "eth0").is_internal(),
+            !lan_ip("fd00:3::8", true, 443, "eth0").is_internal(),
             "a router handing out the bridge's own prefix does not make its \
              addresses internal, which would put them beyond the operator's reach"
-        );
-        assert!(
-            !lan_ip("fe80::1", true, 443, "lxcbr0").is_internal(),
-            "a link-local address is the kernel's, not one the bridge is given"
         );
     }
 
@@ -2256,7 +2268,7 @@ mod tests {
             public_v6_gateways: BTreeSet::new(),
             private: private.iter().map(|ip| ip.parse().unwrap()).collect(),
             acme: None,
-            addr: "10.0.3.2:80".parse().unwrap(),
+            addr: "172.16.0.3:80".parse().unwrap(),
             addr_v6: None,
             proxy: None,
             connect_ssl: None,
@@ -2309,12 +2321,12 @@ mod tests {
             forwards,
             vhosts,
             private_dns,
-            gua_forwards,
+            v6_forwards,
         } = HostBinds::default();
         assert!(forwards.is_empty());
         assert!(vhosts.is_empty());
         assert!(private_dns.is_empty());
-        assert!(gua_forwards.is_empty());
+        assert!(v6_forwards.is_empty());
     }
 
     fn args(cmd: &Command) -> Vec<&str> {
@@ -2327,8 +2339,8 @@ mod tests {
     /// `ip rule` rejects an IPv6 source without `-6`.
     #[test]
     fn outbound_rule_family_follows_its_source() {
-        assert_eq!(args(&ip_rule("10.0.3.5".parse().unwrap())), ["rule"]);
-        assert_eq!(args(&ip_rule("fd00:3::5".parse().unwrap())), ["-6", "rule"]);
+        assert_eq!(args(&ip_rule("172.16.0.5".parse().unwrap())), ["rule"]);
+        assert_eq!(args(&ip_rule("fd00:3::8".parse().unwrap())), ["-6", "rule"]);
     }
 
     #[test]
@@ -2342,17 +2354,24 @@ mod tests {
         assert_eq!(
             args(&outbound_rule_command(
                 "add",
-                "10.0.3.5".parse().unwrap(),
+                "172.16.0.5".parse().unwrap(),
                 ServiceOutboundRule::Gateway(1004),
             )),
             [
-                "rule", "add", "from", "10.0.3.5", "lookup", "1004", "priority", "70"
+                "rule",
+                "add",
+                "from",
+                "172.16.0.5",
+                "lookup",
+                "1004",
+                "priority",
+                "70"
             ]
         );
         assert_eq!(
             args(&outbound_rule_command(
                 "add",
-                "fd00:3::5".parse().unwrap(),
+                "fd00:3::8".parse().unwrap(),
                 ServiceOutboundRule::Reject,
             )),
             [
@@ -2360,7 +2379,7 @@ mod tests {
                 "rule",
                 "add",
                 "from",
-                "fd00:3::5",
+                "fd00:3::8",
                 "unreachable",
                 "priority",
                 "71"
@@ -2371,12 +2390,12 @@ mod tests {
     #[test]
     fn conntrack_filter_family_follows_its_source() {
         assert_eq!(
-            args(&delete_conntrack_command("10.0.3.5".parse().unwrap())),
-            ["-D", "-s", "10.0.3.5"]
+            args(&delete_conntrack_command("172.16.0.5".parse().unwrap())),
+            ["-D", "-s", "172.16.0.5"]
         );
         assert_eq!(
-            args(&delete_conntrack_command("fd00:3::5".parse().unwrap())),
-            ["-D", "-f", "ipv6", "-s", "fd00:3::5"]
+            args(&delete_conntrack_command("fd00:3::8".parse().unwrap())),
+            ["-D", "-f", "ipv6", "-s", "fd00:3::8"]
         );
     }
 
@@ -2384,7 +2403,7 @@ mod tests {
     fn outbound_sources_cover_every_address_the_container_holds() {
         let mut data = NetServiceData {
             id: None,
-            ip: Ipv4Addr::new(10, 0, 3, 5),
+            ip: Ipv4Addr::new(172, 16, 0, 5),
             ipv6: None,
             _dns: Default::default(),
             controller: Default::default(),
@@ -2392,13 +2411,13 @@ mod tests {
         };
         assert_eq!(
             data.outbound_sources(),
-            ["10.0.3.5".parse::<IpAddr>().unwrap()]
+            ["172.16.0.5".parse::<IpAddr>().unwrap()]
         );
 
-        data.ipv6 = Some("fd00:3::5".parse().unwrap());
+        data.ipv6 = Some("fd00:3::8".parse().unwrap());
         assert_eq!(
             data.outbound_sources(),
-            ["10.0.3.5", "fd00:3::5"].map(|a| a.parse::<IpAddr>().unwrap())
+            ["172.16.0.5", "fd00:3::8"].map(|a| a.parse::<IpAddr>().unwrap())
         );
     }
 

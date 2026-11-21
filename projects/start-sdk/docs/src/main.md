@@ -157,7 +157,7 @@ Three shorthands cover most needs:
 | ----------- | ------------------------------------------------------------------------------------- |
 | `.nonLocal` | what a client off the box can reach — drops loopback, IPv6 link-local, and the bridge |
 | `.public`   | only addresses flagged `public` — WAN IPs, public domains, onions                     |
-| `.bridge`   | only the `lxcbr0` addresses other containers reach you on                             |
+| `.bridge`   | only the OS addresses other containers reach you on                                   |
 
 Beyond those, `.filter({ kind, visibility, pluginId })` composes as an intersection and `.matchesAny([...])` unions:
 

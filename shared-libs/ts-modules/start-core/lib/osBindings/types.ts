@@ -90,6 +90,8 @@ export type CliSetIconParams = z.output<typeof schemas.CliSetIconParams>
 export type CliSetIconParamsInput = z.input<typeof schemas.CliSetIconParams>
 export type ContactInfo = z.output<typeof schemas.ContactInfo>
 export type ContactInfoInput = z.input<typeof schemas.ContactInfo>
+export type ContainerSlot = z.output<typeof schemas.ContainerSlot>
+export type ContainerSlotInput = z.input<typeof schemas.ContainerSlot>
 
 /**
  * Lifecycle of a daemon-owned conversion attempt.

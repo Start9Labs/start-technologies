@@ -288,7 +288,12 @@ mod tests {
         let tree = MountGuard::mount(&Bind::new(fixture.path()), fixture.path(), ReadWrite)
             .await
             .unwrap();
-        let mut mounts = SharedVolumeMounts::new(fixture.path()).await.unwrap();
+        let mut mounts = SharedVolumeMounts::new(
+            fixture.path(),
+            crate::lxc::slot::ContainerSlot::new(0).unwrap().idmap(),
+        )
+        .await
+        .unwrap();
         let guid = Guid::new();
         let namespace =
             std::sync::Arc::new(

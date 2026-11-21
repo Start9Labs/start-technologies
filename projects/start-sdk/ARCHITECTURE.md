@@ -187,7 +187,7 @@ Utility modules including:
 **Reactive subscription wrappers** — Each wraps an Effects callback-based method into a consistent reactive API:
 
 - `Watchable<A>` — Base class providing `const()`, `once()`, `watch()`, `onChange()`, `waitFor()`; `MappedWatchable<Raw, Mapped>` adds a `map` over a raw value; `Watchable.from` and `Watchable.combine` build readers from `WatchSource`s
-- `GetContainerIp`, `GetStatus`, `GetSystemSmtp`, `GetOutboundGateway`, `GetSslCertificate`, `GetHostInfo`, `GetServiceManifest` — Typed wrappers for specific Effects methods
+- `GetStatus`, `GetSystemSmtp`, `GetOutboundGateway`, `GetSslCertificate`, `GetHostInfo`, `GetServiceManifest` — Typed wrappers for specific Effects methods
 
 **General utilities:**
 
@@ -225,7 +225,7 @@ The `.build()` method returns an object containing the entire SDK surface area, 
 | **Containers**   | `SubContainer.of`, `SubContainer.withTemp`, `Mounts.of`                                                                             | Container execution with mounts                   |
 | **Forms**        | `InputSpec.of`, `Value`, `Variants`, `List`                                                                                         | Form input builders                               |
 | **Triggers**     | `trigger.defaultTrigger`, `.cooldownTrigger`, `.statusTrigger`, `.onceTrigger`                                                      | Health check polling strategies                   |
-| **Reactive**     | `getContainerIp`, `getStatus`, `getSystemSmtp`, `getOutboundGateway`, `getSslCertificate`, `getServiceManifest`                     | Subscription-based data access                    |
+| **Reactive**     | `getStatus`, `getSystemSmtp`, `getOutboundGateway`, `getSslCertificate`, `getServiceManifest`                                       | Subscription-based data access                    |
 | **Plugins**      | `plugin.url.register`, `plugin.url.exportUrl`                                                                                       | Plugin system (gated by manifest `plugins` field) |
 | **Effects**      | `restart`, `shutdown`, `setHealth`, `mount`, `clearBindings`, ...                                                                   | Direct effect wrappers                            |
 | **Utilities**    | `nullIfEmpty`, `useEntrypoint`, `patterns`, `setDataVersion`, `getDataVersion`                                                      | Misc helpers                                      |

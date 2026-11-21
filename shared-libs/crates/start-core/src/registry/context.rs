@@ -29,6 +29,7 @@ use crate::middleware::auth::signature::{
     NonceCache, SignatureAuthContext, SignatureAuthMetadata, SignatureAuthorizationContext,
     SigningContext,
 };
+use crate::net::dial::is_onion;
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::locales::IndexLocaleTracker;
@@ -186,7 +187,7 @@ impl RegistryContext {
             .tor_proxy
             .clone()
             .map(Ok)
-            .unwrap_or_else(|| "socks5h://tor.startos:9050".parse())?;
+            .unwrap_or_else(|| "socks5h://127.0.0.1:9050".parse())?;
         let metrics_db_path = datadir.join("metrics.db");
         let metrics_db = Connection::open(&metrics_db_path).with_kind(ErrorKind::Database)?;
         metrics_db
@@ -257,7 +258,7 @@ impl RegistryContext {
 /// Proxies `.onion` hosts through Tor and dials everything else directly.
 pub(super) fn client_builder(tor_proxy_url: Url) -> reqwest::ClientBuilder {
     Client::builder().proxy(Proxy::custom(move |url| {
-        if url.host_str().map_or(false, |h| h.ends_with(".onion")) {
+        if url.host_str().is_some_and(is_onion) {
             Some(tor_proxy_url.clone())
         } else {
             None

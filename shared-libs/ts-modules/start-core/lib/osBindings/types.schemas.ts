@@ -13,16 +13,16 @@ const literal_3 = /* @__PURE__ */ z.union([
 ])
 const literal_4 = /* @__PURE__ */ z.union([z.string(), z.array(z.number())])
 const literal_5 = /* @__PURE__ */ z.enum(['processor', 'display'])
-const literal_6 = /* @__PURE__ */ z.array(z.record(z.string(), z.unknown()))
-const literal_7 = /* @__PURE__ */ z.union([
+const literal_6 = /* @__PURE__ */ z.number()
+const literal_7 = /* @__PURE__ */ z.array(z.record(z.string(), z.unknown()))
+const literal_8 = /* @__PURE__ */ z.union([
   z.object({ only: z.array(z.number()) }),
   z.object({ except: z.array(z.number()) }),
 ])
-const literal_8 = /* @__PURE__ */ z.union([
+const literal_9 = /* @__PURE__ */ z.union([
   z.object({ only: z.array(z.string()) }),
   z.object({ except: z.array(z.string()) }),
 ])
-const literal_9 = /* @__PURE__ */ z.number()
 const literal_10 = /* @__PURE__ */ z.object({
   value: z.string(),
   unit: z.string(),
@@ -181,7 +181,7 @@ export const BuildArg: z.ZodUnion<
 > = /* @__PURE__ */ z.union([z.string(), object({ env: z.string() })]).meta({
   id: 'BuildArg',
 })
-export const CallbackId: typeof literal_9 = /* @__PURE__ */ literal_9.meta({
+export const CallbackId: typeof literal_6 = /* @__PURE__ */ literal_6.meta({
   id: 'CallbackId',
 })
 export const CapabilityVerdict: z.ZodObject<{
@@ -279,12 +279,12 @@ export const CifsAddParams: z.ZodObject<{
 }).meta({
   id: 'CifsAddParams',
 })
-export const ClearCallbacksParams: typeof literal_7 =
-  /* @__PURE__ */ literal_7.meta({
+export const ClearCallbacksParams: typeof literal_8 =
+  /* @__PURE__ */ literal_8.meta({
     id: 'ClearCallbacksParams',
   })
-export const ClearTasksParams: typeof literal_8 =
-  /* @__PURE__ */ literal_8.meta({
+export const ClearTasksParams: typeof literal_9 =
+  /* @__PURE__ */ literal_9.meta({
     id: 'ClearTasksParams',
   })
 export const CliSetIconParams: z.ZodObject<{
@@ -314,6 +314,9 @@ export const ContactInfo: z.ZodUnion<
   .meta({
     id: 'ContactInfo',
   })
+export const ContainerSlot: typeof literal_6 = /* @__PURE__ */ literal_6.meta({
+  id: 'ContainerSlot',
+})
 
 /**
  * Lifecycle of a daemon-owned conversion attempt.
@@ -3110,19 +3113,37 @@ export const GetActionInputParams: z.ZodObject<{
 }).meta({
   id: 'GetActionInputParams',
 })
-export const GetContainerIpParams: z.ZodObject<{
-  packageId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PackageId>>,
-    z.ZodNullable<typeof PackageId>
-  >
-  callback: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof CallbackId>>,
-    z.ZodNullable<typeof CallbackId>
-  >
-}> = /* @__PURE__ */ object({
-  packageId: wire(PackageId.nullable().optional(), PackageId.nullable()),
-  callback: wire(CallbackId.nullable().optional(), CallbackId.nullable()),
-}).meta({
+export const GetContainerIpParams: z.ZodCodec<
+  z.ZodObject<{
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: z.ZodOptional<z.ZodNullable<typeof CallbackId>>
+  }>,
+  z.ZodObject<{
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: z.ZodNullable<typeof CallbackId>
+  }>
+> = /* @__PURE__ */ wire(
+  object({
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: CallbackId.nullable().optional().meta({
+      description: 'Ignored: the address is fixed for the installation.',
+    }),
+  }),
+  object({
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: CallbackId.nullable().meta({
+      description: 'Ignored: the address is fixed for the installation.',
+    }),
+  }),
+).meta({
   id: 'GetContainerIpParams',
 })
 export const GetHostInfoParams: z.ZodObject<{
@@ -4847,13 +4868,13 @@ export const TaskInput: z.ZodCodec<
   typeof TaskInputRepr,
   z.ZodIntersection<
     z.ZodObject<{ kind: z.ZodLiteral<'partial'> }>,
-    z.ZodObject<{ accept: typeof literal_6; set: typeof literal_1 }>
+    z.ZodObject<{ accept: typeof literal_7; set: typeof literal_1 }>
   >
 > = /* @__PURE__ */ wire(
   TaskInputRepr,
   z.intersection(
     object({ kind: z.literal('partial') }),
-    object({ accept: literal_6, set: literal_1 }),
+    object({ accept: literal_7, set: literal_1 }),
   ),
 ).meta({
   id: 'TaskInput',
@@ -7794,6 +7815,7 @@ export const NetworkInfo: z.ZodObject<{
 export const PackageDataEntry: z.ZodObject<{
   stateInfo: typeof PackageState
   s9pk: z.ZodString
+  containerSlot: typeof ContainerSlot
   statusInfo: typeof StatusInfo
   registry: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -7821,6 +7843,7 @@ export const PackageDataEntry: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   stateInfo: PackageState,
   s9pk: z.string(),
+  containerSlot: ContainerSlot,
   statusInfo: StatusInfo,
   registry: wire(z.string().nullable().optional(), z.string().nullable()),
   developerKey: literal_0.meta({

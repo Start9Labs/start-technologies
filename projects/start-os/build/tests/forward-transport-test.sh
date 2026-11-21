@@ -77,6 +77,9 @@ try {
         const expected = transport === 'tcp' || transport === 'udp' ? [transport] : ['tcp', 'udp']
         assert.deepEqual(protocols(), new Set(expected))
         assert(state().every(rule => !rule.body.includes('{ tcp, udp }')))
+        const forwards = state().filter(rule => rule.chain === 'forward')
+        assert.equal(forwards.length, expected.length)
+        assert(forwards.every(rule => rule.body.includes('ct state new ct status dnat accept')))
         const log = fs.readFileSync(logFile, 'utf8')
         for (const protocol of ['tcp', 'udp']) {
           assert.equal(log.includes('conntrack -D ' + (v6 ? '-f ipv6 ' : '') + '-p ' + protocol), expected.includes(protocol))

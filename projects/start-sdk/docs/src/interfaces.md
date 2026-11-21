@@ -427,7 +427,7 @@ Each internal port a host currently binds belongs to one claim. A `bindPortRange
 
 `setupInterfaces()` ends every pass by **disabling** each binding it did not just declare — it does not delete it. Disabling is the right default: it keeps the row, the external port number, and the user's per-address choices, so a binding your package declares conditionally comes back at the same address they already bookmarked.
 
-The cost is that a binding you stop declaring **for good** stays behind. It keeps its external port claimed for as long as your service is installed, it keeps recomputing its addresses, and a dependency resolving it through `getBridgeAddress` still gets a `10.0.3.1:<port>` that nothing listens on. Retire it explicitly:
+The cost is that a binding you stop declaring **for good** stays behind. It keeps its external port claimed for as long as your service is installed, it keeps recomputing its addresses, and a dependency resolving it through `getBridgeAddress` still gets a `172.16.0.1:<port>` that nothing listens on. Retire it explicitly:
 
 ```typescript
 await sdk.MultiHost.of(effects, 'ui-multi').retire() // the whole host
@@ -583,9 +583,9 @@ For unproxied service TLS, StartOS preserves the client source IP when it routes
 
 **The SANs are the whole contract.** Nothing rewrites the handshake, so the certificate must be valid for every address a client actually dials — there is no proxy to paper over a mismatch:
 
-- `sdk.getOsIp` (`10.0.3.1`) — the bridge, where other services reach you
+- `sdk.getOsIp` — the bridge, where other services reach you
+- `sdk.getContainerIp` — the container itself, which StartOS dials when it rewraps your TLS
 - `127.0.0.1` — your own subcontainers, which share the service's network namespace
-- `sdk.getContainerIp` — the container itself
 - **every address the interface is published at** — LAN IPs, the server's `.local` name, private and public domains, and any onion a plugin has exported
 
 Those three constants are the internal half, and naming only them is the mistake to avoid: an off-box client dialing the LAN address or the `.local` name gets a certificate matching none of them. Take the external half from the **binding**, so it follows the addresses the operator adds and removes:
@@ -606,7 +606,7 @@ export const setupCerts = sdk.setupOnInit(async effects => {
     )
     .const()
 
-  const hostnames = [await sdk.getContainerIp(effects).const(), '127.0.0.1', await sdk.getOsIp(effects), ...served]
+  const hostnames = [await sdk.getContainerIp(effects).once(), '127.0.0.1', await sdk.getOsIp(effects), ...served]
   const cert = (await sdk.getSslCertificate(effects, hostnames).const()).join('')
   const key = await sdk.getSslKey(effects, { hostnames })
   await writeFile('/media/startos/volumes/main/tls.cert', cert)
@@ -620,12 +620,12 @@ That distinction has teeth because reissuing the certificate restarts the servic
 
 `getSslCertificate` signs an IP the **box itself holds** — one in the container bridge subnet, or an address on one of the server's own gateways. A WAN IPv4 fails the whole call because that address belongs to the router, not to you; an IPv6 GUA is configured on the box and is signed. See [Narrowing the set](main.md#narrowing-the-set) for why that exclusion is a union rather than a two-field `exclude`.
 
-Read the container IP with `.const()` rather than `.once()`: a container that comes back on a new IP must reissue the certificate, or every client dialing the old one fails verification.
+The container IP is fixed for the installation, so `.once()` reads it.
 
 Most daemons read their TLS pair once at startup, so reissuing the file is only half the job — something has to restart the service, or it keeps serving the old certificate against the new address set. Whatever you key that restart on must not blink: a value that momentarily reads empty will restart the daemon for nothing, and if the restart can feed back into the value, it will not converge.
 
 > [!WARNING]
-> Do **not** add a `<package-id>.startos` DNS name to the SANs. That overlay DNS is deprecated and slated for removal, and it resolves to the container IP rather than the bridge — so it bypasses the platform entirely. Dependents reach you through the bridge; see [Service-to-Service Networking](service-to-service.md).
+> Do **not** add a `<package-id>.startos` DNS name to the SANs. StartOS does not resolve those names. Dependents reach you through the bridge; see [Service-to-Service Networking](service-to-service.md).
 
 A passthrough port carries its external port in `net.assignedSslPort`, the same as an `addSsl` port — which of the two fields is populated says whether the port speaks TLS, not who terminates it. Dependents should read neither field directly; `sdk.host.getBridgeAddress` resolves the binding's derived address and is correct under every arrangement on this page.
 

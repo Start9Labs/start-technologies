@@ -81,9 +81,9 @@ fn reassign<Kind: HostApiKind>(
         .as_gateways()
         .de()?;
     for host in all_hosts(db) {
-        let host = host?;
+        let (owner, host) = host?;
         let previous = host.as_bindings().de()?;
-        host.update_addresses(&hostname, &gateways, &ports)?;
+        host.update_addresses(owner, &hostname, &gateways, &ports)?;
         host.as_bindings_mut().mutate(|bindings| {
             for (port, binding) in bindings.iter_mut() {
                 let Some(previous) = previous.get(port) else {

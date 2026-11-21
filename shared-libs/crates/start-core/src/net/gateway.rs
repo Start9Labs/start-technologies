@@ -35,14 +35,13 @@ use crate::db::model::public::{
     CapabilityVerdict, GatewayPortMapCapabilities, IpInfo, NetworkInterfaceInfo,
     NetworkInterfaceType,
 };
+use crate::lxc::slot::{OS_LISTEN_IP, OS_LISTEN_IPV6, is_os_listen};
 use crate::net::dns::{OutboundDnsUpdate, validate_dns_update};
 use crate::net::forward::{START9_BRIDGE_IFACE, nft_ensure_base};
 use crate::net::gateway::device::DeviceProxy;
 use crate::net::host::all_hosts;
 use crate::net::port_map::{candidate_gateways, probe};
-use crate::net::utils::{
-    bind_mio_listener, find_wifi_iface, ipv6_is_link_local, ipv6_is_local, is_global_ip,
-};
+use crate::net::utils::{find_wifi_iface, ipv6_is_link_local, ipv6_is_local, is_global_ip};
 use crate::net::web_server::{Accept, AcceptStream, MetadataVisitor, TcpMetadata};
 use crate::net::{
     DEFAULT_OUTBOUND_REJECT_RULE_PRIORITY, DEFAULT_OUTBOUND_RULE_PRIORITY, LOCAL_OUTBOUND_MARK,
@@ -1676,7 +1675,7 @@ async fn watcher(
                         reconcile_mangle_rules(&policy_ifaces).await.log_err();
                         if !policy_ifaces.is_empty() {
                             for v6 in [false, true] {
-                                ensure_main_suppress_rule(v6).await.log_err();
+                                ensure_base_rules(v6).await.log_err();
                             }
                         }
                         let mut jobs = jobs
@@ -1851,11 +1850,7 @@ async fn gc_policy_routing(active_ifaces: &BTreeSet<GatewayId>) {
             let Some(rest) = reply.or(source) else {
                 continue;
             };
-            let Some(pos) = rest.find("lookup ") else {
-                continue;
-            };
-            let token = rest[pos + 7..].split_whitespace().next().unwrap_or("");
-            let Ok(table_id) = token.parse::<u32>() else {
+            let Some(table_id) = rule_lookup_table(rest) else {
                 continue;
             };
             if table_id < GATEWAY_TABLE_BASE || active_tables.contains(&table_id) {
@@ -2108,8 +2103,15 @@ fn policy_table_for(device_type: Option<NetworkInterfaceType>, iface: &GatewayId
 
 /// Rebuilds the mangle chains in one transaction. The gateway coordinator is
 /// their only writer.
-async fn reconcile_mangle_rules(policy_ifaces: &BTreeMap<GatewayId, u32>) -> Result<(), Error> {
+pub(super) async fn reconcile_mangle_rules(
+    policy_ifaces: &BTreeMap<GatewayId, u32>,
+) -> Result<(), Error> {
     nft_ensure_base().await?;
+    // An accepted TCP socket carries its arrival gateway's mark, including after DNAT.
+    Command::new("sysctl")
+        .args(["-qw", "net.ipv4.tcp_fwmark_accept=1"])
+        .invoke(ErrorKind::Network)
+        .await?;
     let mut script = String::new();
     script.push_str("flush chain ip startos mangle_prerouting\n");
     script.push_str("flush chain ip startos mangle_output\n");
@@ -2337,6 +2339,21 @@ async fn watch_ip(
     }
 }
 
+fn rule_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let mut tokens = line.split_whitespace();
+    tokens.find(|token| *token == key)?;
+    tokens.next()
+}
+
+const MAIN_TABLE_ID: u32 = 254;
+
+fn rule_lookup_table(line: &str) -> Option<u32> {
+    match rule_value(line, "lookup")? {
+        "main" => Some(MAIN_TABLE_ID),
+        table => table.parse().ok(),
+    }
+}
+
 fn rule_has(line: &str, key: &str, value: &str) -> bool {
     line.split_whitespace()
         .collect::<Vec<_>>()
@@ -2357,8 +2374,8 @@ fn main_suppress_rule(line: &str) -> bool {
     })
 }
 
-/// Specific routes are `main`'s; per-interface tables hold only defaults.
-async fn ensure_main_suppress_rule(v6: bool) -> Result<(), Error> {
+/// Installs the `specific` lookup and the OS listen address's unmarked-reply lookup.
+async fn ensure_base_rules(v6: bool) -> Result<(), Error> {
     // Reject-type defaults terminate before suppression; `throw` routes fall through.
     let mut ip = Command::new("ip");
     if v6 {
@@ -2386,6 +2403,12 @@ async fn ensure_main_suppress_rule(v6: bool) -> Result<(), Error> {
             .invoke(ErrorKind::Network)
             .await?;
     }
+    let os_listen = if v6 {
+        OS_LISTEN_IPV6.to_string()
+    } else {
+        OS_LISTEN_IP.to_string()
+    };
+    reconcile_source_rules(v6, MAIN_TABLE_ID, &[os_listen].into(), &rules).await;
     Ok(())
 }
 
@@ -2618,7 +2641,22 @@ async fn apply_policy_routing_v6(
     Ok(())
 }
 
-/// A reply is first routed unmarked, by its source address alone.
+/// Sources of the priority-60 rules that look up the table.
+fn source_rule_addresses(table_id: u32, rules: &str) -> BTreeSet<String> {
+    rules
+        .lines()
+        .filter_map(|line| {
+            let rule = rule_at_priority(line, SOURCE_RULE_PRIORITY)?;
+            (rule_lookup_table(rule) == Some(table_id))
+                .then(|| rule_value(rule, "from"))
+                .flatten()
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+/// A local reply is first routed unmarked, by its source address alone. A forwarded packet
+/// claiming that source never matches.
 async fn reconcile_source_rules(
     v6: bool,
     table_id: u32,
@@ -2626,19 +2664,7 @@ async fn reconcile_source_rules(
     rules_output: &str,
 ) {
     let table_str = table_id.to_string();
-    let existing: BTreeSet<String> = rules_output
-        .lines()
-        .filter_map(|l| {
-            let toks: Vec<&str> = rule_at_priority(l, SOURCE_RULE_PRIORITY)?
-                .split_whitespace()
-                .collect();
-            toks.windows(2)
-                .any(|w| w[0] == "lookup" && w[1].parse::<u32>().ok() == Some(table_id))
-                .then(|| toks.windows(2).find(|w| w[0] == "from").map(|w| w[1]))
-                .flatten()
-                .map(|addr| addr.to_owned())
-        })
-        .collect();
+    let existing = source_rule_addresses(table_id, rules_output);
     for (action, addrs) in [
         ("add", addrs.difference(&existing)),
         ("del", existing.difference(addrs)),
@@ -2652,6 +2678,8 @@ async fn reconcile_source_rules(
                 .arg(action)
                 .arg("from")
                 .arg(addr)
+                .arg("iif")
+                .arg("lo")
                 .arg("fwmark")
                 .arg("0/0xffffffff")
                 .arg("lookup")
@@ -2663,6 +2691,17 @@ async fn reconcile_source_rules(
                 .log_err();
         }
     }
+}
+
+/// Omits the OS listen addresses.
+fn observed_subnets(
+    addresses: impl IntoIterator<Item = AddressData>,
+) -> Result<OrdSet<IpNet>, Error> {
+    let subnets: OrdSet<IpNet> = addresses.into_iter().map(IpNet::try_from).try_collect()?;
+    Ok(subnets
+        .into_iter()
+        .filter(|subnet| !is_os_listen(subnet.addr()))
+        .collect())
 }
 
 async fn poll_ip_info(
@@ -2728,7 +2767,7 @@ async fn poll_ip_info(
             .map(|octets| IpAddr::V6(Ipv6Addr::from(octets))),
     );
     let scope_id = if_nametoindex(iface.as_str()).with_kind(ErrorKind::Network)?;
-    let subnets: OrdSet<IpNet> = addresses.into_iter().map(IpNet::try_from).try_collect()?;
+    let subnets = observed_subnets(addresses)?;
 
     // Policy routing: ensure replies exit the same interface they arrived on,
     // eliminating the need for MASQUERADE.
@@ -3191,7 +3230,8 @@ impl NetworkInterfaceController {
             let hostname = crate::hostname::ServerHostname::load(db.as_public().as_server_info())?;
             let ports = db.as_private().as_available_ports().de()?;
             for host in all_hosts(db) {
-                host?.update_addresses(&hostname, info, &ports)?;
+                let (owner, host) = host?;
+                host.update_addresses(owner, &hostname, info, &ports)?;
             }
             Ok(())
         })
@@ -3640,16 +3680,21 @@ impl NetworkInterfaceController {
     }
 }
 
+/// The interface holding the address. A link-local address matches only within its zone.
 pub fn lookup_info_by_addr(
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
     addr: SocketAddr,
 ) -> Option<(&GatewayId, &NetworkInterfaceInfo)> {
-    // IPv4 clients arrive mapped through the dual-stack listener.
     let ip = addr.ip().to_canonical();
-    ip_info.iter().find(|(_, i)| {
-        i.ip_info
-            .as_ref()
-            .map_or(false, |i| i.subnets.iter().any(|i| i.addr() == ip))
+    let zone = match addr {
+        SocketAddr::V6(addr) if ipv6_is_link_local(*addr.ip()) => Some(addr.scope_id()),
+        _ => None,
+    };
+    ip_info.iter().find(|(_, interface)| {
+        interface.ip_info.as_ref().is_some_and(|info| {
+            zone.is_none_or(|zone| zone != 0 && zone == info.scope_id)
+                && info.subnets.iter().any(|subnet| subnet.addr() == ip)
+        })
     })
 }
 
@@ -3674,15 +3719,76 @@ pub struct NetworkInterfaceListenerAcceptMetadata {
     pub inner: TcpMetadata,
     pub info: GatewayInfo,
 }
+impl NetworkInterfaceListenerAcceptMetadata {
+    /// Describes the connection by the destination its client dialed, before any DNAT.
+    pub(crate) fn from_stream(
+        stream: &tokio::net::TcpStream,
+        peer_addr: SocketAddr,
+        interfaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    ) -> Result<Self, Error> {
+        let inner = crate::net::ingress::tcp_metadata(stream, peer_addr)?;
+        let info = lookup_info_by_addr(interfaces, inner.local_addr)
+            .map(|(id, info)| GatewayInfo {
+                id: id.clone(),
+                info: info.clone(),
+            })
+            .unwrap_or_else(|| GatewayInfo {
+                id: InternedString::from_static("").into(),
+                info: NetworkInterfaceInfo::default(),
+            });
+        Ok(Self { inner, info })
+    }
+}
 impl<V: MetadataVisitor> Visit<V> for NetworkInterfaceListenerAcceptMetadata {
     fn visit(&self, visitor: &mut V) -> V::Result {
         self.visit_fields(visitor).collect()
     }
 }
 
-/// Accepts wildcard TCP connections with their matching `GatewayInfo`.
+/// Drops a connection whose metadata fails and keeps accepting. Listener errors surface.
+pub(super) fn poll_accept_described<M>(
+    listener: &TcpListener,
+    cx: &mut std::task::Context<'_>,
+    mut describe: impl FnMut(&tokio::net::TcpStream, SocketAddr) -> Result<M, Error>,
+) -> Poll<Result<(M, AcceptStream), Error>> {
+    loop {
+        let (stream, peer_addr) = std::task::ready!(listener.poll_accept(cx))?;
+        crate::net::utils::set_default_keepalive(&stream);
+        match describe(&stream, peer_addr) {
+            Ok(metadata) => return Poll::Ready(Ok((metadata, Box::pin(stream)))),
+            Err(error) => {
+                tracing::trace!(%peer_addr, ?error, "Dropped connection without ingress metadata");
+            }
+        }
+    }
+}
+
+/// The addresses the UI listener binds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UiListen {
+    Wildcard,
+    OsListen,
+}
+impl UiListen {
+    fn addresses(self, port: u16) -> Vec<SocketAddr> {
+        match self {
+            Self::Wildcard => vec![SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), port)],
+            Self::OsListen => vec![
+                SocketAddr::new(OS_LISTEN_IP.into(), port),
+                SocketAddr::new(OS_LISTEN_IPV6.into(), port),
+            ],
+        }
+    }
+}
+
+/// Accepts the UI's TCP connections with their matching `GatewayInfo`.
+///
+/// Binds the dual-stack wildcard until the network controller narrows it to the OS listen
+/// addresses, which every other address reaches through a forward.
 pub struct WildcardListener {
-    listener: TcpListener,
+    listeners: Vec<TcpListener>,
+    listen: UiListen,
+    port: u16,
     ip_info: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     /// Handle to the self-contained watcher task started in `new()`.
     /// Dropped (and thus aborted) when `set_ip_info` replaces the ip_info source.
@@ -3690,17 +3796,15 @@ pub struct WildcardListener {
 }
 impl WildcardListener {
     pub fn new(port: u16) -> Result<Self, Error> {
-        let listener = TcpListener::from_std(
-            bind_mio_listener(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))
-                .with_kind(ErrorKind::Network)?
-                .into(),
-        )
-        .with_kind(ErrorKind::Network)?;
+        let listeners = bind_ui_listeners(UiListen::Wildcard, port)?;
+        let port = listeners[0].local_addr()?.port();
         let ip_info = Watch::new(OrdMap::new());
         let watcher_handle =
             tokio::spawn(watcher(ip_info.clone(), Watch::new(BTreeMap::new()), None)).into();
         Ok(Self {
-            listener,
+            listeners,
+            listen: UiListen::Wildcard,
+            port,
             ip_info,
             _watcher: Some(watcher_handle),
         })
@@ -3716,43 +3820,66 @@ impl WildcardListener {
         self.ip_info = ip_info;
         self._watcher = None;
     }
+
+    /// Serves the OS listen addresses alone. Requires the forwards that reach them.
+    pub fn serve_os_listen(&mut self) -> Result<(), Error> {
+        self.serve(UiListen::OsListen)
+    }
+
+    /// Serves every address of the server.
+    pub fn serve_wildcard(&mut self) -> Result<(), Error> {
+        self.serve(UiListen::Wildcard)
+    }
+
+    /// Binds the replacement before releasing the current sockets. A failed bind keeps them.
+    fn serve(&mut self, listen: UiListen) -> Result<(), Error> {
+        if self.listen != listen {
+            self.listeners = bind_ui_listeners(listen, self.port)?;
+            self.listen = listen;
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn local_addrs(&self) -> Vec<SocketAddr> {
+        self.listeners
+            .iter()
+            .map(|listener| listener.local_addr().unwrap())
+            .collect()
+    }
 }
+
+/// Shares the port with the sockets being replaced.
+fn bind_ui_listeners(listen: UiListen, port: u16) -> Result<Vec<TcpListener>, Error> {
+    listen
+        .addresses(port)
+        .into_iter()
+        .map(|addr| {
+            crate::net::utils::bind_tokio_listener_reuse_port(addr)
+                .with_ctx(|_| (ErrorKind::Network, addr.to_string()))
+        })
+        .collect()
+}
+
 impl Accept for WildcardListener {
     type Metadata = NetworkInterfaceListenerAcceptMetadata;
     fn poll_accept(
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(Self::Metadata, AcceptStream), Error>> {
-        if let Poll::Ready((stream, peer_addr)) = TcpListener::poll_accept(&self.listener, cx)? {
-            if let Err(e) = socket2::SockRef::from(&stream)
-                .set_tcp_keepalive(&crate::net::utils::default_keepalive())
-            {
-                tracing::error!("Failed to set tcp keepalive: {e}");
-                tracing::debug!("{e:?}");
-            }
-            let local_addr = stream.local_addr()?;
-            let info = self
-                .ip_info
-                .peek(|ip_info| {
-                    lookup_info_by_addr(ip_info, local_addr).map(|(id, info)| GatewayInfo {
-                        id: id.clone(),
-                        info: info.clone(),
+        let ip_info = &self.ip_info;
+        for listener in &self.listeners {
+            if let Poll::Ready(accepted) =
+                poll_accept_described(listener, cx, |stream, peer_addr| {
+                    ip_info.peek(|interfaces| {
+                        NetworkInterfaceListenerAcceptMetadata::from_stream(
+                            stream, peer_addr, interfaces,
+                        )
                     })
                 })
-                .unwrap_or_else(|| GatewayInfo {
-                    id: InternedString::from_static("").into(),
-                    info: NetworkInterfaceInfo::default(),
-                });
-            return Poll::Ready(Ok((
-                NetworkInterfaceListenerAcceptMetadata {
-                    inner: TcpMetadata {
-                        local_addr,
-                        peer_addr,
-                    },
-                    info,
-                },
-                Box::pin(stream),
-            )));
+            {
+                return Poll::Ready(accepted);
+            }
         }
         Poll::Pending
     }
@@ -3761,6 +3888,27 @@ impl Accept for WildcardListener {
 #[cfg(test)]
 mod policy_rule_tests {
     use super::*;
+
+    #[test]
+    fn source_rules_read_named_and_numeric_tables_at_their_priority() {
+        let rules = "60:\tfrom 172.16.0.2 iif lo fwmark 0 lookup main\n\
+                     60:\tfrom 10.0.0.9 fwmark 0 lookup 254\n\
+                     60:\tfrom 192.0.2.10 iif lo fwmark 0 lookup 1004\n\
+                     600:\tfrom 192.0.2.11 fwmark 0 lookup main\n";
+        assert_eq!(
+            source_rule_addresses(MAIN_TABLE_ID, rules),
+            ["172.16.0.2".to_owned(), "10.0.0.9".to_owned()].into()
+        );
+        assert_eq!(
+            source_rule_addresses(1004, rules),
+            ["192.0.2.10".to_owned()].into()
+        );
+        assert_eq!(
+            rule_lookup_table("from all lookup main"),
+            Some(MAIN_TABLE_ID)
+        );
+        assert_eq!(rule_lookup_table("from all lookup missing"), None);
+    }
 
     #[test]
     fn main_suppress_rule_requires_the_unrestricted_rule() {
@@ -3981,6 +4129,108 @@ mod lookup_tests {
         let ip_info = gateway_holding("192.168.1.5/24");
         let compatible: SocketAddr = "[::192.168.1.5]:80".parse().unwrap();
         assert!(lookup_info_by_addr(&ip_info, compatible).is_none());
+    }
+
+    #[test]
+    fn observation_omits_the_os_listen_addresses() {
+        use crate::lxc::slot::{CONTAINER_NET, CONTAINER_NET_V6, HOST_IP, HOST_IPV6};
+        let address = |ip: IpAddr, prefix: u8| AddressData {
+            address: ip.to_string(),
+            prefix: prefix.into(),
+        };
+        let subnets = observed_subnets([
+            address(HOST_IP.into(), CONTAINER_NET.prefix_len()),
+            address(OS_LISTEN_IP.into(), CONTAINER_NET.prefix_len()),
+            address(HOST_IPV6.into(), CONTAINER_NET_V6.prefix_len()),
+            address(OS_LISTEN_IPV6.into(), CONTAINER_NET_V6.prefix_len()),
+        ])
+        .unwrap();
+        assert_eq!(
+            subnets
+                .iter()
+                .map(|subnet| subnet.addr())
+                .collect::<Vec<_>>(),
+            [IpAddr::V4(HOST_IP), IpAddr::V6(HOST_IPV6)]
+        );
+        assert!(
+            observed_subnets([AddressData {
+                address: "invalid".into(),
+                prefix: 24,
+            }])
+            .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod ui_listener_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn the_ui_listener_narrows_to_the_os_listen_addresses_and_back() {
+        let mut listener = WildcardListener::new(0).unwrap();
+        let port = listener.port;
+        assert_eq!(
+            listener.local_addrs(),
+            [SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), port)]
+        );
+        listener.serve_os_listen().unwrap();
+        assert_eq!(
+            listener.local_addrs(),
+            [
+                SocketAddr::new(OS_LISTEN_IP.into(), port),
+                SocketAddr::new(OS_LISTEN_IPV6.into(), port),
+            ]
+        );
+        listener.serve_os_listen().unwrap();
+        listener.serve_wildcard().unwrap();
+        assert_eq!(
+            listener.local_addrs(),
+            [SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), port)]
+        );
+    }
+}
+
+#[cfg(test)]
+mod accept_tests {
+    use std::time::Duration;
+
+    use tokio::io::AsyncReadExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn a_rejected_connection_is_dropped_without_stalling_the_listener() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let endpoint = listener.local_addr().unwrap();
+        let mut rejected = tokio::net::TcpStream::connect(endpoint).await.unwrap();
+        let rejected_addr = rejected.local_addr().unwrap();
+        let accepted = tokio::net::TcpStream::connect(endpoint).await.unwrap();
+        let accepted_addr = accepted.local_addr().unwrap();
+        let (peer, _) = tokio::time::timeout(
+            Duration::from_secs(5),
+            std::future::poll_fn(|cx| {
+                poll_accept_described(&listener, cx, |_, peer_addr| {
+                    if peer_addr == rejected_addr {
+                        Err(Error::new(eyre!("rejected"), ErrorKind::Network))
+                    } else {
+                        Ok(peer_addr)
+                    }
+                })
+            }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(peer, accepted_addr);
+        let mut buf = [0; 1];
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), rejected.read(&mut buf))
+                .await
+                .unwrap()
+                .unwrap_or(0),
+            0
+        );
     }
 }
 

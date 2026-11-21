@@ -37,6 +37,7 @@ function mockService(
     outboundGateway: null,
     outboundDns: null,
     registry: 'https://registry.start9.com/',
+    containerSlot: 0,
     developerKey: 'developer-key',
     plugin: { url: null },
     tasks: {},
@@ -805,6 +806,7 @@ export const mockPatchData: DataModel = {
       outboundGateway: null,
       outboundDns: null,
       registry: 'https://registry.start9.com/',
+      containerSlot: 1,
       developerKey: 'developer-key',
       plugin: { url: null },
       tasks: {
@@ -1434,6 +1436,7 @@ export const mockPatchData: DataModel = {
       outboundGateway: null,
       outboundDns: null,
       registry: 'https://registry.start9.com/',
+      containerSlot: 2,
       developerKey: 'developer-key',
       plugin: { url: null },
       tasks: {
@@ -1515,6 +1518,7 @@ export const mockPatchData: DataModel = {
       outboundGateway: null,
       outboundDns: null,
       registry: 'https://registry.start9.com/',
+      containerSlot: 3,
       developerKey: 'developer-key',
       plugin: { url: { tableAction: 'create-onion-service' } },
       tasks: {},

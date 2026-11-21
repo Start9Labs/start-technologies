@@ -116,6 +116,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_container_dialing_the_os_listen_address_is_internal() {
+        for (local, peer) in [
+            (
+                std::net::IpAddr::from(crate::lxc::slot::OS_LISTEN_IP),
+                "172.16.0.3",
+            ),
+            (crate::lxc::slot::OS_LISTEN_IPV6.into(), "fd00:3::3"),
+        ] {
+            let tcp = TcpMetadata {
+                peer_addr: SocketAddr::new(peer.parse().unwrap(), 41000),
+                local_addr: SocketAddr::new(local, 80),
+            };
+            let origin = RequestOrigin::from_connection(Some(&tcp), None);
+            assert!(origin.is_internal(), "{local}");
+            assert_eq!(origin.gateway, None);
+        }
+    }
+
     #[tokio::test]
     async fn proxy_origin_lives_until_the_relay_is_dropped() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

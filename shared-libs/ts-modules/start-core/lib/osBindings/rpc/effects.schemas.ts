@@ -1197,19 +1197,37 @@ export const GetActionInputParams: z.ZodObject<{
 }).meta({
   id: 'GetActionInputParams',
 })
-export const GetContainerIpParams: z.ZodObject<{
-  packageId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PackageId>>,
-    z.ZodNullable<typeof PackageId>
-  >
-  callback: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof CallbackId>>,
-    z.ZodNullable<typeof CallbackId>
-  >
-}> = /* @__PURE__ */ object({
-  packageId: wire(PackageId.nullable().optional(), PackageId.nullable()),
-  callback: wire(CallbackId.nullable().optional(), CallbackId.nullable()),
-}).meta({
+export const GetContainerIpParams: z.ZodCodec<
+  z.ZodObject<{
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: z.ZodOptional<z.ZodNullable<typeof CallbackId>>
+  }>,
+  z.ZodObject<{
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: z.ZodNullable<typeof CallbackId>
+  }>
+> = /* @__PURE__ */ wire(
+  object({
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: CallbackId.nullable().optional().meta({
+      description: 'Ignored: the address is fixed for the installation.',
+    }),
+  }),
+  object({
+    /**
+     * Ignored: the address is fixed for the installation.
+     */
+    callback: CallbackId.nullable().meta({
+      description: 'Ignored: the address is fixed for the installation.',
+    }),
+  }),
+).meta({
   id: 'GetContainerIpParams',
 })
 export const GetHostInfoParams: z.ZodObject<{
@@ -3395,7 +3413,7 @@ export const Api = {
     },
     'get-container-ip': {
       _PARAMS: /* @__PURE__ */ GetContainerIpParams,
-      _RETURN: /* @__PURE__ */ z.string().nullable(),
+      _RETURN: /* @__PURE__ */ z.string(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },

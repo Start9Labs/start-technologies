@@ -474,9 +474,17 @@ impl Service {
         event_id: Guid,
         path: PathBuf,
     ) -> Result<(), Error> {
-        let container =
-            PersistentContainer::new_backup(&seed.ctx, seed.persistent_container.s9pk.clone())
-                .await?;
+        let namespace_owner = seed
+            .persistent_container
+            .lxc_container
+            .get()
+            .or_not_found("lxc container")?;
+        let container = PersistentContainer::new_backup(
+            &seed.ctx,
+            seed.persistent_container.s9pk.clone(),
+            namespace_owner,
+        )
+        .await?;
         let backup =
             Self::from_container(seed.ctx.clone(), container, seed.backup_phase.clone(), None);
         let result = async {

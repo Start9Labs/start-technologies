@@ -109,14 +109,14 @@ pub async fn mount(
         ));
     }
     let source = confined_join(&volume, subpath.as_deref().unwrap_or(Path::new(""))).await?;
-    let rootfs = context
+    let lxc = context
         .seed
         .persistent_container
         .lxc_container
         .get()
-        .or_not_found("lxc container")?
-        .rootfs_dir()
-        .to_owned();
+        .or_not_found("lxc container")?;
+    let base = lxc.slot().idmap();
+    let rootfs = lxc.rootfs_dir().to_owned();
     let mountpoint = confined_join(&rootfs, &location).await?;
 
     if is_mountpoint(&mountpoint).await? {
@@ -125,6 +125,7 @@ pub async fn mount(
 
     service_filesystem(
         Bind::new(source).with_type(filetype).recursive(true),
+        base,
         &idmap,
     )
     .mount(
@@ -561,6 +562,12 @@ pub async fn get_service_manifest(
 mod test {
     use super::*;
 
+    const BASE_IDMAP: IdMap = IdMap {
+        from_id: 0,
+        to_id: 100000,
+        range: 65536,
+    };
+
     #[test]
     fn dependency_titles_use_the_declaring_package_default_with_or_without_the_dependency() {
         let db = Model::from_value(imbl_value::json!({
@@ -768,6 +775,7 @@ mod test {
             Bind::new(&src)
                 .with_type(FileType::Directory)
                 .recursive(true),
+            BASE_IDMAP,
             &[idmap(0, 1000, 1)],
         )
         .mount(&target, MountType::ReadWrite)

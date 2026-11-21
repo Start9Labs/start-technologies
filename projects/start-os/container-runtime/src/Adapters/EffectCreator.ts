@@ -241,12 +241,6 @@ export function makeEffects(context: EffectContext): Effects {
     ) => {
       return rpcRound('export-range-service-interface', options)
     }) as Effects['exportRangeServiceInterface'],
-    getContainerIp(...[options]: Parameters<T.Effects['getContainerIp']>) {
-      return rpcRound('get-container-ip', {
-        ...options,
-        callback: context.callbacks?.addCallback(options.callback) || null,
-      })
-    },
     getOsIp(...[]: Parameters<T.Effects['getOsIp']>) {
       return rpcRound('get-os-ip', {})
     },
@@ -284,6 +278,13 @@ export function makeEffects(context: EffectContext): Effects {
       return rpcRound('get-system-smtp', {
         ...options,
         callback: context.callbacks?.addCallback(options.callback) || null,
+      })
+    },
+    getContainerIp(...[options]: Parameters<T.Effects['getContainerIp']>) {
+      // Legacy packageId selectors must reach the host's rejection guard.
+      return rpcRound('get-container-ip', {
+        ...options,
+        callback: null,
       })
     },
     getOutboundGateway(

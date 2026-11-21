@@ -31,7 +31,6 @@ import { setupExportedUrls } from '@start9labs/start-core/interfaces/setupExport
 import { setupServiceInterfaces } from '@start9labs/start-core/interfaces/setupInterfaces'
 import * as T from '@start9labs/start-core/types'
 import { Effects, ServiceInterfaceType } from '@start9labs/start-core/types'
-import { GetContainerIp } from '@start9labs/start-core/util/GetContainerIp'
 import {
   getBridgeAddress,
   getHost,
@@ -55,6 +54,7 @@ import { Mounts } from './mainFn/Mounts'
 import { cooldownTrigger, onceTrigger, statusTrigger } from './trigger'
 import { defaultTrigger } from './trigger/defaultTrigger'
 import {
+  GetContainerIp,
   GetOutboundGateway,
   GetSslCertificate,
   GetSystemSmtp,
@@ -346,7 +346,7 @@ export class StartSdk<Manifest extends T.SDKManifest> {
          */
         getAddressGateways,
         /**
-         * Resolve the bridge address (`10.0.3.1:<port>`) a dependency's binding
+         * Resolve the bridge address (`172.16.0.1:<port>`) a dependency's binding
          * is reachable at from this container, with the same reactive read
          * strategies as `get`/`getOwn`.
          *
@@ -365,21 +365,6 @@ export class StartSdk<Manifest extends T.SDKManifest> {
          */
         getBridgeAddress,
       },
-      /**
-       * Get the container IP address with reactive subscription support.
-       *
-       * Returns an object with multiple read strategies: `const()` for a value
-       * that retries on change, `once()` for a single read, `watch()` for an async
-       * generator, `onChange()` for a callback, and `waitFor()` to block until a predicate is met.
-       *
-       * @param effects - The effects context
-       * @param options - Optional filtering options (e.g. `containerId`)
-       */
-      getContainerIp: <Opts extends { packageId?: T.PackageId } = {}>(
-        effects: T.Effects,
-        options: Opts = {} as Opts,
-      ) => new GetContainerIp(effects, options),
-
       /**
        * Get the service's current status with reactive subscription support.
        *
@@ -635,6 +620,13 @@ export class StartSdk<Manifest extends T.SDKManifest> {
        */
       getOutboundGateway: <E extends Effects>(effects: E) =>
         new GetOutboundGateway(effects),
+      /**
+       * Get this service's own container address with reactive subscription support.
+       * The address is fixed for the installation.
+       * @param effects - The effects context
+       */
+      getContainerIp: <E extends Effects>(effects: E) =>
+        new GetContainerIp(effects),
       /**
        * Get an SSL certificate for the given hostnames with reactive subscription support.
        * @param effects - The effects context

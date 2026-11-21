@@ -93,13 +93,25 @@ async fn local_creation_keeps_container_ids_on_the_host_view() {
     let file = path.join("owner");
     std::fs::write(&file, b"data").unwrap();
     std::os::unix::fs::chown(&file, Some(1000), Some(2000)).unwrap();
-    let view = TmpMountGuard::mount(&SourceFilesystem::local(path.clone()), ReadWrite)
-        .await
-        .unwrap();
+    let slot = crate::lxc::slot::ContainerSlot::new(1).unwrap();
+    let base = slot.host_root();
+    let view = TmpMountGuard::mount(
+        &crate::disk::mount::filesystem::idmapped::IdMapped::new(
+            SourceFilesystem::local(path.clone()),
+            vec![slot.idmap()],
+        ),
+        ReadWrite,
+    )
+    .await
+    .unwrap();
     let root = std::fs::metadata(view.path()).unwrap();
-    assert_eq!((root.uid(), root.gid()), (0, 0));
-    let metadata = std::fs::metadata(view.path().join("owner")).unwrap();
-    assert_eq!((metadata.uid(), metadata.gid()), (1000, 2000));
+    assert_eq!((root.uid(), root.gid()), (base, base));
+    let mapped_file = view.path().join("owner");
+    let metadata = std::fs::metadata(&mapped_file).unwrap();
+    assert_eq!((metadata.uid(), metadata.gid()), (base + 1000, base + 2000));
+    std::os::unix::fs::chown(&mapped_file, Some(base + 3000), Some(base + 4000)).unwrap();
+    let metadata = std::fs::metadata(&file).unwrap();
+    assert_eq!((metadata.uid(), metadata.gid()), (3000, 4000));
     view.unmount().await.unwrap();
     tokio::fs::write(path.join("sentinel"), b"allocated data")
         .await
@@ -482,17 +494,18 @@ async fn external_folder_is_created_pinned_and_limits_consumer_subpaths() {
     let consumer_root = tempfile::tempdir().unwrap();
     std::fs::set_permissions(consumer_root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
     let consumer_path = consumer_root.path().join("volume");
+    let slot = crate::lxc::slot::ContainerSlot::new(1).unwrap();
     let consumer = MountGuard::mount(
         &crate::disk::mount::filesystem::idmapped::IdMapped::new(
             Bind::new(source.path()),
-            vec![crate::lxc::BASE_IDMAP],
+            vec![slot.idmap()],
         ),
         &consumer_path,
         ReadWrite,
     )
     .await
     .unwrap();
-    let uid = crate::lxc::BASE_IDMAP.to_id.to_string();
+    let uid = slot.host_root().to_string();
     tokio::process::Command::new("setpriv")
         .args([
             "--reuid",
@@ -581,21 +594,23 @@ async fn external_partition_maps_service_ownership_without_changing_disk_owners(
         b"external-preserved\n"
     );
     let metadata = std::fs::metadata(mapped.path()).unwrap();
-    assert_eq!((metadata.uid(), metadata.gid()), (0, 0));
+    assert_eq!(metadata.uid(), 0);
+    assert_eq!(metadata.gid(), 0);
     let consumer_root = tempfile::tempdir().unwrap();
     std::fs::set_permissions(consumer_root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
     let consumer_path = consumer_root.path().join("volume");
+    let slot = crate::lxc::slot::ContainerSlot::new(1).unwrap();
     let consumer = MountGuard::mount(
         &crate::disk::mount::filesystem::idmapped::IdMapped::new(
             Bind::new(mapped.path()),
-            vec![crate::lxc::BASE_IDMAP],
+            vec![slot.idmap()],
         ),
         &consumer_path,
         ReadWrite,
     )
     .await
     .unwrap();
-    let uid = crate::lxc::BASE_IDMAP.to_id.to_string();
+    let uid = slot.host_root().to_string();
     tokio::process::Command::new("setpriv")
         .args([
             "--reuid",

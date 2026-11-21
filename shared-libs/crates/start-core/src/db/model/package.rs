@@ -10,6 +10,7 @@ use patch_db::json_ptr::JsonPointer;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 
+use crate::lxc::slot::ContainerSlot;
 use crate::net::host::Hosts;
 use crate::prelude::*;
 use crate::progress::FullProgress;
@@ -400,6 +401,7 @@ impl Default for ActionVisibility {
 pub struct PackageDataEntry {
     pub state_info: PackageState,
     pub s9pk: PathBuf,
+    pub container_slot: ContainerSlot,
     pub status_info: StatusInfo,
     pub registry: Option<Url>,
     pub developer_key: Der64<ed25519_dalek::VerifyingKey>,

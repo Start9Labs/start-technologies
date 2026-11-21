@@ -10,6 +10,8 @@ lxc.apparmor.profile = generated
 lxc.apparmor.allow_nesting = 1
 lxc.idmap = u {id_from} {id_to} {id_count}
 lxc.idmap = g {id_from} {id_to} {id_count}
+# Created by startd and owned by the container's root uid.
+lxc.namespace.share.user = {userns}
 
 # Place every service container's cgroup under the `services.slice` systemd
 # slice (see core/services.slice + system::limit_container_memory) instead of
@@ -23,10 +25,7 @@ lxc.cgroup.dir.container.inner = ns
 lxc.rootfs.path = dir:/var/lib/lxc/{guid}/rootfs
 lxc.uts.name = {guid}
 
-# Network configuration
-lxc.net.0.type = veth
-lxc.net.0.link = lxcbr0
-lxc.net.0.flags = up
+{network}
 
 lxc.rootfs.options = rshared
 

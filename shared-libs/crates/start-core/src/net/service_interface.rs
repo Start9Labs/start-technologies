@@ -83,6 +83,15 @@ impl HostnameInfo {
         }
         Some(SocketAddrV6::new(ip, self.port?, 0, 0))
     }
+
+    /// The IPv6 address a plain-port forward DNATs.
+    pub fn forwarded_v6(&self) -> Option<SocketAddrV6> {
+        if !matches!(self.metadata, HostnameMetadata::Ipv6 { .. }) {
+            return None;
+        }
+        let ip = self.hostname.parse::<Ipv6Addr>().ok()?;
+        Some(SocketAddrV6::new(ip, self.port?, 0, 0))
+    }
 }
 
 impl HostnameMetadata {
