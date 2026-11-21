@@ -10,7 +10,7 @@ A passkey works only at the address it was created at. A passkey added while you
 
 ## Signing In With a Passkey
 
-On the login page, click **Login with passkey** and confirm with your device. StartOS asks again each time you open the UI in a new browser tab or reload it. Nothing from a passkey sign-in is saved in the browser, so closing the tab ends it.
+On the login page, click **Login with passkey** and confirm with your device. StartOS asks again each time you open the UI in a new browser tab or reload it, and after the UI has been disconnected for ten minutes, for example while your computer sleeps. Nothing from a passkey sign-in is saved in the browser, and a passkey sign-in ends ten minutes after its tab closes.
 
 ## Removing a Passkey
 

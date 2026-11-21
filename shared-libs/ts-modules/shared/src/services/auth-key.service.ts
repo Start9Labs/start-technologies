@@ -21,9 +21,6 @@ export const AUTH_SIGNING_HOST = new InjectionToken<string>(
   { factory: () => inject(WA_WINDOW).location.hostname },
 )
 
-/** localStorage key for this browser's random passkey device label. */
-const PASSKEY_DEVICE_STORAGE_KEY = '_startos/passkeyDevice'
-
 /** The active device identity and its cancellation lifetime. */
 export interface AuthKeyLease extends SessionSocketIdentity {
   readonly key: auth.AuthKey
@@ -111,16 +108,6 @@ export class AuthKeyService {
     this.displaced = null
     await this.delete()
     this.cached = key
-  }
-
-  /** A stable random label distinguishing this browser's passkey sessions. */
-  passkeyDevice(): string {
-    const storage = this.win.localStorage
-    const existing = storage?.getItem(PASSKEY_DEVICE_STORAGE_KEY)
-    if (existing) return existing
-    const device = this.win.crypto.randomUUID()
-    storage?.setItem(PASSKEY_DEVICE_STORAGE_KEY, device)
-    return device
   }
 
   /** Restores the key displaced by a failed login. */

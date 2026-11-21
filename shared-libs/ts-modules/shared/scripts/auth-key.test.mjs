@@ -9,13 +9,10 @@ import './typescript-loader.mjs'
 const { AuthKeyService, AUTH_SIGNING_HOST, AUTH_KEY_STORAGE_KEY } =
   await import('../src/services/auth-key.service.ts')
 
-function keys(cached = null, storage = null) {
+function keys(cached = null) {
   const injector = Injector.create({
     providers: [
-      {
-        provide: WA_WINDOW,
-        useValue: { crypto: globalThis.crypto, localStorage: storage },
-      },
+      { provide: WA_WINDOW, useValue: {} },
       { provide: AUTH_SIGNING_HOST, useValue: 'server.test' },
       { provide: AUTH_KEY_STORAGE_KEY, useValue: 'test' },
     ],
@@ -82,19 +79,6 @@ test('a passkey-enrolled key signs from memory and discards the stored key', asy
   await service.clear()
   assert.equal(lease.signal.aborted, true)
   assert.equal(await service.lease(), null)
-})
-
-test('the passkey device label is stable per browser storage', () => {
-  const values = new Map()
-  const storage = {
-    getItem: key => values.get(key) ?? null,
-    setItem: (key, value) => values.set(key, value),
-  }
-  const device = keys(null, storage).passkeyDevice()
-  assert.match(device, /^[0-9a-f-]{36}$/)
-  assert.equal(keys(null, storage).passkeyDevice(), device)
-  const empty = { getItem: () => null, setItem: () => {} }
-  assert.notEqual(keys(null, empty).passkeyDevice(), device)
 })
 
 test('enrollment and rollback invalidate their displaced possession leases', async () => {

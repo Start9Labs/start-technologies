@@ -22,6 +22,8 @@ pub struct SecureSession {
     address: InternedString,
     server_identity: ServerIdentity,
     replay_check: RequestReplayCheck,
+    /// Released when the last context sharing this session drops.
+    lease: Option<Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 impl SecureSession {
@@ -32,6 +34,11 @@ impl SecureSession {
     /// The ingress-validated server name bound into the exchange.
     pub fn address(&self) -> &InternedString {
         &self.address
+    }
+
+    pub(crate) fn with_lease<T: Send + Sync + 'static>(mut self, lease: Option<Arc<T>>) -> Self {
+        self.lease = lease.map(|lease| lease as Arc<dyn std::any::Any + Send + Sync>);
+        self
     }
 
     /// Admits a fresh encrypted continuation only for the initiating identity.
@@ -164,6 +171,7 @@ impl<C: SignatureAuthContext + Clone> WebSocketUpgrader<C> for RpcSessionUpgrade
                 address,
                 server_identity,
                 replay_check,
+                lease: None,
             });
             Ok(UpgradedWebSocket {
                 context: Arc::new(scoped),

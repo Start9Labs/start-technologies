@@ -158,10 +158,7 @@ export default class LoginPage {
 
     try {
       const key = await auth.generateAuthKey()
-      await this.api.enrollWithPasskey({
-        pubkey: key.pubkeyPem,
-        device: this.authKeys.passkeyDevice(),
-      })
+      await this.api.enrollWithPasskey({ pubkey: key.pubkeyPem })
       await this.authKeys.adopt(key)
       this.authService.setVerified(true)
       await this.router.navigate([''], { replaceUrl: true })

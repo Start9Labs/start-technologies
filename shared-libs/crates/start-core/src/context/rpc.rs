@@ -67,7 +67,7 @@ pub struct RpcContextSeed {
     pub disk_guid: InternedString,
     pub ephemeral_auth_keys: SyncMutex<AuthKeys>,
     /// Session keys each passkey enrolled, revoked with the passkey.
-    pub passkey_sessions: SyncMutex<crate::auth::passkey::PasskeySessions>,
+    pub passkey_sessions: SyncMutex<crate::auth::passkey::sessions::PasskeySessions>,
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub db: TypedPatchDb<Database>,
     pub sync_db: watch::Sender<u64>,
@@ -172,8 +172,21 @@ impl RpcContext {
         mut self,
         session: crate::middleware::auth::session::SecureSession,
     ) -> Self {
-        self.1 = Some(Arc::new(session));
+        let lease = crate::auth::passkey::sessions::hold(&self, session.peer());
+        self.1 = Some(Arc::new(session.with_lease(lease)));
         self
+    }
+    pub(crate) fn weak(&self) -> WeakRpcContext {
+        WeakRpcContext(Arc::downgrade(&self.0))
+    }
+}
+
+/// An `RpcContext` reference that does not keep the server running.
+pub(crate) struct WeakRpcContext(std::sync::Weak<RpcContextSeed>);
+
+impl WeakRpcContext {
+    pub(crate) fn upgrade(&self) -> Option<RpcContext> {
+        self.0.upgrade().map(|seed| RpcContext(seed, None))
     }
 }
 

@@ -26,6 +26,7 @@ async fn scope() -> (SecureSession, Signer, ScopeOwner) {
         address: "localhost".into(),
         server_identity: context.server_identity().unwrap().into(),
         replay_check: context.replay_check(),
+        lease: None,
     };
     (
         scope,

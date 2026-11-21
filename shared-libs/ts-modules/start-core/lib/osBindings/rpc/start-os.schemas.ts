@@ -2183,23 +2183,12 @@ export const EnrollPasskeySessionParams: z.ZodObject<{
    * The browser's unpersisted session key.
    */
   pubkey: typeof AnyVerifyingKey
-  /**
-   * A stable random label for the browser; its previous session key for this passkey is revoked.
-   */
-  device: z.ZodString
 }> = /* @__PURE__ */ object({
   /**
    * The browser's unpersisted session key.
    */
   pubkey: AnyVerifyingKey.meta({
     description: "The browser's unpersisted session key.",
-  }),
-  /**
-   * A stable random label for the browser; its previous session key for this passkey is revoked.
-   */
-  device: z.string().meta({
-    description:
-      'A stable random label for the browser; its previous session key for this passkey is revoked.',
   }),
 }).meta({
   id: 'EnrollPasskeySessionParams',

@@ -4261,13 +4261,6 @@ auth.passkey.invalid-credential-id:
   fr_FR: "Identifiant d’identification de clé d’accès invalide"
   pl_PL: "Nieprawidłowy identyfikator poświadczenia klucza dostępu"
 
-auth.passkey.invalid-device:
-  en_US: "Invalid passkey device ID"
-  de_DE: "Ungültige Passkey-Geräte-ID"
-  es_ES: "ID de dispositivo de llave de acceso no válido"
-  fr_FR: "Identifiant d’appareil de clé d’accès invalide"
-  pl_PL: "Nieprawidłowy identyfikator urządzenia klucza dostępu"
-
 auth.passkey.not-a-passkey:
   en_US: "Only a registered passkey can enroll a passkey session"
   de_DE: "Nur ein registrierter Passkey kann eine Passkey-Sitzung anmelden"
