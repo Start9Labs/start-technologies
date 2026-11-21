@@ -428,6 +428,8 @@ export type RemoveCategoryParamsInput = z.input<
 >
 export type RemoveDomainParams = z.output<typeof schemas.RemoveDomainParams>
 export type RemoveDomainParamsInput = z.input<typeof schemas.RemoveDomainParams>
+export type RemoveTokensParams = z.output<typeof schemas.RemoveTokensParams>
+export type RemoveTokensParamsInput = z.input<typeof schemas.RemoveTokensParams>
 export type RemoveVersionParams = z.output<typeof schemas.RemoveVersionParams>
 export type RemoveVersionParamsInput = z.input<
   typeof schemas.RemoveVersionParams
@@ -936,8 +938,6 @@ export type InstalledVersionParamsInput = z.input<
 >
 export type IpInfo = z.output<typeof schemas.IpInfo>
 export type IpInfoInput = z.input<typeof schemas.IpInfo>
-export type KillParams = z.output<typeof schemas.KillParams>
-export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LegacyAlpnInfo = z.output<typeof schemas.LegacyAlpnInfo>
 export type LegacyAlpnInfoInput = z.input<typeof schemas.LegacyAlpnInfo>
 export type ListPackageSignersParams = z.output<
@@ -1346,6 +1346,16 @@ export type InitProgressRes = z.output<typeof schemas.InitProgressRes>
 export type InitProgressResInput = z.input<typeof schemas.InitProgressRes>
 export type InstallParams = z.output<typeof schemas.InstallParams>
 export type InstallParamsInput = z.input<typeof schemas.InstallParams>
+
+/**
+ * Enrolled keys, including ephemeral ones, and the caller's own.
+ */
+export type KeyList = z.output<typeof schemas.KeyList>
+
+/**
+ * Enrolled keys, including ephemeral ones, and the caller's own.
+ */
+export type KeyListInput = z.input<typeof schemas.KeyList>
 export type MetadataSrc = z.output<typeof schemas.MetadataSrc>
 export type MetadataSrcInput = z.input<typeof schemas.MetadataSrc>
 export type Metrics = z.output<typeof schemas.Metrics>
@@ -1528,8 +1538,6 @@ export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type PackageVersionInfoInput = z.input<typeof schemas.PackageVersionInfo>
 export type ServerStatus = z.output<typeof schemas.ServerStatus>
 export type ServerStatusInput = z.input<typeof schemas.ServerStatus>
-export type SessionList = z.output<typeof schemas.SessionList>
-export type SessionListInput = z.input<typeof schemas.SessionList>
 export type SetBackupProgress = z.output<typeof schemas.SetBackupProgress>
 export type SetBackupProgressInput = z.input<typeof schemas.SetBackupProgress>
 export type SetHealth = z.output<typeof schemas.SetHealth>

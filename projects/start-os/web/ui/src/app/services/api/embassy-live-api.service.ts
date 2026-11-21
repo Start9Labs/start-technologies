@@ -151,7 +151,7 @@ export class LiveApiService extends ApiService {
   }
 
   checkEnrollment(): Promise<unknown> {
-    return this.request({ method: 'auth.session.list', params: {} })
+    return this.request({ method: 'auth.key.list', params: {} })
   }
 
   private request<T>(options: RPCOptions): Promise<T> {

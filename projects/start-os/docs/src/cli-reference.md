@@ -52,35 +52,35 @@ Reset the master password. Must be run locally (via SSH or physical access).
 
 Retrieve the server's public key.
 
-### `start-cli auth session list`
+### `start-cli auth key add <KEY> [--name <NAME>] [--user-agent <USER_AGENT>]`
 
-List all enrolled device keys and bearer tokens.
-
-- `--format` — Output format
-
-### `start-cli auth session kill [--pubkey <KEY>]... [--token <ID>]...`
-
-End one or more sessions. `--pubkey` removes an enrolled device key; `--token` revokes a bearer token by the ID `auth session list` shows.
-
-### `start-cli auth token create --name <NAME>`
-
-Create a bearer token for an API client that cannot sign requests. The token is printed once and is not stored; the client sends it as `Authorization: Bearer <token>`. It appears in `auth session list` under its name and is revoked with `auth session kill --token` or after 30 days unused.
-
-An MCP client authenticates with the same token to use the server's API as tools at `https://<server-address>/mcp`, over the streamable HTTP transport.
-
-### `start-cli auth key add <NAME> <KEY>`
-
-Enroll a device key under a name, without a password or the login rate limit. The web UI shows this command, with its own key, when too many login attempts block signing in.
+Enroll a device key without a password or the login rate limit. `--name` and `--user-agent` label it in `auth key list`. The web UI shows this command, with its own key and user agent, when too many login attempts block signing in.
 
 ### `start-cli auth key list`
 
-List enrolled device keys with their names.
+List enrolled device keys, including the web interface's and `start-cli`'s. The key making the request is highlighted.
 
 - `--format` — Output format
 
-### `start-cli auth key remove <KEY>`
+### `start-cli auth key remove <KEY>...`
 
-Remove an enrolled device key.
+Remove one or more enrolled device keys, ending their sessions.
+
+### `start-cli auth token create --name <NAME>`
+
+Create a bearer token for an API client that cannot sign requests. The token is printed once and is not stored; the client sends it as `Authorization: Bearer <token>`. It appears in `auth token list` under its name and is revoked with `auth token remove` or after 30 days unused.
+
+An MCP client authenticates with the same token to use the server's API as tools at `https://<server-address>/mcp`, over the streamable HTTP transport.
+
+### `start-cli auth token list`
+
+List bearer tokens by ID and name.
+
+- `--format` — Output format
+
+### `start-cli auth token remove <ID>...`
+
+Revoke one or more bearer tokens by the ID `auth token list` shows.
 
 ## Server
 

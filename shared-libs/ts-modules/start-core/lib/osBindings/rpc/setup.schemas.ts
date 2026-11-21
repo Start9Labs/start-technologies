@@ -889,7 +889,6 @@ export const Api = {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
         key: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
-        session: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         token: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
       },
     },

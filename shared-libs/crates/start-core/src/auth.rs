@@ -27,7 +27,7 @@ use crate::rpc_continuations::{OpenAuthedContinuations, RevocationSubscription};
 use crate::sign::{AnyVerifyingKey, Signer};
 use crate::util::crypto::EncryptedWire;
 use crate::util::io::create_file_mod;
-use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
+use crate::util::serde::{HandlerExtSerde, display_serializable};
 use crate::util::sync::SyncMutex;
 use crate::{Error, ResultExt, ensure_code};
 
@@ -86,7 +86,7 @@ rpc_toolkit::reflect_ts!(Sessions);
 rpc_toolkit::ts_export!(Sessions, namespaces = [""]);
 
 /// Contexts where a password can enroll an auth key (login), plus access to
-/// the enrolled-key store that login writes and the session list reads.
+/// the enrolled-key store that login writes and the key list reads.
 pub trait LoginContext: SignatureAuthorizationContext {
     /// The persisted enrolled-key store. Enrollment happens via login; never
     /// remove a key directly — unenrollment goes through
@@ -362,10 +362,6 @@ pub fn auth<C: Context, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>() -
                 .with_call_remote::<CC>(),
         )
         .subcommand(
-            "session",
-            session::<C, AC, CC>().with_about("about.list-or-kill-auth-sessions"),
-        )
-        .subcommand(
             "key",
             key::<C, AC, CC>().with_about("about.commands-authorized-keys"),
         )
@@ -386,7 +382,6 @@ fn key<C: Context, AC: LoginContext, CC: CallRemote<AC>>() -> ParentHandler<C> {
             "remove",
             from_fn_async(remove_key::<AC>)
                 .with_metadata("sync_db", Value::Bool(true))
-                .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_display()
                 .with_about("about.remove-authorized-key")
                 .with_call_remote::<CC>(),
@@ -394,20 +389,13 @@ fn key<C: Context, AC: LoginContext, CC: CallRemote<AC>>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list_keys::<AC>)
-                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .with_metadata("get_signer", Value::Bool(true))
                 .with_display_serializable()
                 .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
-                    use prettytable::*;
                     if let Some(format) = params.format {
                         return display_serializable(format, res);
                     }
-                    let mut table = Table::new();
-                    table.add_row(row![bc => "NAME", "KEY"]);
-                    for (key, info) in res.0 {
-                        table.add_row(row![info.name.as_deref().unwrap_or("-"), key]);
-                    }
-                    crate::util::output::print_table(&table)?;
-                    Ok(())
+                    display_sessions(&res.keys.0, res.current.as_ref())
                 })
                 .with_about("about.list-authorized-keys")
                 .with_call_remote::<CC>(),
@@ -417,9 +405,16 @@ fn key<C: Context, AC: LoginContext, CC: CallRemote<AC>>() -> ParentHandler<C> {
 #[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct AddKeyParams {
-    pub name: InternedString,
+    #[arg(help = "help.arg.auth-key")]
     pub key: AnyVerifyingKey,
+    #[arg(long, help = "help.arg.auth-key-name")]
+    #[serde(default)]
+    pub name: Option<InternedString>,
+    #[arg(long, help = "help.arg.user-agent")]
+    #[serde(default)]
+    pub user_agent: Option<String>,
 }
 
 rpc_toolkit::reflect_ts!(AddKeyParams);
@@ -428,14 +423,18 @@ rpc_toolkit::ts_export!(AddKeyParams, namespaces = [""]);
 /// Enrolls a key without a password or the login rate limit.
 pub async fn add_key<C: LoginContext>(
     ctx: C,
-    AddKeyParams { name, key }: AddKeyParams,
+    AddKeyParams {
+        key,
+        name,
+        user_agent,
+    }: AddKeyParams,
 ) -> Result<(), Error> {
     let now = Utc::now();
     let record = Session {
-        name: Some(name),
+        name,
         logged_in: now,
         last_active: now,
-        user_agent: None,
+        user_agent,
     };
     ctx.db()
         .mutate(|db| {
@@ -450,7 +449,8 @@ pub async fn add_key<C: LoginContext>(
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveKeyParams {
-    pub key: AnyVerifyingKey,
+    #[arg(required = true, help = "help.arg.session-pubkeys")]
+    pub keys: Vec<AnyVerifyingKey>,
 }
 
 rpc_toolkit::reflect_ts!(RemoveKeyParams);
@@ -458,36 +458,54 @@ rpc_toolkit::ts_export!(RemoveKeyParams, namespaces = [""]);
 
 pub async fn remove_key<C: LoginContext>(
     ctx: C,
-    RemoveKeyParams { key }: RemoveKeyParams,
+    RemoveKeyParams { keys }: RemoveKeyParams,
 ) -> Result<(), Error> {
-    ctx.unenroll([key.interned_der64()]).await?;
+    ctx.unenroll(keys.iter().map(AnyVerifyingKey::interned_der64))
+        .await?;
     Ok(())
 }
 
-pub async fn list_keys<C: LoginContext>(ctx: C) -> Result<AuthKeys, Error> {
-    C::access_auth_keys(&mut ctx.db().peek().await).de()
-}
-
-/// Bearer-token commands; a token is a named session, listed and revoked with `auth.session`.
+/// Bearer-token commands; a token is a named session.
 pub fn token<C: Context, AC: LoginContext>() -> ParentHandler<C>
 where
     CliContext: CallRemote<AC>,
 {
-    ParentHandler::new().subcommand(
-        "create",
-        from_fn_async(create_token::<AC>)
-            .with_metadata(crate::mcp::MCP, Value::Bool(false))
-            .with_display_serializable()
-            .with_custom_display_fn(|handle, result| {
-                if let Some(format) = handle.params.format {
-                    return display_serializable(format, result);
-                }
-                println!("{}", result.token);
-                Ok(())
-            })
-            .with_about("about.create-auth-token")
-            .with_call_remote::<CliContext>(),
-    )
+    ParentHandler::new()
+        .subcommand(
+            "create",
+            from_fn_async(create_token::<AC>)
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .with_display_serializable()
+                .with_custom_display_fn(|handle, result| {
+                    if let Some(format) = handle.params.format {
+                        return display_serializable(format, result);
+                    }
+                    println!("{}", result.token);
+                    Ok(())
+                })
+                .with_about("about.create-auth-token")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "list",
+            from_fn_async(list_tokens::<AC>)
+                .with_display_serializable()
+                .with_custom_display_fn(|handle, result| {
+                    if let Some(format) = handle.params.format {
+                        return display_serializable(format, result);
+                    }
+                    display_sessions(&result, None)
+                })
+                .with_about("about.list-auth-tokens")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "remove",
+            from_fn_async(remove_tokens::<AC>)
+                .no_display()
+                .with_about("about.remove-auth-tokens")
+                .with_call_remote::<CliContext>(),
+        )
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
@@ -505,7 +523,7 @@ rpc_toolkit::ts_export!(CreateTokenParams, namespaces = [""]);
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedToken {
-    /// The session id the token authenticates as, for `auth.session.kill`.
+    /// The session id the token authenticates as, for `auth.token.remove`.
     pub id: InternedString,
     /// The bearer secret. It is not stored and cannot be retrieved again.
     pub token: String,
@@ -923,64 +941,40 @@ pub struct Session {
 rpc_toolkit::reflect_ts!(Session);
 rpc_toolkit::ts_export!(Session, namespaces = [""]);
 
+/// Enrolled keys, including ephemeral ones, and the caller's own.
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionList {
+pub struct KeyList {
     current: Option<InternedString>,
-    sessions: Sessions,
+    keys: AuthKeys,
 }
 
-rpc_toolkit::reflect_ts!(SessionList);
-rpc_toolkit::ts_export!(SessionList, namespaces = [""]);
+rpc_toolkit::reflect_ts!(KeyList);
+rpc_toolkit::ts_export!(KeyList, namespaces = [""]);
 
-pub fn session<C: Context, AC: LoginContext, CC: CallRemote<AC>>() -> ParentHandler<C> {
-    ParentHandler::new()
-        .subcommand(
-            "list",
-            from_fn_async(list::<AC>)
-                .with_metadata("get_signer", Value::Bool(true))
-                .with_display_serializable()
-                .with_custom_display_fn(|handle, result| display_sessions(handle.params, result))
-                .with_about("about.display-all-auth-sessions")
-                .with_call_remote::<CC>(),
-        )
-        .subcommand(
-            "kill",
-            from_fn_async(kill::<AC>)
-                .no_display()
-                .with_about("about.terminate-auth-sessions")
-                .with_call_remote::<CC>(),
-        )
-}
-
-fn display_sessions(params: WithIoFormat<ListParams>, arg: SessionList) -> Result<(), Error> {
+fn display_sessions<'a>(
+    sessions: impl IntoIterator<Item = (&'a InternedString, &'a Session)>,
+    current: Option<&InternedString>,
+) -> Result<(), Error> {
     use prettytable::*;
-
-    if let Some(format) = params.format {
-        return display_serializable(format, arg);
-    }
 
     let mut table = Table::new();
     table.add_row(row![bc =>
-        "TYPE",
         "ID",
         "NAME",
         "LOGGED IN",
         "LAST ACTIVE",
         "USER AGENT",
     ]);
-    let pubkeys = arg.sessions.pubkeys.0.into_iter().map(|s| ("pubkey", s));
-    let tokens = arg.sessions.tokens.into_iter().map(|s| ("token", s));
-    for (kind, (id, session)) in pubkeys.chain(tokens) {
+    for (id, session) in sessions {
         let mut row = row![
-            kind,
-            &id,
+            id,
             session.name.as_deref().unwrap_or("N/A"),
             &format!("{}", session.logged_in),
             &format!("{}", session.last_active),
             session.user_agent.as_deref().unwrap_or("N/A"),
         ];
-        if Some(id) == arg.current {
+        if Some(id) == current {
             row.iter_mut()
                 .map(|c| c.style(Attr::ForegroundColor(color::GREEN)))
                 .collect::<()>()
@@ -995,62 +989,58 @@ fn display_sessions(params: WithIoFormat<ListParams>, arg: SessionList) -> Resul
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
-pub struct ListParams {
+pub struct ListKeysParams {
     #[arg(skip)]
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
     signer: Option<InternedString>,
 }
 
-rpc_toolkit::reflect_ts!(ListParams);
+rpc_toolkit::reflect_ts!(ListKeysParams);
 
 #[instrument(skip_all)]
-pub async fn list<C: LoginContext>(
+pub async fn list_keys<C: LoginContext>(
     ctx: C,
-    ListParams { signer }: ListParams,
-) -> Result<SessionList, Error> {
-    let mut db = ctx.db().peek().await;
-    let mut pubkeys = C::access_auth_keys(&mut db).de()?;
+    ListKeysParams { signer }: ListKeysParams,
+) -> Result<KeyList, Error> {
+    let mut keys = C::access_auth_keys(&mut ctx.db().peek().await).de()?;
     if let Some(ephemeral) = ctx.ephemeral_auth_keys() {
         ephemeral.peek(|e| {
-            pubkeys
-                .0
+            keys.0
                 .extend(e.0.iter().map(|(k, v)| (k.clone(), v.clone())))
         });
     }
-    let tokens = C::access_tokens(&mut db)
-        .map(|tokens| tokens.de())
-        .transpose()?
-        .unwrap_or_default();
-    Ok(SessionList {
+    Ok(KeyList {
         current: signer,
-        sessions: Sessions { pubkeys, tokens },
+        keys,
     })
+}
+
+#[instrument(skip_all)]
+pub async fn list_tokens<C: LoginContext>(ctx: C) -> Result<TokenSessions, Error> {
+    C::access_tokens(&mut ctx.db().peek().await)
+        .map(|tokens| tokens.de())
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
-pub struct KillParams {
-    #[arg(long = "pubkey", help = "help.arg.session-pubkeys")]
-    #[serde(default)]
-    pubkeys: Vec<AnyVerifyingKey>,
-    #[arg(long = "token", help = "help.arg.session-tokens")]
-    #[serde(default)]
+pub struct RemoveTokensParams {
+    #[arg(required = true, help = "help.arg.session-tokens")]
     tokens: Vec<InternedString>,
 }
 
-rpc_toolkit::reflect_ts!(KillParams);
-rpc_toolkit::ts_export!(KillParams, namespaces = [""]);
+rpc_toolkit::reflect_ts!(RemoveTokensParams);
+rpc_toolkit::ts_export!(RemoveTokensParams, namespaces = [""]);
 
 #[instrument(skip_all)]
-pub async fn kill<C: LoginContext>(
+pub async fn remove_tokens<C: LoginContext>(
     ctx: C,
-    KillParams { pubkeys, tokens }: KillParams,
+    RemoveTokensParams { tokens }: RemoveTokensParams,
 ) -> Result<(), Error> {
-    ctx.unenroll(pubkeys.iter().map(AnyVerifyingKey::interned_der64))
-        .await?;
     let continuations = ctx.open_authed_continuations();
     ctx.db()
         .mutate(|db| revoke_tokens::<C>(continuations, db, tokens))

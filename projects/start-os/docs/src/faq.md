@@ -200,7 +200,7 @@ No. StartOS has one administrator, protected by the master password, and no othe
 
 To let someone use a service without administering the server, give them the service's [address](interfaces.md) and an account in that service, never the master password.
 
-To revoke known administrative credentials, [change the master password](change-password.md) and remove their SSH keys under **System > SSH**. List web-interface and `start-cli` sessions with `start-cli auth session list`, then revoke each unwanted entry with `start-cli auth session kill --pubkey <ID>` for a `pubkey` entry or `start-cli auth session kill --token <ID>` for a `token` entry, using its ID from the list.
+To revoke known administrative credentials, [change the master password](change-password.md) and remove their SSH keys under **System > SSH**. List web-interface and `start-cli` sessions with `start-cli auth key list` and remove unwanted ones with `start-cli auth key remove <ID>`. List bearer tokens with `start-cli auth token list` and revoke unwanted ones with `start-cli auth token remove <ID>`.
 
 An SSH connection that is already open stays open until it ends; restarting the server closes it. Revoking credentials leaves in place any change they made to the server and any data they copied. If you no longer trust someone who had administrative access, [get help](https://start9.com/help) restoring trust in the server; changing credentials alone cannot establish that.
 

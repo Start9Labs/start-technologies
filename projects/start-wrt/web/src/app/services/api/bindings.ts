@@ -193,7 +193,7 @@ export type LanIpv4Response = z.output<typeof schemas.LanIpv4Response>
 export type LanIpv4SetRequestInput = z.input<typeof schemas.LanIpv4SetRequest>
 export type LanIpv6Response = z.output<typeof schemas.LanIpv6Response>
 export type LanIpv6SetRequestInput = z.input<typeof schemas.LanIpv6SetRequest>
-export type ListParamsInput = z.input<typeof schemas.ListParams>
+export type ListKeysParamsInput = z.input<typeof schemas.ListKeysParams>
 export type LogEntry = z.output<typeof schemas.LogEntry>
 export type LogoutParamsInput = z.input<typeof schemas.LogoutParams>
 export type MacStrategy = z.output<typeof schemas.MacStrategy>
@@ -320,7 +320,6 @@ export type EthernetInfo = z.output<typeof schemas.EthernetInfo>
 export type EthernetSetRequestInput = z.input<typeof schemas.EthernetSetRequest>
 export type EthernetSetResult = z.output<typeof schemas.EthernetSetResult>
 export type FollowLogsRes = z.output<typeof schemas.FollowLogsRes>
-export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 export type LogsResponse = z.output<typeof schemas.LogsResponse>
 export type OutboundVpn = z.output<typeof schemas.OutboundVpn>
@@ -392,6 +391,11 @@ export type WifiSetResult = z.output<typeof schemas.WifiSetResult>
 export type BlackoutSetRequestInput = z.input<typeof schemas.BlackoutSetRequest>
 export type ConfigCheck = z.output<typeof schemas.ConfigCheck>
 export type FlashParamsInput = z.input<typeof schemas.FlashParams>
+
+/**
+ * Enrolled keys, including ephemeral ones, and the caller's own.
+ */
+export type KeyList = z.output<typeof schemas.KeyList>
 export type NamedProgress = z.output<typeof schemas.NamedProgress>
 export type PublishedPortsSetRequestInput = z.input<
   typeof schemas.PublishedPortsSetRequest
@@ -404,11 +408,6 @@ export type PublishedPortsSetRequestInput = z.input<
 export type PublishedPortsSetResult = z.output<
   typeof schemas.PublishedPortsSetResult
 >
-
-/**
- * The server's sessions, by credential type.
- */
-export type Sessions = z.output<typeof schemas.Sessions>
 export type SetInitialPasswordParamsInput = z.input<
   typeof schemas.SetInitialPasswordParams
 >
@@ -423,5 +422,4 @@ export type WifiRegulatory = z.output<typeof schemas.WifiRegulatory>
  * Snapshot of overall + per-phase progress, sent over WebSocket.
  */
 export type FullProgress = z.output<typeof schemas.FullProgress>
-export type SessionList = z.output<typeof schemas.SessionList>
 export type Api = RpcSchemaTree<typeof schemas.Api>

@@ -22,20 +22,22 @@
         "AddKeyParams": {
           "type": "object",
           "properties": {
-            "name": { "type": "string" },
-            "key": { "$ref": "#/$defs/AnyVerifyingKey" }
+            "key": { "$ref": "#/$defs/AnyVerifyingKey" },
+            "name": { "type": ["string", "null"] },
+            "userAgent": { "type": ["string", "null"] }
           },
-          "required": ["name", "key"],
+          "required": ["key"],
           "additionalProperties": true
         },
         "AnyVerifyingKey": { "type": "string" }
       },
       "type": "object",
       "properties": {
-        "name": { "type": "string" },
-        "key": { "$ref": "#/$defs/AnyVerifyingKey" }
+        "key": { "$ref": "#/$defs/AnyVerifyingKey" },
+        "name": { "type": ["string", "null"] },
+        "userAgent": { "type": ["string", "null"] }
       },
-      "required": ["name", "key"],
+      "required": ["key"],
       "additionalProperties": true
     }
   },
@@ -43,22 +45,45 @@
     "name": "auth.key.list",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "format": {
-          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
-        }
-      },
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/ListKeysParams" }
+      ],
       "$defs": {
         "IoFormat": {
           "type": "string",
           "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
+        "ListKeysParams": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
         }
-      }
+      },
+      "type": "object"
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$defs": {
+        "KeyList": {
+          "type": "object",
+          "properties": {
+            "current": { "type": ["string", "null"] },
+            "keys": { "$ref": "#/$defs/AuthKeys" }
+          },
+          "required": ["current", "keys"],
+          "additionalProperties": true,
+          "description": "Enrolled keys, including ephemeral ones, and the caller's own."
+        },
         "AuthKeys": {
           "type": "object",
           "propertyNames": { "type": "string" },
@@ -81,9 +106,13 @@
         }
       },
       "type": "object",
-      "propertyNames": { "type": "string" },
-      "additionalProperties": { "$ref": "#/$defs/Session" },
-      "description": "Enrolled sign-ins indexed by canonical DER64 SPKI."
+      "properties": {
+        "current": { "type": ["string", "null"] },
+        "keys": { "$ref": "#/$defs/AuthKeys" }
+      },
+      "required": ["current", "keys"],
+      "additionalProperties": true,
+      "description": "Enrolled keys, including ephemeral ones, and the caller's own."
     }
   },
   {
@@ -93,15 +122,25 @@
       "$defs": {
         "RemoveKeyParams": {
           "type": "object",
-          "properties": { "key": { "$ref": "#/$defs/AnyVerifyingKey" } },
-          "required": ["key"],
+          "properties": {
+            "keys": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/AnyVerifyingKey" }
+            }
+          },
+          "required": ["keys"],
           "additionalProperties": true
         },
         "AnyVerifyingKey": { "type": "string" }
       },
       "type": "object",
-      "properties": { "key": { "$ref": "#/$defs/AnyVerifyingKey" } },
-      "required": ["key"],
+      "properties": {
+        "keys": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AnyVerifyingKey" }
+        }
+      },
+      "required": ["keys"],
       "additionalProperties": true
     }
   },
@@ -194,121 +233,6 @@
     }
   },
   {
-    "name": "auth.session.kill",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "KillParams": {
-          "type": "object",
-          "properties": {
-            "pubkeys": {
-              "type": "array",
-              "items": { "$ref": "#/$defs/AnyVerifyingKey" }
-            },
-            "tokens": { "type": "array", "items": { "type": "string" } }
-          },
-          "additionalProperties": true
-        },
-        "AnyVerifyingKey": { "type": "string" }
-      },
-      "type": "object",
-      "properties": {
-        "pubkeys": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/AnyVerifyingKey" }
-        },
-        "tokens": { "type": "array", "items": { "type": "string" } }
-      },
-      "additionalProperties": true
-    }
-  },
-  {
-    "name": "auth.session.list",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "allOf": [
-        {
-          "type": "object",
-          "properties": {
-            "format": {
-              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
-            }
-          },
-          "additionalProperties": true
-        },
-        { "type": "object", "properties": {}, "additionalProperties": true },
-        { "$ref": "#/$defs/ListParams" }
-      ],
-      "$defs": {
-        "IoFormat": {
-          "type": "string",
-          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
-        },
-        "ListParams": {
-          "type": "object",
-          "properties": {},
-          "additionalProperties": true
-        }
-      },
-      "type": "object"
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$defs": {
-        "SessionList": {
-          "type": "object",
-          "properties": {
-            "current": { "type": ["string", "null"] },
-            "sessions": { "$ref": "#/$defs/Sessions" }
-          },
-          "required": ["current", "sessions"],
-          "additionalProperties": true
-        },
-        "Sessions": {
-          "type": "object",
-          "properties": {
-            "pubkeys": { "$ref": "#/$defs/AuthKeys" },
-            "tokens": {
-              "type": "object",
-              "propertyNames": { "type": "string" },
-              "additionalProperties": { "$ref": "#/$defs/Session" }
-            }
-          },
-          "required": ["pubkeys", "tokens"],
-          "additionalProperties": true,
-          "description": "The server's sessions, by credential type."
-        },
-        "AuthKeys": {
-          "type": "object",
-          "propertyNames": { "type": "string" },
-          "additionalProperties": { "$ref": "#/$defs/Session" },
-          "description": "Enrolled sign-ins indexed by canonical DER64 SPKI."
-        },
-        "Session": {
-          "type": "object",
-          "properties": {
-            "name": {
-              "description": "A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.",
-              "type": ["string", "null"]
-            },
-            "loggedIn": { "type": "string" },
-            "lastActive": { "type": "string" },
-            "userAgent": { "type": ["string", "null"] }
-          },
-          "required": ["name", "loggedIn", "lastActive", "userAgent"],
-          "additionalProperties": true
-        }
-      },
-      "type": "object",
-      "properties": {
-        "current": { "type": ["string", "null"] },
-        "sessions": { "$ref": "#/$defs/Sessions" }
-      },
-      "required": ["current", "sessions"],
-      "additionalProperties": true
-    }
-  },
-  {
     "name": "auth.token.create",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -347,7 +271,7 @@
           "properties": {
             "id": {
               "type": "string",
-              "description": "The session id the token authenticates as, for `auth.session.kill`."
+              "description": "The session id the token authenticates as, for `auth.token.remove`."
             },
             "token": {
               "type": "string",
@@ -362,7 +286,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "The session id the token authenticates as, for `auth.session.kill`."
+          "description": "The session id the token authenticates as, for `auth.token.remove`."
         },
         "token": {
           "type": "string",
@@ -370,6 +294,68 @@
         }
       },
       "required": ["id", "token"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "auth.token.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "propertyNames": { "type": "string" },
+      "additionalProperties": { "$ref": "#/$defs/Session" },
+      "$defs": {
+        "Session": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "description": "A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.",
+              "type": ["string", "null"]
+            },
+            "loggedIn": { "type": "string" },
+            "lastActive": { "type": "string" },
+            "userAgent": { "type": ["string", "null"] }
+          },
+          "required": ["name", "loggedIn", "lastActive", "userAgent"],
+          "additionalProperties": true
+        }
+      }
+    }
+  },
+  {
+    "name": "auth.token.remove",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RemoveTokensParams": {
+          "type": "object",
+          "properties": {
+            "tokens": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["tokens"],
+          "additionalProperties": true
+        }
+      },
+      "type": "object",
+      "properties": {
+        "tokens": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["tokens"],
       "additionalProperties": true
     }
   },

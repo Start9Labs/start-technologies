@@ -1,4 +1,5 @@
 import { Component, DestroyRef, inject, signal } from '@angular/core'
+import { WA_NAVIGATOR } from '@ng-web-apis/common'
 import { auth } from '@start9labs/start-core'
 import {
   TuiButton,
@@ -15,7 +16,7 @@ import { i18nKey } from '../i18n/i18n.providers'
 import { AuthKeyService } from '../services/auth-key.service'
 
 export interface CliEnrollOptions {
-  /** Enrolls a key when followed by a name and the key. */
+  /** Enrolls the key that follows it. */
   readonly command: string
   /** Rejects until the server accepts this browser's key. */
   readonly probe: () => Promise<unknown>
@@ -72,6 +73,7 @@ export interface CliEnrollOptions {
 })
 export class CliEnrollDialog {
   private readonly authKeys = inject(AuthKeyService)
+  private readonly userAgent = inject(WA_NAVIGATOR).userAgent
   private enrolled = false
 
   protected readonly context =
@@ -83,7 +85,9 @@ export class CliEnrollDialog {
   constructor() {
     const created = this.authKeys.create().then(key => {
       const der64 = auth.normalizeDer64(key.pubkeyPem)
-      this.command.set(`${this.context.data.command} browser ${der64}`)
+      this.command.set(
+        `${this.context.data.command} ${der64} --user-agent ${shellQuote(this.userAgent)}`,
+      )
     })
     inject(DestroyRef).onDestroy(() => {
       if (!this.enrolled) created.then(() => this.authKeys.rollback())
@@ -106,3 +110,7 @@ export class CliEnrollDialog {
 }
 
 export const CLI_ENROLL = new PolymorpheusComponent(CliEnrollDialog)
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`
+}

@@ -101,7 +101,7 @@ export class LiveApiService extends ApiService {
   }
 
   checkEnrollment(): Promise<unknown> {
-    return this.rpc.probe({ method: 'auth.session.list', params: {} })
+    return this.rpc.probe({ method: 'auth.key.list', params: {} })
   }
 
   async setTimezone(params: { timezone: string }): Promise<null> {

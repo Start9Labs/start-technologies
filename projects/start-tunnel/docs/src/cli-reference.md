@@ -41,29 +41,19 @@ Reset the web UI password.
 
 Retrieve the server's public key.
 
-### `start-tunnel auth session list`
+### `start-tunnel auth key add <KEY> [--name <NAME>] [--user-agent <USER_AGENT>]`
 
-List enrolled device keys.
-
-- `--format` — Output format
-
-### `start-tunnel auth session kill [--pubkey <KEY>]...`
-
-Remove enrolled device keys.
-
-### `start-tunnel auth key add <NAME> <KEY>`
-
-Enroll a device key under a name, without a password or the login rate limit. The web UI shows this command, with its own key, when too many login attempts block signing in.
+Enroll a device key without a password or the login rate limit. `--name` and `--user-agent` label it in `auth key list`. The web UI shows this command, with its own key and user agent, when too many login attempts block signing in.
 
 ### `start-tunnel auth key list`
 
-List enrolled device keys with their names.
+List enrolled device keys. The key making the request is highlighted.
 
 - `--format` — Output format
 
-### `start-tunnel auth key remove <KEY>`
+### `start-tunnel auth key remove <KEY>...`
 
-Remove an enrolled device key.
+Remove one or more enrolled device keys, ending their sessions.
 
 ## Subnets
 
