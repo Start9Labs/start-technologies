@@ -356,6 +356,44 @@ describe('HealthDaemon.term', () => {
     await releaseSibling()
     expect(sub.destroyed).toBe(true)
   })
+
+  it('does not call effects.setHealth after term() if an in-flight start fails', async () => {
+    let rejectStart!: (error: Error) => void
+    const setHealth = jest.fn(async () => null)
+    const daemon = {
+      start: jest.fn(
+        () =>
+          new Promise<void>((_, reject) => {
+            rejectStart = reject
+          }),
+      ),
+      stop: jest.fn(async () => {}),
+      term: jest.fn(async () => {}),
+      onExit: jest.fn(),
+      isOneshot: () => false,
+    }
+    const hd = new HealthDaemon<Manifest>(
+      daemon as unknown as Daemon<Manifest>,
+      [],
+      'worker',
+      {
+        display: 'Worker',
+        gracePeriod: 0,
+        fn: () => ({ result: 'success', message: null }),
+      },
+      { ...fakeEffects(), setHealth },
+    )
+
+    const updating = hd.updateStatus()
+    await tick()
+    setHealth.mockClear()
+
+    const terminating = hd.term()
+    rejectStart(new Error('failed during teardown'))
+    await Promise.all([updating, terminating])
+
+    expect(setHealth).not.toHaveBeenCalled()
+  })
 })
 
 describe('HealthDaemon ready polling', () => {

@@ -139,6 +139,7 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         )
         // health
         .subcommand("set-health", from_fn_async(health::set_health).no_cli())
+        .subcommand("clear-health", from_fn_async(health::clear_health).no_cli())
         // notification
         .subcommand(
             "notification",

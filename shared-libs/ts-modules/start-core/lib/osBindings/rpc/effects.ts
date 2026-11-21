@@ -118,6 +118,7 @@ export type CallbackIdInput = z.input<typeof schemas.CallbackId>
 export type ClearCallbacksParamsInput = z.input<
   typeof schemas.ClearCallbacksParams
 >
+export type ClearHealthInput = z.input<typeof schemas.ClearHealth>
 export type ClearTasksParamsInput = z.input<typeof schemas.ClearTasksParams>
 export type DeviceFilter = z.output<typeof schemas.DeviceFilter>
 export type EchoParamsInput = z.input<typeof schemas.EchoParams>

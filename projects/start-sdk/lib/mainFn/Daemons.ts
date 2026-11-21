@@ -940,6 +940,13 @@ type RunningEntry<M extends T.SDKManifest> = {
   configHash: string
   sharedVolumesRevision: number
   requires: ReadonlyArray<string>
+  hasHealth: boolean
+}
+
+function hasDisplayedHealth<M extends T.SDKManifest>(
+  entry: DaemonEntry<M>,
+): boolean {
+  return entry.kind !== 'oneshot' && Boolean(entry.ready.display)
 }
 
 /**
@@ -959,6 +966,10 @@ export class DaemonsReconciler<M extends T.SDKManifest>
   private pendingRerun = false
   private sharedVolumesRevision = 0
   private isTerminating = false
+  private resolveTerminating!: () => void
+  private readonly terminatingPromise = new Promise<void>(resolve => {
+    this.resolveTerminating = resolve
+  })
   private termPromise: Promise<void> | null = null
   private detached = false
 
@@ -1144,7 +1155,32 @@ export class DaemonsReconciler<M extends T.SDKManifest>
       }
     }
 
+    const desiredHealthIds = new Set(
+      entries.filter(hasDisplayedHealth).map(entry => entry.id),
+    )
+    const healthToClear = [...toStop].filter(
+      id => this.running.get(id)?.hasHealth && !desiredHealthIds.has(id),
+    )
+    const stoppedDaemons = [...toStop]
+      .map(id => this.running.get(id)?.healthDaemon)
+      .filter((hd): hd is HealthDaemon<M> => !!hd)
+
     await this.stopEntries(toStop)
+
+    if (!this.isTerminating && stoppedDaemons.length > 0) {
+      await Promise.race([
+        Promise.all(stoppedDaemons.map(hd => hd.waitForHealthWrites())),
+        this.terminatingPromise,
+      ])
+    }
+    if (this.isTerminating) return
+    if (healthToClear.length > 0) {
+      try {
+        await this.rootEffects.clearHealth({ only: healthToClear })
+      } catch (e) {
+        logErrorOnce(asError(e))
+      }
+    }
 
     for (const entry of entries) {
       if (this.running.has(entry.id)) continue
@@ -1241,6 +1277,7 @@ export class DaemonsReconciler<M extends T.SDKManifest>
       configHash: hash,
       sharedVolumesRevision,
       requires: entry.requires,
+      hasHealth: hasDisplayedHealth(entry),
     })
 
     await healthDaemon.updateStatus()
@@ -1249,6 +1286,7 @@ export class DaemonsReconciler<M extends T.SDKManifest>
   private async term(): Promise<void> {
     if (this.termPromise) return this.termPromise
     this.isTerminating = true
+    this.resolveTerminating()
     this.termPromise = (async () => {
       // Drain any in-flight reconcile before stopping. The reconcile
       // catches its own errors, so awaiting it never throws; the await

@@ -9,6 +9,7 @@ import {
   CheckDependenciesResult,
   CreateNotificationParamsInput as CreateNotificationParams,
   SetHealthInput as SetHealth,
+  ClearHealthInput as ClearHealth,
   BindParamsInput as BindParams,
   BindRangeParamsInput as BindRangeParams,
   RetireHostParamsInput as RetireHostParams,
@@ -156,6 +157,8 @@ export type Effects = {
   // health
   /** sets the result of a health check */
   setHealth(o: SetHealth): Promise<null>
+  /** removes health check results by id */
+  clearHealth(o: ClearHealth): Promise<null>
 
   // notification
   notification: {
