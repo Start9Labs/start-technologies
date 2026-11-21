@@ -11,6 +11,7 @@ import {
 import {
   DialogService,
   Exver,
+  getErrorMessage,
   i18nPipe,
   LocalizePipe,
   MarkdownPipe,
@@ -388,7 +389,7 @@ export class UpdatesItemComponent {
     try {
       await this.service.installPackage(pkg, url, trust)
     } catch (e) {
-      this.error.set(e instanceof Error ? e.message : String(e))
+      this.error.set(getErrorMessage(e))
     } finally {
       this.ready.set(true)
     }
