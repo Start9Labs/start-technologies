@@ -41,7 +41,7 @@ Back up your server's data to a physical drive or a network folder.
 
 ## What a Backup Does Not Include
 
-A backup holds each service's data and your server's identity: its name, master password, root certificate authority and keys. Settings you make in StartOS itself are not included, and return to their defaults after a restore. Note them down so you can re-enter them. Which of them backups should include is being discussed in [start-technologies#4859](https://github.com/Start9Labs/start-technologies/issues/4859).
+A backup holds each service's data and your server's identity: its name, root certificate authority and keys. You choose the restored server's master password during setup. Settings you make in StartOS itself return to their defaults after a restore. Note them down so you can re-enter them. Which of them backups should include is being discussed in [start-technologies#4859](https://github.com/Start9Labs/start-technologies/issues/4859).
 
 Restoring a service does not bring back:
 
