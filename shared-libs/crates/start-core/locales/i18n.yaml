@@ -3909,6 +3909,27 @@ context.rpc.volume-maintenance-failed:
   pl_PL: "Konserwacja wolumenów nie powiodła się: %{error}"
 
 # middleware/auth/local.rs
+middleware.auth.local-auth-invalid:
+  en_US: "Invalid local auth token in %{path}"
+  de_DE: "Ungültiges lokales Authentifizierungstoken in %{path}"
+  es_ES: "Token de autenticación local no válido en %{path}"
+  fr_FR: "Jeton d'authentification local invalide dans %{path}"
+  pl_PL: "Nieprawidłowy lokalny token uwierzytelniania w %{path}"
+
+middleware.auth.local-auth-permission-denied:
+  en_US: "Cannot read local auth token at %{path}: permission denied (run as root, for example with `sudo`)"
+  de_DE: "Lokales Authentifizierungstoken unter %{path} kann nicht gelesen werden: Zugriff verweigert (als root ausführen, zum Beispiel mit `sudo`)"
+  es_ES: "No se puede leer el token de autenticación local en %{path}: permiso denegado (ejecute como root, por ejemplo con `sudo`)"
+  fr_FR: "Impossible de lire le jeton d'authentification local à %{path} : permission refusée (exécutez en tant que root, par exemple avec `sudo`)"
+  pl_PL: "Nie można odczytać lokalnego tokena uwierzytelniania w %{path}: brak uprawnień (uruchom jako root, na przykład za pomocą `sudo`)"
+
+middleware.auth.local-service-not-running:
+  en_US: "The %{service} service is not running on this machine"
+  de_DE: "Der Dienst %{service} läuft auf diesem Rechner nicht"
+  es_ES: "El servicio %{service} no se está ejecutando en esta máquina"
+  fr_FR: "Le service %{service} ne s'exécute pas sur cette machine"
+  pl_PL: "Usługa %{service} nie działa na tym komputerze"
+
 middleware.auth.unauthorized:
   en_US: "UNAUTHORIZED"
   de_DE: "NICHT AUTORISIERT"
@@ -4323,6 +4344,14 @@ tunnel.api.invalid-name:
   es_ES: 'Los nombres no pueden estar vacíos ni contener solo espacios, no deben contener caracteres de control y deben tener como máximo %{max} caracteres'
   fr_FR: 'Les noms ne doivent pas être vides ni composés uniquement d’espaces, ne doivent contenir aucun caractère de contrôle et doivent comporter au maximum %{max} caractères'
   pl_PL: 'Nazwy nie mogą być puste ani składać się wyłącznie z białych znaków, nie mogą zawierać znaków sterujących i mogą mieć najwyżej %{max} znaków'
+
+# tunnel/context.rs
+tunnel.context.tunnel-required:
+  en_US: "`--tunnel` required"
+  de_DE: "`--tunnel` erforderlich"
+  es_ES: "`--tunnel` requerido"
+  fr_FR: "`--tunnel` requis"
+  pl_PL: "Wymagany `--tunnel`"
 
 util.actor.runtime-exited:
   en_US: The task processor has stopped.
