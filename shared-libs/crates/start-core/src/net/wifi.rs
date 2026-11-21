@@ -602,13 +602,7 @@ pub async fn set_country(
         ));
     }
     let mut wpa_supplicant = ctx.write_wifi_manager().await?;
-    wpa_supplicant.set_country_low(country.alpha2()).await?;
-    for (network_id, _wifi_info) in wpa_supplicant.list_networks_low().await? {
-        wpa_supplicant.remove_network_low(network_id).await?;
-    }
-    wpa_supplicant.remove_all_connections().await?;
-
-    wpa_supplicant.save_config(ctx.db.clone()).await?;
+    wpa_supplicant.set_country(ctx.db.clone(), country).await?;
 
     Ok(())
 }
@@ -888,18 +882,6 @@ impl WpaCli {
             .await?;
         Ok(())
     }
-    pub async fn remove_all_connections(&mut self) -> Result<(), Error> {
-        let location_connections = Path::new(SAVED_PROFILE_DIRECTORY);
-        let mut connections = tokio::fs::read_dir(&location_connections).await?;
-        while let Some(connection) = connections.next_entry().await? {
-            let path = connection.path();
-            if path.is_file() {
-                let _ = tokio::fs::remove_file(&path).await?;
-            }
-        }
-
-        Ok(())
-    }
     pub async fn save_config(&mut self, db: TypedPatchDb<Database>) -> Result<(), Error> {
         let new_country = self.get_country_low().await?;
         db.mutate(|d| {
@@ -1032,6 +1014,19 @@ impl WpaCli {
         psk: &Psk,
     ) -> Result<(), Error> {
         self.add_network_low(ssid, psk).await?;
+        self.save_config(db).await?;
+        Ok(())
+    }
+    #[instrument(skip_all)]
+    pub async fn set_country(
+        &mut self,
+        db: TypedPatchDb<Database>,
+        country: CountryCode,
+    ) -> Result<(), Error> {
+        self.set_country_low(country.alpha2()).await?;
+        for network_id in self.list_networks_low().await?.into_keys() {
+            self.remove_network_low(network_id).await?;
+        }
         self.save_config(db).await?;
         Ok(())
     }
