@@ -39,6 +39,24 @@ Back up your server's data to a physical drive or a network folder.
    > [!WARNING]
    > Before backing up, check the free space remaining on the target and make sure your selected services will fit. If space is tight, use the **Delete old backup** button to reclaim the space this server's old backup occupies, or choose another drive. A backup started while that space is still being reclaimed in the background waits for the reclamation to finish first, shown as an initial `Reclaiming Space` phase in the backup's progress.
 
+## What a Backup Does Not Include
+
+A backup holds each service's data and your server's identity: its name, root certificate authority and keys. You choose the restored server's master password during setup. Settings you make in StartOS itself return to their defaults after a restore. Note them down so you can re-enter them. Which of them backups should include is being discussed in [start-technologies#4859](https://github.com/Start9Labs/start-technologies/issues/4859).
+
+Restoring a service does not bring back:
+
+- the public and private domains enabled on each of its interfaces, and its interface port settings.
+- its outbound gateway and DNS choices.
+
+Restoring an entire server also does not bring back:
+
+- the server's own domains, WiFi networks, ACME settings, default outbound gateway, outbound DNS and passthroughs. Certificates are issued again.
+- SSH keys added for logging in.
+- SMTP, custom registries and NUT (UPS) settings.
+- backup targets, their credentials, and backup history.
+- performance settings (zram, CPU governor) and UI preferences.
+- notifications.
+
 ## Backup Format Upgrades
 
 Existing backups remain usable for backups and restores with their original filesystem encryption/checksum format until explicitly converted. Normal mounts do not start conversion. The folder remains `StartOSBackupsV2`; this is separate from the older `StartOSBackups` folder cleanup described above.
