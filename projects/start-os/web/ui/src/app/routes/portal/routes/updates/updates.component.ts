@@ -2,7 +2,6 @@ import { Component, computed, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import {
   Marketplace,
-  MarketplacePkg,
   StoreIconDirective,
   StoreIdentity,
   isRegistryLoading,
@@ -15,7 +14,7 @@ import {
   TuiFade,
   TuiSkeleton,
 } from '@taiga-ui/kit'
-import { combineLatest, map } from 'rxjs'
+import { combineLatest } from 'rxjs'
 import { UpdatesCount } from 'src/app/routes/portal/components/updates-count'
 import { RegistryNotice } from 'src/app/routes/portal/components/registry-notice'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
@@ -29,10 +28,6 @@ import {
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
 import { TitleDirective } from 'src/app/services/title.service'
-import {
-  refinementKey,
-  UpdatesRefinementService,
-} from 'src/app/services/updates-refinement.service'
 import { FilterUpdatesPipe } from './filter-updates.pipe'
 import { UpdatesItemComponent } from './item.component'
 
@@ -41,7 +36,6 @@ interface UpdatesData {
   marketplace: Marketplace
   localPkgs: Record<string, PackageDataEntry<InstalledState | UpdatingState>>
   hidden: Record<string, string[]>
-  pending: Set<string>
 }
 
 @Component({
@@ -79,7 +73,7 @@ interface UpdatesData {
             </span>
             @if (
               (
-                data()?.marketplace?.[registry.url]?.packages || []
+                data()?.marketplace?.[registry.url]?.updates || []
                 | filterUpdates: data()?.localPkgs : data()?.hidden
               ).length;
               as length
@@ -105,19 +99,20 @@ interface UpdatesData {
         <table
           [appTable]="['Name', 'Version', 'Package Hash', 'Published', null]"
         >
-          @let packages = data()?.marketplace?.[current()?.url || '']?.packages;
+          @let store = data()?.marketplace?.[current()?.url || ''];
           @if (
-            packages && !isRegistryLoading(current()?.status, packages.length)
+            store &&
+            !isRegistryLoading(current()?.status, store.packages.length)
           ) {
             @if (
-              packages | filterUpdates: data()?.localPkgs : data()?.hidden;
+              store.updates || []
+                | filterUpdates: data()?.localPkgs : data()?.hidden;
               as updates
             ) {
               @for (pkg of updates; track pkg.id) {
                 <updates-item
                   [item]="pkg"
                   [local]="data()?.localPkgs?.[pkg.id]!"
-                  [pending]="isPending(pkg)"
                 />
               } @empty {
                 <tr>
@@ -252,7 +247,6 @@ export default class UpdatesComponent {
   private readonly breakpoint = inject(TUI_BREAKPOINT)
   private readonly marketplaceService = inject(MarketplaceService)
   private readonly hiddenUpdatesService = inject(HiddenUpdatesService)
-  private readonly refinementService = inject(UpdatesRefinementService)
 
   protected readonly isRegistryLoading = isRegistryLoading
   protected readonly selectedRegistry = signal('')
@@ -275,39 +269,16 @@ export default class UpdatesComponent {
     )
   })
 
-  // The registry's "best" version can be unreachable from the user's installed
-  // version — e.g. NextCloud major updates must be sequential, so v30 users
-  // can't jump straight to v32. UpdatesRefinementService runs this resolution
-  // in the background (kept warm by BadgeService's navbar subscription) so by
-  // the time the user opens this tab the refined state is usually already
-  // resolved and replayed via shareReplay — no "Finding suitable version..."
-  // flash on each navigation.
   readonly data = toSignal<UpdatesData>(
     combineLatest({
       hosts: this.marketplaceService.registries$,
-      refined: this.refinementService.refined$,
+      marketplace: this.marketplaceService.marketplace$,
       localPkgs: inject(LocalPackagesService),
       hidden: this.hiddenUpdatesService.effective$,
-    }).pipe(
-      map(({ hosts, refined, localPkgs, hidden }) => ({
-        hosts,
-        marketplace: refined.marketplace,
-        pending: refined.pending,
-        localPkgs,
-        hidden,
-      })),
-    ),
+    }),
   )
 
   clear(url: string): string {
     return url.replace(/https?:\/\//, '').replace(/\/$/, '')
-  }
-
-  isPending(pkg: MarketplacePkg): boolean {
-    const url = this.current()?.url
-    if (!url) return false
-    return (
-      this.data()?.pending?.has(refinementKey(url, pkg.id, pkg.flavor)) ?? false
-    )
   }
 }

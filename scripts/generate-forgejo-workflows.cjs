@@ -62,9 +62,10 @@ async function generate(root) {
     if (step.uses === `${upstream}.github/actions/upload-each@master`) {
       step.name = 'Upload s9pks'
       step.uses = `${artifactHost}/upload-artifact@v4`
-      const { pattern, ...options } = step.with
+      const { pattern, archive, ...options } = step.with
       step.with = {
         ...options,
+        ...(archive === false && { 'compression-level': 0 }),
         name: job.strategy?.matrix
           ? "s9pks-${{ matrix.target || 'default' }}"
           : 's9pks',

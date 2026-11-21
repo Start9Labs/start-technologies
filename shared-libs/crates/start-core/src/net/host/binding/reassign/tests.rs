@@ -77,6 +77,7 @@ fn database(host: Host, server: Host, ports: AvailablePorts) -> DatabaseModel {
             "disks": [],
             "sharedVolumes": {},
             "backupTargets": {},
+            "sshPubkeys": {},
             "serverInfo": {
                 "hostname": "server",
                 "network": {

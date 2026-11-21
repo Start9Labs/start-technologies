@@ -17,8 +17,11 @@ const ARCHES = ['x86_64', 'aarch64', 'riscv64']
 
 const daysAgo = days =>
   new Date(Date.now() - days * 86400e3).toISOString().replace(/\.\d+Z$/, 'Z')
+const deb = (product, arch) => `${product}-0.4.0-aaaaaaa_${arch}.deb`
 const debs = (product, arches = ARCHES) =>
-  arches.map(arch => `${product}_${arch}.deb`)
+  arches.map(arch => deb(product, arch))
+const downloaded = (runId, product) =>
+  ARCHES.map(arch => `${runId} ${deb(product, arch)}`)
 const run = (id, created, artifacts, overrides = {}) => ({
   id,
   created_at: created,
@@ -64,11 +67,14 @@ test('each product comes from its newest master build holding every arch', t => 
     }),
   ])
   assert.equal(result.status, 0, result.stdout + result.stderr)
-  assert.deepEqual(downloads.sort(), [
-    '1 start-registry_*.deb',
-    '1 start-tunnel_*.deb',
-    '2 start-cli_*.deb',
-  ])
+  assert.deepEqual(
+    downloads.sort(),
+    [
+      ...downloaded(1, 'start-registry'),
+      ...downloaded(1, 'start-tunnel'),
+      ...downloaded(2, 'start-cli'),
+    ].sort(),
+  )
 })
 
 test('PR-only activity does not hide complete master artifacts', t => {
@@ -83,11 +89,45 @@ test('PR-only activity does not hide complete master artifacts', t => {
     ),
   ])
   assert.equal(result.status, 0, result.stdout + result.stderr)
-  assert.deepEqual(downloads.sort(), [
-    '1 start-cli_*.deb',
-    '1 start-registry_*.deb',
-    '1 start-tunnel_*.deb',
+  assert.deepEqual(
+    downloads.sort(),
+    [
+      ...downloaded(1, 'start-cli'),
+      ...downloaded(1, 'start-registry'),
+      ...downloaded(1, 'start-tunnel'),
+    ].sort(),
+  )
+})
+
+test('all products share one paginated artifact discovery', t => {
+  const { result, downloads, calls } = collectFrom(t, [
+    run(1, daysAgo(2), [
+      ...debs('start-cli'),
+      ...debs('start-tunnel'),
+      ...debs('start-registry'),
+    ]),
+    run(
+      2,
+      daysAgo(1),
+      Array.from({ length: 201 }, (_, index) => `unrelated-${index}`),
+    ),
   ])
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.deepEqual(
+    downloads.sort(),
+    [
+      ...downloaded(1, 'start-cli'),
+      ...downloaded(1, 'start-tunnel'),
+      ...downloaded(1, 'start-registry'),
+    ].sort(),
+  )
+  const listings = calls.flatMap(args =>
+    args.filter(arg =>
+      arg.startsWith(`repos/${REPOSITORY}/actions/artifacts?`),
+    ),
+  )
+  assert.ok(listings.length > 1)
+  assert.equal(listings.length, new Set(listings).size)
 })
 
 test('a product without a complete build keeps its published package', t => {
@@ -95,11 +135,11 @@ test('a product without a complete build keeps its published package', t => {
     run(1, daysAgo(3), [
       ...debs('start-cli'),
       ...debs('start-registry', ['x86_64']),
-      { name: 'start-tunnel_x86_64.deb', expired: true },
+      { name: deb('start-tunnel', 'x86_64'), expired: true },
     ]),
   ])
   assert.equal(result.status, 0, result.stdout + result.stderr)
-  assert.deepEqual(downloads, ['1 start-cli_*.deb'])
+  assert.deepEqual(downloads.sort(), downloaded(1, 'start-cli').sort())
   assert.match(result.stdout, /start-tunnel has no complete master build left/)
   assert.match(
     result.stdout,
@@ -122,21 +162,24 @@ test('an older run with unexpired rerun artifacts remains eligible', t => {
         ...debs('start-cli'),
         ...debs('start-tunnel'),
         ...debs('start-registry'),
-      ],
+      ].map(name => ({ name, created_at: daysAgo(1) })),
       { run_attempt: 2 },
     ),
   ])
   assert.equal(result.status, 0, result.stdout + result.stderr)
-  assert.deepEqual(downloads.sort(), [
-    '1 start-cli_*.deb',
-    '1 start-registry_*.deb',
-    '1 start-tunnel_*.deb',
-  ])
+  assert.deepEqual(
+    downloads.sort(),
+    [
+      ...downloaded(1, 'start-cli'),
+      ...downloaded(1, 'start-registry'),
+      ...downloaded(1, 'start-tunnel'),
+    ].sort(),
+  )
 })
 
 test('expired artifacts do not cause run metadata queries', t => {
   const { result, calls } = collectFrom(t, [
-    run(1, daysAgo(20), [{ name: 'start-cli_x86_64.deb', expired: true }]),
+    run(1, daysAgo(20), [{ name: deb('start-cli', 'x86_64'), expired: true }]),
   ])
   assert.notEqual(result.status, 0)
   assert.equal(

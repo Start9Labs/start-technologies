@@ -98,6 +98,17 @@ test('uses repository retention and compression defaults', async () => {
   ])
 })
 
+test('uploads each file unarchived when archive is false', async () => {
+  const file = path.resolve('one.s9pk')
+  const { uploads } = await runAction(
+    { pattern: '*.s9pk', archive: 'false', 'compression-level': '0' },
+    [file],
+  )
+  assert.deepEqual(uploads, [
+    ['one.s9pk', [file], process.cwd(), { skipArchive: true }],
+  ])
+})
+
 for (const mode of ['warn', 'error', 'ignore']) {
   test(`handles no files in ${mode} mode without uploading`, async () => {
     const { uploads, messages, outcome } = await runAction(

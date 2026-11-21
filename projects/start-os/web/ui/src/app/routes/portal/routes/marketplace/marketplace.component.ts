@@ -9,24 +9,15 @@ import {
   isRegistryLoading,
   StoreIdentity,
 } from '@start9labs/marketplace'
-import {
-  ErrorService,
-  i18nPipe,
-  registryUrl,
-  sameUrl,
-  TaskService,
-} from '@start9labs/shared'
+import { i18nPipe, registryUrl, sameUrl, TaskService } from '@start9labs/shared'
 import { TuiButton } from '@taiga-ui/core'
 import { TuiBlockStatus } from '@taiga-ui/layout'
 import {
-  catchError,
   combineLatest,
-  concat,
   distinctUntilChanged,
   EMPTY,
   map,
   of,
-  skip,
   startWith,
   switchMap,
   take,
@@ -133,7 +124,6 @@ import { MarketplaceControlsComponent } from './components/controls.component'
 })
 export default class Marketplace {
   private readonly marketplaceService = inject(MarketplaceService)
-  private readonly error = inject(ErrorService)
   private readonly configService = inject(ConfigService)
   private readonly router = inject(Router)
   private readonly storage = inject(StorageService)
@@ -208,20 +198,7 @@ export default class Marketplace {
       provides && range
         ? this.marketplaceService
             .fetchProviders$(url, provides, range, providerId)
-            .pipe(
-              catchError((error, retry$) => {
-                this.error.handleError(error)
-                return concat(
-                  of([]),
-                  this.marketplaceService.currentRegistry$.pipe(
-                    skip(1),
-                    take(1),
-                    switchMap(() => retry$),
-                  ),
-                )
-              }),
-              startWith(null),
-            )
+            .pipe(startWith(null))
         : of(undefined),
     ),
   )

@@ -808,7 +808,8 @@ pub(crate) async fn send_http(
 
     if !res.status().is_success() {
         let status = res.status();
-        let txt = res.text().await?;
+        let txt = String::from_utf8_lossy(&read_limited(&mut res, max_response_bytes).await?)
+            .into_owned();
         let mut res = Err(Error::new(
             eyre!("{}", status.canonical_reason().unwrap_or(status.as_str())),
             ErrorKind::Network,
@@ -825,20 +826,11 @@ pub(crate) async fn send_http(
         .and_then(|v| v.to_str().ok())
     {
         Some("application/json") => {
-            let mut bytes = Vec::new();
-            while let Some(chunk) = res.chunk().await? {
-                if chunk.len() > max_response_bytes - bytes.len() {
-                    return Err(Error::new(
-                        eyre!("{}", t!("util.net.secure.invalid-message")),
-                        ErrorKind::Network,
-                    )
-                    .into());
-                }
-                bytes.extend_from_slice(&chunk);
-            }
-            serde_json::from_slice::<RpcResponse>(&bytes)
-                .with_kind(ErrorKind::Deserialization)?
-                .result
+            serde_json::from_slice::<RpcResponse>(
+                &read_limited(&mut res, max_response_bytes).await?,
+            )
+            .with_kind(ErrorKind::Deserialization)?
+            .result
         }
         _ => Err(Error::new(
             eyre!("{}", t!("middleware.auth.unknown-content-type")),
@@ -846,6 +838,20 @@ pub(crate) async fn send_http(
         )
         .into()),
     }
+}
+
+async fn read_limited(res: &mut reqwest::Response, limit: usize) -> Result<Vec<u8>, Error> {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = res.chunk().await? {
+        if chunk.len() > limit - bytes.len() {
+            return Err(Error::new(
+                eyre!("{}", t!("util.net.secure.invalid-message")),
+                ErrorKind::Network,
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]

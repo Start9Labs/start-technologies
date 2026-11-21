@@ -1,5 +1,5 @@
 import { Service } from '@angular/core'
-import { ExtendedVersion, VersionRange } from '@start9labs/start-core'
+import { ExtendedVersion, Version, VersionRange } from '@start9labs/start-core'
 
 @Service()
 export class Exver {
@@ -27,6 +27,11 @@ export class Exver {
 
   satisfies(version: string, range: string): boolean {
     return ExtendedVersion.parse(version).satisfies(VersionRange.parse(range))
+  }
+
+  /** For a plain version such as a package's `osVersion`. */
+  versionSatisfies(version: string, range: string): boolean {
+    return Version.parse(version).satisfies(VersionRange.parse(range))
   }
 
   releaseSatisfies(
