@@ -16,6 +16,12 @@ export const SIGNATURE_PROFILE = {
       156, 154, 227, 187, 133, 251, 242, 137, 91, 4, 64,
     ],
   },
+  webauthn: {
+    algorithm: [
+      48, 22, 6, 20, 105, 130, 176, 132, 192, 167, 187, 205, 162, 186, 255, 169,
+      236, 216, 239, 250, 128, 138, 191, 17,
+    ],
+  },
   signatureBytes: 64,
   fingerprint: {
     algorithm: 'SHA-256',

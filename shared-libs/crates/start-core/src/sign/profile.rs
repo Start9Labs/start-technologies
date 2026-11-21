@@ -28,6 +28,7 @@ pub fn browser_profile() -> serde_json::Value {
             "signaturePrefix": prefix(AnySignature::Ed25519(signature)),
         },
         "ed25519ph": { "signaturePrefix": prefix(AnySignature::Ed25519ph(signature)) },
+        "webauthn": { "algorithm": super::webauthn::WEBAUTHN_ALGORITHM_ID_DER },
         "signatureBytes": signature.to_bytes().len(),
         "fingerprint": super::fingerprint::wire_profile(),
     })

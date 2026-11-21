@@ -867,6 +867,8 @@ mod tests {
     /// TypeScript-generated proof for seed 0102…1f20 and `BODY`.
     const JS_PRODUCED_HEADER: &str = "commitment=request&timestamp=1792644825&nonce=18095015305127205807&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ&signature=MEkwBQYDK2VwBEBBctoB4q6Ez-Iuc8w7CBw6gz5ysJYD6F2fpz7Cb7A9mX96rUFD-IPWzjs3mt-Y6oBqDfYVVC-cVXbkU9UTGIsC";
     const JS_PRODUCED_HEADER_V1: &str = "timestamp=1784746349&nonce=5184603501117103523&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ&signature=MEkwBQYDK2VwBEA0QgkL7GFycl72l-Bt076252XjpFG7aLngdxeIs-hNXpCkcJUtq9Xsfm_YV68U0JtK2qLMG2KPSfAVTcg8ntMH";
+    /// TypeScript-generated proof from a P-256 passkey with seed 0303…03 and `BODY`.
+    const JS_PRODUCED_PASSKEY_HEADER: &str = "commitment=request&timestamp=1795224261&nonce=10052478647810308202&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWRq3ceu8_W2cuQlNEGUordGmnUTCwfYn8InsWLnGGt-fTmq_DQRcDGk6PGitfJfKcr5k3vSib-zSY92YqSeA8A&signature=MIIBZjAWBhRpgrCEwKe7zaK6_6ns2O_6gIq_EQSCAUowggFGBCU1MHpuBDmUe4X4C33g7TpcYcrd84LUgooQ5loFRg6ICAUAAAABBIHSeyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiVTNSaGNuUXRRWFYwYUMxVGFXY2dkaklBRFhOMFlYSjBMVGt1Ykc5allXd0RBQUFBQUdzQThzV0xnWlFSNHU2NGFnQUFBQUFBQUFBNzk1bzNNWlJEZ01hc2p5RUtiNmgycU1iMUpGT3M0NWxaZGlZMnFlWERSUVkiLCJvcmlnaW4iOiJodHRwczovL3N0YXJ0LTkubG9jYWwiLCJjcm9zc09yaWdpbiI6ZmFsc2V9BEgwRgIhAPSUSGLM7zcNG40h_tg1BwATbADgVBVQ3V_MZb3iugeAAiEAuHcVOLwO0aN2tgPw1oEyqLLlEzERFgVs8NqfjTqRubg";
     const BODY: &[u8] = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server.echo\",\"params\":{}}";
 
     #[test]
@@ -898,7 +900,11 @@ mod tests {
 
     #[test]
     fn verifies_js_produced_signature_headers() {
-        for raw in [JS_PRODUCED_HEADER, JS_PRODUCED_HEADER_V1] {
+        for raw in [
+            JS_PRODUCED_HEADER,
+            JS_PRODUCED_HEADER_V1,
+            JS_PRODUCED_PASSKEY_HEADER,
+        ] {
             let header = SignatureHeader::from_header(&HeaderValue::from_static(raw))
                 .expect("header parses");
             assert_eq!(header.commitment.size, BODY.len() as u64);

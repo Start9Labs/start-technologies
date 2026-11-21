@@ -14,6 +14,8 @@ pub(super) const WEBAUTHN_ALGORITHM_ID_DER: &[u8] = &[
 ];
 
 const FLAG_USER_PRESENT: u8 = 0x01;
+const FLAG_USER_VERIFIED: u8 = 0x04;
+const REQUIRED_FLAGS: u8 = FLAG_USER_PRESENT | FLAG_USER_VERIFIED;
 const FLAGS_OFFSET: usize = 32;
 const MIN_AUTHENTICATOR_DATA_LEN: usize = 37;
 
@@ -57,7 +59,7 @@ impl WebAuthnAssertion {
         })
     }
 
-    /// Requires a `webauthn.get` ceremony with user presence.
+    /// Requires a `webauthn.get` ceremony with user presence and verification.
     pub fn verify(&self, key: &AnyVerifyingKey, message: &[u8]) -> Result<(), Error> {
         let authenticator_data = self.authenticator_data.as_bytes();
         let client_data_json = self.client_data_json.as_bytes();
@@ -69,7 +71,7 @@ impl WebAuthnAssertion {
                 .map_err(|_| invalid_assertion())?
                 != message
             || authenticator_data.len() < MIN_AUTHENTICATOR_DATA_LEN
-            || authenticator_data[FLAGS_OFFSET] & FLAG_USER_PRESENT == 0
+            || authenticator_data[FLAGS_OFFSET] & REQUIRED_FLAGS != REQUIRED_FLAGS
         {
             return Err(invalid_assertion());
         }
@@ -144,7 +146,7 @@ pub(crate) mod test_util {
     pub fn passkey_assertion(key: &p256::ecdsa::SigningKey, challenge: &[u8]) -> WebAuthnAssertion {
         p256_assertion(
             key,
-            authenticator_data(FLAG_USER_PRESENT),
+            authenticator_data(REQUIRED_FLAGS),
             client_data("webauthn.get", challenge),
         )
     }
@@ -179,7 +181,7 @@ mod tests {
     #[test]
     fn accepts_high_s_ecdsa_signatures() {
         let key = p256_key();
-        let authenticator_data = authenticator_data(FLAG_USER_PRESENT);
+        let authenticator_data = authenticator_data(REQUIRED_FLAGS);
         let client_data_json = client_data("webauthn.get", b"message");
         let signature: p256::ecdsa::Signature =
             key.sign(&signed_bytes(&authenticator_data, &client_data_json));
@@ -200,7 +202,7 @@ mod tests {
     fn ed25519_assertion_verifies_its_challenge() {
         use ed25519_dalek::Signer as _;
         let key = ed25519_dalek::SigningKey::from_bytes(&[5; 32]);
-        let authenticator_data = authenticator_data(FLAG_USER_PRESENT);
+        let authenticator_data = authenticator_data(REQUIRED_FLAGS);
         let client_data_json = client_data("webauthn.get", b"message");
         let signature = key.sign(&signed_bytes(&authenticator_data, &client_data_json));
         let assertion = WebAuthnAssertion::new(
@@ -215,18 +217,23 @@ mod tests {
     }
 
     #[test]
-    fn rejects_registration_ceremonies_and_absent_user_presence() {
+    fn rejects_registration_ceremonies_and_unverified_users() {
         let key = p256_key();
         let public = AnyVerifyingKey::P256(*key.verifying_key());
         for assertion in [
             p256_assertion(
                 &key,
-                authenticator_data(FLAG_USER_PRESENT),
+                authenticator_data(REQUIRED_FLAGS),
                 client_data("webauthn.create", b"message"),
             ),
             p256_assertion(
                 &key,
-                authenticator_data(0x04),
+                authenticator_data(FLAG_USER_VERIFIED),
+                client_data("webauthn.get", b"message"),
+            ),
+            p256_assertion(
+                &key,
+                authenticator_data(FLAG_USER_PRESENT),
                 client_data("webauthn.get", b"message"),
             ),
             p256_assertion(
@@ -234,7 +241,7 @@ mod tests {
                 RP_ID_HASH.to_vec(),
                 client_data("webauthn.get", b"message"),
             ),
-            p256_assertion(&key, authenticator_data(FLAG_USER_PRESENT), b"{}".to_vec()),
+            p256_assertion(&key, authenticator_data(REQUIRED_FLAGS), b"{}".to_vec()),
         ] {
             assert_eq!(
                 assertion.verify(&public, b"message").unwrap_err().kind,
@@ -248,7 +255,7 @@ mod tests {
         let key = p256_key();
         let mut assertion = passkey_assertion(&key, b"message");
         assertion.authenticator_data =
-            der::asn1::OctetString::new(authenticator_data(FLAG_USER_PRESENT | 0x04)).unwrap();
+            der::asn1::OctetString::new(authenticator_data(REQUIRED_FLAGS | 0x08)).unwrap();
         assert!(
             assertion
                 .verify(&AnyVerifyingKey::P256(*key.verifying_key()), b"message")
