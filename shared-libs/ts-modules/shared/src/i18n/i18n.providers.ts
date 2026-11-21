@@ -15,6 +15,11 @@ export const I18N = new InjectionToken('', {
   factory: () => signal<i18n | null>(null),
 })
 
+/** English key to id in the dictionaries `I18N_LOADER` loads. */
+export const I18N_IDS = new InjectionToken<Record<string, number>>('', {
+  factory: () => ENGLISH,
+})
+
 export const I18N_LOADER = new InjectionToken<
   (lang: TuiLanguageName) => Promise<i18n | null>
 >('')

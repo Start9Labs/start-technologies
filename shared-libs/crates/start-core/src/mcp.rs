@@ -106,6 +106,7 @@ mod test {
             "auth.login",
             "auth.logout",
             "auth.reset-password",
+            "auth.key.add",
             "auth.token.create",
             "db.subscribe",
             "package.attach",
@@ -119,8 +120,10 @@ mod test {
             assert!(server.get_tool(withheld).is_none(), "{withheld} is exposed");
         }
         for exposed in [
-            "auth.session.list",
-            "auth.session.kill",
+            "auth.key.list",
+            "auth.key.remove",
+            "auth.token.list",
+            "auth.token.remove",
             "notification.push.key",
             "notification.push.list",
             "notification.push.subscribe",

@@ -823,8 +823,8 @@ export const LanIpv6SetRequest: z.ZodObject<{
 }).meta({
   id: 'LanIpv6SetRequest',
 })
-export const ListParams: typeof empty = /* @__PURE__ */ empty.meta({
-  id: 'ListParams',
+export const ListKeysParams: typeof empty = /* @__PURE__ */ empty.meta({
+  id: 'ListKeysParams',
 })
 export const LogEntry: z.ZodObject<{
   timestamp: z.ZodString
@@ -1695,6 +1695,23 @@ export const ActivityListResponse: z.ZodObject<{
 }).meta({
   id: 'ActivityListResponse',
 })
+export const AddKeyParams: z.ZodObject<{
+  key: typeof AnyVerifyingKey
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  userAgent: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  key: AnyVerifyingKey,
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'AddKeyParams',
+})
 
 /**
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
@@ -2211,21 +2228,6 @@ export const FollowLogsRes: z.ZodObject<{
 }).meta({
   id: 'FollowLogsRes',
 })
-export const KillParams: z.ZodObject<{
-  pubkeys: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
-    z.ZodArray<typeof AnyVerifyingKey>
-  >
-  tokens: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pubkeys: wire(z.array(AnyVerifyingKey).optional(), z.array(AnyVerifyingKey)),
-  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
-}).meta({
-  id: 'KillParams',
-})
 export const LoginParams: z.ZodObject<{
   password: z.ZodString
   /**
@@ -2617,6 +2619,11 @@ export const PublishedPortInput: z.ZodObject<{
   }),
 }).meta({
   id: 'PublishedPortInput',
+})
+export const RemoveKeyParams: z.ZodObject<{
+  keys: z.ZodArray<typeof AnyVerifyingKey>
+}> = /* @__PURE__ */ object({ keys: z.array(AnyVerifyingKey) }).meta({
+  id: 'RemoveKeyParams',
 })
 export const ScheduleWindows: z.ZodObject<{
   interface: z.ZodString
@@ -3245,6 +3252,23 @@ export const FlashParams: z.ZodObject<{
 }).meta({
   id: 'FlashParams',
 })
+
+/**
+ * Enrolled keys, including ephemeral ones, and the caller's own.
+ */
+export const KeyList: z.ZodObject<{
+  current: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  keys: typeof AuthKeys
+}> = /* @__PURE__ */ object({
+  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  keys: AuthKeys,
+}).meta({
+  id: 'KeyList',
+  description: "Enrolled keys, including ephemeral ones, and the caller's own.",
+})
 export const NamedProgress: z.ZodObject<{
   name: z.ZodString
   progress: typeof Progress
@@ -3269,20 +3293,6 @@ export const PublishedPortsSetResult: z.ZodObject<{
   id: 'PublishedPortsSetResult',
   description:
     '[`set`] response. A non-empty collision list means nothing was applied —\nthe caller confirms and re-saves; empty means the request was applied.',
-})
-
-/**
- * The server's sessions, by credential type.
- */
-export const Sessions: z.ZodObject<{
-  pubkeys: typeof AuthKeys
-  tokens: z.ZodRecord<z.ZodString, typeof Session>
-}> = /* @__PURE__ */ object({
-  pubkeys: AuthKeys,
-  tokens: z.record(z.string(), Session),
-}).meta({
-  id: 'Sessions',
-  description: "The server's sessions, by credential type.",
 })
 export const SetInitialPasswordParams: z.ZodObject<{
   password: typeof PasswordType
@@ -3355,18 +3365,6 @@ export const FullProgress: z.ZodObject<{
   id: 'FullProgress',
   description: 'Snapshot of overall + per-phase progress, sent over WebSocket.',
 })
-export const SessionList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sessions: typeof Sessions
-}> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
-  sessions: Sessions,
-}).meta({
-  id: 'SessionList',
-})
 export const Api = {
   _PARAMS: /* @__PURE__ */ empty,
   _CHILDREN: {
@@ -3413,23 +3411,11 @@ export const Api = {
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
-        login: {
-          _PARAMS: /* @__PURE__ */ LoginParams,
-          _RETURN: /* @__PURE__ */ z.null(),
-          _ITEM: /* @__PURE__ */ z.never(),
-          _FINAL: /* @__PURE__ */ z.null(),
-        },
-        logout: {
-          _PARAMS: /* @__PURE__ */ LogoutParams,
-          _RETURN: /* @__PURE__ */ HasUnenrolledKeys.nullable(),
-          _ITEM: /* @__PURE__ */ z.never(),
-          _FINAL: /* @__PURE__ */ z.null(),
-        },
-        session: {
+        key: {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
-            kill: {
-              _PARAMS: /* @__PURE__ */ KillParams,
+            add: {
+              _PARAMS: /* @__PURE__ */ AddKeyParams,
               _RETURN: /* @__PURE__ */ z.null(),
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
@@ -3445,13 +3431,31 @@ export const Api = {
                   }),
                   empty,
                 ),
-                ListParams,
+                ListKeysParams,
               ),
-              _RETURN: /* @__PURE__ */ SessionList,
+              _RETURN: /* @__PURE__ */ KeyList,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ RemoveKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
             },
           },
+        },
+        login: {
+          _PARAMS: /* @__PURE__ */ LoginParams,
+          _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        logout: {
+          _PARAMS: /* @__PURE__ */ LogoutParams,
+          _RETURN: /* @__PURE__ */ HasUnenrolledKeys.nullable(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-initial-password': {
           _PARAMS: /* @__PURE__ */ SetInitialPasswordParams,

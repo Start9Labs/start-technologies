@@ -1,8 +1,9 @@
 import { Component, inject, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { Router } from '@angular/router'
-import { AuthKeyService } from '@start9labs/shared'
-import { TuiButton, TuiError, TuiInput } from '@taiga-ui/core'
+import { AuthKeyService, CLI_ENROLL } from '@start9labs/shared'
+import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
+import { TuiButton, TuiError, TuiInput, TuiLink } from '@taiga-ui/core'
 import { TuiButtonLoading } from '@taiga-ui/kit'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { i18nKey } from 'src/app/i18n/i18n.providers'
@@ -20,7 +21,7 @@ import { AuthService } from 'src/app/services/auth.service'
           [placeholder]="'Enter password' | i18n"
           [ngModelOptions]="{ standalone: true }"
           [(ngModel)]="password"
-          (ngModelChange)="error.set(null)"
+          (ngModelChange)="error.set(null); rateLimited.set(false)"
           [disabled]="loading()"
         />
         <button
@@ -34,6 +35,11 @@ import { AuthService } from 'src/app/services/auth.service'
       </tui-textfield>
       @if (error(); as err) {
         <tui-error [error]="err | i18n" />
+      }
+      @if (rateLimited()) {
+        <button tuiLink type="button" (click)="enroll()">
+          {{ 'Sign in from the command line' | i18n }}
+        </button>
       }
     </form>
   `,
@@ -62,6 +68,7 @@ import { AuthService } from 'src/app/services/auth.service'
     FormsModule,
     TuiError,
     TuiButtonLoading,
+    TuiLink,
     i18nPipe,
   ],
 })
@@ -70,8 +77,11 @@ export default class Login {
   private readonly router = inject(Router)
   private readonly authKeys = inject(AuthKeyService)
   private readonly api = inject(ApiService)
+  private readonly dialogs = inject(TuiResponsiveDialogService)
+  private readonly i18n = inject(i18nPipe)
 
   protected readonly error = signal<i18nKey | null>(null)
+  protected readonly rateLimited = signal(false)
   protected readonly loading = signal(false)
 
   password = ''
@@ -90,14 +100,33 @@ export default class Login {
         await this.authKeys.rollback()
         throw e
       }
-      this.auth.authenticated.set(true)
-      this.router.navigate(['.'])
+      this.signedIn()
     } catch (e: any) {
+      this.rateLimited.set(e.code === 37)
       // Code 7 is a wrong password; anything else (unrecognized server
       // identity, clock skew, rate limit) carries its own message.
       this.error.set(e.code === 7 ? 'Password is invalid' : e.message)
     } finally {
       this.loading.set(false)
     }
+  }
+
+  protected enroll() {
+    this.dialogs
+      .open<boolean>(CLI_ENROLL, {
+        label: this.i18n.transform('Enroll this browser'),
+        data: {
+          command: 'start-tunnel auth key add',
+          probe: () => this.api.checkEnrollment(),
+        },
+      })
+      .subscribe(enrolled => {
+        if (enrolled) this.signedIn()
+      })
+  }
+
+  private signedIn() {
+    this.auth.authenticated.set(true)
+    this.router.navigate(['.'])
   }
 }
