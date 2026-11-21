@@ -1079,7 +1079,9 @@ mod tests {
             .unwrap()
             .to_string();
         let params = imbl_value::from_value(json!({ "keys": [pem, key_id("der64")] })).unwrap();
-        startos::auth::remove_key(ctx.clone(), params).await.unwrap();
+        startos::auth::remove_key(ctx.clone(), params)
+            .await
+            .unwrap();
         assert!(enrolled(&ctx).await.is_empty());
     }
 
