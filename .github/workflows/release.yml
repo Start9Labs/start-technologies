@@ -155,16 +155,15 @@ jobs:
         with:
           key: ${{ secrets.DEV_KEY }}
 
-      # start-cli 0.4.0-beta.10's `s9pk pack` requires a packaging workspace: a
-      # `.startos/` dir holding a `build-key` signing key. A bare CI checkout has
-      # none, and `s9pk init-workspace` would clone the guide repo. Provision the
-      # minimum instead — reuse the developer key as the workspace build key,
-      # which restores the pre-beta.10 signing identity (s9pks were signed by the
-      # developer key before the build-key split).
+      # `s9pk pack` requires a packaging workspace: a `.startos/` dir holding a
+      # `build.key.pem` signing key. A bare CI checkout has none, and
+      # `s9pk init-workspace` would clone the guide repo. Provision the minimum
+      # instead — reuse the identity key as the workspace build key, which keeps
+      # the signing identity s9pks had before the build-key split.
       - name: Provision workspace build key
         run: |
           mkdir -p .startos
-          cp ~/.startos/developer.key.pem .startos/build-key
+          cp ~/.startos/id.key.pem .startos/build.key.pem
         shell: bash
 
       # SDK 2.0+ packages `include node_modules/@start9labs/start-sdk/s9pk.mk`,
@@ -384,11 +383,9 @@ jobs:
           PACKAGE_ID="${{ steps.version.outputs.package_id }}"
           VERSION="${{ steps.version.outputs.version }}"
 
-          OUTPUT=$(start-cli --registry="${REGISTRY}" registry package get "${PACKAGE_ID}" --target-version="${VERSION}" 2>&1)
-          EXIT_CODE=$?
-
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "::warning::Could not query registry: ${OUTPUT}"
+          # Logs go to stderr; any stdout is a published version.
+          if ! OUTPUT=$(start-cli --registry="${REGISTRY}" registry package get "${PACKAGE_ID}" --target-version="${VERSION}"); then
+            echo "::warning::Could not query registry ${REGISTRY}"
           elif [ -n "$OUTPUT" ]; then
             echo "Version ${VERSION} already exists on ${REGISTRY}. Removing..."
             start-cli --registry="${REGISTRY}" registry package remove "${PACKAGE_ID}" "${VERSION}"

@@ -58,7 +58,7 @@ for (const forge of ['github', 'forgejo']) {
     )
   }
 
-  test(`${forge} private versions remain protected by the permanent-version gate`, t => {
+  function runPermanentVersionGate(t, startCli) {
     const home = mkdtempSync(join(tmpdir(), 'private-package-gate-'))
     t.after(() => rmSync(home, { recursive: true, force: true }))
     const output = join(home, 'output')
@@ -69,15 +69,7 @@ for (const forge of ['github', 'forgejo']) {
       DEV_KEY: 'fixture-developer-key',
       GITHUB_OUTPUT: output,
     }
-    writeFileSync(
-      join(home, 'start-cli'),
-      `#!/bin/bash
-if [ -f "$HOME/.startos/developer.key.pem" ] && [ "$(< "$HOME/.startos/developer.key.pem")" = "$DEV_KEY" ]; then
-  printf '%s\\n' 'Published private package'
-fi
-`,
-      { mode: 0o755 },
-    )
+    writeFileSync(join(home, 'start-cli'), startCli, { mode: 0o755 })
     const steps = document('tagAndRelease').jobs.Tag.steps
     const check = steps.findIndex(step => step.id === 'check')
     for (const step of steps.slice(0, check)) {
@@ -103,7 +95,29 @@ fi
       },
     )
     execFileSync('bash', ['-e', '-o', 'pipefail', '-c', script], { env })
-    assert.match(readFileSync(output, 'utf8'), /^skip=true$/m)
+    return readFileSync(output, 'utf8')
+  }
+
+  test(`${forge} private versions remain protected by the permanent-version gate`, t => {
+    const output = runPermanentVersionGate(
+      t,
+      `#!/bin/bash
+if [ -f "$HOME/.startos/id.key.pem" ] && [ "$(< "$HOME/.startos/id.key.pem")" = "$DEV_KEY" ]; then
+  printf '%s\\n' 'Published private package'
+fi
+`,
+    )
+    assert.match(output, /^skip=true$/m)
+  })
+
+  test(`${forge} permanent-version gate ignores start-cli logs`, t => {
+    const output = runPermanentVersionGate(
+      t,
+      `#!/bin/bash
+printf '%s\\n' 'INFO start_core::developer: Renamed legacy key file' >&2
+`,
+    )
+    assert.match(output, /^skip=false$/m)
   })
 
   test(`${forge} validates private publication before building`, () => {
