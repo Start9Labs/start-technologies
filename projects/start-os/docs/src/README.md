@@ -68,6 +68,7 @@ The [Overview](overview.md) introduces the main StartOS concepts.
 - [Kiosk Mode](kiosk-mode.md)
 - [Updating StartOS](updating-startos.md)
 - [Trusted Keys](trusted-keys.md)
+- [Passkeys](passkeys.md)
 - [Change Password](change-password.md)
 - [Forgot Password](forgot-password.md)
 

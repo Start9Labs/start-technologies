@@ -27,12 +27,10 @@ export interface AuthKeyLease extends SessionSocketIdentity {
 }
 
 /**
- * Holds the device key this browser enrolled at login: a non-extractable
- * WebCrypto Ed25519 key persisted in IndexedDB, so a script can sign with it
- * while the page lives but can never read it out. Cleared by the app on
- * logout or server rejection; the server-side enrollment is revoked
- * separately. Key acquisition and enrollment cannot adopt a replacement identity
- * after their cancellation lifetime ends.
+ * Holds the active non-extractable Ed25519 device key.
+ * Password logins persist it in IndexedDB; passkey sign-ins keep it in memory.
+ * Logout and server rejection cancel the key lifetime; server-side revocation is separate.
+ * Async acquisition and enrollment cannot revive a cancelled identity.
  */
 @Service()
 export class AuthKeyService {
@@ -103,6 +101,17 @@ export class AuthKeyService {
     return key
   }
 
+  /** Replaces stored credentials with an in-memory key within the originating lease.
+   * Returns the adopted key's cancellation lifetime. */
+  async adopt(key: auth.AuthKey, signal: AbortSignal): Promise<AbortSignal> {
+    signal.throwIfAborted()
+    this.displaced = null
+    const lifetime = await this.delete()
+    lifetime.signal.throwIfAborted()
+    this.cached = key
+    return lifetime.signal
+  }
+
   /** Restores the key displaced by a failed login. */
   async rollback(): Promise<void> {
     const restore = this.displaced
@@ -142,10 +151,11 @@ export class AuthKeyService {
     lifetime.signal.throwIfAborted()
   }
 
-  private async delete(): Promise<void> {
-    this.replaceLifetime()
+  private async delete(): Promise<AbortController> {
+    const lifetime = this.replaceLifetime()
     this.cached = null
     await this.idb('readwrite', s => s.delete(this.storageKey))
+    return lifetime
   }
 
   private replaceLifetime(): AbortController {

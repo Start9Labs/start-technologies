@@ -94,7 +94,7 @@
           "type": "object",
           "properties": {
             "name": {
-              "description": "A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.",
+              "description": "A friendly name assigned at enrollment: a tunnel device's name, or the\nname of the passkey that enrolled the key. Password logins are unnamed.",
               "type": ["string", "null"]
             },
             "loggedIn": { "type": "string" },
@@ -196,6 +196,144 @@
       },
       "type": "object",
       "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "auth.passkey.add",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "AddPasskeyParams": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "credentialId": {
+              "type": "string",
+              "description": "Base64url credential ID."
+            },
+            "publicKey": { "$ref": "#/$defs/AnyVerifyingKey" },
+            "password": {
+              "type": "string",
+              "description": "The server password, confirming a credential that will outlive every session."
+            }
+          },
+          "required": ["name", "credentialId", "publicKey", "password"],
+          "additionalProperties": true
+        },
+        "AnyVerifyingKey": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "credentialId": {
+          "type": "string",
+          "description": "Base64url credential ID."
+        },
+        "publicKey": { "$ref": "#/$defs/AnyVerifyingKey" },
+        "password": {
+          "type": "string",
+          "description": "The server password, confirming a credential that will outlive every session."
+        }
+      },
+      "required": ["name", "credentialId", "publicKey", "password"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "auth.passkey.credentials",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "auth.passkey.enroll",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "EnrollPasskeySessionParams": {
+          "type": "object",
+          "properties": {
+            "pubkey": {
+              "description": "The browser's unpersisted session key.",
+              "$ref": "#/$defs/AnyVerifyingKey"
+            }
+          },
+          "required": ["pubkey"],
+          "additionalProperties": true
+        },
+        "AnyVerifyingKey": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "pubkey": {
+          "description": "The browser's unpersisted session key.",
+          "$ref": "#/$defs/AnyVerifyingKey"
+        }
+      },
+      "required": ["pubkey"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "auth.passkey.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "propertyNames": { "type": "string" },
+      "additionalProperties": { "$ref": "#/$defs/Passkey" },
+      "$defs": {
+        "Passkey": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "credentialId": {
+              "type": "string",
+              "description": "Base64url credential ID, for the browser's `allowCredentials`."
+            },
+            "addedAt": { "type": "string" }
+          },
+          "required": ["name", "credentialId", "addedAt"],
+          "additionalProperties": true,
+          "description": "A persisted WebAuthn credential independent of browser session expiry."
+        }
+      }
+    }
+  },
+  {
+    "name": "auth.passkey.remove",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "RemovePasskeyParams": {
+          "type": "object",
+          "properties": { "publicKey": { "$ref": "#/$defs/AnyVerifyingKey" } },
+          "required": ["publicKey"],
+          "additionalProperties": true
+        },
+        "AnyVerifyingKey": { "type": "string" }
+      },
+      "type": "object",
+      "properties": { "publicKey": { "$ref": "#/$defs/AnyVerifyingKey" } },
+      "required": ["publicKey"],
       "additionalProperties": true
     }
   },
@@ -324,7 +462,7 @@
           "type": "object",
           "properties": {
             "name": {
-              "description": "A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.",
+              "description": "A friendly name assigned at enrollment: a tunnel device's name, or the\nname of the passkey that enrolled the key. Password logins are unnamed.",
               "type": ["string", "null"]
             },
             "loggedIn": { "type": "string" },
@@ -8628,7 +8766,7 @@
             "publicKeys": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "Ed25519 public keys in PEM or armored GPG format."
+              "description": "Ed25519 or P-256 public keys in PEM, or Ed25519 keys in armored GPG format."
             },
             "trustFor": {
               "description": "Grants this permission to every imported key, including existing keys.",

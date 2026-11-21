@@ -255,6 +255,10 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
                     "token",
                     auth::token::<C, RpcContext>().with_about("about.commands-auth-tokens"),
                 )
+                .subcommand(
+                    "passkey",
+                    auth::passkey::passkey::<C>().with_about("about.commands-passkeys"),
+                )
                 .with_about("about.commands-authentication"),
         )
         .subcommand(

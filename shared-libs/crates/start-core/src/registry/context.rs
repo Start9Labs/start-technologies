@@ -282,12 +282,13 @@ impl Deref for RegistryContext {
 pub(crate) async fn call_cli(
     ctx: &CliContext,
     url: Url,
-    headers: HeaderMap,
+    mut headers: HeaderMap,
     address: &str,
     method: &str,
     mut params: Value,
 ) -> Result<Value, RpcError> {
     use crate::middleware::auth::session::client;
+    super::device_info::advertise_signature_capabilities(&mut headers);
     super::compat::pem_wire(&mut params);
     if let Some(signer) = ctx.rpc_signer(&headers)? {
         let request = ctx.rpc_client.capture(method, params)?;
@@ -426,6 +427,7 @@ pub(super) async fn call_legacy(
     use crate::middleware::auth::signature::{
         AUTH_SIG_HEADER, SignatureHeader, rpc_request_body, send_http,
     };
+    super::device_info::advertise_signature_capabilities(&mut headers);
     let body = rpc_request_body(method, params)?;
     let address = registry.host_str().or_not_found("registry hostname")?;
     headers.insert(

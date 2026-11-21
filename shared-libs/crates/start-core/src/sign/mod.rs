@@ -11,6 +11,7 @@ use crate::prelude::*;
 use crate::sign::commitment::{Digestable, SignedCommitment};
 use crate::sign::ed25519::{ED25519PH_ALGORITHM_ID_DER, Ed25519ph};
 use crate::sign::gpg_agent::GpgAgentKey;
+use crate::sign::webauthn::{WEBAUTHN_ALGORITHM_ID_DER, WebAuthnAssertion};
 use crate::util::FromStrParser;
 use crate::util::serde::{Der64, DerEncoding, deserialize_from_str};
 
@@ -23,6 +24,7 @@ pub mod gpg_agent;
 pub mod instance;
 mod profile;
 pub mod session;
+pub mod webauthn;
 pub use profile::browser_profile;
 
 /// Signatures serialized in signer order.
@@ -36,7 +38,7 @@ pub fn canonicalize_verifying_keys<T>(
         .collect()
 }
 
-/// Protocol tag prefixed to pure-Ed25519 commitment signing messages.
+/// Domain separator for pure-Ed25519 and WebAuthn commitment signatures.
 pub(crate) const COMMITMENT_SIG_TAG: &[u8] = b"Start-Commitment-Sig v1\0";
 
 /// The tag, the context prefixed with its length as one byte, the commitment type, then the
@@ -202,18 +204,33 @@ impl Serialize for AnySigningKey {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, VisitVariants)]
+#[derive(Clone, Debug, PartialEq, Eq, VisitVariants)]
 #[visit(opaque, ts(type = "z.string()"))]
 #[non_exhaustive]
 pub enum AnyVerifyingKey {
     Ed25519(<Ed25519ph as SignatureScheme>::VerifyingKey),
+    /// Signs only as a WebAuthn credential.
+    P256(p256::ecdsa::VerifyingKey),
+}
+
+impl AnyVerifyingKey {
+    fn identity(&self) -> (u8, std::borrow::Cow<'_, [u8]>) {
+        match self {
+            Self::Ed25519(k) => (0, k.as_bytes().as_slice().into()),
+            Self::P256(k) => (1, k.to_sec1_point(true).as_bytes().to_vec().into()),
+        }
+    }
+}
+
+impl std::hash::Hash for AnyVerifyingKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.identity().hash(state)
+    }
 }
 
 impl Ord for AnyVerifyingKey {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (self, other) {
-            (Self::Ed25519(a), Self::Ed25519(b)) => a.as_bytes().cmp(b.as_bytes()),
-        }
+        self.identity().cmp(&other.identity())
     }
 }
 
@@ -243,6 +260,14 @@ impl AnyVerifyingKey {
                 )?;
                 Ok(())
             }
+            (key, AnySignature::WebAuthn(a)) => a.verify(
+                key,
+                &signing_message(COMMITMENT_SIG_TAG, commitment, context)?,
+            ),
+            (Self::P256(_), _) => Err(Error::new(
+                eyre!("{}", t!("sign.unknown-signature-algorithm")),
+                ErrorKind::InvalidSignature,
+            )),
         }
     }
     /// Canonical SPKI map key for persisted signer indexes.
@@ -257,6 +282,8 @@ impl<'a> TryFrom<SubjectPublicKeyInfo<AnyRef<'a>, BitStringRef<'a>>> for AnyVeri
     ) -> Result<Self, Self::Error> {
         if value.algorithm == ed25519_dalek::pkcs8::ALGORITHM_ID {
             Ok(Self::Ed25519(ed25519_dalek::VerifyingKey::try_from(value)?))
+        } else if value.algorithm.oid == p256::elliptic_curve::ALGORITHM_OID {
+            Ok(Self::P256(p256::PublicKey::try_from(value)?.into()))
         } else {
             Err(pkcs8::spki::Error::OidUnknown {
                 oid: value.algorithm.oid,
@@ -268,6 +295,7 @@ impl pkcs8::EncodePublicKey for AnyVerifyingKey {
     fn to_public_key_der(&self) -> pkcs8::spki::Result<pkcs8::Document> {
         match self {
             Self::Ed25519(s) => s.to_public_key_der(),
+            Self::P256(s) => s.to_public_key_der(),
         }
     }
 }
@@ -316,6 +344,17 @@ impl Serialize for AnyVerifyingKey {
         Der64::new_ref(self).serialize(serializer)
     }
 }
+impl crate::util::serde::PemEncoding for AnyVerifyingKey {
+    fn from_pem<E: serde::de::Error>(pem: &str) -> Result<Self, E> {
+        use pkcs8::DecodePublicKey;
+        Self::from_public_key_pem(pem).map_err(E::custom)
+    }
+    fn to_pem<E: serde::ser::Error>(&self) -> Result<String, E> {
+        use pkcs8::EncodePublicKey;
+        self.to_public_key_pem(pkcs8::LineEnding::LF)
+            .map_err(E::custom)
+    }
+}
 impl ValueParserFactory for AnyVerifyingKey {
     type Parser = FromStrParser<Self>;
     fn value_parser() -> Self::Parser {
@@ -328,6 +367,7 @@ impl ValueParserFactory for AnyVerifyingKey {
 pub enum AnySignature {
     Ed25519(ed25519_dalek::Signature),
     Ed25519ph(ed25519_dalek::Signature),
+    WebAuthn(WebAuthnAssertion),
 }
 
 rpc_toolkit::reflect_ts!(AnySignature);
@@ -349,15 +389,28 @@ fn ed25519ph_algorithm_id() -> der::asn1::Any {
     der::asn1::Any::from_der(ED25519PH_ALGORITHM_ID_DER)
         .expect("Ed25519ph AlgorithmIdentifier decodes")
 }
+fn webauthn_algorithm_id() -> der::asn1::Any {
+    use der::Decode;
+    der::asn1::Any::from_der(WEBAUTHN_ALGORITHM_ID_DER)
+        .expect("WebAuthn AlgorithmIdentifier decodes")
+}
 impl TryFrom<AnySignatureDer> for AnySignature {
     type Error = Error;
     fn try_from(der: AnySignatureDer) -> Result<Self, Error> {
-        let sig = ed25519_dalek::Signature::from_slice(der.sig.as_bytes())
-            .with_kind(ErrorKind::Deserialization)?;
+        let ed25519 = || {
+            ed25519_dalek::Signature::from_slice(der.sig.as_bytes())
+                .with_kind(ErrorKind::Deserialization)
+        };
         if der.alg == ed25519_algorithm_id() {
-            Ok(Self::Ed25519(sig))
+            Ok(Self::Ed25519(ed25519()?))
         } else if der.alg == ed25519ph_algorithm_id() {
-            Ok(Self::Ed25519ph(sig))
+            Ok(Self::Ed25519ph(ed25519()?))
+        } else if der.alg == webauthn_algorithm_id() {
+            use der::Decode;
+            Ok(Self::WebAuthn(
+                WebAuthnAssertion::from_der(der.sig.as_bytes())
+                    .with_kind(ErrorKind::Deserialization)?,
+            ))
         } else {
             Err(Error::new(
                 eyre!("{}", t!("sign.unknown-signature-algorithm")),
@@ -377,21 +430,25 @@ impl DerEncoding for AnySignature {
     }
     fn to_der<E: serde::ser::Error>(&self) -> Result<Vec<u8>, E> {
         use der::Encode;
-        self.to_der_struct().to_der().map_err(E::custom)
+        self.to_der_struct()
+            .map_err(E::custom)?
+            .to_der()
+            .map_err(E::custom)
     }
 }
 
 impl AnySignature {
-    fn to_der_struct(&self) -> AnySignatureDer {
+    fn to_der_struct(&self) -> der::Result<AnySignatureDer> {
+        use der::Encode;
         let (alg, sig) = match self {
-            Self::Ed25519(s) => (ed25519_algorithm_id(), s),
-            Self::Ed25519ph(s) => (ed25519ph_algorithm_id(), s),
+            Self::Ed25519(s) => (ed25519_algorithm_id(), s.to_bytes().to_vec()),
+            Self::Ed25519ph(s) => (ed25519ph_algorithm_id(), s.to_bytes().to_vec()),
+            Self::WebAuthn(a) => (webauthn_algorithm_id(), a.to_der()?),
         };
-        AnySignatureDer {
+        Ok(AnySignatureDer {
             alg,
-            sig: der::asn1::OctetString::new(sig.to_bytes())
-                .expect("64-byte signature encodes as OCTET STRING"),
-        }
+            sig: der::asn1::OctetString::new(sig)?,
+        })
     }
 }
 
@@ -407,6 +464,7 @@ impl Display for AnySignature {
         f.write_str(
             &self
                 .to_der_struct()
+                .map_err(|_| std::fmt::Error)?
                 .to_pem(der::pem::LineEnding::LF)
                 .map_err(|_| std::fmt::Error)?,
         )
@@ -536,6 +594,95 @@ mod tests {
         assert_ne!(
             AnySignature::Ed25519(s).to_string(),
             AnySignature::Ed25519ph(s).to_string()
+        );
+    }
+
+    #[test]
+    fn p256_keys_round_trip_and_sort_after_ed25519() {
+        let p256 = AnyVerifyingKey::P256(*webauthn::test_util::p256_key().verifying_key());
+        let ed25519 = AnyVerifyingKey::Ed25519(
+            ed25519_dalek::SigningKey::from_bytes(&[3; 32]).verifying_key(),
+        );
+        assert_eq!(p256.to_string().parse::<AnyVerifyingKey>().unwrap(), p256);
+        assert_eq!(
+            p256.interned_der64().parse::<AnyVerifyingKey>().unwrap(),
+            p256
+        );
+        assert!(ed25519 < p256);
+        let signatures = SignatureMap::from([
+            (
+                p256.clone(),
+                AnySignature::Ed25519(ed25519_dalek::Signature::from_bytes(&[4; 64])),
+            ),
+            (
+                ed25519.clone(),
+                AnySignature::Ed25519(ed25519_dalek::Signature::from_bytes(&[4; 64])),
+            ),
+        ]);
+        assert_eq!(
+            serde_json::from_str::<SignatureMap>(&serde_json::to_string(&signatures).unwrap())
+                .unwrap(),
+            signatures
+        );
+    }
+
+    #[test]
+    fn compressed_p256_spki_has_the_same_canonical_identity() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../testdata/p256-public-key.json")).unwrap();
+        let uncompressed = hex::decode(fixture["uncompressedDerHex"].as_str().unwrap()).unwrap();
+        let compressed = hex::decode(fixture["compressedDerHex"].as_str().unwrap()).unwrap();
+        let key = AnyVerifyingKey::from_der::<serde_json::Error>(&uncompressed).unwrap();
+        let alias = AnyVerifyingKey::from_der::<serde_json::Error>(&compressed).unwrap();
+        assert_eq!(key, alias);
+        assert_eq!(key.interned_der64(), alias.interned_der64());
+        assert_eq!(key.to_der::<serde_json::Error>().unwrap(), uncompressed);
+    }
+
+    #[test]
+    fn webauthn_signature_round_trips_with_its_own_label() {
+        let key = webauthn::test_util::p256_key();
+        let sig =
+            AnySignature::WebAuthn(webauthn::test_util::passkey_assertion(&key, b"challenge"));
+        assert_eq!(sig.to_string().parse::<AnySignature>().unwrap(), sig);
+        assert_eq!(
+            Der64::<AnySignature>::from_str(&Der64::new_ref(&sig).to_string())
+                .unwrap()
+                .0,
+            sig
+        );
+        assert!(sig.to_string().starts_with("-----BEGIN SIGNATURE-----"));
+    }
+
+    #[test]
+    fn passkey_commitment_signature_binds_context_and_type() {
+        use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
+
+        let key = webauthn::test_util::p256_key();
+        let vk = AnyVerifyingKey::P256(*key.verifying_key());
+        let blake3 = Blake3Commitment {
+            hash: crate::util::serde::Base64([3; 32]),
+            size: 11,
+        };
+        let merkle = MerkleArchiveCommitment {
+            root_sighash: crate::util::serde::Base64([3; 32]),
+            root_maxsize: 11,
+        };
+        let sig = AnySignature::WebAuthn(webauthn::test_util::passkey_assertion(
+            &key,
+            &signing_message(COMMITMENT_SIG_TAG, &blake3, "startos").unwrap(),
+        ));
+        vk.verify_commitment(&blake3, "startos", &sig).unwrap();
+        compat::verify_commitment(&vk, &blake3, "startos", &sig).unwrap();
+        assert!(vk.verify_commitment(&blake3, "s9pk", &sig).is_err());
+        assert!(vk.verify_commitment(&merkle, "startos", &sig).is_err());
+        assert!(
+            vk.verify_commitment(
+                &blake3,
+                "startos",
+                &AnySignature::Ed25519(ed25519_dalek::Signature::from_bytes(&[4; 64]))
+            )
+            .is_err()
         );
     }
 

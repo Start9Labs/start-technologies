@@ -15,7 +15,7 @@ StartWRT never updates automatically — updating always requires explicit actio
    > [!WARNING]
    > Do not unplug your router during the update or reboot. The update can take several minutes to apply. All network traffic — Wi-Fi, Ethernet, VPN connections, and port forwarding — will be interrupted until the router finishes restarting.
 
-Firmware integrity is enforced cryptographically: the download must match the release's Blake3 commitment, and that commitment must carry valid ed25519 signatures, so a corrupted, tampered, or unsigned image is rejected.
+Firmware integrity is enforced cryptographically: the download must match the release's Blake3 commitment, and that commitment must carry valid Ed25519 or passkey signatures, so a corrupted, tampered, or unsigned image is rejected.
 
 ## Pages Open During an Update
 

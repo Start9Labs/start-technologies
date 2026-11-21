@@ -57,6 +57,74 @@ test('possession admission shares an unpersisted key without changing enrollment
   assert.equal(writes, 1)
 })
 
+test('a passkey-enrolled key signs from memory and discards the stored key', async () => {
+  const stored = await auth.generateAuthKey()
+  const service = keys(stored)
+  const writes = []
+  service.idb = async (mode, op) => {
+    if (mode === 'readwrite')
+      op({
+        put: () => writes.push('put'),
+        delete: () => writes.push('delete'),
+      })
+  }
+  const before = await service.lease()
+  const adopted = await auth.generateAuthKey()
+  const active = await service.adopt(adopted, before.signal)
+  assert.deepEqual(writes, ['delete'])
+  assert.equal(before.signal.aborted, true)
+  const lease = await service.lease()
+  assert.equal(lease.key, adopted)
+  assert.equal(lease.signal, active)
+  assert.equal(await peer(lease), auth.normalizeDer64(adopted.pubkeyPem))
+  await service.clear()
+  assert.equal(lease.signal.aborted, true)
+  assert.equal(await service.lease(), null)
+})
+
+for (const transition of ['logout', 'replacement']) {
+  test(`${transition} rejects passkey adoption from an obsolete lease`, async () => {
+    const service = keys()
+    const origin = await service.admissionLease()
+    const adopted = await auth.generateAuthKey()
+    const replacement =
+      transition === 'replacement' ? await auth.generateAuthKey() : null
+    if (replacement) await service.put(replacement)
+    else await service.clear()
+    await assert.rejects(service.adopt(adopted, origin.signal), {
+      name: 'AbortError',
+    })
+    assert.equal(await service.get(), replacement)
+  })
+
+  test(`${transition} cancels passkey adoption while stored-key deletion is pending`, async () => {
+    const service = keys()
+    const origin = await service.admissionLease()
+    const adopted = await auth.generateAuthKey()
+    const replacement =
+      transition === 'replacement' ? await auth.generateAuthKey() : null
+    const started = Promise.withResolvers()
+    const deleted = Promise.withResolvers()
+    let writes = 0
+    service.idb = mode => {
+      if (mode !== 'readwrite') return Promise.resolve()
+      if (++writes === 1) {
+        started.resolve()
+        return deleted.promise
+      }
+      return Promise.resolve()
+    }
+    const adopting = service.adopt(adopted, origin.signal)
+    const rejected = assert.rejects(adopting, { name: 'AbortError' })
+    await started.promise
+    if (replacement) await service.put(replacement)
+    else await service.clear()
+    deleted.resolve()
+    await rejected
+    assert.equal(await service.get(), replacement)
+  })
+}
+
 test('enrollment and rollback invalidate their displaced possession leases', async () => {
   const service = keys()
   const before = await service.admissionLease()

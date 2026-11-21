@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
@@ -320,6 +321,9 @@ async fn send_handshake(socket: &mut BoxWebSocket, payload: &[u8]) -> Result<(),
         .with_kind(ErrorKind::Network)
 }
 
+/// Opaque state retained until the physical encrypted connection drops.
+pub(crate) type SocketLease = Arc<dyn std::any::Any + Send + Sync>;
+
 /// An authenticated channel retaining WebSocket text, binary and control semantics.
 /// Close results are encrypted; physical controls carry no application close reason.
 /// Peer authentication does not enroll keys or grant RPC roles.
@@ -329,6 +333,7 @@ pub struct EncryptedSocket {
     pending: VecDeque<Message>,
     closing: Option<Message>,
     fused: bool,
+    _lease: Option<SocketLease>,
 }
 
 impl EncryptedSocket {
@@ -344,7 +349,13 @@ impl EncryptedSocket {
             pending: VecDeque::new(),
             closing: None,
             fused: false,
+            _lease: None,
         }
+    }
+
+    pub(crate) fn with_lease(mut self, lease: Option<SocketLease>) -> Self {
+        self._lease = lease;
+        self
     }
 
     /// Completes the initiator exchange before returning the verified remote identity.

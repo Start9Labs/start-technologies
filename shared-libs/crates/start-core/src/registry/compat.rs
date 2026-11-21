@@ -1,6 +1,39 @@
 use crate::prelude::*;
 use crate::sign::{AnySignature, AnyVerifyingKey};
 
+pub fn without_passkeys(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            for (name, value) in object.iter_mut() {
+                match (&**name, value) {
+                    ("signatures", Value::Object(signatures)) => {
+                        signatures.retain(|key, signature| {
+                            !matches!(key.parse::<AnyVerifyingKey>(), Ok(AnyVerifyingKey::P256(_)))
+                                && !matches!(
+                                    from_value::<AnySignature>(signature.clone()),
+                                    Ok(AnySignature::WebAuthn(_))
+                                )
+                        })
+                    }
+                    ("keys" | "addKey" | "removeKey", Value::Array(keys)) => keys.retain(|key| {
+                        !matches!(
+                            from_value::<AnyVerifyingKey>(key.clone()),
+                            Ok(AnyVerifyingKey::P256(_))
+                        )
+                    }),
+                    (_, value) => without_passkeys(value),
+                }
+            }
+        }
+        Value::Array(array) => {
+            for value in array.iter_mut() {
+                without_passkeys(value);
+            }
+        }
+        _ => (),
+    }
+}
+
 pub fn pem_wire(value: &mut Value) {
     match value {
         Value::Object(object) => {

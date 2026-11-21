@@ -352,6 +352,16 @@ export type PackageVersionCountInput = z.input<
 >
 export type PartitionTable = z.output<typeof schemas.PartitionTable>
 export type PartitionTableInput = z.input<typeof schemas.PartitionTable>
+
+/**
+ * A persisted WebAuthn credential independent of browser session expiry.
+ */
+export type Passkey = z.output<typeof schemas.Passkey>
+
+/**
+ * A persisted WebAuthn credential independent of browser session expiry.
+ */
+export type PasskeyInput = z.input<typeof schemas.Passkey>
 export type PathOrUrl = z.output<typeof schemas.PathOrUrl>
 export type PathOrUrlInput = z.input<typeof schemas.PathOrUrl>
 export type Pem = z.output<typeof schemas.Pem>
@@ -658,6 +668,8 @@ export type AddPackageToCategoryParams = z.output<
 export type AddPackageToCategoryParamsInput = z.input<
   typeof schemas.AddPackageToCategoryParams
 >
+export type AddPasskeyParams = z.output<typeof schemas.AddPasskeyParams>
+export type AddPasskeyParamsInput = z.input<typeof schemas.AddPasskeyParams>
 export type AddPrivateDomainParams = z.output<
   typeof schemas.AddPrivateDomainParams
 >
@@ -839,6 +851,12 @@ export type EffectsRunActionParams = z.output<
 >
 export type EffectsRunActionParamsInput = z.input<
   typeof schemas.EffectsRunActionParams
+>
+export type EnrollPasskeySessionParams = z.output<
+  typeof schemas.EnrollPasskeySessionParams
+>
+export type EnrollPasskeySessionParamsInput = z.input<
+  typeof schemas.EnrollPasskeySessionParams
 >
 export type ExportPackageVersionParams = z.output<
   typeof schemas.ExportPackageVersionParams
@@ -1026,6 +1044,16 @@ export type PackageIcon = z.output<typeof schemas.PackageIcon>
 export type PackageIconInput = z.input<typeof schemas.PackageIcon>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PackageInfoShortInput = z.input<typeof schemas.PackageInfoShort>
+
+/**
+ * What an unauthenticated browser needs to request and attribute a passkey signature.
+ */
+export type PasskeyCredential = z.output<typeof schemas.PasskeyCredential>
+
+/**
+ * What an unauthenticated browser needs to request and attribute a passkey signature.
+ */
+export type PasskeyCredentialInput = z.input<typeof schemas.PasskeyCredential>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
 export type PassthroughInfoInput = z.input<typeof schemas.PassthroughInfo>
 export type PasswordType = z.output<typeof schemas.PasswordType>
@@ -1135,6 +1163,10 @@ export type RemovePackageSignerParams = z.output<
 >
 export type RemovePackageSignerParamsInput = z.input<
   typeof schemas.RemovePackageSignerParams
+>
+export type RemovePasskeyParams = z.output<typeof schemas.RemovePasskeyParams>
+export type RemovePasskeyParamsInput = z.input<
+  typeof schemas.RemovePasskeyParams
 >
 export type RemoveReaderParams = z.output<typeof schemas.RemoveReaderParams>
 export type RemoveReaderParamsInput = z.input<typeof schemas.RemoveReaderParams>

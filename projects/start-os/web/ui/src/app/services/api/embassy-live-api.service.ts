@@ -18,7 +18,12 @@ import {
   rpcRequestBody,
   waitForPatchSequence,
 } from '@start9labs/shared'
-import { createRpcClient, createRpcStreamClient } from '@start9labs/start-core'
+import {
+  auth,
+  createRpcClient,
+  createRpcStreamClient,
+  T,
+} from '@start9labs/start-core'
 import type { RpcStreamOptions } from '@start9labs/start-core'
 import { Dump } from 'patch-db-client'
 import { catchError } from 'rxjs'
@@ -148,6 +153,49 @@ export class LiveApiService extends ApiService {
       this.identity,
       since,
     ).pipe(catchError(error => this.raiseError(error)))
+  }
+
+  async enrollWithPasskey(
+    params: T.EnrollPasskeySessionParams,
+    signal: AbortSignal,
+  ): Promise<void> {
+    signal.throwIfAborted()
+    const credentials = await this.rpc.auth.passkey.credentials({})
+    signal.throwIfAborted()
+    if (!credentials.length) throw new Error('No passkeys are registered')
+    const signer = auth.passkeyRequestSigner(
+      credentials.map(({ credentialId, publicKey }) => ({
+        credentialId,
+        pubkeyPem: auth.derToPem('PUBLIC KEY', auth.base64ToBytes(publicKey)),
+      })),
+    )
+    const lifetime = new AbortController()
+    let signingError: unknown
+    try {
+      const response = await this.sockets.message<null>(
+        rpcRequestBody({ method: 'auth.passkey.enroll', params }),
+        { openObserver: this.identity.openObserver },
+        {
+          signer: {
+            sign: async (context, body) => {
+              try {
+                return await signer.sign(context, body)
+              } catch (error) {
+                signingError = error
+                throw error
+              }
+            },
+          },
+          signal: AbortSignal.any([signal, lifetime.signal]),
+        },
+      )
+      signal.throwIfAborted()
+      rpcResponseResult(response)
+    } catch (error) {
+      throw signingError ?? error
+    } finally {
+      lifetime.abort()
+    }
   }
 
   checkEnrollment(): Promise<unknown> {

@@ -16,6 +16,24 @@ export const SIGNATURE_PROFILE = {
       156, 154, 227, 187, 133, 251, 242, 137, 91, 4, 64,
     ],
   },
+  webauthn: {
+    algorithm: [
+      48, 22, 6, 20, 105, 130, 176, 132, 192, 167, 187, 205, 162, 186, 255, 169,
+      236, 216, 239, 250, 128, 138, 191, 17,
+    ],
+  },
+  p256: {
+    keyPrefix: [
+      48, 89, 48, 19, 6, 7, 42, 134, 72, 206, 61, 2, 1, 6, 8, 42, 134, 72, 206,
+      61, 3, 1, 7, 3, 66, 0,
+    ],
+    keyBytes: 65,
+    compressedKeyPrefix: [
+      48, 57, 48, 19, 6, 7, 42, 134, 72, 206, 61, 2, 1, 6, 8, 42, 134, 72, 206,
+      61, 3, 1, 7, 3, 34, 0,
+    ],
+    compressedKeyBytes: 33,
+  },
   signatureBytes: 64,
   fingerprint: {
     algorithm: 'SHA-256',
@@ -27,5 +45,9 @@ export const SIGNATURE_PROFILE = {
       50, 0,
     ],
     header: 'X-Start-Auth-Sig',
+  },
+  registry: {
+    header: 'x-start-webauthn-signatures',
+    value: 'true',
   },
 } as const

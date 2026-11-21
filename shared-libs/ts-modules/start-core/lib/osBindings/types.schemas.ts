@@ -1294,6 +1294,32 @@ export const PartitionTable: z.ZodEnum<{ mbr: 'mbr'; gpt: 'gpt' }> =
   /* @__PURE__ */ z.enum(['mbr', 'gpt']).meta({
     id: 'PartitionTable',
   })
+
+/**
+ * A persisted WebAuthn credential independent of browser session expiry.
+ */
+export const Passkey: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * Base64url credential ID, for the browser's `allowCredentials`.
+   */
+  credentialId: z.ZodString
+  addedAt: z.ZodString
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * Base64url credential ID, for the browser's `allowCredentials`.
+   */
+  credentialId: z.string().meta({
+    description:
+      "Base64url credential ID, for the browser's `allowCredentials`.",
+  }),
+  addedAt: z.string(),
+}).meta({
+  id: 'Passkey',
+  description:
+    'A persisted WebAuthn credential independent of browser session expiry.',
+})
 export const PathOrUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'PathOrUrl',
 })
@@ -1565,8 +1591,8 @@ export const ServiceInterfaceType: z.ZodEnum<{
 })
 export const Session: z.ZodObject<{
   /**
-   * A friendly name for the key, if one was assigned at enrollment (e.g.
-   * tunnel device keys). UI-enrolled keys are unnamed.
+   * A friendly name assigned at enrollment: a tunnel device's name, or the
+   * name of the passkey that enrolled the key. Password logins are unnamed.
    */
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1580,12 +1606,12 @@ export const Session: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   /**
-   * A friendly name for the key, if one was assigned at enrollment (e.g.
-   * tunnel device keys). UI-enrolled keys are unnamed.
+   * A friendly name assigned at enrollment: a tunnel device's name, or the
+   * name of the passkey that enrolled the key. Password logins are unnamed.
    */
   name: wire(z.string().nullable().optional(), z.string().nullable()).meta({
     description:
-      'A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.',
+      "A friendly name assigned at enrollment: a tunnel device's name, or the\nname of the passkey that enrolled the key. Password logins are unnamed.",
   }),
   loggedIn: wire(z.string().optional(), z.string()),
   lastActive: wire(z.string().optional(), z.string()),
@@ -2515,6 +2541,36 @@ export const AddPackageToCategoryParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ id: z.string(), package: PackageId }).meta({
   id: 'AddPackageToCategoryParams',
 })
+export const AddPasskeyParams: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.ZodString
+  publicKey: typeof AnyVerifyingKey
+  /**
+   * The server password, confirming a credential that will outlive every session.
+   */
+  password: z.ZodString
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.string().meta({
+    description: 'Base64url credential ID.',
+  }),
+  publicKey: AnyVerifyingKey,
+  /**
+   * The server password, confirming a credential that will outlive every session.
+   */
+  password: z.string().meta({
+    description:
+      'The server password, confirming a credential that will outlive every session.',
+  }),
+}).meta({
+  id: 'AddPasskeyParams',
+})
 export const AddPrivateDomainParams: z.ZodObject<{
   fqdn: z.ZodString
   gateway: typeof GatewayId
@@ -3111,6 +3167,21 @@ export const EffectsRunActionParams: z.ZodObject<{
   input: z.unknown(),
 }).meta({
   id: 'EffectsRunActionParams',
+})
+export const EnrollPasskeySessionParams: z.ZodObject<{
+  /**
+   * The browser's unpersisted session key.
+   */
+  pubkey: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({
+  /**
+   * The browser's unpersisted session key.
+   */
+  pubkey: AnyVerifyingKey.meta({
+    description: "The browser's unpersisted session key.",
+  }),
+}).meta({
+  id: 'EnrollPasskeySessionParams',
 })
 export const ExportPackageVersionParams: z.ZodIntersection<
   z.ZodObject<{ id: typeof PackageId; version: typeof Version }>,
@@ -4125,6 +4196,29 @@ export const PackageInfoShort: z.ZodObject<{
 }).meta({
   id: 'PackageInfoShort',
 })
+
+/**
+ * What an unauthenticated browser needs to request and attribute a passkey signature.
+ */
+export const PasskeyCredential: z.ZodObject<{
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.ZodString
+  publicKey: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.string().meta({
+    description: 'Base64url credential ID.',
+  }),
+  publicKey: AnyVerifyingKey,
+}).meta({
+  id: 'PasskeyCredential',
+  description:
+    'What an unauthenticated browser needs to request and attribute a passkey signature.',
+})
 export const PassthroughInfo: z.ZodObject<{
   hostname: z.ZodString
   listenPort: z.ZodInt
@@ -4443,6 +4537,11 @@ export const RemovePackageSignerParams: z.ZodObject<{
   signer: typeof Guid
 }> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
   id: 'RemovePackageSignerParams',
+})
+export const RemovePasskeyParams: z.ZodObject<{
+  publicKey: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({ publicKey: AnyVerifyingKey }).meta({
+  id: 'RemovePasskeyParams',
 })
 export const RemoveReaderParams: z.ZodObject<{ id: typeof Guid }> =
   /* @__PURE__ */ object({ id: Guid }).meta({

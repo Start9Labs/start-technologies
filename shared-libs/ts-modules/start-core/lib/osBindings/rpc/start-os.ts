@@ -286,6 +286,11 @@ export type OutboundDnsUpdateInput = z.input<typeof schemas.OutboundDnsUpdate>
 export type PackageBackupReport = z.output<typeof schemas.PackageBackupReport>
 export type PackageId = z.output<typeof schemas.PackageId>
 export type PackageIdInput = z.input<typeof schemas.PackageId>
+
+/**
+ * A persisted WebAuthn credential independent of browser session expiry.
+ */
+export type Passkey = z.output<typeof schemas.Passkey>
 export type Percentage = z.output<typeof schemas.Percentage>
 export type ProgressUnits = z.output<typeof schemas.ProgressUnits>
 export type PushKeys = z.output<typeof schemas.PushKeys>
@@ -413,6 +418,7 @@ export type AcceptSignersInput = z.input<typeof schemas.AcceptSigners>
 export type ActionInput = z.output<typeof schemas.ActionInput>
 export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
 export type AddKeyParamsInput = z.input<typeof schemas.AddKeyParams>
+export type AddPasskeyParamsInput = z.input<typeof schemas.AddPasskeyParams>
 export type AddPassthroughParamsInput = z.input<
   typeof schemas.AddPassthroughParams
 >
@@ -469,6 +475,9 @@ export type DeleteLegacyParamsInput = z.input<typeof schemas.DeleteLegacyParams>
  */
 export type DnsSettings = z.output<typeof schemas.DnsSettings>
 export type EditGatewayParamsInput = z.input<typeof schemas.EditGatewayParams>
+export type EnrollPasskeySessionParamsInput = z.input<
+  typeof schemas.EnrollPasskeySessionParams
+>
 export type EppInfo = z.output<typeof schemas.EppInfo>
 export type EppParamsInput = z.input<typeof schemas.EppParams>
 export type ExecParamsInput = z.input<typeof schemas.ExecParams>
@@ -520,6 +529,11 @@ export type NutSettingsInput = z.input<typeof schemas.NutSettings>
 export type OsInfo = z.output<typeof schemas.OsInfo>
 export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
 export type PackageIdParamsInput = z.input<typeof schemas.PackageIdParams>
+
+/**
+ * What an unauthenticated browser needs to request and attribute a passkey signature.
+ */
+export type PasskeyCredential = z.output<typeof schemas.PasskeyCredential>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
 export type PasswordTypeInput = z.input<typeof schemas.PasswordType>
 
@@ -550,6 +564,9 @@ export type RebuildParamsInput = z.input<typeof schemas.RebuildParams>
 export type RegistryIdentity = z.output<typeof schemas.RegistryIdentity>
 export type RemoveAcmeParamsInput = z.input<typeof schemas.RemoveAcmeParams>
 export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
+export type RemovePasskeyParamsInput = z.input<
+  typeof schemas.RemovePasskeyParams
+>
 export type RemoveTunnelParamsInput = z.input<typeof schemas.RemoveTunnelParams>
 export type RenameGatewayParamsInput = z.input<
   typeof schemas.RenameGatewayParams

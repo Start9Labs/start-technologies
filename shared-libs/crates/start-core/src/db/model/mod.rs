@@ -39,6 +39,7 @@ impl Database {
                 key_store: KeyStore::new(account)?,
                 password: account.password.clone(),
                 sessions: Sessions::default(),
+                passkeys: BTreeMap::new(),
                 ssh_privkey: Pem(account.ssh_key.clone()),
                 available_ports: AvailablePorts::new(),
                 notifications: Notifications::new(),

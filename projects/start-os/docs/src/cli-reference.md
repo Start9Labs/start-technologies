@@ -66,6 +66,16 @@ List enrolled device keys, including the web interface's and `start-cli`'s. The 
 
 Remove one or more enrolled device keys, ending their sessions.
 
+### `start-cli auth passkey list`
+
+List the passkeys registered for signing in to the UI.
+
+- `--format` — Output format
+
+### `start-cli auth passkey remove <PUBLIC_KEY>`
+
+Remove a passkey and sign out every session it started. Passkeys are added from the UI, under System > Passkeys.
+
 ### `start-cli auth token create --name <NAME>`
 
 Create a bearer token for an API client that cannot sign requests. The token is printed once and is not stored; the client sends it as `Authorization: Bearer <token>`. It appears in `auth token list` under its name and is revoked with `auth token remove` or after 30 days unused.
@@ -255,7 +265,7 @@ List trusted keys by ID, with each key's name and whether it is trusted for pack
 
 ### `start-cli server trusted-keys add <PUBLIC_KEYS>...`
 
-Import Ed25519 public keys in PEM or armored GPG format. Put options before `--` and the quoted keys after it. Newly added keys are trusted for packages; `--trust-for os` additionally trusts them for StartOS updates.
+Import Ed25519 or P-256 (passkey) public keys in PEM format, or Ed25519 keys in armored GPG format. Put options before `--` and the quoted keys after it. Newly added keys are trusted for packages; `--trust-for os` additionally trusts them for StartOS updates.
 
 - `--name <NAME>` — Name for the keys; blank names each GPG key after its identity
 - `--trust-for <marketplace|os>` — Grant this trust to every imported key, including keys already present

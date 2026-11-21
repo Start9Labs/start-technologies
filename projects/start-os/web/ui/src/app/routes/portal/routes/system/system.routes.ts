@@ -76,6 +76,11 @@ export default [
         loadComponent: () => import('./routes/ssh/ssh.component'),
       },
       {
+        path: 'passkeys',
+        title: titleResolver,
+        loadComponent: () => import('./routes/passkeys'),
+      },
+      {
         path: 'registries',
         title: titleResolver,
         data: { title: 'Registries' },

@@ -21,6 +21,9 @@ pub struct Private {
     pub password: String, // argon2 hash
     #[serde(default)]
     pub sessions: Sessions,
+    /// Registered passkeys keyed by canonical DER64 public key.
+    #[serde(default)]
+    pub passkeys: BTreeMap<InternedString, crate::auth::passkey::Passkey>,
     /// Retains the persisted name for existing databases.
     #[serde(default = "generate_server_identity_key", rename = "developerKey")]
     pub server_identity_key: Der64<ed25519_dalek::SigningKey>,

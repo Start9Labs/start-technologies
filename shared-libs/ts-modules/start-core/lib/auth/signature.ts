@@ -1,4 +1,5 @@
 import { ed25519, ed25519ph } from '@noble/curves/ed25519'
+import { p256 } from '@noble/curves/p256'
 import { blake3 } from '@noble/hashes/blake3'
 import { sha256 } from '@noble/hashes/sha256'
 import { bytesToHex, concatBytes } from '@noble/hashes/utils'
@@ -8,6 +9,14 @@ import { SIGNATURE_PROFILE } from '../osBindings/signature-profile'
 const REQUEST_AUTH_TAG = new Uint8Array(SIGNATURE_PROFILE.http.tag)
 const COMMITMENT_TAG = new Uint8Array(SIGNATURE_PROFILE.commitmentTag)
 const ED25519_SPKI_PREFIX = new Uint8Array(SIGNATURE_PROFILE.ed25519.keyPrefix)
+const WEBAUTHN_ALGORITHM = new Uint8Array(SIGNATURE_PROFILE.webauthn.algorithm)
+const COSE_ES256 = -7
+const COSE_EDDSA = -8
+
+/** Advertises registry support for P-256 keys and WebAuthn signatures. */
+export const REGISTRY_SIGNATURE_HEADERS = {
+  [SIGNATURE_PROFILE.registry.header]: SIGNATURE_PROFILE.registry.value,
+} as const
 
 export const AUTH_SIG_HEADER = SIGNATURE_PROFILE.http.header
 export const SIGNATURE_PREFIX = new Uint8Array(
@@ -21,24 +30,104 @@ export interface AuthKey {
   pubkeyPem: string
 }
 
+/** A WebAuthn credential that signs StartOS request commitments. */
+export interface Passkey {
+  /** Base64url credential ID. */
+  credentialId: string
+  /** PEM-encoded P-256 or Ed25519 public key. */
+  pubkeyPem: string
+}
+
 /** Signs captured body bytes and returns a binary CBOR request proof without exporting private keys. */
 export interface RequestSigner {
   sign(context: string, body: Uint8Array): Promise<Uint8Array<ArrayBuffer>>
 }
 
 interface SigningIdentity {
-  publicKey: Uint8Array
-  sign(message: Uint8Array<ArrayBuffer>): Promise<Uint8Array>
+  /** Returns the signer's SPKI DER and a DER-encoded `AnySignature`. */
+  sign(
+    message: Uint8Array<ArrayBuffer>,
+  ): Promise<{ signer: Uint8Array; signature: Uint8Array }>
 }
 
 function webCryptoIdentity(key: AuthKey): SigningIdentity {
+  const signer = base64ToBytes(normalizeDer64(key.pubkeyPem))
   return {
-    publicKey: base64ToBytes(normalizeDer64(key.pubkeyPem)),
-    sign: async message =>
-      new Uint8Array(
-        await crypto.subtle.sign('Ed25519', key.privateKey, message),
+    sign: async message => ({
+      signer,
+      signature: concatBytes(
+        SIGNATURE_PREFIX,
+        new Uint8Array(
+          await crypto.subtle.sign('Ed25519', key.privateKey, message),
+        ),
       ),
+    }),
   }
+}
+
+/** Offers every passkey and attributes the signature to the one the user chose. */
+function passkeyIdentity(passkeys: readonly Passkey[]): SigningIdentity {
+  const credentials = passkeys.map(passkey => ({
+    id: new Uint8Array(base64ToBytes(normalizeDer64(passkey.credentialId))),
+    signer: base64ToBytes(normalizeDer64(passkey.pubkeyPem)),
+  }))
+  return {
+    sign: async message => {
+      const credential = (await navigator.credentials.get({
+        publicKey: {
+          challenge: new Uint8Array(sha256(message)),
+          allowCredentials: credentials.map(({ id }) => ({
+            type: 'public-key',
+            id,
+          })),
+          userVerification: 'required',
+        },
+      })) as PublicKeyCredential | null
+      if (!credential) throw new Error('Passkey signing was cancelled')
+      const rawId = new Uint8Array(credential.rawId)
+      const chosen = credentials.find(
+        ({ id }) =>
+          id.length === rawId.length &&
+          id.every((byte, i) => byte === rawId[i]),
+      )
+      if (!chosen) throw new Error('Unknown passkey')
+      const response = credential.response as AuthenticatorAssertionResponse
+      return {
+        signer: chosen.signer,
+        signature: webAuthnSignature(
+          new Uint8Array(response.authenticatorData),
+          new Uint8Array(response.clientDataJSON),
+          new Uint8Array(response.signature),
+        ),
+      }
+    },
+  }
+}
+
+function derTlv(tag: number, content: Uint8Array): Uint8Array {
+  const length: number[] = []
+  for (let n = content.length; n > 0; n >>= 8) length.unshift(n & 0xff)
+  const header =
+    content.length < 0x80
+      ? [tag, content.length]
+      : [tag, 0x80 | length.length, ...length]
+  return concatBytes(new Uint8Array(header), content)
+}
+
+function webAuthnSignature(
+  authenticatorData: Uint8Array,
+  clientDataJson: Uint8Array,
+  signature: Uint8Array,
+): Uint8Array {
+  const assertion = derTlv(
+    0x30,
+    concatBytes(
+      derTlv(0x04, authenticatorData),
+      derTlv(0x04, clientDataJson),
+      derTlv(0x04, signature),
+    ),
+  )
+  return derTlv(0x30, concatBytes(WEBAUTHN_ALGORITHM, derTlv(0x04, assertion)))
 }
 
 function commitmentSigner(identity: SigningIdentity): RequestSigner {
@@ -60,9 +149,12 @@ export function requestSigner(key: AuthKey): RequestSigner {
 /** Generates an opaque Ed25519 possession signer without WebCrypto or persistence. */
 export async function generateEphemeralRequestSigner(): Promise<RequestSigner> {
   const secret = ed25519.utils.randomPrivateKey()
+  const signer = concatBytes(ED25519_SPKI_PREFIX, ed25519.getPublicKey(secret))
   return commitmentSigner({
-    publicKey: concatBytes(ED25519_SPKI_PREFIX, ed25519.getPublicKey(secret)),
-    sign: async message => ed25519.sign(message, secret),
+    sign: async message => ({
+      signer,
+      signature: concatBytes(SIGNATURE_PREFIX, ed25519.sign(message, secret)),
+    }),
   })
 }
 
@@ -76,14 +168,70 @@ export async function generateAuthKey(): Promise<AuthKey> {
   return { privateKey, pubkeyPem: derToPem('PUBLIC KEY', spki) }
 }
 
+/** Registers a user-verified passkey for the current site. */
+export async function createPasskey(
+  user: PublicKeyCredentialUserEntity,
+  rpName: string,
+): Promise<Passkey> {
+  const credential = (await navigator.credentials.create({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rp: { name: rpName },
+      user,
+      pubKeyCredParams: [
+        { type: 'public-key', alg: COSE_ES256 },
+        { type: 'public-key', alg: COSE_EDDSA },
+      ],
+      authenticatorSelection: {
+        residentKey: 'preferred',
+        userVerification: 'required',
+      },
+      attestation: 'none',
+    },
+  })) as PublicKeyCredential | null
+  if (!credential) throw new Error('Passkey registration was cancelled')
+  const spki = (
+    credential.response as AuthenticatorAttestationResponse
+  ).getPublicKey()
+  if (!spki) throw new Error('Passkey uses an unsupported algorithm')
+  return {
+    credentialId: base64UrlEncode(new Uint8Array(credential.rawId)),
+    pubkeyPem: derToPem('PUBLIC KEY', new Uint8Array(spki)),
+  }
+}
+
+/** Uses any of the passkeys for generic request commitments, prompting once per request. */
+export function passkeyRequestSigner(
+  passkeys: readonly Passkey[],
+): RequestSigner {
+  return commitmentSigner(passkeyIdentity(passkeys))
+}
+
 /** Produces an HTTP authentication header for the complete resource body. */
 export async function signRequest(
   key: AuthKey,
   context: string,
   body: Uint8Array,
 ): Promise<string> {
+  return authHeader(webCryptoIdentity(key), context, body)
+}
+
+/** Produces an HTTP authentication header, prompting for one of the passkeys. */
+export async function signRequestWithPasskey(
+  passkeys: readonly Passkey[],
+  context: string,
+  body: Uint8Array,
+): Promise<string> {
+  return authHeader(passkeyIdentity(passkeys), context, body)
+}
+
+async function authHeader(
+  identity: SigningIdentity,
+  context: string,
+  body: Uint8Array,
+): Promise<string> {
   const proof = await signTaggedRequest(
-    webCryptoIdentity(key),
+    identity,
     context,
     body,
     REQUEST_AUTH_TAG,
@@ -140,11 +288,11 @@ async function signTaggedRequest(
     SIGNATURE_PROFILE.requestType,
     requestCommitment(timestamp, nonce, size, hash),
   )
-  const signature = await identity.sign(message)
+  const { signer, signature } = await identity.sign(message)
   return {
     commitment: { timestamp, nonce, size, blake3: new Uint8Array(hash) },
-    signer: new Uint8Array(identity.publicKey),
-    signature: new Uint8Array(concatBytes(SIGNATURE_PREFIX, signature)),
+    signer: new Uint8Array(signer),
+    signature: new Uint8Array(signature),
   }
 }
 
@@ -257,7 +405,8 @@ export function signingMessage(
   return new Uint8Array([...tag, bytes.length, ...bytes, type, ...commitment])
 }
 
-function derToPem(label: string, der: Uint8Array): string {
+/** PEM-armors DER bytes using 64-character lines. */
+export function derToPem(label: string, der: Uint8Array): string {
   const body = bytesToBase64(der)
   const lines: string[] = []
   for (let i = 0; i < body.length; i += 64) lines.push(body.slice(i, i + 64))
@@ -310,6 +459,25 @@ export function parseEd25519PublicKey(serialized: string): Uint8Array {
   if (!ed25519.utils.isValidPublicKey(key, true))
     throw new Error('Public key is not a curve point')
   return key
+}
+
+/** Canonical SPKI DER64 for an Ed25519 or P-256 key, including compressed P-256 input. */
+export function verifyingKeyDer64(serialized: string): string {
+  const profile = SIGNATURE_PROFILE.p256
+  for (const [prefix, length] of [
+    [profile.keyPrefix, profile.keyBytes],
+    [profile.compressedKeyPrefix, profile.compressedKeyBytes],
+  ] as const) {
+    try {
+      const point = p256.ProjectivePoint.fromHex(
+        parseDerPayload(serialized, new Uint8Array(prefix), length),
+      )
+      return bytesToBase64(
+        concatBytes(new Uint8Array(profile.keyPrefix), point.toRawBytes(false)),
+      )
+    } catch {}
+  }
+  return ed25519PublicKeyDer64(parseEd25519PublicKey(serialized))
 }
 
 /** Decodes a fixed-layout DER value using native key/signature encodings. */

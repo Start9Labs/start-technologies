@@ -16,7 +16,7 @@ New installations include the drbonez, matthill, and Start9 signing keys, truste
 
 ## Adding Keys
 
-Click **Add key** and paste an Ed25519 public key into **Public key**, either as a PEM public key or as an armored GPG public-key export. A PEM key also asks for a **Label**; a GPG key is labeled with its GPG identity name. Each signing key in a GPG export gets its own row. A new key is trusted for packages only. Adding a key that is already present keeps its label and trust and merges any new GPG identities.
+Click **Add key** and paste a public key into **Public key**: an Ed25519 or P-256 (passkey) PEM public key, or an armored GPG public-key export of an Ed25519 key. A PEM key also asks for a **Label**; a GPG key is labeled with its GPG identity name. Each signing key in a GPG export gets its own row. A new key is trusted for packages only. Adding a key that is already present keeps its label and trust and merges any new GPG identities.
 
 GPG imports retain the complete original public export, including user IDs, subkeys, expiry, and revocation information. Signing trust uses Ed25519 primary keys and Ed25519 signing subkeys; encryption keys and keys revoked in the pasted export are excluded. Revocation signatures are verified during import. Trust selections govern imported keys independently of GPG certificate lifetimes. Exports without a supported signing key are rejected.
 

@@ -52,6 +52,13 @@ impl KeyStreamInfo {
         .concat();
         let signature = Zeroizing::new(match signer.sign_message(&message).await? {
             AnySignature::Ed25519(s) | AnySignature::Ed25519ph(s) => s.to_bytes(),
+            // A keystream needs a deterministic signature.
+            AnySignature::WebAuthn(_) => {
+                return Err(Error::new(
+                    eyre!("{}", t!("sign.unknown-signature-algorithm")),
+                    ErrorKind::InvalidSignature,
+                ));
+            }
         });
         let mut okm = Zeroizing::new([0u8; 48]);
         Hkdf::<Sha256>::new(None, &*signature)

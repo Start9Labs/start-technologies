@@ -5,6 +5,7 @@ import { decodeFirst, encode } from '../auth/cbor'
 import type { BinaryRequestProof } from '../osBindings/session'
 import {
   ed25519PublicKeyDer64,
+  verifyingKeyDer64,
   normalizeDer64,
   parseEd25519PublicKey,
   signRequest,
@@ -87,6 +88,37 @@ test('public-key decoding rejects off-curve points but retains backend ZIP-215 e
     expect(parseEd25519PublicKey(ed25519PublicKeyDer64(key))).toEqual(key)
   }
   expect(parseEd25519PublicKey(pem)).toEqual(parseEd25519PublicKey(der64))
+})
+
+test('generic verifying keys canonicalize P-256 points without broadening server identities', () => {
+  const fixture = JSON.parse(
+    readFileSync(
+      resolve(
+        __dirname,
+        '../../../../crates/start-core/testdata/p256-public-key.json',
+      ),
+      'utf8',
+    ),
+  )
+  const uncompressed = Buffer.from(fixture.uncompressedDerHex, 'hex')
+  const canonical = uncompressed.toString('base64')
+  for (const hex of [fixture.uncompressedDerHex, fixture.compressedDerHex]) {
+    const der = Buffer.from(hex, 'hex').toString('base64')
+    expect(verifyingKeyDer64(der)).toBe(canonical)
+    expect(
+      verifyingKeyDer64(
+        `-----BEGIN PUBLIC KEY-----\n${der}\n-----END PUBLIC KEY-----\n`,
+      ),
+    ).toBe(canonical)
+    expect(() => parseEd25519PublicKey(der)).toThrow()
+  }
+  const offCurve = Buffer.from(uncompressed)
+  offCurve.fill(0, offCurve.length - 64)
+  expect(() => verifyingKeyDer64(offCurve.toString('base64'))).toThrow()
+  const unknownCurve = Buffer.from(uncompressed)
+  unknownCurve[22] ^= 1
+  expect(() => verifyingKeyDer64(unknownCurve.toString('base64'))).toThrow()
+  expect(verifyingKeyDer64(pem)).toBe(der64)
 })
 
 test('HTTP signature headers retain their base64url envelope', async () => {

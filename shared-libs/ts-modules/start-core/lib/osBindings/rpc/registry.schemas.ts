@@ -797,7 +797,8 @@ export const AddSignerParams: z.ZodObject<{
   name: z.ZodString
   contact: z.ZodArray<typeof ContactInfo>
   /**
-   * Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+   * Ed25519 or P-256 public keys in PEM or canonical DER Base64, or Ed25519 keys in armored
+   * OpenPGP format.
    */
   keys: z.ZodArray<z.ZodString>
   /**
@@ -811,11 +812,12 @@ export const AddSignerParams: z.ZodObject<{
   name: z.string(),
   contact: z.array(ContactInfo),
   /**
-   * Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+   * Ed25519 or P-256 public keys in PEM or canonical DER Base64, or Ed25519 keys in armored
+   * OpenPGP format.
    */
   keys: z.array(z.string()).meta({
     description:
-      'Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.',
+      'Ed25519 or P-256 public keys in PEM or canonical DER Base64, or Ed25519 keys in armored\nOpenPGP format.',
   }),
   /**
    * Retained certificates; `keys` determines the selected signing keys.
@@ -1465,6 +1467,10 @@ export const SubscribeIndexParams: z.ZodIntersection<
       z.ZodNullable<z.ZodString>
     >
     /**
+     * Requests P-256 keys and WebAuthn signatures in a versioned view.
+     */
+    passkeySignatures: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+    /**
      * Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.
      */
     language: z.ZodCodec<
@@ -1486,6 +1492,13 @@ export const SubscribeIndexParams: z.ZodIntersection<
       ).meta({
         description:
           'Client StartOS version. Omission preserves the canonical index format.',
+      }),
+      /**
+       * Requests P-256 keys and WebAuthn signatures in a versioned view.
+       */
+      passkeySignatures: wire(z.boolean().optional(), z.boolean()).meta({
+        description:
+          'Requests P-256 keys and WebAuthn signatures in a versioned view.',
       }),
       /**
        * Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.

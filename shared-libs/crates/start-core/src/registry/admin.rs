@@ -238,7 +238,8 @@ pub fn display_package_signers<T>(
 pub struct AddSignerParams {
     pub name: String,
     pub contact: Vec<ContactInfo>,
-    /// Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+    /// Ed25519 or P-256 public keys in PEM or canonical DER Base64, or Ed25519 keys in armored
+    /// OpenPGP format.
     pub keys: Vec<String>,
     /// Retained certificates; `keys` determines the selected signing keys.
     #[serde(default)]

@@ -98,8 +98,6 @@ pub async fn init(ctx: CliContext) -> Result<(), Error> {
     Ok(())
 }
 
-pub async fn pubkey(ctx: CliContext) -> Result<Pem<ed25519_dalek::VerifyingKey>, Error> {
-    match ctx.id_key()?.verifying_key().await? {
-        crate::sign::AnyVerifyingKey::Ed25519(k) => Ok(Pem(k)),
-    }
+pub async fn pubkey(ctx: CliContext) -> Result<Pem<crate::sign::AnyVerifyingKey>, Error> {
+    Ok(Pem(ctx.id_key()?.verifying_key().await?))
 }

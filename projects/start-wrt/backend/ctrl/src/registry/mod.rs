@@ -3,7 +3,7 @@ pub use startos::registry::{asset, signer};
 pub mod device_info;
 pub mod os;
 
-use http::HeaderValue;
+use http::{HeaderMap, HeaderValue};
 use reqwest::Client;
 use rpc_toolkit::yajrc::{GenericRpcMethod, Id, RpcRequest};
 use serde_json::Value;
@@ -37,8 +37,11 @@ pub async fn call_registry_rpc(
         .push("rpc")
         .push("v0");
 
+    let mut headers = HeaderMap::new();
+    startos::registry::device_info::advertise_signature_capabilities(&mut headers);
     let mut req = client
         .post(url.clone())
+        .headers(headers)
         .header(http::header::CONTENT_TYPE, "application/json")
         .header(http::header::ACCEPT, "application/json")
         .header(http::header::CONTENT_LENGTH, body.len());

@@ -105,12 +105,7 @@ pub trait LoginContext: SignatureAuthorizationContext {
         db: &Model<Self::Database>,
         key: &InternedString,
     ) -> Result<bool, Error> {
-        Ok(self
-            .ephemeral_auth_keys()
-            .is_some_and(|keys| keys.peek(|keys| keys.0.contains_key(&**key)))
-            || Self::access_auth_keys(&mut db.clone())
-                .as_idx(key)
-                .is_some())
+        Ok(session_key_is_enrolled(self, db, key))
     }
     /// Current bearer membership in the context's authoritative token store.
     fn auth_token_is_enrolled(&self, db: &Model<Self::Database>, token: &InternedString) -> bool {
@@ -142,6 +137,17 @@ pub trait LoginContext: SignatureAuthorizationContext {
     ) -> impl Future<Output = ()> + Send {
         async {}
     }
+}
+
+/// Whether the key holds a persisted or ephemeral login session.
+fn session_key_is_enrolled<C: LoginContext + ?Sized>(
+    ctx: &C,
+    db: &Model<C::Database>,
+    key: &InternedString,
+) -> bool {
+    ctx.ephemeral_auth_keys()
+        .is_some_and(|keys| keys.peek(|keys| keys.0.contains_key(&**key)))
+        || C::access_auth_keys(&mut db.clone()).as_idx(key).is_some()
 }
 
 /// Where a login came from.
@@ -195,6 +201,14 @@ pub fn revoke_tokens<C: LoginContext>(
 impl LoginContext for RpcContext {
     fn access_auth_keys(db: &mut Model<Self::Database>) -> &mut Model<AuthKeys> {
         db.as_private_mut().as_sessions_mut().as_pubkeys_mut()
+    }
+    /// Registered passkeys authorize without a session and survive logout and idle expiry.
+    fn auth_key_is_enrolled(
+        &self,
+        db: &Model<Self::Database>,
+        key: &InternedString,
+    ) -> Result<bool, Error> {
+        Ok(passkey::is_registered(db, key) || session_key_is_enrolled(self, db, key))
     }
     fn access_tokens(db: &mut Model<Self::Database>) -> Option<&mut Model<TokenSessions>> {
         Some(db.as_private_mut().as_sessions_mut().as_tokens_mut())
@@ -314,6 +328,7 @@ impl std::str::FromStr for PasswordType {
         })
     }
 }
+pub mod passkey;
 #[cfg(test)]
 mod password_tests;
 
@@ -820,7 +835,7 @@ pub async fn login_impl<C: LoginContext>(
 }
 
 /// Returns the verified database hash; holds no database lock while hashing.
-async fn verify_password<C: LoginContext>(
+pub(crate) async fn verify_password<C: LoginContext>(
     ctx: &C,
     password: &str,
 ) -> Result<Option<String>, Error> {
@@ -835,7 +850,7 @@ async fn verify_password<C: LoginContext>(
 }
 
 /// Enrollment rejects a replaced database password before inserting persistent or ephemeral keys.
-fn check_verified_password<C: LoginContext>(
+pub(crate) fn check_verified_password<C: LoginContext>(
     db: &Model<C::Database>,
     verified_hash: &Option<String>,
 ) -> Result<(), Error> {
@@ -926,8 +941,8 @@ pub async fn logout<C: LoginContext>(
 #[derive(Debug, Clone, Default, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
-    /// A friendly name for the key, if one was assigned at enrollment (e.g.
-    /// tunnel device keys). UI-enrolled keys are unnamed.
+    /// A friendly name assigned at enrollment: a tunnel device's name, or the
+    /// name of the passkey that enrolled the key. Password logins are unnamed.
     #[serde(default)]
     pub name: Option<InternedString>,
     #[serde(default)]
