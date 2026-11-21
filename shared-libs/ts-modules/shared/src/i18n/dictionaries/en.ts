@@ -1015,11 +1015,11 @@ export const ENGLISH: Record<string, number> = {
   'Create': 1219, // as in, create a backup
   'Restore': 1220, // as in, restore from a backup
   'Go to Backup Targets': 1221,
-  'A backup is currently running. Interrupting it now can corrupt the backup being written.': 1309,
-  'Wait for backup to complete': 1310,
-  'Shut down now': 1311,
-  'A backup is running. Your server will restart when it finishes.': 1307,
-  'A backup is running. Your server will shut down when it finishes.': 1308,
+  'A backup is currently running. Interrupting it now can corrupt the backup being written.': 1313,
+  'Wait for backup to complete': 1314,
+  'Shut down now': 1315,
+  'A backup is running. Your server will restart when it finishes.': 1311,
+  'A backup is running. Your server will shut down when it finishes.': 1312,
   'UPS Monitor': 1222,
   'NUT server': 1223,
   'Shut down safely when a UPS battery is low': 1224,
