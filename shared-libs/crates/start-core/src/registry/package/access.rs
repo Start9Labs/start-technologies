@@ -1,17 +1,21 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use clap::{ArgAction, Parser};
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::PackageId;
 use crate::context::CliContext;
 use crate::prelude::*;
 use crate::registry::admin::display_signers;
 use crate::registry::context::RegistryContext;
+use crate::registry::package::promote::{call_registry, resolve_registry_url};
 use crate::registry::signer::SignerInfo;
 use crate::registry::upstream::WRITES_INDEX;
 use crate::rpc_continuations::Guid;
+use crate::sign::AnyVerifyingKey;
+use crate::sign::gpg::parse_public_keys;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 
 pub fn access_api<C: Context>() -> ParentHandler<C> {
@@ -53,6 +57,13 @@ pub fn access_api<C: Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_about("about.remove-package-reader")
                 .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "restrict",
+            from_fn_async(cli_restrict_package)
+                .no_ts()
+                .no_display()
+                .with_about("about.restrict-package"),
         )
 }
 
@@ -224,4 +235,90 @@ pub async fn remove_package_reader(
         })
         .await
         .result
+}
+
+#[derive(Debug, Deserialize, Serialize, Parser)]
+#[group(skip)]
+#[command(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
+pub struct CliRestrictPackageParams {
+    #[arg(help = "help.arg.package-id")]
+    pub id: PackageId,
+    #[arg(help = "help.arg.reader-keys", allow_hyphen_values = true)]
+    pub readers: Vec<String>,
+}
+
+pub async fn cli_restrict_package(
+    ctx: CliContext,
+    CliRestrictPackageParams { id, readers }: CliRestrictPackageParams,
+) -> Result<(), Error> {
+    let url = resolve_registry_url(None, &ctx)?;
+    restrict_package(&ctx, url, &id, &parse_public_keys(&readers)?.keys).await
+}
+
+pub(crate) async fn list_registry_signers(
+    ctx: &CliContext,
+    url: Url,
+) -> Result<BTreeMap<Guid, SignerInfo>, Error> {
+    from_value(call_registry(ctx, url, "admin.signer.list", imbl_value::json!({})).await?)
+}
+
+/// Makes the package private, readable by exactly the registered signers holding the given keys.
+///
+/// Creates the package entry when absent. An unregistered key fails before any change.
+pub(crate) async fn restrict_package(
+    ctx: &CliContext,
+    url: Url,
+    id: &PackageId,
+    reader_keys: &BTreeSet<AnyVerifyingKey>,
+) -> Result<(), Error> {
+    let signers = list_registry_signers(ctx, url.clone()).await?;
+    let mut readers = BTreeSet::new();
+    for key in reader_keys {
+        let Some((signer, _)) = signers.iter().find(|(_, info)| info.keys.contains(key)) else {
+            return Err(Error::new(
+                eyre!(
+                    "{}",
+                    t!("registry.package.access.unregistered-reader", key = key)
+                ),
+                ErrorKind::NotFound,
+            ));
+        };
+        readers.insert(signer.clone());
+    }
+    call_registry(
+        ctx,
+        url.clone(),
+        "package.access.set-private",
+        imbl_value::json!({ "id": id, "private": true }),
+    )
+    .await?;
+    let current: PackageAccess = from_value(
+        call_registry(
+            ctx,
+            url.clone(),
+            "package.access.get",
+            imbl_value::json!({ "id": id }),
+        )
+        .await?,
+    )?;
+    for signer in readers.iter().filter(|s| !current.readers.contains_key(*s)) {
+        call_registry(
+            ctx,
+            url.clone(),
+            "package.access.add-reader",
+            imbl_value::json!({ "id": id, "signer": signer }),
+        )
+        .await?;
+    }
+    for signer in current.readers.keys().filter(|s| !readers.contains(*s)) {
+        call_registry(
+            ctx,
+            url.clone(),
+            "package.access.remove-reader",
+            imbl_value::json!({ "id": id, "signer": signer }),
+        )
+        .await?;
+    }
+    Ok(())
 }

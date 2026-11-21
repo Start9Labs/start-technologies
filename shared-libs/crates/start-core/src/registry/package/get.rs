@@ -99,6 +99,8 @@ rpc_toolkit::ts_export!(GetPackageParams, namespaces = [""]);
 #[model = "Model<Self>"]
 pub struct GetPackageResponse {
     pub categories: BTreeSet<InternedString>,
+    #[serde(default)]
+    pub private: bool,
     pub best: BTreeMap<VersionString, PackageVersionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub other_versions: Option<BTreeMap<VersionString, PackageInfoShort>>,
@@ -146,6 +148,8 @@ impl GetPackageResponse {
 #[model = "Model<Self>"]
 pub struct GetPackageResponseFull {
     pub categories: BTreeSet<InternedString>,
+    #[serde(default)]
+    pub private: bool,
     pub best: BTreeMap<VersionString, PackageVersionInfo>,
     pub other_versions: BTreeMap<VersionString, PackageVersionInfo>,
 }
@@ -325,6 +329,14 @@ pub(crate) fn select_packages(
             .transpose()
             .map(Option::unwrap_or_default)
     };
+    let private_for = |id: &PackageId| -> Result<bool, Error> {
+        index
+            .as_packages()
+            .as_idx(id)
+            .map(|p| p.as_access().as_private().de())
+            .transpose()
+            .map(Option::unwrap_or_default)
+    };
     let mut best: BTreeMap<PackageId, BTreeMap<VersionString, Model<PackageVersionInfo>>> =
         Default::default();
     let mut other: BTreeMap<PackageId, BTreeMap<VersionString, Model<PackageVersionInfo>>> =
@@ -355,6 +367,7 @@ pub(crate) fn select_packages(
     }
     if let Some(id) = &params.id {
         let categories = categories_for(id)?;
+        let private = private_for(id)?;
         let best: BTreeMap<VersionString, PackageVersionInfo> = best
             .remove(id)
             .unwrap_or_default()
@@ -365,11 +378,13 @@ pub(crate) fn select_packages(
         match params.other_versions.unwrap_or_default() {
             PackageDetailLevel::None => to_value(&GetPackageResult::Package(GetPackageResponse {
                 categories,
+                private,
                 best,
                 other_versions: None,
             })),
             PackageDetailLevel::Short => to_value(&GetPackageResult::Package(GetPackageResponse {
                 categories,
+                private,
                 best,
                 other_versions: Some(
                     other
@@ -381,6 +396,7 @@ pub(crate) fn select_packages(
             PackageDetailLevel::Full => {
                 to_value(&GetPackageResult::PackageFull(GetPackageResponseFull {
                     categories,
+                    private,
                     best,
                     other_versions: other
                         .into_iter()
@@ -395,10 +411,12 @@ pub(crate) fn select_packages(
                 best.into_iter()
                     .map(|(id, best)| {
                         let categories = categories_for(&id)?;
+                        let private = private_for(&id)?;
                         Ok::<_, Error>((
                             id,
                             GetPackageResponse {
                                 categories,
+                                private,
                                 best: best
                                     .into_iter()
                                     .map(|(k, i)| Ok::<_, Error>((k, i.de()?)))
@@ -413,11 +431,13 @@ pub(crate) fn select_packages(
                 best.into_iter()
                     .map(|(id, best)| {
                         let categories = categories_for(&id)?;
+                        let private = private_for(&id)?;
                         let other = other.remove(&id).unwrap_or_default();
                         Ok::<_, Error>((
                             id,
                             GetPackageResponse {
                                 categories,
+                                private,
                                 best: best
                                     .into_iter()
                                     .map(|(k, i)| Ok::<_, Error>((k, i.de()?)))
@@ -437,11 +457,13 @@ pub(crate) fn select_packages(
                 best.into_iter()
                     .map(|(id, best)| {
                         let categories = categories_for(&id)?;
+                        let private = private_for(&id)?;
                         let other = other.remove(&id).unwrap_or_default();
                         Ok::<_, Error>((
                             id,
                             GetPackageResponseFull {
                                 categories,
+                                private,
                                 best: best
                                     .into_iter()
                                     .map(|(k, i)| Ok::<_, Error>((k, i.de()?)))
@@ -913,9 +935,13 @@ fn check_matching_info_short() {
 
 #[test]
 fn rpc_result_surrogate_preserves_all_package_selection_shapes() {
-    let minimal = serde_json::json!({ "categories": ["tools"], "best": {} });
-    let with_versions =
-        serde_json::json!({ "categories": ["tools"], "best": {}, "otherVersions": {} });
+    let minimal = serde_json::json!({ "categories": ["tools"], "private": false, "best": {} });
+    let with_versions = serde_json::json!({
+        "categories": ["tools"],
+        "private": true,
+        "best": {},
+        "otherVersions": {},
+    });
     for fixture in [minimal, with_versions.clone()] {
         let package = serde_json::from_value::<GetPackageResponse>(fixture.clone()).unwrap();
         assert_eq!(

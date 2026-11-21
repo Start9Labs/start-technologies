@@ -272,6 +272,142 @@ async fn registry_cli_filters_signatures_on_upload_mirror_and_promotion() {
 }
 
 #[tokio::test]
+async fn restriction_replaces_readers_and_promotion_carries_it() {
+    use crate::context::config::{ClientConfig, Profiles};
+    use crate::developer::write_signing_key;
+    use crate::registry::package::access::{CliRestrictPackageParams, cli_restrict_package};
+    use crate::registry::package::add::cli_add_package_impl;
+    use crate::registry::package::promote::{CliPromoteParams, cli_promote};
+    use crate::registry::signer::ContactInfo;
+
+    let key =
+        |seed: u8| AnyVerifyingKey::Ed25519(SigningKey::from_bytes(&[seed; 32]).verifying_key());
+    let uploader_key = SigningKey::from_bytes(&[13; 32]);
+    let uploader = AnyVerifyingKey::Ed25519(uploader_key.verifying_key());
+    let reader = SignerInfo {
+        name: "Reader".into(),
+        contact: vec![ContactInfo::Email("reader@example.com".into())],
+        keys: [key(14)].into(),
+        gpg_exports: Default::default(),
+    };
+    let stale = SignerInfo {
+        name: "Stale".into(),
+        contact: vec![],
+        keys: [key(15)].into(),
+        gpg_exports: Default::default(),
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let source = context(temp.path().join("source"), uploader.clone()).await;
+    let target = context(temp.path().join("target"), uploader.clone()).await;
+    for (registry, signer) in [(&source, &reader), (&source, &stale), (&target, &stale)] {
+        registry
+            .db
+            .mutate(|db| db.as_index_mut().as_signers_mut().add_signer(signer))
+            .await
+            .result
+            .unwrap();
+    }
+    let (host, _, host_task) = server([("base".into(), fixture("base.s9pk"))].into()).await;
+    let (source_url, source_task) = registry_server(source.clone()).await;
+    let (target_url, target_task) = registry_server(target.clone()).await;
+    let key_path = temp.path().join("identity.pem");
+    write_signing_key(&uploader_key, &key_path).await.unwrap();
+    let cli = CliContext::init(ClientConfig {
+        id_key_path: Some(key_path),
+        registry: Some(Profiles(BTreeMap::from([
+            ("default".into(), source_url.to_string()),
+            ("destination".into(), target_url.to_string()),
+        ]))),
+        ..Default::default()
+    })
+    .unwrap();
+    let id: crate::PackageId = "trust-fixture".parse().unwrap();
+    let version: crate::util::VersionString = "1.0.0:0".parse().unwrap();
+    let restrict = |readers: &SignerInfo| {
+        cli_restrict_package(
+            cli.clone(),
+            CliRestrictPackageParams {
+                id: id.clone(),
+                readers: readers.keys.iter().map(ToString::to_string).collect(),
+            },
+        )
+    };
+    let access = |registry: &RegistryContext| {
+        let registry = registry.clone();
+        let id = id.clone();
+        async move {
+            let db = registry.db.peek().await;
+            let signers = db.as_index().as_signers().de().unwrap();
+            db.as_index()
+                .as_package()
+                .as_packages()
+                .as_idx(&id)
+                .map(|package| {
+                    let access = package.as_access().de().unwrap();
+                    let readers = access
+                        .readers
+                        .iter()
+                        .map(|signer| signers[signer].clone())
+                        .collect::<Vec<_>>();
+                    (access.private, readers)
+                })
+        }
+    };
+
+    let unregistered = SignerInfo {
+        keys: [key(16)].into(),
+        ..stale.clone()
+    };
+    assert_eq!(
+        restrict(&unregistered).await.unwrap_err().kind,
+        ErrorKind::NotFound
+    );
+    assert_eq!(access(&source).await, None);
+
+    restrict(&stale).await.unwrap();
+    restrict(&reader).await.unwrap();
+    assert_eq!(access(&source).await, Some((true, vec![reader.clone()])));
+
+    cli_add_package_impl(
+        cli.clone(),
+        local_package().await,
+        vec![host.join("base").unwrap()],
+        false,
+    )
+    .await
+    .unwrap();
+    cli_promote(
+        cli.clone(),
+        CliPromoteParams {
+            from: None,
+            to: Some("destination".into()),
+            id: id.clone(),
+            version: version.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(access(&target).await, Some((true, vec![reader.clone()])));
+    assert!(
+        target
+            .db
+            .peek()
+            .await
+            .as_index()
+            .as_package()
+            .as_packages()
+            .as_idx(&id)
+            .unwrap()
+            .as_versions()
+            .contains_key(&version)
+            .unwrap()
+    );
+    host_task.abort();
+    source_task.abort();
+    target_task.abort();
+}
+
+#[tokio::test]
 async fn registry_rejects_submitted_invalid_signatures_atomically_and_defaults_old_requests() {
     let uploader_key = SigningKey::from_bytes(&[12; 32]);
     let uploader = AnyVerifyingKey::Ed25519(uploader_key.verifying_key());

@@ -38,6 +38,10 @@ start-registry package access get <PACKAGE_ID>
 start-registry package access remove-reader <PACKAGE_ID> <SIGNER_ID>
 ```
 
+`start-cli registry package access restrict <PACKAGE_ID> <READER_KEY>...` makes a package private
+and replaces its readers with the registered signers holding those public keys.
+`start-cli registry package promote` carries a private package's readers to the destination.
+
 `set-private` creates a package entry when needed, allowing restriction before publication.
 Existing packages default to public. Readers authenticate through encrypted sessions or signed
 requests; revocations update active subscriptions. A subscriber using the public mirror must reconnect after receiving a private

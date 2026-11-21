@@ -3154,6 +3154,13 @@ registry.package.access.not-reader:
   fr_FR: "Le signataire %{signer} n'est pas un lecteur de %{id}"
   pl_PL: "Sygnatariusz %{signer} nie jest czytelnikiem %{id}"
 
+registry.package.access.unregistered-reader:
+  en_US: "No registered signer holds reader key %{key}"
+  de_DE: "Kein registrierter Unterzeichner besitzt den Leserschlüssel %{key}"
+  es_ES: "Ningún firmante registrado tiene la clave de lector %{key}"
+  fr_FR: "Aucun signataire enregistré ne détient la clé de lecteur %{key}"
+  pl_PL: "Żaden zarejestrowany sygnatariusz nie posiada klucza czytelnika %{key}"
+
 registry.package.access.private:
   en_US: "Private"
   de_DE: "Privat"
@@ -5134,6 +5141,13 @@ help.arg.package-private:
   es_ES: "Si solo los administradores, los firmantes del paquete y sus lectores pueden verlo"
   fr_FR: "Si seuls les administrateurs, les signataires du paquet et ses lecteurs peuvent le voir"
   pl_PL: "Czy tylko administratorzy, sygnatariusze pakietu i jego czytelnicy mogą go widzieć"
+
+help.arg.reader-keys:
+  en_US: "Public keys of the registered signers who may read the package, in PEM, DER Base64, or armored OpenPGP format"
+  de_DE: "Öffentliche Schlüssel der registrierten Unterzeichner, die das Paket lesen dürfen, im PEM-, DER-Base64- oder ASCII-armored-OpenPGP-Format"
+  es_ES: "Claves públicas de los firmantes registrados que pueden leer el paquete, en formato PEM, DER Base64 u OpenPGP blindado"
+  fr_FR: "Clés publiques des signataires enregistrés autorisés à lire le paquet, au format PEM, DER Base64 ou OpenPGP armuré"
+  pl_PL: "Klucze publiczne zarejestrowanych sygnatariuszy, którzy mogą czytać pakiet, w formacie PEM, DER Base64 lub opancerzonym OpenPGP"
 
 help.arg.package-url:
   en_US: "URL of the package"
@@ -8136,6 +8150,13 @@ about.set-package-private:
   es_ES: "Establecer si un paquete es privado"
   fr_FR: "Définir si un paquet est privé"
   pl_PL: "Ustaw, czy pakiet jest prywatny"
+
+about.restrict-package:
+  en_US: "Make a package private, readable by exactly the signers holding the given keys"
+  de_DE: "Ein Paket privat machen, lesbar genau für die Unterzeichner mit den angegebenen Schlüsseln"
+  es_ES: "Hacer privado un paquete, legible exactamente por los firmantes que tienen las claves indicadas"
+  fr_FR: "Rendre un paquet privé, lisible exactement par les signataires détenant les clés indiquées"
+  pl_PL: "Ustaw pakiet jako prywatny, czytelny dokładnie dla sygnatariuszy posiadających podane klucze"
 
 about.set-registry-icon:
   en_US: "Set the registry icon"

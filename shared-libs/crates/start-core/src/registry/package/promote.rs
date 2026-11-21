@@ -8,6 +8,8 @@ use crate::PackageId;
 use crate::context::CliContext;
 use crate::context::config::resolve_profile;
 use crate::prelude::*;
+use crate::registry::admin::AddSignerParams;
+use crate::registry::package::access::{PackageAccess, list_registry_signers, restrict_package};
 use crate::registry::package::get::{GetPackageResponseFull, PackageDetailLevel};
 use crate::s9pk::v2::SIG_CONTEXT;
 use crate::util::VersionString;
@@ -84,7 +86,7 @@ pub async fn cli_promote(
 
     let res: Value = call_registry(
         &ctx,
-        from_url,
+        from_url.clone(),
         "package.get",
         imbl_value::json!({
             "id": &id,
@@ -114,6 +116,10 @@ pub async fn cli_promote(
             )
         })?;
 
+    if response.private {
+        carry_private_access(&ctx, from_url, to_url.clone(), &id).await?;
+    }
+
     for (_, asset) in &version_info.s9pks {
         let commitment = &asset.commitment;
         let signature = ctx
@@ -136,6 +142,50 @@ pub async fn cli_promote(
     }
 
     Ok(())
+}
+
+/// Restricts the destination package to the source package's readers, registering missing reader signers.
+async fn carry_private_access(
+    ctx: &CliContext,
+    from: Url,
+    to: Url,
+    id: &PackageId,
+) -> Result<(), Error> {
+    let access: PackageAccess = from_value(
+        call_registry(
+            ctx,
+            from,
+            "package.access.get",
+            imbl_value::json!({ "id": id }),
+        )
+        .await?,
+    )?;
+    let registered = list_registry_signers(ctx, to.clone()).await?;
+    for reader in access.readers.values() {
+        if registered
+            .values()
+            .all(|signer| signer.keys.is_disjoint(&reader.keys))
+        {
+            call_registry(
+                ctx,
+                to.clone(),
+                "admin.signer.add",
+                to_value(&AddSignerParams {
+                    name: reader.name.clone(),
+                    contact: reader.contact.clone(),
+                    keys: reader.keys.iter().map(ToString::to_string).collect(),
+                    gpg_exports: reader.gpg_exports.clone(),
+                })?,
+            )
+            .await?;
+        }
+    }
+    let reader_keys = access
+        .readers
+        .into_values()
+        .flat_map(|reader| reader.keys)
+        .collect();
+    restrict_package(ctx, to, id, &reader_keys).await
 }
 
 #[cfg(test)]

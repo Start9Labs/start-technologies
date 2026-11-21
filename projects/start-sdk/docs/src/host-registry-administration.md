@@ -78,6 +78,18 @@ start-cli registry package promote myservice 1.2.0:0 --from alpha --to productio
 
 At least one endpoint is required; an omitted endpoint uses the configured registry selected by `-r` or the `default` profile. `start-cli registry os promote <VERSION>` accepts the same endpoint options for OS versions.
 
+Promoting a private package keeps it private on the destination with the same readers, registering any reader signer the destination lacks. This requires admin rights on both registries.
+
+### Private packages
+
+An admin can hide a package from everyone except admins, its authorized publishers, and chosen readers:
+
+```sh
+start-cli registry package access restrict <PACKAGE_ID> <READER_KEY>...
+```
+
+Each reader key is the public key of a signer registered on the registry, in PEM or DER Base64. The command makes the package private and replaces its readers with exactly those signers. It creates the package entry when needed, so run it before the first publish. `start-cli registry package access get <PACKAGE_ID>` shows the current readers.
+
 ### Removing a package
 
 Remove a specific version:

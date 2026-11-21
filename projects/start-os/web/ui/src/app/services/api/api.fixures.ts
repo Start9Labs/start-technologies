@@ -651,6 +651,7 @@ export namespace Mock {
           },
         },
         categories: ['bitcoin'],
+        private: false,
         otherVersions: {
           '27.0.0:1.0.0': {
             releaseNotes: 'Even better support for Bitcoin and wallets!',
@@ -737,6 +738,7 @@ export namespace Mock {
           },
         },
         categories: ['bitcoin'],
+        private: false,
         otherVersions: {
           '27.0.0:1.0.0': {
             releaseNotes: 'Even better support for Bitcoin and wallets!',
@@ -790,6 +792,7 @@ export namespace Mock {
           },
         },
         categories: ['bitcoin', 'finance'],
+        private: false,
         otherVersions: {
           '0.18.0:0.0.1': {
             releaseNotes: 'Upstream release and minor fixes.',
@@ -841,6 +844,7 @@ export namespace Mock {
           },
         },
         categories: ['bitcoin', 'finance'],
+        private: false,
         otherVersions: {
           '0.18.0:0.0.1': {
             releaseNotes: 'Upstream release and minor fixes.',
@@ -893,6 +897,7 @@ export namespace Mock {
           },
         },
         categories: ['bitcoin', 'networking'],
+        private: false,
         otherVersions: {
           '0.4.0:0': {
             releaseNotes: 'Major release with breaking changes.',
@@ -1055,6 +1060,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
         },
       },
       categories: ['bitcoin'],
+      private: false,
       otherVersions: {
         '26.1.0:0.1.0': {
           releaseNotes: 'Even better support for Bitcoin and wallets!',
@@ -1106,6 +1112,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
         },
       },
       categories: ['bitcoin', 'finance'],
+      private: false,
       otherVersions: {
         '0.17.5:0': {
           releaseNotes: 'Upstream release to 0.17.5',
@@ -1200,6 +1207,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
         },
       },
       categories: ['bitcoin', 'networking'],
+      private: false,
       otherVersions: {
         '0.3.2.7:0': {
           releaseNotes: 'Upstream release and minor fixes.',

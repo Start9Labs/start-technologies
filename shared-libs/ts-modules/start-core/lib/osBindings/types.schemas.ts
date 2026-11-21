@@ -7139,12 +7139,14 @@ export const DnsStatus: z.ZodObject<{
 })
 export const GetPackageResponse: z.ZodObject<{
   categories: z.ZodArray<z.ZodString>
+  private: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   best: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
   otherVersions: z.ZodOptional<
     z.ZodNullable<z.ZodRecord<z.ZodString, typeof PackageInfoShort>>
   >
 }> = /* @__PURE__ */ object({
   categories: z.array(z.string()),
+  private: wire(z.boolean().optional(), z.boolean()),
   best: z.record(z.string(), PackageVersionInfo),
   otherVersions: z.record(z.string(), PackageInfoShort).nullable().optional(),
 }).meta({
@@ -7152,10 +7154,12 @@ export const GetPackageResponse: z.ZodObject<{
 })
 export const GetPackageResponseFull: z.ZodObject<{
   categories: z.ZodArray<z.ZodString>
+  private: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
   best: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
   otherVersions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
 }> = /* @__PURE__ */ object({
   categories: z.array(z.string()),
+  private: wire(z.boolean().optional(), z.boolean()),
   best: z.record(z.string(), PackageVersionInfo),
   otherVersions: z.record(z.string(), PackageVersionInfo),
 }).meta({
