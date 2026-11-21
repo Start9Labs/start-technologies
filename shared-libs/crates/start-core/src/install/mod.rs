@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,7 +23,8 @@ use crate::progress::{
     FullProgress, FullProgressTracker, forward_progress, progress_until_complete, with_cli_progress,
 };
 use crate::registry::context::RegistryContext;
-use crate::registry::package::get::GetPackageResponse;
+use crate::registry::device_info::DeviceInfo;
+use crate::registry::package::get::{GetPackageParams, GetPackageResponse};
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::s9pk::manifest::PackageId;
 use crate::s9pk::v2::SIG_CONTEXT;
@@ -140,8 +142,25 @@ pub async fn install(
         accept_signers,
     }: InstallParams,
 ) -> Result<(), Error> {
-    let asset = crate::registry::package::get::remote_asset(&ctx, &registry, &id, &version)
-        .await?
+    let device = DeviceInfo::load(&ctx).await?;
+    let package: GetPackageResponse = from_value(crate::registry::sync::synced_packages(
+        &ctx.db.peek().await,
+        &registry,
+        &GetPackageParams {
+            id: Some(id.clone()),
+            target_version: Some(VersionRange::exactly(version.deref().clone())),
+            source_version: None,
+            device_info: Some(device),
+            other_versions: None,
+            all_revisions: false,
+            reader: Default::default(),
+        },
+    )?)?;
+
+    let asset = package
+        .best
+        .get(&version)
+        .and_then(crate::registry::package::get::first_asset)
         .ok_or_else(|| {
             Error::new(
                 eyre!(

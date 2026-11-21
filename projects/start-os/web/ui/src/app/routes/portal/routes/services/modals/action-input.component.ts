@@ -203,7 +203,7 @@ export class ActionInputModal {
             : null,
       })
     } catch (e) {
-      this.error.set(String(getErrorMessage(e)))
+      this.error.set(getErrorMessage(e))
     }
   }
 

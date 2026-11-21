@@ -1,13 +1,13 @@
 use std::path::{Path, PathBuf};
 
+use super::ContentCommitment;
 use super::stored_file::StoredFile;
-use super::{ContentCommitment, METADATA_TIMEOUT};
 use crate::context::RpcContext;
 use crate::db::model::package::{ManifestPreference, PackageState};
 use crate::prelude::*;
 use crate::registry::asset::RegistryAsset;
-use crate::registry::context::{RegistryContext, RegistryUrlParams};
-use crate::registry::os::index::OsIndex;
+use crate::registry::device_info::DeviceInfo;
+use crate::registry::os::index::{OsIndex, OsVersionInfoMap};
 use crate::s9pk::S9pk;
 use crate::sign::commitment::blake3::Blake3Commitment;
 use crate::sign::commitment::{Commitment, SignedCommitment};
@@ -16,13 +16,8 @@ pub(crate) async fn register_existing(ctx: &RpcContext) -> Result<(), Error> {
     if !ctx.torrents.downloads_enabled() {
         return Ok(());
     }
-    let (packages, os_registry) = {
-        let peek = ctx.db.peek().await;
-        (
-            peek.as_public().as_package_data().de()?,
-            peek.as_public().as_server_info().as_os_registry().de()?,
-        )
-    };
+    let device = DeviceInfo::load(ctx).await?;
+    let packages = ctx.db.peek().await.as_public().as_package_data().de()?;
     for (id, entry) in packages.0 {
         if !matches!(
             entry.state_info,
@@ -46,17 +41,13 @@ pub(crate) async fn register_existing(ctx: &RpcContext) -> Result<(), Error> {
                 return Ok::<_, Error>(());
             }
             let local = package.as_archive().commitment().await?;
-            let asset = tokio::time::timeout(
-                METADATA_TIMEOUT,
-                crate::registry::package::get::advertised_asset(
-                    ctx,
-                    registry,
-                    &id,
-                    &manifest.version,
-                ),
-            )
-            .await
-            .with_kind(ErrorKind::Timeout)??;
+            let asset = crate::registry::package::get::advertised_asset(
+                &ctx.db.peek().await,
+                registry,
+                &id,
+                &manifest.version,
+                &device,
+            )?;
             if let Some(asset) = asset {
                 if asset.commitment == local {
                     register_advertisement(ctx, &entry.s9pk, &asset, crate::s9pk::v2::SIG_CONTEXT)
@@ -70,9 +61,7 @@ pub(crate) async fn register_existing(ctx: &RpcContext) -> Result<(), Error> {
             tracing::warn!(%error, package = %id, "Cannot discover stored S9PK torrent metadata");
         }
     }
-    if ctx.torrents.for_source(&os_registry).is_some() {
-        discover_images(ctx, os_registry).await?;
-    }
+    discover_images(ctx).await?;
     Ok(())
 }
 
@@ -112,7 +101,17 @@ fn image_for_name<'a>(
     advertised_images(index).find(|asset| crate::update::image_checksum(&asset.commitment) == name)
 }
 
-async fn discover_images(ctx: &RpcContext, registry: url::Url) -> Result<(), Error> {
+async fn discover_images(ctx: &RpcContext) -> Result<(), Error> {
+    let index = {
+        let peek = ctx.db.peek().await;
+        let registry = peek.as_public().as_server_info().as_os_registry().de()?;
+        if ctx.torrents.for_source(&registry).is_none() {
+            return Ok(());
+        }
+        OsIndex {
+            versions: OsVersionInfoMap(crate::registry::sync::synced_os_versions(&peek)?),
+        }
+    };
     let mut entries = match tokio::fs::read_dir(crate::update::IMAGES_DIRECTORY).await {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -132,19 +131,6 @@ async fn discover_images(ctx: &RpcContext, registry: url::Url) -> Result<(), Err
     if images.is_empty() {
         return Ok(());
     }
-    let index: OsIndex = from_value(
-        tokio::time::timeout(
-            METADATA_TIMEOUT,
-            ctx.call_remote_with::<RegistryContext, _>(
-                "os.index",
-                Default::default(),
-                imbl_value::json!({}),
-                RegistryUrlParams { registry },
-            ),
-        )
-        .await
-        .with_kind(ErrorKind::Timeout)??,
-    )?;
     for path in images {
         let discovered = async {
             let asset = match image_for_name(&index, &path) {

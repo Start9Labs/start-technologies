@@ -1,8 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use clap::{Parser, ValueEnum};
 use exver::{ExtendedVersion, VersionRange};
 use imbl_value::{InternedString, json};
@@ -13,10 +12,11 @@ use tracing::warn;
 
 use crate::PackageId;
 use crate::context::CliContext;
+use crate::db::model::DatabaseModel;
 use crate::prelude::*;
 use crate::progress::{FullProgressTracker, ProgressUnits};
 use crate::registry::asset::RegistryAsset;
-use crate::registry::context::{RegistryContext, RegistryUrlParams};
+use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::package::index::{PackageIndex, PackageVersionInfo, ReaderParams};
 use crate::s9pk::manifest::{HardwareRequirements, LocaleString};
@@ -102,30 +102,34 @@ rpc_toolkit::ts_export!(GetPackageParams, namespaces = [""]);
 #[model = "Model<Self>"]
 pub struct GetPackageResponse {
     pub categories: BTreeSet<InternedString>,
+    /// When this registry first published any version it still carries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_published_at: Option<DateTime<Utc>>,
     pub best: BTreeMap<VersionString, PackageVersionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub other_versions: Option<BTreeMap<VersionString, PackageInfoShort>>,
 }
 
-pub(crate) async fn remote_asset(
-    ctx: &impl rpc_toolkit::CallRemote<RegistryContext, RegistryUrlParams>,
+pub(crate) fn advertised_asset(
+    db: &DatabaseModel,
     registry: &reqwest::Url,
     id: &PackageId,
     version: &VersionString,
+    device: &DeviceInfo,
 ) -> Result<Option<RegistryAsset<MerkleArchiveCommitment>>, Error> {
-    let package: GetPackageResponse =
-        from_value(remote_package(ctx, registry, download_query(id, version)).await?)?;
-    Ok(package.best.get(version).and_then(first_asset))
-}
-
-pub(crate) async fn advertised_asset(
-    ctx: &impl rpc_toolkit::CallRemote<RegistryContext, RegistryUrlParams>,
-    registry: &reqwest::Url,
-    id: &PackageId,
-    version: &VersionString,
-) -> Result<Option<RegistryAsset<MerkleArchiveCommitment>>, Error> {
-    let package: GetPackageResponseFull =
-        from_value(remote_package(ctx, registry, advertisement_query(id)).await?)?;
+    let package: GetPackageResponseFull = from_value(crate::registry::sync::synced_packages(
+        db,
+        registry,
+        &GetPackageParams {
+            id: Some(id.clone()),
+            target_version: None,
+            source_version: None,
+            device_info: Some(device.clone()),
+            other_versions: Some(PackageDetailLevel::Full),
+            all_revisions: true,
+            reader: Default::default(),
+        },
+    )?)?;
     Ok(package
         .best
         .get(version)
@@ -133,55 +137,10 @@ pub(crate) async fn advertised_asset(
         .and_then(first_asset))
 }
 
-fn first_asset(info: &PackageVersionInfo) -> Option<RegistryAsset<MerkleArchiveCommitment>> {
+pub(crate) fn first_asset(
+    info: &PackageVersionInfo,
+) -> Option<RegistryAsset<MerkleArchiveCommitment>> {
     info.s9pks.first().map(|(_, asset)| asset.clone())
-}
-
-fn package_query(id: &PackageId) -> GetPackageParams {
-    GetPackageParams {
-        id: Some(id.clone()),
-        target_version: None,
-        source_version: None,
-        device_info: None,
-        other_versions: Some(PackageDetailLevel::None),
-        all_revisions: false,
-        reader: Default::default(),
-    }
-}
-
-fn download_query(id: &PackageId, version: &VersionString) -> GetPackageParams {
-    GetPackageParams {
-        target_version: Some(VersionRange::exactly(version.deref().clone())),
-        ..package_query(id)
-    }
-}
-
-// Targeted queries count as package requests in registry metrics.
-fn advertisement_query(id: &PackageId) -> GetPackageParams {
-    GetPackageParams {
-        other_versions: Some(PackageDetailLevel::Full),
-        all_revisions: true,
-        ..package_query(id)
-    }
-}
-
-async fn remote_package(
-    ctx: &impl rpc_toolkit::CallRemote<RegistryContext, RegistryUrlParams>,
-    registry: &reqwest::Url,
-    params: GetPackageParams,
-) -> Result<Value, Error> {
-    Ok(ctx
-        .call_remote(
-            "package.get",
-            [("get_device_info", Value::Bool(true))]
-                .into_iter()
-                .collect(),
-            to_value(&params)?,
-            RegistryUrlParams {
-                registry: registry.clone(),
-            },
-        )
-        .await?)
 }
 
 rpc_toolkit::reflect_ts!(GetPackageResponse);
@@ -226,6 +185,9 @@ impl GetPackageResponse {
 #[model = "Model<Self>"]
 pub struct GetPackageResponseFull {
     pub categories: BTreeSet<InternedString>,
+    /// When this registry first published any version it still carries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_published_at: Option<DateTime<Utc>>,
     pub best: BTreeMap<VersionString, PackageVersionInfo>,
     pub other_versions: BTreeMap<VersionString, PackageVersionInfo>,
 }
@@ -338,6 +300,16 @@ fn hide_superseded_revisions(
     best: Option<&BTreeMap<VersionString, Model<PackageVersionInfo>>>,
     other: &mut BTreeMap<VersionString, Model<PackageVersionInfo>>,
 ) -> Result<(), Error> {
+    let hidden = superseded_revisions(best, other)?;
+    other.retain(|v, _| !hidden.contains(v));
+    Ok(())
+}
+
+/// Older revisions whose upstream version and flavor a newer revision covers on all their hardware.
+fn superseded_revisions(
+    best: Option<&BTreeMap<VersionString, Model<PackageVersionInfo>>>,
+    other: &BTreeMap<VersionString, Model<PackageVersionInfo>>,
+) -> Result<BTreeSet<VersionString>, Error> {
     let group = |v: &VersionString| (v.flavor().map(str::to_owned), v.upstream().clone());
     let hardware = |info: &Model<PackageVersionInfo>| {
         from_value::<Vec<(HardwareRequirements, Value)>>(info.as_s9pks().clone().into())
@@ -359,8 +331,7 @@ fn hide_superseded_revisions(
         }
         seen.push(hw);
     }
-    other.retain(|v, _| !hidden.contains(v));
-    Ok(())
+    Ok(hidden)
 }
 
 pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Result<Value, Error> {
@@ -393,23 +364,15 @@ pub async fn get_package(ctx: RegistryContext, params: GetPackageParams) -> Resu
     Ok(result)
 }
 
-pub(crate) fn select_packages(
-    index: &Model<PackageIndex>,
-    params: &GetPackageParams,
-) -> Result<Value, Error> {
-    let categories_for = |id: &PackageId| -> Result<BTreeSet<InternedString>, Error> {
-        index
-            .as_packages()
-            .as_idx(id)
-            .map(|p| p.as_categories().de())
-            .transpose()
-            .map(Option::unwrap_or_default)
-    };
-    let mut best: BTreeMap<PackageId, BTreeMap<VersionString, Model<PackageVersionInfo>>> =
-        Default::default();
-    let mut other: BTreeMap<PackageId, BTreeMap<VersionString, Model<PackageVersionInfo>>> =
-        Default::default();
-    for (id, version, info) in get_matching_models(index, params)? {
+type Releases = BTreeMap<PackageId, BTreeMap<VersionString, Model<PackageVersionInfo>>>;
+
+/// Splits releases into each package's best per flavor and the rest.
+fn partition_best(
+    matching: Vec<(PackageId, ExtendedVersion, Model<PackageVersionInfo>)>,
+) -> (Releases, Releases) {
+    let mut best: Releases = Default::default();
+    let mut other: Releases = Default::default();
+    for (id, version, info) in matching {
         let package_best = best.entry(id.clone()).or_default();
         let package_other = other.entry(id.clone()).or_default();
         if package_best.keys().all(|k| !(**k > version)) {
@@ -428,6 +391,120 @@ pub(crate) fn select_packages(
             package_other.insert(version.into(), info);
         }
     }
+    (best, other)
+}
+
+fn categories(
+    index: &Model<PackageIndex>,
+    id: &PackageId,
+) -> Result<BTreeSet<InternedString>, Error> {
+    index
+        .as_packages()
+        .as_idx(id)
+        .map(|p| p.as_categories().de())
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
+fn first_published_at(
+    index: &Model<PackageIndex>,
+    id: &PackageId,
+) -> Result<Option<DateTime<Utc>>, Error> {
+    let Some(package) = index.as_packages().as_idx(id) else {
+        return Ok(None);
+    };
+    package
+        .as_versions()
+        .as_entries()?
+        .into_iter()
+        .map(|(_, info)| info.as_s9pks().de())
+        .flatten_ok()
+        .map_ok(|(_, asset)| asset.published_at)
+        .process_results(|times| times.min())
+}
+
+/// Every release of a package that a device can run, as StartOS lists it in its registry cache.
+#[derive(Debug, Deserialize, Serialize, VisitFields, HasModel)]
+#[serde(rename_all = "camelCase")]
+#[model = "Model<Self>"]
+pub struct PackageReleases {
+    pub categories: BTreeSet<InternedString>,
+    /// When this registry first published any version it still carries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_published_at: Option<DateTime<Utc>>,
+    pub versions: BTreeMap<VersionString, PackageRelease>,
+    /// Newest release of the installed flavor that the installed version can migrate to and this
+    /// server can install.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_target: Option<VersionString>,
+}
+
+rpc_toolkit::reflect_ts!(PackageReleases);
+
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageRelease {
+    #[serde(flatten)]
+    pub info: PackageVersionInfo,
+    /// A newer revision of this upstream version and flavor covers its hardware.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub superseded: bool,
+}
+
+rpc_toolkit::reflect_ts!(PackageRelease);
+
+/// Lists every release the device can run, including superseded revisions, without update targets.
+pub(crate) fn select_releases(
+    index: &Model<PackageIndex>,
+    device: &DeviceInfo,
+) -> Result<BTreeMap<PackageId, PackageReleases>, Error> {
+    let params = GetPackageParams {
+        id: None,
+        target_version: None,
+        source_version: None,
+        device_info: Some(device.clone()),
+        other_versions: None,
+        all_revisions: true,
+        reader: Default::default(),
+    };
+    let (best, mut other) = partition_best(get_matching_models(index, &params)?);
+    best.into_iter()
+        .map(|(id, best)| {
+            let other = other.remove(&id).unwrap_or_default();
+            let superseded = superseded_revisions(Some(&best), &other)?;
+            let versions = best
+                .into_iter()
+                .chain(other)
+                .map(|(version, info)| {
+                    Ok::<_, Error>((
+                        version.clone(),
+                        PackageRelease {
+                            superseded: superseded.contains(&version),
+                            info: info.de()?,
+                        },
+                    ))
+                })
+                .try_collect()?;
+            Ok((
+                id.clone(),
+                PackageReleases {
+                    categories: categories(index, &id)?,
+                    first_published_at: first_published_at(index, &id)?,
+                    versions,
+                    update_target: None,
+                },
+            ))
+        })
+        .collect()
+}
+
+pub(crate) fn select_packages(
+    index: &Model<PackageIndex>,
+    params: &GetPackageParams,
+) -> Result<Value, Error> {
+    let categories_for = |id: &PackageId| categories(index, id);
+    let first_published_for = |id: &PackageId| first_published_at(index, id);
+    let (mut best, mut other) = partition_best(get_matching_models(index, params)?);
     if !params.all_revisions {
         for (id, package_other) in &mut other {
             hide_superseded_revisions(best.get(id), package_other)?;
@@ -435,6 +512,7 @@ pub(crate) fn select_packages(
     }
     if let Some(id) = &params.id {
         let categories = categories_for(id)?;
+        let first_published_at = first_published_for(id)?;
         let best: BTreeMap<VersionString, PackageVersionInfo> = best
             .remove(id)
             .unwrap_or_default()
@@ -444,11 +522,13 @@ pub(crate) fn select_packages(
         let other = other.remove(id).unwrap_or_default();
         match params.other_versions.unwrap_or_default() {
             PackageDetailLevel::None => to_value(&GetPackageResult::Package(GetPackageResponse {
+                first_published_at,
                 categories,
                 best,
                 other_versions: None,
             })),
             PackageDetailLevel::Short => to_value(&GetPackageResult::Package(GetPackageResponse {
+                first_published_at,
                 categories,
                 best,
                 other_versions: Some(
@@ -460,6 +540,7 @@ pub(crate) fn select_packages(
             })),
             PackageDetailLevel::Full => {
                 to_value(&GetPackageResult::PackageFull(GetPackageResponseFull {
+                    first_published_at,
                     categories,
                     best,
                     other_versions: other
@@ -475,9 +556,11 @@ pub(crate) fn select_packages(
                 best.into_iter()
                     .map(|(id, best)| {
                         let categories = categories_for(&id)?;
+                        let first_published_at = first_published_for(&id)?;
                         Ok::<_, Error>((
                             id,
                             GetPackageResponse {
+                                first_published_at,
                                 categories,
                                 best: best
                                     .into_iter()
@@ -493,10 +576,12 @@ pub(crate) fn select_packages(
                 best.into_iter()
                     .map(|(id, best)| {
                         let categories = categories_for(&id)?;
+                        let first_published_at = first_published_for(&id)?;
                         let other = other.remove(&id).unwrap_or_default();
                         Ok::<_, Error>((
                             id,
                             GetPackageResponse {
+                                first_published_at,
                                 categories,
                                 best: best
                                     .into_iter()
@@ -517,10 +602,12 @@ pub(crate) fn select_packages(
                 best.into_iter()
                     .map(|(id, best)| {
                         let categories = categories_for(&id)?;
+                        let first_published_at = first_published_for(&id)?;
                         let other = other.remove(&id).unwrap_or_default();
                         Ok::<_, Error>((
                             id,
                             GetPackageResponseFull {
+                                first_published_at,
                                 categories,
                                 best: best
                                     .into_iter()
@@ -767,75 +854,6 @@ pub async fn cli_download(
 mod tests {
     use super::*;
 
-    struct RegistryProbe {
-        requests: std::sync::Mutex<Vec<GetPackageParams>>,
-        response: Value,
-    }
-
-    impl rpc_toolkit::Context for RegistryProbe {}
-    impl rpc_toolkit::CallRemote<RegistryContext, RegistryUrlParams> for RegistryProbe {
-        async fn call_remote(
-            &self,
-            method: &str,
-            metadata: imbl::OrdMap<&'static str, Value>,
-            params: Value,
-            extra: RegistryUrlParams,
-        ) -> Result<Value, rpc_toolkit::yajrc::RpcError> {
-            assert_eq!(method, "package.get");
-            assert_eq!(metadata.get("get_device_info"), Some(&Value::Bool(true)));
-            assert_eq!(extra.registry.as_str(), "https://example.com/registry/");
-            self.requests
-                .lock()
-                .unwrap()
-                .push(from_value(params).unwrap());
-            Ok(self.response.clone())
-        }
-    }
-
-    #[tokio::test]
-    async fn advertised_assets_browse_historical_revisions_without_request_metrics()
-    -> Result<(), Error> {
-        let mut info = fixture_info();
-        let asset = RegistryAsset {
-            published_at: Utc::now(),
-            urls: vec!["https://example.com/package.s9pk".parse()?],
-            torrent: Some("https://example.com/package.torrent".parse()?),
-            commitment: MerkleArchiveCommitment {
-                root_sighash: crate::util::serde::Base64([7; 32]),
-                root_maxsize: 1024,
-            },
-            signatures: Default::default(),
-        };
-        info.s9pks.push((Default::default(), asset.clone()));
-        let version: VersionString = "1.0.0:0".parse()?;
-        let registry = "https://example.com/registry/".parse()?;
-        let id = "hello-world".parse()?;
-        let probe = RegistryProbe {
-            requests: Default::default(),
-            response: json!({"categories": [], "best": {}, "otherVersions": {"1.0.0:0": info}}),
-        };
-        let found = advertised_asset(&probe, &registry, &id, &version)
-            .await?
-            .unwrap();
-        assert_eq!(found.commitment, asset.commitment);
-        assert_eq!(found.torrent, asset.torrent);
-        assert!(
-            remote_asset(&probe, &registry, &id, &version)
-                .await?
-                .is_none()
-        );
-        let requests = probe.requests.lock().unwrap();
-        assert_eq!(requests.len(), 2);
-        assert_eq!(requests[0].id.as_ref(), Some(&id));
-        assert!(requests[0].target_version.is_none());
-        assert_eq!(requests[0].other_versions, Some(PackageDetailLevel::Full));
-        assert!(requests[0].all_revisions);
-        assert!(requests[1].target_version.is_some());
-        assert_eq!(requests[1].other_versions, Some(PackageDetailLevel::None));
-        assert!(!requests[1].all_revisions);
-        Ok(())
-    }
-
     fn versions(entries: &[&str]) -> BTreeMap<VersionString, Model<PackageVersionInfo>> {
         entries.iter().map(|v| version(v, Vec::new())).collect()
     }
@@ -1019,6 +1037,80 @@ mod tests {
 
         let params = GetPackageParams::try_parse_from(["get", "--all-revisions"]).unwrap();
         assert!(params.all_revisions);
+    }
+
+    #[test]
+    fn select_releases_keeps_superseded_revisions_marked() {
+        use crate::registry::package::index::tests::version_info_signed_by;
+
+        let (_, info) = version_info_signed_by(1);
+        let info = to_value(&info).unwrap();
+        let index: Model<PackageIndex> = json!({
+            "categories": {},
+            "packages": { "demo": {
+                "authorized": {},
+                "categories": ["tools"],
+                "versions": { "1.0.0:0": info, "1.0.0:1": info, "2.0.0:0": info },
+            } },
+        })
+        .into();
+        let device = DeviceInfo {
+            os: crate::registry::device_info::OsInfo {
+                version: "0.4.0".parse().unwrap(),
+                compat: "*".parse().unwrap(),
+                platform: "x86_64".into(),
+                language: None,
+            },
+            hardware: None,
+        };
+        let releases = select_releases(&index, &device).unwrap();
+        let demo = &releases[&"demo".parse::<PackageId>().unwrap()];
+        assert_eq!(demo.categories, ["tools".into()].into());
+        let marked: Vec<_> = demo
+            .versions
+            .iter()
+            .map(|(v, r)| (v.to_string(), r.superseded))
+            .collect();
+        assert_eq!(
+            marked,
+            [
+                ("1.0.0:0".to_owned(), true),
+                ("1.0.0:1".to_owned(), false),
+                ("2.0.0:0".to_owned(), false),
+            ]
+        );
+        assert!(demo.update_target.is_none());
+    }
+
+    #[test]
+    fn first_published_at_is_the_earliest_asset_of_any_version() {
+        use crate::registry::package::index::tests::version_info_signed_by;
+
+        let (_, mut first) = version_info_signed_by(1);
+        first.s9pks[0].1.published_at = "2026-01-01T00:00:00Z".parse().unwrap();
+        let (_, mut second) = version_info_signed_by(2);
+        second.s9pks[0].1.published_at = "2026-03-01T00:00:00Z".parse().unwrap();
+        let index: Model<PackageIndex> = json!({
+            "categories": {},
+            "packages": { "demo": {
+                "authorized": {},
+                "categories": [],
+                "versions": {
+                    "1.0.0:0": to_value(&first).unwrap(),
+                    "2.0.0:0": to_value(&second).unwrap(),
+                },
+            } },
+        })
+        .into();
+        let expected = json!("2026-01-01T00:00:00Z");
+
+        let one = GetPackageParams::try_parse_from(["get", "demo"]).unwrap();
+        let one = select_packages(&index, &one).unwrap();
+        assert_eq!(one["firstPublishedAt"], expected);
+
+        let all = GetPackageParams::try_parse_from(["get"]).unwrap();
+        let all = select_packages(&index, &all).unwrap();
+        assert_eq!(all["demo"]["firstPublishedAt"], expected);
     }
 }
 

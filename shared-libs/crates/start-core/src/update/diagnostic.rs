@@ -6,7 +6,6 @@ use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
 use exver::{Version, VersionRange};
 use http::HeaderMap;
-use imbl_value::json;
 use itertools::Itertools;
 use reqwest::{Client, Url};
 use rpc_toolkit::HandlerArgs;
@@ -14,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use tracing::instrument;
 
-use crate::PLATFORM;
 use crate::context::{CliContext, DiagnosticContext};
 use crate::middleware::auth::signature;
 use crate::prelude::*;
@@ -244,11 +242,7 @@ async fn get_versions(
         registry,
         HeaderMap::new(),
         "os.version.get",
-        json!({
-            "sourceVersion": source,
-            "targetVersion": target,
-            "platform": &**PLATFORM,
-        }),
+        super::version_query_params(source, target),
     )
     .await
     .map_err(Error::from)?;
@@ -300,6 +294,7 @@ mod tests {
                     assert!(headers.get(signature::AUTH_SIG_HEADER).is_none());
                     assert_eq!(body["method"], "os.version.get");
                     assert_eq!(body["params"]["sourceVersion"], "0.4.2");
+                    assert_eq!(body["params"]["platform"], &**crate::PLATFORM);
                     axum::Json(serde_json::json!({"jsonrpc":"2.0","id":0,"result":{}}))
                 },
             ),

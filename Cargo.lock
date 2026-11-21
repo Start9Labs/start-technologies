@@ -1688,7 +1688,7 @@ dependencies = [
 [[package]]
 name = "crab_nat"
 version = "0.7.6"
-source = "git+https://github.com/Start9Labs/crab_nat.git?branch=feat%2Fcustom-pcp-options#2fea2a34ea91451240abebcc0023b8b73f78fb20"
+source = "git+https://github.com/Start9Labs/crab_nat.git?branch=feat%2Fcustom-pcp-options#2d2139c5cbafb907998b237518ce4cbd696ec55f"
 dependencies = [
  "bytes",
  "displaydoc",
