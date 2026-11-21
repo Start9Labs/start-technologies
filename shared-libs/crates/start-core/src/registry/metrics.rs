@@ -1,3 +1,5 @@
+//! Metric collection observes existing registry requests and adds no client requests.
+
 use chrono::Utc;
 use clap::{Parser, ValueEnum};
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
