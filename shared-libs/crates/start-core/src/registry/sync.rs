@@ -490,6 +490,7 @@ fn update_targets(
             &GetPackageParams {
                 id: Some(id.clone()),
                 target_version: None,
+                provides: None,
                 source_version: Some(version.clone()),
                 device_info: Some(device.clone()),
                 other_versions: Some(PackageDetailLevel::None),

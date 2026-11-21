@@ -1103,4 +1103,8 @@ export const ENGLISH: Record<string, number> = {
   'This browser is not enrolled yet': 1308,
   'Sign in from the command line': 1309,
   'Enroll this browser': 1310,
+  'Provided by': 1311,
+  'Select a dependency provider': 1312,
+  'Lock provider': 1313,
+  'Unlock provider': 1314,
 }

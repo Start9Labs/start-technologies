@@ -2984,6 +2984,31 @@ export const PatchOperation: z.ZodUnion<
     id: 'PatchOperation',
     description: 'JSON Patch single patch operation',
   })
+export const PreviewProviderChangeParams: z.ZodObject<{
+  id: typeof PackageId
+  version: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof Version>>,
+    z.ZodNullable<typeof Version>
+  >
+  satisfies: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof Version>>,
+    z.ZodArray<typeof Version>
+  >
+  satisfiesPackages: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<typeof Version>>>,
+    z.ZodRecord<z.ZodString, z.ZodArray<typeof Version>>
+  >
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  version: wire(Version.nullable().optional(), Version.nullable()),
+  satisfies: wire(z.array(Version).optional(), z.array(Version)),
+  satisfiesPackages: wire(
+    z.record(z.string(), z.array(Version)).optional(),
+    z.record(z.string(), z.array(Version)),
+  ),
+}).meta({
+  id: 'PreviewProviderChangeParams',
+})
 
 /**
  * Auth gate enforced by the OS reverse proxy on incoming requests.
@@ -3191,6 +3216,30 @@ export const RunActionParams: z.ZodObject<{
   input: wire(z.unknown().nullable().optional(), z.unknown().nullable()),
 }).meta({
   id: 'RunActionParams',
+})
+export const SelectProviderParams: z.ZodObject<{
+  id: typeof PackageId
+  dependencyId: typeof PackageId
+  providerId: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof PackageId>>,
+    z.ZodNullable<typeof PackageId>
+  >
+  /**
+   * Locks to this ID without fallback.
+   */
+  locked: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  dependencyId: PackageId,
+  providerId: wire(PackageId.nullable().optional(), PackageId.nullable()),
+  /**
+   * Locks to this ID without fallback.
+   */
+  locked: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Locks to this ID without fallback.',
+  }),
+}).meta({
+  id: 'SelectProviderParams',
 })
 export const ServiceStats: z.ZodObject<{
   container_id: typeof ContainerId
@@ -6296,6 +6345,12 @@ export const Api = {
             },
           },
         },
+        'preview-provider-change': {
+          _PARAMS: /* @__PURE__ */ PreviewProviderChangeParams,
+          _RETURN: /* @__PURE__ */ z.array(PackageId),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
         rebuild: {
           _PARAMS: /* @__PURE__ */ RebuildParams,
           _RETURN: /* @__PURE__ */ z.null(),
@@ -6304,6 +6359,12 @@ export const Api = {
         },
         restart: {
           _PARAMS: /* @__PURE__ */ ControlParams,
+          _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'select-dependency-provider': {
+          _PARAMS: /* @__PURE__ */ SelectProviderParams,
           _RETURN: /* @__PURE__ */ z.null(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),

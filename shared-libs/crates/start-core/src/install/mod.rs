@@ -149,6 +149,7 @@ pub async fn install(
         &GetPackageParams {
             id: Some(id.clone()),
             target_version: Some(VersionRange::exactly(version.deref().clone())),
+            provides: None,
             source_version: None,
             device_info: Some(device),
             other_versions: None,

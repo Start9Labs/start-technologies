@@ -6,6 +6,7 @@ use patch_db::json_ptr::JsonPointer;
 use tokio::process::Command;
 
 use crate::db::model::public::NetworkInterfaceInfo;
+use crate::dependencies::providers::find_package;
 use crate::service::effects::callbacks::CallbackHandler;
 use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
@@ -32,7 +33,16 @@ pub async fn get_container_ip(
 ) -> Result<Option<Ipv4Addr>, Error> {
     let context = context.deref()?;
 
-    if let Some(package_id) = package_id.filter(|id| id != &context.seed.id) {
+    let package_id = package_id.unwrap_or_else(|| context.seed.id.clone());
+    let Some(package_id) = find_package(
+        &context.seed.ctx.db.peek().await,
+        &context.seed.id,
+        &package_id,
+    )?
+    else {
+        return Ok(None);
+    };
+    if package_id != context.seed.id {
         if let Some(callback) = callback {
             // ip is static for the lifetime of the container, so callback unnecessary for self
             let callback = callback.register(&context.seed.persistent_container);

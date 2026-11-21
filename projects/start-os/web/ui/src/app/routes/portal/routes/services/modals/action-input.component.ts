@@ -32,6 +32,7 @@ import { ActionService } from 'src/app/services/action.service'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { PrimaryStatus } from 'src/app/services/pkg-status-rendering.service'
+import { dependencyProvider } from 'src/app/utils/dependency-provider'
 import {
   getAllPackages,
   getLiveTasks,
@@ -283,7 +284,8 @@ export class ActionInputModal {
             ([_, { task, active }]) =>
               !active &&
               task.severity === 'critical' &&
-              task.packageId === this.pkgInfo.id &&
+              dependencyProvider(packages[id]!, task.packageId) ===
+                this.pkgInfo.id &&
               task.actionId === this.actionId &&
               task.when?.condition === 'input-not-matches' &&
               task.input &&

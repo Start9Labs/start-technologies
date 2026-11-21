@@ -97,6 +97,88 @@ test('the builder publishes its complete base dependency requirements', () => {
   })
 })
 
+test('compatibility metadata defaults to empty claims', () => {
+  const built = buildManifest({
+    versionGraph: versions,
+    manifest: manifest(),
+    dependencies: Dependencies.of(),
+    i18n,
+  })
+
+  expect(built.satisfies).toEqual([])
+  expect(built.satisfiesPackages).toEqual({})
+})
+
+test('the manifest publishes current compatibility claims, not historical claims', () => {
+  const graph = VersionGraph.of({
+    current: versions.current
+      .satisfies('#fork:1.0.0:0')
+      .satisfies('bitcoind', '28.0:0')
+      .satisfies('bitcoind', '29.0:0'),
+    other: [
+      VersionInfo.of({
+        version: '0.9.0:0',
+        releaseNotes: '',
+        migrations: {},
+      }).satisfies('historical-provider', '1.0.0:0'),
+    ],
+  })
+  const built = buildManifest({
+    versionGraph: graph,
+    manifest: manifest(),
+    dependencies: Dependencies.of(),
+    i18n: setupI18n({}, {}, 'fr_FR'),
+  })
+
+  expect(built.defaultLocale).toBe('fr_FR')
+  expect(built.satisfies).toEqual(['#fork:1.0.0:0'])
+  expect(built.satisfiesPackages).toEqual({ bitcoind: ['28.0:0', '29.0:0'] })
+  expect(built.osVersion).toBe('0.4.3')
+  expect(
+    buildManifest({
+      versionGraph: graph,
+      manifest: { ...manifest(), osVersion: '0.4.0' },
+      dependencies: Dependencies.of(),
+      i18n,
+    }).osVersion,
+  ).toBe('0.4.3')
+  expect(
+    buildManifest({
+      versionGraph: graph,
+      manifest: { ...manifest(), osVersion: '0.5.0' },
+      dependencies: Dependencies.of(),
+      i18n,
+    }).osVersion,
+  ).toBe('0.5.0')
+})
+
+test('package-qualified claims reject the manifest own ID', () => {
+  const graph = VersionGraph.of({
+    current: versions.current.satisfies('test', '2.0.0:0'),
+    other: [],
+  })
+  expect(() =>
+    buildManifest({
+      versionGraph: graph,
+      manifest: manifest(),
+      dependencies: Dependencies.of(),
+      i18n,
+    }),
+  ).toThrow('Use .satisfies(version)')
+  const samePackage = VersionGraph.of({
+    current: versions.current.satisfies('2.0.0:0'),
+    other: [],
+  })
+  expect(
+    buildManifest({
+      versionGraph: samePackage,
+      manifest: manifest(),
+      dependencies: Dependencies.of(),
+      i18n,
+    }).satisfies,
+  ).toEqual(['2.0.0:0'])
+})
+
 test('images emulate missing architectures by default', () => {
   const built = buildManifest({
     versionGraph: versions,
@@ -119,6 +201,38 @@ test('images can require a native architecture', () => {
 
   expect(built.images.main.emulateMissing).toBe(false)
   expect(built.hardwareRequirements.arch).toEqual(['aarch64'])
+})
+
+test('shared-volume and provider compatibility floors compose', () => {
+  const graph = VersionGraph.of({
+    current: versions.current.satisfies('bitcoind', '29.0:0'),
+    other: [],
+  })
+  const capable = { ...manifest(), sharedVolumes: true }
+  expect(
+    buildManifest({
+      versionGraph: graph,
+      manifest: capable,
+      dependencies: Dependencies.of(),
+      i18n,
+    }).osVersion,
+  ).toBe('0.4.3')
+  expect(() =>
+    buildManifest({
+      versionGraph: graph,
+      manifest: { ...capable, osVersion: '0.4.2' },
+      dependencies: Dependencies.of(),
+      i18n,
+    }),
+  ).toThrow('Shared volumes require StartOS 0.4.3 or later')
+  expect(
+    buildManifest({
+      versionGraph: graph,
+      manifest: { ...capable, osVersion: '0.5.0' },
+      dependencies: Dependencies.of(),
+      i18n,
+    }).osVersion,
+  ).toBe('0.5.0')
 })
 
 test('shared-volume capability defaults to false and preserves explicit opt-in', () => {

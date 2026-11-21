@@ -160,12 +160,19 @@ export class MarketplacePreviewComponent {
   private readonly flavor$ = this.params$.pipe(map(p => p.get('flavor')))
 
   readonly targetRange = computed(() =>
-    this.params()?.get('requirePkg') === this.pkgId()
+    this.params()?.get('requirePkg') &&
+    (this.params()?.get('requirePkg') === this.pkgId() ||
+      this.params()?.get('provides') === this.params()?.get('requirePkg'))
       ? this.params()?.get('requireRange')
       : null,
   )
 
-  readonly selectedVersion = linkedSignal(() => this.pkg()?.version ?? null)
+  private readonly provides = computed(() => this.params()?.get('requirePkg'))
+
+  readonly selectedVersion = linkedSignal({
+    source: this.pkg,
+    computation: (): string | null => null,
+  })
 
   readonly noMatch = signal(false)
 
@@ -181,8 +188,17 @@ export class MarketplacePreviewComponent {
         tap(pkg => {
           if (!pkg || version) return
           const range = this.targetRange()
-          if (!range || satisfiesWithAliases(this.exver, pkg, range)) return
-          const candidate = compatibleVersions(this.exver, pkg, range)[0]
+          if (
+            !range ||
+            satisfiesWithAliases(this.exver, pkg, range, this.provides())
+          )
+            return
+          const candidate = compatibleVersions(
+            this.exver,
+            pkg,
+            range,
+            this.provides(),
+          )[0]
           if (candidate) {
             this.selectedVersion.set(candidate)
           } else {
@@ -194,9 +210,8 @@ export class MarketplacePreviewComponent {
 
           return (
             !!pkg &&
-            (!!version ||
-              !range ||
-              satisfiesWithAliases(this.exver, pkg, range))
+            (!range ||
+              satisfiesWithAliases(this.exver, pkg, range, this.provides()))
           )
         }),
         startWith<MarketplacePkg | null>(null),
@@ -208,7 +223,7 @@ export class MarketplacePreviewComponent {
   private package$(version: string | null, flavor: string | null) {
     const pkg = this.pkg()
 
-    return pkg?.version === version
+    return pkg && (!version || pkg.version === version)
       ? of(pkg)
       : this.marketplaceService.getPackage$(this.pkgId(), version, flavor)
   }
@@ -221,7 +236,7 @@ export class MarketplacePreviewComponent {
       p =>
         p.id === this.pkgId() &&
         p.flavor !== current &&
-        !!compatibleVersions(this.exver, p, range).length,
+        !!compatibleVersions(this.exver, p, range, this.provides()).length,
     )
 
     if (match) {
@@ -251,9 +266,19 @@ export class MarketplacePreviewComponent {
 
   readonly versions$ = this.flavor$.pipe(
     switchMap(flavor =>
-      this.marketplaceService.getPackage$(this.pkgId(), null, flavor).pipe(
+      (this.pkg()?.flavor === flavor
+        ? of(this.pkg()!)
+        : this.marketplaceService.getPackage$(this.pkgId(), null, flavor)
+      ).pipe(
         filter(Boolean),
-        map(pkg => compatibleVersions(this.exver, pkg, this.targetRange())),
+        map(pkg =>
+          compatibleVersions(
+            this.exver,
+            pkg,
+            this.targetRange(),
+            this.provides(),
+          ),
+        ),
       ),
     ),
   )

@@ -1102,4 +1102,8 @@ export default {
   1308: 'Dieser Browser ist noch nicht registriert',
   1309: 'Über die Befehlszeile anmelden',
   1310: 'Diesen Browser registrieren',
+  1311: 'Bereitgestellt von',
+  1312: 'Abhängigkeitsanbieter auswählen',
+  1313: 'Anbieter fixieren',
+  1314: 'Fixierung aufheben',
 } satisfies i18n

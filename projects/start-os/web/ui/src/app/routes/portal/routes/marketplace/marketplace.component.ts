@@ -6,12 +6,23 @@ import {
   MarketplacePackageLinkComponent,
   MarketplaceRegistrySelectComponent,
   MarketplaceTileComponent,
+  isRegistryLoading,
   StoreIdentity,
 } from '@start9labs/marketplace'
 import { i18nPipe, registryUrl, sameUrl, TaskService } from '@start9labs/shared'
 import { TuiButton } from '@taiga-ui/core'
 import { TuiBlockStatus } from '@taiga-ui/layout'
-import { EMPTY, switchMap, take, tap } from 'rxjs'
+import {
+  combineLatest,
+  distinctUntilChanged,
+  EMPTY,
+  map,
+  of,
+  startWith,
+  switchMap,
+  take,
+  tap,
+} from 'rxjs'
 import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { StorageService } from 'src/app/services/storage.service'
@@ -166,8 +177,49 @@ export default class Marketplace {
     )
     .subscribe()
 
+  // Registry status changes must not reset loaded tiles or open previews.
+  private readonly providers$ = combineLatest([
+    this.marketplaceService.currentRegistry$.pipe(
+      map(({ url }) => url),
+      distinctUntilChanged(),
+    ),
+    inject(ActivatedRoute).queryParamMap.pipe(
+      map(params => [
+        params.get('provides'),
+        params.get('requireRange'),
+        params.get('providerId'),
+      ]),
+      distinctUntilChanged(
+        ([a, b, c], [d, e, f]) => a === d && b === e && c === f,
+      ),
+    ),
+  ]).pipe(
+    switchMap(([url, [provides, range, providerId]]) =>
+      provides && range
+        ? this.marketplaceService
+            .fetchProviders$(url, provides, range, providerId)
+            .pipe(startWith(null))
+        : of(undefined),
+    ),
+  )
+
   protected readonly registry = toSignal(
-    this.marketplaceService.currentRegistry$,
+    combineLatest([
+      this.marketplaceService.currentRegistry$,
+      this.providers$,
+    ]).pipe(
+      map(([registry, packages]) =>
+        packages === undefined
+          ? registry
+          : {
+              ...registry,
+              packages: packages || [],
+              loading:
+                !packages ||
+                isRegistryLoading(registry.status, registry.packages.length),
+            },
+      ),
+    ),
   )
 
   /** A remembered registry the server no longer saves gives way to the default. */
@@ -183,6 +235,7 @@ export default class Marketplace {
     this.router.navigate([], {
       queryParams: { registry },
       queryParamsHandling: 'merge',
+      replaceUrl: true,
     })
   }
 

@@ -352,6 +352,7 @@ export namespace Mock {
     title: 'Bitcoin Core',
     version: '0.21.0:0',
     satisfies: [],
+    satisfiesPackages: {},
     canMigrateTo: '!',
     canMigrateFrom: '*',
     gitHash: 'abcdefgh',
@@ -395,6 +396,7 @@ export namespace Mock {
     title: 'Lightning Network Daemon',
     version: '0.11.1:0',
     satisfies: [],
+    satisfiesPackages: {},
     canMigrateTo: '!',
     canMigrateFrom: '*',
     gitHash: 'abcdefgh',
@@ -452,6 +454,7 @@ export namespace Mock {
     title: 'Tor',
     version: '0.4.8:0',
     satisfies: [],
+    satisfiesPackages: {},
     canMigrateTo: '!',
     canMigrateFrom: '*',
     gitHash: 'torhash1',
@@ -495,6 +498,7 @@ export namespace Mock {
     title: 'Bitcoin Proxy',
     version: '0.2.2:0',
     satisfies: [],
+    satisfiesPackages: {},
     canMigrateTo: '!',
     canMigrateFrom: '*',
     gitHash: 'lmnopqrx',
@@ -584,6 +588,7 @@ export namespace Mock {
             icon: BTC_ICON,
             sourceVersion: null,
             satisfies: [],
+            satisfiesPackages: {},
             dependencyMetadata: {},
             donationUrl: null,
             s9pks: [
@@ -628,6 +633,7 @@ export namespace Mock {
             icon: BTC_ICON,
             sourceVersion: null,
             satisfies: [],
+            satisfiesPackages: {},
             dependencyMetadata: {},
             donationUrl: null,
             s9pks: [
@@ -676,6 +682,7 @@ export namespace Mock {
             icon: BTC_ICON,
             sourceVersion: null,
             satisfies: [],
+            satisfiesPackages: {},
             dependencyMetadata: {},
             donationUrl: null,
             s9pks: [
@@ -714,6 +721,7 @@ export namespace Mock {
             icon: BTC_ICON,
             sourceVersion: null,
             satisfies: [],
+            satisfiesPackages: {},
             dependencyMetadata: {},
             donationUrl: null,
             s9pks: [
@@ -764,6 +772,7 @@ export namespace Mock {
             icon: LND_ICON,
             sourceVersion: null,
             satisfies: [],
+            satisfiesPackages: {},
             dependencyMetadata: {
               bitcoind: BitcoinDep,
               'btc-rpc-proxy': ProxyDep,
@@ -815,6 +824,7 @@ export namespace Mock {
             icon: LND_ICON,
             sourceVersion: null,
             satisfies: [],
+            satisfiesPackages: {},
             dependencyMetadata: {
               bitcoind: BitcoinDep,
               'btc-rpc-proxy': ProxyDep,
@@ -868,6 +878,7 @@ export namespace Mock {
             icon: PROXY_ICON,
             sourceVersion: null,
             satisfies: [],
+            satisfiesPackages: {},
             dependencyMetadata: {
               bitcoind: BitcoinDep,
             },
@@ -988,6 +999,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
           icon: BTC_ICON,
           sourceVersion: '>=26.0.0:0',
           satisfies: [],
+          satisfiesPackages: {},
           dependencyMetadata: {},
           donationUrl: null,
           s9pks: [
@@ -1032,6 +1044,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
           icon: BTC_ICON,
           sourceVersion: null,
           satisfies: [],
+          satisfiesPackages: {},
           dependencyMetadata: {},
           donationUrl: null,
           s9pks: [
@@ -1080,6 +1093,7 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
           icon: LND_ICON,
           sourceVersion: null,
           satisfies: [],
+          satisfiesPackages: {},
           dependencyMetadata: {
             bitcoind: BitcoinDep,
             'btc-rpc-proxy': ProxyDep,
@@ -1138,6 +1152,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           icon: PROXY_ICON,
           sourceVersion: null,
           satisfies: [],
+          satisfiesPackages: {},
           dependencyMetadata: {
             bitcoind: BitcoinDep,
           },
@@ -1175,6 +1190,7 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
           icon: PROXY_ICON,
           sourceVersion: null,
           satisfies: ['0.3.2.7:0'],
+          satisfiesPackages: {},
           dependencyMetadata: {
             bitcoind: BitcoinDep,
           },
@@ -2657,6 +2673,8 @@ PersistentKeepalive = 25`
         group: null,
       },
     },
+    dependencySelections: {},
+    dependencyBindings: {},
     currentDependencies: {},
     hosts: {
       abcdefg: {
@@ -2897,6 +2915,8 @@ PersistentKeepalive = 25`
       error: null,
     },
     actions: {},
+    dependencySelections: {},
+    dependencyBindings: {},
     currentDependencies: {
       bitcoind: {
         title: BitcoinDep.title,
@@ -2950,6 +2970,8 @@ PersistentKeepalive = 25`
         group: 'Connecting',
       },
     },
+    dependencySelections: {},
+    dependencyBindings: {},
     currentDependencies: {
       bitcoind: {
         title: BitcoinDep.title,
@@ -3050,4 +3072,28 @@ PersistentKeepalive = 25`
       'btc-rpc-proxy': bitcoinProxy,
       lnd: lnd,
     }
+  const bitcoinRegistry = RegistryPackages['bitcoind']!
+  const bitcoinVersion = Object.values(bitcoinRegistry.best)[0]!
+  RegistryPackages['bitcoin-alternative'] = {
+    ...bitcoinRegistry,
+    best: {
+      '1.0.0:0': {
+        ...bitcoinVersion,
+        title: 'Bitcoin Alternative',
+        satisfiesPackages: { bitcoind: ['26.0.0:0', '29.0.0:0'] },
+      },
+    },
+    otherVersions: {},
+  }
+  RegistryPackages['bitcoin-legacy'] = {
+    ...bitcoinRegistry,
+    best: {
+      '5.0.0:0': {
+        ...bitcoinVersion,
+        title: 'Bitcoin Legacy',
+        satisfiesPackages: { bitcoind: ['29.0.0:0'] },
+      },
+    },
+    otherVersions: {},
+  }
 }

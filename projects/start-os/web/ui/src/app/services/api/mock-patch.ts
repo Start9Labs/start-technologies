@@ -7,6 +7,7 @@ import {
 } from 'src/app/services/patch-db/data-model'
 import { knownAuthorities } from 'src/app/utils/acme'
 import { Mock, mockAddresses } from './api.fixures'
+import { BTC_ICON } from './api-icons'
 const version = require('../../../../../../../../package.json').version
 
 function mockService(
@@ -31,6 +32,8 @@ function mockService(
     lastBackup: null,
     statusInfo,
     actions: {},
+    dependencySelections: {},
+    dependencyBindings: {},
     currentDependencies: {},
     hosts: {},
     storeExposedDependents: [],
@@ -786,6 +789,8 @@ export const mockPatchData: DataModel = {
           group: 'Connecting',
         },
       },
+      dependencySelections: {},
+      dependencyBindings: {},
       currentDependencies: {
         bitcoind: {
           title: Mock.BitcoinDep.title,
@@ -885,7 +890,7 @@ export const mockPatchData: DataModel = {
         state: 'installed',
         manifest: {
           ...Mock.MockManifestBitcoind,
-          version: '0.20.0:0-alpha.1',
+          version: '26.0.0:0',
         },
       },
       s9pk: '/media/startos/data/package-data/archive/installed/bitcoind.s9pk',
@@ -1020,6 +1025,8 @@ export const mockPatchData: DataModel = {
           group: null,
         },
       },
+      dependencySelections: {},
+      dependencyBindings: {},
       currentDependencies: {},
       hosts: {
         abcdefg: {
@@ -1509,6 +1516,8 @@ export const mockPatchData: DataModel = {
           group: null,
         },
       },
+      dependencySelections: {},
+      dependencyBindings: {},
       currentDependencies: {},
       hosts: {},
       storeExposedDependents: [],
@@ -1588,3 +1597,81 @@ export const mockPatchData: DataModel = {
     ),
   },
 }
+
+const bitcoinCandidates = {
+  bitcoind: ['26.0.0:0'],
+  'bitcoin-alternative': ['26.0.0:0', '29.0.0:0'],
+}
+
+mockPatchData.packageData['bitcoin-alternative'] = {
+  ...mockPatchData.packageData['bitcoind']!,
+  stateInfo: {
+    state: 'installed',
+    manifest: {
+      ...Mock.MockManifestBitcoind,
+      id: 'bitcoin-alternative',
+      title: 'Bitcoin Alternative',
+      version: '1.0.0:0',
+      satisfiesPackages: { bitcoind: ['26.0.0:0', '29.0.0:0'] },
+    },
+  },
+  s9pk: '/media/startos/data/package-data/archive/installed/bitcoin-alternative.s9pk',
+  statusInfo: {
+    desired: { main: 'running' },
+    started: new Date().toISOString(),
+    error: null,
+    health: {},
+  },
+  tasks: {},
+}
+mockPatchData.packageData['lnd']!.dependencySelections = {
+  bitcoind: { providerId: 'bitcoin-alternative', pin: null },
+}
+mockPatchData.packageData['lnd']!.dependencyBindings = {
+  bitcoind: {
+    providerId: 'bitcoin-alternative',
+    versions: ['26.0.0:0', '29.0.0:0'],
+    candidates: bitcoinCandidates,
+  },
+  'btc-rpc-proxy': { providerId: null, versions: [], candidates: {} },
+}
+mockPatchData.packageData['electrs']!.currentDependencies = {
+  bitcoind: {
+    title: 'Bitcoin',
+    kind: 'running',
+    versionRange: '>=26.0.0',
+    healthChecks: [],
+  },
+}
+mockPatchData.packageData['electrs']!.dependencyBindings = {
+  bitcoind: { providerId: null, versions: [], candidates: bitcoinCandidates },
+}
+
+const pinnedExample = mockService('mempool', 'Mempool', '3.0.0:0', {
+  desired: { main: 'running' },
+  started: new Date().toISOString(),
+  error: null,
+  health: {},
+})
+pinnedExample.currentDependencies = {
+  bitcoind: {
+    title: 'Bitcoin',
+    kind: 'running',
+    versionRange: '>=29.0.0:0',
+    healthChecks: [],
+  },
+}
+pinnedExample.dependencySelections = {
+  bitcoind: {
+    providerId: 'bitcoin-legacy',
+    pin: { title: 'Bitcoin Legacy', icon: BTC_ICON },
+  },
+}
+pinnedExample.dependencyBindings = {
+  bitcoind: {
+    providerId: null,
+    versions: [],
+    candidates: { 'bitcoin-alternative': ['26.0.0:0', '29.0.0:0'] },
+  },
+}
+mockPatchData.packageData['mempool'] = pinnedExample

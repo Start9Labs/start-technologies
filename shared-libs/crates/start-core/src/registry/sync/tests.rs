@@ -444,6 +444,76 @@ fn synced_package_queries_keep_target_and_source_selection_while_offline() {
 }
 
 #[test]
+fn cached_provider_queries_select_claimed_versions_even_when_a_newer_release_drops_the_claim() {
+    let mut db = database();
+    let mut catalog = index();
+    catalog
+        .package
+        .packages
+        .get_mut("test")
+        .unwrap()
+        .versions
+        .get_mut(&"1.0.0:0".parse().unwrap())
+        .unwrap()
+        .metadata
+        .satisfies_packages
+        .insert(
+            "logical".parse().unwrap(),
+            BTreeSet::from(["26.0.0:0".parse().unwrap()]),
+        );
+    publish_snapshot(
+        &mut db,
+        &Subscription::Index(url()),
+        &to_value(&catalog).unwrap(),
+        &device(),
+    )
+    .unwrap();
+    set_status(
+        &mut db,
+        &Subscription::Index(url()),
+        RegistryStatus::Error,
+        None,
+    )
+    .unwrap();
+    let cached = db
+        .as_public()
+        .as_registry_cache()
+        .as_idx(&url())
+        .unwrap()
+        .de()
+        .unwrap();
+    let releases = &cached.catalog["test"].versions;
+    assert_eq!(
+        releases[&"1.0.0:0".parse().unwrap()]
+            .info
+            .metadata
+            .satisfies_packages["logical"],
+        BTreeSet::from(["26.0.0:0".parse().unwrap()])
+    );
+    assert!(
+        releases[&"2.0.0:0".parse().unwrap()]
+            .info
+            .metadata
+            .satisfies_packages
+            .is_empty()
+    );
+    let result = select(
+        &db,
+        &url(),
+        json!({"provides":"logical", "targetVersion":">=26.0.0:0", "otherVersions":"short"}),
+    )
+    .unwrap();
+    assert!(result["test"]["best"]["1.0.0:0"].is_object());
+    assert!(
+        result["test"]["best"]
+            .as_object()
+            .unwrap()
+            .get("2.0.0:0")
+            .is_none()
+    );
+}
+
+#[test]
 fn connecting_registries_select_nothing_and_first_failures_are_unreachable() {
     let mut db = database();
     for subscription in [Subscription::Index(url()), Subscription::Os(url())] {
@@ -872,6 +942,50 @@ fn update_target(db: &DatabaseModel) -> Option<String> {
         .get(&"test".parse::<crate::PackageId>().unwrap())
         .and_then(|package| package.update_target.as_ref())
         .map(ToString::to_string)
+}
+
+#[test]
+fn provider_update_targets_use_physical_versions_not_advertised_dependency_versions() {
+    let mut db = database();
+    let mut catalog = index();
+    for release in catalog
+        .package
+        .packages
+        .get_mut("test")
+        .unwrap()
+        .versions
+        .values_mut()
+    {
+        release.metadata.satisfies_packages.insert(
+            "logical".parse().unwrap(),
+            BTreeSet::from(["26.0.0:0".parse().unwrap()]),
+        );
+    }
+    publish_snapshot(
+        &mut db,
+        &Subscription::Index(url()),
+        &to_value(&catalog).unwrap(),
+        &device(),
+    )
+    .unwrap();
+    install(&mut db, "1.6.0:0");
+    refresh_update_targets(&mut db, &device()).unwrap();
+    assert_eq!(update_target(&db).as_deref(), Some("2.0.0:0"));
+    let cached = db
+        .as_public()
+        .as_registry_cache()
+        .as_idx(&url())
+        .unwrap()
+        .de()
+        .unwrap();
+    assert!(!cached.catalog.contains_key("logical"));
+    assert_eq!(
+        cached.catalog["test"].versions[&"2.0.0:0".parse().unwrap()]
+            .info
+            .metadata
+            .satisfies_packages["logical"],
+        BTreeSet::from(["26.0.0:0".parse().unwrap()])
+    );
 }
 
 #[test]

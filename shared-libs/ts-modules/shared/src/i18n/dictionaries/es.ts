@@ -1102,4 +1102,8 @@ export default {
   1308: 'Este navegador aún no está registrado',
   1309: 'Iniciar sesión desde la línea de comandos',
   1310: 'Registrar este navegador',
+  1311: 'Proporcionado por',
+  1312: 'Selecciona un proveedor de dependencias',
+  1313: 'Fijar proveedor',
+  1314: 'Desfijar proveedor',
 } satisfies i18n

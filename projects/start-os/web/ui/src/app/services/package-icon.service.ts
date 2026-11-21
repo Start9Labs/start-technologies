@@ -1,4 +1,5 @@
 import { inject, Service } from '@angular/core'
+import { T } from '@start9labs/start-core'
 import { FALLBACK_ICON, registryIconUrl } from '@start9labs/marketplace'
 import { PatchDB } from 'patch-db-client'
 import { catchError, defer, Observable, of, shareReplay, switchMap } from 'rxjs'
@@ -26,7 +27,10 @@ export class PackageIconService {
     return this.load(url, url)
   }
 
-  get(pkg: PackageDataEntry | string, dependency?: string): Observable<string> {
+  get(
+    pkg: PackageDataEntry | T.ProviderPin | string,
+    dependency?: string,
+  ): Observable<string> {
     if (typeof pkg === 'string') {
       return this.patch
         .watch$('packageData', pkg)
@@ -36,6 +40,8 @@ export class PackageIconService {
           ),
         )
     }
+
+    if ('icon' in pkg) return of(pkg.icon)
 
     const { id } = getManifest(pkg)
     const path = dependency ? `dependencies/${dependency}/icon` : 'icon'

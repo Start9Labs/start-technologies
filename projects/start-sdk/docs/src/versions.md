@@ -119,6 +119,8 @@ export const current = VersionInfo.of({
 
 Write `version` as a quoted string literal — never a template literal or an expression built from a constant such as an upstream-version pin. The release workflow reads it from the file's text to name the git tag, and fails on anything else.
 
+Chain `.satisfies(version)` to declare full compatibility with another version of this package, or `.satisfies(packageId, version)` to provide another package's contract. See [Compatible Providers](dependencies.md#compatible-providers) for the declaration format, compatibility obligations, and provider selection.
+
 ### index.ts
 
 ```typescript

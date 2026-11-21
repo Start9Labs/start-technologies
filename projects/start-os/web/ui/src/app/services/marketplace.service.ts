@@ -6,6 +6,7 @@ import {
   StoreDataWithUrl,
   StoreIdentity,
   packageSignerPolicy,
+  satisfiesWithAliases,
   registryStatus,
   isRegistryLoading,
 } from '@start9labs/marketplace'
@@ -192,6 +193,40 @@ export class MarketplaceService extends AbstractMarketplaceService {
     )
   }
 
+  fetchProviders$(
+    url: string,
+    provides: string,
+    range: string,
+    providerId: string | null = null,
+  ): Observable<MarketplacePkg[]> {
+    return this.watchRegistry$(url).pipe(
+      filter(registryReady),
+      map(entry =>
+        Object.entries(entry.catalog).flatMap(([id, pkg]) => {
+          if (providerId && id !== providerId) return []
+          const listed = listedVersions(
+            this.exver,
+            pkg,
+            Object.entries(pkg.versions)
+              .filter(([version, release]) =>
+                satisfiesWithAliases(
+                  this.exver,
+                  { id, version, ...release },
+                  range,
+                  provides,
+                ),
+              )
+              .map(([version]) => version),
+          )
+          return listed.flatMap(
+            version =>
+              toMarketplacePkg(this.exver, id, version, pkg, listed) ?? [],
+          )
+        }),
+      ),
+    )
+  }
+
   private toStore(
     url: string,
     entry: T.Public['registryCache'][string],
@@ -273,16 +308,20 @@ export class MarketplaceService extends AbstractMarketplaceService {
 }
 
 /** The release listed for each flavor: its update target, else its newest. */
-function listedVersions(exver: Exver, pkg: T.PackageReleases): string[] {
+function listedVersions(
+  exver: Exver,
+  pkg: T.PackageReleases,
+  versions = Object.keys(pkg.versions),
+): string[] {
   const listed = new Map<string | null, string>()
-  for (const version of Object.keys(pkg.versions)) {
+  for (const version of versions) {
     const flavor = exver.getFlavor(version)
     const newest = listed.get(flavor)
     if (!newest || exver.compareExver(version, newest) === 1) {
       listed.set(flavor, version)
     }
   }
-  if (pkg.updateTarget) {
+  if (pkg.updateTarget && versions.includes(pkg.updateTarget)) {
     listed.set(exver.getFlavor(pkg.updateTarget), pkg.updateTarget)
   }
   return [...listed.values()]

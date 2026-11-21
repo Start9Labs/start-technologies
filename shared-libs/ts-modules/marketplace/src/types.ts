@@ -16,7 +16,6 @@ export type GetPackageRes = T.GetPackageResponse & {
 
 export type GetPackagesReq = PackageParams & {
   id: null
-  targetVersion: null
   sourceVersion: null
   otherVersions: 'short'
 }
@@ -60,6 +59,8 @@ export type StoreIdentity = RegistryObservation & {
 export type Marketplace = Record<string, StoreDataWithUrl | null>
 
 export type StoreData = RegistryObservation & {
+  /** Whether a filtered catalog is awaiting results. */
+  loading?: boolean
   info: T.RegistryInfo
   packages: MarketplacePkg[]
   /** Installable updates of installed packages; absent outside StartOS. */

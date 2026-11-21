@@ -1,27 +1,16 @@
-import { Exver } from '@start9labs/shared'
-import { DataModel } from '../services/patch-db/data-model'
+import type { ApiService } from '../services/api/embassy-api.service'
+import type { Params } from '../services/api/api.types'
+import type { DataModel } from '../services/patch-db/data-model'
 import { getManifest } from './get-package-data'
 
-export function dryUpdate(
-  {
-    id,
-    version,
-    satisfies,
-  }: { id: string; version: string; satisfies: string[] },
-  pkgs: DataModel['packageData'],
-  exver: Exver,
-): string[] {
-  return Object.values(pkgs)
-    .filter(
-      pkg =>
-        Object.keys(pkg.currentDependencies || {}).some(
-          pkgId => pkgId === id,
-        ) &&
-        !exver.releaseSatisfies(
-          version,
-          satisfies,
-          pkg.currentDependencies[id]?.versionRange || '',
-        ),
-    )
-    .map(pkg => getManifest(pkg).title)
+export async function dryUpdate(
+  params: Params<'package.preview-provider-change'>,
+  packages: DataModel['packageData'],
+  api: ApiService,
+): Promise<string[]> {
+  const affected = await api.rpc.package.previewProviderChange(params)
+  return affected.map(id => {
+    const pkg = packages[id]
+    return pkg ? getManifest(pkg).title : id
+  })
 }

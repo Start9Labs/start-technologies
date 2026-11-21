@@ -18,7 +18,7 @@ use crate::net::ssl::FullchainCertData;
 use crate::prelude::*;
 use crate::service::effects::context::EffectContext;
 use crate::service::effects::net::ssl::Algorithm;
-use crate::service::rpc::{CallbackHandle, CallbackId};
+use crate::service::rpc::{Callback, CallbackHandle, CallbackId};
 use crate::service::{Service, ServiceActorSeed};
 use crate::status::StatusInfo;
 use crate::util::collections::EqMap;
@@ -470,10 +470,18 @@ impl CallbackHandler {
         }
     }
     pub async fn call(mut self, args: Vector<Value>) -> Result<(), Error> {
-        if let Some(seed) = self.seed.upgrade() {
-            seed.persistent_container
-                .callback(self.handle.take(), args)
-                .await?;
+        // Notifications must not retain the service during socket I/O.
+        let notification = self.seed.upgrade().and_then(|seed| {
+            let container = &seed.persistent_container;
+            let mut params = None;
+            container.state.send_if_modified(|state| {
+                params = self.handle.take().params(&mut state.callbacks, args);
+                params.is_some()
+            });
+            params.map(|params| (container.rpc_client.clone(), params))
+        });
+        if let Some((client, params)) = notification {
+            client.notify(Callback, params).await?;
         }
         Ok(())
     }

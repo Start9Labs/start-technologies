@@ -4,6 +4,7 @@ use imbl_value::InternedString;
 use patch_db::TypedDbWatch;
 
 use crate::db::model::Database;
+use crate::dependencies::providers::find_package;
 use crate::net::host::{Host, Hosts};
 use crate::net::service_interface::{
     AddressInfo, RangeServiceInterface, ServiceInterface, ServiceInterfaceType,
@@ -272,6 +273,14 @@ pub async fn get_service_interface(
 ) -> Result<Option<ServiceInterface>, Error> {
     let context = context.deref()?;
     let package_id = package_id.unwrap_or_else(|| context.seed.id.clone());
+    let Some(package_id) = find_package(
+        &context.seed.ctx.db.peek().await,
+        &context.seed.id,
+        &package_id,
+    )?
+    else {
+        return Ok(None);
+    };
 
     let mut hosts_watch = HostsWatch::new(&context.seed.ctx.db, &package_id).await;
 
@@ -344,6 +353,14 @@ pub async fn list_service_interfaces(
 ) -> Result<BTreeMap<ServiceInterfaceId, ServiceInterface>, Error> {
     let context = context.deref()?;
     let package_id = package_id.unwrap_or_else(|| context.seed.id.clone());
+    let Some(package_id) = find_package(
+        &context.seed.ctx.db.peek().await,
+        &context.seed.id,
+        &package_id,
+    )?
+    else {
+        return Ok(BTreeMap::new());
+    };
 
     let mut watch = HostsWatch::new(&context.seed.ctx.db, &package_id).await;
 

@@ -209,6 +209,7 @@ boundaries.set(
     'key-identity.ts',
     'types.ts',
     'registry-state.ts',
+    'util/compatible-versions.ts',
     'services/abstract-marketplace.service.ts',
     'util/icon.ts',
     'util/releases.ts',
@@ -224,6 +225,8 @@ loadTypeScript(boundaries)
 const { SwUpdate } = await import('@angular/service-worker')
 const { ActivatedRoute, convertToParamMap, Router } =
   await import('@angular/router')
+const { Exver: ProductionExver } =
+  await import('../../../../../shared-libs/ts-modules/shared/src/services/exver.service.ts')
 const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
 const { PatchDB } = await import('patch-db-client')
@@ -2879,6 +2882,7 @@ test('grant capability reads the installed manifest throughout updates without c
 })
 
 test('production mocks support inspection, independent failed backups and new-local restore without a public password', async t => {
+  const { Exver } = await import('@start9labs/shared')
   const { MockApiService } =
     await import('src/app/services/api/embassy-mock-api.service')
   const { Mock } = await import('src/app/services/api/api.fixures')
@@ -2904,6 +2908,7 @@ test('production mocks support inspection, independent failed backups and new-lo
     { provide: PATCH_CACHE, useValue: cache },
     { provide: ConfigService, useValue: { gitHash: runningGitHash } },
     { provide: i18nPipe, useValue: { transform: value => value } },
+    { provide: Exver, useValue: new ProductionExver() },
   ])
   const api = runInInjectionContext(injector, () => new MockApiService())
   const patch = new PatchDB(
@@ -3414,7 +3419,7 @@ function controlsFixture({
       },
     },
     marketplace: { currentRegistryUrl$: of('https://registry.test') },
-    installOrUpload: async (...params) => {
+    dryInstall: async (...params) => {
       calls.push(params)
     },
   }
@@ -4495,14 +4500,7 @@ function marketplaceFixture(t, entries = {}) {
   )
   const injector = createEnvironmentInjector([
     { provide: PatchDB, useValue: patch },
-    {
-      provide: Exver,
-      useValue: {
-        getFlavor: () => null,
-        compareExver: (a, b) =>
-          Math.sign(a.localeCompare(b, undefined, { numeric: true })),
-      },
-    },
+    { provide: Exver, useValue: new ProductionExver() },
     {
       provide: StorageService,
       useValue: {
@@ -5170,4 +5168,440 @@ test('patch cache discards its snapshot after a failed write and clears on deman
     id: 0,
     value: {},
   })
+})
+
+test('provider-change preview completes before install and uses affected consumer names', async () => {
+  const events = []
+  const pending = deferred()
+  const metadata = {
+    ...pkg,
+    satisfies: [],
+    satisfiesPackages: { bitcoin: ['26.0.0:0'] },
+  }
+  const instance = {
+    pkg: () => metadata,
+    patch: {
+      watch$: () =>
+        of({
+          consumer: {
+            stateInfo: {
+              state: 'installed',
+              manifest: { title: 'Bitcoin consumer' },
+            },
+          },
+        }),
+    },
+    tasks: { runInline: runTask },
+    api: {
+      rpc: {
+        package: {
+          previewProviderChange: async request => {
+            events.push(['preview', request])
+            return pending.promise
+          },
+        },
+      },
+    },
+    alerts: {
+      alertBreakages: async titles => {
+        events.push(['warning', titles])
+        return true
+      },
+    },
+    installOrUpload: async (...args) => events.push(['install', ...args]),
+  }
+  const installing = Controls.prototype.dryInstall.call(
+    instance,
+    'registry',
+    false,
+  )
+  await tick()
+  assert.deepEqual(events, [
+    [
+      'preview',
+      {
+        id: metadata.id,
+        version: metadata.version,
+        satisfies: [],
+        satisfiesPackages: metadata.satisfiesPackages,
+      },
+    ],
+  ])
+  pending.resolve(['consumer'])
+  await installing
+  assert.deepEqual(events.slice(1), [
+    ['warning', ['Bitcoin consumer']],
+    ['install', 'registry', false],
+  ])
+})
+
+test('failed provider preview prevents installation', async () => {
+  let installed = false
+  const instance = {
+    pkg: () => pkg,
+    patch: { watch$: () => of({}) },
+    tasks: {
+      runInline: async work => {
+        try {
+          await work()
+          return true
+        } catch {
+          return false
+        }
+      },
+    },
+    api: {
+      rpc: {
+        package: {
+          previewProviderChange: async () => {
+            throw Error('offline')
+          },
+        },
+      },
+    },
+    installOrUpload: async () => {
+      installed = true
+    },
+  }
+  await Controls.prototype.dryInstall.call(instance, 'registry', false)
+  assert.equal(installed, false)
+})
+
+const providerRegistryEntry = (claim = '26.0.0:0', status = 'connected') => ({
+  ...registryEntry('1.0.0:0', status),
+  catalog: {
+    alternate: {
+      categories: ['bitcoin'],
+      versions: {
+        '1.0.0:0': {
+          title: 'Alternate',
+          satisfies: [],
+          satisfiesPackages: { bitcoin: [claim] },
+        },
+      },
+    },
+  },
+})
+
+test('provider discovery filters the full cached catalog before choosing releases, including superseded claiming revisions', async t => {
+  const url = 'https://registry.test/'
+  const entry = providerRegistryEntry()
+  const pkg = entry.catalog.alternate
+  pkg.firstPublishedAt = '2026-01-01T00:00:00Z'
+  pkg.versions['1.0.0:0'].superseded = true
+  pkg.versions['1.0.0:1'] = { title: 'Claim withdrawn in revision' }
+  pkg.versions['2.0.0:0'] = { title: 'Claim withdrawn in upstream release' }
+  pkg.updateTarget = '2.0.0:0'
+  const f = marketplaceFixture(t, { [url]: entry })
+  const [selected] = await firstValueFrom(
+    f.service.fetchProviders$(url, 'bitcoin', '>=26.0.0'),
+  )
+  assert.equal(selected.id, 'alternate')
+  assert.equal(selected.version, '1.0.0:0')
+  assert.equal(selected.firstPublishedAt, pkg.firstPublishedAt)
+  assert.deepEqual(selected.satisfiesPackages, { bitcoin: ['26.0.0:0'] })
+  assert.deepEqual(Object.keys(selected.best), ['1.0.0:0'])
+  assert.deepEqual(f.queries, [])
+})
+
+test('provider discovery rejects unrelated versions and aliases and honors an exact provider filter', async t => {
+  const url = 'https://registry.test/'
+  const entry = providerRegistryEntry()
+  const record = (version, metadata = {}) => ({
+    categories: [],
+    versions: { [version]: { title: 'Package', satisfies: [], ...metadata } },
+  })
+  Object.assign(entry.catalog, {
+    unrelated: record('99.0.0:0', { satisfies: ['26.0.0:0'] }),
+    bitcoin: record('27.0.0:0'),
+    wrongClaim: record('99.0.0:0', {
+      satisfiesPackages: { other: ['26.0.0:0'] },
+    }),
+  })
+  const f = marketplaceFixture(t, { [url]: entry })
+  const packages = await firstValueFrom(
+    f.service.fetchProviders$(url, 'bitcoin', '>=26.0.0'),
+  )
+  assert.deepEqual(
+    packages.map(pkg => pkg.id),
+    ['alternate', 'bitcoin'],
+  )
+  const pinned = await firstValueFrom(
+    f.service.fetchProviders$(url, 'bitcoin', '>=26.0.0', 'alternate'),
+  )
+  assert.deepEqual(
+    pinned.map(pkg => pkg.id),
+    ['alternate'],
+  )
+  assert.deepEqual(
+    await firstValueFrom(
+      f.service.fetchProviders$(url, 'bitcoin', '>=26.0.0', 'missing'),
+    ),
+    [],
+  )
+  assert.deepEqual(f.queries, [])
+})
+
+test('provider discovery honors a matching physical update target and retains newer-OS release metadata', async t => {
+  const url = 'https://registry.test/'
+  const entry = providerRegistryEntry()
+  const pkg = entry.catalog.alternate
+  pkg.versions['2.0.0:0'] = {
+    title: 'Newer OS',
+    osVersion: '0.5.0',
+    sourceVersion: '>=1.5.0',
+    satisfiesPackages: { bitcoin: ['27.0.0:0'] },
+  }
+  pkg.updateTarget = '1.0.0:0'
+  const f = marketplaceFixture(t, { [url]: entry })
+  const load = range =>
+    firstValueFrom(f.service.fetchProviders$(url, 'bitcoin', range))
+  assert.equal((await load('>=26.0.0'))[0].version, '1.0.0:0')
+  const [future] = await load('>=27.0.0')
+  assert.equal(future.version, '2.0.0:0')
+  assert.equal(future.osVersion, '0.5.0')
+  assert.equal(future.sourceVersion, '>=1.5.0')
+  assert.deepEqual(f.queries, [])
+})
+
+test('provider marketplace preserves its request across tiles and distinguishes filtered emptiness from cache loading', t => {
+  const url = 'https://registry.test/'
+  const f = marketplaceFixture(t, { [url]: registryEntry() })
+  const calls = [],
+    replies = []
+  f.service.fetchProviders$ = (...args) => {
+    calls.push(args)
+    const reply = new Subject()
+    replies.push(reply)
+    return reply
+  }
+  const params = {
+    registry: url,
+    provides: 'bitcoin',
+    requireRange: '>=26.0.0',
+  }
+  f.routeParams.next(convertToParamMap(params))
+  const page = f.makePage()
+  assert.equal(page.registry().loading, true)
+  replies[0].next([{ id: 'alternate' }])
+  const loaded = page.registry()
+  for (const tile of [{ id: 'alternate', flavor: 'default' }, {}]) {
+    f.routeParams.next(convertToParamMap({ ...params, ...tile }))
+    assert.equal(calls.length, 1)
+    assert.equal(page.registry(), loaded)
+  }
+  f.routeParams.next(convertToParamMap({ ...params, requireRange: '>=27.0.0' }))
+  assert.equal(calls.length, 2)
+  assert.equal(page.registry().loading, true)
+  f.replace('/registryCache', { [url]: registryEntry('1.0.0:0', 'connecting') })
+  assert.equal(calls.length, 2)
+  assert.equal(page.registry().status, 'connecting')
+  replies[1].next([])
+  assert.equal(page.registry().loading, false)
+  f.routeParams.next(
+    convertToParamMap({
+      ...params,
+      requireRange: '>=27.0.0',
+      providerId: 'pinned',
+    }),
+  )
+  replies[2].next([{ id: 'pinned' }])
+  assert.deepEqual(calls, [
+    [url, 'bitcoin', '>=26.0.0', null],
+    [url, 'bitcoin', '>=27.0.0', null],
+    [url, 'bitcoin', '>=27.0.0', 'pinned'],
+  ])
+  f.replace('/registryCache', { [url]: registryEntry('1.0.0:0', 'error') })
+  assert.equal(calls.length, 3)
+  assert.equal(page.registry().status, 'error')
+  assert.equal(page.registry().loading, false)
+  assert.deepEqual(page.registry().packages, [{ id: 'pinned' }])
+})
+
+test('provider results remain available offline and recover from cache updates without a query', t => {
+  const url = 'https://registry.test/'
+  const f = marketplaceFixture(t, { [url]: providerRegistryEntry() })
+  f.routeParams.next(
+    convertToParamMap({
+      registry: url,
+      provides: 'bitcoin',
+      requireRange: '>=26.0.0',
+    }),
+  )
+  const page = f.makePage()
+  assert.equal(page.registry().packages[0].id, 'alternate')
+  for (const status of ['connecting', 'error', 'connected']) {
+    f.replace('/registryCache', {
+      [url]: providerRegistryEntry('26.0.0:0', status),
+    })
+    assert.equal(page.registry().status, status)
+    assert.equal(page.registry().packages[0].id, 'alternate')
+    assert.equal(page.registry().loading, false)
+  }
+  f.replace('/registryCache', { [url]: registryEntry() })
+  assert.deepEqual(page.registry().packages, [])
+  assert.equal(page.registry().loading, false)
+  f.replace('/registryCache', { [url]: providerRegistryEntry() })
+  assert.equal(page.registry().packages[0].id, 'alternate')
+  assert.deepEqual(f.queries, [])
+})
+
+test('provider query and registry changes cannot revive an obsolete cached selection', t => {
+  const url = 'https://registry.test/'
+  const other = 'https://other.test/'
+  const f = marketplaceFixture(t, {
+    [url]: providerRegistryEntry(),
+    [other]: providerRegistryEntry('27.0.0:0'),
+  })
+  const params = {
+    registry: url,
+    provides: 'bitcoin',
+    requireRange: '>=26.0.0',
+  }
+  f.routeParams.next(convertToParamMap(params))
+  const page = f.makePage()
+  assert.equal(page.registry().packages[0].id, 'alternate')
+  f.routeParams.next(convertToParamMap({ ...params, requireRange: '>=27.0.0' }))
+  assert.deepEqual(page.registry().packages, [])
+  f.routeParams.next(
+    convertToParamMap({ ...params, registry: other, requireRange: '>=27.0.0' }),
+  )
+  assert.equal(
+    page.registry().packages[0].satisfiesPackages.bitcoin[0],
+    '27.0.0:0',
+  )
+  f.replace('/registryCache', {
+    [url]: providerRegistryEntry('99.0.0:0'),
+    [other]: providerRegistryEntry('27.0.0:0'),
+  })
+  assert.equal(page.registry().url, other)
+  assert.equal(
+    page.registry().packages[0].satisfiesPackages.bitcoin[0],
+    '27.0.0:0',
+  )
+  assert.deepEqual(f.queries, [])
+})
+
+test('provider discovery waits for its cache, then consumes cache changes offline without RPC', t => {
+  const url = 'https://registry.test/'
+  const f = marketplaceFixture(t)
+  const values = f.watch(f.service.fetchProviders$(url, 'bitcoin', '>=26.0.0'))
+  assert.deepEqual(values, [])
+  f.replace('/registryCache', {
+    [url]: { ...registryEntry(), catalog: {}, status: 'connecting' },
+  })
+  assert.deepEqual(values, [])
+  f.replace('/registryCache', { [url]: providerRegistryEntry() })
+  assert.equal(values.at(-1)[0].id, 'alternate')
+  f.replace('/registryCache', {
+    [url]: { ...registryEntry(), status: 'error' },
+  })
+  assert.deepEqual(values.at(-1), [])
+  assert.deepEqual(f.queries, [])
+})
+
+test('an initial provider-catalog failure retains registry status for retry without querying an empty cache', t => {
+  const url = 'https://registry.test/'
+  const f = marketplaceFixture(t, {
+    [url]: { ...registryEntry(), catalog: {}, status: 'error' },
+  })
+  f.routeParams.next(
+    convertToParamMap({
+      registry: url,
+      provides: 'bitcoin',
+      requireRange: '>=26.0.0',
+    }),
+  )
+  const page = f.makePage()
+  assert.equal(page.registry().status, 'error')
+  assert.equal(page.registry().loading, true)
+  assert.deepEqual(f.queries, [])
+})
+
+test('automatic registry resolution replaces history in both marketplaces', async t => {
+  const { default: StartOSMarketplace } =
+    await import('../src/app/routes/portal/routes/marketplace/marketplace.component.ts')
+  const { MainComponent: BrochureMarketplace } =
+    await import('../../../../../projects/brochure-marketplace/src/app/components/main.component.ts')
+  const { StorageService } = await import('src/app/services/storage.service')
+  const { defaultRegistries } = await import('@start9labs/shared')
+  for (const Component of [StartOSMarketplace, BrochureMarketplace]) {
+    const navigations = [],
+      failures = new Subject()
+    const savedRegistries = new BehaviorSubject([
+      { url: 'https://saved.registry', name: 'Saved registry' },
+    ])
+    const storage = new Map([['selectedRegistry', 'https://saved.registry']])
+    const route = {
+      queryParamMap: new BehaviorSubject(
+        convertToParamMap({ search: 'bitcoin', providerId: 'pinned' }),
+      ),
+      snapshot: { queryParamMap: convertToParamMap({}) },
+    }
+    const injector = createEnvironmentInjector([
+      {
+        provide: MarketplaceService,
+        useValue: {
+          currentRegistry$: of({ url: 'registry', info: {}, packages: [] }),
+          currentRegistryUrl$: new Subject(),
+          registries$: savedRegistries,
+          lastSelectedRegistry: 'https://saved.registry',
+          registryError$: failures,
+        },
+      },
+      { provide: ActivatedRoute, useValue: route },
+      {
+        provide: Router,
+        useValue: { navigate: async (...args) => navigations.push(args) },
+      },
+      {
+        provide: ConfigService,
+        useValue: { defaultRegistry: 'https://default.registry' },
+      },
+      {
+        provide: StorageService,
+        useValue: {
+          get: key => storage.get(key),
+          set: (key, value) => storage.set(key, value),
+        },
+      },
+      {
+        provide: ErrorService,
+        useValue: { handleError: error => assert.fail(String(error)) },
+      },
+      { provide: DialogService, useValue: { openAlert: () => of(undefined) } },
+      { provide: i18nPipe, useValue: { transform: value => value } },
+      { provide: TaskService, useValue: {} },
+    ])
+    t.after(() => injector.destroy())
+    runInInjectionContext(injector, () => new Component())
+    assert.equal(navigations[0][1].replaceUrl, true)
+    assert.equal(navigations[0][1].queryParamsHandling, 'merge')
+    assert.equal(
+      navigations[0][1].queryParams.registry,
+      'https://saved.registry',
+    )
+    if (Component === StartOSMarketplace) {
+      savedRegistries.next([])
+      route.queryParamMap.next(convertToParamMap({ providerId: 'pinned' }))
+      assert.equal(navigations.at(-1)[1].replaceUrl, true)
+      assert.equal(navigations.at(-1)[1].queryParamsHandling, 'merge')
+      assert.equal(
+        navigations.at(-1)[1].queryParams.registry,
+        'https://default.registry',
+      )
+      assert.equal(storage.get('selectedRegistry'), null)
+    }
+    if (Component === BrochureMarketplace) {
+      route.snapshot.queryParamMap = convertToParamMap({
+        registry: 'https://unreachable.registry',
+      })
+      failures.next('https://unreachable.registry')
+      assert.equal(navigations.at(-1)[1].replaceUrl, true)
+      assert.equal(
+        navigations.at(-1)[1].queryParams.registry,
+        defaultRegistries.start9,
+      )
+    }
+  }
 })
