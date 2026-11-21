@@ -809,7 +809,7 @@ export const ENGLISH: Record<string, number> = {
   'Delete trusted keyring?': 959,
   'Deleting this keyring removes it from both service-package and OS-update trust lists.': 960,
   'Add trusted keyring': 961,
-  'Enter an Ed25519 public key in PEM or GPG format.': 963,
+  'Enter an Ed25519 or P-256 public key in PEM format, or an Ed25519 key in GPG format.': 963,
   'Signed by': 964,
   'None': 965,
   "This service package isn't signed by anyone you trust.": 966,

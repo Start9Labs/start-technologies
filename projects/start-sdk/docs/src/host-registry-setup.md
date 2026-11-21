@@ -44,7 +44,7 @@ it added. Manage package trust under System → Trusted Keys; see
 
 ## 3. Add the first administrator
 
-Run **Manage Signers**, expand the section bearing the registry's name, and add an entry to its **Signers** list. Give it a label and paste your public key into **Public Keys**: a PEM-encoded Ed25519 public key, or a complete armored GPG export of an Ed25519 key. Contacts (email addresses, Matrix usernames, or URLs) are optional. Turn on **Admin**. Admins can manage signers, publish packages, register OS versions, and edit categories.
+Run **Manage Signers**, expand the section bearing the registry's name, and add an entry to its **Signers** list. Give it a label and paste your public key into **Public Keys**: a PEM-encoded Ed25519 or P-256 (passkey) public key, or a complete armored GPG export of an Ed25519 key. Contacts (email addresses, Matrix usernames, or URLs) are optional. Turn on **Admin**. Admins can manage signers, publish packages, register OS versions, and edit categories.
 
 **Offer for Trust**, on the same entry, is separate from **Admin**: it offers the signer's keys to users who connect the registry. See [Offering signing keys to users](host-registry-administration.md#offering-signing-keys-to-users) before turning it on.
 

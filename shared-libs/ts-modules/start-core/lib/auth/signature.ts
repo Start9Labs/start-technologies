@@ -62,7 +62,7 @@ function passkeyIdentity(passkey: Passkey): SigningIdentity {
     sign: async message => {
       const credential = (await navigator.credentials.get({
         publicKey: {
-          challenge: message,
+          challenge: new Uint8Array(sha256(message)),
           allowCredentials: [
             {
               type: 'public-key',

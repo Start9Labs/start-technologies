@@ -808,7 +808,7 @@ export default {
   959: 'Usunąć zaufany pęk kluczy?',
   960: 'Usunięcie tego pęku kluczy usuwa go z list zaufania dla pakietów usług i aktualizacji systemu.',
   961: 'Dodaj zaufany pęk kluczy',
-  963: 'Wprowadź klucz publiczny Ed25519 w formacie PEM lub GPG.',
+  963: 'Wprowadź klucz publiczny Ed25519 lub P-256 w formacie PEM albo klucz Ed25519 w formacie GPG.',
   964: 'Podpisany przez',
   965: 'Brak',
   966: 'Ten pakiet usługi nie jest podpisany przez nikogo, komu ufasz.',

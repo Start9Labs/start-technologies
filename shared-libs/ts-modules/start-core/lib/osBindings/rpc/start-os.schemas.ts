@@ -2183,7 +2183,8 @@ export const AddSignerParams: z.ZodObject<{
   name: z.ZodString
   contact: z.ZodArray<typeof ContactInfo>
   /**
-   * Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+   * Ed25519 or P-256 public keys in PEM or canonical DER Base64, or Ed25519 keys in armored
+   * OpenPGP format.
    */
   keys: z.ZodArray<z.ZodString>
   /**
@@ -2197,11 +2198,12 @@ export const AddSignerParams: z.ZodObject<{
   name: z.string(),
   contact: z.array(ContactInfo),
   /**
-   * Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.
+   * Ed25519 or P-256 public keys in PEM or canonical DER Base64, or Ed25519 keys in armored
+   * OpenPGP format.
    */
   keys: z.array(z.string()).meta({
     description:
-      'Ed25519 public keys in PEM, canonical DER Base64, or armored OpenPGP format.',
+      'Ed25519 or P-256 public keys in PEM or canonical DER Base64, or Ed25519 keys in armored\nOpenPGP format.',
   }),
   /**
    * Retained certificates; `keys` determines the selected signing keys.
@@ -2222,7 +2224,7 @@ export const AddTrustedKeyParams: z.ZodObject<{
    */
   name: z.ZodString
   /**
-   * Ed25519 public keys in PEM or armored GPG format.
+   * Ed25519 or P-256 public keys in PEM, or Ed25519 keys in armored GPG format.
    */
   publicKeys: z.ZodArray<z.ZodString>
   /**
@@ -2240,10 +2242,11 @@ export const AddTrustedKeyParams: z.ZodObject<{
     description: 'Blank names each GPG key after its identity.',
   }),
   /**
-   * Ed25519 public keys in PEM or armored GPG format.
+   * Ed25519 or P-256 public keys in PEM, or Ed25519 keys in armored GPG format.
    */
   publicKeys: z.array(z.string()).meta({
-    description: 'Ed25519 public keys in PEM or armored GPG format.',
+    description:
+      'Ed25519 or P-256 public keys in PEM, or Ed25519 keys in armored GPG format.',
   }),
   /**
    * Grants this permission to every imported key, including existing keys.

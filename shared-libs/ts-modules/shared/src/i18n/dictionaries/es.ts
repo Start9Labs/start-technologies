@@ -808,7 +808,7 @@ export default {
   959: '¿Eliminar llavero de confianza?',
   960: 'Al eliminar este llavero se retira de las listas de confianza de paquetes de servicios y de actualizaciones del sistema operativo.',
   961: 'Añadir llavero de confianza',
-  963: 'Introduce una clave pública Ed25519 en formato PEM o GPG.',
+  963: 'Introduce una clave pública Ed25519 o P-256 en formato PEM, o una clave Ed25519 en formato GPG.',
   964: 'Firmado por',
   965: 'Ninguno',
   966: 'Este paquete de servicio no está firmado por nadie en quien confíes.',

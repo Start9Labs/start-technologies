@@ -808,7 +808,7 @@ export default {
   959: 'Supprimer le trousseau de confiance ?',
   960: 'La suppression de ce trousseau le retire des listes de confiance des paquets de services et des mises à jour du système.',
   961: 'Ajouter un trousseau de confiance',
-  963: 'Saisissez une clé publique Ed25519 au format PEM ou GPG.',
+  963: 'Saisissez une clé publique Ed25519 ou P-256 au format PEM, ou une clé Ed25519 au format GPG.',
   964: 'Signé par',
   965: 'Aucun',
   966: 'Ce paquet de service n’est signé par personne à qui vous faites confiance.',

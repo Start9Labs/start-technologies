@@ -19,7 +19,7 @@ const REQUIRED_FLAGS: u8 = FLAG_USER_PRESENT | FLAG_USER_VERIFIED;
 const FLAGS_OFFSET: usize = 32;
 const MIN_AUTHENTICATOR_DATA_LEN: usize = 37;
 
-/// A WebAuthn assertion whose challenge is the signed message.
+/// A WebAuthn assertion whose challenge is the SHA-256 digest of the signed message.
 ///
 /// The signature is ASN.1 DER ECDSA for a P-256 key and raw EdDSA for an Ed25519 key. The
 /// relying party and origin are not bound to the key.
@@ -69,7 +69,7 @@ impl WebAuthnAssertion {
             || URL_SAFE_NO_PAD
                 .decode(client_data.challenge)
                 .map_err(|_| invalid_assertion())?
-                != message
+                != Sha256::digest(message).as_slice()
             || authenticator_data.len() < MIN_AUTHENTICATOR_DATA_LEN
             || authenticator_data[FLAGS_OFFSET] & REQUIRED_FLAGS != REQUIRED_FLAGS
         {
@@ -111,10 +111,10 @@ pub(crate) mod test_util {
         data
     }
 
-    pub fn client_data(ty: &str, challenge: &[u8]) -> Vec<u8> {
+    pub fn client_data(ty: &str, message: &[u8]) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
             "type": ty,
-            "challenge": URL_SAFE_NO_PAD.encode(challenge),
+            "challenge": URL_SAFE_NO_PAD.encode(Sha256::digest(message)),
             "origin": "https://start9.local",
             "crossOrigin": false,
         }))
@@ -142,12 +142,12 @@ pub(crate) mod test_util {
         .unwrap()
     }
 
-    /// A user-present P-256 passkey assertion over the challenge.
-    pub fn passkey_assertion(key: &p256::ecdsa::SigningKey, challenge: &[u8]) -> WebAuthnAssertion {
+    /// A user-verified P-256 passkey assertion over the message.
+    pub fn passkey_assertion(key: &p256::ecdsa::SigningKey, message: &[u8]) -> WebAuthnAssertion {
         p256_assertion(
             key,
             authenticator_data(REQUIRED_FLAGS),
-            client_data("webauthn.get", challenge),
+            client_data("webauthn.get", message),
         )
     }
 

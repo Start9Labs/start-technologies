@@ -60,6 +60,71 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
     assert!(asset.validate_all(SIG_CONTEXT, None).is_err());
 }
 
+fn passkey_signed_asset<C: crate::sign::commitment::SignedCommitment>(
+    commitment: C,
+    context: &str,
+) -> (RegistryAsset<C>, TrustedKeys) {
+    let key = crate::sign::webauthn::test_util::p256_key();
+    let public = AnyVerifyingKey::P256(*key.verifying_key());
+    let signature = AnySignature::WebAuthn(crate::sign::webauthn::test_util::passkey_assertion(
+        &key,
+        &crate::sign::signing_message(crate::sign::COMMITMENT_SIG_TAG, &commitment, context)
+            .unwrap(),
+    ));
+    let asset = RegistryAsset {
+        published_at: chrono::Utc::now(),
+        urls: vec![],
+        commitment,
+        signatures: SignatureMap::from([(public.clone(), signature)]),
+    };
+    let keys = TrustedKeys::from([(
+        public.interned_der64(),
+        TrustedKey {
+            name: "passkey".into(),
+            origin: "manual".into(),
+            origin_registry: None,
+            removable: true,
+            public_key: public,
+            gpg_exports: Default::default(),
+            contact: Default::default(),
+            added_at: chrono::Utc::now(),
+            marketplace: true,
+            os: true,
+        },
+    )]);
+    (asset, keys)
+}
+
+#[test]
+fn trusted_passkeys_sign_packages_and_os_updates() {
+    let (package, keys) = passkey_signed_asset(
+        MerkleArchiveCommitment {
+            root_sighash: Base64([8; 32]),
+            root_maxsize: 123,
+        },
+        SIG_CONTEXT,
+    );
+    package
+        .validate_all(
+            SIG_CONTEXT,
+            trusted_keys::signer_policy(Some(enabled_keys(&keys, TrustContext::Marketplace))),
+        )
+        .unwrap();
+    let (os, keys) = passkey_signed_asset(
+        crate::sign::commitment::blake3::Blake3Commitment {
+            hash: Base64([7; 32]),
+            size: 456,
+        },
+        crate::registry::os::SIG_CONTEXT,
+    );
+    os.validate_all(
+        crate::registry::os::SIG_CONTEXT,
+        trusted_keys::signer_policy(Some(enabled_keys(&keys, TrustContext::Os))),
+    )
+    .unwrap();
+    assert!(os.validate_all(SIG_CONTEXT, None).is_err());
+}
+
 #[test]
 fn production_and_community_build_signers_are_not_seeded_or_trusted() {
     for (fixture, signer) in [

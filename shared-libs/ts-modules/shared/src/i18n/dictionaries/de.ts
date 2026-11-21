@@ -808,7 +808,7 @@ export default {
   959: 'Vertrauenswürdigen Schlüsselbund löschen?',
   960: 'Das Löschen dieses Schlüsselbunds entfernt ihn aus den Vertrauenslisten für Dienstpakete und Betriebssystem-Updates.',
   961: 'Vertrauenswürdigen Schlüsselbund hinzufügen',
-  963: 'Geben Sie einen öffentlichen Ed25519-Schlüssel im PEM- oder GPG-Format ein.',
+  963: 'Geben Sie einen öffentlichen Ed25519- oder P-256-Schlüssel im PEM-Format oder einen Ed25519-Schlüssel im GPG-Format ein.',
   964: 'Signiert von',
   965: 'Keine',
   966: 'Dieses Dienstpaket ist von niemandem signiert, dem Sie vertrauen.',

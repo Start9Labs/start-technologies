@@ -5488,11 +5488,11 @@ help.arg.trusted-key-name:
   pl_PL: "Nazwa klucza; pusta nadaje każdemu kluczowi GPG nazwę jego tożsamości"
 
 help.arg.trusted-public-keys:
-  en_US: "Ed25519 public keys in PEM or armored GPG format; put options before -- and keys after it"
-  de_DE: "Öffentliche Ed25519-Schlüssel im PEM- oder ASCII-armierten GPG-Format; Optionen vor -- und Schlüssel danach angeben"
-  es_ES: "Claves públicas Ed25519 en formato PEM o GPG blindado; coloque las opciones antes de -- y las claves después"
-  fr_FR: "Clés publiques Ed25519 au format PEM ou GPG armuré ; placer les options avant -- et les clés après"
-  pl_PL: "Klucze publiczne Ed25519 w formacie PEM lub GPG z pancerzem ASCII; opcje podaj przed --, a klucze po nim"
+  en_US: "Ed25519 or P-256 public keys in PEM, or Ed25519 keys in armored GPG format; put options before -- and keys after it"
+  de_DE: "Öffentliche Ed25519- oder P-256-Schlüssel im PEM-Format oder Ed25519-Schlüssel im ASCII-armierten GPG-Format; Optionen vor -- und Schlüssel danach angeben"
+  es_ES: "Claves públicas Ed25519 o P-256 en formato PEM, o claves Ed25519 en formato GPG blindado; coloque las opciones antes de -- y las claves después"
+  fr_FR: "Clés publiques Ed25519 ou P-256 au format PEM, ou clés Ed25519 au format GPG armuré ; placer les options avant -- et les clés après"
+  pl_PL: "Klucze publiczne Ed25519 lub P-256 w formacie PEM albo klucze Ed25519 w formacie GPG z pancerzem ASCII; opcje podaj przed --, a klucze po nim"
 
 help.arg.tunnel-address:
   en_US: "Tunnel server address"
@@ -8566,11 +8566,11 @@ update.security.selected-registry:
   pl_PL: "wybranym rejestrze systemu"
 
 trusted-keys.invalid:
-  en_US: "Enter a name and at least one Ed25519 public key"
-  de_DE: "Geben Sie einen Namen und mindestens einen öffentlichen Ed25519-Schlüssel ein"
-  es_ES: "Introduzca un nombre y al menos una clave pública Ed25519"
-  fr_FR: "Saisissez un nom et au moins une clé publique Ed25519"
-  pl_PL: "Podaj nazwę i co najmniej jeden klucz publiczny Ed25519"
+  en_US: "Enter a name and at least one Ed25519 or P-256 public key"
+  de_DE: "Geben Sie einen Namen und mindestens einen öffentlichen Ed25519- oder P-256-Schlüssel ein"
+  es_ES: "Introduzca un nombre y al menos una clave pública Ed25519 o P-256"
+  fr_FR: "Saisissez un nom et au moins une clé publique Ed25519 ou P-256"
+  pl_PL: "Podaj nazwę i co najmniej jeden klucz publiczny Ed25519 lub P-256"
 
 trusted-keys.invalid-registry-url:
   en_US: "Enter an HTTP or HTTPS registry URL without credentials, query, or fragment"
