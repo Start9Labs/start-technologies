@@ -596,4 +596,6 @@ export default {
   644: 'Lorsque derrière un NAT',
   645: 'Se connecter depuis la ligne de commande',
   646: 'Enregistrer ce navigateur',
+  647: '{profile} chevauche le réseau amont {network}',
+  648: 'Ses appareils peuvent perdre Internet ou ce tableau de bord. Changez son sous-réseau pour un sous-réseau hors de ce réseau.',
 } satisfies i18n

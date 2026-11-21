@@ -202,7 +202,8 @@ struct SetInitialPasswordParams {
 }
 // Response: null
 // Backend: decrypts the password, writes the root hash to /etc/shadow, revokes
-// every enrolled key, applies the timezone, disables the captive portal
+// every enrolled key, applies the timezone, disables the captive portal across
+// all dnsmasq instances. Subnet-triggered reconciliation cannot undo this cleanup.
 ```
 
 ---
@@ -473,6 +474,8 @@ struct WanIpv4SetRequest {
 }
 // Response: null
 // Backend: updates UCI network.wan, restarts network
+// Validation: a static address whose network overlaps any profile's /24 is
+//   InvalidRequest (see Subnet rules under profiles).
 ```
 
 ### `wan.ipv6-get`
@@ -707,23 +710,18 @@ struct LanIpv4SetRequest {
 // Backend: updates UCI network.lan ipaddr (netmask /24) — and every profile's
 // addresses on a /16 block change — then clears DHCP leases, cycles only the LAN
 // interface (plus every profile interface on a block change) with ifdown/ifup,
-// reloads the firewall and dnsmasq, and restarts Wi-Fi.
+// reloads the firewall and dnsmasq, refreshes captive discovery, restarts Wi-Fi,
+// and drops carrier on the affected wired LAN ports. Readiness checks use each
+// interface's configured device, including VLAN devices.
 // Inbound VPN peers the change would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
-// Validation: address must fall inside an RFC 1918 block at one of the
-//   selectable /16 boundaries, else ErrorKind::InvalidRequest:
+// Validation: the Subnet rules under profiles, for the LAN and, on a block
+//   change, every profile it moves. The LAN address must fall inside an
+//   RFC 1918 block at one of the selectable /16 boundaries:
 //     10.0.0.0/8     — second octet 0..=255
 //     172.16.0.0/12  — second octet 16..=31
 //     192.168.0.0/16 — second octet == 168
-//   (3rd/4th octets unconstrained.) The same rule is enforced on the admin
-//   profile via profiles.set/create; non-admin profiles must additionally
-//   share the admin LAN's first two octets (stay inside its /16).
-//   The target /24 must not collide with another profile's subnet, else
-//   ErrorKind::SubnetCollision (same guard as profiles.create/profiles.edit;
-//   on a block change the check applies post-move, since every profile keeps
-//   its 3rd octet). A re-set of the current subnet always passes.
-//   Changing the address while a DHCP reservation sits in the old /24 (the old
-//   /16 on a block change) is rejected with ErrorKind::DhcpStaticHostsInSubnet.
+//   (3rd/4th octets unconstrained.) A re-set of the current address always passes.
 ```
 
 ### `lan.ipv6-get`
@@ -2033,15 +2031,29 @@ struct Profile<ProfileIdOpt> {
     dns_source: String,
 }
 // Response: ProfileId
-// Validation: gateway_ip must stay inside the LAN network block (see
-//   lan.ipv4-set). owns_lan profiles must be a valid RFC 1918 selection;
-//   others must share the admin LAN's first two octets, else InvalidRequest.
-//   outbound must be "wan" or an outbound VPN that vpn-client.list reports as
+// Validation: the Subnet rules below. outbound must be "wan" or an outbound VPN that vpn-client.list reports as
 //   enabled: an unknown interface (or one that is a VPN server rather than a
 //   client) is ErrorKind::NotFound, a disabled one ErrorKind::VpnDisabled.
 //   A disabled VPN's tunnel never comes up, so routing a profile through it
 //   would blackhole that profile.
 ```
+
+### Subnet rules
+
+Every write that adds or moves a profile or LAN gateway (`profiles.create`,
+`profiles.set`, `lan.ipv4-set`, and the moves `profiles.resolve-wan-overlap`
+makes), or changes the static WAN address (`wan.ipv4-set`), is checked against
+the configuration it is about to save. Each added or moved `/24`:
+
+- stays inside the LAN network block; the LAN itself must be an RFC 1918
+  selection (`InvalidRequest`);
+- holds no other profile's `/24` (`SubnetCollision`);
+- overlaps no WAN IPv4 network, live or static (`InvalidRequest`);
+- leaves no DHCP reservation in the `/24` it moved off (`DhcpStaticHostsInSubnet`).
+
+A changed static WAN network is checked against every profile. Subnets the
+write leaves unchanged always pass, so an already conflicting configuration
+stays editable.
 
 On create and set, `lan_access: "ALL"` stores `access_to_new_profiles: true`,
 `"SAME_PROFILE"` stores `false`, and `other_profiles` preserves the supplied flag.
@@ -2064,7 +2076,10 @@ struct ProfileSetRequest {
     force: bool,
 }
 // Response: ProfileId
-// Validation: same gateway_ip and outbound checks as profiles.create.
+// Validation: same checks as profiles.create; a LAN owner's change that moves
+//   the network block applies the Subnet rules to every profile it moves.
+// LAN ownership comes from the resolved interface; owns_lan is ignored on update.
+// VPN peer protection also uses the resolved interface for fullname-only lookups.
 // Inbound VPN peers the new subnet would break fail the call with
 //   ErrorKind::VpnPeersWouldBreak unless force is set.
 ```
@@ -2143,6 +2158,46 @@ struct ScheduleWindows {
 // regenerates the crontab projection and firewall rules. Same wrap/overlap/
 // full-week validation as wifi.blackout-set (equal startTime/endTime = full
 // 24-hour window; InvalidValue on overlap or gapless full-week coverage).
+```
+
+### `profiles.wan-overlaps`
+
+```rust
+// Request: {}
+// Response: Vec<WanOverlap>, empty while the WAN has no IPv4 address
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WanOverlap {
+    profile: String,      // fullname
+    interface: String,
+    subnet: String,       // the profile's /24, e.g. "192.168.0.0/24"
+    wan_network: String,  // the overlapping WAN network, e.g. "192.168.0.0/24"
+}
+// Backend: every profile whose /24 overlaps a live or static WAN IPv4 network.
+```
+
+### `profiles.resolve-wan-overlap`
+
+Internal endpoint, **not called from the frontend**. Run by the daemon at boot and by the
+`/etc/hotplug.d/iface/99-startwrt-wan-overlap` hook on `wan` `ifup`/`ifupdate`, in the
+`startwrt-cli` process.
+
+```rust
+// Request: {}
+// Response: null
+// Backend: under a lock shared by every run, moves each profile whose /24
+//   overlaps a WAN IPv4 network and is the LAN owner, or has no Wi-Fi password,
+//   LAN port, or inbound VPN server, to the lowest free /24 in the block from .10
+//   up. Every move is held to the Subnet rules and the inbound VPN peer guard; a
+//   refused move is logged to the Activity log and left for the user, and the
+//   rest proceed. All moves land in one write, then the moved interfaces are
+//   cycled, an active captive portal follows the LAN, and the LAN ports carrying
+//   the moved profiles are bounced. The WAN stays up. A run with nothing to move
+//   changes nothing. Eligibility, trial validation and publication share one
+//   UCI snapshot; concurrent assignments conflict and replan from fresh intent.
+//   Refused moves do not reserve free subnets. profiles.wan-overlaps reports
+//   every overlap.
 ```
 
 ---

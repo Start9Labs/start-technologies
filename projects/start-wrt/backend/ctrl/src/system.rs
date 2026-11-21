@@ -267,6 +267,17 @@ pub(crate) fn wan_ipv4_addrs() -> Vec<Ipv4Addr> {
 
 /// `None` when ubus is unavailable; empty when the interface is down.
 pub(crate) fn read_wan_ipv4_addrs() -> Option<Vec<Ipv4Addr>> {
+    Some(
+        read_wan_ipv4_networks()?
+            .into_iter()
+            .map(|net| net.addr())
+            .collect(),
+    )
+}
+
+/// Every IPv4 address on the `wan` interface with its prefix length, in ubus
+/// order. `None` when ubus is unavailable; empty when the interface is down.
+pub(crate) fn read_wan_ipv4_networks() -> Option<Vec<ipnet::Ipv4Net>> {
     let out = StdCommand::new("ubus")
         .args(["call", "network.interface.wan", "status"])
         .output()
@@ -275,16 +286,7 @@ pub(crate) fn read_wan_ipv4_addrs() -> Option<Vec<Ipv4Addr>> {
         return None;
     }
     let json = serde_json::from_slice::<serde_json::Value>(&out.stdout).ok()?;
-    Some(
-        json.get("ipv4-address")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|e| e.get("address")?.as_str()?.parse().ok())
-                    .collect()
-            })
-            .unwrap_or_default(),
-    )
+    Some(crate::subnets::parse_ubus_ipv4(&json))
 }
 
 pub async fn get_wan_ipv6s() -> Result<Vec<Ipv6Addr>, Error> {

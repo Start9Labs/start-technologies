@@ -596,4 +596,6 @@ export default {
   644: 'Wenn hinter NAT',
   645: 'Über die Befehlszeile anmelden',
   646: 'Diesen Browser registrieren',
+  647: '{profile} überschneidet sich mit dem vorgelagerten Netzwerk {network}',
+  648: 'Geräte darin können das Internet oder dieses Dashboard verlieren. Ändern Sie sein Subnetz in eines außerhalb dieses Netzwerks.',
 } satisfies i18n

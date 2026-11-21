@@ -1657,6 +1657,19 @@ export const WanIpv6Mode: z.ZodEnum<{
   .meta({
     id: 'WanIpv6Mode',
   })
+export const WanOverlap: z.ZodObject<{
+  profile: z.ZodString
+  interface: z.ZodString
+  subnet: z.ZodString
+  wanNetwork: z.ZodString
+}> = /* @__PURE__ */ object({
+  profile: z.string(),
+  interface: z.string(),
+  subnet: z.string(),
+  wanNetwork: z.string(),
+}).meta({
+  id: 'WanOverlap',
+})
 export const WifiRadio: z.ZodObject<{
   band: z.ZodString
   channel: z.ZodString
@@ -3989,6 +4002,12 @@ export const Api = {
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
+        'resolve-wan-overlap': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
         'schedule-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
@@ -4035,6 +4054,23 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ ProfileId,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'wan-overlaps': {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
+          _RETURN: /* @__PURE__ */ z.array(WanOverlap),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },

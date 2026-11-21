@@ -46,6 +46,7 @@ pub use startos::sign;
 pub mod ssh_keys;
 pub mod ssh_sessions;
 pub mod ssl;
+pub mod subnets;
 pub mod system;
 pub mod tls;
 pub mod uci;
@@ -118,6 +119,14 @@ pub trait CtrlContext: Context + Clone {
     fn wan_ipv4_addrs(&self) -> Vec<std::net::Ipv4Addr> {
         if self.effectful() {
             crate::system::wan_ipv4_addrs()
+        } else {
+            Vec::new()
+        }
+    }
+    /// The router's WAN IPv4 networks. Empty when unknown.
+    fn wan_ipv4_networks(&self) -> Vec<ipnet::Ipv4Net> {
+        if self.effectful() {
+            crate::system::read_wan_ipv4_networks().unwrap_or_default()
         } else {
             Vec::new()
         }

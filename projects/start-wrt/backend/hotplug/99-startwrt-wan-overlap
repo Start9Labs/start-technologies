@@ -1,0 +1,5 @@
+#!/bin/sh
+# Move profiles off a subnet the WAN lease now overlaps.
+[ "$ACTION" = "ifup" -o "$ACTION" = "ifupdate" ] && [ "$INTERFACE" = "wan" ] && {
+    /usr/bin/startwrt-cli profiles resolve-wan-overlap 2>/dev/null &
+}

@@ -601,4 +601,6 @@ export const ENGLISH: Record<string, number> = {
   'When behind NAT': 644,
   'Sign in from the command line': 645,
   'Enroll this browser': 646,
+  '{profile} overlaps the upstream network {network}': 647,
+  'Devices on it can lose the Internet or this dashboard. Change its subnet to one outside that network.': 648,
 }
