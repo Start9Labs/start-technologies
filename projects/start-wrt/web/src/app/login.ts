@@ -8,8 +8,15 @@ import {
 } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { Router } from '@angular/router'
-import { AuthKeyService, CaWizard } from '@start9labs/shared'
-import { TuiButton, TuiError, TuiInput, TuiTextfield } from '@taiga-ui/core'
+import { AuthKeyService, CaWizard, CLI_ENROLL } from '@start9labs/shared'
+import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
+import {
+  TuiButton,
+  TuiError,
+  TuiInput,
+  TuiLink,
+  TuiTextfield,
+} from '@taiga-ui/core'
 import { TuiButtonLoading } from '@taiga-ui/kit'
 import { ApiService } from 'src/app/services/api/api.service'
 import { AuthService } from 'src/app/services/auth.service'
@@ -44,6 +51,11 @@ import { RpcError } from 'src/app/services/rpc.service'
           </button>
         </tui-textfield>
         <tui-error [error]="(error() | i18n) || null" />
+        @if (rateLimited()) {
+          <button tuiLink type="button" (click)="enroll()">
+            {{ 'Sign in from the command line' | i18n }}
+          </button>
+        }
       </form>
     }
   `,
@@ -84,6 +96,7 @@ import { RpcError } from 'src/app/services/rpc.service'
     TuiError,
     TuiButtonLoading,
     TuiInput,
+    TuiLink,
     CaWizard,
     i18nPipe,
   ],
@@ -94,6 +107,8 @@ export default class Login {
   private readonly api = inject(ApiService)
   private readonly authKeys = inject(AuthKeyService)
   private readonly document = inject(DOCUMENT)
+  private readonly dialogs = inject(TuiResponsiveDialogService)
+  private readonly i18n = inject(i18nPipe)
 
   private readonly isLanHttp = computed(() => {
     const loc = this.document.location
@@ -107,6 +122,10 @@ export default class Login {
   protected readonly error = linkedSignal<string, i18nKey | null>({
     source: () => this.password(),
     computation: () => null,
+  })
+  protected readonly rateLimited = linkedSignal({
+    source: () => this.password(),
+    computation: () => false,
   })
 
   protected async login() {
@@ -122,9 +141,9 @@ export default class Login {
         await this.authKeys.rollback()
         throw e
       }
-      this.auth.authenticated.set(true)
-      this.router.navigate(['.'])
+      this.signedIn()
     } catch (e) {
+      this.rateLimited.set(e instanceof RpcError && e.code === 37)
       this.error.set(
         e instanceof RpcError && e.code === 7
           ? 'Password is invalid'
@@ -133,5 +152,24 @@ export default class Login {
     } finally {
       this.loading.set(false)
     }
+  }
+
+  protected enroll() {
+    this.dialogs
+      .open<boolean>(CLI_ENROLL, {
+        label: this.i18n.transform('Enroll this browser'),
+        data: {
+          command: 'startwrt-cli auth key add',
+          probe: () => this.api.checkEnrollment(),
+        },
+      })
+      .subscribe(enrolled => {
+        if (enrolled) this.signedIn()
+      })
+  }
+
+  private signedIn() {
+    this.auth.authenticated.set(true)
+    this.router.navigate(['.'])
   }
 }

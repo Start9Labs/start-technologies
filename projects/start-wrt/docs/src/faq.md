@@ -37,6 +37,10 @@ You have two options:
 1. **Factory reset** — Perform a [factory reset](factory-reset.md) from the web interface (if you are still logged in) or, on the four-port Start9 Router, with the factory-reset button. This wipes all settings; Wi-Fi comes back up with the sticker password.
 2. **Reflash** — Boot from a microSD card and choose "Keep settings" to reinstall the firmware while preserving settings. You will be prompted to create a new admin password. See [Installing StartWRT](installing.md).
 
+## Login says there have been too many attempts
+
+StartWRT limits password attempts, and someone guessing your password can use them all up. Select **Sign in from the command line** under the error. [SSH](ssh.md) into the router, run the command it shows, then select **Continue**. The command enrolls this browser without a password, so the web interface works normally even while the guessing continues.
+
 ## What if I lose my Wi-Fi sticker password?
 
 The Wi-Fi password is printed on the sticker on the bottom of the router and stored in the router's EEPROM — it can also be displayed in the StartWRT GUI on the WiFi tab as the Admin Profile 'Default' label. The EEPROM value is only re-read on a [factory reset](factory-reset.md); if you have replaced the **Default** password with your own, that new password is what's in effect. On a DIY or unprogrammed board with no EEPROM Wi-Fi password, connect via Ethernet and set one in the web interface. See [Installing StartWRT](installing.md#diy-and-unprogrammed-boards) for the full procedure.

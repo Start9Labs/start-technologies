@@ -1098,4 +1098,8 @@ export default {
   1304: 'Nowości',
   1305: 'Ta wersja wymaga nowszej wersji StartOS. Zaktualizuj serwer, aby ją zainstalować.',
   1306: 'Zainstalowanej wersji nie można zaktualizować bezpośrednio do tej wersji.',
+  1307: 'Zaloguj się bez hasła, uruchamiając to polecenie w terminalu na serwerze, a następnie wybierz Kontynuuj.',
+  1308: 'Ta przeglądarka nie jest jeszcze zarejestrowana',
+  1309: 'Zaloguj się z wiersza poleceń',
+  1310: 'Zarejestruj tę przeglądarkę',
 } satisfies i18n

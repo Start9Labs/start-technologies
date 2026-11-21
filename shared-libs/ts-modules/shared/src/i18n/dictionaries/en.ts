@@ -1099,4 +1099,8 @@ export const ENGLISH: Record<string, number> = {
   'New Arrivals': 1304,
   'This version requires a newer version of StartOS. Update your server to install it.': 1305,
   'Your installed version cannot update directly to this version.': 1306,
+  'Sign in without a password by running this command in a terminal on the server, then select Continue.': 1307,
+  'This browser is not enrolled yet': 1308,
+  'Sign in from the command line': 1309,
+  'Enroll this browser': 1310,
 }

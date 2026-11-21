@@ -9,8 +9,9 @@
 - `shared` hosts the dictionaries for ui/setup-wizard/brochure; start-wrt, start-tunnel, and
   support-server's portal keep local copies of the same machinery (consolidation into shared
   is planned — don't grow them further apart). A shared component translates through the shared
-  `I18N` token, not the app's; start-wrt fills it in `i18nService.setLangLocal`, and an app
-  that does not renders shared components in English. ops-server and start9-store are English-only:
+  `I18N` token; start-wrt fills it with the shared dictionaries in `i18nService.setLangLocal`,
+  and start-tunnel fills it with its own and provides their English-to-ID map as `I18N_IDS`,
+  so its dictionaries carry every shared string it renders. ops-server and start9-store are English-only:
   hardcode strings there.
 - Shared-lib services translate centrally: `DialogService`/`TaskService` accept `i18nKey`-typed
   labels, so callers pass English keys and never pre-translate.
