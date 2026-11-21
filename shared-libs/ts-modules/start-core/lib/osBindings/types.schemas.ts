@@ -336,7 +336,7 @@ export const CreateTokenParams: z.ZodObject<{ name: z.ZodString }> =
   })
 export const CreatedToken: z.ZodObject<{
   /**
-   * The session id the token authenticates as, for `auth.session.kill`.
+   * The session id the token authenticates as, for `auth.token.remove`.
    */
   id: z.ZodString
   /**
@@ -345,11 +345,11 @@ export const CreatedToken: z.ZodObject<{
   token: z.ZodString
 }> = /* @__PURE__ */ object({
   /**
-   * The session id the token authenticates as, for `auth.session.kill`.
+   * The session id the token authenticates as, for `auth.token.remove`.
    */
   id: z.string().meta({
     description:
-      'The session id the token authenticates as, for `auth.session.kill`.',
+      'The session id the token authenticates as, for `auth.token.remove`.',
   }),
   /**
    * The bearer secret. It is not stored and cannot be retrieved again.
@@ -1443,6 +1443,11 @@ export const RemoveDomainParams: z.ZodObject<{ fqdn: z.ZodString }> =
   /* @__PURE__ */ object({ fqdn: z.string() }).meta({
     id: 'RemoveDomainParams',
   })
+export const RemoveTokensParams: z.ZodObject<{
+  tokens: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({ tokens: z.array(z.string()) }).meta({
+  id: 'RemoveTokensParams',
+})
 export const RemoveVersionParams: z.ZodObject<{ version: z.ZodString }> =
   /* @__PURE__ */ object({ version: z.string() }).meta({
     id: 'RemoveVersionParams',
@@ -2416,6 +2421,23 @@ export const AddCategoryParams: z.ZodObject<{
   name: typeof LocaleString
 }> = /* @__PURE__ */ object({ id: z.string(), name: LocaleString }).meta({
   id: 'AddCategoryParams',
+})
+export const AddKeyParams: z.ZodObject<{
+  key: typeof AnyVerifyingKey
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  userAgent: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  key: AnyVerifyingKey,
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'AddKeyParams',
 })
 export const AddMirrorParams: z.ZodObject<{
   url: z.ZodString
@@ -3604,21 +3626,6 @@ export const IpInfo: z.ZodObject<{
 }).meta({
   id: 'IpInfo',
 })
-export const KillParams: z.ZodObject<{
-  pubkeys: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
-    z.ZodArray<typeof AnyVerifyingKey>
-  >
-  tokens: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pubkeys: wire(z.array(AnyVerifyingKey).optional(), z.array(AnyVerifyingKey)),
-  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
-}).meta({
-  id: 'KillParams',
-})
 export const LegacyAlpnInfo: z.ZodUnion<
   readonly [
     z.ZodLiteral<'reflect'>,
@@ -4370,6 +4377,11 @@ export const RemoveAdminParams: z.ZodObject<{ signer: typeof Guid }> =
   /* @__PURE__ */ object({ signer: Guid }).meta({
     id: 'RemoveAdminParams',
   })
+export const RemoveKeyParams: z.ZodObject<{
+  keys: z.ZodArray<typeof AnyVerifyingKey>
+}> = /* @__PURE__ */ object({ keys: z.array(AnyVerifyingKey) }).meta({
+  id: 'RemoveKeyParams',
+})
 export const RemoveMirrorParams: z.ZodObject<{
   id: typeof PackageId
   version: typeof Version
@@ -5569,6 +5581,23 @@ export const InstallParams: z.ZodObject<{
   }),
 }).meta({
   id: 'InstallParams',
+})
+
+/**
+ * Enrolled keys, including ephemeral ones, and the caller's own.
+ */
+export const KeyList: z.ZodObject<{
+  current: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  keys: typeof AuthKeys
+}> = /* @__PURE__ */ object({
+  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  keys: AuthKeys,
+}).meta({
+  id: 'KeyList',
+  description: "Enrolled keys, including ephemeral ones, and the caller's own.",
 })
 export const MetadataSrc: z.ZodUnion<
   readonly [
@@ -7098,18 +7127,6 @@ export const ServerStatus: z.ZodObject<{
   restart: wire(RestartReason.nullable().optional(), RestartReason.nullable()),
 }).meta({
   id: 'ServerStatus',
-})
-export const SessionList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sessions: typeof Sessions
-}> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
-  sessions: Sessions,
-}).meta({
-  id: 'SessionList',
 })
 export const SetBackupProgress: z.ZodObject<{ progress: typeof Progress }> =
   /* @__PURE__ */ object({ progress: Progress }).meta({

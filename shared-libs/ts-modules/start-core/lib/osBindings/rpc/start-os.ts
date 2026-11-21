@@ -218,6 +218,7 @@ export type HostIdInput = z.input<typeof schemas.HostId>
 export type ImageIdInput = z.input<typeof schemas.ImageId>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
 export type KeyboardOptionsInput = z.input<typeof schemas.KeyboardOptions>
+export type ListKeysParamsInput = z.input<typeof schemas.ListKeysParams>
 export type ListNotificationParamsInput = z.input<
   typeof schemas.ListNotificationParams
 >
@@ -226,7 +227,6 @@ export type ListNotificationParamsInput = z.input<
  * Address of the NUT server to list UPS devices from.
  */
 export type ListNutUpsParamsInput = z.input<typeof schemas.ListNutUpsParams>
-export type ListParamsInput = z.input<typeof schemas.ListParams>
 export type LogEntry = z.output<typeof schemas.LogEntry>
 
 /**
@@ -308,6 +308,7 @@ export type RemoveOperation = z.output<typeof schemas.RemoveOperation>
 export type RemovePassthroughParamsInput = z.input<
   typeof schemas.RemovePassthroughParams
 >
+export type RemoveTokensParamsInput = z.input<typeof schemas.RemoveTokensParams>
 export type RemoveTrustedKeyParamsInput = z.input<
   typeof schemas.RemoveTrustedKeyParams
 >
@@ -423,6 +424,7 @@ export type ZramParamsInput = z.input<typeof schemas.ZramParams>
 export type AcceptSignersInput = z.input<typeof schemas.AcceptSigners>
 export type ActionInput = z.output<typeof schemas.ActionInput>
 export type ActionResultValue = z.output<typeof schemas.ActionResultValue>
+export type AddKeyParamsInput = z.input<typeof schemas.AddKeyParams>
 export type AddPassthroughParamsInput = z.input<
   typeof schemas.AddPassthroughParams
 >
@@ -511,7 +513,6 @@ export type InstalledVersionParamsInput = z.input<
   typeof schemas.InstalledVersionParams
 >
 export type IpInfo = z.output<typeof schemas.IpInfo>
-export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LegacyAlpnInfo = z.output<typeof schemas.LegacyAlpnInfo>
 export type LogFollowResponse = z.output<typeof schemas.LogFollowResponse>
 export type LogResponse = z.output<typeof schemas.LogResponse>
@@ -560,6 +561,7 @@ export type PushSubscriptionInput = z.input<typeof schemas.PushSubscription>
 export type RebuildParamsInput = z.input<typeof schemas.RebuildParams>
 export type RegistryIdentity = z.output<typeof schemas.RegistryIdentity>
 export type RemoveAcmeParamsInput = z.input<typeof schemas.RemoveAcmeParams>
+export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
 export type RemoveTunnelParamsInput = z.input<typeof schemas.RemoveTunnelParams>
 export type RenameGatewayParamsInput = z.input<
   typeof schemas.RenameGatewayParams
@@ -656,6 +658,11 @@ export type HostAddress = z.output<typeof schemas.HostAddress>
 export type HostnameInfo = z.output<typeof schemas.HostnameInfo>
 export type HostnameInfoInput = z.input<typeof schemas.HostnameInfo>
 export type InstallParamsInput = z.input<typeof schemas.InstallParams>
+
+/**
+ * Enrolled keys, including ephemeral ones, and the caller's own.
+ */
+export type KeyList = z.output<typeof schemas.KeyList>
 export type Metrics = z.output<typeof schemas.Metrics>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
 export type NotificationWithId = z.output<typeof schemas.NotificationWithId>
@@ -675,11 +682,6 @@ export type ResetPasswordParamsInput = z.input<
   typeof schemas.ResetPasswordParams
 >
 export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
-
-/**
- * The server's sessions, by credential type.
- */
-export type Sessions = z.output<typeof schemas.Sessions>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 
 /**
@@ -722,7 +724,6 @@ export type SelectAddressParamsInput = z.input<
   typeof schemas.SelectAddressParams
 >
 export type SelectGuaParamsInput = z.input<typeof schemas.SelectGuaParams>
-export type SessionList = z.output<typeof schemas.SessionList>
 
 /**
  * Parameters for replacing the stored NUT configuration.

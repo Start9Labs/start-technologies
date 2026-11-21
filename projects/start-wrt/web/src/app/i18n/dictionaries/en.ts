@@ -599,4 +599,6 @@ export const ENGLISH: Record<string, number> = {
   "To disable this VPN, first change {vpns} to connect via something else.": 642,
   'Never (Default)': 643,
   'When behind NAT': 644,
+  'Sign in from the command line': 645,
+  'Enroll this browser': 646,
 }

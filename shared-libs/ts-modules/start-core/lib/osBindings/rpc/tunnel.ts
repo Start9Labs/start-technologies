@@ -161,7 +161,7 @@ export type HasUnenrolledKeys = z.output<typeof schemas.HasUnenrolledKeys>
 export type HttpRedirectStatus = z.output<typeof schemas.HttpRedirectStatus>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
 export type ListDevicesParamsInput = z.input<typeof schemas.ListDevicesParams>
-export type ListParamsInput = z.input<typeof schemas.ListParams>
+export type ListKeysParamsInput = z.input<typeof schemas.ListKeysParams>
 export type LogoutParamsInput = z.input<typeof schemas.LogoutParams>
 
 /**
@@ -235,7 +235,6 @@ export type ApplyWithPathParamsInput = z.input<
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
-export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 
 /**
@@ -262,14 +261,14 @@ export type UpdatePortForwardLabelParamsInput = z.input<
 export type WgConfig = z.output<typeof schemas.WgConfig>
 
 /**
+ * Enrolled keys, including ephemeral ones, and the caller's own.
+ */
+export type KeyList = z.output<typeof schemas.KeyList>
+
+/**
  * Representation of JSON Patch (list of patch operations)
  */
 export type Patch = z.output<typeof schemas.Patch>
-
-/**
- * The server's sessions, by credential type.
- */
-export type Sessions = z.output<typeof schemas.Sessions>
 
 /**
  * Non-empty selected transports, serialized as a sorted, deduplicated array.
@@ -285,7 +284,6 @@ export type DiffPatch = z.output<typeof schemas.DiffPatch>
 export type RemovePinholeParamsInput = z.input<
   typeof schemas.RemovePinholeParams
 >
-export type SessionList = z.output<typeof schemas.SessionList>
 export type SetPinholeEnabledParamsInput = z.input<
   typeof schemas.SetPinholeEnabledParams
 >
