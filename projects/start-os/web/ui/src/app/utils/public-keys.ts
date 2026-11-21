@@ -3,11 +3,17 @@ import { auth } from '@start9labs/start-core'
 const PUBLIC_KEY_BLOCK =
   /-----BEGIN (PUBLIC KEY|PGP PUBLIC KEY BLOCK)-----[\s\S]*?-----END \1-----/g
 export function publicKeyPem(raw: Uint8Array): string {
-  return `-----BEGIN PUBLIC KEY-----\n${auth.ed25519PublicKeyDer64(raw)}\n-----END PUBLIC KEY-----\n`
+  return auth.derToPem(
+    'PUBLIC KEY',
+    auth.base64ToBytes(auth.ed25519PublicKeyDer64(raw)),
+  )
 }
 
 export function parsePemPublicKey(value: string): string {
-  return publicKeyPem(auth.parseEd25519PublicKey(auth.normalizeDer64(value)))
+  return auth.derToPem(
+    'PUBLIC KEY',
+    auth.base64ToBytes(auth.verifyingKeyDer64(auth.normalizeDer64(value))),
+  )
 }
 
 export function parsePublicKeys(value: string): string[] {

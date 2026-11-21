@@ -53,6 +53,7 @@ pub(crate) fn db_subscribe_request(
     let mut params = imbl_value::json!({ "pointer": pointer });
     if let Some(os_version) = os_version {
         params["osVersion"] = imbl_value::json!(os_version);
+        params["passkeySignatures"] = imbl_value::json!(true);
     }
     imbl_value::json!({
         "jsonrpc": "2.0", "rpcstream": RPCSTREAM_VERSION, "id": id,
@@ -75,8 +76,9 @@ pub(crate) async fn connect(
     client: &ReloadableHttpClient,
     registry: &Url,
     signer: &Signer,
-    headers: http::HeaderMap,
+    mut headers: http::HeaderMap,
 ) -> Result<EncryptedSocket, Error> {
+    crate::registry::device_info::advertise_signature_capabilities(&mut headers);
     let address = registry.host_str().or_not_found("registry hostname")?;
     let url = websocket_url(registry)?;
     let mut request = url.into_client_request().with_kind(ErrorKind::Network)?;

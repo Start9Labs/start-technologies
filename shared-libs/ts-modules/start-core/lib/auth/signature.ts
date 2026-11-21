@@ -1,4 +1,5 @@
 import { ed25519, ed25519ph } from '@noble/curves/ed25519'
+import { p256 } from '@noble/curves/p256'
 import { blake3 } from '@noble/hashes/blake3'
 import { sha256 } from '@noble/hashes/sha256'
 import { bytesToHex, concatBytes } from '@noble/hashes/utils'
@@ -11,6 +12,11 @@ const ED25519_SPKI_PREFIX = new Uint8Array(SIGNATURE_PROFILE.ed25519.keyPrefix)
 const WEBAUTHN_ALGORITHM = new Uint8Array(SIGNATURE_PROFILE.webauthn.algorithm)
 const COSE_ES256 = -7
 const COSE_EDDSA = -8
+
+/** Advertises registry support for P-256 keys and WebAuthn signatures. */
+export const REGISTRY_SIGNATURE_HEADERS = {
+  [SIGNATURE_PROFILE.registry.header]: SIGNATURE_PROFILE.registry.value,
+} as const
 
 export const AUTH_SIG_HEADER = SIGNATURE_PROFILE.http.header
 export const SIGNATURE_PREFIX = new Uint8Array(
@@ -382,7 +388,8 @@ export function signingMessage(
   return new Uint8Array([...tag, bytes.length, ...bytes, type, ...commitment])
 }
 
-function derToPem(label: string, der: Uint8Array): string {
+/** PEM-armors DER bytes using 64-character lines. */
+export function derToPem(label: string, der: Uint8Array): string {
   const body = bytesToBase64(der)
   const lines: string[] = []
   for (let i = 0; i < body.length; i += 64) lines.push(body.slice(i, i + 64))
@@ -435,6 +442,25 @@ export function parseEd25519PublicKey(serialized: string): Uint8Array {
   if (!ed25519.utils.isValidPublicKey(key, true))
     throw new Error('Public key is not a curve point')
   return key
+}
+
+/** Canonical SPKI DER64 for an Ed25519 or P-256 key, including compressed P-256 input. */
+export function verifyingKeyDer64(serialized: string): string {
+  const profile = SIGNATURE_PROFILE.p256
+  for (const [prefix, length] of [
+    [profile.keyPrefix, profile.keyBytes],
+    [profile.compressedKeyPrefix, profile.compressedKeyBytes],
+  ] as const) {
+    try {
+      const point = p256.ProjectivePoint.fromHex(
+        parseDerPayload(serialized, new Uint8Array(prefix), length),
+      )
+      return bytesToBase64(
+        concatBytes(new Uint8Array(profile.keyPrefix), point.toRawBytes(false)),
+      )
+    } catch {}
+  }
+  return ed25519PublicKeyDer64(parseEd25519PublicKey(serialized))
 }
 
 /** Decodes a fixed-layout DER value using native key/signature encodings. */

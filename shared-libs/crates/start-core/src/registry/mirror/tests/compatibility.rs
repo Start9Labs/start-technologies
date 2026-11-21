@@ -76,7 +76,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.3.1").into(),
+        wire("0.4.3.1").with_passkey_signatures().into(),
         fixture.dir.path(),
     )
     .await
@@ -247,6 +247,89 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         fixture.main.peek().await.into_value()["index"]["os"]["versions"]["0.4.0.6"]["headline"],
         json!("Stored unused headline")
     );
+}
+
+#[tokio::test]
+async fn passkey_keys_and_signatures_follow_capabilities_through_revisions() {
+    let fixture = fixture().await;
+    let mirrors = IndexMirrors::default();
+    let legacy_wire = wire("0.4.3");
+    let mut subscriptions = Vec::new();
+    for (wire, passkeys) in [
+        (legacy_wire, false),
+        (legacy_wire.with_passkey_signatures(), true),
+    ] {
+        let mirror = index_mirror(
+            &mirrors,
+            &fixture.main,
+            None,
+            wire.into(),
+            fixture.dir.path(),
+        )
+        .await
+        .unwrap();
+        let (dump, sub) = mirror
+            .db
+            .dump_and_sub("/index".parse::<JsonPointer>().unwrap())
+            .await;
+        subscriptions.push((mirror, dump.value, sub, passkeys));
+    }
+    let key = crate::sign::webauthn::test_util::p256_key();
+    let public = AnyVerifyingKey::P256(*key.verifying_key());
+    let signature = AnySignature::WebAuthn(crate::sign::webauthn::test_util::passkey_assertion(
+        &key, b"asset",
+    ));
+    let mut state = fixture.main.peek().await.into_value();
+    state["index"]["name"] = json!("Changed");
+    let (_, signer) = state["index"]["signers"]
+        .as_object_mut()
+        .unwrap()
+        .iter_mut()
+        .next()
+        .unwrap();
+    signer["keys"]
+        .as_array_mut()
+        .unwrap()
+        .push_back(to_value(&public).unwrap());
+    state["index"]["package"]["packages"]["public"]["versions"]["1.0.0:0"]["s9pks"][0][1]
+        ["signatures"]
+        .as_object_mut()
+        .unwrap()
+        .insert(public.interned_der64(), to_value(&signature).unwrap());
+    fixture
+        .main
+        .put(&JsonPointer::<&str>::default(), &state)
+        .await
+        .unwrap();
+    for (_mirror, mut view, mut sub, passkeys) in subscriptions {
+        let revision = tokio::time::timeout(std::time::Duration::from_secs(5), sub.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        patch_db::json_patch::patch(&mut view, &revision.patch).unwrap();
+        assert_eq!(view["name"], json!("Changed"));
+        let keys = &view["signers"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()["keys"];
+        assert_eq!(
+            keys.as_array()
+                .unwrap()
+                .contains(&to_value(&public).unwrap()),
+            passkeys
+        );
+        let signatures = &view["package"]["packages"]["public"]["versions"]["1.0.0:0"]["s9pks"][0]
+            [1]["signatures"];
+        assert_eq!(
+            signatures
+                .as_object()
+                .unwrap()
+                .contains_key(&public.interned_der64()),
+            passkeys
+        );
+    }
 }
 
 #[tokio::test]

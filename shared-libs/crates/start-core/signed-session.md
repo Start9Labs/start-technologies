@@ -2,7 +2,7 @@
 
 Identity authentication uses StartOS request commitments, `RequestProof::sign_commitment`,
 `AnyVerifyingKey::verify_commitment` and `AnySignature`. Handshake proofs emit pure Ed25519
-through `Signer::sign_message`; verification also accepts Ed25519ph. Existing package and
+through `Signer::sign_message`; verification also accepts Ed25519ph and WebAuthn assertions. Existing package and
 storage signature policy stays with its own signing owner. Client and server schemes
 need not match. Adding a signing scheme extends those owners and the browser provider,
 not the transport. WebAuthn enrollment, assertions and user-presence policy are separate.

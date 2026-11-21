@@ -38,7 +38,7 @@ pub fn canonicalize_verifying_keys<T>(
         .collect()
 }
 
-/// Protocol tag prefixed to pure-Ed25519 commitment signing messages.
+/// Domain separator for pure-Ed25519 and WebAuthn commitment signatures.
 pub(crate) const COMMITMENT_SIG_TAG: &[u8] = b"Start-Commitment-Sig v1\0";
 
 /// The tag, the context prefixed with its length as one byte, the commitment type, then the
@@ -624,6 +624,19 @@ mod tests {
                 .unwrap(),
             signatures
         );
+    }
+
+    #[test]
+    fn compressed_p256_spki_has_the_same_canonical_identity() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../testdata/p256-public-key.json")).unwrap();
+        let uncompressed = hex::decode(fixture["uncompressedDerHex"].as_str().unwrap()).unwrap();
+        let compressed = hex::decode(fixture["compressedDerHex"].as_str().unwrap()).unwrap();
+        let key = AnyVerifyingKey::from_der::<serde_json::Error>(&uncompressed).unwrap();
+        let alias = AnyVerifyingKey::from_der::<serde_json::Error>(&compressed).unwrap();
+        assert_eq!(key, alias);
+        assert_eq!(key.interned_der64(), alias.interned_der64());
+        assert_eq!(key.to_der::<serde_json::Error>().unwrap(), uncompressed);
     }
 
     #[test]

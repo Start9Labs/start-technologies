@@ -4434,6 +4434,10 @@ export const SubscribeIndexParams: z.ZodIntersection<
       z.ZodNullable<z.ZodString>
     >
     /**
+     * Requests P-256 keys and WebAuthn signatures in a versioned view.
+     */
+    passkeySignatures: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+    /**
      * Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.
      */
     language: z.ZodCodec<
@@ -4455,6 +4459,13 @@ export const SubscribeIndexParams: z.ZodIntersection<
       ).meta({
         description:
           'Client StartOS version. Omission preserves the canonical index format.',
+      }),
+      /**
+       * Requests P-256 keys and WebAuthn signatures in a versioned view.
+       */
+      passkeySignatures: wire(z.boolean().optional(), z.boolean()).meta({
+        description:
+          'Requests P-256 keys and WebAuthn signatures in a versioned view.',
       }),
       /**
        * Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.

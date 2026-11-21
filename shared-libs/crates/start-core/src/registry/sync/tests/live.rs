@@ -55,6 +55,7 @@ fn channel_authenticated_watches_keep_distinct_ids_and_projection_versions() {
         assert_eq!(request["method"], json!("db.subscribe"));
         assert_eq!(request["rpcstream"], json!(rpc_toolkit::RPCSTREAM_VERSION));
         assert_eq!(request["params"]["osVersion"], json!(version));
+        assert_eq!(request["params"]["passkeySignatures"], json!(true));
         assert!(request.get("signature").is_none());
     }
 }
