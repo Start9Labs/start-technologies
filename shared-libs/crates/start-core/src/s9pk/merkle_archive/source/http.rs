@@ -5,7 +5,7 @@ use std::task::Poll;
 
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
-use reqwest::header::CONTENT_LENGTH;
+use reqwest::header::{CONTENT_LENGTH, CONTENT_RANGE, RANGE};
 use reqwest::{Client, Url};
 use tokio::io::{AsyncRead, AsyncReadExt, ReadBuf, Take};
 use tokio_util::io::StreamReader;
@@ -31,11 +31,15 @@ impl HttpSource {
             .with_kind(ErrorKind::Network)?
             .error_for_status()
             .with_kind(ErrorKind::Network)?;
-        let size = head
+        let size = match head
             .headers()
             .get(CONTENT_LENGTH)
             .and_then(|s| s.to_str().ok())
-            .and_then(|s| s.parse().ok());
+            .and_then(|s| s.parse().ok())
+        {
+            Some(size) => Some(size),
+            None => ranged_size(&client, &url).await?,
+        };
         Ok(Self {
             url,
             client,
@@ -44,6 +48,24 @@ impl HttpSource {
         })
     }
 }
+/// The total length a one-byte range request reports. None without a `Content-Range` total.
+async fn ranged_size(client: &Client, url: &Url) -> Result<Option<u64>, Error> {
+    let response = client
+        .get(url.clone())
+        .header(RANGE, "bytes=0-0")
+        .send()
+        .await
+        .with_kind(ErrorKind::Network)?
+        .error_for_status()
+        .with_kind(ErrorKind::Network)?;
+    Ok(response
+        .headers()
+        .get(CONTENT_RANGE)
+        .and_then(|s| s.to_str().ok())
+        .and_then(|s| s.rsplit_once('/'))
+        .and_then(|(_, total)| total.parse().ok()))
+}
+
 impl ArchiveSource for HttpSource {
     type FetchReader = HttpReader;
     type FetchAllReader = StreamReader<BoxStream<'static, Result<Bytes, std::io::Error>>, Bytes>;
@@ -141,5 +163,40 @@ impl PinnedDrop for HttpReader {
         if let Some(reader) = this.reader.take() {
             this.pool.lock().unwrap().insert(reader.into_inner());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn size_falls_back_to_the_range_total_when_head_omits_it() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url: Url = format!("http://{}/file", listener.local_addr().unwrap())
+            .parse()
+            .unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = vec![0; 4096];
+                let len = stream.read(&mut request).await.unwrap();
+                let request = String::from_utf8_lossy(&request[..len]).to_lowercase();
+                let response = if request.starts_with("head") {
+                    "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".to_owned()
+                } else {
+                    assert!(request.contains("range: bytes=0-0"));
+                    "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-0/1234\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx"
+                        .to_owned()
+                };
+                stream.write_all(response.as_bytes()).await.unwrap();
+                stream.shutdown().await.unwrap();
+            }
+        });
+        let source = HttpSource::new(Client::new(), url).await.unwrap();
+        assert_eq!(source.size().await, Some(1234));
+        server.await.unwrap();
     }
 }
