@@ -27,9 +27,8 @@ pub(crate) fn spawn_filesystem_cleanup(future: impl Future<Output = ()> + Send +
 pub(crate) fn run_filesystem_blocking<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> impl Future<Output = Result<T, tokio::task::JoinError>> + Send + 'static {
-    let completion = spawn_cleanup(&FILESYSTEM_CLEANUP, async move {
-        tokio::task::spawn_blocking(work).await
-    });
+    let worker = tokio::task::spawn_blocking(work);
+    let completion = spawn_cleanup(&FILESYSTEM_CLEANUP, worker);
     async move {
         completion
             .await

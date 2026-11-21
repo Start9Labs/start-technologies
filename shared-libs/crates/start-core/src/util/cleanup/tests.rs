@@ -87,6 +87,44 @@ async fn blocking_filesystem_work_retains_resources_after_its_caller_is_cancelle
 }
 
 #[tokio::test]
+async fn discarded_file_lock_result_is_joined_and_releases_its_lock() {
+    let _serial = FILESYSTEM_CLEANUP_TEST_LOCK.lock().await;
+    wait_for_filesystem_cleanup().await;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("lock");
+    let first = std::fs::File::create(&path).unwrap();
+    let held = fd_lock_rs::FdLock::lock(first, fd_lock_rs::LockType::Exclusive, false).unwrap();
+    let waiting = std::fs::File::options()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    let (started, running) = oneshot::channel();
+    drop(run_filesystem_blocking(move || {
+        started.send(()).unwrap();
+        fd_lock_rs::FdLock::lock(waiting, fd_lock_rs::LockType::Exclusive, true)
+    }));
+    tokio::time::timeout(std::time::Duration::from_secs(3), running)
+        .await
+        .unwrap()
+        .unwrap();
+    let drain = wait_for_filesystem_cleanup();
+    tokio::pin!(drain);
+    assert!(futures::poll!(&mut drain).is_pending());
+    drop(held);
+    tokio::time::timeout(std::time::Duration::from_secs(3), &mut drain)
+        .await
+        .expect("file-lock callback escaped the drain");
+    crate::util::FileLock::new(&path, false)
+        .await
+        .unwrap()
+        .unlock()
+        .await
+        .unwrap();
+    wait_for_filesystem_cleanup().await;
+}
+
+#[tokio::test]
 async fn temporary_directory_drop_cleanup_finishes_before_teardown_returns() {
     let _serial = FILESYSTEM_CLEANUP_TEST_LOCK.lock().await;
     wait_for_filesystem_cleanup().await;
