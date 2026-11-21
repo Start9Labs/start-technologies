@@ -4082,13 +4082,6 @@ update.already-updating:
   fr_FR: "Le serveur est déjà en cours de mise à jour !"
   pl_PL: "Serwer jest już w trakcie aktualizacji!"
 
-update.registry-not-selected:
-  en_US: "%{registry} is not the selected StartOS update registry"
-  de_DE: "%{registry} ist nicht die ausgewählte Registry für StartOS-Updates"
-  es_ES: "%{registry} no es el registro seleccionado para las actualizaciones de StartOS"
-  fr_FR: "%{registry} n'est pas le registre sélectionné pour les mises à jour de StartOS"
-  pl_PL: "%{registry} nie jest wybranym rejestrem aktualizacji StartOS"
-
 update.error-returning-progress:
   en_US: "Error returning progress of update: %{error}"
   de_DE: "Fehler beim Zurückgeben des Update-Fortschritts: %{error}"

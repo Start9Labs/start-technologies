@@ -453,7 +453,7 @@ fn connecting_registries_select_nothing_and_first_failures_are_unreachable() {
         select(&db, &url(), json!({"id":"test"})).unwrap()["best"],
         json!({})
     );
-    assert!(synced_os_versions(&db, &url()).unwrap().is_empty());
+    assert!(synced_os_versions(&db).unwrap().is_empty());
     set_status(
         &mut db,
         &Subscription::Index(url()),
@@ -488,7 +488,7 @@ fn connecting_registries_select_nothing_and_first_failures_are_unreachable() {
         RegistryStatus::Error
     );
     assert!(select(&db, &url(), json!({"id":"test"})).is_err());
-    assert!(synced_os_versions(&db, &url()).is_err());
+    assert!(synced_os_versions(&db).is_err());
     publish_snapshot(
         &mut db,
         &Subscription::Os(url()),
@@ -496,7 +496,7 @@ fn connecting_registries_select_nothing_and_first_failures_are_unreachable() {
         &device(),
     )
     .unwrap();
-    assert!(synced_os_versions(&db, &url()).unwrap().is_empty());
+    assert!(synced_os_versions(&db).unwrap().is_empty());
     publish_snapshot(
         &mut db,
         &Subscription::Index(url()),
@@ -701,16 +701,23 @@ fn os_cache_excludes_other_platforms_and_incompatible_sources() {
             .is_empty()
     );
     assert_eq!(
-        synced_os_versions(&db, &url())
-            .unwrap()
-            .keys()
-            .collect::<Vec<_>>(),
+        synced_os_versions(&db).unwrap().keys().collect::<Vec<_>>(),
         cache.versions.keys().collect::<Vec<_>>()
     );
-    assert!(synced_os_versions(&db, &"https://other.test".parse().unwrap()).is_err());
+    db.as_public_mut()
+        .as_server_info_mut()
+        .as_os_registry_mut()
+        .ser(&"https://other.test".parse().unwrap())
+        .unwrap();
+    assert!(synced_os_versions(&db).unwrap().is_empty());
+    db.as_public_mut()
+        .as_server_info_mut()
+        .as_os_registry_mut()
+        .ser(&url())
+        .unwrap();
     for status in [RegistryStatus::Connecting, RegistryStatus::Error] {
         set_status(&mut db, &Subscription::Os(url()), status, None).unwrap();
-        assert_eq!(synced_os_versions(&db, &url()).unwrap().len(), 1);
+        assert_eq!(synced_os_versions(&db).unwrap().len(), 1);
     }
     let full = |os: OsIndex| FullIndex {
         os,

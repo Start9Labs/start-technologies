@@ -6358,7 +6358,14 @@ export const TrustedKey: z.ZodObject<{
     'Signing-key material and independent package and OS-update trust.',
 })
 export const UpdateSystemParams: z.ZodObject<{
-  registry: z.ZodString
+  /**
+   * Fetches once from this registry instead of using the selected update registry's
+   * synchronized releases.
+   */
+  registry: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
   /**
    * Additional signer requirements checked before starting the update.
    */
@@ -6379,7 +6386,14 @@ export const UpdateSystemParams: z.ZodObject<{
    */
   progress: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
-  registry: z.string(),
+  /**
+   * Fetches once from this registry instead of using the selected update registry's
+   * synchronized releases.
+   */
+  registry: wire(z.string().nullable().optional(), z.string().nullable()).meta({
+    description:
+      "Fetches once from this registry instead of using the selected update registry's\nsynchronized releases.",
+  }),
   /**
    * Additional signer requirements checked before starting the update.
    */

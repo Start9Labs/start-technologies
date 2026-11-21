@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -22,6 +23,7 @@ mod signature_tests;
 use crate::PLATFORM;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::RestartReason;
+use crate::middleware::auth::signature::SigningContext;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{
@@ -50,8 +52,10 @@ use crate::version::release_notes::{UpdateNotes, save_update_notes};
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct UpdateSystemParams {
+    /// Fetches once from this registry instead of using the selected update registry's
+    /// synchronized releases.
     #[arg(help = "help.arg.registry-url")]
-    registry: Url,
+    registry: Option<Url>,
     /// Additional signer requirements checked before starting the update.
     #[arg(skip)]
     pub accept_signers: Option<AcceptSigners>,
@@ -290,14 +294,30 @@ struct StartedUpdate {
 #[instrument(skip_all)]
 async fn maybe_do_update(
     ctx: RpcContext,
-    registry: Url,
+    registry: Option<Url>,
     target: VersionRange,
     accept_signers: Option<AcceptSigners>,
     trust: bool,
 ) -> Result<Option<StartedUpdate>, Error> {
     let peeked = ctx.db.peek().await;
     let current_version = peeked.as_public().as_server_info().as_version().de()?;
-    let mut available = crate::registry::sync::synced_os_versions(&peeked, &registry)?;
+    let mut available: BTreeMap<Version, OsVersionInfo> = match &registry {
+        None => crate::registry::sync::synced_os_versions(&peeked)?,
+        Some(registry) => from_value(
+            crate::registry::context::call(
+                &ctx.client,
+                &ctx.signing_key()?,
+                registry,
+                reqwest::header::HeaderMap::new(),
+                "os.version.get",
+                imbl_value::json!({
+                    "sourceVersion": current_version,
+                    "targetVersion": target,
+                }),
+            )
+            .await?,
+        )?,
+    };
     available.retain(|version, info| {
         version.satisfies(&target) && current_version.satisfies(&info.source_version)
     });

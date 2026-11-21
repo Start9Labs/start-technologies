@@ -712,24 +712,18 @@ pub(crate) fn synced_packages(
 /// An empty cache whose synchronization failed is unreachable, not evidence of no updates.
 pub(crate) fn synced_os_versions(
     db: &DatabaseModel,
-    registry: &Url,
 ) -> Result<BTreeMap<exver::Version, OsVersionInfo>, Error> {
+    let selected = db.as_public().as_server_info().as_os_registry().de()?;
     let Some(cache) = db
         .as_public()
         .as_os_update_cache()
         .de()?
-        .filter(|cache| same_registry(cache.registry.as_str(), registry.as_str()))
+        .filter(|cache| same_registry(cache.registry.as_str(), selected.as_str()))
     else {
-        return Err(Error::new(
-            eyre!(
-                "{}",
-                t!("update.registry-not-selected", registry = registry.as_str())
-            ),
-            ErrorKind::NotFound,
-        ));
+        return Ok(BTreeMap::new());
     };
     if cache.status == RegistryStatus::Error && cache.versions.is_empty() {
-        return Err(unreachable(registry, cache.error.as_deref()));
+        return Err(unreachable(&selected, cache.error.as_deref()));
     }
     Ok(cache.versions)
 }

@@ -8839,7 +8839,10 @@
         "UpdateSystemParams": {
           "type": "object",
           "properties": {
-            "registry": { "type": "string" },
+            "registry": {
+              "description": "Fetches once from this registry instead of using the selected update registry's\nsynchronized releases.",
+              "type": ["string", "null"]
+            },
             "acceptSigners": {
               "description": "Additional signer requirements checked before starting the update.",
               "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
@@ -8854,7 +8857,6 @@
               "type": "boolean"
             }
           },
-          "required": ["registry"],
           "additionalProperties": true
         },
         "AcceptSigners": {
@@ -8893,7 +8895,10 @@
       },
       "type": "object",
       "properties": {
-        "registry": { "type": "string" },
+        "registry": {
+          "description": "Fetches once from this registry instead of using the selected update registry's\nsynchronized releases.",
+          "type": ["string", "null"]
+        },
         "acceptSigners": {
           "description": "Additional signer requirements checked before starting the update.",
           "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
@@ -8908,7 +8913,6 @@
           "type": "boolean"
         }
       },
-      "required": ["registry"],
       "additionalProperties": true
     },
     "outputSchema": {

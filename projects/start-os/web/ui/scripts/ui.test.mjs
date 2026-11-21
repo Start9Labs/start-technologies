@@ -1413,7 +1413,6 @@ test('General opens the update modal and submission targets exactly the newest c
   assert.deepEqual(f.submissions, [
     {
       targetVersion: '=0.4.0.4',
-      registry: 'https://registry.test',
       progress: false,
       acceptSigners: { any: [{ signer: OS_UPDATE_SIGNERS[0] }] },
     },
