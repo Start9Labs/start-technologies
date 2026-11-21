@@ -80,7 +80,10 @@ rpc_toolkit::reflect_ts!(CifsAddParams);
 rpc_toolkit::ts_export!(CifsAddParams, namespaces = [""]);
 
 fn read_password() -> Result<Option<String>, Error> {
-    let password = crate::util::tui::read_password("CIFS_PASSWORD", &t!("help.arg.cifs-password"))?;
+    let password = crate::util::tui::read_password(
+        "CIFS_PASSWORD",
+        &t!("backup.target.cifs.prompt-password"),
+    )?;
     Ok((!password.is_empty()).then_some(password))
 }
 

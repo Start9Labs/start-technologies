@@ -323,6 +323,48 @@ export class Value<
     )
   }
   /**
+   * @description Displays a checkbox the user must tick before the form submits, for a
+   * consequence they have to accept. The field always submits `true` and starts unticked,
+   * whatever the prefill. It belongs at the top level of an {@link InputSpec}; building one
+   * nested in an object, a union variant or a list item throws. The form shows it after every
+   * other field.
+   * @example
+   * ```
+    acknowledgementExample: Value.acknowledgement({
+      // required
+      name: 'I hold the keys of this address',
+
+      // optional
+      description: null,
+      warning: null,
+      footnote: null,
+    }),
+   * ```
+   */
+  static acknowledgement(a: {
+    name: string
+    description?: string | null
+    /** Presents a warning prompt before permitting the value to change. */
+    warning?: string | null
+    /** Supplementary text rendered persistently beneath the field. */
+    footnote?: string | null
+  }) {
+    const validator = z.literal(true)
+    return new Value<true>(
+      async () => ({
+        spec: {
+          description: null,
+          warning: null,
+          footnote: null,
+          ...a,
+          type: 'acknowledgement' as const,
+        },
+        validator,
+      }),
+      validator,
+    )
+  }
+  /**
    * @description Displays a text input field
    * @example
    * ```
@@ -1171,7 +1213,7 @@ export class Value<
     spec: InputSpec<Type, StaticValidatedAs>,
   ) {
     const value = new Value<Type, StaticValidatedAs>(async options => {
-      const built = await spec.build(options as any)
+      const built = await spec.buildNested(options as any)
       return {
         spec: {
           type: 'object' as const,

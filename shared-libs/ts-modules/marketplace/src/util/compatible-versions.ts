@@ -17,7 +17,12 @@ export function compatibleVersions(
   >,
   range?: string | null,
 ) {
-  return [pkg.version, ...Object.keys(pkg.otherVersions)]
+  return [
+    pkg.version,
+    ...Object.entries(pkg.otherVersions)
+      .filter(([, info]) => !info.superseded)
+      .map(([version]) => version),
+  ]
     .filter(v => exver.getFlavor(v) === pkg.flavor)
     .filter(
       v =>
