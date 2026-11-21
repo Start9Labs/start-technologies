@@ -1,17 +1,21 @@
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 
 use super::ipv4_listener_addr;
 use crate::net::web_server::{Accept, AcceptStream, TcpMetadata};
 use crate::prelude::*;
-use crate::tunnel::forward::sni::{FallbackSource, SniDemux};
+use crate::tunnel::forward::sni::{FallbackSource, LocalSink, SniDemux};
+
+const HANDOFF_BACKLOG: usize = 128;
 
 pub(crate) struct UiListener {
     listeners: Vec<TcpListener>,
-    fallback: Option<(Arc<SniDemux>, SocketAddrV4, SocketAddrV4)>,
+    fallback: Option<(Arc<SniDemux>, SocketAddrV4, LocalSink)>,
+    handoff: Option<mpsc::Receiver<(TcpMetadata, AcceptStream)>>,
 }
 
 impl UiListener {
@@ -20,17 +24,13 @@ impl UiListener {
         if let Some(addr) = direct_ipv6_addr(addr) {
             listeners.push(crate::net::utils::bind_tokio_listener_v6_only(addr)?);
         }
+        let mut handoff = None;
         let fallback = if let Some(external) = ipv4_listener_addr(addr) {
-            let listener = crate::net::utils::bind_tokio_listener(
-                SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into(),
-            )?;
-            let SocketAddr::V4(target) = listener.local_addr()? else {
-                unreachable!()
-            };
+            let (sink, connections) = mpsc::channel(HANDOFF_BACKLOG);
             sni.register_local_fallback(
                 *external.ip(),
                 external.port(),
-                target,
+                sink.clone(),
                 FallbackSource::Any,
             )
             .map_err(|code| {
@@ -43,14 +43,15 @@ impl UiListener {
                     ErrorKind::Network,
                 )
             })?;
-            listeners.push(listener);
-            Some((sni, external, target))
+            handoff = Some(connections);
+            Some((sni, external, sink))
         } else {
             None
         };
         Ok(Self {
             listeners,
             fallback,
+            handoff,
         })
     }
 
@@ -79,21 +80,29 @@ impl Accept for UiListener {
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(Self::Metadata, AcceptStream), Error>> {
-        self.listeners.poll_accept(cx)
+        if let Poll::Ready(accepted) = self.listeners.poll_accept(cx)? {
+            return Poll::Ready(Ok(accepted));
+        }
+        if let Some(Poll::Ready(Some(accepted))) =
+            self.handoff.as_mut().map(|handoff| handoff.poll_recv(cx))
+        {
+            return Poll::Ready(Ok(accepted));
+        }
+        Poll::Pending
     }
 }
 
 impl Drop for UiListener {
     fn drop(&mut self) {
-        if let Some((sni, external, target)) = &self.fallback {
-            sni.unregister_fallback(*external.ip(), external.port(), *target);
+        if let Some((sni, external, sink)) = &self.fallback {
+            sni.unregister_local_fallback(*external.ip(), external.port(), sink);
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv6Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr};
     use std::time::Duration;
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
