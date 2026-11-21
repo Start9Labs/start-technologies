@@ -1022,7 +1022,11 @@ mod tests {
                 .unwrap()
                 .as_version_t()
                 .unwrap();
-            let mut db = json!({ "private": { "sessions": { "pubkeys": {}, "tokens": {} } },
+            let ssh_keys = json!({ "key": { "alg": "ssh-ed25519" } });
+            let mut db = json!({ "private": {
+                    "sessions": { "pubkeys": {}, "tokens": {} },
+                    "sshPubkeys": ssh_keys.clone(),
+                },
                 "public": { "serverInfo": {
                     "version": from,
                     "trustedKeys": trust,
@@ -1044,7 +1048,13 @@ mod tests {
                 to_value(current.compat()).unwrap()
             );
             assert_eq!(db["public"]["serverInfo"]["postInitMigrationTodos"], todos);
-            assert_eq!(db["private"], private);
+            let mut upgraded_private = private.clone();
+            upgraded_private
+                .as_object_mut()
+                .unwrap()
+                .remove("sshPubkeys");
+            assert_eq!(db["private"], upgraded_private);
+            assert_eq!(db["public"]["sshPubkeys"], ssh_keys);
             assert_eq!(db["public"]["packageData"], packages);
             rollback_to_unchecked(&current, &previous, &mut db).unwrap();
             assert_eq!(db["public"]["serverInfo"]["version"], json!(from));
