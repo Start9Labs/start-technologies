@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use imbl::OrdMap;
 use openssl::asn1::Asn1Time;
 use openssl::hash::MessageDigest;
 use openssl::x509::X509Req;
@@ -413,16 +414,17 @@ impl crate::db::DbAccessByKey<crate::db::model::public::AcmeSettings> for TestDa
 
 #[derive(Clone)]
 struct ConfiguredProvider;
-impl super::super::GetAcmeProvider for ConfiguredProvider {
-    async fn get_provider<'a, 'b: 'a>(
-        &'b self,
+impl super::super::GetAcmeIssuance for ConfiguredProvider {
+    async fn get_issuance<'a>(
+        &'a self,
         _: &'a BTreeSet<InternedString>,
-    ) -> Option<impl AsRef<super::super::AcmeProvider> + Send + 'b> {
-        Some(
-            "https://acme.test/directory"
+    ) -> Option<super::super::AcmeIssuance> {
+        Some(super::super::AcmeIssuance {
+            provider: "https://acme.test/directory"
                 .parse::<super::super::AcmeProvider>()
                 .unwrap(),
-        )
+            gateway: InternedString::intern("eth0").into(),
+        })
     }
 }
 
@@ -455,9 +457,10 @@ async fn cached_certificates_keep_working_after_provider_configuration_is_remove
             db,
             acme_cache: Arc::new(SyncMutex::new(Default::default())),
             crypto_provider: Arc::new(provider()),
-            get_provider: ConfiguredProvider,
+            get_issuance: ConfiguredProvider,
             in_progress: Watch::new([(sans(), OrderEntry::default())].into_iter().collect()),
             report_failure: None,
+            interfaces: Watch::new(OrdMap::new()),
         };
         assert_eq!(handler.get_cert(&sans()).await.is_some(), days > 0);
         if days == 90 {
@@ -542,25 +545,144 @@ async fn native_tls_transport_checks_private_ca_trust_and_preserves_response_met
             .body(BodyWrapper::from(b"signed request".to_vec()))
             .unwrap()
     };
+    let connector = || {
+        let mut connector = hyper_util::client::legacy::connect::HttpConnector::new();
+        connector.enforce_http(false);
+        connector
+    };
     assert!(
-        AcmeHttpClient::new()
+        AcmeHttpClient::new(connector(), native_tls::TlsConnector::new().unwrap())
             .unwrap()
             .request(request())
             .await
             .is_err()
     );
-    let client = reqwest::Client::builder()
-        .use_native_tls()
-        .no_proxy()
-        .add_root_certificate(reqwest::Certificate::from_pem(issuer.pem().as_bytes()).unwrap())
+    let tls = native_tls::TlsConnector::builder()
+        .add_root_certificate(native_tls::Certificate::from_pem(issuer.pem().as_bytes()).unwrap())
         .build()
         .unwrap();
-    let response = AcmeHttpClient(client).request(request()).await.unwrap();
+    let response = AcmeHttpClient::new(connector(), tls)
+        .unwrap()
+        .request(request())
+        .await
+        .unwrap();
     assert_eq!(response.parts.status, http::StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(response.parts.headers["Retry-After"], "120");
     let mut body = response.body;
     assert_eq!(body.into_bytes().await.unwrap(), "problem body");
     server.await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn an_order_through_a_missing_gateway_fails_instead_of_using_another() {
+    let servers = VecDeque::from(["10.64.0.1:53".parse().unwrap()]);
+    assert!(
+        AcmeHttpClient::via_gateway(
+            &InternedString::intern("startos-absent0").into(),
+            0,
+            &servers
+        )
+        .is_err()
+    );
+}
+
+/// Answers an A query with 192.0.2.10 when asked from 10.0.0.2, else 192.0.2.11.
+#[cfg(target_os = "linux")]
+fn respond_by_source(socket: std::net::UdpSocket) -> ! {
+    let mut buf = [0; 512];
+    loop {
+        let (len, from) = socket.recv_from(&mut buf).unwrap();
+        let query = &buf[..len];
+        let mut qname_end = 12;
+        while query[qname_end] != 0 {
+            qname_end += 1 + usize::from(query[qname_end]);
+        }
+        let question_end = qname_end + 5;
+        let is_a = query[qname_end + 1..qname_end + 3] == [0, 1];
+        let mut response = query[..2].to_vec();
+        response.extend([0x81, 0x80, 0, 1, 0, u8::from(is_a), 0, 0, 0, 0]);
+        response.extend(&query[12..question_end]);
+        if is_a {
+            let last = if from.ip() == IpAddr::from([10, 0, 0, 2]) {
+                10
+            } else {
+                11
+            };
+            response.extend([0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 0, 2, last]);
+        }
+        socket.send_to(&response, from).unwrap();
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn gateways_sharing_a_dns_address_each_resolve_through_their_own_interface() {
+    use std::process::Command;
+    use std::str::FromStr;
+
+    use hyper_util::client::legacy::connect::dns::Name;
+    use tower_service::Service;
+
+    const NAME: &str = "gateways_sharing_a_dns_address_each_resolve_through_their_own_interface";
+    if std::env::var_os("STARTOS_ACME_DNS_RESPONDER").is_some() {
+        respond_by_source(std::net::UdpSocket::bind("10.64.0.1:5353").unwrap());
+    }
+    if std::env::var_os("STARTOS_ACME_DNS_NETNS").is_none() {
+        if !Command::new("unshare")
+            .args(["-rnm", "bash", "-c", "command -v ip && command -v sysctl"])
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
+            eprintln!("skipped: gateway DNS needs user/network/mount namespaces and iproute2");
+            return;
+        }
+        let test = format!("{}::{NAME}", module_path!().split_once("::").unwrap().1);
+        let output = Command::new("unshare")
+            .args([
+                "-rnm",
+                "bash",
+                "-c",
+                include_str!("dns_test.sh"),
+                "acme-dns",
+            ])
+            .arg(std::env::current_exe().unwrap())
+            .arg(test)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let servers = VecDeque::from(["10.64.0.1:5353".parse().unwrap()]);
+    let index = |iface| nix::net::if_::if_nametoindex(iface).unwrap();
+    let resolve = |iface: &str, index: u32| {
+        let mut dns = GatewayDns::new(iface.parse().unwrap(), index, &servers).unwrap();
+        async move {
+            dns.call(Name::from_str("acme.test").unwrap())
+                .await
+                .map(|addrs| addrs.map(|addr| addr.ip()).collect::<Vec<_>>())
+        }
+    };
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            assert_eq!(
+                resolve("gw0", index("gw0")).await.unwrap(),
+                [IpAddr::from([192, 0, 2, 10])]
+            );
+            assert_eq!(
+                resolve("gw1", index("gw1")).await.unwrap(),
+                [IpAddr::from([192, 0, 2, 11])]
+            );
+            assert!(resolve("gw0", index("gw1")).await.is_err());
+        });
 }
 
 struct FailingHttp;

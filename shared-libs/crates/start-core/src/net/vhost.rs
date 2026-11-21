@@ -34,8 +34,8 @@ use crate::db::model::Database;
 use crate::db::model::public::{AcmeSettings, NetworkInterfaceInfo};
 use crate::db::{DbAccessByKey, DbAccessMut};
 use crate::net::acme::{
-    ACME_TLS_ALPN_NAME, AcmeCertStore, AcmeProvider, AcmeTlsAlpnCache, AcmeTlsHandler,
-    GetAcmeProvider, ReportOrderFailure,
+    ACME_TLS_ALPN_NAME, AcmeCertStore, AcmeIssuance, AcmeProvider, AcmeTlsAlpnCache,
+    AcmeTlsHandler, GetAcmeIssuance, ReportOrderFailure,
 };
 use crate::net::forward::START9_BRIDGE_V6_SUBNET;
 use crate::net::gateway::{
@@ -396,6 +396,7 @@ impl VHostController {
             self.branding.clone(),
             self.acme_cache.clone(),
             self.report_acme_failure(),
+            self.interfaces.watcher.subscribe(),
         )
     }
 
@@ -967,7 +968,7 @@ pub trait VHostTarget<A: Accept>: std::fmt::Debug + Eq {
     fn routes_like(&self, other: &Self) -> bool {
         false
     }
-    fn acme(&self) -> Option<&AcmeProvider> {
+    fn acme(&self) -> Option<&AcmeIssuance> {
         None
     }
     /// Returns (public_gateways, private_ips) this target needs the listener to bind on.
@@ -997,7 +998,7 @@ pub trait DynVHostTargetT<A: Accept>: std::fmt::Debug + Any {
     fn filter_private(&self, metadata: &<A as Accept>::Metadata) -> bool;
     fn admits(&self, arrival: &Arrival) -> bool;
     fn routes_like(&self, other: &dyn DynVHostTargetT<A>) -> bool;
-    fn acme(&self) -> Option<&AcmeProvider>;
+    fn acme(&self) -> Option<&AcmeIssuance>;
     fn bind_requirements(&self) -> (BTreeSet<GatewayId>, BTreeSet<IpAddr>);
     fn is_passthrough(&self) -> bool;
     fn preprocess<'a>(
@@ -1032,7 +1033,7 @@ impl<A: Accept, T: VHostTarget<A> + 'static> DynVHostTargetT<A> for T {
             .downcast_ref()
             .is_some_and(|other| <T as VHostTarget<A>>::routes_like(self, other))
     }
-    fn acme(&self) -> Option<&AcmeProvider> {
+    fn acme(&self) -> Option<&AcmeIssuance> {
         VHostTarget::acme(self)
     }
     fn is_passthrough(&self) -> bool {
@@ -1139,7 +1140,7 @@ pub struct ProxyTarget {
     /// Gateways WAN-public on every GUA they carry.
     pub public_v6_gateways: BTreeSet<GatewayId>,
     pub private: BTreeSet<IpAddr>,
-    pub acme: Option<AcmeProvider>,
+    pub acme: Option<AcmeIssuance>,
     pub addr: SocketAddr,
     /// The container's IPv6 address on the bridge, when it has one. Only the
     /// source-preserving leg uses it — the plain connect stays on `addr` — since
@@ -1456,7 +1457,7 @@ where
     fn routes_like(&self, other: &Self) -> bool {
         self.same_route(other)
     }
-    fn acme(&self) -> Option<&AcmeProvider> {
+    fn acme(&self) -> Option<&AcmeIssuance> {
         self.acme.as_ref()
     }
     fn bind_requirements(&self) -> (BTreeSet<GatewayId>, BTreeSet<IpAddr>) {
@@ -2003,21 +2004,22 @@ fn is_acme_challenge<'a>(
     server_name.is_some() && alpn.any(|a| a == ACME_TLS_ALPN_NAME)
 }
 
-pub struct GetVHostAcmeProvider<A: Accept + 'static>(pub Watch<Mapping<A>>);
-impl<A: Accept + 'static> Clone for GetVHostAcmeProvider<A> {
+pub struct GetVHostAcmeIssuance<A: Accept + 'static>(pub Watch<Mapping<A>>);
+impl<A: Accept + 'static> Clone for GetVHostAcmeIssuance<A> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
-impl<A: Accept + 'static> GetAcmeProvider for GetVHostAcmeProvider<A> {
-    async fn get_provider<'a, 'b: 'a>(
-        &'b self,
+impl<A: Accept + 'static> GetAcmeIssuance for GetVHostAcmeIssuance<A> {
+    /// Every name the certificate covers must agree on the issuance.
+    async fn get_issuance<'a>(
+        &'a self,
         san_info: &'a BTreeSet<InternedString>,
-    ) -> Option<impl AsRef<AcmeProvider> + Send + 'b> {
-        self.0.peek(|m| -> Option<AcmeProvider> {
+    ) -> Option<AcmeIssuance> {
+        self.0.peek(|m| -> Option<AcmeIssuance> {
             san_info
                 .iter()
-                .fold(Some::<Option<&AcmeProvider>>(None), |acc, x| {
+                .fold(Some::<Option<&AcmeIssuance>>(None), |acc, x| {
                     let acc = acc?;
                     if x.parse::<IpAddr>().is_ok() {
                         return Some(acc);
@@ -2027,16 +2029,10 @@ impl<A: Accept + 'static> GetAcmeProvider for GetVHostAcmeProvider<A> {
                         .iter()
                         .filter(|(_, e)| e.alive())
                         .find_map(|(t, _)| t.0.acme())?;
-                    Some(if let Some(acc) = acc {
-                        if acme == acc {
-                            // all must match
-                            Some(acme)
-                        } else {
-                            None
-                        }
-                    } else {
-                        Some(acme)
-                    })
+                    match acc {
+                        Some(acc) if acc != acme => None,
+                        _ => Some(Some(acme)),
+                    }
                 })
                 .flatten()
                 .cloned()
@@ -2171,7 +2167,7 @@ where
 struct VHostListener<M, A>(
     TlsListener<
         A,
-        VHostTlsHandler<Arc<AcmeTlsHandler<M, GetVHostAcmeProvider<A>>>, RootCaTlsHandler<M>, A>,
+        VHostTlsHandler<Arc<AcmeTlsHandler<M, GetVHostAcmeIssuance<A>>>, RootCaTlsHandler<M>, A>,
     >,
 )
 where
@@ -2283,6 +2279,7 @@ impl<A: Accept> VHostServer<A> {
         branding: CertBranding,
         acme_cache: AcmeTlsAlpnCache,
         report_acme_failure: ReportOrderFailure,
+        interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     ) -> Self
     where
         for<'a> M: HasModel<Model = Model<M>>
@@ -2313,9 +2310,10 @@ impl<A: Accept> VHostServer<A> {
                             db: db.clone(),
                             acme_cache,
                             crypto_provider: crypto_provider.clone(),
-                            get_provider: GetVHostAcmeProvider(mapping.clone()),
+                            get_issuance: GetVHostAcmeIssuance(mapping.clone()),
                             in_progress: Watch::new(BTreeMap::new()),
                             report_failure: Some(report_acme_failure),
+                            interfaces,
                         }),
                         root_ca: RootCaTlsHandler {
                             db,
@@ -2621,7 +2619,10 @@ mod port_map_tests {
             },
             public_v6_gateways: BTreeSet::new(),
             private: BTreeSet::new(),
-            acme: acme.then(|| AcmeProvider::from_str("letsencrypt").unwrap()),
+            acme: acme.then(|| AcmeIssuance {
+                provider: AcmeProvider::from_str("letsencrypt").unwrap(),
+                gateway: GatewayId::from(InternedString::intern(GATEWAY)),
+            }),
             addr: "10.0.3.2:443".parse().unwrap(),
             addr_v6: None,
             proxy: None,
@@ -3539,6 +3540,7 @@ mod upstream_alpn_tests {
                 CertBranding::start_os("loopback"),
                 Arc::new(SyncMutex::new(BTreeMap::new())),
                 Arc::new(|_, _| async {}.boxed()),
+                Watch::new(OrdMap::new()),
             );
             server.set_challenge_bind_reqs(VHostBindRequirements {
                 private_ips: BTreeSet::from([old_addr.ip(), new_addr.ip()]),
