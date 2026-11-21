@@ -291,6 +291,15 @@ struct StartedUpdate {
     done: tokio::task::JoinHandle<Result<(), Error>>,
 }
 
+/// Update listings exclude releases without a squashfs for this server's platform.
+fn version_query_params(source: &Version, target: &VersionRange) -> Value {
+    imbl_value::json!({
+        "sourceVersion": source,
+        "targetVersion": target,
+        "platform": &**PLATFORM,
+    })
+}
+
 #[instrument(skip_all)]
 async fn maybe_do_update(
     ctx: RpcContext,
@@ -310,10 +319,7 @@ async fn maybe_do_update(
                 registry,
                 reqwest::header::HeaderMap::new(),
                 "os.version.get",
-                imbl_value::json!({
-                    "sourceVersion": current_version,
-                    "targetVersion": target,
-                }),
+                version_query_params(&current_version, &target),
             )
             .await?,
         )?,
@@ -563,5 +569,70 @@ mod tests {
         let default =
             UpdateSystemParams::try_parse_from(["update", "https://registry.start9.com"]).unwrap();
         assert!(!default.trust);
+    }
+
+    #[test]
+    fn update_registry_defaults_to_the_selected_source() {
+        let cli = UpdateSystemParams::try_parse_from(["update"]).unwrap();
+        assert!(cli.registry.is_none());
+        let rpc: UpdateSystemParams = from_value(imbl_value::json!({})).unwrap();
+        assert!(rpc.registry.is_none());
+    }
+
+    #[test]
+    fn update_query_keeps_other_platforms_from_hiding_an_available_release() {
+        use crate::registry::os::index::{OsIndex, OsVersionInfoMap};
+        use crate::registry::os::version::{GetOsVersionParams, select_versions};
+
+        let other_platform = if &**PLATFORM == "x86_64" {
+            "aarch64"
+        } else {
+            "x86_64"
+        };
+        let release = |platform: &str| OsVersionInfo {
+            source_version: "*".parse().unwrap(),
+            squashfs: [(
+                platform.into(),
+                RegistryAsset {
+                    published_at: "2026-01-01T00:00:00Z".parse().unwrap(),
+                    urls: Vec::new(),
+                    commitment: Blake3Commitment {
+                        hash: crate::util::serde::Base64([0; 32]),
+                        size: 1,
+                    },
+                    signatures: Default::default(),
+                },
+            )]
+            .into(),
+            ..Default::default()
+        };
+        let index = OsIndex {
+            versions: OsVersionInfoMap(BTreeMap::from([
+                ("0.4.0.6".parse().unwrap(), release(&PLATFORM)),
+                ("0.4.0.7".parse().unwrap(), release(other_platform)),
+            ])),
+        };
+        let params: GetOsVersionParams = from_value(version_query_params(
+            &"0.4.0.5".parse().unwrap(),
+            &VersionRange::Any,
+        ))
+        .unwrap();
+        let available: BTreeMap<Version, OsVersionInfo> = from_value(
+            select_versions(
+                &Model::new(&index).unwrap(),
+                params.source_version.as_ref(),
+                params.target_version.as_ref(),
+                params.platform.as_ref(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            available
+                .keys()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["0.4.0.6"]
+        );
     }
 }
