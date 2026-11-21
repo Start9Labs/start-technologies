@@ -171,7 +171,7 @@ mod tests {
             .await
             .unwrap();
         let visible = std::fs::metadata(view.path().join("sentinel")).unwrap();
-        assert_eq!((visible.uid(), visible.gid()), (101000, 102000));
+        assert_eq!((visible.uid(), visible.gid()), (1000, 2000));
         view.unmount().await.unwrap();
         let retired = fixture.path().join("volume.convert-old");
         legacy(&retired).await;

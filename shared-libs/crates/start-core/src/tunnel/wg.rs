@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use x25519_dalek::{PublicKey, StaticSecret};
 
+use crate::net::gateway::WIREGUARD_DEFAULT_MTU;
 use crate::prelude::*;
 use crate::tunnel::wg6;
 use crate::util::Invoke;
@@ -365,6 +366,7 @@ impl std::fmt::Display for ClientConfig {
             allowed = allowed,
             server_pubkey = self.server_pubkey.to_padded_string(),
             server_addr = self.server_addr,
+            mtu = WIREGUARD_DEFAULT_MTU,
         )
     }
 }
@@ -394,6 +396,7 @@ mod tests {
         assert!(cfg.contains("Address = 10.59.0.2/24"));
         assert!(cfg.contains("DNS = 10.59.0.1"));
         assert!(cfg.contains("AllowedIPs = 10.59.0.0/24"));
+        assert!(cfg.contains("MTU = 1280"));
         assert!(!cfg.contains("::"));
     }
 
@@ -444,6 +447,7 @@ mod tests {
         let rendered = server.server_config().to_string();
         // Server's own /128 (subnet .1) on its interface, at the prefix length.
         assert!(rendered.contains("2001:db8:abcd::a3b:1/64"));
+        assert!(rendered.contains("MTU = 1280"));
         assert!(rendered.contains("AllowedIPs = 10.59.0.2/32, 2001:db8:abcd::a3b:2/128"));
     }
 }
@@ -468,6 +472,7 @@ impl<'a> std::fmt::Display for ServerConfig<'a> {
             subnets = addresses.join(", "),
             server_port = server.port,
             server_privkey = server.key.to_padded_string(),
+            mtu = WIREGUARD_DEFAULT_MTU,
         )?;
         for cfg in server.subnets.0.values() {
             for (client_addr, peer) in &cfg.clients.0 {

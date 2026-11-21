@@ -116,14 +116,12 @@ pub use id::*;
 use imbl_value::Value;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{
-    CallRemoteHandler, Context, Empty, HandlerExt, ParentHandler, from_fn, from_fn_async,
-    from_fn_async_local,
+    Context, Empty, HandlerExt, ParentHandler, from_fn, from_fn_async, from_fn_async_local,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::context::{CliContext, DiagnosticContext, InitContext, RpcContext};
 use crate::disk::fsck::RequiresReboot;
-use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::system::kiosk;
 use crate::util::output::print_table;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
@@ -279,13 +277,6 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "backup",
             backup::backup::<C>().with_about("about.commands-backup"),
-        )
-        .subcommand(
-            "registry",
-            CallRemoteHandler::<RpcContext, _, _, RegistryUrlParams>::new(
-                registry::registry_api::<RegistryContext>(),
-            )
-            .no_cli(),
         )
         .subcommand(
             "registry",

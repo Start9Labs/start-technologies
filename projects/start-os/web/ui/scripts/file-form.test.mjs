@@ -109,6 +109,29 @@ test('extension filters match case-insensitive filename suffixes, including comp
   )
 })
 
+test('acknowledgements start unticked regardless of saved acceptance', () => {
+  const injector = createEnvironmentInjector([
+    { provide: UntypedFormBuilder, useFactory: () => new UntypedFormBuilder() },
+  ])
+  try {
+    const service = runInInjectionContext(injector, () => new FormService())
+    for (const confirm of [undefined, false, true]) {
+      const form = service.createForm(
+        { confirm: { type: 'acknowledgement' } },
+        { confirm },
+      )
+      assert.equal(form.value.confirm, false)
+      assert.equal(form.valid, false)
+      form.controls.confirm.setValue(true)
+      assert.equal(form.valid, true)
+      form.controls.confirm.setValue(false)
+      assert.equal(form.valid, false)
+    }
+  } finally {
+    injector.destroy()
+  }
+})
+
 test('numeric controls preserve zero defaults and share inclusive bounds with action validation', () => {
   const injector = createEnvironmentInjector([
     { provide: UntypedFormBuilder, useFactory: () => new UntypedFormBuilder() },

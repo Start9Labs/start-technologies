@@ -5,6 +5,7 @@
 Address = {addr}
 PrivateKey = {privkey}
 DNS = {dns}
+MTU = {mtu}
 
 [Peer]
 PublicKey = {server_pubkey}

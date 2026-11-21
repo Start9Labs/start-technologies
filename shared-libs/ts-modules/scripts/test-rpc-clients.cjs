@@ -1412,7 +1412,7 @@ test('StartOS interface rows hide disabled insecure HTTP and keep private GUA ac
   )
 })
 
-test('StartOS mock routes preserve registry fixtures, configured build identity, and UPS discovery', async () => {
+test('StartOS mock routes keep build identity and UPS discovery and expose no registry proxy', async () => {
   const pkg = { categories: [], best: {}, otherVersions: {} }
   const version = { ...pkg, best: { '1.0.0': {} } }
   const fixtures = {
@@ -1445,28 +1445,9 @@ test('StartOS mock routes preserve registry fixtures, configured build identity,
     )[0].name,
     'ups',
   )
-  const params = {
-    registry: 'https://registry.test/',
-    id: null,
-    targetVersion: null,
-    sourceVersion: null,
-    otherVersions: 'short',
-  }
-  assert.equal(
-    await client.rpc.registry.package.get(params),
-    fixtures.RegistryPackages,
-  )
-  assert.equal(
-    await client.rpc.registry.package.get({ ...params, id: 'example' }),
-    pkg,
-  )
-  assert.equal(
-    await client.rpc.registry.package.get({
-      ...params,
-      id: 'example',
-      targetVersion: '=1.0.0',
-    }),
-    version,
+  await assert.rejects(
+    client.rpc.registry.package.get({ registry: 'https://registry.test/' }),
+    /No handler for registry\.package\.get/,
   )
 })
 

@@ -454,7 +454,7 @@ test('every product builds from one compile per target, on standard runners', ()
   )
   assert.ok(compile !== -1)
   for (const [product, recipe] of [
-    ['start-os', 'make compiled-${{ matrix.arch }}.tar'],
+    ['start-os', 'make compiled-${{ matrix.arch }}.tar.gz'],
     ['start-cli', 'make start-cli-deb'],
     ['start-registry', 'make start-registry-deb'],
     ['start-tunnel', 'make start-tunnel-deb'],
@@ -483,7 +483,7 @@ test('the CLI binaries cover every triple a release attaches', () => {
   const linux = products.jobs.build.steps.find(
     step =>
       step.uses === 'actions/upload-artifact@v7' &&
-      step.with.name.endsWith('-unknown-linux-musl'),
+      step.with.name?.endsWith('-unknown-linux-musl'),
   )
   const built = [
     ...['x86_64', 'aarch64', 'riscv64'].map(arch =>
@@ -500,6 +500,37 @@ test('the CLI binaries cover every triple a release attaches', () => {
     built.sort(),
     triples.map(triple => `start-cli_${triple}`).sort(),
   )
+})
+
+test('registry image platforms match the downloaded deb architectures', t => {
+  const mapPlatforms = step(
+    products.jobs['registry-image'],
+    'Map matrix.arch to docker platform',
+  ).run
+  for (const [arches, expected] of [
+    [['x86_64'], ['linux/amd64']],
+    [['aarch64'], ['linux/arm64']],
+    [['riscv64'], ['linux/riscv64']],
+    [
+      ['x86_64', 'aarch64', 'riscv64'],
+      ['linux/amd64', 'linux/arm64', 'linux/riscv64'],
+    ],
+  ]) {
+    const f = fixture(t)
+    for (const arch of arches)
+      f.write(`start-registry-0.4.0-aaaaaaa_${arch}.deb`, '')
+    const output = f.write('env', '')
+    const result = f.run('bash', ['-e', '-c', mapPlatforms], {
+      env: { ...f.env, GITHUB_ENV: output },
+      encoding: 'utf8',
+    })
+    assert.equal(result.status, 0, result.stdout + result.stderr)
+    const platforms = readFileSync(output, 'utf8')
+      .trim()
+      .replace(/^DOCKER_PLATFORM=/, '')
+      .split(',')
+    assert.deepEqual(platforms.sort(), expected.sort())
+  }
 })
 
 test('build environments: release-equivalent on master and NONE, dev elsewhere', () => {
@@ -523,15 +554,19 @@ test('build environments: release-equivalent on master and NONE, dev elsewhere',
 
 test('a publishing build dispatches startos-iso.yaml pinned to its commit', t => {
   const publish = products.jobs.publish
-  assert.deepEqual(publish.needs, ['changes', 'build'])
-  for (const [channel, build, expected] of [
+  assert.deepEqual(publish.needs, ['changes', 'build', 'rootfs'])
+  for (const [channel, rootfs, expected] of [
     ['alpha', 'success', true],
     ['', 'success', false],
     ['alpha', 'failure', false],
+    ['alpha', 'skipped', false],
   ])
     assert.equal(
       evaluate(publish.if, {
-        needs: { changes: { outputs: { channel } }, build: { result: build } },
+        needs: {
+          changes: { outputs: { channel } },
+          rootfs: { result: rootfs },
+        },
       }),
       expected,
     )
@@ -802,4 +837,46 @@ test('product builds trigger on every push and pull request and classify in the 
     )
   }
   assert.deepEqual(wrt.jobs.deploy.needs, ['image'])
+})
+
+test('the rootfs builds once per architecture for every image this run or its publish builds', () => {
+  const { image, rootfs } = products.jobs
+  assert.deepEqual(image.needs, ['changes', 'build', 'rootfs'])
+  for (const [event, osImage, channel, rootfsRuns, imageRuns] of [
+    ['pull_request', 'true', '', true, true],
+    ['pull_request', 'false', '', false, false],
+    ['push', 'false', '', true, true],
+    ['push', 'false', 'alpha', true, false],
+  ]) {
+    const outputs = { 'start-os': 'true', 'os-image': osImage, channel }
+    const context = {
+      github: { event_name: event },
+      needs: {
+        changes: { outputs },
+        build: { result: 'success' },
+        rootfs: { result: 'success' },
+      },
+    }
+    assert.equal(evaluate(rootfs.if, context), rootfsRuns, `${event} rootfs`)
+    assert.equal(evaluate(image.if, context), imageRuns, `${event} image`)
+  }
+  assert.equal(
+    evaluate(image.if, {
+      github: { event_name: 'push' },
+      needs: {
+        changes: { outputs: { 'start-os': 'true', channel: '' } },
+        rootfs: { result: 'failure' },
+      },
+    }),
+    false,
+  )
+})
+
+test('compiled-artifact consumers grant Actions read permission', () => {
+  for (const permissions of [
+    products.jobs.rootfs.permissions,
+    products.jobs.image.permissions,
+    iso.permissions,
+  ])
+    assert.equal(permissions.actions, 'read')
 })
