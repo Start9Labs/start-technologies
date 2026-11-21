@@ -4,6 +4,7 @@ import { TuiTable } from '@taiga-ui/addon-table'
 import { TuiLink } from '@taiga-ui/core'
 import { TuiChip, TuiFormatNumberPipe } from '@taiga-ui/kit'
 import { Placeholder } from 'src/app/components/placeholder'
+import { DataUsageMbPipe } from 'src/app/routes/devices/data-usage.pipe'
 import { DeviceTableItem } from 'src/app/routes/devices/utils'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
@@ -20,7 +21,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
         <th tuiTh>{{ 'Security Profile' | i18n }}</th>
         <th tuiTh>{{ 'MAC' | i18n }}</th>
         <th tuiTh>{{ 'IP' | i18n }}</th>
-        <th tuiTh>{{ 'Data' | i18n }}</th>
+        <th tuiTh>{{ 'Data (MB)' | i18n }}</th>
         <th tuiTh [style.text-align]="'start'">{{ 'Speed' | i18n }}</th>
         <th tuiTh></th>
       </tr>
@@ -72,8 +73,11 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             }
           </td>
           <td tuiTd>
-            {{ item.dataUsage ?? 0 | tuiFormatNumber }}
-            <small class="g-secondary">GB</small>
+            @if (item.dataUsage | dataUsageMb; as formatted) {
+              {{ formatted }}
+            } @else {
+              <span class="g-secondary">—</span>
+            }
           </td>
           <td tuiTd>
             @if (item.speed?.up != null) {
@@ -113,6 +117,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
     TuiChip,
     TuiLink,
     Placeholder,
+    DataUsageMbPipe,
     i18nPipe,
   ],
   host: { class: 'g-table' },

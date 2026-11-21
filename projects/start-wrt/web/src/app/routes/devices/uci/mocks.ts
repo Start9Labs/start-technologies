@@ -137,7 +137,7 @@ export interface MockDeviceDef {
   connection: string
   status: 'online' | 'offline'
   speed: { up: number; down: number } | null
-  dataUsage: number
+  dataUsage: number | null
   // Simulates the backend's derived label (DHCP-fingerprint OS or MAC-OUI
   // vendor) for a device that advertises no hostname — the rung between the
   // name cache and the `device-<mac>` placeholder.
@@ -153,7 +153,7 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     connection: 'Ethernet',
     status: 'online',
     speed: { up: 2.3, down: 45.7 },
-    dataUsage: 156.3,
+    dataUsage: 1_857_028_096,
   },
   {
     mac: '00:1A:2B:3C:4D:5F',
@@ -163,7 +163,7 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     connection: 'Ethernet',
     status: 'online',
     speed: { up: 0.8, down: 12.4 },
-    dataUsage: 42.8,
+    dataUsage: 39_522_992_128,
   },
   {
     mac: 'AA:BB:CC:DD:EE:03',
@@ -173,7 +173,7 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     connection: 'Wi-Fi 5GHz',
     status: 'online',
     speed: { up: 1.2, down: 18.6 },
-    dataUsage: 64.9,
+    dataUsage: 42_257_613,
   },
   {
     mac: 'DE:AD:BE:EF:CA:FE',
@@ -183,7 +183,7 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     connection: 'Wi-Fi 2.4GHz',
     status: 'online',
     speed: null,
-    dataUsage: 18.2,
+    dataUsage: 0,
   },
   {
     mac: 'AA:BB:CC:DD:EE:04',
@@ -193,7 +193,7 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     connection: 'Wi-Fi 5GHz',
     status: 'online',
     speed: { up: 0.2, down: 24.3 },
-    dataUsage: 311.7,
+    dataUsage: 8_735_686_656,
   },
   {
     mac: 'AA:BB:CC:DD:EE:05',
@@ -203,7 +203,7 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     connection: 'Wi-Fi 2.4GHz',
     status: 'online',
     speed: { up: 0.1, down: 0.1 },
-    dataUsage: 0.4,
+    dataUsage: 419_430,
   },
   {
     mac: 'AA:BB:CC:DD:EE:06',
@@ -213,7 +213,7 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     connection: 'Wi-Fi 5GHz',
     status: 'online',
     speed: { up: 0.4, down: 6.8 },
-    dataUsage: 2.1,
+    dataUsage: 32_768,
   },
   {
     mac: 'DE:AD:BE:EF:CA:FF',
@@ -223,7 +223,7 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     connection: 'Wi-Fi 5GHz',
     status: 'online',
     speed: { up: 0.1, down: 3.2 },
-    dataUsage: 87.5,
+    dataUsage: null,
   },
   {
     mac: 'AA:BB:CC:DD:EE:01',
@@ -233,7 +233,7 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     connection: 'Wi-Fi 5GHz',
     status: 'offline',
     speed: null,
-    dataUsage: 234.1,
+    dataUsage: 245_471_642,
   },
   {
     // No DHCP name advertised ('*') and no static host entry — exercises the
@@ -245,7 +245,7 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     connection: 'Ethernet',
     status: 'online',
     speed: { up: 0.5, down: 5.0 },
-    dataUsage: 12.0,
+    dataUsage: 12_582_912,
   },
   {
     // No hostname either, but identifiable — exercises the derived-label rung
@@ -257,7 +257,7 @@ export const MOCK_DEVICE_DEFS: MockDeviceDef[] = [
     connection: 'Ethernet',
     status: 'online',
     speed: { up: 0.3, down: 8.1 },
-    dataUsage: 5.4,
+    dataUsage: 5_872_026,
     identLabel: 'Google device (112233)',
   },
 ]
@@ -276,26 +276,29 @@ export function generateMockDataUsage(
   const numPoints = period === 'week' ? 7 : period === 'month' ? 30 : 90
   const startTime = now - numPoints * interval
 
+  const def = MOCK_DEVICE_DEFS.find(
+    d => d.mac.toUpperCase() === mac.toUpperCase(),
+  )
+  const dailyBudget = def ? def.dataUsage : 2 * 1024 * 1024 * 1024
+
   // Generate some variation based on MAC address
   const seed = mac.split(':').reduce((acc, hex) => acc + parseInt(hex, 16), 0)
 
   for (let i = 0; i < numPoints; i++) {
     const timestamp = startTime + i * interval
 
-    // Generate pseudo-random but consistent data based on MAC and timestamp
-    const variation = Math.sin(seed + i * 0.5) * 0.5 + 0.5
-    const timeOfDay = (timestamp % (24 * 60 * 60)) / (24 * 60 * 60)
-    const activityFactor = timeOfDay > 0.3 && timeOfDay < 0.9 ? 1.5 : 0.5
+    if (!dailyBudget) {
+      points.push({ timestamp, upload: 0, download: 0 })
+      continue
+    }
 
-    // Download is typically higher than upload (in GB scale)
-    const baseDownload = 2 * 1024 * 1024 * 1024 * activityFactor * variation // ~2GB base
-    const baseUpload = 0.5 * 1024 * 1024 * 1024 * activityFactor * variation // ~500MB base
+    const variation = Math.sin(seed + i * 0.7) * 0.4 + 0.6
+    const uploadShare = 0.2 + (Math.cos(seed + i * 1.1) * 0.5 + 0.5) * 0.15
+    const total = Math.max(1, Math.round(dailyBudget * variation))
+    const upload = Math.round(total * uploadShare)
+    const download = Math.max(0, total - upload)
 
-    points.push({
-      timestamp,
-      upload: Math.floor(baseUpload * (0.5 + Math.random())),
-      download: Math.floor(baseDownload * (0.5 + Math.random())),
-    })
+    points.push({ timestamp, upload, download })
   }
 
   return points

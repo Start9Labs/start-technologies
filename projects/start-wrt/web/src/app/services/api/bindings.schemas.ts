@@ -1934,11 +1934,14 @@ export const Device: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof SpeedData>>,
     z.ZodNullable<typeof SpeedData>
   >
+  /**
+   * Total bytes (`rx + tx`, capped at `2^53 - 1`) in the current nlbwmon
+   * period (since 00:00 UTC), or cumulative `wg show` bytes for a VPN peer;
+   * `None` when no record exists.
+   */
   data_usage: z.ZodCodec<
-    z.ZodOptional<
-      z.ZodNullable<z.ZodCodec<z.ZodNumber, z.ZodNullable<z.ZodNumber>>>
-    >,
-    z.ZodNullable<z.ZodCodec<z.ZodNumber, z.ZodNullable<z.ZodNumber>>>
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
   >
 }> = /* @__PURE__ */ object({
   mac: wire(z.string().nullable().optional(), z.string().nullable()),
@@ -2045,10 +2048,15 @@ export const Device: z.ZodObject<{
     z.string().nullable(),
   ),
   speed: wire(SpeedData.nullable().optional(), SpeedData.nullable()),
-  data_usage: wire(
-    wire(z.number(), z.number().nullable()).nullable().optional(),
-    wire(z.number(), z.number().nullable()).nullable(),
-  ),
+  /**
+   * Total bytes (`rx + tx`, capped at `2^53 - 1`) in the current nlbwmon
+   * period (since 00:00 UTC), or cumulative `wg show` bytes for a VPN peer;
+   * `None` when no record exists.
+   */
+  data_usage: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description:
+      'Total bytes (`rx + tx`, capped at `2^53 - 1`) in the current nlbwmon\nperiod (since 00:00 UTC), or cumulative `wg show` bytes for a VPN peer;\n`None` when no record exists.',
+  }),
 }).meta({
   id: 'Device',
 })

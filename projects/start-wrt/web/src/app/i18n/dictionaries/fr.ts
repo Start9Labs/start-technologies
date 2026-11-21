@@ -127,7 +127,6 @@ export default {
   128: 'Changer l’IP du routeur invalidera toutes les configurations clients VPN existantes. Le serveur VPN entrant et ses pairs seront supprimés et devront être recréés.',
   129: 'Connexion',
   130: 'Identifiants',
-  131: 'Données',
   132: 'Utilisation des données',
   133: ' (par défaut)',
   134: 'Par défaut',
@@ -596,4 +595,5 @@ export default {
   644: 'Lorsque derrière un NAT',
   645: 'Se connecter depuis la ligne de commande',
   646: 'Enregistrer ce navigateur',
+  647: 'Données (MB)',
 } satisfies i18n

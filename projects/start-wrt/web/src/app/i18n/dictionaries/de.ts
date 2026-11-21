@@ -127,7 +127,6 @@ export default {
   128: 'Das Ändern der Router-IP macht alle vorhandenen VPN-Client-Konfigurationen ungültig. Der eingehende VPN-Server und seine Peers werden entfernt und müssen neu erstellt werden.',
   129: 'Verbindung',
   130: 'Anmeldedaten',
-  131: 'Daten',
   132: 'Datennutzung',
   133: ' (Standard)',
   134: 'Standard',
@@ -596,4 +595,5 @@ export default {
   644: 'Wenn hinter NAT',
   645: 'Über die Befehlszeile anmelden',
   646: 'Diesen Browser registrieren',
+  647: 'Daten (MB)',
 } satisfies i18n

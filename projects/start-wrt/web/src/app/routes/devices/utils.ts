@@ -17,7 +17,7 @@ export interface DeviceTableItem {
   ipv6?: string
   /** `ipv4` is a reservation DHCP applies. */
   ipv4Static?: boolean
-  dataUsage?: number // GB
+  dataUsage?: number // bytes
   speed?: { up: number | null; down: number | null }
 }
 

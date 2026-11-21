@@ -952,9 +952,10 @@ struct Device {
     /// between polls (`wg show` byte deltas for a VPN peer). Only set for online
     /// devices with a previous sample.
     speed: Option<SpeedData>,
-    /// Total data used in the current nlbwmon period (GB, 1 decimal, rx+tx); for
-    /// a VPN peer, its cumulative `wg show` rx+tx since the interface came up
-    data_usage: Option<f64>,
+    /// Total bytes (`rx + tx`, capped at `2^53 - 1`) in the current nlbwmon
+    /// period (since 00:00 UTC), or cumulative `wg show` bytes for a VPN peer;
+    /// `None` when no record exists.
+    data_usage: Option<u64>,
 }
 
 #[derive(Serialize)]

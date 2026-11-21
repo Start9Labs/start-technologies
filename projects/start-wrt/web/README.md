@@ -14,7 +14,7 @@ npm run build:deps   # Build the file: deps (@start9labs/start-core, patch-db cl
 npm run start:wrt    # Dev server (mock API by default)
 npm run build:wrt    # Production build → web/dist/startwrt/browser/
 npm run build:wrt:demo  # The demo bundle: mocks on, 404.html for a static host
-npm run check:wrt    # Type-check without emitting
+npm run check:wrt    # Type-check and logic tests
 ```
 
 The dev server uses mock data by default (`config.json` → `useMocks: true`), so no router or running backend is needed.

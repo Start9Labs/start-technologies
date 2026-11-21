@@ -127,7 +127,6 @@ export default {
   128: 'Zmiana adresu IP routera unieważni wszystkie istniejące konfiguracje klientów VPN. Przychodzący serwer VPN i jego węzły zostaną usunięte i muszą zostać utworzone ponownie.',
   129: 'Połączenie',
   130: 'Dane logowania',
-  131: 'Dane',
   132: 'Zużycie danych',
   133: ' (domyślnie)',
   134: 'Domyślnie',
@@ -596,4 +595,5 @@ export default {
   644: 'Gdy za NAT',
   645: 'Zaloguj się z wiersza poleceń',
   646: 'Zarejestruj tę przeglądarkę',
+  647: 'Dane (MB)',
 } satisfies i18n

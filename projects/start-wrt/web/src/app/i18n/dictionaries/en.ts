@@ -132,7 +132,6 @@ export const ENGLISH: Record<string, number> = {
   'Changing the router IP will invalidate all existing VPN client configurations. The inbound VPN server and its peers will be removed and must be re-created.': 128,
   'Connection': 129,
   'Credentials': 130,
-  'Data': 131,
   'Data Usage': 132,
   ' (Default)': 133,
   'Default': 134,
@@ -601,4 +600,5 @@ export const ENGLISH: Record<string, number> = {
   'When behind NAT': 644,
   'Sign in from the command line': 645,
   'Enroll this browser': 646,
+  'Data (MB)': 647,
 }
