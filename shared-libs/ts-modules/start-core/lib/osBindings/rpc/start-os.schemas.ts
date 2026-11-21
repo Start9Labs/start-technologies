@@ -302,7 +302,7 @@ export const CreateTokenParams: z.ZodObject<{ name: z.ZodString }> =
   })
 export const CreatedToken: z.ZodObject<{
   /**
-   * The session id the token authenticates as, for `auth.session.kill`.
+   * The session id the token authenticates as, for `auth.token.remove`.
    */
   id: z.ZodString
   /**
@@ -311,11 +311,11 @@ export const CreatedToken: z.ZodObject<{
   token: z.ZodString
 }> = /* @__PURE__ */ object({
   /**
-   * The session id the token authenticates as, for `auth.session.kill`.
+   * The session id the token authenticates as, for `auth.token.remove`.
    */
   id: z.string().meta({
     description:
-      'The session id the token authenticates as, for `auth.session.kill`.',
+      'The session id the token authenticates as, for `auth.token.remove`.',
   }),
   /**
    * The bearer secret. It is not stored and cannot be retrieved again.
@@ -609,6 +609,9 @@ export const KeyboardOptions: z.ZodObject<{
 }).meta({
   id: 'KeyboardOptions',
 })
+export const ListKeysParams: typeof empty = /* @__PURE__ */ empty.meta({
+  id: 'ListKeysParams',
+})
 export const ListNotificationParams: z.ZodObject<{
   before: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodInt>>,
@@ -637,9 +640,6 @@ export const ListNutUpsParams: z.ZodObject<{
 }).meta({
   id: 'ListNutUpsParams',
   description: 'Address of the NUT server to list UPS devices from.',
-})
-export const ListParams: typeof empty = /* @__PURE__ */ empty.meta({
-  id: 'ListParams',
 })
 export const LogEntry: z.ZodObject<{
   timestamp: z.ZodString
@@ -1045,6 +1045,11 @@ export const RemovePassthroughParams: z.ZodObject<{
   'listen-port': z.int(),
 }).meta({
   id: 'RemovePassthroughParams',
+})
+export const RemoveTokensParams: z.ZodObject<{
+  tokens: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({ tokens: z.array(z.string()) }).meta({
+  id: 'RemoveTokensParams',
 })
 export const RemoveTrustedKeyParams: z.ZodObject<{ id: z.ZodString }> =
   /* @__PURE__ */ object({ id: z.string() }).meta({
@@ -1767,6 +1772,23 @@ export const ActionResultValue: z.ZodUnion<
   .meta({
     id: 'ActionResultValue',
   })
+export const AddKeyParams: z.ZodObject<{
+  key: typeof AnyVerifyingKey
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  userAgent: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  key: AnyVerifyingKey,
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'AddKeyParams',
+})
 export const AddPassthroughParams: z.ZodObject<{
   hostname: z.ZodString
   'listen-port': z.ZodInt
@@ -2493,21 +2515,6 @@ export const IpInfo: z.ZodObject<{
 }).meta({
   id: 'IpInfo',
 })
-export const KillParams: z.ZodObject<{
-  pubkeys: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
-    z.ZodArray<typeof AnyVerifyingKey>
-  >
-  tokens: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pubkeys: wire(z.array(AnyVerifyingKey).optional(), z.array(AnyVerifyingKey)),
-  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
-}).meta({
-  id: 'KillParams',
-})
 export const LegacyAlpnInfo: z.ZodUnion<
   readonly [
     z.ZodLiteral<'reflect'>,
@@ -3103,6 +3110,11 @@ export const RemoveAcmeParams: z.ZodObject<{ provider: typeof AcmeProvider }> =
   /* @__PURE__ */ object({ provider: AcmeProvider }).meta({
     id: 'RemoveAcmeParams',
   })
+export const RemoveKeyParams: z.ZodObject<{
+  keys: z.ZodArray<typeof AnyVerifyingKey>
+}> = /* @__PURE__ */ object({ keys: z.array(AnyVerifyingKey) }).meta({
+  id: 'RemoveKeyParams',
+})
 export const RemoveTunnelParams: z.ZodObject<{ id: typeof GatewayId }> =
   /* @__PURE__ */ object({ id: GatewayId }).meta({
     id: 'RemoveTunnelParams',
@@ -4051,6 +4063,23 @@ export const InstallParams: z.ZodObject<{
 }).meta({
   id: 'InstallParams',
 })
+
+/**
+ * Enrolled keys, including ephemeral ones, and the caller's own.
+ */
+export const KeyList: z.ZodObject<{
+  current: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  keys: typeof AuthKeys
+}> = /* @__PURE__ */ object({
+  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  keys: AuthKeys,
+}).meta({
+  id: 'KeyList',
+  description: "Enrolled keys, including ephemeral ones, and the caller's own.",
+})
 export const Metrics: z.ZodObject<{
   general: typeof MetricsGeneral
   memory: typeof MetricsMemory
@@ -4332,20 +4361,6 @@ export const ServiceInterface: z.ZodObject<{
   }),
 }).meta({
   id: 'ServiceInterface',
-})
-
-/**
- * The server's sessions, by credential type.
- */
-export const Sessions: z.ZodObject<{
-  pubkeys: typeof AuthKeys
-  tokens: z.ZodRecord<z.ZodString, typeof Session>
-}> = /* @__PURE__ */ object({
-  pubkeys: AuthKeys,
-  tokens: z.record(z.string(), Session),
-}).meta({
-  id: 'Sessions',
-  description: "The server's sessions, by credential type.",
 })
 export const SideloadParams: z.ZodObject<{
   acceptSigners: z.ZodCodec<
@@ -4908,18 +4923,6 @@ export const NetworkGatewayInfo: z.ZodObject<{
     id: 'NetworkGatewayInfo',
   },
 )
-export const SessionList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sessions: typeof Sessions
-}> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
-  sessions: Sessions,
-}).meta({
-  id: 'SessionList',
-})
 
 /**
  * Parameters for replacing the stored NUT configuration.
@@ -5150,6 +5153,40 @@ export const Api = {
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
+        key: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ AddKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                ListKeysParams,
+              ),
+              _RETURN: /* @__PURE__ */ KeyList,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ RemoveKeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+          },
+        },
         login: {
           _PARAMS: /* @__PURE__ */ LoginParams,
           _RETURN: /* @__PURE__ */ z.null(),
@@ -5168,34 +5205,6 @@ export const Api = {
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
-        session: {
-          _PARAMS: /* @__PURE__ */ empty,
-          _CHILDREN: {
-            kill: {
-              _PARAMS: /* @__PURE__ */ KillParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-            list: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
-                  empty,
-                ),
-                ListParams,
-              ),
-              _RETURN: /* @__PURE__ */ SessionList,
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
         token: {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
@@ -5213,6 +5222,29 @@ export const Api = {
                 CreateTokenParams,
               ),
               _RETURN: /* @__PURE__ */ CreatedToken,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ z.record(z.string(), Session),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ RemoveTokensParams,
+              _RETURN: /* @__PURE__ */ z.null(),
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
             },
