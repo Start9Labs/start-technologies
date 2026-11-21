@@ -1,4 +1,4 @@
-import { KeyValuePipe } from '@angular/common'
+import { KeyValue, KeyValuePipe } from '@angular/common'
 import {
   Component,
   Input,
@@ -20,7 +20,7 @@ import { FormUnionComponent } from './union.component'
 @Component({
   selector: 'form-group',
   template: `
-    @for (entry of spec | keyvalue: asIsOrder | filterHidden; track entry) {
+    @for (entry of spec | keyvalue: fieldOrder | filterHidden; track entry) {
       @switch (entry.value.type) {
         @case ('object') {
           <form-object
@@ -116,7 +116,13 @@ import { FormUnionComponent } from './union.component'
 export class FormGroupComponent {
   @Input() spec: IST.InputSpec = {}
 
-  asIsOrder() {
-    return 0
+  protected fieldOrder(
+    left: KeyValue<string, IST.ValueSpec>,
+    right: KeyValue<string, IST.ValueSpec>,
+  ) {
+    return (
+      Number(left.value.type === 'acknowledgement') -
+      Number(right.value.type === 'acknowledgement')
+    )
   }
 }

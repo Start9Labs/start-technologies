@@ -4,16 +4,15 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use futures::StreamExt;
-use imbl::OrdMap;
 
 use super::namespace::invalid_source;
 use super::source::BuildSource;
 use crate::context::RpcContext;
+use crate::middleware::auth::signature::SigningContext;
 use crate::os_overlay::public_source::{Release, SourceCache, invalid_source as unavailable};
 use crate::os_overlay::{PreparedGeneration, VerityImage};
 use crate::prelude::*;
 use crate::registry::asset::RegistryAsset;
-use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::registry::os::SIG_CONTEXT;
 use crate::registry::os::asset::get::GetOsAssetParams;
 use crate::sign::commitment::blake3::Blake3Commitment;
@@ -54,14 +53,16 @@ pub(super) async fn stage(
             .as_os_registry()
             .de()?;
         let asset: RegistryAsset<Blake3Commitment> = from_value(
-            ctx.call_remote_with::<RegistryContext, _>(
+            crate::registry::context::call(
+                &ctx.client,
+                &ctx.signing_key()?,
+                &registry,
+                reqwest::header::HeaderMap::new(),
                 "os.asset.get.squashfs",
-                OrdMap::new(),
                 to_value(&GetOsAssetParams {
                     version: expected.version.clone(),
                     platform: expected.platform.clone().into(),
                 })?,
-                RegistryUrlParams { registry },
             )
             .await?,
         )?;

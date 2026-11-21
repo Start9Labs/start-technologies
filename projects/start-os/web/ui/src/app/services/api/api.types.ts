@@ -1,6 +1,5 @@
 import { IST, RPC, RpcClient, RpcStreamClient, T } from '@start9labs/start-core'
 import { WebSocketSubjectConfig } from 'rxjs/webSocket'
-import { GetPackageReq, GetPackagesReq } from '@start9labs/marketplace'
 
 export type Api = RPC.StartOS | RPC.Diagnostic | RPC.Init | RPC.Unlock
 export type ApiClient = RpcClient<RPC.StartOS> &
@@ -42,10 +41,6 @@ export type ActionRes = Extract<
   NonNullable<Result<'package.action.run'>>,
   { version: '1' }
 > | null
-export type GetRegistryPackageReq = GetPackageReq &
-  Pick<Params<'registry.package.get'>, 'registry'>
-export type GetRegistryPackagesReq = GetPackagesReq &
-  Pick<Params<'registry.package.get'>, 'registry'>
 export type CheckDnsRes = Result<'net.gateway.check-dns'>
 export type RecoverySource = DiskRecoverySource | CifsRecoverySource
 export interface DiskRecoverySource {
