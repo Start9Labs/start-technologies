@@ -647,6 +647,7 @@ pub struct CliDownloadParams {
 
 rpc_toolkit::reflect_ts!(CliDownloadParams);
 
+/// Private downloads omit supplemental endorsements.
 pub async fn cli_download(
     ctx: CliContext,
     CliDownloadParams {

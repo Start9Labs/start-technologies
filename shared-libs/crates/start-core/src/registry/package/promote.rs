@@ -106,6 +106,7 @@ async fn export_version(
     }
 }
 
+/// Requires a source without package-level private versions.
 async fn listed_version(
     ctx: &CliContext,
     url: Url,
