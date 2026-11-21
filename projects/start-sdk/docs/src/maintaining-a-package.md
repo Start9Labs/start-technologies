@@ -50,7 +50,9 @@ Five disciplines apply on top of it.
 
 ### Only the wrapped application is upstream
 
-The `<upstream>` half of a package version is the wrapped application's version, so a new release of that application is the only upstream change that moves it. A base image is upstream when the application arrives through it — a newer Alpine carries a newer Tor to a package that installs Tor from it — and not when it only supplies a runtime for code the package owns. Anything else `UPDATING.md` pins beside the application, such as a database image or a bundled plugin, is refreshed along with a release or a revision bump, never as the reason for one.
+The `<upstream>` half of a package version is the wrapped application's version, so a new release of that application is the only upstream change that moves it. A base image is upstream when the application arrives through it — a newer Alpine carries a newer Tor to a package that installs Tor from it — and not when it only supplies a runtime for code the package owns. Anything else `UPDATING.md` pins beside the application, such as a database image or a bundled plugin, never moves `<upstream>`. Bring every such pin current whenever the package ships a release or a revision bump, to its newest stable release or to the tag `UPDATING.md` says to follow; a pin left behind waits for the next one.
+
+A pinned component's new release is not by itself a reason to ship, with one exception: **a release that fixes a security vulnerability the package can reach.** Ship it on its own as a revision bump, with `<upstream>` unchanged, as soon as the artifact resolves. Reachable means the package runs the affected code path in its shipped configuration — a fix to a listener the package enables, not to a feature it leaves off. Read the fix's changelog entry or commit to decide, and say in the pull request which of the package's settings reach it.
 
 ### A release existing does not mean the artifact exists
 

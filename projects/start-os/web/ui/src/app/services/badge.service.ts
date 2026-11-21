@@ -8,7 +8,6 @@ import { NotificationService } from 'src/app/services/notification.service'
 import { OSService } from 'src/app/services/os.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
-import { UpdatesRefinementService } from 'src/app/services/updates-refinement.service'
 import { FilterUpdatesPipe } from '../routes/portal/routes/updates/filter-updates.pipe'
 
 /** Counts tally pending items; warnings flag conditions that need attention. */
@@ -24,24 +23,23 @@ export class BadgeService {
     .pipe(map(synced => !synced))
   private readonly filterUpdatesPipe = inject(FilterUpdatesPipe)
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
-  private readonly refinement = inject(UpdatesRefinementService)
 
-  private readonly registryErrors$ = inject(
-    MarketplaceService,
-  ).requestErrors$.pipe(map(errors => errors.length > 0))
+  private readonly marketplace = inject(MarketplaceService)
+  private readonly registryErrors$ = this.marketplace.requestErrors$.pipe(
+    map(errors => errors.length > 0),
+  )
 
-  // The navbar keeps refinement warm across Updates navigation.
   private readonly updates$ = combineLatest([
-    this.refinement.refined$,
+    this.marketplace.marketplace$,
     inject(LocalPackagesService),
     this.hiddenUpdates.effective$,
   ]).pipe(
     map(
-      ([refined, local, hidden]) =>
-        Object.entries(refined.marketplace).reduce(
-          (list, [_, store]) =>
+      ([marketplace, local, hidden]) =>
+        Object.values(marketplace).reduce(
+          (list, store) =>
             this.filterUpdatesPipe
-              .transform(store?.packages || [], local, hidden)
+              .transform(store?.updates || [], local, hidden)
               .reduce((result, { id }) => result.add(id), list),
           new Set<string>(),
         ).size,

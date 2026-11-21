@@ -1594,6 +1594,8 @@ export type LegacyProxySslOptionsInput = z.input<
 >
 export type PackageInfo = z.output<typeof schemas.PackageInfo>
 export type PackageInfoInput = z.input<typeof schemas.PackageInfo>
+export type PackageRelease = z.output<typeof schemas.PackageRelease>
+export type PackageReleaseInput = z.input<typeof schemas.PackageRelease>
 
 /**
  * A contiguous binding keyed by its internal start port in [`BindingRanges`].
@@ -1620,14 +1622,14 @@ export type PackageIndex = z.output<typeof schemas.PackageIndex>
 export type PackageIndexInput = z.input<typeof schemas.PackageIndex>
 
 /**
- * Last synchronized package listings and registry trust proposals.
+ * Every release of a package that a device can run, as StartOS lists it in its registry cache.
  */
-export type RegistryCache = z.output<typeof schemas.RegistryCache>
+export type PackageReleases = z.output<typeof schemas.PackageReleases>
 
 /**
- * Last synchronized package listings and registry trust proposals.
+ * Every release of a package that a device can run, as StartOS lists it in its registry cache.
  */
-export type RegistryCacheInput = z.input<typeof schemas.RegistryCache>
+export type PackageReleasesInput = z.input<typeof schemas.PackageReleases>
 export type BindOptions = z.output<typeof schemas.BindOptions>
 export type BindOptionsInput = z.input<typeof schemas.BindOptions>
 export type FullIndex = z.output<typeof schemas.FullIndex>
@@ -1636,6 +1638,16 @@ export type InstalledState = z.output<typeof schemas.InstalledState>
 export type InstalledStateInput = z.input<typeof schemas.InstalledState>
 export type InstallingInfo = z.output<typeof schemas.InstallingInfo>
 export type InstallingInfoInput = z.input<typeof schemas.InstallingInfo>
+
+/**
+ * Last synchronized package listings and registry trust proposals.
+ */
+export type RegistryCache = z.output<typeof schemas.RegistryCache>
+
+/**
+ * Last synchronized package listings and registry trust proposals.
+ */
+export type RegistryCacheInput = z.input<typeof schemas.RegistryCache>
 export type BindInfo = z.output<typeof schemas.BindInfo>
 export type BindInfoInput = z.input<typeof schemas.BindInfo>
 export type BindParams = z.output<typeof schemas.BindParams>

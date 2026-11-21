@@ -3001,20 +3001,6 @@ registry.context.missing-hostname:
   fr_FR: "Configuration requise manquante : registry-hostname"
   pl_PL: "Brak wymaganej konfiguracji: registry-hostname"
 
-registry.context.onion-tor-not-installed:
-  en_US: "Cannot reach this Tor (.onion) registry: the Tor service is not installed. Install and start it to use onion registries."
-  de_DE: "Diese Tor-(.onion-)Registry ist nicht erreichbar: Der Tor-Dienst ist nicht installiert. Installieren und starten Sie ihn, um Onion-Registries zu verwenden."
-  es_ES: "No se puede acceder a este registro Tor (.onion): el servicio Tor no está instalado. Instálalo e inícialo para usar registros onion."
-  fr_FR: "Impossible d'accéder à ce registre Tor (.onion) : le service Tor n'est pas installé. Installez-le et démarrez-le pour utiliser les registres onion."
-  pl_PL: "Nie można połączyć się z tym rejestrem Tor (.onion): usługa Tor nie jest zainstalowana. Zainstaluj ją i uruchom, aby korzystać z rejestrów onion."
-
-registry.context.onion-tor-not-running:
-  en_US: "Cannot reach this Tor (.onion) registry: the Tor service is not running. Start the Tor service to use onion registries."
-  de_DE: "Diese Tor-(.onion-)Registry ist nicht erreichbar: Der Tor-Dienst läuft nicht. Starten Sie den Tor-Dienst, um Onion-Registries zu verwenden."
-  es_ES: "No se puede acceder a este registro Tor (.onion): el servicio Tor no está en ejecución. Inicia el servicio Tor para usar registros onion."
-  fr_FR: "Impossible d'accéder à ce registre Tor (.onion) : le service Tor n'est pas démarré. Démarrez le service Tor pour utiliser les registres onion."
-  pl_PL: "Nie można połączyć się z tym rejestrem Tor (.onion): usługa Tor nie jest uruchomiona. Uruchom usługę Tor, aby korzystać z rejestrów onion."
-
 registry.context.registry-required:
   en_US: "`--registry` required"
   de_DE: "`--registry` erforderlich"
@@ -3312,6 +3298,20 @@ registry.sync.closed:
   es_ES: "Conexión con el registro cerrada"
   fr_FR: "Connexion au registre fermée"
   pl_PL: "Połączenie z rejestrem zostało zamknięte"
+
+registry.sync.not-saved:
+  en_US: "%{registry} is not a saved registry"
+  de_DE: "%{registry} ist keine gespeicherte Registry"
+  es_ES: "%{registry} no es un registro guardado"
+  fr_FR: "%{registry} n'est pas un registre enregistré"
+  pl_PL: "%{registry} nie jest zapisanym rejestrem"
+
+registry.sync.unreachable:
+  en_US: "%{registry} is unreachable: %{error}"
+  de_DE: "%{registry} ist nicht erreichbar: %{error}"
+  es_ES: "%{registry} no está accesible: %{error}"
+  fr_FR: "%{registry} est injoignable : %{error}"
+  pl_PL: "%{registry} jest nieosiągalny: %{error}"
 
 # sign/commitment/request.rs
 sign.commitment.request.unsupported-type:
