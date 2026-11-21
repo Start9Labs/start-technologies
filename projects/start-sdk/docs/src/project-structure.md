@@ -220,7 +220,7 @@ jobs:
       contents: write
 ```
 
-A package built from a private repository is published as private. Setting `PACKAGE_READER_KEYS` also publishes it as private, readable by the registered signers whose public keys it lists, one per line in DER Base64 or PEM. Before publishing, the workflows run `start-cli registry package access restrict`, which requires `DEV_KEY` to belong to an admin of `RELEASE_REGISTRY`.
+A package built from a private repository is published as private. Setting `PACKAGE_READER_KEYS` also publishes it as private, readable by the registered signers whose public keys it lists, one per line in DER Base64 or PEM. Before publishing, the workflows run `start-cli registry package access restrict`, which requires `DEV_KEY` to belong to an admin of `RELEASE_REGISTRY`. Tag-and-release also requires this key to have read access on `REFERENCE_REGISTRY`. Registry publication from private repositories requires `S3_S9PKS_BASE_URL` as the download host, accessible to the registry and its readers. Registry privacy controls package metadata and icons; archive access follows the download host's permissions.
 
 To publish to registries served over Tor, run a Tor SOCKS proxy the runners can reach and set `REGISTRY_PROXY` to its URL, such as `socks5h://tor-proxy.example:9050`. The `socks5h` scheme resolves names through the proxy, which `.onion` addresses require. Both workflows then route every `start-cli` registry request through it. The workflows do not start a proxy themselves.
 

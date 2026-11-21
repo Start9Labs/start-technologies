@@ -286,6 +286,16 @@ pub(crate) async fn restrict_package(
         };
         readers.insert(signer.clone());
     }
+    restrict_package_to_signers(ctx, url, id, &readers).await
+}
+
+/// Makes the package private and replaces its explicit reader set.
+pub(crate) async fn restrict_package_to_signers(
+    ctx: &CliContext,
+    url: Url,
+    id: &PackageId,
+    readers: &BTreeSet<Guid>,
+) -> Result<(), Error> {
     call_registry(
         ctx,
         url.clone(),

@@ -287,7 +287,7 @@ async fn restriction_replaces_readers_and_promotion_carries_it() {
     let reader = SignerInfo {
         name: "Reader".into(),
         contact: vec![ContactInfo::Email("reader@example.com".into())],
-        keys: [key(14)].into(),
+        keys: [key(14), key(17)].into(),
         gpg_exports: Default::default(),
     };
     let stale = SignerInfo {
@@ -388,6 +388,40 @@ async fn restriction_replaces_readers_and_promotion_carries_it() {
     .await
     .unwrap();
     assert_eq!(access(&target).await, Some((true, vec![reader.clone()])));
+
+    let destination_reader = SignerInfo {
+        name: "Destination reader".into(),
+        keys: [key(14), key(18)].into(),
+        ..reader.clone()
+    };
+    target
+        .db
+        .mutate(|db| {
+            let signer = db.as_index().as_signers().get_signer(&key(14))?;
+            db.as_index_mut()
+                .as_signers_mut()
+                .as_idx_mut(&signer)
+                .unwrap()
+                .ser(&destination_reader)
+        })
+        .await
+        .result
+        .unwrap();
+    cli_promote(
+        cli.clone(),
+        CliPromoteParams {
+            from: None,
+            to: Some("destination".into()),
+            id: id.clone(),
+            version: version.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        access(&target).await,
+        Some((true, vec![destination_reader]))
+    );
     assert!(
         target
             .db

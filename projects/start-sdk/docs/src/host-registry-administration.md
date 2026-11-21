@@ -78,7 +78,7 @@ start-cli registry package promote myservice 1.2.0:0 --from alpha --to productio
 
 At least one endpoint is required; an omitted endpoint uses the configured registry selected by `-r` or the `default` profile. `start-cli registry os promote <VERSION>` accepts the same endpoint options for OS versions.
 
-Promoting a private package keeps it private on the destination with the same readers, registering any reader signer the destination lacks. This requires admin rights on both registries.
+Promoting a private package keeps it private on the destination with the same readers, registering any reader signer the destination lacks. Existing destination signers are matched by shared public keys and retain their own keys and profile. This requires admin rights on both registries.
 
 ### Private packages
 

@@ -54,6 +54,10 @@ jobs:
         uses: https://github.com/Start9Labs/start-technologies/.github/actions/configure-registry-proxy@master
         with:
           proxy: ${{ inputs.REGISTRY_PROXY }}
+      - name: Set up developer signing key
+        uses: https://github.com/Start9Labs/start-technologies/.github/actions/configure-developer-key@master
+        with:
+          key: ${{ secrets.DEV_KEY }}
       - name: Extract package ID and version
         id: extract
         uses: https://github.com/Start9Labs/start-technologies/.github/actions/extract-version@master

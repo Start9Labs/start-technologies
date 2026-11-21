@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use clap::Parser;
 use http::HeaderMap;
 use imbl_value::InternedString;
@@ -9,8 +11,12 @@ use crate::context::CliContext;
 use crate::context::config::resolve_profile;
 use crate::prelude::*;
 use crate::registry::admin::AddSignerParams;
-use crate::registry::package::access::{PackageAccess, list_registry_signers, restrict_package};
+use crate::registry::package::access::{
+    PackageAccess, list_registry_signers, restrict_package_to_signers,
+};
 use crate::registry::package::get::{GetPackageResponseFull, PackageDetailLevel};
+use crate::registry::package::index::PackageIndex;
+use crate::rpc_continuations::Guid;
 use crate::s9pk::v2::SIG_CONTEXT;
 use crate::util::VersionString;
 
@@ -96,7 +102,7 @@ pub async fn cli_promote(
     )
     .await?;
 
-    let response: GetPackageResponseFull = from_value(res)?;
+    let response: GetPackageResponseFull = from_value(res.clone())?;
 
     let version_info = response
         .best
@@ -116,7 +122,7 @@ pub async fn cli_promote(
             )
         })?;
 
-    if response.private {
+    if source_package_is_private(&ctx, from_url.clone(), &id, &res).await? {
         carry_private_access(&ctx, from_url, to_url.clone(), &id).await?;
     }
 
@@ -144,7 +150,25 @@ pub async fn cli_promote(
     Ok(())
 }
 
-/// Restricts the destination package to the source package's readers, registering missing reader signers.
+async fn source_package_is_private(
+    ctx: &CliContext,
+    from: Url,
+    id: &PackageId,
+    response: &Value,
+) -> Result<bool, Error> {
+    if let Some(private) = response
+        .as_object()
+        .and_then(|response| response.get("private"))
+    {
+        return from_value(private.clone());
+    }
+    // Registries before 1.7.0 omit `private` from `package.get`.
+    let index: PackageIndex =
+        from_value(call_registry(ctx, from, "package.index", imbl_value::json!({})).await?)?;
+    Ok(index.packages.get(id).or_not_found(id)?.access.private)
+}
+
+/// Existing reader signers match by shared keys; their records stay unchanged.
 async fn carry_private_access(
     ctx: &CliContext,
     from: Url,
@@ -161,31 +185,33 @@ async fn carry_private_access(
         .await?,
     )?;
     let registered = list_registry_signers(ctx, to.clone()).await?;
+    let mut readers = BTreeSet::new();
     for reader in access.readers.values() {
-        if registered
-            .values()
-            .all(|signer| signer.keys.is_disjoint(&reader.keys))
-        {
-            call_registry(
-                ctx,
-                to.clone(),
-                "admin.signer.add",
-                to_value(&AddSignerParams {
-                    name: reader.name.clone(),
-                    contact: reader.contact.clone(),
-                    keys: reader.keys.iter().map(ToString::to_string).collect(),
-                    gpg_exports: reader.gpg_exports.clone(),
-                })?,
-            )
-            .await?;
+        let matching: BTreeSet<Guid> = registered
+            .iter()
+            .filter(|(_, signer)| !signer.keys.is_disjoint(&reader.keys))
+            .map(|(id, _)| id.clone())
+            .collect();
+        if matching.is_empty() {
+            readers.insert(from_value::<Guid>(
+                call_registry(
+                    ctx,
+                    to.clone(),
+                    "admin.signer.add",
+                    to_value(&AddSignerParams {
+                        name: reader.name.clone(),
+                        contact: reader.contact.clone(),
+                        keys: reader.keys.iter().map(ToString::to_string).collect(),
+                        gpg_exports: reader.gpg_exports.clone(),
+                    })?,
+                )
+                .await?,
+            )?);
+        } else {
+            readers.extend(matching);
         }
     }
-    let reader_keys = access
-        .readers
-        .into_values()
-        .flat_map(|reader| reader.keys)
-        .collect();
-    restrict_package(ctx, to, id, &reader_keys).await
+    restrict_package_to_signers(ctx, to, id, &readers).await
 }
 
 #[cfg(test)]
@@ -202,6 +228,67 @@ mod tests {
                 .unwrap(),
         )
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn legacy_selection_privacy_comes_from_the_source_index() {
+        use ed25519_dalek::SigningKey;
+
+        use crate::developer::write_signing_key;
+        use crate::registry::context::test_utils::{context as registry_context, registry_server};
+        use crate::registry::package::access::{SetPackagePrivateParams, set_package_private};
+        use crate::sign::AnyVerifyingKey;
+
+        let temp = tempfile::tempdir().unwrap();
+        let key = SigningKey::from_bytes(&[19; 32]);
+        let registry = registry_context(
+            temp.path().join("registry"),
+            AnyVerifyingKey::Ed25519(key.verifying_key()),
+        )
+        .await;
+        let id: PackageId = "private-fixture".parse().unwrap();
+        let (url, task) = registry_server(registry.clone()).await;
+        let key_path = temp.path().join("identity.pem");
+        write_signing_key(&key, &key_path).await.unwrap();
+        let cli = CliContext::init(ClientConfig {
+            id_key_path: Some(key_path),
+            ..Default::default()
+        })
+        .unwrap();
+        let url = registry_rpc_url(&url).unwrap();
+        let legacy = imbl_value::json!({
+            "categories": [], "best": {}, "otherVersions": {},
+        });
+        for private in [true, false] {
+            set_package_private(
+                registry.clone(),
+                SetPackagePrivateParams {
+                    id: id.clone(),
+                    private,
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                source_package_is_private(&cli, url.clone(), &id, &legacy)
+                    .await
+                    .unwrap(),
+                private,
+            );
+        }
+        assert_eq!(
+            source_package_is_private(
+                &cli,
+                url.clone(),
+                &"missing-fixture".parse().unwrap(),
+                &legacy,
+            )
+            .await
+            .unwrap_err()
+            .kind,
+            ErrorKind::NotFound,
+        );
+        task.abort();
     }
 
     #[test]

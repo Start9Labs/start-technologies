@@ -58,10 +58,16 @@ jobs:
         with:
           proxy: ${{ inputs.REGISTRY_PROXY }}
 
+      - name: Set up developer signing key
+        uses: Start9Labs/start-technologies/.github/actions/configure-developer-key@master
+        with:
+          key: ${{ secrets.DEV_KEY }}
+
       - name: Extract package ID and version
         id: extract
         uses: Start9Labs/start-technologies/.github/actions/extract-version@master
 
+      # DEV_KEY must have read access on REFERENCE_REGISTRY.
       - name: Check production registry
         id: check
         run: |

@@ -161,9 +161,11 @@ version metadata, including existing rows without either field. One visibility p
 public packages, admins, authorized publishers, and listed readers. Browsing endpoints, mirrors,
 and stored-icon references use it. Browsing and subscription projections redact reader lists for
 non-admins. Admin-only `package.access` commands manage the policy, and `package.get` reports
-`private` to anyone who can see the package. Promotion restricts a private package on the
-destination before indexing it there. Invalid resource proofs
-retain anonymous access to public icons; inaccessible private-only icons return 404.
+`private` to anyone who can see the package. Promotion resolves omitted privacy metadata through
+`package.index` and restricts a private package on the destination before indexing it there.
+Existing destination reader signers match by shared keys and retain their records; missing readers
+are registered from the source. Invalid resource proofs retain anonymous access to public icons;
+inaccessible private-only icons return 404.
 Signed public browsing retains the verified identity without adding admin audit records.
 
 OS versions use the shared `LocaleString` for `releaseNotes`, as package metadata does:
