@@ -172,8 +172,15 @@ impl RpcContext {
         mut self,
         session: crate::middleware::auth::session::SecureSession,
     ) -> Self {
-        let lease = crate::auth::passkey::sessions::hold(&self, session.peer());
-        self.1 = Some(Arc::new(session.with_lease(lease)));
+        let owner = self.weak();
+        let peer = session.peer().clone();
+        self.1 = Some(Arc::new(session.with_lease_factory(move || {
+            let ctx = owner.upgrade()?;
+            Some(
+                crate::auth::passkey::sessions::hold(&ctx, &peer)
+                    as crate::util::net::secure::SocketLease,
+            )
+        })));
         self
     }
     pub(crate) fn weak(&self) -> WeakRpcContext {

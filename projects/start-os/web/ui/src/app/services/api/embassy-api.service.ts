@@ -54,6 +54,7 @@ export abstract class ApiService {
   /** Enrolls a session key on a connection signed by a registered passkey. */
   abstract enrollWithPasskey(
     params: T.EnrollPasskeySessionParams,
+    signal: AbortSignal,
   ): Promise<void>
 
   /** Reaches a foreign server unsigned; rejection never changes local authentication. */

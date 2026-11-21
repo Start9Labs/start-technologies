@@ -985,6 +985,103 @@ test('Setup explicitly admits temporary identities for streams and continuations
   }
 })
 
+test('passkey enrollment preserves authenticator cancellation across transport wrapping', async () => {
+  const core = require('@start9labs/start-core')
+  const cancellation = new DOMException('User cancelled', 'NotAllowedError')
+  const { load } = harness(
+    new Map([
+      [
+        '@start9labs/start-core',
+        {
+          ...core,
+          auth: {
+            ...core.auth,
+            passkeyRequestSigner: () => ({
+              sign: async () => {
+                throw cancellation
+              },
+            }),
+          },
+        },
+      ],
+    ]),
+    { AbortController },
+  )
+  const client = Object.create(
+    load(
+      'projects/start-os/web/ui/src/app/services/api/embassy-live-api.service.ts',
+    ).LiveApiService.prototype,
+  )
+  client.rpc = {
+    auth: {
+      passkey: {
+        credentials: async () => [
+          {
+            credentialId: 'AQID',
+            publicKey:
+              'MCowBQYDK2VwAyEAebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=',
+          },
+        ],
+      },
+    },
+  }
+  client.identity = { openObserver: {} }
+  let signal
+  client.sockets = {
+    message: async (_, __, lease) => {
+      signal = lease.signal
+      try {
+        await lease.signer.sign('server.test', new Uint8Array())
+      } catch (error) {
+        throw Object.assign(new Error('Transport failed', { cause: error }), {
+          code: 0,
+        })
+      }
+      assert.fail('Expected authenticator cancellation')
+    },
+  }
+  await assert.rejects(
+    client.enrollWithPasskey({}, new AbortController().signal),
+    error => error === cancellation,
+  )
+  assert.equal(signal.aborted, true)
+})
+
+test('passkey enrollment does not dispatch after its originating lease is cancelled', async () => {
+  const { load } = harness(new Map(), { AbortController })
+  const client = Object.create(
+    load(
+      'projects/start-os/web/ui/src/app/services/api/embassy-live-api.service.ts',
+    ).LiveApiService.prototype,
+  )
+  const credentials = Promise.withResolvers()
+  let discoveries = 0
+  client.rpc = {
+    auth: {
+      passkey: {
+        credentials: () => {
+          discoveries++
+          return credentials.promise
+        },
+      },
+    },
+  }
+  client.sockets = { message: () => assert.fail('Cancelled enrollment dispatched') }
+  const cancelled = new AbortController()
+  cancelled.abort()
+  await assert.rejects(client.enrollWithPasskey({}, cancelled.signal), {
+    name: 'AbortError',
+  })
+  assert.equal(discoveries, 0)
+  const active = new AbortController()
+  const pending = client.enrollWithPasskey({}, active.signal)
+  const rejected = assert.rejects(pending, { name: 'AbortError' })
+  active.abort()
+  credentials.resolve([])
+  await rejected
+  assert.equal(discoveries, 1)
+})
+
 test('setup mock ordinary and typed status share their progress and terminal owner', async () => {
   const { load } = harness(new Map(), { AbortController })
   const mock = Object.create(
