@@ -489,7 +489,9 @@ grp:::::::::5555555555555555555555555555555555555555:
         let crate::sign::AnySignature::Ed25519(raw) = sig else {
             panic!("gpg-agent signs pure Ed25519");
         };
-        let crate::sign::AnyVerifyingKey::Ed25519(vk) = &key;
+        let crate::sign::AnyVerifyingKey::Ed25519(vk) = &key else {
+            panic!("gpg-agent holds Ed25519 keys");
+        };
         vk.verify_strict(&msg, &raw).unwrap();
 
         let commitment = crate::sign::commitment::blake3::Blake3Commitment {

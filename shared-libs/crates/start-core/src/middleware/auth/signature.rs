@@ -692,7 +692,8 @@ fn verify_auth_message(
             key.verify_strict(message, signature)?;
             Ok(())
         }
-        (_, AnySignature::Ed25519ph(_)) => Err(Error::new(
+        (key, AnySignature::WebAuthn(assertion)) => assertion.verify(key, message),
+        (_, AnySignature::Ed25519ph(_)) | (AnyVerifyingKey::P256(_), _) => Err(Error::new(
             eyre!("{}", t!("sign.unknown-signature-algorithm")),
             ErrorKind::InvalidSignature,
         )),
@@ -1296,5 +1297,37 @@ mod tests {
             .is_err(),
             "clients sign the v2 layout"
         );
+    }
+
+    #[tokio::test]
+    async fn passkey_signed_request_verifies_under_its_context() {
+        let key = crate::sign::webauthn::test_util::p256_key();
+        let ed25519 = Signer::Key(AnySigningKey::Ed25519(
+            ed25519_dalek::SigningKey::from_bytes(&[2; 32]),
+        ));
+        let mut header = SignatureHeader::sign(&ed25519, BODY, "start-9.local")
+            .await
+            .expect("signs");
+        header.signer = AnyVerifyingKey::P256(*key.verifying_key());
+        header.signature =
+            AnySignature::WebAuthn(crate::sign::webauthn::test_util::passkey_assertion(
+                &key,
+                &request_signing_message(&header.commitment, "start-9.local").unwrap(),
+            ));
+        let parsed = SignatureHeader::from_header(&header.to_header()).expect("header parses");
+        verify_request(
+            &parsed.signer,
+            &parsed.commitment,
+            "start-9.local",
+            &parsed.signature,
+        )
+        .expect("passkey signature verifies");
+        verify_request(
+            &parsed.signer,
+            &parsed.commitment,
+            "other-host.local",
+            &parsed.signature,
+        )
+        .expect_err("passkey signature does not verify under a different context");
     }
 }

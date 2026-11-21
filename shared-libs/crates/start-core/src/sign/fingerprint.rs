@@ -3,14 +3,14 @@ use super::AnyVerifyingKey;
 const PREFIX: &str = "SHA256:";
 const ALGORITHM: &str = "SHA-256";
 
-/// SHA-256 fingerprint of the raw Ed25519 identity public key.
+/// SHA-256 fingerprint of the raw public key, an uncompressed SEC1 point for P-256.
 pub fn fingerprint(key: &AnyVerifyingKey) -> String {
     use sha2::Digest;
-    let AnyVerifyingKey::Ed25519(key) = key;
-    format!(
-        "{PREFIX}{}",
-        hex::encode(sha2::Sha256::digest(key.as_bytes()))
-    )
+    let digest = match key {
+        AnyVerifyingKey::Ed25519(key) => sha2::Sha256::digest(key.as_bytes()),
+        AnyVerifyingKey::P256(key) => sha2::Sha256::digest(key.to_sec1_point(false).as_bytes()),
+    };
+    format!("{PREFIX}{}", hex::encode(digest))
 }
 
 #[test]
