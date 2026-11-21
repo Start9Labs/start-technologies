@@ -690,6 +690,7 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
       RUN_UNTIL_SUCCESS_ID,
       EXIT_SUCCESS,
       this.effects,
+      true,
     )
     // Inject the sentinel into the live HealthDaemon list so term() walks
     // it during dependency-ordered shutdown along with the user's daemons.

@@ -2,9 +2,15 @@ import { getEventListeners } from 'node:events'
 import { setFlagsFromString } from 'node:v8'
 import { runInNewContext } from 'node:vm'
 import { Daemon } from '../mainFn/Daemon'
+import { Daemons } from '../mainFn/Daemons'
 import { EXIT_SUCCESS, HealthDaemon } from '../mainFn/HealthDaemon'
 import { HealthCheckResult } from '../health/checkFns'
-import { cooldownTrigger, onceTrigger, Trigger } from '../trigger'
+import {
+  cooldownTrigger,
+  onceTrigger,
+  statusTrigger,
+  Trigger,
+} from '../trigger'
 import * as T from '@start9labs/start-core/types'
 
 type Manifest = {
@@ -189,9 +195,10 @@ describe('HealthDaemon dependency-driven restart cycle', () => {
   const fakeDep = () => ({
     id: 'dep',
     running: true,
-    _health: { result: 'success' as const, message: null },
+    dependentsReady: true,
     ready: { display: 'Dep' },
     addWatcher: () => {},
+    addDependentWatcher: () => {},
   })
 
   // A fake managed daemon that records which lifecycle method HealthDaemon calls.
@@ -649,5 +656,922 @@ describe('HealthDaemon check loop', () => {
     )
     logged.mockRestore()
     await hd.term()
+  })
+})
+
+describe('HealthDaemon ready-check hysteresis and display-null logging', () => {
+  const controllableDaemon = () => {
+    const exitFns: Array<(success: boolean) => void> = []
+    return {
+      start: jest.fn(async () => {}),
+      stop: jest.fn(async () => {
+        exitFns.length = 0
+      }),
+      term: jest.fn(async () => {
+        exitFns.length = 0
+      }),
+      onExit: jest.fn((fn: (success: boolean) => void) => {
+        exitFns.push(fn)
+      }),
+      isOneshot: () => false,
+      lastExitError: null as Error | null,
+      emitExit(success: boolean, error?: Error) {
+        this.lastExitError = error ?? null
+        exitFns.forEach(fn => fn(success))
+      },
+    }
+  }
+
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => {
+    jest.restoreAllMocks()
+    jest.useRealTimers()
+  })
+
+  it('tolerates transient failures on defaultTrigger, retries at 1s, resets on recovery, and logs with display: null', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const setHealth = jest.fn(async () => null)
+    const depDaemon = controllableDaemon()
+    const appDaemon = controllableDaemon()
+    const sequence: HealthCheckResult[] = [
+      { result: 'success', message: null },
+      { result: 'failure', message: 'pg_isready timeout 1' },
+      { result: 'failure', message: 'pg_isready timeout 2' },
+      { result: 'success', message: null },
+      { result: 'failure', message: 'pg_isready timeout 3' },
+      { result: 'success', message: null },
+    ]
+    let i = 0
+    const depFn = jest.fn(() => sequence[Math.min(i++, sequence.length - 1)])
+
+    const dep = new HealthDaemon<Manifest>(
+      depDaemon as unknown as Daemon<Manifest>,
+      [],
+      'postgres',
+      { display: null, fn: depFn },
+      { ...fakeEffects(), setHealth },
+    )
+    const app = new HealthDaemon<Manifest>(
+      appDaemon as unknown as Daemon<Manifest>,
+      [dep],
+      'immich-server',
+      {
+        display: 'Immich Server',
+        fn: () => ({ result: 'success', message: null }),
+      },
+      fakeEffects(),
+    )
+
+    await dep.updateStatus()
+    await app.updateStatus()
+    expect(appDaemon.start).not.toHaveBeenCalled()
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(depFn).toHaveBeenCalledTimes(1)
+    expect(appDaemon.start).toHaveBeenCalledTimes(1)
+    expect(appDaemon.stop).not.toHaveBeenCalled()
+
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(depFn).toHaveBeenCalledTimes(2)
+    expect(appDaemon.stop).not.toHaveBeenCalled()
+    expect(setHealth).not.toHaveBeenCalled()
+    expect(logged).toHaveBeenCalledWith(
+      'Health Check postgres failed:',
+      'pg_isready timeout 1',
+    )
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(depFn).toHaveBeenCalledTimes(3)
+    expect(appDaemon.stop).not.toHaveBeenCalled()
+    expect(logged).toHaveBeenCalledWith(
+      'Health Check postgres failed:',
+      'pg_isready timeout 2',
+    )
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(depFn).toHaveBeenCalledTimes(4)
+    expect(appDaemon.start).toHaveBeenCalledTimes(1)
+    expect(appDaemon.stop).not.toHaveBeenCalled()
+
+    await jest.advanceTimersByTimeAsync(29_000)
+    expect(depFn).toHaveBeenCalledTimes(4)
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(depFn).toHaveBeenCalledTimes(5)
+    expect(appDaemon.stop).not.toHaveBeenCalled()
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(depFn).toHaveBeenCalledTimes(6)
+    expect(appDaemon.start).toHaveBeenCalledTimes(1)
+    expect(appDaemon.stop).not.toHaveBeenCalled()
+
+    await app.term()
+    await dep.term()
+  })
+
+  it('pauses dependents on the third consecutive failure (including async and sync throws) and resumes on recovery', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const depDaemon = controllableDaemon()
+    const appDaemon = controllableDaemon()
+    const steps: Array<() => Promise<HealthCheckResult> | HealthCheckResult> = [
+      () => ({ result: 'success', message: null }),
+      () => Promise.reject(new Error('exec ETIMEDOUT')),
+      () => {
+        throw 'sync check boom'
+      },
+      () => Promise.reject({ result: 'failure', message: 'script failed' }),
+      () => ({ result: 'success', message: null }),
+    ]
+    let i = 0
+    const depFn = jest.fn(() => steps[Math.min(i++, steps.length - 1)]())
+
+    const dep = new HealthDaemon<Manifest>(
+      depDaemon as unknown as Daemon<Manifest>,
+      [],
+      'postgres',
+      { display: null, fn: depFn },
+      fakeEffects(),
+    )
+    const app = new HealthDaemon<Manifest>(
+      appDaemon as unknown as Daemon<Manifest>,
+      [dep],
+      'immich-server',
+      EXIT_SUCCESS,
+      fakeEffects(),
+    )
+
+    await dep.updateStatus()
+    await app.updateStatus()
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(appDaemon.start).toHaveBeenCalledTimes(1)
+
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(appDaemon.stop).not.toHaveBeenCalled()
+    expect(logged).toHaveBeenCalledWith(
+      'Health Check postgres failed:',
+      'exec ETIMEDOUT',
+    )
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(appDaemon.stop).not.toHaveBeenCalled()
+    expect(logged).toHaveBeenCalledWith(
+      'Health Check postgres failed:',
+      'sync check boom',
+    )
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(appDaemon.stop).toHaveBeenCalledTimes(1)
+    expect(appDaemon.term).not.toHaveBeenCalled()
+    expect(logged).toHaveBeenCalledWith(
+      'Health Check postgres failed:',
+      'script failed',
+    )
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(appDaemon.start).toHaveBeenCalledTimes(2)
+
+    await app.term()
+    await dep.term()
+  })
+
+  it.each([
+    { label: 'crash', exitOk: false, error: new Error('SIGSEGV') },
+    { label: 'unexpected clean exit', exitOk: true, error: undefined },
+  ])(
+    'pauses dependents immediately on daemon $label even while a transient failure is active',
+    async ({ exitOk, error }) => {
+      const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+      const depDaemon = controllableDaemon()
+      const appDaemon = controllableDaemon()
+      const resultsSeq: HealthCheckResult[] = [
+        { result: 'success', message: null },
+        { result: 'failure', message: 'transient blip' },
+      ]
+      let i = 0
+      const dep = new HealthDaemon<Manifest>(
+        depDaemon as unknown as Daemon<Manifest>,
+        [],
+        'postgres',
+        {
+          display: null,
+          fn: () => resultsSeq[Math.min(i++, resultsSeq.length - 1)],
+        },
+        fakeEffects(),
+      )
+      const app = new HealthDaemon<Manifest>(
+        appDaemon as unknown as Daemon<Manifest>,
+        [dep],
+        'immich-server',
+        EXIT_SUCCESS,
+        fakeEffects(),
+      )
+
+      await dep.updateStatus()
+      await app.updateStatus()
+
+      await jest.advanceTimersByTimeAsync(1_000)
+      expect(appDaemon.start).toHaveBeenCalledTimes(1)
+
+      await jest.advanceTimersByTimeAsync(30_000)
+      expect(dep.health.result).toBe('failure')
+      expect(appDaemon.stop).not.toHaveBeenCalled()
+
+      depDaemon.emitExit(exitOk, error)
+      await jest.advanceTimersByTimeAsync(0)
+      expect(appDaemon.stop).toHaveBeenCalledTimes(1)
+      expect(logged).toHaveBeenCalledWith(
+        'Health Check postgres failed:',
+        expect.stringContaining('postgres daemon'),
+      )
+
+      await app.term()
+      await dep.term()
+    },
+  )
+
+  it('respects gracePeriod before logging failures for display: null', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const setHealth = jest.fn(async () => null)
+    const dep = new HealthDaemon<Manifest>(
+      controllableDaemon() as unknown as Daemon<Manifest>,
+      [],
+      'postgres',
+      {
+        display: null,
+        fn: () => ({ result: 'failure', message: 'still booting' }),
+      },
+      { ...fakeEffects(), setHealth },
+    )
+
+    await dep.updateStatus()
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(logged).not.toHaveBeenCalled()
+    expect(setHealth).not.toHaveBeenCalled()
+
+    await jest.advanceTimersByTimeAsync(9_000)
+    expect(logged).toHaveBeenCalledWith(
+      'Health Check postgres failed:',
+      'still booting',
+    )
+    expect(setHealth).not.toHaveBeenCalled()
+
+    await dep.term()
+  })
+
+  it('does not deadlock a multi-dependency child when one ready dependency has a transient failure as another becomes ready', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {})
+    let aResult: HealthCheckResult = { result: 'success', message: null }
+    let bResult: HealthCheckResult = { result: 'starting', message: null }
+    const cDaemon = controllableDaemon()
+
+    const depA = new HealthDaemon<Manifest>(
+      controllableDaemon() as unknown as Daemon<Manifest>,
+      [],
+      'dep-a',
+      { display: null, fn: () => aResult },
+      fakeEffects(),
+    )
+    const depB = new HealthDaemon<Manifest>(
+      controllableDaemon() as unknown as Daemon<Manifest>,
+      [],
+      'dep-b',
+      { display: null, trigger: cooldownTrigger(500), fn: () => bResult },
+      fakeEffects(),
+    )
+    const child = new HealthDaemon<Manifest>(
+      cDaemon as unknown as Daemon<Manifest>,
+      [depA, depB],
+      'child',
+      EXIT_SUCCESS,
+      fakeEffects(),
+    )
+
+    await depA.updateStatus()
+    await depB.updateStatus()
+    await child.updateStatus()
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(cDaemon.start).not.toHaveBeenCalled()
+
+    aResult = { result: 'failure', message: 'blip' }
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(depA.health.result).toBe('failure')
+    expect(cDaemon.start).not.toHaveBeenCalled()
+
+    bResult = { result: 'success', message: null }
+    await jest.advanceTimersByTimeAsync(500)
+    expect(depA.health.result).toBe('failure')
+    expect(cDaemon.start).toHaveBeenCalledTimes(1)
+
+    aResult = { result: 'success', message: null }
+    await jest.advanceTimersByTimeAsync(500)
+    expect(depA.health.result).toBe('success')
+    expect(cDaemon.start).toHaveBeenCalledTimes(1)
+    expect(cDaemon.stop).not.toHaveBeenCalled()
+
+    await child.term()
+    await depB.term()
+    await depA.term()
+  })
+
+  it('pauses dependents if a finite trigger ends while a transient failure is pending', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {})
+    const depDaemon = controllableDaemon()
+    const appDaemon = controllableDaemon()
+    let call = 0
+    const dep = new HealthDaemon<Manifest>(
+      depDaemon as unknown as Daemon<Manifest>,
+      [],
+      'finite',
+      {
+        display: null,
+        gracePeriod: 0,
+        trigger: async function* () {
+          yield
+          await new Promise(resolve => setTimeout(resolve, 1_000))
+          yield
+        },
+        fn: () =>
+          call++ === 0
+            ? { result: 'success', message: null }
+            : { result: 'failure', message: 'last poll failed' },
+      },
+      fakeEffects(),
+    )
+    const app = new HealthDaemon<Manifest>(
+      appDaemon as unknown as Daemon<Manifest>,
+      [dep],
+      'app',
+      EXIT_SUCCESS,
+      fakeEffects(),
+    )
+
+    await dep.updateStatus()
+    await app.updateStatus()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(appDaemon.start).toHaveBeenCalledTimes(1)
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(appDaemon.stop).toHaveBeenCalledTimes(1)
+
+    await app.term()
+    await dep.term()
+  })
+
+  it('propagates upstream dependency loss through a middle daemon immediately before middle stop finishes', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {})
+    let releaseMidStop: (() => void) | null = null
+    const rootDaemon = controllableDaemon()
+    const midDaemon = {
+      ...controllableDaemon(),
+      stop: jest.fn(async () => {
+        await new Promise<void>(resolve => (releaseMidStop = resolve))
+      }),
+    }
+    const leafDaemon = controllableDaemon()
+
+    const root = new HealthDaemon<Manifest>(
+      rootDaemon as unknown as Daemon<Manifest>,
+      [],
+      'root',
+      { display: null, fn: () => ({ result: 'success', message: null }) },
+      fakeEffects(),
+    )
+    const mid = new HealthDaemon<Manifest>(
+      midDaemon as unknown as Daemon<Manifest>,
+      [root],
+      'mid',
+      { display: null, fn: () => ({ result: 'success', message: null }) },
+      fakeEffects(),
+    )
+    const leaf = new HealthDaemon<Manifest>(
+      leafDaemon as unknown as Daemon<Manifest>,
+      [mid],
+      'leaf',
+      EXIT_SUCCESS,
+      fakeEffects(),
+    )
+
+    await root.updateStatus()
+    await mid.updateStatus()
+    await leaf.updateStatus()
+
+    await jest.advanceTimersByTimeAsync(2_000)
+    expect(leafDaemon.start).toHaveBeenCalledTimes(1)
+
+    rootDaemon.emitExit(false, new Error('killed'))
+    await jest.advanceTimersByTimeAsync(0)
+    expect(midDaemon.stop).toHaveBeenCalledTimes(1)
+    expect(releaseMidStop).not.toBeNull()
+    expect(leafDaemon.stop).toHaveBeenCalledTimes(1)
+
+    releaseMidStop!()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(leafDaemon.start).toHaveBeenCalledTimes(1)
+    expect(leafDaemon.stop).toHaveBeenCalledTimes(1)
+
+    await leaf.term()
+    await mid.term()
+    await root.term()
+  })
+
+  it('pauses dependents if a throwing trigger stops while a transient failure is pending', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const depDaemon = controllableDaemon()
+    const appDaemon = controllableDaemon()
+    let call = 0
+    const dep = new HealthDaemon<Manifest>(
+      depDaemon as unknown as Daemon<Manifest>,
+      [],
+      'broken',
+      {
+        display: null,
+        gracePeriod: 0,
+        trigger: async function* () {
+          yield
+          await new Promise(resolve => setTimeout(resolve, 1_000))
+          yield
+          throw new Error('trigger exploded')
+        },
+        fn: () =>
+          call++ === 0
+            ? { result: 'success', message: null }
+            : { result: 'failure', message: 'blip before crash' },
+      },
+      fakeEffects(),
+    )
+    const app = new HealthDaemon<Manifest>(
+      appDaemon as unknown as Daemon<Manifest>,
+      [dep],
+      'app',
+      EXIT_SUCCESS,
+      fakeEffects(),
+    )
+
+    await dep.updateStatus()
+    await app.updateStatus()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(appDaemon.start).toHaveBeenCalledTimes(1)
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(appDaemon.stop).toHaveBeenCalledTimes(1)
+    expect(logged).toHaveBeenCalledWith(
+      'Daemon broken health check failed: Error: trigger exploded',
+    )
+
+    await app.term()
+    await dep.term()
+  })
+
+  it('discards an in-flight middle poll that resolves after upstream loss without relaunching the leaf', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {})
+    const rootDaemon = controllableDaemon()
+    const midDaemon = controllableDaemon()
+    const leafDaemon = controllableDaemon()
+    let releaseMidSetHealth: (() => void) | null = null
+    let holdNextMidSetHealth = false
+    let releaseMidPoll: (() => void) | null = null
+    let holdNextMidPoll = false
+
+    const midEffects = {
+      ...fakeEffects(),
+      setHealth: jest.fn(async () => {
+        if (!holdNextMidSetHealth) return null
+        holdNextMidSetHealth = false
+        await new Promise<void>(resolve => (releaseMidSetHealth = resolve))
+        return null
+      }),
+    }
+
+    const root = new HealthDaemon<Manifest>(
+      rootDaemon as unknown as Daemon<Manifest>,
+      [],
+      'root',
+      { display: null, fn: () => ({ result: 'success', message: null }) },
+      fakeEffects(),
+    )
+    const mid = new HealthDaemon<Manifest>(
+      midDaemon as unknown as Daemon<Manifest>,
+      [root],
+      'mid',
+      {
+        display: 'Mid',
+        fn: async () => {
+          if (holdNextMidPoll) {
+            holdNextMidPoll = false
+            await new Promise<void>(resolve => (releaseMidPoll = resolve))
+          }
+          return { result: 'success', message: null }
+        },
+      },
+      midEffects,
+    )
+    const leaf = new HealthDaemon<Manifest>(
+      leafDaemon as unknown as Daemon<Manifest>,
+      [mid],
+      'leaf',
+      EXIT_SUCCESS,
+      fakeEffects(),
+    )
+
+    await root.updateStatus()
+    await mid.updateStatus()
+    await leaf.updateStatus()
+    await jest.advanceTimersByTimeAsync(2_000)
+    expect(leafDaemon.start).toHaveBeenCalledTimes(1)
+
+    holdNextMidPoll = true
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(releaseMidPoll).not.toBeNull()
+
+    holdNextMidSetHealth = true
+    rootDaemon.emitExit(false, new Error('killed'))
+    await jest.advanceTimersByTimeAsync(0)
+    expect(releaseMidSetHealth).not.toBeNull()
+    expect(leafDaemon.stop).toHaveBeenCalledTimes(1)
+
+    releaseMidPoll!()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(leafDaemon.start).toHaveBeenCalledTimes(1)
+    expect(leafDaemon.stop).toHaveBeenCalledTimes(1)
+
+    releaseMidSetHealth!()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(midDaemon.stop).toHaveBeenCalledTimes(1)
+    expect(leafDaemon.start).toHaveBeenCalledTimes(1)
+    expect(leafDaemon.stop).toHaveBeenCalledTimes(1)
+
+    await leaf.term()
+    await mid.term()
+    await root.term()
+  })
+
+  it('discards a stale pre-crash probe so dependents stay paused until a fresh post-crash success', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {})
+    const depDaemon = controllableDaemon()
+    const appDaemon = controllableDaemon()
+    let releaseStaleProbe: (() => void) | null = null
+    let poll = 0
+    const dep = new HealthDaemon<Manifest>(
+      depDaemon as unknown as Daemon<Manifest>,
+      [],
+      'postgres',
+      {
+        display: null,
+        fn: async () => {
+          poll++
+          if (poll === 1) return { result: 'success', message: null }
+          if (poll === 2) {
+            await new Promise<void>(resolve => (releaseStaleProbe = resolve))
+            return { result: 'success', message: null }
+          }
+          if (poll === 3) {
+            return { result: 'failure', message: 'still restarting' }
+          }
+          return { result: 'success', message: null }
+        },
+      },
+      fakeEffects(),
+    )
+    const app = new HealthDaemon<Manifest>(
+      appDaemon as unknown as Daemon<Manifest>,
+      [dep],
+      'app',
+      EXIT_SUCCESS,
+      fakeEffects(),
+    )
+
+    await dep.updateStatus()
+    await app.updateStatus()
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(appDaemon.start).toHaveBeenCalledTimes(1)
+
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(releaseStaleProbe).not.toBeNull()
+
+    depDaemon.emitExit(false, new Error('SIGSEGV'))
+    await jest.advanceTimersByTimeAsync(0)
+    expect(appDaemon.stop).toHaveBeenCalledTimes(1)
+
+    releaseStaleProbe!()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(appDaemon.start).toHaveBeenCalledTimes(1)
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(poll).toBe(3)
+    expect(appDaemon.start).toHaveBeenCalledTimes(1)
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(poll).toBe(4)
+    expect(appDaemon.start).toHaveBeenCalledTimes(2)
+
+    await app.term()
+    await dep.term()
+  })
+
+  it('keeps lifecycle order when waiting health publication finishes late or rejects', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const depDaemon = controllableDaemon()
+    const appDaemon = controllableDaemon()
+    let depResult: HealthCheckResult = { result: 'success', message: null }
+    let releaseWaitingWrite: (() => void) | null = null
+    let mode: 'normal' | 'delay-waiting' | 'reject-waiting' = 'normal'
+
+    const appEffects = {
+      ...fakeEffects(),
+      setHealth: jest.fn(async (health: { waiting?: boolean }) => {
+        if (health.waiting && mode === 'delay-waiting') {
+          mode = 'normal'
+          await new Promise<void>(resolve => (releaseWaitingWrite = resolve))
+          return null
+        }
+        if (health.waiting && mode === 'reject-waiting') {
+          mode = 'normal'
+          throw new Error('rpc disconnected')
+        }
+        return null
+      }),
+    }
+
+    const dep = new HealthDaemon<Manifest>(
+      depDaemon as unknown as Daemon<Manifest>,
+      [],
+      'postgres',
+      { display: 'Postgres', fn: () => depResult },
+      fakeEffects(),
+    )
+    const app = new HealthDaemon<Manifest>(
+      appDaemon as unknown as Daemon<Manifest>,
+      [dep],
+      'app',
+      { display: 'App', fn: () => ({ result: 'success', message: null }) },
+      appEffects as unknown as T.Effects,
+    )
+
+    await dep.updateStatus()
+    await app.updateStatus()
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(appDaemon.start).toHaveBeenCalledTimes(1)
+
+    mode = 'delay-waiting'
+    depDaemon.emitExit(false, new Error('crash 1'))
+    await jest.advanceTimersByTimeAsync(0)
+    expect(releaseWaitingWrite).not.toBeNull()
+    expect(appDaemon.stop).toHaveBeenCalledTimes(1)
+
+    depResult = { result: 'success', message: null }
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(appDaemon.start).toHaveBeenCalledTimes(2)
+
+    releaseWaitingWrite!()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(appDaemon.stop).toHaveBeenCalledTimes(1)
+    expect(appDaemon.start).toHaveBeenCalledTimes(2)
+
+    mode = 'reject-waiting'
+    depDaemon.emitExit(false, new Error('crash 2'))
+    await jest.advanceTimersByTimeAsync(0)
+    expect(appDaemon.stop).toHaveBeenCalledTimes(2)
+    expect(logged).toHaveBeenCalledWith(
+      'Failed to report health for app:',
+      expect.any(Error),
+    )
+
+    await app.term()
+    await dep.term()
+  })
+
+  it.each([
+    {
+      label: 'failure: Infinity',
+      trigger: () => statusTrigger(1_000, { failure: Infinity }),
+      second: { result: 'failure', message: 'fatal' } as HealthCheckResult,
+    },
+    {
+      label: 'disabled: Infinity',
+      trigger: () => statusTrigger(1_000, { disabled: Infinity }),
+      second: {
+        result: 'disabled',
+        message: 'turned off',
+      } as HealthCheckResult,
+    },
+  ])(
+    'pauses dependents immediately when statusTrigger parks on $label',
+    async ({ trigger, second }) => {
+      jest.spyOn(console, 'error').mockImplementation(() => {})
+      const depDaemon = controllableDaemon()
+      const appDaemon = controllableDaemon()
+      let poll = 0
+      const dep = new HealthDaemon<Manifest>(
+        depDaemon as unknown as Daemon<Manifest>,
+        [],
+        'dep',
+        {
+          display: null,
+          gracePeriod: 0,
+          trigger: trigger(),
+          fn: () =>
+            poll++ === 0 ? { result: 'success', message: null } : second,
+        },
+        fakeEffects(),
+      )
+      const app = new HealthDaemon<Manifest>(
+        appDaemon as unknown as Daemon<Manifest>,
+        [dep],
+        'app',
+        EXIT_SUCCESS,
+        fakeEffects(),
+      )
+
+      await dep.updateStatus()
+      await app.updateStatus()
+      await jest.advanceTimersByTimeAsync(1_000)
+      expect(appDaemon.start).toHaveBeenCalledTimes(1)
+
+      await jest.advanceTimersByTimeAsync(1_000)
+      expect(poll).toBe(2)
+      expect(appDaemon.stop).toHaveBeenCalledTimes(1)
+
+      await app.term()
+      await dep.term()
+    },
+  )
+
+  it('keeps runUntilSuccess pending while a previously ready check is reporting failure', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {})
+    let aResult: HealthCheckResult = { result: 'success', message: null }
+    let bResult: HealthCheckResult = { result: 'starting', message: null }
+    const effects = fakeEffects()
+    const chain = Daemons.of<Manifest>({ effects })
+      .addHealthCheck('check-a', {
+        ready: {
+          display: null,
+          gracePeriod: 0,
+          trigger: cooldownTrigger(1_000),
+          fn: () => aResult,
+        },
+        requires: [],
+      })
+      .addHealthCheck('check-b', {
+        ready: {
+          display: null,
+          gracePeriod: 0,
+          trigger: cooldownTrigger(500),
+          fn: () => bResult,
+        },
+        requires: [],
+      })
+
+    let done = false
+    const running = chain.runUntilSuccess(null).then(() => {
+      done = true
+    })
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(done).toBe(false)
+
+    aResult = { result: 'failure', message: 'transient' }
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(done).toBe(false)
+
+    bResult = { result: 'success', message: null }
+    await jest.advanceTimersByTimeAsync(500)
+    expect(done).toBe(false)
+
+    aResult = { result: 'success', message: null }
+    await jest.advanceTimersByTimeAsync(500)
+    await running
+    expect(done).toBe(true)
+  })
+
+  it('delivers raw health transitions to public addWatcher while keeping dependents running across blips', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {})
+    const depDaemon = controllableDaemon()
+    const appDaemon = controllableDaemon()
+    const seq: HealthCheckResult[] = [
+      { result: 'success', message: null },
+      { result: 'failure', message: 'blip 1' },
+      { result: 'loading', message: 'catching up' },
+      { result: 'success', message: null },
+    ]
+    let i = 0
+    const dep = new HealthDaemon<Manifest>(
+      depDaemon as unknown as Daemon<Manifest>,
+      [],
+      'dep',
+      {
+        display: null,
+        trigger: cooldownTrigger(1_000),
+        fn: () => seq[Math.min(i++, seq.length - 1)],
+      },
+      fakeEffects(),
+    )
+    const app = new HealthDaemon<Manifest>(
+      appDaemon as unknown as Daemon<Manifest>,
+      [dep],
+      'app',
+      EXIT_SUCCESS,
+      fakeEffects(),
+    )
+    const observed: string[] = []
+    dep.addWatcher(() => observed.push(dep.health.result))
+
+    await dep.updateStatus()
+    await app.updateStatus()
+
+    await jest.advanceTimersByTimeAsync(4_000)
+    expect(observed).toEqual(['success', 'failure', 'loading', 'success'])
+    expect(appDaemon.start).toHaveBeenCalledTimes(1)
+    expect(appDaemon.stop).not.toHaveBeenCalled()
+
+    await app.term()
+    await dep.term()
+  })
+
+  it('handles unstringifiable thrown values without terminating the health check loop', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const depDaemon = controllableDaemon()
+    let poll = 0
+    const dep = new HealthDaemon<Manifest>(
+      depDaemon as unknown as Daemon<Manifest>,
+      [],
+      'dep',
+      {
+        display: null,
+        gracePeriod: 0,
+        trigger: cooldownTrigger(1_000),
+        fn: () => {
+          poll++
+          if (poll === 1) return { result: 'success', message: null }
+          if (poll === 2) throw Object.create(null)
+          if (poll === 3) throw { message: Object.create(null) }
+          return { result: 'success', message: null }
+        },
+      },
+      fakeEffects(),
+    )
+
+    await dep.updateStatus()
+    await jest.advanceTimersByTimeAsync(4_000)
+    expect(poll).toBe(4)
+    expect(dep.health.result).toBe('success')
+    expect(logged).toHaveBeenCalledWith(
+      'Health Check dep failed:',
+      'Unknown health check error',
+    )
+
+    await dep.term()
+  })
+
+  it('handles unstringifiable trigger errors cleanly without rejecting term()', async () => {
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const depDaemon = controllableDaemon()
+    const appDaemon = controllableDaemon()
+    let call = 0
+    const dep = new HealthDaemon<Manifest>(
+      depDaemon as unknown as Daemon<Manifest>,
+      [],
+      'dep',
+      {
+        display: null,
+        gracePeriod: 0,
+        trigger: async function* () {
+          yield
+          await new Promise(resolve => setTimeout(resolve, 1_000))
+          yield
+          throw Object.create(null)
+        },
+        fn: () =>
+          call++ === 0
+            ? { result: 'success', message: null }
+            : {
+                result: 'failure',
+                message: 'blip before unstringifiable throw',
+              },
+      },
+      fakeEffects(),
+    )
+    const app = new HealthDaemon<Manifest>(
+      appDaemon as unknown as Daemon<Manifest>,
+      [dep],
+      'app',
+      EXIT_SUCCESS,
+      fakeEffects(),
+    )
+
+    await dep.updateStatus()
+    await app.updateStatus()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(appDaemon.start).toHaveBeenCalledTimes(1)
+
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(appDaemon.stop).toHaveBeenCalledTimes(1)
+    expect(logged).toHaveBeenCalledWith(
+      'Daemon dep health check failed: Unknown health check error',
+    )
+
+    await expect(app.term()).resolves.toBeUndefined()
+    await expect(dep.term()).resolves.toBeUndefined()
+    expect(depDaemon.term).toHaveBeenCalledTimes(1)
   })
 })
