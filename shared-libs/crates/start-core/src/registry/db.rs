@@ -201,7 +201,9 @@ pub async fn subscribe(
         patch_db::Revision,
     >,
 ) -> Result<SubscribeIndexResult, Error> {
+    let os_version = params.os_version.as_ref().map(ToString::to_string);
     let (mirror, dump, sub) = visible_subscription(&context, params).await?;
+    crate::registry::metrics::record_subscription(&context, os_version);
     if let Some(stream) = rpc_stream {
         stream_subscription(stream, mirror, sub);
         Ok(SubscribeIndexResult::Stream(dump))

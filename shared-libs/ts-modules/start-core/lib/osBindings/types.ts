@@ -160,14 +160,10 @@ export type GenerateCertificateResponse = z.output<
 export type GenerateCertificateResponseInput = z.input<
   typeof schemas.GenerateCertificateResponse
 >
-export type GetDownloadsParams = z.output<typeof schemas.GetDownloadsParams>
-export type GetDownloadsParamsInput = z.input<typeof schemas.GetDownloadsParams>
 export type GetOsAssetParams = z.output<typeof schemas.GetOsAssetParams>
 export type GetOsAssetParamsInput = z.input<typeof schemas.GetOsAssetParams>
 export type GetOsVersionParams = z.output<typeof schemas.GetOsVersionParams>
 export type GetOsVersionParamsInput = z.input<typeof schemas.GetOsVersionParams>
-export type GetUsersParams = z.output<typeof schemas.GetUsersParams>
-export type GetUsersParamsInput = z.input<typeof schemas.GetUsersParams>
 export type GigaBytes = z.output<typeof schemas.GigaBytes>
 export type GigaBytesInput = z.input<typeof schemas.GigaBytes>
 export type GitHash = z.output<typeof schemas.GitHash>
@@ -260,6 +256,8 @@ export type MerkleArchiveCommitment = z.output<
 export type MerkleArchiveCommitmentInput = z.input<
   typeof schemas.MerkleArchiveCommitment
 >
+export type MetricsInterval = z.output<typeof schemas.MetricsInterval>
+export type MetricsIntervalInput = z.input<typeof schemas.MetricsInterval>
 export type ModifyNotificationBeforeParams = z.output<
   typeof schemas.ModifyNotificationBeforeParams
 >
@@ -358,6 +356,10 @@ export type Pem = z.output<typeof schemas.Pem>
 export type PemInput = z.input<typeof schemas.Pem>
 export type Percentage = z.output<typeof schemas.Percentage>
 export type PercentageInput = z.input<typeof schemas.Percentage>
+export type PeriodCount = z.output<typeof schemas.PeriodCount>
+export type PeriodCountInput = z.input<typeof schemas.PeriodCount>
+export type PeriodUsers = z.output<typeof schemas.PeriodUsers>
+export type PeriodUsersInput = z.input<typeof schemas.PeriodUsers>
 export type PluginId = z.output<typeof schemas.PluginId>
 export type PluginIdInput = z.input<typeof schemas.PluginId>
 export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
@@ -616,8 +618,6 @@ export type UpstreamCertValidation = z.output<
 export type UpstreamCertValidationInput = z.input<
   typeof schemas.UpstreamCertValidation
 >
-export type UsersResponse = z.output<typeof schemas.UsersResponse>
-export type UsersResponseInput = z.input<typeof schemas.UsersResponse>
 export type Version = z.output<typeof schemas.Version>
 export type VersionInput = z.input<typeof schemas.Version>
 export type VolumeId = z.output<typeof schemas.VolumeId>
@@ -890,6 +890,8 @@ export type GetContainerIpParams = z.output<typeof schemas.GetContainerIpParams>
 export type GetContainerIpParamsInput = z.input<
   typeof schemas.GetContainerIpParams
 >
+export type GetDownloadsParams = z.output<typeof schemas.GetDownloadsParams>
+export type GetDownloadsParamsInput = z.input<typeof schemas.GetDownloadsParams>
 export type GetHostInfoParams = z.output<typeof schemas.GetHostInfoParams>
 export type GetHostInfoParamsInput = z.input<typeof schemas.GetHostInfoParams>
 export type GetOutboundGatewayParams = z.output<
@@ -932,6 +934,8 @@ export type GetSystemSmtpParams = z.output<typeof schemas.GetSystemSmtpParams>
 export type GetSystemSmtpParamsInput = z.input<
   typeof schemas.GetSystemSmtpParams
 >
+export type GetUsersParams = z.output<typeof schemas.GetUsersParams>
+export type GetUsersParamsInput = z.input<typeof schemas.GetUsersParams>
 export type GrantedSharedVolume = z.output<typeof schemas.GrantedSharedVolume>
 export type GrantedSharedVolumeInput = z.input<
   typeof schemas.GrantedSharedVolume
@@ -1252,6 +1256,12 @@ export type StartOsRecoveryInfo = z.output<typeof schemas.StartOsRecoveryInfo>
 export type StartOsRecoveryInfoInput = z.input<
   typeof schemas.StartOsRecoveryInfo
 >
+export type SubscriptionsResponse = z.output<
+  typeof schemas.SubscriptionsResponse
+>
+export type SubscriptionsResponseInput = z.input<
+  typeof schemas.SubscriptionsResponse
+>
 export type TaskInput = z.output<typeof schemas.TaskInput>
 export type TaskInputInput = z.input<typeof schemas.TaskInput>
 export type TaskTrigger = z.output<typeof schemas.TaskTrigger>
@@ -1288,6 +1298,8 @@ export type UrlPluginRegistration = z.output<
 export type UrlPluginRegistrationInput = z.input<
   typeof schemas.UrlPluginRegistration
 >
+export type UsersResponse = z.output<typeof schemas.UsersResponse>
+export type UsersResponseInput = z.input<typeof schemas.UsersResponse>
 export type VersionSignerParams = z.output<typeof schemas.VersionSignerParams>
 export type VersionSignerParamsInput = z.input<
   typeof schemas.VersionSignerParams

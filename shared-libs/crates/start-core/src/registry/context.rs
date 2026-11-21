@@ -206,7 +206,13 @@ impl RegistryContext {
                 );
                 CREATE INDEX IF NOT EXISTS idx_user_activity_created_at ON user_activity(created_at);
                 CREATE INDEX IF NOT EXISTS idx_package_request_created_at ON package_request(created_at);
-                CREATE INDEX IF NOT EXISTS idx_package_request_pkg_id ON package_request(pkg_id);",
+                CREATE INDEX IF NOT EXISTS idx_package_request_pkg_id ON package_request(pkg_id);
+                CREATE TABLE IF NOT EXISTS index_subscription (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    os_version TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_index_subscription_created_at ON index_subscription(created_at);",
             )
             .with_kind(ErrorKind::Database)?;
         let metrics_db = SyncMutex::new(metrics_db);

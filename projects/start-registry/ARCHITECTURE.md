@@ -54,7 +54,7 @@ Subcommands (same module), each available over RPC and to the `start-registry` C
 | `package` | `registry/package/`   | add/get/list packages, versions, assets                                  |
 | `admin`   | `registry/admin.rs`   | manage admins, signers and reader keys                                   |
 | `db`      | `registry/db.rs`      | dump/inspect the registry database; subscribe to `/index` or any subpath |
-| `metrics` | `registry/metrics.rs` | download/user metrics summaries (admin-only)                             |
+| `metrics` | `registry/metrics.rs` | user, subscription and lookup metrics, with time series (admin-only)     |
 
 ### Registry index subscriptions
 
