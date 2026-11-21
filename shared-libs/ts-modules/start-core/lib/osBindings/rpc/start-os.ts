@@ -288,7 +288,7 @@ export type PackageId = z.output<typeof schemas.PackageId>
 export type PackageIdInput = z.input<typeof schemas.PackageId>
 
 /**
- * A WebAuthn credential that signs each encrypted RPC connection in place of a session key.
+ * A persisted WebAuthn credential independent of browser session expiry.
  */
 export type Passkey = z.output<typeof schemas.Passkey>
 export type Percentage = z.output<typeof schemas.Percentage>

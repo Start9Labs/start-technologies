@@ -2227,10 +2227,11 @@ export class MockApiService extends ApiService implements StartupApiService {
     }
   }
 
-  // state
-
-  async enrollWithPasskey(_: T.EnrollPasskeySessionParams): Promise<void> {
-    await pauseFor(1000)
+  async enrollWithPasskey(
+    _: T.EnrollPasskeySessionParams,
+    signal: AbortSignal,
+  ): Promise<void> {
+    await pauseFor(1000, signal)
   }
 
   async echo(params: Params<'echo'>, url: string): Promise<string> {

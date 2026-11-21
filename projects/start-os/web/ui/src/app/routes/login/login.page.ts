@@ -13,6 +13,7 @@ import {
   AuthKeyService,
   CA_TRUST_CHECK,
   CaWizard,
+  getErrorMessage,
   i18nKey,
   i18nPipe,
   RELATIVE_URL,
@@ -35,7 +36,6 @@ import { ConfigService } from 'src/app/services/config.service'
   selector: 'login',
   template: `
     @if (config.isSecureContext()) {
-      <!-- Secure context -->
       <div tuiCardLarge>
         <img alt="StartOS Icon" src="assets/img/icon.png" />
         <header tuiHeader="h4">
@@ -72,7 +72,6 @@ import { ConfigService } from 'src/app/services/config.service'
         </form>
       </div>
     } @else {
-      <!-- Insecure context -->
       <ca-wizard product="start-os" />
     }
   `,
@@ -157,16 +156,18 @@ export default class LoginPage {
     this.passkeyLoading.set(true)
 
     try {
+      const lease = await this.authKeys.admissionLease()
       const key = await auth.generateAuthKey()
-      await this.api.enrollWithPasskey({ pubkey: key.pubkeyPem })
-      await this.authKeys.adopt(key)
+      await this.api.enrollWithPasskey({ pubkey: key.pubkeyPem }, lease.signal)
+      const active = await this.authKeys.adopt(key, lease.signal)
+      active.throwIfAborted()
       this.authService.setVerified(true)
       await this.router.navigate([''], { replaceUrl: true })
-    } catch (e: any) {
+    } catch (error) {
       this.error.set(
-        e.name === 'NotAllowedError'
+        error instanceof DOMException && error.name === 'NotAllowedError'
           ? 'Passkey sign-in was cancelled'
-          : (e.message as i18nKey),
+          : (getErrorMessage(error) as i18nKey),
       )
     } finally {
       this.passkeyLoading.set(false)
@@ -198,12 +199,17 @@ export default class LoginPage {
 
       this.password.set('')
       this.authService.setVerified(true)
-      // Await navigation so the button keeps loading until the route actually
-      // changes — otherwise `finally` clears it the moment navigate() is called.
       await this.router.navigate([''], { replaceUrl: true })
-    } catch (e: any) {
-      // code 7 is for incorrect password
-      this.error.set(e.code === 7 ? 'Invalid password' : (e.message as i18nKey))
+    } catch (error) {
+      // Code 7 denotes an incorrect password.
+      this.error.set(
+        error !== null &&
+          typeof error === 'object' &&
+          'code' in error &&
+          error.code === 7
+          ? 'Invalid password'
+          : (getErrorMessage(error) as i18nKey),
+      )
     } finally {
       this.loading.set(false)
     }

@@ -942,7 +942,7 @@ export const PackageId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 })
 
 /**
- * A WebAuthn credential that signs each encrypted RPC connection in place of a session key.
+ * A persisted WebAuthn credential independent of browser session expiry.
  */
 export const Passkey: z.ZodObject<{
   name: z.ZodString
@@ -964,7 +964,7 @@ export const Passkey: z.ZodObject<{
 }).meta({
   id: 'Passkey',
   description:
-    'A WebAuthn credential that signs each encrypted RPC connection in place of a session key.',
+    'A persisted WebAuthn credential independent of browser session expiry.',
 })
 export const Percentage: typeof literal_4 = /* @__PURE__ */ literal_4.meta({
   id: 'Percentage',

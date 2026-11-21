@@ -1282,7 +1282,7 @@ export const PartitionTable: z.ZodEnum<{ mbr: 'mbr'; gpt: 'gpt' }> =
   })
 
 /**
- * A WebAuthn credential that signs each encrypted RPC connection in place of a session key.
+ * A persisted WebAuthn credential independent of browser session expiry.
  */
 export const Passkey: z.ZodObject<{
   name: z.ZodString
@@ -1304,7 +1304,7 @@ export const Passkey: z.ZodObject<{
 }).meta({
   id: 'Passkey',
   description:
-    'A WebAuthn credential that signs each encrypted RPC connection in place of a session key.',
+    'A persisted WebAuthn credential independent of browser session expiry.',
 })
 export const PathOrUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'PathOrUrl',

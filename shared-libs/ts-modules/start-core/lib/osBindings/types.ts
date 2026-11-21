@@ -340,12 +340,12 @@ export type PartitionTable = z.output<typeof schemas.PartitionTable>
 export type PartitionTableInput = z.input<typeof schemas.PartitionTable>
 
 /**
- * A WebAuthn credential that signs each encrypted RPC connection in place of a session key.
+ * A persisted WebAuthn credential independent of browser session expiry.
  */
 export type Passkey = z.output<typeof schemas.Passkey>
 
 /**
- * A WebAuthn credential that signs each encrypted RPC connection in place of a session key.
+ * A persisted WebAuthn credential independent of browser session expiry.
  */
 export type PasskeyInput = z.input<typeof schemas.Passkey>
 export type PathOrUrl = z.output<typeof schemas.PathOrUrl>

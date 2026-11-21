@@ -23,7 +23,7 @@ pub mod sessions;
 /// WebAuthn's limit on credential ID length.
 const MAX_CREDENTIAL_ID_BYTES: usize = 1023;
 
-/// A WebAuthn credential that signs each encrypted RPC connection in place of a session key.
+/// A persisted WebAuthn credential independent of browser session expiry.
 #[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
@@ -203,17 +203,35 @@ rpc_toolkit::ts_export!(EnrollPasskeySessionParams, namespaces = [""]);
 
 /// Enrolls a session key in memory only, on a connection a registered passkey signed.
 /// The key lasts while it has connections and for [`sessions::GRACE`] after the last closes.
-pub async fn enroll(
-    ctx: RpcContext,
+pub async fn enroll(ctx: RpcContext, params: EnrollPasskeySessionParams) -> Result<(), Error> {
+    let ephemeral = &ctx.ephemeral_auth_keys;
+    let tracked = &ctx.passkey_sessions;
+    let owner = std::panic::AssertUnwindSafe(ctx.weak());
+    ctx.db
+        .mutate(|db| {
+            let key = enroll_session(ephemeral, tracked, db, params)?;
+            if let Some(ctx) = owner.upgrade() {
+                sessions::expire_after_grace(&ctx, key);
+            }
+            Ok(())
+        })
+        .await
+        .result
+}
+
+/// The caller holds the database mutation gate shared with revocation.
+fn enroll_session(
+    ephemeral: &SyncMutex<AuthKeys>,
+    sessions: &SyncMutex<sessions::PasskeySessions>,
+    db: &mut Model<Database>,
     EnrollPasskeySessionParams {
         pubkey,
         signer,
         user_agent,
     }: EnrollPasskeySessionParams,
-) -> Result<(), Error> {
+) -> Result<InternedString, Error> {
     let passkey = signer.interned_der64();
-    let peek = ctx.db.peek().await;
-    let Some(registered) = peek.as_private().as_passkeys().as_idx(&passkey) else {
+    let Some(registered) = db.as_private().as_passkeys().as_idx(&passkey) else {
         return Err(Error::new(
             eyre!("{}", t!("auth.passkey.not-a-passkey")),
             ErrorKind::Authorization,
@@ -227,12 +245,9 @@ pub async fn enroll(
         user_agent,
     };
     let key = pubkey.interned_der64();
-    ctx.ephemeral_auth_keys
-        .mutate(|keys| keys.0.insert(key.clone(), session));
-    ctx.passkey_sessions
-        .mutate(|sessions| sessions.enroll(key.clone(), passkey, std::time::Instant::now()));
-    sessions::expire_after_grace(&ctx, key);
-    Ok(())
+    ephemeral.mutate(|keys| keys.0.insert(key.clone(), session));
+    sessions.mutate(|sessions| sessions.enroll(key.clone(), passkey, std::time::Instant::now()));
+    Ok(key)
 }
 
 /// Revokes the passkey, the session keys it enrolled, and their open connections and continuations.
@@ -295,7 +310,7 @@ mod tests {
 
     const PASSWORD: &str = "passkey-test";
 
-    async fn database() -> TypedPatchDb<Database> {
+    pub(super) async fn database() -> TypedPatchDb<Database> {
         let account = AccountInfo::new(PASSWORD, std::time::SystemTime::now(), None).unwrap();
         let raw = PatchDb::in_memory();
         raw.put(&ROOT, &Database::init(&account, false, None, None).unwrap())
@@ -368,6 +383,79 @@ mod tests {
         assert!(!is_registered(&db.peek().await, &id));
         assert!(ephemeral.peek(|keys| keys.0.is_empty()));
         assert!(sessions.mutate(|sessions| !sessions.connect(&session)));
+    }
+
+    fn enrollment(signer: &AnyVerifyingKey, seed: u8) -> EnrollPasskeySessionParams {
+        EnrollPasskeySessionParams {
+            pubkey: AnyVerifyingKey::Ed25519(
+                ed25519_dalek::SigningKey::from_bytes(&[seed; 32]).verifying_key(),
+            ),
+            signer: signer.clone(),
+            user_agent: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn revoked_passkeys_cannot_publish_a_session_from_prior_authorization() {
+        let db = database().await;
+        let (public_key, passkey) = passkey();
+        let id = public_key.interned_der64();
+        db.mutate(|db| register(db, PASSWORD, &public_key, &passkey))
+            .await
+            .result
+            .unwrap();
+        let admitted = db.peek().await;
+        let continuations = OpenAuthedContinuations::new();
+        let ephemeral = SyncMutex::new(AuthKeys::new());
+        let sessions = SyncMutex::new(sessions::PasskeySessions::default());
+        db.mutate(|db| revoke(&continuations, Some(&ephemeral), &sessions, db, id.clone()))
+            .await
+            .result
+            .unwrap();
+        assert!(is_registered(&admitted, &id));
+        let params = enrollment(&public_key, 11);
+        let key = params.pubkey.interned_der64();
+        let result = db
+            .mutate(|db| enroll_session(&ephemeral, &sessions, db, params))
+            .await
+            .result;
+        assert_eq!(result.unwrap_err().kind, ErrorKind::Authorization);
+        assert!(ephemeral.peek(|keys| keys.0.is_empty()));
+        assert!(!sessions.mutate(|sessions| sessions.connect(&key)));
+    }
+
+    #[tokio::test]
+    async fn passkey_removal_revokes_connected_and_unconnected_derived_keys() {
+        let db = database().await;
+        let (public_key, passkey) = passkey();
+        let id = public_key.interned_der64();
+        db.mutate(|db| register(db, PASSWORD, &public_key, &passkey))
+            .await
+            .result
+            .unwrap();
+        let continuations = OpenAuthedContinuations::new();
+        let ephemeral = SyncMutex::new(AuthKeys::new());
+        let sessions = SyncMutex::new(sessions::PasskeySessions::default());
+        let mut enrolled = Vec::new();
+        for seed in [11, 12] {
+            enrolled.push(
+                db.mutate(|db| {
+                    enroll_session(&ephemeral, &sessions, db, enrollment(&public_key, seed))
+                })
+                .await
+                .result
+                .unwrap(),
+            );
+        }
+        assert!(sessions.mutate(|sessions| sessions.connect(&enrolled[0])));
+        db.mutate(|db| revoke(&continuations, Some(&ephemeral), &sessions, db, id))
+            .await
+            .result
+            .unwrap();
+        assert!(ephemeral.peek(|keys| keys.0.is_empty()));
+        for key in enrolled {
+            assert!(!sessions.mutate(|sessions| sessions.connect(&key)));
+        }
     }
 
     #[tokio::test]
