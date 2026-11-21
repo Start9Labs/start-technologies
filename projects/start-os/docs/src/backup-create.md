@@ -45,7 +45,7 @@ A backup holds each service's data and your server's identity: its name, master 
 
 Restoring a service does not bring back:
 
-- the public and private domains enabled on each of its interfaces, and its interface port settings. Until you enable a public domain again, the service gives out LAN addresses.
+- the public and private domains enabled on each of its interfaces, and its interface port settings.
 - its outbound gateway and DNS choices.
 
 Restoring an entire server also does not bring back:
